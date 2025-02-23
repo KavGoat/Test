@@ -1,54 +1,3 @@
-Hugging Face's logo
-Hugging Face
- 
-Models
-Datasets
-Spaces
-Posts
-Docs
-Enterprise
-Pricing
-
-
-
- 
-Spaces:
-
-Kavindith
-/
-DiscGolf
-
-
-like
-0
- 
-Logs
-App
-
-Files
-Community
-Settings
-DiscGolf
-/
-pages
-/
-stats.py
-
-Kavindith's picture
-Kavindith
-Update pages/stats.py
-2dfa9c4
-VERIFIED
-less than a minute ago
-raw
-
-Copy download link
-history
-blame
-edit
-delete
-
-24.3 kB
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -91,8 +40,6 @@ custom_css = """
     </style>
 """
 st.markdown(custom_css, unsafe_allow_html=True)
-
-st.set_page_config(theme="dark")
 
 def fetch_data():
     try:
