@@ -85,6 +85,74 @@ def winner (rounds):
         return [players, f"{winners[0]} and {winners[1]}"]
     else:
         return [players, ", ".join(winners[:-1]) + " and " + winners[-1]]
+
+def winner_string(name, tally, plays, percentage):
+    if plays[name] == 0:
+        return "-(-/-)"
+
+    else:
+        pe = format(percentage[name], "g")
+        t = format(tally[name], "g")
+        pl = int(plays[name])
+        return f"{pe}% ({t}/{pl})"
+
+
+def winner_tally (dates, rounds):
+    names = ["Kav", "Nethidu", "Mahith"]
+    tally = {"Kav":0, "Nethidu":0, "Mahith":0}
+    plays = {"Kav":0, "Nethidu":0, "Mahith":0}
+    percentage = {}
+    for date in dates:
+        scores = []
+        for go in rounds[date]:
+            if go[0] in names:
+               scores += [go[5]]
+               plays[go[0]] = plays[go[0]] + 1
+        min_score = min(scores)
+        occs = scores.count(min_score)
+        for name in names:
+            for go in rounds[date]:
+                if go[0]==name and go[5]==min_score:
+                    tally[name] = tally[name] + 1/occs
+    for name in names:
+        if plays[name] != 0:
+            percentage[name] = round((tally[name]/plays[name])*100,2)
+        else:
+            percentage[name] = 0
+    sorted_names = sorted(
+        percentage.keys(),
+        key=lambda name: (plays[name] == 0, -percentage[name], list(percentage.keys()).index(name))
+    )
+    highest_win = percentage[sorted_names[0]]
+    top_winners = [name for name in sorted_names if percentage[name] == highest_win]
+    top_winners_str = " and ".join(top_winners) if len(top_winners) < 3 else ", ".join(top_winners[:-1]) + " and " + top_winners[-1]
+    if sum(play > 0 for play in plays.values()) != 1:
+        st.markdown(f"<p style='text-decoration: underline;margin-bottom: 0px; text-align: left; font-size: clamp(20px, 3.7vw, 28px); font-weight: bold;'>Win Tally</p>", unsafe_allow_html=True)
+        st.markdown("""
+                    <style>
+                        .stHorizontalBlock {
+                            display: flex;
+                            flex-wrap: nowrap;
+                        }
+                        .stHorizontalBlock .stColumn {
+                            width: calc(33.3333333% - 1rem); /* Adjust width */
+                            min-width: unset;               /* Unset min-width */
+                        }
+                    </style>
+                """, unsafe_allow_html=True)    
+        with st.container(border=True):
+            st.markdown(f"<p style='text-align: left; font-size: clamp(18px, 3.5vw, 26px); font-weight: bold;'>👑&nbsp;&nbsp;{top_winners_str}</p>", unsafe_allow_html=True)
+            col4, col5, col6 = st.columns(3)
+            cols = [col4, col5, col6]
+            for index, name in enumerate(sorted_names):
+                with cols[index]:
+                    st.markdown(f"<p style='text-align: center; font-size: clamp(13px, 2.5vw, 18px); font-weight: bold;'>{name}</p>", unsafe_allow_html=True)
+                    st.markdown(f"<p style='text-align: center; font-size: clamp(13px, 2vw, 16px)'>{winner_string(name, tally, plays, percentage)}</p>", unsafe_allow_html=True)
+
+            
+
+
+
     
 def winner_order(name, all_rounds_data):
     last_value = all_rounds_data[name][-1]
@@ -279,11 +347,6 @@ def style_table(df, min_width_value, className, fontsize):
             if val == 1:
                 background_color = "#44AD86"
                 border_radius = "20%"
-                #return f'''<div style="display: flex; justify-content: center; align-items: center;  overflow: hidden; justify-self: center;
-                #            width: calc(min({width_string}) * 0.8); aspect-ratio: 1/1; background-color: {background_color}; 
-                #            border-radius: {border_radius}; transform: rotate(45deg); text-align:center;">
-                #                <span style="display: block; transform: rotate(-45deg);">{val}</span>
-                #          </div>'''
                 return (
                     f'''<div style="display: grid; width: 100%; height: 100%; 
                             grid-template-rows: 1fr; grid-template-columns: 1fr; 
@@ -314,10 +377,6 @@ def style_table(df, min_width_value, className, fontsize):
 
             # Determine border-radius based on whether it's bogey or under par
             border_radius = "20%" if val > par else "100%"
-
-            #return f'<div style="display: flex; justify-content: center; align-items: center; ' \
-            #       f'width: min({width_string}); aspect-ratio: 1 / 1; justify-self: center;overflow: hidden;' \
-            #       f'background-color: {background_color}; border-radius: {border_radius};text-align:center; line-height:1;">{val}</div>'
             if isinstance(val, float):
                 if val.is_integer():
                     val = int(val)
@@ -455,43 +514,6 @@ def display_round(all_rounds_data, date, holes, pars, current_course, current_la
                     html_string += '<div class="mobile-table"><hr style="margin-top:1em; margin-bottom:1em"></div>'
             st.markdown(html_string+"</div>",unsafe_allow_html=True)
 
-def trend_analysis(data, course, layout):
-    # Filter data for the specific course and layout
-    filtered_data = [round for round in data if round[1] == course and round[2] == layout]
-    
-    if not filtered_data:
-        return None
-    
-    # Organize data by player and date
-    player_scores = {}
-    for round in filtered_data:
-        player = round[0]
-        date = datetime.strptime(round[3], "%Y-%m-%d %H%M").strftime("%Y-%m-%d")
-        
-        # Handle invalid total_score and par_score values
-        try:
-            total_score = int(round[5]) if round[5] not in ["-", "", None] and not pd.isna(round[5]) else None
-            par_score = int(round[6]) if round[6] not in ["-", "", None] and not pd.isna(round[6]) else None
-        except (ValueError, TypeError):
-            total_score = None
-            par_score = None
-        
-        # Skip rounds with invalid scores
-        if total_score is None or par_score is None:
-            continue
-        
-        relative_score = total_score - par_score  # Relative performance
-        
-        # Track the best relative score for each player
-        if player not in player_scores:
-            player_scores[player] = {"Date": date, "Total Score": total_score, "Relative Score": relative_score}
-        else:
-            if relative_score < player_scores[player]["Relative Score"]:
-                player_scores[player] = {"Date": date, "Total Score": total_score, "Relative Score": relative_score}
-
-    df = pd.DataFrame(player_scores).T.reset_index().rename(columns={"index": "Player"})
-    
-    return df
 
 def main():
     data, course_layouts = fetch_data()
@@ -501,13 +523,14 @@ def main():
     if Course == "All" or Layout == "All":
         types = ["Previous Rounds"]
     else:
-        types = ["Previous Rounds", "Best Round", "Best Per Hole", "Average", "Trend Analysis"]  # Add "Trend Analysis" option
+        types = ["Previous Rounds", "Best Round", "Best Per Hole", "Average"]  # Add "Trend Analysis" option
     
     Type = st.selectbox("Select a stat", types)
     dates, rounds = get_all_rounds(data, course_layouts, Course, Layout)
     
     if Course is not None and Layout in course_layouts[Course]:
         if Type == "Previous Rounds":
+            winner_tally(dates,rounds)
             st.markdown(f"<p style='text-decoration: underline;margin-bottom: 0px; text-align: left; font-size: clamp(20px, 3.7vw, 28px); font-weight: bold;'>Previous Rounds</p>", unsafe_allow_html=True)
             for date in dates:
                 all_rounds_data, holes, pars, current_course, current_layout = get_round(date, rounds) 
@@ -530,23 +553,4 @@ def main():
             all_rounds_data, holes, pars, current_course, current_layout = get_round(dates[0], rounds)
             best_rounds = get_average(rounds, dates)
             display_round(best_rounds, "NA", holes, pars, current_course, current_layout)
-        
-        elif Type == "Trend Analysis":
-            st.markdown(f"<p style='text-decoration: underline;margin-bottom: 0px; text-align: left; font-size: clamp(20px, 3.7vw, 28px); font-weight: bold;'>Trend Analysis</p>", unsafe_allow_html=True)
-            trend_data = trend_analysis(data, Course, Layout)
-            
-            if trend_data is not None:
-                st.write(f"### Best Rounds (Relative to Par) on {Course} ({Layout})")
-                
-                # Display the best rounds for each player
-                st.write(trend_data)
-                
-                # Plot the best rounds
-                import plotly.express as px
-                fig = px.bar(trend_data, x="Player", y="Total Score", color="Player",
-                              title=f"Best Rounds (Relative to Par) on {Course} ({Layout})",
-                              labels={"Player": "Player", "Total Score": "Total Score"})
-                st.plotly_chart(fig)
-            else:
-                st.write("No trend data available for the selected course and layout.")
 main()
