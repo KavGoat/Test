@@ -412,6 +412,58 @@ def get_best(rounds, dates, names):
                             all_data[name] = [tries[i], totals[i], scores[i]]
     return all_data
 
+def winner_string(name, tally, plays, percentage):
+    pe = format(percentage[name], "g")
+    t = format(tally[name], "g")
+    pl = int(plays[name])
+    return f"{pe}% ({t}/{pl})"
+
+def winner_tally (dates, rounds, names):
+    tally = {}
+    plays = {}
+    percentage = {}
+    for name in names:
+        tally[name] = 0
+        plays[name] = 0
+        percentage[name]=0
+
+    for date in dates:
+        players = []
+        for tries in rounds[date]:
+            players += [tries[0]]
+        if set(names).issubset(players):
+            scores = []
+            for go in rounds[date]:
+                if go[0] in names:
+                    scores += [go[5]]
+                    plays[go[0]] = plays[go[0]] + 1
+            min_score = min(scores)
+            occs = scores.count(min_score)
+            for name in names:
+                for go in rounds[date]:
+                    if go[0]==name and go[5]==min_score:
+                        tally[name] = tally[name] + 1/occs
+    for name in names:
+        if plays[name] != 0:
+            percentage[name] = round((tally[name]/plays[name])*100,2)
+    sorted_names = sorted(
+        percentage.keys(),
+        key=lambda name: (plays[name] == 0, -percentage[name], list(percentage.keys()).index(name))
+    )
+    highest_win = percentage[sorted_names[0]]
+    top_winners = [name for name in sorted_names if percentage[name] == highest_win]
+    top_winners_str = " and ".join(top_winners) if len(top_winners) < 3 else ", ".join(top_winners[:-1]) + " and " + top_winners[-1]
+    if sum(play > 0 for play in plays.values()) != 0:
+        st.markdown(f"<p style='text-align: left; font-size: clamp(18px, 3.5vw, 26px); font-weight: bold;'>Rounds with {', '.join(names[:-1])} and {names[-1]}</p>", unsafe_allow_html=True)
+        st.markdown(f"<p style='text-align: left; font-size: clamp(12px, 2vw, 16px);'>👑&nbsp;&nbsp;{top_winners_str}</p>", unsafe_allow_html=True)
+        cols = st.columns(len(names))
+        for index, name in enumerate(sorted_names):
+            with cols[index]:
+                st.markdown(f"<p style='text-align: center; font-size: clamp(13px, 2.5vw, 18px); font-weight: bold;'>{name}</p>", unsafe_allow_html=True)
+                st.markdown(f"<p style='text-align: center; font-size: clamp(12px, 2vw, 16px)'>{winner_string(name, tally, plays, percentage)}</p>", unsafe_allow_html=True)
+    else:
+        st.markdown("<p>""</p>", unsafe_allow_html=True) 
+        st.markdown(f"<p style='text-align: left; font-size: clamp(18px, 3.5vw, 26px); font-weight: bold;'>No head to head matchups.</p>", unsafe_allow_html=True)
 def main():
     st.markdown("""
         <style>
@@ -444,9 +496,9 @@ def main():
     Course = st.selectbox("Select a course", list(course_layouts.keys()))
     Layout = st.selectbox("Select a layout", course_layouts[Course])
     if Course == "All" or Layout == "All":
-        types = ["Previous Rounds", "Win Tally", "Player Comparison"]
+        types = ["Previous Rounds", "Player Comparison"]
     else:
-        types = ["Previous Rounds", "Win Tally", "Player Comparison", "Best Round", "Best Per Hole", "Average"]
+        types = ["Previous Rounds", "Player Comparison", "Best Round", "Best Per Hole", "Average"]
     Type = st.selectbox("Select a stat", types)
     dates, rounds, names = get_all_rounds(data, course_layouts, Course, Layout)
     if Course is not None and Layout in course_layouts[Course]:
@@ -456,6 +508,13 @@ def main():
             for date in dates:
                 all_rounds_data, holes, pars, current_course, current_layout, round_names = get_round(date, rounds) 
                 display_round(all_rounds_data, date, holes, pars, current_course, current_layout, round_names)
+        elif Type == "Player Comparison":
+            selected_names = st.multiselect("Select Players", names)
+            with st.container(border=True):
+                if len(selected_names)>=2:
+                    winner_tally(dates, rounds, selected_names)
+                else:
+                    st.markdown(f"<p style='text-align: left; font-size: clamp(18px, 3.5vw, 26px); font-weight: bold;'>Select at least two players.</p>", unsafe_allow_html=True)
         elif Type == "Best Round":
             all_rounds_data, holes, pars, current_course, current_layout,round_names = get_round(dates[0], rounds)
             best_rounds = get_best(rounds, dates, names)
