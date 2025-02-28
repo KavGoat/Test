@@ -5,13 +5,12 @@ import ssl
 from io import StringIO
 import sys
 from contextlib import redirect_stdout
-import math
+import math 
 import os
 from datetime import datetime
 import pytz
-from st_pages import get_nav_from_toml
 import statistics
-import plotly.express as px
+from PIL import ImageFont
 
 def fetch_data():
     try:
@@ -186,11 +185,17 @@ def wrap_in_div(val, row_idx, col_idx, pars, width_string):
             )
         return val
 
+def get_text_width(font_size, names):
+    widths = {}
+    for text in names:
+        font = ImageFont.truetype("fonts/SourceSansPro-Regular.DZLUzqI4.ttf", font_size)
+        bbox = font.getbbox(text)
+        width = bbox[2] - bbox[0]
+        widths[text] = width + 4
+    return widths
+
 def style_table(df, min_width_value, className, fontsize):
-    if fontsize == 14:
-        width_string="90%, 30px"
-    else:
-        width_string="95%, 31.667px"
+    width_string="90%, 30px"
     pars = df.iloc[1].values.tolist()
     prelim_columns = df.iloc[:2].values.tolist()
     df.columns = [[str(sublist[0])] + [str(int(x)) for x in sublist[1:]] for sublist in prelim_columns]
@@ -218,10 +223,10 @@ def style_table(df, min_width_value, className, fontsize):
     styled_html = f'<div class="{className}">{styled_df}</div>'
     return styled_html
 
-def display_round(all_rounds_data, date, holes, pars, current_course, current_layout, names):
+def display_round(all_rounds_data, date, holes, pars, current_course, current_layout, names, font_size, widths):
     with st.container(border=True):
         st.markdown(f"<p style='text-align: left; font-size: clamp(18px, 3.5vw, 26px); font-weight: bold;'>{current_course}</p>", unsafe_allow_html=True)
-        st.markdown(f"<p style='text-align: left; font-size: clamp(12px, 2vw, 16px);'>⛳️&nbsp;&nbsp;{current_layout}</p>", unsafe_allow_html=True)
+        st.markdown(f"<p style='text-align: left; font-size: clamp(13px, 2.5vw, 17px);'>⛳️&nbsp;&nbsp;{current_layout}</p>", unsafe_allow_html=True)
         if date != "NA":
             utc_tz = pytz.timezone('UTC')
             nz_tz = pytz.timezone('Pacific/Auckland')
@@ -229,33 +234,33 @@ def display_round(all_rounds_data, date, holes, pars, current_course, current_la
             utc_time = utc_tz.localize(utc_time)
             nz_time = utc_time.astimezone(nz_tz)
             formatted_date_time = "🗓️&nbsp;&nbsp;" + nz_time.strftime("%a, %-d %b %Y") + "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;🕒&nbsp;&nbsp;" + nz_time.strftime("%I:%M %p").lstrip("0")
-            st.markdown(f"<p style='text-align: left; font-size: clamp(12px, 2vw, 16px);'>{formatted_date_time}</p>", unsafe_allow_html=True)
+            st.markdown(f"<p style='text-align: left; font-size: clamp(13px, 2.5vw, 17px);'>{formatted_date_time}</p>", unsafe_allow_html=True)
         else:
             pass
         names = sorted(
             names, 
-            key=lambda name: (- (all_rounds_data[name][-2] - all_rounds_data[name][-1]), all_rounds_data[name][-1])
+            key=lambda name: (-round(all_rounds_data[name][-2] - all_rounds_data[name][-1]), all_rounds_data[name][-1])
         )
         first_place_value = (
-            all_rounds_data[names[0]][-2] - all_rounds_data[names[0]][-1], 
+            round(all_rounds_data[names[0]][-2] - all_rounds_data[names[0]][-1]), 
             all_rounds_data[names[0]][-1]
         )
         first_place_names = [
             name for name in names 
-            if (all_rounds_data[name][-2] - all_rounds_data[name][-1], all_rounds_data[name][-1]) == first_place_value
+            if (round(all_rounds_data[name][-2] - all_rounds_data[name][-1]), all_rounds_data[name][-1]) == first_place_value
         ]
         first_place_string = first_place_names[0] if len(first_place_names) == 1 else " and ".join(first_place_names) if len(first_place_names) == 2 else ", ".join(first_place_names[:-1]) + ", and " + first_place_names[-1]
         if len(names)>1:
-            st.markdown(f"<p style='text-align: left; font-size: clamp(12px, 2vw, 16px);'>👑&nbsp;&nbsp;{first_place_string}</p>", unsafe_allow_html=True)
+            st.markdown(f"<p style='text-align: left; font-size: clamp(13px, 2.5vw, 17px);'>👑&nbsp;&nbsp;{first_place_string}</p>", unsafe_allow_html=True)
         cols = st.columns(len(names))
         current_max = 0
         fillers = []
         for index, name in enumerate(names):
             with cols[index]:
                 player_data = all_rounds_data[name]
-                current_max =  max(player_data[1] - player_data[2], current_max)
-                if player_data[1] - player_data[2] < sum(pars):
-                    if player_data[1] - player_data[2] == current_max:
+                current_max =  max(round(player_data[1] - player_data[2]), current_max)
+                if round(player_data[1] - player_data[2]) < sum(pars):
+                    if round(player_data[1] - player_data[2]) == current_max:
                         filler_ting = " (P)"
                     else:
                         filler_ting = " (PP)"
@@ -263,14 +268,14 @@ def display_round(all_rounds_data, date, holes, pars, current_course, current_la
                     filler_ting = ""
                 fillers += [filler_ting]
                 score_display = f"{'+' if player_data[2] > 0 else ''}{'E' if player_data[2] == 0 else player_data[2]} ({player_data[1]})"
-                st.markdown(f"<p style='text-align: center; font-size: clamp(13px, 2.5vw, 18px); font-weight: bold;'>{name}{filler_ting}</p>", unsafe_allow_html=True)
-                st.markdown(f"<p style='text-align: center; font-size: clamp(12px, 2vw, 16px)'>{score_display}</p>", unsafe_allow_html=True)
+                st.markdown(f"<p style='text-align: center; font-size: clamp(13px, 2.5vw, 17px); font-weight: bold;'>{name}{filler_ting}</p>", unsafe_allow_html=True)
+                st.markdown(f"<p style='text-align: center; font-size: clamp(13px, 2.5vw, 17px)'>{score_display}</p>", unsafe_allow_html=True)
         if fillers != [""] * len(cols):
             htmlting = f"<div style='line-height:0.75; padding-bottom:5px'><p style='text-decoration: underline; text-align: left; font-size: clamp(12px, 2vw, 16px)'>Notes</p>"
             if " (P)" in fillers:
-                htmlting += f"<p style='text-align: left; font-size: clamp(12px, 2vw, 16px)'>(P) - Partial round</p>"
+                htmlting += f"<p style='text-align: left; font-size: clamp(13px, 2.5vw, 17px)'>(P) - Partial round</p>"
             elif " (PP)" in fillers:
-                htmlting += f"<p style='text-align: left; font-size: clamp(12px, 2vw, 16px)'>(PP) - Fewer holes played than others</p>"
+                htmlting += f"<p style='text-align: left; font-size: clamp(13px, 2.5vw, 17px)'>(PP) - Fewer holes played than others</p>"
             st.markdown(htmlting+"</div>", unsafe_allow_html=True)
         if date == "NA":
             package = st.container(border=True)
@@ -284,6 +289,7 @@ def display_round(all_rounds_data, date, holes, pars, current_course, current_la
             html_string = "<div>"
             chunk_size = 18
             num_chunks = len(holes) // chunk_size + (1 if len(holes) % chunk_size != 0 else 0)
+            string_width = max([widths[name] for name in names if name in widths])
             for i in range(num_chunks):
                 start = i * chunk_size
                 end = min((i + 1) * chunk_size, len(holes))
@@ -293,7 +299,7 @@ def display_round(all_rounds_data, date, holes, pars, current_course, current_la
                 for player in names:
                     table.append([player] + all_rounds_data[player][0][start:end])
                 df = pd.DataFrame(table)
-                html_string += style_table(df, f"calc(min(587px/{max(min(len(holes), chunk_size),1)},638px/{max(min(len(holes), chunk_size)+1,1)}))", "laptop-table",14)
+                html_string += style_table(df, f"calc(min({638-string_width}px/{max(min(len(holes), chunk_size),1)},638px/{max(min(len(holes), chunk_size)+1,1)}))", "laptop-table",font_size)
                 if i+1 < num_chunks:
                     html_string += '<div class="laptop-table"><hr style="margin-top:1em; margin-bottom:1em"></div>'
             chunk_size = 9
@@ -307,7 +313,7 @@ def display_round(all_rounds_data, date, holes, pars, current_course, current_la
                 for player in names:
                     table.append([player] + all_rounds_data[player][0][start:end])
                 df = pd.DataFrame(table)
-                html_string += style_table(df, "calc(min((11.111vw - 17.222px),(10vw - 10.4px)))", "mobile-table",14)
+                html_string += style_table(df, f"calc(min((11.111vw - {(104+string_width)/9}px),(10vw - 10.4px)))", "mobile-table",font_size)
                 if i+1 < num_chunks:
                     html_string += '<div class="mobile-table"><hr style="margin-top:1em; margin-bottom:1em"></div>'
             st.markdown(html_string+"</div>",unsafe_allow_html=True)
@@ -455,16 +461,52 @@ def winner_tally (dates, rounds, names):
     top_winners_str = " and ".join(top_winners) if len(top_winners) < 3 else ", ".join(top_winners[:-1]) + " and " + top_winners[-1]
     if sum(play > 0 for play in plays.values()) != 0:
         st.markdown(f"<p style='text-align: left; font-size: clamp(18px, 3.5vw, 26px); font-weight: bold;'>Rounds with {', '.join(names[:-1])} and {names[-1]}</p>", unsafe_allow_html=True)
-        st.markdown(f"<p style='text-align: left; font-size: clamp(12px, 2vw, 16px);'>👑&nbsp;&nbsp;{top_winners_str}</p>", unsafe_allow_html=True)
+        st.markdown(f"<p style='text-align: left; font-size: clamp(13px, 2.5vw, 17px);'>👑&nbsp;&nbsp;{top_winners_str}</p>", unsafe_allow_html=True)
         cols = st.columns(len(names))
         for index, name in enumerate(sorted_names):
             with cols[index]:
-                st.markdown(f"<p style='text-align: center; font-size: clamp(13px, 2.5vw, 18px); font-weight: bold;'>{name}</p>", unsafe_allow_html=True)
-                st.markdown(f"<p style='text-align: center; font-size: clamp(12px, 2vw, 16px)'>{winner_string(name, tally, plays, percentage)}</p>", unsafe_allow_html=True)
+                st.markdown(f"<p style='text-align: center; font-size: clamp(13px, 2.5vw, 17px); font-weight: bold;'>{name}</p>", unsafe_allow_html=True)
+                st.markdown(f"<p style='text-align: center; font-size: clamp(13px, 2.5vw, 17px)'>{winner_string(name, tally, plays, percentage)}</p>", unsafe_allow_html=True)
     else:
         st.markdown("<p>""</p>", unsafe_allow_html=True) 
-        st.markdown(f"<p style='text-align: left; font-size: clamp(18px, 3.5vw, 26px); font-weight: bold;'>No head to head matchups.</p>", unsafe_allow_html=True)
+        st.markdown(f"<p style='text-align: left; font-size: clamp(18px, 3.5vw, 26px); font-weight: bold;'>No head to head matchups</p>", unsafe_allow_html=True)
+
+def high_scores(names, dates, rounds):  
+    par_total = rounds[dates[0]][0][5]
+    if len(names) > 0:
+            scores = []
+            for date in dates:
+                for attempt in rounds[date]:
+                    if attempt[0] in names:
+                        scores += [[attempt[0], date, attempt[5], attempt[6]]]
+            filtered_scores = []
+            max_attempt = 0
+            for score in scores:
+                max_attempt = max(max_attempt, score[2] - score[3])
+            for score in scores:
+                if score[2] - score[3] == max_attempt:
+                    if max_attempt < par_total:
+                        score[0] = score[0] + " (P)"
+                    filtered_scores += [score]
+            filtered_scores.sort(key=lambda x: (-(x[2] - x[3]), x[3], -(int(x[1].replace("-", "").replace(" ", ""))), x[0]))
+            if len(filtered_scores) > 10:
+                num = st.slider("No. of Results", 10, len(filtered_scores))
+            else:
+                num = len(filtered_scores)
+    st.markdown("<p></p>", unsafe_allow_html=True)
+    with st.container(border=True):
+        if len(names) > 0:
+            for score in filtered_scores[:num]:
+                st.write(f"{score[0]}, {score[1]}, {score[2]}, {score[3]}")
+        else:
+            st.markdown(f"<p style='text-align: left; font-size: clamp(18px, 3.5vw, 26px); font-weight: bold;'>Select at least one player</p>", unsafe_allow_html=True)
+
+
+
 def main():
+    #with st.sidebar:
+        #st.page_link("files/stats.py", label="Stats")
+        #st.page_link("files/update_data.py", label="Update Data")
     st.markdown("""
         <style>
             .stMainBlockContainer {
@@ -490,44 +532,67 @@ def main():
             .stHorizontalBlock .stColumn {
                 min-width: unset;
             }
+            .stMain {
+                position: absolute;
+                inset: 0px;
+            }
+            .stSidebar {
+                box-shadow: transparent -2rem 0px 2rem 2rem;
+            }
+            div[data-testid="stSidebarCollapseButton"] {
+                display: inline!important;
+            }
         </style>
     """, unsafe_allow_html=True)
     data, course_layouts = fetch_data()
     Course = st.selectbox("Select a course", list(course_layouts.keys()))
     Layout = st.selectbox("Select a layout", course_layouts[Course])
+    dates, rounds, names = get_all_rounds(data, course_layouts, Course, Layout)
+    font_size = 14
+    widths = get_text_width(font_size, names)
     if Course == "All" or Layout == "All":
         types = ["Previous Rounds", "Player Comparison"]
+    elif len(names) == 1:
+        types = ["Previous Rounds", "Best Round", "Best Per Hole", "Average"]
     else:
-        types = ["Previous Rounds", "Player Comparison", "Best Round", "Best Per Hole", "Average"]
+        types = ["Previous Rounds", "Player Comparison", "Best Round", "Best Per Hole", "Average", 'High Scores']
     Type = st.selectbox("Select a stat", types)
-    dates, rounds, names = get_all_rounds(data, course_layouts, Course, Layout)
     if Course is not None and Layout in course_layouts[Course]:
         st.markdown(f"<p style='text-decoration: underline;margin-bottom: 0px; text-align: left; font-size: clamp(20px, 3.7vw, 28px); font-weight: bold;'>{Type}</p>", unsafe_allow_html=True)
         st.markdown("<p></p>", unsafe_allow_html=True)
         if Type == "Previous Rounds":
-            for date in dates:
+            if len(dates) > 10:
+                num = st.slider("No. of Results", 10, len(dates))
+            else:
+                num = len(dates)
+            for date in dates[:num]:
                 all_rounds_data, holes, pars, current_course, current_layout, round_names = get_round(date, rounds) 
-                display_round(all_rounds_data, date, holes, pars, current_course, current_layout, round_names)
+                display_round(all_rounds_data, date, holes, pars, current_course, current_layout, round_names, font_size, widths)
         elif Type == "Player Comparison":
             selected_names = st.multiselect("Select Players", names)
+            st.markdown("<p></p>", unsafe_allow_html=True)
             with st.container(border=True):
                 if len(selected_names)>=2:
                     winner_tally(dates, rounds, selected_names)
                 else:
-                    st.markdown(f"<p style='text-align: left; font-size: clamp(18px, 3.5vw, 26px); font-weight: bold;'>Select at least two players.</p>", unsafe_allow_html=True)
+                    st.markdown(f"<p style='text-align: left; font-size: clamp(18px, 3.5vw, 26px); font-weight: bold;'>Select at least two players</p>", unsafe_allow_html=True)
         elif Type == "Best Round":
             all_rounds_data, holes, pars, current_course, current_layout,round_names = get_round(dates[0], rounds)
             best_rounds = get_best(rounds, dates, names)
-            display_round(best_rounds, "NA", holes, pars, current_course, current_layout, names)
+            display_round(best_rounds, "NA", holes, pars, current_course, current_layout, names, font_size, widths)
         
         elif Type == "Best Per Hole":
             all_rounds_data, holes, pars, current_course, current_layout,round_names= get_round(dates[0], rounds)
             best_rounds = best_per_hole(rounds, dates, names)
-            display_round(best_rounds, "NA", holes, pars, current_course, current_layout, names)
+            display_round(best_rounds, "NA", holes, pars, current_course, current_layout, names, font_size, widths)
         
         elif Type == "Average":
             all_rounds_data, holes, pars, current_course, current_layout,round_names = get_round(dates[0], rounds)
             best_rounds = get_average(rounds, dates, names)
-            display_round(best_rounds, "NA", holes, pars, current_course, current_layout, names)
-
+            display_round(best_rounds, "NA", holes, pars, current_course, current_layout, names, font_size, widths)
+        elif Type == "High Scores":
+            selected_names = st.multiselect("Select Players", names, names)
+            high_scores(selected_names, dates, rounds)
+            
+    
 main()
