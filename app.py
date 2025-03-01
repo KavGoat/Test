@@ -185,10 +185,9 @@ def wrap_in_div(val, row_idx, col_idx, pars, width_string):
             )
         return val
 
-def get_text_width(font_size, names):
+def get_text_width(names, font):
     widths = {}
     for text in names:
-        font = ImageFont.truetype("fonts/SourceSansPro-Regular.DZLUzqI4.ttf", font_size)
         bbox = font.getbbox(text)
         width = bbox[2] - bbox[0]
         widths[text] = width + 4
@@ -223,7 +222,7 @@ def style_table(df, min_width_value, className, fontsize):
     styled_html = f'<div class="{className}">{styled_df}</div>'
     return styled_html
 
-def display_round(all_rounds_data, date, holes, pars, current_course, current_layout, names, font_size, widths):
+def display_round(all_rounds_data, date, holes, pars, current_course, current_layout, names, font_size, widths, font):
     with st.container(border=True):
         st.markdown(f"<p style='text-align: left; font-size: clamp(18px, 3.5vw, 26px); font-weight: bold;'>{current_course}</p>", unsafe_allow_html=True)
         st.markdown(f"<p style='text-align: left; font-size: clamp(13px, 2.5vw, 17px);'>⛳️&nbsp;&nbsp;{current_layout}</p>", unsafe_allow_html=True)
@@ -268,10 +267,10 @@ def display_round(all_rounds_data, date, holes, pars, current_course, current_la
                     filler_ting = ""
                 fillers += [filler_ting]
                 score_display = f"{'+' if player_data[2] > 0 else ''}{'E' if player_data[2] == 0 else player_data[2]} ({player_data[1]})"
-                st.markdown(f"<p style='text-align: center; font-size: clamp(13px, 2.5vw, 17px); font-weight: bold;'>{name}{filler_ting}</p>", unsafe_allow_html=True)
-                st.markdown(f"<p style='text-align: center; font-size: clamp(13px, 2.5vw, 17px)'>{score_display}</p>", unsafe_allow_html=True)
+                st.markdown(f"<p style='text-align: center; font-size: clamp(15px, 2.5vw, 17px); font-weight: bold;'>{name}{filler_ting}</p>", unsafe_allow_html=True)
+                st.markdown(f"<p style='text-align: center; font-size: clamp(14px, 2.5vw, 17px)'>{score_display}</p>", unsafe_allow_html=True)
         if fillers != [""] * len(cols):
-            htmlting = f"<div style='line-height:0.75; padding-bottom:5px'><p style='text-decoration: underline; text-align: left; font-size: clamp(12px, 2vw, 16px)'>Notes</p>"
+            htmlting = f"<div style='line-height:0.75; padding-bottom:5px'><p style='text-decoration: underline; text-align: left; font-size: clamp(13px, 2.5vw, 17px)'>Notes</p>"
             if " (P)" in fillers:
                 htmlting += f"<p style='text-align: left; font-size: clamp(13px, 2.5vw, 17px)'>(P) - Partial round</p>"
             elif " (PP)" in fillers:
@@ -280,7 +279,7 @@ def display_round(all_rounds_data, date, holes, pars, current_course, current_la
         if date == "NA":
             package = st.container(border=True)
         else:
-            package = st.expander("See more")
+            package = st.expander("Scorecard")
         with package:
             full_table = [["Hole"] + holes, ["Par"] + pars]
             for player in names:
@@ -290,6 +289,9 @@ def display_round(all_rounds_data, date, holes, pars, current_course, current_la
             chunk_size = 18
             num_chunks = len(holes) // chunk_size + (1 if len(holes) % chunk_size != 0 else 0)
             string_width = max([widths[name] for name in names if name in widths])
+            if date != "NA":
+                html_string += '<div class="laptop-table"><hr style="margin-top:0; margin-bottom:1em"></div>'
+                html_string += '<div class="mobile-table"><hr style="margin-top:0; margin-bottom:1em"></div>'
             for i in range(num_chunks):
                 start = i * chunk_size
                 end = min((i + 1) * chunk_size, len(holes))
@@ -317,6 +319,104 @@ def display_round(all_rounds_data, date, holes, pars, current_course, current_la
                 if i+1 < num_chunks:
                     html_string += '<div class="mobile-table"><hr style="margin-top:1em; margin-bottom:1em"></div>'
             st.markdown(html_string+"</div>",unsafe_allow_html=True)
+        if date != "NA":
+            colours = {
+                    "holes": "#44AD86",
+                    "-3": "#7798CB",
+                    "-2": "#4F6A97",
+                    "-1": "#28406A",
+                    "0": "transparent",
+                    "1": "#BF896C",
+                    "2": "#C16E46",
+                    "3": "#AA5129"
+                }
+            with st.expander("Player Overview"):
+                css = ""
+                for i, name in enumerate(names):
+                    valid_scores = {}
+                    for index, throws in enumerate(all_rounds_data[name][0]):
+                        if throws != "-":
+                            if throws == 1:
+                                if "holes" not in valid_scores:
+                                    valid_scores["holes"] = 1
+                                else:
+                                    valid_scores["holes"] += 1
+                            elif throws - pars[index] == 0:
+                                if "0" not in valid_scores:
+                                    valid_scores["0"] = 1
+                                else:
+                                    valid_scores["0"] += 1
+                            elif throws - pars[index] == 1:
+                                if "1" not in valid_scores:
+                                    valid_scores["1"] = 1
+                                else:
+                                    valid_scores["1"] += 1
+                            elif throws - pars[index]==2:
+                                if "2" not in valid_scores:
+                                    valid_scores["2"] = 1
+                                else:
+                                    valid_scores["2"] += 1
+                            elif throws - pars[index]==-1:
+                                if "-1" not in valid_scores:
+                                    valid_scores["-1"] = 1
+                                else:
+                                    valid_scores["-1"] += 1
+                            elif throws - pars[index]==-2:
+                                if "-2" not in valid_scores:
+                                    valid_scores["-2"] = 1
+                                else:
+                                    valid_scores["-2"] += 1
+                            elif throws - pars[index] >= 3:
+                                if "3" not in valid_scores:
+                                    valid_scores["3"] = 1
+                                else:
+                                    valid_scores["3"] += 1
+                            elif throws - pars[index]:
+                                if "-3" not in valid_scores <= -3:
+                                    valid_scores["-3"] = 1
+                                else:
+                                    valid_scores["-3"] += 1
+                    played = 0
+                    for type in valid_scores.keys():
+                        played += valid_scores[type]
+                    birdies = 0
+                    ordered_types = []
+                    all_types = ["holes", "-3", "-2", "-1", "0", "1", "2", "3"]
+                    for type in all_types:
+                        if type in valid_scores.keys():
+                            ordered_types += [type]
+                            if type in ["holes", "-3", "-2", "-1"]:
+                                birdies += valid_scores[type]
+                    st.markdown('<hr style="margin-bottom:1em; margin-top:0">',unsafe_allow_html=True)
+                    cols = st.columns([0.6, 0.4])
+                    with cols[0]:
+                        st.markdown(f"<p style='font-size: clamp(15px, 2.5vw, 17px); font-weight: bold;'>{name}</p>", unsafe_allow_html=True)
+                    with cols[1]:
+                        st.markdown(f"<p style='font-size: 14px; text-align:right'>{round(birdies/played*100)}% Birdies</p>", unsafe_allow_html=True)
+                    if i + 1 == len(names):
+                        bar = """<div style="vertical-align:center; display: flex; border-radius:8px; border:solid rgba(250, 250, 250, 0.2); border-width:1px; overflow:hidden">"""
+                    else:
+                        bar = """<div style="vertical-align:center; display: flex; border-radius:8px; border:solid rgba(250, 250, 250, 0.2); border-width:1px; overflow:hidden; margin-bottom:1em">"""
+                    for type in ordered_types:
+                        bbox = font.getbbox(str(valid_scores[type]))
+                        width = (bbox[2] - bbox[0] + 4)*played/valid_scores[type]+104
+                        if width > 743:
+                            bar += f"""<div style="width: {valid_scores[type]/played*100}%; text-align: center; font-size:{font_size}px; background-color:{colours[type]}"></div>"""                                                     
+                        else:
+                            className = f"{name}_{date.replace(' ', '').replace('-', '')}_{type}"
+                            bar += f"""<div style="width: {valid_scores[type]/played*100}%; background-color:{colours[type]}"><div class="{className}" style="text-align: center; font-size:{font_size}px;">{valid_scores[type]}</div></div>"""
+                            css += f"""
+                                <style>
+                                @media (max-width: {int(np.ceil(width))}px) {"{"}
+                                    .{className} {"{"}
+                                        display: none;
+                                    {"}"}
+                                {"}"}
+                                </style>
+                                """
+                    bar += """</div>"""
+                    st.markdown(bar,unsafe_allow_html=True)
+                st.markdown(css, unsafe_allow_html=True)
 
 def best_per_hole(rounds, dates, names):
     pars = [int(x) for x in rounds[dates[0]][0][8:] if str(x) != 'nan']
@@ -465,7 +565,7 @@ def winner_tally (dates, rounds, names):
         cols = st.columns(len(names))
         for index, name in enumerate(sorted_names):
             with cols[index]:
-                st.markdown(f"<p style='text-align: center; font-size: clamp(13px, 2.5vw, 17px); font-weight: bold;'>{name}</p>", unsafe_allow_html=True)
+                st.markdown(f"<p style='text-align: center; font-size: clamp(15px, 2.5vw, 17px); font-weight: bold;'>{name}</p>", unsafe_allow_html=True)
                 st.markdown(f"<p style='text-align: center; font-size: clamp(13px, 2.5vw, 17px)'>{winner_string(name, tally, plays, percentage)}</p>", unsafe_allow_html=True)
     else:
         st.markdown("<p>""</p>", unsafe_allow_html=True) 
@@ -501,12 +601,129 @@ def high_scores(names, dates, rounds):
         else:
             st.markdown(f"<p style='text-align: left; font-size: clamp(18px, 3.5vw, 26px); font-weight: bold;'>Select at least one player</p>", unsafe_allow_html=True)
 
+def breakdown(names, dates, rounds, font, font_size):
+    colours = {
+        "holes": "#44AD86",
+        "-3": "#7798CB",
+        "-2": "#4F6A97",
+        "-1": "#28406A",
+        "0": "transparent",
+        "1": "#BF896C",
+        "2": "#C16E46",
+        "3": "#AA5129"
+    }
+    pars = [int(x) for x in rounds[dates[0]][0][8:] if str(x) != 'nan']
+    length = len(pars)
+    all_data = {}
+    for name in names:
+        all_data[name] = None
+        tries = []
+        for date in dates:
+            if name in [row[0] for row in rounds[date] if len(row) > 0]:
+                tries += [individuals_round(date, rounds, name, length)[0]]
+        bests = []
+        avs = []
+        scores = []
+        for i, par in enumerate(pars):
+            hole_scores = []
+            for roundr in tries:
+                if roundr[i] != "-":
+                    hole_scores += [roundr[i]]
+            if len(hole_scores) == 0:
+                bests += ["N/A"]
+                avs += ["N/A"]
+            else:
+                bests += [min(hole_scores)]
+                avs += [round(statistics.mean(hole_scores),1)]
+            scores += [hole_scores]
+        all_data[name] = [bests, avs, scores]
+    for i, par in enumerate(pars):
+        with st.container(border=True):
+            css = ""
+            st.markdown(f"<p style='text-align: left; font-size: clamp(18px, 3.5vw, 26px); font-weight: bold;'>Hole {i+1} - Par {par}</p>", unsafe_allow_html=True)
+            for x, name in enumerate(names):
+                st.markdown('<div><hr style="margin-top:0; margin-bottom:1em"></div>', unsafe_allow_html=True)
+                col1, col2 = st.columns([0.4, 0.6])
+                with col1:
+                    st.markdown(f"<p style='font-size: clamp(15px, 2.5vw, 17px); font-weight: bold;'>{name}</p>", unsafe_allow_html=True)
+                with col2:
+                    birdies = 0
+                    for ting in all_data[name][2][i]:
+                        if ting == 1:
+                            birdies += 1
+                        elif ting - par < 0:
+                            birdies += 1
+                    played = len(all_data[name][2][i])
+                    if all_data[name][0][i] == "N/A":
+                        st.markdown(f"<p style='font-size: 14px; text-align:right'>Best:&nbsp;{all_data[name][0][i]}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Average:&nbsp;{all_data[name][1][i]}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Birdies:&nbsp;N/A</p>", unsafe_allow_html=True)
+                    else:
+                        st.markdown(f"<p style='font-size: 14px; text-align:right'>Best:&nbsp;{all_data[name][0][i]}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Average:&nbsp;{all_data[name][1][i]}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Birdies:&nbsp;{int(round(birdies/played*100))}%</p>", unsafe_allow_html=True)
+                if all_data[name][0][i] == "N/A":
+                    if x + 1 == len(names):
+                        bar = """<div style="vertical-align:center; text-align: center; border-radius:8px; border:solid rgba(250, 250, 250, 0.2); border-width:1px; overflow:hidden">N/A</div>"""
+                    else:
+                        bar = """<div style="vertical-align:center; text-align: center; border-radius:8px; border:solid rgba(250, 250, 250, 0.2); border-width:1px; overflow:hidden; margin-bottom:1em">N/A</div>"""
+                else:
+                    scoretings = {}
+                    for ting in all_data[name][2][i]:
+                        if ting == 1:
+                            if "holes" in scoretings:
+                                scoretings["holes"] += 1
+                            else:
+                                scoretings["holes"] = 1
+                        elif ting - par <= -3:
+                            if "-3" in scoretings:
+                                scoretings["-3"] += 1
+                            else:
+                                scoretings["-3"] = 1
+                        elif ting-par >= 3:
+                            if "3" in scoretings:
+                                scoretings["3"] += 1
+                            else:
+                                scoretings["3"] = 1
+                        else:
+                            if str(ting-par) in scoretings:
+                                scoretings[str(ting-par)] += 1
+                            else:
+                                scoretings[str(ting-par)] = 1
+                    all_types = ["holes", "-3", "-2", "-1", "0", "1", "2", "3"]
+                    ordered_types = []
+                    for type in all_types:
+                        if type in scoretings.keys():
+                            ordered_types += [type]
+                    if x + 1 == len(names):
+                        bar = """<div style="vertical-align:center; display: flex; border-radius:8px; border:solid rgba(250, 250, 250, 0.2); border-width:1px; overflow:hidden">"""
+                    else:
+                        bar = """<div style="vertical-align:center; display: flex; border-radius:8px; border:solid rgba(250, 250, 250, 0.2); border-width:1px; overflow:hidden; margin-bottom:1em">"""
+                    for type in ordered_types:
+                        bbox = font.getbbox(str(scoretings[type]))
+                        width = (bbox[2] - bbox[0] + 4)*played/scoretings[type]+72
+                        if width > 743:
+                            bar += f"""<div style="width: {scoretings[type]/played*100}%; text-align: center; font-size:{font_size}px; background-color:{colours[type]}"></div>"""                                                     
+                        else:
+                            className = f"{name}_{i}_{type}"
+                            bar += f"""<div style="width: {scoretings[type]/played*100}%; background-color:{colours[type]}"><div class="{className}" style="text-align: center; font-size:{font_size}px;">{scoretings[type]}</div></div>"""
+                            css += f"""
+                                    <style>
+                                    @media (max-width: {int(np.ceil(width))}px) {"{"}
+                                        .{className} {"{"}
+                                            display: none;
+                                        {"}"}
+                                    {"}"}
+                                    </style>
+                                    """
+                    bar += """</div>"""
+                st.markdown(bar,unsafe_allow_html=True)
+            st.markdown(css, unsafe_allow_html=True)
+
+
+    
 
 
 def main():
     #with st.sidebar:
-        #st.page_link("files/stats.py", label="Stats")
-        #st.page_link("files/update_data.py", label="Update Data")
+    #    st.page_link("files/stats.py", label="Stats")
+    #    st.page_link("files/update_data.py", label="Update Data")
     st.markdown("""
         <style>
             .stMainBlockContainer {
@@ -549,13 +766,14 @@ def main():
     Layout = st.selectbox("Select a layout", course_layouts[Course])
     dates, rounds, names = get_all_rounds(data, course_layouts, Course, Layout)
     font_size = 14
-    widths = get_text_width(font_size, names)
+    font = ImageFont.truetype("fonts/SourceSansPro-Regular.DZLUzqI4.ttf", font_size)
+    widths = get_text_width(names, font)
     if Course == "All" or Layout == "All":
         types = ["Previous Rounds", "Player Comparison"]
     elif len(names) == 1:
-        types = ["Previous Rounds", "Best Round", "Best Per Hole", "Average"]
+        types = ["Previous Rounds", "Best Round", "Best Per Hole", "Average", "High Scores", "Hole Breakdown"]
     else:
-        types = ["Previous Rounds", "Player Comparison", "Best Round", "Best Per Hole", "Average", 'High Scores']
+        types = ["Previous Rounds", "Player Comparison", "Best Round", "Best Per Hole", "Average", 'High Scores', "Hole Breakdown"]
     Type = st.selectbox("Select a stat", types)
     if Course is not None and Layout in course_layouts[Course]:
         st.markdown(f"<p style='text-decoration: underline;margin-bottom: 0px; text-align: left; font-size: clamp(20px, 3.7vw, 28px); font-weight: bold;'>{Type}</p>", unsafe_allow_html=True)
@@ -567,7 +785,7 @@ def main():
                 num = len(dates)
             for date in dates[:num]:
                 all_rounds_data, holes, pars, current_course, current_layout, round_names = get_round(date, rounds) 
-                display_round(all_rounds_data, date, holes, pars, current_course, current_layout, round_names, font_size, widths)
+                display_round(all_rounds_data, date, holes, pars, current_course, current_layout, round_names, font_size, widths, font)
         elif Type == "Player Comparison":
             selected_names = st.multiselect("Select Players", names)
             st.markdown("<p></p>", unsafe_allow_html=True)
@@ -579,20 +797,30 @@ def main():
         elif Type == "Best Round":
             all_rounds_data, holes, pars, current_course, current_layout,round_names = get_round(dates[0], rounds)
             best_rounds = get_best(rounds, dates, names)
-            display_round(best_rounds, "NA", holes, pars, current_course, current_layout, names, font_size, widths)
+            display_round(best_rounds, "NA", holes, pars, current_course, current_layout, names, font_size, widths, font)
         
         elif Type == "Best Per Hole":
             all_rounds_data, holes, pars, current_course, current_layout,round_names= get_round(dates[0], rounds)
             best_rounds = best_per_hole(rounds, dates, names)
-            display_round(best_rounds, "NA", holes, pars, current_course, current_layout, names, font_size, widths)
+            display_round(best_rounds, "NA", holes, pars, current_course, current_layout, names, font_size, widths, font)
         
         elif Type == "Average":
             all_rounds_data, holes, pars, current_course, current_layout,round_names = get_round(dates[0], rounds)
             best_rounds = get_average(rounds, dates, names)
-            display_round(best_rounds, "NA", holes, pars, current_course, current_layout, names, font_size, widths)
+            display_round(best_rounds, "NA", holes, pars, current_course, current_layout, names, font_size, widths, font)
         elif Type == "High Scores":
-            selected_names = st.multiselect("Select Players", names, names)
+            if len(names) == 1:
+                selected_names = names
+            else:
+                selected_names = st.multiselect("Select Players", names, names)
             high_scores(selected_names, dates, rounds)
+        elif Type == "Hole Breakdown":
+            if len(names) == 1:
+                selected_names = names
+            else:
+                selected_names = st.multiselect("Select Players", names, names)
+            breakdown(selected_names, dates, rounds, font, font_size)
+
             
     
 main()
