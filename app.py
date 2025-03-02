@@ -538,17 +538,24 @@ def winner_tally (dates, rounds, names):
         for tries in rounds[date]:
             players += [tries[0]]
         if set(names).issubset(players):
-            scores = []
+            max_attempt = 0
+            total_attempts = 0
             for go in rounds[date]:
                 if go[0] in names:
-                    scores += [go[5]]
-                    plays[go[0]] = plays[go[0]] + 1
-            min_score = min(scores)
-            occs = scores.count(min_score)
-            for name in names:
+                    max_attempt = max(max_attempt, go[5] - go[6])
+                    total_attempts += go[5] - go[6]
+            if max_attempt * len(names) == total_attempts:
+                scores = []
                 for go in rounds[date]:
-                    if go[0]==name and go[5]==min_score:
-                        tally[name] = tally[name] + 1/occs
+                    if go[0] in names:
+                        scores += [go[5]]
+                        plays[go[0]] = plays[go[0]] + 1
+                min_score = min(scores)
+                occs = scores.count(min_score)
+                for name in names:
+                    for go in rounds[date]:
+                        if go[0]==name and go[5]==min_score:
+                            tally[name] = tally[name] + 1/occs
     for name in names:
         if plays[name] != 0:
             percentage[name] = round((tally[name]/plays[name])*100,2)
@@ -578,7 +585,7 @@ def high_scores(names, dates, rounds):
             for date in dates:
                 for attempt in rounds[date]:
                     if attempt[0] in names:
-                        scores += [[attempt[0], date, attempt[5], attempt[6]]]
+                        scores += [[attempt[0], date, round(attempt[5]), round(attempt[6])]]
             filtered_scores = []
             max_attempt = 0
             for score in scores:
@@ -596,8 +603,30 @@ def high_scores(names, dates, rounds):
     st.markdown("<p></p>", unsafe_allow_html=True)
     with st.container(border=True):
         if len(names) > 0:
-            for score in filtered_scores[:num]:
-                st.write(f"{score[0]}, {score[1]}, {score[2]}, {score[3]}")
+            html_ting = "<div style='margin:0'>"
+            for i, score in enumerate(filtered_scores[:num]):
+                if i == 0:
+                    margin_ting = "0.2em"
+                else:
+                    margin_ting = "1em"
+                score_display = f"{'+' if score[3] > 0 else ''}{'E' if score[3] == 0 else score[3]} ({score[2]})"
+                utc_tz = pytz.timezone('UTC')
+                nz_tz = pytz.timezone('Pacific/Auckland')
+                utc_time = datetime.strptime(score[1], "%Y-%m-%d %H%M")
+                utc_time = utc_tz.localize(utc_time)
+                nz_time = utc_time.astimezone(nz_tz)
+                formatted_date_time = "🗓️&nbsp;&nbsp;" + nz_time.strftime("%a, %-d %b %Y")
+                html_ting += f'<div style="display:flex; vertical-align:middle; margin-top:{margin_ting}; margin-bottom:1em">'
+                html_ting += f'<p style="width:200px; vertical-align:middle; margin:0">{i+1})&nbsp;&nbsp;{score[0]}</p>'
+                html_ting += f'<p style="width:75px; text-align:right; vertical-align:middle; margin:0">{score_display}</p>'
+                html_ting += f"<p style='text-align:right; width:100%; vertical-align:middle;margin:0'>{formatted_date_time}</p>"
+                html_ting += '</div>'
+                if i+1 == len(filtered_scores[:num]):
+                    pass
+                else:
+                    html_ting += '<hr style="margin:0">'
+            html_ting += "</div>"
+            st.markdown(html_ting, unsafe_allow_html=True)
         else:
             st.markdown(f"<p style='text-align: left; font-size: clamp(18px, 3.5vw, 26px); font-weight: bold;'>Select at least one player</p>", unsafe_allow_html=True)
 
@@ -643,9 +672,9 @@ def breakdown(names, dates, rounds, font, font_size):
             st.markdown(f"<p style='text-align: left; font-size: clamp(18px, 3.5vw, 26px); font-weight: bold;'>Hole {i+1} - Par {par}</p>", unsafe_allow_html=True)
             for x, name in enumerate(names):
                 st.markdown('<div><hr style="margin-top:0; margin-bottom:1em"></div>', unsafe_allow_html=True)
-                col1, col2 = st.columns([0.4, 0.6])
+                col1, col2 = st.columns([0.3, 0.7])
                 with col1:
-                    st.markdown(f"<p style='font-size: clamp(15px, 2.5vw, 17px); font-weight: bold;'>{name}</p>", unsafe_allow_html=True)
+                    st.markdown(f"<p style='font-size: clamp(15px, 2.5vw, 17px); vertical-align: middle; font-weight: bold;'>{name}</p>", unsafe_allow_html=True)
                 with col2:
                     birdies = 0
                     for ting in all_data[name][2][i]:
@@ -654,10 +683,15 @@ def breakdown(names, dates, rounds, font, font_size):
                         elif ting - par < 0:
                             birdies += 1
                     played = len(all_data[name][2][i])
+                    data_html = '<div style="display:flex; width:100%; align-content:right; text-align:right; justify-content:right">'
+                    data_html += f"<div style='font-size: 14px; width: 60px; text-align:left; vertical-align: middle;'>Best:&nbsp;{all_data[name][0][i]}</div>"
+                    data_html += f"<div style='font-size: 14px; width: 85px; text-align:left; vertical-align: middle;'>Average:&nbsp;{all_data[name][1][i]}</div>"
                     if all_data[name][0][i] == "N/A":
-                        st.markdown(f"<p style='font-size: 14px; text-align:right'>Best:&nbsp;{all_data[name][0][i]}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Average:&nbsp;{all_data[name][1][i]}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Birdies:&nbsp;N/A</p>", unsafe_allow_html=True)
+                        data_html += f"<div style='font-size: 14px; width: 85px; text-align:left; vertical-align: middle;'>Birdies:&nbsp;N/A</div>"
                     else:
-                        st.markdown(f"<p style='font-size: 14px; text-align:right'>Best:&nbsp;{all_data[name][0][i]}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Average:&nbsp;{all_data[name][1][i]}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Birdies:&nbsp;{int(round(birdies/played*100))}%</p>", unsafe_allow_html=True)
+                        data_html += f"<div style='font-size: 14px; width: 85px; text-align:left; vertical-align: middle;'>Birdies:&nbsp;{int(round(birdies/played*100))}%</div>"
+                    data_html += "</div>"
+                    st.markdown(data_html, unsafe_allow_html=True)
                 if all_data[name][0][i] == "N/A":
                     if x + 1 == len(names):
                         bar = """<div style="vertical-align:center; text-align: center; border-radius:8px; border:solid rgba(250, 250, 250, 0.2); border-width:1px; overflow:hidden">N/A</div>"""
@@ -716,10 +750,6 @@ def breakdown(names, dates, rounds, font, font_size):
                 st.markdown(bar,unsafe_allow_html=True)
             st.markdown(css, unsafe_allow_html=True)
 
-
-    
-
-
 def main():
     #with st.sidebar:
     #    st.page_link("files/stats.py", label="Stats")
@@ -774,8 +804,8 @@ def main():
         types = ["Previous Rounds", "Best Round", "Best Per Hole", "Average", "High Scores", "Hole Breakdown"]
     else:
         types = ["Previous Rounds", "Player Comparison", "Best Round", "Best Per Hole", "Average", 'High Scores', "Hole Breakdown"]
-    Type = st.selectbox("Select a stat", types)
-    if Course is not None and Layout in course_layouts[Course]:
+    Type = st.selectbox("Select a stat", types, None)
+    if Course is not None and Layout in course_layouts[Course] and Type is not None:
         st.markdown(f"<p style='text-decoration: underline;margin-bottom: 0px; text-align: left; font-size: clamp(20px, 3.7vw, 28px); font-weight: bold;'>{Type}</p>", unsafe_allow_html=True)
         st.markdown("<p></p>", unsafe_allow_html=True)
         if Type == "Previous Rounds":
@@ -819,7 +849,12 @@ def main():
                 selected_names = names
             else:
                 selected_names = st.multiselect("Select Players", names, names)
-            breakdown(selected_names, dates, rounds, font, font_size)
+            if len(selected_names) == 0:
+                st.markdown("<p></p>", unsafe_allow_html=True)
+                with st.container(border=True):
+                    st.markdown(f"<p style='text-align: left; font-size: clamp(18px, 3.5vw, 26px); font-weight: bold;'>Select at least one player</p>", unsafe_allow_html=True)
+            else:
+                breakdown(selected_names, dates, rounds, font, font_size)
 
             
     
