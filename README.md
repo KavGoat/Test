@@ -46,9 +46,12 @@ On a headless machine (CI, a container) run with `QT_QPA_PLATFORM=offscreen`.
 
 ## Calculations
 
-Draw a calculation block with the **Calculation** tool (`M`) and type ordinary
-engineering maths. It is typeset as you would write it by hand — real fractions,
-radicals, subscripts and superscripts — and evaluated live.
+Type `\` anywhere on the page — or pick the **Calculation** tool (`M`) — and write
+ordinary engineering maths. It is typeset as you would write it by hand — real
+fractions, radicals, subscripts and superscripts — with the result immediately
+after it. Each line is its own region, so you can drag any of them where you want.
+Press **Enter** to open the next line below, **Shift+Enter** to keep several lines
+in one region.
 
 ```
 # Simply supported beam
@@ -68,7 +71,9 @@ sigma_b <= f_y                    # capacity check
 
 | You type | What happens |
 |---|---|
-| `b := 300 mm` | Defines `b`. `b = 300 mm` works too. |
+| `b = 300 mm` | Defines `b` the first time that name appears… |
+| `b = 400 mm` | …and *checks* it afterwards, reading `false`, so nothing is silently overwritten. |
+| `b := 400 mm` or `b : 400 mm` | Always defines, even over a name that already exists. |
 | `b*d^2/6` | Implicit multiplication and `^` powers; shown as a real fraction. |
 | `5 kN`, `24 kN/m^3` | A number and a unit — no `*` needed. |
 | `M_max` | `_` makes a subscript; `sigma`, `delta`, `gamma`… become Greek letters. |
@@ -77,14 +82,32 @@ sigma_b <= f_y                    # capacity check
 | `sigma <= f_y` | A check — the result reads `true` or `false`. |
 | `# note` | A comment, at the start of a line or after an expression. |
 
-Units that cancel collapse to a plain number, the way an engineer reads them:
-`6 m / 200 mm` is **30**, and a utilisation ratio built from `kN·m/(mm³·MPa)` is
-**0.1018** — while `30 deg` stays an angle.
+Results come out in the unit you would have written yourself. `w·L²/8` reads
+**124.4 kN·m**, a bearing pressure reads **149.8 kPa**, a deflection **7.26 mm** —
+lengths swap from mm to m past a metre, forces from N to kN past a kilonewton.
+A value you typed out in full keeps the unit you chose (`896 cm³` stays cm³), and
+imperial input is never quietly turned into SI. An angle that fell out of `atan`
+reads in degrees; one you wrote in radians stays in radians.
+
+Units that cancel collapse to a plain number: `6 m / 200 mm` is **30**, and a
+utilisation ratio built from `kN·m/(mm³·MPa)` is **0.1018**.
 
 Units are enforced, not decorative: `1 m + 1 kg` is refused with
 *"Units do not match: cannot combine meter with kilogram"*, and every result carries
 the unit it earned. SI, imperial and the usual structural units (`kN`, `MPa`, `kip`,
 `ksi`, `psf`, `pcf`, `klf`…) are all built in.
+
+### Order is position
+
+The whole document evaluates in one pass, top-left to bottom-right, exactly as
+SMath does. A value has to be defined above — or to the left of — whatever uses
+it, so dragging a line somewhere else really does change what resolves. When
+something stops resolving the **Problems** panel says so, with the page, the line
+or cell, and what went wrong: an undefined name, a unit mismatch, a bad formula.
+The status bar carries the count.
+
+**Split into separate lines** and **Merge into one block** (under *Calculate*)
+convert between one region per line and a single block.
 
 ### What is available
 
@@ -100,6 +123,14 @@ The **Variables** panel shows every value the document has defined, what it eval
 to, and which block it came from.
 
 ---
+
+## Plots
+
+Draw a plot with the **Plot** tool (`G`) and give it a curve per line — a function
+you defined (`M`), or any expression in the plot variable. The range can be
+written in units (`0 m` to `L`), the axes label themselves from the units that
+come back, and a curve whose units do not match the y axis says so rather than
+being silently dropped.
 
 ## Markup
 
@@ -155,6 +186,9 @@ Total                                 =SUM(D2:D4)
 
 - Cells accept numbers, text, booleans **and quantities** — `150 mm` is a length, not
   a string, so `=B2*C2` comes out as a pressure.
+- Copy, cut and paste ranges with `Ctrl+C` / `Ctrl+X` / `Ctrl+V`. Relative references
+  follow the paste, absolute ones do not, and the clipboard is tab-separated so it
+  round-trips with Excel.
 - Excel-style functions: `SUM`, `AVERAGE`, `COUNT`, `COUNTA`, `IF`, `IFERROR`,
   `AND`, `OR`, `MIN`, `MAX`, `ROUND`, `SUMIF`, `COUNTIF`, `SUMPRODUCT`, `VLOOKUP`,
   `INDEX`, `MATCH`, `CONCAT`, `TEXT`… case-insensitive, with `=` for equality,
@@ -181,12 +215,33 @@ passes so a block can reference something defined further down the document.
 - **Print** and **print preview** through the normal system dialog, **Export to PDF**
   (vector, any page size), export pages as images, and export the markups list or the
   variable list to CSV.
+- **Layers** with per-layer show, lock and print — hidden layers cannot be clicked,
+  locked ones cannot be moved, non-printing ones stay out of the output.
+- **Redaction that redacts**: draw the boxes, then *Markup ▸ Apply redactions* to
+  overwrite the page pixels underneath and delete the markups they cover. It says
+  plainly that this cannot be undone, and that partly-overlapping markups are left
+  for you to check.
+- A light and a dark theme; the page itself stays paper-white in both.
+- Autosave every two minutes beside the document, offered back on the next start.
 - Save to `.cfx` — a zip holding the document as JSON plus its images and imported
   PDF pages, so a file is self-contained and diff-friendly.
 
 ---
 
 ## Keyboard
+
+Typing straight onto the page does **nothing unless the key is bound** — which is
+what lets a bare keystroke mean "start writing here":
+
+| Key | Starts |
+|---|---|
+| `"` | A text region where the cursor is |
+| `\` | A calculation |
+| `\|` | A table |
+| `@` | A callout |
+
+Everything is editable under **Help ▸ Customise shortcuts**, which flags any key
+used twice and remembers your bindings between sessions.
 
 | Key | Action |
 |---|---|
@@ -195,11 +250,13 @@ passes so a block can reference something defined further down the document.
 | `L` `A` | Line · arrow |
 | `R` `E` `C` | Rectangle · ellipse · revision cloud |
 | `T` `N` `S` | Text box · note · stamp |
-| `M` `B` | Calculation · table |
+| `M` `B` `G` | Calculation · table · plot |
 | `H`, `Space`+drag | Pan |
 | `Ctrl`+wheel | Zoom · `Ctrl+0` fit page · `Ctrl+1` fit width |
 | `Shift`+drag | Constrain to 15° or square |
 | Double-click | Edit text, calculation or table · add a polyline vertex |
+| `Enter` | In a one-line calculation: open the next line below |
+| `Shift+Enter` | Keep typing on a new line of the same region |
 | `F9` | Recalculate everything |
 | `Ctrl+Z` / `Ctrl+Y` | Undo · redo |
 | In a table | `Enter`/`F2` edit · `Tab`/arrows move · `Ctrl+D`/`Ctrl+R` fill |
@@ -213,13 +270,14 @@ Full list under **Help ▸ Keyboard shortcuts** (`F1`).
 ```
 calcforge/
   core/        units, evaluation engine, function library, 2D maths typesetting,
-               spreadsheet engine, document and page model
+               spreadsheet engine, document and page model, problem collection
   items/       everything that can sit on a page: shapes, text, stamps, images,
-               measurements, calculation blocks, tables
-  ui/          the scene and canvas, tools, dock panels, dialogs, main window
+               measurements, calculations, tables, plots
+  ui/          the scene and canvas, tools, key bindings, dock panels, dialogs,
+               main window
   io/          project files, PDF import, printing and export
   sample.py    the worked example
-tests/         100 tests: engine, spreadsheet, items and end-to-end GUI
+tests/         168 tests: engine, spreadsheet, items and end-to-end GUI
 ```
 
 Two pieces are worth knowing about if you go digging:
@@ -232,6 +290,10 @@ makes a calculation look handwritten rather than like source code.
 coordinates are PostScript points, so a font sized in points would come out four
 times too large on a 300 dpi printer; pixel sizing pins text to scene units and lets
 the painter's transform scale it like any other geometry.
+
+**`core/units.py`** holds the ladders that decide a result reads best in kN rather
+than 780 000 N, and the rules that keep an angle, an imperial input or a value you
+typed out in full exactly as it was written.
 
 ### Tests
 

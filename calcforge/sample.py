@@ -4,61 +4,64 @@ from __future__ import annotations
 from PySide6.QtCore import QPointF, QRectF
 
 from .core.document import Document, Page, PageScale, PageSetup
+from .core.engine import Workspace
 from .items.mathitem import MathItem
+from .items.plotitem import PlotItem, Series
 from .items.measure import MeasureItem
 from .items.shapes import RectItem
 from .items.tableitem import TableItem
 from .items.text import CalloutItem, StampItem, TextItem
 
 BEAM_CALC = """# Span and loading
-L := 7.2 m
-w_dead := 8.5 kN/m
-w_live := 6.0 kN/m
-w := 1.2*w_dead + 1.5*w_live   # ULS combination
+L = 7.2 m
+w_dead = 8.5 kN/m
+w_live = 6.0 kN/m
+w = 1.2*w_dead + 1.5*w_live   # ULS combination
 
 # Design actions
-M_max := w*L^2/8 -> kN*m
-V_max := w*L/2 -> kN
+M_max = w*L^2/8
+V_max = w*L/2
+M(x) = w*x*(L - x)/2
 
 # Section 356 x 171 x 51 UB
-Z_x := 896 cm^3
-I_x := 14100 cm^4
-E := 205 GPa
-f_y := 355 MPa
+Z_x = 896 cm^3
+I_x = 14100 cm^4
+E = 205 GPa
+f_y = 355 MPa
 
 # Bending check
-sigma_b := M_max/Z_x -> MPa
-M_cap := f_y*Z_x -> kN*m
-util_b := M_max/M_cap
+sigma_b = M_max/Z_x
+M_cap = f_y*Z_x
+util_b = M_max/M_cap
 util_b <= 1.0
 
 # Deflection under live load
-delta := 5*w_live*L^4/(384*E*I_x) -> mm
-delta_lim := L/360 -> mm
+delta = 5*w_live*L^4/(384*E*I_x)
+delta_lim = L/360
 delta <= delta_lim
 """
 
 REACTION_CALC = """# Beam reaction using the table total
-q_total := q_floor + 1.0 kPa      # plus an allowance for partitions
-b_trib := 3.0 m
-L_beam := 7.2 m
-w_beam := q_total*b_trib -> kN/m
-R := w_beam*L_beam/2 -> kN
+q_total = q_floor + 1.0 kPa      # plus an allowance for partitions
+b_trib = 3.0 m
+L_beam = 7.2 m
+w_beam = q_total*b_trib
+R = w_beam*L_beam/2
 """
 
 FOUNDATION_CALC = """# Pad footing bearing pressure
-N := 780 kN            # column axial load
-B := 2.4 m
-D := 2.4 m
-t := 0.6 m
-gamma_c := 24 kN/m^3
+N = 780 kN            # column axial load
+B = 2.4 m
+D = 2.4 m
+t = 0.6 m
+gamma_c = 24 kN/m^3
 
-W_pad := B*D*t*gamma_c -> kN
-N_total := N + W_pad -> kN
-A_base := B*D -> m^2
-q := N_total/A_base -> kPa
-q_allow := 200 kPa
-util_q := q/q_allow
+W_pad = B*D*t*gamma_c
+N_total = N + W_pad
+A_base = B*D
+q = N_total/A_base
+q_allow = 200 kPa
+util_q = q/q_allow
 q <= q_allow
 """
 
@@ -86,10 +89,19 @@ def build_sample() -> Document:
     first.label = "Beam design"
 
     beam_heading = _heading("Steel beam design", QPointF(56, 46), 420)
-    beam = MathItem(BEAM_CALC)
-    beam.setPos(QPointF(56, 84))
-    beam.label = "Beam design"
-    beam.style.font_size = 9.0
+    # One region per line, the way the calculation tool now builds them, so each
+    # line can be dragged on its own.
+    beam_lines = _as_lines(BEAM_CALC, QPointF(56, 84), label="Beam design")
+
+    moment_plot = PlotItem()
+    moment_plot.series = [Series("M", "Bending moment")]
+    moment_plot.variable = "x"
+    moment_plot.x_from = "0 m"
+    moment_plot.x_to = "L"
+    moment_plot.title = "Bending moment along the span"
+    moment_plot.x_label = "Distance from support"
+    moment_plot.setPos(QPointF(300, 470))
+    moment_plot.set_local_rect(QRectF(0, 0, 250, 170))
 
     stamp = StampItem("FOR REVIEW")
     stamp.setPos(QPointF(360, 716))
@@ -187,11 +199,26 @@ def build_sample() -> Document:
                           size=8.0, bold=False)
     cloud_text.style.text_color = "#a02020"
 
-    first._pending_items = _serialise([beam_heading, beam, stamp])
+    first._pending_items = _serialise([beam_heading] + beam_lines
+                                      + [moment_plot, stamp])
     second._pending_items = _serialise([table_heading, loads, note, reaction, hint])
     third._pending_items = _serialise([footing_heading, footing, column,
                                        width_dim, area, scale_note, cloud, cloud_text])
     return document
+
+
+def _as_lines(source: str, origin: QPointF, label: str = "",
+              font_size: float = 9.0) -> list[MathItem]:
+    """Lay a block of source out as one movable region per line."""
+    block = MathItem(source)
+    block.style.font_size = font_size
+    block.label = label
+    block.setPos(origin)
+    workspace = Workspace()
+    workspace.begin_pass()
+    block.refresh(workspace)
+    pieces = block.split_lines()
+    return pieces or [block]
 
 
 def _heading(text: str, position: QPointF, width: float, size: float = 16.0,

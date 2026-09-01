@@ -1,3 +1,4 @@
+import gc
 import os
 import sys
 
@@ -5,6 +6,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
+from PySide6.QtCore import QCoreApplication, QEvent
 
 
 @pytest.fixture(scope="session")
@@ -33,5 +35,16 @@ def window(qapp):
     for page in main.document.pages:
         page.scene = None
     main.close()
+    main.setParent(None)
     main.deleteLater()
+    # Windows left alive make every later app-wide restyle slower, so make sure
+    # Qt has actually finished with this one before the next test builds another.
+    for _ in range(3):
+        qapp.processEvents()
+    # A bare processEvents() does not deliver DeferredDelete — only a running
+    # event loop does — so a suite that never enters one has to send it itself.
+    # Without this every window built by an earlier test stays alive and each
+    # application-wide restyle gets slower.
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    gc.collect()
     qapp.processEvents()

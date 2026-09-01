@@ -5,9 +5,10 @@ from typing import Optional
 
 from PySide6.QtCore import QByteArray, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import QGraphicsScene
+from PySide6.QtWidgets import QGraphicsItem, QGraphicsScene
 
 from ..core.document import MM_TO_PT, Document, Page
+from ..theme import CANVAS, LIGHT
 from ..items.base import MarkupItem, build_item
 from ..items.media import ImageItem
 
@@ -53,8 +54,11 @@ class PageScene(QGraphicsScene):
         self._background: Optional[QPixmap] = None
         self.print_mode = False
         self.update_scene_rect()
-        self.setBackgroundBrush(QBrush(QColor("#8b9099")))
+        self.set_canvas_colour(CANVAS[LIGHT])
         self.selectionChanged.connect(self.selectionInfoChanged.emit)
+
+    def set_canvas_colour(self, colour: str) -> None:
+        self.setBackgroundBrush(QBrush(QColor(colour)))
 
     # -- geometry ----------------------------------------------------------
     def update_scene_rect(self) -> None:
@@ -225,6 +229,21 @@ class PageScene(QGraphicsScene):
         for item in self.ordered_markups():
             item.refresh(self.workspace, self.page)
 
+    def apply_layers(self) -> None:
+        """Hide and lock items according to the layer they sit on."""
+        for item in self.markups():
+            layer = self.document.layer(item.layer)
+            item.setVisible(layer.visible)
+            movable = not item.locked and not layer.locked
+            item.setFlag(QGraphicsItem.ItemIsMovable, movable)
+            item.setFlag(QGraphicsItem.ItemIsSelectable, layer.visible)
+            if not layer.visible:
+                item.setSelected(False)
+
+    def layer_prints(self, item) -> bool:
+        layer = self.document.layer(item.layer)
+        return layer.printable and layer.visible
+
     def assets_used(self) -> set[str]:
         used: set[str] = set()
         for item in self.markups():
@@ -245,12 +264,13 @@ class PageScene(QGraphicsScene):
                 chrome.append((item, item.show_chrome))
                 item.show_chrome = False
             item.setSelected(False)
-        hidden = [item for item in self.markups() if not item.printable and for_print]
+        hidden = [item for item in self.markups()
+                  if for_print and (not item.printable or not self.layer_prints(item))]
         for item in hidden:
             item.setVisible(False)
         self.render(painter, target, self.page_rect(), Qt.IgnoreAspectRatio)
         for item in hidden:
-            item.setVisible(True)
+            item.setVisible(self.document.layer(item.layer).visible)
         for item, value in chrome:
             item.show_chrome = value
         for item in selected:

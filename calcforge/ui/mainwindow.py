@@ -6,7 +6,8 @@ import os
 from typing import Optional
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer
-from PySide6.QtGui import (QAction, QActionGroup, QFont, QKeySequence, QUndoStack)
+from PySide6.QtGui import (QAction, QActionGroup, QColor, QFont, QKeySequence,
+                           QUndoStack)
 from PySide6.QtPrintSupport import QPrintDialog, QPrintPreviewDialog, QPrinter
 from PySide6.QtWidgets import (QApplication, QComboBox, QDockWidget, QDoubleSpinBox,
                                QFileDialog, QHBoxLayout, QInputDialog, QLabel,
@@ -25,12 +26,12 @@ from ..items.measure import MeasureItem
 from ..items.media import ImageItem
 from ..items.shapes import PolyItem, RectItem
 from ..items.tableitem import TableItem
-from ..items.text import NoteItem, StampItem, TextItem, _TextBase
+from ..items.text import NoteItem, StampItem, _TextBase
 from . import dialogs
 from .commands import DocumentStructureCommand
 from .icons import icon
-from .panels import (FunctionsPanel, MarkupsPanel, PagesPanel, ProblemsPanel,
-                     PropertiesPanel, VariablesPanel)
+from .panels import (FunctionsPanel, LayersPanel, MarkupsPanel, PagesPanel,
+                     ProblemsPanel, PropertiesPanel, VariablesPanel)
 from .scene import PageScene
 from .shortcuts import COMMAND, INSERT, TOOL, ShortcutManager
 from .tools import CATEGORIES, TOOL_MAP, TOOLS, tools_in
@@ -77,7 +78,15 @@ class MainWindow(QMainWindow):
         self._connect()
         self.apply_shortcuts()
 
+        self._autosave = QTimer(self)
+        self._autosave.setInterval(120_000)
+        self._autosave.timeout.connect(self.write_autosave)
+        self._autosave.start()
+
         self.new_document(confirm=False)
+        from ..app import current_theme
+        from ..theme import DARK
+        self.act_dark.setChecked(current_theme() == DARK)
         QTimer.singleShot(0, self.view.fit_page)
 
     # ==================================================================
@@ -190,11 +199,14 @@ class MainWindow(QMainWindow):
 
         self._act("grid", "Show grid", self.toggle_grid, "Ctrl+G", checkable=True)
         self._act("snap", "Snap to grid", self.toggle_snap, "", checkable=True)
+        self._act("dark", "Dark theme", self.toggle_theme, "", checkable=True)
         self._act("margins", "Show margins", self.toggle_margins, "", checkable=True)
         self.act_margins.setChecked(True)
         self._act("sticky", "Keep the tool active", self.toggle_sticky, "", checkable=True,
                   tip="Stay on the current tool after drawing instead of returning to Select")
         self._act("recalc", "Recalculate", self.recalculate, "F9", "recalc")
+        self._act("apply_redactions", "Apply redactions…", self.apply_redactions, "",
+                  tip="Permanently remove what the black boxes cover")
         self._act("split_lines", "Split into separate lines", self.split_calculation, "",
                   tip="Turn a multi-line calculation into one movable region per line")
         self._act("merge_lines", "Merge into one block", self.merge_calculations, "",
@@ -313,6 +325,9 @@ class MainWindow(QMainWindow):
         self.functions_panel = FunctionsPanel()
         self.dock_functions = self._dock("Functions", self.functions_panel,
                                          Qt.RightDockWidgetArea, "dock_functions")
+        self.layers_panel = LayersPanel(self)
+        self.dock_layers = self._dock("Layers", self.layers_panel,
+                                      Qt.RightDockWidgetArea, "dock_layers")
         self.markups_panel = MarkupsPanel(self)
         self.dock_markups = self._dock("Markups", self.markups_panel,
                                        Qt.BottomDockWidgetArea, "dock_markups")
@@ -322,6 +337,7 @@ class MainWindow(QMainWindow):
         self.tabifyDockWidget(self.dock_markups, self.dock_problems)
         self.dock_markups.raise_()
         self.tabifyDockWidget(self.dock_variables, self.dock_functions)
+        self.tabifyDockWidget(self.dock_functions, self.dock_layers)
         self.dock_variables.raise_()
         self.resizeDocks([self.dock_pages, self.dock_properties], [190, 320], Qt.Horizontal)
         # Without an explicit vertical split the properties form gets squeezed
@@ -354,13 +370,21 @@ class MainWindow(QMainWindow):
         view_menu = bar.addMenu("&View")
         for action in (self.act_zoom_in, self.act_zoom_out, self.act_fit_page,
                        self.act_fit_width, self.act_zoom_sel, None, self.act_grid,
-                       self.act_snap, self.act_margins, None, self.act_prev_page,
+                       self.act_snap, self.act_margins, self.act_dark, None,
+                       self.act_prev_page,
                        self.act_next_page):
             view_menu.addSeparator() if action is None else view_menu.addAction(action)
         panels_menu = view_menu.addMenu("Panels")
         for dock in (self.dock_pages, self.dock_properties, self.dock_variables,
-                     self.dock_functions, self.dock_markups, self.dock_problems):
+                     self.dock_functions, self.dock_layers, self.dock_markups,
+                     self.dock_problems):
             panels_menu.addAction(dock.toggleViewAction())
+
+        markup_menu = bar.addMenu("&Markup")
+        markup_menu.addAction(self.act_apply_redactions)
+        markup_menu.addAction(self.act_renumber_counts)
+        markup_menu.addSeparator()
+        markup_menu.addAction(self.act_export_markups)
 
         page_menu = bar.addMenu("&Page")
         for action in (self.act_add_page, self.act_duplicate_page, self.act_delete_page,
@@ -442,6 +466,7 @@ class MainWindow(QMainWindow):
         self.pages_panel.pagesReordered.connect(self.move_page)
         self.markups_panel.markupActivated.connect(self.reveal_markup)
         self.problems_panel.problemActivated.connect(self.reveal_markup)
+        self.layers_panel.layersChanged.connect(self.apply_layers)
         self.variables_panel.insertRequested.connect(self.insert_into_math)
         self.functions_panel.insertRequested.connect(self.insert_into_math)
         self.formula_edit.returnPressed.connect(self.commit_formula_bar)
@@ -477,6 +502,7 @@ class MainWindow(QMainWindow):
         self.page_spin.setValue(self.current_index + 1)
         self.page_spin.blockSignals(False)
         self.pages_panel.rebuild(self.document, self.current_index)
+        self.apply_layers()
         self.refresh_lists()
         self.refresh_scale_label()
 
@@ -506,6 +532,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Save", f"Could not save:\n{exc}")
             return False
         self.undo_stack.setClean()
+        self.clear_autosave()
         self.update_title()
         self.status_hint.setText(f"Saved {self.document.path}")
         return True
@@ -538,11 +565,78 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
         self.view.deactivate_table()
+        self._autosave.stop()
+        self.clear_autosave()
         try:
             self.undo_stack.cleanChanged.disconnect()
         except (RuntimeError, TypeError):
             pass
         event.accept()
+
+    # ==================================================================
+    # autosave and recovery
+    # ==================================================================
+    def autosave_path(self) -> str:
+        if self.document.path:
+            return self.document.path + ".autosave"
+        return os.path.join(self.recovery_dir(), "untitled.cfx.autosave")
+
+    @staticmethod
+    def recovery_dir() -> str:
+        from PySide6.QtCore import QStandardPaths
+        base = QStandardPaths.writableLocation(QStandardPaths.AppDataLocation) or "."
+        folder = os.path.join(base, "recovery")
+        os.makedirs(folder, exist_ok=True)
+        return folder
+
+    def write_autosave(self) -> Optional[str]:
+        """Save a recovery copy beside the document, quietly."""
+        if self.undo_stack.isClean() and not self.document.modified:
+            return None
+        path = self.autosave_path()
+        try:
+            saved_path = self.document.path
+            project_io.save_document(self.document, path, enforce_extension=False)
+            self.document.path = saved_path     # an autosave is not a save-as
+            self.document.modified = True
+            return path
+        except Exception:                        # noqa: BLE001 - never interrupt typing
+            return None
+
+    def clear_autosave(self) -> None:
+        for path in {self.autosave_path(),
+                     os.path.join(self.recovery_dir(), "untitled.cfx.autosave")}:
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except OSError:
+                pass
+
+    def offer_recovery(self) -> bool:
+        """On start-up, offer to reopen whatever a previous session left behind."""
+        path = os.path.join(self.recovery_dir(), "untitled.cfx.autosave")
+        if not os.path.exists(path):
+            return False
+        answer = QMessageBox.question(
+            self, "Recover unsaved work",
+            "CalcForge found a document from a session that did not finish.\n\n"
+            "Open the recovered copy?",
+            QMessageBox.Yes | QMessageBox.No)
+        if answer != QMessageBox.Yes:
+            self.clear_autosave()
+            return False
+        try:
+            project_io.load_document(self.document, path)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "Recover unsaved work", str(exc))
+            return False
+        self.document.path = None
+        self.document.modified = True
+        self.current_index = 0
+        self.rebuild_scenes()
+        self.update_title()
+        self.status_hint.setText("Recovered unsaved work — save it somewhere permanent")
+        return True
 
     def update_title(self) -> None:
         name = os.path.basename(self.document.path) if self.document.path else "Untitled"
@@ -894,7 +988,7 @@ class MainWindow(QMainWindow):
             self.status_hint.setText(items[0].display_name())
 
     def delete_selection(self) -> None:
-        items = [item for item in self.selected_items() if not item.locked]
+        items = [item for item in self.selected_items() if self.view.editable(item)]
         if not items:
             return
         self.view.deactivate_table()
@@ -906,6 +1000,8 @@ class MainWindow(QMainWindow):
         self.refresh_selection()
 
     def copy_selection(self) -> None:
+        if self.view.active_table is not None and self.view.copy_cells():
+            return
         items = self.selected_items()
         if not items:
             return
@@ -914,10 +1010,14 @@ class MainWindow(QMainWindow):
         self.status_hint.setText(f"Copied {len(items)} markup(s)")
 
     def cut_selection(self) -> None:
+        if self.view.active_table is not None and self.view.cut_cells():
+            return
         self.copy_selection()
         self.delete_selection()
 
     def paste_items(self) -> None:
+        if self.view.active_table is not None and self.view.paste_cells():
+            return
         payload = self._clipboard
         text = QApplication.clipboard().text()
         if text.strip().startswith("{"):
@@ -1003,7 +1103,7 @@ class MainWindow(QMainWindow):
         self.view.commit_snapshot("Change order")
 
     def align_items(self, mode: str) -> None:
-        items = [i for i in self.selected_items() if not i.locked]
+        items = [i for i in self.selected_items() if self.view.editable(i)]
         if len(items) < 2:
             return
         rects = {item: item.sceneBoundingRect() for item in items}
@@ -1040,10 +1140,36 @@ class MainWindow(QMainWindow):
         self.refresh_selection()
 
     def layer_visible(self, name: str) -> bool:
-        for layer in self.document.layers:
-            if layer.name == name:
-                return layer.visible
-        return True
+        return self.document.layer(name).visible
+
+    def apply_layers(self) -> None:
+        """Push layer visibility, locking and print flags onto every page."""
+        for page in self.document.pages:
+            if page.scene is not None:
+                page.scene.apply_layers()
+        self.layers_panel.rebuild()
+        self.refresh_selection()
+
+    def rename_layer(self, old: str, new: str) -> None:
+        for page in self.document.pages:
+            if page.scene is None:
+                continue
+            for item in page.scene.markups():
+                if item.layer == old:
+                    item.layer = new
+        self.document.modified = True
+
+    def move_selection_to_layer(self, name: str) -> None:
+        items = self.selected_items()
+        if not items:
+            self.status_hint.setText("Select some markups first.")
+            return
+        self.view.begin_snapshot()
+        for item in items:
+            item.layer = name
+        self.view.commit_snapshot("Change layer")
+        self.apply_layers()
+        self.status_hint.setText(f"Moved {len(items)} markup(s) to “{name}”")
 
     def load_image_into(self, item: ImageItem) -> bool:
         path, _ = QFileDialog.getOpenFileName(
@@ -1298,6 +1424,19 @@ class MainWindow(QMainWindow):
         self.document.settings.show_margins = on
         self._refresh_all_scenes()
 
+    def toggle_theme(self, dark: bool) -> None:
+        from ..app import apply_theme
+        from ..theme import CANVAS, DARK, LIGHT
+
+        theme = DARK if dark else LIGHT
+        application = QApplication.instance()
+        if application is not None:
+            apply_theme(application, theme)
+        for page in self.document.pages:
+            if page.scene is not None:
+                page.scene.set_canvas_colour(CANVAS[theme])
+        self._refresh_all_scenes()
+
     def _refresh_all_scenes(self) -> None:
         for page in self.document.pages:
             if page.scene is not None:
@@ -1373,7 +1512,7 @@ class MainWindow(QMainWindow):
             menu.addAction(self.act_paste)
             menu.addSeparator()
             insert = menu.addMenu("Insert here")
-            for key in ("math", "table", "text", "callout", "stamp", "image"):
+            for key in ("math", "table", "plot", "text", "callout", "stamp", "image"):
                 tool = TOOL_MAP[key]
                 insert.addAction(icon(tool.icon), tool.label,
                                  lambda _c=False, k=key, p=scene_pos: self._insert_at(k, p))
@@ -1429,6 +1568,111 @@ class MainWindow(QMainWindow):
         table.prepareGeometryChange()
         self.recalculate()
         self.view.commit_snapshot("Edit table")
+
+    # ==================================================================
+    # redaction
+    # ==================================================================
+    def redaction_items(self) -> list[tuple]:
+        from ..items.shapes import RectItem
+        found = []
+        for index, page in enumerate(self.document.pages):
+            if page.scene is None:
+                continue
+            for item in page.scene.markups():
+                if isinstance(item, RectItem) and item.kind == "redact":
+                    found.append((index, page, item))
+        return found
+
+    def apply_redactions(self) -> None:
+        """Burn every redaction box into the page and delete what it covers."""
+        targets = self.redaction_items()
+        if not targets:
+            QMessageBox.information(
+                self, "Apply redactions",
+                "There are no redaction boxes in this document.\n\n"
+                "Draw one with the Redact tool first — until it is applied it only "
+                "hides the content, it does not remove it.")
+            return
+        answer = QMessageBox.warning(
+            self, "Apply redactions",
+            f"Permanently remove everything under {len(targets)} redaction box"
+            f"{'es' if len(targets) != 1 else ''}?\n\n"
+            "The imported page pixels underneath are overwritten and markups that "
+            "sit entirely inside a box are deleted. Markups that only partly overlap "
+            "one are left alone — check those yourself.\n\n"
+            "This cannot be undone.",
+            QMessageBox.Yes | QMessageBox.Cancel)
+        if answer != QMessageBox.Yes:
+            return
+
+        removed = 0
+        by_page: dict[int, list] = {}
+        for index, page, item in targets:
+            by_page.setdefault(index, []).append((page, item))
+        for index, entries in by_page.items():
+            page = entries[0][0]
+            boxes = [item.sceneBoundingRect() for _page, item in entries]
+            self._burn_into_background(page, boxes)
+            removed += self._flatten_redactions(page, [item for _page, item in entries], boxes)
+        self.document.modified = True
+        self.recalculate()
+        self.undo_stack.clear()          # the pixels are gone; undo would lie
+        self.status_hint.setText(
+            f"Applied {len(targets)} redaction(s); removed {removed} covered markup(s)")
+
+    def _burn_into_background(self, page, boxes: list) -> None:
+        """Paint the boxes into the page's background image, destroying it."""
+        from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+        from PySide6.QtGui import QImage, QPainter as _Painter
+
+        data = self.document.asset(page.background_key)
+        if not data:
+            return
+        image = QImage()
+        if not image.loadFromData(QByteArray(data)):
+            return
+        scale_x = image.width() / max(page.width_pt, 1.0)
+        scale_y = image.height() / max(page.height_pt, 1.0)
+        painter = _Painter(image)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor("#000000"))
+        for box in boxes:
+            painter.drawRect(QRectF(box.x() * scale_x, box.y() * scale_y,
+                                    box.width() * scale_x, box.height() * scale_y))
+        painter.end()
+        buffer = QBuffer()
+        buffer.open(QIODevice.WriteOnly)
+        image.save(buffer, "PNG")
+        page.background_key = self.document.add_asset(bytes(buffer.data()), "png")
+        if page.scene is not None:
+            page.scene._background = None
+            page.scene.load_background()
+            page.scene.update()
+
+    def _flatten_redactions(self, page, items: list, boxes: list) -> int:
+        """Delete what the boxes fully cover and leave a locked black rectangle."""
+        scene = page.scene
+        if scene is None:
+            return 0
+        removed = 0
+        for other in list(scene.markups()):
+            if other in items:
+                continue
+            rect = other.sceneBoundingRect()
+            if any(box.contains(rect) for box in boxes):
+                scene.remove_markup(other)
+                removed += 1
+        for item in items:
+            item.kind = "redact"
+            item.style.fill = "#000000"
+            item.style.fill_opacity = 1.0
+            item.style.stroke = "#000000"
+            item.style.opacity = 1.0
+            item.label = "Redacted"
+            item.comment = "Applied redaction — the content underneath was removed."
+            item.set_locked(True)
+            item.update()
+        return removed
 
     def document_properties(self) -> None:
         dialog = dialogs.DocumentPropertiesDialog(self.document, self)

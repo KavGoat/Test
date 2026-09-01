@@ -162,11 +162,17 @@ def sheet_sumproduct(*ranges):
 
 
 def sheet_index(values, position, column=None):
-    flat = fnlib._flatten([values])
+    """INDEX(range, n) along a range, or INDEX(range, row, col) across one."""
     position = int(fnlib.as_float(position))
     if column is not None:
-        # two-dimensional index over a rectangular range is flattened row-major
-        raise ValueError("INDEX with two axes needs a rectangular range")
+        column = int(fnlib.as_float(column))
+        grid = getattr(values, "grid", None)
+        if grid is None:
+            raise ValueError("INDEX with a row and a column needs a cell range")
+        if not 1 <= position <= len(grid) or not 1 <= column <= len(grid[0]):
+            raise IndexError("INDEX position out of range")
+        return grid[position - 1][column - 1]
+    flat = fnlib._flatten([values])
     if not 1 <= position <= len(flat):
         raise IndexError("INDEX position out of range")
     return flat[position - 1]
@@ -578,6 +584,70 @@ class Sheet:
             if cell is not None:
                 cell.fmt = CellFormat.from_dict(origin.fmt.to_dict())
 
+    # -- clipboard ---------------------------------------------------------
+    def region_text(self, r0: int, c0: int, r1: int, c1: int, raw: bool = True) -> str:
+        """The region as tab-separated rows, the way a spreadsheet copies."""
+        lines = []
+        for row in range(r0, r1 + 1):
+            cells = []
+            for col in range(c0, c1 + 1):
+                cells.append(self.raw(row, col) if raw else self.display_text(row, col))
+            lines.append("\t".join(cells))
+        return "\n".join(lines)
+
+    def region_payload(self, r0: int, c0: int, r1: int, c1: int) -> dict:
+        """Everything about a region, so an in-app paste keeps formats too."""
+        rows = []
+        for row in range(r0, r1 + 1):
+            line = []
+            for col in range(c0, c1 + 1):
+                cell = self.cells.get((row, col))
+                line.append({"raw": cell.raw if cell else "",
+                             "fmt": cell.fmt.to_dict() if cell else {}})
+            rows.append(line)
+        return {"origin": [r0, c0], "rows": rows}
+
+    def paste_payload(self, payload: dict, row: int, col: int) -> tuple[int, int]:
+        """Paste a captured region with its origin at (row, col)."""
+        origin = payload.get("origin", [row, col])
+        delta_row, delta_col = row - int(origin[0]), col - int(origin[1])
+        rows = payload.get("rows", [])
+        for r_offset, line in enumerate(rows):
+            for c_offset, entry in enumerate(line):
+                target_row, target_col = row + r_offset, col + c_offset
+                if target_row >= self.rows or target_col >= self.cols:
+                    continue
+                raw = self.translate_formula(entry.get("raw", ""), delta_row, delta_col)
+                self.set_raw(target_row, target_col, raw)
+                fmt = entry.get("fmt") or {}
+                if fmt:
+                    self.cells.setdefault((target_row, target_col), Cell()).fmt = \
+                        CellFormat.from_dict(fmt)
+        height = len(rows)
+        width = max((len(line) for line in rows), default=0)
+        return height, width
+
+    def paste_text(self, text: str, row: int, col: int) -> tuple[int, int]:
+        """Paste tab-separated text, as pasted from Excel or a text editor."""
+        lines = [line for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
+        while lines and not lines[-1].strip():
+            lines.pop()
+        for r_offset, line in enumerate(lines):
+            for c_offset, value in enumerate(line.split("\t")):
+                target_row, target_col = row + r_offset, col + c_offset
+                if target_row >= self.rows or target_col >= self.cols:
+                    continue
+                self.set_raw(target_row, target_col, value)
+        width = max((len(line.split("\t")) for line in lines), default=0)
+        return len(lines), width
+
+    def grow_to_fit(self, row: int, col: int, height: int, width: int) -> None:
+        """Add rows or columns so a paste is not clipped."""
+        if row + height > self.rows:
+            self.resize(min(row + height, MAX_ROWS), self.cols)
+        if col + width > self.cols:
+            self.resize(self.rows, min(col + width, MAX_COLS))
+
     # -- evaluation --------------------------------------------------------
     def recalculate(self, workspace: Optional[Workspace] = None) -> None:
         """Evaluate every cell in dependency order, flagging circular chains."""
@@ -712,6 +782,26 @@ class Sheet:
         return sheet
 
 
+class CellRange(list):
+    """The values in a rectangular range.
+
+    It behaves as the flat list every aggregate function expects, and also keeps
+    its shape so INDEX(range, row, col) can address it two-dimensionally.
+    """
+
+    def __init__(self, grid: list[list]):
+        self.grid = grid
+        super().__init__([value for row in grid for value in row])
+
+    @property
+    def rows(self) -> int:
+        return len(self.grid)
+
+    @property
+    def cols(self) -> int:
+        return len(self.grid[0]) if self.grid else 0
+
+
 class _Resolver:
     """Supplies cell and range values to compiled formulas."""
 
@@ -726,17 +816,19 @@ class _Resolver:
             raise CellError(cell.value.code, cell.value.detail)
         return cell.value if cell.value is not None else 0
 
-    def range_values(self, r0: int, c0: int, r1: int, c1: int) -> list[Any]:
-        values = []
+    def range_values(self, r0: int, c0: int, r1: int, c1: int) -> "CellRange":
+        grid = []
         for row in range(min(r0, r1), max(r0, r1) + 1):
+            line = []
             for col in range(min(c0, c1), max(c0, c1) + 1):
                 cell = self.sheet.cells.get((row, col))
                 if cell is None or cell.blank:
                     continue
                 if isinstance(cell.value, CellError):
                     raise CellError(cell.value.code, cell.value.detail)
-                values.append(cell.value)
-        return values
+                line.append(cell.value)
+            grid.append(line)
+        return CellRange(grid)
 
 
 def _topological_order(formulas: dict[tuple[int, int], tuple[str, set]]

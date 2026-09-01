@@ -1,18 +1,20 @@
 """The interactive page canvas: tools, selection, editing and navigation."""
 from __future__ import annotations
 
+import json
 import math
 from typing import Optional
 
-from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QMimeData, QPoint, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (QCursor, QKeyEvent, QMouseEvent, QPainter, QTransform, QWheelEvent)
-from PySide6.QtWidgets import (QGraphicsView, QLineEdit, QRubberBand, QGraphicsProxyWidget)
+from PySide6.QtWidgets import (QApplication, QGraphicsView, QLineEdit, QRubberBand, QGraphicsProxyWidget)
 
 from ..core.document import MM_TO_PT
 from ..items.base import HANDLE_CURSORS, MarkupItem
 from ..items.mathitem import LINE_STEP, MathItem
 from ..items.measure import CALIBRATE, CountItem, MeasureItem
 from ..items.media import ImageItem
+from ..items.plotitem import PlotItem
 from ..items.shapes import PolyItem
 from ..items.tableitem import TableItem
 from ..items.text import CalloutItem, NoteItem, StampItem, TextItem, _TextBase
@@ -22,6 +24,7 @@ from .tools import CLICK, DRAG, FREE, NONE, POLY, TOOL_MAP, Tool
 MIN_ZOOM = 0.08
 MAX_ZOOM = 16.0
 CLICK_SLOP = 3.0
+CELLS_MIME = "application/x-calcforge-cells"
 FREE_MIN_STEP = 1.2
 
 
@@ -298,7 +301,7 @@ class PageView(QGraphicsView):
 
         # 2. a resize handle on an already-selected item
         for item in self.scene().selectedItems():
-            if not isinstance(item, MarkupItem) or item.locked:
+            if not isinstance(item, MarkupItem) or not self.editable(item):
                 continue
             key = item.handle_at(item.mapFromScene(scene_pos))
             if key:
@@ -329,13 +332,13 @@ class PageView(QGraphicsView):
             item.setSelected(True)
         self.selectionChanged.emit()
 
-        if item.locked:
+        if not self.editable(item):
             self._mode = "idle"
             event.accept()
             return
         self._mode = "move"
         self._move_items = [(other, other.pos()) for other in self.scene().selectedItems()
-                            if isinstance(other, MarkupItem) and not other.locked]
+                            if isinstance(other, MarkupItem) and self.editable(other)]
         self.begin_snapshot()
         event.accept()
 
@@ -511,7 +514,7 @@ class PageView(QGraphicsView):
         if self.tool_key != "select":
             return
         for item in self.scene().selectedItems():
-            if isinstance(item, MarkupItem) and not item.locked:
+            if isinstance(item, MarkupItem) and self.editable(item):
                 key = item.handle_at(item.mapFromScene(scene_pos))
                 if key:
                     self.setCursor(HANDLE_CURSORS.get(key, Qt.SizeAllCursor))
@@ -526,7 +529,7 @@ class PageView(QGraphicsView):
                 self.setCursor(Qt.CrossCursor)
                 return
         item = self.markup_at(scene_pos)
-        self.setCursor(Qt.SizeAllCursor if item is not None and not item.locked
+        self.setCursor(Qt.SizeAllCursor if item is not None and self.editable(item)
                        else Qt.ArrowCursor)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
@@ -545,7 +548,7 @@ class PageView(QGraphicsView):
                 self._rubber.hide()
                 scene_rect = self.mapToScene(rect).boundingRect()
                 for item in self.scene().items(scene_rect):
-                    if isinstance(item, MarkupItem) and not item.locked:
+                    if isinstance(item, MarkupItem) and self.editable(item):
                         item.setSelected(True)
             self.selectionChanged.emit()
             event.accept()
@@ -734,6 +737,8 @@ class PageView(QGraphicsView):
 
     @staticmethod
     def _default_size(item: MarkupItem) -> tuple[float, float]:
+        if isinstance(item, PlotItem):
+            return 300.0, 200.0
         if isinstance(item, TableItem):
             return item.sheet.total_width(), item.sheet.total_height()
         if isinstance(item, MathItem):
@@ -836,6 +841,12 @@ class PageView(QGraphicsView):
         if isinstance(item, _TextBase):
             return not item.text().strip()
         return False
+
+    @staticmethod
+    def editable(item) -> bool:
+        """False when the markup itself is locked, or the layer under it is."""
+        from PySide6.QtWidgets import QGraphicsItem as _GraphicsItem
+        return bool(item.flags() & _GraphicsItem.ItemIsMovable) and not item.locked
 
     def markup_at(self, scene_pos: QPointF) -> Optional[MarkupItem]:
         for item in self.scene().items(scene_pos):
@@ -943,6 +954,72 @@ class PageView(QGraphicsView):
             self.commit_snapshot("Fill")
         self._fill_origin = None
 
+    # -- cell clipboard ----------------------------------------------------
+    def copy_cells(self) -> bool:
+        """Copy the selected cells as TSV, plus a full-fidelity private copy."""
+        table = self.active_table
+        if table is None:
+            return False
+        r0, c0, r1, c1 = table.selection()
+        mime = QMimeData()
+        mime.setText(table.sheet.region_text(r0, c0, r1, c1, raw=True))
+        mime.setData(CELLS_MIME, json.dumps(
+            table.sheet.region_payload(r0, c0, r1, c1)).encode("utf-8"))
+        QApplication.clipboard().setMimeData(mime)
+        count = (r1 - r0 + 1) * (c1 - c0 + 1)
+        self.statusMessage.emit(f"Copied {count} cell(s)")
+        return True
+
+    def cut_cells(self) -> bool:
+        table = self.active_table
+        if table is None or not self.copy_cells():
+            return False
+        self.begin_snapshot()
+        for row, col in table.selected_cells():
+            table.sheet.set_raw(row, col, "")
+        self.window.recalculate()
+        self.commit_snapshot("Cut cells")
+        return True
+
+    def paste_cells(self) -> bool:
+        """Paste into the active table, from CalcForge or from a spreadsheet."""
+        table = self.active_table
+        if table is None or table.locked:
+            return False
+        mime = QApplication.clipboard().mimeData()
+        row, col = table.current
+        self.begin_snapshot()
+        if mime.hasFormat(CELLS_MIME):
+            try:
+                payload = json.loads(bytes(mime.data(CELLS_MIME)).decode("utf-8"))
+            except ValueError:
+                payload = None
+            if payload:
+                height = len(payload.get("rows", []))
+                width = max((len(line) for line in payload.get("rows", [])), default=0)
+                table.sheet.grow_to_fit(row, col, height, width)
+                table.sheet.paste_payload(payload, row, col)
+                self._finish_paste(table, row, col, height, width)
+                return True
+        text = mime.text()
+        if not text:
+            return False
+        lines = text.replace("\r\n", "\n").split("\n")
+        table.sheet.grow_to_fit(row, col, len(lines),
+                                max((len(l.split("\t")) for l in lines), default=1))
+        height, width = table.sheet.paste_text(text, row, col)
+        self._finish_paste(table, row, col, height, width)
+        return True
+
+    def _finish_paste(self, table, row: int, col: int, height: int, width: int) -> None:
+        table.anchor = (min(row + max(height, 1) - 1, table.sheet.rows - 1),
+                        min(col + max(width, 1) - 1, table.sheet.cols - 1))
+        table.prepareGeometryChange()
+        self.window.recalculate()
+        self.commit_snapshot("Paste cells")
+        self.cellChanged.emit(table)
+        self.statusMessage.emit(f"Pasted {height}×{width} cell(s)")
+
     def fill_down(self) -> None:
         table = self.active_table
         if table is None:
@@ -1042,7 +1119,7 @@ class PageView(QGraphicsView):
             delta = {Qt.Key_Left: QPointF(-step, 0), Qt.Key_Right: QPointF(step, 0),
                      Qt.Key_Up: QPointF(0, -step), Qt.Key_Down: QPointF(0, step)}[key]
             items = [i for i in self.scene().selectedItems()
-                     if isinstance(i, MarkupItem) and not i.locked]
+                     if isinstance(i, MarkupItem) and self.editable(i)]
             if items:
                 self.begin_snapshot()
                 for item in items:

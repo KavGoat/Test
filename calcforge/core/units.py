@@ -28,7 +28,7 @@ Q_ = ureg.Quantity
 # structural / civil engineers do not use).  Each line is applied defensively so
 # that a future pint release adding one of them cannot break start-up.
 _EXTRA_DEFINITIONS = [
-    "kip = 1000 * force_pound = kips",
+    "kip = 1000 * force_pound = kip = kips",
     "ksi = kip / inch ** 2",
     "psf = force_pound / foot ** 2",
     "pcf = force_pound / foot ** 3",
@@ -206,6 +206,15 @@ def format_number(value: Any, digits: int = 4, mode: str = AUTO,
     return _strip_zeros(text)
 
 
+# pint orders a product's symbols alphabetically, which puts the lever arm in
+# front of the force.  Engineers write the force first.
+_UNIT_TEXT_FIXES = {
+    "m·N": "N·m", "mm·N": "N·mm", "cm·N": "N·cm", "km·N": "N·km",
+    "m·lbf": "lbf·m", "ft·lbf": "lbf·ft", "in·lbf": "lbf·in",
+    "m·kip": "kip·m", "ft·kip": "kip·ft",
+}
+
+
 def format_unit(unit) -> str:
     """Render a pint unit the way an engineer writes it."""
     if unit is None:
@@ -214,7 +223,8 @@ def format_unit(unit) -> str:
         text = f"{unit:~P}"
     except Exception:
         text = str(unit)
-    return text.replace(" ** ", "^").replace("**", "^").strip()
+    text = text.replace(" ** ", "^").replace("**", "^").strip()
+    return _UNIT_TEXT_FIXES.get(text, text)
 
 
 def format_quantity(value: Any, digits: int = 4, mode: str = AUTO,
@@ -322,20 +332,31 @@ def _unit_names(quantity) -> set[str]:
 
 
 _FORCE_DIMENSION = {"[mass]": 1, "[length]": 1, "[time]": -2}
-_IS_FORCE_CACHE: dict[str, bool] = {}
+_ENERGY_DIMENSION = {"[mass]": 1, "[length]": 2, "[time]": -2}
+_POWER_DIMENSION = {"[mass]": 1, "[length]": 2, "[time]": -3}
+_DIMENSION_CACHE: dict[str, dict] = {}
+
+
+def _unit_dimension(name: str) -> dict:
+    """The dimensionality of a single unit symbol, cached."""
+    known = _DIMENSION_CACHE.get(name)
+    if known is None:
+        try:
+            known = {str(k): int(v) for k, v in ureg.Unit(name).dimensionality.items()}
+        except Exception:
+            known = {}
+        _DIMENSION_CACHE[name] = known
+    return known
 
 
 def _is_force_unit(name: str) -> bool:
     """True when *name* on its own is a force — 'kN' as well as 'newton'."""
-    known = _IS_FORCE_CACHE.get(name)
-    if known is None:
-        try:
-            dimensions = {str(k): int(v) for k, v in ureg.Unit(name).dimensionality.items()}
-            known = dimensions == _FORCE_DIMENSION
-        except Exception:
-            known = False
-        _IS_FORCE_CACHE[name] = known
-    return known
+    return _unit_dimension(name) == _FORCE_DIMENSION
+
+
+def _is_energy_unit(name: str) -> bool:
+    """True for J, kJ, kWh and friends — a unit that names energy outright."""
+    return _unit_dimension(name) in (_ENERGY_DIMENSION, _POWER_DIMENSION)
 
 
 def preferred_unit(value: Any) -> Optional[str]:
@@ -360,10 +381,12 @@ def preferred_unit(value: Any) -> Optional[str]:
 
         dimension = _dimension_key(value)
         if dimension == _MOMENT_DIMENSION:
-            # A moment and an energy share a dimension; "kN·m" was written as a
-            # force times a lever arm, "kJ" was not.
-            written_as_force = any(_is_force_unit(name) for name in names)
-            ladder = MOMENT_LADDER if written_as_force else ENERGY_LADDER
+            # A moment and an energy share a dimension.  Only something written
+            # in an energy or power unit is an energy; everything else — a force
+            # times a lever arm, or a stress times a section modulus — is a
+            # moment, which is what this dimension almost always means here.
+            written_as_energy = any(_is_energy_unit(name) for name in names)
+            ladder = ENERGY_LADDER if written_as_energy else MOMENT_LADDER
         else:
             ladder = None
             for candidate, units in UNIT_LADDERS:

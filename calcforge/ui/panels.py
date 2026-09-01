@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDoubleS
 from ..core.units import format_quantity
 from ..items.base import ARROW_HEADS, LINE_STYLES, MarkupItem
 from ..items.mathitem import MathItem
+from ..items.plotitem import PlotItem, Series
 from ..items.measure import CountItem, MeasureItem
 from ..items.shapes import PolyItem, RectItem
 from ..items.tableitem import TableItem
@@ -229,11 +230,25 @@ class MarkupsPanel(QWidget):
         QMessageBox.information(self, "Export markups", f"Saved {path}")
 
 
+def _set_series(item: PlotItem, text: str) -> None:
+    """Rebuild a plot's curves from one line of text per curve."""
+    series: list[Series] = []
+    for line in text.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        expression, _, label = line.partition("|")
+        series.append(Series(expression.strip(), label.strip()))
+    item.series = series or [Series()]
+
+
 def _icon_for(item) -> str:
     if isinstance(item, MathItem):
         return "math"
     if isinstance(item, TableItem):
         return "table"
+    if isinstance(item, PlotItem):
+        return "plot"
     if isinstance(item, MeasureItem):
         return "measure_length"
     if isinstance(item, CountItem):
@@ -356,6 +371,147 @@ class FunctionsPanel(QWidget):
     def _show_help(self, row: int) -> None:
         if 0 <= row < len(self._visible):
             self.help.setText(self._visible[row][1])
+
+
+# ---------------------------------------------------------------------------
+# Layers
+# ---------------------------------------------------------------------------
+
+class LayersPanel(QWidget):
+    """Show, hide, lock and set printability per layer."""
+
+    layersChanged = Signal()
+
+    def __init__(self, window):
+        super().__init__()
+        self.window = window
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
+
+        self.table = QTableWidget(0, 5)
+        self.table.setHorizontalHeaderLabels(["Show", "Lock", "Print", "Layer", "Items"])
+        self.table.verticalHeader().setVisible(False)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        self.table.itemChanged.connect(self._cell_changed)
+        layout.addWidget(self.table, 1)
+
+        buttons = QHBoxLayout()
+        for label, tip, slot in (("Add", "Add a layer", self.add_layer),
+                                 ("Rename", "Rename the selected layer", self.rename_layer),
+                                 ("Delete", "Delete the selected layer", self.delete_layer),
+                                 ("Move here", "Move the selected markups to this layer",
+                                  self.move_selection)):
+            button = QPushButton(label)
+            button.setToolTip(tip)
+            button.clicked.connect(slot)
+            buttons.addWidget(button)
+        buttons.addStretch(1)
+        layout.addLayout(buttons)
+        self._building = False
+
+    # -- display -----------------------------------------------------------
+    def rebuild(self) -> None:
+        self._building = True
+        document = self.window.document
+        counts: dict[str, int] = {}
+        for page in document.pages:
+            if page.scene is None:
+                continue
+            for item in page.scene.markups():
+                counts[item.layer] = counts.get(item.layer, 0) + 1
+        self.table.setRowCount(len(document.layers))
+        for row, layer in enumerate(document.layers):
+            for column, flag in enumerate((layer.visible, layer.locked, layer.printable)):
+                cell = QTableWidgetItem()
+                cell.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                cell.setCheckState(Qt.Checked if flag else Qt.Unchecked)
+                self.table.setItem(row, column, cell)
+            name = QTableWidgetItem(layer.name)
+            self.table.setItem(row, 3, name)
+            count = QTableWidgetItem(str(counts.get(layer.name, 0)))
+            count.setFlags(Qt.ItemIsEnabled)
+            self.table.setItem(row, 4, count)
+        for column in (0, 1, 2, 4):
+            self.table.resizeColumnToContents(column)
+        self._building = False
+
+    def current_layer(self):
+        row = self.table.currentRow()
+        layers = self.window.document.layers
+        return layers[row] if 0 <= row < len(layers) else None
+
+    # -- edits -------------------------------------------------------------
+    def _cell_changed(self, cell: QTableWidgetItem) -> None:
+        if self._building:
+            return
+        row, column = cell.row(), cell.column()
+        layers = self.window.document.layers
+        if not 0 <= row < len(layers):
+            return
+        layer = layers[row]
+        if column in (0, 1, 2):
+            checked = cell.checkState() == Qt.Checked
+            if column == 0:
+                layer.visible = checked
+            elif column == 1:
+                layer.locked = checked
+            else:
+                layer.printable = checked
+        elif column == 3:
+            new_name = cell.text().strip() or layer.name
+            if new_name != layer.name:
+                self.window.rename_layer(layer.name, new_name)
+                layer.name = new_name
+        self.layersChanged.emit()
+
+    def add_layer(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+        name, accepted = QInputDialog.getText(self, "Add layer", "Layer name:")
+        if accepted and name.strip():
+            self.window.document.add_layer(name.strip())
+            self.rebuild()
+            self.layersChanged.emit()
+
+    def rename_layer(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+        layer = self.current_layer()
+        if layer is None:
+            return
+        name, accepted = QInputDialog.getText(self, "Rename layer", "Layer name:",
+                                              text=layer.name)
+        if accepted and name.strip() and name.strip() != layer.name:
+            self.window.rename_layer(layer.name, name.strip())
+            layer.name = name.strip()
+            self.rebuild()
+            self.layersChanged.emit()
+
+    def delete_layer(self) -> None:
+        from PySide6.QtWidgets import QMessageBox
+        layer = self.current_layer()
+        document = self.window.document
+        if layer is None or len(document.layers) < 2:
+            QMessageBox.information(self, "Delete layer",
+                                    "A document needs at least one layer.")
+            return
+        remaining = [l for l in document.layers if l is not layer][0]
+        if QMessageBox.question(
+                self, "Delete layer",
+                f"Delete “{layer.name}”?\nIts markups move to “{remaining.name}”."
+        ) != QMessageBox.Yes:
+            return
+        self.window.rename_layer(layer.name, remaining.name)
+        document.layers.remove(layer)
+        self.rebuild()
+        self.layersChanged.emit()
+
+    def move_selection(self) -> None:
+        layer = self.current_layer()
+        if layer is not None:
+            self.window.move_selection_to_layer(layer.name)
+            self.rebuild()
 
 
 # ---------------------------------------------------------------------------
@@ -501,6 +657,8 @@ class PropertiesPanel(QScrollArea):
                 self._add_math(first)
             elif isinstance(first, TableItem):
                 self._add_table(first)
+            elif isinstance(first, PlotItem):
+                self._add_plot(first)
             elif isinstance(first, MeasureItem):
                 self._add_measure(first)
             elif isinstance(first, CountItem):
@@ -759,6 +917,63 @@ class PropertiesPanel(QScrollArea):
         names = QPushButton("Named cells…")
         names.clicked.connect(lambda: self.window.edit_named_cells(item))
         form.addRow("", names)
+
+    def _add_plot(self, item: PlotItem) -> None:
+        form = self._group("Plot")
+        curves = QPlainTextEdit("\n".join(
+            (s.expression if not s.label else f"{s.expression} | {s.label}")
+            for s in item.series))
+        curves.setFixedHeight(64)
+        curves.setToolTip("One curve per line: an expression or a defined function,\n"
+                          "optionally followed by  |  and a legend label")
+        curves.textChanged.connect(
+            lambda: self._apply(lambda i: _set_series(i, curves.toPlainText()), "Plot curves"))
+        form.addRow("Curves", curves)
+
+        variable = QLineEdit(item.variable)
+        variable.textEdited.connect(
+            lambda text: self._apply(lambda i: setattr(i, "variable", text.strip() or "x"),
+                                     "Plot variable"))
+        form.addRow("Variable", variable)
+
+        for label, attribute, placeholder in (("From", "x_from", "0 m"),
+                                              ("To", "x_to", "L")):
+            edit = QLineEdit(getattr(item, attribute))
+            edit.setPlaceholderText(placeholder)
+            edit.textEdited.connect(
+                lambda text, a=attribute: self._apply(lambda i: setattr(i, a, text),
+                                                      "Plot range"))
+            form.addRow(label, edit)
+
+        samples = QSpinBox()
+        samples.setRange(2, 2000)
+        samples.setValue(item.samples)
+        samples.valueChanged.connect(
+            lambda value: self._apply(lambda i: setattr(i, "samples", value), "Plot samples"))
+        form.addRow("Points", samples)
+
+        for label, attribute in (("Title", "title"), ("X label", "x_label"),
+                                 ("Y label", "y_label")):
+            edit = QLineEdit(getattr(item, attribute))
+            edit.textEdited.connect(
+                lambda text, a=attribute: self._apply(lambda i: setattr(i, a, text),
+                                                      "Plot labels"))
+            form.addRow(label, edit)
+
+        for label, attribute in (("X unit", "x_unit"), ("Y unit", "y_unit")):
+            combo = UnitCombo(getattr(item, attribute))
+            combo.currentTextChanged.connect(
+                lambda text, a=attribute: self._apply(lambda i: setattr(i, a, text.strip()),
+                                                      "Plot units"))
+            form.addRow(label, combo)
+
+        for label, attribute in (("Grid", "show_grid"), ("Legend", "show_legend"),
+                                 ("Markers", "show_markers")):
+            box = QCheckBox(label)
+            box.setChecked(getattr(item, attribute))
+            box.toggled.connect(
+                lambda on, a=attribute: self._apply(lambda i: setattr(i, a, on), "Plot style"))
+            form.addRow("", box)
 
     def _add_measure(self, item: MeasureItem) -> None:
         form = self._group("Measurement")

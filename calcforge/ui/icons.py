@@ -144,6 +144,18 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
         _glyph(painter, "x", ACCENT, 8, True, QRectF(4, 3, 10, 9))
         _glyph(painter, "y", ACCENT, 8, True, QRectF(4, 12, 10, 9))
         _glyph(painter, "=", ACCENT, 9, True, QRectF(13, 6, 10, 12))
+    elif name == "plot":
+        _pen(painter, INK, 1.2)
+        painter.drawLine(QPointF(5, 4), QPointF(5, 19))
+        painter.drawLine(QPointF(5, 19), QPointF(20, 19))
+        _pen(painter, ACCENT, 1.6)
+        path = QPainterPath(QPointF(6, 16))
+        path.cubicTo(QPointF(10, 4), QPointF(15, 4), QPointF(19, 13))
+        painter.drawPath(path)
+        _pen(painter, WARM, 1.3)
+        path2 = QPainterPath(QPointF(6, 18))
+        path2.cubicTo(QPointF(11, 11), QPointF(15, 11), QPointF(19, 16))
+        painter.drawPath(path2)
     elif name == "table":
         _pen(painter, INK, 1.3)
         painter.drawRect(QRectF(4, 6, 16, 12))
@@ -288,3 +300,37 @@ def colour_icon(colour: str, size: int = 20) -> QIcon:
     painter.drawRoundedRect(QRectF(2, 2, size - 4, size - 4), 3, 3)
     painter.end()
     return QIcon(pixmap)
+
+
+@lru_cache(maxsize=8)
+def app_icon(size: int = 256) -> QIcon:
+    """The application icon: a sheet with a rule, a curve and a result."""
+    icon_object = QIcon()
+    for edge in (16, 24, 32, 48, 64, 128, size):
+        pixmap = QPixmap(edge, edge)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.scale(edge / 64.0, edge / 64.0)
+
+        body = QRectF(6, 4, 52, 56)
+        painter.setPen(QPen(QColor("#2f3a4a"), 2.4))
+        painter.setBrush(QBrush(QColor("#fdfefe")))
+        painter.drawRoundedRect(body, 6, 6)
+
+        painter.setPen(QPen(QColor("#1971c2"), 3.0, Qt.SolidLine, Qt.RoundCap))
+        painter.drawLine(QPointF(14, 24), QPointF(30, 24))     # fraction rule
+        painter.setPen(QPen(QColor("#2f3a4a"), 2.6, Qt.SolidLine, Qt.RoundCap))
+        painter.drawLine(QPointF(16, 17), QPointF(28, 17))     # numerator
+        painter.drawLine(QPointF(17, 32), QPointF(27, 32))     # denominator
+        painter.setPen(QPen(QColor("#e8590c"), 3.0, Qt.SolidLine, Qt.RoundCap))
+        painter.drawLine(QPointF(36, 24), QPointF(50, 24))     # equals
+        painter.drawLine(QPointF(36, 30), QPointF(50, 30))
+
+        curve = QPainterPath(QPointF(13, 52))
+        curve.cubicTo(QPointF(24, 38), QPointF(38, 38), QPointF(51, 50))
+        painter.setPen(QPen(QColor("#2f9e44"), 3.0, Qt.SolidLine, Qt.RoundCap))
+        painter.drawPath(curve)
+        painter.end()
+        icon_object.addPixmap(pixmap)
+    return icon_object

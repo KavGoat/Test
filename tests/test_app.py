@@ -888,3 +888,293 @@ def test_renumber_counts_closes_gaps(window):
     remaining = sorted([i for i in markups(window) if isinstance(i, CountItem)],
                        key=lambda i: i.pos().x())
     assert [c.index for c in remaining] == [1, 2]
+
+
+def _make_table(window, x=80, y=80):
+    window.select_tool("table")
+    drag(window.view, x, y, x + 340, y + 160)
+    return window.view.active_table
+
+
+def test_copy_and_paste_a_cell_range(window):
+    table = _make_table(window)
+    table.sheet.resize(6, 4)
+    for row, values in enumerate([["1", "2"], ["3", "4"]]):
+        for col, value in enumerate(values):
+            table.set_cell(row, col, value)
+    table.set_cell(0, 2, "=A1+B1")
+    table.set_cell(1, 2, "=A2+B2")
+    window.recalculate()
+
+    table.current, table.anchor = (0, 0), (1, 2)
+    window.copy_selection()
+    table.current = table.anchor = (3, 0)
+    window.paste_items()
+
+    assert table.sheet.raw(3, 0) == "1"
+    assert table.sheet.raw(3, 2) == "=A4+B4"        # relative refs follow the paste
+    assert table.sheet.value(4, 2) == 7
+
+
+def test_cut_clears_the_source_cells(window):
+    table = _make_table(window)
+    table.set_cell(0, 0, "9")
+    window.recalculate()
+    table.current = table.anchor = (0, 0)
+    window.cut_selection()
+    assert table.sheet.raw(0, 0) == ""
+    table.current = table.anchor = (2, 1)
+    window.paste_items()
+    assert table.sheet.raw(2, 1) == "9"
+
+
+def test_paste_tab_separated_text_from_a_spreadsheet(window):
+    from PySide6.QtWidgets import QApplication
+    table = _make_table(window)
+    QApplication.clipboard().setText("Item\tLoad\nSlab\t3.6 kPa\nScreed\t1.3 kPa")
+    table.current = table.anchor = (0, 0)
+    window.paste_items()
+    window.recalculate()
+    assert table.sheet.raw(0, 0) == "Item"
+    assert table.sheet.value(1, 1).to("kPa").magnitude == pytest.approx(3.6)
+
+
+def test_copied_cells_reach_the_system_clipboard_as_tsv(window):
+    from PySide6.QtWidgets import QApplication
+    table = _make_table(window)
+    table.set_cell(0, 0, "a")
+    table.set_cell(0, 1, "b")
+    table.current, table.anchor = (0, 0), (0, 1)
+    window.copy_selection()
+    assert QApplication.clipboard().text() == "a\tb"
+
+
+def test_paste_grows_the_table_when_needed(window):
+    from PySide6.QtWidgets import QApplication
+    table = _make_table(window)
+    table.sheet.resize(2, 2)
+    QApplication.clipboard().setText("1\t2\t3\n4\t5\t6\n7\t8\t9")
+    table.current = table.anchor = (0, 0)
+    window.paste_items()
+    assert table.sheet.rows >= 3 and table.sheet.cols >= 3
+    assert table.sheet.raw(2, 2) == "9"
+
+
+def test_plot_draws_a_defined_function(window):
+    from calcforge.items.plotitem import PlotItem, Series
+    window.select_tool("math")
+    drag(window.view, 60, 60, 300, 90)
+    editing_item(window)._editor.setPlainText("L = 6 m")
+    window.view.end_item_edit()
+    window.select_tool("math")
+    drag(window.view, 60, 120, 300, 150)
+    editing_item(window)._editor.setPlainText("M(x) = 12 kN/m*x*(L-x)/2")
+    window.view.end_item_edit()
+
+    window.select_tool("plot")
+    drag(window.view, 60, 300, 400, 520)
+    plot = [i for i in markups(window) if isinstance(i, PlotItem)][0]
+    plot.series = [Series("M")]
+    plot.variable = "x"
+    plot.x_from = "0 m"
+    plot.x_to = "L"
+    window.recalculate()
+    assert len(plot.series[0].xs) > 50
+    assert plot._y_display == "kN·m"
+    assert max(plot.series[0].ys) == pytest.approx(54, rel=1e-2)
+
+
+def test_plot_reports_a_curve_that_does_not_share_the_y_axis(window):
+    from calcforge.items.plotitem import PlotItem, Series
+    window.select_tool("math")
+    drag(window.view, 60, 60, 300, 90)
+    editing_item(window)._editor.setPlainText("f(x) = x*1 kN")
+    window.view.end_item_edit()
+    window.select_tool("math")
+    drag(window.view, 60, 120, 300, 150)
+    editing_item(window)._editor.setPlainText("g(x) = x*1 m")
+    window.view.end_item_edit()
+
+    window.select_tool("plot")
+    drag(window.view, 60, 300, 400, 520)
+    plot = [i for i in markups(window) if isinstance(i, PlotItem)][0]
+    plot.series = [Series("f"), Series("g")]
+    plot.x_from, plot.x_to = "0", "5"
+    window.recalculate()
+    assert plot.series[0].xs and not plot.series[1].xs
+    assert "y axis" in plot.series[1].error
+
+
+def test_hiding_a_layer_hides_and_deselects_its_markups(window):
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 200)
+    window.select_tool("select")
+    item = markups(window)[0]
+    item.setSelected(True)
+    assert item.isVisible()
+
+    window.document.layer("Markups").visible = False
+    window.apply_layers()
+    assert not item.isVisible()
+    assert not item.isSelected()
+    assert window.view.markup_at(QPointF(150, 150)) is None
+
+    window.document.layer("Markups").visible = True
+    window.apply_layers()
+    assert item.isVisible()
+
+
+def test_locking_a_layer_stops_its_markups_moving(window):
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 200)
+    window.select_tool("select")
+    item = markups(window)[0]
+    window.document.layer("Markups").locked = True
+    window.apply_layers()
+    origin = item.pos()
+    press(window.view, 150, 150)
+    move(window.view, 260, 260)
+    release(window.view, 260, 260)
+    assert item.pos() == origin
+
+
+def test_non_printing_layers_are_left_out_of_output(window, tmp_path):
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 200)
+    window.select_tool("select")
+    scene = window.view.scene()
+    with_layer = scene.render_image(dpi=60, for_print=True)
+    window.document.layer("Markups").printable = False
+    without_layer = scene.render_image(dpi=60, for_print=True)
+    assert with_layer != without_layer
+
+
+def test_layers_panel_moves_the_selection(window):
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 200)
+    window.select_tool("select")
+    item = markups(window)[0]
+    item.setSelected(True)
+    window.move_selection_to_layer("Calculations")
+    assert item.layer == "Calculations"
+    assert window.layers_panel.table.rowCount() == len(window.document.layers)
+
+
+def test_renaming_a_layer_carries_its_markups(window):
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 200)
+    item = markups(window)[0]
+    window.rename_layer("Markups", "Review")
+    window.document.layers[0].name = "Review"
+    assert item.layer == "Review"
+    assert window.layer_visible("Review")
+
+
+def test_applying_redactions_destroys_what_is_underneath(window, monkeypatch, tmp_path):
+    from PySide6.QtGui import QImage
+    from PySide6.QtWidgets import QMessageBox
+    from calcforge.items.shapes import RectItem
+
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: QMessageBox.Yes)
+
+    # a page background to redact, and two markups: one covered, one outside
+    page = window.current_page()
+    image = QImage(300, 425, QImage.Format_ARGB32)
+    image.fill(0xFFFF0000)
+    from PySide6.QtCore import QBuffer, QIODevice
+    buffer = QBuffer()
+    buffer.open(QIODevice.WriteOnly)
+    image.save(buffer, "PNG")
+    page.background_key = window.document.add_asset(bytes(buffer.data()), "png")
+    original_key = page.background_key
+    page.scene.load_background()
+
+    window.select_tool("text")
+    drag(window.view, 120, 120, 200, 150)
+    editing_item(window).set_text("secret")
+    window.view.end_item_edit()
+
+    window.select_tool("text")
+    drag(window.view, 420, 500, 500, 530)
+    editing_item(window).set_text("kept")
+    window.view.end_item_edit()
+
+    window.select_tool("redact")
+    drag(window.view, 100, 100, 320, 260)
+    window.select_tool("select")
+
+    window.apply_redactions()
+
+    assert page.background_key != original_key          # pixels rewritten
+    remaining = [i for i in markups(window) if isinstance(i, TextItem)]
+    assert [i.text() for i in remaining] == ["kept"]
+    redaction = [i for i in markups(window) if isinstance(i, RectItem)][0]
+    assert redaction.locked and redaction.style.fill_opacity == 1.0
+
+    burnt = QImage()
+    burnt.loadFromData(window.document.asset(page.background_key))
+    scale = burnt.width() / page.width_pt
+    assert burnt.pixelColor(int(200 * scale), int(180 * scale)).name() == "#000000"
+    assert burnt.pixelColor(int(500 * scale), int(600 * scale)).name() == "#ff0000"
+
+
+def test_applying_redactions_with_none_present_explains_itself(window, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+    seen = {}
+    monkeypatch.setattr(QMessageBox, "information",
+                        lambda parent, title, text, *a, **k: seen.update(text=text))
+    window.apply_redactions()
+    assert "no redaction boxes" in seen["text"]
+
+
+def test_autosave_writes_and_clears_a_recovery_copy(window, tmp_path):
+    import os
+    path = str(tmp_path / "doc.cfx")
+    from calcforge.io import project as project_io
+    project_io.save_document(window.document, path)
+    window.document.path = path
+
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 200)
+    written = window.write_autosave()
+    assert written == path + ".autosave"
+    assert os.path.exists(written)
+    assert window.document.path == path        # autosaving is not a save-as
+
+    recovered = type(window.document)()
+    project_io.load_document(recovered, written)
+    assert len(recovered.pages[0]._pending_items) == 1
+
+    window.save_document()
+    assert not os.path.exists(written)
+
+
+def test_autosave_does_nothing_when_there_is_nothing_to_save(window):
+    window.document.modified = False
+    window.undo_stack.setClean()
+    assert window.write_autosave() is None
+
+
+def test_dark_theme_switches_the_chrome_but_not_the_paper(window):
+    from PySide6.QtWidgets import QApplication
+    from calcforge.theme import CANVAS, DARK
+
+    window.toggle_theme(True)
+    assert "#24272e" in QApplication.instance().styleSheet()
+    assert window.view.scene().backgroundBrush().color().name() == CANVAS[DARK]
+    # the page itself stays paper-white
+    image = window.view.scene().render_image(dpi=40, for_print=False)
+    assert image.pixelColor(image.width() // 2, image.height() // 2).name() == "#ffffff"
+    window.toggle_theme(False)
+    assert "#eef1f5" in QApplication.instance().styleSheet()
+
+
+def test_two_axis_index_addresses_a_rectangular_range(window):
+    table = _make_table(window)
+    table.sheet.resize(5, 4)
+    for row, values in enumerate([["1", "2", "3"], ["4", "5", "6"]]):
+        for col, value in enumerate(values):
+            table.set_cell(row, col, value)
+    table.set_cell(3, 0, "=INDEX(A1:C2,2,3)")
+    window.recalculate()
+    assert table.sheet.value(3, 0) == 6

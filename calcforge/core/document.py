@@ -231,7 +231,6 @@ class DocumentSettings:
     show_margins: bool = True
     math_font: str = "Cambria Math"
     math_size: float = 10.0
-    ui_theme: str = "light"
     header_left: str = ""
     header_center: str = ""
     header_right: str = ""
@@ -292,6 +291,28 @@ class Document:
         page = self.pages.pop(source)
         self.pages.insert(max(0, min(target, len(self.pages))), page)
         self.modified = True
+
+    # -- layers ------------------------------------------------------------
+    def layer(self, name: str) -> Layer:
+        for layer in self.layers:
+            if layer.name == name:
+                return layer
+        return Layer(name or "Markups")
+
+    def layer_names(self) -> list[str]:
+        return [layer.name for layer in self.layers]
+
+    def add_layer(self, name: str) -> Layer:
+        existing = set(self.layer_names())
+        candidate = name or "Layer"
+        index = 2
+        while candidate in existing:
+            candidate = f"{name} {index}"
+            index += 1
+        layer = Layer(candidate)
+        self.layers.append(layer)
+        self.modified = True
+        return layer
 
     def index_of(self, page: Page) -> int:
         try:

@@ -7,7 +7,6 @@ shows up as a warning rather than as a silently wrong sheet.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 UNDEFINED = "undefined"
 UNIT_MISMATCH = "units"

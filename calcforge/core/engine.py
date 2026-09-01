@@ -247,6 +247,54 @@ def _all_names(code) -> set[str]:
 # Errors
 # ---------------------------------------------------------------------------
 
+def _reads_well(value: Any) -> bool:
+    """True when a magnitude is already in the comfortable 1–1000 range."""
+    try:
+        magnitude = abs(float(value.magnitude if isinstance(value, Quantity) else value))
+    except (TypeError, ValueError):
+        return True
+    return 1.0 <= magnitude < 1000.0
+
+
+def is_unit_literal(tree) -> bool:
+    """True when an expression is one number scaled by pure unit names.
+
+    ``12 kN/m`` and ``896 cm^3`` are values the author entered, not results, so
+    they keep the units they were written in rather than being normalised.
+    """
+    if tree is None:
+        return False
+    node = tree.body if isinstance(tree, ast.Expression) else tree
+    while isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        node = node.operand
+    if not isinstance(node, ast.BinOp):
+        return False
+    return _number_times_units(node)
+
+
+def _number_times_units(node) -> bool:
+    if isinstance(node, ast.Constant):
+        return isinstance(node.value, (int, float))
+    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Mult, ast.Div)):
+        return _number_times_units(node.left) and _pure_units(node.right)
+    return False
+
+
+def _pure_units(node) -> bool:
+    """True for a unit-only expression such as ``kN``, ``m^3`` or ``kg*m/s^2``."""
+    from .units import is_unit_name
+
+    if isinstance(node, ast.Name):
+        return is_unit_name(node.id)
+    if isinstance(node, ast.BinOp):
+        if isinstance(node.op, ast.Pow):
+            return (_pure_units(node.left) and isinstance(node.right, ast.Constant)
+                    and isinstance(node.right.value, (int, float)))
+        if isinstance(node.op, (ast.Mult, ast.Div)):
+            return _pure_units(node.left) and _pure_units(node.right)
+    return False
+
+
 def friendly_error(exc: Exception) -> str:
     if isinstance(exc, pint.DimensionalityError):
         return (f"Units do not match: cannot combine "
@@ -464,6 +512,7 @@ class Statement:
     tree: Optional[ast.AST] = None
     forced: bool = True          # written with ":=" or ":" rather than a bare "="
     auto_unit: bool = True       # let the engine pick a readable display unit
+    is_input: bool = False       # a value typed out in full, e.g. "896 cm^3"
 
     @property
     def ok(self) -> bool:
@@ -478,6 +527,8 @@ class Statement:
         unit = preferred_unit(self.result)
         if unit == "deg" and _ANGLE_UNIT_RE.search(self.expression):
             return None          # the author picked an angle unit; respect it
+        if unit and self.is_input and _reads_well(self.result):
+            return None          # "896 cm³" was typed that way on purpose
         return unit
 
     def result_text(self, digits: int = 4, mode: str = "auto") -> str:
@@ -587,6 +638,18 @@ def evaluate_statement(statement: Statement, workspace: Workspace, source: str =
             value = simplify_units(value)
 
         statement.result = value
+        # Store the value in the unit it reads best in, so the variables panel,
+        # spreadsheet cells and exports all agree with what is on the page — but
+        # never rewrite a value the author typed out in full.
+        statement.is_input = is_unit_literal(tree)
+        if not statement.target_unit:
+            unit = statement.display_unit()
+            if unit:
+                try:
+                    value = convert(value, unit)
+                    statement.result = value
+                except Exception:
+                    pass
         if statement.kind == DEFINE:
             workspace.define(statement.name, value, source, statement.expression)
     except Exception as exc:  # noqa: BLE001 - surfaced to the user as text

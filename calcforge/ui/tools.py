@@ -10,6 +10,7 @@ from ..items.mathitem import MathItem
 from ..items.measure import CountItem, MeasureItem
 from ..items.media import ImageItem
 from ..items.shapes import PolyItem, RectItem
+from ..items.plotitem import PlotItem
 from ..items.tableitem import TableItem
 from ..items.text import CalloutItem, NoteItem, StampItem, TextItem
 
@@ -91,6 +92,8 @@ TOOLS: list[Tool] = [
          "Unit-aware calculation block", factory=lambda: MathItem()),
     Tool("table", "Table", "table", DRAG, "Calculate", "B",
          "Spreadsheet that can use your variables", factory=lambda: TableItem()),
+    Tool("plot", "Plot", "plot", DRAG, "Calculate", "G",
+         "Plot a function or expression against a range", factory=lambda: PlotItem()),
 
     Tool("measure_length", "Length", "measure_length", DRAG, "Measure", "",
          "Measure a distance", max_points=2, factory=_measure(measure_module.LENGTH)),

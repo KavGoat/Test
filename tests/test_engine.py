@@ -2,8 +2,8 @@
 
 import pytest
 
-from calcforge.core.engine import (EVALUATE, FUNCTION, Workspace, evaluate_source,
-                                   parse_statement, transform)
+from calcforge.core.engine import (DEFINE, EVALUATE, FUNCTION, Workspace,
+                                   evaluate_source, parse_statement, transform)
 from calcforge.core.units import Q_, format_number, format_quantity, ureg
 
 
@@ -149,3 +149,67 @@ def test_real_units_are_left_alone():
 
 def test_explicit_display_unit_still_wins():
     assert value_of("6 m/(200 mm) -> percent").result.magnitude == pytest.approx(3000)
+
+
+def test_results_choose_a_readable_unit():
+    workspace = Workspace()
+    statements = evaluate_source(
+        "w = 12 kN/m\nL = 7.2 m\nM = w*L^2/8\nV = w*L/2\n"
+        "Z = 896 cm^3\nf_y = 355 MPa\nsigma = M/Z\nq = 780 kN/(2.4 m*2.4 m)",
+        workspace)
+    shown = {s.name: s.result_text() for s in statements if s.name}
+    assert shown["M"] == "77.76 kN·m"
+    assert shown["V"] == "43.2 kN"
+    assert shown["sigma"] == "86.79 MPa"
+    assert shown["q"] == "135.4 kPa"
+
+
+def test_lengths_switch_between_millimetres_and_metres():
+    assert value_of("300 mm").result_text() == "300 mm"
+    assert value_of("7200 mm").result_text() == "7.2 m"
+    assert value_of("1500 m").result_text() == "1.5 km"
+
+
+def test_a_value_typed_in_a_sensible_unit_keeps_it():
+    assert value_of("896 cm^3").result_text() == "896 cm³"
+    assert value_of("14100 cm^4").result_text() == "14100 cm⁴"
+    assert value_of("355 MPa").result_text() == "355 MPa"
+
+
+def test_imperial_input_is_never_converted():
+    assert value_of("3 kip").result_text() == "3 kip"
+    assert value_of("50 ksi").result_text() == "50 ksi"
+    assert value_of("800 lbf*ft").result_text() == "800 lbf·ft"
+
+
+def test_a_moment_is_not_shown_as_an_energy():
+    assert value_of("355 MPa*896 cm^3").result_text() == "318.1 kN·m"
+    assert value_of("12 kN*3 m").result_text() == "36 kN·m"
+    assert value_of("1500 J").result_text() == "1.5 kJ"
+    workspace = Workspace()
+    energy = evaluate_source("P = 3 kW\nE = P*1.5 hr", workspace)[-1]
+    assert energy.result_text() == "16.2 MJ"
+
+
+def test_plain_equals_defines_once_then_checks():
+    workspace = Workspace()
+    statements = evaluate_source("b = 300 mm\nb = 300 mm\nb = 400 mm", workspace)
+    assert statements[0].kind == DEFINE
+    assert statements[1].kind == EVALUATE and statements[1].result is True
+    assert statements[2].kind == EVALUATE and statements[2].result is False
+    assert workspace.get("b").to("mm").magnitude == pytest.approx(300)
+
+
+def test_colon_forces_a_definition_over_an_existing_name():
+    workspace = Workspace()
+    evaluate_source("b = 300 mm\nb : 450 mm\nb := 500 mm", workspace)
+    assert workspace.get("b").to("mm").magnitude == pytest.approx(500)
+
+
+def test_reading_order_is_reset_between_passes():
+    workspace = Workspace()
+    evaluate_source("b = 300 mm", workspace)
+    # a second pass over the same source must define again, not compare
+    statements = evaluate_source("b = 400 mm", workspace)
+    assert statements[0].kind == DEFINE
+    assert workspace.get("b").to("mm").magnitude == pytest.approx(400)

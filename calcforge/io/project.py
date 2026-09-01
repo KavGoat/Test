@@ -11,9 +11,13 @@ EXTENSION = ".cfx"
 FILTER = "CalcForge documents (*.cfx);;All files (*)"
 
 
-def save_document(document, path: str) -> None:
-    """Write *document* to *path* atomically."""
-    if not path.lower().endswith(EXTENSION):
+def save_document(document, path: str, enforce_extension: bool = True) -> None:
+    """Write *document* to *path* atomically.
+
+    Recovery copies are written beside the document as ``…​.cfx.autosave``, so
+    they pass *enforce_extension* False to keep the name they were given.
+    """
+    if enforce_extension and not path.lower().endswith(EXTENSION):
         path += EXTENSION
     used: set[str] = set()
     for page in document.pages:

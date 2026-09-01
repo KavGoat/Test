@@ -7,7 +7,9 @@ import sys
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication
 
-from .theme import STYLESHEET
+from PySide6.QtCore import QSettings
+
+from .theme import DARK, LIGHT, stylesheet
 
 APP_NAME = "CalcForge"
 ORGANISATION = "CalcForge"
@@ -23,8 +25,21 @@ def build_application(argv: list[str]) -> QApplication:
     font.setPointSizeF(9.5)
     application.setFont(font)
     application.setStyle("Fusion")
-    application.setStyleSheet(STYLESHEET)
+    from .ui.icons import app_icon
+    application.setWindowIcon(app_icon())
+    apply_theme(application, current_theme())
     return application
+
+
+def current_theme() -> str:
+    """The theme the user last chose."""
+    value = QSettings(ORGANISATION, APP_NAME).value("theme", LIGHT)
+    return DARK if str(value) == DARK else LIGHT
+
+
+def apply_theme(application: QApplication, theme: str) -> None:
+    application.setStyleSheet(stylesheet(theme))
+    QSettings(ORGANISATION, APP_NAME).setValue("theme", theme)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -34,6 +49,7 @@ def main(argv: list[str] | None = None) -> int:
     from .ui.mainwindow import MainWindow
     window = MainWindow()
     window.show()
+    window.offer_recovery()
 
     for argument in argv[1:]:
         if argument.lower().endswith(".cfx") and os.path.exists(argument):

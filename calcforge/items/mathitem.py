@@ -281,43 +281,10 @@ class MathItem(MarkupItem):
             return True
         return cls._is_unit_literal(tree)
 
-    @classmethod
-    def _is_unit_literal(cls, tree) -> bool:
-        """True when the expression is one number scaled by pure unit names.
-
-        ``12 kN/m`` and ``24 kN/m^3`` are entered values; rendering them as a
-        stacked fraction with a separate result would only add noise.
-        """
-        if tree is None:
-            return False
-        node = tree.body if isinstance(tree, ast.Expression) else tree
-        while isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
-            node = node.operand
-        if not isinstance(node, ast.BinOp):
-            return False
-        return cls._number_times_units(node)
-
-    @classmethod
-    def _number_times_units(cls, node) -> bool:
-        if isinstance(node, ast.Constant):
-            return isinstance(node.value, (int, float))
-        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Mult, ast.Div)):
-            return cls._number_times_units(node.left) and cls._pure_units(node.right)
-        return False
-
-    @classmethod
-    def _pure_units(cls, node) -> bool:
-        """True for a unit-only expression such as ``kN``, ``m^3`` or ``kg*m/s^2``."""
-        if isinstance(node, ast.Name):
-            from ..core.units import is_unit_name
-            return is_unit_name(node.id)
-        if isinstance(node, ast.BinOp):
-            if isinstance(node.op, ast.Pow):
-                return (cls._pure_units(node.left) and isinstance(node.right, ast.Constant)
-                        and isinstance(node.right.value, (int, float)))
-            if isinstance(node.op, (ast.Mult, ast.Div)):
-                return cls._pure_units(node.left) and cls._pure_units(node.right)
-        return False
+    @staticmethod
+    def _is_unit_literal(tree) -> bool:
+        """An entered value such as ``12 kN/m`` — shown as typed, with no result."""
+        return engine.is_unit_literal(tree)
 
     def _measure(self) -> None:
         self.prepareGeometryChange()
