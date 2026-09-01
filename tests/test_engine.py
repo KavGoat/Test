@@ -4,7 +4,7 @@ import pytest
 
 from calcforge.core.engine import (EVALUATE, FUNCTION, Workspace, evaluate_source,
                                    parse_statement, transform)
-from calcforge.core.units import Q_, format_number, format_quantity
+from calcforge.core.units import Q_, format_number, format_quantity, ureg
 
 
 def value_of(source, workspace=None):
@@ -126,3 +126,26 @@ def test_workspace_dependencies():
     workspace = Workspace()
     evaluate_source("a := 2\nb := 3", workspace)
     assert workspace.dependencies("a*b + 1") == {"a", "b"}
+
+
+def test_cancelling_units_reduce_to_a_plain_number():
+    assert value_of("6 m/(200 mm)").result == pytest.approx(30)
+    assert value_of("138 MPa/(355 MPa)").result == pytest.approx(0.3887, rel=1e-3)
+    statement = value_of("285 kN*m/(300 mm*(540 mm)^2*32 MPa)")
+    assert statement.result == pytest.approx(0.1018, rel=1e-3)
+
+
+def test_angles_and_percent_are_not_flattened():
+    theta = value_of("30 deg").result
+    assert theta.units == ureg.degree and theta.magnitude == pytest.approx(30)
+    assert value_of("2 rad").result.magnitude == pytest.approx(2)
+    assert value_of("45 percent").result.magnitude == pytest.approx(45)
+
+
+def test_real_units_are_left_alone():
+    assert value_of("3 m*4 m").result.to("m**2").magnitude == pytest.approx(12)
+    assert value_of("12 kN/m * 6 m").result.to("kN").magnitude == pytest.approx(72)
+
+
+def test_explicit_display_unit_still_wins():
+    assert value_of("6 m/(200 mm) -> percent").result.magnitude == pytest.approx(3000)

@@ -77,6 +77,10 @@ sigma_b <= f_y                    # capacity check
 | `sigma <= f_y` | A check — the result reads `true` or `false`. |
 | `# note` | A comment, at the start of a line or after an expression. |
 
+Units that cancel collapse to a plain number, the way an engineer reads them:
+`6 m / 200 mm` is **30**, and a utilisation ratio built from `kN·m/(mm³·MPa)` is
+**0.1018** — while `30 deg` stays an angle.
+
 Units are enforced, not decorative: `1 m + 1 kg` is refused with
 *"Units do not match: cannot combine meter with kilogram"*, and every result carries
 the unit it earned. SI, imperial and the usual structural units (`kN`, `MPa`, `kip`,

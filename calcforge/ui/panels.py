@@ -389,6 +389,13 @@ class PropertiesPanel(QScrollArea):
             child = self.layout.takeAt(0)
             widget = child.widget()
             if widget is not None:
+                # Hide before unparenting, then unparent before deleting:
+                # deleteLater() only runs on the next trip through the event
+                # loop, so until then an old child would keep painting over its
+                # replacement — and a *visible* widget given no parent becomes a
+                # floating top-level window.
+                widget.hide()
+                widget.setParent(None)
                 widget.deleteLater()
         if not self._items:
             hint = QLabel("Nothing selected.\n\nPick a markup on the page to edit its "
@@ -397,6 +404,7 @@ class PropertiesPanel(QScrollArea):
             hint.setStyleSheet("color:#6b7280;")
             self.layout.addWidget(hint)
             self.layout.addStretch(1)
+            self._settle()
             self._building = False
             return
 
@@ -431,7 +439,20 @@ class PropertiesPanel(QScrollArea):
                 self._add_cloud(first)
         self._add_metadata(first)
         self.layout.addStretch(1)
+        self._settle()
         self._building = False
+
+    def _settle(self) -> None:
+        """Re-lay-out the rebuilt form and scroll back to the top.
+
+        Without this the scroll area keeps the geometry of the *previous*
+        selection for one more event loop turn, which leaves the panel showing
+        empty space below content that is no longer there.
+        """
+        self.layout.activate()
+        self.body.adjustSize()
+        self.verticalScrollBar().setValue(0)
+        self.horizontalScrollBar().setValue(0)
 
     def _group(self, title: str) -> QFormLayout:
         box = QGroupBox(title)

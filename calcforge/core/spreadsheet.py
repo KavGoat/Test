@@ -35,7 +35,7 @@ class _ConcatOperator(ast.NodeTransformer):
 
 
 SHEET_TRANSFORMERS = (_ConcatOperator(),)
-from .units import Quantity, convert, format_quantity, ureg
+from .units import Quantity, convert, format_quantity, simplify_units, ureg
 
 MAX_COLS = 702          # A .. ZZ
 MAX_ROWS = 20000
@@ -615,6 +615,8 @@ class Sheet:
                 unit = self.cell_unit(*key)
                 if unit and isinstance(value, Quantity):
                     value = convert(value, unit)
+                else:
+                    value = simplify_units(value)
                 cell.value = value
             except CellError as exc:
                 cell.value = exc

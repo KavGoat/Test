@@ -27,28 +27,57 @@ def _apply_layout(device, page) -> None:
     device.setPageLayout(layout)
 
 
-def paint_pages(device, document: Document, pages: Iterable, resolution: float) -> None:
-    """Render *pages* onto a paged paint device."""
+def paint_pages(device, document: Document, pages: Iterable, resolution: float,
+                per_page_layout: bool = True) -> None:
+    """Render *pages* onto a paged paint device.
+
+    ``QPdfWriter`` accepts a new page size for every page, so an export can mix
+    A4 and A3 sheets faithfully.  ``QPrinter`` refuses to change its layout once
+    printing has started, so for a real printer the layout is fixed by the first
+    page and every other page is scaled to fit it — pass ``per_page_layout=False``
+    for that.  The painter is always ended, even if a page fails to draw, because
+    leaving it open crashes the print-preview dialog on its next repaint.
+    """
     painter = QPainter()
     started = False
-    for page in pages:
-        if page.scene is None:
-            continue
-        _apply_layout(device, page)
-        if not started:
-            if not painter.begin(device):
-                raise OSError("Could not start the print job")
-            started = True
-        else:
-            device.newPage()
-        painter.setRenderHint(QPainter.Antialiasing, True)
-        painter.setRenderHint(QPainter.TextAntialiasing, True)
-        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+    try:
+        for page in pages:
+            if page.scene is None:
+                continue
+            if not started:
+                _apply_layout(device, page)
+                if not painter.begin(device):
+                    raise OSError("Could not start the print job")
+                started = True
+            else:
+                if per_page_layout:
+                    _apply_layout(device, page)
+                device.newPage()
+            painter.setRenderHint(QPainter.Antialiasing, True)
+            painter.setRenderHint(QPainter.TextAntialiasing, True)
+            painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+            page.scene.render_page(painter, _target_rect(painter, page, resolution,
+                                                         per_page_layout),
+                                   for_print=True)
+    finally:
+        if started:
+            painter.end()
+
+
+def _target_rect(painter: QPainter, page, resolution: float,
+                 per_page_layout: bool) -> QRectF:
+    """Where this page lands on the device, in device pixels."""
+    if per_page_layout:
         scale = resolution / 72.0
-        target = QRectF(0, 0, page.width_pt * scale, page.height_pt * scale)
-        page.scene.render_page(painter, target, for_print=True)
-    if started:
-        painter.end()
+        return QRectF(0, 0, page.width_pt * scale, page.height_pt * scale)
+    device = painter.device()
+    available = QRectF(0, 0, device.width(), device.height())
+    scale = min(available.width() / max(page.width_pt, 1.0),
+                available.height() / max(page.height_pt, 1.0))
+    width = page.width_pt * scale
+    height = page.height_pt * scale
+    return QRectF((available.width() - width) / 2, (available.height() - height) / 2,
+                  width, height)
 
 
 def export_pdf(document: Document, path: str, pages: Optional[list] = None,
@@ -60,10 +89,25 @@ def export_pdf(document: Document, path: str, pages: Optional[list] = None,
     paint_pages(writer, document, pages if pages is not None else document.pages, resolution)
 
 
+def pages_for_printer(document: Document, printer: QPrinter) -> list:
+    """The pages the print dialog actually asked for."""
+    try:
+        selection = printer.printRange()
+    except Exception:
+        return list(document.pages)
+    if selection == QPrinter.PageRange:
+        first = max(printer.fromPage(), 1)
+        last = printer.toPage() or len(document.pages)
+        return document.pages[first - 1:last]
+    if selection == QPrinter.CurrentPage:
+        return list(document.pages)
+    return list(document.pages)
+
+
 def print_document(document: Document, printer: QPrinter,
                    pages: Optional[list] = None) -> None:
-    paint_pages(printer, document, pages if pages is not None else document.pages,
-                printer.resolution())
+    chosen = pages if pages is not None else pages_for_printer(document, printer)
+    paint_pages(printer, document, chosen, printer.resolution(), per_page_layout=False)
 
 
 def export_images(document: Document, folder: str, dpi: float = 200.0,

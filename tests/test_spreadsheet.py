@@ -150,3 +150,15 @@ def test_sumif_sums_every_match():
 def test_sumif_keeps_units():
     sheet = build([["10 kN", "a"], ["20 kN", "a"], ['=SUMIF(B1:B2,"a",A1:A2)']])
     assert sheet.value(2, 0).to("kN").magnitude == pytest.approx(30)
+
+
+def test_cell_ratios_reduce_to_plain_numbers():
+    sheet = build([["6 m", "200 mm", "=A1/B1"], ["138 MPa", "355 MPa", "=A2/B2"]])
+    assert sheet.value(0, 2) == pytest.approx(30)
+    assert sheet.display_text(0, 2) == "30"
+    assert sheet.value(1, 2) == pytest.approx(0.3887, rel=1e-3)
+
+
+def test_cell_angles_keep_their_unit():
+    sheet = build([["30 deg"]])
+    assert sheet.display_text(0, 0) == "30 deg"

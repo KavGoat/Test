@@ -103,6 +103,27 @@ def parse_unit(text: str):
     return ureg.parse_expression(text)
 
 
+def simplify_units(value: Any) -> Any:
+    """Collapse a quantity whose units cancel out into a plain number.
+
+    ``6 m / 200 mm`` is 30, not "0.03 m/mm", and a utilisation ratio built from
+    ``kN·m/(mm³·MPa)`` is a bare number — that is what an engineer expects to
+    read.  Angles are left alone: ``30 deg`` is dimensionless to pint but very
+    much not a plain number, so single-unit quantities (deg, rad, %) are never
+    touched, and only composite units are reduced.
+    """
+    if not isinstance(value, Quantity):
+        return value
+    try:
+        if not value.dimensionless:
+            return value
+        if len(value.units._units) <= 1:
+            return value
+        return value.to_reduced_units()
+    except Exception:
+        return value
+
+
 def convert(value: Any, unit_text: str):
     """Convert *value* to *unit_text*.  Accepts prefactors, e.g. ``1e3*mm``."""
     target = parse_unit(unit_text)

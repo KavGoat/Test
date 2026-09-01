@@ -300,7 +300,10 @@ class MainWindow(QMainWindow):
                                        Qt.BottomDockWidgetArea, "dock_markups")
         self.tabifyDockWidget(self.dock_variables, self.dock_functions)
         self.dock_variables.raise_()
-        self.resizeDocks([self.dock_pages, self.dock_properties], [180, 300], Qt.Horizontal)
+        self.resizeDocks([self.dock_pages, self.dock_properties], [190, 320], Qt.Horizontal)
+        # Without an explicit vertical split the properties form gets squeezed
+        # into a couple of rows by whatever is stacked under it.
+        self.resizeDocks([self.dock_properties, self.dock_variables], [560, 340], Qt.Vertical)
         self.resizeDocks([self.dock_markups], [190], Qt.Vertical)
 
     def _build_menus(self) -> None:

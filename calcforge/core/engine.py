@@ -29,7 +29,7 @@ from typing import Any, Callable, Optional
 import pint
 
 from . import functions as fnlib
-from .units import Q_, Quantity, convert, format_quantity, ureg
+from .units import Q_, Quantity, convert, format_quantity, simplify_units, ureg
 
 # ---------------------------------------------------------------------------
 # Source normalisation
@@ -532,6 +532,8 @@ def evaluate_statement(statement: Statement, workspace: Workspace, source: str =
             except Exception as exc:
                 statement.error = friendly_error(exc)
                 return statement
+        else:
+            value = simplify_units(value)
 
         statement.result = value
         if statement.kind == DEFINE:

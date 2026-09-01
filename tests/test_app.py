@@ -486,3 +486,137 @@ def test_page_scale_change_updates_measurements(window):
     window.current_page().scale = PageScale.from_ratio(200)
     window.current_page().scene.refresh_items()
     assert measure.value.to("m").magnitude == pytest.approx(first * 2, rel=1e-6)
+
+
+def _pdf_printer(path):
+    from PySide6.QtPrintSupport import QPrinter
+    printer = QPrinter(QPrinter.HighResolution)
+    printer.setOutputFormat(QPrinter.PdfFormat)
+    printer.setOutputFileName(path)
+    return printer
+
+
+def test_printing_survives_repeated_repaints(window, tmp_path):
+    """The print-preview dialog repaints the same printer more than once."""
+    from calcforge.io import export as export_io
+    window.load_sample()
+    printer = _pdf_printer(str(tmp_path / "preview.pdf"))
+    export_io.print_document(window.document, printer)
+    export_io.print_document(window.document, printer)
+    assert os.path.getsize(str(tmp_path / "preview.pdf")) > 3000
+
+
+def test_printing_fits_mixed_page_sizes_onto_one_paper(window, tmp_path):
+    from calcforge.core.document import PageSetup
+    from calcforge.io import export as export_io, pdfio
+    window.load_sample()
+    window.document.pages[1].setup = PageSetup.from_name("A3")
+    window.document.pages[1].setup.orientation = "landscape"
+    path = str(tmp_path / "print.pdf")
+    export_io.print_document(window.document, _pdf_printer(path))
+    source = pdfio.PdfSource(path)
+    try:
+        sizes = {(round(source.page_info(i).width_pt), round(source.page_info(i).height_pt))
+                 for i in range(source.page_count)}
+    finally:
+        source.close()
+    assert sizes == {(595, 842)}
+
+
+def test_export_keeps_each_page_at_its_own_size(window, tmp_path):
+    from calcforge.core.document import PageSetup
+    from calcforge.io import export as export_io, pdfio
+    window.load_sample()
+    window.document.pages[1].setup = PageSetup.from_name("A3")
+    window.document.pages[1].setup.orientation = "landscape"
+    path = str(tmp_path / "export.pdf")
+    export_io.export_pdf(window.document, path)
+    source = pdfio.PdfSource(path)
+    try:
+        second = source.page_info(1)
+    finally:
+        source.close()
+    assert round(second.width_pt) == 1191 and round(second.height_pt) == 842
+
+
+def test_print_range_is_honoured(window, tmp_path):
+    from PySide6.QtPrintSupport import QPrinter
+    from calcforge.io import export as export_io, pdfio
+    window.load_sample()
+    path = str(tmp_path / "range.pdf")
+    printer = _pdf_printer(path)
+    printer.setPrintRange(QPrinter.PageRange)
+    printer.setFromTo(2, 3)
+    assert len(export_io.pages_for_printer(window.document, printer)) == 2
+    export_io.print_document(window.document, printer)
+    assert pdfio.page_count(path) == 2
+
+
+def test_properties_panel_leaves_no_stale_widgets(window):
+    """Rebuilding the panel must unparent the old widgets, not just unlayout them."""
+    from PySide6.QtWidgets import QLabel
+
+    window.select_tool("math")
+    drag(window.view, 70, 90, 400, 190)
+    editing_item(window)._editor.setPlainText("# Beam check\nb := 300 mm")
+    window.view.end_item_edit()
+
+    block = [i for i in markups(window) if isinstance(i, MathItem)][0]
+    window.view.scene().clearSelection()
+    block.setSelected(True)
+    window.refresh_selection()
+
+    headings = [w for w in window.properties_panel.body.findChildren(QLabel)
+                if w.parent() is not None and w.text().startswith("Calc")]
+    assert [w.text() for w in headings] == [block.display_name()]
+
+    window.view.scene().clearSelection()
+    window.refresh_selection()
+    assert not [w for w in window.properties_panel.body.findChildren(QLabel)
+                if w.parent() is not None and w.text().startswith("Calc")]
+
+
+def test_properties_panel_relayouts_when_the_selection_changes(window):
+    """The scroll area must follow the new form, not the previous one."""
+    window.select_tool("table")
+    drag(window.view, 80, 80, 400, 240)
+    window.select_tool("select")
+    window.view.deactivate_table()
+    table = [i for i in markups(window) if isinstance(i, TableItem)][0]
+    window.view.scene().clearSelection()
+    table.setSelected(True)
+    window.refresh_selection()
+    tall = window.properties_panel.body.sizeHint().height()
+
+    window.select_tool("note")
+    from calcforge.items.measure import MeasureItem
+    measure = MeasureItem("length", [QPointF(0, 0), QPointF(100, 0)])
+    window.view.scene().add_markup(measure, QPointF(120, 500))
+    window.view.scene().clearSelection()
+    measure.setSelected(True)
+    window.properties_panel.verticalScrollBar().setValue(50)
+    window.refresh_selection()
+
+    assert window.properties_panel.verticalScrollBar().value() == 0
+    assert window.properties_panel.body.sizeHint().height() != tall
+
+
+def test_rebuilding_properties_leaves_no_floating_windows(window):
+    """A visible widget given no parent becomes a top-level window."""
+    from PySide6.QtWidgets import QApplication, QGroupBox
+
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 200)
+    window.select_tool("select")
+    item = markups(window)[0]
+    for _ in range(3):
+        window.view.scene().clearSelection()
+        window.refresh_selection()
+        item.setSelected(True)
+        window.refresh_selection()
+    # Discarded group boxes sit parentless until deleteLater() runs; that is
+    # harmless as long as none of them is *shown*, because a visible parentless
+    # widget is a floating window on the user's desktop.
+    floating = [w.title() for w in QApplication.topLevelWidgets()
+                if isinstance(w, QGroupBox) and w.isVisible()]
+    assert floating == []
