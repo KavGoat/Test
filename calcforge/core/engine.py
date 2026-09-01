@@ -387,10 +387,30 @@ class Workspace:
         # is theirs, so it is never quietly resolved as a unit just because it
         # is used before the line that defines it.
         self.document_names: set[str] = set()
+        self.parent: Optional["Workspace"] = None
         self.rebuild_base()
 
     def begin_pass(self) -> None:
         self.pass_defined = set()
+
+    def child(self) -> "Workspace":
+        """A scope that can read this workspace but keeps its own definitions.
+
+        A multi-line calculation block evaluates in one of these, so the working
+        values inside it — a dozen intermediate names — stay inside it instead of
+        colliding with the rest of the document.  Anything already defined above
+        the block is visible from within it.
+        """
+        scope = Workspace.__new__(Workspace)
+        scope.variables = dict(self.variables)
+        scope.functions = dict(self.functions)
+        scope._base = self._base
+        scope._counter = self._counter
+        scope._unit_cache = self._unit_cache
+        scope.pass_defined = set(self.pass_defined)
+        scope.document_names = self.document_names
+        scope.parent = self
+        return scope
 
     def defined_earlier(self, name: str) -> bool:
         return name in self.pass_defined

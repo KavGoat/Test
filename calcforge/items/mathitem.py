@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 import ast
-from typing import Optional
+from typing import Any, Optional
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import (QColor, QPainter, QPen)
+from PySide6.QtGui import QColor, QPainter, QPen, QTextCursor
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsTextItem
 
 from ..core import engine
@@ -83,6 +83,10 @@ class MathItem(MarkupItem):
         self.line_gap = 4.0
         self.result_gap = 10.0
         self.title = ""
+        # A block of several lines keeps its working values to itself; a single
+        # line is how the document defines something everything else can use.
+        self.local_scope = True
+        self.local_values: dict[str, Any] = {}
         self.auto_width = True
         self._width = 260.0
         self._height = 40.0
@@ -143,6 +147,10 @@ class MathItem(MarkupItem):
         return [s.name for s in self.statements
                 if s.kind in (engine.DEFINE, engine.FUNCTION) and s.ok]
 
+    def published_names(self) -> set[str]:
+        """Names this region gives to the rest of the document."""
+        return set() if self.scoped else self.declared_names()
+
     def declared_names(self) -> set[str]:
         """Names this region assigns, read from the source without evaluating.
 
@@ -174,6 +182,11 @@ class MathItem(MarkupItem):
         )
 
     # -- evaluation --------------------------------------------------------
+    @property
+    def scoped(self) -> bool:
+        """True when this region's definitions stay inside it."""
+        return self.local_scope and not self.single_line
+
     def refresh(self, workspace=None, page=None) -> None:
         if workspace is None:
             scene = self.scene()
@@ -181,9 +194,16 @@ class MathItem(MarkupItem):
         if workspace is None:
             return
         label = self.label or "Calculation"
-        self.statements = engine.evaluate_source(self.source, workspace, label,
+        target = workspace.child() if self.scoped else workspace
+        self.statements = engine.evaluate_source(self.source, target, label,
                                                  new_pass=False)
-        self._known_names = set(workspace.variables) | set(workspace.functions)
+        if self.scoped:
+            self.local_values = {
+                name: info for name, info in target.variables.items()
+                if workspace.variables.get(name) is not info}
+        else:
+            self.local_values = {}
+        self._known_names = set(target.variables) | set(target.functions)
         self.relayout()
 
     def relayout(self) -> None:
@@ -353,6 +373,9 @@ class MathItem(MarkupItem):
         self._editor.show()
         self._editing = True
         self._editor.setFocus(Qt.MouseFocusReason)
+        cursor = self._editor.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        self._editor.setTextCursor(cursor)
         self.update()
 
     def end_edit(self) -> bool:
@@ -400,6 +423,12 @@ class MathItem(MarkupItem):
             painter.drawRect(rect)
             return
 
+        if self.scoped and self.rows:
+            rule = QPen(QColor(120, 140, 170, 130))
+            rule.setWidthF(1.2)
+            painter.setPen(rule)
+            painter.drawLine(QPointF(1.5, rect.top() + 2), QPointF(1.5, rect.bottom() - 2))
+
         pad = self.style.padding
         for row in self.rows:
             if row.left is not None:
@@ -426,6 +455,7 @@ class MathItem(MarkupItem):
             "show_definition_results": self.show_definition_results,
             "align_results": self.align_results,
             "show_comments": self.show_comments,
+            "local_scope": self.local_scope,
             "auto_width": self.auto_width,
             "width": self._width,
             "line_gap": self.line_gap,
@@ -439,6 +469,7 @@ class MathItem(MarkupItem):
         self.number_format = data.get("number_format", "auto")
         self.show_definition_results = bool(data.get("show_definition_results", True))
         self.show_comments = bool(data.get("show_comments", True))
+        self.local_scope = bool(data.get("local_scope", True))
         self.auto_width = bool(data.get("auto_width", True))
         self.align_results = bool(data.get("align_results", False))
         self._width = float(data.get("width", 260.0))

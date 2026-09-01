@@ -260,9 +260,9 @@ class PageScene(QGraphicsScene):
         selected = self.selectedItems()
         chrome: list[tuple] = []
         for item in self.markups():
-            if hasattr(item, "show_chrome"):
-                chrome.append((item, item.show_chrome))
-                item.show_chrome = False
+            if hasattr(item, "set_chrome") and item.show_chrome:
+                chrome.append(item)
+                item.set_chrome(False)
             item.setSelected(False)
         hidden = [item for item in self.markups()
                   if for_print and (not item.printable or not self.layer_prints(item))]
@@ -271,8 +271,8 @@ class PageScene(QGraphicsScene):
         self.render(painter, target, self.page_rect(), Qt.IgnoreAspectRatio)
         for item in hidden:
             item.setVisible(self.document.layer(item.layer).visible)
-        for item, value in chrome:
-            item.show_chrome = value
+        for item in chrome:
+            item.set_chrome(True)
         for item in selected:
             item.setSelected(True)
         self.print_mode = previous

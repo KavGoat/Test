@@ -54,6 +54,23 @@ class TableItem(MarkupItem):
     def gutter_size(self) -> tuple[float, float]:
         return (GUTTER_W, GUTTER_H) if self.show_chrome else (0.0, 0.0)
 
+    def set_chrome(self, on: bool) -> None:
+        """Show or hide the A/B/C and 1/2/3 gutters.
+
+        The gutters are drawn above and to the left of the grid, so the item has
+        to grow outwards rather than push its own cells down and right —
+        otherwise activating a table would move every cell out from under the
+        pointer that just double-clicked one.
+        """
+        on = bool(on)
+        if on == self.show_chrome:
+            return
+        self.prepareGeometryChange()
+        self.show_chrome = on
+        shift = QPointF(-GUTTER_W, -GUTTER_H) if on else QPointF(GUTTER_W, GUTTER_H)
+        self.setPos(self.pos() + shift)
+        self.update()
+
     def grid_origin(self) -> QPointF:
         gw, gh = self.gutter_size()
         return QPointF(gw, gh + self.title_height())
@@ -445,6 +462,11 @@ class TableItem(MarkupItem):
     # -- serialisation -----------------------------------------------------
     def serialize(self) -> dict:
         data = self.base_dict()
+        if self.show_chrome:
+            # Store the position the table has when its gutters are hidden, so a
+            # document saved mid-edit reopens with its cells in the same place.
+            data["x"] = data["x"] + GUTTER_W
+            data["y"] = data["y"] + GUTTER_H
         data.update({
             "sheet": self.sheet.to_dict(),
             "title": self.title,

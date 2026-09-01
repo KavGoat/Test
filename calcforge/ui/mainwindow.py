@@ -988,6 +988,8 @@ class MainWindow(QMainWindow):
             self.status_hint.setText(items[0].display_name())
 
     def delete_selection(self) -> None:
+        if self.view.editing_item() is not None:
+            return                      # Delete belongs to the text being edited
         items = [item for item in self.selected_items() if self.view.editable(item)]
         if not items:
             return
@@ -1000,6 +1002,8 @@ class MainWindow(QMainWindow):
         self.refresh_selection()
 
     def copy_selection(self) -> None:
+        if self.view.text_clipboard("copy"):
+            return
         if self.view.active_table is not None and self.view.copy_cells():
             return
         items = self.selected_items()
@@ -1010,12 +1014,16 @@ class MainWindow(QMainWindow):
         self.status_hint.setText(f"Copied {len(items)} markup(s)")
 
     def cut_selection(self) -> None:
+        if self.view.text_clipboard("cut"):
+            return
         if self.view.active_table is not None and self.view.cut_cells():
             return
         self.copy_selection()
         self.delete_selection()
 
     def paste_items(self) -> None:
+        if self.view.text_clipboard("paste"):
+            return
         if self.view.active_table is not None and self.view.paste_cells():
             return
         payload = self._clipboard

@@ -101,10 +101,31 @@ def test_calibration_from_a_drawn_distance(qapp):
 def test_math_item_evaluates_and_lays_out(qapp):
     workspace = Workspace()
     item = MathItem("L := 6 m\nw := 12 kN/m\nM := w*L^2/8 -> kN*m")
+    item.local_scope = False
     item.refresh(workspace)
     assert workspace.get("M").to("kN*m").magnitude == pytest.approx(54)
     assert item.local_rect().width() > 40
     assert item.defined_names() == ["L", "w", "M"]
+
+
+def test_a_block_is_self_contained_by_default(qapp):
+    workspace = Workspace()
+    workspace.begin_pass()
+    MathItem("L = 6 m").refresh(workspace)          # a one-line region defines globally
+
+    block = MathItem("w = 12 kN/m\nM = w*L^2/8")
+    block.refresh(workspace)
+    assert block.scoped
+    assert workspace.get("L").to("m").magnitude == pytest.approx(6)   # read from above
+    assert workspace.get("M") is None and workspace.get("w") is None
+    assert block.local_values["M"].value.to("kN*m").magnitude == pytest.approx(54)
+
+
+def test_block_scope_survives_a_round_trip(qapp):
+    item = MathItem("a = 1 m\nb = 2 m")
+    item.local_scope = False
+    clone = build_item(item.serialize())
+    assert clone.local_scope is False
 
 
 def test_math_item_marks_unit_literals(qapp):

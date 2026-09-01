@@ -146,13 +146,14 @@ def build_sample() -> Document:
     note.style.font_size = 8.0
 
     reaction = MathItem(REACTION_CALC)
-    reaction.setPos(QPointF(56, 258))
+    reaction.setPos(QPointF(56, 268))
     reaction.label = "Beam reaction from the table"
     reaction.style.font_size = 9.0
+    reaction.local_scope = True      # a self-contained block: reads q_floor, keeps its own
 
-    hint = _heading("Try it: change a thickness in the table and press F9 — "
-                    "the reaction below follows.", QPointF(56, 440), 430, size=10.0,
-                    bold=False)
+    hint = _heading("The block below is self-contained: it reads q_floor from the "
+                    "table but keeps its own working values.", QPointF(56, 232), 430,
+                    size=10.0, bold=False)
     hint.style.text_color = "#5a6270"
 
     # ---------------------------------------------------------------- page 3
@@ -166,6 +167,7 @@ def build_sample() -> Document:
     footing.setPos(QPointF(56, 84))
     footing.label = "Pad footing"
     footing.style.font_size = 9.0
+    footing.local_scope = True       # self-contained: nothing here leaks to the document
 
     column = RectItem("rect", QRectF(0, 0, COLUMN_PT, COLUMN_PT))
     column.setPos(QPointF(96 + (PAD_PT - COLUMN_PT) / 2, 486 + (PAD_PT - COLUMN_PT) / 2))

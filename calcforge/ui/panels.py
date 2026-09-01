@@ -308,6 +308,24 @@ class VariablesPanel(QWidget):
             lambda cell: self.insertRequested.emit(self.table.item(cell.row(), 0).text()))
         layout.addWidget(self.table, 1)
 
+    def _block_locals(self) -> list[tuple[str, str, str]]:
+        """Values that live inside a self-contained block, shown for reference."""
+        rows: list[tuple[str, str, str]] = []
+        document = getattr(self.window, "document", None)
+        if document is None:
+            return rows
+        for page in document.pages:
+            if page.scene is None:
+                continue
+            for item in page.scene.ordered_markups():
+                locals_map = getattr(item, "local_values", None)
+                if not locals_map:
+                    continue
+                for name, info in sorted(locals_map.items(), key=lambda kv: kv[1].order):
+                    rows.append((name, format_quantity(info.value, 6),
+                                 f"{item.display_name()} · local"))
+        return rows
+
     def rebuild(self, workspace) -> None:
         needle = self.filter.text().strip().lower()
         entries = []
@@ -315,6 +333,8 @@ class VariablesPanel(QWidget):
             entries.append((name, format_quantity(info.value, 6), info.source))
         for name, function in sorted(workspace.functions.items()):
             entries.append((function.signature(), function.source, ""))
+        for name, value, source in self._block_locals():
+            entries.append((name, value, source))
         entries = [row for row in entries
                    if not needle or any(needle in str(cell).lower() for cell in row)]
         self.table.setRowCount(len(entries))
@@ -863,6 +883,23 @@ class PropertiesPanel(QScrollArea):
                 lambda on, a=attribute: self._apply(
                     lambda i: (setattr(i, a, on), i.relayout()), "Calculation layout"))
             form.addRow("", box)
+
+        scope = QCheckBox("Keep values inside this block")
+        scope.setChecked(item.local_scope)
+        scope.setToolTip(
+            "A block of several lines keeps its working values to itself, so its\n"
+            "intermediate names cannot collide with the rest of the document.\n"
+            "It can still read anything defined above it. A single-line region\n"
+            "always defines for the whole document.")
+        scope.setEnabled(not item.single_line)
+        scope.toggled.connect(
+            lambda on: self._apply(lambda i: setattr(i, "local_scope", on), "Block scope"))
+        form.addRow("", scope)
+        if item.single_line:
+            note = QLabel("A one-line region always defines for the whole document.")
+            note.setWordWrap(True)
+            note.setStyleSheet("color:#6b7280;")
+            form.addRow("", note)
 
         edit = QPushButton("Edit calculation…")
         edit.clicked.connect(lambda: self.window.view.begin_item_edit(item))

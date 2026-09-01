@@ -237,10 +237,24 @@ class PageView(QGraphicsView):
     # ------------------------------------------------------------------
     # mouse
     # ------------------------------------------------------------------
+    def editing_rect(self) -> Optional[QRectF]:
+        item = self._editing_item
+        return item.sceneBoundingRect() if item is not None else None
+
     def mousePressEvent(self, event: QMouseEvent) -> None:
         scene_pos = self.mapToScene(event.position().toPoint())
         self._press_scene = scene_pos
         self._press_view = event.position().toPoint()
+
+        # While a region is being edited the pointer belongs to its text: a
+        # click inside places the caret, a drag selects, a click outside
+        # finishes the edit.
+        if self._editing_item is not None and event.button() == Qt.LeftButton:
+            rect = self.editing_rect()
+            if rect is not None and rect.contains(scene_pos):
+                super().mousePressEvent(event)
+                return
+            self.end_item_edit()
 
         if event.button() == Qt.MiddleButton or self._space_pan or self.tool_key == "pan":
             self._mode = "pan"
@@ -406,6 +420,10 @@ class PageView(QGraphicsView):
         self._last_scene_pos = scene_pos
         self.cursorMoved.emit(scene_pos)
 
+        if self._editing_item is not None and self._mode == "idle":
+            super().mouseMoveEvent(event)       # dragging selects text
+            return
+
         if self._mode == "pan":
             delta = event.position().toPoint() - self._pan_origin
             self._pan_origin = event.position().toPoint()
@@ -535,6 +553,10 @@ class PageView(QGraphicsView):
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         scene_pos = self.mapToScene(event.position().toPoint())
 
+        if self._editing_item is not None and self._mode == "idle":
+            super().mouseReleaseEvent(event)
+            return
+
         if self._mode == "pan":
             self._mode = "idle"
             self.setCursor(self._cursor_for_tool(self.current_tool()))
@@ -612,6 +634,11 @@ class PageView(QGraphicsView):
             self.finish_poly()
             event.accept()
             return
+        # Already editing this region: let the editor select a word.
+        rect = self.editing_rect()
+        if rect is not None and rect.contains(scene_pos):
+            super().mouseDoubleClickEvent(event)
+            return
         item = self.markup_at(scene_pos)
         if item is None:
             super().mouseDoubleClickEvent(event)
@@ -626,6 +653,7 @@ class PageView(QGraphicsView):
             return
         if isinstance(item, (MathItem, _TextBase)) and not item.locked:
             self.begin_item_edit(item)
+            self.place_caret(item, scene_pos)
             event.accept()
             return
         if isinstance(item, (PolyItem, MeasureItem)) and not item.locked:
@@ -790,6 +818,28 @@ class PageView(QGraphicsView):
     def editing_item(self):
         return self._editing_item
 
+    @staticmethod
+    def place_caret(item, scene_pos: QPointF) -> None:
+        """Put the caret where the pointer is, rather than at the start.
+
+        Only for text boxes, where what is displayed and what is edited are the
+        same layout.  A calculation is displayed typeset and edited as source, so
+        a point on the fraction bar means nothing in the source text — there the
+        caret goes to the end of the line, which is at least predictable.
+        """
+        editor = getattr(item, "_editor", None)
+        if editor is None or isinstance(item, MathItem):
+            return
+        try:
+            local = editor.mapFromScene(scene_pos)
+            position = editor.document().documentLayout().hitTest(local, Qt.FuzzyHit)
+        except Exception:
+            return
+        if position >= 0:
+            cursor = editor.textCursor()
+            cursor.setPosition(position)
+            editor.setTextCursor(cursor)
+
     def begin_item_edit(self, item) -> None:
         self.begin_snapshot()
         self.scene().clearSelection()
@@ -857,6 +907,26 @@ class PageView(QGraphicsView):
         from PySide6.QtWidgets import QGraphicsItem as _GraphicsItem
         return bool(item.flags() & _GraphicsItem.ItemIsMovable) and not item.locked
 
+    def text_clipboard(self, action: str) -> bool:
+        """Copy, cut or paste inside the region being edited; False if none is."""
+        item = self._editing_item
+        editor = getattr(item, "_editor", None) if item is not None else None
+        if editor is None:
+            return False
+        cursor = editor.textCursor()
+        clipboard = QApplication.clipboard()
+        if action == "paste":
+            cursor.insertText(clipboard.text())
+            editor.setTextCursor(cursor)
+            return True
+        if not cursor.hasSelection():
+            return True                      # nothing selected: swallow, do nothing
+        clipboard.setText(cursor.selectedText())
+        if action == "cut":
+            cursor.removeSelectedText()
+            editor.setTextCursor(cursor)
+        return True
+
     def markup_at(self, scene_pos: QPointF) -> Optional[MarkupItem]:
         for item in self.scene().items(scene_pos):
             if isinstance(item, MarkupItem):
@@ -873,9 +943,7 @@ class PageView(QGraphicsView):
             return
         self.deactivate_table()
         self.active_table = table
-        table.show_chrome = True
-        table.prepareGeometryChange()
-        table.update()
+        table.set_chrome(True)
         self.scene().clearSelection()
         table.setSelected(True)
         self.cellChanged.emit(table)
@@ -885,9 +953,7 @@ class PageView(QGraphicsView):
     def deactivate_table(self) -> None:
         self.close_cell_editor()
         if self.active_table is not None:
-            self.active_table.show_chrome = False
-            self.active_table.prepareGeometryChange()
-            self.active_table.update()
+            self.active_table.set_chrome(False)
             self.active_table = None
             self.cellChanged.emit(None)
 
@@ -1076,6 +1142,20 @@ class PageView(QGraphicsView):
     def keyPressEvent(self, event: QKeyEvent) -> None:
         key = event.key()
         modifiers = event.modifiers()
+
+        # While a region or a cell is being edited every key belongs to it —
+        # arrows move the caret, not the markup — apart from Escape, which
+        # finishes the edit.
+        if self._editing_item is not None or self._cell_editor is not None:
+            if key == Qt.Key_Escape:
+                if self._cell_editor is not None:
+                    self.close_cell_editor(commit=False)
+                else:
+                    self.end_item_edit()
+                event.accept()
+                return
+            super().keyPressEvent(event)
+            return
 
         if key == Qt.Key_Space and not event.isAutoRepeat():
             self._space_pan = True

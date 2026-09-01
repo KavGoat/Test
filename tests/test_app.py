@@ -239,6 +239,7 @@ def test_math_block_editing_updates_variables(window):
     block = editing_item(window)
     assert isinstance(block, MathItem) and block.editing
     block._editor.setPlainText("L := 6 m\nw := 12 kN/m\nM := w*L^2/8 -> kN*m")
+    block.local_scope = False        # publish to the document rather than keep local
     window.view.end_item_edit()
     assert window.document.workspace.get("M").to("kN*m").magnitude == pytest.approx(54)
     assert window.variables_panel.table.rowCount() >= 3
@@ -367,8 +368,9 @@ def test_page_setup_defaults_to_a4(window):
 def test_save_and_reload_round_trip(window, tmp_path):
     window.select_tool("math")
     drag(window.view, 80, 80, 340, 160)
-    block = [i for i in markups(window) if isinstance(i, MathItem)][0]
+    block = editing_item(window)
     block._editor.setPlainText("a := 3 m\nb := a*2")
+    block.local_scope = False        # publish, so the reload can be checked by value
     window.view.end_item_edit()
     window.select_tool("rect")
     drag(window.view, 80, 300, 200, 380)
@@ -413,7 +415,12 @@ def test_sample_document_is_consistent(window):
     assert len(window.document.pages) == 3
     assert workspace.get("q_floor").to("kPa").magnitude == pytest.approx(5.87, rel=1e-3)
     assert workspace.get("util_b") == pytest.approx(0.3911, rel=1e-3)
-    assert workspace.get("q").to("kPa").magnitude == pytest.approx(149.8, rel=1e-3)
+    # the footing block is self-contained, so its values are not document-wide
+    assert workspace.get("q") is None
+    footing = [i for i in window.document.pages[2].scene.markups()
+               if isinstance(i, MathItem) and i.label == "Pad footing"][0]
+    assert footing.local_values["q"].value.to("kPa").magnitude == pytest.approx(149.8,
+                                                                               rel=1e-3)
 
 
 def test_zoom_controls(window):
@@ -1231,3 +1238,247 @@ def test_using_a_stress_before_it_is_defined_warns_rather_than_inventing_a_unit(
     window.recalculate()
     assert window.problems_panel._problems == []
     assert window.document.workspace.get("util") == pytest.approx(0.3887, rel=1e-3)
+
+
+def real_double_click(view, x, y):
+    """The sequence Qt actually sends: press, release, double-click, release."""
+    from PySide6.QtWidgets import QApplication
+    for kind in (QEvent.MouseButtonPress, QEvent.MouseButtonRelease,
+                 QEvent.MouseButtonDblClick, QEvent.MouseButtonRelease):
+        QApplication.sendEvent(view.viewport(), _event(view, kind, x, y))
+
+
+def test_double_click_starts_editing_a_calculation(window):
+    window.select_tool("math")
+    drag(window.view, 100, 100, 260, 125)
+    block = editing_item(window)
+    block._editor.setPlainText("b = 300 mm")
+    window.view.end_item_edit()
+    window.select_tool("select")
+
+    centre = block.mapToScene(block.local_rect().center())
+    real_double_click(window.view, centre.x(), centre.y())
+    assert editing_item(window) is block
+
+
+def test_arrows_move_the_caret_while_editing_not_the_markup(window):
+    window.select_tool("math")
+    drag(window.view, 100, 100, 260, 125)
+    block = editing_item(window)
+    block._editor.setPlainText("b = 300 mm")
+    window.view.end_item_edit()
+    window.select_tool("select")
+    centre = block.mapToScene(block.local_rect().center())
+    real_double_click(window.view, centre.x(), centre.y())
+
+    origin = block.pos()
+    caret = block._editor.textCursor().position()
+    key(window.view, Qt.Key_Left)
+    assert block.pos() == origin
+    assert block._editor.textCursor().position() == caret - 1
+
+
+def test_typing_while_editing_reaches_the_text(window):
+    from PySide6.QtWidgets import QApplication
+    window.select_tool("math")
+    drag(window.view, 100, 100, 260, 125)
+    block = editing_item(window)
+    from PySide6.QtGui import QTextCursor
+    block._editor.setPlainText("b = 300")
+    cursor = block._editor.textCursor()
+    cursor.movePosition(QTextCursor.End)
+    block._editor.setTextCursor(cursor)
+    QApplication.sendEvent(window.view, QKeyEvent(QEvent.KeyPress, Qt.Key_X,
+                                                  Qt.NoModifier, " mm"))
+    assert block._editor.toPlainText() == "b = 300 mm"
+
+
+def test_delete_while_editing_does_not_remove_the_markup(window):
+    window.select_tool("math")
+    drag(window.view, 100, 100, 260, 125)
+    block = editing_item(window)
+    block._editor.setPlainText("b = 300 mm")
+    window.delete_selection()
+    assert block in markups(window)
+
+
+def test_clicking_outside_finishes_the_edit(window):
+    window.select_tool("math")
+    drag(window.view, 100, 100, 260, 125)
+    editing_item(window)._editor.setPlainText("b = 300 mm")
+    press(window.view, 500, 600)
+    release(window.view, 500, 600)
+    assert editing_item(window) is None
+    assert window.document.workspace.get("b").to("mm").magnitude == pytest.approx(300)
+
+
+def test_double_click_on_a_cell_opens_its_editor(window):
+    window.select_tool("table")
+    drag(window.view, 100, 300, 420, 430)
+    table = window.view.active_table
+    window.view.deactivate_table()
+    window.select_tool("select")
+
+    point = table.mapToScene(table.cell_rect(1, 1).center())
+    real_double_click(window.view, point.x(), point.y())
+    assert window.view.active_table is table
+    assert window.view._cell_editor is not None
+    assert table.current == (1, 1)
+
+
+def test_arrows_move_the_cell_cursor_not_the_table(window):
+    window.select_tool("table")
+    drag(window.view, 100, 300, 420, 430)
+    table = window.view.active_table
+    origin = table.pos()
+    key(window.view, Qt.Key_Down)
+    key(window.view, Qt.Key_Right)
+    assert table.pos() == origin
+    assert table.current == (1, 1)
+
+
+def test_activating_a_table_leaves_its_cells_where_they_were(window):
+    window.select_tool("table")
+    drag(window.view, 100, 300, 420, 430)
+    table = window.view.active_table
+    before = table.mapToScene(table.cell_rect(1, 1).center())
+    window.view.deactivate_table()
+    after_hidden = table.mapToScene(table.cell_rect(1, 1).center())
+    window.view.activate_table(table)
+    after_shown = table.mapToScene(table.cell_rect(1, 1).center())
+    assert (before - after_hidden).manhattanLength() < 0.01
+    assert (before - after_shown).manhattanLength() < 0.01
+
+
+def test_a_table_saved_while_active_reopens_in_place(window):
+    window.select_tool("table")
+    drag(window.view, 100, 300, 420, 430)
+    table = window.view.active_table
+    window.view.deactivate_table()
+    resting = table.pos()
+    window.view.activate_table(table)
+    data = table.serialize()
+    assert data["x"] == pytest.approx(resting.x())
+    assert data["y"] == pytest.approx(resting.y())
+
+
+def test_a_block_keeps_its_values_to_itself(window):
+    window.select_tool("math")
+    drag(window.view, 80, 80, 300, 110)
+    editing_item(window)._editor.setPlainText("q_floor = 5 kPa")
+    window.view.end_item_edit()
+
+    window.select_tool("math")
+    drag(window.view, 80, 200, 300, 300)
+    block = editing_item(window)
+    block._editor.setPlainText("b_trib = 3 m\nw = q_floor*b_trib\nR = w*6 m/2")
+    window.view.end_item_edit()
+
+    workspace = window.document.workspace
+    assert workspace.get("q_floor").to("kPa").magnitude == pytest.approx(5)
+    assert workspace.get("R") is None and workspace.get("b_trib") is None
+    assert block.scoped
+    assert block.local_values["R"].value.to("kN").magnitude == pytest.approx(45)
+
+
+def test_a_block_can_read_globals_defined_above_it(window):
+    window.select_tool("math")
+    drag(window.view, 80, 80, 300, 110)
+    editing_item(window)._editor.setPlainText("L = 6 m")
+    window.view.end_item_edit()
+
+    window.select_tool("math")
+    drag(window.view, 80, 200, 300, 280)
+    block = editing_item(window)
+    block._editor.setPlainText("w = 12 kN/m\nM = w*L^2/8")
+    window.view.end_item_edit()
+
+    assert [s.error for s in block.statements if s.error] == []
+    assert block.local_values["M"].value.to("kN*m").magnitude == pytest.approx(54)
+
+
+def test_a_later_line_cannot_see_inside_a_block(window):
+    window.select_tool("math")
+    drag(window.view, 80, 100, 300, 180)
+    editing_item(window)._editor.setPlainText("a = 2 m\nb = 3 m")
+    window.view.end_item_edit()
+
+    window.select_tool("math")
+    drag(window.view, 80, 400, 300, 430)
+    after = editing_item(window)
+    after._editor.setPlainText("c = a*2")
+    window.view.end_item_edit()
+
+    assert any("not defined" in s.error for s in after.statements if s.error)
+    assert [p.kind for p in window.problems_panel._problems] == ["undefined"]
+
+
+def test_a_single_line_region_always_defines_globally(window):
+    window.select_tool("math")
+    drag(window.view, 80, 80, 300, 110)
+    line = editing_item(window)
+    line._editor.setPlainText("b = 300 mm")
+    window.view.end_item_edit()
+    assert not line.scoped
+    assert window.document.workspace.get("b").to("mm").magnitude == pytest.approx(300)
+
+
+def test_a_block_can_be_opened_up_to_the_document(window):
+    window.select_tool("math")
+    drag(window.view, 80, 100, 300, 180)
+    block = editing_item(window)
+    block._editor.setPlainText("x = 2 m\ny = x*3")
+    window.view.end_item_edit()
+    assert window.document.workspace.get("y") is None
+
+    block.local_scope = False
+    window.recalculate()
+    assert window.document.workspace.get("y").to("m").magnitude == pytest.approx(6)
+
+
+def test_block_locals_are_listed_for_reference(window):
+    window.select_tool("math")
+    drag(window.view, 80, 100, 300, 180)
+    editing_item(window)._editor.setPlainText("x = 2 m\ny = x*3")
+    window.view.end_item_edit()
+    window.recalculate()
+    rows = [window.variables_panel.table.item(r, 0).text()
+            for r in range(window.variables_panel.table.rowCount())]
+    sources = [window.variables_panel.table.item(r, 2).text()
+               for r in range(window.variables_panel.table.rowCount())]
+    assert "y" in rows
+    assert any("local" in source for source in sources)
+
+
+def test_editing_a_calculation_starts_at_the_end_of_the_line(window):
+    window.select_tool("math")
+    drag(window.view, 100, 100, 260, 125)
+    block = editing_item(window)
+    block._editor.setPlainText("L = 6 m")
+    window.view.end_item_edit()
+    window.select_tool("select")
+
+    centre = block.mapToScene(block.local_rect().center())
+    real_double_click(window.view, centre.x(), centre.y())
+    assert block._editor.textCursor().position() == len("L = 6 m")
+
+    for _ in range(3):
+        key(window.view, Qt.Key_Left)
+    key(window.view, Qt.Key_unknown, "7")
+    window.view.end_item_edit()
+    assert window.document.workspace.get("L").to("m").magnitude == pytest.approx(76)
+
+
+def test_editing_a_text_box_puts_the_caret_near_the_click(window):
+    window.select_tool("text")
+    drag(window.view, 100, 100, 320, 140)
+    box = editing_item(window)
+    box.set_text("the quick brown fox")
+    window.view.end_item_edit()
+    window.select_tool("select")
+
+    rect = box.local_rect()
+    point = box.mapToScene(QPointF(rect.left() + rect.width() * 0.45, rect.top() + 8))
+    real_double_click(window.view, point.x(), point.y())
+    assert editing_item(window) is box
+    assert 0 < box._editor.textCursor().position() < len("the quick brown fox")

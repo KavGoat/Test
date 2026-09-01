@@ -53,6 +53,10 @@ after it. Each line is its own region, so you can drag any of them where you wan
 Press **Enter** to open the next line below, **Shift+Enter** to keep several lines
 in one region.
 
+**Double-click** any region, cell or line to edit it. While you are editing, the
+keyboard and the pointer belong to the text: arrows move the caret, dragging
+selects, `Ctrl+C`/`V` work on the text, and clicking outside finishes the edit.
+
 ```
 # Simply supported beam
 L := 7.2 m
@@ -96,6 +100,19 @@ Units are enforced, not decorative: `1 m + 1 kg` is refused with
 *"Units do not match: cannot combine meter with kilogram"*, and every result carries
 the unit it earned. SI, imperial and the usual structural units (`kN`, `MPa`, `kip`,
 `ksi`, `psf`, `pcf`, `klf`…) are all built in.
+
+### Blocks are self-contained
+
+A region holding **several lines is a block**, and its working values stay inside
+it — a dozen intermediate names in one calculation cannot collide with the rest of
+the document. A block can still read anything defined **above** it, so it is the
+natural place for a self-contained check that consumes a couple of document-wide
+inputs. A self-contained block is marked with a rule down its left edge, and its
+values are listed in the Variables panel as local to it.
+
+A **single-line region always defines for the whole document** — that is how you
+publish something everything else can use. To open a block up as well, untick
+*Keep values inside this block* in its properties.
 
 ### Order is position
 
