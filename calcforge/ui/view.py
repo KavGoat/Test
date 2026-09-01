@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (QGraphicsView, QLineEdit, QRubberBand, QGraphicsP
 
 from ..core.document import MM_TO_PT
 from ..items.base import HANDLE_CURSORS, MarkupItem
-from ..items.mathitem import MathItem
+from ..items.mathitem import LINE_STEP, MathItem
 from ..items.measure import CALIBRATE, CountItem, MeasureItem
 from ..items.media import ImageItem
 from ..items.shapes import PolyItem
@@ -72,6 +72,7 @@ class PageView(QGraphicsView):
         self._fill_origin: Optional[tuple[int, int]] = None
         self._editing_item = None
 
+        self._last_scene_pos = QPointF(60, 60)
         self.count_subject = "Count"
         self.count_symbol = "circle"
         self.stamp_text = "APPROVED"
@@ -399,6 +400,7 @@ class PageView(QGraphicsView):
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         scene_pos = self.mapToScene(event.position().toPoint())
+        self._last_scene_pos = scene_pos
         self.cursorMoved.emit(scene_pos)
 
         if self._mode == "pan":
@@ -689,6 +691,9 @@ class PageView(QGraphicsView):
                 self.finish_tool()
                 return
             draft.prepareGeometryChange()
+        elif isinstance(draft, MathItem):
+            # A calculation sizes itself around what is typed into it.
+            pass
         else:
             rect = draft.local_rect()
             if tiny or rect.width() < 6 or rect.height() < 6:
@@ -779,8 +784,33 @@ class PageView(QGraphicsView):
         self.begin_snapshot()
         self.scene().clearSelection()
         item.setSelected(True)
+        if isinstance(item, MathItem) and not getattr(item, "_enter_wired", False):
+            item.enterPressed.connect(self._open_next_line)
+            item._enter_wired = True
         item.begin_edit()
         self._editing_item = item
+
+    def _open_next_line(self) -> None:
+        """Enter in a one-line calculation opens the next one just below it."""
+        item = self._editing_item
+        if not isinstance(item, MathItem):
+            return
+        below = item.pos() + QPointF(0, item.local_rect().height() + LINE_STEP)
+        self.end_item_edit()
+        self.begin_snapshot()
+        following = MathItem("")
+        following.style = item.style.copy()
+        following.digits = item.digits
+        following.number_format = item.number_format
+        following.show_definition_results = item.show_definition_results
+        following.show_comments = item.show_comments
+        following.author = item.author
+        following.layer = item.layer
+        self.scene().add_markup(following, self.snap(below))
+        self.scene().clearSelection()
+        following.setSelected(True)
+        self.commit_snapshot("Add calculation")
+        self.begin_item_edit(following)
 
     def end_item_edit(self) -> None:
         item = getattr(self, "_editing_item", None)
@@ -792,8 +822,20 @@ class PageView(QGraphicsView):
             self.window.recalculate()
         else:
             item.end_edit()
+        # A region left completely empty is an invisible click target; drop it.
+        if self._is_empty(item):
+            self.scene().remove_markup(item)
+            self.window.recalculate()
         self.commit_snapshot("Edit text")
         self.documentEdited.emit()
+
+    @staticmethod
+    def _is_empty(item) -> bool:
+        if isinstance(item, MathItem):
+            return not item.source.strip()
+        if isinstance(item, _TextBase):
+            return not item.text().strip()
+        return False
 
     def markup_at(self, scene_pos: QPointF) -> Optional[MarkupItem]:
         for item in self.scene().items(scene_pos):
@@ -930,6 +972,21 @@ class PageView(QGraphicsView):
     # ------------------------------------------------------------------
     # keyboard
     # ------------------------------------------------------------------
+    def idle_on_canvas(self) -> bool:
+        """True when a keystroke should be read as "start something here"."""
+        return (self._editing_item is None and self.active_table is None
+                and self._cell_editor is None and self._mode == "idle"
+                and self.tool_key in ("select", "pan"))
+
+    def typing_position(self) -> QPointF:
+        """Where a region opened by typing should appear."""
+        scene = self.scene()
+        point = QPointF(self._last_scene_pos)
+        if scene is not None and not scene.page_rect().contains(point):
+            left, top, _width, _height = scene.page.setup.content_rect_pt
+            point = QPointF(left, top)
+        return self.snap(point)
+
     def keyPressEvent(self, event: QKeyEvent) -> None:
         key = event.key()
         modifiers = event.modifiers()
@@ -968,6 +1025,17 @@ class PageView(QGraphicsView):
             self.window.delete_selection()
             event.accept()
             return
+
+        # A bare keystroke on the canvas only does something if it is bound:
+        # '"' starts text, '\\' starts maths, tool keys pick their tool.
+        if self.idle_on_canvas() and not self.scene().selectedItems():
+            if self.window.run_typed_binding(event.text(), modifiers,
+                                             self.typing_position()):
+                event.accept()
+                return
+            if event.text() and event.text().isprintable():
+                event.accept()          # unbound: deliberately nothing happens
+                return
 
         if key in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down):
             step = 1.0 if modifiers & Qt.ShiftModifier else 0.25 * MM_TO_PT * 4

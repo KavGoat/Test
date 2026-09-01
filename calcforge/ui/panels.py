@@ -359,6 +359,80 @@ class FunctionsPanel(QWidget):
 
 
 # ---------------------------------------------------------------------------
+# Problems
+# ---------------------------------------------------------------------------
+
+class ProblemsPanel(QWidget):
+    """Everything in the document that did not evaluate, and where it lives."""
+
+    problemActivated = Signal(int, str)
+
+    COLUMNS = ["Page", "Kind", "Where", "Message", "Source"]
+
+    def __init__(self, window):
+        super().__init__()
+        self.window = window
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
+
+        top = QHBoxLayout()
+        self.filter = QLineEdit()
+        self.filter.setPlaceholderText("Filter problems…")
+        self.filter.setClearButtonEnabled(True)
+        self.filter.textChanged.connect(lambda _: self.rebuild(self._problems))
+        top.addWidget(self.filter, 1)
+        self.summary = QLabel("")
+        self.summary.setStyleSheet("color:#a33; font-weight:600;")
+        top.addWidget(self.summary)
+        layout.addLayout(top)
+
+        self.table = QTableWidget(0, len(self.COLUMNS))
+        self.table.setHorizontalHeaderLabels(self.COLUMNS)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setAlternatingRowColors(True)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        self.table.itemDoubleClicked.connect(self._activate)
+        layout.addWidget(self.table, 1)
+
+        self.empty = QLabel("No problems — everything evaluated.")
+        self.empty.setStyleSheet("color:#3a7a4a; padding:4px;")
+        layout.addWidget(self.empty)
+        self._problems: list = []
+
+    def rebuild(self, problems: list) -> None:
+        from ..core.problems import summarise
+
+        self._problems = list(problems)
+        needle = self.filter.text().strip().lower()
+        rows = [p for p in self._problems
+                if not needle or needle in p.message.lower()
+                or needle in p.source.lower() or needle in p.label.lower()]
+        self.table.setRowCount(len(rows))
+        for index, problem in enumerate(rows):
+            cells = [str(problem.page + 1), problem.label, problem.where,
+                     problem.message, problem.source]
+            for column, text in enumerate(cells):
+                entry = QTableWidgetItem(text)
+                entry.setData(Qt.UserRole, (problem.page, problem.item_uid))
+                if column == 1:
+                    entry.setForeground(QColor("#b3261e"))
+                self.table.setItem(index, column, entry)
+        for column in (0, 1, 2):
+            self.table.resizeColumnToContents(column)
+        self.summary.setText(summarise(self._problems))
+        self.empty.setVisible(not self._problems)
+        self.table.setVisible(bool(self._problems))
+
+    def _activate(self, cell: QTableWidgetItem) -> None:
+        data = cell.data(Qt.UserRole)
+        if data:
+            self.problemActivated.emit(data[0], data[1])
+
+
+# ---------------------------------------------------------------------------
 # Properties
 # ---------------------------------------------------------------------------
 

@@ -11,7 +11,29 @@ from ..core.document import MM_TO_PT, Document, Page
 from ..items.base import MarkupItem, build_item
 from ..items.media import ImageItem
 
+ROW_TOLERANCE = 9.0        # points; items this close vertically share a row
+
 PAPER = QColor("#ffffff")
+
+
+def reading_order(items: list) -> list:
+    """Sort *items* top-left to bottom-right, banding near-equal tops into rows."""
+    remaining = sorted(items, key=lambda i: (i.pos().y(), i.pos().x()))
+    ordered: list = []
+    row: list = []
+    row_top = None
+    for item in remaining:
+        top = item.pos().y()
+        if row_top is None or abs(top - row_top) <= ROW_TOLERANCE:
+            if row_top is None:
+                row_top = top
+            row.append(item)
+        else:
+            ordered.extend(sorted(row, key=lambda i: i.pos().x()))
+            row = [item]
+            row_top = top
+    ordered.extend(sorted(row, key=lambda i: i.pos().x()))
+    return ordered
 MARGIN_PEN = QColor(120, 160, 220, 120)
 GRID_PEN = QColor(180, 195, 210, 110)
 GRID_PEN_MAJOR = QColor(150, 170, 195, 150)
@@ -156,8 +178,13 @@ class PageScene(QGraphicsScene):
         return [item for item in self.items() if isinstance(item, MarkupItem)]
 
     def ordered_markups(self) -> list[MarkupItem]:
-        """Reading order: top to bottom, then left to right."""
-        return sorted(self.markups(), key=lambda i: (round(i.pos().y(), 1), round(i.pos().x(), 1)))
+        """Reading order: top-left to bottom-right, the way SMath evaluates.
+
+        Items whose tops are within a line's height of each other count as one
+        row and are read left to right, so a value placed beside another still
+        evaluates after it rather than before.
+        """
+        return reading_order(self.markups())
 
     def add_markup(self, item: MarkupItem, position: Optional[QPointF] = None) -> MarkupItem:
         if position is not None:

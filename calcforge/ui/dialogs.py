@@ -433,6 +433,95 @@ class CountSubjectDialog(QDialog):
         layout.addRow(_buttons(self))
 
 
+class ShortcutManagerDialog(QDialog):
+    """Edit, check and reset the keyboard bindings."""
+
+    def __init__(self, manager, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Customise shortcuts")
+        self.manager = manager
+        self.resize(560, 560)
+        layout = QVBoxLayout(self)
+
+        note = QLabel(
+            "Type the keys for each command. A single character — <b>\"</b> for text, "
+            "<b>\\</b> for maths — acts when you type it straight onto the page with "
+            "nothing selected. Anything longer, such as <b>Ctrl+0</b>, works everywhere. "
+            "Leave a row empty to unbind it.")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
+        self.table = QTableWidget(0, 4)
+        self.table.setHorizontalHeaderLabels(["Group", "Command", "Shortcut", "Default"])
+        self.table.verticalHeader().setVisible(False)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        layout.addWidget(self.table, 1)
+
+        self.editors: dict[str, QLineEdit] = {}
+        for binding in manager.bindings():
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            group = QTableWidgetItem(binding.category)
+            group.setFlags(Qt.ItemIsEnabled)
+            self.table.setItem(row, 0, group)
+            label = QTableWidgetItem(binding.label)
+            label.setFlags(Qt.ItemIsEnabled)
+            self.table.setItem(row, 1, label)
+            editor = QLineEdit(manager.sequence(binding.action_id))
+            editor.setPlaceholderText("unbound")
+            editor.textChanged.connect(lambda _t: self._check())
+            self.table.setCellWidget(row, 2, editor)
+            self.editors[binding.action_id] = editor
+            default = QTableWidgetItem(binding.default or "—")
+            default.setFlags(Qt.ItemIsEnabled)
+            self.table.setItem(row, 3, default)
+        self.table.resizeColumnsToContents()
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+
+        self.warning = QLabel("")
+        self.warning.setStyleSheet("color:#b3261e;")
+        self.warning.setWordWrap(True)
+        layout.addWidget(self.warning)
+
+        buttons = QHBoxLayout()
+        reset_row = QPushButton("Reset this row")
+        reset_row.clicked.connect(self._reset_row)
+        reset_all = QPushButton("Reset all")
+        reset_all.clicked.connect(self._reset_all)
+        buttons.addWidget(reset_row)
+        buttons.addWidget(reset_all)
+        buttons.addStretch(1)
+        layout.addLayout(buttons)
+        layout.addWidget(_buttons(self))
+        self._check()
+
+    def _reset_row(self) -> None:
+        row = self.table.currentRow()
+        if row < 0:
+            return
+        binding = self.manager.bindings()[row]
+        self.editors[binding.action_id].setText(binding.default)
+
+    def _reset_all(self) -> None:
+        for binding in self.manager.bindings():
+            self.editors[binding.action_id].setText(binding.default)
+
+    def _check(self) -> None:
+        seen: dict[str, list[str]] = {}
+        for binding in self.manager.bindings():
+            text = self.editors[binding.action_id].text().strip()
+            if text:
+                seen.setdefault(text.lower(), []).append(binding.label)
+        clashes = [f"{key}: {', '.join(labels)}" for key, labels in seen.items()
+                   if len(labels) > 1]
+        self.warning.setText("Used more than once — " + "; ".join(clashes) if clashes else "")
+
+    def apply(self) -> None:
+        for binding in self.manager.bindings():
+            self.manager.set_sequence(binding.action_id,
+                                      self.editors[binding.action_id].text())
+
+
 class AboutDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -461,13 +550,19 @@ class AboutDialog(QDialog):
 
 class ShortcutsDialog(QDialog):
     ROWS = [
+        ("Typing on the page", ""),
+        ("\"", "Start a text region where the cursor is"),
+        ("\\", "Start a calculation where the cursor is"),
+        ("|", "Start a table here"),
+        ("@", "Start a callout here"),
+        ("any other key", "Nothing, unless you bind it (Help ▸ Customise shortcuts)"),
         ("Tools", ""),
         ("Esc", "Back to the select tool / finish what you are doing"),
         ("P / K", "Pen / highlighter"),
         ("L / A", "Line / arrow"),
         ("R / E / C", "Rectangle / ellipse / revision cloud"),
         ("T / N / S", "Text box / note / stamp"),
-        ("M / B", "Calculation block / table"),
+        ("M / B", "Calculation / table"),
         ("H", "Pan"),
         ("Canvas", ""),
         ("Ctrl + wheel", "Zoom"),
@@ -476,6 +571,8 @@ class ShortcutsDialog(QDialog):
         ("Double-click", "Edit text, calculation or table · add a vertex to a polyline"),
         ("Delete", "Delete the selection"),
         ("Arrow keys", "Nudge the selection"),
+        ("Enter", "In a one-line calculation: open the next line below"),
+        ("Shift+Enter", "In a calculation: keep typing on a new line of the same region"),
         ("Spreadsheet", ""),
         ("Enter / F2", "Edit the current cell"),
         ("Tab / arrows", "Move between cells"),

@@ -29,15 +29,24 @@ from ..items.text import NoteItem, StampItem, TextItem, _TextBase
 from . import dialogs
 from .commands import DocumentStructureCommand
 from .icons import icon
-from .panels import (FunctionsPanel, MarkupsPanel, PagesPanel, PropertiesPanel,
-                     VariablesPanel)
+from .panels import (FunctionsPanel, MarkupsPanel, PagesPanel, ProblemsPanel,
+                     PropertiesPanel, VariablesPanel)
 from .scene import PageScene
+from .shortcuts import COMMAND, INSERT, TOOL, ShortcutManager
 from .tools import CATEGORIES, TOOL_MAP, TOOLS, tools_in
 from .view import PageView
 from .widgets import ColorButton
 
 APP_NAME = "CalcForge"
 CLIPBOARD_TAG = "application/x-calcforge-items"
+
+
+def _command_id(method: str) -> str:
+    """Binding id for a command method, e.g. split_calculation -> split_lines."""
+    return {"recalculate": "recalculate", "fit_page": "fit_page",
+            "fit_width": "fit_width", "split_calculation": "split_lines",
+            "merge_calculations": "merge_lines", "show_problems": "problems",
+            "renumber_counts": "renumber_counts"}.get(method, method)
 
 
 class MainWindow(QMainWindow):
@@ -50,6 +59,7 @@ class MainWindow(QMainWindow):
         self.undo_stack.setUndoLimit(200)
         self.current_index = 0
         self.default_style = Style()
+        self.shortcuts = ShortcutManager(self)
         self._clipboard: list[dict] = []
         self._suspend_recalc = False
 
@@ -65,6 +75,7 @@ class MainWindow(QMainWindow):
         self._build_menus()
         self._build_status()
         self._connect()
+        self.apply_shortcuts()
 
         self.new_document(confirm=False)
         QTimer.singleShot(0, self.view.fit_page)
@@ -184,8 +195,15 @@ class MainWindow(QMainWindow):
         self._act("sticky", "Keep the tool active", self.toggle_sticky, "", checkable=True,
                   tip="Stay on the current tool after drawing instead of returning to Select")
         self._act("recalc", "Recalculate", self.recalculate, "F9", "recalc")
+        self._act("split_lines", "Split into separate lines", self.split_calculation, "",
+                  tip="Turn a multi-line calculation into one movable region per line")
+        self._act("merge_lines", "Merge into one block", self.merge_calculations, "",
+                  tip="Combine the selected calculations into a single region")
 
         self._act("shortcuts", "Keyboard shortcuts", self.show_shortcuts, "F1")
+        self._act("edit_shortcuts", "Customise shortcuts…", self.edit_shortcuts)
+        self._act("problems", "Show problems", self.show_problems)
+        self._act("renumber_counts", "Renumber count markers", self.renumber_counts)
         self._act("about", f"About {APP_NAME}", self.show_about)
         self._act("sample", "Load the worked example", self.load_sample)
 
@@ -298,6 +316,11 @@ class MainWindow(QMainWindow):
         self.markups_panel = MarkupsPanel(self)
         self.dock_markups = self._dock("Markups", self.markups_panel,
                                        Qt.BottomDockWidgetArea, "dock_markups")
+        self.problems_panel = ProblemsPanel(self)
+        self.dock_problems = self._dock("Problems", self.problems_panel,
+                                        Qt.BottomDockWidgetArea, "dock_problems")
+        self.tabifyDockWidget(self.dock_markups, self.dock_problems)
+        self.dock_markups.raise_()
         self.tabifyDockWidget(self.dock_variables, self.dock_functions)
         self.dock_variables.raise_()
         self.resizeDocks([self.dock_pages, self.dock_properties], [190, 320], Qt.Horizontal)
@@ -336,7 +359,7 @@ class MainWindow(QMainWindow):
             view_menu.addSeparator() if action is None else view_menu.addAction(action)
         panels_menu = view_menu.addMenu("Panels")
         for dock in (self.dock_pages, self.dock_properties, self.dock_variables,
-                     self.dock_functions, self.dock_markups):
+                     self.dock_functions, self.dock_markups, self.dock_problems):
             panels_menu.addAction(dock.toggleViewAction())
 
         page_menu = bar.addMenu("&Page")
@@ -355,10 +378,17 @@ class MainWindow(QMainWindow):
 
         calc_menu = bar.addMenu("&Calculate")
         calc_menu.addAction(self.act_recalc)
+        calc_menu.addSeparator()
+        calc_menu.addAction(self.act_split_lines)
+        calc_menu.addAction(self.act_merge_lines)
+        calc_menu.addSeparator()
+        calc_menu.addAction(self.act_problems)
+        calc_menu.addAction(self.act_renumber_counts)
         calc_menu.addAction(self.act_export_vars)
 
         help_menu = bar.addMenu("&Help")
         help_menu.addAction(self.act_shortcuts)
+        help_menu.addAction(self.act_edit_shortcuts)
         help_menu.addAction(self.act_sample)
         help_menu.addAction(self.act_about)
 
@@ -371,6 +401,13 @@ class MainWindow(QMainWindow):
         self.status_position = QLabel("")
         self.status_position.setMinimumWidth(190)
         status.addPermanentWidget(self.status_position)
+
+        self.status_problems = QToolButton()
+        self.status_problems.setAutoRaise(True)
+        self.status_problems.setText("No problems")
+        self.status_problems.setToolTip("Click to show everything that did not evaluate")
+        self.status_problems.clicked.connect(self.show_problems)
+        status.addPermanentWidget(self.status_problems)
 
         self.status_scale = QToolButton()
         self.status_scale.setText("Scale 1:1")
@@ -404,6 +441,7 @@ class MainWindow(QMainWindow):
         self.pages_panel.pageSelected.connect(self.go_to_page)
         self.pages_panel.pagesReordered.connect(self.move_page)
         self.markups_panel.markupActivated.connect(self.reveal_markup)
+        self.problems_panel.problemActivated.connect(self.reveal_markup)
         self.variables_panel.insertRequested.connect(self.insert_into_math)
         self.functions_panel.insertRequested.connect(self.insert_into_math)
         self.formula_edit.returnPressed.connect(self.commit_formula_bar)
@@ -676,6 +714,83 @@ class MainWindow(QMainWindow):
     # ==================================================================
     # tools & style
     # ==================================================================
+    # ==================================================================
+    # keyboard
+    # ==================================================================
+    COMMAND_ACTIONS = {
+        "recalculate": "act_recalc", "fit_page": "act_fit_page",
+        "fit_width": "act_fit_width", "split_calculation": "act_split_lines",
+        "merge_calculations": "act_merge_lines", "show_problems": "act_problems",
+        "renumber_counts": "act_renumber_counts",
+    }
+
+    def apply_shortcuts(self) -> None:
+        """Push the current bindings onto the actions that can carry them.
+
+        A single printable character is handled by the canvas rather than by a
+        QAction, so that typing only does something when the canvas has focus
+        and nothing is selected.
+        """
+        for tool_key, action in self.tool_actions.items():
+            sequence = self.shortcuts.sequence(f"tool.{tool_key}")
+            action.setShortcut(QKeySequence(sequence) if len(sequence) > 1
+                               else QKeySequence())
+            tool = TOOL_MAP[tool_key]
+            hint = f"  ({sequence})" if sequence else ""
+            action.setToolTip(f"{tool.label}{hint}"
+                              + (f"\n{tool.hint}" if tool.hint else ""))
+        for method, attribute in self.COMMAND_ACTIONS.items():
+            action = getattr(self, attribute, None)
+            sequence = self.shortcuts.sequence(f"command.{_command_id(method)}")
+            if action is not None and sequence:
+                action.setShortcut(QKeySequence(sequence))
+
+    def run_typed_binding(self, text: str, modifiers, position: QPointF) -> bool:
+        """Act on a bare keystroke over the canvas; False if nothing is bound."""
+        binding = self.shortcuts.match_typed(text, modifiers)
+        if binding is None:
+            return False
+        if binding.kind == INSERT:
+            self._insert_at(binding.payload, position)
+            return True
+        if binding.kind == TOOL:
+            self.select_tool(binding.payload)
+            return True
+        if binding.kind == COMMAND:
+            method = getattr(self, binding.payload, None)
+            if callable(method):
+                method()
+                return True
+        return False
+
+    def edit_shortcuts(self) -> None:
+        dialog = dialogs.ShortcutManagerDialog(self.shortcuts, self)
+        if dialog.exec() == dialogs.QDialog.Accepted:
+            dialog.apply()
+            self.shortcuts.save()
+            self.apply_shortcuts()
+            self.status_hint.setText("Shortcuts updated")
+
+    def renumber_counts(self) -> None:
+        """Close the gaps left in each count subject after deletions."""
+        from ..items.measure import CountItem
+        from .scene import reading_order
+
+        self.view.begin_snapshot()
+        counters: dict[str, int] = {}
+        for page in self.document.pages:
+            if page.scene is None:
+                continue
+            for item in reading_order(page.scene.markups()):
+                if isinstance(item, CountItem):
+                    counters[item.subject] = counters.get(item.subject, 0) + 1
+                    item.index = counters[item.subject]
+                    item.update()
+        self.view.commit_snapshot("Renumber counts")
+        self.refresh_lists()
+        total = sum(counters.values())
+        self.status_hint.setText(f"Renumbered {total} count marker(s)")
+
     def select_tool(self, key: str) -> None:
         self.view.set_tool(key)
         action = self.tool_actions.get(key)
@@ -984,17 +1099,88 @@ class MainWindow(QMainWindow):
             return
         workspace = self.document.workspace
         workspace.clear()
-        # Two passes: the second resolves references to things defined later on.
-        for _pass in range(2):
-            for index, page in enumerate(self.document.pages):
-                if page.scene is None:
-                    continue
-                for item in page.scene.ordered_markups():
-                    item.refresh(workspace, page)
+        workspace.begin_pass()
+        # One pass, strictly top-left to bottom-right across every page: a value
+        # has to be defined above (or to the left of) whatever uses it, so moving
+        # a region really does change what resolves — as it does in SMath.
+        for page in self.document.pages:
+            if page.scene is None:
+                continue
+            for item in page.scene.ordered_markups():
+                item.refresh(workspace, page)
         self.variables_panel.rebuild(workspace)
         self.markups_panel.rebuild(self.document)
+        self.refresh_problems()
         if self.view.active_table is not None:
             self.refresh_formula_bar(self.view.active_table)
+
+    def split_calculation(self) -> None:
+        """Break each selected multi-line calculation into one region per line."""
+        blocks = [i for i in self.selected_items() if isinstance(i, MathItem)]
+        if not blocks:
+            self.status_hint.setText("Select a calculation to split.")
+            return
+        self.view.begin_snapshot()
+        created = 0
+        for block in blocks:
+            pieces = block.split_lines()
+            if not pieces:
+                continue
+            self.view.scene().remove_markup(block)
+            for piece in pieces:
+                self.view.scene().add_markup(piece)
+                created += 1
+        self.recalculate()
+        self.view.commit_snapshot("Split calculation")
+        self.status_hint.setText(f"Split into {created} line(s)" if created
+                                 else "Nothing to split — already one line each")
+        self.refresh_selection()
+
+    def merge_calculations(self) -> None:
+        """Join the selected calculations into one region, in reading order."""
+        from ..ui.scene import reading_order
+        blocks = [i for i in self.selected_items() if isinstance(i, MathItem)]
+        if len(blocks) < 2:
+            self.status_hint.setText("Select two or more calculations to merge.")
+            return
+        blocks = reading_order(blocks)
+        first = blocks[0]
+        merged = MathItem("\n".join(block.source.rstrip() for block in blocks))
+        merged.style = first.style.copy()
+        merged.digits = first.digits
+        merged.number_format = first.number_format
+        merged.author = first.author
+        merged.layer = first.layer
+        merged.setPos(first.pos())
+        merged.setZValue(first.zValue())
+        self.view.begin_snapshot()
+        for block in blocks:
+            self.view.scene().remove_markup(block)
+        self.view.scene().add_markup(merged)
+        self.recalculate()
+        self.view.commit_snapshot("Merge calculations")
+        self.view.scene().clearSelection()
+        merged.setSelected(True)
+        self.refresh_selection()
+
+    def refresh_problems(self) -> None:
+        from ..core.problems import collect_problems, summarise
+
+        problems = collect_problems(self.document)
+        self.problems_panel.rebuild(problems)
+        if problems:
+            self.status_problems.setText(f"⚠ {len(problems)} problem"
+                                         f"{'s' if len(problems) != 1 else ''}")
+            self.status_problems.setStyleSheet("color:#b3261e; font-weight:600;")
+            self.status_problems.setToolTip(summarise(problems) + "\nClick to show them")
+        else:
+            self.status_problems.setText("No problems")
+            self.status_problems.setStyleSheet("")
+            self.status_problems.setToolTip("Everything in the document evaluated")
+
+    def show_problems(self) -> None:
+        self.dock_problems.show()
+        self.dock_problems.raise_()
 
     def refresh_lists(self) -> None:
         self.markups_panel.rebuild(self.document)
@@ -1151,6 +1337,11 @@ class MainWindow(QMainWindow):
         if item is not None:
             if isinstance(item, (MathItem, _TextBase)):
                 menu.addAction("Edit…", lambda: self.view.begin_item_edit(item))
+            if isinstance(item, MathItem):
+                if not item.single_line:
+                    menu.addAction(self.act_split_lines)
+                if len([i for i in self.selected_items() if isinstance(i, MathItem)]) > 1:
+                    menu.addAction(self.act_merge_lines)
             if isinstance(item, TableItem):
                 menu.addAction("Edit table", lambda: self.view.activate_table(item))
                 menu.addAction("Named cells…", lambda: self.edit_named_cells(item))
@@ -1199,7 +1390,7 @@ class MainWindow(QMainWindow):
         self.apply_default_style(item)
         item.author = self.document.settings.default_author or self.document.author
         width, height = self.view._default_size(item)
-        if hasattr(item, "set_local_rect") and not isinstance(item, TableItem):
+        if (hasattr(item, "set_local_rect") and not isinstance(item, (TableItem, MathItem))):
             item.set_local_rect(QRectF(0, 0, width, height))
         if isinstance(item, ImageItem) and not self.load_image_into(item):
             return
@@ -1208,7 +1399,7 @@ class MainWindow(QMainWindow):
         item.setSelected(True)
         self.recalculate()
         self.view.commit_snapshot(f"Add {tool.label.lower()}")
-        if isinstance(item, (MathItem, TextItem)):
+        if isinstance(item, (MathItem, _TextBase)):
             self.view.begin_item_edit(item)
         elif isinstance(item, TableItem):
             self.view.activate_table(item)

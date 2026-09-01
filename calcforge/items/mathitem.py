@@ -4,7 +4,7 @@ from __future__ import annotations
 import ast
 from typing import Optional
 
-from PySide6.QtCore import QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (QColor, QPainter, QPen)
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsTextItem
 
@@ -12,7 +12,34 @@ from ..core import engine
 from ..core.mathrender import Box, MathStyle, Row, Spacer, Typesetter
 from .base import MarkupItem, Style, register_item
 
-DEFAULT_SOURCE = "# new calculation\n"
+DEFAULT_SOURCE = ""
+
+# Vertical step used when Enter opens the next calculation line below this one.
+LINE_STEP = 6.0
+
+
+class _MathEditor(QGraphicsTextItem):
+    """The plain-text editor shown while a calculation is being typed.
+
+    Enter finishes a single-line region and asks for the next one below it, the
+    way pressing Enter in SMath drops you onto a new line of the sheet.  Shift
+    with Enter keeps the old behaviour and grows this region into a block.
+    """
+
+    def __init__(self, owner):
+        super().__init__(owner)
+        self.owner = owner
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            if event.modifiers() & Qt.ShiftModifier:
+                super().keyPressEvent(event)
+                return
+            if self.owner.single_line:
+                self.owner.enterPressed.emit()
+                event.accept()
+                return
+        super().keyPressEvent(event)
 
 
 class _MathRow:
@@ -33,11 +60,13 @@ class _MathRow:
 
 @register_item
 class MathItem(MarkupItem):
-    """A block of engineering maths, evaluated against the document workspace."""
+    """A calculation region — one line by default, so each can be moved alone."""
 
     TYPE = "math"
     NAME = "Calculation"
     ROTATABLE = False
+
+    enterPressed = Signal()
 
     def __init__(self, source: str = DEFAULT_SOURCE):
         super().__init__()
@@ -47,10 +76,12 @@ class MathItem(MarkupItem):
         self.digits = 4
         self.number_format = "auto"
         self.show_definition_results = True
-        self.align_results = True
+        # SMath puts the result immediately after the expression rather than in
+        # a column down the right-hand side of the page.
+        self.align_results = False
         self.show_comments = True
         self.line_gap = 4.0
-        self.result_gap = 16.0
+        self.result_gap = 10.0
         self.title = ""
         self.auto_width = True
         self._width = 260.0
@@ -64,6 +95,40 @@ class MathItem(MarkupItem):
         self.layer = "Calculations"
 
     # -- identity ----------------------------------------------------------
+    @property
+    def single_line(self) -> bool:
+        """True while this region holds at most one line of maths."""
+        return len([line for line in self.source.split("\n") if line.strip()]) <= 1
+
+    def split_lines(self) -> list["MathItem"]:
+        """One region per source line, stacked where this one sits.
+
+        Each line then moves on its own, and reading order across the page —
+        not membership of a block — decides what is defined before what.
+        """
+        lines = [line for line in self.source.split("\n")]
+        while lines and not lines[-1].strip():
+            lines.pop()
+        if len(lines) <= 1:
+            return []
+        pieces: list[MathItem] = []
+        offset = 0.0
+        for index, line in enumerate(lines):
+            piece = MathItem(line)
+            piece.style = self.style.copy()
+            piece.digits = self.digits
+            piece.number_format = self.number_format
+            piece.show_definition_results = self.show_definition_results
+            piece.show_comments = self.show_comments
+            piece.author = self.author
+            piece.layer = self.layer
+            row = self.rows[index] if index < len(self.rows) else None
+            piece.setPos(self.pos() + QPointF(0, offset))
+            piece.setZValue(self.zValue() + index * 0.001)
+            offset += (row.height + self.line_gap) if row else (self.style.font_size * 1.8)
+            pieces.append(piece)
+        return pieces
+
     def display_name(self) -> str:
         if self.label:
             return self.label
@@ -103,7 +168,8 @@ class MathItem(MarkupItem):
         if workspace is None:
             return
         label = self.label or "Calculation"
-        self.statements = engine.evaluate_source(self.source, workspace, label)
+        self.statements = engine.evaluate_source(self.source, workspace, label,
+                                                 new_pass=False)
         self._known_names = set(workspace.variables) | set(workspace.functions)
         self.relayout()
 
@@ -159,10 +225,11 @@ class MathItem(MarkupItem):
                                         color=style.error_color)
             elif shows_result:
                 value = statement.result
-                if statement.target_unit:
+                unit = statement.display_unit()
+                if unit:
                     from ..core.units import convert
                     try:
-                        value = convert(value, statement.target_unit)
+                        value = convert(value, unit)
                     except Exception:
                         pass
                 result = Row([setter.text("=", size), Spacer(size * 0.34),
@@ -293,7 +360,7 @@ class MathItem(MarkupItem):
         if self.locked:
             return
         if self._editor is None:
-            self._editor = QGraphicsTextItem(self)
+            self._editor = _MathEditor(self)
             self._editor.setFlag(QGraphicsItem.ItemIsFocusable, True)
             from ..core.typography import MONO, page_font
             self._editor.setFont(page_font("", max(self.style.font_size * 1.05, 8.0),
@@ -391,10 +458,10 @@ class MathItem(MarkupItem):
         self.digits = int(data.get("digits", 4))
         self.number_format = data.get("number_format", "auto")
         self.show_definition_results = bool(data.get("show_definition_results", True))
-        self.align_results = bool(data.get("align_results", True))
         self.show_comments = bool(data.get("show_comments", True))
         self.auto_width = bool(data.get("auto_width", True))
+        self.align_results = bool(data.get("align_results", False))
         self._width = float(data.get("width", 260.0))
         self.line_gap = float(data.get("line_gap", 4.0))
-        self.result_gap = float(data.get("result_gap", 16.0))
+        self.result_gap = float(data.get("result_gap", 10.0))
         self.load_base(data)

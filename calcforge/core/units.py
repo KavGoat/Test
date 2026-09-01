@@ -218,8 +218,13 @@ def format_unit(unit) -> str:
 
 
 def format_quantity(value: Any, digits: int = 4, mode: str = AUTO,
-                    unit: Optional[str] = None, thousands: bool = False) -> str:
-    """Format anything the engine can produce into display text."""
+                    unit: Optional[str] = None, thousands: bool = False,
+                    auto_unit: bool = False) -> str:
+    """Format anything the engine can produce into display text.
+
+    With *auto_unit* and no explicit *unit*, the result is shown in the unit an
+    engineer would write it in — kN, kPa, kN/m, mm or m as the magnitude asks.
+    """
     import numpy as np
 
     if value is None:
@@ -231,6 +236,8 @@ def format_quantity(value: Any, digits: int = 4, mode: str = AUTO,
             value = convert(value, unit)
         except Exception:
             pass
+    elif auto_unit:
+        value = apply_preferred_unit(value)
 
     if isinstance(value, Quantity):
         mag = value.magnitude
@@ -262,6 +269,143 @@ def format_matrix(array, digits: int = 4, mode: str = AUTO) -> str:
     for row in array:
         rows.append(", ".join(format_number(v, digits, mode) for v in row))
     return "[" + "; ".join(rows) + "]"
+
+
+# ---------------------------------------------------------------------------
+# Automatic display units
+# ---------------------------------------------------------------------------
+
+# Ladders of units an engineer would actually write, smallest first.  A result
+# is shown in the largest unit that still leaves a magnitude of at least one, so
+# 300 mm stays millimetres, 6000 mm becomes 6 m and 780 000 N becomes 780 kN.
+UNIT_LADDERS: list[tuple[dict, list[str]]] = [
+    ({"[length]": 1}, ["mm", "m", "km"]),
+    ({"[length]": 2}, ["mm**2", "m**2"]),
+    ({"[length]": 3}, ["mm**3", "m**3"]),
+    ({"[mass]": 1}, ["g", "kg", "tonne"]),
+    ({"[mass]": 1, "[length]": 1, "[time]": -2}, ["N", "kN", "MN"]),
+    ({"[mass]": 1, "[length]": -1, "[time]": -2}, ["Pa", "kPa", "MPa", "GPa"]),
+    ({"[mass]": 1, "[time]": -2}, ["N/m", "kN/m", "MN/m"]),
+    ({"[mass]": 1, "[length]": -2, "[time]": -2}, ["N/m**3", "kN/m**3"]),
+    ({"[mass]": 1, "[length]": -3}, ["kg/m**3"]),
+    ({"[mass]": 1, "[length]": 2, "[time]": -3}, ["W", "kW", "MW"]),
+    ({"[time]": -1}, ["Hz", "kHz", "MHz"]),
+]
+
+# A moment and an energy share a dimension; tell them apart by what was written.
+MOMENT_LADDER = ["N*m", "kN*m", "MN*m"]
+ENERGY_LADDER = ["J", "kJ", "MJ"]
+_MOMENT_DIMENSION = {"[mass]": 1, "[length]": 2, "[time]": -2}
+
+# Anything written in these is left exactly as the author wrote it.
+_NON_SI = {
+    "inch", "foot", "yard", "mile", "thou", "mil", "pound", "force_pound",
+    "kip", "ksi", "psi", "psf", "pcf", "kcf", "klf", "plf", "ounce", "slug",
+    "gallon", "quart", "pint", "fluid_ounce", "acre", "British_thermal_unit",
+    "horsepower", "degree_Fahrenheit", "degree_Rankine", "short_ton", "long_ton",
+}
+
+# Units that carry meaning of their own and must never be auto-converted.
+_KEEP_AS_WRITTEN = {"degree", "radian", "gradian", "percent", "turn", "count",
+                    "dimensionless"}
+
+# Above this, a magnitude has too many digits to read comfortably.
+_TOO_MANY_DIGITS = 1e6
+
+
+def _dimension_key(quantity) -> dict:
+    return {str(name): int(power) for name, power in quantity.dimensionality.items()}
+
+
+def _unit_names(quantity) -> set[str]:
+    return {str(name) for name in quantity.units._units}
+
+
+_FORCE_DIMENSION = {"[mass]": 1, "[length]": 1, "[time]": -2}
+_IS_FORCE_CACHE: dict[str, bool] = {}
+
+
+def _is_force_unit(name: str) -> bool:
+    """True when *name* on its own is a force — 'kN' as well as 'newton'."""
+    known = _IS_FORCE_CACHE.get(name)
+    if known is None:
+        try:
+            dimensions = {str(k): int(v) for k, v in ureg.Unit(name).dimensionality.items()}
+            known = dimensions == _FORCE_DIMENSION
+        except Exception:
+            known = False
+        _IS_FORCE_CACHE[name] = known
+    return known
+
+
+def preferred_unit(value: Any) -> Optional[str]:
+    """The unit this quantity reads best in, or None to leave it alone."""
+    if not isinstance(value, Quantity):
+        return None
+    try:
+        names = _unit_names(value)
+        if names & _NON_SI or not names:
+            return None
+        # Inverse trigonometry hands back radians; engineers read degrees.  An
+        # angle the author wrote themselves is left exactly as written.
+        if names == {"radian"}:
+            return "deg"
+        if names & _KEEP_AS_WRITTEN:
+            return None
+        magnitude = value.magnitude
+        if isinstance(magnitude, (list, tuple)) or hasattr(magnitude, "shape"):
+            return None
+        if magnitude == 0 or not math.isfinite(float(magnitude)):
+            return None
+
+        dimension = _dimension_key(value)
+        if dimension == _MOMENT_DIMENSION:
+            # A moment and an energy share a dimension; "kN·m" was written as a
+            # force times a lever arm, "kJ" was not.
+            written_as_force = any(_is_force_unit(name) for name in names)
+            ladder = MOMENT_LADDER if written_as_force else ENERGY_LADDER
+        else:
+            ladder = None
+            for candidate, units in UNIT_LADDERS:
+                if dimension == candidate:
+                    ladder = units
+                    break
+        if not ladder:
+            return None
+
+        # Largest unit that still leaves a magnitude of at least one …
+        chosen_index = 0
+        for index, unit in enumerate(ladder):
+            try:
+                if abs(float(value.to(unit).magnitude)) >= 1.0:
+                    chosen_index = index
+                else:
+                    break
+            except Exception:
+                break
+        # … but area and volume ladders step by a factor of a million, so that
+        # rule alone would render half a cubic metre as 500 000 000 mm³.  When
+        # the number is still unreadably long, move up one more rung.
+        try:
+            magnitude_here = abs(float(value.to(ladder[chosen_index]).magnitude))
+            if magnitude_here >= _TOO_MANY_DIGITS and chosen_index + 1 < len(ladder):
+                chosen_index += 1
+        except Exception:
+            pass
+        return ladder[chosen_index]
+    except Exception:
+        return None
+
+
+def apply_preferred_unit(value: Any) -> Any:
+    """Convert *value* into the unit it reads best in, when there is one."""
+    unit = preferred_unit(value)
+    if unit is None:
+        return value
+    try:
+        return value.to(unit)
+    except Exception:
+        return value
 
 
 # Units offered in the UI drop-downs, grouped by quantity kind.

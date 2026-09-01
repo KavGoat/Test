@@ -292,10 +292,12 @@ def test_fill_down_translates_formulas(window):
     assert table.sheet.value(2, 1) == 30
 
 
-def test_recalculation_order_handles_forward_references(window):
+def test_evaluation_is_strictly_top_to_bottom(window):
+    """A value must be defined above whatever uses it — order is position."""
     window.select_tool("math")
     drag(window.view, 60, 400, 320, 470)
-    editing_item(window)._editor.setPlainText("total := base * 2")
+    lower = editing_item(window)
+    lower._editor.setPlainText("total := base * 2")
     window.view.end_item_edit()
 
     window.select_tool("math")
@@ -304,6 +306,11 @@ def test_recalculation_order_handles_forward_references(window):
     window.view.end_item_edit()
 
     assert window.document.workspace.get("total").to("kN").magnitude == pytest.approx(10)
+
+    # Push the definition below its use and the reference stops resolving.
+    lower.setPos(QPointF(lower.pos().x(), 40))
+    window.recalculate()
+    assert window.document.workspace.get("total") is None
 
 
 # ---------------------------------------------------------------------------
@@ -424,6 +431,7 @@ def test_markups_panel_lists_everything(window):
     drag(window.view, 60, 60, 160, 160)
     window.select_tool("text")
     drag(window.view, 200, 60, 340, 110)
+    editing_item(window).set_text("a note")
     window.view.end_item_edit()
     window.recalculate()
     assert window.markups_panel.tree.topLevelItem(0).childCount() == 2
@@ -620,3 +628,263 @@ def test_rebuilding_properties_leaves_no_floating_windows(window):
     floating = [w.title() for w in QApplication.topLevelWidgets()
                 if isinstance(w, QGroupBox) and w.isVisible()]
     assert floating == []
+
+
+def test_new_calculations_are_one_movable_line(window):
+    window.select_tool("math")
+    drag(window.view, 80, 80, 380, 180)
+    block = editing_item(window)
+    block._editor.setPlainText("b = 300 mm")
+    window.view.end_item_edit()
+    assert block.single_line
+    # sized around its content, not around the rectangle that was dragged
+    assert block.local_rect().height() < 40
+
+
+def test_enter_opens_the_next_calculation_below(window):
+    window.select_tool("math")
+    drag(window.view, 80, 80, 200, 100)
+    first = editing_item(window)
+    first._editor.setPlainText("b = 300 mm")
+    window.view._open_next_line()
+    second = editing_item(window)
+    assert isinstance(second, MathItem) and second is not first
+    assert second.pos().y() > first.pos().y()
+    second._editor.setPlainText("d = 2*b")
+    window.view.end_item_edit()
+    assert window.document.workspace.get("d").to("mm").magnitude == pytest.approx(600)
+
+
+def test_empty_regions_are_discarded(window):
+    window.select_tool("math")
+    drag(window.view, 80, 80, 200, 100)
+    window.view.end_item_edit()
+    assert markups(window) == []
+
+
+def test_evaluation_follows_position_not_creation_order(window):
+    """Move a definition below its use and the reference should break."""
+    window.select_tool("math")
+    drag(window.view, 80, 100, 200, 120)
+    upper = editing_item(window)
+    upper._editor.setPlainText("base = 5 kN")
+    window.view.end_item_edit()
+
+    window.select_tool("math")
+    drag(window.view, 80, 300, 200, 320)
+    lower = editing_item(window)
+    lower._editor.setPlainText("total = base*2")
+    window.view.end_item_edit()
+    assert window.document.workspace.get("total").to("kN").magnitude == pytest.approx(10)
+
+    upper.setPos(QPointF(upper.pos().x(), 500))
+    window.recalculate()
+    assert window.document.workspace.get("total") is None
+    assert any("not defined" in s.error for s in lower.statements if s.error)
+
+
+def test_items_on_the_same_row_read_left_to_right(window):
+    from calcforge.ui.scene import reading_order
+    window.select_tool("math")
+    drag(window.view, 300, 200, 380, 220)
+    right = editing_item(window)
+    right._editor.setPlainText("y = x*2")
+    window.view.end_item_edit()
+
+    window.select_tool("math")
+    drag(window.view, 80, 202, 160, 222)
+    left = editing_item(window)
+    left._editor.setPlainText("x = 4 m")
+    window.view.end_item_edit()
+
+    assert reading_order([right, left]) == [left, right]
+    assert window.document.workspace.get("y").to("m").magnitude == pytest.approx(8)
+
+
+def test_split_and_merge_calculations(window):
+    window.select_tool("math")
+    drag(window.view, 80, 80, 300, 200)
+    block = editing_item(window)
+    block._editor.setPlainText("a = 2 m\nb = 3 m\nc = a*b")
+    window.view.end_item_edit()
+    block.setSelected(True)
+    window.split_calculation()
+
+    pieces = [i for i in markups(window) if isinstance(i, MathItem)]
+    assert len(pieces) == 3
+    assert window.document.workspace.get("c").to("m**2").magnitude == pytest.approx(6)
+
+    window.view.scene().clearSelection()
+    for piece in pieces:
+        piece.setSelected(True)
+    window.merge_calculations()
+    merged = [i for i in markups(window) if isinstance(i, MathItem)]
+    assert len(merged) == 1
+    assert merged[0].source.split("\n") == ["a = 2 m", "b = 3 m", "c = a*b"]
+
+
+def test_problems_panel_reports_undefined_names_and_unit_mismatches(window):
+    from calcforge.core.problems import UNDEFINED, UNIT_MISMATCH
+
+    window.select_tool("math")
+    drag(window.view, 80, 100, 300, 120)
+    editing_item(window)._editor.setPlainText("bad = nonexistent*2")
+    window.view.end_item_edit()
+
+    window.select_tool("math")
+    drag(window.view, 80, 200, 300, 220)
+    editing_item(window)._editor.setPlainText("clash = 1 m + 1 kg")
+    window.view.end_item_edit()
+
+    kinds = {p.kind for p in window.problems_panel._problems}
+    assert kinds == {UNDEFINED, UNIT_MISMATCH}
+    assert "2 problem" in window.status_problems.text()
+    assert window.problems_panel.table.rowCount() == 2
+
+
+def test_problems_panel_reports_bad_cells_by_reference(window):
+    window.select_tool("table")
+    drag(window.view, 80, 80, 400, 240)
+    table = window.view.active_table
+    table.set_cell(2, 1, "=missing_name*2")
+    window.recalculate()
+    problems = window.problems_panel._problems
+    assert [p.where for p in problems] == ["cell B3"]
+
+
+def test_problems_clear_once_the_document_evaluates(window):
+    window.select_tool("math")
+    drag(window.view, 80, 100, 300, 120)
+    block = editing_item(window)
+    block._editor.setPlainText("bad = nonexistent*2")
+    window.view.end_item_edit()
+    assert window.problems_panel._problems
+
+    window.view.begin_item_edit(block)
+    block._editor.setPlainText("good = 2 m")
+    window.view.end_item_edit()
+    assert window.problems_panel._problems == []
+    assert window.status_problems.text() == "No problems"
+
+
+def test_moving_a_definition_below_its_use_raises_a_problem(window):
+    window.select_tool("math")
+    drag(window.view, 80, 100, 300, 120)
+    definition = editing_item(window)
+    definition._editor.setPlainText("base = 5 kN")
+    window.view.end_item_edit()
+
+    window.select_tool("math")
+    drag(window.view, 80, 300, 300, 320)
+    editing_item(window)._editor.setPlainText("total = base*2")
+    window.view.end_item_edit()
+    assert window.problems_panel._problems == []
+
+    definition.setPos(QPointF(definition.pos().x(), 600))
+    window.recalculate()
+    assert [p.kind for p in window.problems_panel._problems] == ["undefined"]
+
+
+def _type_on_canvas(window, text, x=140.0, y=180.0):
+    from PySide6.QtCore import QPointF as _P
+    window.select_tool("select")
+    window.view.scene().clearSelection()
+    window.view._last_scene_pos = _P(x, y)
+    key(window.view, Qt.Key_unknown, text)
+
+
+def test_quote_starts_a_text_region_where_the_cursor_is(window):
+    _type_on_canvas(window, '"')
+    item = editing_item(window)
+    assert isinstance(item, TextItem)
+    assert item.pos().x() == pytest.approx(140, abs=1)
+    item.set_text("a note")
+    window.view.end_item_edit()
+    assert len(markups(window)) == 1
+
+
+def test_backslash_starts_a_calculation(window):
+    _type_on_canvas(window, "\\")
+    item = editing_item(window)
+    assert isinstance(item, MathItem)
+    item._editor.setPlainText("q = 5 kPa")
+    window.view.end_item_edit()
+    assert window.document.workspace.get("q").to("kPa").magnitude == pytest.approx(5)
+
+
+def test_pipe_starts_a_table_and_at_starts_a_callout(window):
+    _type_on_canvas(window, "|")
+    assert isinstance(window.view.active_table, TableItem)
+    window.view.deactivate_table()
+    _type_on_canvas(window, "@", 320, 400)
+    from calcforge.items.text import CalloutItem
+    assert isinstance(editing_item(window), CalloutItem)
+
+
+def test_unbound_keys_do_nothing_on_the_canvas(window):
+    before = len(markups(window))
+    for text in ("z", "q", "#", "5"):
+        _type_on_canvas(window, text)
+    assert len(markups(window)) == before
+    assert editing_item(window) is None
+
+
+def test_bound_tool_letter_selects_its_tool(window):
+    _type_on_canvas(window, "r")
+    assert window.view.tool_key == "rect"
+    window.select_tool("select")
+    _type_on_canvas(window, "k")
+    assert window.view.tool_key == "highlighter"
+
+
+def test_typing_is_ignored_while_editing_or_in_a_table(window):
+    window.select_tool("math")
+    drag(window.view, 80, 80, 200, 100)
+    block = editing_item(window)
+    assert not window.view.idle_on_canvas()
+    block._editor.setPlainText("a = 1 m")
+    window.view.end_item_edit()
+
+    window.select_tool("table")
+    drag(window.view, 80, 300, 400, 420)
+    assert not window.view.idle_on_canvas()
+
+
+def test_shortcuts_can_be_rebound_and_reset(window):
+    manager = window.shortcuts
+    assert manager.sequence("insert.math") == "\\"
+    manager.set_sequence("insert.math", "!")
+    window.apply_shortcuts()
+    _type_on_canvas(window, "!")
+    assert isinstance(editing_item(window), MathItem)
+    window.view.end_item_edit()
+    manager.reset("insert.math")
+    assert manager.sequence("insert.math") == "\\"
+
+
+def test_shortcut_conflicts_are_detectable(window):
+    manager = window.shortcuts
+    assert manager.conflicts() == {}
+    manager.set_sequence("tool.rect", "\\")
+    assert "\\" in manager.conflicts()
+    manager.reset()
+
+
+def test_renumber_counts_closes_gaps(window):
+    window.view.count_subject = "Doors"
+    for x in (100, 200, 300):
+        window.select_tool("count")
+        press(window.view, x, 400)
+        release(window.view, x, 400)
+    window.select_tool("select")
+    from calcforge.items.measure import CountItem
+    counts = sorted([i for i in markups(window) if isinstance(i, CountItem)],
+                    key=lambda i: i.pos().x())
+    assert [c.index for c in counts] == [1, 2, 3]
+    window.view.scene().clearSelection()
+    counts[1].setSelected(True)
+    window.delete_selection()
+    window.renumber_counts()
+    remaining = sorted([i for i in markups(window) if isinstance(i, CountItem)],
+                       key=lambda i: i.pos().x())
+    assert [c.index for c in remaining] == [1, 2]

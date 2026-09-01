@@ -29,7 +29,8 @@ from typing import Any, Callable, Optional
 import pint
 
 from . import functions as fnlib
-from .units import Q_, Quantity, convert, format_quantity, simplify_units, ureg
+from .units import (Q_, Quantity, convert, format_quantity, preferred_unit,
+                    simplify_units, ureg)
 
 # ---------------------------------------------------------------------------
 # Source normalisation
@@ -336,7 +337,18 @@ class Workspace:
         self._base: dict[str, Any] = {}
         self._counter = 0
         self._unit_cache: dict[str, Any] = {}
+        # Names defined so far during the current evaluation pass, in document
+        # order.  A plain "=" means "define" the first time a name appears and
+        # "evaluate" afterwards, and that has to be decided from reading order
+        # rather than from whatever a previous pass happened to leave behind.
+        self.pass_defined: set[str] = set()
         self.rebuild_base()
+
+    def begin_pass(self) -> None:
+        self.pass_defined = set()
+
+    def defined_earlier(self, name: str) -> bool:
+        return name in self.pass_defined
 
     # -- namespace ---------------------------------------------------------
     def rebuild_base(self) -> None:
@@ -381,15 +393,18 @@ class Workspace:
     def clear(self) -> None:
         self.variables.clear()
         self.functions.clear()
+        self.pass_defined = set()
         self._counter = 0
 
     def define(self, name: str, value: Any, source: str = "", expression: str = "") -> None:
         self._counter += 1
         self.variables[name] = VariableInfo(name, value, source, expression, self._counter)
+        self.pass_defined.add(name)
 
     def define_function(self, name: str, params: list[str], source: str) -> UserFunction:
         fn = UserFunction(name, params, source, self)
         self.functions[name] = fn
+        self.pass_defined.add(name)
         return fn
 
     def get(self, name: str, default: Any = None) -> Any:
@@ -425,6 +440,10 @@ COMMENT = "comment"
 BLANK = "blank"
 ERROR = "error"
 
+# An angle the author wrote themselves keeps the unit they chose; an angle that
+# fell out of inverse trigonometry is shown in degrees.
+_ANGLE_UNIT_RE = re.compile(r"\b(rad|radian|radians|deg|degree|degrees|grad|gradian)\b")
+
 _FUNC_LHS = re.compile(r"^\s*([A-Za-z_Ͱ-Ͽ][\wͰ-Ͽ]*)\s*\(([^()]*)\)\s*$")
 _NAME_LHS = re.compile(r"^\s*([A-Za-z_Ͱ-Ͽ][\wͰ-Ͽ]*)\s*$")
 
@@ -443,15 +462,28 @@ class Statement:
     result: Any = None
     error: str = ""
     tree: Optional[ast.AST] = None
+    forced: bool = True          # written with ":=" or ":" rather than a bare "="
+    auto_unit: bool = True       # let the engine pick a readable display unit
 
     @property
     def ok(self) -> bool:
         return not self.error
 
+    def display_unit(self) -> Optional[str]:
+        """The unit this result should be shown in."""
+        if self.target_unit:
+            return self.target_unit
+        if not self.auto_unit:
+            return None
+        unit = preferred_unit(self.result)
+        if unit == "deg" and _ANGLE_UNIT_RE.search(self.expression):
+            return None          # the author picked an angle unit; respect it
+        return unit
+
     def result_text(self, digits: int = 4, mode: str = "auto") -> str:
         if self.error:
             return ""
-        return format_quantity(self.result, digits, mode, self.target_unit or None)
+        return format_quantity(self.result, digits, mode, self.display_unit())
 
 
 def parse_statement(line: str) -> Statement:
@@ -477,13 +509,23 @@ def parse_statement(line: str) -> Statement:
             text, target_unit = split[0].strip(), split[1].strip()
             break
 
-    # definition?
+    # A definition can be written three ways.  ":=" and a bare ":" always
+    # define, even over a name that already exists.  A plain "=" defines the
+    # first time the name is seen and evaluates afterwards, which is decided
+    # later, once reading order is known.
+    forced = True
     parts = _split_top_level(text, ":=")
     if parts is None:
-        eq = _split_top_level(text, "=")
-        # ignore comparison operators
-        if eq and not eq[0].rstrip().endswith(("<", ">", "!", "=")) and not eq[1].startswith("="):
-            parts = eq
+        colon = _split_top_level(text, ":")
+        if colon and colon[0].strip() and colon[1].strip():
+            parts = colon
+    if parts is None:
+        equals = _split_top_level(text, "=")
+        # a comparison operator is not an assignment
+        if (equals and not equals[0].rstrip().endswith(("<", ">", "!", "="))
+                and not equals[1].startswith("=")):
+            parts = equals
+            forced = False
     if parts is not None:
         lhs, rhs = parts[0].strip(), parts[1].strip()
         if not rhs:
@@ -494,13 +536,15 @@ def parse_statement(line: str) -> Statement:
         if func:
             params = [p.strip() for p in func.group(2).split(",") if p.strip()]
             return Statement(raw=raw, kind=FUNCTION, name=func.group(1), params=params,
-                             expression=rhs, target_unit=target_unit, comment=comment)
+                             expression=rhs, target_unit=target_unit, comment=comment,
+                             forced=forced)
         name = _NAME_LHS.match(lhs)
         if name:
             return Statement(raw=raw, kind=DEFINE, name=name.group(1), expression=rhs,
-                             target_unit=target_unit, comment=comment)
-        return Statement(raw=raw, kind=ERROR, expression=text,
-                         error=f"'{lhs}' is not a valid name to define")
+                             target_unit=target_unit, comment=comment, forced=forced)
+        if forced:
+            return Statement(raw=raw, kind=ERROR, expression=text,
+                             error=f"'{lhs}' is not a valid name to define")
 
     return Statement(raw=raw, kind=EVALUATE, expression=text,
                      target_unit=target_unit, comment=comment)
@@ -512,6 +556,13 @@ def evaluate_statement(statement: Statement, workspace: Workspace, source: str =
     statement.error = ""
     if statement.kind in (BLANK, COMMENT, ERROR):
         return statement
+
+    # A plain "=" over a name that an earlier line already defined is a check,
+    # not a redefinition — write ":=" or ":" to assign again.
+    if (statement.kind in (DEFINE, FUNCTION) and not statement.forced
+            and workspace.defined_earlier(statement.name)):
+        statement.kind = EVALUATE
+        statement.expression = f"({statement.name}) == ({statement.expression})"
 
     try:
         if statement.kind == FUNCTION:
@@ -543,8 +594,16 @@ def evaluate_statement(statement: Statement, workspace: Workspace, source: str =
     return statement
 
 
-def evaluate_source(text: str, workspace: Workspace, source: str = "") -> list[Statement]:
-    """Parse and evaluate a whole math region, top to bottom."""
+def evaluate_source(text: str, workspace: Workspace, source: str = "",
+                    new_pass: bool = True) -> list[Statement]:
+    """Parse and evaluate a whole math region, top to bottom.
+
+    *new_pass* resets the record of which names have been defined so far.  A
+    document evaluates many regions in reading order within one pass, so it
+    resets once at the start and passes ``new_pass=False`` for each region.
+    """
+    if new_pass:
+        workspace.begin_pass()
     statements = []
     for line in text.split("\n"):
         statement = parse_statement(line)
