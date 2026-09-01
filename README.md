@@ -46,7 +46,7 @@ On a headless machine (CI, a container) run with `QT_QPA_PLATFORM=offscreen`.
 
 ## Calculations
 
-Type `\` anywhere on the page — or pick the **Calculation** tool (`M`) — and write
+Type `\` anywhere on the page — or pick the **Calculation** tool from the toolbar — and write
 ordinary engineering maths. It is typeset as you would write it by hand — real
 fractions, radicals, subscripts and superscripts — with the result immediately
 after it. Each line is its own region, so you can drag any of them where you want.
@@ -172,11 +172,39 @@ as a takeoff. Measurements and counts sharing a subject are totalled at the bott
 
 ### Scale and measurement
 
-Set the page scale from the status bar, or draw a known distance with the
-**Calibrate** tool and type what it represents ("5 m"). Every measurement on that page
-then reads true site dimensions in the units you choose, at the precision you choose.
-Scale is per page, so an imported 1:50 detail and a 1:200 layout can live in the same
-document.
+A scale is **optional**. A page starts without one, and everything still works —
+measurements simply read paper distances, and the first one you draw says so.
+
+Give a page a scale whenever you want real dimensions: click the scale button in the
+status bar, or draw a known distance with the **Calibrate** tool and type what it
+represents ("5 m"). Scale is per page, so an imported 1:50 detail and a 1:200 layout
+can live in the same document.
+
+Only the three tools that measure something obey the scale:
+
+| Tool | Key | Reads |
+|---|---|---|
+| Length | `M` | The true distance between the two ends |
+| Area | `Shift+Alt+A` | The true area of the polygon you click out |
+| Rectangle | `R` | Its true width × height — and it will take an exact size |
+
+Draw a rectangle on a scaled page and it asks for the width and height, so you can
+type `3 m` × `1.5 m` and have it set out exactly; leave the boxes as they are to keep
+what you dragged. Its size stays written on it as the page scale changes.
+
+Everything else — polygon, pen, cloud, arrow, text — is a drawing, not a measurement,
+and is never scaled.
+
+The **Dimension** tool (`Alt+M`) is the exception that measures but lets you overrule
+the number: it asks for the text to display, so a run of studs can read `3600 c/c`
+while the takeoff total still uses what was actually measured.
+
+### Moving and duplicating by an exact offset
+
+`Ctrl+Shift+D` (also on the right-click menu) moves or copies whatever is selected by a
+distance you type, any number of times — "across 3 m, 4 times" lays out a row of
+footings. On a scaled page the offset is a real distance (`3 m`); without a scale it is
+a paper one (`25 mm`).
 
 ### PDF pages
 
@@ -263,11 +291,13 @@ used twice and remembers your bindings between sessions.
 | Key | Action |
 |---|---|
 | `Esc` | Back to Select · finish or cancel what you are doing |
-| `P` `K` | Pen · highlighter |
 | `L` `A` | Line · arrow |
 | `R` `E` `C` | Rectangle · ellipse · revision cloud |
-| `T` `N` `S` | Text box · note · stamp |
-| `M` `B` `G` | Calculation · table · plot |
+| `P` `Alt+P` `K` | Polygon · pen · highlighter |
+| `T` `Q` `N` `S` | Text box · callout · note · stamp |
+| `B` `G` | Table · plot |
+| `M` `Shift+Alt+A` | Measure length · measure area |
+| `Alt+M` | Dimension — asks for the text to show |
 | `H`, `Space`+drag | Pan |
 | `Ctrl`+wheel | Zoom · `Ctrl+0` fit page · `Ctrl+1` fit width |
 | `Shift`+drag | Constrain to 15° or square |
@@ -275,6 +305,7 @@ used twice and remembers your bindings between sessions.
 | `Enter` | In a one-line calculation: open the next line below |
 | `Shift+Enter` | Keep typing on a new line of the same region |
 | `F9` | Recalculate everything |
+| `Ctrl+Shift+D` | Move or duplicate the selection by an exact offset |
 | `Ctrl+Z` / `Ctrl+Y` | Undo · redo |
 | In a table | `Enter`/`F2` edit · `Tab`/arrows move · `Ctrl+D`/`Ctrl+R` fill |
 

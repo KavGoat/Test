@@ -24,6 +24,8 @@ def window(qapp):
     main = MainWindow()
     # Nothing in the suite may block on a modal "save your changes?" dialog.
     main.confirm_discard = lambda: True
+    # Prompts are opened deliberately by the tests that exercise them.
+    main.interactive_prompts = False
     main.resize(1280, 860)
     # 1:1 zoom keeps synthesised view coordinates aligned with scene points.
     main.view.set_zoom(1.0)

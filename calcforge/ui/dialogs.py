@@ -434,6 +434,73 @@ class CountSubjectDialog(QDialog):
         layout.addRow(_buttons(self))
 
 
+class RectangleSizeDialog(QDialog):
+    """Type an exact real-world width and height for a rectangle."""
+
+    def __init__(self, width_text: str, height_text: str, unit: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Rectangle size")
+        layout = QVBoxLayout(self)
+        note = QLabel("This page has a scale, so the rectangle can be set out at an "
+                      "exact size. Leave these as they are to keep what you drew.")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        form = QFormLayout()
+        self.width = QLineEdit(width_text)
+        self.width.setPlaceholderText(f"e.g. 3 {unit}")
+        self.height = QLineEdit(height_text)
+        self.height.setPlaceholderText(f"e.g. 2 {unit}")
+        form.addRow("Width", self.width)
+        form.addRow("Height", self.height)
+        layout.addLayout(form)
+        layout.addWidget(_buttons(self))
+        self.width.setFocus()
+        self.width.selectAll()
+
+    def values(self) -> tuple[str, str]:
+        return self.width.text().strip(), self.height.text().strip()
+
+
+class ArrayDialog(QDialog):
+    """Move or copy the selection by an exact offset, any number of times."""
+
+    def __init__(self, unit: str, scaled: bool, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Move or duplicate by an offset")
+        layout = QVBoxLayout(self)
+        if scaled:
+            message = ("This page has a scale, so distances are real distances. "
+                       f"Type them with a unit, for example <b>3 {unit}</b>.")
+        else:
+            message = ("This page has no scale, so distances are measured on the "
+                       "paper. Type them with a unit, for example <b>25 mm</b>.")
+        note = QLabel(message)
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
+        form = QFormLayout()
+        self.dx = QLineEdit(f"1 {unit}")
+        self.dy = QLineEdit("0")
+        form.addRow("Across (x)", self.dx)
+        form.addRow("Down (y)", self.dy)
+        self.count = QSpinBox()
+        self.count.setRange(1, 500)
+        self.count.setValue(1)
+        form.addRow("Times", self.count)
+        layout.addLayout(form)
+
+        self.duplicate = QRadioButton("Duplicate — leave the original in place")
+        self.move = QRadioButton("Move — no copies")
+        self.duplicate.setChecked(True)
+        layout.addWidget(self.duplicate)
+        layout.addWidget(self.move)
+        layout.addWidget(_buttons(self))
+
+    def offsets(self) -> tuple[str, str, int, bool]:
+        return (self.dx.text().strip(), self.dy.text().strip(),
+                self.count.value(), self.duplicate.isChecked())
+
+
 class ShortcutManagerDialog(QDialog):
     """Edit, check and reset the keyboard bindings."""
 

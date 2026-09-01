@@ -12,10 +12,10 @@ from PySide6.QtWidgets import (QApplication, QGraphicsView, QLineEdit, QRubberBa
 from ..core.document import MM_TO_PT
 from ..items.base import HANDLE_CURSORS, MarkupItem
 from ..items.mathitem import LINE_STEP, MathItem
-from ..items.measure import CALIBRATE, CountItem, MeasureItem
+from ..items.measure import CALIBRATE, DIMENSION, CountItem, MeasureItem
 from ..items.media import ImageItem
 from ..items.plotitem import PlotItem
-from ..items.shapes import PolyItem
+from ..items.shapes import PolyItem, RectItem
 from ..items.tableitem import TableItem
 from ..items.text import CalloutItem, NoteItem, StampItem, TextItem, _TextBase
 from .commands import PageEditCommand
@@ -742,6 +742,8 @@ class PageView(QGraphicsView):
                 self.scene().remove_markup(draft)
                 self.finish_tool()
                 return
+        if isinstance(draft, RectItem) and draft.kind == "rect":
+            draft.refresh(page=self.page())
         if isinstance(draft, MeasureItem):
             if draft.kind == CALIBRATE:
                 self.scene().remove_markup(draft)
@@ -754,14 +756,27 @@ class PageView(QGraphicsView):
         draft.refresh(self.scene().workspace, self.page())
         self.scene().clearSelection()
         draft.setSelected(True)
-        self.commit_snapshot(f"Add {tool.label.lower()}")
         self.selectionChanged.emit()
+
+        # Tools that ask a question do it now, while the markup is still fresh.
+        note_scale = False
+        if isinstance(draft, RectItem) and draft.kind == "rect":
+            self.window.prompt_rectangle_size(draft)
+        elif isinstance(draft, MeasureItem):
+            if draft.kind == DIMENSION:
+                self.window.prompt_dimension_text(draft)
+            else:
+                note_scale = True
+        self.commit_snapshot(f"Add {tool.label.lower()}")
 
         if isinstance(draft, (MathItem, TextItem, CalloutItem)):
             self.begin_item_edit(draft)
         elif isinstance(draft, TableItem):
             self.activate_table(draft)
         self.finish_tool()
+        # Last word, so returning to the select tool does not wipe the notice.
+        if note_scale:
+            self.window.note_missing_scale()
 
     @staticmethod
     def _default_size(item: MarkupItem) -> tuple[float, float]:
@@ -800,6 +815,8 @@ class PageView(QGraphicsView):
         self.commit_snapshot(f"Add {tool.label.lower()}")
         self.selectionChanged.emit()
         self.finish_tool()
+        if isinstance(draft, MeasureItem) and draft.kind != DIMENSION:
+            self.window.note_missing_scale()
 
     def cancel_draft(self) -> None:
         if self._draft is not None:

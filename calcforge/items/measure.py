@@ -11,6 +11,7 @@ from PySide6.QtGui import (QBrush, QColor, QFontMetricsF, QPainter, QPainterPath
 from ..core.units import Q_, convert, format_quantity, parse_unit
 from .base import HANDLE_SIZE, MarkupItem, Style, arrow_path, register_item
 
+DIMENSION = "dimension"
 LENGTH = "length"
 POLYLENGTH = "polylength"
 AREA = "area"
@@ -22,7 +23,7 @@ VOLUME = "volume"
 CALIBRATE = "calibrate"
 
 MEASURE_NAMES = {
-    LENGTH: "Length", POLYLENGTH: "Polyline length", AREA: "Area",
+    DIMENSION: "Dimension", LENGTH: "Length", POLYLENGTH: "Polyline length", AREA: "Area",
     PERIMETER: "Perimeter", ANGLE: "Angle", RADIUS: "Radius",
     DIAMETER: "Diameter", VOLUME: "Volume", CALIBRATE: "Calibration",
 }
@@ -65,9 +66,13 @@ class MeasureItem(MarkupItem):
         self.points: list[QPointF] = [QPointF(p) for p in (points or [])]
         self.label_offset = QPointF(0, -14)
         self.depth_text = ""            # for volume: e.g. "150 mm"
+        # A dimension carries whatever text the author wants on it — "varies",
+        # "2 no. @ 300 c/c" — instead of the measured value.
+        self.custom_label = ""
         self.show_label = True
         self.value = None               # last computed quantity
         self.value_text = ""
+        self.measured_text = ""
         self.subject = MEASURE_NAMES.get(kind, "Measurement")
         self.style = Style(stroke="#1971c2", fill="#1971c2", fill_opacity=0.18,
                            width=1.2, font_size=8.0, text_color="#0b3d91",
@@ -75,6 +80,8 @@ class MeasureItem(MarkupItem):
         if kind in (AREA, VOLUME, PERIMETER):
             self.style.arrow_start = "none"
             self.style.arrow_end = "none"
+        if kind == DIMENSION:
+            self.subject = "Dimension"
 
     # -- identity ----------------------------------------------------------
     def display_name(self) -> str:
@@ -199,7 +206,7 @@ class MeasureItem(MarkupItem):
     def raw_measure(self) -> tuple[str, float]:
         """Return (kind of quantity, value in page points or degrees)."""
         points = self.points
-        if self.kind in (LENGTH, CALIBRATE) and len(points) >= 2:
+        if self.kind in (LENGTH, CALIBRATE, DIMENSION) and len(points) >= 2:
             return "length", _distance(points[0], points[1])
         if self.kind == POLYLENGTH and len(points) >= 2:
             return "length", sum(_distance(a, b) for a, b in zip(points, points[1:]))
@@ -243,9 +250,9 @@ class MeasureItem(MarkupItem):
         except Exception:
             quantity = None
         self.value = quantity
-        self.value_text = format_quantity(quantity, digits + 2, "fixed") if quantity is not None else ""
-        if quantity is not None:
-            self.value_text = format_quantity(quantity, digits, "fixed")
+        measured = format_quantity(quantity, digits, "fixed") if quantity is not None else ""
+        self.value_text = self.custom_label or measured
+        self.measured_text = measured
         self.update()
 
     # -- painting ----------------------------------------------------------
@@ -263,7 +270,7 @@ class MeasureItem(MarkupItem):
 
         if self.kind == ANGLE and len(self.points) >= 3:
             self._paint_angle_arc(painter)
-        if self.kind in (LENGTH, CALIBRATE) and len(self.points) >= 2:
+        if self.kind in (LENGTH, CALIBRATE, DIMENSION) and len(self.points) >= 2:
             self._paint_extension_ticks(painter)
         self._paint_arrows(painter)
         if self.show_label and self.value_text:
@@ -350,6 +357,7 @@ class MeasureItem(MarkupItem):
         offset = data.get("label_offset", [0, -14])
         self.label_offset = QPointF(offset[0], offset[1])
         self.depth_text = data.get("depth_text", "")
+        self.custom_label = data.get("custom_label", "")
         self.show_label = bool(data.get("show_label", True))
         self.load_base(data)
         self.refresh()

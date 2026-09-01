@@ -7,6 +7,9 @@ from typing import Optional
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPolygonF
 
+from PySide6.QtGui import QFontMetricsF
+
+from ..core.units import format_quantity, parse_unit
 from .base import (HANDLE_SIZE, MarkupItem, Style, arrow_path, cloud_path,
                    register_item)
 
@@ -51,6 +54,12 @@ class RectItem(MarkupItem):
         self.kind = kind
         self._rect = QRectF(rect) if rect else QRectF(0, 0, 120, 70)
         self.cloud_radius = 9.0
+        # A rectangle reports its real size when the page carries a scale, so it
+        # can be used to set out an area rather than only to draw a box.
+        self.show_size = True
+        self.size_text = ""
+        self.width_value = None
+        self.height_value = None
         if kind == "highlight":
             self.style = Style(stroke="", fill="#ffe066", fill_opacity=0.55,
                                blend="multiply", width=0.0)
@@ -81,6 +90,58 @@ class RectItem(MarkupItem):
             path.addRect(rect.adjusted(-grow, -grow, grow, grow))
         return path
 
+    # -- real-world size ---------------------------------------------------
+    def page_scale(self):
+        scene = self.scene()
+        page = getattr(scene, "page", None) if scene is not None else None
+        if page is not None:
+            return page.scale
+        from ..core.document import PageScale
+        return PageScale()
+
+    def refresh(self, workspace=None, page=None) -> None:
+        scale = page.scale if page is not None else self.page_scale()
+        rect = self._rect.normalized()
+        if self.kind != "rect" or not scale.is_calibrated():
+            self.size_text = ""
+            self.width_value = self.height_value = None
+            self.update()
+            return
+        try:
+            from ..core.units import convert
+            self.width_value = convert(scale.length(rect.width()), scale.display_unit)
+            self.height_value = convert(scale.length(rect.height()), scale.display_unit)
+            digits = max(scale.precision, 0)
+            self.size_text = (f"{format_quantity(self.width_value, digits, 'fixed')}"
+                              f" × {format_quantity(self.height_value, digits, 'fixed')}")
+        except Exception:
+            self.size_text = ""
+        self.update()
+
+    def set_real_size(self, width_text: str, height_text: str, page=None) -> bool:
+        """Resize to an exact real-world width and height."""
+        scale = page.scale if page is not None else self.page_scale()
+        width = parse_unit(width_text)
+        height = parse_unit(height_text)
+        if width is None or height is None or not scale.is_calibrated():
+            return False
+        try:
+            per_point = scale.length(1.0)
+            points_wide = float((width / per_point).to("dimensionless").magnitude)
+            points_high = float((height / per_point).to("dimensionless").magnitude)
+        except Exception:
+            return False
+        if points_wide <= 0 or points_high <= 0:
+            return False
+        self.prepareGeometryChange()
+        rect = self._rect.normalized()
+        self._rect = QRectF(rect.x(), rect.y(), points_wide, points_high)
+        self.refresh(page=page)
+        return True
+
+    def summary(self) -> str:
+        return self.comment or self.size_text or self.label
+
     def paint_content(self, painter: QPainter) -> None:
         rect = self._rect.normalized()
         painter.setRenderHint(QPainter.Antialiasing, True)
@@ -103,12 +164,31 @@ class RectItem(MarkupItem):
             painter.drawRoundedRect(rect, self.style.corner_radius, self.style.corner_radius)
         else:
             painter.drawRect(rect)
+        if self.show_size and self.size_text:
+            self._paint_size(painter, rect)
+
+    def _paint_size(self, painter: QPainter, rect: QRectF) -> None:
+        font = self.style.font()
+        from ..core.typography import set_size
+        font = set_size(font, max(self.style.font_size * 0.9, 5.5))
+        painter.setFont(font)
+        metrics = QFontMetricsF(font)
+        width = metrics.horizontalAdvance(self.size_text) + 6
+        height = metrics.height() + 2
+        box = QRectF(rect.center().x() - width / 2, rect.bottom() - height - 2,
+                     width, height)
+        painter.setBrush(QColor(255, 255, 255, 205))
+        painter.setPen(QPen(QColor(self.style.stroke or "#495057"), 0.4))
+        painter.drawRoundedRect(box, 2, 2)
+        painter.setPen(QPen(QColor(self.style.text_color)))
+        painter.drawText(box, Qt.AlignCenter, self.size_text)
 
     def serialize(self) -> dict:
         data = self.base_dict()
         data.update({"kind": self.kind, "rect": [self._rect.x(), self._rect.y(),
                                                  self._rect.width(), self._rect.height()],
-                     "cloud_radius": self.cloud_radius})
+                     "cloud_radius": self.cloud_radius,
+                     "show_size": self.show_size})
         return data
 
     def deserialize(self, data: dict) -> None:
@@ -116,6 +196,7 @@ class RectItem(MarkupItem):
         values = data.get("rect", [0, 0, 100, 60])
         self._rect = QRectF(*values)
         self.cloud_radius = float(data.get("cloud_radius", 9.0))
+        self.show_size = bool(data.get("show_size", True))
         self.load_base(data)
 
 

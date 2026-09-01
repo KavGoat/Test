@@ -15,8 +15,8 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QDockWidget, QDoubleSpin
                                QSpinBox, QStatusBar, QToolBar, QToolButton,
                                QVBoxLayout, QWidget)
 
-from ..core.document import (PT_TO_MM, Document, Page, PageSetup)
-from ..core.units import format_quantity
+from ..core.document import MM_TO_PT, PT_TO_MM, Document, Page, PageSetup
+from ..core.units import format_quantity, parse_unit
 from ..io import export as export_io
 from ..io import pdfio
 from ..io import project as project_io
@@ -61,6 +61,9 @@ class MainWindow(QMainWindow):
         self.current_index = 0
         self.default_style = Style()
         self.shortcuts = ShortcutManager(self)
+        # Drawing a rectangle on a scaled page, or a dimension, asks a question.
+        # Automated runs turn that off and set the values directly.
+        self.interactive_prompts = True
         self._clipboard: list[dict] = []
         self._suspend_recalc = False
 
@@ -171,6 +174,9 @@ class MainWindow(QMainWindow):
         self._act("delete", "Delete", self.delete_selection, "", "delete")
         self._act("select_all", "Select all", self.select_all, "Ctrl+A")
         self._act("lock", "Lock / unlock", self.toggle_lock, "Ctrl+L")
+        self._act("array", "Move or duplicate by an offset…", self.array_selection,
+                  "Ctrl+Shift+D",
+                  tip="Repeat the selection at a fixed spacing, any number of times")
         self._act("front", "Bring to front", lambda: self.reorder("front"), "Ctrl+Shift+]")
         self._act("back", "Send to back", lambda: self.reorder("back"), "Ctrl+Shift+[")
         self._act("forward", "Bring forward", lambda: self.reorder("forward"), "Ctrl+]")
@@ -358,7 +364,7 @@ class MainWindow(QMainWindow):
         edit_menu = bar.addMenu("&Edit")
         for action in (self.act_undo, self.act_redo, None, self.act_cut, self.act_copy,
                        self.act_paste, self.act_duplicate, self.act_delete, None,
-                       self.act_select_all, self.act_lock):
+                       self.act_select_all, self.act_lock, self.act_array):
             edit_menu.addSeparator() if action is None else edit_menu.addAction(action)
         order_menu = edit_menu.addMenu("Order")
         for action in (self.act_front, self.act_forward, self.act_backward, self.act_back):
@@ -380,13 +386,16 @@ class MainWindow(QMainWindow):
                      self.dock_problems):
             panels_menu.addAction(dock.toggleViewAction())
 
-        markup_menu = bar.addMenu("&Markup")
+        # Mnemonic on the "k": Alt+M belongs to the dimension tool, and a
+        # menu with the same mnemonic makes the shortcut ambiguous.
+        markup_menu = bar.addMenu("Mar&kup")
         markup_menu.addAction(self.act_apply_redactions)
         markup_menu.addAction(self.act_renumber_counts)
         markup_menu.addSeparator()
         markup_menu.addAction(self.act_export_markups)
 
-        page_menu = bar.addMenu("&Page")
+        # Mnemonic on the "g" for the same reason: Alt+P draws freehand.
+        page_menu = bar.addMenu("Pa&ge")
         for action in (self.act_add_page, self.act_duplicate_page, self.act_delete_page,
                        None, self.act_page_setup, self.act_scale, None, self.act_doc_props):
             page_menu.addSeparator() if action is None else page_menu.addAction(action)
@@ -965,6 +974,51 @@ class MainWindow(QMainWindow):
         if hasattr(item, "apply_style"):
             item.apply_style()
 
+    # ==================================================================
+    # prompts the drawing tools use
+    # ==================================================================
+    def prompt_rectangle_size(self, item) -> None:
+        """After drawing a rectangle on a scaled page, offer an exact size."""
+        page = self.current_page()
+        if not self.interactive_prompts or item.kind != "rect":
+            return
+        if not page.scale.is_calibrated():
+            return
+        item.refresh(page=page)
+        if item.width_value is None or item.height_value is None:
+            return
+        digits = max(page.scale.precision, 0)
+        dialog = dialogs.RectangleSizeDialog(
+            format_quantity(item.width_value, digits, "fixed"),
+            format_quantity(item.height_value, digits, "fixed"),
+            page.scale.display_unit, self)
+        if dialog.exec() != dialogs.QDialog.Accepted:
+            return
+        width, height = dialog.values()
+        if not item.set_real_size(width, height, page):
+            self.status_hint.setText("Could not read those dimensions — "
+                                     "try something like “3 m”.")
+
+    def prompt_dimension_text(self, item) -> None:
+        """A dimension carries whatever text the author wants."""
+        if not self.interactive_prompts:
+            return
+        text, accepted = QInputDialog.getText(
+            self, "Dimension text",
+            "Text for this dimension (leave empty to show the measured length):",
+            text=item.measured_text)
+        if accepted:
+            item.custom_label = text.strip()
+            item.refresh(page=self.current_page())
+
+    def note_missing_scale(self) -> None:
+        """Say once that measurements are in page units until a scale is set."""
+        if self.current_page().scale.is_calibrated():
+            return
+        self.status_hint.setText(
+            "This page has no scale — measurements are paper distances. "
+            "Click “Scale 1:1” in the status bar to set one.")
+
     def choose_count_subject(self) -> None:
         dialog = dialogs.CountSubjectDialog(self.view.count_subject, self.view.count_symbol, self)
         if dialog.exec() == dialogs.QDialog.Accepted:
@@ -1135,6 +1189,79 @@ class MainWindow(QMainWindow):
                 delta.setY(union.center().y() - rect.center().y())
             item.setPos(item.pos() + delta)
         self.view.commit_snapshot("Align markups")
+
+    def array_selection(self) -> None:
+        """Move or copy the selection by an exact offset, any number of times."""
+        items = [i for i in self.selected_items() if self.view.editable(i)]
+        if not items:
+            self.status_hint.setText("Select something to move or duplicate first.")
+            return
+        page = self.current_page()
+        scaled = page.scale.is_calibrated()
+        dialog = dialogs.ArrayDialog(page.scale.display_unit if scaled else "mm",
+                                     scaled, self)
+        if dialog.exec() != dialogs.QDialog.Accepted:
+            return
+        dx_text, dy_text, count, duplicate = dialog.offsets()
+        self.apply_array(items, dx_text, dy_text, count, duplicate)
+
+    def apply_array(self, items, dx_text: str, dy_text: str,
+                    count: int, duplicate: bool) -> None:
+        """The half of the array command that does not need a dialog."""
+        if not items or count < 1:
+            return
+        page = self.current_page()
+        try:
+            step = QPointF(self.distance_in_points(dx_text, page),
+                           self.distance_in_points(dy_text, page))
+        except ValueError as exc:
+            QMessageBox.warning(self, "Move or duplicate", str(exc))
+            return
+
+        self.view.begin_snapshot()
+        self.view.scene().clearSelection()
+        made = 0
+        for step_index in range(1, count + 1):
+            offset = QPointF(step.x() * step_index, step.y() * step_index)
+            for item in items:
+                if duplicate:
+                    copy = item.clone()
+                    if copy is None:
+                        continue
+                    if isinstance(copy, ImageItem):
+                        copy.load_from_document(self.document)
+                    copy.setPos(item.pos() + offset)
+                    self.view.scene().add_markup(copy)
+                    copy.setSelected(True)
+                    made += 1
+                elif step_index == count:
+                    item.setPos(item.pos() + offset)
+                    item.setSelected(True)
+        self.recalculate()
+        self.view.commit_snapshot("Duplicate along an offset" if duplicate
+                                  else "Move by an offset")
+        self.refresh_selection()
+        self.status_hint.setText(
+            f"Made {made} cop{'y' if made == 1 else 'ies'}" if duplicate
+            else f"Moved {len(items)} markup(s)")
+
+    def distance_in_points(self, text: str, page) -> float:
+        """Read a typed distance as page points, honouring the page scale."""
+        text = (text or "").strip()
+        if not text or text in ("0", "0.0"):
+            return 0.0
+        try:
+            quantity = parse_unit(text)
+        except Exception:  # noqa: BLE001 - pint raises for unknown unit names
+            quantity = None
+        if quantity is None:
+            raise ValueError(f"Could not read “{text}” as a distance.")
+        try:
+            if page.scale.is_calibrated():
+                return float((quantity / page.scale.length(1.0)).to("dimensionless").magnitude)
+            return float(quantity.to("mm").magnitude) * MM_TO_PT
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"“{text}” is not a length.") from exc
 
     def reveal_markup(self, page_index: int, uid: str) -> None:
         self.go_to_page(page_index)
@@ -1528,6 +1655,7 @@ class MainWindow(QMainWindow):
                 align = menu.addMenu("Align")
                 for key in ("left", "hcenter", "right", "top", "vcenter", "bottom"):
                     align.addAction(getattr(self, f"act_align_{key}"))
+            menu.addAction(self.act_array)
             menu.addAction(self.act_lock)
         else:
             menu.addAction(self.act_paste)
