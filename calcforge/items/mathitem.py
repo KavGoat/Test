@@ -83,9 +83,11 @@ class MathItem(MarkupItem):
         self.line_gap = 4.0
         self.result_gap = 10.0
         self.title = ""
-        # A block of several lines keeps its working values to itself; a single
-        # line is how the document defines something everything else can use.
-        self.local_scope = True
+        # By default every calculation defines for the whole document, which is
+        # what a calculation sheet reads like.  Turning this on makes a block
+        # self-contained: it still reads what is defined above it, but its own
+        # names stay inside it.
+        self.local_scope = False
         self.local_values: dict[str, Any] = {}
         self.auto_width = True
         self._width = 260.0
@@ -469,7 +471,7 @@ class MathItem(MarkupItem):
         self.number_format = data.get("number_format", "auto")
         self.show_definition_results = bool(data.get("show_definition_results", True))
         self.show_comments = bool(data.get("show_comments", True))
-        self.local_scope = bool(data.get("local_scope", True))
+        self.local_scope = bool(data.get("local_scope", False))
         self.auto_width = bool(data.get("auto_width", True))
         self.align_results = bool(data.get("align_results", False))
         self._width = float(data.get("width", 260.0))

@@ -30,7 +30,8 @@ import pint
 
 from . import functions as fnlib
 from .units import (Q_, Quantity, SHADOWED_UNITS, convert, format_quantity,
-                    preferred_unit, reads_well, simplify_units, ureg)
+                    is_unit_name, preferred_unit, reads_well, simplify_units,
+                    ureg)
 
 # ---------------------------------------------------------------------------
 # Source normalisation
@@ -284,6 +285,31 @@ def _pure_units(node) -> bool:
         if isinstance(node.op, (ast.Mult, ast.Div)):
             return _pure_units(node.left) and _pure_units(node.right)
     return False
+
+
+def name_problem(name: str, taken: Optional[set] = None) -> str:
+    """Why *name* cannot be used as a variable — empty string if it can.
+
+    Used wherever the user gets to invent a name, so a table cell and a
+    calculation refuse the same things for the same reasons.
+    """
+    from . import functions as fnlib
+
+    name = (name or "").strip()
+    if not name:
+        return "Give the name at least one character."
+    if not name.isidentifier():
+        return (f"“{name}” is not a valid name. Use letters, digits and "
+                "underscores, starting with a letter.")
+    if keyword.iskeyword(name):
+        return f"“{name}” is a reserved word."
+    if name in fnlib.FUNCTIONS or name in fnlib.CONSTANTS:
+        return f"“{name}” is already a built-in {('constant' if name in fnlib.CONSTANTS else 'function')}."
+    if is_unit_name(name):
+        return f"“{name}” is a unit, so a variable of that name would shadow it."
+    if taken and name in taken:
+        return f"“{name}” is already defined somewhere else in the document."
+    return ""
 
 
 def friendly_error(exc: Exception) -> str:

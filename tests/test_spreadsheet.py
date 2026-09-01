@@ -187,3 +187,44 @@ def test_an_explicit_column_unit_still_wins():
     sheet.column_units[1] = "kN/m^2"
     sheet.recalculate(Workspace())
     assert sheet.display_text(0, 1) == "3.6 kN/m²"
+
+
+# ---------------------------------------------------------------------------
+# clipboard from Excel
+# ---------------------------------------------------------------------------
+
+def test_a_grid_is_read_from_tab_separated_clipboard_text():
+    from calcforge.core.spreadsheet import parse_clipboard_grid
+    grid = parse_clipboard_grid("Item\tThickness\nSlab\t150 mm\nScreed\t60 mm\n")
+    assert grid == [["Item", "Thickness"], ["Slab", "150 mm"], ["Screed", "60 mm"]]
+
+
+def test_excel_quoting_survives_the_trip():
+    from calcforge.core.spreadsheet import parse_clipboard_grid
+    grid = parse_clipboard_grid('a\t"two\nlines"\tc\nd\t"say ""hi"""\tf')
+    assert grid == [["a", "two\nlines", "c"], ["d", 'say "hi"', "f"]]
+
+
+def test_thousands_separators_are_removed_so_numbers_stay_numbers():
+    from calcforge.core.spreadsheet import parse_clipboard_grid, parse_literal
+    grid = parse_clipboard_grid("1,234.5\t12,000\t1,2,3\tabc,def")
+    assert grid == [["1234.5", "12000", "1,2,3", "abc,def"]]
+    assert parse_literal(grid[0][0]) == pytest.approx(1234.5)
+    assert parse_literal(grid[0][1]) == 12000
+
+
+def test_a_single_value_is_not_a_grid():
+    from calcforge.core.spreadsheet import looks_like_a_grid
+    assert not looks_like_a_grid("42")
+    assert not looks_like_a_grid("")
+    assert looks_like_a_grid("a\tb")
+    assert looks_like_a_grid("a\nb")
+
+
+def test_pasting_text_into_a_sheet_keeps_units_and_formulas():
+    sheet = Sheet(4, 3)
+    sheet.paste_text("Slab\t150 mm\t=B1*2\nScreed\t60 mm\t=B2*2", 0, 0)
+    sheet.recalculate()
+    assert sheet.value(0, 1).to("mm").magnitude == pytest.approx(150)
+    assert sheet.value(0, 2).to("mm").magnitude == pytest.approx(300)
+    assert sheet.value(1, 2).to("mm").magnitude == pytest.approx(120)

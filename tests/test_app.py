@@ -4,6 +4,7 @@ import os
 import pytest
 from PySide6.QtCore import QEvent, QPointF, Qt
 from PySide6.QtGui import QKeyEvent, QMouseEvent
+from PySide6.QtWidgets import QApplication
 
 from calcforge.items.mathitem import MathItem
 from calcforge.items.measure import CountItem, MeasureItem
@@ -1362,6 +1363,41 @@ def test_a_table_saved_while_active_reopens_in_place(window):
     assert data["y"] == pytest.approx(resting.y())
 
 
+def test_a_block_defines_for_the_document_unless_told_otherwise(window):
+    window.select_tool("math")
+    drag(window.view, 80, 100, 300, 180)
+    block = editing_item(window)
+    block._editor.setPlainText("b_trib = 3 m\nw = 5 kPa*b_trib")
+    window.view.end_item_edit()
+
+    assert not block.local_scope
+    workspace = window.document.workspace
+    assert workspace.get("b_trib").to("m").magnitude == pytest.approx(3)
+    assert workspace.get("w").to("kN/m").magnitude == pytest.approx(15)
+
+
+def test_the_context_menu_toggles_a_block_between_the_two(window):
+    window.select_tool("math")
+    drag(window.view, 80, 100, 300, 180)
+    block = editing_item(window)
+    block._editor.setPlainText("x = 2 m\ny = x*3")
+    window.view.end_item_edit()
+    window.select_tool("select")
+    block.setSelected(True)
+
+    menu = window.build_context_menu(block, QPointF(120, 120))
+    action = [a for a in menu.actions() if a.text() == "Self-contained block"][0]
+    assert action.isCheckable() and not action.isChecked()
+
+    action.setChecked(True)                      # emits toggled
+    assert block.local_scope
+    assert window.document.workspace.get("y") is None
+
+    action.setChecked(False)
+    assert not block.local_scope
+    assert window.document.workspace.get("y").to("m").magnitude == pytest.approx(6)
+
+
 def test_a_block_keeps_its_values_to_itself(window):
     window.select_tool("math")
     drag(window.view, 80, 80, 300, 110)
@@ -1373,6 +1409,8 @@ def test_a_block_keeps_its_values_to_itself(window):
     block = editing_item(window)
     block._editor.setPlainText("b_trib = 3 m\nw = q_floor*b_trib\nR = w*6 m/2")
     window.view.end_item_edit()
+    block.setSelected(True)
+    window.set_block_scope(True)
 
     workspace = window.document.workspace
     assert workspace.get("q_floor").to("kPa").magnitude == pytest.approx(5)
@@ -1392,6 +1430,8 @@ def test_a_block_can_read_globals_defined_above_it(window):
     block = editing_item(window)
     block._editor.setPlainText("w = 12 kN/m\nM = w*L^2/8")
     window.view.end_item_edit()
+    block.setSelected(True)
+    window.set_block_scope(True)
 
     assert [s.error for s in block.statements if s.error] == []
     assert block.local_values["M"].value.to("kN*m").magnitude == pytest.approx(54)
@@ -1400,8 +1440,11 @@ def test_a_block_can_read_globals_defined_above_it(window):
 def test_a_later_line_cannot_see_inside_a_block(window):
     window.select_tool("math")
     drag(window.view, 80, 100, 300, 180)
-    editing_item(window)._editor.setPlainText("a = 2 m\nb = 3 m")
+    first = editing_item(window)
+    first._editor.setPlainText("a = 2 m\nb = 3 m")
     window.view.end_item_edit()
+    first.setSelected(True)
+    window.set_block_scope(True)
 
     window.select_tool("math")
     drag(window.view, 80, 400, 300, 430)
@@ -1429,19 +1472,22 @@ def test_a_block_can_be_opened_up_to_the_document(window):
     block = editing_item(window)
     block._editor.setPlainText("x = 2 m\ny = x*3")
     window.view.end_item_edit()
+    block.setSelected(True)
+    window.set_block_scope(True)
     assert window.document.workspace.get("y") is None
 
-    block.local_scope = False
-    window.recalculate()
+    window.set_block_scope(False)
     assert window.document.workspace.get("y").to("m").magnitude == pytest.approx(6)
 
 
 def test_block_locals_are_listed_for_reference(window):
     window.select_tool("math")
     drag(window.view, 80, 100, 300, 180)
-    editing_item(window)._editor.setPlainText("x = 2 m\ny = x*3")
+    block = editing_item(window)
+    block._editor.setPlainText("x = 2 m\ny = x*3")
     window.view.end_item_edit()
-    window.recalculate()
+    block.setSelected(True)
+    window.set_block_scope(True)
     rows = [window.variables_panel.table.item(r, 0).text()
             for r in range(window.variables_panel.table.rowCount())]
     sources = [window.variables_panel.table.item(r, 2).text()
@@ -1482,3 +1528,150 @@ def test_editing_a_text_box_puts_the_caret_near_the_click(window):
     real_double_click(window.view, point.x(), point.y())
     assert editing_item(window) is box
     assert 0 < box._editor.textCursor().position() < len("the quick brown fox")
+
+
+# ---------------------------------------------------------------------------
+# published table cells
+# ---------------------------------------------------------------------------
+
+def _table_with_a_named_cell(window, name="q_floor"):
+    window.select_tool("table")
+    drag(window.view, 80, 80, 420, 240)
+    table = window.view.active_table
+    table.set_cell(0, 0, "Load")
+    table.set_cell(0, 1, "Value")
+    table.set_cell(1, 0, "Floor")
+    table.set_cell(1, 1, "5 kPa")
+    table.current = (1, 1)
+    window.refresh_formula_bar(table)
+    window.cell_name.setText(name)
+    window.commit_cell_name()
+    return table
+
+
+def test_naming_a_cell_from_the_formula_bar_publishes_it(window):
+    table = _table_with_a_named_cell(window)
+    assert table.named_cells == {"q_floor": "B2"}
+    assert table.name_for(1, 1) == "q_floor"
+    value = window.document.workspace.get("q_floor")
+    assert value.to("kPa").magnitude == pytest.approx(5)
+
+
+def test_the_name_box_shows_what_the_current_cell_publishes(window):
+    table = _table_with_a_named_cell(window)
+    table.current = (0, 0)
+    window.refresh_formula_bar(table)
+    assert window.cell_name.text() == ""
+    table.current = (1, 1)
+    window.refresh_formula_bar(table)
+    assert window.cell_name.text() == "q_floor"
+
+
+def test_a_published_cell_is_tagged_on_the_sheet(window):
+    table = _table_with_a_named_cell(window)
+    window.view.deactivate_table()            # how the sheet is normally read
+    assert table.show_names
+    from PySide6.QtGui import QColor, QImage, QPainter
+    image = QImage(400, 240, QImage.Format_ARGB32)
+    image.fill(0)
+    painter = QPainter(image)
+    table.paint_content(painter)          # must not raise, and must draw the tag
+    painter.end()
+    tag = QColor("#2f7d4f").rgb()
+    assert any(image.pixel(x, y) == tag
+               for x in range(400) for y in range(240)), "no name tag was drawn"
+
+
+def test_the_variables_panel_says_which_cell_a_value_came_from(window):
+    _table_with_a_named_cell(window)
+    window.recalculate()
+    panel = window.variables_panel
+    rows = {panel.table.item(r, 0).text(): panel.table.item(r, 2).text()
+            for r in range(panel.table.rowCount())}
+    assert "q_floor" in rows
+    assert "B2" in rows["q_floor"]
+
+
+def test_a_bad_cell_name_is_refused_and_the_box_reverts(window, monkeypatch):
+    from calcforge.ui import mainwindow as mw
+    table = _table_with_a_named_cell(window)
+    warned = []
+    monkeypatch.setattr(mw.QMessageBox, "warning",
+                        lambda *args, **kwargs: warned.append(args[-1]))
+    window.cell_name.setText("m")          # a unit
+    window.commit_cell_name()
+    assert warned and "unit" in warned[0]
+    assert window.cell_name.text() == "q_floor"
+    assert table.named_cells == {"q_floor": "B2"}
+
+
+def test_clearing_the_name_box_stops_publishing(window):
+    table = _table_with_a_named_cell(window)
+    window.cell_name.setText("")
+    window.commit_cell_name()
+    assert table.named_cells == {}
+    assert window.document.workspace.get("q_floor") is None
+
+
+def test_a_named_cell_survives_a_save_and_reload(window, tmp_path):
+    _table_with_a_named_cell(window)
+    window.view.deactivate_table()
+    path = str(tmp_path / "named.cfx")
+    from calcforge.io import project as project_io
+    from calcforge.core.document import Document
+    project_io.save_document(window.document, path)
+    reopened = Document()
+    project_io.load_document(reopened, path)
+    window.document = reopened
+    window.rebuild_scenes()
+    table = [i for i in window.view.scene().ordered_markups()
+             if isinstance(i, TableItem)][0]
+    assert table.named_cells == {"q_floor": "B2"}
+    assert table.show_names
+    assert window.document.workspace.get("q_floor").to("kPa").magnitude == pytest.approx(5)
+
+
+def test_pasting_excel_cells_onto_the_page_makes_a_table(window):
+    clipboard = QApplication.clipboard()
+    clipboard.setText("Item\tThickness\tDensity\n"
+                      "Slab\t150 mm\t24 kN/m^3\n"
+                      "Screed\t60 mm\t22 kN/m^3")
+    window.view._last_scene_pos = QPointF(120, 140)
+    window.paste_items()
+
+    tables = [i for i in markups(window) if isinstance(i, TableItem)]
+    assert len(tables) == 1
+    sheet = tables[0].sheet
+    assert (sheet.rows, sheet.cols) == (3, 3)
+    assert sheet.header_row                       # words over numbers
+    assert sheet.raw(1, 0) == "Slab"
+    assert sheet.value(1, 1).to("mm").magnitude == pytest.approx(150)
+    assert sheet.value(2, 2).to("kN/m**3").magnitude == pytest.approx(22)
+
+
+def test_a_pasted_table_can_be_calculated_against(window):
+    clipboard = QApplication.clipboard()
+    clipboard.setText("Layer\tt\tgamma\nSlab\t150 mm\t24 kN/m^3")
+    window.view._last_scene_pos = QPointF(120, 140)
+    table = window.paste_grid_as_table(clipboard.text())
+    table.sheet.resize(2, 4)
+    window.view.activate_table(table)
+    table.set_cell(1, 3, "=B2*C2")
+    table.current = (1, 3)
+    window.refresh_formula_bar(table)
+    window.cell_name.setText("q_slab")
+    window.commit_cell_name()
+
+    value = window.document.workspace.get("q_slab")
+    assert value.to("kPa").magnitude == pytest.approx(3.6)
+
+
+def test_pasting_a_single_value_still_pastes_markups_not_a_table(window):
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 200)
+    window.select_tool("select")
+    markups(window)[0].setSelected(True)
+    window.copy_selection()
+    window.paste_items()
+    assert len([i for i in markups(window) if isinstance(i, TableItem)]) == 0
+    assert len(markups(window)) == 2

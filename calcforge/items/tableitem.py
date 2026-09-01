@@ -5,7 +5,7 @@ from typing import Optional
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import (QBrush, QColor, QFont, QFontMetricsF, QPainter,
-                           QPen)
+                           QPen, QPolygonF)
 
 from ..core.spreadsheet import (Cell, CellError, CellFormat, Sheet, column_letter,
                                 make_ref, parse_ref)
@@ -15,6 +15,7 @@ from .base import MarkupItem, Style, register_item
 GUTTER_W = 24.0
 GUTTER_H = 15.0
 BORDER_GRAB = 3.0
+NAME_TAG = "#2f7d4f"        # the green a published cell is tagged with
 
 
 @register_item
@@ -32,6 +33,8 @@ class TableItem(MarkupItem):
         self.show_chrome = False          # A/B/C and 1/2/3 gutters while editing
         self.publish_headers = False
         self.named_cells: dict[str, str] = {}
+        # Write the variable name on any cell the document can read.
+        self.show_names = True
         self.current: tuple[int, int] = (0, 0)
         self.anchor: tuple[int, int] = (0, 0)
         self.style = Style(stroke="#adb5bd", fill="#ffffff", fill_opacity=1.0,
@@ -256,6 +259,22 @@ class TableItem(MarkupItem):
                     names.add(header)
         return names
 
+    def name_for(self, row: int, col: int) -> str:
+        """The variable a cell publishes, if any."""
+        ref = f"{column_letter(col)}{row + 1}"
+        for name, target in self.named_cells.items():
+            if target.upper() == ref:
+                return name
+        return ""
+
+    def set_cell_name(self, name: str, row: int, col: int) -> None:
+        """Publish this cell as `name` — or, with an empty name, stop."""
+        ref = f"{column_letter(col)}{row + 1}"
+        for existing in [n for n, t in self.named_cells.items() if t.upper() == ref]:
+            del self.named_cells[existing]
+        if name:
+            self.named_cells[name] = ref
+
     def publish(self, workspace) -> None:
         """Expose named cells (and optionally whole columns) as variables."""
         source = self.display_name()
@@ -308,6 +327,8 @@ class TableItem(MarkupItem):
         self._paint_backgrounds(painter)
         self._paint_grid(painter, grid_rect)
         self._paint_text(painter)
+        if self.show_names:
+            self._paint_names(painter)
         if self.show_chrome:
             self._paint_selection(painter)
 
@@ -346,6 +367,43 @@ class TableItem(MarkupItem):
         painter.fillRect(corner, header_brush)
         painter.setPen(pen)
         painter.drawRect(corner)
+
+    def _paint_names(self, painter: QPainter) -> None:
+        """Tag every published cell with the name the document reads it by.
+
+        Without this a table looks like any other grid, and there is no way to
+        tell that D2 is the q_floor every calculation below is using.
+        """
+        from ..core.typography import set_size
+        painter.save()
+        painter.setFont(set_size(self.style.font(), max(self.style.font_size * 0.72, 4.5)))
+        metrics = painter.fontMetrics()
+        for name, ref in sorted(self.named_cells.items()):
+            position = parse_ref(ref.split(":", 1)[0])
+            if position is None:
+                continue
+            row, col = position
+            if row >= self.sheet.rows or col >= self.sheet.cols:
+                continue
+            box = self.cell_rect(row, col)
+            # A folded corner marks the cell; the tag sits above it.
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(QColor(NAME_TAG)))
+            corner = QPolygonF([box.topRight() + QPointF(-5.0, 0.0),
+                                box.topRight(),
+                                box.topRight() + QPointF(0.0, 5.0)])
+            painter.drawPolygon(corner)
+
+            width = metrics.horizontalAdvance(name) + 8.0
+            height = metrics.height() + 1.0
+            tag = QRectF(box.left(), box.top() - height - 0.5, width, height)
+            if tag.top() < 0:                      # first row: sit inside instead
+                tag = QRectF(box.left(), box.top() + 0.5, width, height)
+            painter.setBrush(QBrush(QColor(NAME_TAG)))
+            painter.drawRoundedRect(tag, 1.5, 1.5)
+            painter.setPen(QPen(QColor("#ffffff")))
+            painter.drawText(tag, Qt.AlignCenter, name)
+        painter.restore()
 
     def _paint_backgrounds(self, painter: QPainter) -> None:
         painter.setPen(Qt.NoPen)
@@ -472,6 +530,7 @@ class TableItem(MarkupItem):
             "title": self.title,
             "publish_headers": self.publish_headers,
             "named_cells": dict(self.named_cells),
+            "show_names": self.show_names,
             "header_fill": self.header_fill,
             "band_fill": self.band_fill,
         })
@@ -482,6 +541,7 @@ class TableItem(MarkupItem):
         self.title = data.get("title", "")
         self.publish_headers = bool(data.get("publish_headers", False))
         self.named_cells = dict(data.get("named_cells", {}))
+        self.show_names = bool(data.get("show_names", True))
         self.header_fill = data.get("header_fill", "#e9ecef")
         self.band_fill = data.get("band_fill", "#f6f8fa")
         self.load_base(data)

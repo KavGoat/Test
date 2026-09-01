@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import re
 
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QPixmap
@@ -274,6 +275,11 @@ def _icon_for(item) -> str:
 # Variables
 # ---------------------------------------------------------------------------
 
+def _is_cell_ref(text: str) -> bool:
+    """A1, D2, or a range like A1:B4 — what a table records as an origin."""
+    return bool(re.fullmatch(r"[A-Z]{1,3}\d{1,5}(:[A-Z]{1,3}\d{1,5})?|column [A-Z]{1,3}", text))
+
+
 class VariablesPanel(QWidget):
     """Live view of every variable and function the document has defined."""
 
@@ -330,7 +336,12 @@ class VariablesPanel(QWidget):
         needle = self.filter.text().strip().lower()
         entries = []
         for name, info in sorted(workspace.variables.items(), key=lambda kv: kv[1].order):
-            entries.append((name, format_quantity(info.value, 6), info.source))
+            # A table cell says which cell it came from, so a published value
+            # can be traced back to the square it lives in.
+            where = info.source
+            if info.expression and _is_cell_ref(info.expression):
+                where = f"{where} · {info.expression}" if where else info.expression
+            entries.append((name, format_quantity(info.value, 6), where))
         for name, function in sorted(workspace.functions.items()):
             entries.append((function.signature(), function.source, ""))
         for name, value, source in self._block_locals():
@@ -884,12 +895,13 @@ class PropertiesPanel(QScrollArea):
                     lambda i: (setattr(i, a, on), i.relayout()), "Calculation layout"))
             form.addRow("", box)
 
-        scope = QCheckBox("Keep values inside this block")
+        scope = QCheckBox("Self-contained block")
         scope.setChecked(item.local_scope)
         scope.setToolTip(
-            "A block of several lines keeps its working values to itself, so its\n"
-            "intermediate names cannot collide with the rest of the document.\n"
-            "It can still read anything defined above it. A single-line region\n"
+            "Off by default: a calculation defines for the whole document.\n"
+            "Turn it on and this block keeps its own names to itself, so its\n"
+            "working values cannot collide with the rest of the document. It\n"
+            "can still read anything defined above it. A single-line region\n"
             "always defines for the whole document.")
         scope.setEnabled(not item.single_line)
         scope.toggled.connect(

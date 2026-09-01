@@ -16,6 +16,9 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QDockWidget, QDoubleSpin
                                QVBoxLayout, QWidget)
 
 from ..core.document import MM_TO_PT, PT_TO_MM, Document, Page, PageSetup
+from ..core.engine import name_problem
+from ..core.spreadsheet import (MAX_COLS, MAX_ROWS, looks_like_a_grid,
+                                parse_clipboard_grid)
 from ..core.units import format_quantity, parse_unit
 from ..io import export as export_io
 from ..io import pdfio
@@ -106,10 +109,19 @@ class MainWindow(QMainWindow):
         bar.setContentsMargins(6, 3, 6, 3)
         bar.setSpacing(6)
         self.cell_ref = QLabel("—")
-        self.cell_ref.setMinimumWidth(74)
+        self.cell_ref.setMinimumWidth(54)
         self.cell_ref.setAlignment(Qt.AlignCenter)
         self.cell_ref.setStyleSheet(
             "border:1px solid #c6ccd6; border-radius:3px; padding:2px 6px; background:#fff;")
+        # Excel's name box: type a name here and the rest of the document can
+        # read this cell by it.
+        self.cell_name = QLineEdit()
+        self.cell_name.setMinimumWidth(110)
+        self.cell_name.setMaximumWidth(160)
+        self.cell_name.setPlaceholderText("name this cell")
+        self.cell_name.setToolTip(
+            "Give this cell a variable name and every calculation in the\n"
+            "document can use it. Clear the box to stop publishing it.")
         self.formula_edit = QLineEdit()
         self.formula_edit.setPlaceholderText(
             "Type a value, or a formula starting with =  (cells, ranges and your variables all work)")
@@ -121,6 +133,8 @@ class MainWindow(QMainWindow):
         self.cell_value.setStyleSheet("color:#3c5a86;")
         bar.addWidget(QLabel("Cell"))
         bar.addWidget(self.cell_ref)
+        bar.addWidget(QLabel("as"))
+        bar.addWidget(self.cell_name)
         bar.addWidget(QLabel("ƒx"))
         bar.addWidget(self.formula_edit, 1)
         bar.addWidget(self.cell_value)
@@ -479,6 +493,7 @@ class MainWindow(QMainWindow):
         self.variables_panel.insertRequested.connect(self.insert_into_math)
         self.functions_panel.insertRequested.connect(self.insert_into_math)
         self.formula_edit.returnPressed.connect(self.commit_formula_bar)
+        self.cell_name.editingFinished.connect(self.commit_cell_name)
         self.undo_stack.cleanChanged.connect(lambda _clean: self.update_title())
 
     # ==================================================================
@@ -1082,6 +1097,11 @@ class MainWindow(QMainWindow):
             return
         payload = self._clipboard
         text = QApplication.clipboard().text()
+        # Cells copied out of Excel with nowhere to go become a table of their
+        # own, which is how most sheets get into a calculation in the first place.
+        if not payload and looks_like_a_grid(text):
+            self.paste_grid_as_table(text)
+            return
         if text.strip().startswith("{"):
             try:
                 decoded = json.loads(text)
@@ -1108,6 +1128,50 @@ class MainWindow(QMainWindow):
         self.recalculate()
         self.view.commit_snapshot("Paste")
         self.refresh_selection()
+
+    @staticmethod
+    def _looks_like_a_header(grid: list[list[str]]) -> bool:
+        """A row of labels sitting over columns that are mostly numbers."""
+        if len(grid) < 2:
+            return False
+        from ..core.spreadsheet import parse_literal
+        first = [c for c in grid[0] if c.strip()]
+        if not first or any(isinstance(parse_literal(c), (int, float)) for c in first):
+            return False
+        below = [c for line in grid[1:] for c in line if c.strip()]
+        if not below:
+            return False
+        numeric = sum(1 for c in below if not isinstance(parse_literal(c), str))
+        return numeric >= len(below) / 2
+
+    def paste_grid_as_table(self, text: str) -> Optional[TableItem]:
+        """Build a table from spreadsheet text on the clipboard."""
+        grid = parse_clipboard_grid(text)
+        if not grid:
+            return None
+        height = len(grid)
+        width = max(len(line) for line in grid)
+        table = TableItem()
+        self.apply_default_style(table)
+        table.author = self.document.settings.default_author or self.document.author
+        table.sheet.resize(min(max(height, 1), MAX_ROWS), min(max(width, 1), MAX_COLS))
+        table.sheet.paste_text(text, 0, 0)
+        # A first row of words over columns of numbers is a header, the way
+        # Excel would read it.
+        table.sheet.header_row = self._looks_like_a_header(grid)
+        table.sheet.recalculate(self.document.workspace)
+        for index in range(table.sheet.cols):
+            table.autofit_column(index)
+
+        self.view.begin_snapshot()
+        self.view.scene().clearSelection()
+        self.view.scene().add_markup(table, self.view.typing_position())
+        table.setSelected(True)
+        self.recalculate()
+        self.view.commit_snapshot("Paste as table")
+        self.refresh_selection()
+        self.status_hint.setText(f"Pasted {height} × {width} cells as a table")
+        return table
 
     def duplicate_selection(self) -> None:
         items = self.selected_items()
@@ -1469,6 +1533,8 @@ class MainWindow(QMainWindow):
         self.formula_bar.setVisible(True)
         row, col = table.current
         self.cell_ref.setText(table.current_ref())
+        if not self.cell_name.hasFocus():
+            self.cell_name.setText(table.name_for(row, col))
         if not self.formula_edit.hasFocus():
             self.formula_edit.setText(table.sheet.raw(row, col))
         cell = table.sheet.cells.get((row, col))
@@ -1478,6 +1544,29 @@ class MainWindow(QMainWindow):
         else:
             self.cell_value.setText(table.sheet.display_text(row, col))
             self.cell_value.setStyleSheet("color:#3c5a86;")
+
+    def commit_cell_name(self) -> None:
+        """Publish (or stop publishing) the current cell under a typed name."""
+        table = self.view.active_table
+        if table is None:
+            return
+        row, col = table.current
+        wanted = self.cell_name.text().strip()
+        if wanted == table.name_for(row, col):
+            return
+        if wanted:
+            problem = name_problem(wanted, self.declared_names() - table.declared_names())
+            if problem:
+                QMessageBox.warning(self, "Name this cell", problem)
+                self.cell_name.setText(table.name_for(row, col))
+                return
+        self.view.begin_snapshot()
+        table.set_cell_name(wanted, row, col)
+        self.recalculate()
+        self.view.commit_snapshot("Name a cell" if wanted else "Unname a cell")
+        self.status_hint.setText(
+            f"{table.current_ref()} is published as {wanted}" if wanted
+            else f"{table.current_ref()} is no longer published")
 
     def commit_formula_bar(self) -> None:
         table = self.view.active_table
@@ -1629,6 +1718,14 @@ class MainWindow(QMainWindow):
                     menu.addAction(self.act_split_lines)
                 if len([i for i in self.selected_items() if isinstance(i, MathItem)]) > 1:
                     menu.addAction(self.act_merge_lines)
+                scope = menu.addAction("Self-contained block")
+                scope.setCheckable(True)
+                scope.setChecked(item.local_scope)
+                scope.setEnabled(not item.single_line)
+                scope.setToolTip(
+                    "Keep this block's own names inside it. It can still read\n"
+                    "anything the document defines above it.")
+                scope.toggled.connect(self.set_block_scope)
             if isinstance(item, TableItem):
                 menu.addAction("Edit table", lambda: self.view.activate_table(item))
                 menu.addAction("Named cells…", lambda: self.edit_named_cells(item))
@@ -1670,6 +1767,24 @@ class MainWindow(QMainWindow):
             menu.addAction(self.act_scale)
             menu.addAction(self.act_select_all)
         return menu
+
+    def set_block_scope(self, on: bool) -> None:
+        """Self-contain the selected calculations, or open them up again."""
+        blocks = [i for i in self.selected_items()
+                  if isinstance(i, MathItem) and not i.single_line]
+        if not blocks:
+            return
+        self.view.begin_snapshot()
+        for block in blocks:
+            block.local_scope = bool(on)
+            block.local_values.clear()
+        self.recalculate()
+        self.view.commit_snapshot("Self-contained block" if on
+                                  else "Block defines for the document")
+        self.refresh_selection()
+        self.status_hint.setText(
+            "This block keeps its names to itself" if on
+            else "This block defines for the whole document")
 
     def _insert_at(self, key: str, point: QPointF) -> None:
         tool = TOOL_MAP[key]

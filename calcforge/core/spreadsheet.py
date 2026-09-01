@@ -391,6 +391,74 @@ def prepare_formula(body: str, rows: int, cols: int) -> tuple[str, set[tuple[int
     return " ".join(output), dependencies
 
 
+# Excel quotes any cell containing a tab, newline or quote, and doubles the
+# quotes inside it — exactly the CSV rules, with tabs for commas.
+_GROUPED_NUMBER = re.compile(r"[-+]?\d{1,3}(?:,\d{3})+(?:\.\d+)?$")
+
+
+def _ungroup(text: str) -> str:
+    """1,234.50 -> 1234.50, so a number copied from Excel stays a number.
+
+    Only a strictly grouped number is touched; anything else is left exactly
+    as it was typed, because guessing at a value is worse than not reading it.
+    """
+    stripped = text.strip()
+    return stripped.replace(",", "") if _GROUPED_NUMBER.fullmatch(stripped) else text
+
+
+def parse_clipboard_grid(text: str) -> list[list[str]]:
+    """Rows and columns from clipboard text copied out of a spreadsheet.
+
+    Handles Excel's quoting, so a cell holding a line break or a tab survives
+    the trip, and un-groups thousands separators so 1,234.5 is still a number.
+    """
+    if not text:
+        return []
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    rows: list[list[str]] = []
+    row: list[str] = []
+    field: list[str] = []
+    quoted = False
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if quoted:
+            if char == '"':
+                if index + 1 < len(text) and text[index + 1] == '"':
+                    field.append('"')
+                    index += 1
+                else:
+                    quoted = False
+            else:
+                field.append(char)
+        elif char == '"' and not field:
+            quoted = True
+        elif char == "\t":
+            row.append("".join(field))
+            field = []
+        elif char == "\n":
+            row.append("".join(field))
+            rows.append(row)
+            row, field = [], []
+        else:
+            field.append(char)
+        index += 1
+    if field or row:
+        row.append("".join(field))
+        rows.append(row)
+    while rows and not any(cell.strip() for cell in rows[-1]):
+        rows.pop()
+    return [[_ungroup(cell) for cell in line] for line in rows]
+
+
+def looks_like_a_grid(text: str) -> bool:
+    """True when clipboard text is worth turning into a table of its own."""
+    grid = parse_clipboard_grid(text)
+    if not grid:
+        return False
+    return len(grid) > 1 or max(len(line) for line in grid) > 1
+
+
 def parse_literal(raw: str, workspace: Optional[Workspace] = None) -> Any:
     """Interpret a non-formula entry as a number, quantity, boolean or text."""
     text = raw.strip()
@@ -630,17 +698,15 @@ class Sheet:
 
     def paste_text(self, text: str, row: int, col: int) -> tuple[int, int]:
         """Paste tab-separated text, as pasted from Excel or a text editor."""
-        lines = [line for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
-        while lines and not lines[-1].strip():
-            lines.pop()
-        for r_offset, line in enumerate(lines):
-            for c_offset, value in enumerate(line.split("\t")):
+        grid = parse_clipboard_grid(text)
+        for r_offset, line in enumerate(grid):
+            for c_offset, value in enumerate(line):
                 target_row, target_col = row + r_offset, col + c_offset
                 if target_row >= self.rows or target_col >= self.cols:
                     continue
                 self.set_raw(target_row, target_col, value)
-        width = max((len(line.split("\t")) for line in lines), default=0)
-        return len(lines), width
+        width = max((len(line) for line in grid), default=0)
+        return len(grid), width
 
     def grow_to_fit(self, row: int, col: int, height: int, width: int) -> None:
         """Add rows or columns so a paste is not clipped."""
