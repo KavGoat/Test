@@ -1225,6 +1225,7 @@ class MainWindow(QMainWindow):
             return
         workspace = self.document.workspace
         workspace.clear()
+        workspace.declare(self.declared_names())
         workspace.begin_pass()
         # One pass, strictly top-left to bottom-right across every page: a value
         # has to be defined above (or to the left of) whatever uses it, so moving
@@ -1288,6 +1289,18 @@ class MainWindow(QMainWindow):
         self.view.scene().clearSelection()
         merged.setSelected(True)
         self.refresh_selection()
+
+    def declared_names(self) -> set[str]:
+        """Every name the document assigns, gathered before anything evaluates."""
+        names: set[str] = set()
+        for page in self.document.pages:
+            if page.scene is None:
+                continue
+            for item in page.scene.markups():
+                collect = getattr(item, "declared_names", None)
+                if callable(collect):
+                    names |= collect()
+        return names
 
     def refresh_problems(self) -> None:
         from ..core.problems import collect_problems, summarise

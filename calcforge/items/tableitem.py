@@ -229,6 +229,16 @@ class TableItem(MarkupItem):
         self.prepareGeometryChange()
         self.update()
 
+    def declared_names(self) -> set[str]:
+        """Variable names this table publishes."""
+        names = set(self.named_cells)
+        if self.publish_headers:
+            for col in range(self.sheet.cols):
+                header = self.sheet.header_name(col)
+                if header:
+                    names.add(header)
+        return names
+
     def publish(self, workspace) -> None:
         """Expose named cells (and optionally whole columns) as variables."""
         source = self.display_name()

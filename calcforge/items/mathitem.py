@@ -143,6 +143,19 @@ class MathItem(MarkupItem):
         return [s.name for s in self.statements
                 if s.kind in (engine.DEFINE, engine.FUNCTION) and s.ok]
 
+    def declared_names(self) -> set[str]:
+        """Names this region assigns, read from the source without evaluating.
+
+        The document needs these up front so that a name the author defines is
+        never resolved as a unit merely because it is used before its own line.
+        """
+        names = set()
+        for line in self.source.split("\n"):
+            statement = engine.parse_statement(line)
+            if statement.kind in (engine.DEFINE, engine.FUNCTION) and statement.name:
+                names.add(statement.name)
+        return names
+
     # -- geometry ----------------------------------------------------------
     def local_rect(self) -> QRectF:
         return QRectF(0, 0, max(self._width, 24.0), max(self._height, 18.0))

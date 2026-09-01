@@ -35,7 +35,8 @@ class _ConcatOperator(ast.NodeTransformer):
 
 
 SHEET_TRANSFORMERS = (_ConcatOperator(),)
-from .units import Quantity, convert, format_quantity, simplify_units, ureg
+from .units import (Quantity, convert, format_quantity, normalise_for_display,
+                    simplify_units, ureg)
 
 MAX_COLS = 702          # A .. ZZ
 MAX_ROWS = 20000
@@ -662,7 +663,15 @@ class Sheet:
                 formulas[key] = (prepared, dependencies)
                 cell.value = None
             else:
-                cell.value = parse_literal(cell.raw, workspace)
+                value = parse_literal(cell.raw, workspace)
+                unit = self.cell_unit(*key)
+                if unit and isinstance(value, Quantity):
+                    value = convert(value, unit)
+                else:
+                    # A typed value keeps its unit unless the number has drifted
+                    # out of the range that unit reads well in.
+                    value = normalise_for_display(value, is_input=True)
+                cell.value = value
 
         order, cyclic = _topological_order(formulas)
         for key in cyclic:
@@ -686,7 +695,7 @@ class Sheet:
                 if unit and isinstance(value, Quantity):
                     value = convert(value, unit)
                 else:
-                    value = simplify_units(value)
+                    value = normalise_for_display(simplify_units(value))
                 cell.value = value
             except CellError as exc:
                 cell.value = exc

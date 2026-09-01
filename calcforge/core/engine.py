@@ -29,8 +29,8 @@ from typing import Any, Callable, Optional
 import pint
 
 from . import functions as fnlib
-from .units import (Q_, Quantity, convert, format_quantity, preferred_unit,
-                    simplify_units, ureg)
+from .units import (Q_, Quantity, SHADOWED_UNITS, convert, format_quantity,
+                    preferred_unit, reads_well, simplify_units, ureg)
 
 # ---------------------------------------------------------------------------
 # Source normalisation
@@ -247,15 +247,6 @@ def _all_names(code) -> set[str]:
 # Errors
 # ---------------------------------------------------------------------------
 
-def _reads_well(value: Any) -> bool:
-    """True when a magnitude is already in the comfortable 1–1000 range."""
-    try:
-        magnitude = abs(float(value.magnitude if isinstance(value, Quantity) else value))
-    except (TypeError, ValueError):
-        return True
-    return 1.0 <= magnitude < 1000.0
-
-
 def is_unit_literal(tree) -> bool:
     """True when an expression is one number scaled by pure unit names.
 
@@ -310,6 +301,8 @@ def friendly_error(exc: Exception) -> str:
         return "Syntax error"
     if isinstance(exc, TypeError) and "not callable" in str(exc):
         return "Value used as a function — did you mean multiplication?"
+    if isinstance(exc, TypeError) and "compare" in str(exc).lower():
+        return "Cannot compare a value that has units with a plain number"
     return str(exc) or type(exc).__name__
 
 
@@ -390,6 +383,10 @@ class Workspace:
         # "evaluate" afterwards, and that has to be decided from reading order
         # rather than from whatever a previous pass happened to leave behind.
         self.pass_defined: set[str] = set()
+        # Every name the document assigns anywhere.  A name the author defines
+        # is theirs, so it is never quietly resolved as a unit just because it
+        # is used before the line that defines it.
+        self.document_names: set[str] = set()
         self.rebuild_base()
 
     def begin_pass(self) -> None:
@@ -424,6 +421,8 @@ class Workspace:
         for name in _all_names(code):
             if name in namespace or name.startswith("__"):
                 continue
+            if name in self.document_names or name in SHADOWED_UNITS:
+                continue        # the author's name, not a unit
             if name in self._unit_cache:
                 value = self._unit_cache[name]
                 if value is not None:
@@ -443,6 +442,10 @@ class Workspace:
         self.functions.clear()
         self.pass_defined = set()
         self._counter = 0
+
+    def declare(self, names) -> None:
+        """Record every name the document assigns, before anything is evaluated."""
+        self.document_names = set(names)
 
     def define(self, name: str, value: Any, source: str = "", expression: str = "") -> None:
         self._counter += 1
@@ -527,7 +530,7 @@ class Statement:
         unit = preferred_unit(self.result)
         if unit == "deg" and _ANGLE_UNIT_RE.search(self.expression):
             return None          # the author picked an angle unit; respect it
-        if unit and self.is_input and _reads_well(self.result):
+        if unit and self.is_input and reads_well(self.result):
             return None          # "896 cm³" was typed that way on purpose
         return unit
 

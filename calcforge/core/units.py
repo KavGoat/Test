@@ -80,9 +80,21 @@ def as_float(value: Any) -> float:
 
 _UNIT_NAME_CACHE: dict[str, bool] = {}
 
+# pint claims several Greek words as obscure units — sigma is the Stefan-
+# Boltzmann constant, gamma a magnetic flux unit, mu and nu atomic masses,
+# alpha and zeta dimensionless constants.  An engineer writing sigma means a
+# stress, so these names are never treated as units: silently binding an
+# undefined stress to a radiation constant is far worse than not knowing the
+# unit at all.  psi is left alone because pounds per square inch is what people
+# actually mean by it.
+SHADOWED_UNITS = {"sigma", "gamma", "mu", "nu", "alpha", "zeta", "beta", "eta",
+                  "tau", "phi", "chi", "omega", "theta", "rho", "lamda"}
+
 
 def is_unit_name(name: str) -> bool:
     """True when *name* is a unit in the registry (cached; used for italics)."""
+    if name in SHADOWED_UNITS:
+        return False
     known = _UNIT_NAME_CACHE.get(name)
     if known is None:
         try:
@@ -418,6 +430,27 @@ def preferred_unit(value: Any) -> Optional[str]:
         return ladder[chosen_index]
     except Exception:
         return None
+
+
+def reads_well(value: Any) -> bool:
+    """True when a magnitude already sits in the comfortable 1–1000 range."""
+    try:
+        magnitude = abs(float(value.magnitude if isinstance(value, Quantity) else value))
+    except (TypeError, ValueError):
+        return True
+    return 1.0 <= magnitude < 1000.0
+
+
+def normalise_for_display(value: Any, is_input: bool = False) -> Any:
+    """Put a value in the unit it reads best in.
+
+    A value the author typed out in full keeps the unit they chose, unless the
+    number has drifted out of the range that unit reads well in — 7200 mm is
+    better as 7.2 m, but 896 cm³ was written that way on purpose.
+    """
+    if is_input and reads_well(value):
+        return value
+    return apply_preferred_unit(value)
 
 
 def apply_preferred_unit(value: Any) -> Any:

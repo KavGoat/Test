@@ -213,3 +213,23 @@ def test_reading_order_is_reset_between_passes():
     statements = evaluate_source("b = 400 mm", workspace)
     assert statements[0].kind == DEFINE
     assert workspace.get("b").to("mm").magnitude == pytest.approx(400)
+
+
+def test_greek_variable_names_are_never_treated_as_units():
+    """pint calls sigma a radiation constant; an engineer means a stress."""
+    for name in ("sigma", "gamma", "mu", "alpha", "beta", "theta", "rho"):
+        statement = value_of(f"{name}*2")
+        assert not statement.ok, f"{name} resolved to a unit"
+        assert "not defined" in statement.error
+
+
+def test_psi_is_still_pounds_per_square_inch():
+    assert value_of("2000 psi -> MPa").result.to("MPa").magnitude == pytest.approx(13.79,
+                                                                                   rel=1e-3)
+
+
+def test_a_name_the_document_defines_beats_a_unit():
+    workspace = Workspace()
+    workspace.declare({"m", "s"})
+    statements = evaluate_source("total = m*2", workspace)
+    assert not statements[0].ok and "not defined" in statements[0].error

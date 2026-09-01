@@ -782,6 +782,11 @@ class PageView(QGraphicsView):
     # ------------------------------------------------------------------
     # item editing
     # ------------------------------------------------------------------
+    @staticmethod
+    def style_line_height(item) -> float:
+        """A sensible minimum row height for an empty region."""
+        return item.style.font_size * 1.9
+
     def editing_item(self):
         return self._editing_item
 
@@ -800,8 +805,12 @@ class PageView(QGraphicsView):
         item = self._editing_item
         if not isinstance(item, MathItem):
             return
-        below = item.pos() + QPointF(0, item.local_rect().height() + LINE_STEP)
+        origin = QPointF(item.pos())
+        # Commit first: the region only knows how tall it is once what was typed
+        # into it has been laid out, and a tall fraction needs more room below.
         self.end_item_edit()
+        height = item.local_rect().height() if item.scene() is not None else 0.0
+        below = origin + QPointF(0, max(height, self.style_line_height(item)) + LINE_STEP)
         self.begin_snapshot()
         following = MathItem("")
         following.style = item.style.copy()
@@ -1105,7 +1114,7 @@ class PageView(QGraphicsView):
 
         # A bare keystroke on the canvas only does something if it is bound:
         # '"' starts text, '\\' starts maths, tool keys pick their tool.
-        if self.idle_on_canvas() and not self.scene().selectedItems():
+        if self.idle_on_canvas():
             if self.window.run_typed_binding(event.text(), modifiers,
                                              self.typing_position()):
                 event.accept()

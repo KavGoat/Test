@@ -1178,3 +1178,56 @@ def test_two_axis_index_addresses_a_rectangular_range(window):
     table.set_cell(3, 0, "=INDEX(A1:C2,2,3)")
     window.recalculate()
     assert table.sheet.value(3, 0) == 6
+
+
+def test_typing_still_works_with_something_selected(window):
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 200)
+    window.select_tool("select")
+    markups(window)[0].setSelected(True)
+    window.view._last_scene_pos = QPointF(300, 400)
+    key(window.view, Qt.Key_unknown, "\\")
+    assert isinstance(editing_item(window), MathItem)
+
+
+def test_successive_calculation_lines_do_not_overlap(window):
+    """Enter must leave room for whatever was actually typed above."""
+    window.select_tool("math")
+    drag(window.view, 80, 80, 220, 100)
+    sources = ["L = 7.2 m", "w = 12 kN/m", "M = w*L^2/8", "Z = 896 cm^3",
+               "sigma = M/Z", "delta = 5*w*L^4/(384*205 GPa*14100 cm^4)"]
+    editing_item(window)._editor.setPlainText(sources[0])
+    for text in sources[1:]:
+        window.view._open_next_line()
+        editing_item(window)._editor.setPlainText(text)
+    window.view.end_item_edit()
+
+    blocks = [i for i in markups(window) if isinstance(i, MathItem)]
+    assert len(blocks) == len(sources)
+    blocks.sort(key=lambda i: i.pos().y())
+    for upper, lower in zip(blocks, blocks[1:]):
+        bottom = upper.pos().y() + upper.local_rect().height()
+        assert lower.pos().y() >= bottom - 0.01, f"{upper.source!r} overlaps {lower.source!r}"
+
+
+def test_using_a_stress_before_it_is_defined_warns_rather_than_inventing_a_unit(window):
+    window.select_tool("math")
+    drag(window.view, 80, 300, 300, 320)
+    editing_item(window)._editor.setPlainText("util = sigma/(355 MPa)")
+    window.view.end_item_edit()
+
+    window.select_tool("math")
+    drag(window.view, 80, 500, 300, 520)
+    editing_item(window)._editor.setPlainText("sigma = 138 MPa")
+    window.view.end_item_edit()
+
+    assert [p.kind for p in window.problems_panel._problems] == ["undefined"]
+    assert "'sigma' is not defined" in window.problems_panel._problems[0].message
+
+    # move the definition above its use and it resolves
+    definition = [i for i in markups(window) if isinstance(i, MathItem)
+                  and i.source.strip().startswith("sigma")][0]
+    definition.setPos(QPointF(80, 100))
+    window.recalculate()
+    assert window.problems_panel._problems == []
+    assert window.document.workspace.get("util") == pytest.approx(0.3887, rel=1e-3)

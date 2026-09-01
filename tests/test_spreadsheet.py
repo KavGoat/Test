@@ -162,3 +162,28 @@ def test_cell_ratios_reduce_to_plain_numbers():
 def test_cell_angles_keep_their_unit():
     sheet = build([["30 deg"]])
     assert sheet.display_text(0, 0) == "30 deg"
+
+
+def test_cells_choose_a_readable_unit_too():
+    sheet = build([["150 mm", "24 kN/m^3", "=A1*B1"],
+                   ["60 mm", "22 kN/m^3", "=A2*B2"],
+                   ["", "", "=SUM(C1:C2)"]])
+    assert sheet.display_text(0, 2) == "3.6 kPa"
+    assert sheet.display_text(2, 2) == "4.92 kPa"
+
+
+def test_typed_cell_values_keep_a_sensible_unit():
+    sheet = build([["150 mm", "896 cm^3", "7200 mm", "355 MPa"]])
+    assert sheet.display_text(0, 0) == "150 mm"
+    assert sheet.display_text(0, 1) == "896 cm³"
+    assert sheet.display_text(0, 2) == "7.2 m"        # out of range for mm
+    assert sheet.display_text(0, 3) == "355 MPa"
+
+
+def test_an_explicit_column_unit_still_wins():
+    sheet = Sheet(1, 2)
+    sheet.set_raw(0, 0, "150 mm")
+    sheet.set_raw(0, 1, "=A1*24 kN/m^3")
+    sheet.column_units[1] = "kN/m^2"
+    sheet.recalculate(Workspace())
+    assert sheet.display_text(0, 1) == "3.6 kN/m²"
