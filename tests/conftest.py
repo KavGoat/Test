@@ -1,0 +1,37 @@
+import os
+import sys
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import pytest
+
+
+@pytest.fixture(scope="session")
+def qapp():
+    from calcforge.app import build_application
+    from PySide6.QtWidgets import QApplication
+    application = QApplication.instance() or build_application([])
+    yield application
+
+
+@pytest.fixture
+def window(qapp):
+    from calcforge.ui.mainwindow import MainWindow
+
+    main = MainWindow()
+    # Nothing in the suite may block on a modal "save your changes?" dialog.
+    main.confirm_discard = lambda: True
+    main.resize(1280, 860)
+    # 1:1 zoom keeps synthesised view coordinates aligned with scene points.
+    main.view.set_zoom(1.0)
+    yield main
+    main.document.modified = False
+    main.undo_stack.clear()
+    main.view.deactivate_table()
+    main.view.setScene(None)
+    for page in main.document.pages:
+        page.scene = None
+    main.close()
+    main.deleteLater()
+    qapp.processEvents()
