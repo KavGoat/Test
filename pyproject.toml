@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "calcforge"
+version = "1.0.0"
+description = "Engineering calculations, drawing markup and spreadsheets in one page-by-page document"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "PySide6>=6.6",
+    "pint>=0.23",
+    "numpy>=1.24",
+    "sympy>=1.12",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4"]
+
+[project.gui-scripts]
+calcforge = "calcforge.app:main"
+
+[tool.setuptools.packages.find]
+include = ["calcforge*"]
+
+[tool.setuptools.package-data]
+calcforge = ["py.typed"]
