@@ -13,21 +13,43 @@ from PySide6.QtGui import (QBrush, QColor, QFont, QIcon, QPainter, QPainterPath,
 INK = "#2c3340"
 ACCENT = "#1971c2"
 WARM = "#e8590c"
+# The icons that carry a colour of their own — a red PDF, a yellow note, a pink
+# count marker. They still have to be legible on a dark toolbar, so each one
+# has a lighter twin rather than being drawn in one fixed colour.
+DANGER = "#c92a2a"
+NOTE = "#ffe066"
+NOTE_EDGE = "#b8860b"
+NOTE_RULE = "#8a6d0b"
+MARKER = "#c2255c"
+FAINT = "#9aa3ad"
 
 _THEME_INK = {"light": "#2c3340", "dark": "#c7cedb"}
 _THEME_ACCENT = {"light": "#1971c2", "dark": "#57a5ec"}
 _THEME_WARM = {"light": "#e8590c", "dark": "#f0854a"}
+_THEME_DANGER = {"light": "#c92a2a", "dark": "#ff8787"}
+_THEME_NOTE = {"light": "#ffe066", "dark": "#ffd43b"}
+_THEME_NOTE_EDGE = {"light": "#b8860b", "dark": "#e8b923"}
+_THEME_NOTE_RULE = {"light": "#8a6d0b", "dark": "#8a6d0b"}
+_THEME_MARKER = {"light": "#c2255c", "dark": "#f783ac"}
+_THEME_FAINT = {"light": "#9aa3ad", "dark": "#79828f"}
 
 _theme = "light"
 
 
 def set_icon_theme(theme: str) -> None:
     """Re-tint every icon for *theme*, and forget the ones already drawn."""
-    global INK, ACCENT, WARM, _theme
+    global INK, ACCENT, WARM, DANGER, NOTE, NOTE_EDGE, NOTE_RULE, MARKER, FAINT
+    global _theme
     _theme = "dark" if theme == "dark" else "light"
     INK = _THEME_INK[_theme]
     ACCENT = _THEME_ACCENT[_theme]
     WARM = _THEME_WARM[_theme]
+    DANGER = _THEME_DANGER[_theme]
+    NOTE = _THEME_NOTE[_theme]
+    NOTE_EDGE = _THEME_NOTE_EDGE[_theme]
+    NOTE_RULE = _THEME_NOTE_RULE[_theme]
+    MARKER = _THEME_MARKER[_theme]
+    FAINT = _THEME_FAINT[_theme]
     icon.cache_clear()
     app_icon.cache_clear()
 
@@ -97,7 +119,7 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
         painter.drawLine(QPointF(13.5, 3.5), QPointF(17.5, 7))
         painter.drawLine(QPointF(15, 5), QPointF(17.5, 7))
     elif name == "highlighter":
-        painter.fillRect(QRectF(4, 14, 16, 4), QColor("#ffe066"))
+        painter.fillRect(QRectF(4, 14, 16, 4), QColor(NOTE))
         _pen(painter, INK, 1.4)
         painter.drawPolyline(QPolygonF([QPointF(7, 12), QPointF(12, 5), QPointF(16, 8),
                                         QPointF(11, 14)]))
@@ -131,8 +153,8 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
             start = 90 - index * (360 / len(centres))
             painter.drawArc(rect, int((start - 110) * 16), int(220 * 16))
     elif name == "highlight":
-        painter.fillRect(QRectF(4, 8, 16, 8), QColor("#ffe066"))
-        _pen(painter, "#b59a00", 1.0)
+        painter.fillRect(QRectF(4, 8, 16, 8), QColor(NOTE))
+        _pen(painter, NOTE_EDGE, 1.0)
         painter.drawRect(QRectF(4, 8, 16, 8))
     elif name == "text":
         _glyph(painter, "T", INK, 14)
@@ -143,10 +165,10 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
         painter.drawRoundedRect(QRectF(8, 4, 12, 9), 2, 2)
         _arrow(painter, QPointF(9, 12), QPointF(4, 19), INK)
     elif name == "note":
-        _pen(painter, "#b8860b", 1.2)
-        painter.setBrush(QBrush(QColor("#ffe066")))
+        _pen(painter, NOTE_EDGE, 1.2)
+        painter.setBrush(QBrush(QColor(NOTE)))
         painter.drawRoundedRect(QRectF(5, 5, 14, 14), 2, 2)
-        _pen(painter, "#8a6d0b", 1.0)
+        _pen(painter, NOTE_RULE, 1.0)
         for offset in range(3):
             painter.drawLine(QPointF(8, 9 + offset * 3), QPointF(16, 9 + offset * 3))
     elif name == "stamp":
@@ -205,9 +227,9 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
         painter.drawEllipse(QRectF(4, 4, 16, 16))
         _arrow(painter, QPointF(12, 12), QPointF(19, 8), ACCENT)
     elif name == "count":
-        _pen(painter, "#c2255c", 1.5)
+        _pen(painter, MARKER, 1.5)
         painter.drawEllipse(QRectF(5, 5, 11, 11))
-        _glyph(painter, "3", "#c2255c", 8, True, QRectF(12, 10, 11, 11))
+        _glyph(painter, "3", MARKER, 8, True, QRectF(12, 10, 11, 11))
     elif name == "calibrate":
         _pen(painter, WARM, 1.5)
         painter.drawLine(QPointF(4, 16), QPointF(20, 16))
@@ -217,13 +239,13 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
     elif name == "page":
         _pen(painter, INK, 1.4)
         painter.drawRect(QRectF(6, 3, 12, 18))
-        _pen(painter, "#9aa3ad", 1.0)
+        _pen(painter, FAINT, 1.0)
         for offset in range(4):
             painter.drawLine(QPointF(8, 7 + offset * 3.2), QPointF(16, 7 + offset * 3.2))
     elif name == "pdf":
-        _pen(painter, "#c92a2a", 1.4)
+        _pen(painter, DANGER, 1.4)
         painter.drawRect(QRectF(5, 3, 14, 18))
-        _glyph(painter, "PDF", "#c92a2a", 6, True, QRectF(5, 8, 14, 10))
+        _glyph(painter, "PDF", DANGER, 6, True, QRectF(5, 8, 14, 10))
     elif name == "print":
         _pen(painter, INK, 1.4)
         painter.drawRect(QRectF(4, 9, 16, 7))
@@ -285,7 +307,7 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
         painter.setPen(QPen(QColor(ACCENT)))
         painter.drawText(QRectF(0, 0, 24, 24), Qt.AlignCenter, "x")
     elif name == "delete":
-        _pen(painter, "#c92a2a", 1.5)
+        _pen(painter, DANGER, 1.5)
         painter.drawLine(QPointF(6, 6), QPointF(18, 18))
         painter.drawLine(QPointF(18, 6), QPointF(6, 18))
     elif name == "pin":

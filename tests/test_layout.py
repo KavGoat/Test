@@ -470,3 +470,60 @@ def test_a_rolled_up_panel_comes_back_rolled_up(window):
     finally:
         second.close()
         second.deleteLater()
+
+
+# ---------------------------------------------------------------------------
+# icons follow the theme
+# ---------------------------------------------------------------------------
+
+def _icon_pixels(action, size=24):
+    from PySide6.QtCore import QSize
+    image = action.icon().pixmap(QSize(size, size)).toImage()
+    return [image.pixel(x, y)
+            for y in range(0, image.height(), 3)
+            for x in range(0, image.width(), 3)]
+
+
+def test_every_icon_on_the_window_is_redrawn_for_the_theme(window):
+    """An icon set once and forgotten keeps its old ink and vanishes."""
+    from PySide6.QtGui import QAction
+
+    before = {action: _icon_pixels(action) for action in window._icon_names}
+    window.toggle_theme(True)
+    try:
+        changed = [action for action in before
+                   if _icon_pixels(action) != before[action]]
+        assert len(changed) == len(before), \
+            f"{len(before) - len(changed)} icon(s) kept their light-theme ink"
+    finally:
+        window.toggle_theme(False)
+
+
+def test_undo_and_redo_are_among_them(window):
+    assert window.act_undo in window._icon_names
+    assert window.act_redo in window._icon_names
+    before = _icon_pixels(window.act_undo)
+    window.toggle_theme(True)
+    try:
+        assert _icon_pixels(window.act_undo) != before
+    finally:
+        window.toggle_theme(False)
+
+
+def test_no_action_with_an_icon_was_left_out(window):
+    """Every icon-carrying action on the window must be registered."""
+    from PySide6.QtGui import QAction
+
+    stray = [action.text() for action in window.findChildren(QAction)
+             # Qt's own clear-buttons on line edits are not ours to re-tint.
+             if not action.objectName().startswith("_q_")
+             and not action.icon().isNull() and action not in window._icon_names]
+    assert stray == []
+
+
+def test_there_is_one_shortcuts_window_not_two(window):
+    help_menu = next(action.menu() for action in window.menuBar().actions()
+                     if action.text().replace("&", "") == "Help")
+    labels = [action.text().replace("&", "") for action in help_menu.actions()]
+    assert labels.count("Keyboard shortcuts…") == 1
+    assert "Keyboard shortcuts" not in labels

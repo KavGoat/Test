@@ -641,8 +641,14 @@ class ShortcutManagerDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Keyboard shortcuts")
         self.manager = manager
-        self.resize(620, 620)
-        layout = QVBoxLayout(self)
+        self.resize(620, 640)
+        outer = QVBoxLayout(self)
+        self.tabs = QTabWidget()
+        outer.addWidget(self.tabs, 1)
+        keys = QWidget()
+        self.tabs.addTab(keys, "Shortcuts")
+        self.tabs.addTab(_GesturesSheet(), "Mouse and canvas")
+        layout = QVBoxLayout(keys)
 
         note = QLabel(
             "Click a shortcut and <b>press the keys you want</b>. "
@@ -705,7 +711,7 @@ class ShortcutManagerDialog(QDialog):
             buttons.addWidget(button)
         buttons.addStretch(1)
         layout.addLayout(buttons)
-        layout.addWidget(_buttons(self))
+        outer.addWidget(_buttons(self))
         self._check()
 
     # -- helpers -----------------------------------------------------------
@@ -816,29 +822,21 @@ class AboutDialog(QDialog):
         layout.addWidget(box)
 
 
-class ShortcutsDialog(QDialog):
+class _GesturesSheet(QWidget):
+    """The things the mouse and the canvas do, which are not rebindable.
+
+    It lives inside the shortcut manager rather than in a dialog of its own:
+    two menu entries both called "Keyboard shortcuts" only ever made people
+    open the wrong one.
+    """
+
     ROWS = [
         ("Typing on the page", ""),
         ("\"", "Start a text region where the cursor is"),
         ("/", "Start a calculation where the cursor is"),
         ("|", "Start a table here"),
         ("@", "Start a callout here"),
-        ("any other key", "Nothing, unless you bind it (Help ▸ Customise shortcuts)"),
-        ("Tools", ""),
-        ("Esc", "Back to the select tool / finish what you are doing"),
-        ("P / K", "Pen / highlighter"),
-        ("L / A", "Line / arrow"),
-        ("R / E / C", "Rectangle / ellipse / revision cloud"),
-        ("T / N / S", "Text box / note / stamp"),
-        ("Q / B / G", "Callout / table / plot"),
-        ("M / Alt+M", "Measure a length / draw a dimension"),
-        ("H", "Pan"),
-        ("Maths symbols", ""),
-        ("Ctrl+Alt+8 / /", "× multiply / ÷ divide"),
-        ("Ctrl+Alt+6 / 2", "^ power / ² squared"),
-        ("Ctrl+Alt+R", "√( square root"),
-        ("Ctrl+Alt+P / D", "π pi / ° degree"),
-        ("Insert ▸ Maths symbol", "The rest of them, and the keys they are on"),
+        ("any other key", "Nothing, unless it is bound on the Shortcuts tab"),
         ("Canvas", ""),
         ("Ctrl + wheel", "Zoom"),
         ("Space + drag", "Pan"),
@@ -857,9 +855,11 @@ class ShortcutsDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Keyboard shortcuts")
-        self.resize(460, 520)
         layout = QVBoxLayout(self)
+        note = QLabel("What the mouse and the canvas do. These are not "
+                      "rebindable; everything that is, is on the Shortcuts tab.")
+        note.setWordWrap(True)
+        layout.addWidget(note)
         table = QTableWidget(len(self.ROWS), 2)
         table.setHorizontalHeaderLabels(["Key", "Action"])
         table.verticalHeader().setVisible(False)
@@ -875,9 +875,6 @@ class ShortcutsDialog(QDialog):
             table.setItem(row, 1, QTableWidgetItem(action))
         table.resizeColumnToContents(0)
         layout.addWidget(table)
-        box = QDialogButtonBox(QDialogButtonBox.Close)
-        box.rejected.connect(self.reject)
-        layout.addWidget(box)
 
 
 class ToolbarDialog(QDialog):

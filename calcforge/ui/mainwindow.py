@@ -178,12 +178,23 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.view, 1)
         self.setCentralWidget(central)
 
+    def give_icon(self, action, name: str):
+        """Put an icon on an action and remember which, for the next theme.
+
+        Every icon is drawn in the theme's ink, so one set and forgotten stays
+        the colour it was drawn in and goes invisible when the theme flips.
+        Nothing may call ``setIcon`` on a long-lived action without coming
+        through here.
+        """
+        action.setIcon(icon(name))
+        self._icon_names[action] = name
+        return action
+
     def _act(self, key: str, text: str, slot, shortcut: str = "", icon_name: str = "",
              checkable: bool = False, tip: str = "") -> QAction:
         action = QAction(text, self)
         if icon_name:
-            action.setIcon(icon(icon_name))
-            self._icon_names[action] = icon_name
+            self.give_icon(action, icon_name)
         if shortcut:
             action.setShortcut(QKeySequence(shortcut))
         action.setCheckable(checkable)
@@ -215,10 +226,10 @@ class MainWindow(QMainWindow):
 
         self.act_undo = self.undo_stack.createUndoAction(self, "Undo")
         self.act_undo.setShortcut(QKeySequence.Undo)
-        self.act_undo.setIcon(icon("undo"))
+        self.give_icon(self.act_undo, "undo")
         self.act_redo = self.undo_stack.createRedoAction(self, "Redo")
         self.act_redo.setShortcut(QKeySequence.Redo)
-        self.act_redo.setIcon(icon("redo"))
+        self.give_icon(self.act_redo, "redo")
 
         self._act("cut", "Cut", self.cut_selection, "Ctrl+X")
         self._act("copy", "Copy", self.copy_selection, "Ctrl+C")
@@ -291,7 +302,8 @@ class MainWindow(QMainWindow):
         self._act("merge_lines", "Merge into one block", self.merge_calculations, "",
                   tip="Combine the selected calculations into a single region")
 
-        self._act("shortcuts", "Keyboard shortcuts", self.show_shortcuts, "F1")
+        self._act("shortcuts", "Keyboard shortcuts…", self.show_shortcuts, "F1",
+                  tip="Every shortcut, and the keys you want them on")
         self._act("edit_shortcuts", "Keyboard shortcuts…", self.edit_shortcuts,
                   "Ctrl+K", tip="Change any shortcut by pressing the keys you want")
         self._act("problems", "Show problems", self.show_problems)
@@ -342,8 +354,7 @@ class MainWindow(QMainWindow):
             if category != CATEGORIES[0]:
                 tool_bar.addSeparator()
             for tool in tools_in(category):
-                action = QAction(icon(tool.icon), tool.label, self)
-                self._icon_names[action] = tool.icon
+                action = self.give_icon(QAction(tool.label, self), tool.icon)
                 action.setCheckable(True)
                 action.setToolTip(f"{tool.label}"
                                   + (f"  ({tool.shortcut})" if tool.shortcut else "")
@@ -515,7 +526,7 @@ class MainWindow(QMainWindow):
         insert_menu = bar.addMenu("&Insert")
         for tool in TOOLS:
             if tool.category in ("Calculate", "Annotate"):
-                action = QAction(icon(tool.icon), tool.label, self)
+                action = self.give_icon(QAction(tool.label, self), tool.icon)
                 action.triggered.connect(lambda _c=False, key=tool.key: self.select_tool(key))
                 insert_menu.addAction(action)
         insert_menu.addSeparator()
@@ -538,8 +549,8 @@ class MainWindow(QMainWindow):
         calc_menu.addAction(self.act_export_vars)
 
         help_menu = bar.addMenu("&Help")
+        # One entry, not two: both used to be called "Keyboard shortcuts".
         help_menu.addAction(self.act_shortcuts)
-        help_menu.addAction(self.act_edit_shortcuts)
         help_menu.addAction(self.act_sample)
         help_menu.addAction(self.act_about)
 
@@ -2424,7 +2435,8 @@ class MainWindow(QMainWindow):
             self.update_title()
 
     def show_shortcuts(self) -> None:
-        dialogs.ShortcutsDialog(self).exec()
+        """F1 opens the one shortcut window there is."""
+        self.edit_shortcuts()
 
     def show_about(self) -> None:
         dialogs.AboutDialog(self).exec()
