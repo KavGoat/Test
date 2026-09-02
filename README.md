@@ -443,7 +443,9 @@ edited. Save, print and zoom stay live throughout, as they do everywhere else.
 | `Ctrl+Home` / `Ctrl+End` | The start and the end of the document |
 | `Ctrl`+wheel | Zoom at the pointer |
 | `Ctrl+0` `Ctrl+1` `Ctrl+2` `Ctrl+Alt+0` | Fit page · fit width · fit selection · 100% |
-| `Shift`+drag | Hold a line to 0°, 45° or 90° · square off a box |
+| `Shift`+drag | Hold a line to 0°, 45° or 90° · square off a box · draw straight freehand |
+| Drag right / left | Select what is wholly inside · what the marquee crosses |
+| Click, click… | Lasso a shape and select what is inside it · `Enter` closes it |
 | `Ctrl`+drag | Leave a copy behind · `Ctrl` mid-drag lets go of the snapping |
 | Double-click | Edit text, calculation or table · add a polyline vertex |
 | `Enter` | In a one-line calculation: open the next line below |
@@ -451,6 +453,7 @@ edited. Save, print and zoom stay live throughout, as they do everywhere else.
 | `F9` | Recalculate everything |
 | `F10` | Check every number — re-derive the document and compare |
 | `Ctrl+Shift+D` | Move or duplicate the selection by an exact offset |
+| `Ctrl+Shift+V` | Carry what was copied on the pointer and click to drop it |
 | `Ctrl+B` | Bookmark this place |
 | `Ctrl+G` / `Ctrl+Shift+G` | Group · ungroup the selection |
 | `1` … `9` | Pick up that tool from **My Tools** |

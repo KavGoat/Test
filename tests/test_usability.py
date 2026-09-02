@@ -3445,3 +3445,102 @@ def test_the_clipboard_can_be_carried_and_dropped(window):
     click(window.view, 350, 500)
     assert len(markups(window)) == 2
     assert markups(window)[1].pos().y() > 400
+
+
+# ---------------------------------------------------------------------------
+# Selecting: which way you drag, and a lasso
+# ---------------------------------------------------------------------------
+
+def _spread(window):
+    """Two boxes with a gap, so a marquee can take one, both or neither."""
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 170)
+    window.select_tool("rect")
+    drag(window.view, 260, 100, 360, 170)
+    window.select_tool("select")
+    window.view.scene().clearSelection()
+    return markups(window)[0], markups(window)[1]
+
+
+def test_dragging_right_takes_only_what_is_wholly_inside(window):
+    first, second = _spread(window)
+    drag(window.view, 60, 60, 240, 220)          # left to right, over the first
+    assert first.isSelected() and not second.isSelected()
+
+
+def test_dragging_right_does_not_take_what_it_merely_crosses(window):
+    first, second = _spread(window)
+    drag(window.view, 60, 60, 150, 220)          # cuts through the first
+    assert not first.isSelected()
+
+
+def test_dragging_left_takes_what_it_crosses(window):
+    first, second = _spread(window)
+    drag(window.view, 320, 220, 150, 60)         # right to left, crossing both
+    assert first.isSelected() and second.isSelected()
+
+
+def test_a_click_on_bare_paper_still_just_marks_the_spot(window):
+    _spread(window)
+    click(window.view, 500, 500)
+    assert window.view.insert_point() is not None
+    press_key(window.view, Qt.Key_unknown, "/")
+    assert window.view.editing_item() is not None      # typing still works
+    window.view.end_item_edit()
+
+
+def test_clicking_out_a_lasso_selects_what_is_inside_it(window):
+    first, second = _spread(window)
+    click(window.view, 60, 60)
+    click(window.view, 240, 60)
+    click(window.view, 240, 220)
+    click(window.view, 60, 220)
+    press_key(window.view, Qt.Key_Return)
+
+    assert first.isSelected() and not second.isSelected()
+    assert window.view._mode == "idle"
+
+
+def test_a_lasso_takes_only_what_is_wholly_inside(window):
+    first, _second = _spread(window)
+    click(window.view, 60, 60)
+    click(window.view, 150, 60)
+    click(window.view, 150, 220)
+    click(window.view, 60, 220)
+    press_key(window.view, Qt.Key_Return)
+    assert not first.isSelected()
+
+
+def test_escape_abandons_a_half_drawn_lasso(window):
+    _spread(window)
+    click(window.view, 60, 60)
+    click(window.view, 240, 60)
+    assert window.view._mode == "lasso"
+    press_key(window.view, Qt.Key_Escape)
+    assert window.view._mode == "idle"
+    assert window.view._marquee == []
+
+
+def test_shift_draws_a_straight_stroke_with_the_pen(window):
+    import math
+    window.select_tool("pen")
+    drag(window.view, 100, 100, 260, 190, modifiers=Qt.ShiftModifier)
+    stroke = markups(window)[0]
+    assert len(stroke.points) == 2
+    delta = stroke.points[-1] - stroke.points[0]
+    angle = abs(math.degrees(math.atan2(delta.y(), delta.x())))
+    assert min(abs(angle - a) for a in (0, 45, 90, 135, 180)) < 0.5
+
+
+def test_the_highlighter_goes_straight_on_shift_too(window):
+    window.select_tool("highlighter")
+    drag(window.view, 100, 300, 300, 302, modifiers=Qt.ShiftModifier)
+    stroke = markups(window)[0]
+    assert len(stroke.points) == 2
+    assert stroke.points[-1].y() == pytest.approx(stroke.points[0].y(), abs=0.5)
+
+
+def test_freehand_is_still_freehand_without_shift(window):
+    window.select_tool("pen")
+    drag(window.view, 100, 100, 260, 190)
+    assert len(markups(window)[0].points) > 2

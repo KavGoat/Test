@@ -1157,6 +1157,8 @@ class _GesturesSheet(QWidget):
         ("Ctrl + wheel", "Zoom"),
         ("Space + drag", "Pan"),
         ("Shift + drag", "Hold a line to 0°, 45° or 90°; square off a box"),
+        ("Drag right / left", "Select what is wholly inside · what it crosses"),
+        ("Click, click…", "Lasso a shape to select inside · Enter to close"),
         ("Double-click", "Edit text, calculation or table · add a vertex to a polyline"),
         ("Delete", "Delete the selection"),
         ("1 … 9", "Pick up that tool from My Tools"),

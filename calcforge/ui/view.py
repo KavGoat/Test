@@ -10,9 +10,10 @@ from typing import Optional
 from PySide6.QtCore import (QEvent, QMimeData, QPoint, QPointF, QRectF, Qt,
                             QTimer, Signal)
 from PySide6.QtGui import (QColor, QCursor, QKeyEvent, QMouseEvent, QPainter,
-                           QPen, QTextCursor, QTransform, QWheelEvent)
+                           QPen, QPolygonF, QTextCursor, QTransform,
+                           QWheelEvent)
 from PySide6.QtWidgets import (QApplication, QCompleter, QGraphicsProxyWidget,
-                               QGraphicsView, QLineEdit, QRubberBand)
+                               QGraphicsView, QLineEdit)
 
 from ..core.document import MM_TO_PT
 from ..core.spreadsheet import make_ref, parse_clipboard_grid
@@ -79,7 +80,10 @@ class PageView(QGraphicsView):
         self._handle_key = ""
         self._move_items: list[tuple[MarkupItem, QPointF]] = []
         self._snapshot: list[dict] = []
-        self._rubber: Optional[QRubberBand] = None
+        # The selection marquee, in scene coordinates: two corners while it is
+        # a rectangle, every corner while it is a lasso.
+        self._marquee: list = []
+        self._keep_selection = False
         self._space_pan = False
         self._pan_origin = QPoint()
         self._zoom = 1.0
@@ -241,6 +245,8 @@ class PageView(QGraphicsView):
         return TOOL_MAP.get(self.tool_key, TOOL_MAP["select"])
 
     def set_tool(self, key: str) -> None:
+        if self._mode == "lasso":
+            self.cancel_marquee()
         if self._draft is not None:
             self.cancel_draft()
         self.close_unit_editor()
@@ -645,17 +651,25 @@ class PageView(QGraphicsView):
                 event.accept()
                 return
         if item is None:
+            if self._mode == "lasso":
+                # Another corner of the lasso — and the spot for anything typed
+                # next, so a click on bare paper always marks where you are.
+                self._marquee.append(QPointF(scene_pos))
+                self.set_insert_point(self.snap_scene(scene_pos))
+                self.viewport().update()
+                event.accept()
+                return
             self.deactivate_table()
-            if not (event.modifiers() & (Qt.ShiftModifier | Qt.ControlModifier)):
+            self._keep_selection = bool(
+                event.modifiers() & (Qt.ShiftModifier | Qt.ControlModifier))
+            if not self._keep_selection:
                 self.scene().clearSelection()
             # Clicking bare paper marks the spot: whatever is typed, inserted
             # or pasted next goes there.
             self.set_insert_point(self.snap_scene(scene_pos))
             self._mode = "rubber"
-            if self._rubber is None:
-                self._rubber = QRubberBand(QRubberBand.Rectangle, self.viewport())
-            self._rubber.setGeometry(QRectF(self._press_view, self._press_view).toRect())
-            self._rubber.show()
+            self._marquee = [QPointF(scene_pos), QPointF(scene_pos)]
+            self.viewport().update()
             event.accept()
             return
 
@@ -806,9 +820,9 @@ class PageView(QGraphicsView):
             event.accept()
             return
 
-        if self._mode == "rubber" and self._rubber is not None:
-            self._rubber.setGeometry(
-                QRectF(self._press_view, event.position().toPoint()).normalized().toRect())
+        if self._mode in ("rubber", "lasso") and self._marquee:
+            self._marquee[-1] = QPointF(scene_pos)
+            self.viewport().update()
             event.accept()
             return
 
@@ -893,7 +907,12 @@ class PageView(QGraphicsView):
         local = draft.mapFromScene(point)
         draft.prepareGeometryChange()
         if self._mode == "draw_free":
-            if not draft.points or _far_enough(draft.points[-1], local):
+            if modifiers & Qt.ShiftModifier:
+                # Shift draws a straight stroke from where the pen went down,
+                # held to 0°, 45° or 90° like every other tool.
+                start = draft.points[0] if draft.points else QPointF(0, 0)
+                draft.points = [QPointF(start), self.constrain(start, local)]
+            elif not draft.points or _far_enough(draft.points[-1], local):
                 draft.points.append(local)
         elif self._mode == "draw_poly":
             if modifiers & Qt.ShiftModifier and len(draft.points) >= 2:
@@ -1000,16 +1019,24 @@ class PageView(QGraphicsView):
             return
 
         if self._mode == "rubber":
-            self._mode = "idle"
-            if self._rubber is not None:
-                rect = self._rubber.geometry()
-                self._rubber.hide()
-                scene_rect = self.mapToScene(rect).boundingRect()
-                for item in self.scene().items(scene_rect):
-                    if isinstance(item, MarkupItem) and self.editable(item):
-                        for member in self.group_of(item):
-                            member.setSelected(True)
-            self.selectionChanged.emit()
+            if self._is_a_click(scene_pos):
+                # A click rather than a drag: the marquee becomes a lasso, and
+                # the next clicks put its corners in.
+                self._mode = "lasso"
+                self._marquee = [QPointF(self._press_scene), QPointF(scene_pos)]
+                self.statusMessage.emit(
+                    "Lasso: click each corner · double-click or Enter to select "
+                    "what is inside · Esc to cancel")
+                self.viewport().update()
+                event.accept()
+                return
+            # select_in_marquee reads the mode to know what shape it is, so
+            # it is left alone until then.
+            self.select_in_marquee()
+            event.accept()
+            return
+
+        if self._mode == "lasso":
             event.accept()
             return
 
@@ -1088,6 +1115,10 @@ class PageView(QGraphicsView):
         scene_pos = self.mapToScene(event.position().toPoint())
         if self._mode == "draw_poly":
             self.finish_poly()
+            event.accept()
+            return
+        if self._mode == "lasso":
+            self.select_in_marquee()
             event.accept()
             return
         # Already editing this region: let the editor select a word.
@@ -1512,6 +1543,8 @@ class PageView(QGraphicsView):
             editor.setTextCursor(cursor)
 
     def begin_item_edit(self, item) -> None:
+        if self._mode == "lasso":
+            self.cancel_marquee()
         # The region may be on a page other than the one on screen — somebody
         # can scroll while a calculation is open — so its own page is what has
         # to be recorded, not whichever the chrome calls current.
@@ -2173,9 +2206,16 @@ class PageView(QGraphicsView):
     # keyboard
     # ------------------------------------------------------------------
     def idle_on_canvas(self) -> bool:
-        """True when a keystroke should be read as "start something here"."""
+        """True when a keystroke should be read as "start something here".
+
+        A lasso with only its first point down counts as idle: that is what one
+        click on bare paper leaves behind, and a click on bare paper followed
+        by typing is how most things get written on a page.
+        """
+        quiet = self._mode == "idle" or (self._mode == "lasso"
+                                         and len(self._marquee) <= 2)
         return (self._editing_item is None and self.active_table is None
-                and self._cell_editor is None and self._mode == "idle"
+                and self._cell_editor is None and quiet
                 and self.tool_key in ("select", "pan"))
 
     def set_insert_point(self, scene_pos: Optional[QPointF]) -> None:
@@ -2191,6 +2231,8 @@ class PageView(QGraphicsView):
     def drawForeground(self, painter: QPainter, rect: QRectF) -> None:
         """Draw the insertion point, so it is obvious where things will land."""
         super().drawForeground(painter, rect)
+        if self._marquee:
+            self._draw_marquee(painter)
         self._draw_group_boxes(painter)
         if self._pending_stamp is not None:
             self._draw_pending_preview(painter)
@@ -2252,6 +2294,84 @@ class PageView(QGraphicsView):
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
         painter.drawRect(QRectF(top_left, box.size()))
+        painter.restore()
+
+    # -- selecting with a marquee ------------------------------------------
+    def marquee_polygon(self):
+        """The marquee as a polygon, whichever shape it is."""
+        if len(self._marquee) < 2:
+            return QPolygonF()
+        if self._mode == "rubber":
+            rect = QRectF(self._marquee[0], self._marquee[-1]).normalized()
+            return QPolygonF([rect.topLeft(), rect.topRight(),
+                              rect.bottomRight(), rect.bottomLeft()])
+        return QPolygonF(self._marquee)
+
+    def marquee_crosses(self) -> bool:
+        """True when the marquee also takes what it merely touches.
+
+        Dragging right, as the drawing is read, takes only what is wholly
+        inside; dragging back the other way takes anything it crosses. That is
+        how every CAD program does it, and the two are worth telling apart.
+        """
+        return (self._mode == "rubber" and len(self._marquee) >= 2
+                and self._marquee[-1].x() < self._marquee[0].x())
+
+    def select_in_marquee(self) -> None:
+        """Select what the marquee caught, then put it away."""
+        polygon = self.marquee_polygon()
+        crossing = self.marquee_crosses()
+        self._marquee = []
+        self._mode = "idle"
+        self.viewport().update()
+        if polygon.size() < 3:
+            self.selectionChanged.emit()
+            return
+        area = polygon.boundingRect()
+        scene = self.scene()
+        for item in scene.items(area) if scene is not None else []:
+            if not isinstance(item, MarkupItem) or not self.editable(item):
+                continue
+            box = item.sceneBoundingRect()
+            if crossing:
+                caught = polygon.intersects(QPolygonF(box))
+            else:
+                caught = all(polygon.containsPoint(corner, Qt.OddEvenFill)
+                             for corner in (box.topLeft(), box.topRight(),
+                                            box.bottomRight(), box.bottomLeft()))
+            if caught:
+                for member in self.group_of(item):
+                    member.setSelected(True)
+        self.selectionChanged.emit()
+
+    def cancel_marquee(self) -> None:
+        self._marquee = []
+        self._mode = "idle"
+        self.viewport().update()
+
+    def _draw_marquee(self, painter: QPainter) -> None:
+        """The marquee itself: solid to take what is inside, dashed to cross."""
+        if self._mode == "lasso" and len(self._marquee) <= 2:
+            return          # one click down: nothing to show yet
+        polygon = self.marquee_polygon()
+        if polygon.size() < 2:
+            return
+        crossing = self.marquee_crosses()
+        colour = QColor("#2f9e44") if crossing else QColor("#1971c2")
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        pen = QPen(colour)
+        pen.setWidthF(0)
+        if crossing or self._mode == "lasso":
+            pen.setStyle(Qt.DashLine)
+        painter.setPen(pen)
+        fill = QColor(colour)
+        fill.setAlpha(28)
+        painter.setBrush(fill)
+        if self._mode == "rubber":
+            painter.drawRect(QRectF(self._marquee[0], self._marquee[-1]).normalized())
+        else:
+            painter.drawPolygon(polygon)
         painter.restore()
 
     def _draw_group_boxes(self, painter: QPainter) -> None:
@@ -2462,7 +2582,9 @@ class PageView(QGraphicsView):
                 self.statusMessage.emit("Callout cancelled")
                 event.accept()
                 return
-            if self._mode in ("draw_poly", "draw_click"):
+            if self._mode == "lasso":
+                self.cancel_marquee()
+            elif self._mode in ("draw_poly", "draw_click"):
                 self.cancel_draft()
             elif getattr(self, "_editing_item", None) is not None:
                 self.end_item_edit()
@@ -2482,6 +2604,11 @@ class PageView(QGraphicsView):
 
         if key in (Qt.Key_Return, Qt.Key_Enter) and self._mode == "draw_poly":
             self.finish_poly()
+            event.accept()
+            return
+
+        if key in (Qt.Key_Return, Qt.Key_Enter) and self._mode == "lasso":
+            self.select_in_marquee()
             event.accept()
             return
 
