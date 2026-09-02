@@ -8,10 +8,12 @@ from typing import Optional
 from PySide6.QtCore import QMimeData, QPoint, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (QColor, QCursor, QKeyEvent, QMouseEvent, QPainter,
                            QPen, QTextCursor, QTransform, QWheelEvent)
-from PySide6.QtWidgets import (QApplication, QGraphicsView, QLineEdit, QRubberBand, QGraphicsProxyWidget)
+from PySide6.QtWidgets import (QApplication, QCompleter, QGraphicsProxyWidget,
+                               QGraphicsView, QLineEdit, QRubberBand)
 
 from ..core.document import MM_TO_PT
 from ..core.spreadsheet import parse_clipboard_grid
+from ..core.units import parse_unit
 from ..items.base import HANDLE_CURSORS, MarkupItem
 from ..items.mathitem import LINE_STEP, MathItem
 from .scene import PageFrame, detach
@@ -76,6 +78,9 @@ class PageView(QGraphicsView):
         self._cell_editor: Optional[QLineEdit] = None
         self._cell_proxy: Optional[QGraphicsProxyWidget] = None
         self._editing_cell: Optional[tuple[int, int]] = None
+        self._unit_editor: Optional[QLineEdit] = None
+        self._unit_proxy: Optional[QGraphicsProxyWidget] = None
+        self._unit_target: tuple = (None, -1)
         self._fill_origin: Optional[tuple[int, int]] = None
         self._editing_item = None
 
@@ -127,6 +132,7 @@ class PageView(QGraphicsView):
         self.window.undo_stack.push(command)
 
     def after_undo(self) -> None:
+        self.close_unit_editor(commit=False)
         self.close_cell_editor(commit=False)
         self.active_table = None
         self.window.recalculate()
@@ -211,6 +217,7 @@ class PageView(QGraphicsView):
     def set_tool(self, key: str) -> None:
         if self._draft is not None:
             self.cancel_draft()
+        self.close_unit_editor()
         self.close_cell_editor()
         self.tool_key = key if key in TOOL_MAP else "select"
         tool = self.current_tool()
@@ -390,6 +397,15 @@ class PageView(QGraphicsView):
         scene_pos = self.mapToScene(event.position().toPoint())
         self._press_scene = scene_pos
         self._press_view = event.position().toPoint()
+
+        # A click away from the little unit box finishes it, the way clicking
+        # off any other in-place editor does.
+        if self._unit_editor is not None and event.button() == Qt.LeftButton:
+            proxy = self._unit_proxy
+            if proxy is not None and proxy.sceneBoundingRect().contains(scene_pos):
+                super().mousePressEvent(event)
+                return
+            self.close_unit_editor(commit=True)
 
         # While a region is being edited the pointer belongs to its text: a
         # click inside places the caret, a drag selects, a click outside
@@ -831,6 +847,14 @@ class PageView(QGraphicsView):
                 self.open_cell_editor()
             event.accept()
             return
+        if isinstance(item, MathItem) and not item.locked:
+            # Double-clicking the answer changes the unit it is shown in, the
+            # way SMath has a unit slot beside every result. Anywhere else on
+            # the line edits the line.
+            row = item.result_at(item.mapFromScene(scene_pos))
+            if row >= 0 and self.open_unit_editor(item, row):
+                event.accept()
+                return
         if isinstance(item, (MathItem, _TextBase)) and not item.locked:
             self.begin_item_edit(item)
             self.place_caret(item, scene_pos)
@@ -1054,7 +1078,7 @@ class PageView(QGraphicsView):
         sentence rather than a request to change tool.
         """
         return (self._editing_item is not None or self._cell_editor is not None
-                or self.active_table is not None)
+                or self._unit_editor is not None or self.active_table is not None)
 
     @staticmethod
     def place_caret(item, scene_pos: QPointF) -> None:
@@ -1194,6 +1218,91 @@ class PageView(QGraphicsView):
                     self._cell_editor.cursorPosition() - len(closing))
             return True
         return False
+
+    # ------------------------------------------------------------------
+    # the unit a result is shown in
+    # ------------------------------------------------------------------
+    def open_unit_editor(self, item: MathItem, index: int) -> bool:
+        """Type the unit a printed result should be shown in, SMath-style.
+
+        The box opens over the answer itself, offering the units it could be
+        converted to and the names already defined, so the unit can be picked
+        with the arrow keys rather than remembered.
+        """
+        if item.locked or not (0 <= index < len(item.rows)):
+            return False
+        self.close_unit_editor(commit=False)
+        rect = item.result_rect(index)
+        if rect.isEmpty():
+            return False
+        editor = QLineEdit()
+        editor.setText(item.display_unit_of(index))
+        editor.setStyleSheet(
+            "QLineEdit { border: 2px solid #1971c2; background: #ffffff; "
+            "color: #1246a0; padding: 0 2px; }")
+        font = item.style.font()
+        font.setPointSizeF(max(item.style.font_size, 6.0))
+        editor.setFont(font)
+        editor.setCompleter(self._unit_completer(editor))
+        proxy = self.scene().addWidget(editor)
+        proxy.setZValue(10_000)
+        proxy.setPos(item.mapToScene(rect.topLeft()))
+        editor.setFixedSize(int(max(rect.width() + 24, 80)), int(max(rect.height(), 16)))
+        editor.selectAll()
+        editor.setFocus(Qt.OtherFocusReason)
+        editor.returnPressed.connect(lambda: self.close_unit_editor(commit=True))
+        self._unit_editor = editor
+        self._unit_proxy = proxy
+        self._unit_target = (item, index)
+        self.statusMessage.emit(
+            "Type the unit to show this result in — Enter to accept, "
+            "Esc to leave it alone, empty to let it choose")
+        return True
+
+    def _unit_completer(self, parent) -> QCompleter:
+        """Units to convert to, and the names this document already knows."""
+        from ..core.units import UNIT_MENU
+
+        words: list[str] = []
+        for group in UNIT_MENU.values():
+            words += [unit for unit in group if unit not in words]
+        workspace = self.window.document.workspace
+        words += sorted(set(workspace.variables) | set(workspace.functions))
+        completer = QCompleter(words, parent)
+        completer.setCaseSensitivity(Qt.CaseSensitive)
+        completer.setCompletionMode(QCompleter.PopupCompletion)
+        completer.setFilterMode(Qt.MatchStartsWith)
+        return completer
+
+    def close_unit_editor(self, commit: bool = True) -> None:
+        if self._unit_editor is None:
+            return
+        text = self._unit_editor.text().strip()
+        item, index = self._unit_target
+        proxy = self._unit_proxy
+        self._unit_editor = None
+        self._unit_proxy = None
+        self._unit_target = (None, -1)
+        if proxy is not None:
+            widget = proxy.widget()
+            if widget is not None:
+                widget.clearFocus()
+            proxy.clearFocus()
+            if proxy.scene() is not None:
+                proxy.scene().removeItem(proxy)
+            proxy.deleteLater()
+        if not commit or item is None:
+            return
+        if text and not _is_a_unit(text):
+            self.statusMessage.emit(f"“{text}” is not a unit I know")
+            return
+        self.begin_snapshot(self.involved_frames(item))
+        if item.set_display_unit(index, text):
+            self.window.recalculate()
+            self.commit_snapshot("Change result unit")
+            self.statusMessage.emit(f"Result shown in {text}" if text
+                                    else "Result shown in the unit it reads best in")
+        self.setFocus(Qt.OtherFocusReason)
 
     def markup_at(self, scene_pos: QPointF) -> Optional[MarkupItem]:
         for item in self.scene().items(scene_pos):
@@ -1478,6 +1587,14 @@ class PageView(QGraphicsView):
         # While a region or a cell is being edited every key belongs to it —
         # arrows move the caret, not the markup — apart from Escape, which
         # finishes the edit.
+        if self._unit_editor is not None:
+            if key == Qt.Key_Escape:
+                self.close_unit_editor(commit=False)
+                event.accept()
+                return
+            super().keyPressEvent(event)
+            return
+
         if self._editing_item is not None or self._cell_editor is not None:
             if key == Qt.Key_Escape:
                 if self._cell_editor is not None:
@@ -1712,6 +1829,14 @@ class PageView(QGraphicsView):
             self.selectionChanged.emit()
         menu = self.window.build_context_menu(item, scene_pos)
         menu.exec(event.globalPos())
+
+
+def _is_a_unit(text: str) -> bool:
+    """True when pint can make sense of what was typed."""
+    try:
+        return parse_unit(text) is not None
+    except Exception:                        # noqa: BLE001 - anything pint throws
+        return False
 
 
 def _far_enough(a: QPointF, b: QPointF) -> bool:

@@ -419,6 +419,58 @@ class MathItem(MarkupItem):
             return QRectF()
         return QRectF(self._editor.pos(), self._editor.boundingRect().size())
 
+    # -- the result's own unit ---------------------------------------------
+    def result_rect(self, index: int) -> QRectF:
+        """Where the printed answer for row *index* sits, in item coordinates."""
+        if not (0 <= index < len(self.rows)):
+            return QRectF()
+        row = self.rows[index]
+        box = row.result or row.error_box
+        if box is None:
+            return QRectF()
+        pad = self.style.padding
+        x = pad + (self._left_column if self.align_results
+                   else (row.left.width if row.left else 0.0)) + self.result_gap
+        return QRectF(x, row.top, box.width, row.height)
+
+    def result_at(self, point: QPointF) -> int:
+        """The row whose printed answer is under *point*, or -1."""
+        for index, row in enumerate(self.rows):
+            if row.result is None:
+                continue
+            if self.result_rect(index).adjusted(-2, -1, 6, 1).contains(point):
+                return index
+        return -1
+
+    def display_unit_of(self, index: int) -> str:
+        """The unit that row is being shown in, whether asked for or chosen."""
+        if not (0 <= index < len(self.rows)):
+            return ""
+        statement = self.rows[index].statement
+        if statement.target_unit:
+            return statement.target_unit
+        from ..core.units import format_unit
+        value = statement.result
+        units = getattr(value, "units", None)
+        return format_unit(units) if units is not None else ""
+
+    def set_display_unit(self, index: int, unit: str) -> bool:
+        """Show row *index* in *unit*; False when the line could not be found."""
+        if not (0 <= index < len(self.rows)):
+            return False
+        statement = self.rows[index].statement
+        try:
+            line = self.statements.index(statement)
+        except ValueError:
+            return False
+        lines = self.source.split("\n")
+        if line >= len(lines):
+            return False
+        lines[line] = engine.set_display_unit(lines[line], unit)
+        self.source = "\n".join(lines)
+        self.touch()
+        return True
+
     def line_at(self, local_y: float) -> int:
         for index, row in enumerate(self.rows):
             if row.top <= local_y <= row.top + row.height + self.line_gap:

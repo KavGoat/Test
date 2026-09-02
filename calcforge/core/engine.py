@@ -694,6 +694,37 @@ def _strip_result_request(text: str) -> tuple[str, bool]:
     return text, False
 
 
+def set_display_unit(line: str, unit: str) -> str:
+    """Rewrite one source line so its result is shown in *unit*.
+
+    Keeps everything else the author wrote — the comment, the trailing "="
+    that asked for the answer in the first place — and replaces any unit they
+    had asked for before. An empty *unit* puts the line back to choosing its
+    own.
+    """
+    raw = line.rstrip()
+    comment = ""
+    split = _split_top_level(raw, "#")
+    if split and split[0].strip():
+        raw, comment = split[0].rstrip(), split[1].strip()
+    body, asked = _strip_result_request(raw.strip())
+    for arrow in _ARROWS:
+        split = _split_top_level(body, arrow)
+        if split and split[0].strip():
+            body = split[0].rstrip()
+            body, again = _strip_result_request(body)
+            asked = asked or again
+            break
+    text = body.rstrip()
+    if unit.strip():
+        text += f" → {unit.strip()}"
+    if asked:
+        text += " ="
+    if comment:
+        text += f"   # {comment}"
+    return text
+
+
 def parse_statement(line: str) -> Statement:
     """Parse a single source line into a :class:`Statement` (no evaluation)."""
     raw = line.rstrip()

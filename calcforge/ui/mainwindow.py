@@ -2166,6 +2166,13 @@ class MainWindow(QMainWindow):
             if isinstance(item, (MathItem, _TextBase)):
                 menu.addAction("Edit…", lambda: self.view.begin_item_edit(item))
             if isinstance(item, MathItem):
+                row = item.result_at(item.mapFromScene(scene_pos))
+                if row < 0:
+                    row = next((i for i, r in enumerate(item.rows)
+                                if r.result is not None), -1)
+                if row >= 0:
+                    menu.addAction("Show this result in…",
+                                   lambda r=row: self.view.open_unit_editor(item, r))
                 if not item.single_line:
                     menu.addAction(self.act_split_lines)
                 if len([i for i in self.selected_items() if isinstance(i, MathItem)]) > 1:

@@ -1321,3 +1321,108 @@ def test_a_region_told_to_show_everything_still_does(window):
     block.show_definition_results = True
     block.relayout()
     assert [s.name for s in block.statements if block._wants_result(s)] == ["A"]
+
+
+# ---------------------------------------------------------------------------
+# Changing the unit a result is shown in
+# ---------------------------------------------------------------------------
+
+def _result_point(window, block, row=None):
+    """A scene point on a printed answer."""
+    if row is None:
+        row = next(i for i, r in enumerate(block.rows) if r.result is not None)
+    return block.mapToScene(block.result_rect(row).center())
+
+
+def test_double_clicking_an_answer_opens_its_unit(window):
+    block = _calc(window, "L := 6 m\nw := 12 kN/m\nM := w*L^2/8 =")
+    window.select_tool("select")
+    point = _result_point(window, block)
+    double_click(window.view, point.x(), point.y())
+
+    assert window.view._unit_editor is not None
+    assert window.view.editing_item() is None          # not the source editor
+    assert window.view._unit_editor.text() == "kN·m"
+
+
+def test_typing_a_unit_changes_what_the_answer_reads(window):
+    block = _calc(window, "L := 6 m\nw := 12 kN/m\nM := w*L^2/8 =")
+    window.view.open_unit_editor(block, block.result_at(
+        block.result_rect(2).center()))
+    window.view._unit_editor.setText("N*m")
+    window.view.close_unit_editor(commit=True)
+
+    assert "→ N*m" in block.source
+    assert block.source.rstrip().endswith("=")          # still asking for it
+    statement = block.statements[2]
+    assert statement.target_unit == "N*m"
+    assert "54000" in statement.result_text().replace(" ", "").replace(" ", "") \
+        or "5.4" in statement.result_text()
+
+
+def test_emptying_the_unit_lets_it_choose_again(window):
+    block = _calc(window, "L := 6 m\nw := 12 kN/m\nM := w*L^2/8 → N*m =")
+    assert block.statements[2].target_unit == "N*m"
+    window.view.open_unit_editor(block, 2)
+    window.view._unit_editor.setText("")
+    window.view.close_unit_editor(commit=True)
+    assert "→" not in block.source
+    assert block.statements[2].target_unit == ""
+
+
+def test_a_unit_that_makes_no_sense_is_refused(window):
+    block = _calc(window, "L := 6 m\nw := 12 kN/m\nM := w*L^2/8 =")
+    before = block.source
+    window.view.open_unit_editor(block, 2)
+    window.view._unit_editor.setText("bananas")
+    window.view.close_unit_editor(commit=True)
+    assert block.source == before
+
+
+def test_escape_leaves_the_unit_alone(window):
+    block = _calc(window, "b := 300 mm\nA := b*b =")
+    before = block.source
+    window.view.open_unit_editor(block, 1)
+    window.view._unit_editor.setText("cm^2")
+    press_key(window.view, Qt.Key_Escape)
+    assert window.view._unit_editor is None
+    assert block.source == before
+
+
+def test_changing_the_unit_can_be_undone(window):
+    block = _calc(window, "b := 300 mm\nA := b*b =")
+    before = block.source
+    window.view.open_unit_editor(block, 1)
+    window.view._unit_editor.setText("cm^2")
+    window.view.close_unit_editor(commit=True)
+    assert block.source != before
+    window.undo_stack.undo()
+    assert window.view.scene().ordered_markups()[0].source == before
+
+
+def test_the_unit_box_offers_units_and_the_names_you_have_defined(window):
+    block = _calc(window, "b := 300 mm\nA := b*b =")
+    window.view.open_unit_editor(block, 1)
+    completer = window.view._unit_editor.completer()
+    words = [completer.model().data(completer.model().index(row, 0))
+             for row in range(completer.model().rowCount())]
+    assert "kN*m" in words and "mm^2" in words
+    assert "b" in words and "A" in words
+    window.view.close_unit_editor(commit=False)
+
+
+def test_the_unit_box_counts_as_typing(window):
+    block = _calc(window, "b := 300 mm\nA := b*b =")
+    window.view.open_unit_editor(block, 1)
+    assert window.view.is_editing()
+    window.view.close_unit_editor(commit=False)
+    assert not window.view.is_editing()
+
+
+def test_the_menu_can_change_the_unit_too(window):
+    block = _calc(window, "b := 300 mm\nA := b*b =")
+    window.select_tool("select")
+    point = _result_point(window, block)
+    menu = window.build_context_menu(block, point)
+    labels = [action.text() for action in menu.actions()]
+    assert "Show this result in…" in labels
