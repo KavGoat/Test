@@ -2669,3 +2669,91 @@ def test_the_page_menu_only_offers_it_where_there_is_a_drawing(window, tmp_path)
     sheet = {a.text(): a for a in window.page_menu(1).actions()}
     assert not blank["Change colours…"].isEnabled()
     assert sheet["Change colours…"].isEnabled()
+
+
+# ---------------------------------------------------------------------------
+# Writing a formula by pointing at cells
+# ---------------------------------------------------------------------------
+
+def _sheet(window):
+    window.select_tool("table")
+    drag(window.view, 60, 60, 420, 240)
+    table = window.view.active_table
+    table.sheet.resize(6, 4)
+    table.set_cell(0, 0, "2")
+    table.set_cell(0, 1, "3")
+    return table
+
+
+def test_clicking_a_cell_while_typing_a_formula_refers_to_it(window):
+    table = _sheet(window)
+    table.current = table.anchor = (2, 0)
+    window.view.open_cell_editor(initial="=")
+
+    target = table.mapToScene(table.cell_rect(0, 1).center())
+    click(window.view, target.x(), target.y())
+
+    assert window.view._cell_editor is not None       # still typing
+    assert window.view._cell_editor.text() == "=B1"
+    assert table.pointing == (0, 1)
+
+
+def test_the_arrow_keys_choose_the_cell_to_refer_to(window):
+    table = _sheet(window)
+    table.current = table.anchor = (2, 2)
+    window.view.open_cell_editor(initial="=")
+
+    press_key(window.view, Qt.Key_Up)
+    assert window.view._cell_editor.text() == "=C2"
+    press_key(window.view, Qt.Key_Up)
+    assert window.view._cell_editor.text() == "=C1"   # replaced, not appended
+    press_key(window.view, Qt.Key_Left)
+    assert window.view._cell_editor.text() == "=B1"
+
+
+def test_a_pointed_formula_works_out(window):
+    table = _sheet(window)
+    table.current = table.anchor = (2, 0)
+    window.view.open_cell_editor(initial="=")
+    first = table.mapToScene(table.cell_rect(0, 0).center())
+    click(window.view, first.x(), first.y())
+    press_key(window.view, Qt.Key_Plus, "+")
+    second = table.mapToScene(table.cell_rect(0, 1).center())
+    click(window.view, second.x(), second.y())
+    window.view.close_cell_editor(commit=True)
+    window.recalculate()
+
+    assert table.sheet.raw(2, 0) == "=A1+B1"
+    assert table.sheet.value(2, 0) == 5
+
+
+def test_the_arrows_still_move_the_caret_in_ordinary_text(window):
+    table = _sheet(window)
+    table.current = table.anchor = (2, 0)
+    window.view.open_cell_editor(initial="hello")
+    editor = window.view._cell_editor
+    editor.setCursorPosition(5)
+    press_key(window.view, Qt.Key_Left)
+    assert editor.text() == "hello"
+    assert table.pointing is None
+
+
+def test_the_arrows_move_the_caret_once_a_reference_is_finished(window):
+    table = _sheet(window)
+    table.current = table.anchor = (2, 0)
+    window.view.open_cell_editor(initial="=A1")
+    editor = window.view._cell_editor
+    editor.setCursorPosition(3)
+    press_key(window.view, Qt.Key_Left)
+    assert editor.text() == "=A1"                    # not a reference to another cell
+
+
+def test_typing_after_pointing_finishes_the_reference(window):
+    table = _sheet(window)
+    table.current = table.anchor = (2, 0)
+    window.view.open_cell_editor(initial="=")
+    press_key(window.view, Qt.Key_Up)
+    assert window.view._point_span is not None
+    press_key(window.view, Qt.Key_Asterisk, "*")
+    assert window.view._point_span is None
+    assert table.pointing is None

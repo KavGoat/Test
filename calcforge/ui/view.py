@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 from typing import Optional
 
 from PySide6.QtCore import QMimeData, QPoint, QPointF, QRectF, Qt, Signal
@@ -13,7 +14,7 @@ from PySide6.QtWidgets import (QApplication, QCompleter, QGraphicsProxyWidget,
                                QGraphicsView, QLineEdit, QRubberBand)
 
 from ..core.document import MM_TO_PT
-from ..core.spreadsheet import parse_clipboard_grid
+from ..core.spreadsheet import make_ref, parse_clipboard_grid
 from ..core.units import parse_unit
 from ..items.base import HANDLE_CURSORS, MarkupItem, build_item
 from ..items.contents import ContentsItem
@@ -89,6 +90,10 @@ class PageView(QGraphicsView):
         self._unit_editor: Optional[QLineEdit] = None
         self._unit_proxy: Optional[QGraphicsProxyWidget] = None
         self._unit_target: tuple = (None, -1)
+        # While a formula is being typed: the cell being pointed at, and where
+        # its reference sits in the text so the next arrow key can replace it.
+        self._pointing: Optional[tuple[int, int]] = None
+        self._point_span: Optional[tuple[int, int]] = None
         self._fill_origin: Optional[tuple[int, int]] = None
         self._draw_origin: Optional[QPointF] = None
         # Ctrl held when a drag starts leaves the originals where they were.
@@ -578,6 +583,14 @@ class PageView(QGraphicsView):
                 event.accept()
                 return
             cell = self.active_table.cell_at(local)
+            if cell is not None and self._cell_editor is not None \
+                    and self.pointing_allowed():
+                # Clicking another cell while writing a formula refers to it
+                # instead of abandoning what is being typed.
+                self.point_at(*cell)
+                self._mode = "idle"
+                event.accept()
+                return
             if cell is not None:
                 self.close_cell_editor()
                 table = self.active_table
@@ -1634,15 +1647,76 @@ class PageView(QGraphicsView):
         editor.selectAll() if initial is None else editor.setCursorPosition(len(editor.text()))
         editor.setFocus(Qt.OtherFocusReason)
         editor.returnPressed.connect(lambda: self.close_cell_editor(move=(1, 0)))
+        editor.textEdited.connect(self._typed_in_cell)
         self._cell_editor = editor
         self._cell_proxy = proxy
         self._editing_cell = (row, col)
+        self.stop_pointing()
+
+    def _typed_in_cell(self, _text: str) -> None:
+        """Anything typed by hand ends the reference the arrows were building."""
+        if self._point_span is not None:
+            self.stop_pointing()
+
+    # -- pointing at cells while writing a formula -------------------------
+    #
+    # After "=" — and after every operator, bracket and comma in the formula —
+    # a reference can go next. While that is true the arrow keys and the
+    # pointer stop moving the cursor and start choosing the cell to refer to,
+    # which is how a formula gets written in every spreadsheet.
+    POINTABLE = "=+-*/^(,:<>&%"
+
+    def pointing_allowed(self) -> bool:
+        """True when what is being typed is a formula waiting for a reference."""
+        editor = self._cell_editor
+        if editor is None:
+            return False
+        text = editor.text()
+        if not text.startswith("="):
+            return False
+        if self._point_span is not None:
+            return True
+        before = text[:editor.cursorPosition()].rstrip()
+        return bool(before) and before[-1] in self.POINTABLE
+
+    def point_at(self, row: int, col: int) -> None:
+        """Put a reference to that cell into the formula being typed."""
+        editor = self._cell_editor
+        table = self.active_table
+        if editor is None or table is None:
+            return
+        row = max(0, min(row, table.sheet.rows - 1))
+        col = max(0, min(col, table.sheet.cols - 1))
+        reference = make_ref(row, col)
+        text = editor.text()
+        start = end = editor.cursorPosition()
+        if self._point_span is not None:
+            first, last = self._point_span
+            # Only replace what is still the reference this put there; if the
+            # text has moved on underneath, the new one is inserted instead.
+            if 0 <= first <= last <= len(text) and _looks_like_a_ref(text[first:last]):
+                start, end = first, last
+        editor.setText(text[:start] + reference + text[end:])
+        editor.setCursorPosition(start + len(reference))
+        self._point_span = (start, start + len(reference))
+        self._pointing = (row, col)
+        table.pointing = (row, col)
+        table.update()
+
+    def stop_pointing(self) -> None:
+        """The reference is finished; the arrows go back to moving the caret."""
+        self._point_span = None
+        self._pointing = None
+        if self.active_table is not None:
+            self.active_table.pointing = None
+            self.active_table.update()
 
     def close_cell_editor(self, commit: bool = True,
                           move: Optional[tuple[int, int]] = None) -> None:
         if self._cell_editor is None:
             return
         text = self._cell_editor.text()
+        self.stop_pointing()
         cell = self._editing_cell
         proxy = self._cell_proxy
         self._cell_editor = None
@@ -1902,6 +1976,22 @@ class PageView(QGraphicsView):
                 self.paste_cells()
                 event.accept()
                 return
+            # An arrow key in the middle of a formula chooses the cell to refer
+            # to rather than moving the caret, the way it does in Excel.
+            arrows = {Qt.Key_Left: (0, -1), Qt.Key_Right: (0, 1),
+                      Qt.Key_Up: (-1, 0), Qt.Key_Down: (1, 0)}
+            if (self._cell_editor is not None and key in arrows
+                    and not (modifiers & Qt.ControlModifier)
+                    and self.pointing_allowed()):
+                start = self._pointing or self._editing_cell or (0, 0)
+                step = arrows[key]
+                self.point_at(start[0] + step[0], start[1] + step[1])
+                event.accept()
+                return
+            if self._cell_editor is not None and key in (Qt.Key_Tab, Qt.Key_Backtab):
+                self.close_cell_editor(move=(0, -1 if key == Qt.Key_Backtab else 1))
+                event.accept()
+                return
             super().keyPressEvent(event)
             return
 
@@ -2119,6 +2209,11 @@ class PageView(QGraphicsView):
             self.selectionChanged.emit()
         menu = self.window.build_context_menu(item, scene_pos)
         menu.exec(event.globalPos())
+
+
+def _looks_like_a_ref(text: str) -> bool:
+    """A1, or BC24 — what point_at writes into a formula."""
+    return bool(re.fullmatch(r"[A-Z]{1,3}\d{1,5}", text))
 
 
 def _is_a_unit(text: str) -> bool:

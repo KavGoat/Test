@@ -39,6 +39,9 @@ class TableItem(MarkupItem):
         self.show_names = True
         self.current: tuple[int, int] = (0, 0)
         self.anchor: tuple[int, int] = (0, 0)
+        # The cell a half-written formula is pointing at, outlined while the
+        # arrows or the pointer are choosing it.
+        self.pointing: Optional[tuple[int, int]] = None
         self.style = Style(stroke="#adb5bd", fill="#ffffff", fill_opacity=1.0,
                            width=0.6, font_size=8.5, text_color="#111318", padding=3.0)
         self.header_fill = "#e9ecef"
@@ -319,6 +322,20 @@ class TableItem(MarkupItem):
         return None if isinstance(value, CellError) else value
 
     # -- painting ----------------------------------------------------------
+    def _paint_pointing(self, painter: QPainter) -> None:
+        """Outline the cell a half-written formula is referring to."""
+        row, col = self.pointing
+        if not (0 <= row < self.sheet.rows and 0 <= col < self.sheet.cols):
+            return
+        painter.save()
+        pen = QPen(QColor("#1971c2"))
+        pen.setWidthF(1.4)
+        pen.setStyle(Qt.DashLine)
+        painter.setPen(pen)
+        painter.setBrush(QColor(25, 113, 194, 28))
+        painter.drawRect(self.cell_rect(row, col))
+        painter.restore()
+
     def paint_content(self, painter: QPainter) -> None:
         painter.setRenderHint(QPainter.Antialiasing, False)
         painter.setRenderHint(QPainter.TextAntialiasing, True)
@@ -339,6 +356,8 @@ class TableItem(MarkupItem):
             self._paint_names(painter)
         if self.show_chrome:
             self._paint_selection(painter)
+        if self.pointing is not None:
+            self._paint_pointing(painter)
 
     def _paint_title(self, painter: QPainter, rect: QRectF) -> None:
         gw, gh = self.gutter_size()
