@@ -444,3 +444,37 @@ def test_a_page_never_shows_a_result_another_page_no_longer_supports(window):
     assert second.statements[0].result is not True
     result = verify_document(window.document)
     assert [p.message for p in result.problems if p.kind == "disagreement"] == []
+
+
+def test_changing_the_page_scale_does_not_turn_definitions_into_checks(window):
+    """Evaluating one page on its own is how "q = 5 kPa" starts reading true."""
+    from calcforge.core.document import PageScale
+    from calcforge.core.verify import verify_document
+
+    window.select_tool("math")
+    drag(window.view, *on_page(window, 0, 80, 80), *on_page(window, 0, 320, 130))
+    block = window.view.editing_item()
+    block._editor.setPlainText("q = 5 kPa")
+    window.view.end_item_edit()
+    window.select_tool("select")
+    assert window.document.workspace.get("q").to("kPa").magnitude == pytest.approx(5)
+
+    for ratio in (50, 100, 20):
+        window.current_page().scale = PageScale.from_ratio(ratio)
+        window.apply_scale_change()
+        assert block.statements[0].result is not True, \
+            "the definition became a check"
+        assert window.document.workspace.get("q").to("kPa").magnitude == pytest.approx(5)
+        assert [p.message for p in verify_document(window.document).problems
+                if p.kind == "disagreement"] == []
+
+
+def test_changing_the_area_unit_leaves_the_calculations_alone(window):
+    window.select_tool("math")
+    drag(window.view, *on_page(window, 0, 80, 80), *on_page(window, 0, 320, 130))
+    window.view.editing_item()._editor.setPlainText("b = 300 mm")
+    window.view.end_item_edit()
+    window.select_tool("select")
+
+    window.set_area_unit("mm^2")
+    assert window.document.workspace.get("b").to("mm").magnitude == pytest.approx(300)

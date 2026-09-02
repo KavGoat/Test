@@ -140,8 +140,13 @@ class PageView(QGraphicsView):
             frames = self.involved_frames()
         self._snapshot = [(frame, frame.serialize_items()) for frame in frames]
 
-    def involved_frames(self) -> list:
-        """Every page a gesture starting now could plausibly change."""
+    def involved_frames(self, *items) -> list:
+        """Every page a gesture starting now could plausibly change.
+
+        *items* names anything the caller is about to work on but that the view
+        does not know about yet — the region it is one line away from opening
+        for editing, say.
+        """
         scene = self.scene()
         if scene is None:
             return []
@@ -157,6 +162,9 @@ class PageView(QGraphicsView):
             remember(self.active_table.parentItem())
         for item in scene.selectedItems():
             remember(item.parentItem())
+        for item in items:
+            if item is not None:
+                remember(item.parentItem())
         return frames
 
     def all_frames(self) -> list:
@@ -812,7 +820,7 @@ class PageView(QGraphicsView):
         if isinstance(item, NoteItem) and not item.locked:
             # A note is a folded-up comment; double-clicking is how you read
             # and change what it says.
-            self.begin_snapshot()
+            self.begin_snapshot(self.involved_frames(item))
             if self.edit_note(item):
                 self.commit_snapshot("Edit note")
             event.accept()
@@ -820,7 +828,7 @@ class PageView(QGraphicsView):
         if isinstance(item, (PolyItem, MeasureItem)) and not item.locked:
             if (getattr(item, "uses_vertex_handles", True)
                     and hasattr(item, "insert_point") and len(item.points) > 2):
-                self.begin_snapshot()
+                self.begin_snapshot(self.involved_frames(item))
                 item.insert_point(item.mapFromScene(scene_pos))
                 item.refresh(self.document().workspace, self.page())
                 self.commit_snapshot("Add vertex")
@@ -1042,7 +1050,10 @@ class PageView(QGraphicsView):
             editor.setTextCursor(cursor)
 
     def begin_item_edit(self, item) -> None:
-        self.begin_snapshot()
+        # The region may be on a page other than the one on screen — somebody
+        # can scroll while a calculation is open — so its own page is what has
+        # to be recorded, not whichever the chrome calls current.
+        self.begin_snapshot(self.involved_frames(item))
         self.scene().clearSelection()
         item.setSelected(True)
         if isinstance(item, MathItem) and not getattr(item, "_enter_wired", False):
@@ -1062,7 +1073,7 @@ class PageView(QGraphicsView):
         self.end_item_edit()
         height = item.local_rect().height() if item.scene() is not None else 0.0
         below = origin + QPointF(0, max(height, self.style_line_height(item)) + LINE_STEP)
-        self.begin_snapshot()
+        self.begin_snapshot(self.involved_frames(item))
         following = MathItem("")
         following.style = item.style.copy()
         following.digits = item.digits

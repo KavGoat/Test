@@ -304,6 +304,13 @@ class PageFrame(QGraphicsObject):
         self.itemsChanged.emit()
 
     def refresh_items(self) -> None:
+        """Re-evaluate this page's items against the shared workspace.
+
+        Only ever safe as part of a whole-document pass. On its own it
+        evaluates this page against a workspace that already holds the
+        definitions from the last pass, which turns every definition on the
+        page into a check — the window recalculates instead.
+        """
         for item in self.ordered_markups():
             item.refresh(self.workspace, self.page)
 

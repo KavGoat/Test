@@ -1028,9 +1028,15 @@ class MainWindow(QMainWindow):
         self.calibrate_scale(None)
 
     def apply_scale_change(self) -> None:
-        """Everything that has to catch up when a page's scale changes."""
+        """Everything that has to catch up when a page's scale changes.
+
+        Through a full recalculation, never by refreshing one page's items on
+        their own: evaluating a page against a workspace that already holds
+        this pass's definitions turns every definition on it into a check, and
+        "q = 5 kPa" quietly starts reading "true".
+        """
         self.refresh_scale_label()
-        self.current_page().frame.refresh_items()
+        self.recalculate()
         # Measurements and rectangle sizes are in the takeoff list too, so it
         # goes stale unless it is rebuilt with them.
         self.refresh_lists()
@@ -1040,7 +1046,7 @@ class MainWindow(QMainWindow):
     def set_area_unit(self, unit: str) -> None:
         if unit:
             self.current_page().scale.area_unit = unit
-            self.current_page().frame.refresh_items()
+            self.recalculate()
             self.refresh_lists()
             self.mark_modified()
 
