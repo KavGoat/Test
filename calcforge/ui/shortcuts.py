@@ -2,7 +2,7 @@
 
 Two of these do more than pick a tool.  On an empty canvas a bare keypress does
 nothing at all unless it is bound — typing ``"`` opens a text region where the
-cursor is and typing ``\\`` opens a calculation, which is how SMath decides what
+cursor is and typing ``/`` opens a calculation, which is how SMath decides what
 you meant before you have typed anything.
 """
 from __future__ import annotations
@@ -44,7 +44,7 @@ def _tool_bindings() -> list[Binding]:
 # for without thinking about tools at all.
 DEFAULT_BINDINGS: list[Binding] = [
     Binding("insert.text", "Start typing text", '"', INSERT, "Typing", "text"),
-    Binding("insert.math", "Start typing maths", "\\", INSERT, "Typing", "math"),
+    Binding("insert.math", "Start typing maths", "/", INSERT, "Typing", "math"),
     Binding("insert.table", "Start a table here", "|", INSERT, "Typing", "table"),
     Binding("insert.callout", "Start a callout here", "@", INSERT, "Typing", "callout"),
 ] + _tool_bindings() + [
@@ -88,7 +88,13 @@ class ShortcutManager(QObject):
         return binding.default if binding else ""
 
     def set_sequence(self, action_id: str, text: str) -> None:
+        """Change a binding, and remember it straight away.
+
+        A rebound key that only survives a clean quit is a rebound key that
+        does not survive a crash, and the user has to do it twice.
+        """
         self._sequences[action_id] = text.strip()
+        self.save()
 
     def reset(self, action_id: Optional[str] = None) -> None:
         if action_id is None:

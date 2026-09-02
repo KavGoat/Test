@@ -281,3 +281,92 @@ def test_the_page_looks_the_same_in_both_themes(window):
     window.toggle_theme(True)
     dark = window.current_page().frame.render_image(dpi=60, for_print=False)
     assert light == dark, "the theme changed what is on the paper"
+
+
+def test_a_toolbar_has_a_grip_to_pick_it_up_by(window):
+    """A movable toolbar with no handle is a toolbar nobody can move."""
+    from PySide6.QtWidgets import QApplication, QStyle, QStyleOptionToolBar
+
+    sheet = QApplication.instance().styleSheet()
+    assert "QToolBar::handle" not in sheet or "width: 0" not in sheet
+    for bar in window.toolbars:
+        assert bar.isMovable()
+        option = QStyleOptionToolBar()
+        bar.initStyleOption(option)
+        extent = bar.style().pixelMetric(QStyle.PM_ToolBarHandleExtent, option, bar)
+        assert extent > 0, f"{bar.objectName()} has no grip"
+
+
+# ---------------------------------------------------------------------------
+# everything is remembered
+# ---------------------------------------------------------------------------
+
+def test_a_rebound_key_is_saved_the_moment_it_changes(window):
+    """A rebinding that only survives a clean quit does not survive a crash."""
+    from calcforge.ui.shortcuts import ShortcutManager
+
+    window.shortcuts.set_sequence("tool.rect", "y")
+    fresh = ShortcutManager()           # as if the application had restarted
+    assert fresh.sequence("tool.rect") == "y"
+
+
+def test_the_theme_is_remembered(window):
+    from calcforge.app import current_theme
+    from calcforge.theme import DARK, LIGHT
+
+    window.toggle_theme(True)
+    assert current_theme() == DARK
+    window.toggle_theme(False)
+    assert current_theme() == LIGHT
+
+
+def test_moving_a_panel_writes_the_layout_out_by_itself(window):
+    """Not only on a clean quit: a crash should not cost the arrangement."""
+    from PySide6.QtCore import QSettings
+
+    QSettings("CalcForge", "CalcForge").remove("window/state")
+    window.addDockWidget(Qt.RightDockWidgetArea, panels(window)["dock_pages"])
+    assert window._layout_timer.isActive(), "nothing scheduled a save"
+    window._layout_timer.stop()
+    window.save_layout()
+    assert QSettings("CalcForge", "CalcForge").value("window/state") is not None
+
+
+def test_hiding_a_panel_schedules_a_save(window):
+    window._layout_timer.stop()
+    panels(window)["dock_layers"].setVisible(False)
+    assert window._layout_timer.isActive()
+
+
+def test_everything_that_can_be_arranged_comes_back(window, qapp):
+    """One restart, and the whole arrangement is as it was left."""
+    from calcforge.theme import DARK
+    from calcforge.ui.mainwindow import MainWindow
+
+    window.toggle_theme(True)
+    window.shortcuts.set_sequence("tool.cloud", "y")
+    window.addToolBar(Qt.LeftToolBarArea, toolbars(window)["toolbar_tools"])
+    window.addDockWidget(Qt.TopDockWidgetArea, panels(window)["dock_problems"])
+    panels(window)["dock_problems"].set_pinned(True)
+    panels(window)["dock_functions"].close()
+    window.lock_toolbars(True)
+    window.visible_tools = {"select", "cloud"}
+    window.save_layout()
+
+    second = MainWindow()
+    second.confirm_discard = lambda: True
+    try:
+        from calcforge.app import current_theme
+        assert current_theme() == DARK
+        assert second.shortcuts.sequence("tool.cloud") == "y"
+        assert second.toolBarArea(toolbars(second)["toolbar_tools"]) == Qt.LeftToolBarArea
+        assert second.dockWidgetArea(panels(second)["dock_problems"]) == Qt.TopDockWidgetArea
+        assert panels(second)["dock_problems"].pinned
+        assert not panels(second)["dock_functions"].isVisibleTo(second)
+        assert not any(bar.isMovable() for bar in second.toolbars)
+        assert second.tool_actions["cloud"].isVisible()
+        assert not second.tool_actions["ellipse"].isVisible()
+    finally:
+        second.close()
+        second.deleteLater()
+        window.toggle_theme(False)

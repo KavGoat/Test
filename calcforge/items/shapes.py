@@ -157,6 +157,13 @@ class RectItem(MarkupItem):
         self.refresh(page=page)
         return True
 
+    def boundingRect(self) -> QRectF:
+        """Room for the size written under the rectangle."""
+        rect = super().boundingRect()
+        if self.show_size and self.size_text:
+            rect = rect.adjusted(0, 0, 0, self.style.font_size + 6)
+        return rect
+
     @property
     def value_text(self) -> str:
         """What the takeoff list reports for this shape — its size."""
@@ -191,20 +198,25 @@ class RectItem(MarkupItem):
             self._paint_size(painter, rect)
 
     def _paint_size(self, painter: QPainter, rect: QRectF) -> None:
-        font = self.style.font()
+        """Write the size under the rectangle, the way a dimension is written.
+
+        Inside the shape it covered whatever was being marked up and collided
+        with a thick border; a dimension belongs outside the thing it measures.
+        """
         from ..core.typography import set_size
-        font = set_size(font, max(self.style.font_size * 0.9, 5.5))
+
+        painter.save()
+        font = set_size(self.style.font(), max(self.style.font_size * 0.82, 5.0))
         painter.setFont(font)
         metrics = QFontMetricsF(font)
-        width = metrics.horizontalAdvance(self.size_text) + 6
-        height = metrics.height() + 2
-        box = QRectF(rect.center().x() - width / 2, rect.bottom() - height - 2,
-                     width, height)
-        painter.setBrush(QColor(255, 255, 255, 205))
-        painter.setPen(QPen(QColor(self.style.stroke or "#495057"), 0.4))
-        painter.drawRoundedRect(box, 2, 2)
-        painter.setPen(QPen(QColor(self.style.text_color)))
+        gap = max(self.style.width, 0.5) + 2.5
+        box = QRectF(rect.center().x() - metrics.horizontalAdvance(self.size_text) / 2,
+                     rect.bottom() + gap,
+                     metrics.horizontalAdvance(self.size_text), metrics.height())
+        painter.setPen(QPen(QColor(self.style.stroke or self.style.text_color)))
+        painter.setBrush(Qt.NoBrush)
         painter.drawText(box, Qt.AlignCenter, self.size_text)
+        painter.restore()
 
     def serialize(self) -> dict:
         data = self.base_dict()

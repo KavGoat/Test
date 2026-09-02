@@ -8,7 +8,8 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import (QAbstractTextDocumentLayout, QBrush, QColor, QPainter,
                            QPainterPath, QPalette, QPen, QTextCursor,
                            QTextDocument, QTextOption)
-from PySide6.QtWidgets import QGraphicsItem, QGraphicsTextItem
+from PySide6.QtWidgets import (QGraphicsItem, QGraphicsTextItem,
+                               QStyle, QStyleOptionGraphicsItem)
 
 from .base import HANDLE_SIZE, MarkupItem, Style, arrow_path, register_item
 
@@ -26,6 +27,21 @@ STAMP_PRESETS = {
     "CONFIDENTIAL": "#c92a2a",
     "ISSUED FOR TENDER": "#1098ad",
 }
+
+
+class _InlineEditor(QGraphicsTextItem):
+    """A text editor with none of Qt's own decoration.
+
+    Qt draws a dotted frame around a focused text item, sized to the text
+    rather than to the region. On a text box that already has its own outline
+    that reads as a second, wrongly-sized box floating in the corner.
+    """
+
+    def paint(self, painter: QPainter, option, widget=None) -> None:
+        trimmed = QStyleOptionGraphicsItem(option)
+        trimmed.state &= ~QStyle.State_HasFocus
+        trimmed.state &= ~QStyle.State_Selected
+        super().paint(painter, trimmed, widget)
 
 
 class _TextBase(MarkupItem):
@@ -114,7 +130,7 @@ class _TextBase(MarkupItem):
         if self.locked:
             return
         if self._editor is None:
-            self._editor = QGraphicsTextItem(self)
+            self._editor = _InlineEditor(self)
             self._editor.setDocument(self.doc)
             self._editor.setFlag(QGraphicsItem.ItemIsFocusable, True)
         self._editor.setDefaultTextColor(self.style.text_qcolor())

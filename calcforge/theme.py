@@ -63,7 +63,7 @@ QMainWindow, QDialog {{ background: {surface}; }}
 /* --- toolbars: flat bands, an underline on the active tool --------------- */
 QToolBar {{
     background: {chrome}; border: 0; border-bottom: 1px solid {chrome_edge};
-    spacing: 1px; padding: 3px 6px;
+    spacing: 1px; padding: 3px 4px 3px 2px;
 }}
 QToolBar QToolButton {{
     border: 0; border-bottom: 2px solid transparent;
@@ -77,7 +77,9 @@ QToolBar QToolButton:checked {{
 QToolBar QToolButton::menu-indicator {{ width: 0; }}
 QToolBar QLabel {{ color: {ink_soft}; padding: 0 3px 0 6px; }}
 QToolBar::separator {{ background: {chrome_edge}; width: 1px; margin: 5px 6px; }}
-QToolBar::handle {{ width: 0; height: 0; }}
+/* The grip is left to the style to draw — a rule here would replace the dots
+   with nothing, which is how the toolbars ended up with no way to pick them up.
+   The padding above leaves it room. */
 
 /* --- menus --------------------------------------------------------------- */
 QMenuBar {{ background: {chrome}; border-bottom: 1px solid {chrome_edge}; }}

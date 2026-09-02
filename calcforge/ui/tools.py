@@ -19,6 +19,7 @@ DRAG = "drag"        # press, drag, release
 CLICK = "click"      # single click places the item
 POLY = "poly"        # click for each vertex, double-click / Enter to finish
 FREE = "free"        # freehand: every mouse-move point is recorded
+ANCHOR = "anchor"    # click what it points at, then drag out the box
 NONE = "none"        # navigation only
 
 
@@ -81,8 +82,9 @@ TOOLS: list[Tool] = [
 
     Tool("text", "Text box", "text", DRAG, "Annotate", "T", "Text box",
          factory=lambda: TextItem("")),
-    Tool("callout", "Callout", "callout", DRAG, "Annotate", "Q",
-         "Text box with a leader", factory=lambda: CalloutItem("")),
+    Tool("callout", "Callout", "callout", ANCHOR, "Annotate", "Q",
+         "Click what it points at, then drag out the box",
+         factory=lambda: CalloutItem("")),
     Tool("note", "Note", "note", CLICK, "Annotate", "N",
          "Sticky note with a comment", factory=lambda: NoteItem("")),
     Tool("stamp", "Stamp", "stamp", DRAG, "Annotate", "S",

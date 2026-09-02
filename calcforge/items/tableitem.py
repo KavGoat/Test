@@ -394,11 +394,14 @@ class TableItem(MarkupItem):
                                 box.topRight() + QPointF(0.0, 5.0)])
             painter.drawPolygon(corner)
 
-            width = metrics.horizontalAdvance(name) + 8.0
-            height = metrics.height() + 1.0
-            tag = QRectF(box.left(), box.top() - height - 0.5, width, height)
-            if tag.top() < 0:                      # first row: sit inside instead
-                tag = QRectF(box.left(), box.top() + 0.5, width, height)
+            # The tag lives inside its own cell. Hanging it above the cell put
+            # it over whatever was in the row before, which is worse than not
+            # labelling it at all.
+            width, height = self._tag_size(painter, name)
+            width = min(width, box.width() - 2.0)
+            height = min(height, box.height() - 2.0)
+            tag = QRectF(box.left() + 1.0, box.top() + 1.0, max(width, 6.0),
+                         max(height, 5.0))
             painter.setBrush(QBrush(QColor(NAME_TAG)))
             painter.drawRoundedRect(tag, 1.5, 1.5)
             painter.setPen(QPen(QColor("#ffffff")))
@@ -474,9 +477,28 @@ class TableItem(MarkupItem):
                     colour = QColor("#c92a2a")
                 painter.setPen(QPen(colour))
                 box = self.cell_rect(row, col).adjusted(pad, 1, -pad, -1)
+                # A published cell wears its name in the top-left corner; the
+                # value steps aside for it rather than being written over it.
+                box.setLeft(box.left() + self._name_inset(painter, row, col))
                 painter.setClipRect(box.adjusted(-1, -1, 2, 2))
                 painter.drawText(box, self._alignment(row, col, cell), text)
                 painter.setClipping(False)
+
+    def _name_inset(self, painter: QPainter, row: int, col: int) -> float:
+        """How much room the published-name tag takes on the left of a cell."""
+        if not self.show_names:
+            return 0.0
+        name = self.name_for(row, col)
+        if not name:
+            return 0.0
+        return self._tag_size(painter, name)[0] + 3.0
+
+    def _tag_size(self, painter: QPainter, name: str) -> tuple:
+        from ..core.typography import set_size
+
+        font = set_size(self.style.font(), max(self.style.font_size * 0.72, 4.5))
+        metrics = QFontMetricsF(font)
+        return metrics.horizontalAdvance(name) + 8.0, metrics.height() + 1.0
 
     def _alignment(self, row: int, col: int, cell) -> Qt.AlignmentFlag:
         fmt = cell.fmt if cell else CellFormat()

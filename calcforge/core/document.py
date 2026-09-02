@@ -44,7 +44,8 @@ class PageSetup:
     width_mm: float = 210.0
     height_mm: float = 297.0
     orientation: str = PORTRAIT
-    margin_left: float = 20.0
+    # Even margins, so the printable area sits in the middle of the sheet.
+    margin_left: float = 15.0
     margin_top: float = 15.0
     margin_right: float = 15.0
     margin_bottom: float = 15.0

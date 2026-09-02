@@ -6,7 +6,8 @@ import math
 from typing import Optional
 
 from PySide6.QtCore import QMimeData, QPoint, QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import (QCursor, QKeyEvent, QMouseEvent, QPainter, QTransform, QWheelEvent)
+from PySide6.QtGui import (QColor, QCursor, QKeyEvent, QMouseEvent, QPainter,
+                           QPen, QTransform, QWheelEvent)
 from PySide6.QtWidgets import (QApplication, QGraphicsView, QLineEdit, QRubberBand, QGraphicsProxyWidget)
 
 from ..core.document import MM_TO_PT
@@ -20,7 +21,7 @@ from ..items.shapes import PolyItem, RectItem
 from ..items.tableitem import TableItem
 from ..items.text import CalloutItem, NoteItem, StampItem, TextItem, _TextBase
 from .commands import PageEditCommand
-from .tools import CLICK, DRAG, FREE, NONE, POLY, TOOL_MAP, Tool
+from .tools import ANCHOR, CLICK, DRAG, FREE, NONE, POLY, TOOL_MAP, Tool
 
 MIN_ZOOM = 0.08
 MAX_ZOOM = 16.0
@@ -78,6 +79,10 @@ class PageView(QGraphicsView):
         self._editing_item = None
 
         self._last_scene_pos = QPointF(60, 60)
+        # Where the next thing typed, inserted or pasted will go, and
+        # what a callout is about to point at.
+        self._insert_point: Optional[QPointF] = None
+        self._pending_anchor: Optional[QPointF] = None
         self._shown_page = 0
         for bar in (self.verticalScrollBar(), self.horizontalScrollBar()):
             bar.valueChanged.connect(self._note_visible_page)
@@ -470,6 +475,9 @@ class PageView(QGraphicsView):
             self.deactivate_table()
             if not (event.modifiers() & (Qt.ShiftModifier | Qt.ControlModifier)):
                 self.scene().clearSelection()
+            # Clicking bare paper marks the spot: whatever is typed, inserted
+            # or pasted next goes there.
+            self.set_insert_point(self.snap_scene(scene_pos))
             self._mode = "rubber"
             if self._rubber is None:
                 self._rubber = QRubberBand(QRubberBand.Rectangle, self.viewport())
@@ -529,6 +537,16 @@ class PageView(QGraphicsView):
     def _press_draw(self, event: QMouseEvent, scene_pos: QPointF, tool: Tool) -> None:
         frame = self.frame_at(scene_pos) or self.frame()
         point = self.snap_scene(scene_pos, frame)
+        if tool.mode == ANCHOR and self._pending_anchor is None:
+            # A callout is drawn the way Bluebeam draws one: click what it
+            # points at first, then drag out the box.
+            self._pending_anchor = QPointF(point)
+            self.set_insert_point(point)
+            self.statusMessage.emit(
+                f"{tool.label}: now drag out the box · Esc to start again")
+            self.viewport().update()
+            event.accept()
+            return
         if tool.mode == CLICK:
             self.begin_snapshot()
             item = self.create_item(tool, point)
@@ -940,6 +958,16 @@ class PageView(QGraphicsView):
         draft.setSelected(True)
         self.selectionChanged.emit()
 
+        if isinstance(draft, CalloutItem) and self._pending_anchor is not None:
+            # Point the leader at whatever was clicked before the box was drawn.
+            target = draft.mapFromScene(self._pending_anchor)
+            box = draft.local_rect()
+            elbow = QPointF((target.x() + box.center().x()) / 2,
+                            (target.y() + box.center().y()) / 2)
+            draft.leader = [QPointF(target), elbow]
+            self._pending_anchor = None
+            self.set_insert_point(None)
+
         # Tools that ask a question do it now, while the markup is still fresh.
         note_scale = False
         if isinstance(draft, RectItem) and draft.kind == "rect":
@@ -1343,12 +1371,44 @@ class PageView(QGraphicsView):
                 and self._cell_editor is None and self._mode == "idle"
                 and self.tool_key in ("select", "pan"))
 
+    def set_insert_point(self, scene_pos: Optional[QPointF]) -> None:
+        """Remember where the next thing put on the page should go."""
+        self._insert_point = QPointF(scene_pos) if scene_pos is not None else None
+        if scene_pos is not None:
+            self._last_scene_pos = QPointF(scene_pos)
+        self.viewport().update()
+
+    def insert_point(self) -> Optional[QPointF]:
+        return QPointF(self._insert_point) if self._insert_point is not None else None
+
+    def drawForeground(self, painter: QPainter, rect: QRectF) -> None:
+        """Draw the insertion point, so it is obvious where things will land."""
+        super().drawForeground(painter, rect)
+        point = self._pending_anchor or self._insert_point
+        if point is None:
+            return
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        arm = 6.0 / max(self._zoom, 0.05)
+        pen = QPen(QColor("#0b6bcb"))
+        pen.setWidthF(0)
+        painter.setPen(pen)
+        painter.drawLine(QPointF(point.x() - arm, point.y()),
+                         QPointF(point.x() + arm, point.y()))
+        painter.drawLine(QPointF(point.x(), point.y() - arm),
+                         QPointF(point.x(), point.y() + arm))
+        if self._pending_anchor is not None:
+            painter.setBrush(QColor(11, 107, 203, 60))
+            painter.drawEllipse(point, arm * 0.55, arm * 0.55)
+        painter.restore()
+
     def typing_position(self) -> QPointF:
         """Where a region opened by typing should appear, in page coordinates."""
-        frame = self.frame_at(self._last_scene_pos) or self.frame()
+        anchor = self._insert_point or self._last_scene_pos
+        frame = self.frame_at(anchor) or self.frame()
         if frame is None:
             return QPointF(self._last_scene_pos)
-        point = frame.mapFromScene(self._last_scene_pos)
+        point = frame.mapFromScene(anchor)
         if not frame.page_rect().contains(point):
             left, top, _width, _height = frame.page.setup.content_rect_pt
             point = QPointF(left, top)
@@ -1356,7 +1416,8 @@ class PageView(QGraphicsView):
 
     def typing_frame(self):
         """The page a region opened by typing belongs to."""
-        return self.frame_at(self._last_scene_pos) or self.frame()
+        anchor = self._insert_point or self._last_scene_pos
+        return self.frame_at(anchor) or self.frame()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         key = event.key()
@@ -1383,6 +1444,12 @@ class PageView(QGraphicsView):
             return
 
         if key == Qt.Key_Escape:
+            if self._pending_anchor is not None:
+                self._pending_anchor = None
+                self.set_insert_point(None)
+                self.statusMessage.emit("Callout cancelled")
+                event.accept()
+                return
             if self._mode == "draw_poly":
                 self.cancel_draft()
             elif getattr(self, "_editing_item", None) is not None:

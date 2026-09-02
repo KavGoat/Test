@@ -7,7 +7,7 @@ the bugs this file exists to catch.
 """
 import pytest
 from PySide6.QtCore import QEvent, QKeyCombination, QPoint, QPointF, Qt
-from PySide6.QtGui import QContextMenuEvent, QKeyEvent, QMouseEvent
+from PySide6.QtGui import QColor, QContextMenuEvent, QKeyEvent, QMouseEvent
 from PySide6.QtWidgets import QApplication
 
 from calcforge.core.document import MM_TO_PT
@@ -193,7 +193,7 @@ def test_backspace_edits_text_rather_than_deleting_the_markup(window):
 
 def test_enter_opens_the_next_calculation_line(window):
     window.view._last_scene_pos = QPointF(100, 100)
-    press_key(window.view, Qt.Key_unknown, "\\")
+    press_key(window.view, Qt.Key_unknown, "/")
     first = window.view.editing_item()
     type_text(window.view, "L = 6 m")
     press_key(window.view, Qt.Key_Return)
@@ -254,14 +254,33 @@ def test_the_modifier_tools_are_reachable_from_their_actions(window):
     assert window.view.tool_key == "measure_dimension"
 
 
-def test_q_draws_a_callout_with_a_leader(window):
+def test_q_draws_a_callout_pointing_at_what_was_clicked_first(window):
+    """Bluebeam's order: click what it points at, then drag out the box."""
     window.select_tool("select")
     window.view._last_scene_pos = QPointF(200, 200)
     press_key(window.view, Qt.Key_unknown, "q")
-    drag(window.view, 200, 200, 360, 250)
+
+    click(window.view, 180, 420)                 # the thing being pointed at
+    assert only(window, CalloutItem) == []       # nothing drawn yet
+    assert window.view._pending_anchor is not None
+
+    drag(window.view, 300, 200, 460, 260)        # now the box
     callout = only(window, CalloutItem)[0]
+    assert window.view._pending_anchor is None
     assert len(callout.leader) >= 2
+    tip = callout.mapToScene(callout.leader[0])
+    assert tip.x() == pytest.approx(180, abs=6)
+    assert tip.y() == pytest.approx(420, abs=6)
     assert window.view.editing_item() is callout
+
+
+def test_escape_abandons_a_half_drawn_callout(window):
+    window.select_tool("callout")
+    click(window.view, 180, 420)
+    assert window.view._pending_anchor is not None
+    press_key(window.view, Qt.Key_Escape)
+    assert window.view._pending_anchor is None
+    assert only(window, CalloutItem) == []
 
 
 # ---------------------------------------------------------------------------
@@ -822,3 +841,65 @@ def test_a_bare_letter_types_rather_than_picking_a_tool(window):
     type_text(window.view, "mrc")
     assert box.text() == "mrc"
     assert window.view.current_tool().key == "select"
+
+
+# ---------------------------------------------------------------------------
+# clicking bare paper marks the spot
+# ---------------------------------------------------------------------------
+
+def test_clicking_empty_paper_marks_where_things_will_go(window):
+    window.select_tool("select")
+    assert window.view.insert_point() is None
+    click(window.view, 260, 340)
+    marked = window.view.insert_point()
+    assert marked is not None
+    assert marked.x() == pytest.approx(260, abs=4)
+    assert marked.y() == pytest.approx(340, abs=4)
+
+
+def test_typing_starts_where_the_page_was_clicked(window):
+    window.select_tool("select")
+    click(window.view, 300, 500)
+    press_key(window.view, Qt.Key_unknown, "/")
+    block = window.view.editing_item()
+    assert block is not None
+    assert block.pos().x() == pytest.approx(300, abs=6)
+    assert block.pos().y() == pytest.approx(500, abs=6)
+
+
+def test_a_paste_lands_where_the_page_was_clicked(window):
+    window.select_tool("rect")
+    drag(window.view, 80, 80, 180, 160)
+    window.select_tool("select")
+    original = only(window, RectItem)[0]
+    original.setSelected(True)
+    window.copy_selection()
+
+    click(window.view, 320, 520)
+    window.paste_items()
+    copies = [i for i in only(window, RectItem) if i is not original]
+    assert len(copies) == 1
+    assert copies[0].pos().x() == pytest.approx(320, abs=6)
+    assert copies[0].pos().y() == pytest.approx(520, abs=6)
+
+
+def test_the_mark_is_drawn_on_the_canvas(window):
+    """It is no use marking a spot the user cannot see."""
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QImage, QPainter
+
+    window.select_tool("select")
+    click(window.view, 260, 340)
+
+    def ink(view) -> int:
+        image = QImage(80, 80, QImage.Format_ARGB32)
+        image.fill(0)
+        painter = QPainter(image)
+        painter.translate(-220, -300)          # look at the marked spot
+        view.drawForeground(painter, QRectF(220, 300, 80, 80))
+        painter.end()
+        return sum(1 for x in range(80) for y in range(80) if image.pixel(x, y))
+
+    assert ink(window.view) > 0, "the insertion mark was not drawn"
+    window.view.set_insert_point(None)
+    assert ink(window.view) == 0, "the mark outstayed its welcome"

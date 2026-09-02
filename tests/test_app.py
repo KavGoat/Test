@@ -811,8 +811,8 @@ def test_quote_starts_a_text_region_where_the_cursor_is(window):
     assert len(markups(window)) == 1
 
 
-def test_backslash_starts_a_calculation(window):
-    _type_on_canvas(window, "\\")
+def test_slash_starts_a_calculation(window):
+    _type_on_canvas(window, "/")
     item = editing_item(window)
     assert isinstance(item, MathItem)
     item._editor.setPlainText("q = 5 kPa")
@@ -860,21 +860,21 @@ def test_typing_is_ignored_while_editing_or_in_a_table(window):
 
 def test_shortcuts_can_be_rebound_and_reset(window):
     manager = window.shortcuts
-    assert manager.sequence("insert.math") == "\\"
+    assert manager.sequence("insert.math") == "/"
     manager.set_sequence("insert.math", "!")
     window.apply_shortcuts()
     _type_on_canvas(window, "!")
     assert isinstance(editing_item(window), MathItem)
     window.view.end_item_edit()
     manager.reset("insert.math")
-    assert manager.sequence("insert.math") == "\\"
+    assert manager.sequence("insert.math") == "/"
 
 
 def test_shortcut_conflicts_are_detectable(window):
     manager = window.shortcuts
     assert manager.conflicts() == {}
-    manager.set_sequence("tool.rect", "\\")
-    assert "\\" in manager.conflicts()
+    manager.set_sequence("tool.rect", "/")
+    assert "/" in manager.conflicts()
     manager.reset()
 
 
@@ -1194,7 +1194,7 @@ def test_typing_still_works_with_something_selected(window):
     window.select_tool("select")
     markups(window)[0].setSelected(True)
     window.view._last_scene_pos = QPointF(300, 400)
-    key(window.view, Qt.Key_unknown, "\\")
+    key(window.view, Qt.Key_unknown, "/")
     assert isinstance(editing_item(window), MathItem)
 
 

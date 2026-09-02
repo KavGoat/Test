@@ -112,6 +112,21 @@ class MainWindow(QMainWindow):
         # back later however far it has been dragged about.
         self._default_state = self.saveState()
         self.restore_layout()
+        # The arrangement is written out shortly after it changes, not only on
+        # a clean quit — a crash or a kill should not cost the layout.
+        self._layout_timer = QTimer(self)
+        self._layout_timer.setSingleShot(True)
+        self._layout_timer.setInterval(1500)
+        self._layout_timer.timeout.connect(self.save_layout)
+        for dock in self.panels:
+            dock.dockLocationChanged.connect(lambda *_: self.note_layout_change())
+            dock.topLevelChanged.connect(lambda *_: self.note_layout_change())
+            dock.visibilityChanged.connect(lambda *_: self.note_layout_change())
+            dock.pinnedChanged.connect(lambda *_: self.note_layout_change())
+        for toolbar in self.toolbars:
+            toolbar.topLevelChanged.connect(lambda *_: self.note_layout_change())
+            toolbar.visibilityChanged.connect(lambda *_: self.note_layout_change())
+            toolbar.movableChanged.connect(lambda *_: self.note_layout_change())
         QTimer.singleShot(0, self.view.fit_page)
 
     # ==================================================================
@@ -864,9 +879,16 @@ class MainWindow(QMainWindow):
             action.setVisible(key in wanted)
 
     # -- remembering it ------------------------------------------------
+    def note_layout_change(self) -> None:
+        """Something moved; write the arrangement out in a moment."""
+        timer = getattr(self, "_layout_timer", None)
+        if timer is not None:
+            timer.start()
+
     def save_layout(self) -> None:
         settings = QSettings(ORGANISATION, APP_NAME)
         settings.setValue("window/geometry", self.saveGeometry())
+        settings.setValue("window/maximised", self.isMaximized())
         settings.setValue("window/state", self.saveState())
         settings.setValue("toolbars/locked", not self.toolbars[0].isMovable())
         if self.visible_tools is None:
@@ -874,6 +896,7 @@ class MainWindow(QMainWindow):
         else:
             settings.setValue("toolbars/tools", sorted(self.visible_tools))
         save_pinned(self.panels)
+        settings.sync()
 
     def restore_layout(self) -> None:
         settings = QSettings(ORGANISATION, APP_NAME)
@@ -883,6 +906,8 @@ class MainWindow(QMainWindow):
             self.restoreGeometry(geometry)
         if state is not None:
             self.restoreState(state)
+        if str(settings.value("window/maximised", "false")).lower() == "true":
+            self.showMaximized()
         stored = settings.value("toolbars/tools", None)
         if stored:
             if isinstance(stored, str):
@@ -1361,11 +1386,25 @@ class MainWindow(QMainWindow):
             return
         self.view.begin_snapshot()
         self.view.scene().clearSelection()
+        # A paste lands where the page was last clicked, if anywhere; otherwise
+        # just beside what was copied, as it always did.
+        target = self.view.insert_point()
+        offset = None
+        if target is not None and payload:
+            frame = self.view.typing_frame()
+            local = frame.mapFromScene(target)
+            first = payload[0]
+            offset = QPointF(local.x() - float(first.get("x", 0)),
+                             local.y() - float(first.get("y", 0)))
         for entry in payload:
             copy = dict(entry)
             copy["uid"] = os.urandom(8).hex()
-            copy["x"] = copy.get("x", 0) + 14
-            copy["y"] = copy.get("y", 0) + 14
+            if offset is not None:
+                copy["x"] = copy.get("x", 0) + offset.x()
+                copy["y"] = copy.get("y", 0) + offset.y()
+            else:
+                copy["x"] = copy.get("x", 0) + 14
+                copy["y"] = copy.get("y", 0) + 14
             item = build_item(copy)
             if item is None:
                 continue

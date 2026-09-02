@@ -46,7 +46,7 @@ On a headless machine (CI, a container) run with `QT_QPA_PLATFORM=offscreen`.
 
 ## Calculations
 
-Type `\` anywhere on the page — or pick the **Calculation** tool from the toolbar — and write
+Type `/` anywhere on the page — or pick the **Calculation** tool from the toolbar — and write
 ordinary engineering maths. It is typeset as you would write it by hand — real
 fractions, radicals, subscripts and superscripts — with the result immediately
 after it. Each line is its own region, so you can drag any of them where you want.
@@ -338,7 +338,7 @@ what lets a bare keystroke mean "start writing here":
 | Key | Starts |
 |---|---|
 | `"` | A text region where the cursor is |
-| `\` | A calculation |
+| `/` | A calculation |
 | `\|` | A table |
 | `@` | A callout |
 

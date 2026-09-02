@@ -6,7 +6,8 @@ from typing import Any, Optional
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen, QTextCursor
-from PySide6.QtWidgets import QGraphicsItem, QGraphicsTextItem
+from PySide6.QtWidgets import (QGraphicsItem, QGraphicsTextItem, QStyle,
+                               QStyleOptionGraphicsItem)
 
 from ..core import engine
 from ..core.mathrender import Box, MathStyle, Row, Spacer, Typesetter
@@ -29,6 +30,14 @@ class _MathEditor(QGraphicsTextItem):
     def __init__(self, owner):
         super().__init__(owner)
         self.owner = owner
+
+    def paint(self, painter, option, widget=None) -> None:
+        # Qt's dotted focus frame is sized to the text, not to the region, and
+        # reads as a second box floating in the corner of the first.
+        trimmed = QStyleOptionGraphicsItem(option)
+        trimmed.state &= ~QStyle.State_HasFocus
+        trimmed.state &= ~QStyle.State_Selected
+        super().paint(painter, trimmed, widget)
 
     def keyPressEvent(self, event) -> None:
         if event.key() in (Qt.Key_Return, Qt.Key_Enter):
