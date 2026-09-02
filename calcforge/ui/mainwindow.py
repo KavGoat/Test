@@ -38,7 +38,7 @@ from .panels import (FunctionsPanel, LayersPanel, MarkupsPanel, PagesPanel,
                      ProblemsPanel, PropertiesPanel, VariablesPanel)
 from .docks import PanelDock, load_panel_state, save_panel_state
 from .scene import DocumentScene, detach
-from .shortcuts import COMMAND, INSERT, TOOL, ShortcutManager
+from .shortcuts import COMMAND, INSERT, SYMBOL, TOOL, ShortcutManager
 from .tools import CATEGORIES, TOOL_MAP, TOOLS, tools_in
 from .view import PageView
 from .widgets import ColorButton
@@ -294,6 +294,17 @@ class MainWindow(QMainWindow):
                   "Ctrl+K", tip="Change any shortcut by pressing the keys you want")
         self._act("problems", "Show problems", self.show_problems)
         self._act("renumber_counts", "Renumber count markers", self.renumber_counts)
+        self.symbol_actions: dict[str, QAction] = {}
+        for binding in self.shortcuts.bindings():
+            if binding.kind != SYMBOL:
+                continue
+            action = QAction(binding.label, self)
+            action.setToolTip(f"Type {binding.payload} into the calculation being edited")
+            action.triggered.connect(
+                lambda _checked=False, text=binding.payload: self.insert_symbol(text))
+            self.addAction(action)
+            self.symbol_actions[binding.action_id] = action
+
         self._act("about", f"About {APP_NAME}", self.show_about)
         self._act("sample", "Load the worked example", self.load_sample)
 
@@ -504,6 +515,10 @@ class MainWindow(QMainWindow):
                 action = QAction(icon(tool.icon), tool.label, self)
                 action.triggered.connect(lambda _c=False, key=tool.key: self.select_tool(key))
                 insert_menu.addAction(action)
+        insert_menu.addSeparator()
+        symbol_menu = insert_menu.addMenu("Maths s&ymbol")
+        for action in self.symbol_actions.values():
+            symbol_menu.addAction(action)
         insert_menu.addSeparator()
         insert_menu.addAction(self.act_insert_pdf)
         insert_menu.addAction(self.act_insert_image_page)
@@ -1192,6 +1207,15 @@ class MainWindow(QMainWindow):
             sequence = self.shortcuts.sequence(f"command.{_command_id(method)}")
             if action is not None and sequence:
                 action.setShortcut(QKeySequence(sequence))
+        for action_id, action in getattr(self, "symbol_actions", {}).items():
+            action.setShortcut(QKeySequence(self.shortcuts.sequence(action_id)))
+
+    def insert_symbol(self, text: str) -> None:
+        """Put a maths symbol in at the cursor, wherever the cursor is."""
+        if self.view.insert_symbol(text):
+            return
+        self.status_hint.setText(
+            f"{text} has nowhere to go — open a calculation, a text box or a cell first")
 
     def run_typed_binding(self, text: str, modifiers, position: QPointF) -> bool:
         """Act on a bare keystroke over the canvas; False if nothing is bound."""
@@ -1209,6 +1233,9 @@ class MainWindow(QMainWindow):
             if callable(method):
                 method()
                 return True
+        if binding.kind == SYMBOL:
+            self.insert_symbol(binding.payload)
+            return True
         return False
 
     def edit_shortcuts(self) -> None:

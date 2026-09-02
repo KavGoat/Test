@@ -1168,3 +1168,106 @@ def test_relative_formulas_follow_a_copy_between_tables(window):
     window.recalculate()
     assert second.sheet.raw(2, 2) == "=A3+B3"
     assert second.sheet.value(2, 2) == 5
+
+
+# ---------------------------------------------------------------------------
+# Maths symbols on a key
+# ---------------------------------------------------------------------------
+
+def test_every_maths_symbol_is_a_binding_you_can_change(window):
+    from calcforge.ui.shortcuts import SYMBOL
+
+    symbols = [b for b in window.shortcuts.bindings() if b.kind == SYMBOL]
+    assert [b.payload for b in symbols][:2] == ["×", "÷"]
+    assert all(b.category == "Symbols" for b in symbols)
+    assert all(b.action_id in window.symbol_actions for b in symbols)
+    # every one of them is on a key out of the box, and no two share it
+    keys = [b.default for b in symbols]
+    assert all(keys) and len(set(keys)) == len(keys)
+
+
+def test_the_multiply_key_types_a_multiply_sign(window):
+    window.view._last_scene_pos = QPointF(120, 120)
+    press_key(window.view, Qt.Key_unknown, "/")
+    block = window.view.editing_item()
+    type_text(window.view, "a := 4 ")
+    window.symbol_actions["symbol.multiply"].trigger()
+    type_text(window.view, " 3")
+    window.view.end_item_edit()
+    assert "×" in block.source
+    assert window.document.workspace.get("a") == 12
+
+
+def test_the_root_key_brings_its_bracket_and_leaves_room_inside(window):
+    window.view._last_scene_pos = QPointF(120, 260)
+    press_key(window.view, Qt.Key_unknown, "/")
+    block = window.view.editing_item()
+    type_text(window.view, "r := ")
+    window.symbol_actions["symbol.root"].trigger()
+    type_text(window.view, "16")
+    window.view.end_item_edit()
+    assert block.source == "r := √(16)"
+    assert window.document.workspace.get("r") == 4
+
+
+def test_a_symbol_goes_into_a_cell_being_edited(window):
+    table = _table(window, 60, 400)
+    table.current = table.anchor = (0, 0)
+    window.view.open_cell_editor()
+    window.view._cell_editor.setText("2")
+    window.view._cell_editor.setCursorPosition(1)
+    window.symbol_actions["symbol.degree"].trigger()
+    assert window.view._cell_editor.text() == "2°"
+
+
+def test_a_symbol_with_nothing_open_says_so_rather_than_vanishing(window):
+    window.view.end_item_edit()
+    window.symbol_actions["symbol.pi"].trigger()
+    assert "nowhere to go" in window.status_hint.text()
+
+
+def test_symbol_keys_survive_being_rebound_and_reopened(window):
+    from calcforge.ui.mainwindow import MainWindow
+    from PySide6.QtGui import QKeySequence
+
+    window.shortcuts.set_sequence("symbol.multiply", "Ctrl+Alt+9")
+    window.apply_shortcuts()
+    assert window.symbol_actions["symbol.multiply"].shortcut() == QKeySequence("Ctrl+Alt+9")
+
+    second = MainWindow()
+    second.confirm_discard = lambda: True
+    try:
+        assert second.shortcuts.sequence("symbol.multiply") == "Ctrl+Alt+9"
+        assert second.symbol_actions["symbol.multiply"].shortcut() == \
+            QKeySequence("Ctrl+Alt+9")
+    finally:
+        second.close()
+        second.deleteLater()
+
+
+def test_a_symbol_bound_to_a_bare_key_still_types_itself(window):
+    window.shortcuts.set_sequence("symbol.pi", ";")
+    window.apply_shortcuts()
+    try:
+        window.view._last_scene_pos = QPointF(120, 320)
+        press_key(window.view, Qt.Key_unknown, "/")
+        block = window.view.editing_item()
+        type_text(window.view, "c := 2 ")
+        assert window.run_typed_binding(";", Qt.NoModifier, QPointF(0, 0))
+        window.view.end_item_edit()
+        assert "π" in block.source
+    finally:
+        window.shortcuts.reset("symbol.pi")
+        window.apply_shortcuts()
+
+
+def test_symbol_keys_are_live_while_you_type(window):
+    """Unlike tool keys, a symbol key must not be swallowed mid-calculation."""
+    from PySide6.QtGui import QKeySequence
+
+    window.view._last_scene_pos = QPointF(120, 380)
+    press_key(window.view, Qt.Key_unknown, "/")
+    assert window.view.is_editing()
+    assert not window.shortcuts.is_canvas_binding(QKeySequence("Ctrl+Alt+8"))
+    assert window.shortcuts.is_canvas_binding(QKeySequence("R"))
+    window.view.end_item_edit()

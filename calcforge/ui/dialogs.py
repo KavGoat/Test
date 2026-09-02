@@ -573,7 +573,8 @@ class ShortcutManagerDialog(QDialog):
             "straight onto the page; anything with Ctrl or Alt works from the menus too. "
             "Backspace clears one, Escape puts it back.<br>"
             "Tool keys are deliberately silent while you are typing into a "
-            "calculation, a text box or a table.")
+            "calculation, a text box or a table. Maths symbols are the other way "
+            "round: they type themselves in wherever the cursor is.")
         note.setWordWrap(True)
         layout.addWidget(note)
 
@@ -742,7 +743,7 @@ class ShortcutsDialog(QDialog):
     ROWS = [
         ("Typing on the page", ""),
         ("\"", "Start a text region where the cursor is"),
-        ("\\", "Start a calculation where the cursor is"),
+        ("/", "Start a calculation where the cursor is"),
         ("|", "Start a table here"),
         ("@", "Start a callout here"),
         ("any other key", "Nothing, unless you bind it (Help ▸ Customise shortcuts)"),
@@ -752,8 +753,15 @@ class ShortcutsDialog(QDialog):
         ("L / A", "Line / arrow"),
         ("R / E / C", "Rectangle / ellipse / revision cloud"),
         ("T / N / S", "Text box / note / stamp"),
-        ("M / B", "Calculation / table"),
+        ("Q / B / G", "Callout / table / plot"),
+        ("M / Alt+M", "Measure a length / draw a dimension"),
         ("H", "Pan"),
+        ("Maths symbols", ""),
+        ("Ctrl+Alt+8 / /", "× multiply / ÷ divide"),
+        ("Ctrl+Alt+6 / 2", "^ power / ² squared"),
+        ("Ctrl+Alt+R", "√( square root"),
+        ("Ctrl+Alt+P / D", "π pi / ° degree"),
+        ("Insert ▸ Maths symbol", "The rest of them, and the keys they are on"),
         ("Canvas", ""),
         ("Ctrl + wheel", "Zoom"),
         ("Space + drag", "Pan"),

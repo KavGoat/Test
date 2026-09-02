@@ -7,7 +7,7 @@ from typing import Optional
 
 from PySide6.QtCore import QMimeData, QPoint, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (QColor, QCursor, QKeyEvent, QMouseEvent, QPainter,
-                           QPen, QTransform, QWheelEvent)
+                           QPen, QTextCursor, QTransform, QWheelEvent)
 from PySide6.QtWidgets import (QApplication, QGraphicsView, QLineEdit, QRubberBand, QGraphicsProxyWidget)
 
 from ..core.document import MM_TO_PT
@@ -1168,6 +1168,32 @@ class PageView(QGraphicsView):
             cursor.removeSelectedText()
             editor.setTextCursor(cursor)
         return True
+
+    def insert_symbol(self, text: str) -> bool:
+        """Type a maths symbol into whatever is being edited; False if nothing is.
+
+        A symbol that opens a bracket — the root sign — brings its closing
+        bracket with it and leaves the caret between the two, because
+        ``√(`` on its own is a syntax error waiting to happen.
+        """
+        closing = ")" if text.endswith("(") else ""
+        item = self._editing_item
+        editor = getattr(item, "_editor", None) if item is not None else None
+        if editor is not None:
+            cursor = editor.textCursor()
+            cursor.insertText(text + closing)
+            if closing:
+                cursor.movePosition(QTextCursor.Left, QTextCursor.MoveAnchor,
+                                    len(closing))
+            editor.setTextCursor(cursor)
+            return True
+        if self._cell_editor is not None:
+            self._cell_editor.insert(text + closing)
+            if closing:
+                self._cell_editor.setCursorPosition(
+                    self._cell_editor.cursorPosition() - len(closing))
+            return True
+        return False
 
     def markup_at(self, scene_pos: QPointF) -> Optional[MarkupItem]:
         for item in self.scene().items(scene_pos):

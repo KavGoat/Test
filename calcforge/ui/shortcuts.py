@@ -18,6 +18,7 @@ from .tools import TOOLS
 TOOL = "tool"
 INSERT = "insert"
 COMMAND = "command"
+SYMBOL = "symbol"
 
 
 @dataclass(frozen=True)
@@ -40,6 +41,37 @@ def _tool_bindings() -> list[Binding]:
     return bindings
 
 
+# Maths symbols, for typing into a calculation, a text box or a cell. The
+# engine reads the operators among them — × really multiplies, √ really takes a
+# root, ² really squares — and Δ and Σ are ordinary letters as far as a variable
+# name is concerned. They are here so the ones somebody uses every day can go on
+# a key they can reach without hunting through a character map.
+SYMBOLS: list[tuple[str, str, str, str]] = [
+    # action name,      symbol, label,               default keys
+    ("multiply",        "×",    "Multiply ×",        "Ctrl+Alt+8"),
+    ("divide",          "÷",    "Divide ÷",          "Ctrl+Alt+/"),
+    ("power",           "^",    "To the power ^",    "Ctrl+Alt+6"),
+    ("root",            "√(",   "Square root √",     "Ctrl+Alt+R"),
+    ("squared",         "²",    "Squared ²",         "Ctrl+Alt+2"),
+    ("cubed",           "³",    "Cubed ³",           "Ctrl+Alt+3"),
+    ("plusminus",       "±",    "Plus or minus ±",   "Ctrl+Alt+="),
+    ("le",              "≤",    "Less or equal ≤",   "Ctrl+Alt+,"),
+    ("ge",              "≥",    "More or equal ≥",   "Ctrl+Alt+."),
+    ("ne",              "≠",    "Not equal ≠",       "Ctrl+Alt+N"),
+    ("pi",              "π",    "Pi π",              "Ctrl+Alt+P"),
+    ("degree",          "°",    "Degree °",          "Ctrl+Alt+D"),
+    ("delta",           "Δ",    "Delta Δ",           "Ctrl+Alt+T"),
+    ("sum",             "Σ",    "Sum Σ",             "Ctrl+Alt+S"),
+    ("diameter",        "⌀",    "Diameter ⌀",        "Ctrl+Alt+O"),
+    ("micro",           "µ",    "Micro µ",           "Ctrl+Alt+M"),
+]
+
+
+def _symbol_bindings() -> list[Binding]:
+    return [Binding(f"symbol.{name}", label, keys, SYMBOL, "Symbols", symbol)
+            for name, symbol, label, keys in SYMBOLS]
+
+
 # The two canvas typing modes come first because they are the ones people reach
 # for without thinking about tools at all.
 DEFAULT_BINDINGS: list[Binding] = [
@@ -59,7 +91,7 @@ DEFAULT_BINDINGS: list[Binding] = [
             "show_problems"),
     Binding("command.renumber_counts", "Renumber count markers", "", COMMAND, "Document",
             "renumber_counts"),
-]
+] + _symbol_bindings()
 
 BY_ID = {binding.action_id: binding for binding in DEFAULT_BINDINGS}
 
