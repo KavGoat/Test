@@ -553,3 +553,45 @@ def test_turning_the_page_while_typing_keeps_what_was_typed(window):
     assert window.view.editing_item() is None
     window.recalculate()
     assert window.document.workspace.get("L").to("m").magnitude == pytest.approx(6)
+
+
+def test_a_note_can_be_placed_without_a_dialog_getting_in_the_way(window):
+    from calcforge.items.text import NoteItem
+
+    window.select_tool("note")               # interactive_prompts is off here
+    click(window.view, 200, 200)
+    notes = only(window, NoteItem)
+    assert len(notes) == 1
+    assert notes[0].comment == ""
+
+
+def test_double_clicking_a_note_opens_what_it_says(window, monkeypatch):
+    from PySide6.QtWidgets import QInputDialog
+    from calcforge.items.text import NoteItem
+
+    window.select_tool("note")
+    click(window.view, 200, 200)
+    note = only(window, NoteItem)[0]
+    window.select_tool("select")
+
+    monkeypatch.setattr(QInputDialog, "getMultiLineText",
+                        staticmethod(lambda *a, **k: ("check the lap length", True)))
+    double_click(window.view, 200 + note.SIZE / 2, 200 + note.SIZE / 2)
+    assert note.comment == "check the lap length"
+    assert "check the lap length" in note.summary()
+
+
+def test_cancelling_the_note_dialog_leaves_it_as_it_was(window, monkeypatch):
+    from PySide6.QtWidgets import QInputDialog
+    from calcforge.items.text import NoteItem
+
+    window.select_tool("note")
+    click(window.view, 200, 200)
+    note = only(window, NoteItem)[0]
+    note.comment = "as built"
+    window.select_tool("select")
+
+    monkeypatch.setattr(QInputDialog, "getMultiLineText",
+                        staticmethod(lambda *a, **k: ("ignored", False)))
+    double_click(window.view, 200 + note.SIZE / 2, 200 + note.SIZE / 2)
+    assert note.comment == "as built"

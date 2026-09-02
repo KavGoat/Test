@@ -657,6 +657,14 @@ class PageView(QGraphicsView):
             self.place_caret(item, scene_pos)
             event.accept()
             return
+        if isinstance(item, NoteItem) and not item.locked:
+            # A note is a folded-up comment; double-clicking is how you read
+            # and change what it says.
+            self.begin_snapshot()
+            if self.edit_note(item):
+                self.commit_snapshot("Edit note")
+            event.accept()
+            return
         if isinstance(item, (PolyItem, MeasureItem)) and not item.locked:
             if getattr(item, "uses_vertex_handles", True) and len(item.points) > 2:
                 self.begin_snapshot()
@@ -684,16 +692,26 @@ class PageView(QGraphicsView):
             item.symbol = self.count_symbol
             item.index = self.next_count_index(self.count_subject)
         if isinstance(item, NoteItem):
-            from PySide6.QtWidgets import QInputDialog
-            text, accepted = QInputDialog.getMultiLineText(self, "Note", "Comment:", "")
-            if not accepted:
+            if self.window.interactive_prompts and not self.edit_note(item):
                 return None
-            item.comment = text
         self.scene().add_markup(item, point)
         self.scene().clearSelection()
         item.setSelected(True)
         self.selectionChanged.emit()
         return item
+
+    def edit_note(self, note) -> bool:
+        """Ask for a note's text. False when the author changed their mind."""
+        from PySide6.QtWidgets import QInputDialog
+
+        text, accepted = QInputDialog.getMultiLineText(
+            self, "Note", "Comment:", note.comment)
+        if not accepted:
+            return False
+        note.comment = text
+        note.touch()
+        note.update()
+        return True
 
     def next_count_index(self, subject: str) -> int:
         highest = 0
