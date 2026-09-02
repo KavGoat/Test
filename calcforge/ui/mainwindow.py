@@ -36,7 +36,7 @@ from .commands import DocumentStructureCommand
 from .icons import icon
 from .panels import (FunctionsPanel, LayersPanel, MarkupsPanel, PagesPanel,
                      ProblemsPanel, PropertiesPanel, VariablesPanel)
-from .docks import PanelDock, load_pinned, save_pinned
+from .docks import PanelDock, load_panel_state, save_panel_state
 from .scene import DocumentScene, detach
 from .shortcuts import COMMAND, INSERT, TOOL, ShortcutManager
 from .tools import CATEGORIES, TOOL_MAP, TOOLS, tools_in
@@ -123,6 +123,7 @@ class MainWindow(QMainWindow):
             dock.topLevelChanged.connect(lambda *_: self.note_layout_change())
             dock.visibilityChanged.connect(lambda *_: self.note_layout_change())
             dock.pinnedChanged.connect(lambda *_: self.note_layout_change())
+            dock.collapsedChanged.connect(lambda *_: self.note_layout_change())
         for toolbar in self.toolbars:
             toolbar.topLevelChanged.connect(lambda *_: self.note_layout_change())
             toolbar.visibilityChanged.connect(lambda *_: self.note_layout_change())
@@ -419,16 +420,20 @@ class MainWindow(QMainWindow):
         self.problems_panel = ProblemsPanel(self)
         self.dock_problems = self._dock("Problems", self.problems_panel,
                                         Qt.BottomDockWidgetArea, "dock_problems")
-        self.tabifyDockWidget(self.dock_markups, self.dock_problems)
+        # Everything you look things up in goes in one place along the bottom:
+        # markups, variables, functions, layers and problems as tabs of the
+        # same panel, so the right-hand side is left to Properties alone.
+        self.reference_docks = [self.dock_markups, self.dock_variables,
+                                self.dock_functions, self.dock_layers,
+                                self.dock_problems]
+        for dock in self.reference_docks[1:]:
+            self.addDockWidget(Qt.BottomDockWidgetArea, dock)
+        for first, second in zip(self.reference_docks, self.reference_docks[1:]):
+            self.tabifyDockWidget(first, second)
         self.dock_markups.raise_()
-        self.tabifyDockWidget(self.dock_variables, self.dock_functions)
-        self.tabifyDockWidget(self.dock_functions, self.dock_layers)
-        self.dock_variables.raise_()
         self.resizeDocks([self.dock_pages, self.dock_properties], [190, 320], Qt.Horizontal)
-        # Without an explicit vertical split the properties form gets squeezed
-        # into a couple of rows by whatever is stacked under it.
-        self.resizeDocks([self.dock_properties, self.dock_variables], [560, 340], Qt.Vertical)
-        self.resizeDocks([self.dock_markups], [230], Qt.Vertical)
+        self.resizeDocks(self.reference_docks, [230] * len(self.reference_docks),
+                         Qt.Vertical)
 
     def _build_menus(self) -> None:
         bar = self.menuBar()
@@ -832,6 +837,7 @@ class MainWindow(QMainWindow):
 
     def show_all_panels(self) -> None:
         for dock in self.panels:
+            dock.set_collapsed(False)
             dock.show()
 
     def lock_toolbars(self, locked: bool) -> None:
@@ -843,12 +849,13 @@ class MainWindow(QMainWindow):
         """Put every panel and toolbar back where it started."""
         settings = QSettings(ORGANISATION, APP_NAME)
         for key in ("window/geometry", "window/state", "panels/pinned",
-                    "toolbars/locked", "toolbars/tools"):
+                    "panels/collapsed", "toolbars/locked", "toolbars/tools"):
             settings.remove(key)
         if self._default_state is not None:
             self.restoreState(self._default_state)
         for dock in self.panels:
             dock.set_pinned(False)
+            dock.set_collapsed(False)
             dock.show()
         for bar in self.toolbars:
             bar.setMovable(True)
@@ -895,7 +902,7 @@ class MainWindow(QMainWindow):
             settings.remove("toolbars/tools")
         else:
             settings.setValue("toolbars/tools", sorted(self.visible_tools))
-        save_pinned(self.panels)
+        save_panel_state(self.panels)
         settings.sync()
 
     def restore_layout(self) -> None:
@@ -917,7 +924,7 @@ class MainWindow(QMainWindow):
         locked = str(settings.value("toolbars/locked", "false")).lower() == "true"
         self.act_lock_toolbars.setChecked(locked)
         self.lock_toolbars(locked)
-        load_pinned(self.panels)
+        load_panel_state(self.panels)
         self.act_pin_panels.setChecked(all(d.pinned for d in self.panels))
 
     def follow_scrolled_page(self, index: int) -> None:

@@ -370,3 +370,103 @@ def test_everything_that_can_be_arranged_comes_back(window, qapp):
         second.close()
         second.deleteLater()
         window.toggle_theme(False)
+
+
+# ---------------------------------------------------------------------------
+# the reference panels live together
+# ---------------------------------------------------------------------------
+
+def test_the_lookup_panels_share_one_panel(window):
+    """Markups, variables, functions, layers and problems are tabs of one panel."""
+    assert [dock.objectName() for dock in window.reference_docks] == [
+        "dock_markups", "dock_variables", "dock_functions", "dock_layers",
+        "dock_problems"]
+    for dock in window.reference_docks:
+        assert window.dockWidgetArea(dock) == Qt.BottomDockWidgetArea
+    together = window.tabifiedDockWidgets(window.dock_markups)
+    assert set(together) == set(window.reference_docks[1:])
+
+
+def test_properties_keeps_the_right_side_to_itself(window):
+    assert window.dockWidgetArea(window.dock_properties) == Qt.RightDockWidgetArea
+    assert window.dockWidgetArea(window.dock_pages) == Qt.LeftDockWidgetArea
+
+
+def test_a_panel_rolls_up_to_its_title_bar(window):
+    dock = panels(window)["dock_variables"]
+    bar = dock.titleBarWidget()
+    assert not dock.collapsed
+
+    dock.set_collapsed(True)
+    assert dock.collapsed
+    assert not dock.widget().isVisibleTo(dock)
+    # the handle to bring it back is still there
+    assert bar.isVisibleTo(dock)
+    assert dock.maximumHeight() <= bar.sizeHint().height() + 2
+
+    dock.set_collapsed(False)
+    assert not dock.collapsed
+    assert dock.widget().isVisibleTo(dock)
+    assert dock.maximumHeight() > 100
+
+
+def test_double_clicking_the_title_rolls_it_up_and_back(window):
+    from PySide6.QtCore import QEvent, QPoint, QPointF
+    from PySide6.QtGui import QMouseEvent
+
+    dock = panels(window)["dock_functions"]
+    bar = dock.titleBarWidget()
+
+    def double_click():
+        event = QMouseEvent(QEvent.MouseButtonDblClick, QPointF(20, 6),
+                            Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
+        bar.mouseDoubleClickEvent(event)
+
+    double_click()
+    assert dock.collapsed
+    double_click()
+    assert not dock.collapsed
+
+
+def test_the_collapse_button_matches_the_state(window):
+    dock = panels(window)["dock_layers"]
+    bar = dock.titleBarWidget()
+    bar.collapse.setChecked(True)
+    assert dock.collapsed
+    dock.set_collapsed(False)
+    assert not bar.collapse.isChecked()
+
+
+def test_showing_every_panel_unrolls_them(window):
+    for dock in window.panels:
+        dock.set_collapsed(True)
+    window.show_all_panels()
+    assert not any(dock.collapsed for dock in window.panels)
+
+
+def test_resetting_the_layout_unrolls_them(window):
+    panels(window)["dock_problems"].set_collapsed(True)
+    window.reset_layout()
+    assert not any(dock.collapsed for dock in window.panels)
+
+
+def test_rolling_a_panel_up_schedules_a_save(window):
+    window._layout_timer.stop()
+    panels(window)["dock_markups"].set_collapsed(True)
+    assert window._layout_timer.isActive()
+
+
+def test_a_rolled_up_panel_comes_back_rolled_up(window):
+    from calcforge.ui.mainwindow import MainWindow
+
+    panels(window)["dock_layers"].set_collapsed(True)
+    window.save_layout()
+
+    second = MainWindow()
+    second.confirm_discard = lambda: True
+    try:
+        assert panels(second)["dock_layers"].collapsed
+        assert not panels(second)["dock_variables"].collapsed
+    finally:
+        second.close()
+        second.deleteLater()
