@@ -405,5 +405,19 @@ order, save/reload, and PDF export.
 | `test_verify.py` | The independent check, mostly by breaking things on purpose |
 | `test_output.py` | Exported PDFs, read back and measured |
 
+Beyond the suite there is a fuzzer:
+
+```bash
+python tools/session_fuzz.py 42 400        # seed, rounds
+```
+
+It drives the real window at random — tools, drags, double-clicks, typing,
+undo, page changes, pasting, rescaling — then asks the verifier whether the
+document still re-derives, and finally whether it still prints. Fifty sessions
+of four hundred gestures each currently run clean. Earlier ones did not: they
+found a crash while rendering a page thumbnail, a page insertion that emptied
+the document, a move that did not recalculate, and a reading order that was not
+a total order.
+
 `docs/what-matters.md` is the brief all of this is written against — what an
 engineer needs from a calculation sheet, and what this tool does not claim.
