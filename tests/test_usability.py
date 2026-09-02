@@ -6,7 +6,7 @@ and key presses with their text.  Calling a handler directly would hide exactly
 the bugs this file exists to catch.
 """
 import pytest
-from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
+from PySide6.QtCore import QEvent, QKeyCombination, QPoint, QPointF, Qt
 from PySide6.QtGui import QContextMenuEvent, QKeyEvent, QMouseEvent
 from PySide6.QtWidgets import QApplication
 
@@ -733,3 +733,92 @@ def test_a_document_re_derives_the_same_way_twice_running(window):
         result = verify_document(window.document)
         disagreements = [p for p in result.problems if p.kind == "disagreement"]
         assert disagreements == [], [p.message for p in disagreements]
+
+
+# ---------------------------------------------------------------------------
+# a tool key is a letter when you are writing
+# ---------------------------------------------------------------------------
+
+def chord(window, key, modifiers=Qt.NoModifier):
+    """Send a key the way Qt delivers a shortcut, and say whether it fired.
+
+    Qt asks with a ShortcutOverride first. If something accepts it the key
+    belongs to whatever has focus and no shortcut runs; otherwise the matching
+    action is triggered, as Qt's shortcut map would.
+    """
+    from PySide6.QtGui import QKeyEvent, QKeySequence
+
+    target = QApplication.focusWidget() or window.view
+    override = QKeyEvent(QEvent.ShortcutOverride, key, modifiers, "")
+    QApplication.sendEvent(target, override)
+    if override.isAccepted():
+        QApplication.sendEvent(target, QKeyEvent(QEvent.KeyPress, key, modifiers, ""))
+        return False
+    wanted = QKeySequence(QKeyCombination(modifiers, key))
+    for action in window.tool_actions.values():
+        if not action.shortcut().isEmpty() and action.shortcut() == wanted:
+            action.trigger()
+            break
+    return True
+
+
+def swallowed(window, key, modifiers=Qt.NoModifier) -> bool:
+    """True when the focus widget claims a key instead of letting it be a shortcut."""
+    from PySide6.QtGui import QKeyEvent
+
+    override = QKeyEvent(QEvent.ShortcutOverride, key, modifiers, "")
+    QApplication.sendEvent(QApplication.focusWidget() or window.view, override)
+    return override.isAccepted()
+
+
+def test_a_tool_chord_does_not_change_tool_while_typing(window):
+    window.select_tool("text")
+    drag(window.view, 100, 100, 340, 150)
+    box = window.view.editing_item()
+    box.set_text("Check ")
+    assert window.view.is_editing()
+
+    assert not chord(window, Qt.Key_M, Qt.AltModifier), "the editor lost the key"
+    assert window.view.current_tool().key == "select"
+    assert window.view.editing_item() is box
+
+
+def test_a_tool_chord_works_again_once_the_edit_is_over(window):
+    window.select_tool("text")
+    drag(window.view, 100, 100, 340, 150)
+    window.view.end_item_edit()
+    assert not window.view.is_editing()
+    assert chord(window, Qt.Key_M, Qt.AltModifier)
+    assert window.view.current_tool().key == "measure_dimension"
+
+
+def test_tool_keys_are_silent_inside_a_table(window):
+    window.select_tool("table")
+    drag(window.view, 80, 80, 460, 240)
+    assert window.view.is_editing()             # a table with the cursor in it
+    assert not chord(window, Qt.Key_M, Qt.AltModifier)
+    assert window.view.current_tool().key == "select"
+
+
+def test_document_commands_stay_live_while_typing(window):
+    """Save and zoom work mid-sentence, as they do in every other application.
+
+    Ctrl+Z is deliberately not in this list: while the cursor is in a text box
+    it undoes the typing, which is what a text box is supposed to do with it.
+    """
+    window.select_tool("text")
+    drag(window.view, 100, 100, 340, 150)
+    assert window.view.is_editing()
+    assert not swallowed(window, Qt.Key_0, Qt.ControlModifier)
+    assert not swallowed(window, Qt.Key_S, Qt.ControlModifier)
+    assert not swallowed(window, Qt.Key_P, Qt.ControlModifier)
+
+
+def test_a_bare_letter_types_rather_than_picking_a_tool(window):
+    window.select_tool("text")
+    drag(window.view, 100, 100, 340, 150)
+    box = window.view.editing_item()
+    box.set_text("")
+    type_text(window.view, "mrc")
+    assert box.text() == "mrc"
+    assert window.view.current_tool().key == "select"

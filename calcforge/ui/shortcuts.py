@@ -106,6 +106,27 @@ class ShortcutManager(QObject):
         return {text: ids for text, ids in seen.items() if len(ids) > 1}
 
     # -- canvas typing -----------------------------------------------------
+    def is_canvas_binding(self, sequence: "QKeySequence") -> bool:
+        """True when *sequence* picks a tool or starts something on the canvas.
+
+        These are the bindings that must fall silent while somebody is typing:
+        M is a letter in the middle of a sentence, and Alt+M is not a request
+        to change tool when the cursor is in a text box.
+        """
+        if sequence.isEmpty():
+            return False
+        wanted = sequence.toString(QKeySequence.PortableText).lower()
+        for binding in DEFAULT_BINDINGS:
+            if binding.kind not in (TOOL, INSERT):
+                continue
+            current = self._sequences.get(binding.action_id, "")
+            if not current:
+                continue
+            if QKeySequence(current).toString(
+                    QKeySequence.PortableText).lower() == wanted:
+                return True
+        return False
+
     def match_typed(self, text: str, modifiers) -> Optional[Binding]:
         """The binding a bare keypress on the canvas should run, if any."""
         if not text or modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier):

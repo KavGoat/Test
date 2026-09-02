@@ -5,7 +5,7 @@ import json
 import os
 from typing import Optional
 
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer
+from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import (QAction, QActionGroup, QColor, QFont, QKeySequence,
                            QUndoStack)
 from PySide6.QtPrintSupport import QPrintDialog, QPrintPreviewDialog, QPrinter
@@ -508,6 +508,12 @@ class MainWindow(QMainWindow):
         self.view.cellChanged.connect(self.refresh_formula_bar)
         self.view.documentEdited.connect(self.mark_modified)
         self.view.pageChanged.connect(self.follow_scrolled_page)
+        # Tool keys have to fall silent while somebody is typing, and a
+        # shortcut fires before the key ever reaches the editor — so they are
+        # headed off at the one point that sees every keystroke.
+        application = QApplication.instance()
+        if application is not None:
+            application.installEventFilter(self)
         self.pages_panel.pageSelected.connect(self.go_to_page)
         self.pages_panel.pagesReordered.connect(self.move_page)
         self.markups_panel.markupActivated.connect(self.reveal_markup)
@@ -744,6 +750,22 @@ class MainWindow(QMainWindow):
         self.pages_panel.list.blockSignals(False)
         self.refresh_scale_label()
         self.refresh_selection()
+
+    def eventFilter(self, watched, event) -> bool:
+        """Let the editor keep a key that would otherwise pick a tool.
+
+        Qt asks with a ShortcutOverride before it fires a shortcut. Accepting
+        it means the key goes to whatever has focus instead — which is exactly
+        what should happen to M, or Alt+M, in the middle of a sentence.
+        Document commands (save, undo, zoom) are deliberately left alone: every
+        other application keeps those live while you type, and so does this.
+        """
+        if event.type() == QEvent.ShortcutOverride and self.view.is_editing():
+            sequence = QKeySequence(event.keyCombination())
+            if self.shortcuts.is_canvas_binding(sequence):
+                event.accept()
+                return True
+        return super().eventFilter(watched, event)
 
     def follow_scrolled_page(self, index: int) -> None:
         """The reader scrolled onto another page; catch the chrome up.

@@ -1009,6 +1009,16 @@ class PageView(QGraphicsView):
     def editing_item(self):
         return self._editing_item
 
+    def is_editing(self) -> bool:
+        """True when a keystroke belongs to something being typed into.
+
+        A region, a cell, or a table with the cursor in it: in all three the
+        keyboard is writing, and a tool key would be a letter of somebody's
+        sentence rather than a request to change tool.
+        """
+        return (self._editing_item is not None or self._cell_editor is not None
+                or self.active_table is not None)
+
     @staticmethod
     def place_caret(item, scene_pos: QPointF) -> None:
         """Put the caret where the pointer is, rather than at the start.
