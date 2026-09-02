@@ -1031,3 +1031,140 @@ def test_a_cancelled_image_insert_changes_nothing(window, monkeypatch):
     monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: ("", ""))
     window.insert_image_page()
     assert len(window.document.pages) == 1
+
+
+# ---------------------------------------------------------------------------
+# Cells from another spreadsheet
+# ---------------------------------------------------------------------------
+
+def _table(window, x=80, y=80):
+    window.select_tool("table")
+    drag(window.view, x, y, x + 340, y + 160)
+    return window.view.active_table
+
+
+def test_a_block_pasted_over_an_open_cell_still_spreads_out(window):
+    """Ctrl+V in the middle of typing must not stuff the sheet into one cell."""
+    from PySide6.QtWidgets import QApplication
+
+    table = _table(window)
+    table.sheet.resize(8, 5)
+    table.current = table.anchor = (0, 0)
+    window.view.open_cell_editor()
+    QApplication.clipboard().setText("1\t2\n3\t4")
+    press_key(window.view, Qt.Key_V, "v", Qt.ControlModifier)
+
+    assert window.view._cell_editor is None
+    assert table.sheet.raw(0, 0) == "1"
+    assert table.sheet.raw(0, 1) == "2"
+    assert table.sheet.raw(1, 0) == "3"
+    assert table.sheet.raw(1, 1) == "4"
+
+
+def test_one_cell_pasted_while_typing_still_goes_into_the_text(window):
+    from PySide6.QtWidgets import QApplication
+
+    table = _table(window)
+    table.current = table.anchor = (0, 0)
+    window.view.open_cell_editor()
+    window.view._cell_editor.setText("")
+    QApplication.clipboard().setText("42")
+    press_key(window.view, Qt.Key_V, "v", Qt.ControlModifier)
+    assert window.view._cell_editor is not None
+
+
+def test_cells_land_in_the_table_you_have_picked_out(window):
+    from PySide6.QtWidgets import QApplication
+
+    table = _table(window)
+    table.sheet.resize(8, 5)
+    window.view.deactivate_table()
+    window.select_tool("select")
+    table.setSelected(True)
+    before = len(window.view.scene().ordered_markups())
+
+    QApplication.clipboard().setText("7\t8\n9\t10")
+    window.paste_items()
+
+    assert len(window.view.scene().ordered_markups()) == before   # no second table
+    assert table.sheet.raw(0, 0) == "7"
+    assert table.sheet.raw(1, 1) == "10"
+
+
+def test_cells_with_nothing_selected_still_become_a_table(window):
+    from PySide6.QtWidgets import QApplication
+
+    QApplication.clipboard().setText("a\tb\n1\t2")
+    window.view.scene().clearSelection()
+    window.paste_items()
+    tables = [i for i in window.view.scene().ordered_markups()
+              if isinstance(i, TableItem)]
+    assert len(tables) == 1
+    assert tables[0].sheet.raw(1, 0) == "1"
+
+
+def test_a_pasted_block_grows_the_table_to_fit(window):
+    from PySide6.QtWidgets import QApplication
+
+    table = _table(window)
+    table.sheet.resize(2, 2)
+    table.current = table.anchor = (0, 0)
+    QApplication.clipboard().setText("1\t2\t3\n4\t5\t6\n7\t8\t9")
+    window.paste_items()
+    assert table.sheet.rows >= 3 and table.sheet.cols >= 3
+    assert table.sheet.raw(2, 2) == "9"
+
+
+def test_formulas_pasted_as_text_stay_formulas(window):
+    from PySide6.QtWidgets import QApplication
+
+    table = _table(window)
+    table.sheet.resize(6, 4)
+    table.current = table.anchor = (0, 0)
+    QApplication.clipboard().setText("2\t3\t=A1+B1")
+    window.paste_items()
+    window.recalculate()
+    assert table.sheet.raw(0, 2) == "=A1+B1"
+    assert table.sheet.value(0, 2) == 5
+
+
+def test_copied_cells_beat_markups_copied_earlier(window):
+    """Copying cells replaces what a paste puts down, markups and all."""
+    from PySide6.QtWidgets import QApplication
+
+    window.select_tool("rect")
+    drag(window.view, 400, 400, 480, 450)
+    window.select_tool("select")
+    click(window.view, 440, 425)
+    window.copy_selection()
+    assert window._clipboard
+
+    table = _table(window)
+    table.sheet.resize(6, 4)
+    table.set_cell(0, 0, "5")
+    table.current = table.anchor = (0, 0)
+    window.copy_selection()
+    assert not window._clipboard
+
+    table.current = table.anchor = (2, 0)
+    window.paste_items()
+    assert table.sheet.raw(2, 0) == "5"
+
+
+def test_relative_formulas_follow_a_copy_between_tables(window):
+    first = _table(window, 60, 60)
+    first.sheet.resize(6, 4)
+    first.set_cell(0, 0, "2")
+    first.set_cell(0, 1, "3")
+    first.set_cell(0, 2, "=A1+B1")
+    window.recalculate()
+    first.current, first.anchor = (0, 0), (0, 2)
+    window.copy_selection()
+
+    second = _table(window, 60, 300)
+    second.sheet.resize(6, 4)
+    second.current = second.anchor = (2, 0)
+    window.paste_items()
+    window.recalculate()
+    assert second.sheet.raw(2, 2) == "=A3+B3"
+    assert second.sheet.value(2, 2) == 5

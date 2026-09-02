@@ -11,6 +11,7 @@ from PySide6.QtGui import (QColor, QCursor, QKeyEvent, QMouseEvent, QPainter,
 from PySide6.QtWidgets import (QApplication, QGraphicsView, QLineEdit, QRubberBand, QGraphicsProxyWidget)
 
 from ..core.document import MM_TO_PT
+from ..core.spreadsheet import parse_clipboard_grid
 from ..items.base import HANDLE_CURSORS, MarkupItem
 from ..items.mathitem import LINE_STEP, MathItem
 from .scene import PageFrame, detach
@@ -1297,11 +1298,36 @@ class PageView(QGraphicsView):
         self.commit_snapshot("Cut cells")
         return True
 
+    def clipboard_cell_size(self) -> tuple[int, int]:
+        """How many rows and columns are on the clipboard, spreadsheet-wise."""
+        mime = QApplication.clipboard().mimeData()
+        rows: list = []
+        if mime.hasFormat(CELLS_MIME):
+            try:
+                rows = json.loads(
+                    bytes(mime.data(CELLS_MIME)).decode("utf-8")).get("rows", [])
+            except ValueError:
+                rows = []
+        if not rows:
+            rows = parse_clipboard_grid(mime.text())
+        return len(rows), max((len(line) for line in rows), default=0)
+
+    def clipboard_is_a_block(self) -> bool:
+        """True when the clipboard holds more than the one cell."""
+        height, width = self.clipboard_cell_size()
+        return height > 1 or width > 1
+
     def paste_cells(self) -> bool:
         """Paste into the active table, from CalcForge or from a spreadsheet."""
         table = self.active_table
         if table is None or table.locked:
             return False
+        # A block of cells is a block wherever the reader happens to be: if a
+        # cell is open for editing it is abandoned, not filled with the lot.
+        if self._cell_editor is not None:
+            if not self.clipboard_is_a_block():
+                return False
+            self.close_cell_editor(commit=False)
         mime = QApplication.clipboard().mimeData()
         row, col = table.current
         self.begin_snapshot()
@@ -1432,6 +1458,15 @@ class PageView(QGraphicsView):
                     self.close_cell_editor(commit=False)
                 else:
                     self.end_item_edit()
+                event.accept()
+                return
+            # Pasting a block of cells into an open cell would put the whole
+            # sheet into that one box. It goes across the cells instead; a
+            # single cell still pastes into the text being typed.
+            if (self._cell_editor is not None and key == Qt.Key_V
+                    and modifiers & Qt.ControlModifier
+                    and self.clipboard_is_a_block()):
+                self.paste_cells()
                 event.accept()
                 return
             super().keyPressEvent(event)

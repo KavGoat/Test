@@ -1422,8 +1422,12 @@ class MainWindow(QMainWindow):
 
     def copy_selection(self) -> None:
         if self.view.text_clipboard("copy"):
+            self._clipboard = []
             return
         if self.view.active_table is not None and self.view.copy_cells():
+            # Whatever markups were copied before, cells are what is on the
+            # clipboard now — otherwise the next paste puts the old ones back.
+            self._clipboard = []
             return
         items = self.selected_items()
         if not items:
@@ -1434,8 +1438,10 @@ class MainWindow(QMainWindow):
 
     def cut_selection(self) -> None:
         if self.view.text_clipboard("cut"):
+            self._clipboard = []
             return
         if self.view.active_table is not None and self.view.cut_cells():
+            self._clipboard = []
             return
         self.copy_selection()
         self.delete_selection()
@@ -1447,6 +1453,14 @@ class MainWindow(QMainWindow):
             return
         payload = self._clipboard
         text = QApplication.clipboard().text()
+        # A table picked out on the page is where a block of cells belongs,
+        # without having to open one of its cells first.
+        if not payload and looks_like_a_grid(text):
+            selected = [i for i in self.selected_items() if isinstance(i, TableItem)]
+            if len(selected) == 1 and not selected[0].locked:
+                self.view.activate_table(selected[0])
+                if self.view.paste_cells():
+                    return
         # Cells copied out of Excel with nowhere to go become a table of their
         # own, which is how most sheets get into a calculation in the first place.
         if not payload and looks_like_a_grid(text):
