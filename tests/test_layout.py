@@ -33,7 +33,7 @@ def test_every_panel_is_one_that_can_be_pinned(window):
 def test_the_expected_panels_are_there(window):
     assert set(panels(window)) == {
         "dock_pages", "dock_properties", "dock_variables", "dock_functions",
-        "dock_layers", "dock_markups", "dock_problems"}
+        "dock_layers", "dock_markups", "dock_bookmarks", "dock_problems"}
 
 
 def test_a_panel_can_be_hidden_and_brought_back(window):
@@ -380,7 +380,7 @@ def test_the_lookup_panels_share_one_panel(window):
     """Markups, variables, functions, layers and problems are tabs of one panel."""
     assert [dock.objectName() for dock in window.reference_docks] == [
         "dock_markups", "dock_variables", "dock_functions", "dock_layers",
-        "dock_problems"]
+        "dock_bookmarks", "dock_problems"]
     for dock in window.reference_docks:
         assert window.dockWidgetArea(dock) == Qt.BottomDockWidgetArea
     together = window.tabifiedDockWidgets(window.dock_markups)

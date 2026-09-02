@@ -169,6 +169,29 @@ class Layer:
     color: str = "#8899aa"
 
 
+@dataclass
+class Bookmark:
+    """A named place in the document.
+
+    Kept against the page's own id rather than its number, so reordering or
+    inserting pages does not send every bookmark to the wrong sheet. *y* is
+    how far down that page it points, in points.
+    """
+
+    title: str
+    page_uid: str
+    y: float = 0.0
+    level: int = 0
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Bookmark":
+        known = {f: data[f] for f in cls.__dataclass_fields__ if f in data}
+        return cls(**known)
+
+
 class Page:
     """One sheet of the document."""
 
@@ -271,6 +294,7 @@ class Document:
         self.settings = DocumentSettings()
         self.pages: list[Page] = [Page()]
         self.layers: list[Layer] = [Layer("Markups"), Layer("Calculations")]
+        self.bookmarks: list[Bookmark] = []
         self.assets: dict[str, bytes] = {}
         self.workspace = Workspace()
         self.path: Optional[str] = None
@@ -353,6 +377,7 @@ class Document:
             "project": self.project,
             "settings": self.settings.to_dict(),
             "layers": [asdict(layer) for layer in self.layers],
+            "bookmarks": [mark.to_dict() for mark in self.bookmarks],
             "pages": [page.to_dict() for page in self.pages],
         }
 
@@ -363,8 +388,42 @@ class Document:
         self.project = data.get("project", "")
         self.settings = DocumentSettings.from_dict(data.get("settings", {}))
         self.layers = [Layer(**layer) for layer in data.get("layers", [])] or [Layer("Markups")]
+        self.bookmarks = [Bookmark.from_dict(mark) for mark in data.get("bookmarks", [])]
         self.pages = [Page.from_dict(page) for page in data.get("pages", [])] or [Page()]
         self.modified = False
+
+    # -- bookmarks ---------------------------------------------------------
+    def page_index_of(self, uid: str) -> int:
+        """Which page a bookmark points at now, or -1 if it has gone."""
+        for index, page in enumerate(self.pages):
+            if page.uid == uid:
+                return index
+        return -1
+
+    def contents_entries(self) -> list:
+        """Bookmarks that still point somewhere, in page order.
+
+        What the bookmarks panel lists, what a contents block prints and what
+        the exported PDF gets as its outline all read from here, so the three
+        can never disagree.
+        """
+        entries = []
+        for mark in self.bookmarks:
+            index = self.page_index_of(mark.page_uid)
+            if index >= 0:
+                entries.append((mark, index))
+        entries.sort(key=lambda pair: (pair[1], pair[0].y))
+        return entries
+
+    def add_bookmark(self, title: str, page_index: int, y: float = 0.0,
+                     level: int = 0) -> Optional[Bookmark]:
+        if not (0 <= page_index < len(self.pages)):
+            return None
+        mark = Bookmark(title.strip() or f"Page {page_index + 1}",
+                        self.pages[page_index].uid, float(y), int(level))
+        self.bookmarks.append(mark)
+        self.modified = True
+        return mark
 
     def field_values(self, page_index: int) -> dict[str, str]:
         """Values available to header/footer templates."""

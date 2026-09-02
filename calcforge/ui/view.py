@@ -16,6 +16,7 @@ from ..core.document import MM_TO_PT
 from ..core.spreadsheet import parse_clipboard_grid
 from ..core.units import parse_unit
 from ..items.base import HANDLE_CURSORS, MarkupItem, build_item
+from ..items.contents import ContentsItem
 from ..items.mathitem import LINE_STEP, MathItem
 from .scene import PageFrame, detach
 from ..items.measure import CALIBRATE, DIMENSION, CountItem, MeasureItem
@@ -602,6 +603,18 @@ class PageView(QGraphicsView):
                 return
 
         item = self.markup_at(scene_pos)
+        if isinstance(item, ContentsItem) and not item.isSelected():
+            # A contents line behaves like a link: one click follows it. Select
+            # the block first if you want to move or resize it.
+            row = item.row_at(item.mapFromScene(scene_pos))
+            if row is not None:
+                self.scene().clearSelection()
+                item.setSelected(True)
+                self.selectionChanged.emit()
+                self.window.go_to_bookmark(*row)
+                self._mode = "idle"
+                event.accept()
+                return
         if item is None:
             self.deactivate_table()
             if not (event.modifiers() & (Qt.ShiftModifier | Qt.ControlModifier)):
@@ -1055,6 +1068,12 @@ class PageView(QGraphicsView):
             # the line edits the line.
             row = item.result_at(item.mapFromScene(scene_pos))
             if row >= 0 and self.open_unit_editor(item, row):
+                event.accept()
+                return
+        if isinstance(item, ContentsItem):
+            row = item.row_at(item.mapFromScene(scene_pos))
+            if row is not None:
+                self.window.go_to_bookmark(*row)
                 event.accept()
                 return
         if isinstance(item, PlotItem) and not item.locked:

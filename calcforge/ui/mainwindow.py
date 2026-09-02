@@ -26,6 +26,7 @@ from ..io import export as export_io
 from ..io import pdfio
 from ..io import project as project_io
 from ..items.base import MarkupItem, Style, build_item
+from ..items.contents import ContentsItem
 from ..items.mathitem import MathItem
 from ..items.measure import MeasureItem
 from ..items.media import ImageItem
@@ -36,7 +37,8 @@ from ..items.text import NoteItem, StampItem, _TextBase
 from . import dialogs
 from .commands import DocumentStructureCommand
 from .icons import icon
-from .panels import (FunctionsPanel, LayersPanel, MarkupsPanel, PagesPanel,
+from .panels import (BookmarksPanel, FunctionsPanel, LayersPanel, MarkupsPanel,
+                     PagesPanel,
                      ProblemsPanel, PropertiesPanel, VariablesPanel)
 from .docks import PanelDock, load_panel_state, save_panel_state
 from .scene import DocumentScene, detach
@@ -316,6 +318,10 @@ class MainWindow(QMainWindow):
                   "Ctrl+K", tip="Change any shortcut by pressing the keys you want")
         self._act("problems", "Show problems", self.show_problems)
         self._act("renumber_counts", "Renumber count markers", self.renumber_counts)
+        self._act("bookmark", "Add bookmark here", self.add_bookmark_here, "Ctrl+B",
+                  tip="Name this place so it can be jumped to, printed in a "
+                      "contents block and exported as a PDF bookmark")
+        self._act("contents", "Insert a table of contents", self.insert_contents_block)
         self.symbol_actions: dict[str, QAction] = {}
         for binding in self.shortcuts.bindings():
             if binding.kind != SYMBOL:
@@ -455,12 +461,16 @@ class MainWindow(QMainWindow):
         self.problems_panel = ProblemsPanel(self)
         self.dock_problems = self._dock("Problems", self.problems_panel,
                                         Qt.BottomDockWidgetArea, "dock_problems")
+        self.bookmarks_panel = BookmarksPanel(self)
+        self.bookmarks_panel.bookmarkActivated.connect(self.go_to_bookmark)
+        self.dock_bookmarks = self._dock("Bookmarks", self.bookmarks_panel,
+                                         Qt.BottomDockWidgetArea, "dock_bookmarks")
         # Everything you look things up in goes in one place along the bottom:
         # markups, variables, functions, layers and problems as tabs of the
         # same panel, so the right-hand side is left to Properties alone.
         self.reference_docks = [self.dock_markups, self.dock_variables,
                                 self.dock_functions, self.dock_layers,
-                                self.dock_problems]
+                                self.dock_bookmarks, self.dock_problems]
         for dock in self.reference_docks[1:]:
             self.addDockWidget(Qt.BottomDockWidgetArea, dock)
         for first, second in zip(self.reference_docks, self.reference_docks[1:]):
@@ -527,7 +537,8 @@ class MainWindow(QMainWindow):
 
         # Mnemonic on the "g" for the same reason: Alt+P draws freehand.
         page_menu = bar.addMenu("Pa&ge")
-        for action in (self.act_add_page, self.act_duplicate_page, self.act_delete_page,
+        for action in (self.act_bookmark, None,
+                       self.act_add_page, self.act_duplicate_page, self.act_delete_page,
                        None, self.act_page_setup, self.act_scale, self.act_header_footer,
                        None, self.act_doc_props):
             page_menu.addSeparator() if action is None else page_menu.addAction(action)
@@ -542,6 +553,8 @@ class MainWindow(QMainWindow):
         symbol_menu = insert_menu.addMenu("Maths s&ymbol")
         for action in self.symbol_actions.values():
             symbol_menu.addAction(action)
+        insert_menu.addSeparator()
+        insert_menu.addAction(self.act_contents)
         insert_menu.addSeparator()
         insert_menu.addAction(self.act_insert_pdf)
         insert_menu.addAction(self.act_insert_image_page)
@@ -2148,6 +2161,66 @@ class MainWindow(QMainWindow):
 
     def refresh_lists(self) -> None:
         self.markups_panel.rebuild(self.document)
+        self.bookmarks_panel.rebuild(self.document)
+
+    # ==================================================================
+    # bookmarks
+    # ==================================================================
+    def add_bookmark_here(self) -> None:
+        """Bookmark the page and place the reader is looking at."""
+        index = self.current_index
+        page = self.document.pages[index]
+        anchor = self.view.insert_point()
+        y = 0.0
+        if anchor is not None and page.frame is not None:
+            y = max(page.frame.mapFromScene(anchor).y(), 0.0)
+        suggestion = page.label or self._nearby_heading(page, y) or f"Page {index + 1}"
+        title, accepted = QInputDialog.getText(self, "Add bookmark", "Name",
+                                               text=suggestion)
+        if not accepted:
+            return
+        self.document.add_bookmark(title, index, y)
+        self.bookmarks_changed()
+        self.status_hint.setText(f"Bookmarked “{title.strip() or suggestion}”")
+
+    @staticmethod
+    def _nearby_heading(page, y: float) -> str:
+        """The nearest piece of text above the spot, as a name to offer."""
+        if page.frame is None:
+            return ""
+        best = ""
+        best_distance = 200.0
+        for item in page.frame.markups():
+            text = getattr(item, "text", None)
+            if not callable(text):
+                continue
+            written = text().strip().split("\n")[0][:60]
+            if not written:
+                continue
+            distance = abs(item.pos().y() - y)
+            if distance < best_distance:
+                best, best_distance = written, distance
+        return best
+
+    def bookmarks_changed(self) -> None:
+        self.bookmarks_panel.rebuild(self.document)
+        self._refresh_all_scenes()
+        self.mark_modified()
+
+    def go_to_bookmark(self, index: int, y: float = 0.0) -> None:
+        """Show the page a bookmark points at, at the place it points to."""
+        self.go_to_page(index)
+        page = self.document.pages[index] if 0 <= index < len(self.document.pages) else None
+        if page is not None and page.frame is not None and y:
+            self.view.centerOn(page.frame.mapToScene(QPointF(0, y))
+                               + QPointF(page.setup.width_pt / 2, 0))
+
+    def insert_contents_block(self) -> None:
+        """Put a contents block on the page, listing the bookmarks."""
+        self.select_tool("contents")
+        self.status_hint.setText(
+            "Drag out where the contents should go — it lists the bookmarks, "
+            "and each line goes to its page")
 
     # ==================================================================
     # formula bar

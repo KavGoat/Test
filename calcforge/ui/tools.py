@@ -6,6 +6,7 @@ from typing import Callable, Optional
 
 
 from ..items import measure as measure_module
+from ..items.contents import ContentsItem
 from ..items.mathitem import MathItem
 from ..items.measure import CountItem, MeasureItem
 from ..items.media import ImageItem
@@ -110,6 +111,9 @@ TOOLS: list[Tool] = [
          "Spreadsheet that can use your variables", factory=lambda: TableItem()),
     Tool("plot", "Plot", "plot", DRAG, "Calculate", "G",
          "Plot a function or expression against a range", factory=lambda: PlotItem()),
+    Tool("contents", "Contents", "page", DRAG, "Calculate", "",
+         "A table of contents built from the document's bookmarks — click a "
+         "line to go there", factory=lambda: ContentsItem()),
 
     Tool("measure_length", "Length", "measure_length", DRAG, "Measure", "M",
          "Measure a distance to the page scale", max_points=2,

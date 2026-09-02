@@ -2372,3 +2372,118 @@ def test_the_highlight_and_the_cloud_callout_are_on_keys(window):
     assert TOOL_MAP["highlight"].shortcut == "J"
     assert TOOL_MAP["cloud_callout"].shortcut == "Shift+Q"
     assert not window.shortcuts.conflicts()
+
+
+# ---------------------------------------------------------------------------
+# Bookmarks and a contents block
+# ---------------------------------------------------------------------------
+
+def test_a_bookmark_is_added_where_you_are(window, monkeypatch):
+    from PySide6.QtWidgets import QInputDialog
+
+    window.load_sample()
+    window.go_to_page(2)
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("Foundation", True))
+    window.add_bookmark_here()
+
+    marks = window.document.bookmarks
+    assert [m.title for m in marks] == ["Foundation"]
+    assert window.document.page_index_of(marks[0].page_uid) == 2
+
+
+def test_bookmarks_are_listed_in_page_order(window):
+    window.load_sample()
+    window.document.add_bookmark("Third", 2)
+    window.document.add_bookmark("First", 0)
+    window.bookmarks_changed()
+
+    tree = window.bookmarks_panel.tree
+    titles = [tree.topLevelItem(row).text(0).strip() for row in range(tree.topLevelItemCount())]
+    pages = [tree.topLevelItem(row).text(1) for row in range(tree.topLevelItemCount())]
+    assert titles == ["First", "Third"]
+    assert pages == ["1", "3"]
+
+
+def test_a_bookmark_follows_its_page_when_pages_move(window):
+    window.load_sample()
+    window.document.add_bookmark("Foundation", 2)
+    window.move_page(2, 0)
+    assert window.document.contents_entries()[0][1] == 0
+
+
+def test_a_bookmark_whose_page_has_gone_is_left_out(window, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    window.load_sample()
+    window.document.add_bookmark("Foundation", 2)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
+    window.delete_page(2)
+    assert window.document.contents_entries() == []
+    window.bookmarks_panel.rebuild(window.document)
+    assert window.bookmarks_panel.tree.topLevelItemCount() == 0
+
+
+def test_double_clicking_a_bookmark_goes_there(window):
+    window.load_sample()
+    window.document.add_bookmark("Foundation", 2)
+    window.bookmarks_changed()
+    tree = window.bookmarks_panel.tree
+    tree.setCurrentItem(tree.topLevelItem(0))
+    window.bookmarks_panel._activate(tree.topLevelItem(0))
+    assert window.current_index == 2
+
+
+def test_a_contents_block_lists_the_bookmarks(window):
+    from calcforge.items.contents import ContentsItem
+
+    window.load_sample()
+    window.document.add_bookmark("Beam design", 0)
+    window.document.add_bookmark("Foundation", 2)
+
+    window.select_tool("contents")
+    drag(window.view, 60, 500, 360, 640)
+    block = next(i for i in markups(window) if isinstance(i, ContentsItem))
+    assert [mark.title for mark, _ in block.entries()] == ["Beam design", "Foundation"]
+
+    window.document.pages[0].frame.render_image(dpi=48.0)      # lays the rows out
+    assert len(block.rows) == 2
+
+
+def test_clicking_a_contents_line_goes_to_that_page(window):
+    window.load_sample()
+    window.document.add_bookmark("Beam design", 0)
+    window.document.add_bookmark("Foundation", 2)
+    from calcforge.items.contents import ContentsItem
+
+    window.select_tool("contents")
+    drag(window.view, 60, 500, 360, 640)
+    block = next(i for i in markups(window) if isinstance(i, ContentsItem))
+    window.select_tool("select")
+    window.view.scene().clearSelection()
+    window.document.pages[0].frame.render_image(dpi=48.0)
+
+    row, index, _y = block.rows[1]
+    point = block.mapToScene(row.center())
+    click(window.view, point.x(), point.y())
+    assert window.current_index == index == 2
+
+
+def test_bookmarks_are_saved_with_the_document(window, tmp_path):
+    from calcforge.core.document import Document
+    from calcforge.io import project as project_io
+
+    window.load_sample()
+    window.document.add_bookmark("Foundation", 2, y=120.0)
+    path = str(tmp_path / "job.cfx")
+    project_io.save_document(window.document, path)
+
+    reopened = Document()
+    project_io.load_document(reopened, path)
+    assert [m.title for m in reopened.bookmarks] == ["Foundation"]
+    assert reopened.bookmarks[0].y == pytest.approx(120.0)
+    assert reopened.page_index_of(reopened.bookmarks[0].page_uid) == 2
+
+
+def test_there_is_a_key_for_bookmarking_where_you_are(window):
+    from PySide6.QtGui import QKeySequence
+    assert window.act_bookmark.shortcut() == QKeySequence("Ctrl+B")

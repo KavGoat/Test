@@ -305,3 +305,121 @@ def test_the_logo_and_its_place_are_saved_with_the_document(window, tmp_path):
     assert reopened.settings.logo_slot == "footer_center"
     assert reopened.settings.logo_height_mm == pytest.approx(12.5)
     assert reopened.asset(reopened.settings.logo_key)
+
+
+# ---------------------------------------------------------------------------
+# Bookmarks, a contents block, and links that work in the exported PDF
+# ---------------------------------------------------------------------------
+
+def _outline_titles(path: str) -> list[str]:
+    """The bookmark names in a PDF, read straight out of the file.
+
+    Walks each string to its own closing bracket, honouring the backslash
+    escapes, rather than trusting a regex not to run past the end of one.
+    """
+    data = open(path, "rb").read()
+    titles = []
+    at = 0
+    while True:
+        at = data.find(b"/Title (", at)
+        if at < 0:
+            break
+        start = at + len(b"/Title (")
+        index = start
+        body = bytearray()
+        while index < len(data):
+            byte = data[index]
+            if byte == 0x5C:                      # backslash: take the next byte
+                body.append(data[index + 1])
+                index += 2
+                continue
+            if byte == 0x29:                      # )
+                break
+            body.append(byte)
+            index += 1
+        at = index + 1
+        if not data[at:at + 40].lstrip().startswith(b"/Parent"):
+            continue                              # the file's own title, not ours
+        raw = bytes(body)
+        titles.append(raw[2:].decode("utf-16-be") if raw.startswith(b"\xfe\xff")
+                      else raw.decode("latin-1"))
+    return titles
+
+
+def _link_count(path: str) -> int:
+    import re
+    return len(re.findall(rb"/Subtype\s*/Link", open(path, "rb").read()))
+
+
+def test_bookmarks_become_the_pdfs_own_bookmarks(window, tmp_path):
+    window.load_sample()
+    window.document.add_bookmark("Beam design", 0)
+    window.document.add_bookmark("Load take-down", 1)
+    window.document.add_bookmark("Foundation", 2)
+
+    path = str(tmp_path / "book.pdf")
+    export_io.export_pdf(window.document, path)
+    assert _outline_titles(path) == ["Beam design", "Load take-down", "Foundation"]
+
+    printed = Printed(path)
+    assert printed.pages == 3           # and the document still opens
+
+
+def test_a_document_without_bookmarks_is_unchanged(window, tmp_path):
+    path = str(tmp_path / "plain.pdf")
+    export_io.export_pdf(window.document, path)
+    assert _outline_titles(path) == []
+    assert Printed(path).pages == 1
+
+
+def test_a_contents_block_becomes_links_in_the_pdf(window, tmp_path):
+    from calcforge.items.contents import ContentsItem
+
+    window.load_sample()
+    window.document.add_bookmark("Beam design", 0)
+    window.document.add_bookmark("Foundation", 2)
+
+    contents = ContentsItem()
+    contents.setPos(60, 600)
+    window.document.pages[0].frame.add_markup(contents)
+    contents.paint_content(_null_painter(window))       # lay the rows out
+
+    path = str(tmp_path / "contents.pdf")
+    export_io.export_pdf(window.document, path)
+    assert _link_count(path) == 2
+    assert Printed(path).pages == 3
+
+
+def _null_painter(window):
+    """A painter over a throwaway image, for laying a block out off-screen."""
+    from PySide6.QtGui import QImage, QPainter
+
+    image = QImage(600, 800, QImage.Format_ARGB32)
+    painter = QPainter(image)
+    window._contents_painter = (image, painter)         # keep them alive
+    return painter
+
+
+def test_the_outline_points_at_the_right_pages(window, tmp_path):
+    import re
+    window.load_sample()
+    window.document.add_bookmark("Foundation", 2)
+    path = str(tmp_path / "one.pdf")
+    export_io.export_pdf(window.document, path)
+
+    data = open(path, "rb").read()
+    kids = re.search(rb"/Kids\s*\[(.*?)\]", data, re.S).group(1)
+    pages = [int(n) for n in re.findall(rb"(\d+)\s+0\s+R", kids)]
+    dest = re.search(rb"/Dest\s*\[\s*(\d+)\s+0\s+R", data).group(1)
+    assert int(dest) == pages[2]
+
+
+def test_exporting_a_range_does_not_leave_links_dangling(window, tmp_path):
+    window.load_sample()
+    window.document.add_bookmark("Beam design", 0)
+    window.document.add_bookmark("Foundation", 2)
+
+    path = str(tmp_path / "range.pdf")
+    export_io.export_pdf(window.document, path, pages=window.document.pages[:1])
+    assert _outline_titles(path) == ["Beam design"]
+    assert Printed(path).pages == 1

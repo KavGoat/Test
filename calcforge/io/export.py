@@ -80,13 +80,61 @@ def _target_rect(painter: QPainter, page, resolution: float,
                   width, height)
 
 
+def outline_and_links(document: Document, printed: list) -> tuple[list, list]:
+    """The bookmarks and contents links that belong in the exported PDF.
+
+    Everything is worked out against the pages actually printed, so exporting
+    a range does not leave links pointing at pages that are not there.
+    """
+    from . import pdflinks
+
+    where = {page.uid: index for index, page in enumerate(printed)}
+    outline = []
+    for mark, _index in document.contents_entries():
+        index = where.get(mark.page_uid)
+        if index is not None:
+            outline.append(pdflinks.Outline(
+                mark.title, pdflinks.Destination(index, mark.y), mark.level))
+
+    links = []
+    for index, page in enumerate(printed):
+        if page.frame is None:
+            continue
+        height = page.height_pt
+        for item in page.frame.markups():
+            rows = getattr(item, "rows", None)
+            if not rows or not hasattr(item, "row_at"):
+                continue
+            for rect, target, y in rows:
+                on_page = item.mapToParent(rect.topLeft()), item.mapToParent(rect.bottomRight())
+                target_index = where.get(document.pages[target].uid) \
+                    if 0 <= target < len(document.pages) else None
+                if target_index is None:
+                    continue
+                links.append(pdflinks.Link(
+                    index,
+                    (on_page[0].x(), height - on_page[1].y(),
+                     on_page[1].x(), height - on_page[0].y()),
+                    pdflinks.Destination(target_index, y)))
+    return outline, links
+
+
 def export_pdf(document: Document, path: str, pages: Optional[list] = None,
                resolution: int = 300) -> None:
     writer = QPdfWriter(path)
     writer.setResolution(resolution)
     writer.setTitle(document.title)
     writer.setCreator("CalcForge")
-    paint_pages(writer, document, pages if pages is not None else document.pages, resolution)
+    printed = pages if pages is not None else document.pages
+    paint_pages(writer, document, printed, resolution)
+    # Qt has no way to write an outline or a link, so both are appended to the
+    # finished file. A failure there costs the bookmarks, never the document.
+    from . import pdflinks
+    outline, links = outline_and_links(document, [p for p in printed if p.frame is not None])
+    try:
+        pdflinks.add_outline_and_links(path, outline, links)
+    except Exception:                              # noqa: BLE001
+        pass
 
 
 def pages_for_printer(document: Document, printer: QPrinter) -> list:

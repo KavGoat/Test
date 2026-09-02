@@ -6,7 +6,8 @@ import re
 
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QPixmap
-from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDoubleSpinBox,
+from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox,
+                               QDoubleSpinBox, QInputDialog,
                                QFontComboBox, QFormLayout, QGroupBox, QHBoxLayout,
                                QHeaderView, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem, QPlainTextEdit, QPushButton,
@@ -426,6 +427,93 @@ class FunctionsPanel(QWidget):
 # ---------------------------------------------------------------------------
 # Layers
 # ---------------------------------------------------------------------------
+
+class BookmarksPanel(QWidget):
+    """Named places in the document, in page order.
+
+    The same list the contents block prints and the exported PDF gets as its
+    outline, so what you navigate by and what a reader navigates by are the
+    same thing.
+    """
+
+    bookmarkActivated = Signal(int, float)
+
+    def __init__(self, window):
+        super().__init__()
+        self.window = window
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
+
+        self.tree = QTreeWidget()
+        self.tree.setColumnCount(2)
+        self.tree.setHeaderLabels(["Bookmark", "Page"])
+        self.tree.setRootIsDecorated(False)
+        self.tree.setUniformRowHeights(True)
+        self.tree.header().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.tree.itemDoubleClicked.connect(self._activate)
+        layout.addWidget(self.tree, 1)
+
+        buttons = QHBoxLayout()
+        for label, tip, slot in (
+                ("Add", "Bookmark where you are now", self.add_here),
+                ("Rename", "Rename the selected bookmark", self.rename),
+                ("Delete", "Remove the selected bookmark", self.remove),
+                ("Contents", "Put a table of contents on the page",
+                 self.insert_contents)):
+            button = QPushButton(label)
+            button.setToolTip(tip)
+            button.clicked.connect(slot)
+            buttons.addWidget(button)
+        buttons.addStretch(1)
+        layout.addLayout(buttons)
+
+    # -- display -----------------------------------------------------------
+    def rebuild(self, document=None) -> None:
+        document = document or self.window.document
+        self.tree.clear()
+        for mark, index in document.contents_entries():
+            node = QTreeWidgetItem([("    " * mark.level) + mark.title,
+                                    str(index + 1)])
+            node.setData(0, Qt.UserRole, mark)
+            self.tree.addTopLevelItem(node)
+
+    def _selected(self):
+        node = self.tree.currentItem()
+        return node.data(0, Qt.UserRole) if node is not None else None
+
+    def _activate(self, node, _column: int = 0) -> None:
+        mark = node.data(0, Qt.UserRole)
+        if mark is None:
+            return
+        index = self.window.document.page_index_of(mark.page_uid)
+        if index >= 0:
+            self.bookmarkActivated.emit(index, mark.y)
+
+    # -- editing -----------------------------------------------------------
+    def add_here(self) -> None:
+        self.window.add_bookmark_here()
+
+    def rename(self) -> None:
+        mark = self._selected()
+        if mark is None:
+            return
+        title, accepted = QInputDialog.getText(self, "Rename bookmark",
+                                               "Name", text=mark.title)
+        if accepted and title.strip():
+            mark.title = title.strip()
+            self.window.bookmarks_changed()
+
+    def remove(self) -> None:
+        mark = self._selected()
+        if mark is None:
+            return
+        self.window.document.bookmarks.remove(mark)
+        self.window.bookmarks_changed()
+
+    def insert_contents(self) -> None:
+        self.window.insert_contents_block()
+
 
 class LayersPanel(QWidget):
     """Show, hide, lock and set printability per layer."""
