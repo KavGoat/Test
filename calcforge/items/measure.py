@@ -64,7 +64,11 @@ class MeasureItem(MarkupItem):
         super().__init__()
         self.kind = kind
         self.points: list[QPointF] = [QPointF(p) for p in (points or [])]
-        self.label_offset = QPointF(0, -14)
+        # A dimension's text sits on the line, in line with it, the way a
+        # dimension is drawn; every other measurement's sits above it.
+        self.label_offset = QPointF(0, 0) if kind == DIMENSION else QPointF(0, -14)
+        # None means "follow the line"; a number means the author turned it.
+        self.label_angle: Optional[float] = None
         self.depth_text = ""            # for volume: e.g. "150 mm"
         # A dimension carries whatever text the author wants on it — "varies",
         # "2 no. @ 300 c/c" — instead of the measured value.
@@ -158,13 +162,48 @@ class MeasureItem(MarkupItem):
     def handle_points(self) -> dict[str, QPointF]:
         handles = {f"v{index}": QPointF(point) for index, point in enumerate(self.points)}
         if self.show_label:
-            handles["lbl"] = self._label_anchor() + self.label_offset
+            centre = self._label_anchor() + self.label_offset
+            handles["lbl"] = centre
+            # A second handle to turn the text by, out along its own angle.
+            angle = math.radians(self.label_rotation())
+            reach = max(self.style.font_size * 2.2, 16.0)
+            handles["lblrot"] = QPointF(centre.x() + math.cos(angle) * reach,
+                                        centre.y() + math.sin(angle) * reach)
         return handles
+
+    def label_rotation(self) -> float:
+        """How the text is turned: with the line, unless it was turned by hand."""
+        if self.label_angle is not None:
+            return self.label_angle
+        if self.kind not in (DIMENSION, LENGTH, CALIBRATE) or len(self.points) < 2:
+            return 0.0
+        a, b = self.points[0], self.points[1]
+        angle = math.degrees(math.atan2(b.y() - a.y(), b.x() - a.x()))
+        # Kept the right way up: nobody reads a dimension upside down.
+        if angle > 90:
+            angle -= 180
+        elif angle < -90:
+            angle += 180
+        return angle
+
+    def label_is_off_the_line(self) -> bool:
+        """True when the text has been moved away from where it belongs."""
+        offset = self.label_offset
+        return math.hypot(offset.x(), offset.y()) > max(self.style.font_size, 8.0)
 
     def move_handle(self, key: str, local_pos: QPointF, keep_ratio: bool = False) -> None:
         if key == "lbl":
             self.prepareGeometryChange()
             self.label_offset = local_pos - self._label_anchor()
+            self.update()
+            return
+        if key == "lblrot":
+            anchor = self._label_anchor() + self.label_offset
+            self.prepareGeometryChange()
+            angle = math.degrees(math.atan2(local_pos.y() - anchor.y(),
+                                            local_pos.x() - anchor.x()))
+            step = 15 if keep_ratio else 1
+            self.label_angle = round(angle / step) * step
             self.update()
             return
         if key.startswith("v"):
@@ -360,20 +399,33 @@ class MeasureItem(MarkupItem):
                                         size, self.style.arrow_start))
 
     def _paint_label(self, painter: QPainter) -> None:
-        position = self._label_anchor() + self.label_offset
+        """The text, in line with what it measures — or on a leader if moved."""
+        anchor = self._label_anchor()
+        position = anchor + self.label_offset
         font = self.style.font()
         painter.setFont(font)
         metrics = QFontMetricsF(font)
         text = self.value_text
         width = metrics.horizontalAdvance(text) + 8
         height = metrics.height() + 4
-        box = QRectF(position.x() - width / 2, position.y() - height / 2, width, height)
-        background = QColor(255, 255, 255, 215)
-        painter.setBrush(QBrush(background))
+
+        if self.label_is_off_the_line():
+            # Moved away from the line, so it needs a leader back to it.
+            pen = QPen(QColor(self.style.stroke), max(self.style.width * 0.6, 0.4))
+            pen.setStyle(Qt.SolidLine)
+            painter.setPen(pen)
+            painter.drawLine(anchor, position)
+
+        painter.save()
+        painter.translate(position)
+        painter.rotate(self.label_rotation())
+        box = QRectF(-width / 2, -height / 2, width, height)
+        painter.setBrush(QBrush(QColor(255, 255, 255, 215)))
         painter.setPen(QPen(QColor(self.style.stroke), 0.5))
         painter.drawRoundedRect(box, 2.5, 2.5)
         painter.setPen(QPen(self.style.text_qcolor()))
         painter.drawText(box, Qt.AlignCenter, text)
+        painter.restore()
 
     # -- serialisation -----------------------------------------------------
     def serialize(self) -> dict:
@@ -382,6 +434,8 @@ class MeasureItem(MarkupItem):
             "kind": self.kind,
             "points": [[round(p.x(), 3), round(p.y(), 3)] for p in self.points],
             "label_offset": [self.label_offset.x(), self.label_offset.y()],
+            "label_angle": self.label_angle,
+            "custom_label": self.custom_label,
             "depth_text": self.depth_text,
             "show_label": self.show_label,
         })
@@ -392,6 +446,8 @@ class MeasureItem(MarkupItem):
         self.points = [QPointF(x, y) for x, y in data.get("points", [])]
         offset = data.get("label_offset", [0, -14])
         self.label_offset = QPointF(offset[0], offset[1])
+        angle = data.get("label_angle")
+        self.label_angle = float(angle) if angle is not None else None
         self.depth_text = data.get("depth_text", "")
         self.custom_label = data.get("custom_label", "")
         self.show_label = bool(data.get("show_label", True))

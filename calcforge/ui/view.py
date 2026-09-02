@@ -112,6 +112,9 @@ class PageView(QGraphicsView):
         # properties for the next thing drawn.
         self._pending_stamp = None
         self._pending_properties: Optional[dict] = None
+        self._label_editor: Optional[QLineEdit] = None
+        self._label_proxy: Optional[QGraphicsProxyWidget] = None
+        self._label_item = None
         self._editing_item = None
 
         self._last_scene_pos = QPointF(60, 60)
@@ -162,6 +165,7 @@ class PageView(QGraphicsView):
         self.window.undo_stack.push(command)
 
     def after_undo(self) -> None:
+        self.close_label_editor(commit=False)
         self.close_unit_editor(commit=False)
         self.close_cell_editor(commit=False)
         self.active_table = None
@@ -521,6 +525,13 @@ class PageView(QGraphicsView):
         scene_pos = self.mapToScene(event.position().toPoint())
         self._press_scene = scene_pos
         self._press_view = event.position().toPoint()
+
+        if self._label_editor is not None and event.button() == Qt.LeftButton:
+            proxy = self._label_proxy
+            if proxy is not None and proxy.sceneBoundingRect().contains(scene_pos):
+                super().mousePressEvent(event)
+                return
+            self.close_label_editor(commit=True)
 
         # A click away from the little unit box finishes it, the way clicking
         # off any other in-place editor does.
@@ -1178,12 +1189,83 @@ class PageView(QGraphicsView):
                 self.commit_snapshot("Add vertex")
                 event.accept()
                 return
+        # A measurement with nowhere to add a vertex is one to type on: a
+        # dimension carries its own words.
+        if isinstance(item, MeasureItem) and not item.locked:
+            if self.open_label_editor(item):
+                event.accept()
+                return
         self.itemActivated.emit(item)
         event.accept()
 
     # ------------------------------------------------------------------
     # item creation
     # ------------------------------------------------------------------
+    # -- typing on a measurement -------------------------------------------
+    def open_label_editor(self, item) -> bool:
+        """Type a measurement's own text where the text sits.
+
+        A dimension carries whatever the author wants on it, and asking for
+        that in a dialog put the words somewhere other than where they were
+        going to appear. The caret goes where the text goes, and it starts
+        empty, so a dimension says nothing until something is typed into it.
+        """
+        if not isinstance(item, MeasureItem) or item.locked:
+            return False
+        self.close_label_editor(commit=False)
+        editor = QLineEdit()
+        editor.setText(item.custom_label)
+        editor.setPlaceholderText(item.measured_text or "text for this dimension")
+        editor.setAlignment(Qt.AlignCenter)
+        editor.setStyleSheet(
+            "QLineEdit { border: 2px solid #1971c2; background: #ffffff; "
+            "padding: 0 3px; }")
+        font = item.style.font()
+        font.setPointSizeF(max(item.style.font_size, 6.0))
+        editor.setFont(font)
+        proxy = self.scene().addWidget(editor)
+        proxy.setZValue(10_000)
+        centre = item.mapToScene(item._label_anchor() + item.label_offset)
+        width = max(int(item.style.font_size * 12), 90)
+        height = max(int(item.style.font_size * 2.0), 18)
+        editor.setFixedSize(width, height)
+        proxy.setPos(centre - QPointF(width / 2, height / 2))
+        editor.selectAll()
+        editor.setFocus(Qt.OtherFocusReason)
+        editor.returnPressed.connect(lambda: self.close_label_editor(commit=True))
+        self._label_editor = editor
+        self._label_proxy = proxy
+        self._label_item = item
+        self.statusMessage.emit(
+            "Type what this dimension should say — Enter to finish, empty for "
+            "the measured value")
+        return True
+
+    def close_label_editor(self, commit: bool = True) -> None:
+        if self._label_editor is None:
+            return
+        text = self._label_editor.text().strip()
+        item = self._label_item
+        proxy = self._label_proxy
+        self._label_editor = None
+        self._label_proxy = None
+        self._label_item = None
+        if proxy is not None:
+            widget = proxy.widget()
+            if widget is not None:
+                widget.clearFocus()
+            proxy.clearFocus()
+            if proxy.scene() is not None:
+                proxy.scene().removeItem(proxy)
+            proxy.deleteLater()
+        if commit and item is not None and item.custom_label != text:
+            self.begin_snapshot(self.involved_frames(item))
+            item.custom_label = text
+            item.refresh(page=self.page())
+            self.commit_snapshot("Dimension text")
+            self.selectionChanged.emit()
+        self.setFocus(Qt.OtherFocusReason)
+
     # -- tools taken from a tool set ---------------------------------------
     def set_pending_properties(self, payload: Optional[dict]) -> None:
         """The next markup drawn wears these properties."""
@@ -1434,13 +1516,14 @@ class PageView(QGraphicsView):
         elif isinstance(draft, PlotItem):
             self.window.edit_plot(draft, fresh=True)
         elif isinstance(draft, MeasureItem):
-            if draft.kind == DIMENSION:
-                self.window.prompt_dimension_text(draft)
-            else:
+            if draft.kind != DIMENSION:
                 note_scale = True
         self.commit_snapshot(f"Add {tool.label.lower()}")
 
-        if isinstance(draft, (MathItem, TextItem, CalloutItem)):
+        if isinstance(draft, MeasureItem) and draft.kind == DIMENSION \
+                and self.window.interactive_prompts:
+            self.open_label_editor(draft)
+        elif isinstance(draft, (MathItem, TextItem, CalloutItem)):
             self.begin_item_edit(draft)
         elif isinstance(draft, TableItem):
             self.activate_table(draft)
@@ -1518,7 +1601,8 @@ class PageView(QGraphicsView):
         sentence rather than a request to change tool.
         """
         return (self._editing_item is not None or self._cell_editor is not None
-                or self._unit_editor is not None or self.active_table is not None)
+                or self._unit_editor is not None or self._label_editor is not None
+                or self.active_table is not None)
 
     @staticmethod
     def place_caret(item, scene_pos: QPointF) -> None:
@@ -2494,6 +2578,14 @@ class PageView(QGraphicsView):
         if self._unit_editor is not None:
             if key == Qt.Key_Escape:
                 self.close_unit_editor(commit=False)
+                event.accept()
+                return
+            super().keyPressEvent(event)
+            return
+
+        if self._label_editor is not None:
+            if key == Qt.Key_Escape:
+                self.close_label_editor(commit=False)
                 event.accept()
                 return
             super().keyPressEvent(event)

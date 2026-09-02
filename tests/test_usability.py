@@ -3544,3 +3544,105 @@ def test_freehand_is_still_freehand_without_shift(window):
     window.select_tool("pen")
     drag(window.view, 100, 100, 260, 190)
     assert len(markups(window)[0].points) > 2
+
+
+# ---------------------------------------------------------------------------
+# A dimension's own words
+# ---------------------------------------------------------------------------
+
+def test_a_new_dimension_asks_for_its_words_where_they_will_appear(window):
+    window.interactive_prompts = True
+    try:
+        window.select_tool("measure_dimension")
+        drag(window.view, 100, 200, 320, 200)
+    finally:
+        window.interactive_prompts = False
+
+    assert window.view._label_editor is not None       # a caret, not a dialog
+    assert window.view._label_editor.text() == ""      # blank until typed into
+    dimension = markups(window)[0]
+    centre = dimension.mapToScene(dimension._label_anchor())
+    box = window.view._label_proxy.sceneBoundingRect()
+    assert box.contains(centre) or box.center().y() == pytest.approx(centre.y(), abs=20)
+
+    window.view._label_editor.setText("3600 c/c")
+    window.view.close_label_editor(commit=True)
+    assert dimension.custom_label == "3600 c/c"
+    assert dimension.value_text == "3600 c/c"
+
+
+def test_leaving_it_blank_leaves_it_blank(window):
+    window.interactive_prompts = True
+    try:
+        window.select_tool("measure_dimension")
+        drag(window.view, 100, 200, 320, 200)
+    finally:
+        window.interactive_prompts = False
+    window.view.close_label_editor(commit=True)
+    assert markups(window)[0].custom_label == ""
+
+
+def test_a_dimensions_text_lies_along_its_line(window):
+    window.select_tool("measure_dimension")
+    drag(window.view, 100, 200, 300, 300)
+    dimension = markups(window)[0]
+    assert dimension.label_offset == QPointF(0, 0)     # on the line
+    assert dimension.label_rotation() == pytest.approx(26.57, abs=0.5)
+
+
+def test_the_text_stays_the_right_way_up(window):
+    window.select_tool("measure_dimension")
+    drag(window.view, 300, 300, 100, 200)              # drawn back the other way
+    assert abs(markups(window)[0].label_rotation()) <= 90
+
+
+def test_moving_the_text_off_the_line_gives_it_a_leader(window):
+    window.select_tool("measure_dimension")
+    drag(window.view, 100, 200, 320, 200)
+    dimension = markups(window)[0]
+    window.view.close_label_editor(commit=False)
+    assert not dimension.label_is_off_the_line()
+
+    dimension.move_handle("lbl", dimension._label_anchor() + QPointF(0, -60))
+    assert dimension.label_is_off_the_line()
+
+
+def test_the_text_can_be_turned_by_hand_and_put_back(window):
+    window.select_tool("measure_dimension")
+    drag(window.view, 100, 200, 320, 200)
+    dimension = markups(window)[0]
+    window.view.close_label_editor(commit=False)
+
+    dimension.move_handle("lblrot", dimension._label_anchor() + QPointF(0, 40))
+    assert dimension.label_angle == pytest.approx(90, abs=1)
+    window.set_label_angle(dimension, None)
+    assert dimension.label_angle is None
+    assert dimension.label_rotation() == pytest.approx(0, abs=0.5)
+
+
+def test_double_clicking_a_dimension_types_on_it(window):
+    window.select_tool("measure_dimension")
+    drag(window.view, 100, 200, 320, 200)
+    dimension = markups(window)[0]
+    window.view.close_label_editor(commit=False)
+    window.select_tool("select")
+
+    point = dimension.mapToScene(dimension.points[1])
+    double_click(window.view, point.x(), point.y())
+    assert window.view._label_editor is not None
+    window.view.close_label_editor(commit=False)
+
+
+def test_typing_on_a_measurement_can_be_undone(window):
+    window.interactive_prompts = True
+    try:
+        window.select_tool("measure_dimension")
+        drag(window.view, 100, 200, 320, 200)
+    finally:
+        window.interactive_prompts = False
+    dimension = markups(window)[0]
+    window.view._label_editor.setText("varies")
+    window.view.close_label_editor(commit=True)
+    assert dimension.custom_label == "varies"
+    window.undo_stack.undo()
+    assert markups(window)[0].custom_label == ""

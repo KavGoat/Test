@@ -1621,17 +1621,16 @@ class MainWindow(QMainWindow):
             f"This table is now “{name}” — read it with {name}(value, A, B)"
             if name else "This table no longer has a name")
 
-    def prompt_dimension_text(self, item) -> None:
-        """A dimension carries whatever text the author wants."""
-        if not self.interactive_prompts:
-            return
-        text, accepted = QInputDialog.getText(
-            self, "Dimension text",
-            "Text for this dimension (leave empty to show the measured length):",
-            text=item.measured_text)
-        if accepted:
-            item.custom_label = text.strip()
-            item.refresh(page=self.current_page())
+    def edit_measure_text(self, item) -> None:
+        """Type on a measurement, where the words are going to appear."""
+        self.view.open_label_editor(item)
+
+    def set_label_angle(self, item, angle) -> None:
+        """Let the text follow the line again, or hold it where it was put."""
+        self.view.begin_snapshot(self.view.involved_frames(item))
+        item.label_angle = angle
+        item.update()
+        self.view.commit_snapshot("Dimension text angle")
 
     def set_rectangle_size(self, item) -> None:
         """Ask for an exact size for a rectangle already on the page."""
@@ -2829,6 +2828,12 @@ class MainWindow(QMainWindow):
                 show.setChecked(item.show_size)
                 show.toggled.connect(lambda on: self.set_size_visible(item, on))
             if isinstance(item, MeasureItem):
+                menu.addAction("Type on it…", lambda: self.edit_measure_text(item))
+                straight = menu.addAction("Text in line with it")
+                straight.setCheckable(True)
+                straight.setChecked(item.label_angle is None)
+                straight.toggled.connect(
+                    lambda on, i=item: self.set_label_angle(i, None if on else 0.0))
                 menu.addAction("Page scale…", self.calibrate_dialog)
             menu.addSeparator()
             if len([i for i in self.selected_items() if isinstance(i, MarkupItem)]) > 1:
