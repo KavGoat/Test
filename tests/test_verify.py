@@ -186,3 +186,59 @@ def test_a_scoped_block_is_verified_in_its_own_scope(window):
     window.set_block_scope(True)
     result = verify_document(window.document)
     assert result.ok, [p.message for p in result.problems]
+
+
+# ---------------------------------------------------------------------------
+# the worked example that ships with the app
+# ---------------------------------------------------------------------------
+
+def test_the_worked_example_re_derives_exactly(window):
+    """The document the app offers as an example has to survive its own check."""
+    window.load_sample()
+    result = verify_document(window.document)
+    assert result.confirmed > 20, "the example barely calculates anything"
+    assert result.ok, [f"{p.item_name} {p.where}: {p.message}" for p in result.problems]
+
+
+def test_the_worked_example_has_no_evaluation_problems(window):
+    from calcforge.core.problems import collect_problems
+
+    window.load_sample()
+    problems = collect_problems(window.document)
+    assert problems == [], [f"{p.item_name} {p.where}: {p.message}" for p in problems]
+
+
+def test_the_worked_example_still_re_derives_after_a_reload(window, tmp_path):
+    from calcforge.core.document import Document
+    from calcforge.io import project as project_io
+
+    window.load_sample()
+    path = str(tmp_path / "example.cfx")
+    project_io.save_document(window.document, path)
+
+    reopened = Document()
+    project_io.load_document(reopened, path)
+    window.document = reopened
+    window.rebuild_scenes()
+
+    result = verify_document(window.document)
+    assert result.ok, [f"{p.item_name} {p.where}: {p.message}" for p in result.problems]
+
+
+def test_the_worked_examples_numbers_are_the_ones_it_claims(window):
+    """Spot-check the example against arithmetic done independently."""
+    window.load_sample()
+    workspace = window.document.workspace
+
+    # Page 1: a 7.2 m beam under 19.2 kN/m
+    assert workspace.get("L").to("m").magnitude == pytest.approx(7.2)
+    assert workspace.get("w").to("kN/m").magnitude == pytest.approx(
+        1.2 * 8.5 + 1.5 * 6)
+    assert workspace.get("M_max").to("kN*m").magnitude == pytest.approx(
+        19.2 * 7.2 ** 2 / 8)
+    assert workspace.get("V_max").to("kN").magnitude == pytest.approx(19.2 * 7.2 / 2)
+
+    # Page 2: the floor build-up published from the table
+    q_floor = workspace.get("q_floor")
+    expected = 0.150 * 24 + 0.060 * 22 + 0.025 * 18 + 0.5
+    assert q_floor.to("kPa").magnitude == pytest.approx(expected, rel=1e-6)
