@@ -2575,3 +2575,97 @@ def test_the_snapshot_tool_is_on_g(window):
     assert TOOL_MAP["snapshot"].shortcut == "G"
     assert TOOL_MAP["plot"].shortcut == "Shift+G"
     assert not window.shortcuts.conflicts()
+
+
+# ---------------------------------------------------------------------------
+# Changing the colours of a drawing
+# ---------------------------------------------------------------------------
+
+def _sheet_page(window, tmp_path, colour=0xFF000000):
+    """A page whose background is a white sheet with one dark line."""
+    from PySide6.QtGui import QColor, QImage
+    from calcforge.io import pdfio
+
+    image = QImage(60, 40, QImage.Format_ARGB32)
+    image.fill(QColor("white"))
+    for x in range(60):
+        image.setPixelColor(x, 20, QColor.fromRgba(colour))
+    path = str(tmp_path / "sheet.png")
+    image.save(path)
+    pdfio.import_image(window.document, path, at=1)
+    window.rebuild_scenes()
+    return window.document.pages[1]
+
+
+def test_the_lines_of_a_page_can_be_pushed_to_another_colour(window, tmp_path, monkeypatch):
+    from PySide6.QtGui import QColor, QImage
+    from calcforge.ui import dialogs
+
+    page = _sheet_page(window, tmp_path)
+    before = page.background_key
+
+    def choose(self):
+        self.lines_mode.setChecked(True)
+        self.line_target = QColor("#888888")
+        return dialogs.QDialog.Accepted
+
+    monkeypatch.setattr(dialogs.RecolourDialog, "exec", choose)
+    window.recolour_page(1)
+
+    assert page.background_key != before
+    image = QImage()
+    image.loadFromData(window.document.asset(page.background_key))
+    assert QColor(image.pixel(5, 20)).name() == "#888888"     # the line
+    assert QColor(image.pixel(5, 5)).name() == "#ffffff"      # the paper
+
+
+def test_one_colour_can_be_swapped_for_another(window, tmp_path, monkeypatch):
+    from PySide6.QtGui import QColor, QImage
+    from calcforge.ui import dialogs
+
+    page = _sheet_page(window, tmp_path)
+
+    def choose(self):
+        self.swap_mode.setChecked(True)
+        index = self.from_colour.findText("#000000")
+        self.from_colour.setCurrentIndex(max(index, 0))
+        self.to_target = QColor("#c92a2a")
+        return dialogs.QDialog.Accepted
+
+    monkeypatch.setattr(dialogs.RecolourDialog, "exec", choose)
+    window.recolour_page(1)
+
+    image = QImage()
+    image.loadFromData(window.document.asset(page.background_key))
+    assert QColor(image.pixel(5, 20)).name() == "#c92a2a"
+
+
+def test_recolouring_a_page_can_be_undone(window, tmp_path, monkeypatch):
+    from PySide6.QtGui import QColor
+    from calcforge.ui import dialogs
+
+    page = _sheet_page(window, tmp_path)
+    before = page.background_key
+    monkeypatch.setattr(dialogs.RecolourDialog, "exec",
+                        lambda self: dialogs.QDialog.Accepted)
+    window.recolour_page(1)
+    assert page.background_key != before
+    window.undo_stack.undo()
+    assert window.document.pages[1].background_key == before
+
+
+def test_a_blank_page_says_there_is_nothing_to_recolour(window, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+    said = {}
+    monkeypatch.setattr(QMessageBox, "information",
+                        lambda *a, **k: said.setdefault("text", a[2]))
+    window.recolour_page(0)
+    assert "no drawing" in said.get("text", "")
+
+
+def test_the_page_menu_only_offers_it_where_there_is_a_drawing(window, tmp_path):
+    _sheet_page(window, tmp_path)
+    blank = {a.text(): a for a in window.page_menu(0).actions()}
+    sheet = {a.text(): a for a in window.page_menu(1).actions()}
+    assert not blank["Change colours…"].isEnabled()
+    assert sheet["Change colours…"].isEnabled()

@@ -5,7 +5,7 @@ import os
 from typing import Optional
 
 from PySide6.QtCore import QKeyCombination, Qt, Signal
-from PySide6.QtGui import QFont, QKeySequence, QPixmap
+from PySide6.QtGui import QColor, QFont, QKeySequence, QPixmap
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox,
                                QCompleter, QDialog,
                                QDialogButtonBox, QDoubleSpinBox, QFileDialog,
@@ -447,6 +447,114 @@ class PlotDialog(QDialog):
         item.show_grid = self.grid.isChecked()
         item.show_legend = self.legend.isChecked()
         item.show_markers = self.markers.isChecked()
+
+
+class RecolourDialog(QDialog):
+    """Change the colours of a drawing that came in as a picture.
+
+    Either one colour for another, or everything dark enough to be a line
+    onto one colour — which is what turns a black sheet grey so markups can
+    be read on top of it. The preview shows what will happen before it does.
+    """
+
+    def __init__(self, image, parent=None):
+        super().__init__(parent)
+        from ..io import recolour
+
+        self.setWindowTitle("Change colours")
+        self.image = image
+        self.result_image = None
+        self.resize(520, 520)
+        layout = QVBoxLayout(self)
+
+        self.lines_mode = QRadioButton("Recolour the lines")
+        self.lines_mode.setChecked(True)
+        self.lines_mode.setToolTip(
+            "Everything darker than the threshold takes the new colour, keeping "
+            "how dark it was, so the drawing does not flatten out")
+        layout.addWidget(self.lines_mode)
+
+        lines = QFormLayout()
+        self.line_colour = QPushButton("Choose…")
+        self.line_target = QColor("#7a8290")
+        self.line_colour.clicked.connect(lambda: self._pick("line_target",
+                                                            self.line_colour))
+        self._show_colour(self.line_colour, self.line_target)
+        lines.addRow("New colour", self.line_colour)
+        self.threshold = QSpinBox()
+        self.threshold.setRange(16, 240)
+        self.threshold.setValue(150)
+        self.threshold.setToolTip("How dark a pixel has to be to count as a line")
+        lines.addRow("Counts as a line below", self.threshold)
+        layout.addLayout(lines)
+
+        self.swap_mode = QRadioButton("Swap one colour for another")
+        layout.addWidget(self.swap_mode)
+        swap = QFormLayout()
+        self.from_colour = QComboBox()
+        for colour in recolour.common_colours(image):
+            self.from_colour.addItem(_colour_chip(colour), colour.name(), colour)
+        self.from_colour.setToolTip("The colours this sheet is mostly made of")
+        swap.addRow("Change", self.from_colour)
+        self.to_button = QPushButton("Choose…")
+        self.to_target = QColor("#1971c2")
+        self.to_button.clicked.connect(lambda: self._pick("to_target", self.to_button))
+        self._show_colour(self.to_button, self.to_target)
+        swap.addRow("To", self.to_button)
+        self.tolerance = QSpinBox()
+        self.tolerance.setRange(0, 200)
+        self.tolerance.setValue(40)
+        self.tolerance.setToolTip("How near a pixel has to be to count as that colour")
+        swap.addRow("Tolerance", self.tolerance)
+        layout.addLayout(swap)
+
+        self.preview = QLabel()
+        self.preview.setAlignment(Qt.AlignCenter)
+        self.preview.setMinimumHeight(180)
+        self.preview.setStyleSheet(
+            "QLabel { border:1px solid palette(mid); background: palette(base); }")
+        layout.addWidget(self.preview, 1)
+
+        refresh = QPushButton("Preview")
+        refresh.clicked.connect(self.refresh_preview)
+        layout.addWidget(refresh)
+        layout.addWidget(_buttons(self))
+        self.refresh_preview()
+
+    def _show_colour(self, button, colour: QColor) -> None:
+        button.setIcon(_colour_chip(colour))
+        button.setText(colour.name())
+
+    def _pick(self, attribute: str, button) -> None:
+        from PySide6.QtWidgets import QColorDialog
+        chosen = QColorDialog.getColor(getattr(self, attribute), self, "Colour")
+        if chosen.isValid():
+            setattr(self, attribute, chosen)
+            self._show_colour(button, chosen)
+            self.refresh_preview()
+
+    def apply_to(self, image):
+        """The recoloured version of *image*, however this dialog is set."""
+        from ..io import recolour
+
+        if self.lines_mode.isChecked():
+            return recolour.recolour_lines(image, self.line_target,
+                                           self.threshold.value())
+        source = self.from_colour.currentData() or QColor("#000000")
+        return recolour.swap_colour(image, source, self.to_target,
+                                    self.tolerance.value())
+
+    def refresh_preview(self) -> None:
+        small = self.image.scaled(360, 360, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.preview.setPixmap(QPixmap.fromImage(self.apply_to(small)))
+
+
+def _colour_chip(colour: QColor):
+    """A small square of colour, for a button or a menu row."""
+    pixmap = QPixmap(14, 14)
+    pixmap.fill(colour)
+    from PySide6.QtGui import QIcon
+    return QIcon(pixmap)
 
 
 class DocumentPropertiesDialog(QDialog):

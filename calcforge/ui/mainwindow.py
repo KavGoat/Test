@@ -1251,6 +1251,9 @@ class MainWindow(QMainWindow):
                                                self.page_setup()))
         menu.addAction("Page scale…", lambda: (self.go_to_page(index),
                                                self.calibrate_dialog()))
+        recolour = menu.addAction("Change colours…",
+                                  lambda: self.recolour_page(index))
+        recolour.setEnabled(bool(self.document.pages[index].background_key))
         delete = menu.addAction("Delete page", lambda: self.delete_page(index))
         delete.setEnabled(len(self.document.pages) > 1)
         return menu
@@ -1725,6 +1728,65 @@ class MainWindow(QMainWindow):
             return None
         raw = bytes(buffer.data())
         return self.document.add_asset(raw, "png"), raw
+
+    def recolour_page(self, index: Optional[int] = None) -> None:
+        """Change the colours of the sheet a page came in on."""
+        which = self.page_index(index)
+        page = self.document.pages[which]
+        image = self._background_image(page)
+        if image is None:
+            QMessageBox.information(
+                self, "Change colours",
+                "This page has no drawing on it to recolour — it is a blank "
+                "sheet you have written on, and the markups keep their own "
+                "colours.")
+            return
+        changed = self._ask_recolour(image)
+        if changed is None:
+            return
+
+        def mutate():
+            page.background_key = changed
+            if page.frame is not None:
+                page.frame._background = None
+            self.current_index = which
+        self._structural_change("Change page colours", mutate)
+
+    def recolour_item(self, item) -> None:
+        """Change the colours of a picture on the page — a snapshot, say."""
+        image = QImage()
+        data = self.document.asset(getattr(item, "asset_key", ""))
+        if not data or not image.loadFromData(data) or image.isNull():
+            return
+        changed = self._ask_recolour(image)
+        if changed is None:
+            return
+        self.view.begin_snapshot(self.view.involved_frames(item))
+        item.asset_key = changed
+        item.load_from_document(self.document)
+        self.view.commit_snapshot("Change colours")
+        self.refresh_selection()
+
+    def _background_image(self, page):
+        image = QImage()
+        data = self.document.asset(page.background_key)
+        if not data or not image.loadFromData(data) or image.isNull():
+            return None
+        return image
+
+    def _ask_recolour(self, image) -> Optional[str]:
+        """Run the dialog and store the result; the new asset key, or None."""
+        dialog = dialogs.RecolourDialog(image, self)
+        if dialog.exec() != dialogs.QDialog.Accepted:
+            return None
+        recoloured = dialog.apply_to(image)
+        buffer = QBuffer()
+        buffer.open(QIODevice.WriteOnly)
+        if not recoloured.save(buffer, "PNG"):
+            QMessageBox.warning(self, "Change colours",
+                                "The recoloured drawing could not be stored.")
+            return None
+        return self.document.add_asset(bytes(buffer.data()), "png")
 
     def copy_selection(self) -> None:
         if self.view.text_clipboard("copy"):
@@ -2539,6 +2601,8 @@ class MainWindow(QMainWindow):
                     "Keep this block's own names inside it. It can still read\n"
                     "anything the document defines above it.")
                 scope.toggled.connect(self.set_block_scope)
+            if isinstance(item, ImageItem):
+                menu.addAction("Change colours…", lambda: self.recolour_item(item))
             if isinstance(item, PlotItem):
                 menu.addAction("Edit plot…", lambda: self.edit_plot(item))
             if isinstance(item, TableItem):
