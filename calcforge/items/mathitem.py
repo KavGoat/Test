@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import ast
+import re
+from functools import lru_cache
 from typing import Any, Optional
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPen, QTextCursor
+from PySide6.QtGui import (QColor, QFont, QPainter, QPen, QSyntaxHighlighter,
+                           QTextCharFormat, QTextCursor)
 from PySide6.QtWidgets import (QGraphicsItem, QGraphicsTextItem, QStyle,
                                QStyleOptionGraphicsItem)
 
@@ -49,6 +52,85 @@ class _MathEditor(QGraphicsTextItem):
                 event.accept()
                 return
         super().keyPressEvent(event)
+
+
+class _SourceColours(QSyntaxHighlighter):
+    """Colour the source while it is being typed, the way it prints.
+
+    The point is that editing and printing look like the same thing: units in
+    the same blue they are printed in, comments in the same grey, the
+    assignment marker standing out, and everything in the page's own maths
+    font at the size it will be printed at. Nothing here changes what is
+    typed — it only stops the editor looking like a different program.
+    """
+
+    def __init__(self, document, item):
+        super().__init__(document)
+        self.item = item
+
+    def highlightBlock(self, text: str) -> None:
+        style = self.item.math_style()
+        comment = QTextCharFormat()
+        comment.setForeground(style.comment_color)
+        comment.setFontItalic(True)
+        unit = QTextCharFormat()
+        unit.setForeground(style.unit_color)
+        number = QTextCharFormat()
+        number.setForeground(QColor(style.color))
+        marker = QTextCharFormat()
+        marker.setForeground(QColor(11, 107, 203))
+        marker.setFontWeight(QFont.DemiBold)
+
+        stripped = text.lstrip()
+        if stripped.startswith("#") or stripped.startswith("//"):
+            self.setFormat(0, len(text), comment)
+            return
+        cut = _top_level_hash(text)
+        if cut >= 0:
+            self.setFormat(cut, len(text) - cut, comment)
+            text = text[:cut]
+
+        for match in re.finditer(r":=|:|→|->|⇒|»", text):
+            self.setFormat(match.start(), match.end() - match.start(), marker)
+        for match in re.finditer(r"\d+(?:\.\d+)?(?:[eE][-+]?\d+)?", text):
+            self.setFormat(match.start(), match.end() - match.start(), number)
+        known = getattr(self.item, "_known_names", set())
+        for match in re.finditer(r"[A-Za-z_\u0370-\u03ff][\w\u0370-\u03ff]*", text):
+            word = match.group(0)
+            if word in known or word in engine.KEYWORD_FUNCTIONS:
+                continue
+            if _is_a_unit_name(word):
+                self.setFormat(match.start(), len(word), unit)
+
+
+def _top_level_hash(text: str) -> int:
+    """Where an inline comment starts, or -1 — brackets and quotes respected."""
+    depth = 0
+    quote = ""
+    for index, character in enumerate(text):
+        if quote:
+            if character == quote:
+                quote = ""
+            continue
+        if character in "\"'":
+            quote = character
+        elif character in "([{":
+            depth += 1
+        elif character in ")]}":
+            depth = max(depth - 1, 0)
+        elif character == "#" and depth == 0:
+            return index
+    return -1
+
+
+@lru_cache(maxsize=512)
+def _is_a_unit_name(word: str) -> bool:
+    """True when pint knows this word as a unit."""
+    from ..core.units import parse_unit
+    try:
+        return parse_unit(word) is not None
+    except Exception:                          # noqa: BLE001
+        return False
 
 
 class _MathRow:
@@ -397,14 +479,23 @@ class MathItem(MarkupItem):
         if self._editor is None:
             self._editor = _MathEditor(self)
             self._editor.setFlag(QGraphicsItem.ItemIsFocusable, True)
-            from ..core.typography import MONO, page_font
-            self._editor.setFont(page_font("", max(self.style.font_size * 1.05, 8.0),
-                                           fallbacks=MONO))
-            self._editor.setDefaultTextColor(QColor("#0b3d91"))
+            # The same face and the same size as the printed line, so entering
+            # an edit does not change what the page looks like.
+            self._editor.setDefaultTextColor(QColor(self.style.text_color))
+            self._colours = _SourceColours(self._editor.document(), self)
+        from ..core.typography import page_font
+        self._editor.setFont(page_font(self.style.font_family, self.style.font_size))
         self._editor.setPlainText(self.source)
         self._editor.setTextInteractionFlags(Qt.TextEditorInteraction)
         self._editor.setPos(self.style.padding, self.style.padding)
-        self._editor.setTextWidth(max(self._width - 2 * self.style.padding, 120.0))
+        # Wrap at the region's own width, and let the region grow if the words
+        # need more room than the printed line did — never scroll sideways
+        # inside a box the reader cannot see the end of.
+        width = max(self._width - 2 * self.style.padding, 120.0)
+        self._editor.setTextWidth(width)
+        if self.auto_width:
+            self.prepareGeometryChange()
+            self._width = max(self._width, width + 2 * self.style.padding)
         self._editor.show()
         self._editing = True
         self._editor.setFocus(Qt.MouseFocusReason)
@@ -505,9 +596,14 @@ class MathItem(MarkupItem):
             painter.setBrush(Qt.NoBrush)
             painter.drawRoundedRect(rect, self.style.corner_radius, self.style.corner_radius)
         if self._editing:
-            painter.setPen(QPen(QColor(30, 110, 220, 160), 0.8, Qt.DashLine))
-            painter.setBrush(QColor(240, 246, 255, 200))
-            painter.drawRect(rect)
+            # While it is being typed the region keeps its own shape and its
+            # answers: only the left-hand side turns into text, in the same
+            # font it prints in. A box in another colour, in another typeface,
+            # scrolling sideways, is the thing this is not.
+            painter.setPen(QPen(QColor(11, 107, 203, 90), 0.8))
+            painter.setBrush(QColor(252, 253, 255))
+            painter.drawRoundedRect(rect, 2.0, 2.0)
+            self._paint_results(painter)
             return
 
         if self.scoped and self.rows:
@@ -526,6 +622,20 @@ class MathItem(MarkupItem):
                 row.result.draw(painter, x, row.baseline)
             elif row.error_box is not None:
                 row.error_box.draw(painter, x, row.baseline)
+
+    def _paint_results(self, painter: QPainter) -> None:
+        """The answers, still shown while the source is being typed."""
+        pad = self.style.padding
+        for row in self.rows:
+            box = row.result or row.error_box
+            if box is None:
+                continue
+            x = pad + (self._left_column if self.align_results
+                       else (row.left.width if row.left else 0.0)) + self.result_gap
+            painter.save()
+            painter.setOpacity(0.55)
+            box.draw(painter, x, row.baseline)
+            painter.restore()
 
     def paint_handles(self, painter: QPainter) -> None:
         if self._editing:

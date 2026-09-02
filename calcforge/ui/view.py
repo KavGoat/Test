@@ -8,7 +8,7 @@ import re
 from typing import Optional
 
 from PySide6.QtCore import (QEvent, QMimeData, QPoint, QPointF, QRectF, Qt,
-                            Signal)
+                            QTimer, Signal)
 from PySide6.QtGui import (QColor, QCursor, QKeyEvent, QMouseEvent, QPainter,
                            QPen, QTextCursor, QTransform, QWheelEvent)
 from PySide6.QtWidgets import (QApplication, QCompleter, QGraphicsProxyWidget,
@@ -97,6 +97,7 @@ class PageView(QGraphicsView):
         self._point_span: Optional[tuple[int, int]] = None
         self._completions = None
         self._completing = False
+        self._live_timer = None
         self._fill_origin: Optional[tuple[int, int]] = None
         self._draw_origin: Optional[QPointF] = None
         # Ctrl held when a drag starts leaves the originals where they were.
@@ -1401,6 +1402,39 @@ class PageView(QGraphicsView):
             item._enter_wired = True
         item.begin_edit()
         self._editing_item = item
+        if isinstance(item, MathItem) and not getattr(item, "_live_wired", False):
+            # Wired once per region: a QTextDocument outlives one edit, and
+            # asking Qt to disconnect something it never held prints a warning.
+            editor = getattr(item, "_editor", None)
+            if editor is not None:
+                editor.document().contentsChanged.connect(self._note_live_edit)
+                item._live_wired = True
+
+    def _note_live_edit(self) -> None:
+        """Work the line out again shortly, so its answer keeps up with it."""
+        if self._live_timer is None:
+            self._live_timer = QTimer(self)
+            self._live_timer.setSingleShot(True)
+            self._live_timer.setInterval(500)
+            self._live_timer.timeout.connect(self._recalculate_while_typing)
+        self._live_timer.start()
+
+    def _recalculate_while_typing(self) -> None:
+        """Update the answers beside what is being typed.
+
+        Through a whole-document pass, never by evaluating this region on its
+        own: a region evaluated against a workspace that already holds this
+        pass's definitions turns its own definitions into checks.
+        """
+        item = self._editing_item
+        editor = getattr(item, "_editor", None) if item is not None else None
+        if not isinstance(item, MathItem) or editor is None:
+            return
+        text = editor.toPlainText()
+        if text == item.source:
+            return
+        item.source = text
+        self.window.recalculate()
 
     # -- completing a name or a unit ---------------------------------------
     #
@@ -1491,6 +1525,7 @@ class PageView(QGraphicsView):
 
     def hide_completions(self) -> None:
         self._completing = False
+        self._live_timer = None
         if self._completions is not None:
             self._completions.hide()
 
@@ -1549,6 +1584,8 @@ class PageView(QGraphicsView):
 
     def end_item_edit(self) -> None:
         self.hide_completions()
+        if self._live_timer is not None:
+            self._live_timer.stop()
         item = getattr(self, "_editing_item", None)
         if item is None:
             return

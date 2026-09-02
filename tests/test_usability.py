@@ -2838,3 +2838,68 @@ def _all_boxes(box):
     yield box
     for child in getattr(box, "children", []) or []:
         yield from _all_boxes(child)
+
+
+# ---------------------------------------------------------------------------
+# Editing a calculation looks like the calculation
+# ---------------------------------------------------------------------------
+
+def test_the_editor_is_the_same_face_and_size_as_the_print(window):
+    block = _calc(window, "L := 6 m", at=(90, 110))
+    window.view.begin_item_edit(block)
+    editor = block._editor
+    assert editor.font().pixelSize() == round(block.style.font_size)
+    assert "mono" not in editor.font().family().lower()
+    assert editor.defaultTextColor().name() == QColor(block.style.text_color).name()
+    window.view.end_item_edit()
+
+
+def test_units_are_blue_while_they_are_being_typed(window):
+    from calcforge.core.mathrender import MathStyle
+
+    block = _calc(window, "w := 12 kN", at=(90, 110))
+    window.view.begin_item_edit(block)
+    document = block._editor.document()
+    formats = document.firstBlock().layout().formats()
+    unit_colour = MathStyle().unit_color.name()
+    coloured = {fmt.format.foreground().color().name() for fmt in formats}
+    assert unit_colour in coloured
+    window.view.end_item_edit()
+
+
+def test_a_comment_is_grey_while_it_is_being_typed(window):
+    from calcforge.core.mathrender import MathStyle
+
+    block = _calc(window, "w := 12 kN   # dead load", at=(90, 110))
+    window.view.begin_item_edit(block)
+    formats = block._editor.document().firstBlock().layout().formats()
+    grey = MathStyle().comment_color.name()
+    assert grey in {fmt.format.foreground().color().name() for fmt in formats}
+    window.view.end_item_edit()
+
+
+def test_the_answers_stay_on_the_page_while_the_line_is_edited(window):
+    block = _calc(window, "L := 6 m\nw := 12 kN/m\nM := w*L^2/8 =", at=(90, 110))
+    assert any(row.result is not None for row in block.rows)
+    window.view.begin_item_edit(block)
+    assert any(row.result is not None for row in block.rows)   # not thrown away
+    window.view.end_item_edit()
+
+
+def test_the_answer_keeps_up_with_what_is_typed(window):
+    block = _calc(window, "b := 300 mm\nA := b*b =", at=(90, 110))
+    window.view.begin_item_edit(block)
+    block._editor.setPlainText("b := 400 mm\nA := b*b =")
+    window.view._recalculate_while_typing()
+
+    assert window.document.workspace.get("A").to("mm^2").magnitude == pytest.approx(160000)
+    window.view.end_item_edit()
+
+
+def test_the_editor_wraps_rather_than_scrolling_sideways(window):
+    block = _calc(window, "L := 6 m", at=(90, 110))
+    window.view.begin_item_edit(block)
+    editor = block._editor
+    assert editor.textWidth() > 0                 # a width to wrap at, not a scroller
+    assert editor.textWidth() <= block.local_rect().width()
+    window.view.end_item_edit()
