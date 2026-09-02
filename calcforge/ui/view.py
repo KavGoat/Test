@@ -1389,14 +1389,79 @@ class PageView(QGraphicsView):
             items = [i for i in self.scene().selectedItems()
                      if isinstance(i, MarkupItem) and self.editable(i)]
             if items:
-                self.begin_snapshot()
+                self.begin_snapshot(self.all_frames())
                 for item in items:
                     item.setPos(item.pos() + delta)
+                self.settle_pages(items)
                 self.commit_snapshot("Nudge markup")
                 event.accept()
                 return
+            # Nothing selected: the arrows scroll the document, as they would
+            # in anything else you read.
+            self.scroll_by(delta * 3)
+            event.accept()
+            return
+
+        if self.navigation_key(event):
+            return
 
         super().keyPressEvent(event)
+
+    # ------------------------------------------------------------------
+    # getting about
+    # ------------------------------------------------------------------
+    def scroll_by(self, delta: QPointF) -> None:
+        """Scroll the canvas by *delta*, given in scene units."""
+        self.horizontalScrollBar().setValue(
+            self.horizontalScrollBar().value() + int(delta.x() * self._zoom))
+        self.verticalScrollBar().setValue(
+            self.verticalScrollBar().value() + int(delta.y() * self._zoom))
+
+    def navigation_key(self, event: QKeyEvent) -> bool:
+        """Page Up/Down, Home and End, as every document reader binds them.
+
+        Ctrl makes Page Up/Down jump a whole page rather than a screenful, and
+        Ctrl+Home and Ctrl+End go to the ends of the document.
+        """
+        key = event.key()
+        control = bool(event.modifiers() & Qt.ControlModifier)
+        bar = self.verticalScrollBar()
+        screen = max(bar.pageStep(), 1)
+        if key == Qt.Key_PageDown:
+            bar.setValue(bar.value() + screen)   # Ctrl+PgDn is a window action
+            event.accept()
+            return True
+        if key == Qt.Key_PageUp:
+            bar.setValue(bar.value() - screen)
+            event.accept()
+            return True
+        if key == Qt.Key_Home:
+            bar.setValue(bar.minimum() if control
+                         else int(self._page_top_value(self.visible_page_index())))
+            event.accept()
+            return True
+        if key == Qt.Key_End:
+            if control:
+                bar.setValue(bar.maximum())
+            else:
+                bar.setValue(int(self._page_top_value(self.visible_page_index())
+                                 + self.page_height_in_view()) - screen)
+            event.accept()
+            return True
+        return False
+
+    def _page_top_value(self, index: int) -> float:
+        scene = self.scene()
+        if scene is None or not scene.frames:
+            return float(self.verticalScrollBar().value())
+        index = max(0, min(index, len(scene.frames) - 1))
+        frame = scene.frames[index]
+        top = frame.mapRectToScene(frame.page_rect()).top()
+        return (top - scene.sceneRect().top()) * self._zoom
+
+    def page_height_in_view(self) -> float:
+        frame = self.frame()
+        return frame.page.height_pt * self._zoom if frame is not None else 0.0
 
     def _table_key(self, event: QKeyEvent) -> bool:
         table = self.active_table

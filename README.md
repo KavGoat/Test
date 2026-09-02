@@ -290,6 +290,15 @@ passes so a block can reference something defined further down the document.
 
 ## The document
 
+- **One continuous canvas.** Every page is stacked down it with a gap of desk
+  between them, and you scroll through the whole document the way you would
+  scroll a PDF. The wheel scrolls, `Shift`+wheel scrolls sideways,
+  `Ctrl`+wheel zooms at the pointer, `Space`+drag and the middle button pan.
+  `PgUp`/`PgDn` move a screenful, `Ctrl`+them move a page, and `Ctrl+Home` /
+  `Ctrl+End` reach the ends. Scrolling onto another page makes it the current
+  one; the view is never moved under you to tidy up.
+- Drawing lands on the page under the pointer, and a markup dragged onto the
+  next page belongs to that page afterwards — undo covers both.
 - Pages are real pages: **A4 portrait by default**, plus A0–A5, Letter, Legal,
   Tabloid, ANSI and ARCH sizes, portrait or landscape, with adjustable margins —
   per page or applied to all.
@@ -337,8 +346,12 @@ used twice and remembers your bindings between sessions.
 | `B` `G` | Table · plot |
 | `M` `Shift+Alt+A` | Measure length · measure area |
 | `Alt+M` | Dimension — asks for the text to show |
-| `H`, `Space`+drag | Pan |
-| `Ctrl`+wheel | Zoom · `Ctrl+0` fit page · `Ctrl+1` fit width |
+| `H`, `Space`+drag, middle-drag | Pan |
+| Wheel · `Shift`+wheel | Scroll · scroll sideways |
+| `PgUp` / `PgDn` | A screenful · `Ctrl`+them for a whole page |
+| `Ctrl+Home` / `Ctrl+End` | The start and the end of the document |
+| `Ctrl`+wheel | Zoom at the pointer |
+| `Ctrl+0` `Ctrl+1` `Ctrl+2` `Ctrl+Alt+0` | Fit page · fit width · fit selection · 100% |
 | `Shift`+drag | Constrain to 15° or square |
 | Double-click | Edit text, calculation or table · add a polyline vertex |
 | `Enter` | In a one-line calculation: open the next line below |
@@ -421,3 +434,5 @@ a total order.
 
 `docs/what-matters.md` is the brief all of this is written against — what an
 engineer needs from a calculation sheet, and what this tool does not claim.
+`docs/interface.md` is the same for the interface: who is at the keyboard, and
+why the chrome looks the way it does.

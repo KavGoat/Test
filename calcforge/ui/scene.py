@@ -28,7 +28,7 @@ from ..items.media import ImageItem
 ROW_TOLERANCE = 9.0        # points; items this close vertically share a row
 
 PAPER = QColor("#ffffff")
-PAGE_EDGE = QColor(120, 126, 136)      # the line around the sheet
+PAGE_EDGE = QColor(92, 98, 108)        # the line around the sheet
 PAGE_GAP = 26.0                        # points of desk between pages
 SHADOW_DEPTH = 7.0                     # how far the shadow reaches
 
@@ -161,12 +161,12 @@ class PageFrame(QGraphicsObject):
         painter.save()
         painter.setPen(Qt.NoPen)
         right = QLinearGradient(rect.right(), 0, rect.right() + SHADOW_DEPTH, 0)
-        right.setColorAt(0.0, QColor(0, 0, 0, 46))
+        right.setColorAt(0.0, QColor(0, 0, 0, 62))
         right.setColorAt(1.0, QColor(0, 0, 0, 0))
         painter.fillRect(QRectF(rect.right(), rect.top() + SHADOW_DEPTH * 0.5,
                                 SHADOW_DEPTH, rect.height()), QBrush(right))
         below = QLinearGradient(0, rect.bottom(), 0, rect.bottom() + SHADOW_DEPTH)
-        below.setColorAt(0.0, QColor(0, 0, 0, 46))
+        below.setColorAt(0.0, QColor(0, 0, 0, 62))
         below.setColorAt(1.0, QColor(0, 0, 0, 0))
         painter.fillRect(QRectF(rect.left() + SHADOW_DEPTH * 0.5, rect.bottom(),
                                 rect.width(), SHADOW_DEPTH), QBrush(below))

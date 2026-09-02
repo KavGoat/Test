@@ -181,8 +181,9 @@ QGraphicsView {{ border: 0; }}
 STYLESHEET = TEMPLATE.format(**_LIGHT_TOKENS)
 DARK_STYLESHEET = TEMPLATE.format(**_DARK_TOKENS)
 
-# The desk the paper lies on, per theme.
-CANVAS = {LIGHT: "#7f858e", DARK: "#15171b"}
+# The desk the paper lies on, per theme.  Dark enough that a white sheet has an
+# unmistakable edge, neutral enough that it never competes with a markup.
+CANVAS = {LIGHT: "#6e747d", DARK: "#141619"}
 
 
 def stylesheet(theme: str) -> str:

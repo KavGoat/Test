@@ -221,3 +221,148 @@ def test_the_shadow_falls_outside_the_paper(window):
     frame = window.current_page().frame
     assert frame.boundingRect().right() > frame.page_rect().right()
     assert frame.boundingRect().bottom() > frame.page_rect().bottom()
+
+
+# ---------------------------------------------------------------------------
+# getting about, the way every reader does it
+# ---------------------------------------------------------------------------
+
+def wheel(view, dy, modifiers=Qt.NoModifier, at=None, pixels=False):
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QWheelEvent
+    from PySide6.QtWidgets import QApplication
+
+    position = at or QPointF(view.viewport().rect().center())
+    angle = QPoint(0, 0) if pixels else QPoint(0, dy)
+    pixel = QPoint(0, dy) if pixels else QPoint(0, 0)
+    event = QWheelEvent(position, view.viewport().mapToGlobal(position.toPoint()),
+                        pixel, angle, Qt.NoButton, modifiers,
+                        Qt.NoScrollPhase, False)
+    QApplication.sendEvent(view.viewport(), event)
+
+
+def press(view, key, modifiers=Qt.NoModifier):
+    from PySide6.QtCore import QEvent
+    from PySide6.QtGui import QKeyEvent
+    from PySide6.QtWidgets import QApplication
+
+    QApplication.sendEvent(view, QKeyEvent(QEvent.KeyPress, key, modifiers, ""))
+
+
+def _three_pages(window):
+    window.add_page()
+    window.add_page()
+    window.view.set_zoom(1.0)
+    window.go_to_page(0)
+
+
+def test_the_wheel_scrolls_the_document(window):
+    _three_pages(window)
+    bar = window.view.verticalScrollBar()
+    before = bar.value()
+    wheel(window.view, -240)
+    assert bar.value() > before
+
+
+def test_shift_and_the_wheel_scroll_sideways(window):
+    _three_pages(window)
+    window.view.set_zoom(3.0)                 # wide enough to scroll across
+    bar = window.view.horizontalScrollBar()
+    before = bar.value()
+    wheel(window.view, -240, Qt.ShiftModifier)
+    assert bar.value() > before
+
+
+def test_ctrl_and_the_wheel_zoom(window):
+    _three_pages(window)
+    before = window.view.zoom()
+    wheel(window.view, 240, Qt.ControlModifier)
+    assert window.view.zoom() > before
+    wheel(window.view, -480, Qt.ControlModifier)
+    assert window.view.zoom() < before
+
+
+def test_a_trackpad_scrolls_smoothly(window):
+    """Pixel deltas are honoured, so two fingers do not move in notches."""
+    _three_pages(window)
+    bar = window.view.verticalScrollBar()
+    before = bar.value()
+    wheel(window.view, -30, pixels=True)
+    assert bar.value() == before + 30
+
+
+def test_page_up_and_down_scroll_a_screenful(window):
+    _three_pages(window)
+    bar = window.view.verticalScrollBar()
+    start = bar.value()
+    press(window.view, Qt.Key_PageDown)
+    assert bar.value() == min(start + bar.pageStep(), bar.maximum())
+    press(window.view, Qt.Key_PageUp)
+    assert bar.value() == start
+
+
+def test_ctrl_home_and_end_reach_the_ends_of_the_document(window):
+    _three_pages(window)
+    bar = window.view.verticalScrollBar()
+    press(window.view, Qt.Key_End, Qt.ControlModifier)
+    assert bar.value() == bar.maximum()
+    press(window.view, Qt.Key_Home, Qt.ControlModifier)
+    assert bar.value() == bar.minimum()
+
+
+def test_arrows_scroll_when_nothing_is_selected(window):
+    _three_pages(window)
+    bar = window.view.verticalScrollBar()
+    before = bar.value()
+    press(window.view, Qt.Key_Down)
+    assert bar.value() > before
+
+
+def test_arrows_still_nudge_a_selected_markup(window):
+    _three_pages(window)
+    window.select_tool("rect")
+    drag(window.view, *on_page(window, 0, 100, 100), *on_page(window, 0, 200, 200))
+    window.select_tool("select")
+    item = only(window, RectItem)[0]
+    item.setSelected(True)
+    origin = item.pos()
+    scroll = window.view.verticalScrollBar().value()
+    press(window.view, Qt.Key_Down)
+    assert item.pos().y() > origin.y()
+    assert window.view.verticalScrollBar().value() == scroll
+
+
+def test_ctrl_page_down_goes_to_the_next_page(window):
+    _three_pages(window)
+    window.act_next_page.trigger()
+    assert window.current_index == 1
+    window.act_prev_page.trigger()
+    assert window.current_index == 0
+
+
+def test_zoom_stays_within_its_limits(window):
+    from calcforge.ui.view import MAX_ZOOM, MIN_ZOOM
+
+    for _ in range(60):
+        window.view.zoom_in()
+    assert window.view.zoom() == pytest.approx(MAX_ZOOM)
+    for _ in range(120):
+        window.view.zoom_out()
+    assert window.view.zoom() == pytest.approx(MIN_ZOOM)
+
+
+def test_fit_page_fits_the_page_being_looked_at(window):
+    _three_pages(window)
+    window.go_to_page(2)
+    window.view.fit_page()
+    frame = window.document.pages[2].frame
+    rect = frame.mapRectToScene(frame.page_rect())
+    visible = window.view.mapToScene(window.view.viewport().rect()).boundingRect()
+    assert visible.contains(rect.center())
+    assert visible.height() >= rect.height() - 1
+
+
+def test_actual_size_is_one_to_one(window):
+    window.view.set_zoom(0.4)
+    window.act_actual_size.trigger()
+    assert window.view.zoom() == pytest.approx(1.0)

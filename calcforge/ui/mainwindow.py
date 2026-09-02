@@ -213,10 +213,13 @@ class MainWindow(QMainWindow):
         self._act("fit_page", "Fit page", self.view.fit_page, "Ctrl+0", "fit")
         self._act("fit_width", "Fit width", self.view.fit_width, "Ctrl+1")
         self._act("zoom_sel", "Zoom to selection", self.view.zoom_to_selection, "Ctrl+2")
+        # Bare Page Up/Down scroll a screenful, as they do in any reader; with
+        # Ctrl they jump a whole page.
         self._act("prev_page", "Previous page", lambda: self.go_to_page(self.current_index - 1),
-                  "PgUp")
+                  "Ctrl+PgUp")
         self._act("next_page", "Next page", lambda: self.go_to_page(self.current_index + 1),
-                  "PgDown")
+                  "Ctrl+PgDown")
+        self._act("actual_size", "Actual size", lambda: self.view.set_zoom(1.0), "Ctrl+Alt+0")
 
         self._act("add_page", "Add page", self.add_page)
         self._act("duplicate_page", "Duplicate page", self.duplicate_page)
@@ -405,7 +408,8 @@ class MainWindow(QMainWindow):
             align_menu.addAction(getattr(self, f"act_align_{key}"))
 
         view_menu = bar.addMenu("&View")
-        for action in (self.act_zoom_in, self.act_zoom_out, self.act_fit_page,
+        for action in (self.act_zoom_in, self.act_zoom_out, self.act_actual_size,
+                       self.act_fit_page,
                        self.act_fit_width, self.act_zoom_sel, None, self.act_grid,
                        self.act_snap, self.act_margins, self.act_dark, None,
                        self.act_prev_page,
