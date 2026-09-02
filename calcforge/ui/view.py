@@ -598,7 +598,9 @@ class PageView(QGraphicsView):
             if self.active_table.fill_handle_rect().contains(local):
                 self.close_cell_editor()
                 self._mode = "table_fill"
-                self._fill_origin = self.active_table.current
+                # The whole selected block is what is dragged from, as in
+                # Excel: two numbers carry a series on, one is copied.
+                self._fill_origin = self.active_table.selection()
                 self.begin_snapshot()
                 event.accept()
                 return
@@ -2160,14 +2162,17 @@ class PageView(QGraphicsView):
         table = self.active_table
         if table is None or self._fill_origin is None:
             return
-        r0, c0, r1, c1 = table.selection()
-        targets = [(r, c) for r in range(r0, r1 + 1) for c in range(c0, c1 + 1)
-                   if (r, c) != self._fill_origin]
-        if targets:
-            table.sheet.fill(self._fill_origin, targets)
+        source = self._fill_origin
+        self._fill_origin = None
+        target = table.selection()
+        if target == source:
+            return
+        filled = table.sheet.fill_series(source, target)
+        if filled:
             self.window.recalculate()
             self.commit_snapshot("Fill")
-        self._fill_origin = None
+            self.cellChanged.emit(table)
+            self.statusMessage.emit(f"Filled {filled} cell(s)")
 
     # -- cell clipboard ----------------------------------------------------
     def copy_cells(self) -> bool:

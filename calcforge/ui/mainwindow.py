@@ -1593,6 +1593,23 @@ class MainWindow(QMainWindow):
             self.view.commit_snapshot("Edit plot")
         self.refresh_selection()
 
+    def rename_table(self, table, name: str) -> None:
+        """Set a table's name from the properties panel."""
+        name = (name or "").strip()
+        if name == table.table_name:
+            return
+        if name and not name.isidentifier():
+            self.status_hint.setText(
+                f"“{name}” cannot be used as a name — letters, digits and "
+                "underscores only, not starting with a digit")
+            return
+        self.view.begin_snapshot(self.view.involved_frames(table))
+        table.prepareGeometryChange()
+        table.table_name = name
+        self.recalculate()
+        self.view.commit_snapshot("Name table")
+        self.refresh_lists()
+
     def name_table(self, table) -> None:
         """Name a table so calculations can look values up in it."""
         name, accepted = QInputDialog.getText(

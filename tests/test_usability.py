@@ -3646,3 +3646,101 @@ def test_typing_on_a_measurement_can_be_undone(window):
     assert dimension.custom_label == "varies"
     window.undo_stack.undo()
     assert markups(window)[0].custom_label == ""
+
+
+# ---------------------------------------------------------------------------
+# Dragging the fill handle
+# ---------------------------------------------------------------------------
+
+def _grid(window, values, at=(60, 60)):
+    window.select_tool("table")
+    drag(window.view, at[0], at[1], at[0] + 360, at[1] + 220)
+    table = window.view.active_table
+    table.sheet.resize(10, 5)
+    for (row, col), value in values.items():
+        table.set_cell(row, col, value)
+    window.recalculate()
+    return table
+
+
+def _drag_fill(window, table, to_cell):
+    """Take hold of the fill handle and drag it to a cell."""
+    handle = table.mapToScene(table.fill_handle_rect().center())
+    target = table.mapToScene(table.cell_rect(*to_cell).center())
+    drag(window.view, handle.x(), handle.y(), target.x(), target.y())
+
+
+def test_dragging_the_fill_handle_carries_a_series_on(window):
+    table = _grid(window, {(0, 0): "1", (1, 0): "2"})
+    table.current, table.anchor = (0, 0), (1, 0)
+    _drag_fill(window, table, (5, 0))
+    assert [table.sheet.raw(row, 0) for row in range(6)] == \
+        ["1", "2", "3", "4", "5", "6"]
+
+
+def test_a_single_value_is_copied_not_counted_up(window):
+    table = _grid(window, {(0, 0): "7"})
+    table.current = table.anchor = (0, 0)
+    _drag_fill(window, table, (3, 0))
+    assert [table.sheet.raw(row, 0) for row in range(4)] == ["7", "7", "7", "7"]
+
+
+def test_a_formula_keeps_its_absolute_references(window):
+    table = _grid(window, {(0, 0): "2", (1, 0): "3", (2, 0): "4",
+                           (0, 1): "10", (0, 2): "=A1*$B$1"})
+    table.current = table.anchor = (0, 2)
+    _drag_fill(window, table, (2, 2))
+    assert [table.sheet.raw(row, 2) for row in range(3)] == \
+        ["=A1*$B$1", "=A2*$B$1", "=A3*$B$1"]
+    window.recalculate()
+    assert table.sheet.value(2, 2) == 40
+
+
+def test_filling_sideways_works_the_same(window):
+    table = _grid(window, {(0, 0): "5", (0, 1): "10"})
+    table.current, table.anchor = (0, 0), (0, 1)
+    _drag_fill(window, table, (0, 4))
+    assert [table.sheet.raw(0, col) for col in range(5)] == \
+        ["5", "10", "15", "20", "25"]
+
+
+def test_a_fill_is_one_undo_step(window):
+    table = _grid(window, {(0, 0): "1", (1, 0): "2"})
+    table.current, table.anchor = (0, 0), (1, 0)
+    _drag_fill(window, table, (5, 0))
+    assert table.sheet.raw(5, 0) == "6"
+    window.undo_stack.undo()
+    filled = [i for i in markups(window) if isinstance(i, TableItem)][0]
+    assert filled.sheet.raw(5, 0) == ""
+
+
+def test_a_named_table_wears_its_name(window):
+    table = _capacity_table(window, "bolts")
+    assert table.title_height() > 0                    # room made for it
+    before = table.local_rect().height()
+    table.prepareGeometryChange()
+    table.table_name = ""
+    assert table.local_rect().height() < before        # and given back
+
+
+def test_the_properties_panel_names_a_table(window):
+    from PySide6.QtWidgets import QLineEdit
+
+    table = _capacity_table(window, "")
+    window.select_tool("select")
+    table.setSelected(True)
+    window.refresh_selection()
+    boxes = [w for w in window.properties_panel.findChildren(QLineEdit)
+             if w.placeholderText() == "bolts"]
+    assert boxes
+    boxes[0].setText("shear")
+    boxes[0].editingFinished.emit()
+    assert table.table_name == "shear"
+    assert "shear" in window.document.workspace.table_names()
+
+
+def test_a_name_that_cannot_be_used_is_refused(window):
+    table = _capacity_table(window, "")
+    window.rename_table(table, "2 bolts")
+    assert table.table_name == ""
+    assert "cannot be used" in window.status_hint.text()

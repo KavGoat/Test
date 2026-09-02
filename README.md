@@ -315,6 +315,10 @@ Total                                 =SUM(D2:D4)
 
 - Cells accept numbers, text, booleans **and quantities** — `150 mm` is a length, not
   a string, so `=B2*C2` comes out as a pressure.
+- Drag the fill handle at the corner of the selection to fill across or down:
+  a run of numbers carries on (1, 2 becomes 3, 4, 5), a single value is copied,
+  and formulas have their relative references shifted while `$absolute$` ones
+  stay put — the same as Excel.
 - Copy, cut and paste ranges with `Ctrl+C` / `Ctrl+X` / `Ctrl+V`. Relative references
   follow the paste, absolute ones do not, and the clipboard is tab-separated so it
   round-trips with Excel.
@@ -324,9 +328,11 @@ Total                                 =SUM(D2:D4)
   `<>` for not-equal and `&` for joining text. `IF` and `IFERROR` are lazy, so
   `=IF(B2=0,0,A2/B2)` is safe.
 - **Any variable from a calculation works in a formula** — `=D2*gamma_c` just works.
-- **Name a table** from its right-click menu and a calculation can look values up in
-  it: `V := bolts(d, A, B)` finds `d` in column A and gives back column B, units and
-  all, interpolating between the rows either side when it has to.
+- **Name a table** — from its right-click menu or the properties panel — and a
+  calculation can look values up in it: `V := bolts(d, A, B)` finds `d` in column A
+  and gives back column B, units and all, interpolating between the rows either side
+  when it has to. A named table wears its name in its top corner, so what a sheet is
+  called is visible on the sheet.
 - Give a column a display unit and every value in it is converted for display.
 
 ### Getting a sheet out of Excel

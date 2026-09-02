@@ -57,7 +57,10 @@ class TableItem(MarkupItem):
 
     # -- geometry ----------------------------------------------------------
     def title_height(self) -> float:
-        return (self.style.font_size + 8.0) if self.title else 0.0
+        """Room above the grid for the title and the name it is read by."""
+        if not self.title and not self.table_name:
+            return 0.0
+        return self.style.font_size + 8.0
 
     def gutter_size(self) -> tuple[float, float]:
         return (GUTTER_W, GUTTER_H) if self.show_chrome else (0.0, 0.0)
@@ -345,7 +348,7 @@ class TableItem(MarkupItem):
                            self.sheet.total_width(), self.sheet.total_height())
 
         painter.fillRect(grid_rect, QColor(self.style.fill or "#ffffff"))
-        if self.title:
+        if self.title or self.table_name:
             self._paint_title(painter, rect)
         if self.show_chrome:
             self._paint_chrome(painter, origin)
@@ -360,6 +363,12 @@ class TableItem(MarkupItem):
             self._paint_pointing(painter)
 
     def _paint_title(self, painter: QPainter, rect: QRectF) -> None:
+        """The title on the left, and the name it is looked up by on the right.
+
+        A named table is read by that name from a calculation, so the name has
+        to be visible on the table itself — otherwise the only way to find out
+        what a sheet is called is to open its menu.
+        """
         gw, gh = self.gutter_size()
         box = QRectF(gw, gh, rect.width() - gw, self.title_height())
         font = self.style.font()
@@ -367,7 +376,17 @@ class TableItem(MarkupItem):
         font.setPointSizeF(self.style.font_size * 1.1)
         painter.setFont(font)
         painter.setPen(QPen(QColor(self.style.text_color)))
-        painter.drawText(box.adjusted(2, 0, -2, 0), Qt.AlignVCenter | Qt.AlignLeft, self.title)
+        painter.drawText(box.adjusted(2, 0, -2, 0), Qt.AlignVCenter | Qt.AlignLeft,
+                         self.title)
+        if self.table_name:
+            tag = self.style.font()
+            tag.setPointSizeF(max(self.style.font_size * 0.95, 5.0))
+            tag.setItalic(True)
+            painter.setFont(tag)
+            painter.setPen(QPen(QColor(NAME_TAG)))
+            painter.drawText(box.adjusted(2, 0, -3, 0),
+                             Qt.AlignVCenter | Qt.AlignRight,
+                             f"{self.table_name}( )")
 
     def _paint_chrome(self, painter: QPainter, origin: QPointF) -> None:
         gw, gh = GUTTER_W, GUTTER_H

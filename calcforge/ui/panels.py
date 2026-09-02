@@ -1326,6 +1326,15 @@ class PropertiesPanel(QScrollArea):
             lambda on: self._apply(lambda i: setattr(i, "publish_headers", on), "Publish columns"))
         form.addRow("", publish)
 
+        name = QLineEdit(item.table_name)
+        name.setPlaceholderText("bolts")
+        name.setToolTip("Name this table and a calculation can read it:\n"
+                        "    V := bolts(d, A, B)\n"
+                        "which finds d in column A and gives back column B")
+        name.editingFinished.connect(
+            lambda: self.window.rename_table(item, name.text()))
+        form.addRow("Table name", name)
+
         names = QPushButton("Named cells…")
         names.clicked.connect(lambda: self.window.edit_named_cells(item))
         form.addRow("", names)

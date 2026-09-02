@@ -653,6 +653,78 @@ class Sheet:
             if cell is not None:
                 cell.fmt = CellFormat.from_dict(origin.fmt.to_dict())
 
+    def fill_series(self, source: tuple, target: tuple) -> int:
+        """Fill *target* from the block *source*, the way dragging does in Excel.
+
+        Formulas have their relative references shifted and their ``$absolute$``
+        ones left alone. A run of numbers is carried on rather than repeated:
+        1, 2 dragged down gives 3, 4, 5, and a single value is simply copied.
+        Both are (r0, c0, r1, c1).
+        """
+        sr0, sc0, sr1, sc1 = source
+        tr0, tc0, tr1, tc1 = target
+        down = tr1 > sr1 or tr0 < sr0
+        height = sr1 - sr0 + 1
+        width = sc1 - sc0 + 1
+        filled = 0
+        for row in range(tr0, tr1 + 1):
+            for col in range(tc0, tc1 + 1):
+                if sr0 <= row <= sr1 and sc0 <= col <= sc1:
+                    continue                    # part of the block dragged from
+                if down:
+                    step = row - sr0 if row > sr1 else row - sr1
+                    lane = (row - sr0) % height
+                    origin = (sr0 + lane, min(max(col, sc0), sc1))
+                    turn = (row - sr1 - 1) if row > sr1 else (row - sr0)
+                else:
+                    step = col - sc0 if col > sc1 else col - sc1
+                    lane = (col - sc0) % width
+                    origin = (min(max(row, sr0), sr1), sc0 + lane)
+                    turn = (col - sc1 - 1) if col > sc1 else (col - sc0)
+                carried = self._carry_series(source, row, col, down)
+                if carried is not None:
+                    self.set_raw(row, col, carried)
+                else:
+                    delta_row = row - origin[0]
+                    delta_col = col - origin[1]
+                    cell = self.cells.get(origin)
+                    raw = self.translate_formula(cell.raw, delta_row, delta_col) \
+                        if cell is not None else ""
+                    self.set_raw(row, col, raw)
+                    if cell is not None:
+                        target_cell = self.cells.setdefault((row, col), Cell())
+                        target_cell.fmt = CellFormat.from_dict(cell.fmt.to_dict())
+                filled += 1
+        return filled
+
+    def _carry_series(self, source: tuple, row: int, col: int,
+                      down: bool) -> Optional[str]:
+        """The next number in the run, when the block dragged from is one."""
+        sr0, sc0, sr1, sc1 = source
+        if down:
+            lane = [(r, min(max(col, sc0), sc1)) for r in range(sr0, sr1 + 1)]
+            position = row - sr0
+        else:
+            lane = [(min(max(row, sr0), sr1), c) for c in range(sc0, sc1 + 1)]
+            position = col - sc0
+        if len(lane) < 2:
+            return None
+        numbers = []
+        for key in lane:
+            cell = self.cells.get(key)
+            if cell is None or cell.is_formula:
+                return None
+            try:
+                numbers.append(float(str(cell.raw).strip()))
+            except (TypeError, ValueError):
+                return None
+        steps = {round(b - a, 9) for a, b in zip(numbers, numbers[1:])}
+        if len(steps) != 1:
+            return None
+        step = steps.pop()
+        value = numbers[0] + step * position
+        return str(int(value)) if value == int(value) else repr(round(value, 10))
+
     # -- clipboard ---------------------------------------------------------
     def region_text(self, r0: int, c0: int, r1: int, c1: int, raw: bool = True) -> str:
         """The region as tab-separated rows, the way a spreadsheet copies."""
