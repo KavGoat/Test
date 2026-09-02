@@ -251,9 +251,15 @@ class CalloutItem(_TextBase):
     TYPE = "callout"
     NAME = "Callout"
 
+    SHAPES = ("box", "cloud")
+
     def __init__(self, text: str = "", rect: Optional[QRectF] = None,
-                 leader: Optional[list[QPointF]] = None):
+                 leader: Optional[list[QPointF]] = None, shape: str = "box"):
         super().__init__(text, rect)
+        # A callout is a box with a leader, or a revision cloud with one —
+        # which is how a comment on a drawing is usually marked up.
+        self.shape_kind = shape if shape in self.SHAPES else "box"
+        self.cloud_radius = 9.0
         self.style.arrow_end = "arrow"
         self.leader: list[QPointF] = [QPointF(p) for p in (leader or [])]
         if not self.leader:
@@ -269,6 +275,8 @@ class CalloutItem(_TextBase):
         for point in self.leader:
             rect = rect.united(QRectF(point.x() - 1, point.y() - 1, 2, 2))
         margin = self.style.width + HANDLE_SIZE + 12
+        if self.shape_kind == "cloud":
+            margin += self.cloud_radius
         return rect.normalized().adjusted(-margin, -margin, margin, margin)
 
     def shape(self) -> QPainterPath:
@@ -375,17 +383,29 @@ class CalloutItem(_TextBase):
         rect = self._rect.normalized()
         painter.setBrush(self.style.brush())
         painter.setPen(pen)
-        painter.drawRoundedRect(rect, self.style.corner_radius, self.style.corner_radius)
+        if self.shape_kind == "cloud":
+            from PySide6.QtGui import QPolygonF
+            from .base import cloud_path
+            painter.drawPath(cloud_path(QPolygonF([
+                rect.topLeft(), rect.topRight(),
+                rect.bottomRight(), rect.bottomLeft()]), self.cloud_radius))
+        else:
+            painter.drawRoundedRect(rect, self.style.corner_radius,
+                                    self.style.corner_radius)
         self.paint_text(painter)
 
     def serialize(self) -> dict:
         data = super().serialize()
         data["leader"] = [[p.x(), p.y()] for p in self.leader]
+        data["shape_kind"] = self.shape_kind
+        data["cloud_radius"] = self.cloud_radius
         return data
 
     def deserialize(self, data: dict) -> None:
         super().deserialize(data)
         self.leader = [QPointF(x, y) for x, y in data.get("leader", [])]
+        self.shape_kind = data.get("shape_kind", "box")
+        self.cloud_radius = float(data.get("cloud_radius", 9.0))
 
     def summary(self) -> str:
         return self.comment or self.text().strip().replace("\n", " ")[:120]

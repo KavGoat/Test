@@ -77,16 +77,20 @@ TOOLS: list[Tool] = [
          "Revision cloud around an area", factory=_rect("cloud")),
     Tool("cloud_poly", "Cloud (polygon)", "cloud", POLY, "Draw", "",
          "Free-form revision cloud", factory=_poly("cloud")),
-    Tool("highlight", "Highlight area", "highlight", DRAG, "Draw", "",
-         "Translucent block highlight", factory=_rect("highlight")),
+    Tool("highlight", "Highlight", "highlight", DRAG, "Draw", "J",
+         "Drag over anything to highlight it — it darkens what is underneath "
+         "rather than covering it", factory=_rect("highlight")),
     Tool("redact", "Redact", "highlight", DRAG, "Draw", "",
          "Opaque black-out box", factory=_rect("redact")),
 
     Tool("text", "Text box", "text", DRAG, "Annotate", "T", "Text box",
          factory=lambda: TextItem("")),
     Tool("callout", "Callout", "callout", ANCHOR, "Annotate", "Q",
-         "Click what it points at, then drag out the box",
+         "Click what it points at, then drag out the box — or click two corners",
          factory=lambda: CalloutItem("")),
+    Tool("cloud_callout", "Cloud callout", "cloud", ANCHOR, "Annotate", "Shift+Q",
+         "A revision cloud with a leader: click what it points at, then draw "
+         "the cloud", factory=lambda: CalloutItem("", shape="cloud")),
     Tool("note", "Note", "note", CLICK, "Annotate", "N",
          "Sticky note with a comment", factory=lambda: NoteItem("")),
     Tool("stamp", "Stamp", "stamp", DRAG, "Annotate", "S",

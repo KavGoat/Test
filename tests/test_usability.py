@@ -2314,3 +2314,61 @@ def test_the_snap_menu_entry_is_there_and_on(window):
     assert not window.document.settings.snap_to_items
     window.act_snap_items.setChecked(True)
     assert window.document.settings.snap_to_items
+
+
+# ---------------------------------------------------------------------------
+# A cloud callout, and a highlight that goes over anything
+# ---------------------------------------------------------------------------
+
+def test_a_cloud_callout_is_a_cloud_with_a_leader(window):
+    window.select_tool("cloud_callout")
+    click(window.view, 200, 300)
+    drag(window.view, 300, 200, 460, 260)
+    call = window.view.editing_item()
+    call.set_text("check this")
+    window.view.end_item_edit()
+
+    assert isinstance(call, CalloutItem)
+    assert call.shape_kind == "cloud"
+    tip = call.mapToScene(call.leader[0])
+    assert (tip.x(), tip.y()) == pytest.approx((200, 300), abs=1)
+    # the scallops bulge out past the box, and the item makes room for them
+    assert call.boundingRect().width() > call.local_rect().width() + call.cloud_radius
+
+
+def test_a_plain_callout_is_still_a_box(window):
+    call = _callout(window)
+    assert call.shape_kind == "box"
+
+
+def test_a_cloud_callout_survives_a_round_trip(window):
+    from calcforge.items.base import build_item
+
+    window.select_tool("cloud_callout")
+    click(window.view, 200, 300)
+    drag(window.view, 300, 200, 460, 260)
+    call = window.view.editing_item()
+    call.set_text("check this")
+    window.view.end_item_edit()
+
+    clone = build_item(call.serialize())
+    assert clone.shape_kind == "cloud"
+    assert clone.text() == "check this"
+
+
+def test_the_highlight_goes_over_whatever_is_under_it(window):
+    from calcforge.items.shapes import RectItem
+
+    window.select_tool("highlight")
+    drag(window.view, 100, 100, 300, 140)
+    mark = markups(window)[0]
+    assert isinstance(mark, RectItem) and mark.kind == "highlight"
+    assert mark.style.blend == "multiply"       # darkens, does not cover
+    assert mark.style.fill_opacity < 1.0
+
+
+def test_the_highlight_and_the_cloud_callout_are_on_keys(window):
+    from calcforge.ui.tools import TOOL_MAP
+    assert TOOL_MAP["highlight"].shortcut == "J"
+    assert TOOL_MAP["cloud_callout"].shortcut == "Shift+Q"
+    assert not window.shortcuts.conflicts()

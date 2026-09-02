@@ -278,7 +278,7 @@ def _icon_for(item) -> str:
     if isinstance(item, NoteItem):
         return "note"
     if isinstance(item, CalloutItem):
-        return "callout"
+        return "cloud" if item.shape_kind == "cloud" else "callout"
     if isinstance(item, TextItem):
         return "text"
     if isinstance(item, RectItem):
