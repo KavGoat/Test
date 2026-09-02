@@ -4,8 +4,8 @@ from __future__ import annotations
 import os
 from typing import Optional
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
+from PySide6.QtCore import QKeyCombination, Qt, Signal
+from PySide6.QtGui import QFont, QKeySequence
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDialog,
                                QDialogButtonBox, QDoubleSpinBox, QFileDialog,
                                QFormLayout, QGroupBox, QHBoxLayout, QHeaderView,
@@ -507,43 +507,103 @@ class ArrayDialog(QDialog):
                 self.count.value(), self.duplicate.isChecked())
 
 
+class ShortcutEdit(QLineEdit):
+    """Press the keys you want; it records them.
+
+    Two kinds of binding live in one box. A keystroke that produces a printable
+    character with no Ctrl or Alt — ``m``, ``"`` — is stored as that character,
+    because those act when they are typed straight onto the page. Anything with
+    a modifier is stored as a key sequence, which works from the menu bar as
+    well. Backspace clears the row; Escape puts back what was there.
+    """
+
+    changed = Signal()
+
+    def __init__(self, text: str = "", parent=None):
+        super().__init__(text, parent)
+        self._original = text
+        self.setReadOnly(True)             # every key is captured, not typed
+        self.setPlaceholderText("press a key")
+        self.setClearButtonEnabled(False)
+
+    def keyPressEvent(self, event) -> None:
+        key = event.key()
+        if key in (Qt.Key_Control, Qt.Key_Shift, Qt.Key_Alt, Qt.Key_Meta,
+                   Qt.Key_AltGr, Qt.Key_unknown):
+            return
+        modifiers = event.modifiers()
+        if key == Qt.Key_Escape and not modifiers:
+            self.setText(self._original)
+            self.changed.emit()
+            return
+        if key in (Qt.Key_Backspace, Qt.Key_Delete) and not modifiers:
+            self.setText("")
+            self.changed.emit()
+            return
+        if key == Qt.Key_Tab and not modifiers:
+            super().keyPressEvent(event)   # let the focus move on
+            return
+        chord = modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)
+        text = event.text()
+        if text and text.isprintable() and not chord:
+            self.setText(text)
+        else:
+            sequence = QKeySequence(QKeyCombination(modifiers, Qt.Key(key)))
+            self.setText(sequence.toString(QKeySequence.PortableText))
+        self.changed.emit()
+
+    def focusInEvent(self, event) -> None:
+        self._original = self.text()
+        super().focusInEvent(event)
+
+
 class ShortcutManagerDialog(QDialog):
-    """Edit, check and reset the keyboard bindings."""
+    """Change any binding by pressing the keys for it."""
 
     def __init__(self, manager, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Customise shortcuts")
+        self.setWindowTitle("Keyboard shortcuts")
         self.manager = manager
-        self.resize(560, 560)
+        self.resize(620, 620)
         layout = QVBoxLayout(self)
 
         note = QLabel(
-            "Type the keys for each command. A single character — <b>\"</b> for text, "
-            "<b>\\</b> for maths — acts when you type it straight onto the page with "
-            "nothing selected. Anything longer, such as <b>Ctrl+0</b>, works everywhere. "
-            "Leave a row empty to unbind it.")
+            "Click a shortcut and <b>press the keys you want</b>. "
+            "A single character — <b>m</b>, <b>\"</b>, <b>\\</b> — acts when you type it "
+            "straight onto the page; anything with Ctrl or Alt works from the menus too. "
+            "Backspace clears one, Escape puts it back.<br>"
+            "Tool keys are deliberately silent while you are typing into a "
+            "calculation, a text box or a table.")
         note.setWordWrap(True)
         layout.addWidget(note)
+
+        self.filter = QLineEdit()
+        self.filter.setPlaceholderText("Filter…")
+        self.filter.setClearButtonEnabled(True)
+        self.filter.textChanged.connect(self._apply_filter)
+        layout.addWidget(self.filter)
 
         self.table = QTableWidget(0, 4)
         self.table.setHorizontalHeaderLabels(["Group", "Command", "Shortcut", "Default"])
         self.table.verticalHeader().setVisible(False)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         layout.addWidget(self.table, 1)
 
-        self.editors: dict[str, QLineEdit] = {}
+        self.editors: dict[str, ShortcutEdit] = {}
+        self.rows: dict[str, int] = {}
         for binding in manager.bindings():
             row = self.table.rowCount()
             self.table.insertRow(row)
+            self.rows[binding.action_id] = row
             group = QTableWidgetItem(binding.category)
             group.setFlags(Qt.ItemIsEnabled)
             self.table.setItem(row, 0, group)
             label = QTableWidgetItem(binding.label)
             label.setFlags(Qt.ItemIsEnabled)
             self.table.setItem(row, 1, label)
-            editor = QLineEdit(manager.sequence(binding.action_id))
-            editor.setPlaceholderText("unbound")
-            editor.textChanged.connect(lambda _t: self._check())
+            editor = ShortcutEdit(manager.sequence(binding.action_id))
+            editor.changed.connect(self._check)
             self.table.setCellWidget(row, 2, editor)
             self.editors[binding.action_id] = editor
             default = QTableWidgetItem(binding.default or "—")
@@ -553,47 +613,103 @@ class ShortcutManagerDialog(QDialog):
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
 
         self.warning = QLabel("")
-        self.warning.setStyleSheet("color:#b3261e;")
         self.warning.setWordWrap(True)
         layout.addWidget(self.warning)
 
         buttons = QHBoxLayout()
-        reset_row = QPushButton("Reset this row")
+        clear_row = QPushButton("Clear")
+        clear_row.clicked.connect(lambda: self._set_current(""))
+        reset_row = QPushButton("Reset this one")
         reset_row.clicked.connect(self._reset_row)
         reset_all = QPushButton("Reset all")
         reset_all.clicked.connect(self._reset_all)
-        buttons.addWidget(reset_row)
-        buttons.addWidget(reset_all)
+        for button in (clear_row, reset_row, reset_all):
+            buttons.addWidget(button)
         buttons.addStretch(1)
         layout.addLayout(buttons)
         layout.addWidget(_buttons(self))
         self._check()
 
-    def _reset_row(self) -> None:
+    # -- helpers -----------------------------------------------------------
+    def _current_binding(self):
         row = self.table.currentRow()
-        if row < 0:
-            return
-        binding = self.manager.bindings()[row]
-        self.editors[binding.action_id].setText(binding.default)
+        bindings = self.manager.bindings()
+        return bindings[row] if 0 <= row < len(bindings) else None
+
+    def _set_current(self, text: str) -> None:
+        binding = self._current_binding()
+        if binding is not None:
+            self.editors[binding.action_id].setText(text)
+            self._check()
+
+    def _reset_row(self) -> None:
+        binding = self._current_binding()
+        if binding is not None:
+            self._set_current(binding.default)
 
     def _reset_all(self) -> None:
         for binding in self.manager.bindings():
             self.editors[binding.action_id].setText(binding.default)
+        self._check()
+
+    def _apply_filter(self, needle: str) -> None:
+        needle = needle.strip().lower()
+        for binding in self.manager.bindings():
+            row = self.rows[binding.action_id]
+            haystack = f"{binding.category} {binding.label} " \
+                       f"{self.editors[binding.action_id].text()}".lower()
+            self.table.setRowHidden(row, bool(needle) and needle not in haystack)
+
+    def assignments(self) -> dict[str, str]:
+        return {binding.action_id: self.editors[binding.action_id].text().strip()
+                for binding in self.manager.bindings()}
 
     def _check(self) -> None:
-        seen: dict[str, list[str]] = {}
+        """Flag anything bound twice, on the rows themselves and in a line."""
+        seen: dict[str, list] = {}
         for binding in self.manager.bindings():
             text = self.editors[binding.action_id].text().strip()
             if text:
-                seen.setdefault(text.lower(), []).append(binding.label)
-        clashes = [f"{key}: {', '.join(labels)}" for key, labels in seen.items()
-                   if len(labels) > 1]
-        self.warning.setText("Used more than once — " + "; ".join(clashes) if clashes else "")
+                seen.setdefault(text.lower(), []).append(binding)
+        clashes = []
+        for text, bindings in seen.items():
+            clash = len(bindings) > 1
+            if clash:
+                clashes.append(f"{bindings[0].label} and "
+                               f"{', '.join(b.label for b in bindings[1:])} "
+                               f"are both on {text}")
+            for binding in bindings:
+                editor = self.editors[binding.action_id]
+                editor.setStyleSheet("border: 1px solid #c0392b;" if clash else "")
+        for binding in self.manager.bindings():
+            if not self.editors[binding.action_id].text().strip():
+                self.editors[binding.action_id].setStyleSheet("")
+        self.warning.setText("⚠ " + "; ".join(clashes) if clashes else "")
+        self.warning.setStyleSheet("color:#b3261e;" if clashes else "")
+
+    def clashes(self) -> list[str]:
+        """Keys bound to more than one thing."""
+        seen: dict[str, list[str]] = {}
+        for action_id, text in self.assignments().items():
+            if text:
+                seen.setdefault(text.lower(), []).append(action_id)
+        return [key for key, ids in seen.items() if len(ids) > 1]
+
+    def accept(self) -> None:
+        """Refuse to save a key that would mean two different things."""
+        clashes = self.clashes()
+        if clashes:
+            QMessageBox.warning(
+                self, "Keyboard shortcuts",
+                "These keys are each bound to more than one thing:\n\n  "
+                + "\n  ".join(sorted(clashes))
+                + "\n\nClear one of them, or give it a different key.")
+            return
+        super().accept()
 
     def apply(self) -> None:
-        for binding in self.manager.bindings():
-            self.manager.set_sequence(binding.action_id,
-                                      self.editors[binding.action_id].text())
+        for action_id, text in self.assignments().items():
+            self.manager.set_sequence(action_id, text)
 
 
 class AboutDialog(QDialog):

@@ -1788,3 +1788,144 @@ def test_the_worked_example_survives_a_page_being_added(window):
     for name, value in values.items():
         assert window.document.workspace.get(name) is not None, f"{name} was lost"
     assert verify_document(window.document).ok
+
+
+# ---------------------------------------------------------------------------
+# the shortcut manager
+# ---------------------------------------------------------------------------
+
+def _press_into(editor, key, modifiers=Qt.NoModifier, text=""):
+    from PySide6.QtGui import QKeyEvent
+    QApplication.sendEvent(editor, QKeyEvent(QEvent.KeyPress, key, modifiers, text))
+
+
+def test_the_manager_lists_every_binding_including_the_chords(window):
+    from calcforge.ui import dialogs
+
+    dialog = dialogs.ShortcutManagerDialog(window.shortcuts, window)
+    ids = set(dialog.editors)
+    assert "tool.measure_dimension" in ids and "tool.measure_area" in ids
+    assert "tool.rect" in ids and "insert.math" in ids
+    assert dialog.editors["tool.measure_dimension"].text() == "Alt+M"
+    assert dialog.editors["tool.rect"].text() == "R"
+    dialog.deleteLater()
+
+
+def test_pressing_keys_records_them(window):
+    from calcforge.ui import dialogs
+
+    dialog = dialogs.ShortcutManagerDialog(window.shortcuts, window)
+    editor = dialog.editors["tool.measure_dimension"]
+    _press_into(editor, Qt.Key_D, Qt.ControlModifier | Qt.ShiftModifier)
+    assert editor.text() == "Ctrl+Shift+D"
+
+    plain = dialog.editors["tool.rect"]
+    _press_into(plain, Qt.Key_J, Qt.NoModifier, "j")
+    assert plain.text() == "j"           # a bare character stays a character
+    dialog.deleteLater()
+
+
+def test_backspace_clears_and_escape_puts_it_back(window):
+    from calcforge.ui import dialogs
+
+    dialog = dialogs.ShortcutManagerDialog(window.shortcuts, window)
+    editor = dialog.editors["tool.cloud"]
+    editor.focusInEvent(__import__("PySide6.QtGui", fromlist=["QFocusEvent"])
+                        .QFocusEvent(QEvent.FocusIn))
+    _press_into(editor, Qt.Key_Backspace)
+    assert editor.text() == ""
+    _press_into(editor, Qt.Key_Escape)
+    assert editor.text() == "C"
+    dialog.deleteLater()
+
+
+def test_a_clash_is_flagged(window):
+    from calcforge.ui import dialogs
+
+    dialog = dialogs.ShortcutManagerDialog(window.shortcuts, window)
+    dialog.editors["tool.cloud"].setText("R")        # already the rectangle
+    dialog._check()
+    assert "both on r" in dialog.warning.text().lower()
+    assert "#c0392b" in dialog.editors["tool.rect"].styleSheet()
+    dialog.editors["tool.cloud"].setText("C")
+    dialog._check()
+    assert dialog.warning.text() == ""
+    dialog.deleteLater()
+
+
+def test_a_changed_shortcut_reaches_the_action_and_the_canvas(window):
+    from calcforge.ui import dialogs
+    from calcforge.ui.tools import TOOL_MAP
+
+    dialog = dialogs.ShortcutManagerDialog(window.shortcuts, window)
+    dialog.editors["tool.measure_dimension"].setText("Ctrl+Shift+Y")
+    dialog.editors["tool.rect"].setText("j")      # a key nothing else uses
+    dialog.apply()
+    window.shortcuts.save()
+    window.apply_shortcuts()
+
+    assert window.tool_actions["measure_dimension"].shortcut().toString() == "Ctrl+Shift+Y"
+    # the bare key is the canvas's job, so the action carries none
+    assert window.tool_actions["rect"].shortcut().isEmpty()
+    window.view._last_scene_pos = QPointF(100, 100)
+    assert window.run_typed_binding("j", Qt.NoModifier, QPointF(100, 100))
+    assert window.view.current_tool().key == "rect"
+
+    # …and the old key no longer does anything
+    assert not window.run_typed_binding("r", Qt.NoModifier, QPointF(100, 100))
+
+
+def test_reset_all_puts_the_defaults_back(window):
+    from calcforge.ui import dialogs
+
+    dialog = dialogs.ShortcutManagerDialog(window.shortcuts, window)
+    dialog.editors["tool.rect"].setText("z")
+    dialog._reset_all()
+    assert dialog.editors["tool.rect"].text() == "R"
+    assert dialog.editors["tool.measure_area"].text() == "Shift+Alt+A"
+    dialog.deleteLater()
+
+
+def test_the_filter_narrows_the_list(window):
+    from calcforge.ui import dialogs
+
+    dialog = dialogs.ShortcutManagerDialog(window.shortcuts, window)
+    dialog.filter.setText("dimension")
+    shown = [b for b in window.shortcuts.bindings()
+             if not dialog.table.isRowHidden(dialog.rows[b.action_id])]
+    assert [b.action_id for b in shown] == ["tool.measure_dimension"]
+    dialog.filter.setText("")
+    assert not dialog.table.isRowHidden(dialog.rows["tool.rect"])
+    dialog.deleteLater()
+
+
+def test_a_rebound_chord_is_still_silent_while_typing(window):
+    from calcforge.ui import dialogs
+    from tests.test_usability import drag as ui_drag, swallowed
+
+    dialog = dialogs.ShortcutManagerDialog(window.shortcuts, window)
+    dialog.editors["tool.measure_dimension"].setText("Alt+K")
+    dialog.apply()
+    window.apply_shortcuts()
+
+    window.select_tool("text")
+    ui_drag(window.view, 100, 100, 340, 150)
+    assert window.view.is_editing()
+    assert swallowed(window, Qt.Key_K, Qt.AltModifier)
+
+
+def test_the_manager_refuses_to_save_a_key_bound_twice(window, monkeypatch):
+    from calcforge.ui import dialogs
+
+    warned = []
+    monkeypatch.setattr(dialogs.QMessageBox, "warning",
+                        lambda *args, **kwargs: warned.append(args[-1]))
+    dialog = dialogs.ShortcutManagerDialog(window.shortcuts, window)
+    dialog.editors["tool.cloud"].setText("R")
+    dialog.accept()
+    assert dialog.result() != dialogs.QDialog.Accepted
+    assert warned and "more than one thing" in warned[0]
+
+    dialog.editors["tool.cloud"].setText("C")
+    dialog.accept()
+    assert dialog.result() == dialogs.QDialog.Accepted

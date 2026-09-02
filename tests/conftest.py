@@ -9,8 +9,42 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
 
 
+@pytest.fixture(scope="session", autouse=True)
+def settings_sandbox(tmp_path_factory):
+    """Keep the suite out of the real settings file.
+
+    Shortcuts, the window layout and the theme are all remembered between
+    sessions. Without this, a test that rebinds a key would change what every
+    later test — and the developer's own copy of the app — starts with.
+    """
+    from PySide6.QtCore import QSettings
+
+    folder = str(tmp_path_factory.mktemp("settings"))
+    QSettings.setDefaultFormat(QSettings.IniFormat)
+    QSettings.setPath(QSettings.IniFormat, QSettings.UserScope, folder)
+    QSettings.setPath(QSettings.IniFormat, QSettings.SystemScope, folder)
+    yield folder
+
+
+@pytest.fixture(autouse=True)
+def fresh_settings(settings_sandbox):
+    """Every test starts from the shipped defaults.
+
+    A test that rebinds a key or moves a panel saves it, and the next window
+    would open with that arrangement. Each test gets a clean slate instead.
+    """
+    from PySide6.QtCore import QSettings
+
+    settings = QSettings("CalcForge", "CalcForge")
+    settings.clear()
+    settings.sync()
+    yield
+    settings.clear()
+    settings.sync()
+
+
 @pytest.fixture(scope="session")
-def qapp():
+def qapp(settings_sandbox):
     from calcforge.app import build_application
     from PySide6.QtWidgets import QApplication
     application = QApplication.instance() or build_application([])
