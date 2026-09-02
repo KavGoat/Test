@@ -793,3 +793,64 @@ class ShortcutsDialog(QDialog):
         box = QDialogButtonBox(QDialogButtonBox.Close)
         box.rejected.connect(self.reject)
         layout.addWidget(box)
+
+
+class ToolbarDialog(QDialog):
+    """Choose which markup tools appear on the toolbar."""
+
+    def __init__(self, tools, chosen, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Tools on the toolbar")
+        self.resize(420, 560)
+        layout = QVBoxLayout(self)
+        note = QLabel("Tick the tools you want on the toolbar. Everything stays "
+                      "available from the Insert and Markup menus and from its "
+                      "keyboard shortcut either way.")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
+        self.boxes: dict[str, QCheckBox] = {}
+        self.list = QTableWidget(0, 1)
+        self.list.setHorizontalHeaderLabels(["Tool"])
+        self.list.verticalHeader().setVisible(False)
+        self.list.horizontalHeader().setStretchLastSection(True)
+        self.list.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        layout.addWidget(self.list, 1)
+
+        category = None
+        for tool in tools:
+            if tool.category != category:
+                category = tool.category
+                row = self.list.rowCount()
+                self.list.insertRow(row)
+                heading = QTableWidgetItem(category.upper())
+                heading.setFlags(Qt.ItemIsEnabled)
+                font = heading.font()
+                font.setBold(True)
+                heading.setFont(font)
+                self.list.setItem(row, 0, heading)
+            row = self.list.rowCount()
+            self.list.insertRow(row)
+            box = QCheckBox(tool.label)
+            box.setChecked(tool.key in chosen)
+            self.boxes[tool.key] = box
+            self.list.setCellWidget(row, 0, box)
+        self.list.resizeRowsToContents()
+
+        buttons = QHBoxLayout()
+        every = QPushButton("Everything")
+        every.clicked.connect(lambda: self._set_all(True))
+        none = QPushButton("Nothing")
+        none.clicked.connect(lambda: self._set_all(False))
+        buttons.addWidget(every)
+        buttons.addWidget(none)
+        buttons.addStretch(1)
+        layout.addLayout(buttons)
+        layout.addWidget(_buttons(self))
+
+    def _set_all(self, on: bool) -> None:
+        for box in self.boxes.values():
+            box.setChecked(on)
+
+    def chosen(self) -> set:
+        return {key for key, box in self.boxes.items() if box.isChecked()}

@@ -5,7 +5,8 @@ import json
 import os
 from typing import Optional
 
-from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt, QTimer
+from PySide6.QtCore import (QEvent, QPointF, QRectF, QSettings, QSize, Qt,
+                            QTimer)
 from PySide6.QtGui import (QAction, QActionGroup, QColor, QFont, QKeySequence,
                            QUndoStack)
 from PySide6.QtPrintSupport import QPrintDialog, QPrintPreviewDialog, QPrinter
@@ -35,6 +36,7 @@ from .commands import DocumentStructureCommand
 from .icons import icon
 from .panels import (FunctionsPanel, LayersPanel, MarkupsPanel, PagesPanel,
                      ProblemsPanel, PropertiesPanel, VariablesPanel)
+from .docks import PanelDock, load_pinned, save_pinned
 from .scene import DocumentScene, detach
 from .shortcuts import COMMAND, INSERT, TOOL, ShortcutManager
 from .tools import CATEGORIES, TOOL_MAP, TOOLS, tools_in
@@ -42,6 +44,7 @@ from .view import PageView
 from .widgets import ColorButton
 
 APP_NAME = "CalcForge"
+ORGANISATION = "CalcForge"
 CLIPBOARD_TAG = "application/x-calcforge-items"
 
 
@@ -73,6 +76,9 @@ class MainWindow(QMainWindow):
         # been left alone for a moment rather than on every keystroke.
         self._verification = None
         self.scene = None
+        self.toolbars: list = []
+        self.visible_tools = None       # None means every tool
+        self._default_state = None
         self._verify_timer = QTimer(self)
         self._verify_timer.setSingleShot(True)
         self._verify_timer.setInterval(900)
@@ -101,6 +107,10 @@ class MainWindow(QMainWindow):
         from ..app import current_theme
         from ..theme import DARK
         self.act_dark.setChecked(current_theme() == DARK)
+        # What the arrangement looks like out of the box, so it can be put
+        # back later however far it has been dragged about.
+        self._default_state = self.saveState()
+        self.restore_layout()
         QTimer.singleShot(0, self.view.fit_page)
 
     # ==================================================================
@@ -220,6 +230,16 @@ class MainWindow(QMainWindow):
         self._act("next_page", "Next page", lambda: self.go_to_page(self.current_index + 1),
                   "Ctrl+PgDown")
         self._act("actual_size", "Actual size", lambda: self.view.set_zoom(1.0), "Ctrl+Alt+0")
+        self._act("pin_panels", "Pin every panel", self.pin_all_panels, "", checkable=True,
+                  tip="Keep the panels where they are, so a stray drag cannot move them")
+        self._act("show_panels", "Show every panel", self.show_all_panels)
+        self._act("reset_layout", "Reset the layout", self.reset_layout,
+                  tip="Put the panels and toolbars back where they started")
+        self._act("lock_toolbars", "Lock the toolbars", self.lock_toolbars, "",
+                  checkable=True, tip="Stop the toolbars being dragged about")
+        self._act("customise_toolbar", "Choose tools on the toolbar…",
+                  self.customise_toolbar,
+                  tip="Pick which tools appear on the markup toolbar")
 
         self._act("add_page", "Add page", self.add_page)
         self._act("duplicate_page", "Duplicate page", self.duplicate_page)
@@ -255,6 +275,14 @@ class MainWindow(QMainWindow):
         self._act("about", f"About {APP_NAME}", self.show_about)
         self._act("sample", "Load the worked example", self.load_sample)
 
+    def _add_toolbar(self, bar) -> None:
+        """Toolbars go on any edge, and remember where they were put."""
+        bar.setMovable(True)
+        bar.setFloatable(False)
+        bar.setAllowedAreas(Qt.AllToolBarAreas)
+        self.addToolBar(bar)
+        self.toolbars.append(bar)
+
     def _build_toolbars(self) -> None:
         main_bar = QToolBar("Main")
         main_bar.setObjectName("toolbar_main")
@@ -264,7 +292,7 @@ class MainWindow(QMainWindow):
                        self.act_undo, self.act_redo, None, self.act_recalc,
                        self.act_verify):
             main_bar.addSeparator() if action is None else main_bar.addAction(action)
-        self.addToolBar(main_bar)
+        self._add_toolbar(main_bar)
         # The markup tools get a row to themselves: there are enough of them
         # that sharing one with the file actions hides the last few.
         self.addToolBarBreak()
@@ -293,7 +321,7 @@ class MainWindow(QMainWindow):
                 self.tool_actions[tool.key] = action
         tool_bar.addSeparator()
         tool_bar.addAction(self.act_sticky)
-        self.addToolBar(tool_bar)
+        self._add_toolbar(tool_bar)
         self.addToolBarBreak()
 
         style_bar = QToolBar("Style")
@@ -340,19 +368,17 @@ class MainWindow(QMainWindow):
         count_button.setText("Count subject…")
         count_button.clicked.connect(self.choose_count_subject)
         style_bar.addWidget(count_button)
-        self.addToolBar(style_bar)
+        self._add_toolbar(style_bar)
 
     def _dock(self, title: str, widget: QWidget, area: Qt.DockWidgetArea,
-              name: str) -> QDockWidget:
-        dock = QDockWidget(title, self)
-        dock.setObjectName(name)
-        dock.setWidget(widget)
-        dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea |
-                             Qt.BottomDockWidgetArea)
+              name: str) -> PanelDock:
+        dock = PanelDock(title, widget, name, self)
         self.addDockWidget(area, dock)
+        self.panels.append(dock)
         return dock
 
     def _build_docks(self) -> None:
+        self.panels: list[PanelDock] = []
         self.pages_panel = PagesPanel(self)
         self.dock_pages = self._dock("Pages", self.pages_panel, Qt.LeftDockWidgetArea,
                                      "dock_pages")
@@ -416,10 +442,19 @@ class MainWindow(QMainWindow):
                        self.act_next_page):
             view_menu.addSeparator() if action is None else view_menu.addAction(action)
         panels_menu = view_menu.addMenu("Panels")
-        for dock in (self.dock_pages, self.dock_properties, self.dock_variables,
-                     self.dock_functions, self.dock_layers, self.dock_markups,
-                     self.dock_problems):
+        for dock in self.panels:
             panels_menu.addAction(dock.toggleViewAction())
+        panels_menu.addSeparator()
+        panels_menu.addAction(self.act_pin_panels)
+        panels_menu.addAction(self.act_show_panels)
+        panels_menu.addAction(self.act_reset_layout)
+        view_menu.addSeparator()
+        toolbars_menu = view_menu.addMenu("Toolbars")
+        for toolbar in self.toolbars:
+            toolbars_menu.addAction(toolbar.toggleViewAction())
+        toolbars_menu.addSeparator()
+        toolbars_menu.addAction(self.act_lock_toolbars)
+        toolbars_menu.addAction(self.act_customise_toolbar)
 
         # Mnemonic on the "k": Alt+M belongs to the dimension tool, and a
         # menu with the same mnemonic makes the shortcut ambiguous.
@@ -639,6 +674,7 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
         self.view.deactivate_table()
+        self.save_layout()
         self._autosave.stop()
         self.clear_autosave()
         try:
@@ -766,6 +802,94 @@ class MainWindow(QMainWindow):
                 event.accept()
                 return True
         return super().eventFilter(watched, event)
+
+    # ==================================================================
+    # panels and toolbars
+    # ==================================================================
+    def pin_all_panels(self, pinned: bool) -> None:
+        for dock in self.panels:
+            dock.set_pinned(pinned)
+        self.status_hint.setText("Panels pinned" if pinned else "Panels unpinned")
+
+    def show_all_panels(self) -> None:
+        for dock in self.panels:
+            dock.show()
+
+    def lock_toolbars(self, locked: bool) -> None:
+        for bar in self.toolbars:
+            bar.setMovable(not locked)
+        self.status_hint.setText("Toolbars locked" if locked else "Toolbars unlocked")
+
+    def reset_layout(self) -> None:
+        """Put every panel and toolbar back where it started."""
+        settings = QSettings(ORGANISATION, APP_NAME)
+        for key in ("window/geometry", "window/state", "panels/pinned",
+                    "toolbars/locked", "toolbars/tools"):
+            settings.remove(key)
+        if self._default_state is not None:
+            self.restoreState(self._default_state)
+        for dock in self.panels:
+            dock.set_pinned(False)
+            dock.show()
+        for bar in self.toolbars:
+            bar.setMovable(True)
+            bar.show()
+        self.act_pin_panels.setChecked(False)
+        self.act_lock_toolbars.setChecked(False)
+        self.visible_tools = None
+        self.apply_visible_tools()
+        self.status_hint.setText("Layout reset")
+
+    def customise_toolbar(self) -> None:
+        """Choose which markup tools are on the toolbar."""
+        dialog = dialogs.ToolbarDialog(TOOLS, self.visible_tool_keys(), self)
+        if dialog.exec() != dialogs.QDialog.Accepted:
+            return
+        self.visible_tools = dialog.chosen()
+        self.apply_visible_tools()
+        self.save_layout()
+
+    def visible_tool_keys(self) -> set:
+        if self.visible_tools is None:
+            return {tool.key for tool in TOOLS}
+        return set(self.visible_tools)
+
+    def apply_visible_tools(self) -> None:
+        wanted = self.visible_tool_keys()
+        for key, action in self.tool_actions.items():
+            action.setVisible(key in wanted)
+
+    # -- remembering it ------------------------------------------------
+    def save_layout(self) -> None:
+        settings = QSettings(ORGANISATION, APP_NAME)
+        settings.setValue("window/geometry", self.saveGeometry())
+        settings.setValue("window/state", self.saveState())
+        settings.setValue("toolbars/locked", not self.toolbars[0].isMovable())
+        if self.visible_tools is None:
+            settings.remove("toolbars/tools")
+        else:
+            settings.setValue("toolbars/tools", sorted(self.visible_tools))
+        save_pinned(self.panels)
+
+    def restore_layout(self) -> None:
+        settings = QSettings(ORGANISATION, APP_NAME)
+        geometry = settings.value("window/geometry")
+        state = settings.value("window/state")
+        if geometry is not None:
+            self.restoreGeometry(geometry)
+        if state is not None:
+            self.restoreState(state)
+        stored = settings.value("toolbars/tools", None)
+        if stored:
+            if isinstance(stored, str):
+                stored = [stored]
+            self.visible_tools = set(stored)
+            self.apply_visible_tools()
+        locked = str(settings.value("toolbars/locked", "false")).lower() == "true"
+        self.act_lock_toolbars.setChecked(locked)
+        self.lock_toolbars(locked)
+        load_pinned(self.panels)
+        self.act_pin_panels.setChecked(all(d.pinned for d in self.panels))
 
     def follow_scrolled_page(self, index: int) -> None:
         """The reader scrolled onto another page; catch the chrome up.
