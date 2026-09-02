@@ -7,7 +7,7 @@ import re
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QPixmap
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox,
-                               QDoubleSpinBox, QInputDialog,
+                               QDoubleSpinBox, QInputDialog, QMessageBox,
                                QFontComboBox, QFormLayout, QGroupBox, QHBoxLayout,
                                QHeaderView, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem, QPlainTextEdit, QPushButton,
@@ -239,7 +239,7 @@ class MarkupsPanel(QWidget):
             self.markupActivated.emit(data[0], data[1])
 
     def export_csv(self) -> None:
-        from PySide6.QtWidgets import QFileDialog, QMessageBox
+        from PySide6.QtWidgets import QFileDialog
         path, _ = QFileDialog.getSaveFileName(self, "Export markups", "markups.csv",
                                               "CSV files (*.csv)")
         if not path:
@@ -513,6 +513,228 @@ class BookmarksPanel(QWidget):
 
     def insert_contents(self) -> None:
         self.window.insert_contents_block()
+
+
+class ToolSetsPanel(QWidget):
+    """Bluebeam's tool chest: things you have made, kept to use again.
+
+    Each entry can be put down two ways. **As a copy** it comes back exactly as
+    it was added, contents and all — a text box with its words in it, a
+    calculation with its lines. **As properties** it is a tool: draw a new one
+    where and how big you like, wearing the stored colours, thickness and font.
+    """
+
+    def __init__(self, window):
+        super().__init__()
+        self.window = window
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
+
+        top = QHBoxLayout()
+        self.sets = QComboBox()
+        self.sets.setToolTip("Which set of tools to show")
+        self.sets.currentIndexChanged.connect(lambda _index: self.rebuild_entries())
+        top.addWidget(self.sets, 1)
+        for label, tip, slot in (("New…", "Start another set", self.new_set),
+                                 ("Rename…", "Rename this set", self.rename_set),
+                                 ("Delete", "Delete this set", self.delete_set)):
+            button = QToolButton()
+            button.setText(label)
+            button.setToolTip(tip)
+            button.clicked.connect(slot)
+            top.addWidget(button)
+        layout.addLayout(top)
+
+        self.list = QListWidget()
+        self.list.setAlternatingRowColors(True)
+        self.list.itemDoubleClicked.connect(lambda _entry: self.use_selected())
+        self.list.setSelectionMode(QAbstractItemView.SingleSelection)
+        layout.addWidget(self.list, 1)
+
+        buttons = QHBoxLayout()
+        for label, tip, slot in (
+                ("Use", "Put this one down on the page", self.use_selected),
+                ("Add selection", "Keep what is selected on the page",
+                 self.add_selection),
+                ("Mode", "Between putting back a copy and drawing a new one "
+                         "with its properties", self.toggle_mode),
+                ("Rename…", "Rename this tool", self.rename_entry),
+                ("Remove", "Take this tool out of the set", self.remove_entry)):
+            button = QPushButton(label)
+            button.setToolTip(tip)
+            button.clicked.connect(slot)
+            buttons.addWidget(button)
+        buttons.addStretch(1)
+        layout.addLayout(buttons)
+
+        move = QHBoxLayout()
+        for label, step in (("Move up", -1), ("Move down", 1)):
+            button = QPushButton(label)
+            button.clicked.connect(lambda _checked=False, s=step: self.move_entry(s))
+            move.addWidget(button)
+        self.hint = QLabel("")
+        self.hint.setWordWrap(True)
+        self.hint.setStyleSheet("color:#6b7280;")
+        move.addWidget(self.hint, 1)
+        layout.addLayout(move)
+
+        self.rebuild()
+
+    # -- the sets ----------------------------------------------------------
+    def rebuild(self, keep: str = "") -> None:
+        from . import toolsets
+
+        self.groups = toolsets.load_toolsets()
+        wanted = keep or self.sets.currentText()
+        self.sets.blockSignals(True)
+        self.sets.clear()
+        self.sets.addItems([group.name for group in self.groups])
+        index = self.sets.findText(wanted)
+        self.sets.setCurrentIndex(index if index >= 0 else 0)
+        self.sets.blockSignals(False)
+        self.rebuild_entries()
+
+    def current_set(self):
+        index = self.sets.currentIndex()
+        return self.groups[index] if 0 <= index < len(self.groups) else None
+
+    def rebuild_entries(self) -> None:
+        from . import toolsets
+
+        group = self.current_set()
+        self.list.clear()
+        if group is None:
+            return
+        numbered = group.name == toolsets.MY_TOOLS
+        for position, entry in enumerate(group.entries):
+            mode = "copy" if entry.mode == toolsets.COPY else "properties"
+            prefix = f"{position + 1}.  " if numbered and position < 9 else ""
+            row = QListWidgetItem(f"{prefix}{entry.label}    ({mode})")
+            row.setIcon(icon(_icon_for_type(entry.type_name), 16))
+            row.setToolTip("Put back exactly what was added" if entry.mode == toolsets.COPY
+                           else "Draw a new one with these properties")
+            self.list.addItem(row)
+        self.hint.setText(
+            "The first nine are on the number keys" if numbered
+            else "Add anything: a markup, a calculation, a table")
+
+    def _store(self) -> None:
+        from . import toolsets
+
+        toolsets.save_toolsets(self.groups)
+        self.rebuild_entries()
+
+    def new_set(self) -> None:
+        from . import toolsets
+
+        name, accepted = QInputDialog.getText(self, "New tool set", "Name")
+        name = name.strip()
+        if not accepted or not name:
+            return
+        if any(group.name == name for group in self.groups):
+            QMessageBox.information(self, "New tool set",
+                                    f"There is already a set called “{name}”.")
+            return
+        self.groups.append(toolsets.ToolSet(name))
+        toolsets.save_toolsets(self.groups)
+        self.rebuild(keep=name)
+
+    def rename_set(self) -> None:
+        from . import toolsets
+
+        group = self.current_set()
+        if group is None or group.name == toolsets.MY_TOOLS:
+            QMessageBox.information(self, "Rename", "My Tools keeps its name.")
+            return
+        name, accepted = QInputDialog.getText(self, "Rename tool set", "Name",
+                                              text=group.name)
+        if accepted and name.strip():
+            group.name = name.strip()
+            toolsets.save_toolsets(self.groups)
+            self.rebuild(keep=group.name)
+
+    def delete_set(self) -> None:
+        from . import toolsets
+
+        group = self.current_set()
+        if group is None or group.name == toolsets.MY_TOOLS:
+            QMessageBox.information(self, "Delete", "My Tools is always there.")
+            return
+        if QMessageBox.question(self, "Delete tool set",
+                                f"Delete “{group.name}” and its "
+                                f"{len(group.entries)} tool(s)?") != QMessageBox.Yes:
+            return
+        self.groups.remove(group)
+        toolsets.save_toolsets(self.groups)
+        self.rebuild()
+
+    # -- the tools ---------------------------------------------------------
+    def current_entry(self):
+        group = self.current_set()
+        row = self.list.currentRow()
+        if group is None or not (0 <= row < len(group.entries)):
+            return None
+        return group.entries[row]
+
+    def add_selection(self) -> None:
+        self.window.add_to_toolset(None, into=self.sets.currentText())
+
+    def use_selected(self) -> None:
+        entry = self.current_entry()
+        if entry is not None:
+            self.window.use_tool_entry(entry)
+
+    def toggle_mode(self) -> None:
+        from . import toolsets
+
+        entry = self.current_entry()
+        if entry is None:
+            return
+        entry.mode = (toolsets.PROPERTIES if entry.mode == toolsets.COPY
+                      else toolsets.COPY)
+        row = self.list.currentRow()
+        self._store()
+        self.list.setCurrentRow(row)
+
+    def rename_entry(self) -> None:
+        entry = self.current_entry()
+        if entry is None:
+            return
+        name, accepted = QInputDialog.getText(self, "Rename tool", "Name",
+                                              text=entry.label)
+        if accepted and name.strip():
+            entry.label = name.strip()
+            self._store()
+
+    def remove_entry(self) -> None:
+        group = self.current_set()
+        row = self.list.currentRow()
+        if group is None or not (0 <= row < len(group.entries)):
+            return
+        del group.entries[row]
+        self._store()
+
+    def move_entry(self, step: int) -> None:
+        group = self.current_set()
+        row = self.list.currentRow()
+        if group is None or not (0 <= row < len(group.entries)):
+            return
+        target = row + step
+        if not (0 <= target < len(group.entries)):
+            return
+        group.entries[row], group.entries[target] = \
+            group.entries[target], group.entries[row]
+        self._store()
+        self.list.setCurrentRow(target)
+
+
+def _icon_for_type(type_name: str) -> str:
+    """The tool icon that goes with a serialised markup's type."""
+    return {"rect": "rect", "poly": "line", "text": "text", "callout": "callout",
+            "note": "note", "stamp": "stamp", "image": "image", "math": "math",
+            "table": "table", "plot": "plot", "measure": "measure_length",
+            "count": "count", "contents": "page"}.get(type_name, "select")
 
 
 class LayersPanel(QWidget):
@@ -810,6 +1032,8 @@ class PropertiesPanel(QScrollArea):
             elif isinstance(first, PolyItem) and first.kind == "cloud":
                 self._add_cloud(first)
         self._add_metadata(first)
+        if len(self._items) == 1:
+            self._add_defaults(first)
         self.layout.addStretch(1)
         self._settle()
         self._building = False
@@ -1242,6 +1466,40 @@ class PropertiesPanel(QScrollArea):
                 item.style.fill = colour
                 item.style.text_color = colour
         self._apply(setter, "Stamp text")
+
+    def _add_defaults(self, first: MarkupItem) -> None:
+        """Keep this one's look for the next one of its kind, or add it to a set."""
+        from . import toolsets
+
+        form = self._group("This kind of markup")
+        note = QLabel("Set how it is now as the way new ones are drawn, or keep "
+                      "the whole thing in a tool set to use again.")
+        note.setWordWrap(True)
+        note.setStyleSheet("color:#6b7280;")
+        form.addRow(note)
+
+        default = QPushButton("Set as default")
+        default.setToolTip("New markups of this kind will be drawn like this one")
+        default.clicked.connect(lambda: self.window.set_as_default(first))
+        form.addRow("", default)
+
+        if toolsets.default_key(first) in toolsets.load_defaults():
+            forget = QPushButton("Forget this default")
+            forget.clicked.connect(lambda: self._forget_default(first))
+            form.addRow("", forget)
+
+        add = QPushButton("Add to a tool set…")
+        add.setToolTip("Keep this markup, contents and all, to put down again")
+        add.clicked.connect(lambda: self.window.add_to_toolset(first))
+        form.addRow("", add)
+
+    def _forget_default(self, item: MarkupItem) -> None:
+        from . import toolsets
+
+        toolsets.forget_default(toolsets.default_key(item))
+        self.window.status_hint.setText(
+            f"New {item.display_name().lower()}s are back to their original look")
+        self.show_items(self._items)
 
     def _add_metadata(self, first: MarkupItem) -> None:
         form = self._group("Details")

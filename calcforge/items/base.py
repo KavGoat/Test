@@ -180,6 +180,8 @@ class MarkupItem(QGraphicsObject):
         self.modified = self.created
         self.locked = False
         self.printable = True
+        # Markups sharing a group id are selected, moved and copied together.
+        self.group = ""
         self._handles_visible = True
         self.setFlags(QGraphicsItem.ItemIsSelectable | QGraphicsItem.ItemIsMovable |
                       QGraphicsItem.ItemSendsGeometryChanges)
@@ -361,6 +363,7 @@ class MarkupItem(QGraphicsObject):
             "modified": self.modified,
             "locked": self.locked,
             "printable": self.printable,
+            "group": self.group,
         }
 
     def serialize(self) -> dict:
@@ -371,6 +374,7 @@ class MarkupItem(QGraphicsObject):
         self.setPos(QPointF(float(data.get("x", 0)), float(data.get("y", 0))))
         self.setZValue(float(data.get("z", 0)))
         self.style = Style.from_dict(data.get("style", {}))
+        self.group = str(data.get("group", ""))
         self.author = data.get("author", "")
         self.subject = data.get("subject", "")
         self.comment = data.get("comment", "")

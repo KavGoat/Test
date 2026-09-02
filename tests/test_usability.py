@@ -2903,3 +2903,388 @@ def test_the_editor_wraps_rather_than_scrolling_sideways(window):
     assert editor.textWidth() > 0                 # a width to wrap at, not a scroller
     assert editor.textWidth() <= block.local_rect().width()
     window.view.end_item_edit()
+
+
+# ---------------------------------------------------------------------------
+# Groups
+# ---------------------------------------------------------------------------
+
+def _two_boxes(window):
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 180, 150)
+    window.select_tool("rect")
+    drag(window.view, 220, 100, 300, 150)
+    window.select_tool("select")
+    return markups(window)[0], markups(window)[1]
+
+
+def test_grouped_markups_are_selected_together(window):
+    first, second = _two_boxes(window)
+    first.setSelected(True)
+    second.setSelected(True)
+    window.group_selection()
+    assert first.group and first.group == second.group
+
+    window.view.scene().clearSelection()
+    centre = first.mapToScene(first.local_rect().center())
+    click(window.view, centre.x(), centre.y())
+    assert first.isSelected() and second.isSelected()
+
+
+def test_a_group_moves_as_one(window):
+    first, second = _two_boxes(window)
+    first.setSelected(True)
+    second.setSelected(True)
+    window.group_selection()
+    window.view.scene().clearSelection()
+
+    before = second.pos()
+    centre = first.mapToScene(first.local_rect().center())
+    drag(window.view, centre.x(), centre.y(), centre.x() + 60, centre.y() + 40)
+    assert second.pos().x() == pytest.approx(before.x() + 60, abs=2)
+    assert second.pos().y() == pytest.approx(before.y() + 40, abs=2)
+
+
+def test_ungrouping_puts_them_back_on_their_own(window):
+    first, second = _two_boxes(window)
+    first.setSelected(True)
+    second.setSelected(True)
+    window.group_selection()
+    window.ungroup_selection()
+    assert not first.group and not second.group
+
+    window.view.scene().clearSelection()
+    centre = first.mapToScene(first.local_rect().center())
+    click(window.view, centre.x(), centre.y())
+    assert first.isSelected() and not second.isSelected()
+
+
+def test_grouping_can_be_undone(window):
+    first, second = _two_boxes(window)
+    first.setSelected(True)
+    second.setSelected(True)
+    window.group_selection()
+    window.undo_stack.undo()
+    assert not markups(window)[0].group
+
+
+def test_a_group_is_saved_with_the_document(window, tmp_path):
+    from calcforge.core.document import Document
+    from calcforge.io import project as project_io
+
+    first, second = _two_boxes(window)
+    first.setSelected(True)
+    second.setSelected(True)
+    window.group_selection()
+    path = str(tmp_path / "job.cfx")
+    project_io.save_document(window.document, path)
+
+    reopened = Document()
+    project_io.load_document(reopened, path)
+    groups = [item.get("group") for item in reopened.pages[0].to_dict()["items"]]
+    assert len(set(groups)) == 1 and all(groups)
+
+
+def test_copying_a_group_makes_a_group_of_its_own(window):
+    first, second = _two_boxes(window)
+    first.setSelected(True)
+    second.setSelected(True)
+    window.group_selection()
+    original = first.group
+
+    window.copy_selection()
+    window.view.set_insert_point(QPointF(120, 400))
+    window.paste_items()
+
+    pasted = [i for i in markups(window) if i.pos().y() > 300]
+    assert len(pasted) == 2
+    assert pasted[0].group == pasted[1].group
+    assert pasted[0].group != original
+
+
+# ---------------------------------------------------------------------------
+# Default properties
+# ---------------------------------------------------------------------------
+
+def test_setting_a_default_draws_the_next_one_the_same(window):
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 160)
+    first = markups(window)[0]
+    first.style.stroke = "#c92a2a"
+    first.style.width = 3.5
+    window.set_as_default(first)
+
+    window.select_tool("rect")
+    drag(window.view, 260, 100, 360, 160)
+    second = markups(window)[1]
+    assert second.style.stroke == "#c92a2a"
+    assert second.style.width == pytest.approx(3.5)
+
+
+def test_a_default_belongs_to_that_kind_of_markup_only(window):
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 160)
+    box = markups(window)[0]
+    box.style.stroke = "#c92a2a"
+    window.set_as_default(box)
+
+    window.select_tool("ellipse")
+    drag(window.view, 260, 100, 360, 160)
+    oval = markups(window)[1]
+    assert oval.style.stroke != "#c92a2a"
+
+
+def test_a_default_is_remembered_between_sessions(window):
+    from calcforge.ui.mainwindow import MainWindow
+
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 160)
+    box = markups(window)[0]
+    box.style.stroke = "#2f9e44"
+    window.set_as_default(box)
+
+    second = MainWindow()
+    second.confirm_discard = lambda: True
+    try:
+        second.select_tool("rect")
+        drag(second.view, 100, 100, 200, 160)
+        assert markups(second)[0].style.stroke == "#2f9e44"
+    finally:
+        second.close()
+        second.deleteLater()
+
+
+def test_a_default_can_be_forgotten(window):
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 160)
+    box = markups(window)[0]
+    original = box.style.stroke
+    box.style.stroke = "#c92a2a"
+    window.set_as_default(box)
+    window.forget_defaults()
+
+    window.select_tool("rect")
+    drag(window.view, 260, 100, 360, 160)
+    assert markups(window)[1].style.stroke == original
+
+
+def test_a_default_never_carries_the_contents_across(window):
+    from calcforge.ui import toolsets
+
+    block = _calc(window, "b := 300 mm", at=(90, 500))
+    window.set_as_default(block)
+    stored = toolsets.load_defaults()[toolsets.default_key(block)]
+    assert "source" not in stored and "x" not in stored and "uid" not in stored
+
+
+def test_the_properties_panel_offers_it(window):
+    from PySide6.QtWidgets import QPushButton
+
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 160)
+    box = markups(window)[0]
+    window.select_tool("select")
+    box.setSelected(True)
+    window.refresh_selection()
+    labels = [b.text() for b in window.properties_panel.findChildren(QPushButton)]
+    assert "Set as default" in labels
+    assert "Add to a tool set…" in labels
+
+
+# ---------------------------------------------------------------------------
+# Tool sets
+# ---------------------------------------------------------------------------
+
+def _kept(window, item, into="My Tools", monkeypatch=None):
+    """Put an item into a tool set without the dialog."""
+    from calcforge.ui import toolsets
+
+    groups = toolsets.load_toolsets()
+    group = next(g for g in groups if g.name == into)
+    group.entries.append(toolsets.entry_for(item, toolsets.COPY))
+    toolsets.save_toolsets(groups)
+    window.toolsets_panel.rebuild(keep=into)
+    return group.entries[-1]
+
+
+def test_my_tools_is_always_there(window):
+    from calcforge.ui import toolsets
+
+    assert [g.name for g in toolsets.load_toolsets()][0] == toolsets.MY_TOOLS
+    assert window.toolsets_panel.sets.itemText(0) == toolsets.MY_TOOLS
+
+
+def test_a_kept_markup_comes_back_exactly_as_it_was(window):
+    window.select_tool("text")
+    drag(window.view, 100, 100, 300, 140)
+    box = window.view.editing_item()
+    box.set_text("FOR APPROVAL")
+    box.style.stroke = "#c92a2a"
+    window.view.end_item_edit()
+    entry = _kept(window, box)
+
+    window.select_tool("select")
+    window.use_tool_entry(entry)
+    click(window.view, 200, 500)
+
+    placed = [i for i in markups(window) if i.pos().y() > 400]
+    assert len(placed) == 1
+    assert placed[0].text() == "FOR APPROVAL"        # its words came with it
+    assert placed[0].style.stroke == "#c92a2a"
+
+
+def test_a_tool_in_properties_mode_draws_a_new_one(window):
+    from calcforge.ui import toolsets
+
+    window.select_tool("text")
+    drag(window.view, 100, 100, 300, 140)
+    box = window.view.editing_item()
+    box.set_text("FOR APPROVAL")
+    box.style.stroke = "#2f9e44"
+    window.view.end_item_edit()
+    entry = _kept(window, box)
+    entry.mode = toolsets.PROPERTIES
+    entry.payload = toolsets.entry_for(box, toolsets.PROPERTIES).payload
+
+    window.use_tool_entry(entry)
+    assert window.view.tool_key == "text"
+    drag(window.view, 100, 500, 320, 545)
+    drawn = window.view.editing_item()
+    drawn.set_text("something else")
+    window.view.end_item_edit()
+
+    assert drawn.style.stroke == "#2f9e44"           # the properties came across
+    assert drawn.text() == "something else"          # the words did not
+    assert drawn.local_rect().width() == pytest.approx(220, abs=3)
+
+
+def test_escape_puts_a_held_tool_back(window):
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 160)
+    entry = _kept(window, markups(window)[0])
+    window.use_tool_entry(entry)
+    assert window.view._pending_stamp is not None
+    press_key(window.view, Qt.Key_Escape)
+    assert window.view._pending_stamp is None
+    click(window.view, 200, 500)
+    assert len(markups(window)) == 1                 # nothing was placed
+
+
+def test_tool_sets_can_be_made_renamed_and_deleted(window, monkeypatch):
+    from PySide6.QtWidgets import QInputDialog, QMessageBox
+    from calcforge.ui import toolsets
+
+    panel = window.toolsets_panel
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("Steel details", True))
+    panel.new_set()
+    assert "Steel details" in [g.name for g in toolsets.load_toolsets()]
+    assert panel.sets.currentText() == "Steel details"
+
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("Steel", True))
+    panel.rename_set()
+    assert "Steel" in [g.name for g in toolsets.load_toolsets()]
+
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
+    panel.delete_set()
+    assert "Steel" not in [g.name for g in toolsets.load_toolsets()]
+
+
+def test_my_tools_cannot_be_renamed_or_deleted(window, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+    from calcforge.ui import toolsets
+
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
+    window.toolsets_panel.delete_set()
+    assert toolsets.MY_TOOLS in [g.name for g in toolsets.load_toolsets()]
+
+
+def test_a_tool_can_be_switched_between_the_two_modes(window):
+    from calcforge.ui import toolsets
+
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 160)
+    _kept(window, markups(window)[0])
+    panel = window.toolsets_panel
+    panel.list.setCurrentRow(0)
+    assert panel.current_entry().mode == toolsets.COPY
+    panel.toggle_mode()
+    assert panel.current_entry().mode == toolsets.PROPERTIES
+    assert "properties" in panel.list.item(0).text()
+
+
+def test_tools_can_be_reordered_and_removed(window):
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 160)
+    window.select_tool("ellipse")
+    drag(window.view, 260, 100, 360, 160)
+    _kept(window, markups(window)[0])
+    _kept(window, markups(window)[1])
+
+    panel = window.toolsets_panel
+    panel.list.setCurrentRow(1)
+    panel.move_entry(-1)
+    assert panel.current_set().entries[0].payload["kind"] == "ellipse"
+    panel.remove_entry()
+    assert len(panel.current_set().entries) == 1
+
+
+def test_tool_sets_are_remembered_between_sessions(window):
+    from calcforge.ui.mainwindow import MainWindow
+
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 160)
+    _kept(window, markups(window)[0])
+
+    second = MainWindow()
+    second.confirm_discard = lambda: True
+    try:
+        assert second.toolsets_panel.list.count() == 1
+    finally:
+        second.close()
+        second.deleteLater()
+
+
+# ---------------------------------------------------------------------------
+# My Tools on the number keys
+# ---------------------------------------------------------------------------
+
+def test_the_number_keys_reach_for_my_tools(window):
+    window.select_tool("text")
+    drag(window.view, 100, 100, 300, 140)
+    box = window.view.editing_item()
+    box.set_text("RFI")
+    window.view.end_item_edit()
+    _kept(window, box)
+    window.select_tool("select")
+
+    press_key(window.view, Qt.Key_1, "1")
+    assert window.view._pending_stamp is not None
+    click(window.view, 200, 500)
+    placed = [i for i in markups(window) if i.pos().y() > 400]
+    assert placed and placed[0].text() == "RFI"
+
+
+def test_my_tools_are_numbered_in_the_panel(window):
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 160)
+    _kept(window, markups(window)[0])
+    assert window.toolsets_panel.list.item(0).text().startswith("1.")
+
+
+def test_a_number_key_does_nothing_while_you_are_typing(window):
+    block = _calc(window, "b := 300 mm", at=(90, 500))
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 160)
+    _kept(window, markups(window)[0])
+
+    window.view.begin_item_edit(block)
+    press_key(window.view, Qt.Key_1, "1")
+    assert window.view._pending_stamp is None       # it typed a 1 instead
+    window.view.end_item_edit()
+
+
+def test_a_number_with_nothing_behind_it_does_nothing(window):
+    window.select_tool("select")
+    press_key(window.view, Qt.Key_3, "3")
+    assert window.view._pending_stamp is None

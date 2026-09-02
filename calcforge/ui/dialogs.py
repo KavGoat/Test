@@ -1159,6 +1159,8 @@ class _GesturesSheet(QWidget):
         ("Shift + drag", "Hold a line to 0°, 45° or 90°; square off a box"),
         ("Double-click", "Edit text, calculation or table · add a vertex to a polyline"),
         ("Delete", "Delete the selection"),
+        ("1 … 9", "Pick up that tool from My Tools"),
+        ("Ctrl+G / Ctrl+Shift+G", "Group · ungroup the selection"),
         ("Arrow keys", "Nudge the selection"),
         ("Enter", "In a one-line calculation: open the next line below"),
         ("Shift+Enter", "In a calculation: keep typing on a new line of the same region"),

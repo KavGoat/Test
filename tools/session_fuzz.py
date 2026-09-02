@@ -267,11 +267,59 @@ def do_recalc():
     win.recalculate()
 
 
+@guard("toolset")
+def do_toolset():
+    """Keep things in tool sets, take them out again, and put them down."""
+    from calcforge.ui import toolsets
+
+    what = rng.random()
+    items = [i for i in view.scene().markups()]
+    if what < 0.3 and items:
+        one = rng.choice(items)
+        groups = toolsets.load_toolsets()
+        group = rng.choice(groups)
+        group.entries.append(toolsets.entry_for(
+            one, rng.choice([toolsets.COPY, toolsets.PROPERTIES])))
+        toolsets.save_toolsets(groups)
+        win.toolsets_panel.rebuild()
+    elif what < 0.5:
+        groups = toolsets.load_toolsets()
+        groups.append(toolsets.ToolSet(f"Set {rng.randint(1, 5)}"))
+        toolsets.save_toolsets(groups)
+        win.toolsets_panel.rebuild()
+    elif what < 0.7:
+        win.activate_my_tool(rng.randint(1, 9))
+        do_click()
+    elif what < 0.85:
+        panel = win.toolsets_panel
+        if panel.list.count():
+            panel.list.setCurrentRow(rng.randrange(panel.list.count()))
+            rng.choice([panel.toggle_mode, panel.use_selected,
+                        lambda: panel.move_entry(rng.choice([-1, 1])),
+                        panel.remove_entry])()
+    else:
+        view.clear_pending_tool()
+
+
+@guard("group")
+def do_group():
+    """Group and ungroup whatever is selected, and set defaults from it."""
+    items = [i for i in view.scene().markups()]
+    if not items:
+        return
+    for one in rng.sample(items, min(len(items), rng.randint(1, 3))):
+        one.setSelected(True)
+    rng.choice([win.group_selection, win.ungroup_selection,
+                lambda: win.set_as_default(rng.choice(items)),
+                win.forget_defaults])()
+
+
 ACTIONS = ([do_drag] * 12 + [do_click] * 4 + [do_double_click] * 4 +
            [do_right_click] * 2 + [do_key] * 4 + [do_typed] * 8 +
            [do_write] * 8 + [do_tool] * 8 + [do_undo] * 2 + [do_page] * 1 +
            [do_clipboard] * 2 + [do_scale] * 2 + [do_recalc] * 2 +
-           [do_navigate] * 6 + [do_chrome] * 4 + [do_shortcuts] * 2)
+           [do_navigate] * 6 + [do_chrome] * 4 + [do_shortcuts] * 2 +
+           [do_toolset] * 4 + [do_group] * 3)
 
 TRACE = len(sys.argv) > 3 and sys.argv[3] == "trace"
 for round_number in range(ROUNDS):

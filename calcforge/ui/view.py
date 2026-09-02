@@ -104,6 +104,10 @@ class PageView(QGraphicsView):
         self._copy_on_move = False
         self._copied = False
         self._snap_marker: Optional[QPointF] = None
+        # Held while a tool set's tool is in hand: something to place, or
+        # properties for the next thing drawn.
+        self._pending_stamp = None
+        self._pending_properties: Optional[dict] = None
         self._editing_item = None
 
         self._last_scene_pos = QPointF(60, 60)
@@ -258,6 +262,8 @@ class PageView(QGraphicsView):
         return QCursor(Qt.PointingHandCursor)
 
     def finish_tool(self) -> None:
+        if not self.sticky_tool:
+            self._pending_properties = None
         if not self.sticky_tool and self.tool_key not in ("select", "pan"):
             self.set_tool("select")
             self.toolFinished.emit("select")
@@ -557,6 +563,11 @@ class PageView(QGraphicsView):
             super().mousePressEvent(event)
             return
 
+        if self._pending_stamp is not None and event.button() == Qt.LeftButton:
+            if self.place_pending_stamp(scene_pos):
+                event.accept()
+                return
+
         tool = self.current_tool()
         if tool.mode == NONE and tool.key == "select":
             self._press_select(event, scene_pos)
@@ -649,16 +660,21 @@ class PageView(QGraphicsView):
             return
 
         control = bool(event.modifiers() & Qt.ControlModifier)
+        family = self.group_of(item)
         if event.modifiers() & Qt.ShiftModifier:
-            item.setSelected(not item.isSelected())
+            wanted = not item.isSelected()
+            for member in family:
+                member.setSelected(wanted)
         elif control:
             # Ctrl adds to the selection and arms a copy; it does not take
             # anything out of it, because Ctrl-dragging what you just clicked
             # is the whole point.
-            item.setSelected(True)
+            for member in family:
+                member.setSelected(True)
         elif not item.isSelected():
             self.scene().clearSelection()
-            item.setSelected(True)
+            for member in family:
+                member.setSelected(True)
         self.selectionChanged.emit()
 
         if not self.editable(item):
@@ -910,6 +926,7 @@ class PageView(QGraphicsView):
         program does, and it keeps the selection meaning the same thing.
         """
         self._copied = True
+        self._copied_groups: dict[str, str] = {}
         scene = self.scene()
         for item, origin in self._move_items:
             frame = item.parentItem()
@@ -917,6 +934,9 @@ class PageView(QGraphicsView):
                 continue
             data = item.serialize()
             data["uid"] = os.urandom(8).hex()
+            if data.get("group"):
+                data["group"] = self._copied_groups.setdefault(
+                    data["group"], os.urandom(6).hex())
             copy = build_item(data)
             if copy is None:
                 continue
@@ -981,7 +1001,8 @@ class PageView(QGraphicsView):
                 scene_rect = self.mapToScene(rect).boundingRect()
                 for item in self.scene().items(scene_rect):
                     if isinstance(item, MarkupItem) and self.editable(item):
-                        item.setSelected(True)
+                        for member in self.group_of(item):
+                            member.setSelected(True)
             self.selectionChanged.emit()
             event.accept()
             return
@@ -1126,9 +1147,65 @@ class PageView(QGraphicsView):
     # ------------------------------------------------------------------
     # item creation
     # ------------------------------------------------------------------
+    # -- tools taken from a tool set ---------------------------------------
+    def set_pending_properties(self, payload: Optional[dict]) -> None:
+        """The next markup drawn wears these properties."""
+        self._pending_properties = dict(payload) if payload else None
+
+    def set_pending_stamp(self, entry) -> None:
+        """The next click puts this markup down, exactly as it was kept."""
+        self._pending_stamp = entry
+        self.set_tool("select")
+        self.setCursor(Qt.CrossCursor)
+
+    def clear_pending_tool(self) -> None:
+        had = self._pending_stamp is not None or self._pending_properties is not None
+        self._pending_stamp = None
+        self._pending_properties = None
+        if had:
+            self.setCursor(self._cursor_for_tool(self.current_tool()))
+        return had
+
+    def place_pending_stamp(self, scene_pos: QPointF) -> bool:
+        """Put a kept markup down where the pointer is. False if none is held."""
+        entry = self._pending_stamp
+        if entry is None:
+            return False
+        frame = self.frame_at(scene_pos) or self.frame()
+        if frame is None:
+            return False
+        data = dict(entry.payload)
+        data["uid"] = os.urandom(8).hex()
+        item = build_item(data)
+        if item is None:
+            self._pending_stamp = None
+            return False
+        if isinstance(item, ImageItem):
+            item.load_from_document(self.document())
+        self.begin_snapshot([frame])
+        # Dropped centred on the pointer, the way a stamp is placed.
+        local = frame.mapFromScene(self.snap_scene(scene_pos, frame))
+        box = item.local_rect()
+        item.setPos(local - QPointF(box.width() / 2, box.height() / 2))
+        frame.add_markup(item)
+        self.scene().clearSelection()
+        item.setSelected(True)
+        self.window.recalculate()
+        self.commit_snapshot(f"Place {entry.label}")
+        self.selectionChanged.emit()
+        self._pending_stamp = None
+        self.setCursor(self._cursor_for_tool(self.current_tool()))
+        self.statusMessage.emit(f"{entry.label} placed")
+        return True
+
     def _prepare_draft(self, item: MarkupItem) -> None:
         item.author = self.document().settings.default_author or self.document().author
         self.window.apply_default_style(item)
+        if self._pending_properties:
+            # Drawn with a tool taken from a set: its properties win over both
+            # the toolbar and the saved default, because it was asked for.
+            from . import toolsets
+            toolsets.apply_properties(item, self._pending_properties)
 
     def create_item(self, tool: Tool, point: QPointF) -> Optional[MarkupItem]:
         item = tool.factory() if tool.factory else None
@@ -1752,6 +1829,22 @@ class PageView(QGraphicsView):
                                     else "Result shown in the unit it reads best in")
         self.setFocus(Qt.OtherFocusReason)
 
+    def group_of(self, item) -> list:
+        """Everything grouped with *item* — itself alone when it is not grouped.
+
+        A group is a shared name rather than a container: the markups stay
+        where they are in the page, and clicking one takes hold of all of them.
+        """
+        name = getattr(item, "group", "")
+        if not name:
+            return [item]
+        scene = self.scene()
+        if scene is None:
+            return [item]
+        family = [other for other in scene.markups()
+                  if getattr(other, "group", "") == name and self.editable(other)]
+        return family or [item]
+
     def markup_at(self, scene_pos: QPointF) -> Optional[MarkupItem]:
         for item in self.scene().items(scene_pos):
             if isinstance(item, MarkupItem):
@@ -2209,6 +2302,10 @@ class PageView(QGraphicsView):
             return
 
         if key == Qt.Key_Escape:
+            if self.clear_pending_tool():
+                self.statusMessage.emit("Put the tool back")
+                event.accept()
+                return
             if self._pending_anchor is not None:
                 self._pending_anchor = None
                 self.set_insert_point(None)
@@ -2246,6 +2343,12 @@ class PageView(QGraphicsView):
         # A bare keystroke on the canvas only does something if it is bound:
         # '"' starts text, '\\' starts maths, tool keys pick their tool.
         if self.idle_on_canvas():
+            # The number keys reach for My Tools, before anything else is
+            # asked about the keystroke: 1 to 9 are the first nine things in it.
+            if event.text().isdigit() and event.text() != "0":
+                if self.window.activate_my_tool(int(event.text())):
+                    event.accept()
+                    return
             if self.window.run_typed_binding(event.text(), modifiers,
                                              self.from_page(self.typing_position(),
                                                             self.typing_frame())):

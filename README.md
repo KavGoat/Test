@@ -204,6 +204,11 @@ held. Arrow keys nudge, and everything is undoable.
 midpoints of anything boxed, and every vertex of anything drawn as a line — and marks
 what it has caught with a small orange square. `View ▸ Snap to what is drawn`.
 
+**Group** several markups with `Ctrl+G` and they select, move and copy as one
+thing; `Ctrl+Shift+G` takes them apart. A group is a shared name rather than a
+container, so the markups stay where they are on the page and grouping is one
+undo step.
+
 **Snapshot** (`G`) drags a region and copies everything in it. What comes back is not
 a picture: the markups, calculations and tables in it are copied as themselves, so
 pasting puts real items down that stay sharp at any zoom and can still be edited.
@@ -211,6 +216,27 @@ pasting puts real items down that stay sharp at any zoom and can still be edited
 The **Markups** panel is a live list of every annotation in the document — page, type,
 subject, measured value, author, date and comment — filterable, and exportable to CSV
 as a takeoff. Measurements and counts sharing a subject are totalled at the bottom.
+
+### Defaults and tool sets
+
+Change a markup's properties and press **Set as default** in the properties
+panel: every rectangle after that is drawn the way you set that one up. Defaults
+are per kind — a rectangle and an ellipse keep their own — and are remembered
+between sessions. *Markup ▸ Forget markup defaults* puts them all back.
+
+The **Tool sets** panel is a tool chest. Keep anything in it — a markup, a
+calculation, a whole table — in as many named sets as you like, and use each
+entry two ways:
+
+- **as a copy**, which puts back exactly what was added, contents and all: a
+  text box comes back with its words in it, a calculation with its lines;
+- **as properties**, which makes it a tool — draw a new one where and how big
+  you like, wearing the stored colours, thickness and font.
+
+**My Tools** is always there for quick adds, and its first nine entries are on
+the number keys: press `3` on the page and you are holding the third one.
+Sets are remembered between documents, because they belong to you rather than
+to the job.
 
 ### Scale and measurement
 
@@ -426,6 +452,8 @@ edited. Save, print and zoom stay live throughout, as they do everywhere else.
 | `F10` | Check every number — re-derive the document and compare |
 | `Ctrl+Shift+D` | Move or duplicate the selection by an exact offset |
 | `Ctrl+B` | Bookmark this place |
+| `Ctrl+G` / `Ctrl+Shift+G` | Group · ungroup the selection |
+| `1` … `9` | Pick up that tool from **My Tools** |
 | `Tab` | Take the offered unit or name · in a table, the next cell |
 | `Ctrl+Alt+8` `Ctrl+Alt+R` … | Maths symbols — the full list under Insert ▸ Maths symbol |
 | `Ctrl+Z` / `Ctrl+Y` | Undo · redo |

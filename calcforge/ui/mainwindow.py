@@ -40,11 +40,12 @@ from . import dialogs
 from .commands import DocumentStructureCommand
 from .icons import icon
 from .panels import (BookmarksPanel, FunctionsPanel, LayersPanel, MarkupsPanel,
-                     PagesPanel,
-                     ProblemsPanel, PropertiesPanel, VariablesPanel)
+                     PagesPanel, ProblemsPanel, PropertiesPanel,
+                     ToolSetsPanel, VariablesPanel)
 from .docks import PanelDock, load_panel_state, save_panel_state
 from .scene import DocumentScene, detach
 from .shortcuts import COMMAND, INSERT, SYMBOL, TOOL, ShortcutManager
+from . import toolsets
 from .tools import CATEGORIES, TOOL_MAP, TOOLS, tools_in
 from .view import SIZED_SHAPES
 from .view import PageView
@@ -320,6 +321,11 @@ class MainWindow(QMainWindow):
                   "Ctrl+K", tip="Change any shortcut by pressing the keys you want")
         self._act("problems", "Show problems", self.show_problems)
         self._act("renumber_counts", "Renumber count markers", self.renumber_counts)
+        self._act("group", "Group", self.group_selection, "Ctrl+G",
+                  tip="Make the selected markups one thing to click and move")
+        self._act("ungroup", "Ungroup", self.ungroup_selection, "Ctrl+Shift+G")
+        self._act("forget_defaults", "Forget markup defaults", self.forget_defaults,
+                  tip="Put every kind of markup back to how it started")
         self._act("bookmark", "Add bookmark here", self.add_bookmark_here, "Ctrl+B",
                   tip="Name this place so it can be jumped to, printed in a "
                       "contents block and exported as a PDF bookmark")
@@ -463,6 +469,9 @@ class MainWindow(QMainWindow):
         self.problems_panel = ProblemsPanel(self)
         self.dock_problems = self._dock("Problems", self.problems_panel,
                                         Qt.BottomDockWidgetArea, "dock_problems")
+        self.toolsets_panel = ToolSetsPanel(self)
+        self.dock_toolsets = self._dock("Tool sets", self.toolsets_panel,
+                                        Qt.BottomDockWidgetArea, "dock_toolsets")
         self.bookmarks_panel = BookmarksPanel(self)
         self.bookmarks_panel.bookmarkActivated.connect(self.go_to_bookmark)
         self.dock_bookmarks = self._dock("Bookmarks", self.bookmarks_panel,
@@ -472,7 +481,8 @@ class MainWindow(QMainWindow):
         # same panel, so the right-hand side is left to Properties alone.
         self.reference_docks = [self.dock_markups, self.dock_variables,
                                 self.dock_functions, self.dock_layers,
-                                self.dock_bookmarks, self.dock_problems]
+                                self.dock_toolsets, self.dock_bookmarks,
+                                self.dock_problems]
         for dock in self.reference_docks[1:]:
             self.addDockWidget(Qt.BottomDockWidgetArea, dock)
         for first, second in zip(self.reference_docks, self.reference_docks[1:]):
@@ -532,6 +542,11 @@ class MainWindow(QMainWindow):
         # Mnemonic on the "k": Alt+M belongs to the dimension tool, and a
         # menu with the same mnemonic makes the shortcut ambiguous.
         markup_menu = bar.addMenu("Mar&kup")
+        markup_menu.addAction(self.act_group)
+        markup_menu.addAction(self.act_ungroup)
+        markup_menu.addSeparator()
+        markup_menu.addAction(self.act_forget_defaults)
+        markup_menu.addSeparator()
         markup_menu.addAction(self.act_apply_redactions)
         markup_menu.addAction(self.act_renumber_counts)
         markup_menu.addSeparator()
@@ -1453,7 +1468,29 @@ class MainWindow(QMainWindow):
         self.properties_panel.show_items(items)
 
     def apply_default_style(self, item: MarkupItem) -> None:
-        """Seed a freshly drawn markup from the style toolbar."""
+        """Seed a freshly drawn markup: the style toolbar, then its own default.
+
+        A default saved for that kind of markup is a deliberate decision about
+        how they should all look, so it has the last word over the toolbar's
+        live colours.
+        """
+        self._apply_toolbar_style(item)
+        toolsets.apply_default(item)
+
+    def set_as_default(self, item: MarkupItem) -> None:
+        """Draw the next markup of this kind the way this one is drawn."""
+        key = toolsets.remember_default(item)
+        self.status_hint.setText(
+            f"New {item.display_name().lower()}s will look like this one "
+            f"— Markup ▸ Forget defaults puts it back")
+        return key
+
+    def forget_defaults(self) -> None:
+        """Put every kind of markup back to how it started."""
+        toolsets.save_defaults({})
+        self.status_hint.setText("Markups are back to their original look")
+
+    def _apply_toolbar_style(self, item: MarkupItem) -> None:
         style = self.default_style
         if isinstance(item, (NoteItem, ImageItem, StampItem, TableItem)):
             return
@@ -1788,6 +1825,110 @@ class MainWindow(QMainWindow):
             return None
         return self.document.add_asset(bytes(buffer.data()), "png")
 
+    # ==================================================================
+    # tool sets
+    # ==================================================================
+    def add_to_toolset(self, item=None, into: str = "") -> None:
+        """Keep a markup — or the selection — in a tool set to use again."""
+        items = [item] if item is not None else [
+            i for i in self.selected_items() if isinstance(i, MarkupItem)]
+        items = [i for i in items if isinstance(i, MarkupItem)]
+        if not items:
+            self.status_hint.setText("Select something on the page to keep")
+            return
+        groups = toolsets.load_toolsets()
+        names = [group.name for group in groups]
+        chosen, accepted = QInputDialog.getItem(
+            self, "Add to a tool set", "Which set?", names,
+            max(names.index(into), 0) if into in names else 0, False)
+        if not accepted:
+            return
+        group = next(g for g in groups if g.name == chosen)
+        for one in items:
+            group.entries.append(toolsets.entry_for(one, toolsets.COPY))
+        toolsets.save_toolsets(groups)
+        self.toolsets_panel.rebuild(keep=chosen)
+        self.dock_toolsets.raise_()
+        self.status_hint.setText(
+            f"Kept {len(items)} tool(s) in “{chosen}” — double-click one to put "
+            "it down again")
+
+    def use_tool_entry(self, entry) -> None:
+        """Pick up a tool from a set: a copy to place, or a tool to draw with."""
+        if entry.mode == toolsets.PROPERTIES:
+            key = self._tool_for_payload(entry.payload)
+            if key is None:
+                self.status_hint.setText(f"“{entry.label}” cannot be drawn as a tool")
+                return
+            self.view.set_pending_properties(entry.payload)
+            self.select_tool(key)
+            self.status_hint.setText(
+                f"{entry.label}: draw one — it will have this tool's properties")
+            return
+        self.view.set_pending_stamp(entry)
+        self.status_hint.setText(
+            f"{entry.label}: click where it should go · Esc to put it back")
+
+    @staticmethod
+    def _tool_for_payload(payload: dict):
+        """The drawing tool that makes the kind of markup a payload describes."""
+        type_name = payload.get("type", "")
+        kind = payload.get("kind", "") or payload.get("shape_kind", "")
+        for tool in TOOLS:
+            if tool.factory is None:
+                continue
+            sample = tool.factory()
+            if sample.TYPE != type_name:
+                continue
+            sample_kind = getattr(sample, "kind", "") or getattr(sample, "shape_kind", "")
+            if kind and sample_kind != kind:
+                continue
+            return tool.key
+        return None
+
+    def activate_my_tool(self, number: int) -> bool:
+        """The number keys reach for the first nine things in My Tools."""
+        groups = toolsets.load_toolsets()
+        mine = next((g for g in groups if g.name == toolsets.MY_TOOLS), None)
+        if mine is None or not (1 <= number <= len(mine.entries)):
+            return False
+        self.use_tool_entry(mine.entries[number - 1])
+        return True
+
+    # ==================================================================
+    # groups
+    # ==================================================================
+    def group_selection(self) -> None:
+        """Make the selected markups one thing to click, move and copy."""
+        items = [i for i in self.selected_items() if isinstance(i, MarkupItem)]
+        if len(items) < 2:
+            self.status_hint.setText("Select two or more markups to group them")
+            return
+        name = os.urandom(6).hex()
+        self.view.begin_snapshot(self.view.all_frames())
+        for item in items:
+            item.group = name
+            item.touch()
+        self.view.commit_snapshot("Group markups")
+        self.refresh_selection()
+        self.status_hint.setText(f"Grouped {len(items)} markups — Ctrl+Shift+G "
+                                 "takes them apart again")
+
+    def ungroup_selection(self) -> None:
+        """Take the selected groups apart."""
+        items = [i for i in self.selected_items()
+                 if isinstance(i, MarkupItem) and i.group]
+        if not items:
+            self.status_hint.setText("Nothing grouped in the selection")
+            return
+        self.view.begin_snapshot(self.view.all_frames())
+        for item in items:
+            item.group = ""
+            item.touch()
+        self.view.commit_snapshot("Ungroup markups")
+        self.refresh_selection()
+        self.status_hint.setText(f"Ungrouped {len(items)} markups")
+
     def copy_selection(self) -> None:
         if self.view.text_clipboard("copy"):
             self._clipboard = []
@@ -1860,9 +2001,14 @@ class MainWindow(QMainWindow):
             first = payload[0]
             offset = QPointF(local.x() - float(first.get("x", 0)),
                              local.y() - float(first.get("y", 0)))
+        # A pasted group is a group of its own: the members stay together, but
+        # they are not the same group as the ones they were copied from.
+        renamed: dict[str, str] = {}
         for entry in payload:
             copy = dict(entry)
             copy["uid"] = os.urandom(8).hex()
+            if copy.get("group"):
+                copy["group"] = renamed.setdefault(copy["group"], os.urandom(6).hex())
             if offset is not None:
                 copy["x"] = copy.get("x", 0) + offset.x()
                 copy["y"] = copy.get("y", 0) + offset.y()
@@ -2626,6 +2772,13 @@ class MainWindow(QMainWindow):
                 show.toggled.connect(lambda on: self.set_size_visible(item, on))
             if isinstance(item, MeasureItem):
                 menu.addAction("Page scale…", self.calibrate_dialog)
+            menu.addSeparator()
+            if len([i for i in self.selected_items() if isinstance(i, MarkupItem)]) > 1:
+                menu.addAction(self.act_group)
+            if any(getattr(i, "group", "") for i in self.selected_items()):
+                menu.addAction(self.act_ungroup)
+            menu.addAction("Set as default", lambda: self.set_as_default(item))
+            menu.addAction("Add to a tool set…", lambda: self.add_to_toolset(item))
             menu.addSeparator()
             menu.addAction(self.act_cut)
             menu.addAction(self.act_copy)
