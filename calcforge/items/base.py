@@ -286,6 +286,10 @@ class MarkupItem(QGraphicsObject):
     def paint_handles(self, painter: QPainter) -> None:
         if not self.isSelected() or not self._handles_visible:
             return
+        if self.group:
+            # A grouped markup is part of one thing, and the view draws one box
+            # round the lot; its own outline and handles would only be noise.
+            return
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing, True)
         rect = self.local_rect().normalized()

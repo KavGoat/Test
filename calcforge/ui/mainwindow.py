@@ -242,6 +242,9 @@ class MainWindow(QMainWindow):
         self._act("cut", "Cut", self.cut_selection, "Ctrl+X")
         self._act("copy", "Copy", self.copy_selection, "Ctrl+C")
         self._act("paste", "Paste", self.paste_items, "Ctrl+V")
+        self._act("paste_here", "Paste where I click…", self.paste_with_preview,
+                  "Ctrl+Shift+V",
+                  tip="Carry what was copied on the pointer and click to drop it")
         self._act("duplicate", "Duplicate", self.duplicate_selection, "Ctrl+D")
         self._act("delete", "Delete", self.delete_selection, "", "delete")
         self._act("select_all", "Select all", self.select_all, "Ctrl+A")
@@ -1833,6 +1836,13 @@ class MainWindow(QMainWindow):
         items = [item] if item is not None else [
             i for i in self.selected_items() if isinstance(i, MarkupItem)]
         items = [i for i in items if isinstance(i, MarkupItem)]
+        # Picking one member of a group means the group: it is one thing.
+        whole: list = []
+        for one in items:
+            for member in self.view.group_of(one):
+                if member not in whole:
+                    whole.append(member)
+        items = whole
         if not items:
             self.status_hint.setText("Select something on the page to keep")
             return
@@ -1844,14 +1854,62 @@ class MainWindow(QMainWindow):
         if not accepted:
             return
         group = next(g for g in groups if g.name == chosen)
+        # Grouped markups go in as one tool; anything else, one tool each.
+        families: dict = {}
+        loose = []
         for one in items:
+            if one.group:
+                families.setdefault(one.group, []).append(one)
+            else:
+                loose.append(one)
+        for one in loose:
             group.entries.append(toolsets.entry_for(one, toolsets.COPY))
+        for members in families.values():
+            group.entries.append(toolsets.entry_for_many(members))
+        kept = len(loose) + len(families)
         toolsets.save_toolsets(groups)
         self.toolsets_panel.rebuild(keep=chosen)
         self.dock_toolsets.raise_()
         self.status_hint.setText(
-            f"Kept {len(items)} tool(s) in “{chosen}” — double-click one to put "
+            f"Kept {kept} tool(s) in “{chosen}” — double-click one to put "
             "it down again")
+
+    def paste_with_preview(self) -> None:
+        """Take the clipboard in hand and show it before it is put down.
+
+        Ctrl+V still pastes straight away, because that is what Ctrl+V does
+        everywhere. This is for when the placing matters: the markups follow
+        the pointer, faded, until a click drops them.
+        """
+        payload = self._clipboard
+        text = QApplication.clipboard().text()
+        if not payload and text.strip().startswith("{"):
+            try:
+                decoded = json.loads(text)
+                payload = decoded.get(CLIPBOARD_TAG) or []
+                for key, encoded in (decoded.get("assets") or {}).items():
+                    if not self.document.asset(key):
+                        self.document.put_asset(key, base64.b64decode(encoded))
+            except (ValueError, TypeError):
+                payload = []
+        if not payload:
+            self.status_hint.setText("Nothing copied to place")
+            return
+        left = min(float(entry.get("x", 0.0)) for entry in payload)
+        top = min(float(entry.get("y", 0.0)) for entry in payload)
+        parts = []
+        for entry in payload:
+            data = dict(entry)
+            data["x"] = float(data.get("x", 0.0)) - left
+            data["y"] = float(data.get("y", 0.0)) - top
+            parts.append(data)
+        one = len(parts) == 1
+        held = toolsets.ToolEntry(
+            "Pasted markup" if one else f"{len(parts)} pasted markups",
+            parts[0] if one else {"type": toolsets.GROUP, "items": parts},
+            toolsets.COPY)
+        self.view.set_pending_stamp(held)
+        self.status_hint.setText("Click where it should go · Esc to put it back")
 
     def use_tool_entry(self, entry) -> None:
         """Pick up a tool from a set: a copy to place, or a tool to draw with."""
@@ -2796,6 +2854,7 @@ class MainWindow(QMainWindow):
             menu.addAction(self.act_lock)
         else:
             menu.addAction(self.act_paste)
+            menu.addAction(self.act_paste_here)
             menu.addSeparator()
             insert = menu.addMenu("Insert here")
             for key in ("math", "table", "plot", "text", "callout", "stamp", "image"):

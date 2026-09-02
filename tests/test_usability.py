@@ -1766,15 +1766,24 @@ def test_the_arrow_can_be_moved_once_the_callout_is_finished(window):
     assert moved.x() == pytest.approx(tip.x() + 40, abs=2)
 
 
-def test_the_elbow_of_the_leader_moves_too(window):
+def test_the_elbow_slides_along_its_own_line(window):
+    """The elbow leaves the box square on, and can only be slid in and out."""
     call = _callout(window)
     window.view.end_item_edit()
     window.select_tool("select")
     call.setSelected(True)
-    elbow = call.mapToScene(call.leader[1])
-    drag(window.view, elbow.x(), elbow.y(), elbow.x() - 20, elbow.y() + 25)
-    moved = call.mapToScene(call.leader[1])
-    assert moved.y() == pytest.approx(elbow.y() + 25, abs=2)
+    before = call.elbow()
+    normal = call.side_normal()
+    elbow = call.mapToScene(before)
+    drag(window.view, elbow.x(), elbow.y(),
+         elbow.x() + normal.x() * 30 + 18, elbow.y() + normal.y() * 30 - 14)
+
+    after = call.elbow()
+    # further out along the same line, and still square on to the side
+    assert call.elbow_reach > 24.0
+    side = call.side_point()
+    assert (after.x() - side.x()) * normal.y() == pytest.approx(
+        (after.y() - side.y()) * normal.x(), abs=0.01)
 
 
 def test_moving_the_box_leaves_the_arrow_pointing_at_the_same_thing(window):
@@ -1804,8 +1813,8 @@ def test_nudging_a_callout_leaves_its_arrow_alone(window):
 
 def test_the_arrow_handles_are_marked_out_as_the_arrow(window):
     call = _callout(window)
-    assert call.leader_handles() == {"l0", "l1"}
-    assert set(call.handle_points()) >= {"l0", "l1", "nw", "se"}
+    assert call.leader_handles() == {"l0", "elbow"}
+    assert set(call.handle_points()) >= {"l0", "elbow", "nw", "se"}
 
 
 def test_an_empty_text_box_is_still_dropped(window):
@@ -3288,3 +3297,151 @@ def test_a_number_with_nothing_behind_it_does_nothing(window):
     window.select_tool("select")
     press_key(window.view, Qt.Key_3, "3")
     assert window.view._pending_stamp is None
+
+
+def test_the_arrow_head_shows_the_moment_it_is_placed(window):
+    """Clicking what a callout points at used to leave nothing to see."""
+    window.select_tool("callout")
+    click(window.view, 200, 300)
+    assert window.view._pending_anchor is not None
+
+    from PySide6.QtGui import QImage, QPainter
+    image = QImage(400, 400, QImage.Format_ARGB32)
+    image.fill(Qt.white)
+    painter = QPainter(image)
+    window.view.render(painter)
+    painter.end()
+    ink = sum(1 for y in range(0, 400, 3) for x in range(0, 400, 3)
+              if image.pixel(x, y) & 0xFFFFFF != 0xFFFFFF)
+    assert ink > 20                      # an arrow and a leader, not a faint cross
+
+
+def test_the_leader_leaves_the_middle_of_a_side(window):
+    call = _callout(window, target=(200, 400), box=(300, 200, 460, 260))
+    window.view.end_item_edit()
+    rect = call.local_rect()
+
+    # the arrow is below and left, so the leader leaves the bottom
+    assert call.side() == "bottom"
+    assert call.side_point().x() == pytest.approx(rect.center().x())
+    assert call.side_point().y() == pytest.approx(rect.bottom())
+
+    call.tip = QPointF(rect.right() + 200, rect.center().y())
+    assert call.side() == "right"
+    assert call.side_point().y() == pytest.approx(rect.center().y())
+
+
+def test_the_elbow_leaves_the_box_square_on(window):
+    call = _callout(window, target=(200, 400))
+    window.view.end_item_edit()
+    side = call.side_point()
+    elbow = call.elbow()
+    assert elbow.x() == pytest.approx(side.x())          # straight down
+    assert elbow.y() > side.y()
+
+
+def test_copying_a_callout_takes_its_arrow_with_it(window):
+    call = _callout(window)
+    window.view.end_item_edit()
+    window.select_tool("select")
+    call.setSelected(True)
+    reach = call.mapToScene(call.tip) - call.mapToScene(call.local_rect().center())
+
+    centre = call.mapToScene(call.local_rect().center())
+    drag(window.view, centre.x(), centre.y(), centre.x() + 120, centre.y() + 60,
+         modifiers=Qt.ControlModifier)
+
+    callouts = [i for i in markups(window) if isinstance(i, CalloutItem)]
+    assert len(callouts) == 2
+    for one in callouts:
+        got = one.mapToScene(one.tip) - one.mapToScene(one.local_rect().center())
+        assert got.x() == pytest.approx(reach.x(), abs=2)
+        assert got.y() == pytest.approx(reach.y(), abs=2)
+
+
+def test_a_selected_group_draws_one_box_round_the_lot(window):
+    first, second = _two_boxes(window)
+    first.setSelected(True)
+    second.setSelected(True)
+    window.group_selection()
+
+    # the members stop drawing their own outlines and handles
+    assert first.group
+    from PySide6.QtGui import QImage, QPainter
+    image = QImage(500, 400, QImage.Format_ARGB32)
+    image.fill(Qt.white)
+    painter = QPainter(image)
+    window.view.render(painter)
+    painter.end()
+    assert image.width() == 500                     # it drew without complaint
+
+
+def test_a_group_goes_into_a_tool_set_as_one_thing(window):
+    from calcforge.ui import toolsets
+
+    first, second = _two_boxes(window)
+    first.setSelected(True)
+    second.setSelected(True)
+    window.group_selection()
+
+    entry = toolsets.entry_for_many([first, second])
+    assert entry.payload["type"] == toolsets.GROUP
+    assert len(entry.payload["items"]) == 2
+    assert entry.label == "Group of 2"
+
+
+def test_placing_a_group_puts_every_member_down_grouped(window):
+    from calcforge.ui import toolsets
+
+    first, second = _two_boxes(window)
+    first.setSelected(True)
+    second.setSelected(True)
+    window.group_selection()
+    entry = toolsets.entry_for_many([first, second])
+
+    window.select_tool("select")
+    window.use_tool_entry(entry)
+    click(window.view, 300, 500)
+
+    placed = [i for i in markups(window) if i.pos().y() > 400]
+    assert len(placed) == 2
+    assert placed[0].group == placed[1].group
+    assert placed[0].group != first.group          # a group of its own
+    # laid out as they were
+    assert round(placed[1].pos().x() - placed[0].pos().x()) == \
+        round(second.pos().x() - first.pos().x())
+
+
+def test_what_is_about_to_be_placed_is_shown_first(window):
+    from PySide6.QtGui import QImage, QPainter
+    from calcforge.ui import toolsets
+
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 220, 180)
+    entry = toolsets.entry_for(markups(window)[0])
+    window.select_tool("select")
+    window.use_tool_entry(entry)
+    hover(window.view, 400, 450)
+
+    assert window.view._pending_stamp is not None
+    assert window.view.pending_extent().width() == pytest.approx(120, abs=3)
+    image = QImage(600, 600, QImage.Format_ARGB32)
+    image.fill(Qt.white)
+    painter = QPainter(image)
+    window.view.render(painter)
+    painter.end()
+    assert len(markups(window)) == 1               # still only the original
+
+
+def test_the_clipboard_can_be_carried_and_dropped(window):
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 160)
+    window.select_tool("select")
+    markups(window)[0].setSelected(True)
+    window.copy_selection()
+
+    window.paste_with_preview()
+    assert window.view._pending_stamp is not None
+    click(window.view, 350, 500)
+    assert len(markups(window)) == 2
+    assert markups(window)[1].pos().y() > 400

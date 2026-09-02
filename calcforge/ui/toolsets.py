@@ -188,6 +188,31 @@ def entry_for(item, mode: str = COPY, label: str = "") -> ToolEntry:
     return ToolEntry(label or describe(item), payload, mode)
 
 
+def entry_for_many(items: list, label: str = "") -> ToolEntry:
+    """Several markups kept as one tool, laid out as they are on the page.
+
+    A group is one thing, so it goes into a set as one entry and comes back
+    as one: every member, in the same arrangement, grouped again.
+    """
+    items = list(items)
+    if len(items) == 1:
+        return entry_for(items[0])
+    left = min(item.pos().x() for item in items)
+    top = min(item.pos().y() for item in items)
+    parts = []
+    for item in items:
+        data = item.serialize()
+        data["x"] = float(data.get("x", 0.0)) - left
+        data["y"] = float(data.get("y", 0.0)) - top
+        parts.append(data)
+    payload = {"type": GROUP, "items": parts}
+    name = label or f"Group of {len(items)}"
+    return ToolEntry(name, payload, COPY)
+
+
+GROUP = "__group__"     # what a multi-markup entry's payload calls itself
+
+
 def describe(item) -> str:
     """A short name for a markup, for the row in the panel."""
     words = (getattr(item, "summary", lambda: "")() or "").strip().replace("\n", " ")

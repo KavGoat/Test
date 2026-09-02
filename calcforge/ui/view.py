@@ -791,6 +791,8 @@ class PageView(QGraphicsView):
         scene_pos = self.mapToScene(event.position().toPoint())
         self._last_scene_pos = scene_pos
         self.cursorMoved.emit(scene_pos)
+        if self._pending_anchor is not None or self._pending_stamp is not None:
+            self.viewport().update()          # the leader, or the preview, follows
 
         if self._editing_item is not None and self._mode == "idle":
             super().mouseMoveEvent(event)       # dragging selects text
@@ -828,7 +830,11 @@ class PageView(QGraphicsView):
                 delta = self.snap_moved(self._move_items, delta)
             for item, origin in self._move_items:
                 target = origin + delta
-                self._place(item, target if free else self.snap(target))
+                # Copying takes the arrow along: what is being dragged out is
+                # a new callout, and its arrow belongs to it. Moving leaves the
+                # arrow pointing at whatever it was pointing at.
+                self._place(item, target if free else self.snap(target),
+                            keep_leader=not self._copy_on_move)
             event.accept()
             return
 
@@ -950,10 +956,10 @@ class PageView(QGraphicsView):
         self.statusMessage.emit(f"Copied {len(self._move_items)} markup(s)")
 
     @staticmethod
-    def _place(item, position: QPointF) -> None:
+    def _place(item, position: QPointF, keep_leader: bool = True) -> None:
         """Move an item, keeping a callout's arrow pointing where it pointed."""
         mover = getattr(item, "move_keeping_leader", None)
-        if callable(mover):
+        if keep_leader and callable(mover):
             mover(position)
         else:
             item.setPos(position)
@@ -1166,37 +1172,75 @@ class PageView(QGraphicsView):
             self.setCursor(self._cursor_for_tool(self.current_tool()))
         return had
 
+    def pending_payloads(self) -> list:
+        """What a held tool would put down: one markup, or a whole group."""
+        from . import toolsets
+
+        entry = self._pending_stamp
+        if entry is None:
+            return []
+        if entry.payload.get("type") == toolsets.GROUP:
+            return [dict(part) for part in entry.payload.get("items", [])]
+        return [dict(entry.payload)]
+
+    def pending_extent(self) -> QRectF:
+        """How big the held tool is, so it can be centred on the pointer."""
+        boxes = QRectF()
+        for data in self.pending_payloads():
+            rect = data.get("rect")
+            width, height = (float(rect[2]), float(rect[3])) if rect else (120.0, 40.0)
+            box = QRectF(float(data.get("x", 0.0)), float(data.get("y", 0.0)),
+                         width, height)
+            boxes = box if boxes.isNull() else boxes.united(box)
+        return boxes
+
     def place_pending_stamp(self, scene_pos: QPointF) -> bool:
-        """Put a kept markup down where the pointer is. False if none is held."""
+        """Put a kept markup — or a whole group — down under the pointer."""
         entry = self._pending_stamp
         if entry is None:
             return False
         frame = self.frame_at(scene_pos) or self.frame()
         if frame is None:
             return False
-        data = dict(entry.payload)
-        data["uid"] = os.urandom(8).hex()
-        item = build_item(data)
-        if item is None:
+        payloads = self.pending_payloads()
+        if not payloads:
             self._pending_stamp = None
             return False
-        if isinstance(item, ImageItem):
-            item.load_from_document(self.document())
+        origin = self._pending_origin(frame, scene_pos)
+        group_name = os.urandom(6).hex() if len(payloads) > 1 else ""
         self.begin_snapshot([frame])
-        # Dropped centred on the pointer, the way a stamp is placed.
-        local = frame.mapFromScene(self.snap_scene(scene_pos, frame))
-        box = item.local_rect()
-        item.setPos(local - QPointF(box.width() / 2, box.height() / 2))
-        frame.add_markup(item)
         self.scene().clearSelection()
-        item.setSelected(True)
+        placed = []
+        for data in payloads:
+            data["uid"] = os.urandom(8).hex()
+            if group_name:
+                data["group"] = group_name
+            item = build_item(data)
+            if item is None:
+                continue
+            if isinstance(item, ImageItem):
+                item.load_from_document(self.document())
+            item.setPos(origin + QPointF(float(data.get("x", 0.0)),
+                                         float(data.get("y", 0.0))))
+            frame.add_markup(item)
+            item.setSelected(True)
+            placed.append(item)
         self.window.recalculate()
         self.commit_snapshot(f"Place {entry.label}")
         self.selectionChanged.emit()
         self._pending_stamp = None
         self.setCursor(self._cursor_for_tool(self.current_tool()))
-        self.statusMessage.emit(f"{entry.label} placed")
-        return True
+        self.statusMessage.emit(f"{entry.label} placed" if len(placed) == 1
+                                else f"{entry.label} placed — {len(placed)} markups")
+        self.viewport().update()
+        return bool(placed)
+
+    def _pending_origin(self, frame, scene_pos: QPointF) -> QPointF:
+        """Where the held tool's top-left goes: centred on the pointer."""
+        local = frame.mapFromScene(self.snap_scene(scene_pos, frame))
+        extent = self.pending_extent()
+        return QPointF(local.x() - extent.width() / 2 - extent.left(),
+                       local.y() - extent.height() / 2 - extent.top())
 
     def _prepare_draft(self, item: MarkupItem) -> None:
         item.author = self.document().settings.default_author or self.document().author
@@ -2147,9 +2191,15 @@ class PageView(QGraphicsView):
     def drawForeground(self, painter: QPainter, rect: QRectF) -> None:
         """Draw the insertion point, so it is obvious where things will land."""
         super().drawForeground(painter, rect)
+        self._draw_group_boxes(painter)
+        if self._pending_stamp is not None:
+            self._draw_pending_preview(painter)
         if self._snap_marker is not None:
             self._draw_snap_marker(painter, self._snap_marker)
-        point = self._pending_anchor or self._insert_point
+        if self._pending_anchor is not None:
+            self._draw_pending_leader(painter, self._pending_anchor)
+            return
+        point = self._insert_point
         if point is None:
             return
         painter.save()
@@ -2162,10 +2212,110 @@ class PageView(QGraphicsView):
                          QPointF(point.x() + arm, point.y()))
         painter.drawLine(QPointF(point.x(), point.y() - arm),
                          QPointF(point.x(), point.y() + arm))
-        if self._pending_anchor is not None:
-            painter.setBrush(QColor(11, 107, 203, 60))
-            painter.drawEllipse(point, arm * 0.55, arm * 0.55)
         painter.restore()
+
+    def _draw_pending_preview(self, painter: QPainter) -> None:
+        """Show what is about to be put down, under the pointer.
+
+        A tool held in the hand is invisible until it lands otherwise, and a
+        group of markups is impossible to place well when you cannot see how
+        big it is or where its top-left will fall.
+        """
+        entry = self._pending_stamp
+        if entry is None:
+            return
+        frame = self.frame_at(self._last_scene_pos) or self.frame()
+        if frame is None:
+            return
+        origin = self._pending_origin(frame, self._last_scene_pos)
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setOpacity(0.55)
+        for data in self.pending_payloads():
+            item = build_item(dict(data, uid="preview"))
+            if item is None:
+                continue
+            if isinstance(item, ImageItem):
+                item.load_from_document(self.document())
+            at = frame.mapToScene(origin + QPointF(float(data.get("x", 0.0)),
+                                                   float(data.get("y", 0.0))))
+            painter.save()
+            painter.translate(at)
+            item.paint_content(painter)
+            painter.restore()
+        painter.setOpacity(1.0)
+        box = self.pending_extent()
+        top_left = frame.mapToScene(origin + box.topLeft())
+        pen = QPen(QColor(11, 107, 203, 170))
+        pen.setWidthF(0)
+        pen.setStyle(Qt.DashLine)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRect(QRectF(top_left, box.size()))
+        painter.restore()
+
+    def _draw_group_boxes(self, painter: QPainter) -> None:
+        """One box around each selected group, rather than one per member.
+
+        A group is one thing to click and move, so it should look like one
+        thing when it is picked up; the members' own outlines say nothing that
+        the group's does not.
+        """
+        families: dict = {}
+        for item in self.scene().selectedItems() if self.scene() else []:
+            name = getattr(item, "group", "")
+            if name:
+                families.setdefault(name, []).append(item)
+        if not families:
+            return
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        pen = QPen(QColor(11, 107, 203, 190))
+        pen.setWidthF(0)
+        pen.setStyle(Qt.DashLine)
+        painter.setPen(pen)
+        painter.setBrush(QColor(11, 107, 203, 12))
+        margin = 5.0 / max(self._zoom, 0.05)
+        for members in families.values():
+            box = members[0].sceneBoundingRect()
+            for item in members[1:]:
+                box = box.united(item.sceneBoundingRect())
+            painter.drawRect(box.adjusted(-margin, -margin, margin, margin))
+        painter.restore()
+
+    def _draw_pending_leader(self, painter: QPainter, anchor: QPointF) -> None:
+        """The callout's arrow, drawn the moment it is placed.
+
+        Clicking what a callout points at used to leave nothing behind but the
+        same faint cross that marks any insert point, so there was no telling
+        whether the click had registered or what it had done. The arrow head
+        is drawn where it will be, with the leader trailing to the pointer.
+        """
+        from ..items.base import arrow_path
+
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        colour = QColor(self.window.default_style.stroke or "#e8590c")
+        pen = QPen(colour)
+        pen.setWidthF(max(self.window.default_style.width, 1.0))
+        painter.setPen(pen)
+        target = self._draft_leader_target()
+        if target is not None:
+            painter.drawLine(anchor, target)
+            angle = math.atan2(anchor.y() - target.y(), anchor.x() - target.x())
+        else:
+            angle = -math.pi / 4
+        painter.setBrush(colour)
+        painter.drawPath(arrow_path(anchor, angle,
+                                    max(pen.widthF() * 4.5, 9.0), "arrow"))
+        painter.restore()
+
+    def _draft_leader_target(self) -> Optional[QPointF]:
+        """Where the pending leader is heading: the box, or the pointer."""
+        draft = self._draft
+        if draft is not None and draft.scene() is not None:
+            return draft.mapToScene(draft.local_rect().center())
+        return QPointF(self._last_scene_pos)
 
     def _draw_snap_marker(self, painter: QPainter, point: QPointF) -> None:
         """A small square where the pointer has caught hold of something."""
