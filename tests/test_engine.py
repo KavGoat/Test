@@ -14,10 +14,31 @@ def value_of(source, workspace=None):
 
 
 def test_implicit_multiplication():
-    assert transform("5 m") == "5 * m"
+    # A number written against a unit is bracketed so that it stays one value.
+    assert transform("5 m") == "( 5 * m )"
     assert transform("2(3+4)") == "2 * ( 3 + 4 )"
-    assert transform("3 kN m") == "3 * kN * m"
+    assert transform("3 kN m") == "( 3 * kN * m )"
     assert transform("a^2") == "a ** 2"
+
+
+def test_a_quantity_is_not_split_by_what_follows_it():
+    """"6 m / 200 mm" is thirty — not "(6 m / 200) mm", which is nonsense."""
+    assert transform("6 m / 200 mm") == "( 6 * m ) / ( 200 * mm )"
+    assert transform("2 kN / 4 m") == "( 2 * kN ) / ( 4 * m )"
+    assert value_of("6 m / 200 mm").result_text() == "30"
+    assert value_of("1 kN / 1000 N").result_text() == "1"
+    assert value_of("2 kN / 4 m").result_text() == "500 N/m"
+    assert value_of("1 hectare / 10000 m^2").result_text() == "1"
+
+    # …while an exponent is still an exponent, and a unit still spans its own
+    # division: 24 kN/m^3 is a density, not 24 kN divided by a cubic metre of
+    # something else.
+    assert value_of("24 kN/m^3 * 200 mm").result.to("kPa").magnitude == pytest.approx(4.8)
+    assert value_of("2^3 m").result.to("m").magnitude == pytest.approx(8)
+    workspace = Workspace()
+    modulus = evaluate_source("f_cm = 38 MPa\n"
+                              "E_cm = 22*(f_cm/(10 MPa))^0.3 GPa", workspace)[-1]
+    assert modulus.result.to("GPa").magnitude == pytest.approx(32.836, rel=1e-4)
 
 
 def test_units_flow_through_arithmetic():
@@ -182,13 +203,50 @@ def test_imperial_input_is_never_converted():
     assert value_of("800 lbf*ft").result_text() == "800 lbf·ft"
 
 
+def test_what_the_author_typed_is_what_they_see():
+    """Rewriting an input's unit is limited to lengths, where it helps."""
+    assert value_of("1500 kN").result_text() == "1500 kN"
+    assert value_of("1470 cm^3").result_text() == "1470 cm³"
+    assert value_of("1200 kPa").result_text() == "1200 kPa"
+    assert value_of("2400 kN*m").result_text() == "2400 kN·m"
+    # the one exception everybody expects
+    assert value_of("7200 mm").result_text() == "7.2 m"
+    assert value_of("300 mm").result_text() == "300 mm"
+
+
+def test_inches_are_a_unit_not_a_python_keyword():
+    """`in` is a reserved word, so "12 in" has to be handled deliberately."""
+    assert value_of("12 in -> mm").result_text() == "304.8 mm"
+    assert value_of("101 in^3").result_text() == "101 in³"
+    workspace = Workspace()
+    statements = evaluate_source("Z_x = 101 in^3\nF_y = 50 ksi\n"
+                                 "M_n = 0.9*F_y*Z_x -> kip*ft", workspace)
+    assert statements[-1].error == ""
+    assert statements[-1].result.to("kip*ft").magnitude == pytest.approx(378.75)
+
+
+def test_a_temperature_is_built_not_multiplied():
+    """degC has an offset, so 20 degC is not 20 times anything."""
+    assert value_of("20 degC -> K").result.to("K").magnitude == pytest.approx(293.15)
+    assert value_of("20 degC -> degF").result.to("degF").magnitude == pytest.approx(68)
+    assert value_of("293.15 K -> degC").result.to("degC").magnitude == pytest.approx(20)
+    # a temperature *difference* is an ordinary multiplicative quantity
+    thermal = evaluate_source("alpha = 12e-6/K\ndT = 35 K\nL = 30 m\n"
+                              "dL = alpha*dT*L -> mm", Workspace())[-1]
+    assert dL_value(thermal) == pytest.approx(12.6)
+
+
+def dL_value(statement):
+    return statement.result.to("mm").magnitude
+
+
 def test_a_moment_is_not_shown_as_an_energy():
     assert value_of("355 MPa*896 cm^3").result_text() == "318.1 kN·m"
     assert value_of("12 kN*3 m").result_text() == "36 kN·m"
-    assert value_of("1500 J").result_text() == "1.5 kJ"
+    assert value_of("1500 J").result_text() == "1500 J"      # as typed
     workspace = Workspace()
     energy = evaluate_source("P = 3 kW\nE = P*1.5 hr", workspace)[-1]
-    assert energy.result_text() == "16.2 MJ"
+    assert energy.result_text() == "16.2 MJ"                 # computed: laddered
 
 
 def test_plain_equals_defines_once_then_checks():

@@ -793,7 +793,8 @@ class MainWindow(QMainWindow):
     # ==================================================================
     # scale
     # ==================================================================
-    def calibrate_scale(self, measured_pt: float) -> None:
+    def calibrate_scale(self, measured_pt: Optional[float] = None) -> None:
+        """Set the page scale, from a drawn distance or straight from a ratio."""
         dialog = dialogs.ScaleDialog(self.current_page().scale, measured_pt, self)
         if dialog.exec() != dialogs.QDialog.Accepted:
             return
@@ -801,26 +802,26 @@ class MainWindow(QMainWindow):
         if scale is None:
             return
         self.current_page().scale = scale
-        self.refresh_scale_label()
-        self.current_page().scene.refresh_items()
-        self.mark_modified()
+        self.apply_scale_change()
 
     def calibrate_dialog(self) -> None:
-        dialog = dialogs.ScaleDialog(self.current_page().scale, None, self)
-        if dialog.exec() != dialogs.QDialog.Accepted:
-            return
-        scale = dialog.result_scale()
-        if scale is None:
-            return
-        self.current_page().scale = scale
+        self.calibrate_scale(None)
+
+    def apply_scale_change(self) -> None:
+        """Everything that has to catch up when a page's scale changes."""
         self.refresh_scale_label()
         self.current_page().scene.refresh_items()
+        # Measurements and rectangle sizes are in the takeoff list too, so it
+        # goes stale unless it is rebuilt with them.
+        self.refresh_lists()
+        self.refresh_selection()
         self.mark_modified()
 
     def set_area_unit(self, unit: str) -> None:
         if unit:
             self.current_page().scale.area_unit = unit
             self.current_page().scene.refresh_items()
+            self.refresh_lists()
             self.mark_modified()
 
     def refresh_scale_label(self) -> None:
@@ -992,21 +993,28 @@ class MainWindow(QMainWindow):
     # ==================================================================
     # prompts the drawing tools use
     # ==================================================================
-    def prompt_rectangle_size(self, item) -> None:
-        """After drawing a rectangle on a scaled page, offer an exact size."""
+    def prompt_rectangle_size(self, item, always: bool = False) -> None:
+        """Offer an exact size for a rectangle.
+
+        Drawing on a scaled page asks straight away, because setting out is the
+        whole point there. On an unscaled page a rectangle is usually markup, so
+        it is only asked for on demand — the size is written on it either way.
+        """
         page = self.current_page()
-        if not self.interactive_prompts or item.kind != "rect":
+        if item.kind != "rect":
             return
-        if not page.scale.is_calibrated():
+        if not always and (not self.interactive_prompts
+                           or not page.scale.is_calibrated()):
             return
         item.refresh(page=page)
         if item.width_value is None or item.height_value is None:
             return
-        digits = max(page.scale.precision, 0)
+        scaled = page.scale.is_calibrated()
+        digits = max(page.scale.precision, 0) if scaled else 1
         dialog = dialogs.RectangleSizeDialog(
             format_quantity(item.width_value, digits, "fixed"),
             format_quantity(item.height_value, digits, "fixed"),
-            page.scale.display_unit, self)
+            page.scale.display_unit if scaled else "mm", self, scaled=scaled)
         if dialog.exec() != dialogs.QDialog.Accepted:
             return
         width, height = dialog.values()
@@ -1025,6 +1033,19 @@ class MainWindow(QMainWindow):
         if accepted:
             item.custom_label = text.strip()
             item.refresh(page=self.current_page())
+
+    def set_rectangle_size(self, item) -> None:
+        """Ask for an exact size for a rectangle already on the page."""
+        self.view.begin_snapshot()
+        self.prompt_rectangle_size(item, always=True)
+        self.view.commit_snapshot("Rectangle size")
+        self.refresh_selection()
+
+    def set_size_visible(self, item, on: bool) -> None:
+        self.view.begin_snapshot()
+        item.show_size = bool(on)
+        item.refresh(page=self.current_page())
+        self.view.commit_snapshot("Show rectangle size")
 
     def note_missing_scale(self) -> None:
         """Say once that measurements are in page units until a scale is set."""
@@ -1737,6 +1758,13 @@ class MainWindow(QMainWindow):
                 menu.addAction("Delete row", lambda: self._table_op(item, "del_row"))
                 menu.addAction("Delete column", lambda: self._table_op(item, "del_col"))
                 menu.addAction("Autofit columns", lambda: self._table_op(item, "autofit"))
+            if isinstance(item, RectItem) and item.kind == "rect":
+                menu.addAction("Set exact size…",
+                               lambda: self.set_rectangle_size(item))
+                show = menu.addAction("Show its size")
+                show.setCheckable(True)
+                show.setChecked(item.show_size)
+                show.toggled.connect(lambda on: self.set_size_visible(item, on))
             if isinstance(item, MeasureItem):
                 menu.addAction("Page scale…", self.calibrate_dialog)
             menu.addSeparator()

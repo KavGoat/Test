@@ -144,8 +144,13 @@ def convert(value: Any, unit_text: str):
     if not isinstance(value, Quantity):
         value = Q_(value, "dimensionless")
     if isinstance(target, Quantity):
-        # e.g. "kN" parses to Quantity(1.0, kilonewton)
-        return (value / target).to("dimensionless") * target
+        # e.g. "kN" parses to Quantity(1.0, kilonewton).  Dividing by it and
+        # multiplying back is what makes a prefactor such as "1e3*mm" work.
+        try:
+            return (value / target).to("dimensionless") * target
+        except pint.OffsetUnitCalculusError:
+            # °C to K is a shift, not a ratio, so it cannot be divided out.
+            return value.to(target.units)
     return value.to(target)
 
 
@@ -444,13 +449,37 @@ def reads_well(value: Any) -> bool:
 def normalise_for_display(value: Any, is_input: bool = False) -> Any:
     """Put a value in the unit it reads best in.
 
-    A value the author typed out in full keeps the unit they chose, unless the
-    number has drifted out of the range that unit reads well in — 7200 mm is
-    better as 7.2 m, but 896 cm³ was written that way on purpose.
+    A value the author typed out in full keeps the unit they chose unless
+    another one genuinely reads better — 7200 mm becomes 7.2 m, but 1470 cm³
+    stays as it was written rather than turning into 0.00147 m³.
     """
-    if is_input and reads_well(value):
+    if is_input and not reads_better(value, preferred_unit(value)):
         return value
     return apply_preferred_unit(value)
+
+
+# The one rewrite an input is worth: a length that has grown out of millimetres.
+# An engineer writing 1500 kN means kN, and 1470 cm³ means cm³ — but 7200 mm is
+# 7.2 m to everybody.
+_INPUT_LADDER_DIMENSION = {"[length]": 1}
+
+
+def reads_better(value: Any, unit: Optional[str]) -> bool:
+    """True when showing *value* in *unit* improves on the unit that was typed.
+
+    Only used for values the author wrote out themselves. Rewriting what
+    somebody typed has to earn its place: it is limited to lengths, where
+    stepping between mm, m and km is what everyone expects, and the new unit
+    has to read well where the old one does not.
+    """
+    if unit is None or reads_well(value):
+        return False
+    try:
+        if _dimension_key(value) != _INPUT_LADDER_DIMENSION:
+            return False
+        return reads_well(value.to(unit))
+    except Exception:
+        return False
 
 
 def apply_preferred_unit(value: Any) -> Any:

@@ -124,8 +124,6 @@ def export_images(document: Document, folder: str, dpi: float = 200.0,
 
 
 def export_markups_csv(document: Document, path: str) -> int:
-    pass
-
     rows = []
     for index, page in enumerate(document.pages):
         if page.scene is None:

@@ -10,6 +10,7 @@ from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
 from PySide6.QtGui import QContextMenuEvent, QKeyEvent, QMouseEvent
 from PySide6.QtWidgets import QApplication
 
+from calcforge.core.document import MM_TO_PT
 from calcforge.items.mathitem import MathItem
 from calcforge.items.measure import DIMENSION, MeasureItem
 from calcforge.items.shapes import PolyItem, RectItem
@@ -339,12 +340,52 @@ def test_the_rectangle_prompt_only_appears_on_a_scaled_page(window, monkeypatch)
 
     window.select_tool("rect")
     drag(window.view, 100, 100, 200, 180)
-    assert asked == []                      # no scale on this page yet
+    assert asked == []                      # markup on an unscaled page: no nagging
 
     scaled_page(window)
     window.select_tool("rect")
     drag(window.view, 300, 100, 400, 180)
     assert asked == [True]
+
+
+def test_a_rectangle_shows_its_paper_size_without_a_scale(window):
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 100 + 4 * MM_TO_PT * 10, 100 + 2 * MM_TO_PT * 10)
+    rect = only(window, RectItem)[0]
+    assert rect.show_size
+    assert rect.width_value.to("mm").magnitude == pytest.approx(40, abs=0.5)
+    assert rect.height_value.to("mm").magnitude == pytest.approx(20, abs=0.5)
+    assert "mm × " in rect.size_text
+
+
+def test_an_exact_size_can_be_asked_for_from_the_right_click_menu(window, monkeypatch):
+    from calcforge.ui import dialogs
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 180)
+    window.select_tool("select")
+    rect = only(window, RectItem)[0]
+    rect.setSelected(True)
+
+    menu = window.build_context_menu(rect, QPointF(150, 140))
+    assert "Set exact size…" in [a.text() for a in menu.actions() if a.text()]
+
+    monkeypatch.setattr(dialogs.RectangleSizeDialog, "exec",
+                        lambda self: dialogs.QDialog.Accepted)
+    monkeypatch.setattr(dialogs.RectangleSizeDialog, "values",
+                        lambda self: ("50 mm", "25 mm"))
+    window.set_rectangle_size(rect)
+    assert rect.size_text == "50.0 mm × 25.0 mm"
+    assert rect.local_rect().width() == pytest.approx(50 * MM_TO_PT, rel=1e-6)
+
+
+def test_a_scale_turns_the_paper_size_into_a_real_one(window):
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 236, 168)
+    rect = only(window, RectItem)[0]
+    assert "mm" in rect.size_text
+    scaled_page(window)
+    window.current_page().scene.refresh_items()
+    assert "2.40 m" in rect.size_text
 
 
 # ---------------------------------------------------------------------------
@@ -432,3 +473,28 @@ def test_no_menu_mnemonic_shadows_a_tool_chord(window):
         if sequence:
             assert sequence not in mnemonics, f"{key} is shadowed by a menu"
     assert "Alt+M" not in mnemonics
+
+
+def test_changing_the_page_scale_updates_the_takeoff_list(window, monkeypatch):
+    """A rectangle's size is in the markups list, so it has to be rebuilt."""
+    from calcforge.core.document import PageScale
+    from calcforge.ui import dialogs
+
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 236, 168)
+    window.select_tool("select")
+
+    def sizes():
+        panel = window.markups_panel
+        return [panel.tree.topLevelItem(0).child(i).text(3)
+                for i in range(panel.tree.topLevelItem(0).childCount())]
+
+    window.refresh_lists()
+    assert any("mm" in text for text in sizes())
+
+    monkeypatch.setattr(dialogs.ScaleDialog, "exec",
+                        lambda self: dialogs.QDialog.Accepted)
+    monkeypatch.setattr(dialogs.ScaleDialog, "result_scale",
+                        lambda self: PageScale.from_ratio(50))
+    window.calibrate_dialog()
+    assert any("2.4" in text and "m" in text for text in sizes())

@@ -437,12 +437,18 @@ class CountSubjectDialog(QDialog):
 class RectangleSizeDialog(QDialog):
     """Type an exact real-world width and height for a rectangle."""
 
-    def __init__(self, width_text: str, height_text: str, unit: str, parent=None):
+    def __init__(self, width_text: str, height_text: str, unit: str, parent=None,
+                 scaled: bool = True):
         super().__init__(parent)
         self.setWindowTitle("Rectangle size")
         layout = QVBoxLayout(self)
-        note = QLabel("This page has a scale, so the rectangle can be set out at an "
-                      "exact size. Leave these as they are to keep what you drew.")
+        if scaled:
+            message = ("This page has a scale, so the rectangle can be set out at an "
+                       "exact size. Leave these as they are to keep what you drew.")
+        else:
+            message = ("This page has no scale, so these are paper sizes. Give the "
+                       "page a scale to set the rectangle out in real dimensions.")
+        note = QLabel(message)
         note.setWordWrap(True)
         layout.addWidget(note)
         form = QFormLayout()

@@ -30,8 +30,8 @@ import pint
 
 from . import functions as fnlib
 from .units import (Q_, Quantity, SHADOWED_UNITS, convert, format_quantity,
-                    is_unit_name, preferred_unit, reads_well, simplify_units,
-                    ureg)
+                    is_unit_name, preferred_unit, reads_better, reads_well,
+                    simplify_units, ureg)
 
 # ---------------------------------------------------------------------------
 # Source normalisation
@@ -155,14 +155,87 @@ def transform(expr: str) -> str:
             following = raw[index + 1] if index + 1 < len(raw) else None
             if following is not None and following.string == "(":
                 text = text + "_"
+            elif text == "in":
+                # "in" is a Python keyword, so "12 in" would not compile.
+                # Nothing in this language uses it as an operator, and to an
+                # engineer it can only mean inches.
+                text = "inch"
         kept.append((token.type, text))
 
+    return " ".join(_join(kept))
+
+
+def _unit_run_end(kept: list[tuple[int, str]], start: int) -> int:
+    """How far the unit expression starting at *start* reaches.
+
+    ``kN`` in ``24 kN/m^3`` runs to the end of ``m^3``; ``m`` in
+    ``6 m / 200 mm`` stops at the ``m``, because what follows the slash is a
+    number and so begins a quantity of its own.
+    """
+    def is_name(position: int) -> bool:
+        """A plain name — not a function, which owns the bracket after it."""
+        return (position < len(kept) and kept[position][0] == tokenize.NAME
+                and not keyword.iskeyword(kept[position][1])
+                and not (position + 1 < len(kept) and kept[position + 1][1] == "("))
+
+    def take_power(position: int) -> int:
+        if (position + 1 < len(kept) and kept[position][1] == "**"
+                and kept[position + 1][0] == tokenize.NUMBER):
+            return position + 2
+        return position
+
+    if not is_name(start):
+        return start
+    index = take_power(start + 1)
+    while index < len(kept):
+        if kept[index][1] in ("*", "/") and is_name(index + 1):
+            index = take_power(index + 2)          # kN/m^3
+        elif is_name(index):
+            index = take_power(index + 1)          # kN m
+        else:
+            break
+    return index
+
+
+def _emit(kept: list[tuple[int, str]]) -> list[str]:
+    """Tokens with implicit products filled in, and nothing else added."""
     out: list[str] = []
     for index, item in enumerate(kept):
         if index and _needs_star(kept[index - 1], item):
             out.append("*")
         out.append(item[1])
-    return " ".join(out)
+    return out
+
+
+def _join(kept: list[tuple[int, str]]) -> list[str]:
+    """Emit Python source, inserting implicit products and binding quantities.
+
+    A number written against a unit is one value, not a product to be broken up
+    by whatever comes next: ``6 m / 200 mm`` is thirty, not ``(6 m / 200) mm``.
+    So each such pair is bracketed as it is emitted.
+    """
+    out: list[str] = []
+    index = 0
+    while index < len(kept):
+        item = kept[index]
+        exponent = index > 0 and kept[index - 1][1] == "**"
+        if (item[0] == tokenize.NUMBER and not exponent
+                and index + 1 < len(kept) and kept[index + 1][0] == tokenize.NAME
+                and not keyword.iskeyword(kept[index + 1][1])):
+            end = _unit_run_end(kept, index + 1)
+            if end > index + 1:
+                if out and _needs_star(kept[index - 1], item):
+                    out.append("*")
+                out.append("(")
+                out.extend(_emit(kept[index:end]))
+                out.append(")")
+                index = end
+                continue
+        if out and _needs_star(kept[index - 1], item):
+            out.append("*")
+        out.append(item[1])
+        index += 1
+    return out
 
 
 def validate(tree: ast.AST) -> None:
@@ -203,6 +276,29 @@ class _LazyCalls(ast.NodeTransformer):
         return node
 
 
+# Celsius and Fahrenheit have an offset, so "20 * degC" is meaningless and pint
+# refuses it.  "20 degC" is what an engineer writes, though, so a number written
+# against one of these is built as a temperature rather than a product.
+OFFSET_UNITS = {"degC", "degF", "celsius", "fahrenheit", "degreeC", "degreeF"}
+
+
+class _OffsetUnitLiterals(ast.NodeTransformer):
+    """Rewrite ``20 * degC`` into ``quantity(20, "degC")``."""
+
+    def visit_BinOp(self, node: ast.BinOp) -> ast.AST:
+        self.generic_visit(node)
+        if (isinstance(node.op, ast.Mult)
+                and isinstance(node.right, ast.Name)
+                and node.right.id in OFFSET_UNITS
+                and isinstance(node.left, ast.Constant)
+                and isinstance(node.left.value, (int, float))):
+            return ast.copy_location(
+                ast.Call(func=ast.Name(id="quantity", ctx=ast.Load()),
+                         args=[node.left, ast.Constant(value=node.right.id)],
+                         keywords=[]), node)
+        return node
+
+
 def compile_expression(source: str, pre_transformers: tuple = ()
                        ) -> tuple[Any, ast.Expression]:
     """Transform, parse, validate and compile *source*.
@@ -214,6 +310,7 @@ def compile_expression(source: str, pre_transformers: tuple = ()
     """
     python_source = transform(source)
     tree = ast.parse(python_source, mode="eval")
+    tree = ast.fix_missing_locations(_OffsetUnitLiterals().visit(tree))
     for transformer in pre_transformers:
         tree = ast.fix_missing_locations(transformer.visit(tree))
     validate(tree)
@@ -576,7 +673,7 @@ class Statement:
         unit = preferred_unit(self.result)
         if unit == "deg" and _ANGLE_UNIT_RE.search(self.expression):
             return None          # the author picked an angle unit; respect it
-        if unit and self.is_input and reads_well(self.result):
+        if unit and self.is_input and not reads_better(self.result, unit):
             return None          # "896 cm³" was typed that way on purpose
         return unit
 

@@ -100,22 +100,35 @@ class RectItem(MarkupItem):
         return PageScale()
 
     def refresh(self, workspace=None, page=None) -> None:
+        """Work out the size to write on the rectangle.
+
+        A scaled page gives real dimensions; an unscaled one still gives the
+        paper size in millimetres, because a rectangle that says nothing at all
+        is the one complaint everybody has about drawing one.
+        """
         scale = page.scale if page is not None else self.page_scale()
         rect = self._rect.normalized()
-        if self.kind != "rect" or not scale.is_calibrated():
+        if self.kind != "rect":
             self.size_text = ""
             self.width_value = self.height_value = None
             self.update()
             return
         try:
-            from ..core.units import convert
-            self.width_value = convert(scale.length(rect.width()), scale.display_unit)
-            self.height_value = convert(scale.length(rect.height()), scale.display_unit)
-            digits = max(scale.precision, 0)
+            from ..core.units import Q_, convert
+            from ..core.document import MM_TO_PT
+            if scale.is_calibrated():
+                self.width_value = convert(scale.length(rect.width()), scale.display_unit)
+                self.height_value = convert(scale.length(rect.height()), scale.display_unit)
+                digits = max(scale.precision, 0)
+            else:
+                self.width_value = Q_(rect.width() / MM_TO_PT, "mm")
+                self.height_value = Q_(rect.height() / MM_TO_PT, "mm")
+                digits = 1
             self.size_text = (f"{format_quantity(self.width_value, digits, 'fixed')}"
                               f" × {format_quantity(self.height_value, digits, 'fixed')}")
         except Exception:
             self.size_text = ""
+            self.width_value = self.height_value = None
         self.update()
 
     def set_real_size(self, width_text: str, height_text: str, page=None) -> bool:
@@ -123,12 +136,17 @@ class RectItem(MarkupItem):
         scale = page.scale if page is not None else self.page_scale()
         width = parse_unit(width_text)
         height = parse_unit(height_text)
-        if width is None or height is None or not scale.is_calibrated():
+        if width is None or height is None:
             return False
         try:
-            per_point = scale.length(1.0)
-            points_wide = float((width / per_point).to("dimensionless").magnitude)
-            points_high = float((height / per_point).to("dimensionless").magnitude)
+            if scale.is_calibrated():
+                per_point = scale.length(1.0)
+                points_wide = float((width / per_point).to("dimensionless").magnitude)
+                points_high = float((height / per_point).to("dimensionless").magnitude)
+            else:
+                from ..core.document import MM_TO_PT
+                points_wide = float(width.to("mm").magnitude) * MM_TO_PT
+                points_high = float(height.to("mm").magnitude) * MM_TO_PT
         except Exception:
             return False
         if points_wide <= 0 or points_high <= 0:
@@ -138,6 +156,11 @@ class RectItem(MarkupItem):
         self._rect = QRectF(rect.x(), rect.y(), points_wide, points_high)
         self.refresh(page=page)
         return True
+
+    @property
+    def value_text(self) -> str:
+        """What the takeoff list reports for this shape — its size."""
+        return self.size_text if self.show_size else ""
 
     def summary(self) -> str:
         return self.comment or self.size_text or self.label

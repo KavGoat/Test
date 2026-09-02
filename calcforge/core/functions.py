@@ -603,6 +603,15 @@ def symint(expr, variable, lo=None, hi=None):
 # registry
 # ---------------------------------------------------------------------------
 
+def quantity(magnitude, unit: str):
+    """A number in a named unit, built rather than multiplied.
+
+    Multiplication is wrong for a unit with an offset — 20 degC is not 20 times
+    anything — so a temperature literal is constructed through here.
+    """
+    return Q_(as_float(magnitude), unit)
+
+
 FUNCTIONS: dict[str, Any] = {
     # elementary
     "sqrt": sqrt, "root": root, "exp": exp, "ln": ln, "log": log, "log10": lambda x: log(x, 10),
@@ -636,6 +645,7 @@ FUNCTIONS: dict[str, Any] = {
     "maximize": maximise, "minimize": minimise,
     # units
     "to": to, "unit_of": unit_of, "mag": mag, "strip_units": strip_units,
+    "quantity": quantity,
     # symbolic
     "sym": sym, "simplify": simplify, "expand": expand, "factor": factor,
     "symsolve": symsolve, "symdiff": symdiff, "symint": symint,
