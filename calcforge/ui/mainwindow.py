@@ -229,10 +229,12 @@ class MainWindow(QMainWindow):
         self._act("dark", "Dark theme", self.toggle_theme, "", checkable=True)
         self._act("margins", "Show margins", self.toggle_margins, "", checkable=True)
         self.act_margins.setChecked(True)
-        self._act("sticky", "Keep the tool active", self.toggle_sticky, "", checkable=True,
+        self._act("sticky", "Keep the tool active", self.toggle_sticky, "", "pin",
+                  checkable=True,
                   tip="Stay on the current tool after drawing instead of returning to Select")
         self._act("recalc", "Recalculate", self.recalculate, "F9", "recalc")
         self._act("verify", "Check every number…", self.verify_document, "F10",
+                  "verify",
                   tip="Re-derive the whole document from scratch and report\n"
                       "anything that does not come back the same")
         self._act("apply_redactions", "Apply redactions…", self.apply_redactions, "",
@@ -255,9 +257,13 @@ class MainWindow(QMainWindow):
         main_bar.setIconSize(QSize(22, 22))
         for action in (self.act_new, self.act_open, self.act_save, None,
                        self.act_insert_pdf, self.act_export_pdf, self.act_print, None,
-                       self.act_undo, self.act_redo, None, self.act_recalc):
+                       self.act_undo, self.act_redo, None, self.act_recalc,
+                       self.act_verify):
             main_bar.addSeparator() if action is None else main_bar.addAction(action)
         self.addToolBar(main_bar)
+        # The markup tools get a row to themselves: there are enough of them
+        # that sharing one with the file actions hides the last few.
+        self.addToolBarBreak()
 
         self.tool_group = QActionGroup(self)
         self.tool_group.setExclusive(True)
@@ -373,7 +379,7 @@ class MainWindow(QMainWindow):
         # Without an explicit vertical split the properties form gets squeezed
         # into a couple of rows by whatever is stacked under it.
         self.resizeDocks([self.dock_properties, self.dock_variables], [560, 340], Qt.Vertical)
-        self.resizeDocks([self.dock_markups], [190], Qt.Vertical)
+        self.resizeDocks([self.dock_markups], [230], Qt.Vertical)
 
     def _build_menus(self) -> None:
         bar = self.menuBar()

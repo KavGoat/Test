@@ -265,6 +265,16 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
         _pen(painter, "#c92a2a", 1.5)
         painter.drawLine(QPointF(6, 6), QPointF(18, 18))
         painter.drawLine(QPointF(18, 6), QPointF(6, 18))
+    elif name == "pin":
+        # A drawing pin: pressed in, the tool stays chosen after each markup.
+        _pen(painter, INK, 1.5)
+        painter.setBrush(QBrush(QColor(INK)))
+        painter.drawPolygon(QPolygonF([QPointF(9, 4), QPointF(15, 4), QPointF(14, 10),
+                                       QPointF(17, 13), QPointF(7, 13), QPointF(10, 10)]))
+        painter.drawLine(QPointF(12, 13), QPointF(12, 20))
+    elif name == "verify":
+        _pen(painter, ACCENT, 1.7)
+        painter.drawPolyline(QPolygonF([QPointF(5, 12), QPointF(10, 17), QPointF(19, 6)]))
     elif name == "recalc":
         _pen(painter, ACCENT, 1.6)
         painter.drawArc(QRectF(5, 5, 14, 14), 30 * 16, 280 * 16)

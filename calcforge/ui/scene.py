@@ -79,6 +79,11 @@ class PageScene(QGraphicsScene):
 
     def drawBackground(self, painter: QPainter, rect: QRectF) -> None:
         page_rect = self.page_rect()
+        if not self.print_mode:
+            # Qt's own drawBackground would paint the brush; this one replaces
+            # it, so the desk the sheet lies on has to be painted here.
+            painter.fillRect(rect, self.backgroundBrush())
+            self._draw_page_shadow(painter, page_rect)
         painter.fillRect(page_rect, PAPER)
         if self._background is None and self.page.background_key:
             self.load_background()
@@ -92,6 +97,17 @@ class PageScene(QGraphicsScene):
             self._draw_grid(painter, rect)
             self._draw_margins(painter)
         self._draw_running_text(painter)
+
+    def _draw_page_shadow(self, painter: QPainter, page_rect: QRectF) -> None:
+        """A soft edge under the sheet, so it reads as paper on a desk."""
+        painter.save()
+        painter.setPen(Qt.NoPen)
+        for step in range(6, 0, -1):
+            shade = QColor(0, 0, 0, 6)
+            painter.setBrush(QBrush(shade))
+            painter.drawRect(page_rect.adjusted(step * 0.6, step * 0.6,
+                                                step * 1.1, step * 1.4))
+        painter.restore()
 
     def _draw_grid(self, painter: QPainter, rect: QRectF) -> None:
         settings = self.document.settings

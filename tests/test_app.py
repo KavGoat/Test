@@ -1165,16 +1165,16 @@ def test_autosave_does_nothing_when_there_is_nothing_to_save(window):
 
 def test_dark_theme_switches_the_chrome_but_not_the_paper(window):
     from PySide6.QtWidgets import QApplication
-    from calcforge.theme import CANVAS, DARK
+    from calcforge.theme import CANVAS, DARK, LIGHT, tokens
 
     window.toggle_theme(True)
-    assert "#24272e" in QApplication.instance().styleSheet()
+    assert tokens(DARK)["chrome"] in QApplication.instance().styleSheet()
     assert window.view.scene().backgroundBrush().color().name() == CANVAS[DARK]
     # the page itself stays paper-white
     image = window.view.scene().render_image(dpi=40, for_print=False)
     assert image.pixelColor(image.width() // 2, image.height() // 2).name() == "#ffffff"
     window.toggle_theme(False)
-    assert "#eef1f5" in QApplication.instance().styleSheet()
+    assert tokens(LIGHT)["chrome"] in QApplication.instance().styleSheet()
 
 
 def test_two_axis_index_addresses_a_rectangular_range(window):
@@ -1675,3 +1675,40 @@ def test_pasting_a_single_value_still_pastes_markups_not_a_table(window):
     window.paste_items()
     assert len([i for i in markups(window) if isinstance(i, TableItem)]) == 0
     assert len(markups(window)) == 2
+
+
+def test_the_desk_behind_the_paper_is_actually_painted(window):
+    """Overriding drawBackground loses Qt's own fill unless it is put back."""
+    from PySide6.QtGui import QImage, QPainter
+    from PySide6.QtCore import QRectF
+    from calcforge.theme import CANVAS, LIGHT
+
+    scene = window.view.scene()
+    page = scene.page_rect()
+    # A region that reaches past the sheet on every side.
+    area = page.adjusted(-60, -60, 60, 60)
+    image = QImage(200, 200, QImage.Format_ARGB32)
+    image.fill(0)
+    painter = QPainter(image)
+    scene.render(painter, QRectF(0, 0, 200, 200), area)
+    painter.end()
+
+    corner = image.pixelColor(3, 3).name()
+    middle = image.pixelColor(100, 100).name()
+    assert corner == CANVAS[LIGHT], "the desk was left transparent"
+    assert middle == "#ffffff", "the paper is not white"
+
+
+def test_every_markup_tool_is_reachable_from_the_toolbar(window):
+    """A tool nobody can click is a tool that does not exist."""
+    from calcforge.ui.tools import TOOLS
+
+    from PySide6.QtWidgets import QToolBar
+
+    for tool in TOOLS:
+        assert tool.key in window.tool_actions, tool.key
+        assert window.tool_actions[tool.key].isEnabled(), tool.key
+    # File actions and markup tools sit on separate rows, so neither row has to
+    # hide its last few buttons behind an overflow arrow.
+    names = {bar.objectName() for bar in window.findChildren(QToolBar)}
+    assert {"toolbar_main", "toolbar_tools", "toolbar_style"} <= names
