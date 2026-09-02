@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (QApplication, QGraphicsView, QLineEdit, QRubberBa
 from ..core.document import MM_TO_PT
 from ..items.base import HANDLE_CURSORS, MarkupItem
 from ..items.mathitem import LINE_STEP, MathItem
-from .scene import detach
+from .scene import PageFrame, detach
 from ..items.measure import CALIBRATE, DIMENSION, CountItem, MeasureItem
 from ..items.media import ImageItem
 from ..items.plotitem import PlotItem
@@ -130,14 +130,34 @@ class PageView(QGraphicsView):
     def begin_snapshot(self, frames=None) -> None:
         """Remember what the affected pages look like before a gesture.
 
-        Most gestures touch one page. A drag can carry a markup onto another,
-        so a move records every page and only the ones that actually changed
-        are written to the undo stack.
+        On a canvas that scrolls through the whole document, a gesture is not
+        necessarily about the page the chrome calls current: the selection can
+        span two pages, and a region can still be being edited on the page
+        above the one now on screen. So the pages actually involved are the
+        ones recorded, and only those that really changed reach the undo stack.
         """
         if frames is None:
-            frame = self.frame()
-            frames = [frame] if frame is not None else []
+            frames = self.involved_frames()
         self._snapshot = [(frame, frame.serialize_items()) for frame in frames]
+
+    def involved_frames(self) -> list:
+        """Every page a gesture starting now could plausibly change."""
+        scene = self.scene()
+        if scene is None:
+            return []
+        frames: list = []
+
+        def remember(frame):
+            if isinstance(frame, PageFrame) and frame not in frames:
+                frames.append(frame)
+
+        remember(self.frame())
+        remember(getattr(self._editing_item, "parentItem", lambda: None)())
+        if self.active_table is not None:
+            remember(self.active_table.parentItem())
+        for item in scene.selectedItems():
+            remember(item.parentItem())
+        return frames
 
     def all_frames(self) -> list:
         scene = self.scene()

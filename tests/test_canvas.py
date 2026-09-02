@@ -366,3 +366,81 @@ def test_actual_size_is_one_to_one(window):
     window.view.set_zoom(0.4)
     window.act_actual_size.trigger()
     assert window.view.zoom() == pytest.approx(1.0)
+
+
+# ---------------------------------------------------------------------------
+# a gesture is not always about the page the chrome calls current
+# ---------------------------------------------------------------------------
+
+def test_editing_a_region_on_another_page_is_still_recorded(window):
+    """Scrolling away while editing must not send the edit to the wrong page."""
+    window.add_page()
+    window.go_to_page(0)
+    window.select_tool("math")
+    drag(window.view, *on_page(window, 0, 80, 80), *on_page(window, 0, 320, 130))
+    block = window.view.editing_item()
+    block._editor.setPlainText("L = 6 m")
+
+    window.go_to_page(1)                 # the chrome now says page 2
+    assert window.view.frame() is window.document.pages[1].frame
+    assert block.parentItem() in window.view.involved_frames()
+
+    window.view.end_item_edit()
+    assert window.document.workspace.get("L").to("m").magnitude == pytest.approx(6)
+    assert window.document.pages[0].frame.markups() == [block]
+
+
+def test_deleting_across_two_pages_recalculates(window):
+    """A selection can span pages, and what it defined has to go with it."""
+    window.add_page()
+    for index, source in enumerate(("sigma = 275 MPa", "b = 300 mm")):
+        window.go_to_page(index)
+        window.select_tool("math")
+        drag(window.view, *on_page(window, index, 80, 80),
+             *on_page(window, index, 320, 130))
+        window.view.editing_item()._editor.setPlainText(source)
+        window.view.end_item_edit()
+    window.select_tool("select")
+    assert window.document.workspace.get("sigma") is not None
+
+    window.view.scene().clearSelection()
+    for frame in window.view.scene().frames:
+        for item in frame.markups():
+            item.setSelected(True)
+    window.delete_selection()
+
+    assert window.document.workspace.get("sigma") is None
+    assert window.document.workspace.get("b") is None
+    assert markups(window) == []
+
+
+def test_a_page_never_shows_a_result_another_page_no_longer_supports(window):
+    """The verifier's own complaint, as a test."""
+    from calcforge.core.verify import verify_document
+
+    window.add_page()
+    window.go_to_page(0)
+    window.select_tool("math")
+    drag(window.view, *on_page(window, 0, 80, 80), *on_page(window, 0, 320, 130))
+    window.view.editing_item()._editor.setPlainText("sigma = 275 MPa")
+    window.view.end_item_edit()
+
+    window.go_to_page(1)
+    window.select_tool("math")
+    drag(window.view, *on_page(window, 1, 80, 80), *on_page(window, 1, 320, 130))
+    second = window.view.editing_item()
+    second._editor.setPlainText("sigma = 275 MPa")     # a check, not a definition
+    window.view.end_item_edit()
+    window.select_tool("select")
+    assert second.statements[0].result is True
+
+    # Take the definition away from the page above; the check below must stop
+    # claiming to be true, without anybody pressing F9.
+    first = window.document.pages[0].frame.markups()[0]
+    window.view.scene().clearSelection()
+    first.setSelected(True)
+    window.delete_selection()
+
+    assert second.statements[0].result is not True
+    result = verify_document(window.document)
+    assert [p.message for p in result.problems if p.kind == "disagreement"] == []

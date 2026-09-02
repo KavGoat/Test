@@ -14,7 +14,9 @@ pinned to the one that caused it.
 
 This found the crash while rendering a page thumbnail, the page insertion that
 emptied the document, the move that did not recalculate, and the reading order
-that was not a total order.
+that was not a total order. It scrolls and zooms as well as drawing, because on
+a canvas holding every page those are the gestures most likely to leave a
+gesture aimed at the wrong page.
 """
 import faulthandler, functools, os, random, sys, traceback
 print = functools.partial(print, flush=True)
@@ -87,7 +89,10 @@ def send(kind, pt, button=Qt.LeftButton, buttons=Qt.NoButton, mods=Qt.NoModifier
 
 
 def spot():
-    return rng.uniform(40, 540), rng.uniform(40, 780)
+    """A point somewhere in the visible part of the canvas."""
+    rect = view.mapToScene(view.viewport().rect()).boundingRect()
+    return (rng.uniform(rect.left(), rect.right()),
+            rng.uniform(rect.top(), rect.bottom()))
 
 
 @guard("drag")
@@ -192,6 +197,22 @@ def do_clipboard():
         QApplication.clipboard().setText("a\tb\n1 m\t2 kN")
 
 
+@guard("navigate")
+def do_navigate():
+    roll = rng.random()
+    bar = view.verticalScrollBar()
+    if roll < 0.3:
+        bar.setValue(rng.randint(bar.minimum(), max(bar.maximum(), bar.minimum())))
+    elif roll < 0.5:
+        view.set_zoom(rng.choice([0.15, 0.35, 0.7, 1.0, 1.6, 3.0]))
+    elif roll < 0.65:
+        view.fit_page()
+    elif roll < 0.8:
+        view.fit_width()
+    else:
+        win.go_to_page(rng.randrange(len(win.document.pages)))
+
+
 @guard("scale")
 def do_scale():
     from calcforge.core.document import PageScale
@@ -208,7 +229,8 @@ def do_recalc():
 ACTIONS = ([do_drag] * 12 + [do_click] * 4 + [do_double_click] * 4 +
            [do_right_click] * 2 + [do_key] * 4 + [do_typed] * 8 +
            [do_write] * 8 + [do_tool] * 8 + [do_undo] * 2 + [do_page] * 1 +
-           [do_clipboard] * 2 + [do_scale] * 2 + [do_recalc] * 2)
+           [do_clipboard] * 2 + [do_scale] * 2 + [do_recalc] * 2 +
+           [do_navigate] * 6)
 
 TRACE = len(sys.argv) > 3 and sys.argv[3] == "trace"
 for round_number in range(ROUNDS):
@@ -256,7 +278,7 @@ try:
 except Exception:
     FAILURES.append(("print", traceback.format_exc()))
 
-markups = sum(len(p.scene.markups()) for p in win.document.pages if p.scene)
+markups = sum(len(p.frame.markups()) for p in win.document.pages if p.frame)
 print(f"seed {SEED}: {ROUNDS} rounds, {len(win.document.pages)} pages, "
       f"{markups} markups, {len(FAILURES)} failure(s)")
 seen = set()
