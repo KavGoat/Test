@@ -857,6 +857,123 @@ class Sheet:
         return sheet
 
 
+class LookupTable:
+    """A named table a calculation can read values out of.
+
+    ``V := bolts(d, A, B)`` finds *d* in column A and gives back the value
+    beside it in column B. A value that falls between two rows is interpolated
+    straight between them, which is what a designer does by hand with a
+    capacity table anyway. Columns can be named by letter, by their header, or
+    by number.
+    """
+
+    def __init__(self, name: str, sheet: "Sheet", source: str = ""):
+        self.name = name
+        self.sheet = sheet
+        self.source = source or name
+
+    # -- calling -----------------------------------------------------------
+    def __call__(self, key, in_col=None, out_col=None, interpolate=True):
+        first = self._column(in_col, 0)
+        second = self._column(out_col, 1)
+        pairs = self._pairs(first, second)
+        if not pairs:
+            raise ValueError(f"{self.name} has nothing to look up in "
+                             f"{column_letter(first)} and {column_letter(second)}")
+        for entry, value in pairs:
+            if _same(entry, key):
+                return value
+        if not interpolate:
+            raise ValueError(f"{key} is not in {self.name}")
+        return self._between(pairs, key)
+
+    def lookup(self, key, in_col=None, out_col=None):
+        """Exact matches only — no interpolating between the rows."""
+        return self(key, in_col, out_col, interpolate=False)
+
+    # -- reading the sheet -------------------------------------------------
+    def _column(self, ref, default: int) -> int:
+        if ref is None:
+            return default
+        if isinstance(ref, bool):
+            raise ValueError(f"{ref} is not a column of {self.name}")
+        if isinstance(ref, (int, float)) and not isinstance(ref, bool):
+            index = int(ref) - 1
+            if 0 <= index < self.sheet.cols:
+                return index
+            raise ValueError(f"{self.name} has no column {int(ref)}")
+        text = str(getattr(ref, "name", ref)).strip()
+        if re.fullmatch(r"[A-Za-z]{1,3}", text):
+            index = column_index(text.upper())
+            if 0 <= index < self.sheet.cols:
+                return index
+        for col in range(self.sheet.cols):
+            header = self.sheet.header_name(col)
+            if header and header.lower() == text.lower():
+                return col
+        raise ValueError(f"{self.name} has no column called “{text}”")
+
+    def _pairs(self, first: int, second: int) -> list:
+        """The rows that have a value in both columns, in the sheet's order."""
+        start = 1 if self.sheet.header_row else 0
+        pairs = []
+        for row in range(start, self.sheet.rows):
+            key = self.sheet.value(row, first)
+            value = self.sheet.value(row, second)
+            if _blank(key) or _blank(value):
+                continue
+            if isinstance(key, CellError) or isinstance(value, CellError):
+                continue
+            pairs.append((key, value))
+        return pairs
+
+    def _between(self, pairs: list, key):
+        """Interpolate linearly between the two rows either side of *key*."""
+        try:
+            ordered = sorted(pairs, key=lambda pair: fnlib._cmp_key(pair[0]))
+        except TypeError:
+            raise ValueError(f"{self.name} cannot be read in order to find {key}")
+        below = above = None
+        for entry, value in ordered:
+            try:
+                if fnlib._cmp_key(entry) <= fnlib._cmp_key(key):
+                    below = (entry, value)
+                elif above is None:
+                    above = (entry, value)
+            except TypeError:
+                continue
+        if below is None or above is None:
+            edge = "below" if below is None else "above"
+            raise ValueError(f"{key} is {edge} everything in {self.name} — "
+                             "it would have to be extrapolated")
+        (low_key, low_value), (high_key, high_value) = below, above
+        span = high_key - low_key
+        try:
+            fraction = (key - low_key) / span
+            if hasattr(fraction, "magnitude"):
+                fraction = float(fraction.to("dimensionless").magnitude)
+            else:
+                fraction = float(fraction)
+        except Exception as exc:                      # noqa: BLE001
+            raise ValueError(f"{self.name}: {key} cannot be compared with the "
+                             f"values in that column") from exc
+        return low_value + (high_value - low_value) * fraction
+
+
+def _same(a, b) -> bool:
+    """Equal, allowing for units and for floating-point untidiness."""
+    try:
+        difference = a - b
+    except Exception:                                 # noqa: BLE001
+        return False
+    magnitude = getattr(difference, "magnitude", difference)
+    try:
+        scale = abs(getattr(a, "magnitude", a)) or 1.0
+        return abs(float(magnitude)) <= 1e-9 * float(scale)
+    except (TypeError, ValueError):
+        return a == b
+
+
 class CellRange(list):
     """The values in a rectangular range.
 

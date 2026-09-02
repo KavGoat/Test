@@ -1529,6 +1529,34 @@ class MainWindow(QMainWindow):
             self.view.commit_snapshot("Edit plot")
         self.refresh_selection()
 
+    def name_table(self, table) -> None:
+        """Name a table so calculations can look values up in it."""
+        name, accepted = QInputDialog.getText(
+            self, "Name this table",
+            "A calculation can then read it — for example, with the name "
+            "“bolts”:\n\n    V := bolts(d, A, B)\n\n"
+            "which finds d in column A and gives back the value beside it in "
+            "column B, interpolating between the rows either side when it has "
+            "to. Leave it empty to take the name away.",
+            text=table.table_name)
+        if not accepted:
+            return
+        name = name.strip()
+        if name and not name.isidentifier():
+            QMessageBox.warning(self, "Name this table",
+                                f"“{name}” cannot be used as a name — letters, "
+                                "digits and underscores only, not starting with "
+                                "a digit.")
+            return
+        self.view.begin_snapshot(self.view.involved_frames(table))
+        table.table_name = name
+        self.recalculate()
+        self.view.commit_snapshot("Name table")
+        self.refresh_lists()
+        self.status_hint.setText(
+            f"This table is now “{name}” — read it with {name}(value, A, B)"
+            if name else "This table no longer has a name")
+
     def prompt_dimension_text(self, item) -> None:
         """A dimension carries whatever text the author wants."""
         if not self.interactive_prompts:
@@ -2338,6 +2366,7 @@ class MainWindow(QMainWindow):
             if isinstance(item, TableItem):
                 menu.addAction("Edit table", lambda: self.view.activate_table(item))
                 menu.addAction("Named cells…", lambda: self.edit_named_cells(item))
+                menu.addAction("Name this table…", lambda: self.name_table(item))
                 menu.addSeparator()
                 menu.addAction("Insert row above", lambda: self._table_op(item, "row_above"))
                 menu.addAction("Insert row below", lambda: self._table_op(item, "row_below"))

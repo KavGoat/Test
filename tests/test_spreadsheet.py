@@ -228,3 +228,80 @@ def test_pasting_text_into_a_sheet_keeps_units_and_formulas():
     assert sheet.value(0, 1).to("mm").magnitude == pytest.approx(150)
     assert sheet.value(0, 2).to("mm").magnitude == pytest.approx(300)
     assert sheet.value(1, 2).to("mm").magnitude == pytest.approx(120)
+
+
+# ---------------------------------------------------------------------------
+# Named tables a calculation can look values up in
+# ---------------------------------------------------------------------------
+
+def _capacity_sheet():
+    from calcforge.core.engine import Workspace
+    from calcforge.core.spreadsheet import Sheet
+
+    sheet = Sheet(5, 3)
+    sheet.header_row = True
+    rows = [["d", "V", "N"],
+            ["12 mm", "29.4 kN", "2"],
+            ["16 mm", "54.3 kN", "3"],
+            ["20 mm", "84.8 kN", "4"]]
+    for r, row in enumerate(rows):
+        for c, value in enumerate(row):
+            sheet.set_raw(r, c, value)
+    sheet.recalculate(Workspace())
+    return sheet
+
+
+def test_a_named_table_gives_back_the_value_beside_the_one_asked_for():
+    from calcforge.core.spreadsheet import LookupTable
+    from calcforge.core.units import Q_
+
+    bolts = LookupTable("bolts", _capacity_sheet())
+    assert bolts(Q_(16, "mm"), "A", "B").to("kN").magnitude == pytest.approx(54.3)
+
+
+def test_a_value_between_two_rows_is_interpolated():
+    from calcforge.core.spreadsheet import LookupTable
+    from calcforge.core.units import Q_
+
+    bolts = LookupTable("bolts", _capacity_sheet())
+    # halfway between 12 mm (29.4 kN) and 16 mm (54.3 kN)
+    got = bolts(Q_(14, "mm"), "A", "B").to("kN").magnitude
+    assert got == pytest.approx((29.4 + 54.3) / 2)
+
+
+def test_columns_can_be_named_by_letter_by_header_or_by_number():
+    from calcforge.core.spreadsheet import LookupTable
+    from calcforge.core.units import Q_
+
+    bolts = LookupTable("bolts", _capacity_sheet())
+    wanted = bolts(Q_(20, "mm"), "A", "B")
+    assert bolts(Q_(20, "mm"), "d", "V") == wanted
+    assert bolts(Q_(20, "mm"), 1, 2) == wanted
+
+
+def test_looking_outside_the_table_says_so_rather_than_guessing():
+    from calcforge.core.spreadsheet import LookupTable
+    from calcforge.core.units import Q_
+
+    bolts = LookupTable("bolts", _capacity_sheet())
+    with pytest.raises(ValueError, match="above"):
+        bolts(Q_(30, "mm"), "A", "B")
+    with pytest.raises(ValueError, match="below"):
+        bolts(Q_(6, "mm"), "A", "B")
+
+
+def test_an_exact_match_is_never_interpolated():
+    from calcforge.core.spreadsheet import LookupTable
+    from calcforge.core.units import Q_
+
+    bolts = LookupTable("bolts", _capacity_sheet())
+    assert bolts(Q_(12, "mm"), "A", "C") == 2       # the row's own value, not 2.0-ish
+
+
+def test_a_column_that_is_not_there_is_reported():
+    from calcforge.core.spreadsheet import LookupTable
+    from calcforge.core.units import Q_
+
+    bolts = LookupTable("bolts", _capacity_sheet())
+    with pytest.raises(ValueError, match="no column"):
+        bolts(Q_(16, "mm"), "A", "Z")

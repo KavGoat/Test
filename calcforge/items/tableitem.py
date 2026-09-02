@@ -30,6 +30,8 @@ class TableItem(MarkupItem):
         super().__init__()
         self.sheet = Sheet(rows, cols)
         self.title = ""
+        # A name the document can look values up in: bolts(d, A, B).
+        self.table_name = ""
         self.show_chrome = False          # A/B/C and 1/2/3 gutters while editing
         self.publish_headers = False
         self.named_cells: dict[str, str] = {}
@@ -252,6 +254,8 @@ class TableItem(MarkupItem):
     def declared_names(self) -> set[str]:
         """Variable names this table publishes."""
         names = set(self.named_cells)
+        if self.table_name:
+            names.add(self.table_name)
         if self.publish_headers:
             for col in range(self.sheet.cols):
                 header = self.sheet.header_name(col)
@@ -278,6 +282,10 @@ class TableItem(MarkupItem):
     def publish(self, workspace) -> None:
         """Expose named cells (and optionally whole columns) as variables."""
         source = self.display_name()
+        if self.table_name:
+            from ..core.spreadsheet import LookupTable
+            workspace.define_table(self.table_name,
+                                   LookupTable(self.table_name, self.sheet, source))
         for name, ref in self.named_cells.items():
             value = self._value_for_ref(ref)
             if value is not None:
@@ -550,6 +558,7 @@ class TableItem(MarkupItem):
         data.update({
             "sheet": self.sheet.to_dict(),
             "title": self.title,
+            "table_name": self.table_name,
             "publish_headers": self.publish_headers,
             "named_cells": dict(self.named_cells),
             "show_names": self.show_names,
@@ -561,6 +570,7 @@ class TableItem(MarkupItem):
     def deserialize(self, data: dict) -> None:
         self.sheet = Sheet.from_dict(data.get("sheet", {}))
         self.title = data.get("title", "")
+        self.table_name = data.get("table_name", "")
         self.publish_headers = bool(data.get("publish_headers", False))
         self.named_cells = dict(data.get("named_cells", {}))
         self.show_names = bool(data.get("show_names", True))

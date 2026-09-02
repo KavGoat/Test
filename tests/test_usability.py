@@ -1896,3 +1896,92 @@ def test_the_plot_dialog_offers_the_names_you_have_defined(window):
         assert "L" in words and "w" in words
     finally:
         dialog.deleteLater()
+
+
+# ---------------------------------------------------------------------------
+# Looking a value up in a table from a calculation
+# ---------------------------------------------------------------------------
+
+def _capacity_table(window, name="bolts"):
+    window.select_tool("table")
+    drag(window.view, 60, 60, 400, 220)
+    table = window.view.active_table
+    table.sheet.resize(4, 3)
+    table.sheet.header_row = True
+    rows = [["d", "V", "N"],
+            ["12 mm", "29.4 kN", "2"],
+            ["16 mm", "54.3 kN", "3"],
+            ["20 mm", "84.8 kN", "4"]]
+    for r, row in enumerate(rows):
+        for c, value in enumerate(row):
+            table.set_cell(r, c, value)
+    table.table_name = name
+    window.view.deactivate_table()
+    window.recalculate()
+    return table
+
+
+def test_a_calculation_can_read_a_named_table(window):
+    _capacity_table(window)
+    block = _calc(window, "d := 16 mm\nV := bolts(d, A, B) =", at=(60, 400))
+    window.recalculate()
+    assert not block.statements[1].error
+    assert window.document.workspace.get("V").to("kN").magnitude == pytest.approx(54.3)
+
+
+def test_a_size_between_two_rows_is_interpolated(window):
+    _capacity_table(window)
+    _calc(window, "d := 14 mm\nV := bolts(d, A, B) =", at=(60, 400))
+    window.recalculate()
+    assert window.document.workspace.get("V").to("kN").magnitude == \
+        pytest.approx((29.4 + 54.3) / 2)
+
+
+def test_the_column_letters_are_columns_not_variables(window):
+    """A is a column of the table here, not an ampere and not somebody's area."""
+    _capacity_table(window)
+    _calc(window, "A := 500 mm^2\nd := 16 mm\nV := bolts(d, A, B) =", at=(60, 400))
+    window.recalculate()
+    assert window.document.workspace.get("V").to("kN").magnitude == pytest.approx(54.3)
+    assert window.document.workspace.get("A").to("mm^2").magnitude == pytest.approx(500)
+
+
+def test_column_headers_work_as_well_as_letters(window):
+    _capacity_table(window)
+    _calc(window, 'd := 20 mm\nV := bolts(d, "d", "V") =', at=(60, 400))
+    window.recalculate()
+    assert window.document.workspace.get("V").to("kN").magnitude == pytest.approx(84.8)
+
+
+def test_asking_outside_the_table_is_a_problem_not_a_number(window):
+    _capacity_table(window)
+    block = _calc(window, "d := 30 mm\nV := bolts(d, A, B) =", at=(60, 400))
+    window.recalculate()
+    assert "extrapolated" in block.statements[1].error
+
+
+def test_a_table_name_is_kept_when_the_document_is_saved(window, tmp_path):
+    from calcforge.core.document import Document
+    from calcforge.io import project as project_io
+
+    _capacity_table(window, "shear")
+    path = str(tmp_path / "job.cfx")
+    project_io.save_document(window.document, path)
+
+    reopened = Document()
+    project_io.load_document(reopened, path)
+    names = [item.get("table_name") for item in reopened.pages[0].to_dict()["items"]
+             if item.get("type") == "table"]
+    assert names == ["shear"]
+
+
+def test_naming_a_table_is_offered_on_its_menu(window):
+    table = _capacity_table(window)
+    labels = [a.text() for a in window.build_context_menu(table, table.pos()).actions()]
+    assert "Name this table…" in labels
+
+
+def test_a_named_table_shows_up_as_something_the_document_knows(window):
+    table = _capacity_table(window)
+    assert "bolts" in table.declared_names()
+    assert "bolts" in window.document.workspace.table_names()

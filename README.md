@@ -90,6 +90,7 @@ working stays a page of working rather than a wall of numbers.
 | `expr -> MPa` | Show this result in a particular unit. |
 | `M := w*L^2/8 =` | The trailing `=` prints the answer; without it the line is worked out quietly. |
 | `f(x) := w*x*(L-x)/2` | Defines a function; call it with `f(2 m)`. |
+| `V := bolts(d, A, B)` | Looks `d` up in column A of the table named `bolts` and gives back column B, interpolating between the rows either side. Name a table from its right-click menu. |
 | `sigma <= f_y` | A check — the result reads `true` or `false`. |
 | `# note` | A comment, at the start of a line or after an expression. |
 

@@ -299,6 +299,29 @@ class _OffsetUnitLiterals(ast.NodeTransformer):
         return node
 
 
+class _ColumnLetters(ast.NodeTransformer):
+    """Read A and B in ``bolts(d, A, B)`` as columns, not as variables.
+
+    Only inside a call to a table that actually exists, and only for arguments
+    that are bare one-to-three-letter capitals. Anywhere else A is whatever the
+    author defined, or an ampere.
+    """
+
+    def __init__(self, tables: set):
+        self.tables = set(tables)
+
+    def visit_Call(self, node: ast.Call) -> ast.AST:
+        self.generic_visit(node)
+        if isinstance(node.func, ast.Name) and node.func.id in self.tables:
+            node.args = [
+                ast.Constant(value=argument.id)
+                if (index > 0 and isinstance(argument, ast.Name)
+                    and re.fullmatch(r"[A-Z]{1,3}", argument.id))
+                else argument
+                for index, argument in enumerate(node.args)]
+        return node
+
+
 def compile_expression(source: str, pre_transformers: tuple = ()
                        ) -> tuple[Any, ast.Expression]:
     """Transform, parse, validate and compile *source*.
@@ -498,6 +521,8 @@ class Workspace:
     def __init__(self):
         self.variables: dict[str, VariableInfo] = {}
         self.functions: dict[str, UserFunction] = {}
+        # Named tables a calculation can look values up in.
+        self.tables: dict[str, Any] = {}
         self._base: dict[str, Any] = {}
         self._counter = 0
         self._unit_cache: dict[str, Any] = {}
@@ -527,6 +552,7 @@ class Workspace:
         scope = Workspace.__new__(Workspace)
         scope.variables = dict(self.variables)
         scope.functions = dict(self.functions)
+        scope.tables = dict(self.tables)
         scope._base = self._base
         scope._counter = self._counter
         scope._unit_cache = self._unit_cache
@@ -557,6 +583,7 @@ class Workspace:
         ns = dict(self._base)
         ns.update({name: info.value for name, info in self.variables.items()})
         ns.update(self.functions)
+        ns.update(self.tables)
         return ns
 
     def resolve_units(self, code, namespace: dict[str, Any]) -> None:
@@ -583,6 +610,7 @@ class Workspace:
     def clear(self) -> None:
         self.variables.clear()
         self.functions.clear()
+        self.tables.clear()
         self.pass_defined = set()
         self._counter = 0
 
@@ -594,6 +622,21 @@ class Workspace:
         self._counter += 1
         self.variables[name] = VariableInfo(name, value, source, expression, self._counter)
         self.pass_defined.add(name)
+
+    def define_table(self, name: str, table) -> None:
+        """Register a named table, so a calculation can look values up in it."""
+        if not name:
+            return
+        self.tables[name] = table
+        self.document_names.add(name)
+        self.pass_defined.add(name)
+
+    def table_names(self) -> set[str]:
+        return set(self.tables)
+
+    def expression_transformers(self) -> tuple:
+        """Surface syntax that depends on what this document defines."""
+        return (_ColumnLetters(self.tables),) if self.tables else ()
 
     def define_function(self, name: str, params: list[str], source: str) -> UserFunction:
         fn = UserFunction(name, params, source, self)
@@ -827,7 +870,8 @@ def evaluate_statement(statement: Statement, workspace: Workspace, source: str =
             statement.result = fn
             return statement
 
-        code, tree = compile_expression(statement.expression)
+        code, tree = compile_expression(statement.expression,
+                                        workspace.expression_transformers())
         statement.tree = tree
         namespace = workspace.namespace()
         workspace.resolve_units(code, namespace)
