@@ -147,6 +147,7 @@ class PageFrame(QGraphicsObject):
         if not self.print_mode:
             self._paint_grid(painter, rect)
             self._paint_margins(painter)
+            self._paint_scale_tag(painter)
         self._paint_running_text(painter)
         if not self.print_mode:
             # Last, so nothing drawn on the page can paint over its own edge.
@@ -249,6 +250,31 @@ class PageFrame(QGraphicsObject):
         else:
             x = band.left()
         return QRectF(x, band.center().y() - height / 2, width, height)
+
+    def _paint_scale_tag(self, painter: QPainter) -> None:
+        """Say what scale this page is at, in its corner.
+
+        On screen only. Which scale a drawing is at decides what every
+        measurement on it means, and looking it up in the status bar is one
+        place too far away.
+        """
+        scale = self.page.scale
+        text = f"Scale {scale.label}" if scale.is_calibrated() else "No scale"
+        from ..core.typography import page_font
+        painter.save()
+        painter.setFont(page_font("", 7.0))
+        metrics = painter.fontMetrics()
+        width = metrics.horizontalAdvance(text) + 12
+        height = metrics.height() + 4
+        box = QRectF(6, self.page.height_pt - height - 6, width, height)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(255, 255, 255, 210) if scale.is_calibrated()
+                         else QColor(255, 245, 235, 210))
+        painter.drawRoundedRect(box, 3, 3)
+        painter.setPen(QPen(QColor(90, 96, 106) if scale.is_calibrated()
+                            else QColor(170, 110, 60)))
+        painter.drawText(box, Qt.AlignCenter, text)
+        painter.restore()
 
     def _paint_running_text(self, painter: QPainter) -> None:
         settings = self.document.settings

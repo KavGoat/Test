@@ -1533,3 +1533,77 @@ def test_an_ellipse_can_be_set_out_to_an_exact_size(window):
     assert oval.set_real_size("50 mm", "30 mm", window.current_page())
     oval.refresh(page=window.current_page())
     assert "50" in oval.size_text and "30" in oval.size_text
+
+
+# ---------------------------------------------------------------------------
+# Setting the page scale
+# ---------------------------------------------------------------------------
+
+def test_the_scale_dialog_offers_picking_two_points_from_a_standing_start(window):
+    from calcforge.ui import dialogs
+
+    from PySide6.QtWidgets import QPushButton
+
+    dialog = dialogs.ScaleDialog(window.current_page().scale, None, window)
+    try:
+        picks = [b for b in dialog.findChildren(QPushButton)
+                 if "pick two points" in b.text().lower()]
+        assert picks and picks[0].isEnabled()
+    finally:
+        dialog.deleteLater()
+
+
+def test_choosing_to_pick_points_starts_the_calibrate_tool(window, monkeypatch):
+    from calcforge.ui import dialogs
+
+    monkeypatch.setattr(dialogs.ScaleDialog, "exec",
+                        lambda self: dialogs.ScaleDialog.PICK)
+    window.calibrate_scale(None)
+    assert window.view.tool_key == "calibrate"
+    assert "click one end" in window.status_hint.text().lower()
+
+
+def test_two_clicks_and_a_length_set_the_scale(window, monkeypatch):
+    from calcforge.ui import dialogs
+
+    asked = {}
+
+    class Stub(dialogs.ScaleDialog):
+        def exec(self):
+            asked["measured"] = self.measured_pt
+            self.known.setText("10 m")
+            return dialogs.QDialog.Accepted
+
+    monkeypatch.setattr(dialogs, "ScaleDialog", Stub)
+    window.select_tool("calibrate")
+    click(window.view, 100, 300)
+    click(window.view, 300, 300)
+
+    assert asked["measured"] == pytest.approx(200, abs=2)
+    scale = window.current_page().scale
+    assert scale.is_calibrated()
+    assert scale.length(200.0).to("m").magnitude == pytest.approx(10, rel=1e-3)
+
+
+def test_a_calibration_line_is_not_left_on_the_page(window, monkeypatch):
+    from calcforge.ui import dialogs
+    monkeypatch.setattr(dialogs.ScaleDialog, "exec",
+                        lambda self: dialogs.QDialog.Rejected)
+    window.select_tool("calibrate")
+    drag(window.view, 100, 300, 300, 300)
+    assert markups(window) == []
+
+
+def test_the_page_says_what_scale_it_is_at(window):
+    frame = window.document.pages[0].frame
+    before = frame.render_image(dpi=48.0, for_print=False)
+    window.current_page().scale = window.current_page().scale.__class__.from_ratio(50)
+    after = frame.render_image(dpi=48.0, for_print=False)
+    assert before != after
+    # and it is chrome, not something that prints
+    assert frame.render_image(dpi=48.0, for_print=True) != after
+
+
+def test_the_page_menu_can_set_the_scale(window):
+    labels = [action.text() for action in window.page_menu(0).actions()]
+    assert "Page scale…" in labels

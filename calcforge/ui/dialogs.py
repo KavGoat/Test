@@ -101,10 +101,18 @@ class PageSetupDialog(QDialog):
 
 
 class ScaleDialog(QDialog):
-    """Set the drawing scale, either as a ratio or from a measured distance."""
+    """Set the drawing scale: from a standard ratio, or from a measured distance.
+
+    Two ways in, and both have to be reachable from a standing start. Picking
+    two points on the drawing is a button here rather than a radio that can
+    only be chosen once a measurement already exists — which is what it was,
+    and it read as broken.
+    """
 
     RATIOS = ["1:1", "1:5", "1:10", "1:20", "1:25", "1:50", "1:100", "1:200",
               "1:250", "1:500", "1:1000", "1:1250", "1:2500"]
+
+    PICK = QDialog.Accepted + 10        # "let me point at two things instead"
 
     def __init__(self, scale: PageScale, measured_pt: Optional[float] = None, parent=None):
         super().__init__(parent)
@@ -113,32 +121,35 @@ class ScaleDialog(QDialog):
         layout = QVBoxLayout(self)
 
         if measured_pt:
-            note = QLabel(f"You drew a line {measured_pt:.1f} pt long on the page.\n"
-                          "Type the real-world length it represents.")
+            box = QGroupBox("From the distance you drew")
+            box.setToolTip("Clear this box to use the ratio below instead")
+            form = QFormLayout(box)
+            note = QLabel(f"You drew a line {measured_pt:.1f} pt long on the page. "
+                          "Type the real-world length it stands for.")
             note.setWordWrap(True)
-            layout.addWidget(note)
+            form.addRow(note)
+            self.known = QLineEdit("5 m")
+            self.known.setPlaceholderText("5 m, 12 ft, 3600 mm…")
+            form.addRow("It represents", self.known)
+            layout.addWidget(box)
+        else:
+            self.known = QLineEdit("5 m")
+            self.known.hide()
+            pick = QPushButton("Calibrate — pick two points on the drawing…")
+            pick.setToolTip("Click one end of something you know the length of, "
+                            "then the other, then type that length")
+            pick.clicked.connect(lambda: self.done(self.PICK))
+            layout.addWidget(pick)
 
-        self.by_measure = QRadioButton("From the distance I just drew")
-        self.by_ratio = QRadioButton("From a standard ratio")
-        self.by_measure.setChecked(bool(measured_pt))
-        self.by_ratio.setChecked(not measured_pt)
-        self.by_measure.setEnabled(bool(measured_pt))
-        layout.addWidget(self.by_measure)
-
-        form = QFormLayout()
-        self.known = QLineEdit("5 m")
-        self.known.setEnabled(bool(measured_pt))
-        form.addRow("Represents", self.known)
-        layout.addLayout(form)
-
-        layout.addWidget(self.by_ratio)
-        ratio_form = QFormLayout()
+        ratio_box = QGroupBox("…or from a standard ratio" if measured_pt
+                              else "From a standard ratio")
+        ratio_form = QFormLayout(ratio_box)
         self.ratio = QComboBox()
         self.ratio.setEditable(True)
         self.ratio.addItems(self.RATIOS)
         self.ratio.setCurrentText(scale.label if scale.label in self.RATIOS else "1:100")
         ratio_form.addRow("Ratio", self.ratio)
-        layout.addLayout(ratio_form)
+        layout.addWidget(ratio_box)
 
         units = QFormLayout()
         self.length_unit = UnitCombo(scale.display_unit)
@@ -152,11 +163,10 @@ class ScaleDialog(QDialog):
         layout.addLayout(units)
         layout.addWidget(_buttons(self))
 
-        self.by_measure.toggled.connect(self.known.setEnabled)
-        self.by_ratio.toggled.connect(self.ratio.setEnabled)
-
     def result_scale(self) -> Optional[PageScale]:
-        if self.by_measure.isChecked() and self.measured_pt:
+        # A measured distance wins when one was drawn and named; empty the box
+        # and the ratio below is used instead.
+        if self.measured_pt and self.known.text().strip():
             if parse_unit(self.known.text()) is None:
                 QMessageBox.warning(self, "Page scale",
                                     "That length could not be read. Try something like “5 m”.")

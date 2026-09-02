@@ -1139,6 +1139,8 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
         menu.addAction("Page setup…", lambda: (self.go_to_page(index),
                                                self.page_setup()))
+        menu.addAction("Page scale…", lambda: (self.go_to_page(index),
+                                               self.calibrate_dialog()))
         delete = menu.addAction("Delete page", lambda: self.delete_page(index))
         delete.setEnabled(len(self.document.pages) > 1)
         return menu
@@ -1149,7 +1151,11 @@ class MainWindow(QMainWindow):
     def calibrate_scale(self, measured_pt: Optional[float] = None) -> None:
         """Set the page scale, from a drawn distance or straight from a ratio."""
         dialog = dialogs.ScaleDialog(self.current_page().scale, measured_pt, self)
-        if dialog.exec() != dialogs.QDialog.Accepted:
+        answer = dialog.exec()
+        if answer == dialogs.ScaleDialog.PICK:
+            self.start_calibrating()
+            return
+        if answer != dialogs.QDialog.Accepted:
             return
         scale = dialog.result_scale()
         if scale is None:
@@ -1159,6 +1165,13 @@ class MainWindow(QMainWindow):
 
     def calibrate_dialog(self) -> None:
         self.calibrate_scale(None)
+
+    def start_calibrating(self) -> None:
+        """Hand over to the calibrate tool: two clicks, then the length."""
+        self.select_tool("calibrate")
+        self.status_hint.setText(
+            "Calibrate: click one end of something you know the length of, "
+            "then the other — then type that length")
 
     def apply_scale_change(self) -> None:
         """Everything that has to catch up when a page's scale changes.

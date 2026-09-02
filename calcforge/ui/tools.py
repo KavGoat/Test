@@ -126,7 +126,8 @@ TOOLS: list[Tool] = [
     Tool("count", "Count", "count", CLICK, "Measure", "",
          "Drop counting markers", factory=lambda: CountItem()),
     Tool("calibrate", "Calibrate scale", "calibrate", DRAG, "Measure", "",
-         "Set the page scale from a known distance", max_points=2,
+         "Click each end of something you know the length of, then type that "
+         "length — the page scale follows", max_points=2,
          factory=_measure(measure_module.CALIBRATE)),
 ]
 
