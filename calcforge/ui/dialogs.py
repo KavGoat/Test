@@ -291,6 +291,36 @@ class PdfImportDialog(QDialog):
         return self.path, indices, self.fit.currentData(), self.dpi.value()
 
 
+class TableSizeDialog(QDialog):
+    """How many rows and columns a new table starts with."""
+
+    def __init__(self, rows: int, cols: int, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("New table")
+        layout = QVBoxLayout(self)
+        note = QLabel("How big is this table? Rows and columns can be added "
+                      "or taken away later from its right-click menu.")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        form = QFormLayout()
+        self.rows = QSpinBox()
+        self.rows.setRange(1, 500)
+        self.rows.setValue(rows)
+        form.addRow("Rows", self.rows)
+        self.cols = QSpinBox()
+        self.cols.setRange(1, 100)
+        self.cols.setValue(cols)
+        form.addRow("Columns", self.cols)
+        self.header = QCheckBox("First row is a header")
+        form.addRow(self.header)
+        layout.addLayout(form)
+        layout.addWidget(_buttons(self))
+        self.rows.setFocus()
+
+    def values(self) -> tuple[int, int, bool]:
+        return self.rows.value(), self.cols.value(), self.header.isChecked()
+
+
 class DocumentPropertiesDialog(QDialog):
     """Title block information, running headers and calculation defaults."""
 

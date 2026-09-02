@@ -1058,6 +1058,8 @@ class PageView(QGraphicsView):
         note_scale = False
         if isinstance(draft, RectItem) and draft.kind in SIZED_SHAPES:
             self.window.prompt_rectangle_size(draft)
+        elif isinstance(draft, TableItem):
+            self.window.prompt_table_size(draft)
         elif isinstance(draft, MeasureItem):
             if draft.kind == DIMENSION:
                 self.window.prompt_dimension_text(draft)

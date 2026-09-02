@@ -1607,3 +1607,120 @@ def test_the_page_says_what_scale_it_is_at(window):
 def test_the_page_menu_can_set_the_scale(window):
     labels = [action.text() for action in window.page_menu(0).actions()]
     assert "Page scale…" in labels
+
+
+# ---------------------------------------------------------------------------
+# Turning a page and changing its paper
+# ---------------------------------------------------------------------------
+
+def test_a_page_can_be_turned_a_quarter_turn(window):
+    page = window.current_page()
+    width, height = page.setup.width_mm, page.setup.height_mm
+    window.rotate_page(0, clockwise=True)
+    assert page.setup.width_mm == pytest.approx(height)
+    assert page.setup.height_mm == pytest.approx(width)
+    assert page.setup.orientation == "landscape"
+
+
+def test_turning_a_page_turns_what_is_drawn_on_it(window):
+    window.select_tool("rect")
+    drag(window.view, 80, 120, 180, 200)
+    box = markups(window)[0]
+    height = window.current_page().setup.height_pt
+    before = box.pos()
+
+    window.rotate_page(0, clockwise=True)
+    after = box.pos()
+    assert after.x() == pytest.approx(height - before.y(), abs=0.5)
+    assert after.y() == pytest.approx(before.x(), abs=0.5)
+    assert box.rotation() % 360 == pytest.approx(90)
+
+
+def test_turning_a_page_turns_its_background_sheet(window, tmp_path, monkeypatch):
+    from PySide6.QtGui import QImage
+    from calcforge.io import pdfio
+
+    document = window.document
+    photo = QImage(200, 100, QImage.Format_ARGB32)
+    photo.fill(0xFF3366AA)
+    path = str(tmp_path / "sheet.png")
+    photo.save(path)
+    pdfio.import_image(document, path, at=1)
+    window.rebuild_scenes()
+    page = document.pages[1]
+    before = page.background_key
+
+    window.rotate_page(1, clockwise=True)
+    assert page.background_key != before
+    turned = QImage()
+    turned.loadFromData(document.asset(page.background_key))
+    assert (turned.width(), turned.height()) == (100, 200)
+
+
+def test_turning_a_page_back_and_forth_leaves_it_as_it_was(window):
+    page = window.current_page()
+    before = (page.setup.width_mm, page.setup.height_mm, page.setup.margin_left,
+              page.setup.margin_top, page.setup.margin_right, page.setup.margin_bottom)
+    window.rotate_page(0, clockwise=True)
+    window.rotate_page(0, clockwise=False)
+    after = (page.setup.width_mm, page.setup.height_mm, page.setup.margin_left,
+             page.setup.margin_top, page.setup.margin_right, page.setup.margin_bottom)
+    assert after == pytest.approx(before)
+
+
+def test_rotating_can_be_undone(window):
+    window.rotate_page(0, clockwise=True)
+    assert window.current_page().setup.orientation == "landscape"
+    window.undo_stack.undo()
+    assert window.document.pages[0].setup.orientation == "portrait"
+
+
+def test_one_page_can_be_put_on_a_different_sheet(window):
+    window.load_sample()
+    window.set_page_size(1, "A3")
+    assert window.document.pages[1].setup.size_name == "A3"
+    assert window.document.pages[0].setup.size_name == "A4"
+
+
+def test_the_page_menu_offers_rotating_and_paper_sizes(window):
+    menu = window.page_menu(0)
+    labels = [action.text() for action in menu.actions()]
+    assert "Rotate clockwise" in labels and "Rotate anticlockwise" in labels
+    paper = next(action.menu() for action in menu.actions()
+                 if action.text() == "Paper size")
+    sizes = [action.text() for action in paper.actions()]
+    assert "A4" in sizes and "A3" in sizes
+    assert next(a for a in paper.actions() if a.text() == "A4").isChecked()
+
+
+def test_a_new_table_asks_how_many_rows_and_columns(window, monkeypatch):
+    from calcforge.ui import dialogs
+
+    window.interactive_prompts = True
+    monkeypatch.setattr(dialogs.TableSizeDialog, "exec",
+                        lambda self: dialogs.QDialog.Accepted)
+    monkeypatch.setattr(dialogs.TableSizeDialog, "values",
+                        lambda self: (9, 3, True))
+    try:
+        window.select_tool("table")
+        drag(window.view, 80, 80, 420, 240)
+    finally:
+        window.interactive_prompts = False
+    table = window.view.active_table
+    assert (table.sheet.rows, table.sheet.cols) == (9, 3)
+    assert table.sheet.header_row
+
+
+def test_saying_no_to_the_size_leaves_the_default(window, monkeypatch):
+    from calcforge.ui import dialogs
+
+    window.interactive_prompts = True
+    monkeypatch.setattr(dialogs.TableSizeDialog, "exec",
+                        lambda self: dialogs.QDialog.Rejected)
+    try:
+        window.select_tool("table")
+        drag(window.view, 80, 300, 420, 460)
+    finally:
+        window.interactive_prompts = False
+    table = window.view.active_table
+    assert (table.sheet.rows, table.sheet.cols) == (6, 4)

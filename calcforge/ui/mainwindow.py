@@ -5,10 +5,10 @@ import json
 import os
 from typing import Optional
 
-from PySide6.QtCore import (QEvent, QPointF, QRectF, QSettings, QSize, Qt,
-                            QTimer)
-from PySide6.QtGui import (QAction, QActionGroup, QColor, QFont, QKeySequence,
-                           QUndoStack)
+from PySide6.QtCore import (QBuffer, QEvent, QIODevice, QPointF, QRectF,
+                            QSettings, QSize, Qt, QTimer)
+from PySide6.QtGui import (QAction, QActionGroup, QColor, QFont, QImage,
+                           QKeySequence, QTransform, QUndoStack)
 from PySide6.QtPrintSupport import QPrintDialog, QPrintPreviewDialog, QPrinter
 from PySide6.QtWidgets import (QApplication, QComboBox, QDockWidget, QDoubleSpinBox,
                                QFileDialog, QHBoxLayout, QInputDialog, QLabel,
@@ -16,7 +16,8 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QDockWidget, QDoubleSpin
                                QSpinBox, QStatusBar, QToolBar, QToolButton,
                                QVBoxLayout, QWidget)
 
-from ..core.document import MM_TO_PT, PT_TO_MM, Document, Page, PageSetup
+from ..core.document import (LANDSCAPE, MM_TO_PT, PAGE_SIZES, PORTRAIT,
+                             PT_TO_MM, Document, Page, PageSetup)
 from ..core.engine import name_problem
 from ..core.spreadsheet import (MAX_COLS, MAX_ROWS, looks_like_a_grid,
                                 parse_clipboard_grid)
@@ -1113,6 +1114,85 @@ class MainWindow(QMainWindow):
         self.view.fit_page()
         self.status_hint.setText(f"Inserted {os.path.basename(path)} as a page")
 
+    def rotate_page(self, index: Optional[int] = None, clockwise: bool = True) -> None:
+        """Turn a page a quarter turn, and everything that is drawn on it.
+
+        The paper, its background sheet and the markups all turn together —
+        rotating only the paper would leave the drawing stretched across the
+        wrong shape and the markups off the edge.
+        """
+        which = self.page_index(index)
+        page = self.document.pages[which]
+        setup = page.setup
+        width, height = setup.width_pt, setup.height_pt
+        rotated_background = self._rotate_background(page, clockwise)
+
+        def mutate():
+            setup.width_mm, setup.height_mm = setup.height_mm, setup.width_mm
+            if setup.orientation == LANDSCAPE:
+                setup.orientation = PORTRAIT
+            else:
+                setup.orientation = LANDSCAPE
+            if clockwise:
+                (setup.margin_left, setup.margin_top,
+                 setup.margin_right, setup.margin_bottom) = (
+                    setup.margin_bottom, setup.margin_left,
+                    setup.margin_top, setup.margin_right)
+            else:
+                (setup.margin_left, setup.margin_top,
+                 setup.margin_right, setup.margin_bottom) = (
+                    setup.margin_top, setup.margin_right,
+                    setup.margin_bottom, setup.margin_left)
+            if rotated_background:
+                page.background_key = rotated_background
+            frame = page.frame
+            if frame is not None:
+                frame._background = None
+                for item in frame.markups():
+                    position = item.pos()
+                    if clockwise:
+                        item.setPos(height - position.y(), position.x())
+                        item.setRotation(item.rotation() + 90)
+                    else:
+                        item.setPos(position.y(), width - position.x())
+                        item.setRotation(item.rotation() - 90)
+            self.current_index = which
+        self._structural_change("Rotate page", mutate)
+        self.view.fit_page()
+
+    def _rotate_background(self, page, clockwise: bool) -> str:
+        """A quarter-turned copy of the page's background sheet, if it has one."""
+        data = self.document.asset(page.background_key)
+        if not data:
+            return ""
+        image = QImage()
+        if not image.loadFromData(data) or image.isNull():
+            return ""
+        transform = QTransform().rotate(90 if clockwise else -90)
+        turned = image.transformed(transform, Qt.SmoothTransformation)
+        buffer = QBuffer()
+        buffer.open(QIODevice.WriteOnly)
+        if not turned.save(buffer, "PNG"):
+            return ""
+        return self.document.add_asset(bytes(buffer.data()), "png")
+
+    def set_page_size(self, index: Optional[int] = None, name: str = "A4") -> None:
+        """Put one page onto a different sheet of paper, keeping its way up."""
+        which = self.page_index(index)
+        page = self.document.pages[which]
+        orientation = page.setup.orientation
+
+        def mutate():
+            setup = PageSetup.from_name(name, orientation)
+            setup.margin_left = page.setup.margin_left
+            setup.margin_top = page.setup.margin_top
+            setup.margin_right = page.setup.margin_right
+            setup.margin_bottom = page.setup.margin_bottom
+            page.setup = setup
+            self.current_index = which
+        self._structural_change(f"Page size {name}", mutate)
+        self.view.fit_page()
+
     def page_menu(self, index: int) -> QMenu:
         """Everything you can do to one page, for its right-click menu."""
         index = self.page_index(index)
@@ -1137,6 +1217,14 @@ class MainWindow(QMainWindow):
         down = menu.addAction("Move down", lambda: self.move_page(index, index + 1))
         down.setEnabled(index < len(self.document.pages) - 1)
         menu.addSeparator()
+        menu.addSeparator()
+        menu.addAction("Rotate clockwise", lambda: self.rotate_page(index, True))
+        menu.addAction("Rotate anticlockwise", lambda: self.rotate_page(index, False))
+        paper = menu.addMenu("Paper size")
+        for name in PAGE_SIZES:
+            entry = paper.addAction(name, lambda n=name: self.set_page_size(index, n))
+            entry.setCheckable(True)
+            entry.setChecked(self.document.pages[index].setup.size_name == name)
         menu.addAction("Page setup…", lambda: (self.go_to_page(index),
                                                self.page_setup()))
         menu.addAction("Page scale…", lambda: (self.go_to_page(index),
@@ -1405,6 +1493,23 @@ class MainWindow(QMainWindow):
         if not item.set_real_size(width, height, page):
             self.status_hint.setText("Could not read those dimensions — "
                                      "try something like “3 m”.")
+
+    def prompt_table_size(self, table) -> None:
+        """Ask how big a table just drawn should be.
+
+        Dragging out a box says where the table goes, not how many cells it
+        holds; every other editor asks, so this one does too.
+        """
+        if not self.interactive_prompts:
+            return
+        dialog = dialogs.TableSizeDialog(table.sheet.rows, table.sheet.cols, self)
+        if dialog.exec() != dialogs.QDialog.Accepted:
+            return
+        rows, cols, header = dialog.values()
+        table.prepareGeometryChange()
+        table.sheet.resize(rows, cols)
+        table.sheet.header_row = header
+        table.refresh(self.document.workspace, self.current_page())
 
     def prompt_dimension_text(self, item) -> None:
         """A dimension carries whatever text the author wants."""
