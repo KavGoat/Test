@@ -102,6 +102,13 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
         painter.drawPolygon(QPolygonF([QPointF(7, 4), QPointF(7, 18), QPointF(10.6, 14.6),
                                        QPointF(13, 19.5), QPointF(15, 18.6),
                                        QPointF(12.7, 13.8), QPointF(17, 13.2)]))
+    elif name == "snapshot":
+        # A marquee with a corner lifted out of it.
+        _pen(painter, INK, 1.3, Qt.DashLine)
+        painter.drawRect(QRectF(3.5, 5.5, 12, 11))
+        _pen(painter, ACCENT, 1.6)
+        painter.setBrush(QBrush(QColor(255, 255, 255, 0)))
+        painter.drawRect(QRectF(9.5, 9.5, 11, 9))
     elif name == "pan":
         _pen(painter, INK, 1.5)
         path = QPainterPath(QPointF(8, 14))

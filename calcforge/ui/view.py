@@ -26,7 +26,8 @@ from ..items.shapes import PolyItem, RectItem
 from ..items.tableitem import TableItem
 from ..items.text import CalloutItem, NoteItem, StampItem, TextItem, _TextBase
 from .commands import PageEditCommand
-from .tools import ANCHOR, CLICK, DRAG, FREE, NONE, POLY, TOOL_MAP, Tool
+from .tools import (ANCHOR, CLICK, DRAG, FREE, NONE, POLY, SNAPSHOT,
+                    TOOL_MAP, Tool)
 
 MIN_ZOOM = 0.08
 MAX_ZOOM = 16.0
@@ -1241,6 +1242,20 @@ class PageView(QGraphicsView):
             self._pending_anchor = None
             self.set_insert_point(None)
 
+        if tool.mode == SNAPSHOT:
+            # The marquee is not a markup: it says which part of the page to
+            # take a copy of, and then it goes.
+            region = draft.mapRectToParent(draft.local_rect().normalized())
+            frame = draft.parentItem()
+            detach(draft)
+            self.forget_snapshot()
+            # The tool is put away first: finishing it writes its own message
+            # into the status bar, which would wipe out what the snapshot has
+            # to say about what it took.
+            self.finish_tool()
+            self.window.take_snapshot(frame, region)
+            return
+
         # Tools that ask a question do it now, while the markup is still fresh.
         note_scale = False
         if isinstance(draft, RectItem) and draft.kind in SIZED_SHAPES:
@@ -1304,6 +1319,10 @@ class PageView(QGraphicsView):
         self.finish_tool()
         if isinstance(draft, MeasureItem) and draft.kind != DIMENSION:
             self.window.note_missing_scale()
+
+    def forget_snapshot(self) -> None:
+        """Drop the undo snapshot taken for a gesture that changes nothing."""
+        self._snapshot = []
 
     def cancel_draft(self) -> None:
         if self._draft is not None:

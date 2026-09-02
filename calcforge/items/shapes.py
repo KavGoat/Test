@@ -47,7 +47,7 @@ class RectItem(MarkupItem):
 
     TYPE = "rect"
     NAME = "Rectangle"
-    KINDS = ("rect", "ellipse", "cloud", "highlight", "redact")
+    KINDS = ("rect", "ellipse", "cloud", "highlight", "redact", "marquee")
 
     def __init__(self, kind: str = "rect", rect: Optional[QRectF] = None):
         super().__init__()
@@ -68,11 +68,16 @@ class RectItem(MarkupItem):
                                blend="multiply", width=0.0)
         elif kind == "redact":
             self.style = Style(stroke="#000000", fill="#000000", fill_opacity=1.0, width=0.8)
+        elif kind == "marquee":
+            # The snapshot region: drawn while dragging, never kept.
+            self.style = Style(stroke="#1971c2", fill="#1971c2", fill_opacity=0.10,
+                               width=1.0, line_style="dash")
 
     @property
     def NAME_FOR_KIND(self) -> str:
         return {"rect": "Rectangle", "ellipse": "Ellipse", "cloud": "Cloud",
-                "highlight": "Highlight", "redact": "Redaction"}.get(self.kind, "Shape")
+                "highlight": "Highlight", "redact": "Redaction",
+                "marquee": "Snapshot region"}.get(self.kind, "Shape")
 
     def display_name(self) -> str:
         return self.label or self.NAME_FOR_KIND

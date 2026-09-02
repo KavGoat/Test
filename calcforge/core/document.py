@@ -362,6 +362,17 @@ class Document:
     def asset(self, key: Optional[str]) -> Optional[bytes]:
         return self.assets.get(key) if key else None
 
+    def put_asset(self, key: str, data: bytes) -> str:
+        """Store an image under a key it already has.
+
+        Pasting a snapshot into another document brings its images along, and
+        they have to keep the keys the pasted items refer to.
+        """
+        if key and data:
+            self.assets[key] = data
+            self.modified = True
+        return key
+
     def prune_assets(self, used: set[str]) -> None:
         for key in list(self.assets):
             if key not in used:

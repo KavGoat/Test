@@ -2487,3 +2487,91 @@ def test_bookmarks_are_saved_with_the_document(window, tmp_path):
 def test_there_is_a_key_for_bookmarking_where_you_are(window):
     from PySide6.QtGui import QKeySequence
     assert window.act_bookmark.shortcut() == QKeySequence("Ctrl+B")
+
+
+# ---------------------------------------------------------------------------
+# Snapshot
+# ---------------------------------------------------------------------------
+
+def test_a_snapshot_copies_what_is_in_the_region_as_itself(window):
+    from calcforge.items.mathitem import MathItem
+
+    _calc(window, "L := 6 m\nA := L*L =", at=(90, 110))
+    window.select_tool("rect")
+    drag(window.view, 100, 200, 220, 260)
+
+    window.select_tool("snapshot")
+    drag(window.view, 60, 80, 400, 320)
+
+    payload = window._clipboard
+    kinds = [entry["type"] for entry in payload]
+    assert "math" in kinds and "rect" in kinds
+    # and the marquee itself is not left on the page
+    assert not [i for i in markups(window) if getattr(i, "kind", "") == "marquee"]
+    assert "copied" in window.status_hint.text()
+
+
+def test_a_snapshot_pastes_back_as_real_markups(window):
+    from calcforge.items.mathitem import MathItem
+
+    _calc(window, "b := 300 mm =", at=(90, 110))
+    window.select_tool("snapshot")
+    drag(window.view, 60, 80, 400, 200)
+    before = len(markups(window))
+
+    window.select_tool("select")
+    window.view.set_insert_point(QPointF(80, 500))
+    window.paste_items()
+
+    after = markups(window)
+    assert len(after) == before + 1
+    pasted = [i for i in after if isinstance(i, MathItem) and i.pos().y() > 400]
+    assert len(pasted) == 1
+    assert "b :=" in pasted[0].source            # the calculation, not a picture
+
+
+def test_a_snapshot_of_nothing_says_so(window):
+    window.select_tool("snapshot")
+    drag(window.view, 60, 500, 200, 560)
+    assert "Nothing in that region" in window.status_hint.text()
+
+
+def test_a_snapshot_takes_the_drawing_underneath_with_it(window, tmp_path, monkeypatch):
+    from PySide6.QtGui import QImage
+    from calcforge.io import pdfio
+
+    photo = QImage(400, 300, QImage.Format_ARGB32)
+    photo.fill(0xFF3366AA)
+    path = str(tmp_path / "sheet.png")
+    photo.save(path)
+    pdfio.import_image(window.document, path, at=1)
+    window.rebuild_scenes()
+    window.go_to_page(1)
+
+    from PySide6.QtCore import QRectF
+
+    frame = window.document.pages[1].frame
+    window.take_snapshot(frame, QRectF(20, 20, 120, 90))
+    payload = window._clipboard
+    assert payload and payload[0]["type"] == "image"
+    assert window.document.asset(payload[0]["asset_key"])
+
+
+def test_a_snapshot_puts_a_picture_on_the_clipboard_for_other_apps(window):
+    from PySide6.QtWidgets import QApplication
+
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 220, 180)
+    window.select_tool("snapshot")
+    drag(window.view, 60, 60, 300, 250)
+
+    image = QApplication.clipboard().image()
+    assert not image.isNull()
+    assert image.width() > 100
+
+
+def test_the_snapshot_tool_is_on_g(window):
+    from calcforge.ui.tools import TOOL_MAP
+    assert TOOL_MAP["snapshot"].shortcut == "G"
+    assert TOOL_MAP["plot"].shortcut == "Shift+G"
+    assert not window.shortcuts.conflicts()

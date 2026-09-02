@@ -21,6 +21,7 @@ CLICK = "click"      # single click places the item
 POLY = "poly"        # click for each vertex, double-click / Enter to finish
 FREE = "free"        # freehand: every mouse-move point is recorded
 ANCHOR = "anchor"    # click what it points at, then drag out the box
+SNAPSHOT = "snapshot"  # drag a region and take a copy of what is in it
 NONE = "none"        # navigation only
 
 
@@ -53,6 +54,10 @@ def _measure(kind: str):
 TOOLS: list[Tool] = [
     Tool("select", "Select", "select", NONE, "Navigate", "Esc",
          "Select, move and edit markups"),
+    Tool("snapshot", "Snapshot", "snapshot", SNAPSHOT, "Navigate", "G",
+         "Drag a region to copy everything in it — paste it back and it is "
+         "still the markups and the drawing, not a picture of them",
+         factory=_rect("marquee")),
     Tool("pan", "Pan", "pan", NONE, "Navigate", "H", "Drag to move around the page"),
 
     Tool("pen", "Pen", "pen", FREE, "Draw", "Alt+P", "Freehand ink", factory=_poly("ink")),
@@ -109,7 +114,7 @@ TOOLS: list[Tool] = [
          factory=lambda: MathItem(block=True)),
     Tool("table", "Table", "table", DRAG, "Calculate", "B",
          "Spreadsheet that can use your variables", factory=lambda: TableItem()),
-    Tool("plot", "Plot", "plot", DRAG, "Calculate", "G",
+    Tool("plot", "Plot", "plot", DRAG, "Calculate", "Shift+G",
          "Plot a function or expression against a range", factory=lambda: PlotItem()),
     Tool("contents", "Contents", "page", DRAG, "Calculate", "",
          "A table of contents built from the document's bookmarks — click a "

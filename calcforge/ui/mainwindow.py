@@ -1,11 +1,13 @@
 """The CalcForge main window."""
 from __future__ import annotations
 
+import base64
 import json
 import os
 from typing import Optional
 
-from PySide6.QtCore import (QBuffer, QEvent, QIODevice, QPointF, QRectF,
+from PySide6.QtCore import (QBuffer, QEvent, QIODevice, QMimeData, QPointF,
+                            QRect, QRectF,
                             QSettings, QSize, Qt, QTimer)
 from PySide6.QtGui import (QAction, QActionGroup, QColor, QFont, QImage,
                            QKeySequence, QTransform, QUndoStack)
@@ -1645,6 +1647,85 @@ class MainWindow(QMainWindow):
         self.view.commit_snapshot("Delete markup")
         self.refresh_selection()
 
+    def take_snapshot(self, frame, region: QRectF) -> None:
+        """Copy everything inside *region* on *frame*, keeping it as itself.
+
+        Bluebeam's snapshot, but what comes back is not a picture: every
+        markup, calculation and table in the region is copied as the thing it
+        is, so pasting it puts real items down that stay sharp at any zoom and
+        can still be edited. Only the page's own background sheet — the raster
+        a PDF or a photo came in on — can be nothing but pixels, so that part
+        is cropped at the resolution it was imported at.
+        """
+        region = region.normalized()
+        if frame is None or region.width() < 2 or region.height() < 2:
+            self.status_hint.setText("Snapshot: drag a region to copy")
+            return
+        payload: list[dict] = []
+        assets: dict[str, str] = {}
+
+        cropped = self._crop_background(frame.page, region)
+        if cropped is not None:
+            key, data = cropped
+            assets[key] = base64.b64encode(data).decode("ascii")
+            payload.append({"type": "image", "asset_key": key, "x": 0.0, "y": 0.0,
+                            "rect": [0, 0, region.width(), region.height()],
+                            "keep_aspect": False, "uid": os.urandom(8).hex()})
+
+        for item in frame.ordered_markups():
+            box = item.mapRectToParent(item.boundingRect())
+            if not region.intersects(box):
+                continue
+            entry = item.serialize()
+            entry["x"] = float(entry.get("x", 0.0)) - region.left()
+            entry["y"] = float(entry.get("y", 0.0)) - region.top()
+            payload.append(entry)
+            key = entry.get("asset_key")
+            if key and key not in assets:
+                data = self.document.asset(key)
+                if data:
+                    assets[key] = base64.b64encode(data).decode("ascii")
+
+        if len(payload) <= (1 if cropped is not None else 0) and not payload:
+            self.status_hint.setText("Nothing in that region to copy")
+            return
+
+        self._clipboard = payload
+        mime = QMimeData()
+        mime.setText(json.dumps({CLIPBOARD_TAG: payload, "assets": assets}))
+        picture = frame.render_image(dpi=150.0, for_print=False)
+        scale = 150.0 / 72.0
+        mime.setImageData(picture.copy(
+            QRect(int(region.left() * scale), int(region.top() * scale),
+                  max(int(region.width() * scale), 1),
+                  max(int(region.height() * scale), 1))))
+        QApplication.clipboard().setMimeData(mime)
+        self.status_hint.setText(
+            f"Snapshot: {len(payload)} item(s) copied — paste it anywhere")
+
+    def _crop_background(self, page, region: QRectF):
+        """The part of the page's background sheet inside the region."""
+        data = self.document.asset(page.background_key)
+        if not data:
+            return None
+        image = QImage()
+        if not image.loadFromData(data) or image.isNull():
+            return None
+        across = image.width() / max(page.width_pt, 1.0)
+        down = image.height() / max(page.height_pt, 1.0)
+        box = QRect(int(region.left() * across), int(region.top() * down),
+                    max(int(region.width() * across), 1),
+                    max(int(region.height() * down), 1))
+        box = box.intersected(image.rect())
+        if box.isEmpty():
+            return None
+        buffer = QBuffer()
+        buffer.open(QIODevice.WriteOnly)
+        if not image.copy(box).save(buffer, "PNG"):
+            return None
+        raw = bytes(buffer.data())
+        return self.document.add_asset(raw, "png"), raw
+
     def copy_selection(self) -> None:
         if self.view.text_clipboard("copy"):
             self._clipboard = []
@@ -1696,7 +1777,12 @@ class MainWindow(QMainWindow):
                 decoded = json.loads(text)
                 if CLIPBOARD_TAG in decoded:
                     payload = decoded[CLIPBOARD_TAG]
-            except ValueError:
+                    # A snapshot carries its images with it, so it can be
+                    # pasted into a document that has never seen them.
+                    for key, encoded in (decoded.get("assets") or {}).items():
+                        if not self.document.asset(key):
+                            self.document.put_asset(key, base64.b64decode(encoded))
+            except (ValueError, TypeError):
                 pass
         if not payload:
             return
