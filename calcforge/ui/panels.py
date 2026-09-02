@@ -44,9 +44,12 @@ class PagesPanel(QWidget):
         layout.setSpacing(4)
 
         buttons = QHBoxLayout()
-        for label, tip, slot in (("+", "Add a page", self.window.add_page),
-                                 ("⧉", "Duplicate this page", self.window.duplicate_page),
-                                 ("−", "Delete this page", self.window.delete_page)):
+        # Lambdas, not the bound methods: clicked() carries a "checked" bool
+        # that would otherwise arrive as the page to act on.
+        for label, tip, slot in (
+                ("+", "Add a page", lambda: self.window.add_page()),
+                ("⧉", "Duplicate this page", lambda: self.window.duplicate_page()),
+                ("−", "Delete this page", lambda: self.window.delete_page())):
             button = QToolButton()
             button.setText(label)
             button.setToolTip(tip)
@@ -65,8 +68,19 @@ class PagesPanel(QWidget):
         self.list.setSelectionMode(QAbstractItemView.SingleSelection)
         self.list.currentRowChanged.connect(self._row_changed)
         self.list.model().rowsMoved.connect(self._rows_moved)
+        self.list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.list.customContextMenuRequested.connect(self._context_menu)
         layout.addWidget(self.list, 1)
         self._suppress = False
+
+    def _context_menu(self, point) -> None:
+        """Right-click a thumbnail for everything you can do to that page."""
+        entry = self.list.itemAt(point)
+        index = self.list.row(entry) if entry is not None else self.list.currentRow()
+        if index < 0:
+            return
+        menu = self.window.page_menu(index)
+        menu.exec(self.list.viewport().mapToGlobal(point))
 
     def _row_changed(self, row: int) -> None:
         if not self._suppress and row >= 0:

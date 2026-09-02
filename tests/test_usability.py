@@ -903,3 +903,131 @@ def test_the_mark_is_drawn_on_the_canvas(window):
     assert ink(window.view) > 0, "the insertion mark was not drawn"
     window.view.set_insert_point(None)
     assert ink(window.view) == 0, "the mark outstayed its welcome"
+
+
+# ---------------------------------------------------------------------------
+# Working on a page from its thumbnail
+# ---------------------------------------------------------------------------
+
+def _menu_labels(menu):
+    return [action.text() for action in menu.actions() if not action.isSeparator()]
+
+
+def test_the_page_menu_offers_everything_you_do_to_a_page(window):
+    window.load_sample()
+    labels = _menu_labels(window.page_menu(0))
+    for wanted in ("Insert blank page before", "Insert blank page after",
+                   "Duplicate page", "Insert PDF pages before…",
+                   "Insert PDF pages after…", "Insert image before…",
+                   "Insert image after…", "Delete page", "Page setup…"):
+        assert wanted in labels
+
+
+def test_the_page_menu_does_not_offer_impossible_moves(window):
+    window.load_sample()
+    last = len(window.document.pages) - 1
+    top = {action.text(): action for action in window.page_menu(0).actions()}
+    bottom = {action.text(): action for action in window.page_menu(last).actions()}
+    assert not top["Move up"].isEnabled()
+    assert top["Move down"].isEnabled()
+    assert bottom["Move up"].isEnabled()
+    assert not bottom["Move down"].isEnabled()
+
+
+def test_the_only_page_cannot_be_deleted_from_the_menu(window):
+    assert len(window.document.pages) == 1
+    actions = {action.text(): action for action in window.page_menu(0).actions()}
+    assert not actions["Delete page"].isEnabled()
+
+
+def test_a_page_can_be_inserted_before_a_named_page(window):
+    window.load_sample()
+    first = window.document.pages[0].uid
+    window.add_page(0, before=True)
+    assert len(window.document.pages) == 4
+    assert window.document.pages[1].uid == first
+    assert window.current_index == 0
+
+
+def test_a_page_can_be_inserted_after_a_named_page(window):
+    window.load_sample()
+    second = window.document.pages[1].uid
+    window.add_page(0)
+    assert window.document.pages[2].uid == second
+    assert window.current_index == 1
+
+
+def test_duplicating_works_on_the_page_you_right_clicked(window):
+    window.load_sample()
+    window.go_to_page(2)
+    source = window.document.pages[0]
+    source.frame.markups()  # the page is live
+    window.duplicate_page(0)
+    assert len(window.document.pages) == 4
+    copy = window.document.pages[1]
+    assert copy.uid != source.uid
+    assert len(copy.to_dict()["items"]) == len(source.to_dict()["items"])
+
+
+def test_deleting_works_on_the_page_you_right_clicked(window, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+    monkeypatch.setattr(QMessageBox, "question",
+                        lambda *a, **k: QMessageBox.Yes)
+    window.load_sample()
+    survivor = window.document.pages[1].uid
+    window.delete_page(0)
+    assert window.document.pages[0].uid == survivor
+
+
+def test_a_page_command_ignores_the_checked_flag_from_a_button(window):
+    """Buttons and actions send a bool; it must not be read as a page number."""
+    window.load_sample()
+    window.go_to_page(2)
+    window.pages_panel.layout().itemAt(0).layout().itemAt(0).widget().click()
+    assert window.current_index == 3
+    assert len(window.document.pages) == 4
+
+
+def test_an_image_goes_in_as_a_page_of_its_own(window, tmp_path, monkeypatch):
+    from PySide6.QtGui import QImage
+    from PySide6.QtWidgets import QFileDialog
+
+    path = str(tmp_path / "site.png")
+    photo = QImage(400, 300, QImage.Format_RGB32)
+    photo.fill(0xFF3366AA)
+    assert photo.save(path)
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (path, ""))
+
+    window.load_sample()
+    window.insert_image_page(0)
+    assert len(window.document.pages) == 4
+    page = window.document.pages[1]
+    assert page.background_key
+    assert window.document.asset(page.background_key)
+    assert page.label == "site.png"
+    # landscape photo, landscape page
+    assert page.setup.width_mm > page.setup.height_mm
+    assert window.current_index == 1
+
+
+def test_inserting_an_image_page_can_be_undone(window, tmp_path, monkeypatch):
+    from PySide6.QtGui import QImage
+    from PySide6.QtWidgets import QFileDialog
+
+    path = str(tmp_path / "detail.png")
+    photo = QImage(200, 400, QImage.Format_RGB32)
+    photo.fill(0xFFFFFFFF)
+    photo.save(path)
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (path, ""))
+
+    window.insert_image_page()
+    assert len(window.document.pages) == 2
+    window.undo_stack.undo()
+    assert len(window.document.pages) == 1
+
+
+def test_a_cancelled_image_insert_changes_nothing(window, monkeypatch):
+    from PySide6.QtWidgets import QFileDialog
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: ("", ""))
+    window.insert_image_page()
+    assert len(window.document.pages) == 1

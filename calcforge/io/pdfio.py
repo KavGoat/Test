@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from PySide6.QtCore import QBuffer, QIODevice, QSize
+from PySide6.QtGui import QImage
 from PySide6.QtPdf import QPdfDocument, QPdfDocumentRenderOptions
 
 from ..core.document import PT_TO_MM, LANDSCAPE, PORTRAIT, Page, PageSetup
@@ -140,3 +141,31 @@ def parse_page_range(text: str, maximum: int) -> list[int]:
             seen.add(index)
             ordered.append(index)
     return ordered
+
+
+def import_image(document, path: str, fit: str = FIT_ORIGINAL,
+                 at: Optional[int] = None) -> Page:
+    """Put a photo or a scan on a page of its own, the way a PDF page goes in."""
+    image = QImage(path)
+    if image.isNull():
+        raise OSError(f"Could not read {path}")
+    buffer = QBuffer()
+    buffer.open(QIODevice.WriteOnly)
+    if not image.save(buffer, "PNG"):
+        raise OSError(f"Could not read {path}")
+    key = document.add_asset(bytes(buffer.data()), "png")
+    # An image has pixels, not points. Read it at 96 dpi, which is what a
+    # screen-shot or a phone photo is usually taken to be.
+    info = PdfPageInfo(0, image.width() * 72.0 / 96.0, image.height() * 72.0 / 96.0)
+    template = document.pages[at - 1].setup if at else (
+        document.pages[-1].setup if document.pages else None)
+    page = Page(setup_for(info, fit, template))
+    page.background_key = key
+    page.source_note = path.rsplit("/", 1)[-1]
+    page.label = page.source_note
+    if at is None:
+        document.pages.append(page)
+    else:
+        document.pages.insert(at, page)
+    document.modified = True
+    return page

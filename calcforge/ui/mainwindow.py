@@ -201,7 +201,10 @@ class MainWindow(QMainWindow):
         self._act("open", "Open…", self.open_document, "Ctrl+O", "open")
         self._act("save", "Save", self.save_document, "Ctrl+S", "save")
         self._act("save_as", "Save as…", self.save_document_as, "Ctrl+Shift+S")
-        self._act("insert_pdf", "Insert PDF pages…", self.insert_pdf, "Ctrl+I", "pdf")
+        self._act("insert_pdf", "Insert PDF pages…", lambda: self.insert_pdf(),
+                  "Ctrl+I", "pdf")
+        self._act("insert_image_page", "Insert image as a page…",
+                  lambda: self.insert_image_page(), "", "image")
         self._act("export_pdf", "Export to PDF…", self.export_pdf, "Ctrl+E", "pdf")
         self._act("export_png", "Export pages as images…", self.export_images)
         self._act("export_markups", "Export markups list…", self.export_markups)
@@ -259,9 +262,9 @@ class MainWindow(QMainWindow):
                   self.customise_toolbar,
                   tip="Pick which tools appear on the markup toolbar")
 
-        self._act("add_page", "Add page", self.add_page)
-        self._act("duplicate_page", "Duplicate page", self.duplicate_page)
-        self._act("delete_page", "Delete page", self.delete_page)
+        self._act("add_page", "Add page", lambda: self.add_page())
+        self._act("duplicate_page", "Duplicate page", lambda: self.duplicate_page())
+        self._act("delete_page", "Delete page", lambda: self.delete_page())
         self._act("page_setup", "Page setup…", self.page_setup, "Ctrl+Shift+P", "page")
         self._act("scale", "Page scale…", self.calibrate_dialog, "", "calibrate")
         self._act("doc_props", "Document properties…", self.document_properties)
@@ -440,7 +443,8 @@ class MainWindow(QMainWindow):
 
         file_menu = bar.addMenu("&File")
         for action in (self.act_new, self.act_open, None, self.act_save, self.act_save_as,
-                       None, self.act_insert_pdf, None, self.act_export_pdf,
+                       None, self.act_insert_pdf, self.act_insert_image_page,
+                       None, self.act_export_pdf,
                        self.act_export_png, self.act_export_markups, self.act_export_vars,
                        None, self.act_preview, self.act_print, None, self.act_quit):
             file_menu.addSeparator() if action is None else file_menu.addAction(action)
@@ -502,6 +506,7 @@ class MainWindow(QMainWindow):
                 insert_menu.addAction(action)
         insert_menu.addSeparator()
         insert_menu.addAction(self.act_insert_pdf)
+        insert_menu.addAction(self.act_insert_image_page)
 
         calc_menu = bar.addMenu("&Calculate")
         calc_menu.addAction(self.act_recalc)
@@ -959,26 +964,40 @@ class MainWindow(QMainWindow):
         mutate()
         self.rebuild_scenes()
         # Adding or removing a page moves the reader to it, the way inserting a
-        # page in any document viewer does.
-        self.view._shown_page = self.current_index
-        self.view.go_to_page_top(self.current_index)
-        self.follow_scrolled_page(self.current_index)
+        # page in any document viewer does. The target is held over the scroll:
+        # a short page (a photo, a small PDF sheet) leaves the next page over
+        # the middle of the view, and that must not steal the selection back.
+        target = self.current_index
+        self.view.go_to_page_top(target)
+        self.current_index = target
+        self.view._shown_page = target
+        self.follow_scrolled_page(target)
         after = self._structure_snapshot()
         self.undo_stack.push(DocumentStructureCommand(before, after, description,
                                                       self._restore_structure))
         self.mark_modified()
 
-    def add_page(self) -> None:
-        target = self.current_index + 1
+    def page_index(self, index: Optional[int] = None) -> int:
+        """The page a command applies to: the one named, else the current one."""
+        if index is None:
+            return self.current_index
+        return max(0, min(int(index), len(self.document.pages) - 1))
+
+    def add_page(self, index: Optional[int] = None, before: bool = False) -> None:
+        target = self.page_index(index) + (0 if before else 1)
 
         def mutate():
             self.document.add_page(target)
             self.current_index = target
         self._structural_change("Add page", mutate)
 
-    def duplicate_page(self) -> None:
-        source = self.current_page().to_dict()
-        target = self.current_index + 1
+    def add_page_before(self, index: Optional[int] = None) -> None:
+        self.add_page(index, before=True)
+
+    def duplicate_page(self, index: Optional[int] = None) -> None:
+        which = self.page_index(index)
+        source = self.document.pages[which].to_dict()
+        target = which + 1
 
         def mutate():
             copy = Page.from_dict(source)
@@ -987,18 +1006,18 @@ class MainWindow(QMainWindow):
             self.current_index = target
         self._structural_change("Duplicate page", mutate)
 
-    def delete_page(self) -> None:
+    def delete_page(self, index: Optional[int] = None) -> None:
         if len(self.document.pages) <= 1:
             QMessageBox.information(self, "Delete page", "A document needs at least one page.")
             return
+        which = self.page_index(index)
         if QMessageBox.question(self, "Delete page",
-                                f"Delete page {self.current_index + 1}?") != QMessageBox.Yes:
+                                f"Delete page {which + 1}?") != QMessageBox.Yes:
             return
-        index = self.current_index
 
         def mutate():
-            self.document.remove_page(index)
-            self.current_index = max(0, index - 1)
+            self.document.remove_page(which)
+            self.current_index = max(0, which - 1)
         self._structural_change("Delete page", mutate)
 
     def move_page(self, source: int, target: int) -> None:
@@ -1021,7 +1040,7 @@ class MainWindow(QMainWindow):
         self._structural_change("Page setup", mutate)
         self.view.fit_page()
 
-    def insert_pdf(self) -> None:
+    def insert_pdf(self, index: Optional[int] = None, before: bool = False) -> None:
         dialog = dialogs.PdfImportDialog(self, self.current_page().setup)
         if dialog.exec() != dialogs.QDialog.Accepted:
             return
@@ -1029,7 +1048,7 @@ class MainWindow(QMainWindow):
         if not path or not indices:
             QMessageBox.information(self, "Insert PDF", "No pages were selected.")
             return
-        target = self.current_index + 1
+        target = self.page_index(index) + (0 if before else 1)
 
         def mutate():
             pdfio.import_pages(self.document, path, indices, fit, dpi, at=target)
@@ -1042,6 +1061,57 @@ class MainWindow(QMainWindow):
         self.view.fit_page()
         self.status_hint.setText(f"Inserted {len(indices)} page(s) from "
                                  f"{os.path.basename(path)}")
+
+    def insert_image_page(self, index: Optional[int] = None,
+                          before: bool = False) -> None:
+        """Put a photo or a scan in as a page of its own."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Insert image as a page", "",
+            "Images (*.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff *.webp)")
+        if not path:
+            return
+        target = self.page_index(index) + (0 if before else 1)
+
+        def mutate():
+            pdfio.import_image(self.document, path, pdfio.FIT_ORIGINAL, at=target)
+            self.current_index = target
+        try:
+            self._structural_change("Insert image page", mutate)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "Insert image", str(exc))
+            return
+        self.view.fit_page()
+        self.status_hint.setText(f"Inserted {os.path.basename(path)} as a page")
+
+    def page_menu(self, index: int) -> QMenu:
+        """Everything you can do to one page, for its right-click menu."""
+        index = self.page_index(index)
+        menu = QMenu(self)
+        menu.addAction("Go to this page", lambda: self.go_to_page(index))
+        menu.addSeparator()
+        menu.addAction("Insert blank page before",
+                       lambda: self.add_page_before(index))
+        menu.addAction("Insert blank page after", lambda: self.add_page(index))
+        menu.addAction("Duplicate page", lambda: self.duplicate_page(index))
+        menu.addSeparator()
+        menu.addAction("Insert PDF pages before…",
+                       lambda: self.insert_pdf(index, before=True))
+        menu.addAction("Insert PDF pages after…", lambda: self.insert_pdf(index))
+        menu.addAction("Insert image before…",
+                       lambda: self.insert_image_page(index, before=True))
+        menu.addAction("Insert image after…",
+                       lambda: self.insert_image_page(index))
+        menu.addSeparator()
+        up = menu.addAction("Move up", lambda: self.move_page(index, index - 1))
+        up.setEnabled(index > 0)
+        down = menu.addAction("Move down", lambda: self.move_page(index, index + 1))
+        down.setEnabled(index < len(self.document.pages) - 1)
+        menu.addSeparator()
+        menu.addAction("Page setup…", lambda: (self.go_to_page(index),
+                                               self.page_setup()))
+        delete = menu.addAction("Delete page", lambda: self.delete_page(index))
+        delete.setEnabled(len(self.document.pages) > 1)
+        return menu
 
     # ==================================================================
     # scale
