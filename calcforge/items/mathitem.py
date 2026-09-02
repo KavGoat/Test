@@ -84,7 +84,7 @@ class MathItem(MarkupItem):
         self.rows: list[_MathRow] = []
         self.digits = 4
         self.number_format = "auto"
-        self.show_definition_results = True
+        self.show_definition_results = False
         # SMath puts the result immediately after the expression rather than in
         # a column down the right-hand side of the page.
         self.align_results = False
@@ -303,14 +303,24 @@ class MathItem(MarkupItem):
             return setter.text(statement.expression, size)
 
     def _wants_result(self, statement) -> bool:
+        """Whether this line's answer is printed.
+
+        A line that ends with "=" asks for its answer, the way SMath does;
+        every other line is worked out in the background so that the names it
+        defines are there for later lines, and shows nothing. Turning
+        "Show every line's result" on in the properties panel puts the old
+        behaviour back for a region, for anyone who prefers it.
+        """
         if statement.result is None:
             return False
         if statement.kind == engine.FUNCTION:
             return False
-        if statement.kind == engine.EVALUATE:
+        if statement.show_result:
             return True
         if not self.show_definition_results:
             return False
+        if statement.kind == engine.EVALUATE:
+            return True
         return not self._is_literal(statement.tree)
 
     @classmethod
@@ -478,6 +488,8 @@ class MathItem(MarkupItem):
         self.source = data.get("source", "")
         self.digits = int(data.get("digits", 4))
         self.number_format = data.get("number_format", "auto")
+        # Documents written before results waited for a trailing "=" showed
+        # every line, so they keep doing that when reopened.
         self.show_definition_results = bool(data.get("show_definition_results", True))
         self.show_comments = bool(data.get("show_comments", True))
         self.local_scope = bool(data.get("local_scope", False))

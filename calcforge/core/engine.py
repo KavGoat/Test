@@ -657,6 +657,7 @@ class Statement:
     error: str = ""
     tree: Optional[ast.AST] = None
     forced: bool = True          # written with ":=" or ":" rather than a bare "="
+    show_result: bool = False    # the line ends with "=", so print the answer
     auto_unit: bool = True       # let the engine pick a readable display unit
     is_input: bool = False       # a value typed out in full, e.g. "896 cm^3"
 
@@ -683,6 +684,16 @@ class Statement:
         return format_quantity(self.result, digits, mode, self.display_unit())
 
 
+_COMPARISONS = ("==", "<=", ">=", "!=", "≤", "≥", "≠", ":=")
+
+
+def _strip_result_request(text: str) -> tuple[str, bool]:
+    """Take a trailing "=" off a line, and say whether one was there."""
+    if text.endswith("=") and not text.endswith(_COMPARISONS):
+        return text[:-1].rstrip(), True
+    return text, False
+
+
 def parse_statement(line: str) -> Statement:
     """Parse a single source line into a :class:`Statement` (no evaluation)."""
     raw = line.rstrip()
@@ -698,12 +709,23 @@ def parse_statement(line: str) -> Statement:
     if inline and inline[0].strip():
         text, comment = inline[0].strip(), inline[1].strip()
 
+    # A trailing "=" is the request to print the answer, the way SMath asks for
+    # one. Without it the line is still worked out — other lines depend on it —
+    # but nothing is shown. "a ==", "a <=" and friends are operators, not a
+    # request. It is taken off both ends of the display-unit arrow, so
+    # "M := x = → kN" and "M := x → kN =" both read as one.
+    text, show_result = _strip_result_request(text)
+    if not text:
+        return Statement(raw=raw, kind=BLANK)
+
     # display-unit conversion suffix
     target_unit = ""
     for arrow in _ARROWS:
         split = _split_top_level(text, arrow)
         if split and split[0].strip():
             text, target_unit = split[0].strip(), split[1].strip()
+            text, asked = _strip_result_request(text)
+            show_result = show_result or asked
             break
 
     # A definition can be written three ways.  ":=" and a bare ":" always
@@ -728,23 +750,26 @@ def parse_statement(line: str) -> Statement:
         if not rhs:
             # "expr =" is an evaluation request
             return Statement(raw=raw, kind=EVALUATE, expression=lhs,
-                             target_unit=target_unit, comment=comment)
+                             target_unit=target_unit, comment=comment,
+                             show_result=True)
         func = _FUNC_LHS.match(lhs)
         if func:
             params = [p.strip() for p in func.group(2).split(",") if p.strip()]
             return Statement(raw=raw, kind=FUNCTION, name=func.group(1), params=params,
                              expression=rhs, target_unit=target_unit, comment=comment,
-                             forced=forced)
+                             forced=forced, show_result=show_result)
         name = _NAME_LHS.match(lhs)
         if name:
             return Statement(raw=raw, kind=DEFINE, name=name.group(1), expression=rhs,
-                             target_unit=target_unit, comment=comment, forced=forced)
+                             target_unit=target_unit, comment=comment, forced=forced,
+                             show_result=show_result)
         if forced:
             return Statement(raw=raw, kind=ERROR, expression=text,
                              error=f"'{lhs}' is not a valid name to define")
 
     return Statement(raw=raw, kind=EVALUATE, expression=text,
-                     target_unit=target_unit, comment=comment)
+                     target_unit=target_unit, comment=comment,
+                     show_result=show_result)
 
 
 def evaluate_statement(statement: Statement, workspace: Workspace, source: str = "") -> Statement:
@@ -760,6 +785,9 @@ def evaluate_statement(statement: Statement, workspace: Workspace, source: str =
             and workspace.defined_earlier(statement.name)):
         statement.kind = EVALUATE
         statement.expression = f"({statement.name}) == ({statement.expression})"
+        # A check exists to be answered, so it prints whether it was asked to
+        # or not.
+        statement.show_result = True
 
     try:
         if statement.kind == FUNCTION:

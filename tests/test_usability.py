@@ -1271,3 +1271,53 @@ def test_symbol_keys_are_live_while_you_type(window):
     assert not window.shortcuts.is_canvas_binding(QKeySequence("Ctrl+Alt+8"))
     assert window.shortcuts.is_canvas_binding(QKeySequence("R"))
     window.view.end_item_edit()
+
+
+# ---------------------------------------------------------------------------
+# A calculation prints what it was asked to print
+# ---------------------------------------------------------------------------
+
+def _calc(window, text, at=(90, 110)):
+    window.view._last_scene_pos = QPointF(*at)
+    press_key(window.view, Qt.Key_unknown, "/")
+    block = window.view.editing_item()
+    block._editor.setPlainText(text)
+    window.view.end_item_edit()
+    window.recalculate()
+    return block
+
+
+def _shown(block) -> list[str]:
+    return [row.result_text() if hasattr(row, "result_text") else ""
+            for row in block.statements]
+
+
+def test_a_quiet_line_shows_no_answer_but_still_defines_it(window):
+    block = _calc(window, "L := 6 m\nw := 12 kN/m\nM := w*L^2/8")
+    assert not any(block._wants_result(s) for s in block.statements)
+    assert window.document.workspace.get("M").to("kN*m").magnitude == pytest.approx(54)
+
+
+def test_asking_with_a_trailing_equals_prints_the_answer(window):
+    block = _calc(window, "L := 6 m\nw := 12 kN/m\nM := w*L^2/8 =")
+    printed = [s for s in block.statements if block._wants_result(s)]
+    assert [s.name for s in printed] == ["M"]
+    assert "54" in printed[0].result_text()
+
+
+def test_typing_the_equals_later_makes_the_answer_appear(window):
+    block = _calc(window, "b := 300 mm\nA := b*b")
+    assert not any(block._wants_result(s) for s in block.statements)
+
+    window.view.begin_item_edit(block)
+    block._editor.setPlainText("b := 300 mm\nA := b*b =")
+    window.view.end_item_edit()
+    window.recalculate()
+    assert [s.name for s in block.statements if block._wants_result(s)] == ["A"]
+
+
+def test_a_region_told_to_show_everything_still_does(window):
+    block = _calc(window, "b := 300 mm\nA := b*b")
+    block.show_definition_results = True
+    block.relayout()
+    assert [s.name for s in block.statements if block._wants_result(s)] == ["A"]

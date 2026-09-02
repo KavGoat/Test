@@ -62,14 +62,20 @@ selects, `Ctrl+C`/`V` work on the text, and clicking outside finishes the edit.
 L := 7.2 m
 w_dead := 8.5 kN/m
 w_live := 6.0 kN/m
-w := 1.2*w_dead + 1.5*w_live      # ULS combination
+w := 1.2*w_dead + 1.5*w_live =    # ULS combination
 
-M_max := w*L^2/8 -> kN*m
+M_max := w*L^2/8 -> kN*m =
 Z_x := 896 cm^3
-sigma_b := M_max/Z_x -> MPa
+sigma_b := M_max/Z_x -> MPa =
 f_y := 355 MPa
-sigma_b <= f_y                    # capacity check
+sigma_b <= f_y =                  # capacity check
 ```
+
+A line ends with `=` when you want to see its answer, the way SMath asks for
+one. Every other line is still worked out — the names it defines are there for
+the lines below — but it prints as you wrote it, with nothing after it. Type the
+`=` when the number matters and leave it off when it does not, and a page of
+working stays a page of working rather than a wall of numbers.
 
 ### How to write it
 
@@ -82,6 +88,7 @@ sigma_b <= f_y                    # capacity check
 | `5 kN`, `24 kN/m^3` | A number and a unit — no `*` needed. |
 | `M_max` | `_` makes a subscript; `sigma`, `delta`, `gamma`… become Greek letters. |
 | `expr -> MPa` | Show this result in a particular unit. |
+| `M := w*L^2/8 =` | The trailing `=` prints the answer; without it the line is worked out quietly. |
 | `f(x) := w*x*(L-x)/2` | Defines a function; call it with `f(2 m)`. |
 | `sigma <= f_y` | A check — the result reads `true` or `false`. |
 | `# note` | A comment, at the start of a line or after an expression. |

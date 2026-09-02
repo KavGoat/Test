@@ -899,7 +899,7 @@ class PropertiesPanel(QScrollArea):
                                       "Number format"))
         form.addRow("Number format", number_format)
 
-        for label, attribute in (("Show results of definitions", "show_definition_results"),
+        for label, attribute in (("Show every line's result", "show_definition_results"),
                                  ("Align results in a column", "align_results"),
                                  ("Show comments", "show_comments")):
             box = QCheckBox(label)

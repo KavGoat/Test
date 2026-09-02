@@ -16,11 +16,11 @@ BEAM_CALC = """# Span and loading
 L = 7.2 m
 w_dead = 8.5 kN/m
 w_live = 6.0 kN/m
-w = 1.2*w_dead + 1.5*w_live   # ULS combination
+w = 1.2*w_dead + 1.5*w_live =   # ULS combination
 
 # Design actions
-M_max = w*L^2/8
-V_max = w*L/2
+M_max = w*L^2/8 =
+V_max = w*L/2 =
 M(x) = w*x*(L - x)/2
 
 # Section 356 x 171 x 51 UB
@@ -30,23 +30,23 @@ E = 205 GPa
 f_y = 355 MPa
 
 # Bending check
-sigma_b = M_max/Z_x
-M_cap = f_y*Z_x
-util_b = M_max/M_cap
-util_b <= 1.0
+sigma_b = M_max/Z_x =
+M_cap = f_y*Z_x =
+util_b = M_max/M_cap =
+util_b <= 1.0 =
 
 # Deflection under live load
-delta = 5*w_live*L^4/(384*E*I_x)
-delta_lim = L/360
-delta <= delta_lim
+delta = 5*w_live*L^4/(384*E*I_x) =
+delta_lim = L/360 =
+delta <= delta_lim =
 """
 
 REACTION_CALC = """# Beam reaction using the table total
-q_total = q_floor + 1.0 kPa      # plus an allowance for partitions
+q_total = q_floor + 1.0 kPa =    # plus an allowance for partitions
 b_trib = 3.0 m
 L_beam = 7.2 m
-w_beam = q_total*b_trib
-R = w_beam*L_beam/2
+w_beam = q_total*b_trib =
+R = w_beam*L_beam/2 =
 """
 
 FOUNDATION_CALC = """# Pad footing bearing pressure
@@ -56,13 +56,13 @@ D = 2.4 m
 t = 0.6 m
 gamma_c = 24 kN/m^3
 
-W_pad = B*D*t*gamma_c
-N_total = N + W_pad
-A_base = B*D
-q = N_total/A_base
+W_pad = B*D*t*gamma_c =
+N_total = N + W_pad =
+A_base = B*D =
+q = N_total/A_base =
 q_allow = 200 kPa
-util_q = q/q_allow
-q <= q_allow
+util_q = q/q_allow =
+q <= q_allow =
 """
 
 

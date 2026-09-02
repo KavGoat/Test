@@ -60,7 +60,7 @@ def test_a_calculation_and_its_result_land_on_the_page(window, tmp_path):
     window.select_tool("math")
     _drag(window, 80, 120, 380, 200)
     block = window.view.editing_item()
-    block._editor.setPlainText("L = 6 m\nw = 12 kN/m\nM = w*L^2/8")
+    block._editor.setPlainText("L = 6 m\nw = 12 kN/m\nM = w*L^2/8 =")
     window.view.end_item_edit()
     window.recalculate()
 

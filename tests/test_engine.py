@@ -291,3 +291,58 @@ def test_a_name_the_document_defines_beats_a_unit():
     workspace.declare({"m", "s"})
     statements = evaluate_source("total = m*2", workspace)
     assert not statements[0].ok and "not defined" in statements[0].error
+
+
+# ---------------------------------------------------------------------------
+# A result is printed only when the line asks for one
+# ---------------------------------------------------------------------------
+
+def test_a_line_without_a_trailing_equals_asks_for_nothing():
+    from calcforge.core.engine import parse_statement
+    assert parse_statement("M := w*L^2/8").show_result is False
+    assert parse_statement("M := w*L^2/8 =").show_result is True
+    assert parse_statement("M =").show_result is True
+    assert parse_statement("M").show_result is False
+
+
+def test_a_comparison_is_not_a_request_for_a_result():
+    from calcforge.core.engine import parse_statement
+    for line in ("a == b", "a <= b", "a >= b", "a != b", "a ≤ b"):
+        statement = parse_statement(line)
+        assert statement.show_result is False, line
+        assert "b" in statement.expression
+
+
+def test_the_request_survives_a_comment_and_a_unit_arrow():
+    from calcforge.core.engine import parse_statement
+    statement = parse_statement("M := w*L^2/8 =   # midspan")
+    assert statement.show_result and statement.comment == "midspan"
+    assert statement.expression == "w*L^2/8"
+
+    for line in ("M := x → kN*m =", "M := x = → kN*m"):
+        statement = parse_statement(line)
+        assert statement.show_result, line
+        assert statement.target_unit == "kN*m"
+        assert statement.expression == "x"
+
+
+def test_a_line_with_no_request_is_still_worked_out():
+    """The value has to be there for the lines that use it, just not printed."""
+    from calcforge.core.engine import Workspace, evaluate_source
+
+    workspace = Workspace()
+    statements = evaluate_source("L := 6 m\nw := 12 kN/m\nM := w*L^2/8\nM =",
+                                 workspace, "block")
+    quiet = statements[2]
+    assert quiet.show_result is False
+    assert quiet.result is not None                     # worked out all the same
+    assert workspace.get("M").to("kN*m").magnitude == pytest.approx(54)
+    assert statements[3].show_result is True
+
+
+def test_a_check_answers_itself_without_being_asked():
+    from calcforge.core.engine import Workspace, evaluate_source
+    statements = evaluate_source("util := 0.4\nutil = 0.4", Workspace(), "block")
+    check = statements[1]
+    assert check.show_result is True
+    assert check.result is True
