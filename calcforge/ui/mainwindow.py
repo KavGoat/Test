@@ -271,7 +271,8 @@ class MainWindow(QMainWindow):
                   tip="Combine the selected calculations into a single region")
 
         self._act("shortcuts", "Keyboard shortcuts", self.show_shortcuts, "F1")
-        self._act("edit_shortcuts", "Customise shortcuts…", self.edit_shortcuts)
+        self._act("edit_shortcuts", "Keyboard shortcuts…", self.edit_shortcuts,
+                  "Ctrl+K", tip="Change any shortcut by pressing the keys you want")
         self._act("problems", "Show problems", self.show_problems)
         self._act("renumber_counts", "Renumber count markers", self.renumber_counts)
         self._act("about", f"About {APP_NAME}", self.show_about)

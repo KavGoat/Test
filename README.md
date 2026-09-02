@@ -342,7 +342,7 @@ what lets a bare keystroke mean "start writing here":
 | `\|` | A table |
 | `@` | A callout |
 
-Everything is editable under **Help ▸ Keyboard shortcuts**: click a shortcut and
+Everything is editable under **Help ▸ Keyboard shortcuts…** (`Ctrl+K`): click a shortcut and
 **press the keys you want**. A single character is stored as that character;
 anything with Ctrl or Alt is stored as a key sequence and works from the menus
 too. Backspace clears one, Escape puts it back, and a key bound to two things
