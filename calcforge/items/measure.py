@@ -194,6 +194,42 @@ class MeasureItem(MarkupItem):
             return self.points[mid]
         return self.points[0]
 
+    # -- vertices ----------------------------------------------------------
+    @property
+    def uses_vertex_handles(self) -> bool:
+        """Only the measurements drawn as a chain of points take vertices."""
+        return self.kind in (POLYLENGTH, AREA, PERIMETER, VOLUME)
+
+    def insert_point(self, local_pos: QPointF) -> int:
+        """Add a vertex on the nearest segment; returns where it went.
+
+        Double-clicking a run of points adds one, the same as it does on a
+        polygon — an area take-off is redrawn far more often than it is drawn.
+        """
+        from .shapes import _segment_distance
+
+        if len(self.points) < 2:
+            return 0
+        best_index, best_distance = 1, float("inf")
+        segments = list(zip(self.points, self.points[1:]))
+        if self.closed:
+            segments.append((self.points[-1], self.points[0]))
+        for index, (start, end) in enumerate(segments):
+            distance = _segment_distance(start, end, local_pos)
+            if distance < best_distance:
+                best_distance, best_index = distance, index + 1
+        self.prepareGeometryChange()
+        self.points.insert(best_index, QPointF(local_pos))
+        self.geometryChanged.emit()
+        return best_index
+
+    def delete_point(self, index: int) -> None:
+        least = 3 if self.closed else 2
+        if len(self.points) > least and 0 <= index < len(self.points):
+            self.prepareGeometryChange()
+            del self.points[index]
+            self.geometryChanged.emit()
+
     # -- measurement -------------------------------------------------------
     def page_scale(self):
         scene = self.scene()

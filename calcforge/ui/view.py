@@ -105,11 +105,20 @@ class PageView(QGraphicsView):
         self._snapshot = scene.serialize_items() if scene is not None else []
 
     def commit_snapshot(self, text: str) -> None:
+        """Record an edit for undo, and leave the document consistent.
+
+        Reading order decides what resolves, so *moving* a calculation changes
+        the answers just as much as retyping it does. Recalculating here means
+        every committed gesture leaves the page showing the truth, rather than
+        each gesture having to remember to ask for it.
+        """
         scene = self.scene()
         if scene is None:
             return
         after = scene.serialize_items()
         if after != self._snapshot:
+            self.window.recalculate()
+            after = scene.serialize_items()
             self.push_command(PageEditCommand(scene, self._snapshot, after, text,
                                               on_apply=self.after_undo))
             self.documentEdited.emit()
@@ -666,9 +675,11 @@ class PageView(QGraphicsView):
             event.accept()
             return
         if isinstance(item, (PolyItem, MeasureItem)) and not item.locked:
-            if getattr(item, "uses_vertex_handles", True) and len(item.points) > 2:
+            if (getattr(item, "uses_vertex_handles", True)
+                    and hasattr(item, "insert_point") and len(item.points) > 2):
                 self.begin_snapshot()
                 item.insert_point(item.mapFromScene(scene_pos))
+                item.refresh(self.scene().workspace, self.page())
                 self.commit_snapshot("Add vertex")
                 event.accept()
                 return

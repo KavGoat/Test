@@ -595,3 +595,80 @@ def test_cancelling_the_note_dialog_leaves_it_as_it_was(window, monkeypatch):
                         staticmethod(lambda *a, **k: ("ignored", False)))
     double_click(window.view, 200 + note.SIZE / 2, 200 + note.SIZE / 2)
     assert note.comment == "as built"
+
+
+def test_double_clicking_an_area_measurement_adds_a_vertex(window):
+    """A take-off is redrawn far more often than it is drawn."""
+    page = scaled_page(window)
+    window.select_tool("measure_area")
+    for x, y in ((100, 400), (300, 400), (300, 600), (100, 600)):
+        click(window.view, x, y)
+        hover(window.view, x, y)
+    window.view.finish_poly()
+    area = [i for i in only(window, MeasureItem) if i.kind == "area"][0]
+    window.select_tool("select")
+    before = len(area.points)
+    first = area.value.to("m**2").magnitude
+
+    double_click(window.view, 200, 400)          # on the top edge
+    assert len(area.points) == before + 1
+    assert area.value is not None                # and it still measures
+    assert area.value.to("m**2").magnitude == pytest.approx(first, rel=0.05)
+
+
+def test_double_clicking_a_two_point_length_does_not_break(window):
+    scaled_page(window)
+    window.select_tool("measure_length")
+    drag(window.view, 100, 400, 300, 400)
+    length = [i for i in only(window, MeasureItem) if i.kind == "length"][0]
+    window.select_tool("select")
+    double_click(window.view, 200, 400)          # no vertices to add here
+    assert len(length.points) == 2
+    assert length.value is not None
+
+
+def test_moving_a_calculation_changes_what_resolves_straight_away(window):
+    """Reading order decides what is defined, so a move is an edit."""
+    window.select_tool("math")
+    drag(window.view, 80, 120, 320, 160)
+    window.view.editing_item()._editor.setPlainText("L = 6 m")
+    window.view.end_item_edit()
+
+    window.select_tool("math")
+    drag(window.view, 80, 400, 320, 440)
+    user = window.view.editing_item()
+    user._editor.setPlainText("M = L*2")
+    window.view.end_item_edit()
+    window.select_tool("select")
+
+    assert window.document.workspace.get("M").to("m").magnitude == pytest.approx(12)
+    assert [s.error for s in user.statements if s.error] == []
+
+    # Drag the user of L above the line that defines it — without pressing F9.
+    # Grab it in the middle: near an edge is a resize handle, not the body.
+    centre = user.mapToScene(user.local_rect().center())
+    click(window.view, centre.x(), centre.y())
+    drag(window.view, centre.x(), centre.y(), centre.x(), 60)
+    assert any("not defined" in s.error for s in user.statements if s.error), \
+        "the page kept a result its position no longer supports"
+
+
+def test_a_moved_document_still_re_derives(window):
+    from calcforge.core.verify import verify_document
+
+    window.select_tool("math")
+    drag(window.view, 80, 120, 320, 160)
+    window.view.editing_item()._editor.setPlainText("L = 6 m")
+    window.view.end_item_edit()
+    window.select_tool("math")
+    drag(window.view, 80, 300, 320, 340)
+    window.view.editing_item()._editor.setPlainText("L = 6 m")
+    window.view.end_item_edit()
+    window.select_tool("select")
+
+    second = [i for i in only(window, MathItem) if i.pos().y() > 200][0]
+    centre = second.mapToScene(second.local_rect().center())
+    drag(window.view, centre.x(), centre.y(), centre.x(), 60)   # swap them over
+    result = verify_document(window.document)
+    disagreements = [p for p in result.problems if p.kind == "disagreement"]
+    assert disagreements == [], [p.message for p in disagreements]
