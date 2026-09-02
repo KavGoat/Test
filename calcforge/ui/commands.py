@@ -11,22 +11,21 @@ from PySide6.QtGui import QUndoCommand
 
 
 class PageEditCommand(QUndoCommand):
-    """Restore a page's markup list to its state before or after an edit."""
+    """Restore one page's markup list to its state before or after an edit."""
 
-    def __init__(self, scene, before: list[dict], after: list[dict], text: str,
+    def __init__(self, frame, before: list[dict], after: list[dict], text: str,
                  on_apply: Optional[Callable] = None):
         super().__init__(text)
-        self.scene = scene
+        self.frame = frame
         self.before = before
         self.after = after
         self.on_apply = on_apply
         self._skip_first_redo = True
 
     def _apply(self, data: list[dict]) -> None:
-        selected = {item.uid for item in self.scene.selectedItems()
-                    if hasattr(item, "uid")}
-        self.scene.load_items(data)
-        for item in self.scene.markups():
+        selected = {item.uid for item in self.frame.markups() if item.isSelected()}
+        self.frame.load_items(data)
+        for item in self.frame.markups():
             if item.uid in selected:
                 item.setSelected(True)
         if self.on_apply is not None:
@@ -77,15 +76,16 @@ class SnapshotGuard:
         self.before: list[dict] = []
 
     def __enter__(self) -> "SnapshotGuard":
-        self.before = self.view.scene().serialize_items()
+        self.before = self.view.frame().serialize_items()
         return self
 
     def __exit__(self, exc_type, exc, traceback) -> bool:
         if exc_type is not None:
             return False
-        after = self.view.scene().serialize_items()
+        frame = self.view.frame()
+        after = frame.serialize_items()
         if after != self.before:
             self.view.push_command(PageEditCommand(
-                self.view.scene(), self.before, after, self.text,
+                frame, self.before, after, self.text,
                 on_apply=self.view.after_undo))
         return False

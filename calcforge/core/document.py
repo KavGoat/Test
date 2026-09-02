@@ -179,7 +179,7 @@ class Page:
         self.background_key: Optional[str] = None   # asset name of an imported PDF page
         self.background_opacity: float = 1.0
         self.source_note: str = ""                  # e.g. "drawing.pdf page 3"
-        self.scene = None                           # set by the UI layer
+        self.frame = None                           # set by the UI layer
         self._pending_items: list[dict] = []
 
     # -- geometry ----------------------------------------------------------
@@ -194,8 +194,8 @@ class Page:
     # -- serialisation -----------------------------------------------------
     def to_dict(self) -> dict:
         items = self._pending_items
-        if self.scene is not None:
-            items = self.scene.serialize_items()
+        if self.frame is not None:
+            items = self.frame.serialize_items()
         return {
             "uid": self.uid,
             "label": self.label,

@@ -35,7 +35,7 @@ def window(qapp):
     main.view.deactivate_table()
     main.view.setScene(None)
     for page in main.document.pages:
-        page.scene = None
+        page.frame = None
     main.close()
     main.setParent(None)
     main.deleteLater()

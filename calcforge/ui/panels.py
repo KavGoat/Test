@@ -97,7 +97,7 @@ class PagesPanel(QWidget):
 
     @staticmethod
     def _thumbnail(page) -> QIcon:
-        scene = page.scene
+        scene = page.frame
         if scene is None:
             pixmap = QPixmap(96, 128)
             pixmap.fill(Qt.white)
@@ -157,14 +157,14 @@ class MarkupsPanel(QWidget):
         self.tree.clear()
         rows = []
         for index, page in enumerate(document.pages):
-            if page.scene is None:
+            if page.frame is None:
                 continue
             page_node = QTreeWidgetItem([f"Page {index + 1}", "", "", "", "", "", ""])
             font = page_node.font(0)
             font.setBold(True)
             page_node.setFont(0, font)
             added = False
-            for item in page.scene.ordered_markups():
+            for item in page.frame.ordered_markups():
                 row = [str(index + 1), item.display_name(), item.subject,
                        getattr(item, "value_text", ""), item.author,
                        item.modified[:10], item.summary()]
@@ -193,9 +193,9 @@ class MarkupsPanel(QWidget):
         lengths = defaultdict(list)
         counts = defaultdict(int)
         for page in document.pages:
-            if page.scene is None:
+            if page.frame is None:
                 continue
-            for item in page.scene.markups():
+            for item in page.frame.markups():
                 if isinstance(item, CountItem):
                     counts[item.subject] += 1
                 elif isinstance(item, MeasureItem) and item.value is not None:
@@ -321,9 +321,9 @@ class VariablesPanel(QWidget):
         if document is None:
             return rows
         for page in document.pages:
-            if page.scene is None:
+            if page.frame is None:
                 continue
-            for item in page.scene.ordered_markups():
+            for item in page.frame.ordered_markups():
                 locals_map = getattr(item, "local_values", None)
                 if not locals_map:
                     continue
@@ -449,9 +449,9 @@ class LayersPanel(QWidget):
         document = self.window.document
         counts: dict[str, int] = {}
         for page in document.pages:
-            if page.scene is None:
+            if page.frame is None:
                 continue
-            for item in page.scene.markups():
+            for item in page.frame.markups():
                 counts[item.layer] = counts.get(item.layer, 0) + 1
         self.table.setRowCount(len(document.layers))
         for row, layer in enumerate(document.layers):

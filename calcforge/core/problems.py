@@ -62,9 +62,9 @@ def collect_problems(document) -> list[Problem]:
 
     problems: list[Problem] = []
     for index, page in enumerate(document.pages):
-        if page.scene is None:
+        if page.frame is None:
             continue
-        for item in page.scene.ordered_markups():
+        for item in page.frame.ordered_markups():
             if isinstance(item, MathItem):
                 for line, statement in enumerate(item.statements, start=1):
                     if statement.error:

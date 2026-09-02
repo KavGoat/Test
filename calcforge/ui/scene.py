@@ -1,11 +1,24 @@
-"""The graphics scene that draws one page and holds its markups."""
+"""The canvas: one scene holding every page of the document.
+
+A calculation sheet is read the way a PDF is read — scrolled through, not
+turned page by page — so all the pages live in one scene, stacked down the
+canvas with a gap between them. Each page is a :class:`PageFrame`: it draws
+its own paper, edge, shadow, imported background, grid, margins and running
+text, and owns its markups as child items.
+
+Keeping markups as children of their page is what makes this cheap: an item's
+position stays relative to the top-left of its own page, exactly as it is
+saved, so nothing else in the application has to know where that page happens
+to sit on the canvas today.
+"""
 from __future__ import annotations
 
 from typing import Optional
 
 from PySide6.QtCore import QByteArray, QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import QGraphicsItem, QGraphicsScene
+from PySide6.QtGui import (QBrush, QColor, QImage, QLinearGradient, QPainter,
+                           QPen, QPixmap)
+from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QGraphicsScene
 
 from ..core.document import MM_TO_PT, Document, Page
 from ..theme import CANVAS, LIGHT
@@ -15,6 +28,9 @@ from ..items.media import ImageItem
 ROW_TOLERANCE = 9.0        # points; items this close vertically share a row
 
 PAPER = QColor("#ffffff")
+PAGE_EDGE = QColor(120, 126, 136)      # the line around the sheet
+PAGE_GAP = 26.0                        # points of desk between pages
+SHADOW_DEPTH = 7.0                     # how far the shadow reaches
 
 
 def _order_key(item):
@@ -48,16 +64,34 @@ def reading_order(items: list) -> list:
             row_top = top
     ordered.extend(sorted(row, key=lambda i: _order_key(i)[1:]))
     return ordered
+
+
+def detach(item: MarkupItem) -> None:
+    """Take a markup off whatever page it is on.
+
+    An item always leaves the page it is actually on. A draft begun on one page
+    and abandoned after scrolling to another would otherwise be removed from
+    the wrong one, which Qt ignores with a warning while leaving the item
+    stranded where it came from.
+    """
+    frame = item.parentItem()
+    if isinstance(frame, PageFrame):
+        frame.remove_markup(item)
+        return
+    scene = item.scene()
+    if scene is not None:
+        scene.removeItem(item)
+
+
 MARGIN_PEN = QColor(120, 160, 220, 120)
 GRID_PEN = QColor(180, 195, 210, 110)
 GRID_PEN_MAJOR = QColor(150, 170, 195, 150)
 
 
-class PageScene(QGraphicsScene):
-    """One page: paper, optional PDF background, guides and markup items."""
+class PageFrame(QGraphicsObject):
+    """One page of the document, and everything drawn on it."""
 
     itemsChanged = Signal()
-    selectionInfoChanged = Signal()
 
     def __init__(self, page: Page, document: Document):
         super().__init__()
@@ -66,27 +100,24 @@ class PageScene(QGraphicsScene):
         self.workspace = document.workspace
         self._background: Optional[QPixmap] = None
         self.print_mode = False
-        # Markups are dragged, resized and re-laid-out constantly, and a
-        # calculation changes shape every time a character is typed into it.
-        # Qt's spatial index assumes the opposite, and any bounding rectangle
-        # that changes without it being told leaves it dereferencing stale
-        # geometry — a crash, not a glitch.  A calculation sheet holds hundreds
-        # of items, not hundreds of thousands, so a linear scan is cheaper than
-        # the index would have been anyway.
-        self.setItemIndexMethod(QGraphicsScene.NoIndex)
-        self.update_scene_rect()
-        self.set_canvas_colour(CANVAS[LIGHT])
-        self.selectionChanged.connect(self.selectionInfoChanged.emit)
-
-    def set_canvas_colour(self, colour: str) -> None:
-        self.setBackgroundBrush(QBrush(QColor(colour)))
+        self.setFlag(QGraphicsItem.ItemIsSelectable, False)
+        self.setFlag(QGraphicsItem.ItemIsMovable, False)
+        # Behind every markup, and behind the desk's own shadow drawing.
+        self.setZValue(-1000.0)
 
     # -- geometry ----------------------------------------------------------
-    def update_scene_rect(self) -> None:
-        self.setSceneRect(QRectF(0, 0, self.page.width_pt, self.page.height_pt))
-
     def page_rect(self) -> QRectF:
         return QRectF(0, 0, self.page.width_pt, self.page.height_pt)
+
+    def boundingRect(self) -> QRectF:
+        return self.page_rect().adjusted(-1, -1, SHADOW_DEPTH + 1, SHADOW_DEPTH + 1)
+
+    def update_scene_rect(self) -> None:
+        """The page's size changed; the canvas has to be laid out again."""
+        self.prepareGeometryChange()
+        scene = self.scene()
+        if isinstance(scene, DocumentScene):
+            scene.layout_pages()
 
     # -- background --------------------------------------------------------
     def load_background(self) -> None:
@@ -98,69 +129,76 @@ class PageScene(QGraphicsScene):
         pixmap.loadFromData(QByteArray(data))
         self._background = pixmap if not pixmap.isNull() else None
 
-    def drawBackground(self, painter: QPainter, rect: QRectF) -> None:
-        page_rect = self.page_rect()
+    def paint(self, painter: QPainter, option, widget=None) -> None:
+        rect = self.page_rect()
         if not self.print_mode:
-            # Qt's own drawBackground would paint the brush; this one replaces
-            # it, so the desk the sheet lies on has to be painted here.
-            painter.fillRect(rect, self.backgroundBrush())
-            self._draw_page_shadow(painter, page_rect)
-        painter.fillRect(page_rect, PAPER)
+            self._paint_shadow(painter, rect)
+        painter.fillRect(rect, PAPER)
         if self._background is None and self.page.background_key:
             self.load_background()
         if self._background is not None:
             painter.save()
             painter.setOpacity(self.page.background_opacity)
             painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
-            painter.drawPixmap(page_rect, self._background, QRectF(self._background.rect()))
+            painter.drawPixmap(rect, self._background, QRectF(self._background.rect()))
             painter.restore()
         if not self.print_mode:
-            self._draw_grid(painter, rect)
-            self._draw_margins(painter)
-        self._draw_running_text(painter)
+            self._paint_grid(painter, rect)
+            self._paint_margins(painter)
+        self._paint_running_text(painter)
+        if not self.print_mode:
+            # Last, so nothing drawn on the page can paint over its own edge.
+            painter.save()
+            pen = QPen(PAGE_EDGE)
+            pen.setWidthF(0)              # one device pixel, at any zoom
+            painter.setPen(pen)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRect(rect)
+            painter.restore()
 
-    def _draw_page_shadow(self, painter: QPainter, page_rect: QRectF) -> None:
-        """A soft edge under the sheet, so it reads as paper on a desk."""
+    def _paint_shadow(self, painter: QPainter, rect: QRectF) -> None:
+        """A soft edge under the sheet, so it reads as paper lying on a desk."""
         painter.save()
         painter.setPen(Qt.NoPen)
-        for step in range(6, 0, -1):
-            shade = QColor(0, 0, 0, 6)
-            painter.setBrush(QBrush(shade))
-            painter.drawRect(page_rect.adjusted(step * 0.6, step * 0.6,
-                                                step * 1.1, step * 1.4))
+        right = QLinearGradient(rect.right(), 0, rect.right() + SHADOW_DEPTH, 0)
+        right.setColorAt(0.0, QColor(0, 0, 0, 46))
+        right.setColorAt(1.0, QColor(0, 0, 0, 0))
+        painter.fillRect(QRectF(rect.right(), rect.top() + SHADOW_DEPTH * 0.5,
+                                SHADOW_DEPTH, rect.height()), QBrush(right))
+        below = QLinearGradient(0, rect.bottom(), 0, rect.bottom() + SHADOW_DEPTH)
+        below.setColorAt(0.0, QColor(0, 0, 0, 46))
+        below.setColorAt(1.0, QColor(0, 0, 0, 0))
+        painter.fillRect(QRectF(rect.left() + SHADOW_DEPTH * 0.5, rect.bottom(),
+                                rect.width(), SHADOW_DEPTH), QBrush(below))
         painter.restore()
 
-    def _draw_grid(self, painter: QPainter, rect: QRectF) -> None:
+    def _paint_grid(self, painter: QPainter, page_rect: QRectF) -> None:
         settings = self.document.settings
         if not settings.show_grid:
             return
         step = max(settings.grid_mm, 1.0) * MM_TO_PT
-        page_rect = self.page_rect()
-        area = rect.intersected(page_rect)
-        if area.isEmpty():
-            return
         painter.save()
         minor = QPen(GRID_PEN)
         minor.setWidthF(0.3)
         major = QPen(GRID_PEN_MAJOR)
         major.setWidthF(0.6)
-        index = int(area.left() / step)
-        x = index * step
-        while x <= area.right():
+        index = 0
+        x = 0.0
+        while x <= page_rect.right():
             painter.setPen(major if index % 5 == 0 else minor)
-            painter.drawLine(QPointF(x, area.top()), QPointF(x, area.bottom()))
+            painter.drawLine(QPointF(x, page_rect.top()), QPointF(x, page_rect.bottom()))
             x += step
             index += 1
-        index = int(area.top() / step)
-        y = index * step
-        while y <= area.bottom():
+        index = 0
+        y = 0.0
+        while y <= page_rect.bottom():
             painter.setPen(major if index % 5 == 0 else minor)
-            painter.drawLine(QPointF(area.left(), y), QPointF(area.right(), y))
+            painter.drawLine(QPointF(page_rect.left(), y), QPointF(page_rect.right(), y))
             y += step
             index += 1
         painter.restore()
 
-    def _draw_margins(self, painter: QPainter) -> None:
+    def _paint_margins(self, painter: QPainter) -> None:
         if not self.document.settings.show_margins:
             return
         x, y, width, height = self.page.setup.content_rect_pt
@@ -173,19 +211,18 @@ class PageScene(QGraphicsScene):
         painter.drawRect(QRectF(x, y, width, height))
         painter.restore()
 
-    def _draw_running_text(self, painter: QPainter) -> None:
+    def _paint_running_text(self, painter: QPainter) -> None:
         settings = self.document.settings
         index = self.document.index_of(self.page)
         left, top, width, height = self.page.setup.content_rect_pt
         from ..core.typography import page_font
-        font = page_font("", 8.0)
         painter.save()
-        painter.setFont(font)
+        painter.setFont(page_font("", 8.0))
         painter.setPen(QPen(QColor(90, 96, 106)))
         if settings.show_header:
             box = QRectF(left, top - 18, width, 14)
-            self._draw_three(painter, box, settings.header_left, settings.header_center,
-                             settings.header_right, index)
+            self._paint_three(painter, box, settings.header_left, settings.header_center,
+                              settings.header_right, index)
             pen = QPen(QColor(190, 196, 206))
             pen.setWidthF(0.5)
             painter.setPen(pen)
@@ -193,8 +230,8 @@ class PageScene(QGraphicsScene):
             painter.setPen(QPen(QColor(90, 96, 106)))
         if settings.show_footer:
             box = QRectF(left, top + height + 5, width, 14)
-            self._draw_three(painter, box, settings.footer_left, settings.footer_center,
-                             settings.footer_right, index)
+            self._paint_three(painter, box, settings.footer_left, settings.footer_center,
+                              settings.footer_right, index)
             pen = QPen(QColor(190, 196, 206))
             pen.setWidthF(0.5)
             painter.setPen(pen)
@@ -202,8 +239,8 @@ class PageScene(QGraphicsScene):
                              QPointF(left + width, top + height + 3))
         painter.restore()
 
-    def _draw_three(self, painter: QPainter, box: QRectF, left: str, center: str,
-                    right: str, index: int) -> None:
+    def _paint_three(self, painter: QPainter, box: QRectF, left: str, center: str,
+                     right: str, index: int) -> None:
         if left:
             painter.drawText(box, Qt.AlignLeft | Qt.AlignVCenter,
                              self.document.expand_fields(left, index))
@@ -216,7 +253,7 @@ class PageScene(QGraphicsScene):
 
     # -- items -------------------------------------------------------------
     def markups(self) -> list[MarkupItem]:
-        return [item for item in self.items() if isinstance(item, MarkupItem)]
+        return [item for item in self.childItems() if isinstance(item, MarkupItem)]
 
     def ordered_markups(self) -> list[MarkupItem]:
         """Reading order: top-left to bottom-right, the way SMath evaluates.
@@ -234,21 +271,17 @@ class PageScene(QGraphicsScene):
             item.setZValue(self.next_z())
         if isinstance(item, ImageItem):
             item.load_from_document(self.document)
-        self.addItem(item)
+        item.setParentItem(self)
         item.refresh(self.workspace, self.page)
         self.itemsChanged.emit()
         return item
 
     def remove_markup(self, item: MarkupItem) -> None:
-        # An item always leaves the scene it is actually in.  A draft started
-        # on one page and abandoned after turning to another would otherwise be
-        # removed from the wrong scene, which Qt ignores with a warning and
-        # leaves the item stranded on the page it came from.
-        owner = item.scene()
-        if owner is None:
-            return
-        owner.removeItem(item)
-        owner.itemsChanged.emit()
+        item.setParentItem(None)
+        scene = item.scene()
+        if scene is not None:
+            scene.removeItem(item)
+        self.itemsChanged.emit()
 
     def next_z(self) -> float:
         markups = self.markups()
@@ -259,15 +292,16 @@ class PageScene(QGraphicsScene):
 
     def load_items(self, data: list[dict]) -> None:
         for item in self.markups():
-            self.removeItem(item)
+            self.remove_markup(item)
         for entry in data:
             item = build_item(entry)
             if item is None:
                 continue
             if isinstance(item, ImageItem):
                 item.load_from_document(self.document)
-            self.addItem(item)
+            item.setParentItem(self)
         self.refresh_items()
+        self.itemsChanged.emit()
 
     def refresh_items(self) -> None:
         for item in self.ordered_markups():
@@ -299,10 +333,13 @@ class PageScene(QGraphicsScene):
     # -- rendering ---------------------------------------------------------
     def render_page(self, painter: QPainter, target: QRectF, for_print: bool = True) -> None:
         """Draw the whole page into *target*, hiding editing chrome."""
+        scene = self.scene()
+        if scene is None:
+            return
         previous = self.print_mode
         self.print_mode = for_print
-        selected = self.selectedItems()
-        chrome: list[tuple] = []
+        selected = [item for item in self.markups() if item.isSelected()]
+        chrome: list = []
         for item in self.markups():
             if hasattr(item, "set_chrome") and item.show_chrome:
                 chrome.append(item)
@@ -312,7 +349,8 @@ class PageScene(QGraphicsScene):
                   if for_print and (not item.printable or not self.layer_prints(item))]
         for item in hidden:
             item.setVisible(False)
-        self.render(painter, target, self.page_rect(), Qt.IgnoreAspectRatio)
+        source = self.mapRectToScene(self.page_rect())
+        scene.render(painter, target, source, Qt.IgnoreAspectRatio)
         for item in hidden:
             item.setVisible(self.document.layer(item.layer).visible)
         for item in chrome:
@@ -334,3 +372,111 @@ class PageScene(QGraphicsScene):
         self.render_page(painter, QRectF(0, 0, width, height), for_print)
         painter.end()
         return image
+
+
+class DocumentScene(QGraphicsScene):
+    """Every page of the document, stacked down one continuous canvas."""
+
+    itemsChanged = Signal()
+    selectionInfoChanged = Signal()
+
+    def __init__(self, document: Document):
+        super().__init__()
+        self.document = document
+        self.workspace = document.workspace
+        self.frames: list[PageFrame] = []
+        self.print_mode = False
+        # Markups are dragged, resized and re-laid-out constantly, and a
+        # calculation changes shape every time a character is typed into it.
+        # Qt's spatial index assumes the opposite, and any bounding rectangle
+        # that changes without it being told leaves it dereferencing stale
+        # geometry — a crash, not a glitch.  A calculation sheet holds hundreds
+        # of items, not hundreds of thousands, so a linear scan is cheaper than
+        # the index would have been anyway.
+        self.setItemIndexMethod(QGraphicsScene.NoIndex)
+        self.set_canvas_colour(CANVAS[LIGHT])
+        self.selectionChanged.connect(self.selectionInfoChanged.emit)
+
+    def set_canvas_colour(self, colour: str) -> None:
+        self.setBackgroundBrush(QBrush(QColor(colour)))
+
+    # -- pages -------------------------------------------------------------
+    def add_frame(self, page: Page) -> PageFrame:
+        frame = PageFrame(page, self.document)
+        self.addItem(frame)
+        frame.itemsChanged.connect(self.itemsChanged.emit)
+        self.frames.append(frame)
+        return frame
+
+    def clear_frames(self) -> None:
+        for frame in self.frames:
+            self.removeItem(frame)
+        self.frames = []
+
+    def layout_pages(self) -> None:
+        """Stack the pages down the canvas, centred on the widest one."""
+        widest = max((frame.page.width_pt for frame in self.frames), default=0.0)
+        y = 0.0
+        for frame in self.frames:
+            frame.setPos((widest - frame.page.width_pt) / 2.0, y)
+            y += frame.page.height_pt + PAGE_GAP
+        height = max(y - PAGE_GAP, 0.0)
+        # A generous margin of desk, so the first and last pages are not welded
+        # to the edge of the window.
+        self.setSceneRect(QRectF(-PAGE_GAP, -PAGE_GAP,
+                                 widest + 2 * PAGE_GAP, height + 2 * PAGE_GAP))
+
+    def frame_for(self, page: Page) -> Optional[PageFrame]:
+        for frame in self.frames:
+            if frame.page is page:
+                return frame
+        return None
+
+    def frame_at(self, scene_pos: QPointF) -> Optional[PageFrame]:
+        """The page under a point — or the nearest one, for a point on the desk."""
+        if not self.frames:
+            return None
+        best, best_distance = None, float("inf")
+        for frame in self.frames:
+            rect = frame.mapRectToScene(frame.page_rect())
+            if rect.contains(scene_pos):
+                return frame
+            centre = rect.center()
+            distance = abs(centre.y() - scene_pos.y())
+            if distance < best_distance:
+                best, best_distance = frame, distance
+        return best
+
+    def index_at(self, scene_pos: QPointF) -> int:
+        frame = self.frame_at(scene_pos)
+        return self.frames.index(frame) if frame in self.frames else 0
+
+    def page_top(self, index: int) -> float:
+        if 0 <= index < len(self.frames):
+            return self.frames[index].pos().y()
+        return 0.0
+
+    # -- items across the whole document ------------------------------------
+    def markups(self) -> list[MarkupItem]:
+        return [item for item in self.items() if isinstance(item, MarkupItem)]
+
+    def ordered_markups(self) -> list[MarkupItem]:
+        """The whole document in reading order: page by page, each top-left
+        to bottom-right. This is the order the document evaluates in."""
+        ordered: list[MarkupItem] = []
+        for frame in self.frames:
+            ordered.extend(frame.ordered_markups())
+        return ordered
+
+    def apply_layers(self) -> None:
+        for frame in self.frames:
+            frame.apply_layers()
+
+    def refresh_items(self) -> None:
+        for frame in self.frames:
+            frame.refresh_items()
+
+    def drawBackground(self, painter: QPainter, rect: QRectF) -> None:
+        # Qt's own drawBackground would paint the brush; this one replaces it,
+        # so the desk the sheets lie on has to be painted here.
+        painter.fillRect(rect, self.backgroundBrush())

@@ -418,7 +418,7 @@ def test_sample_document_is_consistent(window):
     assert workspace.get("util_b") == pytest.approx(0.3911, rel=1e-3)
     # the footing block is self-contained, so its values are not document-wide
     assert workspace.get("q") is None
-    footing = [i for i in window.document.pages[2].scene.markups()
+    footing = [i for i in window.document.pages[2].frame.markups()
                if isinstance(i, MathItem) and i.label == "Pad footing"][0]
     assert footing.local_values["q"].value.to("kPa").magnitude == pytest.approx(149.8,
                                                                                rel=1e-3)
@@ -500,7 +500,7 @@ def test_page_scale_change_updates_measurements(window):
     measure = [i for i in markups(window) if isinstance(i, MeasureItem)][0]
     first = measure.value.to("m").magnitude
     window.current_page().scale = PageScale.from_ratio(200)
-    window.current_page().scene.refresh_items()
+    window.current_page().frame.refresh_items()
     assert measure.value.to("m").magnitude == pytest.approx(first * 2, rel=1e-6)
 
 
@@ -607,7 +607,7 @@ def test_properties_panel_relayouts_when_the_selection_changes(window):
     window.select_tool("note")
     from calcforge.items.measure import MeasureItem
     measure = MeasureItem("length", [QPointF(0, 0), QPointF(100, 0)])
-    window.view.scene().add_markup(measure, QPointF(120, 500))
+    window.view.frame().add_markup(measure, QPointF(120, 500))
     window.view.scene().clearSelection()
     measure.setSelected(True)
     window.properties_panel.verticalScrollBar().setValue(50)
@@ -1050,7 +1050,7 @@ def test_non_printing_layers_are_left_out_of_output(window, tmp_path):
     window.select_tool("rect")
     drag(window.view, 100, 100, 200, 200)
     window.select_tool("select")
-    scene = window.view.scene()
+    scene = window.current_page().frame
     with_layer = scene.render_image(dpi=60, for_print=True)
     window.document.layer("Markups").printable = False
     without_layer = scene.render_image(dpi=60, for_print=True)
@@ -1095,7 +1095,7 @@ def test_applying_redactions_destroys_what_is_underneath(window, monkeypatch, tm
     image.save(buffer, "PNG")
     page.background_key = window.document.add_asset(bytes(buffer.data()), "png")
     original_key = page.background_key
-    page.scene.load_background()
+    page.frame.load_background()
 
     window.select_tool("text")
     drag(window.view, 120, 120, 200, 150)
@@ -1171,7 +1171,7 @@ def test_dark_theme_switches_the_chrome_but_not_the_paper(window):
     assert tokens(DARK)["chrome"] in QApplication.instance().styleSheet()
     assert window.view.scene().backgroundBrush().color().name() == CANVAS[DARK]
     # the page itself stays paper-white
-    image = window.view.scene().render_image(dpi=40, for_print=False)
+    image = window.current_page().frame.render_image(dpi=40, for_print=False)
     assert image.pixelColor(image.width() // 2, image.height() // 2).name() == "#ffffff"
     window.toggle_theme(False)
     assert tokens(LIGHT)["chrome"] in QApplication.instance().styleSheet()
@@ -1683,10 +1683,10 @@ def test_the_desk_behind_the_paper_is_actually_painted(window):
     from PySide6.QtCore import QRectF
     from calcforge.theme import CANVAS, LIGHT
 
-    scene = window.view.scene()
-    page = scene.page_rect()
-    # A region that reaches past the sheet on every side.
-    area = page.adjusted(-60, -60, 60, 60)
+    frame = window.current_page().frame
+    scene = frame.scene()
+    # A region of the canvas that reaches past the sheet on every side.
+    area = frame.mapRectToScene(frame.page_rect()).adjusted(-60, -60, 60, 60)
     image = QImage(200, 200, QImage.Format_ARGB32)
     image.fill(0)
     painter = QPainter(image)
@@ -1719,18 +1719,22 @@ def test_every_markup_tool_is_reachable_from_the_toolbar(window):
 # ---------------------------------------------------------------------------
 
 def _page_counts(window):
-    return [len(page.scene.markups()) for page in window.document.pages]
+    return [len(page.frame.markups()) for page in window.document.pages]
 
 
 def _fill_three_pages(window):
     """Two markups on page 1, three on page 2, one on page 3."""
+    from tests.test_usability import on_page
+
     for extra in range(2):
         window.add_page()
     for index, count in enumerate((2, 3, 1)):
         window.go_to_page(index)
         for number in range(count):
             window.select_tool("rect")
-            drag(window.view, 60 + number * 80, 60, 120 + number * 80, 120)
+            x0, y0 = on_page(window, index, 60 + number * 80, 60)
+            x1, y1 = on_page(window, index, 120 + number * 80, 120)
+            drag(window.view, x0, y0, x1, y1)
     window.select_tool("select")
     assert _page_counts(window) == [2, 3, 1]
 

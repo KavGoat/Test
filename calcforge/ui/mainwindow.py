@@ -35,7 +35,7 @@ from .commands import DocumentStructureCommand
 from .icons import icon
 from .panels import (FunctionsPanel, LayersPanel, MarkupsPanel, PagesPanel,
                      ProblemsPanel, PropertiesPanel, VariablesPanel)
-from .scene import PageScene
+from .scene import DocumentScene, detach
 from .shortcuts import COMMAND, INSERT, TOOL, ShortcutManager
 from .tools import CATEGORIES, TOOL_MAP, TOOLS, tools_in
 from .view import PageView
@@ -72,6 +72,7 @@ class MainWindow(QMainWindow):
         # The independent check is not cheap, so it runs once the document has
         # been left alone for a moment rather than on every keystroke.
         self._verification = None
+        self.scene = None
         self._verify_timer = QTimer(self)
         self._verify_timer.setSingleShot(True)
         self._verify_timer.setInterval(900)
@@ -502,6 +503,7 @@ class MainWindow(QMainWindow):
         self.view.toolFinished.connect(self.select_tool)
         self.view.cellChanged.connect(self.refresh_formula_bar)
         self.view.documentEdited.connect(self.mark_modified)
+        self.view.pageChanged.connect(self.follow_scrolled_page)
         self.pages_panel.pageSelected.connect(self.go_to_page)
         self.pages_panel.pagesReordered.connect(self.move_page)
         self.markups_panel.markupActivated.connect(self.reveal_markup)
@@ -528,24 +530,36 @@ class MainWindow(QMainWindow):
         self.update_title()
 
     def rebuild_scenes(self) -> None:
-        """Give every page a scene, and show the current one.
+        """Give every page a frame on the canvas, and show the current one.
 
-        A page that already has a live scene keeps it. Building a fresh one
+        A page that already has a live frame keeps it. Building a fresh one
         would load the page's *pending* items, and those were emptied into the
-        scene the first time it was built — so rebuilding after inserting a
+        frame the first time it was built — so rebuilding after inserting a
         page would have quietly emptied every page in the document.
         """
+        if self.scene is None or self.scene.document is not self.document:
+            self.scene = DocumentScene(self.document)
+            self.scene.itemsChanged.connect(self.refresh_lists)
+            self.view.setScene(self.scene)
+        # Frames whose page has gone leave the canvas with it.
+        live = {id(page) for page in self.document.pages}
+        for frame in list(self.scene.frames):
+            if id(frame.page) not in live:
+                self.scene.frames.remove(frame)
+                self.scene.removeItem(frame)
+        ordered = []
         for page in self.document.pages:
-            if page.scene is None:
-                scene = PageScene(page, self.document)
-                page.scene = scene
-                scene.load_items(page._pending_items)
-                scene.itemsChanged.connect(self.refresh_lists)
+            if page.frame is None or page.frame.scene() is not self.scene:
+                frame = self.scene.add_frame(page)
+                page.frame = frame
+                frame.load_items(page._pending_items)
             elif page._pending_items:
-                page.scene.load_items(page._pending_items)
+                page.frame.load_items(page._pending_items)
             page._pending_items = []
+            ordered.append(page.frame)
+        self.scene.frames = ordered
+        self.scene.layout_pages()
         self.current_index = max(0, min(self.current_index, len(self.document.pages) - 1))
-        self.view.setScene(self.document.pages[self.current_index].scene)
         self.recalculate()
         self.page_spin.blockSignals(True)
         self.page_spin.setRange(1, len(self.document.pages))
@@ -716,7 +730,8 @@ class MainWindow(QMainWindow):
         self.view.deactivate_table()
         self.view.cancel_draft()
         self.current_index = index
-        self.view.setScene(self.document.pages[index].scene)
+        self.view._shown_page = index
+        self.view.go_to_page_top(index)
         self.page_spin.blockSignals(True)
         self.page_spin.setValue(index + 1)
         self.page_spin.blockSignals(False)
@@ -725,6 +740,23 @@ class MainWindow(QMainWindow):
         self.pages_panel.list.blockSignals(False)
         self.refresh_scale_label()
         self.refresh_selection()
+
+    def follow_scrolled_page(self, index: int) -> None:
+        """The reader scrolled onto another page; catch the chrome up.
+
+        Deliberately does not scroll: the view is already where the reader put
+        it, and moving it under them would be maddening.
+        """
+        if not 0 <= index < len(self.document.pages) or index == self.current_index:
+            return
+        self.current_index = index
+        self.page_spin.blockSignals(True)
+        self.page_spin.setValue(index + 1)
+        self.page_spin.blockSignals(False)
+        self.pages_panel.list.blockSignals(True)
+        self.pages_panel.list.setCurrentRow(index)
+        self.pages_panel.list.blockSignals(False)
+        self.refresh_scale_label()
 
     def _structure_snapshot(self) -> dict:
         return {"pages": [page.to_dict() for page in self.document.pages],
@@ -740,6 +772,11 @@ class MainWindow(QMainWindow):
         before = self._structure_snapshot()
         mutate()
         self.rebuild_scenes()
+        # Adding or removing a page moves the reader to it, the way inserting a
+        # page in any document viewer does.
+        self.view._shown_page = self.current_index
+        self.view.go_to_page_top(self.current_index)
+        self.follow_scrolled_page(self.current_index)
         after = self._structure_snapshot()
         self.undo_stack.push(DocumentStructureCommand(before, after, description,
                                                       self._restore_structure))
@@ -840,7 +877,7 @@ class MainWindow(QMainWindow):
     def apply_scale_change(self) -> None:
         """Everything that has to catch up when a page's scale changes."""
         self.refresh_scale_label()
-        self.current_page().scene.refresh_items()
+        self.current_page().frame.refresh_items()
         # Measurements and rectangle sizes are in the takeoff list too, so it
         # goes stale unless it is rebuilt with them.
         self.refresh_lists()
@@ -850,7 +887,7 @@ class MainWindow(QMainWindow):
     def set_area_unit(self, unit: str) -> None:
         if unit:
             self.current_page().scale.area_unit = unit
-            self.current_page().scene.refresh_items()
+            self.current_page().frame.refresh_items()
             self.refresh_lists()
             self.mark_modified()
 
@@ -928,9 +965,9 @@ class MainWindow(QMainWindow):
         self.view.begin_snapshot()
         counters: dict[str, int] = {}
         for page in self.document.pages:
-            if page.scene is None:
+            if page.frame is None:
                 continue
-            for item in reading_order(page.scene.markups()):
+            for item in reading_order(page.frame.markups()):
                 if isinstance(item, CountItem):
                     counters[item.subject] = counters.get(item.subject, 0) + 1
                     item.index = counters[item.subject]
@@ -1116,7 +1153,7 @@ class MainWindow(QMainWindow):
         self.view.deactivate_table()
         self.view.begin_snapshot()
         for item in items:
-            self.view.scene().remove_markup(item)
+            detach(item)
         self.recalculate()
         self.view.commit_snapshot("Delete markup")
         self.refresh_selection()
@@ -1174,7 +1211,7 @@ class MainWindow(QMainWindow):
                 continue
             if isinstance(item, ImageItem):
                 item.load_from_document(self.document)
-            self.view.scene().add_markup(item)
+            self.view.frame().add_markup(item)
             item.setSelected(True)
         self.recalculate()
         self.view.commit_snapshot("Paste")
@@ -1216,7 +1253,7 @@ class MainWindow(QMainWindow):
 
         self.view.begin_snapshot()
         self.view.scene().clearSelection()
-        self.view.scene().add_markup(table, self.view.typing_position())
+        self.view.typing_frame().add_markup(table, self.view.typing_position())
         table.setSelected(True)
         self.recalculate()
         self.view.commit_snapshot("Paste as table")
@@ -1235,14 +1272,14 @@ class MainWindow(QMainWindow):
             if copy is not None:
                 if isinstance(copy, ImageItem):
                     copy.load_from_document(self.document)
-                self.view.scene().add_markup(copy)
+                self.view.frame().add_markup(copy)
                 copy.setSelected(True)
         self.recalculate()
         self.view.commit_snapshot("Duplicate")
         self.refresh_selection()
 
     def select_all(self) -> None:
-        for item in self.view.scene().markups():
+        for item in self.view.frame().markups():
             if self.layer_visible(item.layer):
                 item.setSelected(True)
         self.refresh_selection()
@@ -1346,7 +1383,7 @@ class MainWindow(QMainWindow):
                     if isinstance(copy, ImageItem):
                         copy.load_from_document(self.document)
                     copy.setPos(item.pos() + offset)
-                    self.view.scene().add_markup(copy)
+                    self.view.frame().add_markup(copy)
                     copy.setSelected(True)
                     made += 1
                 elif step_index == count:
@@ -1395,16 +1432,16 @@ class MainWindow(QMainWindow):
     def apply_layers(self) -> None:
         """Push layer visibility, locking and print flags onto every page."""
         for page in self.document.pages:
-            if page.scene is not None:
-                page.scene.apply_layers()
+            if page.frame is not None:
+                page.frame.apply_layers()
         self.layers_panel.rebuild()
         self.refresh_selection()
 
     def rename_layer(self, old: str, new: str) -> None:
         for page in self.document.pages:
-            if page.scene is None:
+            if page.frame is None:
                 continue
-            for item in page.scene.markups():
+            for item in page.frame.markups():
                 if item.layer == old:
                     item.layer = new
         self.document.modified = True
@@ -1481,9 +1518,9 @@ class MainWindow(QMainWindow):
         # has to be defined above (or to the left of) whatever uses it, so moving
         # a region really does change what resolves — as it does in SMath.
         for page in self.document.pages:
-            if page.scene is None:
+            if page.frame is None:
                 continue
-            for item in page.scene.ordered_markups():
+            for item in page.frame.ordered_markups():
                 item.refresh(workspace, page)
         self.variables_panel.rebuild(workspace)
         self.markups_panel.rebuild(self.document)
@@ -1506,9 +1543,9 @@ class MainWindow(QMainWindow):
             pieces = block.split_lines()
             if not pieces:
                 continue
-            self.view.scene().remove_markup(block)
+            detach(block)
             for piece in pieces:
-                self.view.scene().add_markup(piece)
+                self.view.frame().add_markup(piece)
                 created += 1
         self.recalculate()
         self.view.commit_snapshot("Split calculation")
@@ -1535,8 +1572,8 @@ class MainWindow(QMainWindow):
         merged.setZValue(first.zValue())
         self.view.begin_snapshot()
         for block in blocks:
-            self.view.scene().remove_markup(block)
-        self.view.scene().add_markup(merged)
+            detach(block)
+        self.view.frame().add_markup(merged)
         self.recalculate()
         self.view.commit_snapshot("Merge calculations")
         self.view.scene().clearSelection()
@@ -1547,9 +1584,9 @@ class MainWindow(QMainWindow):
         """Every name the document assigns, gathered before anything evaluates."""
         names: set[str] = set()
         for page in self.document.pages:
-            if page.scene is None:
+            if page.frame is None:
                 continue
-            for item in page.scene.markups():
+            for item in page.frame.markups():
                 collect = getattr(item, "declared_names", None)
                 if callable(collect):
                     names |= collect()
@@ -1753,15 +1790,13 @@ class MainWindow(QMainWindow):
         application = QApplication.instance()
         if application is not None:
             apply_theme(application, theme)
-        for page in self.document.pages:
-            if page.scene is not None:
-                page.scene.set_canvas_colour(CANVAS[theme])
+        if self.scene is not None:
+            self.scene.set_canvas_colour(CANVAS[theme])
         self._refresh_all_scenes()
 
     def _refresh_all_scenes(self) -> None:
-        for page in self.document.pages:
-            if page.scene is not None:
-                page.scene.update()
+        if self.scene is not None:
+            self.scene.update()
 
     def _zoom_chosen(self, _index: int) -> None:
         text = self.zoom_combo.currentText().strip().lower()
@@ -1877,8 +1912,11 @@ class MainWindow(QMainWindow):
             "This block keeps its names to itself" if on
             else "This block defines for the whole document")
 
-    def _insert_at(self, key: str, point: QPointF) -> None:
+    def _insert_at(self, key: str, scene_point: QPointF) -> None:
+        """Put a new markup on the page under *scene_point*."""
         tool = TOOL_MAP[key]
+        frame = self.view.frame_at(scene_point) or self.view.frame()
+        point = frame.mapFromScene(scene_point)
         self.view.begin_snapshot()
         item = tool.factory()
         self.apply_default_style(item)
@@ -1888,7 +1926,7 @@ class MainWindow(QMainWindow):
             item.set_local_rect(QRectF(0, 0, width, height))
         if isinstance(item, ImageItem) and not self.load_image_into(item):
             return
-        self.view.scene().add_markup(item, point)
+        frame.add_markup(item, point)
         self.view.scene().clearSelection()
         item.setSelected(True)
         self.recalculate()
@@ -1931,9 +1969,9 @@ class MainWindow(QMainWindow):
         from ..items.shapes import RectItem
         found = []
         for index, page in enumerate(self.document.pages):
-            if page.scene is None:
+            if page.frame is None:
                 continue
-            for item in page.scene.markups():
+            for item in page.frame.markups():
                 if isinstance(item, RectItem) and item.kind == "redact":
                     found.append((index, page, item))
         return found
@@ -1999,23 +2037,23 @@ class MainWindow(QMainWindow):
         buffer.open(QIODevice.WriteOnly)
         image.save(buffer, "PNG")
         page.background_key = self.document.add_asset(bytes(buffer.data()), "png")
-        if page.scene is not None:
-            page.scene._background = None
-            page.scene.load_background()
-            page.scene.update()
+        if page.frame is not None:
+            page.frame._background = None
+            page.frame.load_background()
+            page.frame.update()
 
     def _flatten_redactions(self, page, items: list, boxes: list) -> int:
         """Delete what the boxes fully cover and leave a locked black rectangle."""
-        scene = page.scene
-        if scene is None:
+        frame = page.frame
+        if frame is None:
             return 0
         removed = 0
-        for other in list(scene.markups()):
+        for other in list(frame.markups()):
             if other in items:
                 continue
             rect = other.sceneBoundingRect()
             if any(box.contains(rect) for box in boxes):
-                scene.remove_markup(other)
+                frame.remove_markup(other)
                 removed += 1
         for item in items:
             item.kind = "redact"

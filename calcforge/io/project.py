@@ -21,8 +21,8 @@ def save_document(document, path: str, enforce_extension: bool = True) -> None:
         path += EXTENSION
     used: set[str] = set()
     for page in document.pages:
-        if page.scene is not None:
-            used |= page.scene.assets_used()
+        if page.frame is not None:
+            used |= page.frame.assets_used()
         elif page.background_key:
             used.add(page.background_key)
     document.prune_assets(used)

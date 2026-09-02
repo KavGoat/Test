@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (QApplication, QGraphicsView, QLineEdit, QRubberBa
 from ..core.document import MM_TO_PT
 from ..items.base import HANDLE_CURSORS, MarkupItem
 from ..items.mathitem import LINE_STEP, MathItem
+from .scene import detach
 from ..items.measure import CALIBRATE, DIMENSION, CountItem, MeasureItem
 from ..items.media import ImageItem
 from ..items.plotitem import PlotItem
@@ -39,6 +40,7 @@ class PageView(QGraphicsView):
     itemActivated = Signal(object)
     cellChanged = Signal(object)
     documentEdited = Signal()
+    pageChanged = Signal(int)
 
     def __init__(self, window):
         super().__init__()
@@ -76,6 +78,9 @@ class PageView(QGraphicsView):
         self._editing_item = None
 
         self._last_scene_pos = QPointF(60, 60)
+        self._shown_page = 0
+        for bar in (self.verticalScrollBar(), self.horizontalScrollBar()):
+            bar.valueChanged.connect(self._note_visible_page)
         self.count_subject = "Count"
         self.count_symbol = "circle"
         self.stamp_text = "APPROVED"
@@ -87,8 +92,30 @@ class PageView(QGraphicsView):
         return self.window.document
 
     def page(self):
+        """The page being worked on — the one the view is looking at."""
+        frame = self.frame()
+        return frame.page if frame is not None else None
+
+    def frame(self):
+        """The page frame the current gesture belongs to."""
+        window = self.window
+        pages = window.document.pages
+        index = max(0, min(window.current_index, len(pages) - 1))
+        return pages[index].frame if pages else None
+
+    def frame_at(self, scene_pos: QPointF):
+        """The page under a point on the canvas."""
         scene = self.scene()
-        return scene.page if scene is not None else None
+        return scene.frame_at(scene_pos) if scene is not None else None
+
+    def to_page(self, scene_pos: QPointF, frame=None) -> QPointF:
+        """A canvas point in the coordinates of *frame*'s page."""
+        frame = frame or self.frame()
+        return frame.mapFromScene(scene_pos) if frame is not None else scene_pos
+
+    def from_page(self, page_pos: QPointF, frame=None) -> QPointF:
+        frame = frame or self.frame()
+        return frame.mapToScene(page_pos) if frame is not None else page_pos
 
     def push_command(self, command) -> None:
         self.window.undo_stack.push(command)
@@ -100,9 +127,21 @@ class PageView(QGraphicsView):
         self.documentEdited.emit()
         self.selectionChanged.emit()
 
-    def begin_snapshot(self) -> None:
+    def begin_snapshot(self, frames=None) -> None:
+        """Remember what the affected pages look like before a gesture.
+
+        Most gestures touch one page. A drag can carry a markup onto another,
+        so a move records every page and only the ones that actually changed
+        are written to the undo stack.
+        """
+        if frames is None:
+            frame = self.frame()
+            frames = [frame] if frame is not None else []
+        self._snapshot = [(frame, frame.serialize_items()) for frame in frames]
+
+    def all_frames(self) -> list:
         scene = self.scene()
-        self._snapshot = scene.serialize_items() if scene is not None else []
+        return list(scene.frames) if scene is not None else []
 
     def commit_snapshot(self, text: str) -> None:
         """Record an edit for undo, and leave the document consistent.
@@ -112,16 +151,22 @@ class PageView(QGraphicsView):
         every committed gesture leaves the page showing the truth, rather than
         each gesture having to remember to ask for it.
         """
-        scene = self.scene()
-        if scene is None:
+        if not self._snapshot:
             return
-        after = scene.serialize_items()
-        if after != self._snapshot:
-            self.window.recalculate()
-            after = scene.serialize_items()
-            self.push_command(PageEditCommand(scene, self._snapshot, after, text,
-                                              on_apply=self.after_undo))
-            self.documentEdited.emit()
+        changed = [(frame, before) for frame, before in self._snapshot
+                   if frame.serialize_items() != before]
+        if not changed:
+            return
+        self.window.recalculate()
+        stack = self.window.undo_stack
+        if len(changed) > 1:
+            stack.beginMacro(text)
+        for frame, before in changed:
+            self.push_command(PageEditCommand(frame, before, frame.serialize_items(),
+                                              text, on_apply=self.after_undo))
+        if len(changed) > 1:
+            stack.endMacro()
+        self.documentEdited.emit()
 
     # ------------------------------------------------------------------
     # tools
@@ -176,25 +221,55 @@ class PageView(QGraphicsView):
     def zoom_out(self) -> None:
         self.set_zoom(self._zoom / 1.25)
 
+    def page_scene_rect(self) -> Optional[QRectF]:
+        """Where the current page sits on the canvas."""
+        frame = self.frame()
+        return frame.mapRectToScene(frame.page_rect()) if frame is not None else None
+
     def fit_page(self) -> None:
-        scene = self.scene()
-        if scene is None:
+        rect = self.page_scene_rect()
+        if rect is None or rect.width() <= 0 or rect.height() <= 0:
             return
-        rect = scene.page_rect().adjusted(-12, -12, 12, 12)
+        padded = rect.adjusted(-12, -12, 12, 12)
         available = self.viewport().rect()
-        if rect.width() <= 0 or rect.height() <= 0:
-            return
-        self.set_zoom(min(available.width() / rect.width(),
-                          available.height() / rect.height()))
-        self.centerOn(scene.page_rect().center())
+        self.set_zoom(min(available.width() / padded.width(),
+                          available.height() / padded.height()))
+        self.centerOn(rect.center())
 
     def fit_width(self) -> None:
-        scene = self.scene()
-        if scene is None:
+        rect = self.page_scene_rect()
+        if rect is None or rect.width() <= 0:
             return
-        rect = scene.page_rect()
         self.set_zoom(max(self.viewport().width() - 26, 40) / rect.width())
-        self.centerOn(rect.center().x(), self.mapToScene(self.viewport().rect().center()).y())
+        self.centerOn(rect.center().x(),
+                      self.mapToScene(self.viewport().rect().center()).y())
+
+    def go_to_page_top(self, index: int, animate: bool = False) -> None:
+        """Scroll so page *index* starts at the top of the window."""
+        scene = self.scene()
+        if scene is None or not scene.frames:
+            return
+        index = max(0, min(index, len(scene.frames) - 1))
+        frame = scene.frames[index]
+        rect = frame.mapRectToScene(frame.page_rect())
+        self.centerOn(rect.center().x(),
+                      rect.top() + self.mapToScene(
+                          self.viewport().rect()).boundingRect().height() / 2 - 12)
+
+    def _note_visible_page(self, _value: int = 0) -> None:
+        """Scrolling past a page boundary makes that page the current one."""
+        index = self.visible_page_index()
+        if index != self._shown_page:
+            self._shown_page = index
+            self.pageChanged.emit(index)
+
+    def visible_page_index(self) -> int:
+        """The page the reader is looking at: the one covering the middle."""
+        scene = self.scene()
+        if scene is None or not scene.frames:
+            return 0
+        middle = self.mapToScene(self.viewport().rect().center())
+        return scene.index_at(middle)
 
     def zoom_to_selection(self) -> None:
         items = self.scene().selectedItems() if self.scene() else []
@@ -210,15 +285,30 @@ class PageView(QGraphicsView):
         self.centerOn(rect.center())
 
     def wheelEvent(self, event: QWheelEvent) -> None:
+        """Wheel scrolls, Shift scrolls sideways, Ctrl zooms at the pointer.
+
+        The same three gestures every document reader uses. A trackpad sends
+        pixelDelta, which is honoured directly so two-finger scrolling is
+        smooth rather than notched.
+        """
         if event.modifiers() & Qt.ControlModifier:
-            delta = event.angleDelta().y()
+            delta = event.angleDelta().y() or event.pixelDelta().y()
             if delta:
                 self.set_zoom(self._zoom * (1.0015 ** delta), anchor_mouse=True)
             event.accept()
             return
+        pixels = event.pixelDelta()
         if event.modifiers() & Qt.ShiftModifier:
+            step = pixels.y() or pixels.x() or event.angleDelta().y()
             bar = self.horizontalScrollBar()
-            bar.setValue(bar.value() - event.angleDelta().y())
+            bar.setValue(bar.value() - step)
+            event.accept()
+            return
+        if not pixels.isNull():
+            self.horizontalScrollBar().setValue(
+                self.horizontalScrollBar().value() - pixels.x())
+            self.verticalScrollBar().setValue(
+                self.verticalScrollBar().value() - pixels.y())
             event.accept()
             return
         super().wheelEvent(event)
@@ -227,11 +317,23 @@ class PageView(QGraphicsView):
     # snapping
     # ------------------------------------------------------------------
     def snap(self, point: QPointF, force: bool = False) -> QPointF:
+        """Snap a point given in page coordinates."""
         settings = self.document().settings
         if not (settings.snap_to_grid or force):
             return point
         step = max(settings.grid_mm, 0.5) * MM_TO_PT
         return QPointF(round(point.x() / step) * step, round(point.y() / step) * step)
+
+    def snap_scene(self, scene_pos: QPointF, frame=None) -> QPointF:
+        """Snap a canvas point to its own page's grid.
+
+        The grid belongs to the page, not to the canvas, so a point is taken
+        into page coordinates to be snapped and brought back again.
+        """
+        frame = frame or self.frame_at(scene_pos) or self.frame()
+        if frame is None:
+            return self.snap(scene_pos)
+        return frame.mapToScene(self.snap(frame.mapFromScene(scene_pos)))
 
     @staticmethod
     def constrain(anchor: QPointF, point: QPointF) -> QPointF:
@@ -362,8 +464,27 @@ class PageView(QGraphicsView):
         self._mode = "move"
         self._move_items = [(other, other.pos()) for other in self.scene().selectedItems()
                             if isinstance(other, MarkupItem) and self.editable(other)]
-        self.begin_snapshot()
+        self.begin_snapshot(self.all_frames())
         event.accept()
+
+    def settle_pages(self, items: list) -> None:
+        """Hand each dragged markup to the page it was dropped on.
+
+        On a canvas that scrolls through the whole document, dragging a markup
+        onto the next page should put it on that page — which means changing
+        which page owns it, while it stays exactly where it was dropped.
+        """
+        scene = self.scene()
+        if scene is None:
+            return
+        for item in items:
+            frame = scene.frame_at(item.sceneBoundingRect().center())
+            if frame is None or item.parentItem() is frame:
+                continue
+            position = item.scenePos()
+            item.setParentItem(frame)
+            item.setPos(frame.mapFromScene(position))
+            item.refresh(self.document().workspace, frame.page)
 
     def _select_table_band(self, gutter: tuple[str, int]) -> None:
         table = self.active_table
@@ -378,7 +499,8 @@ class PageView(QGraphicsView):
         self.cellChanged.emit(table)
 
     def _press_draw(self, event: QMouseEvent, scene_pos: QPointF, tool: Tool) -> None:
-        point = self.snap(scene_pos)
+        frame = self.frame_at(scene_pos) or self.frame()
+        point = self.snap_scene(scene_pos, frame)
         if tool.mode == CLICK:
             self.begin_snapshot()
             item = self.create_item(tool, point)
@@ -393,9 +515,9 @@ class PageView(QGraphicsView):
                 self.begin_snapshot()
                 self._draft = tool.factory()
                 self._prepare_draft(self._draft)
-                self._draft.setPos(point)
+                self._draft.setPos(frame.mapFromScene(point))
                 self._draft.points = [QPointF(0, 0), QPointF(0, 0)]
-                self.scene().add_markup(self._draft)
+                frame.add_markup(self._draft)
                 self._mode = "draw_poly"
                 self.statusMessage.emit(
                     f"{tool.label}: click to add points · double-click or Enter to finish · Esc to cancel")
@@ -416,12 +538,12 @@ class PageView(QGraphicsView):
         self.begin_snapshot()
         self._draft = tool.factory()
         self._prepare_draft(self._draft)
-        self._draft.setPos(point)
+        self._draft.setPos(frame.mapFromScene(point))
         if isinstance(self._draft, (PolyItem, MeasureItem)):
             self._draft.points = [QPointF(0, 0), QPointF(0, 0)]
         else:
             self._draft.set_local_rect(QRectF(0, 0, 1, 1))
-        self.scene().add_markup(self._draft)
+        frame.add_markup(self._draft)
         self._mode = "draw_free" if tool.mode == FREE else "draw_drag"
         event.accept()
 
@@ -510,7 +632,7 @@ class PageView(QGraphicsView):
 
     def _update_draft(self, scene_pos: QPointF, modifiers) -> None:
         draft = self._draft
-        point = self.snap(scene_pos)
+        point = self.snap_scene(scene_pos)
         local = draft.mapFromScene(point)
         draft.prepareGeometryChange()
         if self._mode == "draw_free":
@@ -588,6 +710,7 @@ class PageView(QGraphicsView):
 
         if self._mode == "move":
             self._mode = "idle"
+            self.settle_pages([item for item, _ in self._move_items])
             self.commit_snapshot("Move markup")
             event.accept()
             return
@@ -597,7 +720,7 @@ class PageView(QGraphicsView):
             item = self._handle_item
             self._handle_item = None
             if item is not None:
-                item.refresh(self.scene().workspace, self.page())
+                item.refresh(self.document().workspace, self.page())
             self.commit_snapshot("Resize markup")
             self.selectionChanged.emit()
             event.accept()
@@ -679,7 +802,7 @@ class PageView(QGraphicsView):
                     and hasattr(item, "insert_point") and len(item.points) > 2):
                 self.begin_snapshot()
                 item.insert_point(item.mapFromScene(scene_pos))
-                item.refresh(self.scene().workspace, self.page())
+                item.refresh(self.document().workspace, self.page())
                 self.commit_snapshot("Add vertex")
                 event.accept()
                 return
@@ -705,7 +828,8 @@ class PageView(QGraphicsView):
         if isinstance(item, NoteItem):
             if self.window.interactive_prompts and not self.edit_note(item):
                 return None
-        self.scene().add_markup(item, point)
+        frame = self.frame_at(point) or self.frame()
+        frame.add_markup(item, frame.mapFromScene(point))
         self.scene().clearSelection()
         item.setSelected(True)
         self.selectionChanged.emit()
@@ -727,10 +851,10 @@ class PageView(QGraphicsView):
     def next_count_index(self, subject: str) -> int:
         highest = 0
         for page in self.document().pages:
-            scene = page.scene
-            if scene is None:
+            frame = page.frame
+            if frame is None:
                 continue
-            for item in scene.markups():
+            for item in frame.markups():
                 if isinstance(item, CountItem) and item.subject == subject:
                     highest = max(highest, item.index)
         return highest + 1
@@ -748,7 +872,7 @@ class PageView(QGraphicsView):
             if tiny and tool.mode != FREE:
                 draft.points[-1] = QPointF(120, 0)
             if tool.mode == FREE and len(draft.points) < 2:
-                self.scene().remove_markup(draft)
+                detach(draft)
                 self.finish_tool()
                 return
             draft.prepareGeometryChange()
@@ -769,21 +893,21 @@ class PageView(QGraphicsView):
             draft.style.text_color = colour
         if isinstance(draft, ImageItem):
             if not self.window.load_image_into(draft):
-                self.scene().remove_markup(draft)
+                detach(draft)
                 self.finish_tool()
                 return
         if isinstance(draft, RectItem) and draft.kind == "rect":
             draft.refresh(page=self.page())
         if isinstance(draft, MeasureItem):
             if draft.kind == CALIBRATE:
-                self.scene().remove_markup(draft)
+                detach(draft)
                 length = math.hypot(draft.points[-1].x(), draft.points[-1].y())
                 self.window.calibrate_scale(length)
                 self.finish_tool()
                 return
             draft.refresh(page=self.page())
 
-        draft.refresh(self.scene().workspace, self.page())
+        draft.refresh(self.document().workspace, self.page())
         self.scene().clearSelection()
         draft.setSelected(True)
         self.selectionChanged.emit()
@@ -835,11 +959,11 @@ class PageView(QGraphicsView):
             draft.points.pop()            # drop the live preview point
         draft.prepareGeometryChange()
         if len(draft.points) < tool.min_points:
-            self.scene().remove_markup(draft)
+            detach(draft)
             self.statusMessage.emit(f"{tool.label} needs at least {tool.min_points} points")
             self.finish_tool()
             return
-        draft.refresh(self.scene().workspace, self.page())
+        draft.refresh(self.document().workspace, self.page())
         self.scene().clearSelection()
         draft.setSelected(True)
         self.commit_snapshot(f"Add {tool.label.lower()}")
@@ -850,7 +974,7 @@ class PageView(QGraphicsView):
 
     def cancel_draft(self) -> None:
         if self._draft is not None:
-            self.scene().remove_markup(self._draft)
+            detach(self._draft)
             self._draft = None
         self._mode = "idle"
 
@@ -917,7 +1041,8 @@ class PageView(QGraphicsView):
         following.show_comments = item.show_comments
         following.author = item.author
         following.layer = item.layer
-        self.scene().add_markup(following, self.snap(below))
+        frame = item.parentItem() or self.frame()
+        frame.add_markup(following, self.snap(below))
         self.scene().clearSelection()
         following.setSelected(True)
         self.commit_snapshot("Add calculation")
@@ -935,7 +1060,7 @@ class PageView(QGraphicsView):
             item.end_edit()
         # A region left completely empty is an invisible click target; drop it.
         if self._is_empty(item):
-            self.scene().remove_markup(item)
+            detach(item)
             self.window.recalculate()
         self.commit_snapshot("Edit text")
         self.documentEdited.emit()
@@ -1178,13 +1303,19 @@ class PageView(QGraphicsView):
                 and self.tool_key in ("select", "pan"))
 
     def typing_position(self) -> QPointF:
-        """Where a region opened by typing should appear."""
-        scene = self.scene()
-        point = QPointF(self._last_scene_pos)
-        if scene is not None and not scene.page_rect().contains(point):
-            left, top, _width, _height = scene.page.setup.content_rect_pt
+        """Where a region opened by typing should appear, in page coordinates."""
+        frame = self.frame_at(self._last_scene_pos) or self.frame()
+        if frame is None:
+            return QPointF(self._last_scene_pos)
+        point = frame.mapFromScene(self._last_scene_pos)
+        if not frame.page_rect().contains(point):
+            left, top, _width, _height = frame.page.setup.content_rect_pt
             point = QPointF(left, top)
         return self.snap(point)
+
+    def typing_frame(self):
+        """The page a region opened by typing belongs to."""
+        return self.frame_at(self._last_scene_pos) or self.frame()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         key = event.key()
@@ -1243,7 +1374,8 @@ class PageView(QGraphicsView):
         # '"' starts text, '\\' starts maths, tool keys pick their tool.
         if self.idle_on_canvas():
             if self.window.run_typed_binding(event.text(), modifiers,
-                                             self.typing_position()):
+                                             self.from_page(self.typing_position(),
+                                                            self.typing_frame())):
                 event.accept()
                 return
             if event.text() and event.text().isprintable():

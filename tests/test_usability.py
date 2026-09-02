@@ -78,6 +78,17 @@ def markups(window):
     return window.view.scene().ordered_markups()
 
 
+def on_page(window, index, x, y):
+    """A point on page *index*, in canvas coordinates.
+
+    The canvas holds every page stacked down it, so drawing on page three
+    means aiming at the part of the canvas page three occupies.
+    """
+    frame = window.document.pages[index].frame
+    point = frame.mapToScene(QPointF(x, y))
+    return point.x(), point.y()
+
+
 def only(window, kind):
     return [i for i in markups(window) if isinstance(i, kind)]
 
@@ -271,7 +282,7 @@ def test_a_page_starts_without_a_scale_and_can_be_given_one(window):
     assert "no scale" in window.status_hint.text()
 
     scaled_page(window)
-    window.current_page().scene.refresh_items()
+    window.current_page().frame.refresh_items()
     measure = only(window, MeasureItem)[0]
     assert measure.value.to("m").magnitude == pytest.approx(3.53, rel=2e-2)
 
@@ -384,7 +395,7 @@ def test_a_scale_turns_the_paper_size_into_a_real_one(window):
     rect = only(window, RectItem)[0]
     assert "mm" in rect.size_text
     scaled_page(window)
-    window.current_page().scene.refresh_items()
+    window.current_page().frame.refresh_items()
     assert "2.40 m" in rect.size_text
 
 
@@ -509,21 +520,25 @@ def test_the_scene_does_not_index_items_it_keeps_reshaping(window):
     from PySide6.QtWidgets import QGraphicsScene
 
     for page in window.document.pages:
-        assert page.scene.itemIndexMethod() == QGraphicsScene.NoIndex
+        assert page.frame.scene().itemIndexMethod() == QGraphicsScene.NoIndex
 
 
-def test_a_markup_is_removed_from_the_scene_it_is_actually_in(window):
+def test_a_markup_is_removed_from_the_page_it_is_actually_on(window):
+    """A markup always leaves the page it is on, not the one being looked at."""
+    from calcforge.ui.scene import detach
+
     window.select_tool("rect")
     drag(window.view, 100, 100, 200, 200)
     window.select_tool("select")
     item = only(window, RectItem)[0]
-    first_scene = item.scene()
+    first_page = window.document.pages[0].frame
+    assert item.parentItem() is first_page
 
-    window.add_page()                      # a second page, with its own scene
-    assert window.view.scene() is not first_scene
-    window.view.scene().remove_markup(item)
+    window.add_page()                      # now looking at a different page
+    assert window.view.frame() is not first_page
+    detach(item)
     assert item.scene() is None
-    assert item not in first_scene.markups()
+    assert item not in first_page.markups()
 
 
 def test_turning_the_page_settles_whatever_was_half_drawn(window):
@@ -539,7 +554,7 @@ def test_turning_the_page_settles_whatever_was_half_drawn(window):
     assert window.view.editing_item() is None
     assert window.view.active_table is None
     # nothing was stranded on the page that was left
-    assert window.document.pages[0].scene.markups() == []
+    assert window.document.pages[0].frame.markups() == []
 
 
 def test_turning_the_page_while_typing_keeps_what_was_typed(window):

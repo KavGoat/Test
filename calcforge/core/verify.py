@@ -96,9 +96,9 @@ def verify_document(document) -> Verification:
     defined_at: dict[str, str] = {}
 
     for index, page in enumerate(document.pages):
-        if page.scene is None:
+        if page.frame is None:
             continue
-        for item in page.scene.ordered_markups():
+        for item in page.frame.ordered_markups():
             where = f"{item.display_name()}"
             if isinstance(item, MathItem):
                 target = fresh.child() if item.scoped else fresh
@@ -132,9 +132,9 @@ def verify_document(document) -> Verification:
 def _document_names(document) -> set[str]:
     names: set[str] = set()
     for page in document.pages:
-        if page.scene is None:
+        if page.frame is None:
             continue
-        for item in page.scene.ordered_markups():
+        for item in page.frame.ordered_markups():
             declared = getattr(item, "declared_names", None)
             if callable(declared):
                 names |= declared()

@@ -42,7 +42,7 @@ def paint_pages(device, document: Document, pages: Iterable, resolution: float,
     started = False
     try:
         for page in pages:
-            if page.scene is None:
+            if page.frame is None:
                 continue
             if not started:
                 _apply_layout(device, page)
@@ -56,7 +56,7 @@ def paint_pages(device, document: Document, pages: Iterable, resolution: float,
             painter.setRenderHint(QPainter.Antialiasing, True)
             painter.setRenderHint(QPainter.TextAntialiasing, True)
             painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
-            page.scene.render_page(painter, _target_rect(painter, page, resolution,
+            page.frame.render_page(painter, _target_rect(painter, page, resolution,
                                                          per_page_layout),
                                    for_print=True)
     finally:
@@ -114,9 +114,9 @@ def export_images(document: Document, folder: str, dpi: float = 200.0,
                   prefix: str = "page") -> list[str]:
     written = []
     for index, page in enumerate(document.pages):
-        if page.scene is None:
+        if page.frame is None:
             continue
-        image = page.scene.render_image(dpi=dpi, for_print=True)
+        image = page.frame.render_image(dpi=dpi, for_print=True)
         path = f"{folder}/{prefix}_{index + 1:02d}.png"
         image.save(path, "PNG")
         written.append(path)
@@ -126,9 +126,9 @@ def export_images(document: Document, folder: str, dpi: float = 200.0,
 def export_markups_csv(document: Document, path: str) -> int:
     rows = []
     for index, page in enumerate(document.pages):
-        if page.scene is None:
+        if page.frame is None:
             continue
-        for item in page.scene.ordered_markups():
+        for item in page.frame.ordered_markups():
             rows.append([index + 1, item.display_name(), item.subject,
                          getattr(item, "value_text", ""), item.author,
                          item.created[:10], item.modified[:10], item.layer,
