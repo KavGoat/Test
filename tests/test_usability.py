@@ -672,3 +672,49 @@ def test_a_moved_document_still_re_derives(window):
     result = verify_document(window.document)
     disagreements = [p for p in result.problems if p.kind == "disagreement"]
     assert disagreements == [], [p.message for p in disagreements]
+
+
+def test_two_markups_in_the_same_spot_always_read_the_same_way(window):
+    """Order decides what is defined, so it cannot depend on luck."""
+    from calcforge.ui.scene import reading_order
+
+    window.select_tool("math")
+    drag(window.view, 80, 120, 320, 160)
+    window.view.editing_item()._editor.setPlainText("L = 6 m")
+    window.view.end_item_edit()
+    window.select_tool("select")
+    only(window, MathItem)[0].setSelected(True)
+    window.duplicate_selection()
+
+    blocks = only(window, MathItem)
+    assert len(blocks) == 2
+    for item in blocks:                       # stack them exactly
+        item.setPos(QPointF(80, 120))
+    window.recalculate()
+
+    first = [i.uid for i in reading_order(list(blocks))]
+    for _ in range(20):
+        assert [i.uid for i in reading_order(list(reversed(blocks)))] == first
+    assert first == sorted(first) or first == sorted(first, reverse=True)
+
+
+def test_a_document_re_derives_the_same_way_twice_running(window):
+    """Two passes over the same sheet must agree — including on the ties."""
+    from calcforge.core.verify import verify_document
+
+    for index, source in enumerate(("L = 6 m", "L = 6 m", "w = 12 kN/m")):
+        window.select_tool("math")
+        drag(window.view, 80, 100 + index * 90, 320, 140 + index * 90)
+        window.view.editing_item()._editor.setPlainText(source)
+        window.view.end_item_edit()
+    window.select_tool("select")
+    # Put two of them at exactly the same place.
+    blocks = only(window, MathItem)
+    blocks[1].setPos(blocks[0].pos())
+    window.recalculate()
+
+    for _ in range(5):
+        window.recalculate()
+        result = verify_document(window.document)
+        disagreements = [p for p in result.problems if p.kind == "disagreement"]
+        assert disagreements == [], [p.message for p in disagreements]

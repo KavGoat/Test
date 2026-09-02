@@ -17,9 +17,22 @@ ROW_TOLERANCE = 9.0        # points; items this close vertically share a row
 PAPER = QColor("#ffffff")
 
 
+def _order_key(item):
+    """A total order for reading: position first, then something unchanging.
+
+    Two markups can sit at exactly the same spot — a duplicate before it is
+    dragged clear, say. Position alone would then leave their order up to
+    whatever the scene happened to hand back, and in a document where order
+    decides what is defined, that means the same sheet could evaluate two
+    different ways. The uid breaks the tie the same way every time.
+    """
+    position = item.pos()
+    return (position.y(), position.x(), item.zValue(), getattr(item, "uid", ""))
+
+
 def reading_order(items: list) -> list:
     """Sort *items* top-left to bottom-right, banding near-equal tops into rows."""
-    remaining = sorted(items, key=lambda i: (i.pos().y(), i.pos().x()))
+    remaining = sorted(items, key=_order_key)
     ordered: list = []
     row: list = []
     row_top = None
@@ -30,10 +43,10 @@ def reading_order(items: list) -> list:
                 row_top = top
             row.append(item)
         else:
-            ordered.extend(sorted(row, key=lambda i: i.pos().x()))
+            ordered.extend(sorted(row, key=lambda i: _order_key(i)[1:]))
             row = [item]
             row_top = top
-    ordered.extend(sorted(row, key=lambda i: i.pos().x()))
+    ordered.extend(sorted(row, key=lambda i: _order_key(i)[1:]))
     return ordered
 MARGIN_PEN = QColor(120, 160, 220, 120)
 GRID_PEN = QColor(180, 195, 210, 110)
