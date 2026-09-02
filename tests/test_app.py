@@ -1986,3 +1986,131 @@ def test_a_logo_that_cannot_be_read_leaves_the_page_alone(window):
     frame = window.document.pages[0].frame
     frame.render_image(dpi=48.0)             # no exception is the point
     assert frame.load_logo() is None
+
+
+# ---------------------------------------------------------------------------
+# Inserting PDF pages
+# ---------------------------------------------------------------------------
+
+def _drawing_pdf(path, colour="#3366aa"):
+    """A one-page PDF with something on it."""
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QColor, QPainter, QPdfWriter
+
+    writer = QPdfWriter(path)
+    writer.setResolution(150)
+    painter = QPainter(writer)
+    painter.fillRect(QRectF(200, 200, 800, 500), QColor(colour))
+    painter.end()
+    return path
+
+
+def _ink(image) -> int:
+    return sum(1 for y in range(0, image.height(), 5)
+               for x in range(0, image.width(), 5)
+               if image.pixel(x, y) & 0xFFFFFF != 0xFFFFFF)
+
+
+def _import_pdf(window, monkeypatch, path, indices=(0,)):
+    from calcforge.ui import dialogs
+    monkeypatch.setattr(dialogs.PdfImportDialog, "exec",
+                        lambda self: dialogs.QDialog.Accepted)
+    monkeypatch.setattr(dialogs.PdfImportDialog, "selection",
+                        lambda self: (path, list(indices), "original", 150.0))
+    window.insert_pdf()
+
+
+def test_an_inserted_pdf_page_carries_the_drawing(window, tmp_path, monkeypatch):
+    path = _drawing_pdf(str(tmp_path / "plan.pdf"))
+    _import_pdf(window, monkeypatch, path)
+
+    assert len(window.document.pages) == 2
+    page = window.document.pages[1]
+    assert page.background_key
+    assert window.document.asset(page.background_key)
+    assert _ink(page.frame.render_image(dpi=48.0)) > 100     # not a blank sheet
+
+
+def test_an_inserted_pdf_page_survives_saving_and_reopening(window, tmp_path, monkeypatch):
+    from calcforge.core.document import Document
+    from calcforge.io import project as project_io
+
+    path = _drawing_pdf(str(tmp_path / "plan.pdf"))
+    _import_pdf(window, monkeypatch, path)
+    saved = str(tmp_path / "job.cfx")
+    project_io.save_document(window.document, saved)
+
+    reopened = Document()
+    project_io.load_document(reopened, saved)
+    key = reopened.pages[1].background_key
+    assert key and reopened.asset(key)
+
+
+def test_an_inserted_pdf_page_prints(window, tmp_path, monkeypatch):
+    from calcforge.io import export as export_io, pdfio
+
+    path = _drawing_pdf(str(tmp_path / "plan.pdf"))
+    _import_pdf(window, monkeypatch, path)
+    out = str(tmp_path / "out.pdf")
+    export_io.export_pdf(window.document, out)
+
+    source = pdfio.PdfSource(out)
+    try:
+        image = source.doc.render(1, source.doc.pagePointSize(1).toSize())
+    finally:
+        source.close()
+    assert _ink(image) > 100
+
+
+def test_undoing_an_insert_and_redoing_it_keeps_the_drawing(window, tmp_path, monkeypatch):
+    path = _drawing_pdf(str(tmp_path / "plan.pdf"))
+    _import_pdf(window, monkeypatch, path)
+    window.undo_stack.undo()
+    assert len(window.document.pages) == 1
+    window.undo_stack.redo()
+    assert _ink(window.document.pages[1].frame.render_image(dpi=48.0)) > 100
+
+
+def test_a_huge_sheet_is_rendered_smaller_rather_than_coming_out_blank(window):
+    """An A0 at 300 dpi is 140 megapixels; Qt will not allocate that."""
+    from calcforge.io.pdfio import MAX_PIXELS, PdfPageInfo, PdfSource
+
+    a0 = PdfPageInfo(0, 2384.0, 3370.0)
+    scale = PdfSource._scale_for(a0, 300.0)
+    assert (a0.width_pt * scale) * (a0.height_pt * scale) <= MAX_PIXELS + 1
+    # a normal sheet is untouched
+    assert PdfSource._scale_for(PdfPageInfo(0, 595.0, 842.0), 150.0) == \
+        pytest.approx(150.0 / 72.0)
+
+
+def test_a_page_that_renders_but_cannot_be_stored_is_reported(window, tmp_path, monkeypatch):
+    """An empty asset used to mean a blank page and no explanation."""
+    from calcforge.io import pdfio
+
+    path = _drawing_pdf(str(tmp_path / "plan.pdf"))
+    monkeypatch.setattr("PySide6.QtGui.QImage.save",
+                        lambda self, *a, **k: False)
+    source = pdfio.PdfSource(path)
+    try:
+        with pytest.raises(OSError, match="could not be stored"):
+            source.render_png(0, 150.0)
+    finally:
+        source.close()
+
+
+def test_the_import_dialog_previews_the_page_it_will_bring_in(window, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QFileDialog
+    from calcforge.ui import dialogs
+
+    path = _drawing_pdf(str(tmp_path / "plan.pdf"))
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (path, ""))
+    dialog = dialogs.PdfImportDialog(window)
+    try:
+        dialog.browse()
+        assert dialog.preview.pixmap() is not None
+        assert not dialog.preview.pixmap().isNull()
+        assert dialog.preview.text() == ""
+        dialog.pages.setText("9")                 # out of range
+        assert dialog.preview.text() == "No pages in that range"
+    finally:
+        dialog.deleteLater()

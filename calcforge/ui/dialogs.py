@@ -5,7 +5,7 @@ import os
 from typing import Optional
 
 from PySide6.QtCore import QKeyCombination, Qt, Signal
-from PySide6.QtGui import QFont, QKeySequence
+from PySide6.QtGui import QFont, QKeySequence, QPixmap
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDialog,
                                QDialogButtonBox, QDoubleSpinBox, QFileDialog,
                                QFormLayout, QGroupBox, QHBoxLayout, QHeaderView,
@@ -219,7 +219,46 @@ class PdfImportDialog(QDialog):
         self.info = QLabel("")
         self.info.setStyleSheet("color:#5a6270;")
         layout.addWidget(self.info)
+
+        # A look at what is actually coming in. A drawing that renders blank is
+        # obvious here rather than after it has been inserted.
+        self.preview = QLabel("Choose a PDF to see the first page it will bring in")
+        self.preview.setAlignment(Qt.AlignCenter)
+        self.preview.setMinimumHeight(200)
+        self.preview.setStyleSheet(
+            "QLabel { border:1px solid palette(mid); background: palette(base); "
+            "color:#5a6270; }")
+        layout.addWidget(self.preview, 1)
+        self.pages.textChanged.connect(lambda _: self.show_preview())
+
         layout.addWidget(_buttons(self))
+
+    def _say_in_preview(self, message: str) -> None:
+        """Words instead of a picture. Clearing the pixmap first, because
+        setting a null one afterwards would wipe the words again."""
+        self.preview.clear()
+        self.preview.setText(message)
+
+    def show_preview(self) -> None:
+        """Draw the first page of the chosen range into the preview panel."""
+        if not self.path or not self._count:
+            return
+        indices = pdfio.parse_page_range(self.pages.text(), self._count)
+        if not indices:
+            self._say_in_preview("No pages in that range")
+            return
+        try:
+            image = pdfio.render_preview(self.path, indices[0], 560)
+        except Exception as exc:  # noqa: BLE001
+            self._say_in_preview(str(exc))
+            return
+        if image is None or image.isNull():
+            self._say_in_preview(f"Page {indices[0] + 1} could not be drawn")
+            return
+        self.preview.setPixmap(QPixmap.fromImage(image).scaled(
+            self.preview.width() - 8, self.preview.height() - 8,
+            Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        self.preview.setText("")
 
     def browse(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Choose a PDF", "",
@@ -235,6 +274,7 @@ class PdfImportDialog(QDialog):
         self.file.setText(path)
         self.info.setText(f"{os.path.basename(path)} — {self._count} page"
                           f"{'s' if self._count != 1 else ''}")
+        self.show_preview()
 
     def selection(self) -> tuple[str, list[int], str, int]:
         indices = pdfio.parse_page_range(self.pages.text(), self._count)

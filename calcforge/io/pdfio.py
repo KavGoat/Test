@@ -10,6 +10,11 @@ from PySide6.QtPdf import QPdfDocument, QPdfDocumentRenderOptions
 
 from ..core.document import PT_TO_MM, LANDSCAPE, PORTRAIT, Page, PageSetup
 
+# An A0 sheet at 300 dpi is 140 megapixels; Qt will not allocate it, and even
+# when it does the PNG encoder can fail. 48 megapixels is A0 at about 100 dpi
+# and A4 at 600, which is more than enough to read a drawing.
+MAX_PIXELS = 48_000_000
+
 FIT_ORIGINAL = "original"       # page takes the PDF page's own size
 FIT_A4 = "a4"                   # scale into A4
 FIT_CURRENT = "current"         # scale into the document's current page size
@@ -41,18 +46,37 @@ class PdfSource:
         return PdfPageInfo(index, size.width(), size.height())
 
     def render_png(self, index: int, dpi: float = 150.0) -> tuple[bytes, PdfPageInfo]:
+        """Render one page to PNG bytes, at *dpi* or the most that will fit.
+
+        A big drawing sheet at a high dpi runs into limits — the image cannot
+        be allocated, or it can be allocated but not encoded — and both used to
+        end with an empty asset and a page that simply came out blank. The
+        request is scaled down to something that will fit, and anything that
+        still fails is raised rather than swallowed.
+        """
         info = self.page_info(index)
-        scale = dpi / 72.0
+        scale = self._scale_for(info, dpi)
         width = max(int(round(info.width_pt * scale)), 1)
         height = max(int(round(info.height_pt * scale)), 1)
         options = QPdfDocumentRenderOptions()
         image = self.doc.render(index, QSize(width, height), options)
         if image.isNull():
-            raise OSError(f"Could not render page {index + 1}")
+            raise OSError(f"Could not render page {index + 1} of this PDF")
         buffer = QBuffer()
         buffer.open(QIODevice.WriteOnly)
-        image.save(buffer, "PNG")
+        if not image.save(buffer, "PNG") or buffer.data().isEmpty():
+            raise OSError(f"Page {index + 1} rendered but could not be stored — "
+                          "try a lower dpi")
         return bytes(buffer.data()), info
+
+    @staticmethod
+    def _scale_for(info: PdfPageInfo, dpi: float) -> float:
+        """Points-to-pixels, held under a size Qt can actually allocate."""
+        scale = max(dpi, 24.0) / 72.0
+        pixels = (info.width_pt * scale) * (info.height_pt * scale)
+        if pixels > MAX_PIXELS:
+            scale *= (MAX_PIXELS / pixels) ** 0.5
+        return max(scale, 24.0 / 72.0)
 
     def close(self) -> None:
         self.doc.close()
@@ -100,6 +124,20 @@ def import_pages(document, path: str, indices: list[int], fit: str = FIT_ORIGINA
         source.close()
     document.modified = True
     return created
+
+
+def render_preview(path: str, index: int, box: int = 560):
+    """A page rendered small, for showing what an import will bring in."""
+    source = PdfSource(path)
+    try:
+        info = source.page_info(index)
+        longest = max(info.width_pt, info.height_pt, 1.0)
+        return source.doc.render(index, QSize(
+            max(int(info.width_pt / longest * box), 1),
+            max(int(info.height_pt / longest * box), 1)),
+            QPdfDocumentRenderOptions())
+    finally:
+        source.close()
 
 
 def page_count(path: str) -> int:
