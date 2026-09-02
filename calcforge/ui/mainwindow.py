@@ -79,6 +79,7 @@ class MainWindow(QMainWindow):
         self.toolbars: list = []
         self.visible_tools = None       # None means every tool
         self._default_state = None
+        self._icon_names: dict = {}
         self._verify_timer = QTimer(self)
         self._verify_timer.setSingleShot(True)
         self._verify_timer.setInterval(900)
@@ -166,6 +167,7 @@ class MainWindow(QMainWindow):
         action = QAction(text, self)
         if icon_name:
             action.setIcon(icon(icon_name))
+            self._icon_names[action] = icon_name
         if shortcut:
             action.setShortcut(QKeySequence(shortcut))
         action.setCheckable(checkable)
@@ -308,6 +310,7 @@ class MainWindow(QMainWindow):
                 tool_bar.addSeparator()
             for tool in tools_in(category):
                 action = QAction(icon(tool.icon), tool.label, self)
+                self._icon_names[action] = tool.icon
                 action.setCheckable(True)
                 action.setToolTip(f"{tool.label}"
                                   + (f"  ({tool.shortcut})" if tool.shortcut else "")
@@ -1932,6 +1935,17 @@ class MainWindow(QMainWindow):
         self.document.settings.show_margins = on
         self._refresh_all_scenes()
 
+    def refresh_icons(self) -> None:
+        """Redraw every icon in the colours of the theme now in use."""
+        for action, name in self._icon_names.items():
+            action.setIcon(icon(name))
+        for dock in self.panels:
+            bar = dock.titleBarWidget()
+            if hasattr(bar, "refresh_icons"):
+                bar.refresh_icons()
+        self.markups_panel.rebuild(self.document)
+        self.problems_panel.rebuild(getattr(self.problems_panel, "_problems", []))
+
     def toggle_theme(self, dark: bool) -> None:
         from ..app import apply_theme
         from ..theme import CANVAS, DARK, LIGHT
@@ -1942,7 +1956,9 @@ class MainWindow(QMainWindow):
             apply_theme(application, theme)
         if self.scene is not None:
             self.scene.set_canvas_colour(CANVAS[theme])
+        self.refresh_icons()
         self._refresh_all_scenes()
+        self.status_hint.setText("Dark theme" if dark else "Light theme")
 
     def _refresh_all_scenes(self) -> None:
         if self.scene is not None:

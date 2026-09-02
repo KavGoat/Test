@@ -314,7 +314,16 @@ passes so a block can reference something defined further down the document.
   overwrite the page pixels underneath and delete the markups they cover. It says
   plainly that this cannot be undone, and that partly-overlapping markups are left
   for you to check.
-- A light and a dark theme; the page itself stays paper-white in both.
+- **A light and a dark theme** (View ▸ Dark). The chrome, the icons and every
+  panel follow it; the page itself stays paper-white in both, and the words on
+  it keep their own colour — the sheet is the sheet, whatever the frame does.
+- **The window is yours.** Every panel has a pin, a float button and a close
+  button in its title bar: pin one and it stays put however clumsy the next
+  drag is. Toolbars dock on any edge and can be locked, and
+  *View ▸ Toolbars ▸ Choose tools* picks which markup tools appear on them —
+  anything taken off is still on its menu and still on its key. Where
+  everything sits, what is pinned, what is hidden and the window's own size
+  come back next time; *Reset the layout* puts the original arrangement back.
 - Autosave every two minutes beside the document, offered back on the next start.
 - Save to `.cfx` — a zip holding the document as JSON plus its images and imported
   PDF pages, so a file is self-contained and diff-friendly.
@@ -333,8 +342,15 @@ what lets a bare keystroke mean "start writing here":
 | `\|` | A table |
 | `@` | A callout |
 
-Everything is editable under **Help ▸ Customise shortcuts**, which flags any key
-used twice and remembers your bindings between sessions.
+Everything is editable under **Help ▸ Keyboard shortcuts**: click a shortcut and
+**press the keys you want**. A single character is stored as that character;
+anything with Ctrl or Alt is stored as a key sequence and works from the menus
+too. Backspace clears one, Escape puts it back, and a key bound to two things
+outlines both rows in red and will not save until you resolve it.
+
+**Tool keys are silent while you are typing.** `M` in the middle of a sentence
+is a letter, and so is `Alt+M` — they only pick a tool when nothing is being
+edited. Save, print and zoom stay live throughout, as they do everywhere else.
 
 | Key | Action |
 |---|---|

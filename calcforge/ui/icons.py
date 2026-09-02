@@ -8,9 +8,32 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import (QBrush, QColor, QFont, QIcon, QPainter, QPainterPath,
                            QPen, QPixmap, QPolygonF)
 
+# Icons are drawn, not loaded, so they take the colour of whichever theme is
+# on. Dark ink on a dark toolbar is an empty toolbar.
 INK = "#2c3340"
 ACCENT = "#1971c2"
 WARM = "#e8590c"
+
+_THEME_INK = {"light": "#2c3340", "dark": "#c7cedb"}
+_THEME_ACCENT = {"light": "#1971c2", "dark": "#57a5ec"}
+_THEME_WARM = {"light": "#e8590c", "dark": "#f0854a"}
+
+_theme = "light"
+
+
+def set_icon_theme(theme: str) -> None:
+    """Re-tint every icon for *theme*, and forget the ones already drawn."""
+    global INK, ACCENT, WARM, _theme
+    _theme = "dark" if theme == "dark" else "light"
+    INK = _THEME_INK[_theme]
+    ACCENT = _THEME_ACCENT[_theme]
+    WARM = _THEME_WARM[_theme]
+    icon.cache_clear()
+    app_icon.cache_clear()
+
+
+def icon_theme() -> str:
+    return _theme
 
 
 def _pen(painter: QPainter, colour: str, width: float = 1.6,

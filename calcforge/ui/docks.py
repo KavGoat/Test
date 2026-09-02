@@ -17,18 +17,20 @@ PINNED_KEY = "panels/pinned"
 
 
 def _icon(name: str, size: int = 14) -> QIcon:
-    """Small monochrome glyphs for the title-bar buttons."""
+    """Small monochrome glyphs for the title-bar buttons, in the theme's ink."""
+    from .icons import INK
+
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.transparent)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.Antialiasing, True)
     painter.scale(size / 14.0, size / 14.0)
-    pen = QPen(QColor("#5a6472"))
+    pen = QPen(QColor(INK))
     pen.setWidthF(1.3)
     pen.setCapStyle(Qt.RoundCap)
     painter.setPen(pen)
     if name == "pin":
-        painter.setBrush(QColor("#5a6472"))
+        painter.setBrush(QColor(INK))
         painter.drawPolygon(QPolygonF([QPointF(5, 2), QPointF(9, 2), QPointF(8.2, 6),
                                        QPointF(10, 8), QPointF(4, 8), QPointF(5.8, 6)]))
         painter.drawLine(QPointF(7, 8), QPointF(7, 12))
@@ -87,6 +89,12 @@ class DockTitleBar(QWidget):
         button.setAutoRaise(True)
         button.setFocusPolicy(Qt.NoFocus)
         return button
+
+    def refresh_icons(self) -> None:
+        """Redraw the buttons after a theme change."""
+        self.float_button.setIcon(_icon("float"))
+        self.close_button.setIcon(_icon("close"))
+        self.refresh()
 
     def refresh(self) -> None:
         self.label.setText(self.dock.windowTitle())

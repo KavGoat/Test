@@ -38,6 +38,13 @@ def current_theme() -> str:
 
 
 def apply_theme(application: QApplication, theme: str) -> None:
+    from .theme import palette
+    from .ui.icons import set_icon_theme
+
+    # Icons are drawn at runtime, so they are re-tinted for the theme rather
+    # than being a set of images that only suit one of them.
+    set_icon_theme(theme)
+    application.setPalette(palette(theme))
     application.setStyleSheet(stylesheet(theme))
     QSettings(ORGANISATION, APP_NAME).setValue("theme", theme)
 

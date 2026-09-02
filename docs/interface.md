@@ -79,10 +79,27 @@ crashes and data losses it found are in the commit history.
 
 ### 6. Keyboard first, for the things done all day
 
-Drawing tools are single keys. The keys are rebindable, and the manager refuses
-a key that is already taken. Typing on the page does nothing unless the key is
-bound — which is what allows a bare keystroke to mean "start writing here"
-rather than being a hazard.
+Drawing tools are single keys. Every binding is rebindable by pressing the keys
+you want, and the manager refuses to save a key that would mean two things.
+Typing on the page does nothing unless the key is bound — which is what allows
+a bare keystroke to mean "start writing here" rather than being a hazard.
+
+**A tool key is a letter when you are writing.** While a calculation, a text
+box or a table cell has the cursor in it, no tool binding fires: `M` types an
+m, and so does `Alt+M`. Document commands — save, print, zoom — stay live,
+because they do in every other application. Getting this wrong is not a small
+annoyance; it is a tool changing under somebody mid-sentence.
+
+### 7. The window belongs to whoever is using it
+
+Panels pin, float, hide and come back. Toolbars go on any edge, lock when they
+are where you want them, and carry the tools you choose. All of it is
+remembered, and all of it can be put back with one command.
+
+The one thing that is *not* customisable is the document: the page always looks
+like the page. The dark theme restyles the frame, never the sheet — the words
+on the paper keep their own colour, because what you see has to be what
+prints.
 
 ## What this is not
 

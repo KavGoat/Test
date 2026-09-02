@@ -214,3 +214,70 @@ def test_resetting_the_layout_puts_everything_back(window):
     assert all(bar.isMovable() for bar in window.toolbars)
     assert window.tool_actions["ellipse"].isVisible()
     assert QSettings("CalcForge", "CalcForge").value("window/state") is None
+
+
+# ---------------------------------------------------------------------------
+# themes
+# ---------------------------------------------------------------------------
+
+def test_the_dark_theme_reaches_the_palette_as_well_as_the_stylesheet(window, qapp):
+    from PySide6.QtGui import QPalette
+    from calcforge.theme import DARK, LIGHT, tokens
+
+    window.toggle_theme(True)
+    palette = qapp.palette()
+    assert palette.color(QPalette.Base).name() == tokens(DARK)["field"]
+    assert palette.color(QPalette.Window).name() == tokens(DARK)["surface"]
+    assert palette.color(QPalette.Text).lightness() > 150     # light text
+
+    window.toggle_theme(False)
+    palette = qapp.palette()
+    assert palette.color(QPalette.Base).name() == tokens(LIGHT)["field"]
+    assert palette.color(QPalette.Text).lightness() < 100     # dark text
+
+
+def test_icons_are_redrawn_for_the_theme(window):
+    from calcforge.ui import icons
+
+    window.toggle_theme(True)
+    dark_ink = icons.INK
+    assert icons.icon_theme() == "dark"
+    window.toggle_theme(False)
+    assert icons.icon_theme() == "light"
+    assert icons.INK != dark_ink
+    # dark ink on a dark toolbar is an empty toolbar
+    from PySide6.QtGui import QColor
+    assert QColor(dark_ink).lightness() > QColor(icons.INK).lightness()
+
+
+def test_a_toolbar_icon_actually_changes_colour(window):
+    """The action has to be given the new drawing, not just the palette."""
+    from PySide6.QtCore import QSize
+
+    def pixels(action):
+        image = action.icon().pixmap(QSize(24, 24)).toImage()
+        return {image.pixel(x, y) for x in range(24) for y in range(24)}
+
+    action = window.tool_actions["select"]
+    window.toggle_theme(False)
+    light = pixels(action)
+    window.toggle_theme(True)
+    dark = pixels(action)
+    assert light != dark
+
+
+def test_the_page_looks_the_same_in_both_themes(window):
+    """The sheet is the sheet, whatever the frame around it does."""
+    window.select_tool("text")
+    from tests.test_usability import drag as ui_drag
+    ui_drag(window.view, 100, 100, 340, 160)
+    box = window.view.editing_item()
+    box.set_text("Steel beam design")
+    box.style.text_color = "#111318"
+    window.view.end_item_edit()
+
+    window.toggle_theme(False)
+    light = window.current_page().frame.render_image(dpi=60, for_print=False)
+    window.toggle_theme(True)
+    dark = window.current_page().frame.render_image(dpi=60, for_print=False)
+    assert light == dark, "the theme changed what is on the paper"

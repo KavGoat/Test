@@ -190,6 +190,45 @@ def stylesheet(theme: str) -> str:
     return DARK_STYLESHEET if theme == DARK else STYLESHEET
 
 
+def palette(theme: str):
+    """The Qt palette to go with the stylesheet.
+
+    A stylesheet only reaches the widgets it has rules for. Everything else —
+    a scroll area's viewport, a tooltip Qt draws itself, the text cursor —
+    falls back to the palette, and a light palette under a dark stylesheet is
+    how a dark theme ends up with white rectangles in it.
+    """
+    from PySide6.QtGui import QColor, QPalette
+
+    values = tokens(theme)
+    ink = QColor(values["ink"])
+    field = QColor(values["field"])
+    surface = QColor(values["surface"])
+    accent = QColor(values["accent"])
+    faint = QColor(values["ink_faint"])
+
+    result = QPalette()
+    result.setColor(QPalette.Window, surface)
+    result.setColor(QPalette.WindowText, ink)
+    result.setColor(QPalette.Base, field)
+    result.setColor(QPalette.AlternateBase, QColor(values["row_alt"]))
+    result.setColor(QPalette.Text, ink)
+    result.setColor(QPalette.Button, QColor(values["chrome"]))
+    result.setColor(QPalette.ButtonText, ink)
+    result.setColor(QPalette.BrightText, QColor(values["danger"]))
+    result.setColor(QPalette.Highlight, accent)
+    result.setColor(QPalette.HighlightedText, QColor("#ffffff"))
+    result.setColor(QPalette.ToolTipBase, ink)
+    result.setColor(QPalette.ToolTipText, field)
+    result.setColor(QPalette.PlaceholderText, faint)
+    result.setColor(QPalette.Link, accent)
+    for group in (QPalette.Disabled,):
+        result.setColor(group, QPalette.Text, faint)
+        result.setColor(group, QPalette.WindowText, faint)
+        result.setColor(group, QPalette.ButtonText, faint)
+    return result
+
+
 def tokens(theme: str) -> dict:
     """The colour tokens the chrome is built from, for code that needs one."""
     return dict(_DARK_TOKENS if theme == DARK else _LIGHT_TOKENS)

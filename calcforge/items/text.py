@@ -5,7 +5,8 @@ import math
 from typing import Optional
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import (QBrush, QColor, QPainter, QPainterPath, QPen, QTextCursor,
+from PySide6.QtGui import (QAbstractTextDocumentLayout, QBrush, QColor, QPainter,
+                           QPainterPath, QPalette, QPen, QTextCursor,
                            QTextDocument, QTextOption)
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsTextItem
 
@@ -170,8 +171,15 @@ class _TextBase(MarkupItem):
             spare = rect.height() - self.doc.size().height()
             offset = max(spare, 0) * (0.5 if self.style.valign == "middle" else 1.0)
             painter.translate(0, offset)
+        # The colour has to be handed to the document layout explicitly. Left
+        # to itself it takes the application's palette, which would mean the
+        # words on the paper changed colour when the user switched the
+        # interface to dark — the sheet is the sheet, whatever the frame does.
+        context = QAbstractTextDocumentLayout.PaintContext()
+        context.palette.setColor(QPalette.Text, self.style.text_qcolor())
+        context.clip = QRectF(0, 0, rect.width() + 1, rect.height() + 1)
         painter.setPen(QPen(self.style.text_qcolor()))
-        self.doc.drawContents(painter)
+        self.doc.documentLayout().draw(painter, context)
         painter.restore()
 
     # -- serialisation -----------------------------------------------------
