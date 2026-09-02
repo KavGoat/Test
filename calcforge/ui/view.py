@@ -394,12 +394,13 @@ class PageView(QGraphicsView):
                 local = self._draft.mapFromScene(point)
                 if event.modifiers() & Qt.ShiftModifier and len(self._draft.points) >= 2:
                     local = self.constrain(self._draft.points[-2], local)
+                # Qt has to be told before the shape changes, not after, or the
+                # scene keeps indexing the item by a rectangle it no longer has.
+                self._draft.prepareGeometryChange()
                 self._draft.points[-1] = local
                 self._draft.points.append(QPointF(local))
                 if tool.max_points and len(self._draft.points) - 1 >= tool.max_points:
                     self.finish_poly()
-            if self._draft is not None:
-                self._draft.prepareGeometryChange()
             event.accept()
             return
 

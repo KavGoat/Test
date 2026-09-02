@@ -701,7 +701,11 @@ class MainWindow(QMainWindow):
     def go_to_page(self, index: int) -> None:
         if not 0 <= index < len(self.document.pages) or index == self.current_index:
             return
+        # Anything half-finished belongs to the page being left, so it is
+        # settled here rather than being carried onto the next one.
+        self.view.end_item_edit()
         self.view.deactivate_table()
+        self.view.cancel_draft()
         self.current_index = index
         self.view.setScene(self.document.pages[index].scene)
         self.page_spin.blockSignals(True)

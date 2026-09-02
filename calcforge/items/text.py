@@ -38,7 +38,10 @@ class _TextBase(MarkupItem):
         self.style = Style(stroke="#1971c2", fill="#ffffff", fill_opacity=1.0,
                            width=1.0, text_color="#111318", font_size=10.0)
         self.auto_size = True
-        self.doc = QTextDocument()
+        # Parented to the item so Qt owns it: a document that outlives its
+        # item, or dies before it, fires contentsChanged into a half-destroyed
+        # receiver on the way out.
+        self.doc = QTextDocument(self)
         self.doc.setDocumentMargin(0)
         self.doc.setPlainText(text)
         self._editor: Optional[QGraphicsTextItem] = None
@@ -127,8 +130,17 @@ class _TextBase(MarkupItem):
     def end_edit(self) -> None:
         if self._editor is not None:
             self._editor.setTextInteractionFlags(Qt.NoTextInteraction)
-            self._editor.hide()
             self._editor.clearFocus()
+            # The editor is thrown away rather than hidden. A hidden one keeps
+            # a live view on the same document for the rest of the item's life,
+            # and two owners of one document is a lifetime problem waiting for
+            # the moment the page is torn down.
+            self._editor.setDocument(None)
+            self._editor.setParentItem(None)
+            scene = self._editor.scene()
+            if scene is not None:
+                scene.removeItem(self._editor)
+            self._editor = None
         self._editing = False
         self.apply_style()
         self.update()

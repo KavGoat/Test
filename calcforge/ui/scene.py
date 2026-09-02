@@ -53,6 +53,14 @@ class PageScene(QGraphicsScene):
         self.workspace = document.workspace
         self._background: Optional[QPixmap] = None
         self.print_mode = False
+        # Markups are dragged, resized and re-laid-out constantly, and a
+        # calculation changes shape every time a character is typed into it.
+        # Qt's spatial index assumes the opposite, and any bounding rectangle
+        # that changes without it being told leaves it dereferencing stale
+        # geometry — a crash, not a glitch.  A calculation sheet holds hundreds
+        # of items, not hundreds of thousands, so a linear scan is cheaper than
+        # the index would have been anyway.
+        self.setItemIndexMethod(QGraphicsScene.NoIndex)
         self.update_scene_rect()
         self.set_canvas_colour(CANVAS[LIGHT])
         self.selectionChanged.connect(self.selectionInfoChanged.emit)
@@ -219,8 +227,15 @@ class PageScene(QGraphicsScene):
         return item
 
     def remove_markup(self, item: MarkupItem) -> None:
-        self.removeItem(item)
-        self.itemsChanged.emit()
+        # An item always leaves the scene it is actually in.  A draft started
+        # on one page and abandoned after turning to another would otherwise be
+        # removed from the wrong scene, which Qt ignores with a warning and
+        # leaves the item stranded on the page it came from.
+        owner = item.scene()
+        if owner is None:
+            return
+        owner.removeItem(item)
+        owner.itemsChanged.emit()
 
     def next_z(self) -> float:
         markups = self.markups()

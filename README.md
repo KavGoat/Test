@@ -101,18 +101,19 @@ Units are enforced, not decorative: `1 m + 1 kg` is refused with
 the unit it earned. SI, imperial and the usual structural units (`kN`, `MPa`, `kip`,
 `ksi`, `psf`, `pcf`, `klf`…) are all built in.
 
-### Blocks are self-contained
+### Blocks can be self-contained
 
-A region holding **several lines is a block**, and its working values stay inside
-it — a dozen intermediate names in one calculation cannot collide with the rest of
-the document. A block can still read anything defined **above** it, so it is the
-natural place for a self-contained check that consumes a couple of document-wide
-inputs. A self-contained block is marked with a rule down its left edge, and its
-values are listed in the Variables panel as local to it.
+By default every calculation **defines for the whole document**, which is how a
+calculation sheet reads: something worked out at the top is available further down.
 
-A **single-line region always defines for the whole document** — that is how you
-publish something everything else can use. To open a block up as well, untick
-*Keep values inside this block* in its properties.
+Right-click a block of several lines and tick **Self-contained block** to keep its
+own names inside it — a dozen intermediate values in one check then cannot collide
+with the rest of the document. A self-contained block can still read anything
+defined **above** it, so it is the natural place for a side calculation that
+consumes a couple of document-wide inputs. It is marked with a rule down its left
+edge, and its values are listed in the Variables panel as local to it.
+
+A single-line region always defines for the whole document.
 
 ### Order is position
 
@@ -125,6 +126,20 @@ The status bar carries the count.
 
 **Split into separate lines** and **Merge into one block** (under *Calculate*)
 convert between one region per line and a single block.
+
+### Checking every number
+
+*Calculate ▸ Check every number* (`F10`) re-derives the whole document from its
+source text in a workspace of its own and compares every answer with what is on
+the page. It shares nothing with the live calculation, so a stale value, a cached
+result or a definition that has quietly gone missing shows up as a disagreement
+rather than as a number nobody questions. It also reports a name defined twice, a
+name that spells out a unit, a result that cannot be shown in its own target unit,
+and a magnitude far outside anything a building is made of.
+
+It runs by itself a moment after you stop typing, so a sheet is never left
+unchecked without you being told. What it finds appears in the **Problems** panel
+alongside anything that failed to evaluate.
 
 ### What is available
 
@@ -188,9 +203,13 @@ Only the three tools that measure something obey the scale:
 | Area | `Shift+Alt+A` | The true area of the polygon you click out |
 | Rectangle | `R` | Its true width × height — and it will take an exact size |
 
-Draw a rectangle on a scaled page and it asks for the width and height, so you can
-type `3 m` × `1.5 m` and have it set out exactly; leave the boxes as they are to keep
-what you dragged. Its size stays written on it as the page scale changes.
+**A rectangle always says how big it is** — real dimensions on a scaled page, paper
+millimetres without one — and that size is in the Value column of the markups list.
+Draw one on a scaled page and it offers an exact size, so you can type `3 m` × `1.5 m`
+and have it set out precisely; leave the boxes as they are to keep what you dragged.
+On an unscaled page it does not interrupt you, because a rectangle there is usually
+markup: ask for an exact size from the right-click menu instead. That menu also
+switches the size label off for a rectangle that does not need one.
 
 Everything else — polygon, pen, cloud, arrow, text — is a drawing, not a measurement,
 and is never scaled.
@@ -241,8 +260,28 @@ Total                                 =SUM(D2:D4)
   `=IF(B2=0,0,A2/B2)` is safe.
 - **Any variable from a calculation works in a formula** — `=D2*gamma_c` just works.
 - Give a column a display unit and every value in it is converted for display.
-- Publish results back: name a cell (right-click ▸ **Named cells…**) or switch on
-  *Publish columns as variables*, and the rest of the document can use it.
+
+### Getting a sheet out of Excel
+
+Copy cells in Excel and paste them straight onto the page: they arrive as a table
+sized to what you copied, with a header row picked up from words sitting over
+numbers. Quantities stay quantities (`150 mm` is a length), Excel's quoting is
+honoured so a cell holding a line break survives, and a thousands-separated number
+like `1,234.5` stays a number instead of becoming text. Pasting into a table that
+is already open drops the cells in at the cursor instead.
+
+### Publishing a cell as a variable
+
+Click a cell and type a name into the **name box** in the formula bar — the box
+between the cell reference and `ƒx`. From then on every calculation in the document
+can use that name, and the cell is **tagged with it on the sheet** and marked with a
+folded corner, so a table never hides what it defines. The Variables panel says
+which cell each published value came from (`Table · B2`). Clear the box to stop
+publishing it.
+
+Names are checked the same way everywhere, so a cell cannot be called after a unit,
+a built-in function or a reserved word. *Publish columns as variables* does the same
+thing for whole columns, using the header as the name.
 
 Recalculation is dependency-ordered with circular-reference detection, and runs in two
 passes so a block can reference something defined further down the document.
@@ -305,6 +344,7 @@ used twice and remembers your bindings between sessions.
 | `Enter` | In a one-line calculation: open the next line below |
 | `Shift+Enter` | Keep typing on a new line of the same region |
 | `F9` | Recalculate everything |
+| `F10` | Check every number — re-derive the document and compare |
 | `Ctrl+Shift+D` | Move or duplicate the selection by an exact offset |
 | `Ctrl+Z` / `Ctrl+Y` | Undo · redo |
 | In a table | `Enter`/`F2` edit · `Tab`/arrows move · `Ctrl+D`/`Ctrl+R` fill |
@@ -352,3 +392,18 @@ python -m pytest
 Runs headless (the suite forces `QT_QPA_PLATFORM=offscreen`) and drives the real
 window: every drawing tool, selection, resize, undo, table editing, recalculation
 order, save/reload, and PDF export.
+
+| File | What it promises |
+|---|---|
+| `test_engine.py` | Parsing, units, `=` / `:=`, functions, matrices, symbolics |
+| `test_spreadsheet.py` | Cells, formulas, ranges, dependency order, clipboard |
+| `test_items.py` | Serialisation, geometry, layout of every markup type |
+| `test_app.py` | The window: tools, panels, undo, files, printing |
+| `test_usability.py` | Real pointer and keyboard sequences through the viewport |
+| `test_validation.py` | Worked examples against published answers |
+| `test_units_property.py` | What must hold for every value, plus randomised runs |
+| `test_verify.py` | The independent check, mostly by breaking things on purpose |
+| `test_output.py` | Exported PDFs, read back and measured |
+
+`docs/what-matters.md` is the brief all of this is written against — what an
+engineer needs from a calculation sheet, and what this tool does not claim.

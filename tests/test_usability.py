@@ -498,3 +498,58 @@ def test_changing_the_page_scale_updates_the_takeoff_list(window, monkeypatch):
                         lambda self: PageScale.from_ratio(50))
     window.calibrate_dialog()
     assert any("2.4" in text and "m" in text for text in sizes())
+
+
+# ---------------------------------------------------------------------------
+# things found by driving the app at random for a long time
+# ---------------------------------------------------------------------------
+
+def test_the_scene_does_not_index_items_it_keeps_reshaping(window):
+    """A bounding rect that changes behind Qt's index is a crash, not a glitch."""
+    from PySide6.QtWidgets import QGraphicsScene
+
+    for page in window.document.pages:
+        assert page.scene.itemIndexMethod() == QGraphicsScene.NoIndex
+
+
+def test_a_markup_is_removed_from_the_scene_it_is_actually_in(window):
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 200)
+    window.select_tool("select")
+    item = only(window, RectItem)[0]
+    first_scene = item.scene()
+
+    window.add_page()                      # a second page, with its own scene
+    assert window.view.scene() is not first_scene
+    window.view.scene().remove_markup(item)
+    assert item.scene() is None
+    assert item not in first_scene.markups()
+
+
+def test_turning_the_page_settles_whatever_was_half_drawn(window):
+    window.add_page()
+    window.go_to_page(0)
+    window.select_tool("polygon")
+    click(window.view, 100, 100)
+    click(window.view, 200, 100)
+    assert window.view._draft is not None
+
+    window.go_to_page(1)
+    assert window.view._draft is None
+    assert window.view.editing_item() is None
+    assert window.view.active_table is None
+    # nothing was stranded on the page that was left
+    assert window.document.pages[0].scene.markups() == []
+
+
+def test_turning_the_page_while_typing_keeps_what_was_typed(window):
+    window.add_page()
+    window.go_to_page(0)
+    window.select_tool("math")
+    drag(window.view, 80, 80, 320, 130)
+    window.view.editing_item()._editor.setPlainText("L = 6 m")
+
+    window.go_to_page(1)
+    assert window.view.editing_item() is None
+    window.recalculate()
+    assert window.document.workspace.get("L").to("m").magnitude == pytest.approx(6)
