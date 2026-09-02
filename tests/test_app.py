@@ -1712,3 +1712,75 @@ def test_every_markup_tool_is_reachable_from_the_toolbar(window):
     # hide its last few buttons behind an overflow arrow.
     names = {bar.objectName() for bar in window.findChildren(QToolBar)}
     assert {"toolbar_main", "toolbar_tools", "toolbar_style"} <= names
+
+
+# ---------------------------------------------------------------------------
+# page operations must not touch what is on the other pages
+# ---------------------------------------------------------------------------
+
+def _page_counts(window):
+    return [len(page.scene.markups()) for page in window.document.pages]
+
+
+def _fill_three_pages(window):
+    """Two markups on page 1, three on page 2, one on page 3."""
+    for extra in range(2):
+        window.add_page()
+    for index, count in enumerate((2, 3, 1)):
+        window.go_to_page(index)
+        for number in range(count):
+            window.select_tool("rect")
+            drag(window.view, 60 + number * 80, 60, 120 + number * 80, 120)
+    window.select_tool("select")
+    assert _page_counts(window) == [2, 3, 1]
+
+
+def test_adding_a_page_keeps_every_other_page(window):
+    _fill_three_pages(window)
+    window.go_to_page(0)
+    window.add_page()
+    assert _page_counts(window) == [2, 0, 3, 1]
+
+
+def test_deleting_a_page_keeps_every_other_page(window, monkeypatch):
+    from calcforge.ui import mainwindow as mw
+
+    _fill_three_pages(window)
+    monkeypatch.setattr(mw.QMessageBox, "question",
+                        lambda *a, **k: mw.QMessageBox.Yes)
+    window.go_to_page(1)
+    window.delete_page()
+    assert _page_counts(window) == [2, 1]
+
+
+def test_duplicating_a_page_copies_it_and_leaves_the_rest(window):
+    _fill_three_pages(window)
+    window.go_to_page(1)
+    window.duplicate_page()
+    assert _page_counts(window) == [2, 3, 3, 1]
+
+
+def test_undoing_a_page_insertion_puts_everything_back(window):
+    _fill_three_pages(window)
+    window.go_to_page(0)
+    window.add_page()
+    assert _page_counts(window) == [2, 0, 3, 1]
+    window.undo_stack.undo()
+    assert _page_counts(window) == [2, 3, 1]
+
+
+def test_the_worked_example_survives_a_page_being_added(window):
+    """The real thing: a document full of calculations, and a new page."""
+    from calcforge.core.verify import verify_document
+
+    window.load_sample()
+    before = _page_counts(window)
+    values = {name: info.value for name, info
+              in window.document.workspace.variables.items()}
+    assert sum(before) > 20
+
+    window.add_page()
+    assert _page_counts(window) == [before[0], 0] + before[1:]
+    for name, value in values.items():
+        assert window.document.workspace.get(name) is not None, f"{name} was lost"
+    assert verify_document(window.document).ok

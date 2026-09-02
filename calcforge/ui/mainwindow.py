@@ -528,13 +528,22 @@ class MainWindow(QMainWindow):
         self.update_title()
 
     def rebuild_scenes(self) -> None:
-        """(Re)create a scene for every page and show the current one."""
+        """Give every page a scene, and show the current one.
+
+        A page that already has a live scene keeps it. Building a fresh one
+        would load the page's *pending* items, and those were emptied into the
+        scene the first time it was built — so rebuilding after inserting a
+        page would have quietly emptied every page in the document.
+        """
         for page in self.document.pages:
-            scene = PageScene(page, self.document)
-            page.scene = scene
-            scene.load_items(page._pending_items)
+            if page.scene is None:
+                scene = PageScene(page, self.document)
+                page.scene = scene
+                scene.load_items(page._pending_items)
+                scene.itemsChanged.connect(self.refresh_lists)
+            elif page._pending_items:
+                page.scene.load_items(page._pending_items)
             page._pending_items = []
-            scene.itemsChanged.connect(self.refresh_lists)
         self.current_index = max(0, min(self.current_index, len(self.document.pages) - 1))
         self.view.setScene(self.document.pages[self.current_index].scene)
         self.recalculate()
