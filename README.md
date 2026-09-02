@@ -110,19 +110,23 @@ Units are enforced, not decorative: `1 m + 1 kg` is refused with
 the unit it earned. SI, imperial and the usual structural units (`kN`, `MPa`, `kip`,
 `ksi`, `psf`, `pcf`, `klf`…) are all built in.
 
-### Blocks can be self-contained
+### A line, or a block
 
-By default every calculation **defines for the whole document**, which is how a
-calculation sheet reads: something worked out at the top is available further down.
+There are two calculation tools, and which one you draw decides how it behaves.
 
-Right-click a block of several lines and tick **Self-contained block** to keep its
-own names inside it — a dozen intermediate values in one check then cannot collide
-with the rest of the document. A self-contained block can still read anything
+A **calculation line** is one line. It defines for the whole document, which is how
+a calculation sheet reads: something worked out at the top is available further
+down. Enter opens the next line below it, so a sheet is typed straight through.
+
+A **calculation block** holds as many lines as you like and keeps its own working
+inside it — a dozen intermediate values in one check cannot collide with the rest
+of the document. Enter simply makes another line. A block can still read anything
 defined **above** it, so it is the natural place for a side calculation that
 consumes a couple of document-wide inputs. It is marked with a rule down its left
 edge, and its values are listed in the Variables panel as local to it.
 
-A single-line region always defines for the whole document.
+Either can be turned into the other from its right-click menu; merging lines gives
+a block, splitting a block gives lines.
 
 ### Order is position
 
@@ -185,10 +189,24 @@ dash pattern, opacity, arrowheads, font, layer, author and comment:
 - **Measure** — length, polyline length, area, perimeter, volume, angle, radius,
   diameter, and a count tool with numbered markers
 
+Every tool draws either way: press and drag, or click for the first point and again
+for the second, with the drawing following the pointer in between. Polylines and
+polygons take a click per vertex and finish on a double-click.
+
 Selected markups get eight resize handles and a rotation handle; polylines, polygons
-and callout leaders get one handle per vertex, and a double-click inserts another.
-Shift constrains to 15° or to a square, arrow keys nudge, and everything is
-undoable.
+and callout leaders get one handle per vertex — the leader's are orange diamonds,
+because they move the arrow rather than the box — and a double-click inserts another.
+Shift holds a line to 0°, 45° or 90° and squares off a box; Ctrl-dragging leaves a
+copy behind, and Ctrl taken hold of mid-drag lets go of the snapping while it is
+held. Arrow keys nudge, and everything is undoable.
+
+**Snapping** picks up the grid and what is already drawn — corners, centres and edge
+midpoints of anything boxed, and every vertex of anything drawn as a line — and marks
+what it has caught with a small orange square. `View ▸ Snap to what is drawn`.
+
+**Snapshot** (`G`) drags a region and copies everything in it. What comes back is not
+a picture: the markups, calculations and tables in it are copied as themselves, so
+pasting puts real items down that stay sharp at any zoom and can still be edited.
 
 The **Markups** panel is a live list of every annotation in the document — page, type,
 subject, measured value, author, date and comment — filterable, and exportable to CSV
@@ -200,9 +218,11 @@ A scale is **optional**. A page starts without one, and everything still works �
 measurements simply read paper distances, and the first one you draw says so.
 
 Give a page a scale whenever you want real dimensions: click the scale button in the
-status bar, or draw a known distance with the **Calibrate** tool and type what it
-represents ("5 m"). Scale is per page, so an imported 1:50 detail and a 1:200 layout
-can live in the same document.
+status bar or right-click the page in the pages panel, then either pick a standard
+ratio or press **Calibrate** — click each end of something you know the length of and
+type that length. Scale is per page, so an imported 1:50 detail and a 1:200 layout
+can live in the same document, and each page carries its scale beside its number in
+the pages panel.
 
 Only the three tools that measure something obey the scale:
 
@@ -212,13 +232,12 @@ Only the three tools that measure something obey the scale:
 | Area | `Shift+Alt+A` | The true area of the polygon you click out |
 | Rectangle | `R` | Its true width × height — and it will take an exact size |
 
-**A rectangle always says how big it is** — real dimensions on a scaled page, paper
-millimetres without one — and that size is in the Value column of the markups list.
-Draw one on a scaled page and it offers an exact size, so you can type `3 m` × `1.5 m`
-and have it set out precisely; leave the boxes as they are to keep what you dragged.
-On an unscaled page it does not interrupt you, because a rectangle there is usually
-markup: ask for an exact size from the right-click menu instead. That menu also
-switches the size label off for a rectangle that does not need one.
+**A rectangle and an ellipse both know how big they are** — real dimensions on a
+scaled page, paper millimetres without one. The size is in the properties panel, where
+it can also be set exactly, and in the Value column of the markups list for a takeoff.
+It is not written across the drawing unless you ask for it: a page of shapes each
+carrying their dimensions is unreadable. Draw one on a scaled page and it offers an
+exact size, so you can type `3 m` × `1.5 m` and have it set out precisely.
 
 Everything else — polygon, pen, cloud, arrow, text — is a drawing, not a measurement,
 and is never scaled.
@@ -238,16 +257,27 @@ a paper one (`25 mm`).
 
 **File ▸ Insert PDF pages** brings drawings in as page backgrounds — all pages or a
 range like `1-3,7`, at the resolution you pick, keeping each page's own size or
-fitting to A4. Mark them up, measure them, and calculate against them.
+fitting to A4, with a preview of what is coming in. Mark them up, measure them, and
+calculate against them. A photo goes in the same way through **Insert image as a
+page**.
+
+Right-clicking a page in the pages panel does everything else to it: insert a blank
+page, PDF pages or an image either side, duplicate, move, turn it a quarter turn
+either way — taking the drawing and the markups with it — put it on a different sheet
+of paper, set its scale, or change its colours. **Change colours** pushes everything
+dark enough to be a line onto one colour, which is what turns a black drawing grey so
+red markups can be read on top of it, or swaps one colour for another.
 
 ---
 
 ## Tables
 
-Draw a table with the **Table** tool (`B`). It behaves like a spreadsheet: click a
-cell and type, `Tab` and the arrow keys navigate, `Ctrl+D` / `Ctrl+R` fill down and
-right (with relative and `$absolute$` references translated properly), and the formula
-bar shows the raw entry and the evaluated result.
+Draw a table with the **Table** tool (`B`) — it asks how many rows and columns it
+holds. It behaves like a spreadsheet: click a cell and type, `Tab` and the arrow keys
+navigate, `Ctrl+D` / `Ctrl+R` fill down and right (with relative and `$absolute$`
+references translated properly), and the formula bar shows the raw entry and the
+evaluated result. After `=`, and after every operator, bracket and comma in a formula,
+the arrows and the pointer choose the cell to refer to and put its reference in.
 
 ```
 A            B          C             D
@@ -268,6 +298,9 @@ Total                                 =SUM(D2:D4)
   `<>` for not-equal and `&` for joining text. `IF` and `IFERROR` are lazy, so
   `=IF(B2=0,0,A2/B2)` is safe.
 - **Any variable from a calculation works in a formula** — `=D2*gamma_c` just works.
+- **Name a table** from its right-click menu and a calculation can look values up in
+  it: `V := bolts(d, A, B)` finds `d` in column A and gives back column B, units and
+  all, interpolating between the rows either side when it has to.
 - Give a column a display unit and every value in it is converted for display.
 
 ### Getting a sheet out of Excel
@@ -333,6 +366,11 @@ passes so a block can reference something defined further down the document.
   anything taken off is still on its menu and still on its key. Where
   everything sits, what is pinned, what is hidden and the window's own size
   come back next time; *Reset the layout* puts the original arrangement back.
+- **Bookmarks** (`Ctrl+B`) name places in the document. The bookmarks panel jumps to
+  them, a **contents block** prints the same list on the page with page numbers and
+  leader dots, and each line of it is a link. Both reach the exported PDF: the
+  bookmarks become the PDF's own outline and every contents line becomes a working
+  link.
 - Autosave every two minutes beside the document, offered back on the next start.
 - Save to `.cfx` — a zip holding the document as JSON plus its images and imported
   PDF pages, so a file is self-contained and diff-friendly.
@@ -367,8 +405,10 @@ edited. Save, print and zoom stay live throughout, as they do everywhere else.
 | `L` `A` | Line · arrow |
 | `R` `E` `C` | Rectangle · ellipse · revision cloud |
 | `P` `Alt+P` `K` | Polygon · pen · highlighter |
-| `T` `Q` `N` `S` | Text box · callout · note · stamp |
-| `B` `G` | Table · plot |
+| `T` `Q` `Shift+Q` `N` `S` | Text box · callout · cloud callout · note · stamp |
+| `J` | Highlight — dragged over anything, it darkens rather than covers |
+| `B` `Shift+G` | Table · plot |
+| `G` | Snapshot — copy a region and paste it back as itself |
 | `M` `Shift+Alt+A` | Measure length · measure area |
 | `Alt+M` | Dimension — asks for the text to show |
 | `H`, `Space`+drag, middle-drag | Pan |
@@ -377,17 +417,22 @@ edited. Save, print and zoom stay live throughout, as they do everywhere else.
 | `Ctrl+Home` / `Ctrl+End` | The start and the end of the document |
 | `Ctrl`+wheel | Zoom at the pointer |
 | `Ctrl+0` `Ctrl+1` `Ctrl+2` `Ctrl+Alt+0` | Fit page · fit width · fit selection · 100% |
-| `Shift`+drag | Constrain to 15° or square |
+| `Shift`+drag | Hold a line to 0°, 45° or 90° · square off a box |
+| `Ctrl`+drag | Leave a copy behind · `Ctrl` mid-drag lets go of the snapping |
 | Double-click | Edit text, calculation or table · add a polyline vertex |
 | `Enter` | In a one-line calculation: open the next line below |
 | `Shift+Enter` | Keep typing on a new line of the same region |
 | `F9` | Recalculate everything |
 | `F10` | Check every number — re-derive the document and compare |
 | `Ctrl+Shift+D` | Move or duplicate the selection by an exact offset |
+| `Ctrl+B` | Bookmark this place |
+| `Tab` | Take the offered unit or name · in a table, the next cell |
+| `Ctrl+Alt+8` `Ctrl+Alt+R` … | Maths symbols — the full list under Insert ▸ Maths symbol |
 | `Ctrl+Z` / `Ctrl+Y` | Undo · redo |
 | In a table | `Enter`/`F2` edit · `Tab`/arrows move · `Ctrl+D`/`Ctrl+R` fill |
 
-Full list under **Help ▸ Keyboard shortcuts** (`F1`).
+Everything is on one window: **Help ▸ Keyboard shortcuts…** (`F1` or `Ctrl+K`), with
+the mouse and canvas gestures on its second tab.
 
 ---
 
