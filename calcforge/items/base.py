@@ -144,6 +144,9 @@ HANDLE_CURSORS = {
     "n": Qt.SizeVerCursor, "s": Qt.SizeVerCursor,
     "e": Qt.SizeHorCursor, "w": Qt.SizeHorCursor,
     "rot": Qt.CrossCursor,
+    # A callout's arrow: pointing at things, not resizing.
+    "l0": Qt.PointingHandCursor, "l1": Qt.PointingHandCursor,
+    "l2": Qt.PointingHandCursor, "l3": Qt.PointingHandCursor,
 }
 
 
@@ -234,6 +237,10 @@ class MarkupItem(QGraphicsObject):
             points["rot"] = QPointF(rect.center().x(), rect.top() - ROTATE_OFFSET)
         return points
 
+    def leader_handles(self) -> set[str]:
+        """Handles that move something other than the item's own box."""
+        return set()
+
     def handle_at(self, local_pos: QPointF, tolerance: float = HANDLE_SIZE) -> Optional[str]:
         if self.locked:
             return None
@@ -293,12 +300,26 @@ class MarkupItem(QGraphicsObject):
         painter.setBrush(QBrush(QColor(255, 255, 255)))
         half = HANDLE_SIZE / 2
         points = self.handle_points()
+        # A markup can own handles that are not corners of its box — a
+        # callout's arrow, for one. They are drawn as orange diamonds so it is
+        # obvious which handle moves what.
+        leader = self.leader_handles()
         for key, point in points.items():
             if key == "rot":
                 painter.setBrush(QBrush(QColor(120, 200, 120)))
                 painter.drawEllipse(point, half, half)
                 painter.setBrush(QBrush(QColor(255, 255, 255)))
                 painter.drawLine(point, QPointF(rect.center().x(), rect.top()))
+            elif key in leader:
+                painter.setPen(QPen(QColor(200, 90, 20), 0.9))
+                painter.setBrush(QBrush(QColor(255, 170, 80)))
+                painter.drawPolygon(QPolygonF([
+                    QPointF(point.x(), point.y() - half - 1),
+                    QPointF(point.x() + half + 1, point.y()),
+                    QPointF(point.x(), point.y() + half + 1),
+                    QPointF(point.x() - half - 1, point.y())]))
+                painter.setPen(QPen(QColor(20, 90, 200), 0.9))
+                painter.setBrush(QBrush(QColor(255, 255, 255)))
             else:
                 painter.drawRect(QRectF(point.x() - half, point.y() - half,
                                         HANDLE_SIZE, HANDLE_SIZE))

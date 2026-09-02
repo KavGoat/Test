@@ -418,13 +418,26 @@ class PageView(QGraphicsView):
 
         # While a region is being edited the pointer belongs to its text: a
         # click inside places the caret, a drag selects, a click outside
-        # finishes the edit.
+        # finishes the edit. Its own handles are the exception — a callout's
+        # arrow is inside its bounding box, so grabbing it would otherwise put
+        # the caret in the text instead of moving the arrow.
         if self._editing_item is not None and event.button() == Qt.LeftButton:
+            item = self._editing_item
+            grabbed = (item.handle_at(item.mapFromScene(scene_pos))
+                       if self.editable(item) else None)
             rect = self.editing_rect()
-            if rect is not None and rect.contains(scene_pos):
+            if grabbed is None and rect is not None and rect.contains(scene_pos):
                 super().mousePressEvent(event)
                 return
             self.end_item_edit()
+            if grabbed and item.scene() is not None:
+                item.setSelected(True)
+                self._handle_item = item
+                self._handle_key = grabbed
+                self._mode = "resize"
+                self.begin_snapshot(self.involved_frames(item))
+                event.accept()
+                return
 
         if event.button() == Qt.MiddleButton or self._space_pan or self.tool_key == "pan":
             self._mode = "pan"
@@ -656,7 +669,7 @@ class PageView(QGraphicsView):
                 held = self.constrain(QPointF(0, 0), delta)
                 delta = QPointF(held.x(), held.y())
             for item, origin in self._move_items:
-                item.setPos(self.snap(origin + delta))
+                self._place(item, self.snap(origin + delta))
             event.accept()
             return
 
@@ -745,6 +758,15 @@ class PageView(QGraphicsView):
         if isinstance(draft, MeasureItem):
             draft.refresh(page=self.page())
         draft.update()
+
+    @staticmethod
+    def _place(item, position: QPointF) -> None:
+        """Move an item, keeping a callout's arrow pointing where it pointed."""
+        mover = getattr(item, "move_keeping_leader", None)
+        if callable(mover):
+            mover(position)
+        else:
+            item.setPos(position)
 
     def _update_hover_cursor(self, scene_pos: QPointF) -> None:
         if self.tool_key != "select":
@@ -1226,6 +1248,11 @@ class PageView(QGraphicsView):
     def _is_empty(item) -> bool:
         if isinstance(item, MathItem):
             return not item.source.strip()
+        if isinstance(item, CalloutItem):
+            # A callout points at something, so it says something even before
+            # a word is typed in it. Dropping it the moment the pointer left
+            # the box was how reaching for its arrow made it disappear.
+            return False
         if isinstance(item, _TextBase):
             return not item.text().strip()
         return False
@@ -1740,7 +1767,7 @@ class PageView(QGraphicsView):
             if items:
                 self.begin_snapshot(self.all_frames())
                 for item in items:
-                    item.setPos(item.pos() + delta)
+                    self._place(item, item.pos() + delta)
                 self.settle_pages(items)
                 self.commit_snapshot("Nudge markup")
                 event.accept()

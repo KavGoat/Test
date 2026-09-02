@@ -1724,3 +1724,89 @@ def test_saying_no_to_the_size_leaves_the_default(window, monkeypatch):
         window.interactive_prompts = False
     table = window.view.active_table
     assert (table.sheet.rows, table.sheet.cols) == (6, 4)
+
+
+# ---------------------------------------------------------------------------
+# The callout's arrow
+# ---------------------------------------------------------------------------
+
+def _callout(window, target=(200, 300), box=(300, 200, 460, 260), text="note"):
+    window.select_tool("callout")
+    click(window.view, *target)
+    drag(window.view, *box)
+    item = window.view.editing_item()
+    if text:
+        item.set_text(text)
+    return item
+
+
+def test_the_arrow_can_be_moved_straight_after_drawing_it(window):
+    """Reaching for the arrow used to make the whole callout disappear."""
+    call = _callout(window, text="")
+    tip = call.mapToScene(call.leader[0])
+    drag(window.view, tip.x(), tip.y(), tip.x() - 60, tip.y() + 40)
+
+    assert call in markups(window)                 # still there
+    moved = call.mapToScene(call.leader[0])
+    assert moved.x() == pytest.approx(tip.x() - 60, abs=2)
+    assert moved.y() == pytest.approx(tip.y() + 40, abs=2)
+
+
+def test_the_arrow_can_be_moved_once_the_callout_is_finished(window):
+    call = _callout(window)
+    window.view.end_item_edit()
+    window.select_tool("select")
+    call.setSelected(True)
+    tip = call.mapToScene(call.leader[0])
+    drag(window.view, tip.x(), tip.y(), tip.x() + 40, tip.y() - 30)
+    moved = call.mapToScene(call.leader[0])
+    assert moved.x() == pytest.approx(tip.x() + 40, abs=2)
+
+
+def test_the_elbow_of_the_leader_moves_too(window):
+    call = _callout(window)
+    window.view.end_item_edit()
+    window.select_tool("select")
+    call.setSelected(True)
+    elbow = call.mapToScene(call.leader[1])
+    drag(window.view, elbow.x(), elbow.y(), elbow.x() - 20, elbow.y() + 25)
+    moved = call.mapToScene(call.leader[1])
+    assert moved.y() == pytest.approx(elbow.y() + 25, abs=2)
+
+
+def test_moving_the_box_leaves_the_arrow_pointing_at_the_same_thing(window):
+    call = _callout(window)
+    window.view.end_item_edit()
+    window.select_tool("select")
+    call.setSelected(True)
+    aimed_at = call.mapToScene(call.leader[0])
+
+    centre = call.mapToScene(call.local_rect().center())
+    drag(window.view, centre.x(), centre.y(), centre.x() + 80, centre.y() - 50)
+
+    assert call.mapToScene(call.leader[0]).x() == pytest.approx(aimed_at.x(), abs=1)
+    assert call.mapToScene(call.leader[0]).y() == pytest.approx(aimed_at.y(), abs=1)
+
+
+def test_nudging_a_callout_leaves_its_arrow_alone(window):
+    call = _callout(window)
+    window.view.end_item_edit()
+    window.select_tool("select")
+    call.setSelected(True)
+    aimed_at = call.mapToScene(call.leader[0])
+    for _ in range(3):
+        press_key(window.view, Qt.Key_Right)
+    assert call.mapToScene(call.leader[0]).x() == pytest.approx(aimed_at.x(), abs=1)
+
+
+def test_the_arrow_handles_are_marked_out_as_the_arrow(window):
+    call = _callout(window)
+    assert call.leader_handles() == {"l0", "l1"}
+    assert set(call.handle_points()) >= {"l0", "l1", "nw", "se"}
+
+
+def test_an_empty_text_box_is_still_dropped(window):
+    window.select_tool("text")
+    drag(window.view, 100, 600, 260, 640)
+    window.view.end_item_edit()
+    assert markups(window) == []

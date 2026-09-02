@@ -316,6 +316,24 @@ class CalloutItem(_TextBase):
             handles[f"l{index}"] = QPointF(point)
         return handles
 
+    def leader_handles(self) -> set[str]:
+        """The handles that belong to the arrow rather than to the box."""
+        return {f"l{index}" for index in range(len(self.leader))}
+
+    def move_keeping_leader(self, position: QPointF) -> None:
+        """Move the box and leave the arrow pointing where it was pointing.
+
+        The leader is held in the item's own coordinates, so without this the
+        arrow travels with the box and stops pointing at the thing it was
+        drawn to point at.
+        """
+        delta = position - self.pos()
+        if not delta.isNull() and self.leader:
+            self.prepareGeometryChange()
+            self.leader = [QPointF(point.x() - delta.x(), point.y() - delta.y())
+                           for point in self.leader]
+        self.setPos(position)
+
     def move_handle(self, key: str, local_pos: QPointF, keep_ratio: bool = False) -> None:
         if key.startswith("l"):
             index = int(key[1:])
