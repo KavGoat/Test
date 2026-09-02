@@ -2757,3 +2757,84 @@ def test_typing_after_pointing_finishes_the_reference(window):
     press_key(window.view, Qt.Key_Asterisk, "*")
     assert window.view._point_span is None
     assert table.pointing is None
+
+
+# ---------------------------------------------------------------------------
+# Units and names, offered rather than assumed
+# ---------------------------------------------------------------------------
+
+def _typing(window, text, at=(100, 120)):
+    window.view._last_scene_pos = QPointF(*at)
+    press_key(window.view, Qt.Key_unknown, "/")
+    for character in text:
+        press_key(window.view, Qt.Key_unknown, character)
+    return window.view.editing_item()
+
+
+def test_typing_offers_units_and_the_names_you_have_defined(window):
+    _calc(window, "L_span := 6 m", at=(90, 500))
+    _typing(window, "w := 3 kN")
+    popup = window.view._completions
+    assert window.view.completions_showing()
+    words = [popup.item(row).text() for row in range(popup.count())]
+    assert "kN" in words
+    window.view.end_item_edit()
+
+    _typing(window, "x := L_", at=(90, 560))
+    words = [window.view._completions.item(row).text()
+             for row in range(window.view._completions.count())]
+    assert "L_span" in words
+    window.view.end_item_edit()
+
+
+def test_nothing_is_completed_until_tab_is_pressed(window):
+    block = _typing(window, "w := 3 kN")
+    assert block._editor.toPlainText() == "w := 3 kN"     # exactly what was typed
+    press_key(window.view, Qt.Key_Tab)
+    assert block._editor.toPlainText().startswith("w := 3 k")
+    window.view.end_item_edit()
+
+
+def test_the_arrows_move_through_the_list_and_tab_takes_one(window):
+    block = _typing(window, "w := 3 k")
+    popup = window.view._completions
+    assert window.view.completions_showing()
+    first = popup.currentItem().text()
+    press_key(window.view, Qt.Key_Down)
+    second = popup.currentItem().text()
+    assert second != first
+    press_key(window.view, Qt.Key_Tab)
+    assert block._editor.toPlainText() == f"w := 3 {second}"
+    window.view.end_item_edit()
+
+
+def test_escape_puts_the_list_away_without_ending_the_edit(window):
+    block = _typing(window, "w := 3 kN")
+    assert window.view.completions_showing()
+    press_key(window.view, Qt.Key_Escape)
+    assert not window.view.completions_showing()
+    assert window.view.editing_item() is block          # still typing
+    window.view.end_item_edit()
+
+
+def test_a_number_on_its_own_is_not_a_word_to_complete(window):
+    _typing(window, "w := 300")
+    assert not window.view.completions_showing()
+    window.view.end_item_edit()
+
+
+def test_a_value_and_its_unit_are_written_with_a_dot_between_them(window):
+    from calcforge.core.mathrender import UNIT_SEPARATOR
+
+    block = _calc(window, "L := 6 m\nw := 12 kN/m\nM := w*L^2/8 =", at=(90, 110))
+    row = next(r for r in block.rows if r.result is not None)
+    assert UNIT_SEPARATOR == "·"
+    # the result row is number, dot, unit
+    assert any(getattr(box, "text", "") == UNIT_SEPARATOR
+               for box in _all_boxes(row.result))
+
+
+def _all_boxes(box):
+    yield box
+    for child in getattr(box, "children", []) or []:
+        yield from _all_boxes(child)

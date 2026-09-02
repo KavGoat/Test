@@ -86,6 +86,12 @@ QMenuBar {{ background: {chrome}; border-bottom: 1px solid {chrome_edge}; }}
 QMenuBar::item {{ padding: 5px 11px; background: transparent; }}
 QMenuBar::item:selected {{ background: {accent_soft}; }}
 QMenu {{ background: {menu}; border: 1px solid {field_edge}; padding: 5px; }}
+QListWidget#completionList {{
+    background: {menu}; border: 1px solid {accent}; border-radius: 3px;
+    padding: 2px; outline: none;
+}}
+QListWidget#completionList::item {{ padding: 2px 8px; border-radius: 2px; }}
+QListWidget#completionList::item:selected {{ background: {accent}; color: white; }}
 QMenu::item {{ padding: 6px 26px 6px 24px; border-radius: 3px; }}
 QMenu::item:selected {{ background: {accent_soft}; }}
 QMenu::item:disabled {{ color: {ink_faint}; }}

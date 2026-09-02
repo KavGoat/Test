@@ -7,7 +7,8 @@ import os
 import re
 from typing import Optional
 
-from PySide6.QtCore import QMimeData, QPoint, QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import (QEvent, QMimeData, QPoint, QPointF, QRectF, Qt,
+                            Signal)
 from PySide6.QtGui import (QColor, QCursor, QKeyEvent, QMouseEvent, QPainter,
                            QPen, QTextCursor, QTransform, QWheelEvent)
 from PySide6.QtWidgets import (QApplication, QCompleter, QGraphicsProxyWidget,
@@ -94,6 +95,8 @@ class PageView(QGraphicsView):
         # its reference sits in the text so the next arrow key can replace it.
         self._pointing: Optional[tuple[int, int]] = None
         self._point_span: Optional[tuple[int, int]] = None
+        self._completions = None
+        self._completing = False
         self._fill_origin: Optional[tuple[int, int]] = None
         self._draw_origin: Optional[QPointF] = None
         # Ctrl held when a drag starts leaves the originals where they were.
@@ -1399,6 +1402,124 @@ class PageView(QGraphicsView):
         item.begin_edit()
         self._editing_item = item
 
+    # -- completing a name or a unit ---------------------------------------
+    #
+    # Typing into a calculation offers what could come next: the units, and
+    # every name this document has defined. Nothing is chosen for you —
+    # Tab takes what is highlighted, the arrows move the highlight, Escape
+    # puts the list away — because a unit that arrives by itself is a unit
+    # nobody asked for.
+    def completion_word(self) -> tuple[str, int]:
+        """The word being typed at the caret, and where it starts."""
+        item = self._editing_item
+        editor = getattr(item, "_editor", None) if item is not None else None
+        if editor is None:
+            return "", 0
+        cursor = editor.textCursor()
+        text = editor.toPlainText()
+        at = cursor.position()
+        start = at
+        while start > 0 and (text[start - 1].isalnum() or text[start - 1] in "_"):
+            start -= 1
+        word = text[start:at]
+        if word and word[0].isdigit():
+            return "", at            # part of a number, not a name
+        return word, start
+
+    def completion_words(self, prefix: str) -> list[str]:
+        """Units and defined names starting with *prefix*, units first."""
+        from ..core.units import UNIT_MENU
+
+        workspace = self.document().workspace
+        names = sorted(set(workspace.variables) | set(workspace.functions)
+                       | set(workspace.table_names()))
+        units: list[str] = []
+        for group in UNIT_MENU.values():
+            units += [unit for unit in group if unit not in units]
+        wanted = [word for word in units if word.startswith(prefix)]
+        wanted += [word for word in names if word.startswith(prefix)
+                   and word not in wanted]
+        if not wanted:                      # nothing exact: try ignoring case
+            lowered = prefix.lower()
+            wanted = [word for word in units + names
+                      if word.lower().startswith(lowered)]
+        return wanted[:40]
+
+    def show_completions(self) -> None:
+        """Offer what could follow what is being typed, if anything could."""
+        word, _start = self.completion_word()
+        if len(word) < 1:
+            self.hide_completions()
+            return
+        words = self.completion_words(word)
+        if not words or words == [word]:
+            self.hide_completions()
+            return
+        popup = self._completer_popup()
+        popup.clear()
+        popup.addItems(words)
+        popup.setCurrentRow(0)
+        popup.resize(200, min(len(words), 8) * 18 + 6)
+        item = self._editing_item
+        editor = getattr(item, "_editor", None)
+        anchor = editor.mapToScene(editor.boundingRect().bottomLeft())
+        popup.move(self.mapFromScene(anchor) + QPoint(0, 2))
+        popup.show()
+        popup.raise_()
+        self._completing = True
+
+    def _completer_popup(self):
+        if self._completions is None:
+            from PySide6.QtWidgets import QListWidget
+            popup = QListWidget(self.viewport())
+            popup.setObjectName("completionList")
+            popup.setFocusPolicy(Qt.NoFocus)
+            popup.setUniformItemSizes(True)
+            popup.itemClicked.connect(lambda _entry: self.accept_completion())
+            self._completions = popup
+        return self._completions
+
+    def completions_showing(self) -> bool:
+        """Whether the list is up.
+
+        Kept as a flag of its own rather than asking the widget: a child of a
+        window that has not been shown is never "visible" as far as Qt is
+        concerned, and whether the list is offering anything is not the same
+        question as whether pixels are on a screen.
+        """
+        return self._completing and self._completions is not None
+
+    def hide_completions(self) -> None:
+        self._completing = False
+        if self._completions is not None:
+            self._completions.hide()
+
+    def move_completion(self, step: int) -> None:
+        popup = self._completions
+        if not self.completions_showing() or not popup.count():
+            return
+        popup.setCurrentRow((popup.currentRow() + step) % popup.count())
+
+    def accept_completion(self) -> bool:
+        """Put the highlighted word in, in place of what was being typed."""
+        popup = self._completions
+        if not self.completions_showing() or popup.currentItem() is None:
+            return False
+        chosen = popup.currentItem().text()
+        word, start = self.completion_word()
+        item = self._editing_item
+        editor = getattr(item, "_editor", None) if item is not None else None
+        if editor is None:
+            return False
+        cursor = editor.textCursor()
+        cursor.setPosition(start)
+        cursor.setPosition(start + len(word), QTextCursor.KeepAnchor)
+        cursor.insertText(chosen)
+        editor.setTextCursor(cursor)
+        self.hide_completions()
+        self.statusMessage.emit(f"{chosen} — Tab accepted it")
+        return True
+
     def _open_next_line(self) -> None:
         """Enter in a one-line calculation opens the next one just below it."""
         item = self._editing_item
@@ -1427,6 +1548,7 @@ class PageView(QGraphicsView):
         self.begin_item_edit(following)
 
     def end_item_edit(self) -> None:
+        self.hide_completions()
         item = getattr(self, "_editing_item", None)
         if item is None:
             return
@@ -1944,6 +2066,24 @@ class PageView(QGraphicsView):
         anchor = self._insert_point or self._last_scene_pos
         return self.frame_at(anchor) or self.frame()
 
+    def event(self, event) -> bool:
+        """Take Tab before Qt spends it moving the focus.
+
+        Qt treats Tab as "go to the next widget" and never lets it reach
+        keyPressEvent, but on a canvas Tab is how a completion is accepted and
+        how the next cell is reached. It is only taken when something is
+        actually being typed into; otherwise it moves the focus as it always
+        did.
+        """
+        if event.type() == QEvent.KeyPress and event.key() in (Qt.Key_Tab,
+                                                               Qt.Key_Backtab):
+            if self._editing_item is not None or self._cell_editor is not None:
+                event.accept()
+                self.keyPressEvent(event)
+                if event.isAccepted():
+                    return True
+        return super().event(event)
+
     def keyPressEvent(self, event: QKeyEvent) -> None:
         key = event.key()
         modifiers = event.modifiers()
@@ -1958,6 +2098,29 @@ class PageView(QGraphicsView):
                 return
             super().keyPressEvent(event)
             return
+
+        if self._editing_item is not None and self._cell_editor is None:
+            # The completion list takes the keys that drive it, and nothing
+            # else: everything it does not use goes on to the text.
+            if self.completions_showing():
+                if key == Qt.Key_Escape:
+                    self.hide_completions()
+                    event.accept()
+                    return
+                if key in (Qt.Key_Tab, Qt.Key_Backtab):
+                    if self.accept_completion():
+                        event.accept()
+                        return
+                if key in (Qt.Key_Down, Qt.Key_Up):
+                    self.move_completion(1 if key == Qt.Key_Down else -1)
+                    event.accept()
+                    return
+            elif key in (Qt.Key_Tab, Qt.Key_Backtab):
+                # Tab with nothing offered asks for the list.
+                self.show_completions()
+                if self.completions_showing() and self.accept_completion():
+                    event.accept()
+                    return
 
         if self._editing_item is not None or self._cell_editor is not None:
             if key == Qt.Key_Escape:
@@ -1993,6 +2156,13 @@ class PageView(QGraphicsView):
                 event.accept()
                 return
             super().keyPressEvent(event)
+            if self._editing_item is not None and self._cell_editor is None:
+                if event.text().isalnum() or event.text() == "_":
+                    self.show_completions()
+                elif key in (Qt.Key_Backspace, Qt.Key_Delete):
+                    self.show_completions()
+                else:
+                    self.hide_completions()
             return
 
         if key == Qt.Key_Space and not event.isAutoRepeat():

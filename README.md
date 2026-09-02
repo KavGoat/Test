@@ -85,7 +85,8 @@ working stays a page of working rather than a wall of numbers.
 | `b = 400 mm` | …and *checks* it afterwards, reading `false`, so nothing is silently overwritten. |
 | `b := 400 mm` or `b : 400 mm` | Always defines, even over a name that already exists. |
 | `b*d^2/6` | Implicit multiplication and `^` powers; shown as a real fraction. |
-| `5 kN`, `24 kN/m^3` | A number and a unit — no `*` needed. |
+| `5 kN`, `24 kN/m^3` | A number and a unit — no `*` needed; printed as `5·kN`, the way SMath separates the two. |
+| Tab | Offers the units and the names you have defined; the arrows move through them and Tab takes one. Nothing is completed for you. |
 | `M_max` | `_` makes a subscript; `sigma`, `delta`, `gamma`… become Greek letters. |
 | `expr -> MPa` | Show this result in a particular unit. |
 | `M := w*L^2/8 =` | The trailing `=` prints the answer; without it the line is worked out quietly. |

@@ -23,6 +23,9 @@ from .units import (Quantity, format_number, format_quantity, format_unit,
 # Symbols
 # ---------------------------------------------------------------------------
 
+# Between a number and its unit, the way SMath separates the two.
+UNIT_SEPARATOR = "·"
+
 GREEK = {
     "alpha": "α", "beta": "β", "gamma": "γ", "delta": "δ", "epsilon": "ε",
     "zeta": "ζ", "eta": "η", "theta": "θ", "iota": "ι", "kappa": "κ",
@@ -539,7 +542,13 @@ class Typesetter:
             body = self.value_box(magnitude, size, digits, mode, color, unit_color)
             if not unit_text or unit_text == "dimensionless":
                 return body
-            return Row([body, Spacer(size * 0.28), self._unit_box(unit_text, size, unit_color)])
+            # SMath writes a small dot between a value and its unit, and it
+            # earns its place: "5·kN" reads as one quantity where "5 kN" can
+            # read as two things that happen to be next to each other.
+            return Row([body, Spacer(size * 0.16),
+                        self.text(UNIT_SEPARATOR, size * 0.8, color=unit_color),
+                        Spacer(size * 0.16),
+                        self._unit_box(unit_text, size, unit_color)])
 
         if isinstance(value, np.ndarray):
             array = np.atleast_2d(value)
