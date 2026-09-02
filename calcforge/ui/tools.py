@@ -64,9 +64,11 @@ TOOLS: list[Tool] = [
     Tool("polyline", "Polyline", "polyline", POLY, "Draw", "",
          "Click each vertex, double-click to finish", factory=_poly("polyline")),
     Tool("rect", "Rectangle", "rect", DRAG, "Draw", "R",
-         "Rectangle — drag it, or type an exact width and height when the page "
-         "has a scale", factory=_rect("rect")),
-    Tool("ellipse", "Ellipse", "ellipse", DRAG, "Draw", "E", "Ellipse",
+         "Rectangle — drag it or click twice; Shift squares it off, and an "
+         "exact width and height can be typed when the page has a scale",
+         factory=_rect("rect")),
+    Tool("ellipse", "Ellipse", "ellipse", DRAG, "Draw", "E",
+         "Ellipse — hold Shift for a circle; it carries its size like a rectangle",
          factory=_rect("ellipse")),
     Tool("polygon", "Polygon", "polygon", POLY, "Draw", "P",
          "Click each vertex, double-click to close — not scaled",

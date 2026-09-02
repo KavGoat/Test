@@ -1426,3 +1426,110 @@ def test_the_menu_can_change_the_unit_too(window):
     menu = window.build_context_menu(block, point)
     labels = [action.text() for action in menu.actions()]
     assert "Show this result in…" in labels
+
+
+# ---------------------------------------------------------------------------
+# Drawing: click-by-click, and Shift
+# ---------------------------------------------------------------------------
+
+def test_a_measure_tool_no_longer_invents_a_measurement(window):
+    """A click used to drop a 120 pt measurement out of nowhere."""
+    window.select_tool("measure_length")
+    click(window.view, 120, 200)
+    assert window.view._mode == "draw_click"      # waiting for the second point
+    assert window.view._draft is not None
+    assert window.view._draft.points[-1] == QPointF(0, 0)
+
+
+def test_two_clicks_draw_a_measurement(window):
+    window.select_tool("measure_length")
+    click(window.view, 120, 200)
+    hover(window.view, 260, 200)
+    click(window.view, 260, 200)
+
+    drawn = markups(window)
+    assert len(drawn) == 1
+    assert isinstance(drawn[0], MeasureItem)
+    assert drawn[0].points[-1].x() == pytest.approx(140, abs=2)
+    assert window.view._mode == "idle"
+
+
+def test_two_clicks_in_the_same_place_draw_nothing(window):
+    window.select_tool("measure_length")
+    click(window.view, 120, 200)
+    click(window.view, 120, 200)
+    assert markups(window) == []
+
+
+def test_dragging_still_draws_in_one_gesture(window):
+    window.select_tool("measure_length")
+    drag(window.view, 120, 240, 300, 240)
+    assert len(markups(window)) == 1
+    assert window.view._mode == "idle"
+
+
+def test_escape_abandons_a_click_started_drawing(window):
+    window.select_tool("rect")
+    click(window.view, 100, 100)
+    hover(window.view, 200, 180)
+    press_key(window.view, Qt.Key_Escape)
+    assert markups(window) == []
+    assert window.view._mode == "idle"
+
+
+def test_two_clicks_draw_a_rectangle_the_size_of_the_two_clicks(window):
+    window.select_tool("rect")
+    click(window.view, 100, 400)
+    hover(window.view, 220, 470)
+    click(window.view, 220, 470)
+    box = markups(window)[0]
+    assert box.local_rect().width() == pytest.approx(120, abs=2)
+    assert box.local_rect().height() == pytest.approx(70, abs=2)
+
+
+def test_shift_squares_a_rectangle_in_every_direction(window):
+    for start, end in (((300, 300), (420, 350)), ((300, 600), (200, 540))):
+        window.select_tool("rect")
+        drag(window.view, *start, *end, modifiers=Qt.ShiftModifier)
+    boxes = [i for i in markups(window) if isinstance(i, RectItem)]
+    assert len(boxes) == 2
+    for box in boxes:
+        rect = box.local_rect()
+        assert rect.width() == pytest.approx(rect.height(), abs=1.5)
+        assert rect.width() > 40
+
+
+def test_shift_holds_a_line_to_forty_five_degrees(window):
+    import math
+    window.select_tool("line")
+    drag(window.view, 100, 100, 240, 190, modifiers=Qt.ShiftModifier)
+    line = markups(window)[0]
+    delta = line.points[-1] - line.points[0]
+    angle = abs(math.degrees(math.atan2(delta.y(), delta.x())))
+    assert min(abs(angle - a) for a in (0, 45, 90, 135, 180)) < 0.5
+
+
+def test_an_ellipse_carries_its_size(window):
+    window.select_tool("ellipse")
+    drag(window.view, 100, 500, 260, 580)
+    oval = markups(window)[0]
+    oval.refresh(page=window.current_page())
+    assert oval.size_text
+    assert "×" in oval.size_text
+    assert oval.value_text == oval.size_text
+
+
+def test_shift_makes_the_ellipse_a_circle(window):
+    window.select_tool("ellipse")
+    drag(window.view, 120, 620, 300, 680, modifiers=Qt.ShiftModifier)
+    rect = markups(window)[0].local_rect()
+    assert rect.width() == pytest.approx(rect.height(), abs=1.5)
+
+
+def test_an_ellipse_can_be_set_out_to_an_exact_size(window):
+    window.select_tool("ellipse")
+    drag(window.view, 100, 700, 200, 760)
+    oval = markups(window)[0]
+    assert oval.set_real_size("50 mm", "30 mm", window.current_page())
+    oval.refresh(page=window.current_page())
+    assert "50" in oval.size_text and "30" in oval.size_text

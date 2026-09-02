@@ -108,7 +108,9 @@ class RectItem(MarkupItem):
         """
         scale = page.scale if page is not None else self.page_scale()
         rect = self._rect.normalized()
-        if self.kind != "rect":
+        # A rectangle and an ellipse are both drawn to a size somebody cares
+        # about; a cloud or a highlight is drawn around something else.
+        if self.kind not in ("rect", "ellipse"):
             self.size_text = ""
             self.width_value = self.height_value = None
             self.update()

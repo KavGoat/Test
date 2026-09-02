@@ -29,6 +29,9 @@ from .tools import ANCHOR, CLICK, DRAG, FREE, NONE, POLY, TOOL_MAP, Tool
 MIN_ZOOM = 0.08
 MAX_ZOOM = 16.0
 CLICK_SLOP = 3.0
+# The shapes drawn to a size somebody cares about, and so worth measuring,
+# asking an exact size for, and writing that size on.
+SIZED_SHAPES = ("rect", "ellipse")
 CELLS_MIME = "application/x-calcforge-cells"
 FREE_MIN_STEP = 1.2
 
@@ -82,6 +85,7 @@ class PageView(QGraphicsView):
         self._unit_proxy: Optional[QGraphicsProxyWidget] = None
         self._unit_target: tuple = (None, -1)
         self._fill_origin: Optional[tuple[int, int]] = None
+        self._draw_origin: Optional[QPointF] = None
         self._editing_item = None
 
         self._last_scene_pos = QPointF(60, 60)
@@ -378,11 +382,16 @@ class PageView(QGraphicsView):
 
     @staticmethod
     def constrain(anchor: QPointF, point: QPointF) -> QPointF:
+        """Hold a line to 0°, 45° or 90° from where it started.
+
+        The angles a drawing is actually made of, and the ones Shift gives you
+        in every other drawing tool.
+        """
         delta = point - anchor
         length = math.hypot(delta.x(), delta.y())
         if length < 1e-6:
             return QPointF(point)
-        angle = math.radians(round(math.degrees(math.atan2(delta.y(), delta.x())) / 15.0) * 15.0)
+        angle = math.radians(round(math.degrees(math.atan2(delta.y(), delta.x())) / 45.0) * 45.0)
         return QPointF(anchor.x() + math.cos(angle) * length,
                        anchor.y() + math.sin(angle) * length)
 
@@ -554,6 +563,13 @@ class PageView(QGraphicsView):
     def _press_draw(self, event: QMouseEvent, scene_pos: QPointF, tool: Tool) -> None:
         frame = self.frame_at(scene_pos) or self.frame()
         point = self.snap_scene(scene_pos, frame)
+        if self._mode == "draw_click":
+            # The second click of a click-click drawing.
+            self._mode = "idle"
+            self._update_draft(scene_pos, event.modifiers())
+            self.finish_draft(scene_pos, clicked=True)
+            event.accept()
+            return
         if tool.mode == ANCHOR and self._pending_anchor is None:
             # A callout is drawn the way Bluebeam draws one: click what it
             # points at first, then drag out the box.
@@ -599,6 +615,7 @@ class PageView(QGraphicsView):
             return
 
         self.begin_snapshot()
+        self._draw_origin = QPointF(point)
         self._draft = tool.factory()
         self._prepare_draft(self._draft)
         self._draft.setPos(frame.mapFromScene(point))
@@ -636,10 +653,8 @@ class PageView(QGraphicsView):
         if self._mode == "move":
             delta = scene_pos - self._press_scene
             if event.modifiers() & Qt.ShiftModifier:
-                if abs(delta.x()) > abs(delta.y()):
-                    delta.setY(0)
-                else:
-                    delta.setX(0)
+                held = self.constrain(QPointF(0, 0), delta)
+                delta = QPointF(held.x(), held.y())
             for item, origin in self._move_items:
                 item.setPos(self.snap(origin + delta))
             event.accept()
@@ -685,7 +700,8 @@ class PageView(QGraphicsView):
             event.accept()
             return
 
-        if self._mode in ("draw_drag", "draw_poly", "draw_free") and self._draft is not None:
+        if self._mode in ("draw_drag", "draw_click", "draw_poly", "draw_free") \
+                and self._draft is not None:
             self._update_draft(scene_pos, event.modifiers())
             event.accept()
             return
@@ -710,15 +726,22 @@ class PageView(QGraphicsView):
                 local = self.constrain(QPointF(0, 0), local)
             draft.points[-1] = local
         else:
-            rect = QRectF(QPointF(0, 0), local).normalized()
+            # Worked out where the drawing started rather than from the draft's
+            # own corner, so that dragging up or left squares off the same way
+            # as dragging down or right.
+            origin = self._draw_origin or self._press_scene
+            corner = QPointF(point)
             if modifiers & Qt.ShiftModifier:
-                side = max(rect.width(), rect.height())
-                rect.setSize(QRectF(0, 0, side, side).size())
-            if local.x() < 0 or local.y() < 0:
-                draft.setPos(QPointF(min(self._press_scene.x(), point.x()),
-                                     min(self._press_scene.y(), point.y())))
-                rect = QRectF(0, 0, abs(local.x()), abs(local.y()))
-            draft.set_local_rect(rect)
+                dx, dy = corner.x() - origin.x(), corner.y() - origin.y()
+                side = max(abs(dx), abs(dy))
+                corner = QPointF(origin.x() + (side if dx >= 0 else -side),
+                                 origin.y() + (side if dy >= 0 else -side))
+            rect = QRectF(origin, corner).normalized()
+            parent = draft.parentItem()
+            top_left = parent.mapFromScene(rect.topLeft()) if parent is not None \
+                else rect.topLeft()
+            draft.setPos(top_left)
+            draft.set_local_rect(QRectF(0, 0, rect.width(), rect.height()))
         if isinstance(draft, MeasureItem):
             draft.refresh(page=self.page())
         draft.update()
@@ -807,8 +830,23 @@ class PageView(QGraphicsView):
             return
 
         if self._mode == "draw_drag":
+            if self._is_a_click(scene_pos):
+                # Bluebeam draws either way: press and drag, or click once for
+                # the first point and again for the second. A click used to
+                # finish the markup then and there, which is where a measure
+                # tool got its 120 pt measurement from nowhere.
+                self._mode = "draw_click"
+                self.statusMessage.emit(
+                    f"{self.current_tool().label}: click again to finish · "
+                    "Shift constrains · Esc to cancel")
+                event.accept()
+                return
             self._mode = "idle"
             self.finish_draft(scene_pos)
+            event.accept()
+            return
+
+        if self._mode == "draw_click":
             event.accept()
             return
 
@@ -930,22 +968,45 @@ class PageView(QGraphicsView):
                     highest = max(highest, item.index)
         return highest + 1
 
-    def finish_draft(self, scene_pos: QPointF) -> None:
+    def _is_a_click(self, scene_pos: QPointF, origin: Optional[QPointF] = None) -> bool:
+        """True when the pointer never really left where the drawing started.
+
+        The origin has to be passed in for the second click of a click-click
+        drawing: by then the last press is that second click, and everything
+        looks like a click compared with itself.
+        """
+        origin = origin if origin is not None else self._press_scene
+        return (abs(scene_pos.x() - origin.x()) < CLICK_SLOP
+                and abs(scene_pos.y() - origin.y()) < CLICK_SLOP)
+
+    def finish_draft(self, scene_pos: QPointF, clicked: bool = False) -> None:
         draft = self._draft
         self._draft = None
         if draft is None:
             return
         tool = self.current_tool()
-        tiny = (abs(scene_pos.x() - self._press_scene.x()) < CLICK_SLOP
-                and abs(scene_pos.y() - self._press_scene.y()) < CLICK_SLOP)
+        origin = self._draw_origin or self._press_scene
+        self._draw_origin = None
+        # A drawing finished by a second click is the size the two clicks made
+        # it, however small; only a stray tap gets a default size.
+        degenerate = self._is_a_click(scene_pos, origin)
+        tiny = not clicked and degenerate
+
+        # Two clicks in the same spot mean the drawing was thought better of,
+        # not that a measurement of some invented length should appear.
+        if clicked and degenerate:
+            detach(draft)
+            self.finish_tool()
+            return
 
         if isinstance(draft, (PolyItem, MeasureItem)):
-            if tiny and tool.mode != FREE:
-                draft.points[-1] = QPointF(120, 0)
             if tool.mode == FREE and len(draft.points) < 2:
                 detach(draft)
                 self.finish_tool()
                 return
+            if tiny:
+                width, _height = self._default_size(draft)
+                draft.points[-1] = QPointF(width, 0)
             draft.prepareGeometryChange()
         elif isinstance(draft, MathItem):
             # A calculation sizes itself around what is typed into it.
@@ -967,7 +1028,7 @@ class PageView(QGraphicsView):
                 detach(draft)
                 self.finish_tool()
                 return
-        if isinstance(draft, RectItem) and draft.kind == "rect":
+        if isinstance(draft, RectItem) and draft.kind in SIZED_SHAPES:
             draft.refresh(page=self.page())
         if isinstance(draft, MeasureItem):
             if draft.kind == CALIBRATE:
@@ -995,7 +1056,7 @@ class PageView(QGraphicsView):
 
         # Tools that ask a question do it now, while the markup is still fresh.
         note_scale = False
-        if isinstance(draft, RectItem) and draft.kind == "rect":
+        if isinstance(draft, RectItem) and draft.kind in SIZED_SHAPES:
             self.window.prompt_rectangle_size(draft)
         elif isinstance(draft, MeasureItem):
             if draft.kind == DIMENSION:
@@ -1628,7 +1689,7 @@ class PageView(QGraphicsView):
                 self.statusMessage.emit("Callout cancelled")
                 event.accept()
                 return
-            if self._mode == "draw_poly":
+            if self._mode in ("draw_poly", "draw_click"):
                 self.cancel_draft()
             elif getattr(self, "_editing_item", None) is not None:
                 self.end_item_edit()

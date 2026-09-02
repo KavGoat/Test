@@ -40,6 +40,7 @@ from .docks import PanelDock, load_panel_state, save_panel_state
 from .scene import DocumentScene, detach
 from .shortcuts import COMMAND, INSERT, SYMBOL, TOOL, ShortcutManager
 from .tools import CATEGORIES, TOOL_MAP, TOOLS, tools_in
+from .view import SIZED_SHAPES
 from .view import PageView
 from .widgets import ColorButton
 
@@ -1371,7 +1372,7 @@ class MainWindow(QMainWindow):
         it is only asked for on demand — the size is written on it either way.
         """
         page = self.current_page()
-        if item.kind != "rect":
+        if item.kind not in SIZED_SHAPES:
             return
         if not always and (not self.interactive_prompts
                            or not page.scale.is_calibrated()):
@@ -2207,7 +2208,7 @@ class MainWindow(QMainWindow):
                 menu.addAction("Delete row", lambda: self._table_op(item, "del_row"))
                 menu.addAction("Delete column", lambda: self._table_op(item, "del_col"))
                 menu.addAction("Autofit columns", lambda: self._table_op(item, "autofit"))
-            if isinstance(item, RectItem) and item.kind == "rect":
+            if isinstance(item, RectItem) and item.kind in SIZED_SHAPES:
                 menu.addAction("Set exact size…",
                                lambda: self.set_rectangle_size(item))
                 show = menu.addAction("Show its size")

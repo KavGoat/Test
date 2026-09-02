@@ -552,7 +552,7 @@ class CountSubjectDialog(QDialog):
 
 
 class RectangleSizeDialog(QDialog):
-    """Type an exact real-world width and height for a rectangle."""
+    """Type an exact real-world width and height for a box or an ellipse."""
 
     def __init__(self, width_text: str, height_text: str, unit: str, parent=None,
                  scaled: bool = True):
@@ -880,7 +880,7 @@ class _GesturesSheet(QWidget):
         ("Canvas", ""),
         ("Ctrl + wheel", "Zoom"),
         ("Space + drag", "Pan"),
-        ("Shift + drag", "Constrain to 15° or square"),
+        ("Shift + drag", "Hold a line to 0°, 45° or 90°; square off a box"),
         ("Double-click", "Edit text, calculation or table · add a vertex to a polyline"),
         ("Delete", "Delete the selection"),
         ("Arrow keys", "Nudge the selection"),
