@@ -197,6 +197,47 @@ def do_clipboard():
         QApplication.clipboard().setText("a\tb\n1 m\t2 kN")
 
 
+@guard("chrome")
+def do_chrome():
+    """Panels, toolbars, themes and the layout — the window's own surface."""
+    roll = rng.random()
+    if roll < 0.15:
+        dock = rng.choice(win.panels)
+        dock.set_pinned(not dock.pinned)
+    elif roll < 0.3:
+        dock = rng.choice(win.panels)
+        dock.setVisible(not dock.isVisibleTo(win))
+    elif roll < 0.4:
+        win.addDockWidget(rng.choice([Qt.LeftDockWidgetArea, Qt.RightDockWidgetArea,
+                                      Qt.TopDockWidgetArea, Qt.BottomDockWidgetArea]),
+                          rng.choice(win.panels))
+    elif roll < 0.5:
+        win.addToolBar(rng.choice([Qt.TopToolBarArea, Qt.LeftToolBarArea,
+                                   Qt.RightToolBarArea, Qt.BottomToolBarArea]),
+                       rng.choice(win.toolbars))
+    elif roll < 0.6:
+        win.lock_toolbars(rng.random() < 0.5)
+    elif roll < 0.7:
+        win.pin_all_panels(rng.random() < 0.5)
+    elif roll < 0.8:
+        win.toggle_theme(rng.random() < 0.5)
+    elif roll < 0.9:
+        win.visible_tools = {t.key for t in TOOLS if rng.random() < 0.6}
+        win.apply_visible_tools()
+    else:
+        win.reset_layout()
+
+
+@guard("shortcuts")
+def do_shortcuts():
+    """Rebind something, then make sure the canvas still agrees."""
+    keys = ["j", "y", "z", "Alt+J", "Ctrl+Alt+U", ""]
+    binding = rng.choice([b for b in win.shortcuts.bindings()
+                          if b.kind in ("tool", "insert")])
+    win.shortcuts.set_sequence(binding.action_id, rng.choice(keys))
+    win.apply_shortcuts()
+
+
 @guard("navigate")
 def do_navigate():
     roll = rng.random()
@@ -230,7 +271,7 @@ ACTIONS = ([do_drag] * 12 + [do_click] * 4 + [do_double_click] * 4 +
            [do_right_click] * 2 + [do_key] * 4 + [do_typed] * 8 +
            [do_write] * 8 + [do_tool] * 8 + [do_undo] * 2 + [do_page] * 1 +
            [do_clipboard] * 2 + [do_scale] * 2 + [do_recalc] * 2 +
-           [do_navigate] * 6)
+           [do_navigate] * 6 + [do_chrome] * 4 + [do_shortcuts] * 2)
 
 TRACE = len(sys.argv) > 3 and sys.argv[3] == "trace"
 for round_number in range(ROUNDS):

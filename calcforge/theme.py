@@ -89,13 +89,20 @@ QMenu::item:selected {{ background: {accent_soft}; }}
 QMenu::item:disabled {{ color: {ink_faint}; }}
 QMenu::separator {{ height: 1px; background: {chrome_edge}; margin: 5px 8px; }}
 
-/* --- docks: a quiet uppercase title, like every drawing tool ------------- */
+/* --- docks: our own title bar, so it can carry a pin --------------------- */
 QDockWidget {{ color: {ink_soft}; }}
-QDockWidget::title {{
-    background: {chrome}; padding: 6px 9px; border-bottom: 1px solid {chrome_edge};
-    font-weight: 600;
-}}
 QDockWidget > QWidget {{ background: {surface}; }}
+#dockTitleBar {{
+    background: {chrome}; border-bottom: 1px solid {chrome_edge};
+}}
+#dockTitle {{
+    color: {ink_soft}; font-weight: 600; letter-spacing: 0.3px;
+}}
+#dockButton {{
+    border: 0; border-radius: 3px; padding: 2px; margin: 0;
+}}
+#dockButton:hover {{ background: {accent_soft}; }}
+#dockButton:checked {{ background: {accent_deep}; }}
 
 QGroupBox {{
     border: 1px solid {chrome_edge}; border-radius: 4px; margin-top: 10px;
@@ -176,6 +183,28 @@ QToolTip {{
     border-radius: 3px;
 }}
 QGraphicsView {{ border: 0; }}
+
+/* --- the odds and ends ---------------------------------------------------- */
+QSpinBox::up-button, QSpinBox::down-button,
+QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
+    width: 14px; border: 0; background: transparent;
+}}
+QComboBox QAbstractItemView {{
+    border: 1px solid {field_edge}; selection-background-color: {accent};
+}}
+QProgressBar {{
+    border: 1px solid {chrome_edge}; border-radius: 3px; text-align: center;
+    background: {field};
+}}
+QProgressBar::chunk {{ background: {accent}; }}
+QSlider::groove:horizontal {{
+    height: 4px; background: {chrome_edge}; border-radius: 2px;
+}}
+QSlider::handle:horizontal {{
+    background: {accent}; width: 12px; margin: -5px 0; border-radius: 6px;
+}}
+QMenu::icon {{ padding-left: 6px; }}
+QLabel:disabled {{ color: {ink_faint}; }}
 """
 
 STYLESHEET = TEMPLATE.format(**_LIGHT_TOKENS)
