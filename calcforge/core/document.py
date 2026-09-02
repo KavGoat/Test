@@ -240,6 +240,11 @@ class DocumentSettings:
     footer_right: str = "Page {page} of {pages}"
     show_header: bool = False
     show_footer: bool = True
+    # A logo sits in one of the six header/footer slots; text in the same slot
+    # steps aside for it.
+    logo_key: str = ""
+    logo_slot: str = "header_left"
+    logo_height_mm: float = 10.0
     default_author: str = ""
 
     def to_dict(self) -> dict:

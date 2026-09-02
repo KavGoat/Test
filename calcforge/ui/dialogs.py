@@ -252,6 +252,7 @@ class DocumentPropertiesDialog(QDialog):
         layout = QVBoxLayout(self)
         tabs = QTabWidget()
         layout.addWidget(tabs, 1)
+        self.tabs = tabs
 
         info = QWidget()
         info_form = QFormLayout(info)
@@ -293,6 +294,43 @@ class DocumentPropertiesDialog(QDialog):
         hint.setWordWrap(True)
         hint.setStyleSheet("color:#5a6270;")
         running_form.addRow(hint)
+
+        logo_box = QGroupBox("Logo")
+        logo_form = QFormLayout(logo_box)
+        self.logo_key = settings.logo_key
+        self.logo_data: Optional[bytes] = None
+        self.logo_name = QLabel()
+        self.logo_name.setWordWrap(True)
+        buttons = QHBoxLayout()
+        choose = QPushButton("Choose image…")
+        choose.clicked.connect(self._choose_logo)
+        clear = QPushButton("Remove")
+        clear.clicked.connect(self._clear_logo)
+        buttons.addWidget(choose)
+        buttons.addWidget(clear)
+        buttons.addStretch(1)
+        holder = QWidget()
+        holder.setLayout(buttons)
+        logo_form.addRow(holder)
+        logo_form.addRow("Image", self.logo_name)
+        self.logo_slot = QComboBox()
+        for label, value in (("Header, left", "header_left"),
+                             ("Header, centre", "header_center"),
+                             ("Header, right", "header_right"),
+                             ("Footer, left", "footer_left"),
+                             ("Footer, centre", "footer_center"),
+                             ("Footer, right", "footer_right")):
+            self.logo_slot.addItem(label, value)
+        index = self.logo_slot.findData(settings.logo_slot)
+        self.logo_slot.setCurrentIndex(index if index >= 0 else 0)
+        logo_form.addRow("Place it", self.logo_slot)
+        self.logo_height = QDoubleSpinBox()
+        self.logo_height.setRange(3, 60)
+        self.logo_height.setSuffix(" mm")
+        self.logo_height.setValue(settings.logo_height_mm)
+        logo_form.addRow("Height", self.logo_height)
+        running_form.addRow(logo_box)
+        self._show_logo_name()
         tabs.addTab(running, "Header && footer")
 
         calc = QWidget()
@@ -335,6 +373,38 @@ class DocumentPropertiesDialog(QDialog):
 
         layout.addWidget(_buttons(self))
 
+    def show_tab(self, name: str) -> None:
+        """Open on a named tab, so a menu entry can go straight to it."""
+        for index in range(self.tabs.count()):
+            if name.lower() in self.tabs.tabText(index).replace("&", "").lower():
+                self.tabs.setCurrentIndex(index)
+                return
+
+    def _show_logo_name(self) -> None:
+        self.logo_name.setText(os.path.basename(getattr(self, "_logo_path", ""))
+                               or ("in the document" if self.logo_key else "none"))
+
+    def _choose_logo(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Choose a logo", "",
+            "Images (*.png *.jpg *.jpeg *.bmp *.gif *.svg *.tif *.tiff *.webp)")
+        if not path:
+            return
+        try:
+            with open(path, "rb") as handle:
+                self.logo_data = handle.read()
+        except OSError as error:
+            QMessageBox.warning(self, "Logo", str(error))
+            return
+        self._logo_path = path
+        self._show_logo_name()
+
+    def _clear_logo(self) -> None:
+        self.logo_key = ""
+        self.logo_data = None
+        self._logo_path = ""
+        self._show_logo_name()
+
     def apply(self) -> None:
         document = self.document
         document.title = self.title.text()
@@ -356,6 +426,13 @@ class DocumentPropertiesDialog(QDialog):
         settings.snap_to_grid = self.snap.isChecked()
         settings.grid_mm = self.grid_mm.value()
         settings.show_margins = self.show_margins.isChecked()
+        if self.logo_data is not None:
+            suffix = os.path.splitext(getattr(self, "_logo_path", ""))[1].lstrip(".")
+            settings.logo_key = document.add_asset(self.logo_data, suffix or "png")
+        else:
+            settings.logo_key = self.logo_key
+        settings.logo_slot = self.logo_slot.currentData()
+        settings.logo_height_mm = self.logo_height.value()
         document.modified = True
 
 

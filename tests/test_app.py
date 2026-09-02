@@ -1929,3 +1929,60 @@ def test_the_manager_refuses_to_save_a_key_bound_twice(window, monkeypatch):
     dialog.editors["tool.cloud"].setText("C")
     dialog.accept()
     assert dialog.result() == dialogs.QDialog.Accepted
+
+
+# ---------------------------------------------------------------------------
+# Header, footer and logo, through the dialog
+# ---------------------------------------------------------------------------
+
+def test_choosing_a_logo_puts_it_in_the_document(window, tmp_path, monkeypatch):
+    from PySide6.QtGui import QImage
+    from PySide6.QtWidgets import QFileDialog
+    from calcforge.ui import dialogs
+
+    path = str(tmp_path / "practice.png")
+    QImage(80, 40, QImage.Format_ARGB32).save(path)
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (path, ""))
+
+    dialog = dialogs.DocumentPropertiesDialog(window.document)
+    dialog._choose_logo()
+    dialog.logo_slot.setCurrentIndex(dialog.logo_slot.findData("footer_right"))
+    dialog.logo_height.setValue(14.0)
+    dialog.apply()
+    dialog.deleteLater()
+
+    settings = window.document.settings
+    assert settings.logo_key
+    assert window.document.asset(settings.logo_key)
+    assert settings.logo_slot == "footer_right"
+    assert settings.logo_height_mm == pytest.approx(14.0)
+
+
+def test_removing_the_logo_takes_it_off_every_page(window):
+    from calcforge.ui import dialogs
+
+    window.document.settings.logo_key = window.document.add_asset(b"not-an-image", "png")
+    dialog = dialogs.DocumentPropertiesDialog(window.document)
+    dialog._clear_logo()
+    dialog.apply()
+    dialog.deleteLater()
+    assert window.document.settings.logo_key == ""
+
+
+def test_the_header_and_footer_have_a_menu_entry_of_their_own(window):
+    from calcforge.ui import dialogs
+
+    assert window.act_header_footer.text() == "Header and footer…"
+    dialog = dialogs.DocumentPropertiesDialog(window.document)
+    dialog.show_tab("header")
+    assert "Header" in dialog.tabs.tabText(dialog.tabs.currentIndex())
+    dialog.deleteLater()
+
+
+def test_a_logo_that_cannot_be_read_leaves_the_page_alone(window):
+    """A file that is not an image must not stop the page drawing."""
+    window.document.settings.logo_key = window.document.add_asset(b"rubbish", "png")
+    window.document.settings.show_header = True
+    frame = window.document.pages[0].frame
+    frame.render_image(dpi=48.0)             # no exception is the point
+    assert frame.load_logo() is None

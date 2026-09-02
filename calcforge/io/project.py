@@ -20,6 +20,10 @@ def save_document(document, path: str, enforce_extension: bool = True) -> None:
     if enforce_extension and not path.lower().endswith(EXTENSION):
         path += EXTENSION
     used: set[str] = set()
+    # The logo belongs to no page, so it has to be spoken for here or the
+    # tidy-up below would throw it away on the first save.
+    if document.settings.logo_key:
+        used.add(document.settings.logo_key)
     for page in document.pages:
         if page.frame is not None:
             used |= page.frame.assets_used()

@@ -267,7 +267,9 @@ class MainWindow(QMainWindow):
         self._act("delete_page", "Delete page", lambda: self.delete_page())
         self._act("page_setup", "Page setup…", self.page_setup, "Ctrl+Shift+P", "page")
         self._act("scale", "Page scale…", self.calibrate_dialog, "", "calibrate")
-        self._act("doc_props", "Document properties…", self.document_properties)
+        self._act("doc_props", "Document properties…", lambda: self.document_properties())
+        self._act("header_footer", "Header and footer…", self.edit_header_footer, "",
+                  tip="Page numbers, the date, a title and a logo on every page")
 
         self._act("grid", "Show grid", self.toggle_grid, "Ctrl+G", checkable=True)
         self._act("snap", "Snap to grid", self.toggle_snap, "", checkable=True)
@@ -506,7 +508,8 @@ class MainWindow(QMainWindow):
         # Mnemonic on the "g" for the same reason: Alt+P draws freehand.
         page_menu = bar.addMenu("Pa&ge")
         for action in (self.act_add_page, self.act_duplicate_page, self.act_delete_page,
-                       None, self.act_page_setup, self.act_scale, None, self.act_doc_props):
+                       None, self.act_page_setup, self.act_scale, self.act_header_footer,
+                       None, self.act_doc_props):
             page_menu.addSeparator() if action is None else page_menu.addAction(action)
 
         insert_menu = bar.addMenu("&Insert")
@@ -2397,8 +2400,14 @@ class MainWindow(QMainWindow):
             item.update()
         return removed
 
-    def document_properties(self) -> None:
+    def edit_header_footer(self) -> None:
+        """Straight to the header and footer, logo and all."""
+        self.document_properties(tab="header")
+
+    def document_properties(self, tab: str = "") -> None:
         dialog = dialogs.DocumentPropertiesDialog(self.document, self)
+        if tab:
+            dialog.show_tab(tab)
         if dialog.exec() == dialogs.QDialog.Accepted:
             dialog.apply()
             self.act_grid.setChecked(self.document.settings.show_grid)

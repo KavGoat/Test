@@ -99,6 +99,8 @@ class PageFrame(QGraphicsObject):
         self.document = document
         self.workspace = document.workspace
         self._background: Optional[QPixmap] = None
+        self._logo: Optional[QPixmap] = None
+        self._logo_key = ""
         self.print_mode = False
         self.setFlag(QGraphicsItem.ItemIsSelectable, False)
         self.setFlag(QGraphicsItem.ItemIsMovable, False)
@@ -211,6 +213,43 @@ class PageFrame(QGraphicsObject):
         painter.drawRect(QRectF(x, y, width, height))
         painter.restore()
 
+    def load_logo(self) -> Optional[QPixmap]:
+        """The header/footer logo, decoded once and kept."""
+        settings = self.document.settings
+        key = settings.logo_key
+        if not key:
+            self._logo = None
+            self._logo_key = ""
+            return None
+        if getattr(self, "_logo_key", "") != key:
+            data = self.document.asset(key)
+            pixmap = QPixmap()
+            if data:
+                pixmap.loadFromData(QByteArray(data))
+            self._logo = pixmap if not pixmap.isNull() else None
+            self._logo_key = key
+        return self._logo
+
+    def _logo_rect(self, band: QRectF, slot: str) -> QRectF:
+        """Where the logo sits in its band, scaled to the height asked for.
+
+        Never taller than the band it is in: a logo that spilled past the
+        margin would print over the paper's edge.
+        """
+        logo = self.load_logo()
+        if logo is None or logo.height() <= 0:
+            return QRectF()
+        height = min(self.document.settings.logo_height_mm * MM_TO_PT, band.height())
+        width = height * logo.width() / logo.height()
+        width = min(width, band.width())
+        if slot.endswith("right"):
+            x = band.right() - width
+        elif slot.endswith("center"):
+            x = band.center().x() - width / 2
+        else:
+            x = band.left()
+        return QRectF(x, band.center().y() - height / 2, width, height)
+
     def _paint_running_text(self, painter: QPainter) -> None:
         settings = self.document.settings
         index = self.document.index_of(self.page)
@@ -220,18 +259,23 @@ class PageFrame(QGraphicsObject):
         painter.setFont(page_font("", 8.0))
         painter.setPen(QPen(QColor(90, 96, 106)))
         if settings.show_header:
-            box = QRectF(left, top - 18, width, 14)
-            self._paint_three(painter, box, settings.header_left, settings.header_center,
-                              settings.header_right, index)
+            # The band is as deep as it has to be for the logo, but never
+            # deeper than the margin it lives in.
+            band = self._band(QRectF(left, top - 18, width, 14), "header", top)
+            self._paint_three(painter, band, settings.header_left,
+                              settings.header_center, settings.header_right,
+                              index, "header")
             pen = QPen(QColor(190, 196, 206))
             pen.setWidthF(0.5)
             painter.setPen(pen)
             painter.drawLine(QPointF(left, top - 4), QPointF(left + width, top - 4))
             painter.setPen(QPen(QColor(90, 96, 106)))
         if settings.show_footer:
-            box = QRectF(left, top + height + 5, width, 14)
-            self._paint_three(painter, box, settings.footer_left, settings.footer_center,
-                              settings.footer_right, index)
+            band = self._band(QRectF(left, top + height + 5, width, 14), "footer",
+                              self.page.height_pt - (top + height))
+            self._paint_three(painter, band, settings.footer_left,
+                              settings.footer_center, settings.footer_right,
+                              index, "footer")
             pen = QPen(QColor(190, 196, 206))
             pen.setWidthF(0.5)
             painter.setPen(pen)
@@ -239,16 +283,51 @@ class PageFrame(QGraphicsObject):
                              QPointF(left + width, top + height + 3))
         painter.restore()
 
+    def _band(self, box: QRectF, which: str, room: float) -> QRectF:
+        """Grow the header or footer band to hold the logo, within the margin."""
+        settings = self.document.settings
+        if not settings.logo_key or not settings.logo_slot.startswith(which):
+            return box
+        wanted = min(settings.logo_height_mm * MM_TO_PT, max(room - 8.0, 8.0))
+        if wanted <= box.height():
+            return box
+        if which == "header":
+            return QRectF(box.left(), box.bottom() - wanted, box.width(), wanted)
+        return QRectF(box.left(), box.top(), box.width(), wanted)
+
     def _paint_three(self, painter: QPainter, box: QRectF, left: str, center: str,
-                     right: str, index: int) -> None:
+                     right: str, index: int, which: str = "") -> None:
+        settings = self.document.settings
+        slot = settings.logo_slot if settings.logo_key else ""
+        logo_rect = QRectF()
+        if slot.startswith(which) and which:
+            logo_rect = self._logo_rect(box, slot)
+            if not logo_rect.isEmpty():
+                painter.save()
+                painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+                painter.drawPixmap(logo_rect, self._logo,
+                                   QRectF(self._logo.rect()))
+                painter.restore()
+
+        def room(alignment: str) -> QRectF:
+            """The text box for one slot, stepped aside from the logo."""
+            if logo_rect.isEmpty() or not slot.endswith(alignment):
+                return box
+            gap = logo_rect.width() + 4.0
+            if alignment == "right":
+                return box.adjusted(0, 0, -gap, 0)
+            if alignment == "left":
+                return box.adjusted(gap, 0, 0, 0)
+            return box                      # centred: the logo is behind it
+
         if left:
-            painter.drawText(box, Qt.AlignLeft | Qt.AlignVCenter,
+            painter.drawText(room("left"), Qt.AlignLeft | Qt.AlignVCenter,
                              self.document.expand_fields(left, index))
         if center:
-            painter.drawText(box, Qt.AlignHCenter | Qt.AlignVCenter,
+            painter.drawText(room("center"), Qt.AlignHCenter | Qt.AlignVCenter,
                              self.document.expand_fields(center, index))
         if right:
-            painter.drawText(box, Qt.AlignRight | Qt.AlignVCenter,
+            painter.drawText(room("right"), Qt.AlignRight | Qt.AlignVCenter,
                              self.document.expand_fields(right, index))
 
     # -- items -------------------------------------------------------------
