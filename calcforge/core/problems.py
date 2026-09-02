@@ -18,6 +18,11 @@ LABELS = {
     UNIT_MISMATCH: "Unit mismatch",
     SYNTAX: "Syntax",
     OTHER: "Error",
+    # raised by the verifier rather than by evaluation
+    "disagreement": "Does not re-derive",
+    "shadowed": "Shadows a unit",
+    "redefined": "Defined twice",
+    "implausible": "Implausible magnitude",
 }
 
 
@@ -86,6 +91,7 @@ def summarise(problems: list[Problem]) -> str:
     counts: dict[str, int] = {}
     for problem in problems:
         counts[problem.kind] = counts.get(problem.kind, 0) + 1
-    order = [UNDEFINED, UNIT_MISMATCH, SYNTAX, OTHER]
+    order = [UNDEFINED, UNIT_MISMATCH, SYNTAX, "disagreement", "redefined",
+             "shadowed", "implausible", OTHER]
     parts = [f"{counts[kind]} {LABELS[kind].lower()}" for kind in order if kind in counts]
     return " · ".join(parts)

@@ -69,6 +69,13 @@ class MainWindow(QMainWindow):
         self.interactive_prompts = True
         self._clipboard: list[dict] = []
         self._suspend_recalc = False
+        # The independent check is not cheap, so it runs once the document has
+        # been left alone for a moment rather than on every keystroke.
+        self._verification = None
+        self._verify_timer = QTimer(self)
+        self._verify_timer.setSingleShot(True)
+        self._verify_timer.setInterval(900)
+        self._verify_timer.timeout.connect(self._verify_quietly)
 
         self.setWindowTitle(APP_NAME)
         self.resize(1500, 960)
@@ -225,6 +232,9 @@ class MainWindow(QMainWindow):
         self._act("sticky", "Keep the tool active", self.toggle_sticky, "", checkable=True,
                   tip="Stay on the current tool after drawing instead of returning to Select")
         self._act("recalc", "Recalculate", self.recalculate, "F9", "recalc")
+        self._act("verify", "Check every number…", self.verify_document, "F10",
+                  tip="Re-derive the whole document from scratch and report\n"
+                      "anything that does not come back the same")
         self._act("apply_redactions", "Apply redactions…", self.apply_redactions, "",
                   tip="Permanently remove what the black boxes cover")
         self._act("split_lines", "Split into separate lines", self.split_calculation, "",
@@ -425,6 +435,7 @@ class MainWindow(QMainWindow):
 
         calc_menu = bar.addMenu("&Calculate")
         calc_menu.addAction(self.act_recalc)
+        calc_menu.addAction(self.act_verify)
         calc_menu.addSeparator()
         calc_menu.addAction(self.act_split_lines)
         calc_menu.addAction(self.act_merge_lines)
@@ -1460,6 +1471,9 @@ class MainWindow(QMainWindow):
         self.refresh_problems()
         if self.view.active_table is not None:
             self.refresh_formula_bar(self.view.active_table)
+        # The independent check runs once the typing stops, so that a sheet is
+        # never left unverified without anybody being told.
+        self._verify_timer.start()
 
     def split_calculation(self) -> None:
         """Break each selected multi-line calculation into one region per line."""
@@ -1522,10 +1536,40 @@ class MainWindow(QMainWindow):
                     names |= collect()
         return names
 
+    def verify_document(self, quiet: bool = False):
+        """Re-derive every number in the document and report the differences.
+
+        The live pass is incremental and evaluates in reading order, which is
+        what makes it pleasant to type into. This is the opposite: a clean
+        workspace, the whole document from its source, and a comparison with
+        what is on the page.
+        """
+        from ..core.verify import verify_document as run_check
+
+        result = run_check(self.document)
+        self._verification = result
+        self.refresh_problems()
+        self.status_hint.setText(result.summary())
+        if not quiet and not result.ok:
+            self.problems_panel.show()
+            self.problems_panel.raise_()
+        return result
+
+    def _verify_quietly(self) -> None:
+        """The background check, after the document has been left alone."""
+        try:
+            self.verify_document(quiet=True)
+        except Exception as exc:                      # noqa: BLE001
+            # A check that crashes must never take the document down with it.
+            self.status_hint.setText(f"The check could not run: {exc}")
+
     def refresh_problems(self) -> None:
         from ..core.problems import collect_problems, summarise
 
         problems = collect_problems(self.document)
+        verification = getattr(self, "_verification", None)
+        if verification is not None:
+            problems = problems + verification.problems
         self.problems_panel.rebuild(problems)
         if problems:
             self.status_problems.setText(f"⚠ {len(problems)} problem"
