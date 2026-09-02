@@ -287,9 +287,14 @@ class MainWindow(QMainWindow):
 
         self._act("grid", "Show grid", self.toggle_grid, "Ctrl+G", checkable=True)
         self._act("snap", "Snap to grid", self.toggle_snap, "", checkable=True)
+        self._act("snap_items", "Snap to what is drawn", self.toggle_item_snap, "",
+                  checkable=True,
+                  tip="Catch corners, centres and line ends of markups already "
+                      "on the page")
         self._act("dark", "Dark theme", self.toggle_theme, "", checkable=True)
         self._act("margins", "Show margins", self.toggle_margins, "", checkable=True)
         self.act_margins.setChecked(True)
+        self.act_snap_items.setChecked(True)
         self._act("sticky", "Keep the tool active", self.toggle_sticky, "", "pin",
                   checkable=True,
                   tip="Stay on the current tool after drawing instead of returning to Select")
@@ -492,7 +497,8 @@ class MainWindow(QMainWindow):
         for action in (self.act_zoom_in, self.act_zoom_out, self.act_actual_size,
                        self.act_fit_page,
                        self.act_fit_width, self.act_zoom_sel, None, self.act_grid,
-                       self.act_snap, self.act_margins, self.act_dark, None,
+                       self.act_snap, self.act_snap_items, self.act_margins,
+                       self.act_dark, None,
                        self.act_prev_page,
                        self.act_next_page):
             view_menu.addSeparator() if action is None else view_menu.addAction(action)
@@ -2277,6 +2283,9 @@ class MainWindow(QMainWindow):
     def toggle_snap(self, on: bool) -> None:
         self.document.settings.snap_to_grid = on
 
+    def toggle_item_snap(self, on: bool) -> None:
+        self.document.settings.snap_to_items = on
+
     def toggle_margins(self, on: bool) -> None:
         self.document.settings.show_margins = on
         self._refresh_all_scenes()
@@ -2623,6 +2632,7 @@ class MainWindow(QMainWindow):
             dialog.apply()
             self.act_grid.setChecked(self.document.settings.show_grid)
             self.act_snap.setChecked(self.document.settings.snap_to_grid)
+            self.act_snap_items.setChecked(self.document.settings.snap_to_items)
             self.act_margins.setChecked(self.document.settings.show_margins)
             self._refresh_all_scenes()
             self.update_title()

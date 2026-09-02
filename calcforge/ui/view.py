@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from typing import Optional
 
 from PySide6.QtCore import QMimeData, QPoint, QPointF, QRectF, Qt, Signal
@@ -14,7 +15,7 @@ from PySide6.QtWidgets import (QApplication, QCompleter, QGraphicsProxyWidget,
 from ..core.document import MM_TO_PT
 from ..core.spreadsheet import parse_clipboard_grid
 from ..core.units import parse_unit
-from ..items.base import HANDLE_CURSORS, MarkupItem
+from ..items.base import HANDLE_CURSORS, MarkupItem, build_item
 from ..items.mathitem import LINE_STEP, MathItem
 from .scene import PageFrame, detach
 from ..items.measure import CALIBRATE, DIMENSION, CountItem, MeasureItem
@@ -29,6 +30,8 @@ from .tools import ANCHOR, CLICK, DRAG, FREE, NONE, POLY, TOOL_MAP, Tool
 MIN_ZOOM = 0.08
 MAX_ZOOM = 16.0
 CLICK_SLOP = 3.0
+# How near the pointer has to be, in view pixels, to catch a drawn point.
+SNAP_REACH = 9.0
 # The shapes drawn to a size somebody cares about, and so worth measuring,
 # asking an exact size for, and writing that size on.
 SIZED_SHAPES = ("rect", "ellipse")
@@ -86,6 +89,10 @@ class PageView(QGraphicsView):
         self._unit_target: tuple = (None, -1)
         self._fill_origin: Optional[tuple[int, int]] = None
         self._draw_origin: Optional[QPointF] = None
+        # Ctrl held when a drag starts leaves the originals where they were.
+        self._copy_on_move = False
+        self._copied = False
+        self._snap_marker: Optional[QPointF] = None
         self._editing_item = None
 
         self._last_scene_pos = QPointF(60, 60)
@@ -370,15 +377,100 @@ class PageView(QGraphicsView):
         return QPointF(round(point.x() / step) * step, round(point.y() / step) * step)
 
     def snap_scene(self, scene_pos: QPointF, frame=None) -> QPointF:
-        """Snap a canvas point to its own page's grid.
+        """Snap a canvas point to what is already drawn, then to the grid.
 
-        The grid belongs to the page, not to the canvas, so a point is taken
-        into page coordinates to be snapped and brought back again.
+        A corner of something beats the grid: lining a markup up with the
+        thing it is about is what the pointer is usually trying to do. The
+        grid belongs to the page, not to the canvas, so a point is taken into
+        page coordinates to be snapped and brought back again.
         """
+        caught = self.snap_to_item(scene_pos)
+        if caught is not None:
+            return caught
         frame = frame or self.frame_at(scene_pos) or self.frame()
         if frame is None:
             return self.snap(scene_pos)
         return frame.mapToScene(self.snap(frame.mapFromScene(scene_pos)))
+
+    def snap_targets(self, frame, ignore=()) -> list:
+        """The points on a page worth lining something up with.
+
+        Corners, edge midpoints and centres of everything boxed, and every
+        vertex of everything drawn as a line — including the lines that came
+        in on a PDF page, once they are markups on it.
+        """
+        points: list[QPointF] = []
+        skip = set(ignore)
+        for item in frame.markups():
+            if item in skip or not item.isVisible():
+                continue
+            points += self.points_of(item)
+        return points
+
+    @staticmethod
+    def points_of(item) -> list:
+        """One markup's own interesting points, in scene coordinates."""
+        vertices = getattr(item, "points", None)
+        if vertices:
+            return [item.mapToScene(point) for point in vertices]
+        rect = item.local_rect().normalized()
+        if rect.isEmpty():
+            return []
+        return [item.mapToScene(corner) for corner in (
+            rect.topLeft(), rect.topRight(), rect.bottomLeft(), rect.bottomRight(),
+            rect.center(),
+            QPointF(rect.center().x(), rect.top()),
+            QPointF(rect.center().x(), rect.bottom()),
+            QPointF(rect.left(), rect.center().y()),
+            QPointF(rect.right(), rect.center().y()))]
+
+    def snap_moved(self, items: list, delta: QPointF) -> QPointF:
+        """Nudge a move so a corner of what is dragged lands on a drawn point."""
+        self._snap_marker = None
+        if not self.document().settings.snap_to_items or not items:
+            return delta
+        item, origin = items[0]
+        frame = item.parentItem()
+        if frame is None:
+            return delta
+        targets = self.snap_targets(frame, ignore={i for i, _ in items})
+        if not targets:
+            return delta
+        shift = frame.mapToScene(origin + delta) - frame.mapToScene(item.pos())
+        reach = SNAP_REACH / max(self._zoom, 0.05)
+        best = None
+        best_distance = reach
+        for point in self.points_of(item):
+            moved = point + shift
+            for target in targets:
+                distance = math.hypot(target.x() - moved.x(), target.y() - moved.y())
+                if distance < best_distance:
+                    best_distance = distance
+                    best = (target - moved, target)
+        if best is None:
+            return delta
+        offset, marker = best
+        self._snap_marker = QPointF(marker)
+        return delta + offset
+
+    def snap_to_item(self, scene_pos: QPointF, ignore=()) -> Optional[QPointF]:
+        """The nearest interesting point of another markup, if one is close."""
+        self._snap_marker = None
+        if not self.document().settings.snap_to_items:
+            return None
+        frame = self.frame_at(scene_pos) or self.frame()
+        if frame is None:
+            return None
+        reach = SNAP_REACH / max(self._zoom, 0.05)
+        best = None
+        best_distance = reach
+        for point in self.snap_targets(frame, ignore):
+            distance = math.hypot(point.x() - scene_pos.x(), point.y() - scene_pos.y())
+            if distance < best_distance:
+                best, best_distance = point, distance
+        if best is not None:
+            self._snap_marker = QPointF(best)
+        return best
 
     @staticmethod
     def constrain(anchor: QPointF, point: QPointF) -> QPointF:
@@ -525,8 +617,14 @@ class PageView(QGraphicsView):
             event.accept()
             return
 
-        if event.modifiers() & (Qt.ShiftModifier | Qt.ControlModifier):
+        control = bool(event.modifiers() & Qt.ControlModifier)
+        if event.modifiers() & Qt.ShiftModifier:
             item.setSelected(not item.isSelected())
+        elif control:
+            # Ctrl adds to the selection and arms a copy; it does not take
+            # anything out of it, because Ctrl-dragging what you just clicked
+            # is the whole point.
+            item.setSelected(True)
         elif not item.isSelected():
             self.scene().clearSelection()
             item.setSelected(True)
@@ -537,6 +635,8 @@ class PageView(QGraphicsView):
             event.accept()
             return
         self._mode = "move"
+        self._copy_on_move = control
+        self._copied = False
         self._move_items = [(other, other.pos()) for other in self.scene().selectedItems()
                             if isinstance(other, MarkupItem) and self.editable(other)]
         self.begin_snapshot(self.all_frames())
@@ -665,11 +765,23 @@ class PageView(QGraphicsView):
 
         if self._mode == "move":
             delta = scene_pos - self._press_scene
+            control = bool(event.modifiers() & Qt.ControlModifier)
+            if self._copy_on_move and not self._copied and not self._is_a_click(scene_pos):
+                self._leave_copies_behind()
             if event.modifiers() & Qt.ShiftModifier:
                 held = self.constrain(QPointF(0, 0), delta)
                 delta = QPointF(held.x(), held.y())
+            # Ctrl taken hold of after the drag started means "leave the
+            # snapping alone for a moment"; Ctrl held from the start means
+            # "copy", and snapping carries on as usual.
+            free = control and not self._copy_on_move
+            if free:
+                self._snap_marker = None
+            else:
+                delta = self.snap_moved(self._move_items, delta)
             for item, origin in self._move_items:
-                self._place(item, self.snap(origin + delta))
+                target = origin + delta
+                self._place(item, target if free else self.snap(target))
             event.accept()
             return
 
@@ -759,6 +871,33 @@ class PageView(QGraphicsView):
             draft.refresh(page=self.page())
         draft.update()
 
+    def _leave_copies_behind(self) -> None:
+        """Ctrl-drag: put a copy of each item back where it started.
+
+        The copies stay put and the originals travel, so what ends up under
+        the pointer is what was picked up — which is what every drawing
+        program does, and it keeps the selection meaning the same thing.
+        """
+        self._copied = True
+        scene = self.scene()
+        for item, origin in self._move_items:
+            frame = item.parentItem()
+            if frame is None:
+                continue
+            data = item.serialize()
+            data["uid"] = os.urandom(8).hex()
+            copy = build_item(data)
+            if copy is None:
+                continue
+            if isinstance(copy, ImageItem):
+                copy.load_from_document(self.document())
+            copy.setPos(origin)
+            frame.add_markup(copy)
+            copy.setSelected(False)
+        if scene is not None:
+            self.window.recalculate()
+        self.statusMessage.emit(f"Copied {len(self._move_items)} markup(s)")
+
     @staticmethod
     def _place(item, position: QPointF) -> None:
         """Move an item, keeping a callout's arrow pointing where it pointed."""
@@ -818,8 +957,11 @@ class PageView(QGraphicsView):
 
         if self._mode == "move":
             self._mode = "idle"
+            self._snap_marker = None
             self.settle_pages([item for item, _ in self._move_items])
-            self.commit_snapshot("Move markup")
+            self.commit_snapshot("Copy markup" if self._copied else "Move markup")
+            self._copy_on_move = False
+            self._copied = False
             event.accept()
             return
 
@@ -1641,6 +1783,8 @@ class PageView(QGraphicsView):
     def drawForeground(self, painter: QPainter, rect: QRectF) -> None:
         """Draw the insertion point, so it is obvious where things will land."""
         super().drawForeground(painter, rect)
+        if self._snap_marker is not None:
+            self._draw_snap_marker(painter, self._snap_marker)
         point = self._pending_anchor or self._insert_point
         if point is None:
             return
@@ -1657,6 +1801,18 @@ class PageView(QGraphicsView):
         if self._pending_anchor is not None:
             painter.setBrush(QColor(11, 107, 203, 60))
             painter.drawEllipse(point, arm * 0.55, arm * 0.55)
+        painter.restore()
+
+    def _draw_snap_marker(self, painter: QPainter, point: QPointF) -> None:
+        """A small square where the pointer has caught hold of something."""
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        arm = 4.5 / max(self._zoom, 0.05)
+        pen = QPen(QColor("#e8590c"))
+        pen.setWidthF(0)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRect(QRectF(point.x() - arm, point.y() - arm, arm * 2, arm * 2))
         painter.restore()
 
     def typing_position(self) -> QPointF:

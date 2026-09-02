@@ -228,6 +228,8 @@ class DocumentSettings:
     number_format: str = "auto"
     show_grid: bool = False
     snap_to_grid: bool = False
+    # Pick up the corners, centres and ends of what is already drawn.
+    snap_to_items: bool = True
     grid_mm: float = 5.0
     show_margins: bool = True
     math_font: str = "Cambria Math"

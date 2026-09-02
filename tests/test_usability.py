@@ -2166,3 +2166,151 @@ def test_the_size_can_still_be_written_on_it_if_you_want(window):
     window.set_size_visible(box, True)
     assert box.show_size
     assert box.value_text
+
+
+# ---------------------------------------------------------------------------
+# Ctrl to copy, Ctrl to let go of the grid
+# ---------------------------------------------------------------------------
+
+def test_ctrl_dragging_leaves_a_copy_behind(window):
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 160)
+    window.select_tool("select")
+    box = markups(window)[0]
+    box.setSelected(True)
+
+    centre = box.mapToScene(box.local_rect().center())
+    drag(window.view, centre.x(), centre.y(), centre.x() + 120, centre.y() + 60,
+         modifiers=Qt.ControlModifier)
+
+    boxes = [i for i in markups(window) if isinstance(i, RectItem)]
+    assert len(boxes) == 2
+    positions = sorted(round(i.pos().x()) for i in boxes)
+    assert positions[0] == 100                       # one stayed where it was
+    assert positions[1] == pytest.approx(220, abs=3)
+
+
+def test_a_ctrl_click_does_not_copy_anything(window):
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 160)
+    window.select_tool("select")
+    box = markups(window)[0]
+    centre = box.mapToScene(box.local_rect().center())
+    click(window.view, centre.x(), centre.y(), modifiers=Qt.ControlModifier)
+    assert len([i for i in markups(window) if isinstance(i, RectItem)]) == 1
+    assert box.isSelected()
+
+
+def test_a_copy_can_be_undone_in_one_go(window):
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 160)
+    window.select_tool("select")
+    box = markups(window)[0]
+    box.setSelected(True)
+    centre = box.mapToScene(box.local_rect().center())
+    drag(window.view, centre.x(), centre.y(), centre.x() + 120, centre.y(),
+         modifiers=Qt.ControlModifier)
+    assert len(markups(window)) == 2
+    window.undo_stack.undo()
+    assert len(markups(window)) == 1
+
+
+def test_ctrl_taken_hold_of_mid_move_lets_go_of_the_grid(window):
+    from PySide6.QtCore import QEvent
+    from PySide6.QtWidgets import QApplication
+
+    window.document.settings.snap_to_grid = True
+    window.document.settings.grid_mm = 10.0
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 160)
+    window.select_tool("select")
+    box = markups(window)[0]
+    box.setSelected(True)
+
+    centre = box.mapToScene(box.local_rect().center())
+    QApplication.sendEvent(window.view.viewport(),
+                           _mouse(window.view, QEvent.MouseButtonPress, centre.x(), centre.y()))
+    QApplication.sendEvent(window.view.viewport(), _mouse(
+        window.view, QEvent.MouseMove, centre.x() + 33, centre.y() + 17,
+        Qt.NoButton, Qt.LeftButton, Qt.ControlModifier))
+    off_grid = box.pos()
+    QApplication.sendEvent(window.view.viewport(), _mouse(
+        window.view, QEvent.MouseMove, centre.x() + 33, centre.y() + 17,
+        Qt.NoButton, Qt.LeftButton, Qt.NoModifier))
+    on_grid = box.pos()
+    QApplication.sendEvent(window.view.viewport(), _mouse(
+        window.view, QEvent.MouseButtonRelease, centre.x() + 33, centre.y() + 17))
+
+    step = 10.0 * MM_TO_PT
+    assert abs(round(on_grid.x() / step) * step - on_grid.x()) < 0.01
+    assert off_grid != on_grid                      # it was free while Ctrl was held
+
+
+# ---------------------------------------------------------------------------
+# Snapping to what is already drawn
+# ---------------------------------------------------------------------------
+
+def test_dragging_catches_the_corner_of_another_markup(window):
+    window.document.settings.snap_to_items = True
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 220, 180)          # the one to line up with
+    window.select_tool("rect")
+    drag(window.view, 300, 400, 380, 460)          # the one to move
+    window.select_tool("select")
+    first, second = markups(window)[0], markups(window)[1]
+    second.setSelected(True)
+
+    # aim the moving box's top-left a few points off the other box's corner
+    corner = first.mapToScene(first.local_rect().bottomRight())
+    grab = second.mapToScene(second.local_rect().center())
+    offset = second.mapToScene(second.local_rect().center()) - \
+        second.mapToScene(second.local_rect().topLeft())
+    drag(window.view, grab.x(), grab.y(),
+         corner.x() + offset.x() + 4, corner.y() + offset.y() - 3)
+
+    landed = second.mapToScene(second.local_rect().topLeft())
+    assert landed.x() == pytest.approx(corner.x(), abs=0.5)
+    assert landed.y() == pytest.approx(corner.y(), abs=0.5)
+
+
+def test_snapping_to_items_can_be_turned_off(window):
+    window.document.settings.snap_to_items = False
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 220, 180)
+    window.select_tool("rect")
+    drag(window.view, 300, 400, 380, 460)
+    window.select_tool("select")
+    first, second = markups(window)[0], markups(window)[1]
+    second.setSelected(True)
+
+    corner = first.mapToScene(first.local_rect().bottomRight())
+    grab = second.mapToScene(second.local_rect().center())
+    offset = second.mapToScene(second.local_rect().center()) - \
+        second.mapToScene(second.local_rect().topLeft())
+    drag(window.view, grab.x(), grab.y(),
+         corner.x() + offset.x() + 4, corner.y() + offset.y() - 3)
+
+    landed = second.mapToScene(second.local_rect().topLeft())
+    assert landed.x() == pytest.approx(corner.x() + 4, abs=0.5)
+
+
+def test_drawing_catches_a_line_end(window):
+    window.document.settings.snap_to_items = True
+    window.select_tool("line")
+    drag(window.view, 100, 100, 260, 200)
+    window.select_tool("line")
+    end = markups(window)[0]
+    tip = end.mapToScene(end.points[-1])
+    drag(window.view, tip.x() + 5, tip.y() - 4, 400, 300)
+
+    started = markups(window)[1].scenePos()
+    assert started.x() == pytest.approx(tip.x(), abs=0.5)
+    assert started.y() == pytest.approx(tip.y(), abs=0.5)
+
+
+def test_the_snap_menu_entry_is_there_and_on(window):
+    assert window.act_snap_items.isChecked()
+    window.act_snap_items.setChecked(False)
+    assert not window.document.settings.snap_to_items
+    window.act_snap_items.setChecked(True)
+    assert window.document.settings.snap_to_items
