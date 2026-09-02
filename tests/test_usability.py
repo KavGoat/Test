@@ -378,11 +378,10 @@ def test_the_rectangle_prompt_only_appears_on_a_scaled_page(window, monkeypatch)
     assert asked == [True]
 
 
-def test_a_rectangle_shows_its_paper_size_without_a_scale(window):
+def test_a_rectangle_knows_its_paper_size_without_a_scale(window):
     window.select_tool("rect")
     drag(window.view, 100, 100, 100 + 4 * MM_TO_PT * 10, 100 + 2 * MM_TO_PT * 10)
     rect = only(window, RectItem)[0]
-    assert rect.show_size
     assert rect.width_value.to("mm").magnitude == pytest.approx(40, abs=0.5)
     assert rect.height_value.to("mm").magnitude == pytest.approx(20, abs=0.5)
     assert "mm × " in rect.size_text
@@ -1985,3 +1984,185 @@ def test_a_named_table_shows_up_as_something_the_document_knows(window):
     table = _capacity_table(window)
     assert "bolts" in table.declared_names()
     assert "bolts" in window.document.workspace.table_names()
+
+
+# ---------------------------------------------------------------------------
+# A calculation line and a calculation block are different things
+# ---------------------------------------------------------------------------
+
+def test_the_two_calculation_tools_are_offered_separately(window):
+    from calcforge.ui.tools import TOOL_MAP
+    assert TOOL_MAP["math"].label == "Calculation line"
+    assert TOOL_MAP["mathblock"].label == "Calculation block"
+    assert "math" in window.tool_actions and "mathblock" in window.tool_actions
+
+
+def test_a_block_keeps_its_working_to_itself(window):
+    window.select_tool("mathblock")
+    drag(window.view, 80, 80, 400, 200)
+    block = window.view.editing_item()
+    assert block.block and block.local_scope
+    block._editor.setPlainText("t := 5 mm\nA := t*t =")
+    window.view.end_item_edit()
+    window.recalculate()
+    assert block.scoped
+    assert window.document.workspace.get("t") is None
+
+
+def test_a_line_defines_for_the_whole_document(window):
+    window.select_tool("math")
+    drag(window.view, 80, 300, 400, 330)
+    line = window.view.editing_item()
+    assert not line.block and not line.local_scope
+    line._editor.setPlainText("t := 5 mm")
+    window.view.end_item_edit()
+    window.recalculate()
+    assert window.document.workspace.get("t").to("mm").magnitude == pytest.approx(5)
+
+
+def test_enter_in_a_block_makes_another_line_not_another_region(window):
+    window.select_tool("mathblock")
+    drag(window.view, 80, 80, 400, 200)
+    block = window.view.editing_item()
+    type_text(window.view, "a := 1")
+    press_key(window.view, Qt.Key_Return)
+    type_text(window.view, "b := 2")
+    assert window.view.editing_item() is block
+    window.view.end_item_edit()
+    assert len([l for l in block.source.split("\n") if l.strip()]) == 2
+    assert len([i for i in markups(window) if isinstance(i, MathItem)]) == 1
+
+
+def test_enter_in_a_line_opens_the_next_line_below(window):
+    window.view._last_scene_pos = QPointF(100, 100)
+    press_key(window.view, Qt.Key_unknown, "/")
+    first = window.view.editing_item()
+    type_text(window.view, "a := 1")
+    press_key(window.view, Qt.Key_Return)
+    assert window.view.editing_item() is not first
+    window.view.end_item_edit()
+
+
+def test_a_line_can_be_turned_into_a_block_and_back(window):
+    window.select_tool("math")
+    drag(window.view, 80, 300, 400, 330)
+    line = window.view.editing_item()
+    line._editor.setPlainText("a := 1")
+    window.view.end_item_edit()
+    line.setSelected(True)
+
+    window.set_block_kind(True)
+    assert line.block
+    window.set_block_kind(False)
+    assert not line.block and not line.local_scope
+
+
+def test_merging_lines_makes_a_block(window):
+    window.select_tool("math")
+    drag(window.view, 80, 300, 400, 330)
+    window.view.editing_item()._editor.setPlainText("a := 1")
+    window.view.end_item_edit()
+    window.select_tool("math")
+    drag(window.view, 80, 380, 400, 410)
+    window.view.editing_item()._editor.setPlainText("b := 2")
+    window.view.end_item_edit()
+
+    for item in markups(window):
+        item.setSelected(True)
+    window.merge_calculations()
+    merged = [i for i in markups(window) if isinstance(i, MathItem)]
+    assert len(merged) == 1 and merged[0].block
+
+
+def test_splitting_a_block_gives_lines(window):
+    window.select_tool("mathblock")
+    drag(window.view, 80, 80, 400, 200)
+    block = window.view.editing_item()
+    block._editor.setPlainText("a := 1\nb := 2")
+    window.view.end_item_edit()
+    block.setSelected(True)
+    window.split_calculation()
+    pieces = [i for i in markups(window) if isinstance(i, MathItem)]
+    assert len(pieces) == 2
+    assert not any(piece.block for piece in pieces)
+
+
+def test_an_older_document_keeps_the_behaviour_it_was_written_with(window):
+    from calcforge.items.base import build_item
+
+    item = build_item({"type": "math", "source": "a := 1\nb := 2", "x": 0, "y": 0})
+    assert item.block                       # several lines: it was a block
+    single = build_item({"type": "math", "source": "a := 1", "x": 0, "y": 0})
+    assert not single.block
+
+
+def test_resizing_a_callout_leaves_the_arrow_where_it_points(window):
+    """The arrow points at something on the drawing; resizing must not move it."""
+    call = _callout(window)
+    window.view.end_item_edit()
+    window.select_tool("select")
+    call.setSelected(True)
+    aimed_at = call.mapToScene(call.leader[0])
+
+    for handle in ("topLeft", "bottomRight"):
+        corner = call.mapToScene(getattr(call.local_rect(), handle)())
+        drag(window.view, corner.x(), corner.y(),
+             corner.x() + (-40 if handle == "topLeft" else 50),
+             corner.y() + (-30 if handle == "topLeft" else 20))
+        moved = call.mapToScene(call.leader[0])
+        assert moved.x() == pytest.approx(aimed_at.x(), abs=0.5), handle
+        assert moved.y() == pytest.approx(aimed_at.y(), abs=0.5), handle
+
+
+def test_a_callout_is_drawn_arrow_first_then_like_a_rectangle(window):
+    window.select_tool("callout")
+    click(window.view, 200, 300)
+    assert window.view._pending_anchor is not None      # the arrow head is set
+    click(window.view, 300, 200)                        # first corner
+    assert window.view._mode == "draw_click"
+    hover(window.view, 460, 260)
+    click(window.view, 460, 260)                        # second corner
+
+    call = markups(window)[0]
+    assert isinstance(call, CalloutItem)
+    assert call.local_rect().width() == pytest.approx(160, abs=2)
+    assert call.local_rect().height() == pytest.approx(60, abs=2)
+    tip = call.mapToScene(call.leader[0])
+    assert (tip.x(), tip.y()) == pytest.approx((200, 300), abs=1)
+
+
+# ---------------------------------------------------------------------------
+# A rectangle is a rectangle, not a dimension
+# ---------------------------------------------------------------------------
+
+def test_a_rectangle_does_not_write_its_size_on_the_drawing(window):
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 260, 180)
+    box = markups(window)[0]
+    assert not box.show_size
+    box.refresh(page=window.current_page())
+    assert box.size_text                       # it knows its size
+    assert box.value_text == box.size_text     # and the takeoff list gets it
+
+
+def test_the_properties_panel_reports_the_size(window):
+    from PySide6.QtWidgets import QLabel
+
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 260, 180)
+    box = markups(window)[0]
+    window.select_tool("select")
+    box.setSelected(True)
+    window.refresh_selection()
+
+    labels = [w.text() for w in window.properties_panel.findChildren(QLabel)]
+    assert any("mm" in text for text in labels)
+
+
+def test_the_size_can_still_be_written_on_it_if_you_want(window):
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 260, 180)
+    box = markups(window)[0]
+    window.set_size_visible(box, True)
+    assert box.show_size
+    assert box.value_text

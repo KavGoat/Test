@@ -342,7 +342,15 @@ class CalloutItem(_TextBase):
                 self.leader[index] = QPointF(local_pos)
                 self.geometryChanged.emit()
             return
+        # Resizing the box must not drag the arrow along with it: the arrow
+        # points at something on the page, and stays pointing at it until it
+        # is moved on purpose. Its points are held in the item's own
+        # coordinates, so they are pinned in scene terms across the resize.
+        pinned = [self.mapToScene(point) for point in self.leader]
         super().move_handle(key, local_pos, keep_ratio)
+        if pinned:
+            self.prepareGeometryChange()
+            self.leader = [self.mapFromScene(point) for point in pinned]
 
     def paint_content(self, painter: QPainter) -> None:
         painter.setRenderHint(QPainter.Antialiasing, True)

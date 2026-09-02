@@ -94,8 +94,14 @@ TOOLS: list[Tool] = [
     Tool("image", "Image", "image", DRAG, "Annotate", "",
          "Place an image from disk", factory=lambda: ImageItem()),
 
-    Tool("math", "Calculation", "math", DRAG, "Calculate", "",
-         "Unit-aware calculation block", factory=lambda: MathItem()),
+    Tool("math", "Calculation line", "math", DRAG, "Calculate", "",
+         "One line of unit-aware maths, defining for the whole document — "
+         "Enter opens the next line below it",
+         factory=lambda: MathItem()),
+    Tool("mathblock", "Calculation block", "math", DRAG, "Calculate", "",
+         "A block of working kept to itself: as many lines as you like, and "
+         "its own names stay inside it",
+         factory=lambda: MathItem(block=True)),
     Tool("table", "Table", "table", DRAG, "Calculate", "B",
          "Spreadsheet that can use your variables", factory=lambda: TableItem()),
     Tool("plot", "Plot", "plot", DRAG, "Calculate", "G",

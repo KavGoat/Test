@@ -56,7 +56,10 @@ class RectItem(MarkupItem):
         self.cloud_radius = 9.0
         # A rectangle reports its real size when the page carries a scale, so it
         # can be used to set out an area rather than only to draw a box.
-        self.show_size = True
+        # Off: a rectangle drawn on a drawing is a rectangle, not a dimension.
+        # Its size is in the properties panel and in the markups list, and the
+        # right-click menu writes it on the shape for anyone who wants it there.
+        self.show_size = False
         self.size_text = ""
         self.width_value = None
         self.height_value = None
@@ -168,8 +171,13 @@ class RectItem(MarkupItem):
 
     @property
     def value_text(self) -> str:
-        """What the takeoff list reports for this shape — its size."""
-        return self.size_text if self.show_size else ""
+        """What the takeoff list reports for this shape — its size.
+
+        Reported whether or not the size is written on the shape: the list is
+        where a takeoff is read from, and a shape that says nothing on the
+        drawing still has a size.
+        """
+        return self.size_text
 
     def summary(self) -> str:
         return self.comment or self.size_text or self.label
@@ -233,7 +241,7 @@ class RectItem(MarkupItem):
         values = data.get("rect", [0, 0, 100, 60])
         self._rect = QRectF(*values)
         self.cloud_radius = float(data.get("cloud_radius", 9.0))
-        self.show_size = bool(data.get("show_size", True))
+        self.show_size = bool(data.get("show_size", False))
         self.load_base(data)
 
 

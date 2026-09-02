@@ -1377,7 +1377,7 @@ def test_a_block_defines_for_the_document_unless_told_otherwise(window):
 
 
 def test_the_context_menu_toggles_a_block_between_the_two(window):
-    window.select_tool("math")
+    window.select_tool("mathblock")
     drag(window.view, 80, 100, 300, 180)
     block = editing_item(window)
     block._editor.setPlainText("x = 2 m\ny = x*3")
@@ -1387,15 +1387,15 @@ def test_the_context_menu_toggles_a_block_between_the_two(window):
 
     menu = window.build_context_menu(block, QPointF(120, 120))
     action = [a for a in menu.actions() if a.text() == "Self-contained block"][0]
-    assert action.isCheckable() and not action.isChecked()
+    assert action.isCheckable() and action.isChecked()   # a block starts closed
 
-    action.setChecked(True)                      # emits toggled
-    assert block.local_scope
-    assert window.document.workspace.get("y") is None
-
-    action.setChecked(False)
+    action.setChecked(False)                     # emits toggled
     assert not block.local_scope
     assert window.document.workspace.get("y").to("m").magnitude == pytest.approx(6)
+
+    action.setChecked(True)
+    assert block.local_scope
+    assert window.document.workspace.get("y") is None
 
 
 def test_a_block_keeps_its_values_to_itself(window):
@@ -1404,13 +1404,12 @@ def test_a_block_keeps_its_values_to_itself(window):
     editing_item(window)._editor.setPlainText("q_floor = 5 kPa")
     window.view.end_item_edit()
 
-    window.select_tool("math")
+    window.select_tool("mathblock")
     drag(window.view, 80, 200, 300, 300)
     block = editing_item(window)
     block._editor.setPlainText("b_trib = 3 m\nw = q_floor*b_trib\nR = w*6 m/2")
     window.view.end_item_edit()
     block.setSelected(True)
-    window.set_block_scope(True)
 
     workspace = window.document.workspace
     assert workspace.get("q_floor").to("kPa").magnitude == pytest.approx(5)
@@ -1425,26 +1424,24 @@ def test_a_block_can_read_globals_defined_above_it(window):
     editing_item(window)._editor.setPlainText("L = 6 m")
     window.view.end_item_edit()
 
-    window.select_tool("math")
+    window.select_tool("mathblock")
     drag(window.view, 80, 200, 300, 280)
     block = editing_item(window)
     block._editor.setPlainText("w = 12 kN/m\nM = w*L^2/8")
     window.view.end_item_edit()
     block.setSelected(True)
-    window.set_block_scope(True)
 
     assert [s.error for s in block.statements if s.error] == []
     assert block.local_values["M"].value.to("kN*m").magnitude == pytest.approx(54)
 
 
 def test_a_later_line_cannot_see_inside_a_block(window):
-    window.select_tool("math")
+    window.select_tool("mathblock")
     drag(window.view, 80, 100, 300, 180)
     first = editing_item(window)
     first._editor.setPlainText("a = 2 m\nb = 3 m")
     window.view.end_item_edit()
     first.setSelected(True)
-    window.set_block_scope(True)
 
     window.select_tool("math")
     drag(window.view, 80, 400, 300, 430)
@@ -1467,13 +1464,12 @@ def test_a_single_line_region_always_defines_globally(window):
 
 
 def test_a_block_can_be_opened_up_to_the_document(window):
-    window.select_tool("math")
+    window.select_tool("mathblock")
     drag(window.view, 80, 100, 300, 180)
     block = editing_item(window)
     block._editor.setPlainText("x = 2 m\ny = x*3")
     window.view.end_item_edit()
     block.setSelected(True)
-    window.set_block_scope(True)
     assert window.document.workspace.get("y") is None
 
     window.set_block_scope(False)
@@ -1481,13 +1477,12 @@ def test_a_block_can_be_opened_up_to_the_document(window):
 
 
 def test_block_locals_are_listed_for_reference(window):
-    window.select_tool("math")
+    window.select_tool("mathblock")
     drag(window.view, 80, 100, 300, 180)
     block = editing_item(window)
     block._editor.setPlainText("x = 2 m\ny = x*3")
     window.view.end_item_edit()
     block.setSelected(True)
-    window.set_block_scope(True)
     rows = [window.variables_panel.table.item(r, 0).text()
             for r in range(window.variables_panel.table.rowCount())]
     sources = [window.variables_panel.table.item(r, 2).text()

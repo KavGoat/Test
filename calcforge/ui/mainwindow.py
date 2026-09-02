@@ -2058,7 +2058,10 @@ class MainWindow(QMainWindow):
             return
         blocks = reading_order(blocks)
         first = blocks[0]
-        merged = MathItem("\n".join(block.source.rstrip() for block in blocks))
+        # Several lines in one region is a block, so Enter inside it makes
+        # another line rather than another region.
+        merged = MathItem("\n".join(block.source.rstrip() for block in blocks),
+                          block=True)
         merged.style = first.style.copy()
         merged.digits = first.digits
         merged.number_format = first.number_format
@@ -2351,12 +2354,19 @@ class MainWindow(QMainWindow):
                                    lambda r=row: self.view.open_unit_editor(item, r))
                 if not item.single_line:
                     menu.addAction(self.act_split_lines)
+                turn = menu.addAction("Keep as one block")
+                turn.setCheckable(True)
+                turn.setChecked(item.block)
+                turn.setToolTip("A block holds several lines and Enter makes a "
+                                "new one.\nA line is one line, and Enter opens "
+                                "the next line below it.")
+                turn.toggled.connect(self.set_block_kind)
                 if len([i for i in self.selected_items() if isinstance(i, MathItem)]) > 1:
                     menu.addAction(self.act_merge_lines)
                 scope = menu.addAction("Self-contained block")
                 scope.setCheckable(True)
                 scope.setChecked(item.local_scope)
-                scope.setEnabled(not item.single_line)
+                scope.setEnabled(item.block)
                 scope.setToolTip(
                     "Keep this block's own names inside it. It can still read\n"
                     "anything the document defines above it.")
@@ -2413,10 +2423,25 @@ class MainWindow(QMainWindow):
             menu.addAction(self.act_select_all)
         return menu
 
+    def set_block_kind(self, on: bool) -> None:
+        """Turn a calculation line into a block, or a block back into a line."""
+        items = [i for i in self.selected_items() if isinstance(i, MathItem)]
+        if not items:
+            return
+        self.view.begin_snapshot()
+        for item in items:
+            item.block = bool(on)
+            if not on:
+                item.local_scope = False
+            item.local_values.clear()
+        self.recalculate()
+        self.view.commit_snapshot("Calculation kind")
+        self.refresh_selection()
+
     def set_block_scope(self, on: bool) -> None:
         """Self-contain the selected calculations, or open them up again."""
         blocks = [i for i in self.selected_items()
-                  if isinstance(i, MathItem) and not i.single_line]
+                  if isinstance(i, MathItem) and i.block]
         if not blocks:
             return
         self.view.begin_snapshot()

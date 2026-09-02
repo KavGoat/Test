@@ -715,6 +715,8 @@ class PropertiesPanel(QScrollArea):
                 self._add_count(first)
             elif isinstance(first, StampItem):
                 self._add_stamp(first)
+            elif isinstance(first, RectItem) and first.kind in ("rect", "ellipse"):
+                self._add_size(first)
             elif isinstance(first, RectItem) and first.kind == "cloud":
                 self._add_cloud(first)
             elif isinstance(first, PolyItem) and first.kind == "cloud":
@@ -876,6 +878,35 @@ class PropertiesPanel(QScrollArea):
             lambda value: self._apply(lambda i: setattr(i.style, "arrow_end", value), "Arrow"))
         form.addRow("End", end)
 
+    def _add_size(self, item) -> None:
+        """What a rectangle or an ellipse measures, and whether it says so.
+
+        The size lives here rather than being written across the drawing:
+        a shape drawn on a plan is a shape, and a page of shapes each carrying
+        their dimensions is unreadable. The tick puts it on the shape for
+        anyone who wants it there.
+        """
+        form = self._group("Size")
+        item.refresh(page=self.window.current_page())
+        value = QLabel(item.size_text or "—")
+        font = value.font()
+        font.setBold(True)
+        value.setFont(font)
+        form.addRow("Measures", value)
+
+        exact = QPushButton("Set exact size…")
+        exact.clicked.connect(lambda: self.window.set_rectangle_size(item))
+        form.addRow("", exact)
+
+        show = QCheckBox("Write the size on the shape")
+        show.setChecked(item.show_size)
+        show.toggled.connect(
+            lambda on: self._apply(
+                lambda i: (setattr(i, "show_size", on),
+                           i.refresh(page=self.window.current_page())),
+                "Show size"))
+        form.addRow("", show)
+
     def _add_cloud(self, first) -> None:
         form = self._group("Cloud")
         radius = QDoubleSpinBox()
@@ -920,14 +951,15 @@ class PropertiesPanel(QScrollArea):
             "Off by default: a calculation defines for the whole document.\n"
             "Turn it on and this block keeps its own names to itself, so its\n"
             "working values cannot collide with the rest of the document. It\n"
-            "can still read anything defined above it. A single-line region\n"
+            "can still read anything defined above it. A calculation line\n"
             "always defines for the whole document.")
-        scope.setEnabled(not item.single_line)
+        scope.setEnabled(item.block)
         scope.toggled.connect(
             lambda on: self._apply(lambda i: setattr(i, "local_scope", on), "Block scope"))
         form.addRow("", scope)
-        if item.single_line:
-            note = QLabel("A one-line region always defines for the whole document.")
+        if not item.block:
+            note = QLabel("A calculation line always defines for the whole document. "
+                          "Draw a calculation block for working you want kept to itself.")
             note.setWordWrap(True)
             note.setStyleSheet("color:#6b7280;")
             form.addRow("", note)

@@ -44,7 +44,7 @@ class _MathEditor(QGraphicsTextItem):
             if event.modifiers() & Qt.ShiftModifier:
                 super().keyPressEvent(event)
                 return
-            if self.owner.single_line:
+            if self.owner.wants_next_region:
                 self.owner.enterPressed.emit()
                 event.accept()
                 return
@@ -77,9 +77,14 @@ class MathItem(MarkupItem):
 
     enterPressed = Signal()
 
-    def __init__(self, source: str = DEFAULT_SOURCE):
+    def __init__(self, source: str = DEFAULT_SOURCE, block: bool = False):
         super().__init__()
         self.source = source
+        # Two kinds of calculation, chosen by which tool drew it. A line is one
+        # line that defines for the whole document; a block holds as many lines
+        # as you like and keeps its working to itself. Which it is decides what
+        # Enter does while typing, and whether its names escape.
+        self.block = bool(block)
         self.statements: list[engine.Statement] = []
         self.rows: list[_MathRow] = []
         self.digits = 4
@@ -96,7 +101,7 @@ class MathItem(MarkupItem):
         # what a calculation sheet reads like.  Turning this on makes a block
         # self-contained: it still reads what is defined above it, but its own
         # names stay inside it.
-        self.local_scope = False
+        self.local_scope = bool(block)
         self.local_values: dict[str, Any] = {}
         self.auto_width = True
         self._width = 260.0
@@ -196,7 +201,16 @@ class MathItem(MarkupItem):
     @property
     def scoped(self) -> bool:
         """True when this region's definitions stay inside it."""
-        return self.local_scope and not self.single_line
+        return self.local_scope and self.block
+
+    @property
+    def wants_next_region(self) -> bool:
+        """Enter opens the next line below, rather than growing this one.
+
+        True for a calculation line, which is one line by definition. In a
+        block Enter does what Enter does in any text box: a new line.
+        """
+        return not self.block
 
     def refresh(self, workspace=None, page=None) -> None:
         if workspace is None:
@@ -528,6 +542,7 @@ class MathItem(MarkupItem):
             "show_definition_results": self.show_definition_results,
             "align_results": self.align_results,
             "show_comments": self.show_comments,
+            "block": self.block,
             "local_scope": self.local_scope,
             "auto_width": self.auto_width,
             "width": self._width,
@@ -544,6 +559,8 @@ class MathItem(MarkupItem):
         # every line, so they keep doing that when reopened.
         self.show_definition_results = bool(data.get("show_definition_results", True))
         self.show_comments = bool(data.get("show_comments", True))
+        # Before there were two kinds, a region with several lines was a block.
+        self.block = bool(data.get("block", not self.single_line))
         self.local_scope = bool(data.get("local_scope", False))
         self.auto_width = bool(data.get("auto_width", True))
         self.align_results = bool(data.get("align_results", False))

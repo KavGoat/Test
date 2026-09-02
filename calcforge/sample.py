@@ -145,11 +145,11 @@ def build_sample() -> Document:
     note.style.text_color = "#8a3a06"
     note.style.font_size = 8.0
 
-    reaction = MathItem(REACTION_CALC)
+    reaction = MathItem(REACTION_CALC, block=True)
     reaction.setPos(QPointF(56, 268))
     reaction.label = "Beam reaction from the table"
     reaction.style.font_size = 9.0
-    reaction.local_scope = True      # a self-contained block: reads q_floor, keeps its own
+    # a self-contained block: reads q_floor, keeps its own working inside
 
     hint = _heading("The block below is self-contained: it reads q_floor from the "
                     "table but keeps its own working values.", QPointF(56, 232), 430,
@@ -163,11 +163,11 @@ def build_sample() -> Document:
     document.pages.append(third)
 
     footing_heading = _heading("Pad footing check and site sketch", QPointF(56, 46), 430)
-    footing = MathItem(FOUNDATION_CALC)
+    footing = MathItem(FOUNDATION_CALC, block=True)
     footing.setPos(QPointF(56, 84))
     footing.label = "Pad footing"
     footing.style.font_size = 9.0
-    footing.local_scope = True       # self-contained: nothing here leaks to the document
+    # self-contained: nothing worked out here leaks into the document
 
     column = RectItem("rect", QRectF(0, 0, COLUMN_PT, COLUMN_PT))
     column.setPos(QPointF(96 + (PAD_PT - COLUMN_PT) / 2, 486 + (PAD_PT - COLUMN_PT) / 2))

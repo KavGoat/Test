@@ -122,8 +122,7 @@ def test_a_block_can_be_made_self_contained(qapp):
     workspace.begin_pass()
     MathItem("L = 6 m").refresh(workspace)          # a one-line region defines globally
 
-    block = MathItem("w = 12 kN/m\nM = w*L^2/8")
-    block.local_scope = True
+    block = MathItem("w = 12 kN/m\nM = w*L^2/8", block=True)
     block.refresh(workspace)
     assert block.scoped
     assert workspace.get("L").to("m").magnitude == pytest.approx(6)   # read from above
@@ -132,11 +131,11 @@ def test_a_block_can_be_made_self_contained(qapp):
 
 
 def test_block_scope_survives_a_round_trip(qapp):
-    item = MathItem("a = 1 m\nb = 2 m")
-    item.local_scope = True
+    item = MathItem("a = 1 m\nb = 2 m", block=True)
     clone = build_item(item.serialize())
-    assert clone.local_scope is True
-    assert build_item(MathItem("a = 1 m").serialize()).local_scope is False
+    assert clone.local_scope is True and clone.block is True
+    line = build_item(MathItem("a = 1 m").serialize())
+    assert line.local_scope is False and line.block is False
 
 
 def test_math_item_marks_unit_literals(qapp):
