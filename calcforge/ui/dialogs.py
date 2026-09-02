@@ -6,7 +6,8 @@ from typing import Optional
 
 from PySide6.QtCore import QKeyCombination, Qt, Signal
 from PySide6.QtGui import QFont, QKeySequence, QPixmap
-from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDialog,
+from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox,
+                               QCompleter, QDialog,
                                QDialogButtonBox, QDoubleSpinBox, QFileDialog,
                                QFormLayout, QGroupBox, QHBoxLayout, QHeaderView,
                                QLabel, QLineEdit, QMessageBox, QPushButton,
@@ -319,6 +320,133 @@ class TableSizeDialog(QDialog):
 
     def values(self) -> tuple[int, int, bool]:
         return self.rows.value(), self.cols.value(), self.header.isChecked()
+
+
+class PlotDialog(QDialog):
+    """What a graph plots: its curves, the variable and the range.
+
+    A plot with nothing in it is a blank box, and the way to fill it in used
+    to be a text field in a panel that had to be found first. This asks
+    outright, and offers the names the document already defines.
+    """
+
+    def __init__(self, item, names=(), parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Plot")
+        self.item = item
+        self.names = sorted(names)
+        self.resize(520, 520)
+        layout = QVBoxLayout(self)
+
+        note = QLabel("One curve per row. Write an expression in the variable "
+                      "below — <b>w*x*(L-x)/2</b> — or the name of a function "
+                      "you have defined.")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
+        self.curves = QTableWidget(0, 2)
+        self.curves.setHorizontalHeaderLabels(["Expression", "Legend label"])
+        self.curves.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.curves.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.curves.verticalHeader().setVisible(False)
+        layout.addWidget(self.curves, 1)
+        for series in item.series:
+            self._add_row(series.expression, series.label)
+        if not item.series:
+            self._add_row("", "")
+
+        buttons = QHBoxLayout()
+        add = QPushButton("Add curve")
+        add.clicked.connect(lambda: self._add_row("", ""))
+        remove = QPushButton("Remove curve")
+        remove.clicked.connect(self._remove_row)
+        buttons.addWidget(add)
+        buttons.addWidget(remove)
+        buttons.addStretch(1)
+        layout.addLayout(buttons)
+
+        form = QFormLayout()
+        self.variable = QLineEdit(item.variable)
+        self.variable.setPlaceholderText("x")
+        form.addRow("Plot against", self.variable)
+        self.x_from = QLineEdit(item.x_from)
+        self.x_from.setPlaceholderText("0 m")
+        form.addRow("From", self.x_from)
+        self.x_to = QLineEdit(item.x_to)
+        self.x_to.setPlaceholderText("L")
+        form.addRow("To", self.x_to)
+        for edit in (self.x_from, self.x_to):
+            edit.setCompleter(self._completer(edit))
+        self.title = QLineEdit(item.title)
+        form.addRow("Title", self.title)
+        self.x_label = QLineEdit(item.x_label)
+        form.addRow("X label", self.x_label)
+        self.y_label = QLineEdit(item.y_label)
+        form.addRow("Y label", self.y_label)
+        self.x_unit = UnitCombo(item.x_unit)
+        form.addRow("X unit", self.x_unit)
+        self.y_unit = UnitCombo(item.y_unit)
+        form.addRow("Y unit", self.y_unit)
+        layout.addLayout(form)
+
+        toggles = QHBoxLayout()
+        self.grid = QCheckBox("Grid")
+        self.grid.setChecked(item.show_grid)
+        self.legend = QCheckBox("Legend")
+        self.legend.setChecked(item.show_legend)
+        self.markers = QCheckBox("Markers")
+        self.markers.setChecked(item.show_markers)
+        for box in (self.grid, self.legend, self.markers):
+            toggles.addWidget(box)
+        toggles.addStretch(1)
+        layout.addLayout(toggles)
+        layout.addWidget(_buttons(self))
+
+    def _completer(self, parent):
+        completer = QCompleter(self.names, parent)
+        completer.setCaseSensitivity(Qt.CaseSensitive)
+        completer.setFilterMode(Qt.MatchContains)
+        return completer
+
+    def _add_row(self, expression: str, label: str) -> None:
+        row = self.curves.rowCount()
+        self.curves.insertRow(row)
+        edit = QLineEdit(expression)
+        edit.setPlaceholderText("w*x*(L-x)/2")
+        edit.setCompleter(self._completer(edit))
+        self.curves.setCellWidget(row, 0, edit)
+        self.curves.setCellWidget(row, 1, QLineEdit(label))
+        self.curves.setCurrentCell(row, 0)
+        edit.setFocus()
+
+    def _remove_row(self) -> None:
+        row = self.curves.currentRow()
+        if row >= 0 and self.curves.rowCount() > 1:
+            self.curves.removeRow(row)
+
+    def apply(self) -> None:
+        from ..items.plotitem import Series
+
+        series = []
+        for row in range(self.curves.rowCount()):
+            expression = self.curves.cellWidget(row, 0).text().strip()
+            if not expression:
+                continue
+            series.append(Series(expression,
+                                 self.curves.cellWidget(row, 1).text().strip()))
+        item = self.item
+        item.series = series or [Series()]
+        item.variable = self.variable.text().strip() or "x"
+        item.x_from = self.x_from.text().strip() or "0"
+        item.x_to = self.x_to.text().strip() or "10"
+        item.title = self.title.text()
+        item.x_label = self.x_label.text()
+        item.y_label = self.y_label.text()
+        item.x_unit = self.x_unit.currentText().strip()
+        item.y_unit = self.y_unit.currentText().strip()
+        item.show_grid = self.grid.isChecked()
+        item.show_legend = self.legend.isChecked()
+        item.show_markers = self.markers.isChecked()
 
 
 class DocumentPropertiesDialog(QDialog):

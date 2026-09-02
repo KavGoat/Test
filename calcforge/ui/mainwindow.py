@@ -29,6 +29,7 @@ from ..items.base import MarkupItem, Style, build_item
 from ..items.mathitem import MathItem
 from ..items.measure import MeasureItem
 from ..items.media import ImageItem
+from ..items.plotitem import PlotItem
 from ..items.shapes import PolyItem, RectItem
 from ..items.tableitem import TableItem
 from ..items.text import NoteItem, StampItem, _TextBase
@@ -1511,6 +1512,23 @@ class MainWindow(QMainWindow):
         table.sheet.header_row = header
         table.refresh(self.document.workspace, self.current_page())
 
+    def edit_plot(self, item, fresh: bool = False) -> None:
+        """Ask a graph what it plots."""
+        if fresh and not self.interactive_prompts:
+            return
+        workspace = self.document.workspace
+        names = set(workspace.variables) | set(workspace.functions)
+        dialog = dialogs.PlotDialog(item, names, self)
+        if dialog.exec() != dialogs.QDialog.Accepted:
+            return
+        if not fresh:
+            self.view.begin_snapshot(self.view.involved_frames(item))
+        dialog.apply()
+        item.refresh(workspace, self.current_page())
+        if not fresh:
+            self.view.commit_snapshot("Edit plot")
+        self.refresh_selection()
+
     def prompt_dimension_text(self, item) -> None:
         """A dimension carries whatever text the author wants."""
         if not self.interactive_prompts:
@@ -2315,6 +2333,8 @@ class MainWindow(QMainWindow):
                     "Keep this block's own names inside it. It can still read\n"
                     "anything the document defines above it.")
                 scope.toggled.connect(self.set_block_scope)
+            if isinstance(item, PlotItem):
+                menu.addAction("Edit plot…", lambda: self.edit_plot(item))
             if isinstance(item, TableItem):
                 menu.addAction("Edit table", lambda: self.view.activate_table(item))
                 menu.addAction("Named cells…", lambda: self.edit_named_cells(item))

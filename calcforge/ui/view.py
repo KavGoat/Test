@@ -915,6 +915,10 @@ class PageView(QGraphicsView):
             if row >= 0 and self.open_unit_editor(item, row):
                 event.accept()
                 return
+        if isinstance(item, PlotItem) and not item.locked:
+            self.window.edit_plot(item)
+            event.accept()
+            return
         if isinstance(item, (MathItem, _TextBase)) and not item.locked:
             self.begin_item_edit(item)
             self.place_caret(item, scene_pos)
@@ -1082,6 +1086,8 @@ class PageView(QGraphicsView):
             self.window.prompt_rectangle_size(draft)
         elif isinstance(draft, TableItem):
             self.window.prompt_table_size(draft)
+        elif isinstance(draft, PlotItem):
+            self.window.edit_plot(draft, fresh=True)
         elif isinstance(draft, MeasureItem):
             if draft.kind == DIMENSION:
                 self.window.prompt_dimension_text(draft)

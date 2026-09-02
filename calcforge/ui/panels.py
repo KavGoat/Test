@@ -96,10 +96,15 @@ class PagesPanel(QWidget):
         self._suppress = True
         self.list.clear()
         for index, page in enumerate(document.pages):
-            entry = QListWidgetItem(self._thumbnail(page), f"{index + 1}")
+            # The scale rides with the page number: what a measurement on that
+            # page means depends on it, and it belongs where the page is named.
+            scale = page.scale.label if page.scale.is_calibrated() else ""
+            caption = f"{index + 1}   {scale}" if scale else f"{index + 1}"
+            entry = QListWidgetItem(self._thumbnail(page), caption)
             entry.setTextAlignment(Qt.AlignHCenter)
             tip = page.label or page.source_note or f"Page {index + 1}"
-            entry.setToolTip(f"{tip}\n{page.setup.size_name} {page.setup.orientation}")
+            entry.setToolTip(f"{tip}\n{page.setup.size_name} {page.setup.orientation}"
+                             f"\nScale {page.scale.label}")
             self.list.addItem(entry)
         self.list.setCurrentRow(current)
         self._suppress = False

@@ -1594,14 +1594,18 @@ def test_a_calibration_line_is_not_left_on_the_page(window, monkeypatch):
     assert markups(window) == []
 
 
-def test_the_page_says_what_scale_it_is_at(window):
-    frame = window.document.pages[0].frame
-    before = frame.render_image(dpi=48.0, for_print=False)
-    window.current_page().scale = window.current_page().scale.__class__.from_ratio(50)
-    after = frame.render_image(dpi=48.0, for_print=False)
-    assert before != after
-    # and it is chrome, not something that prints
-    assert frame.render_image(dpi=48.0, for_print=True) != after
+def test_the_page_list_says_what_scale_each_page_is_at(window):
+    from calcforge.core.document import PageScale
+
+    window.load_sample()
+    window.document.pages[1].scale = PageScale.from_ratio(50)
+    window.pages_panel.rebuild(window.document, 0)
+
+    entries = [window.pages_panel.list.item(row).text()
+               for row in range(window.pages_panel.list.count())]
+    assert entries[0] == "1"                    # no scale, no clutter
+    assert "1:50" in entries[1]
+    assert "Scale 1:50" in window.pages_panel.list.item(1).toolTip()
 
 
 def test_the_page_menu_can_set_the_scale(window):
@@ -1810,3 +1814,85 @@ def test_an_empty_text_box_is_still_dropped(window):
     drag(window.view, 100, 600, 260, 640)
     window.view.end_item_edit()
     assert markups(window) == []
+
+
+# ---------------------------------------------------------------------------
+# What a graph plots
+# ---------------------------------------------------------------------------
+
+def _plot(window, monkeypatch, curves=(("sin(x)", "wave"),), accept=True):
+    from calcforge.ui import dialogs
+
+    def fake_exec(self):
+        self.curves.setRowCount(0)
+        for expression, label in curves:
+            self._add_row(expression, label)
+        self.x_from.setText("0")
+        self.x_to.setText("6")
+        return dialogs.QDialog.Accepted if accept else dialogs.QDialog.Rejected
+
+    monkeypatch.setattr(dialogs.PlotDialog, "exec", fake_exec)
+
+
+def test_a_new_graph_asks_what_it_plots(window, monkeypatch):
+    _plot(window, monkeypatch)
+    window.interactive_prompts = True
+    try:
+        window.select_tool("plot")
+        drag(window.view, 80, 80, 400, 280)
+    finally:
+        window.interactive_prompts = False
+    plot = markups(window)[0]
+    assert [s.expression for s in plot.series] == ["sin(x)"]
+    assert [s.label for s in plot.series] == ["wave"]
+    assert plot.x_to == "6"
+
+
+def test_double_clicking_a_graph_edits_what_it_plots(window, monkeypatch):
+    window.select_tool("plot")
+    drag(window.view, 80, 80, 400, 280)
+    plot = markups(window)[0]
+    window.select_tool("select")
+
+    _plot(window, monkeypatch, curves=(("x^2", ""), ("2*x", "line")))
+    centre = plot.mapToScene(plot.local_rect().center())
+    double_click(window.view, centre.x(), centre.y())
+    assert [s.expression for s in plot.series] == ["x^2", "2*x"]
+
+
+def test_editing_a_graph_can_be_undone(window, monkeypatch):
+    window.select_tool("plot")
+    drag(window.view, 80, 80, 400, 280)
+    plot = markups(window)[0]
+    before = [s.expression for s in plot.series]
+
+    _plot(window, monkeypatch, curves=(("x^3", ""),))
+    window.edit_plot(plot)
+    assert [s.expression for s in plot.series] == ["x^3"]
+    window.undo_stack.undo()
+    assert [s.expression for s in markups(window)[0].series] == before
+
+
+def test_the_graph_menu_offers_editing_it(window):
+    window.select_tool("plot")
+    drag(window.view, 80, 80, 400, 280)
+    plot = markups(window)[0]
+    labels = [a.text() for a in window.build_context_menu(plot, plot.pos()).actions()]
+    assert "Edit plot…" in labels
+
+
+def test_the_plot_dialog_offers_the_names_you_have_defined(window):
+    from calcforge.ui import dialogs
+
+    _calc(window, "L := 6 m\nw := 12 kN/m", at=(90, 500))
+    window.select_tool("plot")
+    drag(window.view, 80, 80, 400, 280)
+    plot = markups(window)[0]
+    workspace = window.document.workspace
+    dialog = dialogs.PlotDialog(plot, set(workspace.variables) | set(workspace.functions))
+    try:
+        model = dialog.curves.cellWidget(0, 0).completer().model()
+        words = [model.data(model.index(row, 0)) for row in range(model.rowCount())]
+        assert "L" in words and "w" in words
+    finally:
+        dialog.deleteLater()
