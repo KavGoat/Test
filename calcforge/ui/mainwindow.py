@@ -53,7 +53,7 @@ from . import toolsets
 from .tools import CATEGORIES, TOOL_MAP, TOOLS, tools_in
 from .view import SIZED_SHAPES
 from .view import PageView
-from .widgets import ColorButton
+from .widgets import ColorButton, keep_the_wheel_with_the_scroller
 
 APP_NAME = "CalcForge"
 ORGANISATION = "CalcForge"
@@ -73,6 +73,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
+        keep_the_wheel_with_the_scroller(QApplication.instance())
         self.document = Document()
         self.undo_stack = QUndoStack(self)
         self.undo_stack.setUndoLimit(200)
@@ -185,6 +186,22 @@ class MainWindow(QMainWindow):
         bar.addWidget(self.cell_ref)
         bar.addWidget(QLabel("as"))
         bar.addWidget(self.cell_name)
+        # Left, centre and right, next to the cell they act on — Excel keeps
+        # them a click away and so does this.
+        self.align_buttons = {}
+        for key, glyph, tip in (("left", "⇤", "Line the cells up on the left"),
+                                ("center", "↔", "Centre the cells"),
+                                ("right", "⇥", "Line the cells up on the right")):
+            button = QToolButton()
+            button.setText(glyph)
+            button.setToolTip(tip)
+            button.setAutoRaise(True)
+            button.setCheckable(True)
+            button.setFocusPolicy(Qt.NoFocus)
+            button.clicked.connect(
+                lambda _checked=False, k=key: self.align_cells(k))
+            self.align_buttons[key] = button
+            bar.addWidget(button)
         bar.addWidget(QLabel("ƒx"))
         bar.addWidget(self.formula_edit, 1)
         bar.addWidget(self.cell_value)
@@ -261,8 +278,11 @@ class MainWindow(QMainWindow):
         self._act("cut", "Cut", self.cut_selection, "Ctrl+X")
         self._act("copy", "Copy", self.copy_selection, "Ctrl+C")
         self._act("paste", "Paste", self.paste_items, "Ctrl+V")
-        self._act("paste_here", "Paste where I click…", self.paste_with_preview,
+        self._act("paste_in_place", "Paste in place", self.paste_in_place,
                   "Ctrl+Shift+V",
+                  tip="Put it back at the same place on this page, as Bluebeam does")
+        self._act("paste_here", "Paste where I click…", self.paste_with_preview,
+                  "Ctrl+Alt+V",
                   tip="Carry what was copied on the pointer and click to drop it")
         self._act("duplicate", "Duplicate", self.duplicate_selection, "Ctrl+D")
         self._act("delete", "Delete", self.delete_selection, "", "delete")
@@ -627,7 +647,8 @@ class MainWindow(QMainWindow):
 
         edit_menu = bar.addMenu("&Edit")
         for action in (self.act_undo, self.act_redo, None, self.act_cut, self.act_copy,
-                       self.act_paste, self.act_duplicate, self.act_delete, None,
+                       self.act_paste, self.act_paste_in_place, self.act_paste_here,
+                       self.act_duplicate, self.act_delete, None,
                        self.act_select_all, self.act_lock, self.act_array):
             edit_menu.addSeparator() if action is None else edit_menu.addAction(action)
         order_menu = edit_menu.addMenu("Order")
@@ -1563,7 +1584,11 @@ class MainWindow(QMainWindow):
         if binding is None:
             return False
         if binding.kind == INSERT:
-            self._insert_at(binding.payload, position)
+            # The maths key opens one that could still turn into words.
+            if binding.payload == "math":
+                self.start_typing("", position)
+            else:
+                self._insert_at(binding.payload, position)
             return True
         if binding.kind == TOOL:
             self.select_tool(binding.payload)
@@ -2147,6 +2172,57 @@ class MainWindow(QMainWindow):
             message += f" — {skipped} could not be read"
         self.status_hint.setText(message)
         return True
+
+    def clipboard_payload(self) -> list:
+        """What was copied, from here or from another window of this."""
+        payload = self._clipboard
+        text = QApplication.clipboard().text()
+        if not payload and text.strip().startswith("{"):
+            try:
+                decoded = json.loads(text)
+                payload = decoded.get(CLIPBOARD_TAG) or []
+                for key, encoded in (decoded.get("assets") or {}).items():
+                    if not self.document.asset(key):
+                        self.document.put_asset(key, base64.b64decode(encoded))
+            except (ValueError, TypeError):
+                payload = []
+        return payload
+
+    def paste_in_place(self) -> None:
+        """Put what was copied back exactly where it was, as Bluebeam does.
+
+        Ctrl+V lands under the pointer, which is what you want most of the
+        time. This is for the other times: the same detail on the next page,
+        or the same note in the same corner of every sheet, where "the same
+        place" is the whole point and hunting for the right pixel is not.
+        """
+        payload = self.clipboard_payload()
+        if not payload:
+            self.status_hint.setText("Nothing copied to paste")
+            return
+        self.view.begin_snapshot()
+        self.view.scene().clearSelection()
+        renamed: dict = {}
+        frame = self.view.typing_frame()
+        placed = 0
+        for entry in payload:
+            copy = dict(entry)
+            copy["uid"] = os.urandom(8).hex()
+            if copy.get("group"):
+                copy["group"] = renamed.setdefault(copy["group"], os.urandom(6).hex())
+            item = build_item(copy)
+            if item is None:
+                continue
+            if isinstance(item, ImageItem):
+                item.load_from_document(self.document)
+            frame.add_markup(item)
+            item.setSelected(True)
+            placed += 1
+        self.recalculate()
+        self.view.commit_snapshot("Paste in place")
+        self.refresh_selection()
+        self.status_hint.setText(
+            f"Pasted {placed} markup(s) in the same place on this page")
 
     def paste_with_preview(self) -> None:
         """Take the clipboard in hand and show it before it is put down.
@@ -3143,6 +3219,11 @@ class MainWindow(QMainWindow):
             self.cell_name.setText(table.name_for(row, col))
         if not self.formula_edit.hasFocus():
             self.formula_edit.setText(table.sheet.raw(row, col))
+        lined_up = self._cells_aligned(table)
+        for key, button in self.align_buttons.items():
+            button.blockSignals(True)
+            button.setChecked(key == lined_up)
+            button.blockSignals(False)
         cell = table.sheet.cells.get((row, col))
         if cell is not None and cell.error:
             self.cell_value.setText(cell.error)
@@ -3150,6 +3231,40 @@ class MainWindow(QMainWindow):
         else:
             self.cell_value.setText(table.sheet.display_text(row, col))
             self.cell_value.setStyleSheet("color:#3c5a86;")
+
+    def align_cells(self, how: str, table=None) -> None:
+        """Left, centre or right, for the cells picked out — as Excel does it.
+
+        "As they come" is the fourth: numbers to the right, words to the left,
+        which is what a spreadsheet does before anybody tells it otherwise.
+        """
+        table = table or self.view.active_table or self._only_selected_table()
+        if table is None or table.locked:
+            self.status_hint.setText("Pick the cells to line up first")
+            return
+        cells = (table.selected_cells() if table is self.view.active_table
+                 else [(row, col) for row in range(table.sheet.rows)
+                       for col in range(table.sheet.cols)])
+        self.view.begin_snapshot(self.view.involved_frames(table))
+        table.apply_format(cells, align=how)
+        table.touch()
+        self.view.commit_snapshot("Align cells")
+        self.refresh_selection()
+        named = {"auto": "as they come"}.get(how, how)
+        self.status_hint.setText(f"{len(cells)} cell(s) lined up {named}")
+
+    def _cells_aligned(self, table) -> str:
+        """How the picked-out cells are lined up now, or "" if they differ."""
+        if table is None:
+            return ""
+        cells = (table.selected_cells() if table is self.view.active_table
+                 else [(0, 0)])
+        found = {table.cell_format(row, col).align for row, col in cells}
+        return found.pop() if len(found) == 1 else ""
+
+    def _only_selected_table(self):
+        tables = [i for i in self.selected_items() if isinstance(i, TableItem)]
+        return tables[0] if len(tables) == 1 else None
 
     def commit_cell_name(self) -> None:
         """Publish (or stop publishing) the current cell under a typed name."""
@@ -3376,6 +3491,15 @@ class MainWindow(QMainWindow):
                 menu.addAction("Delete row", lambda: self._table_op(item, "del_row"))
                 menu.addAction("Delete column", lambda: self._table_op(item, "del_col"))
                 menu.addAction("Autofit columns", lambda: self._table_op(item, "autofit"))
+                menu.addSeparator()
+                align = menu.addMenu("Align cells")
+                for key, label in (("left", "Left"), ("center", "Centre"),
+                                   ("right", "Right"), ("auto", "As they come")):
+                    entry = align.addAction(label,
+                                            lambda _c=False, k=key:
+                                            self.align_cells(k, item))
+                    entry.setCheckable(True)
+                    entry.setChecked(self._cells_aligned(item) == key)
             if isinstance(item, RectItem) and item.kind in SIZED_SHAPES:
                 menu.addAction("Set exact size…",
                                lambda: self.set_rectangle_size(item))
@@ -3438,6 +3562,7 @@ class MainWindow(QMainWindow):
             menu.addAction("Properties", self.show_properties_panel)
         else:
             menu.addAction(self.act_paste)
+            menu.addAction(self.act_paste_in_place)
             menu.addAction(self.act_paste_here)
             menu.addSeparator()
             insert = menu.addMenu("Insert here")
@@ -3485,12 +3610,17 @@ class MainWindow(QMainWindow):
             else "This block defines for the whole document")
 
     def start_typing(self, first: str, scene_point: QPointF) -> None:
-        """Begin writing on bare paper, starting with the character just typed.
+        """Open a calculation on bare paper, ready to become words instead.
 
-        There is no mode to choose first. A calculation is what a calculation
-        sheet is mostly made of, so that is what a keystroke starts; the moment
-        a space is typed into something that has not become maths yet, it turns
-        into a text box instead.
+        The maths key opens a calculation, because that is what a calculation
+        sheet is mostly made of. But a line that has no operator, no bracket
+        and no equals sign in it yet could still turn out to be a sentence, and
+        the moment a space is typed into one that has not become maths, it
+        turns into a text box. Nothing needs to be chosen first, and nothing
+        needs to be undone if the guess was wrong.
+
+        Inserting a calculation from the menu is different: that is a
+        deliberate request for one, and a space in it is just a space.
         """
         self._insert_at("math", scene_point)
         item = self.view.editing_item()

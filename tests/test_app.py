@@ -833,14 +833,27 @@ def test_pipe_starts_a_table_and_at_starts_a_callout(window):
     assert isinstance(editing_item(window), CalloutItem)
 
 
-def test_an_unbound_key_starts_a_calculation(window):
-    """There is one way to start writing on a page: type."""
+def test_an_unbound_key_starts_nothing_at_all(window):
+    """Writing begins deliberately, so every other letter stays free.
+
+    A bare letter used to open a calculation and put itself in it, which meant
+    every letter on the keyboard was spoken for: a tool key not yet bound, or
+    a keystroke meant for something that had just lost the focus, started a
+    calculation instead of doing nothing.
+    """
+    _type_on_canvas(window, "5")
+    assert window.view.editing_item() is None
+    assert not markups(window)
+
+
+def test_the_maths_key_starts_a_calculation(window):
+    """"/" is what opens one, and it is on the shortcut list to be changed."""
     from calcforge.items.mathitem import MathItem
 
-    _type_on_canvas(window, "5")
+    _type_on_canvas(window, "/")
     item = window.view.editing_item()
     assert isinstance(item, MathItem)
-    assert item.source == "5"
+    item._editor.setPlainText("5")
     window.view.end_item_edit()
     assert editing_item(window) is None
 

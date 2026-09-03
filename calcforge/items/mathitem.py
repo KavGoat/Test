@@ -47,13 +47,13 @@ class _MathEditor(QGraphicsTextItem):
         return
 
     # Nothing in maths needs a space: a unit goes straight after its number,
-    # and an operator needs no room around it. So a space, typed into something
-    # that has not become maths yet, means this was never a calculation.
+    # and an operator needs no room around it. So spaces, typed into something
+    # that has not become maths yet, mean this was never a calculation.
     MATHS_MARKS = set("+-*/^()=:<>,")
 
     def keyPressEvent(self, event) -> None:
-        if (event.text() == " " and self.owner.looks_like_words()
-                and not (event.modifiers() & Qt.ShiftModifier)):
+        if (event.text() == " " and not (event.modifiers() & Qt.ShiftModifier)
+                and self.owner.looks_like_words(this_space_included=True)):
             self.owner.wantsWords.emit()
             event.accept()
             return
@@ -494,16 +494,51 @@ class MathItem(MarkupItem):
             self._typeset_wired = True
         self.update()
 
-    def looks_like_words(self) -> bool:
-        """True while what has been typed could still turn out to be prose.
+    def looks_like_words(self, this_space_included: bool = False) -> bool:
+        """Whether what has been typed reads as prose rather than as maths.
 
-        Once there is an operator, an equals sign or a bracket in it, it is a
-        calculation and a space is just a space.
+        Two things say it is not prose. An operator, an equals sign or a
+        bracket: that is a calculation, and a space in it is just a space. And
+        a *single* word so far: ``L`` waiting for its ``:=`` is the commonest
+        thing on a calculation sheet, and turning it into a text box the moment
+        the space after it is typed would be maddening. It takes a second word
+        with nothing mathematical between them before this is prose.
+
+        *this_space_included* counts the space now being typed as one of them,
+        which is what the editor needs when it has to decide before the space
+        has landed.
         """
         if not self.started_by_typing:
             return False
         text = self._editor.toPlainText() if self._editor is not None else self.source
-        return not any(mark in text for mark in _MathEditor.MATHS_MARKS)
+        if any(mark in text for mark in _MathEditor.MATHS_MARKS):
+            return False
+        words = text.split()
+        if this_space_included:
+            # A space now: prose if there is already a whole word behind it
+            # and a space somewhere before that.
+            return len(words) >= 2 and text[-1:] != " "
+        return len(words) >= 2
+
+    def reads_as_a_sentence(self) -> bool:
+        """A line finished with a space in it and nothing mathematical about it.
+
+        ``sigma`` waiting for its ``:=`` looks the same as the first word of a
+        sentence while it is being typed, so the space after it is let through.
+        Once the caret has left, a line that never grew an operator, a number
+        or a second line, and does have a space in it, was a sentence.
+        """
+        if not self.started_by_typing:
+            return False
+        text = (self._editor.toPlainText() if self._editor is not None
+                else self.source)
+        if not text.strip() or "\n" in text:
+            return False
+        if any(mark in text for mark in _MathEditor.MATHS_MARKS):
+            return False
+        if any(character.isdigit() for character in text):
+            return False
+        return " " in text.strip() or text != text.strip()
 
     def retypeset_live(self) -> None:
         """Lay the working out again from what has been typed so far.

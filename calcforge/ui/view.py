@@ -1968,6 +1968,10 @@ class PageView(QGraphicsView):
         frame = item.parentItem()
         position = item.pos()
         style = item.style
+        # It is becoming words now, so it is no longer a line that *might*:
+        # without this, closing the edit below would ask the same question
+        # again and answer it a second time.
+        item.started_by_typing = False
         self.end_item_edit()
         self.begin_snapshot(self.involved_frames(item))
         detach(item)
@@ -2167,6 +2171,16 @@ class PageView(QGraphicsView):
             return
         self._editing_item = None
         if isinstance(item, MathItem):
+            # Last chance for a line that turned out to be a sentence. While it
+            # was being typed one word and a space could still have been a
+            # variable waiting for its ":=", so it was left alone; now that the
+            # caret has gone it plainly was not.
+            if item.looks_like_words() or item.reads_as_a_sentence():
+                item.end_edit()
+                self.turn_into_words(item)
+                self.commit_snapshot("Write a note")
+                self.documentEdited.emit()
+                return
             item.end_edit()
             self.window.recalculate()
         else:
@@ -3098,18 +3112,15 @@ class PageView(QGraphicsView):
                                                             self.typing_frame())):
                 event.accept()
                 return
-            text = event.text()
-            if text and text.isprintable() and text != " ":
-                # There is one way to start writing on a page: type. What comes
-                # out is a calculation, because that is what a calculation
-                # sheet is mostly made of — and if it turns out to be a
-                # sentence, the first space says so and it becomes a text box.
-                self.window.start_typing(
-                    text, self.from_page(self.typing_position(), self.typing_frame()))
+            # And nothing else. A letter on bare paper used to open a
+            # calculation and put the letter in it, which meant every letter
+            # was spoken for: a tool key that had not been bound yet, or a
+            # keystroke meant for something that had just lost the focus,
+            # started a calculation instead of doing nothing. Writing begins
+            # deliberately — "/" for maths, '"' for words — and those are on
+            # the shortcut list where they can be changed.
+            if event.text() and event.text().isprintable():
                 event.accept()
-                return
-            if text and text.isprintable():
-                event.accept()          # a space on bare paper starts nothing
                 return
 
         if key in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down):

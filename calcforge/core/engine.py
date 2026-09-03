@@ -299,27 +299,47 @@ class _OffsetUnitLiterals(ast.NodeTransformer):
         return node
 
 
-class _ColumnLetters(ast.NodeTransformer):
-    """Read A and B in ``bolts(d, A, B)`` as columns, not as variables.
+class _ColumnNames(ast.NodeTransformer):
+    """Read the column arguments of ``bolts(d, Dia, Shear)`` as columns.
 
-    Only inside a call to a table that actually exists, and only for arguments
-    that are bare one-to-three-letter capitals. Anywhere else A is whatever the
-    author defined, or an ampere.
+    A table's columns can be named two ways: by their letter, ``A`` and ``B``,
+    and by whatever their heading says — ``Dia`` and ``Shear`` for a bolt
+    table with those at the top. Both read the same way in a lookup, because
+    both are how somebody would say it out loud.
+
+    Only inside a call to a table that actually exists, and only after the
+    first argument, which is the value being looked up. Anywhere else ``A`` is
+    whatever the author defined, or an ampere, and ``Dia`` is a variable like
+    any other.
     """
 
-    def __init__(self, tables: set):
-        self.tables = set(tables)
+    def __init__(self, tables):
+        # {table name: {the headings it has}}. A plain set of names still
+        # works: a table with no headings read yet accepts letters only.
+        self.tables = {name: {str(h).lower() for h in (headings or ())}
+                       for name, headings in (tables.items()
+                                              if hasattr(tables, "items")
+                                              else ((n, ()) for n in tables))}
+
+    def _is_a_column(self, table: str, name: str) -> bool:
+        if re.fullmatch(r"[A-Z]{1,3}", name):
+            return True
+        return name.lower() in self.tables.get(table, set())
 
     def visit_Call(self, node: ast.Call) -> ast.AST:
         self.generic_visit(node)
         if isinstance(node.func, ast.Name) and node.func.id in self.tables:
             node.args = [
-                ast.Constant(value=argument.id)
+                ast.copy_location(ast.Constant(value=argument.id), argument)
                 if (index > 0 and isinstance(argument, ast.Name)
-                    and re.fullmatch(r"[A-Z]{1,3}", argument.id))
+                    and self._is_a_column(node.func.id, argument.id))
                 else argument
                 for index, argument in enumerate(node.args)]
         return node
+
+
+# The old name, for anything that still reaches for it.
+_ColumnLetters = _ColumnNames
 
 
 def python_form(source: str) -> str:
@@ -646,7 +666,22 @@ class Workspace:
 
     def expression_transformers(self) -> tuple:
         """Surface syntax that depends on what this document defines."""
-        return (_ColumnLetters(self.tables),) if self.tables else ()
+        if not self.tables:
+            return ()
+        return (_ColumnNames(self.table_headings()),)
+
+    def table_headings(self) -> dict:
+        """What each table calls its columns, so a lookup can use those names."""
+        headings = {}
+        for name, table in self.tables.items():
+            sheet = getattr(table, "sheet", None)
+            if sheet is None:
+                headings[name] = set()
+                continue
+            headings[name] = {sheet.header_name(col)
+                              for col in range(sheet.cols)
+                              if sheet.header_name(col)}
+        return headings
 
     def define_function(self, name: str, params: list[str], source: str) -> UserFunction:
         fn = UserFunction(name, params, source, self)

@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
-from PySide6.QtWidgets import (QColorDialog, QComboBox, QHBoxLayout, QLabel,
-                               QMenu, QSlider, QToolButton, QWidget, QWidgetAction,
-                               QGridLayout)
+from PySide6.QtWidgets import (QAbstractSpinBox, QColorDialog, QComboBox,
+                               QGridLayout, QHBoxLayout, QLabel, QMenu, QSlider,
+                               QToolButton, QWidget, QWidgetAction)
 
 from ..items.base import PALETTE
 from .icons import colour_icon
@@ -131,3 +131,41 @@ class UnitCombo(QComboBox):
                 self.addItem(unit)
         self.setCurrentText(value)
         self.setMinimumContentsLength(8)
+
+
+def keep_the_wheel_with_the_scroller(application) -> None:
+    """Install the filter below on *application*, once.
+
+    Called from the window rather than from start-up, so it is in force
+    however the application came to exist — including under a test harness
+    that builds its own.
+    """
+    if getattr(application, "_wheel_filter", None) is not None:
+        return
+    application._wheel_filter = WheelBelongsToTheScroller(application)
+    application.installEventFilter(application._wheel_filter)
+
+
+class WheelBelongsToTheScroller(QObject):
+    """Stop a dropdown or a spinner eating the wheel while a panel is scrolled.
+
+    Rolling down the properties panel with the pointer happening to pass over
+    a font box used to change the font. Nobody means that. Qt's own rule is
+    the right one and it is only a line: a combo, a spinner or a slider takes
+    the wheel when it has been clicked into, and passes it up to whatever is
+    scrolling when it has not.
+
+    Installed once, on the application, so every one of them behaves the same
+    and no new one has to remember.
+    """
+
+    WATCHED = (QComboBox, QAbstractSpinBox, QSlider)
+
+    def eventFilter(self, watched, event):
+        if event.type() != QEvent.Wheel or not isinstance(watched, self.WATCHED):
+            return False
+        if watched.hasFocus():
+            return False                  # clicked into: the wheel is its own
+        # Not focused: hand it on. The scroll area above it will take it.
+        event.ignore()
+        return True

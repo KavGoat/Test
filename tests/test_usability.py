@@ -4209,37 +4209,67 @@ def test_clicking_a_fraction_puts_the_caret_in_that_part_of_it(window):
 
 def test_typing_a_calculation_keeps_the_working_up_with_it(window):
     window.select_tool("select")
-    press_key(window.view, Qt.Key_unknown, "5")
+    press_key(window.view, Qt.Key_unknown, "/")
     item = window.view.editing_item()
     assert item is not None
-    type_text(window.view, "kN+3kN=")
+    type_text(window.view, "5kN+3kN=")
     assert item.source == "5kN+3kN="
     assert item.rows                          # laid out, not waiting
     window.view.end_item_edit()
 
 
-def test_a_space_turns_what_was_typed_into_a_text_box(window):
-    """Maths needs no spaces, so a space says this was a sentence."""
+def test_a_second_word_turns_what_was_typed_into_a_text_box(window):
+    """Maths needs no spaces, so two words with no operator is a sentence."""
     from calcforge.items.text import TextItem
 
     window.select_tool("select")
-    press_key(window.view, Qt.Key_unknown, "f")
-    type_text(window.view, "ine")
+    press_key(window.view, Qt.Key_unknown, "/")
+    type_text(window.view, "check bolt")
     press_key(window.view, Qt.Key_Space, " ")
 
     box = window.view.editing_item()
     assert isinstance(box, TextItem)
-    assert box.text() == "fine "
+    assert box.text() == "check bolt "
     window.view.end_item_edit()
     assert [type(i).__name__ for i in markups(window)] == ["TextItem"]
+
+
+def test_one_word_and_a_space_waits_to_see_what_follows(window):
+    """"L " is a variable waiting for its ":=", not the start of a sentence."""
+    from calcforge.items.mathitem import MathItem
+
+    window.select_tool("select")
+    press_key(window.view, Qt.Key_unknown, "/")
+    type_text(window.view, "sigma")
+    press_key(window.view, Qt.Key_Space, " ")
+    assert isinstance(window.view.editing_item(), MathItem)
+
+    type_text(window.view, ":= 5MPa")
+    window.view.end_item_edit()
+    assert [type(i).__name__ for i in markups(window)] == ["MathItem"]
+    assert window.document.workspace.get("sigma") is not None
+
+
+def test_a_lone_word_left_behind_becomes_a_note_after_all(window):
+    """Once the caret has gone, a word and a space was plainly a sentence."""
+    from calcforge.items.text import TextItem
+
+    window.select_tool("select")
+    press_key(window.view, Qt.Key_unknown, "/")
+    type_text(window.view, "checked")
+    press_key(window.view, Qt.Key_Space, " ")
+    window.view.end_item_edit()
+
+    assert [type(i).__name__ for i in markups(window)] == ["TextItem"]
+    assert markups(window)[0].text().strip() == "checked"
 
 
 def test_a_space_in_real_maths_is_just_a_space(window):
     from calcforge.items.mathitem import MathItem
 
     window.select_tool("select")
-    press_key(window.view, Qt.Key_unknown, "5")
-    type_text(window.view, "+")
+    press_key(window.view, Qt.Key_unknown, "/")
+    type_text(window.view, "5+")
     press_key(window.view, Qt.Key_Space, " ")
     item = window.view.editing_item()
     assert isinstance(item, MathItem)
@@ -5238,3 +5268,123 @@ def test_nothing_is_placed_behind_a_dashed_box(window):
     hits = sum(1 for x in range(image.width()) for y in range(image.height())
                if (image.pixel(x, y) & 0x00FFFFFF) == (dashes & 0x00FFFFFF))
     assert hits == 0
+
+
+# ---------------------------------------------------------------------------
+# Paste in place, cell alignment, headings as column names, the wheel
+# ---------------------------------------------------------------------------
+
+def test_ctrl_shift_v_pastes_in_the_same_place(window):
+    window.select_tool("rect")
+    drag(window.view, 120, 120, 240, 200)
+    rect = markups(window)[0]
+    where = QPointF(rect.pos())
+    window.scene.clearSelection()
+    rect.setSelected(True)
+    window.copy_selection()
+
+    # The pointer is somewhere else entirely; paste in place ignores it.
+    hover(window.view, 400, 500)
+    window.paste_in_place()
+
+    copies = [i for i in markups(window) if isinstance(i, RectItem)]
+    assert len(copies) == 2
+    assert all(copy.pos() == where for copy in copies)   # right on top of it
+    assert len({copy.uid for copy in copies}) == 2       # and a copy, not the same one
+
+
+def test_paste_in_place_is_on_ctrl_shift_v(window):
+    assert window.act_paste_in_place.shortcut().toString() == "Ctrl+Shift+V"
+    assert window.act_paste_here.shortcut().toString() == "Ctrl+Alt+V"
+
+
+def test_cells_can_be_lined_up_left_centre_and_right(window):
+    table = _capacity_table(window)
+    window.view.activate_table(table)
+    table.current = (1, 0)
+    table.anchor = (1, 1)
+
+    window.align_cells("right")
+    assert table.cell_format(1, 0).align == "right"
+    assert table.cell_format(1, 1).align == "right"
+    assert table.cell_format(2, 0).align != "right"
+
+    window.align_cells("center")
+    assert table.cell_format(1, 0).align == "center"
+
+
+def test_the_cell_bar_shows_how_the_cells_are_lined_up(window):
+    table = _capacity_table(window)
+    window.view.activate_table(table)
+    table.current = table.anchor = (1, 0)
+    window.align_cells("center")
+    window.refresh_formula_bar(table)
+
+    assert window.align_buttons["center"].isChecked()
+    assert not window.align_buttons["left"].isChecked()
+
+
+def test_alignment_is_on_the_tables_own_menu(window):
+    table = _capacity_table(window)
+    table.setSelected(True)
+    menu = window.build_context_menu(table, table.pos())
+    align = [a for a in menu.actions() if a.text() == "Align cells"]
+    assert align
+    labels = [a.text() for a in align[0].menu().actions()]
+    assert labels == ["Left", "Centre", "Right", "As they come"]
+
+
+def test_a_table_can_be_read_by_its_column_headings(window):
+    _capacity_table(window)          # headings are d, V and N
+    _calc(window, "dia := 20 mm\nV := bolts(dia, d, V) =", at=(60, 400))
+    window.recalculate()
+    assert window.document.workspace.get("V").to("kN").magnitude == pytest.approx(84.8)
+
+
+def test_the_letters_still_work_alongside_the_headings(window):
+    _capacity_table(window)
+    _calc(window, "dia := 16 mm\nV := bolts(dia, A, B) =", at=(60, 400))
+    window.recalculate()
+    assert window.document.workspace.get("V").to("kN").magnitude == pytest.approx(54.3)
+
+
+def test_a_heading_that_is_not_a_column_is_still_a_variable(window):
+    """Only a table's own headings are read as columns; the rest are names."""
+    _capacity_table(window)
+    _calc(window, "width := 3\nV := width * 2 =", at=(60, 400))
+    window.recalculate()
+    assert window.document.workspace.get("V") == 6
+
+
+def test_the_wheel_over_a_dropdown_scrolls_the_panel(window):
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QWheelEvent
+    from PySide6.QtWidgets import QComboBox
+
+    window.select_tool("rect")
+    drag(window.view, 120, 120, 240, 200)
+    markups(window)[0].setSelected(True)
+    window.refresh_selection()
+
+    combos = window.properties_panel.findChildren(QComboBox)
+    assert combos, "the properties panel has no dropdowns to test"
+    combo = combos[0]
+    combo.clearFocus()
+    before = combo.currentIndex()
+
+    wheel = QWheelEvent(QPointF(5, 5), combo.mapToGlobal(QPoint(5, 5)),
+                        QPoint(0, -120), QPoint(0, -120), Qt.NoButton,
+                        Qt.NoModifier, Qt.NoScrollPhase, False)
+    QApplication.sendEvent(combo, wheel)
+    assert combo.currentIndex() == before      # the panel scrolled, not the box
+
+    # And the filter hands it straight back the moment it has been clicked
+    # into, so a deliberate wheel over an open box still works.
+    from calcforge.ui.widgets import WheelBelongsToTheScroller
+
+    kept = WheelBelongsToTheScroller()
+    combo.hasFocus = lambda: True              # focus needs an active window
+    wheel = QWheelEvent(QPointF(5, 5), combo.mapToGlobal(QPoint(5, 5)),
+                        QPoint(0, -120), QPoint(0, -120), Qt.NoButton,
+                        Qt.NoModifier, Qt.NoScrollPhase, False)
+    assert kept.eventFilter(combo, wheel) is False

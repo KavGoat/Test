@@ -71,7 +71,7 @@ in a conversation is a list that gets lost.
 - [ ] **Variable completion**: typing a name in an equation offers every
   variable, and Tab fills it in.
 - [ ] The **unit list** appears in the wrong place.
-- [ ] **Only the bound key starts a calculation** — a bare keystroke must not,
+- [x] **Only the bound key starts a calculation** — a bare keystroke must not,
   or the tool shortcuts stop working.
 - [ ] **How many figures** a result is shown to: decimal places, significant
   figures or scientific notation, from its right-click menu.
@@ -81,16 +81,16 @@ in a conversation is a list that gets lost.
 
 ## Tables and text
 
-- [ ] A table can be **read by its column headings** as well as by A, B, C.
-- [ ] **Alignment for cells**, left, centre and right, the way Excel offers it.
+- [x] A table can be **read by its column headings** as well as by A, B, C.
+- [x] **Alignment for cells**, left, centre and right, the way Excel offers it.
 - [ ] **Subscript and superscript** from `_` and `^` in a text box and in a
   table cell.
 - [ ] **Pasting from Excel** carries relative formulas across where it can.
 
 ## The frame
 
-- [ ] The wheel **scrolls the panel**, not the dropdown the pointer is over.
-- [ ] **Ctrl+Shift+V pastes in place**, where it was copied from.
+- [x] The wheel **scrolls the panel**, not the dropdown the pointer is over.
+- [x] **Ctrl+Shift+V pastes in place**, where it was copied from.
 - [ ] **Everything in the menus**: every page, line and markup function
   reachable from the menu bar, preferences under Settings, and a tool search
   in Help.
