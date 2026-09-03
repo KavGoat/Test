@@ -85,7 +85,7 @@ Checking this against your raw messages turned up a few places where either I go
 - [x] Fix visual overlap between adjacent table cells so content doesn't run into the next cell (11)
 - [x] Clarify how a computed/output cell is displayed vs. a plain input cell (e.g. a cell defined as `q_floor`) — currently ambiguous which is which (11, 61)
 - [x] **(new)** Bug: in the insert-table dialog, the "header row" checkbox shows as ticked, but clicking it off and back on leaves it unticked (state gets lost on the second toggle) — fix the checkbox's state handling
-- [ ] **(new)** Dragging out a table must add and take away rows and columns as it goes, at a fixed default cell size — not stretch a fixed 6×4 grid to whatever the box is. The drag says how many cells, not how big they are
+- [x] **(new)** Dragging out a table must add and take away rows and columns as it goes, at a fixed default cell size — not stretch a fixed 6×4 grid to whatever the box is. The drag says how many cells, not how big they are
 
 ## 7. Markup tools — placement & interaction model (Bluebeam parity)
 
@@ -93,7 +93,7 @@ Checking this against your raw messages turned up a few places where either I go
 - [x] "Properties mode" (place a new copy using the last-used style/properties rather than an exact one-to-one duplicate) should only be selectable for a single markup object — for calc blocks, images, graphs, and groups it should be greyed out or simply not offered, since it doesn't make sense for those (41)
 - [x] Selection tool: a click-drag draws a rectangular marquee select; a plain click (no drag) instead falls back to a polygon/lasso-style custom selection area (39)
 - [x] Rectangle marquee direction matters: dragging left-to-right selects only items fully enclosed by the box; dragging right-to-left selects enclosed **and** intersecting items. This left/right distinction is for the rectangle marquee only — it does not apply to the polygon/lasso selection (39)
-- [ ] **(new)** Selecting as it stands — click, and click-drag for a rectangular marquee, with no key held — is right and stays as it is. What Shift adds: **Shift and click point after point draws a polygon to select inside**, closed by clicking the first point again or by Enter
+- [x] **(new)** Selecting as it stands — click, and click-drag for a rectangular marquee, with no key held — is right and stays as it is. What Shift adds: **Shift and click point after point draws a polygon to select inside**, closed by clicking the first point again or by Enter
 - [x] **(contradiction — later message wins)** A plain click on empty canvas must not start a select-drag; a rectangular marquee begins on a click-drag and a lasso on Shift+click-drag. The original half of this (msg 53: a click sets an *insertion point* for pastes) was withdrawn by msgs 46 and 74 ("remove the insert click point thing and remove other dependent functionality") — there is no insertion point; what you are pointing at is where things land (53, superseded by 46/74)
 - [x] Escape must always fully clear selection and exit whatever edit/tool sub-state you're in, in one press, regardless of how deep the current mode is nested (81, 92)
 - [x] Fix: it's possible to get permanently stuck inside a tool (e.g. right after placing a callout's arrow) with no way out — Escape doesn't help and no other tool can be switched to (82, 110)

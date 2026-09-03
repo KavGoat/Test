@@ -884,6 +884,16 @@ class PageView(QGraphicsView):
                 return
             self.close_label_editor(commit=True)
 
+        # Drawing a shape round what you want: every click is a corner of it,
+        # whatever it lands on. Without this a click that happened to fall on
+        # a markup selected that markup instead, so a shape could only be
+        # drawn across bare paper — which is not where the things you want to
+        # select are.
+        if self._mode == "lasso" and event.button() == Qt.LeftButton:
+            self._add_lasso_point(scene_pos)
+            event.accept()
+            return
+
         # A click away from the little unit box finishes it, the way clicking
         # off any other in-place editor does.
         if self._unit_editor is not None and event.button() == Qt.LeftButton:
@@ -1093,12 +1103,6 @@ class PageView(QGraphicsView):
                 event.accept()
                 return
         if item is None:
-            if self._mode == "lasso":
-                # Another corner of the lasso.
-                self._marquee.append(QPointF(scene_pos))
-                self.viewport().update()
-                event.accept()
-                return
             self.deactivate_table()
             self._keep_selection = bool(event.modifiers() & Qt.ControlModifier)
             if not self._keep_selection:
@@ -1110,8 +1114,8 @@ class PageView(QGraphicsView):
                 self._mode = "lasso"
                 self._marquee = [QPointF(scene_pos), QPointF(scene_pos)]
                 self.statusMessage.emit(
-                    "Lasso: click each corner · double-click or Enter to "
-                    "select what is inside · Esc to cancel")
+                    "Click each corner · click the first corner again, or "
+                    "Enter, to select what is inside · Esc to cancel")
                 self.viewport().update()
                 event.accept()
                 return
@@ -1547,7 +1551,11 @@ class PageView(QGraphicsView):
             top_left = parent.mapFromScene(rect.topLeft()) if parent is not None \
                 else rect.topLeft()
             draft.setPos(top_left)
-            draft.set_local_rect(QRectF(0, 0, rect.width(), rect.height()))
+            if isinstance(draft, TableItem):
+                # A table's drag counts cells rather than stretching them.
+                draft.fit_to_a_drag(rect.width(), rect.height())
+            else:
+                draft.set_local_rect(QRectF(0, 0, rect.width(), rect.height()))
         if isinstance(draft, MeasureItem):
             draft.refresh(page=self.page())
         draft.update()
@@ -3580,6 +3588,22 @@ class PageView(QGraphicsView):
         """
         return (self._mode == "rubber" and len(self._marquee) >= 2
                 and self._marquee[-1].x() < self._marquee[0].x())
+
+    CLOSING_REACH = 9.0
+
+    def _add_lasso_point(self, scene_pos: QPointF) -> None:
+        """One more corner — or the first one again, which closes the shape."""
+        if not self._marquee:
+            self._marquee = [QPointF(scene_pos)]
+        first = self._marquee[0]
+        reach = self.CLOSING_REACH / max(self.zoom(), 0.05)
+        enough = len(self._marquee) > 3
+        if enough and math.hypot(scene_pos.x() - first.x(),
+                                 scene_pos.y() - first.y()) <= reach:
+            self.select_in_marquee()
+            return
+        self._marquee.append(QPointF(scene_pos))
+        self.viewport().update()
 
     def select_in_marquee(self) -> None:
         """Select what the marquee caught, then put it away."""

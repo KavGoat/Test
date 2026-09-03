@@ -110,6 +110,34 @@ class TableItem(MarkupItem):
         self.prepareGeometryChange()
         self.update()
 
+    # How many cells fit in a box, at the size a cell is meant to be. Dragging
+    # a table out says how many cells there are, not how big they are: a table
+    # dragged twice as wide is a table with twice as many columns, each still
+    # the width a column reads well at. Stretching a fixed six-by-four to
+    # whatever the box happened to be gave cells of a different size on every
+    # table on the sheet.
+    MOST_ROWS = 500
+    MOST_COLS = 100
+
+    def fit_to_a_drag(self, width: float, height: float) -> tuple[int, int]:
+        """Set the grid to as many default-sized cells as *width* × *height* holds."""
+        from ..core.spreadsheet import DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT
+
+        gw, gh = self.gutter_size()
+        across = max(width - gw, 0.0)
+        down = max(height - gh - self.title_height(), 0.0)
+        cols = max(1, min(int(across // DEFAULT_COL_WIDTH), self.MOST_COLS))
+        rows = max(1, min(int(down // DEFAULT_ROW_HEIGHT), self.MOST_ROWS))
+        if (rows, cols) != (self.sheet.rows, self.sheet.cols):
+            self.prepareGeometryChange()
+            self.sheet.resize(rows, cols)
+        # Whatever a previous drag left behind: every cell is the default size
+        # again, so the grid the box shows is the grid that gets placed.
+        self.sheet.col_widths.clear()
+        self.sheet.row_heights.clear()
+        self.update()
+        return rows, cols
+
     def column_x(self, col: int) -> float:
         x = self.grid_origin().x()
         for index in range(col):

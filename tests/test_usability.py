@@ -3842,6 +3842,52 @@ def test_a_lasso_takes_only_what_is_wholly_inside(window):
     assert not first.isSelected()
 
 
+def test_clicking_the_first_corner_again_closes_the_polygon(window):
+    """The way every polygon is closed — no key needed at all."""
+    first, second = _spread(window)
+    click(window.view, 60, 60, modifiers=Qt.ShiftModifier)
+    click(window.view, 240, 60)
+    click(window.view, 240, 220)
+    click(window.view, 60, 220)
+    click(window.view, 61, 61)                   # back where it started
+
+    assert window.view._mode == "idle"
+    assert first.isSelected() and not second.isSelected()
+
+
+def test_a_corner_can_land_on_a_markup_while_drawing_the_polygon(window):
+    """Otherwise the shape can only be drawn across bare paper.
+
+    Which is not where the things you want to select are: a click that
+    happened to fall on a markup used to select that markup and abandon the
+    shape halfway through.
+    """
+    first, second = _spread(window)
+    over_the_second = second.sceneBoundingRect().center()
+    click(window.view, 60, 60, modifiers=Qt.ShiftModifier)
+    corners = len(window.view._marquee)
+    click(window.view, over_the_second.x(), over_the_second.y())
+
+    assert window.view._mode == "lasso", "still drawing, not selecting"
+    assert len(window.view._marquee) == corners + 1, "the corner went in"
+    assert not second.isSelected(), "the click was a corner, not a pick"
+
+    # And the shape still takes what it ends up wholly round.
+    click(window.view, 420, 240)
+    click(window.view, 60, 240)
+    press_key(window.view, Qt.Key_Return)
+    assert first.isSelected(), "which is the box the shape encloses"
+
+
+def test_a_stray_click_near_the_start_does_not_close_it_too_early(window):
+    """Three corners is not a shape, so the second click cannot close one."""
+    _spread(window)
+    click(window.view, 60, 60, modifiers=Qt.ShiftModifier)
+    click(window.view, 61, 61)
+    assert window.view._mode == "lasso"
+    window.view.escape_everything()
+
+
 def test_escape_abandons_a_half_drawn_lasso(window):
     _spread(window)
     click(window.view, 60, 60, modifiers=Qt.ShiftModifier)
@@ -8212,3 +8258,66 @@ def test_the_menu_says_how_many_pages_it_is_about(window):
     _pick_pages(window, [1])
     labels = [a.text() for a in window.page_menu(1).actions()]
     assert "Delete page" in labels
+
+
+# ---------------------------------------------------------------------------
+# a table's drag says how many cells, not how big they are
+# ---------------------------------------------------------------------------
+
+def test_dragging_a_table_out_counts_its_cells(window):
+    """It used to stretch a fixed six-by-four to whatever the box was.
+
+    That gave cells of a different size on every table on the sheet. The drag
+    says how many rows and columns there are; a cell stays the size a cell
+    reads well at.
+    """
+    from calcforge.core.spreadsheet import DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT
+
+    def drag_out(across, down):
+        before = {id(i) for i in markups(window)}
+        window.select_tool("table")
+        drag(window.view, 60, 60,
+             60 + across * DEFAULT_COL_WIDTH + 3,
+             60 + down * DEFAULT_ROW_HEIGHT + 3)
+        window.view.deactivate_table()
+        fresh = [i for i in markups(window)
+                 if isinstance(i, TableItem) and id(i) not in before]
+        assert fresh, "a table was drawn"
+        return fresh[0]
+
+    wide = drag_out(6, 10)
+    assert (wide.sheet.cols, wide.sheet.rows) == (6, 10)
+    assert wide.sheet.col_width(0) == DEFAULT_COL_WIDTH
+    assert wide.sheet.row_height(0) == DEFAULT_ROW_HEIGHT
+
+    small = drag_out(2, 3)
+    assert (small.sheet.cols, small.sheet.rows) == (2, 3)
+    assert small.sheet.col_width(0) == DEFAULT_COL_WIDTH, "the same size cell"
+    assert small.sheet.row_height(0) == DEFAULT_ROW_HEIGHT
+
+
+def test_a_table_never_comes_out_with_no_cells_at_all(window):
+    """A box too small for one cell still makes a table of one."""
+    before = {id(i) for i in markups(window)}
+    window.select_tool("table")
+    drag(window.view, 60, 60, 68, 66)
+    window.view.deactivate_table()
+    made = [i for i in markups(window)
+            if isinstance(i, TableItem) and id(i) not in before]
+    assert made and (made[0].sheet.rows, made[0].sheet.cols) == (1, 1)
+
+
+def test_the_drawn_table_fits_inside_the_box_it_was_dragged(window):
+    """What is drawn never overshoots the rubber box it was drawn with."""
+    from calcforge.core.spreadsheet import DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT
+
+    before = {id(i) for i in markups(window)}
+    window.select_tool("table")
+    across, down = 4.6 * DEFAULT_COL_WIDTH, 6.7 * DEFAULT_ROW_HEIGHT
+    drag(window.view, 60, 60, 60 + across, 60 + down)
+    window.view.deactivate_table()
+    table = [i for i in markups(window)
+             if isinstance(i, TableItem) and id(i) not in before][0]
+    assert (table.sheet.cols, table.sheet.rows) == (4, 6), "whole cells only"
+    assert table.local_rect().width() <= across + 1
+    assert table.local_rect().height() <= down + 1
