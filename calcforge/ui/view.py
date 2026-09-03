@@ -1647,13 +1647,27 @@ class PageView(QGraphicsView):
     def place_caret(item, scene_pos: QPointF) -> None:
         """Put the caret where the pointer is, rather than at the start.
 
-        Only for text boxes, where what is displayed and what is edited are the
-        same layout.  A calculation is displayed typeset and edited as source, so
-        a point on the fraction bar means nothing in the source text — there the
-        caret goes to the end of the line, which is at least predictable.
+        A calculation is typeset while it is being written, so a click on the
+        numerator of a fraction has to be turned back into a place in the
+        source. The box tree knows which characters it was built from, which is
+        what makes that possible — and what makes clicking into a calculation
+        feel like clicking into anything else.
         """
         editor = getattr(item, "_editor", None)
-        if editor is None or isinstance(item, MathItem):
+        if editor is None:
+            return
+        if isinstance(item, MathItem):
+            line, column = item.offset_at(item.mapFromScene(scene_pos))
+            if line < 0:
+                return
+            cursor = editor.textCursor()
+            block = editor.document().findBlockByNumber(line)
+            if not block.isValid():
+                return
+            cursor.setPosition(block.position()
+                               + min(max(column, 0), block.length() - 1))
+            editor.setTextCursor(cursor)
+            item.update()
             return
         try:
             local = editor.mapFromScene(scene_pos)
@@ -1676,6 +1690,7 @@ class PageView(QGraphicsView):
         item.setSelected(True)
         if isinstance(item, MathItem) and not getattr(item, "_enter_wired", False):
             item.enterPressed.connect(self._open_next_line)
+            item.wantsWords.connect(lambda i=item: self.turn_into_words(i))
             item._enter_wired = True
         item.begin_edit()
         self._editing_item = item
@@ -1686,6 +1701,33 @@ class PageView(QGraphicsView):
             if editor is not None:
                 editor.document().contentsChanged.connect(self._note_live_edit)
                 item._live_wired = True
+
+    def turn_into_words(self, item) -> None:
+        """Swap a half-typed calculation for a text box holding the same words.
+
+        Nothing is lost and nothing has to be retyped: what was in the region
+        goes into the text box, the caret carries on at the end of it, and the
+        space that caused all this is added where it was typed.
+        """
+        if item.scene() is None:
+            return
+        words = item.source
+        frame = item.parentItem()
+        position = item.pos()
+        style = item.style
+        self.end_item_edit()
+        self.begin_snapshot(self.involved_frames(item))
+        detach(item)
+        box = TextItem(words + " ")
+        box.style = style
+        box.set_local_rect(QRectF(0, 0, max(item.local_rect().width(), 140.0),
+                                  max(item.local_rect().height(), 22.0)))
+        frame.add_markup(box, position)
+        self.scene().clearSelection()
+        box.setSelected(True)
+        self.commit_snapshot("Write text")
+        self.selectionChanged.emit()
+        self.begin_item_edit(box)
 
     def _note_live_edit(self) -> None:
         """Work the line out again shortly, so its answer keeps up with it."""
@@ -2774,8 +2816,18 @@ class PageView(QGraphicsView):
                                                             self.typing_frame())):
                 event.accept()
                 return
-            if event.text() and event.text().isprintable():
-                event.accept()          # unbound: deliberately nothing happens
+            text = event.text()
+            if text and text.isprintable() and text != " ":
+                # There is one way to start writing on a page: type. What comes
+                # out is a calculation, because that is what a calculation
+                # sheet is mostly made of — and if it turns out to be a
+                # sentence, the first space says so and it becomes a text box.
+                self.window.start_typing(
+                    text, self.from_page(self.typing_position(), self.typing_frame()))
+                event.accept()
+                return
+            if text and text.isprintable():
+                event.accept()          # a space on bare paper starts nothing
                 return
 
         if key in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down):

@@ -80,11 +80,20 @@ class MathStyle:
 # ---------------------------------------------------------------------------
 
 class Box:
-    """A laid-out fragment with a width and an ascent/descent about its baseline."""
+    """A laid-out fragment with a width and an ascent/descent about its baseline.
+
+    A box also remembers which characters of the source it was built from, as
+    ``span``. That is what lets a caret be drawn inside typeset maths: given a
+    position in the text, the box tree can say where on the page it falls, and
+    given a point on the page it can say which character it is nearest. Without
+    it there would have to be a second, plainer view of the expression to type
+    into — which is exactly the thing worth avoiding.
+    """
 
     width: float = 0.0
     ascent: float = 0.0
     descent: float = 0.0
+    span: Optional[tuple] = None
 
     @property
     def height(self) -> float:
@@ -92,6 +101,14 @@ class Box:
 
     def draw(self, painter: QPainter, x: float, baseline: float) -> None:
         raise NotImplementedError
+
+    def children_at(self, x: float, baseline: float) -> list:
+        """Each child with where it sits, as (box, x, baseline).
+
+        The default is a leaf: nothing inside it. Containers override this so
+        the caret walk can reach the deepest box that covers a character.
+        """
+        return []
 
 
 class Glyph(Box):
@@ -134,6 +151,13 @@ class Row(Box):
             child.draw(painter, x, baseline)
             x += child.width
 
+    def children_at(self, x: float, baseline: float) -> list:
+        placed = []
+        for child in self.children:
+            placed.append((child, x, baseline))
+            x += child.width
+        return placed
+
 
 class Shifted(Box):
     """A box moved vertically relative to the baseline (super/subscripts)."""
@@ -147,6 +171,9 @@ class Shifted(Box):
 
     def draw(self, painter: QPainter, x: float, baseline: float) -> None:
         self.child.draw(painter, x, baseline + self.dy)
+
+    def children_at(self, x: float, baseline: float) -> list:
+        return [(self.child, x, baseline + self.dy)]
 
 
 class Fraction(Box):
@@ -176,6 +203,16 @@ class Fraction(Box):
         painter.setPen(pen)
         painter.drawLine(QPointF(x + self.pad * 0.4, bar_y),
                          QPointF(x + self.width - self.pad * 0.4, bar_y))
+
+    def children_at(self, x: float, baseline: float) -> list:
+        bar_y = baseline - self.axis
+        centre = x + self.width / 2
+        return [
+            (self.num, centre - self.num.width / 2,
+             bar_y - self.rule / 2 - self.gap - self.num.descent),
+            (self.den, centre - self.den.width / 2,
+             bar_y + self.rule / 2 + self.gap + self.den.ascent),
+        ]
 
 
 class Radical(Box):
@@ -211,6 +248,9 @@ class Radical(Box):
         if self.index is not None:
             self.index.draw(painter, x, top + (bottom - top) * 0.42)
         self.child.draw(painter, x + self.lead + self.pad, baseline)
+
+    def children_at(self, x: float, baseline: float) -> list:
+        return [(self.child, x + self.lead + self.pad, baseline)]
 
 
 class Bracket(Box):
@@ -268,6 +308,9 @@ class Bracket(Box):
         self.child.draw(painter, x + self.thickness, baseline)
         self._paint(painter, x + self.thickness + self.child.width, top, bottom, False)
 
+    def children_at(self, x: float, baseline: float) -> list:
+        return [(self.child, x + self.thickness, baseline)]
+
 
 class Stack(Box):
     """Vertically stacked rows (matrices, multi-line results)."""
@@ -293,6 +336,77 @@ class Stack(Box):
                 rx = x
             row.draw(painter, rx, y + row.ascent)
             y += row.height + self.gap
+
+    def children_at(self, x: float, baseline: float) -> list:
+        placed = []
+        y = baseline - self.ascent
+        for row in self.rows:
+            if self.align == "center":
+                rx = x + (self.width - row.width) / 2
+            elif self.align == "right":
+                rx = x + self.width - row.width
+            else:
+                rx = x
+            placed.append((row, rx, y + row.ascent))
+            y += row.height + self.gap
+        return placed
+
+
+# ---------------------------------------------------------------------------
+# Finding a place in typeset maths
+# ---------------------------------------------------------------------------
+
+def caret_in(box: Box, x: float, baseline: float, offset: int):
+    """Where character *offset* falls in a laid-out box, or None.
+
+    Returns (x, baseline, ascent, descent): enough to draw a caret the right
+    height for wherever it has landed, so it is short inside a subscript and
+    tall beside a fraction, as it is in SMath.
+    """
+    best = None
+    for child, cx, cy in box.children_at(x, baseline):
+        found = caret_in(child, cx, cy, offset)
+        if found is not None:
+            best = found
+    if best is not None:
+        return best
+    span = box.span
+    if span is None or not (span[0] <= offset <= span[1]) or box.width <= 0:
+        return None
+    if span[1] > span[0]:
+        # Slide along the box in proportion to how far through its characters
+        # the caret is: good enough inside a number or a name, and exact at
+        # either end, which is where a caret usually sits.
+        share = (offset - span[0]) / (span[1] - span[0])
+    else:
+        share = 0.0
+    return (x + box.width * share, baseline, box.ascent, box.descent)
+
+
+def offset_in(box: Box, x: float, baseline: float, point) -> Optional[int]:
+    """Which character of the source is nearest *point*, or None.
+
+    Used to put the caret where the page was clicked. The nearest box wins,
+    measured to the middle of its line rather than to its baseline, so a click
+    below a fraction lands in its denominator.
+    """
+    best: tuple[float, int] = (float("inf"), -1)
+
+    def visit(current: Box, cx: float, cy: float) -> None:
+        nonlocal best
+        for child, kx, ky in current.children_at(cx, cy):
+            visit(child, kx, ky)
+        span = current.span
+        if span is None:
+            return
+        middle = cy - (current.ascent - current.descent) / 2
+        for edge, offset in ((cx, span[0]), (cx + current.width, span[1])):
+            distance = abs(point.x() - edge) + abs(point.y() - middle) * 0.35
+            if distance < best[0]:
+                best = (distance, offset)
+
+    visit(box, x, baseline)
+    return None if best[1] < 0 else best[1]
 
 
 # ---------------------------------------------------------------------------
@@ -354,9 +468,15 @@ class Typesetter:
     # -- dispatch ----------------------------------------------------------
     def build(self, node: ast.AST, size: float) -> Box:
         method = getattr(self, "_build_" + type(node).__name__, None)
-        if method is None:
-            return self.text(_unparse(node), size)
-        return method(node, size)
+        box = self.text(_unparse(node), size) if method is None else method(node, size)
+        # Every box remembers the characters it came from, so the caret can be
+        # put where the typing is rather than in a second, plainer copy of the
+        # expression.
+        start = getattr(node, "col_offset", None)
+        end = getattr(node, "end_col_offset", None)
+        if box.span is None and start is not None and end is not None:
+            box.span = (start, end)
+        return box
 
     def _wrap(self, node: ast.AST, size: float, parent_precedence: int,
               right: bool = False) -> Box:

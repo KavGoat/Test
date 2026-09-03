@@ -13,7 +13,8 @@ from PySide6.QtWidgets import (QGraphicsItem, QGraphicsTextItem, QStyle,
                                QStyleOptionGraphicsItem)
 
 from ..core import engine
-from ..core.mathrender import Box, MathStyle, Row, Spacer, Typesetter
+from ..core.mathrender import (Box, MathStyle, Row, Spacer, Typesetter,
+                               caret_in, offset_in)
 from .base import MarkupItem, Style, register_item
 
 DEFAULT_SOURCE = ""
@@ -35,14 +36,27 @@ class _MathEditor(QGraphicsTextItem):
         self.owner = owner
 
     def paint(self, painter, option, widget=None) -> None:
-        # Qt's dotted focus frame is sized to the text, not to the region, and
-        # reads as a second box floating in the corner of the first.
-        trimmed = QStyleOptionGraphicsItem(option)
-        trimmed.state &= ~QStyle.State_HasFocus
-        trimmed.state &= ~QStyle.State_Selected
-        super().paint(painter, trimmed, widget)
+        """Draw nothing at all.
+
+        This item exists to hold the text and the cursor and to take the
+        keystrokes — Qt's text editing is worth having. What the reader sees
+        is the typeset working the region paints itself, with the caret in it.
+        Painting this as well would put a second copy of the expression on the
+        page in a different shape, which is the thing being got rid of.
+        """
+        return
+
+    # Nothing in maths needs a space: a unit goes straight after its number,
+    # and an operator needs no room around it. So a space, typed into something
+    # that has not become maths yet, means this was never a calculation.
+    MATHS_MARKS = set("+-*/^()=:<>,")
 
     def keyPressEvent(self, event) -> None:
+        if (event.text() == " " and self.owner.looks_like_words()
+                and not (event.modifiers() & Qt.ShiftModifier)):
+            self.owner.wantsWords.emit()
+            event.accept()
+            return
         if event.key() in (Qt.Key_Return, Qt.Key_Enter):
             if event.modifiers() & Qt.ShiftModifier:
                 super().keyPressEvent(event)
@@ -52,55 +66,6 @@ class _MathEditor(QGraphicsTextItem):
                 event.accept()
                 return
         super().keyPressEvent(event)
-
-
-class _SourceColours(QSyntaxHighlighter):
-    """Colour the source while it is being typed, the way it prints.
-
-    The point is that editing and printing look like the same thing: units in
-    the same blue they are printed in, comments in the same grey, the
-    assignment marker standing out, and everything in the page's own maths
-    font at the size it will be printed at. Nothing here changes what is
-    typed — it only stops the editor looking like a different program.
-    """
-
-    def __init__(self, document, item):
-        super().__init__(document)
-        self.item = item
-
-    def highlightBlock(self, text: str) -> None:
-        style = self.item.math_style()
-        comment = QTextCharFormat()
-        comment.setForeground(style.comment_color)
-        comment.setFontItalic(True)
-        unit = QTextCharFormat()
-        unit.setForeground(style.unit_color)
-        number = QTextCharFormat()
-        number.setForeground(QColor(style.color))
-        marker = QTextCharFormat()
-        marker.setForeground(QColor(11, 107, 203))
-        marker.setFontWeight(QFont.DemiBold)
-
-        stripped = text.lstrip()
-        if stripped.startswith("#") or stripped.startswith("//"):
-            self.setFormat(0, len(text), comment)
-            return
-        cut = _top_level_hash(text)
-        if cut >= 0:
-            self.setFormat(cut, len(text) - cut, comment)
-            text = text[:cut]
-
-        for match in re.finditer(r":=|:|→|->|⇒|»", text):
-            self.setFormat(match.start(), match.end() - match.start(), marker)
-        for match in re.finditer(r"\d+(?:\.\d+)?(?:[eE][-+]?\d+)?", text):
-            self.setFormat(match.start(), match.end() - match.start(), number)
-        known = getattr(self.item, "_known_names", set())
-        for match in re.finditer(r"[A-Za-z_\u0370-\u03ff][\w\u0370-\u03ff]*", text):
-            word = match.group(0)
-            if word in known or word in engine.KEYWORD_FUNCTIONS:
-                continue
-            if _is_a_unit_name(word):
-                self.setFormat(match.start(), len(word), unit)
 
 
 def _top_level_hash(text: str) -> int:
@@ -136,14 +101,16 @@ def _is_a_unit_name(word: str) -> bool:
 class _MathRow:
     """One laid-out source line."""
 
-    __slots__ = ("statement", "left", "result", "error_box", "top", "height", "baseline")
+    __slots__ = ("statement", "left", "result", "error_box", "top", "height",
+                 "baseline", "line")
 
     def __init__(self, statement, left: Optional[Box], result: Optional[Box],
-                 error_box: Optional[Box]):
+                 error_box: Optional[Box], line: int = 0):
         self.statement = statement
         self.left = left
         self.result = result
         self.error_box = error_box
+        self.line = line
         self.top = 0.0
         self.height = 0.0
         self.baseline = 0.0
@@ -167,6 +134,7 @@ class MathItem(MarkupItem):
     ROTATABLE = False
 
     enterPressed = Signal()
+    wantsWords = Signal()        # a space, typed before this became maths
 
     def __init__(self, source: str = DEFAULT_SOURCE, block: bool = False):
         super().__init__()
@@ -195,6 +163,9 @@ class MathItem(MarkupItem):
         # way round can say so once, in the preferences.
         self.local_scope = _blocks_keep_their_names() if block else False
         self.local_values: dict[str, Any] = {}
+        # Set when this region was begun by typing on bare paper rather than
+        # chosen from a tool. Only those can still turn out to be prose.
+        self.started_by_typing = False
         self.auto_width = True
         self._width = 260.0
         self._height = 40.0
@@ -329,9 +300,10 @@ class MathItem(MarkupItem):
         size = style.size
         rows: list[_MathRow] = []
 
-        for statement in self.statements:
+        for line_number, statement in enumerate(self.statements):
             if statement.kind == engine.BLANK:
-                blank = _MathRow(statement, Spacer(0, size * 0.5, 0), None, None)
+                blank = _MathRow(statement, Spacer(0, size * 0.5, 0), None, None,
+                                 line_number)
                 rows.append(blank)
                 continue
             if statement.kind == engine.COMMENT:
@@ -339,7 +311,7 @@ class MathItem(MarkupItem):
                     continue
                 text = setter.text(statement.comment, size * 0.95, italic=True,
                                    color=style.comment_color)
-                rows.append(_MathRow(statement, text, None, None))
+                rows.append(_MathRow(statement, text, None, None, line_number))
                 continue
 
             left_parts: list[Box] = []
@@ -388,7 +360,8 @@ class MathItem(MarkupItem):
                 note = setter.text("   " + statement.comment, size * 0.9, italic=True,
                                    color=style.comment_color)
                 result = Row([result, Spacer(size * 0.4), note]) if result else note
-            rows.append(_MathRow(statement, left, result, error_box))
+            rows.append(_MathRow(statement, left, result, error_box,
+                                 line_number))
 
         self.rows = rows
         self._measure()
@@ -497,26 +470,66 @@ class MathItem(MarkupItem):
             # The same face and the same size as the printed line, so entering
             # an edit does not change what the page looks like.
             self._editor.setDefaultTextColor(QColor(self.style.text_color))
-            self._colours = _SourceColours(self._editor.document(), self)
         from ..core.typography import page_font
         self._editor.setFont(page_font(self.style.font_family, self.style.font_size))
         self._editor.setPlainText(self.source)
         self._editor.setTextInteractionFlags(Qt.TextEditorInteraction)
         self._editor.setPos(self.style.padding, self.style.padding)
-        # Wrap at the region's own width, and let the region grow if the words
-        # need more room than the printed line did — never scroll sideways
-        # inside a box the reader cannot see the end of.
-        width = max(self._width - 2 * self.style.padding, 120.0)
-        self._editor.setTextWidth(width)
-        if self.auto_width:
-            self.prepareGeometryChange()
-            self._width = max(self._width, width + 2 * self.style.padding)
+        self._editor.setTextWidth(-1)
+        # What the source said when the edit began, so end_edit can tell
+        # whether anything actually changed: the text itself is kept level with
+        # the typing as it goes, and by then it is too late to compare.
+        self._source_at_edit_start = self.source
         self._editor.show()
         self._editing = True
         self._editor.setFocus(Qt.MouseFocusReason)
         cursor = self._editor.textCursor()
         cursor.movePosition(QTextCursor.End)
         self._editor.setTextCursor(cursor)
+        if not getattr(self, "_typeset_wired", False):
+            # Keep the typeset working level with the typing. The answers wait
+            # for the recalculation a moment later; the working itself must
+            # not, or the caret would be standing in yesterday's expression.
+            self._editor.document().contentsChanged.connect(self.retypeset_live)
+            self._typeset_wired = True
+        self.update()
+
+    def looks_like_words(self) -> bool:
+        """True while what has been typed could still turn out to be prose.
+
+        Once there is an operator, an equals sign or a bracket in it, it is a
+        calculation and a space is just a space.
+        """
+        if not self.started_by_typing:
+            return False
+        text = self._editor.toPlainText() if self._editor is not None else self.source
+        return not any(mark in text for mark in _MathEditor.MATHS_MARKS)
+
+    def retypeset_live(self) -> None:
+        """Lay the working out again from what has been typed so far.
+
+        Only parsed, never evaluated: working a half-finished line out against
+        the document would define names that are still being spelt. The
+        answers already on the page are kept for the lines that have not
+        changed, so they stay put rather than blinking out at every keystroke.
+        """
+        if self._editor is None:
+            return
+        source = self._editor.toPlainText()
+        if source == self.source and self.rows:
+            self.update()
+            return
+        self.source = source
+        previous = {(index, statement.raw): statement
+                    for index, statement in enumerate(self.statements)}
+        fresh = []
+        for index, line in enumerate(source.split("\n")):
+            parsed = engine.parse_statement(line)
+            kept = previous.get((index, parsed.raw))
+            fresh.append(kept if kept is not None else parsed)
+        self.statements = fresh
+        self.prepareGeometryChange()
+        self.relayout()
         self.update()
 
     def end_edit(self) -> bool:
@@ -524,7 +537,7 @@ class MathItem(MarkupItem):
         changed = False
         if self._editor is not None:
             text = self._editor.toPlainText()
-            changed = text != self.source
+            changed = text != getattr(self, "_source_at_edit_start", self.source)
             self.source = text
             self._editor.setTextInteractionFlags(Qt.NoTextInteraction)
             self._editor.hide()
@@ -611,15 +624,15 @@ class MathItem(MarkupItem):
             painter.setBrush(Qt.NoBrush)
             painter.drawRoundedRect(rect, self.style.corner_radius, self.style.corner_radius)
         if self._editing:
-            # While it is being typed the region keeps its own shape and its
-            # answers: only the left-hand side turns into text, in the same
-            # font it prints in. A box in another colour, in another typeface,
-            # scrolling sideways, is the thing this is not.
+            # There is one view of a calculation, and this is it. While it is
+            # being typed it stays typeset — fractions are still fractions,
+            # powers are still powers — with a caret standing in the working
+            # rather than a second, flatter copy of it underneath. That is how
+            # SMath does it, and it is the only way the thing you are editing
+            # is the thing you will print.
             painter.setPen(QPen(QColor(11, 107, 203, 90), 0.8))
-            painter.setBrush(QColor(252, 253, 255))
+            painter.setBrush(QColor(252, 253, 255, 210))
             painter.drawRoundedRect(rect, 2.0, 2.0)
-            self._paint_results(painter)
-            return
 
         if self.scoped and self.rows:
             rule = QPen(QColor(120, 140, 170, 130))
@@ -637,20 +650,123 @@ class MathItem(MarkupItem):
                 row.result.draw(painter, x, row.baseline)
             elif row.error_box is not None:
                 row.error_box.draw(painter, x, row.baseline)
+        if self._editing:
+            self._paint_caret(painter)
 
-    def _paint_results(self, painter: QPainter) -> None:
-        """The answers, still shown while the source is being typed."""
-        pad = self.style.padding
+    # -- the caret, inside the typeset working ------------------------------
+    def caret_line_and_column(self) -> tuple:
+        """Where the caret is, as (line, column), or (-1, 0) when not typing."""
+        if self._editor is None or not self._editing:
+            return (-1, 0)
+        cursor = self._editor.textCursor()
+        return (cursor.blockNumber(), cursor.positionInBlock())
+
+    def row_for_line(self, line: int):
         for row in self.rows:
-            box = row.result or row.error_box
-            if box is None:
+            if row.line == line:
+                return row
+        return None
+
+    @staticmethod
+    @lru_cache(maxsize=512)
+    def _alignment(written: str, parsed: str) -> tuple:
+        """Line the written expression up with the Python it is parsed as.
+
+        "12 kN" is parsed as "( 12 * kN )", so a character of one is not the
+        same character of the other, and the offsets in the box tree count the
+        second. Lining them up character by character is what lets a click on
+        the page find the right place in what was actually typed.
+        """
+        from difflib import SequenceMatcher
+
+        forward: dict[int, int] = {}
+        backward: dict[int, int] = {}
+        matcher = SequenceMatcher(None, written, parsed, autojunk=False)
+        for start_a, start_b, size in matcher.get_matching_blocks():
+            for step in range(size):
+                forward[start_a + step] = start_b + step
+                backward[start_b + step] = start_a + step
+        forward[len(written)] = len(parsed)
+        backward[len(parsed)] = len(written)
+        return forward, backward
+
+    def alignment(self, statement) -> tuple:
+        return self._alignment(statement.expression or "",
+                               engine.python_form(statement.expression or ""))
+
+    @staticmethod
+    def _nearest(table: dict, offset: int) -> int:
+        if offset in table:
+            return table[offset]
+        below = [key for key in table if key <= offset]
+        return table[max(below)] if below else 0
+
+    @staticmethod
+    def expression_column(statement) -> int:
+        """Where a statement's expression starts within the line as written.
+
+        The parser hands back the expression on its own, having taken off the
+        name, the arrow and the trailing "=". To put a caret in the right
+        place, the offsets in the box tree — which count from the start of the
+        expression — have to be moved along by however much came before it.
+        """
+        raw, expression = statement.raw or "", statement.expression or ""
+        if not expression:
+            return 0
+        found = raw.rfind(expression)
+        if found >= 0:
+            return found
+        return max(len(raw) - len(expression), 0)
+
+    def caret_place(self):
+        """The caret's place on the page: (x, baseline, ascent, descent)."""
+        line, column = self.caret_line_and_column()
+        if line < 0:
+            return None
+        row = self.row_for_line(line)
+        if row is None or row.left is None:
+            return None
+        written = column - self.expression_column(row.statement)
+        forward, _backward = self.alignment(row.statement)
+        offset = self._nearest(forward, max(written, 0))
+        found = caret_in(row.left, self.style.padding, row.baseline, offset)
+        if found is not None:
+            return found
+        # Off the end of what could be typeset — the caret sits just past the
+        # last thing drawn, which is where the next character will go.
+        return (self.style.padding + row.left.width, row.baseline,
+                row.left.ascent, row.left.descent)
+
+    def offset_at(self, point) -> tuple:
+        """The (line, column) nearest a point, for clicking into the working."""
+        best = (-1, 0, float("inf"))
+        for row in self.rows:
+            if row.left is None:
                 continue
-            x = pad + (self._left_column if self.align_results
-                       else (row.left.width if row.left else 0.0)) + self.result_gap
-            painter.save()
-            painter.setOpacity(0.55)
-            box.draw(painter, x, row.baseline)
-            painter.restore()
+            distance = abs(point.y() - row.baseline)
+            offset = offset_in(row.left, self.style.padding, row.baseline, point)
+            if offset is None:
+                continue
+            if distance < best[2]:
+                _forward, backward = self.alignment(row.statement)
+                written = self._nearest(backward, offset)
+                best = (row.line, written + self.expression_column(row.statement),
+                        distance)
+        if best[0] < 0:
+            return (-1, 0)
+        return (best[0], best[1])
+
+    def _paint_caret(self, painter: QPainter) -> None:
+        place = self.caret_place()
+        if place is None:
+            return
+        x, baseline, ascent, descent = place
+        ascent = max(ascent, self.style.font_size * 0.75)
+        descent = max(descent, self.style.font_size * 0.2)
+        pen = QPen(QColor(11, 107, 203))
+        pen.setWidthF(1.1)
+        painter.setPen(pen)
+        painter.drawLine(QPointF(x, baseline - ascent), QPointF(x, baseline + descent))
 
     def paint_handles(self, painter: QPainter) -> None:
         if self._editing:

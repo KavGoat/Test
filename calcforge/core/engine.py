@@ -322,6 +322,16 @@ class _ColumnLetters(ast.NodeTransformer):
         return node
 
 
+def python_form(source: str) -> str:
+    """The Python the expression is turned into before it is parsed.
+
+    Worth having on its own: the offsets in the parsed tree count characters of
+    *this*, not of what the author typed, and putting a caret in typeset maths
+    means being able to get from one to the other.
+    """
+    return transform(source)
+
+
 def compile_expression(source: str, pre_transformers: tuple = ()
                        ) -> tuple[Any, ast.Expression]:
     """Transform, parse, validate and compile *source*.
@@ -331,7 +341,7 @@ def compile_expression(source: str, pre_transformers: tuple = ()
     uses one for Excel's ``&`` concatenation operator).  The returned tree is
     the display tree — lazy-call rewriting only affects the compiled code.
     """
-    python_source = transform(source)
+    python_source = python_form(source)
     tree = ast.parse(python_source, mode="eval")
     tree = ast.fix_missing_locations(_OffsetUnitLiterals().visit(tree))
     for transformer in pre_transformers:

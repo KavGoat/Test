@@ -3059,6 +3059,25 @@ class MainWindow(QMainWindow):
             "This block keeps its names to itself" if on
             else "This block defines for the whole document")
 
+    def start_typing(self, first: str, scene_point: QPointF) -> None:
+        """Begin writing on bare paper, starting with the character just typed.
+
+        There is no mode to choose first. A calculation is what a calculation
+        sheet is mostly made of, so that is what a keystroke starts; the moment
+        a space is typed into something that has not become maths yet, it turns
+        into a text box instead.
+        """
+        self._insert_at("math", scene_point)
+        item = self.view.editing_item()
+        if not isinstance(item, MathItem):
+            return
+        item.started_by_typing = True
+        editor = getattr(item, "_editor", None)
+        if editor is not None:
+            cursor = editor.textCursor()
+            cursor.insertText(first)
+            editor.setTextCursor(cursor)
+
     def _insert_at(self, key: str, scene_point: QPointF) -> None:
         """Put a new markup on the page under *scene_point*."""
         tool = TOOL_MAP[key]

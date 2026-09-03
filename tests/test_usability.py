@@ -4074,3 +4074,88 @@ def test_misspelt_words_are_underlined_only_while_typing(window):
     window.view.end_item_edit()
     assert box._speller is None
     assert not box.doc.findBlockByNumber(0).layout().formats()
+
+
+# ---------------------------------------------------------------------------
+# One view of a calculation, typed into where it is
+# ---------------------------------------------------------------------------
+
+def test_a_calculation_stays_typeset_while_it_is_typed(window):
+    """No second, flatter copy underneath: the caret stands in the working."""
+    from calcforge.items.mathitem import MathItem
+
+    item = MathItem("x := 5/2 =")
+    item.setPos(60, 60)
+    window.view.frame().add_markup(item)
+    window.recalculate()
+    window.view.begin_item_edit(item)
+
+    editor = item._editor
+    cursor = editor.textCursor()
+    places = {}
+    for column in (5, 7):                    # the 5, then the 2
+        cursor.setPosition(column)
+        editor.setTextCursor(cursor)
+        places[column] = item.caret_place()
+
+    numerator, denominator = places[5], places[7]
+    assert numerator is not None and denominator is not None
+    assert numerator[1] < denominator[1]     # one above the bar, one below
+    window.view.end_item_edit()
+
+
+def test_clicking_a_fraction_puts_the_caret_in_that_part_of_it(window):
+    from calcforge.items.mathitem import MathItem
+
+    item = MathItem("x := 5/2 =")
+    item.setPos(60, 60)
+    window.view.frame().add_markup(item)
+    window.recalculate()
+    window.view.begin_item_edit(item)
+
+    row = item.rows[0]
+    top = QPointF(item.style.padding + row.left.width - 4,
+                  row.baseline - row.left.ascent + 4)
+    line, column = item.offset_at(top)
+    assert line == 0
+    assert column in (5, 6)                  # in the numerator, not at the end
+    window.view.end_item_edit()
+
+
+def test_typing_a_calculation_keeps_the_working_up_with_it(window):
+    window.select_tool("select")
+    press_key(window.view, Qt.Key_unknown, "5")
+    item = window.view.editing_item()
+    assert item is not None
+    type_text(window.view, "kN+3kN=")
+    assert item.source == "5kN+3kN="
+    assert item.rows                          # laid out, not waiting
+    window.view.end_item_edit()
+
+
+def test_a_space_turns_what_was_typed_into_a_text_box(window):
+    """Maths needs no spaces, so a space says this was a sentence."""
+    from calcforge.items.text import TextItem
+
+    window.select_tool("select")
+    press_key(window.view, Qt.Key_unknown, "f")
+    type_text(window.view, "ine")
+    press_key(window.view, Qt.Key_Space, " ")
+
+    box = window.view.editing_item()
+    assert isinstance(box, TextItem)
+    assert box.text() == "fine "
+    window.view.end_item_edit()
+    assert [type(i).__name__ for i in markups(window)] == ["TextItem"]
+
+
+def test_a_space_in_real_maths_is_just_a_space(window):
+    from calcforge.items.mathitem import MathItem
+
+    window.select_tool("select")
+    press_key(window.view, Qt.Key_unknown, "5")
+    type_text(window.view, "+")
+    press_key(window.view, Qt.Key_Space, " ")
+    item = window.view.editing_item()
+    assert isinstance(item, MathItem)
+    window.view.end_item_edit()

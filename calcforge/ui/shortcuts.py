@@ -76,6 +76,8 @@ def _symbol_bindings() -> list[Binding]:
 # for without thinking about tools at all.
 DEFAULT_BINDINGS: list[Binding] = [
     Binding("insert.text", "Start typing text", '"', INSERT, "Typing", "text"),
+    # Typing anything unbound already starts a calculation; this is for people
+    # who would rather say so first.
     Binding("insert.math", "Start typing maths", "/", INSERT, "Typing", "math"),
     Binding("insert.table", "Start a table here", "|", INSERT, "Typing", "table"),
     Binding("insert.callout", "Start a callout here", "@", INSERT, "Typing", "callout"),
