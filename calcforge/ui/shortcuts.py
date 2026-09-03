@@ -64,6 +64,19 @@ SYMBOLS: list[tuple[str, str, str, str]] = [
     ("sum",             "Σ",    "Sum Σ",             "Ctrl+Alt+S"),
     ("diameter",        "⌀",    "Diameter ⌀",        "Ctrl+Alt+O"),
     ("micro",           "µ",    "Micro µ",           "Ctrl+Alt+M"),
+    # The Greek letters an engineer here writes every week. φ is the capacity
+    # reduction factor, and it is the same variable however it is typed —
+    # "phi", this key, or a letter pasted out of a standard.
+    ("phi",             "φ",    "Phi φ",             "Ctrl+Alt+F"),
+    ("sigma",           "σ",    "Sigma σ",           "Ctrl+Alt+G"),
+    ("alpha",           "α",    "Alpha α",           "Ctrl+Alt+A"),
+    ("beta",            "β",    "Beta β",            "Ctrl+Alt+B"),
+    ("gamma",           "γ",    "Gamma γ",           "Ctrl+Alt+Y"),
+    ("theta",           "θ",    "Theta θ",           "Ctrl+Alt+H"),
+    ("lamda",           "λ",    "Lambda λ",          "Ctrl+Alt+L"),
+    ("rho",             "ρ",    "Rho ρ",             "Ctrl+Alt+K"),
+    ("epsilon",         "ε",    "Epsilon ε",         "Ctrl+Alt+E"),
+    ("omega",           "ω",    "Omega ω",           "Ctrl+Alt+W"),
 ]
 
 

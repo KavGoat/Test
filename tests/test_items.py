@@ -215,10 +215,17 @@ def test_a_highlighter_stroke_is_one_even_band(qapp):
     assert shades != {0xFFFFFFFF}
 
 
-def test_an_exponent_clears_a_tall_base(qapp):
-    """"f²" must not put the 2 through the top of the f."""
+def test_an_exponent_rides_the_shoulder_of_its_base(qapp):
+    """"d²" reads as one thing: the 2 against the upper part of the d.
+
+    Floating it clear above the letter — which is what happens when it is
+    placed against the *font's* ascent rather than the letter's own ink —
+    reads as two things side by side, and is what a calculation sheet should
+    never look like.
+    """
     import ast
-    from calcforge.core.mathrender import MathStyle, Shifted, Typesetter
+    from calcforge.core.mathrender import (MathStyle, Shifted, Typesetter,
+                                           ink_ascent)
 
     setter = Typesetter(MathStyle())
     size = 10.0
@@ -230,13 +237,34 @@ def test_an_exponent_clears_a_tall_base(qapp):
         lifted = [c for c in row.children if isinstance(c, Shifted)][0]
         return base, lifted
 
-    tall_base, tall_exp = parts("f ** 2")
-    short_base, short_exp = parts("2 ** 2")
+    tall_base, tall_exp = parts("d ** 2")
+    short_base, short_exp = parts("x ** 2")
 
-    # The exponent's lowest ink sits above the base's own top.
-    bottom = -tall_exp.dy - tall_exp.child.descent
-    assert bottom > tall_base.ascent * 0.5
-    # A taller base lifts it further than a short one does.
-    assert -tall_exp.dy >= -short_exp.dy
-    # And there is a gap between the two, not just a shift.
-    assert tall_base.width + tall_exp.width < parts("f ** 2")[0].width + 40
+    for base, lifted in ((tall_base, tall_exp), (short_base, short_exp)):
+        lift = -lifted.dy
+        top = lift + ink_ascent(lifted.child)
+        # It clears the top of what it belongs to …
+        assert top > ink_ascent(base)
+        # … but its own foot sits inside the letter, not above it.
+        assert lift < ink_ascent(base)
+        # and never so low that it reads as a second character on the line.
+        assert lift > size * 0.3
+
+    # A taller letter carries it higher than a short one.
+    assert -tall_exp.dy > -short_exp.dy
+
+
+def test_a_subscript_and_a_power_share_one_column(qapp):
+    """"x_1^2" is one letter with two scripts, not "x₁" followed by "²"."""
+    import ast
+    from calcforge.core.mathrender import (MathStyle, Scripts, Typesetter)
+    from calcforge.core.engine import python_form
+
+    setter = Typesetter(MathStyle())
+    row = setter.build(ast.parse(python_form("x_1^2").strip(), mode="eval").body, 10.0)
+    columns = [c for c in row.children if isinstance(c, Scripts)]
+    assert len(columns) == 1
+    column = columns[0]
+    assert column.subscript is not None and column.superscript is not None
+    # One slot wide, not two: the width is the wider of the two scripts.
+    assert column.width == max(column.subscript.width, column.superscript.width)

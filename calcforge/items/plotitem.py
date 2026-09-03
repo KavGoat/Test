@@ -182,13 +182,14 @@ class PlotItem(MarkupItem):
         text = expression.strip()
         if text in workspace.functions:
             text = f"{text}({self.variable})"
-        code, _tree = engine.compile_expression(text)
-        return code
+        code, tree = engine.compile_expression(text)
+        return code, tree
 
-    def _sample(self, code, workspace, position) -> Any:
+    def _sample(self, compiled, workspace, position) -> Any:
+        code, tree = compiled
         namespace = workspace.namespace()
         namespace[self.variable] = position
-        workspace.resolve_units(code, namespace)
+        workspace.resolve_units(code, namespace, tree)
         return engine.evaluate_code(code, namespace)
 
     @staticmethod

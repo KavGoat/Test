@@ -655,7 +655,11 @@ CONSTANTS: dict[str, Any] = {
     "pi": math.pi,
     "e": math.e,
     "tau": math.tau,
-    "phi": (1 + math.sqrt(5)) / 2,
+    # Not "phi": on a structural calculation φ is the capacity reduction
+    # factor, and a line that quietly evaluated it as 1.618 because nobody had
+    # defined it yet would be wrong in the worst possible way. The golden ratio
+    # keeps its own name.
+    "golden": (1 + math.sqrt(5)) / 2,
     "inf": math.inf,
     "true": True,
     "false": False,

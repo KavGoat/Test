@@ -91,6 +91,37 @@ SHADOWED_UNITS = {"sigma", "gamma", "mu", "nu", "alpha", "zeta", "beta", "eta",
                   "tau", "phi", "chi", "omega", "theta", "rho", "lamda"}
 
 
+def a_bare_name_could_be_a_unit(name: str) -> bool:
+    """Whether an undefined name standing on its own may be read as a unit.
+
+    A unit is written after a number — ``300 MPa``, ``6 m`` — and that is read
+    as a unit wherever it appears. A name standing on its own is a variable:
+    ``b*d^2/6`` is a section modulus, and reading ``b`` as a barn and ``d`` as
+    a day gives an answer in MPa·b·d², which is the kind of wrong that gets
+    printed and signed. So a single letter on its own is never a unit, and
+    neither is a two-letter name that reads as an engineer's shorthand.
+
+    Longer names are left alone: somebody who writes ``kN`` on its own means
+    the unit, and there is no dimension anybody calls ``kN``.
+    """
+    return len(name) > 1 and name not in _TWO_LETTER_VARIABLES
+
+
+# Two-letter names that are units to pint and dimensions to an engineer.
+_TWO_LETTER_VARIABLES = {
+    "bd",   # not becquerel·day
+    "As",   # area of steel, not arsenic-second
+    "Ag",   # gross area, not silver
+    "Ac",   # area of concrete
+    "Av",   # shear area
+    "Ix", "Iy", "Iz",
+    "Zx", "Zy",   # section moduli — "Zy" is not zetta-year
+    "Sx", "Sy",
+    "kd", "ku", "kt", "kl",   # the k factors of NZS 3404 and AS 1720
+    "ha",   # depth, not hectare, when it stands alone in a formula
+}
+
+
 def is_unit_name(name: str) -> bool:
     """True when *name* is a unit in the registry (cached; used for italics)."""
     if name in SHADOWED_UNITS:

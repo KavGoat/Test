@@ -4,6 +4,7 @@ import pytest
 
 from calcforge.core.engine import (DEFINE, EVALUATE, FUNCTION, Workspace,
                                    evaluate_source, parse_statement, transform)
+from calcforge.items.mathitem import MathItem
 from calcforge.core.units import Q_, format_number, format_quantity, ureg
 
 
@@ -388,3 +389,80 @@ def test_mistakes_are_reported_with_where_they_are():
     assert [word for _start, _length, word in found] == ["teh"]
     start, length, _word = found[0]
     assert "the colour of teh beam"[start:start + length] == "teh"
+
+
+# ---------------------------------------------------------------------------
+# One Greek letter, and a bare letter that is a variable
+# ---------------------------------------------------------------------------
+
+def test_the_two_unicode_phis_are_one_variable():
+    """φ (U+03C6) and ϕ (U+03D5) are one letter to an engineer."""
+    from calcforge.core.engine import normalise
+
+    assert normalise("φ") == normalise("ϕ") == "phi"
+    assert normalise("φ := 0.9") == "phi := 0.9"
+
+
+def test_every_greek_letter_folds_to_one_name():
+    from calcforge.core import greek
+
+    for name, letter in greek.LETTERS.items():
+        assert greek.fold(letter) == name
+    for variant, name in greek.VARIANTS.items():
+        assert greek.fold(variant) == name
+
+
+def test_a_greek_letter_typed_either_way_is_the_same_value():
+    workspace = Workspace()
+    workspace.begin_pass()
+    block = MathItem("φ := 0.9\nN := 100 kN\nR := ϕ*N -> kN")
+    block.local_scope = False
+    block.refresh(workspace)
+    assert workspace.get("R").to("kN").magnitude == pytest.approx(90)
+
+
+def test_phi_is_not_quietly_the_golden_ratio():
+    """On a structural sheet φ is the capacity factor, and 1.618 would be wrong."""
+    from calcforge.core.functions import CONSTANTS
+
+    assert "phi" not in CONSTANTS
+    assert CONSTANTS["golden"] == pytest.approx(1.6180339887)
+
+
+def test_a_letter_standing_alone_is_a_variable_not_a_unit():
+    """b*d^2/6 is a section modulus, not an answer in barn·day²."""
+    workspace = Workspace()
+    workspace.begin_pass()
+    block = MathItem("b := 300 mm\nd := 500 mm\nZ := b*d^2/6 -> mm^3")
+    block.local_scope = False
+    block.refresh(workspace)
+    assert workspace.get("Z").to("mm**3").magnitude == pytest.approx(12.5e6)
+
+
+def test_an_undefined_letter_is_reported_rather_than_read_as_a_unit():
+    workspace = Workspace()
+    workspace.begin_pass()
+    block = MathItem("Z := b*d^2/6 =")
+    block.local_scope = False
+    block.refresh(workspace)
+    assert "not defined" in (block.statements[0].error or "")
+
+
+def test_a_unit_after_a_number_is_still_a_unit():
+    workspace = Workspace()
+    workspace.begin_pass()
+    block = MathItem("L := 6 m\nw := 2 kN/m\nM := w*L^2/8 -> kN*m")
+    block.local_scope = False
+    block.refresh(workspace)
+    assert workspace.get("M").to("kN*m").magnitude == pytest.approx(9)
+    assert workspace.get("L").to("m").magnitude == pytest.approx(6)
+
+
+def test_a_named_unit_on_its_own_still_reads_as_one():
+    """Nobody calls a dimension "kN", so a long name is left as the unit."""
+    workspace = Workspace()
+    workspace.begin_pass()
+    block = MathItem("F := 5*kN -> kN")
+    block.local_scope = False
+    block.refresh(workspace)
+    assert workspace.get("F").to("kN").magnitude == pytest.approx(5)

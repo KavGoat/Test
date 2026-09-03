@@ -29,7 +29,9 @@ from typing import Any, Callable, Optional
 import pint
 
 from . import functions as fnlib
-from .units import (Q_, Quantity, SHADOWED_UNITS, convert, format_quantity,
+from . import greek
+from .units import (Q_, Quantity, SHADOWED_UNITS, a_bare_name_could_be_a_unit,
+                    convert, format_quantity,
                     is_unit_name, preferred_unit, reads_better, reads_well,
                     simplify_units, ureg)
 
@@ -74,8 +76,42 @@ _ALLOWED_NODES = (
 )
 
 
+def _starts_with_a_number(node) -> bool:
+    """Whether the leftmost thing in an expression is a plain number.
+
+    ``6 m``, ``2 kN/m`` and ``3 m^2`` all come out of the transform as a
+    number multiplied by the unit run that followed it, so this is how the
+    tree says "what follows here is a unit".
+    """
+    while isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Mult, ast.Div,
+                                                              ast.Pow)):
+        node = node.left
+    return isinstance(node, ast.Constant) and isinstance(node.value, (int, float))
+
+
+def unit_positions(tree) -> set[str]:
+    """Every name in *tree* that stands where a unit stands: after a number."""
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.BinOp) or not isinstance(node.op, (ast.Mult,
+                                                                      ast.Div)):
+            continue
+        if not _starts_with_a_number(node.left):
+            continue
+        for inner in ast.walk(node.right):
+            if isinstance(inner, ast.Name):
+                found.add(inner.id)
+    return found
+
+
 def normalise(text: str) -> str:
-    """Replace typographic and unicode maths characters with ASCII."""
+    """Replace typographic and unicode maths characters with ASCII.
+
+    Greek letters are folded first: φ and ϕ are one letter to an engineer even
+    though Unicode has two codepoints for them, and a document that quietly
+    held two variables called phi would be wrong in a way nobody would spot.
+    """
+    text = greek.fold(text)
     for source, target in _UNICODE_MAP.items():
         if source in text:
             text = text.replace(source, target)
@@ -522,7 +558,7 @@ class UserFunction:
             raise TypeError(f"{self.name}() takes {len(self.params)} argument(s), got {len(args)}")
         namespace = self.workspace.namespace()
         namespace.update(dict(zip(self.params, args)))
-        self.workspace.resolve_units(self.code, namespace)
+        self.workspace.resolve_units(self.code, namespace, self.tree)
         return evaluate_code(self.code, namespace)
 
     def signature(self) -> str:
@@ -616,13 +652,25 @@ class Workspace:
         ns.update(self.tables)
         return ns
 
-    def resolve_units(self, code, namespace: dict[str, Any]) -> None:
-        """Bind any still-unknown name in *code* to a unit, if one exists."""
+    def resolve_units(self, code, namespace: dict[str, Any], tree=None) -> None:
+        """Bind any still-unknown name in *code* to a unit, if one exists.
+
+        A name is only read as a unit when it stands where a unit stands:
+        after a number. ``6 m`` is six metres; ``b*d^2/6`` is a section
+        modulus, and reading its ``b`` as a barn and its ``d`` as a day would
+        give an answer in MPa·b·d² — wrong in the way that gets printed and
+        signed. Without a tree to look at, the old rule stands, because a
+        caller that cannot say where the name was has no better information.
+        """
+        after_a_number = unit_positions(tree) if tree is not None else None
         for name in _all_names(code):
             if name in namespace or name.startswith("__"):
                 continue
             if name in self.document_names or name in SHADOWED_UNITS:
                 continue        # the author's name, not a unit
+            if (after_a_number is not None and name not in after_a_number
+                    and not a_bare_name_could_be_a_unit(name)):
+                continue        # b and d are breadth and depth, not barn·day
             if name in self._unit_cache:
                 value = self._unit_cache[name]
                 if value is not None:
@@ -698,9 +746,9 @@ class Workspace:
 
     # -- evaluation --------------------------------------------------------
     def evaluate(self, source: str) -> Any:
-        code, _tree = compile_expression(source)
+        code, tree = compile_expression(source)
         namespace = self.namespace()
-        self.resolve_units(code, namespace)
+        self.resolve_units(code, namespace, tree)
         return evaluate_code(code, namespace)
 
     def dependencies(self, source: str) -> set[str]:
@@ -920,7 +968,7 @@ def evaluate_statement(statement: Statement, workspace: Workspace, source: str =
                                         workspace.expression_transformers())
         statement.tree = tree
         namespace = workspace.namespace()
-        workspace.resolve_units(code, namespace)
+        workspace.resolve_units(code, namespace, tree)
         value = evaluate_code(code, namespace)
 
         # What the author wrote is kept apart from what they asked to see it

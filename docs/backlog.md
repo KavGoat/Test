@@ -64,9 +64,9 @@ in a conversation is a list that gets lost.
 ## Calculations
 
 - [ ] **One written-out equation view.** The edit view must be the final view:
-  fractions, powers, subscripts, no inline fallback, and a superscript that
-  sits where it belongs. Rebuilt in terms of lines and blocks.
-- [ ] **One phi.** Two different characters are being used for it; every Greek
+  fractions, powers, subscripts, no inline fallback. (The superscript itself
+  is fixed; what is left is the edit view.)
+- [x] **One phi.** Two different characters are being used for it; every Greek
   letter wants checking, and the spacing around them fixing.
 - [ ] **Variable completion**: typing a name in an equation offers every
   variable, and Tab fills it in.

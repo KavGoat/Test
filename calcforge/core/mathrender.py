@@ -15,9 +15,10 @@ import numpy as np
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen
 
+from . import greek as _greek
 from .typography import SERIF, page_font
-from .units import (Quantity, format_number, format_quantity, format_unit,
-                    is_unit_name)
+from .units import (Quantity, a_bare_name_could_be_a_unit, format_number,
+                    format_quantity, format_unit, is_unit_name)
 
 # ---------------------------------------------------------------------------
 # Symbols
@@ -26,16 +27,14 @@ from .units import (Quantity, format_number, format_quantity, format_unit,
 # Between a number and its unit, the way SMath separates the two.
 UNIT_SEPARATOR = "·"
 
-GREEK = {
-    "alpha": "α", "beta": "β", "gamma": "γ", "delta": "δ", "epsilon": "ε",
-    "zeta": "ζ", "eta": "η", "theta": "θ", "iota": "ι", "kappa": "κ",
-    "lamda": "λ", "lambda_": "λ", "mu": "μ", "nu": "ν", "xi": "ξ",
-    "omicron": "ο", "pi": "π", "rho": "ρ", "sigma": "σ", "tau": "τ",
-    "upsilon": "υ", "phi": "φ", "chi": "χ", "psi": "ψ", "omega": "ω",
-    "Gamma": "Γ", "Delta": "Δ", "Theta": "Θ", "Lambda": "Λ", "Xi": "Ξ",
-    "Pi": "Π", "Sigma": "Σ", "Phi": "Φ", "Psi": "Ψ", "Omega": "Ω",
+# What each spelled name is drawn as. The names are the ones the engine folds
+# every Greek character to, so however φ was typed it is one variable, and it
+# comes back out on the page as the letter.
+GREEK = dict(_greek.LETTERS)
+GREEK.update({
+    "lambda_": "λ", "Lambda": "Λ",
     "nabla": "∇", "partial": "∂", "infinity": "∞", "inf": "∞",
-}
+})
 
 OPERATORS = {
     ast.Add: "+", ast.Sub: "−", ast.Mult: "·", ast.Div: "/", ast.Mod: "mod",
@@ -79,6 +78,15 @@ class MathStyle:
 # Box model
 # ---------------------------------------------------------------------------
 
+def ink_ascent(box) -> float:
+    """How high a box's own ink reaches above the baseline.
+
+    Only a glyph knows; everything else falls back to the ascent it is laid
+    out on, which for a fraction or a bracket is its ink anyway.
+    """
+    return getattr(box, "ink_ascent", None) or box.ascent
+
+
 class Box:
     """A laid-out fragment with a width and an ascent/descent about its baseline.
 
@@ -118,8 +126,16 @@ class Glyph(Box):
         self.color = color
         metrics = QFontMetricsF(font)
         self.width = metrics.horizontalAdvance(text)
+        # The font's ascent, which is the same for every glyph of a size, is
+        # what a line of them has to be laid out on. How high *this* glyph
+        # actually reaches is a different number, and it is the one an
+        # exponent has to be placed against: a font ascent cannot tell an "f"
+        # from an "x", so anything that uses it puts the exponent on both at
+        # the same height and gets one of them wrong.
         self.ascent = metrics.ascent()
         self.descent = metrics.descent()
+        ink = metrics.tightBoundingRect(text)
+        self.ink_ascent = max(-ink.top(), 0.0) if text.strip() else 0.0
 
     def draw(self, painter: QPainter, x: float, baseline: float) -> None:
         painter.setFont(self.font)
@@ -312,6 +328,41 @@ class Bracket(Box):
         return [(self.child, x + self.thickness, baseline)]
 
 
+class Scripts(Box):
+    """A subscript and a superscript in the same column, as print sets them.
+
+    ``x_1^2`` written as ``x₁ ²`` — the two side by side — is what a program
+    does when it has only a row to put them in, and it reads as three things
+    rather than one. They belong one above the other in the slot after the
+    letter, which is what this is for.
+    """
+
+    def __init__(self, subscript: Optional[Box], superscript: Optional[Box],
+                 drop: float, lift: float):
+        self.subscript = subscript
+        self.superscript = superscript
+        self.drop = drop
+        self.lift = lift
+        self.width = max((box.width for box in (subscript, superscript) if box),
+                         default=0.0)
+        self.ascent = (superscript.ascent + lift) if superscript else 0.0
+        self.descent = (subscript.descent + drop) if subscript else 0.0
+
+    def draw(self, painter: QPainter, x: float, baseline: float) -> None:
+        if self.superscript is not None:
+            self.superscript.draw(painter, x, baseline - self.lift)
+        if self.subscript is not None:
+            self.subscript.draw(painter, x, baseline + self.drop)
+
+    def children_at(self, x: float, baseline: float) -> list:
+        placed = []
+        if self.superscript is not None:
+            placed.append((self.superscript, x, baseline - self.lift))
+        if self.subscript is not None:
+            placed.append((self.subscript, x, baseline + self.drop))
+        return placed
+
+
 class Stack(Box):
     """Vertically stacked rows (matrices, multi-line results)."""
 
@@ -445,7 +496,16 @@ class Typesetter:
         self.variables = variables or set()
 
     def is_unit(self, name: str) -> bool:
-        return name not in self.variables and name not in GREEK and is_unit_name(name)
+        """Whether to set this name upright, the way units are set in print.
+
+        The same rule the engine reads by: a name standing on its own is a
+        variable unless it is long enough to be unmistakably a unit. Setting
+        the ``A`` of a section area upright in unit blue, because pint knows
+        an ampere, says the page means something it does not.
+        """
+        if name in self.variables or name in GREEK:
+            return False
+        return a_bare_name_could_be_a_unit(name) and is_unit_name(name)
 
     # -- primitives --------------------------------------------------------
     def text(self, text: str, size: float, italic: bool = False, bold: bool = False,
@@ -513,6 +573,22 @@ class Typesetter:
             return self.text(node.id, size, italic=False, color=self.style.unit_color)
         return self.name_box(node.id, size)
 
+    def _subscripted_power(self, base_node, exponent: Box, size: float,
+                           exp_size: float) -> Optional[Box]:
+        """``x_1^2`` set with both scripts in one column, or None if it is not one."""
+        if not isinstance(base_node, ast.Name) or "_" not in base_node.id:
+            return None
+        if base_node.id in GREEK or self.is_unit(base_node.id):
+            return None
+        base_text, sub_text = split_name(base_node.id)
+        if not sub_text:
+            return None
+        glyph = self.text(base_text, size, len(base_text) <= 2)
+        sub_box = self.text(sub_text, exp_size, False)
+        lift = max(ink_ascent(glyph) * 0.62, size * 0.42)
+        column = Scripts(sub_box, exponent, size * 0.24, lift)
+        return Row([glyph, Spacer(size * 0.04), column])
+
     def _build_Constant(self, node: ast.Constant, size: float) -> Box:
         value = node.value
         if isinstance(value, bool):
@@ -531,16 +607,20 @@ class Typesetter:
             den = self.build(node.right, small)
             return Fraction(num, den, self.style, size, self.color)
         if op is ast.Pow:
-            base = self._wrap(node.left, size, 8)
             exp_size = max(size * self.style.script_ratio, self.style.min_size)
             exponent = self.build(node.right, exp_size)
-            # Lifted clear of the base's own ink rather than by a fixed
-            # fraction of the size: an italic f is far taller than a 2, and
-            # "f²" set with one rule for both puts the exponent through the
-            # top of the f. A hair of space to its left as well, because an
-            # italic letter leans into whatever follows it.
-            lift = max(base.ascent * 0.58, size * 0.46) + exponent.descent
-            return Row([base, Spacer(size * 0.07), Shifted(exponent, -lift)])
+            column = self._subscripted_power(node.left, exponent, size, exp_size)
+            if column is not None:
+                return column
+            base = self._wrap(node.left, size, 8)
+            # The exponent rides against the upper part of the base rather
+            # than floating clear above it, which is what print does and what
+            # the eye reads as one thing rather than two. It is measured
+            # against the base's own ink: a font ascent is the same for every
+            # letter of a size, so anything keyed on it lifts the exponent on
+            # an "x" as far as on an "f" and one of them comes out wrong.
+            lift = max(ink_ascent(base) * 0.62, size * 0.42)
+            return Row([base, Spacer(size * 0.06), Shifted(exponent, -lift)])
 
         if op is ast.Mult and isinstance(node.left, ast.Constant) and isinstance(node.right, ast.Name):
             # "5 m" reads better than "5 · m"

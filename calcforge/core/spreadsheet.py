@@ -876,12 +876,12 @@ class Sheet:
             cell = self.cells[key]
             prepared, _deps = formulas[key]
             try:
-                code, _tree = compile_expression(prepared, SHEET_TRANSFORMERS)
+                code, tree = compile_expression(prepared, SHEET_TRANSFORMERS)
                 namespace = workspace.namespace()
                 namespace.update(SHEET_FUNCTIONS)
                 namespace["_cell"] = resolver.cell_value
                 namespace["_range"] = resolver.range_values
-                workspace.resolve_units(code, namespace)
+                workspace.resolve_units(code, namespace, tree)
                 value = evaluate_code(code, namespace)
                 unit = self.cell_unit(*key)
                 if unit and isinstance(value, Quantity):
