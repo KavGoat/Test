@@ -1,6 +1,7 @@
 """Importing PDF pages as page backgrounds, using Qt's own PDF module."""
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Optional
 
@@ -99,20 +100,149 @@ def setup_for(info: PdfPageInfo, fit: str, template: Optional[PageSetup]) -> Pag
     return setup
 
 
+# How many pieces of line work are worth bringing across from one page. A
+# big drawing can hold hundreds of thousands; past a few thousand the page is
+# slower to draw than it is useful, and the picture underneath still shows
+# everything.
+MOST_STROKES = 6000
+
+
+def line_work(path: str, indices: list[int]) -> dict[int, list[dict]]:
+    """The vector line work of each page, ready to become markups.
+
+    Nothing when the file cannot be read that way — an encrypted PDF, or one
+    compressed with a filter this reader does not do. The pages still come in
+    as pictures; they simply do not gain geometry to snap to.
+    """
+    from . import pdfvector
+
+    try:
+        source = pdfvector.PdfFile.open(path)
+        pages = source.pages()
+    except Exception:                                  # noqa: BLE001
+        return {}
+    found: dict[int, list[dict]] = {}
+    for index in indices:
+        if not 0 <= index < len(pages):
+            continue
+        try:
+            strokes = pdfvector.strokes_of_page(source, pages[index])
+        except Exception:                              # noqa: BLE001
+            continue
+        if strokes:
+            found[index] = strokes[:MOST_STROKES]
+    return found
+
+
+def _items_from(strokes: list[dict], scale: float = 1.0) -> list[dict]:
+    """Strokes as markup payloads: one polyline for each piece of line work.
+
+    Curves are flattened into short straight runs. What this is for is
+    snapping, measuring and pointing at — a curve read as eight segments
+    measures and snaps the same as one read as a spline, and the picture
+    underneath is what is actually looked at.
+    """
+    items: list[dict] = []
+    for stroke in strokes:
+        for points in _runs(stroke.get("path") or []):
+            if len(points) < 2:
+                continue
+            xs = [p[0] * scale for p in points]
+            ys = [p[1] * scale for p in points]
+            left, top = min(xs), min(ys)
+            items.append({
+                "type": "poly",
+                "kind": "polyline",
+                "x": left, "y": top,
+                "points": [[x - left, y - top] for x, y in zip(xs, ys)],
+                "style": {
+                    "stroke": stroke.get("stroke") or "#3d4350",
+                    "fill": "",
+                    "width": max(float(stroke.get("width", 0.6)) * scale, 0.1),
+                },
+                "layer": "Drawing",
+                "uid": os.urandom(8).hex(),
+            })
+    return items
+
+
+def _runs(path: list) -> list[list]:
+    """One path as separate runs of points, split where the pen lifts."""
+    runs: list[list] = []
+    current: list = []
+    start = None
+    for step in path:
+        op = step[0]
+        if op == "m":
+            if len(current) > 1:
+                runs.append(current)
+            start = [step[1], step[2]]
+            current = [list(start)]
+        elif op == "l":
+            current.append([step[1], step[2]])
+        elif op == "c" and len(step) >= 7:
+            if not current:
+                continue
+            here = current[-1]
+            for piece in range(1, 9):
+                t = piece / 8.0
+                current.append(_bezier(here, step[1:3], step[3:5], step[5:7], t))
+        elif op == "z":
+            if start is not None and current:
+                current.append(list(start))
+            if len(current) > 1:
+                runs.append(current)
+            current = [list(start)] if start is not None else []
+    if len(current) > 1:
+        runs.append(current)
+    return runs
+
+
+def _bezier(a, b, c, d, t: float) -> list:
+    """One point along a cubic curve."""
+    u = 1.0 - t
+    return [u ** 3 * a[0] + 3 * u * u * t * b[0] + 3 * u * t * t * c[0] + t ** 3 * d[0],
+            u ** 3 * a[1] + 3 * u * u * t * b[1] + 3 * u * t * t * c[1] + t ** 3 * d[1]]
+
+
 def import_pages(document, path: str, indices: list[int], fit: str = FIT_ORIGINAL,
-                 dpi: float = 150.0, at: Optional[int] = None) -> list[Page]:
-    """Load the chosen PDF pages into *document* as new pages."""
+                 dpi: float = 150.0, at: Optional[int] = None,
+                 vectors: bool = False) -> list[Page]:
+    """Load the chosen PDF pages into *document* as new pages.
+
+    With *vectors*, the PDF's own line work comes across as well: real
+    geometry on a layer of its own, sitting exactly over the picture, so a
+    measurement can snap to the end of a beam rather than to a guess.
+    """
     source = PdfSource(path)
     template = document.pages[at - 1].setup if at else (
         document.pages[-1].setup if document.pages else None)
+    drawn = line_work(path, indices) if vectors else {}
     created: list[Page] = []
     try:
         for offset, index in enumerate(indices):
             data, info = source.render_png(index, dpi)
             key = document.add_asset(data, "png")
             page = Page(setup_for(info, fit, template))
+            if index in drawn:
+                # The line work belongs on a layer of its own, so it can be
+                # turned off, locked, or left out of the print without
+                # touching anything drawn on top of it.
+                if "Drawing" not in document.layer_names():
+                    from ..core.document import Layer
+                    document.layers.append(Layer("Drawing", locked=True))
+                # The page's own line work, over the picture of it. The page
+                # may have been fitted to different paper, so it is scaled the
+                # same way the picture is.
+                across = info.width_pt or 1.0
+                page._pending_items = _items_from(
+                    drawn[index], page.setup.width_pt / across)
             page.background_key = key
             page.source_note = f"{path.rsplit('/', 1)[-1]} page {index + 1}"
+            # A drawing has its own lines. A grid ruled over the top of it
+            # only gets in the way, so a page that came in from a PDF starts
+            # without one whatever the rest of the document does.
+            page.grid = False
             page.label = page.source_note
             position = None if at is None else at + offset
             if position is None:
@@ -200,6 +330,7 @@ def import_image(document, path: str, fit: str = FIT_ORIGINAL,
     page = Page(setup_for(info, fit, template))
     page.background_key = key
     page.source_note = path.rsplit("/", 1)[-1]
+    page.grid = False
     page.label = page.source_note
     if at is None:
         document.pages.append(page)

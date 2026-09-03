@@ -50,7 +50,7 @@ from .rail import (AREAS, LEFT, RIGHT, PanelRail, RailBar, load_sides,
 from .scene import DocumentScene, detach
 from .shortcuts import COMMAND, INSERT, SYMBOL, TOOL, ShortcutManager
 from . import toolsets
-from .tools import CATEGORIES, TOOL_MAP, TOOLS, tools_in
+from .tools import CATEGORIES, NONE, TOOL_MAP, TOOLS, tools_in
 from .view import SIZED_SHAPES
 from .view import PageView
 from .widgets import ColorButton, keep_the_wheel_with_the_scroller
@@ -95,6 +95,8 @@ _SHORTCUT_GROUPS = {
     "fit_page": "View", "fit_width": "View", "actual_size": "View",
     "prev_page": "View", "next_page": "View", "grid": "View", "snap": "View",
     "snap_items": "View", "margins": "View", "dark": "View",
+    "turn_view_cw": "View", "turn_view_acw": "View",
+    "turn_view_reset": "View",
     "group": "Markup", "ungroup": "Markup", "autosize": "Markup",
     "format_painter": "Markup", "hide": "Markup", "show_hidden": "Markup",
     "flatten": "Markup", "forget_defaults": "Markup",
@@ -105,6 +107,7 @@ _SHORTCUT_GROUPS = {
     "merge_lines": "Calculate", "problems": "Calculate",
     "renumber_counts": "Calculate",
     "shortcuts": "Help", "edit_shortcuts": "Help", "sample": "Help",
+    "find_tool": "Help",
     "about": "Help",
 }
 
@@ -377,6 +380,20 @@ class MainWindow(QMainWindow):
         self._act("fit_page", "Fit page", self.view.fit_page, "Ctrl+0", "fit")
         self._act("fit_width", "Fit width", self.view.fit_width, "Ctrl+1")
         self._act("zoom_sel", "Zoom to selection", self.view.zoom_to_selection, "Ctrl+2")
+        # Turning the view is a way of looking at the page, not a change to
+        # it: for reading a drawing that came in sideways. Rotating the page
+        # itself is on the page menu, and does change the document.
+        self._act("turn_view_cw", "Turn view clockwise",
+                  lambda: self.view.rotate_view(True), "Ctrl+Shift+.",
+                  tip="Turn the page on screen, for reading a drawing "
+                      "sideways — the page itself is not changed")
+        self._act("turn_view_acw", "Turn view anticlockwise",
+                  lambda: self.view.rotate_view(False), "Ctrl+Shift+,",
+                  tip="Turn the page on screen the other way — the page "
+                      "itself is not changed")
+        self._act("turn_view_reset", "Turn view upright",
+                  self.view.reset_view_rotation,
+                  tip="Put the view back the way up the page is")
         # Bare Page Up/Down scroll a screenful, as they do in any reader; with
         # Ctrl they jump a whole page.
         self._act("prev_page", "Previous page", lambda: self.go_to_page(self.current_index - 1),
@@ -438,6 +455,9 @@ class MainWindow(QMainWindow):
         self._act("edit_shortcuts", "Keyboard shortcuts…", self.edit_shortcuts,
                   "Ctrl+K", tip="Change any shortcut by pressing the keys you want")
         self._act("problems", "Show problems", self.show_problems)
+        self._act("find_tool", "Find a tool…", self.find_a_tool, "Shift+F1",
+                  tip="Type what you want to do, and it says which tool does "
+                      "it and which key it is on")
         self._act("renumber_counts", "Renumber count markers", self.renumber_counts)
         self._act("group", "Group", self.group_selection, "Ctrl+G",
                   tip="Make the selected markups one thing to click and move")
@@ -445,7 +465,7 @@ class MainWindow(QMainWindow):
         self._act("autosize", "Auto-size text box", self.autosize_text, "Alt+Z",
                   tip="Shrink the box around the words in it")
         self._act("format_painter", "Format painter", self.format_painter,
-                  "Ctrl+Shift+C",
+                  "Ctrl+Shift+C", "format_painter",
                   tip="Take this one's look, then click another to paint it on")
         self._act("hide", "Hide", self.hide_selection,
                   tip="Take it off the screen and out of the print, without "
@@ -739,7 +759,9 @@ class MainWindow(QMainWindow):
         view_menu = bar.addMenu("&View")
         for action in (self.act_zoom_in, self.act_zoom_out, self.act_actual_size,
                        self.act_fit_page,
-                       self.act_fit_width, self.act_zoom_sel, None, self.act_grid,
+                       self.act_fit_width, self.act_zoom_sel, None,
+                       self.act_turn_view_cw, self.act_turn_view_acw,
+                       self.act_turn_view_reset, None, self.act_grid,
                        self.act_snap, self.act_snap_items, self.act_margins,
                        self.act_dark, None,
                        self.act_prev_page,
@@ -795,6 +817,20 @@ class MainWindow(QMainWindow):
                 action.triggered.connect(lambda _c=False, key=tool.key: self.select_tool(key))
                 insert_menu.addAction(action)
         insert_menu.addSeparator()
+        # Every drawing tool, on the menu as well as on the toolbar. Somebody
+        # who does not know which button the polygon is under can find it by
+        # reading, which is what a menu bar is for.
+        for heading in ("Draw", "Measure"):
+            sub = insert_menu.addMenu("Markup" if heading == "Draw" else "Measurement")
+            for tool in tools_in(heading):
+                if tool.mode == NONE:
+                    continue
+                entry = self.give_icon(QAction(tool.label, self), tool.icon)
+                entry.setToolTip(tool.hint)
+                entry.triggered.connect(
+                    lambda _c=False, key=tool.key: self.select_tool(key))
+                sub.addAction(entry)
+        insert_menu.addSeparator()
         symbol_menu = insert_menu.addMenu("Maths s&ymbol")
         for action in self.symbol_actions.values():
             symbol_menu.addAction(action)
@@ -816,6 +852,8 @@ class MainWindow(QMainWindow):
         calc_menu.addAction(self.act_export_vars)
 
         help_menu = bar.addMenu("&Help")
+        help_menu.addAction(self.act_find_tool)
+        help_menu.addSeparator()
         # One entry, not two: both used to be called "Keyboard shortcuts".
         help_menu.addAction(self.act_shortcuts)
         help_menu.addAction(self.act_sample)
@@ -845,11 +883,62 @@ class MainWindow(QMainWindow):
         self.status_scale.clicked.connect(self.calibrate_dialog)
         status.addPermanentWidget(self.status_scale)
 
+        # The page bar, in the middle where Bluebeam keeps it: back a page,
+        # which page, on a page — and beside it the two buttons that get used
+        # constantly, fit-width and the grid.
+        self.page_back = QToolButton()
+        self.page_back.setText("‹")
+        self.page_back.setAutoRaise(True)
+        self.page_back.setToolTip("Previous page")
+        self.page_back.clicked.connect(lambda: self.go_to_page(self.current_index - 1))
+        status.addPermanentWidget(self.page_back)
+
         self.page_spin = QSpinBox()
         self.page_spin.setRange(1, 1)
         self.page_spin.setPrefix("Page ")
         self.page_spin.valueChanged.connect(lambda value: self.go_to_page(value - 1))
         status.addPermanentWidget(self.page_spin)
+
+        self.page_total = QLabel("of 1")
+        status.addPermanentWidget(self.page_total)
+
+        self.page_forward = QToolButton()
+        self.page_forward.setText("›")
+        self.page_forward.setAutoRaise(True)
+        self.page_forward.setToolTip("Next page")
+        self.page_forward.clicked.connect(lambda: self.go_to_page(self.current_index + 1))
+        status.addPermanentWidget(self.page_forward)
+
+        self.status_fit = QToolButton()
+        self.status_fit.setAutoRaise(True)
+        self.status_fit.setText("Fit width")
+        self.status_fit.setToolTip("Fit the page across the window")
+        self.status_fit.clicked.connect(self.view.fit_width)
+        status.addPermanentWidget(self.status_fit)
+
+        self.status_grid = QToolButton()
+        self.status_grid.setAutoRaise(True)
+        self.status_grid.setCheckable(True)
+        self.status_grid.setText("Grid")
+        self.status_grid.setToolTip("Show the grid on this page")
+        self.status_grid.toggled.connect(
+            lambda on: self.set_page_grid(self.current_index, on))
+        status.addPermanentWidget(self.status_grid)
+
+        self.status_snap = QToolButton()
+        self.status_snap.setAutoRaise(True)
+        self.status_snap.setCheckable(True)
+        self.status_snap.setText("Snap")
+        self.status_snap.setToolTip("Snap what is drawn to the grid — hold "
+                                    "Ctrl to let go of it for a moment")
+        self.status_snap.toggled.connect(self.toggle_snap)
+        status.addPermanentWidget(self.status_snap)
+
+        self.status_size = QToolButton()
+        self.status_size.setAutoRaise(True)
+        self.status_size.setToolTip("The paper and its margins — click to change them")
+        self.status_size.clicked.connect(self.page_setup)
+        status.addPermanentWidget(self.status_size)
 
         self.zoom_combo = QComboBox()
         self.zoom_combo.setEditable(True)
@@ -994,12 +1083,35 @@ class MainWindow(QMainWindow):
             return self.save_document()
         return True
 
+    def keyPressEvent(self, event) -> None:
+        """Escape works wherever the keyboard happens to be.
+
+        A key that no widget wants ends up here. Escape is the one key that
+        has to work from anywhere: half-way through placing a call-out, with
+        the focus sitting in a panel, it is the only way out — and it used to
+        go to the panel and be swallowed. So it is caught here as well, and
+        unwinds whatever the page is half-way through.
+        """
+        if event.key() == Qt.Key_Escape and not event.modifiers():
+            self.view.escape_everything()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def closeEvent(self, event) -> None:
         if not self.confirm_discard():
             event.ignore()
             return
         self.view.deactivate_table()
         self.save_layout()
+        # This window's arrangement is written now. The timer must not fire
+        # afterwards: a second later this window is gone, another may have
+        # saved a newer arrangement, and what would land is this one's — the
+        # layout of a window that has been closed overwriting the layout of
+        # the one still open.
+        timer = getattr(self, "_layout_timer", None)
+        if timer is not None:
+            timer.stop()
         self._autosave.stop()
         self.clear_autosave()
         try:
@@ -1329,14 +1441,15 @@ class MainWindow(QMainWindow):
             return None
         return payload
 
-    def paste_page(self, index: Optional[int] = None) -> None:
-        """Put the copied page in after this one."""
+    def paste_page(self, index: Optional[int] = None,
+                   before: bool = False) -> None:
+        """Put the copied page in beside this one, and go to where it landed."""
         payload = self.page_on_the_clipboard()
         if payload is None:
             self.status_hint.setText("There is no page on the clipboard")
             return
         which = self.page_index(index)
-        target = which + 1
+        target = which if before else which + 1
         for key, encoded in (payload.get("assets") or {}).items():
             if not self.document.asset(key):
                 try:
@@ -1350,6 +1463,11 @@ class MainWindow(QMainWindow):
             self.document.pages.insert(target, page)
             self.current_index = target
         self._structural_change("Paste page", mutate)
+        # Land on it, and say where it went: a page inserted somewhere out of
+        # sight is a page nobody can find.
+        self.go_to_page(target)
+        self.pages_panel.list.setCurrentRow(target)
+        self.status_hint.setText(f"Page pasted in as page {target + 1}")
 
     def delete_page(self, index: Optional[int] = None) -> None:
         if len(self.document.pages) <= 1:
@@ -1389,14 +1507,16 @@ class MainWindow(QMainWindow):
         dialog = dialogs.PdfImportDialog(self, self.current_page().setup)
         if dialog.exec() != dialogs.QDialog.Accepted:
             return
-        path, indices, fit, dpi = dialog.selection()
+        path, indices, fit, dpi, vectors = dialog.selection()
         if not path or not indices:
             QMessageBox.information(self, "Insert PDF", "No pages were selected.")
             return
         target = self.page_index(index) + (0 if before else 1)
+        brought: list = []
 
         def mutate():
-            pdfio.import_pages(self.document, path, indices, fit, dpi, at=target)
+            brought.extend(pdfio.import_pages(self.document, path, indices, fit,
+                                              dpi, at=target, vectors=vectors))
             self.current_index = target
         try:
             self._structural_change(f"Insert {len(indices)} PDF page(s)", mutate)
@@ -1404,8 +1524,50 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Insert PDF", str(exc))
             return
         self.view.fit_page()
-        self.status_hint.setText(f"Inserted {len(indices)} page(s) from "
-                                 f"{os.path.basename(path)}")
+        lines = sum(len(page.frame.markups()) if page.frame is not None else 0
+                    for page in brought)
+        said = f"Inserted {len(indices)} page(s) from {os.path.basename(path)}"
+        if vectors:
+            said += (f" — {lines} pieces of line work came with them"
+                     if lines else " — no line work could be read out of this one")
+        self.status_hint.setText(said)
+
+    def insert_files_at(self, paths: list[str], row: int) -> int:
+        """Put PDFs and images in as pages, starting where they were dropped.
+
+        The pages panel is where pages live, so dropping a drawing on it is
+        the obvious way to bring it in — and the line the drag draws says
+        exactly which page it will land in front of. Says how many went in.
+        """
+        row = max(0, min(int(row), len(self.document.pages)))
+        added = 0
+
+        def mutate():
+            nonlocal added
+            at = row
+            for path in paths:
+                try:
+                    if path.lower().endswith(".pdf"):
+                        pages = pdfio.import_pages(
+                            self.document, path,
+                            list(range(pdfio.PdfSource(path).page_count())),
+                            pdfio.FIT_ORIGINAL, at=at)
+                        added += len(pages)
+                        at += len(pages)
+                    else:
+                        pdfio.import_image(self.document, path,
+                                           pdfio.FIT_ORIGINAL, at=at)
+                        added += 1
+                        at += 1
+                except Exception as exc:  # noqa: BLE001
+                    QMessageBox.critical(self, "Insert pages", str(exc))
+            self.current_index = min(row, len(self.document.pages) - 1)
+        self._structural_change("Insert dropped pages", mutate)
+        if added:
+            self.go_to_page(min(row, len(self.document.pages) - 1))
+            self.status_hint.setText(
+                f"Inserted {added} page(s) as page {row + 1}")
+        return added
 
     def insert_image_page(self, index: Optional[int] = None,
                           before: bool = False) -> None:
@@ -1442,11 +1604,14 @@ class MainWindow(QMainWindow):
         rotated_background = self._rotate_background(page, clockwise)
 
         def mutate():
-            setup.width_mm, setup.height_mm = setup.height_mm, setup.width_mm
-            if setup.orientation == LANDSCAPE:
-                setup.orientation = PORTRAIT
-            else:
-                setup.orientation = LANDSCAPE
+            # Which way up the sheet is, and nothing else. The size in
+            # millimetres is the sheet's own size — A4 is 210 by 297 whichever
+            # way it is turned — and the orientation says how it is being
+            # used. Turning both swapped the page straight back to the shape
+            # it started as, which is why rotating a page used to move every
+            # markup on it and leave the paper exactly as it was.
+            setup.orientation = (PORTRAIT if setup.orientation == LANDSCAPE
+                                 else LANDSCAPE)
             if clockwise:
                 (setup.margin_left, setup.margin_top,
                  setup.margin_right, setup.margin_bottom) = (
@@ -1490,6 +1655,48 @@ class MainWindow(QMainWindow):
             return ""
         return self.document.add_asset(bytes(buffer.data()), "png")
 
+    def set_page_grid(self, index: Optional[int] = None,
+                      on: bool = True) -> None:
+        """Rule this page, or stop ruling it.
+
+        The grid is the page's own from here on, so turning the document's
+        grid on later does not put one back over a drawing.
+        """
+        pages = self.selected_pages() or [self.page_index(index)]
+
+        def mutate():
+            for which in pages:
+                self.document.pages[which].grid = bool(on)
+        self._structural_change("Grid on this page", mutate)
+        self.view.viewport().update()
+        many = f" on {len(pages)} pages" if len(pages) > 1 else ""
+        self.status_hint.setText(f"Grid {'on' if on else 'off'}{many}")
+
+    def set_page_running_text(self, index: Optional[int], which: str,
+                              on: bool) -> None:
+        """Put the running header or footer on this page, or take it off.
+
+        A drawing sheet that came in with its own title block does not want a
+        second one written across it, and one page in a set is often the
+        exception. Whichever pages are picked out in the panel are all done at
+        once, so a run of drawings is one gesture rather than twenty.
+        """
+        pages = self.selected_pages() or [self.page_index(index)]
+
+        def mutate():
+            for page in pages:
+                setattr(self.document.pages[page], which, bool(on))
+        self._structural_change(f"{which.title()} on this page", mutate)
+        many = f" on {len(pages)} pages" if len(pages) > 1 else ""
+        self.status_hint.setText(
+            f"{which.title()} {'on' if on else 'off'}{many}")
+
+    def selected_pages(self) -> list[int]:
+        """Which pages the page panel has picked out, if it has picked any."""
+        rows = [self.pages_panel.list.row(entry)
+                for entry in self.pages_panel.list.selectedItems()]
+        return sorted(row for row in rows if 0 <= row < len(self.document.pages))
+
     def set_page_size(self, index: Optional[int] = None, name: str = "A4") -> None:
         """Put one page onto a different sheet of paper, keeping its way up."""
         which = self.page_index(index)
@@ -1515,7 +1722,19 @@ class MainWindow(QMainWindow):
         menu.addAction("Add to bookmarks…", lambda: self.bookmark_page(index))
         menu.addSeparator()
         menu.addAction("Copy page", lambda: self.copy_page(index))
-        menu.addAction("Paste page", lambda: self.paste_page(index))
+        # Named with the place it lands, because "Paste page" on its own does
+        # not say where the page goes and there is nothing on screen to say
+        # so either.
+        waiting = self.page_on_the_clipboard()
+        paste = menu.addAction(f"Paste page after page {index + 1}",
+                               lambda: self.paste_page(index))
+        paste.setEnabled(waiting is not None)
+        if waiting is None:
+            paste.setText("Paste page")
+            paste.setToolTip("There is no page on the clipboard")
+        before = menu.addAction(f"Paste page before page {index + 1}",
+                                lambda: self.paste_page(index, before=True))
+        before.setEnabled(waiting is not None)
         menu.addSeparator()
         menu.addAction("Insert blank page before",
                        lambda: self.add_page_before(index))
@@ -1536,8 +1755,31 @@ class MainWindow(QMainWindow):
         down.setEnabled(index < len(self.document.pages) - 1)
         menu.addSeparator()
         menu.addSeparator()
-        menu.addAction("Rotate clockwise", lambda: self.rotate_page(index, True))
-        menu.addAction("Rotate anticlockwise", lambda: self.rotate_page(index, False))
+        turn_cw = menu.addAction("Rotate page clockwise",
+                                 lambda: self.rotate_page(index, True))
+        turn_cw.setToolTip("Turn the paper and everything drawn on it. To turn "
+                           "only the way it is shown, use View ▸ Turn view.")
+        menu.addAction("Rotate page anticlockwise",
+                       lambda: self.rotate_page(index, False))
+        running = menu.addMenu("Header and footer")
+        for which, label in (("header", "Header on this page"),
+                             ("footer", "Footer on this page")):
+            entry = running.addAction(label)
+            entry.setCheckable(True)
+            page = self.document.pages[index]
+            entry.setChecked(getattr(page, f"shows_a_{which}")(
+                self.document.settings))
+            entry.toggled.connect(
+                lambda on, i=index, w=which: self.set_page_running_text(i, w, on))
+        running.addSeparator()
+        running.addAction("Edit the wording…", self.edit_header_footer)
+        grid = menu.addAction("Grid on this page")
+        grid.setCheckable(True)
+        grid.setChecked(self.document.pages[index].shows_a_grid(
+            self.document.settings))
+        grid.setToolTip("A grid belongs to the page it is on, and prints with "
+                        "it.\nPages that came in from a PDF start without one.")
+        grid.toggled.connect(lambda on, i=index: self.set_page_grid(i, on))
         paper = menu.addMenu("Paper size")
         for name in PAGE_SIZES:
             entry = paper.addAction(name, lambda n=name: self.set_page_size(index, n))
@@ -1610,6 +1852,34 @@ class MainWindow(QMainWindow):
         self.status_scale.setText(f"Scale {scale.label}")
         self.status_scale.setToolTip(
             f"1 page point = {format_quantity(scale.length_per_pt, 5)}\nClick to change")
+        self.refresh_page_bar()
+
+    def refresh_page_bar(self) -> None:
+        """The bar along the bottom, saying what this page is."""
+        total = len(self.document.pages)
+        self.page_total.setText(f"of {total}")
+        self.page_back.setEnabled(self.current_index > 0)
+        self.page_forward.setEnabled(self.current_index < total - 1)
+        page = self.current_page()
+        setup = page.setup
+        # The paper and the room round the writing, which is what somebody is
+        # actually asking when they look down here.
+        margins = {setup.margin_left, setup.margin_top,
+                   setup.margin_right, setup.margin_bottom}
+        room = (f"{setup.margin_left:g} mm" if len(margins) == 1
+                else f"{setup.margin_left:g}/{setup.margin_top:g}/"
+                     f"{setup.margin_right:g}/{setup.margin_bottom:g} mm")
+        wide = setup.width_pt * PT_TO_MM
+        tall = setup.height_pt * PT_TO_MM
+        self.status_size.setText(f"{setup.size_name} {wide:.0f}×{tall:.0f}")
+        self.status_size.setToolTip(
+            f"{setup.size_name}, {setup.orientation} — {wide:.0f} × {tall:.0f} mm\n"
+            f"Margins {room}\nClick to change the paper or the margins")
+        for button, on in ((self.status_grid, page.shows_a_grid(self.document.settings)),
+                           (self.status_snap, self.document.settings.snap_to_grid)):
+            button.blockSignals(True)
+            button.setChecked(bool(on))
+            button.blockSignals(False)
 
     # ==================================================================
     # tools & style
@@ -2001,6 +2271,12 @@ class MainWindow(QMainWindow):
         self.properties_panel.show_items(items)
         if len(items) == 1:
             self.status_hint.setText(items[0].display_name())
+        # The box round a group and the handles are painted over the canvas
+        # rather than by the items, and Qt only repaints the part of the
+        # canvas that changed. Selecting something changed no part of it, so
+        # nothing was redrawn and the selection had nothing round it until a
+        # menu opening forced the whole viewport to be painted again.
+        self.view.viewport().update()
 
     def delete_selection(self) -> None:
         if self.view.editing_item() is not None:
@@ -2019,46 +2295,50 @@ class MainWindow(QMainWindow):
     SNAPSHOT_DPI = 300.0
 
     def take_snapshot(self, frame, region: QRectF) -> None:
-        """Take a picture of *region* on *frame*.
+        """Take a copy of *region* on *frame*.
 
-        A snapshot is a picture, the way Bluebeam's is: what comes back is
-        what that part of the page looks like, not a rebuilt copy of the
-        markups and calculations that made it. That is the point of taking
-        one — you want the drawing as it stands, not fifteen items that will
-        recalculate, renumber and shift about when they land somewhere else.
+        A snapshot brings the drawing across, not a photograph of it: what is
+        stored is every line, letter and image that was under the marquee,
+        recorded as the instructions that drew them. So it stays sharp however
+        far it is zoomed into, and it prints as vectors rather than as a
+        rectangle of pixels.
 
-        It is taken at 300 dpi, so it holds up when it is zoomed into or
-        printed, and it goes on the system clipboard as an ordinary image, so
-        it can be pasted into an email or a report as easily as back onto the
-        page.
+        It is not a rebuilt copy of the markups either — nothing recalculates,
+        renumbers or shifts about when it lands somewhere else. It is the
+        drawing as it stood, and it is its own kind of markup, not an image
+        with a different name.
+
+        A picture of it goes on the system clipboard as well, so it can still
+        be pasted straight into an email or a report.
         """
         region = region.normalized()
         if frame is None or region.width() < 2 or region.height() < 2:
             self.status_hint.setText("Snapshot: drag a region to copy")
             return
 
-        cut = frame.render_image(dpi=self.SNAPSHOT_DPI, for_print=False,
-                                 region=region)
-        if cut.isNull():
+        picture = frame.render_picture(region)
+        if picture.isNull():
             self.status_hint.setText("Nothing in that region to copy")
             return
-
-        buffer = QBuffer()
-        buffer.open(QIODevice.WriteOnly)
-        if not cut.save(buffer, "PNG"):
-            self.status_hint.setText("The snapshot could not be taken")
-            return
-        data = bytes(buffer.data())
-        key = self.document.put_asset(f"snapshot-{os.urandom(6).hex()}.png", data)
-        payload = [{"type": "image", "asset": key, "x": 0.0, "y": 0.0,
+        data = bytes(picture.data())
+        key = self.document.put_asset(f"snapshot-{os.urandom(6).hex()}.qpic", data)
+        payload = [{"type": "snapshot", "asset": key, "x": 0.0, "y": 0.0,
                     "rect": [0, 0, region.width(), region.height()],
+                    "source_rect": [0, 0, region.width(), region.height()],
+                    "source_page": self.document.pages.index(frame.page) + 1
+                    if frame.page in self.document.pages else 0,
                     "keep_aspect": True, "uid": os.urandom(8).hex()}]
         assets = {key: base64.b64encode(data).decode("ascii")}
 
         self._clipboard = payload
         mime = QMimeData()
         mime.setText(json.dumps({CLIPBOARD_TAG: payload, "assets": assets}))
-        mime.setImageData(cut)
+        # For everything outside this application, which cannot read a
+        # recording: a picture of the same region, at printing resolution.
+        cut = frame.render_image(dpi=self.SNAPSHOT_DPI, for_print=False,
+                                 region=region)
+        if not cut.isNull():
+            mime.setImageData(cut)
         QApplication.clipboard().setMimeData(mime)
         self.status_hint.setText(
             "Snapshot taken — paste it back, or into anything else")
@@ -2306,7 +2586,7 @@ class MainWindow(QMainWindow):
             item = build_item(copy)
             if item is None:
                 continue
-            if isinstance(item, ImageItem):
+            if hasattr(item, "load_from_document"):
                 item.load_from_document(self.document)
             frame.add_markup(item)
             item.setSelected(True)
@@ -2528,7 +2808,7 @@ class MainWindow(QMainWindow):
             item = build_item(copy)
             if item is None:
                 continue
-            if isinstance(item, ImageItem):
+            if hasattr(item, "load_from_document"):
                 item.load_from_document(self.document)
             self.view.frame().add_markup(item)
             item.setSelected(True)
@@ -2589,7 +2869,7 @@ class MainWindow(QMainWindow):
         for item in items:
             copy = item.clone()
             if copy is not None:
-                if isinstance(copy, ImageItem):
+                if hasattr(copy, "load_from_document"):
                     copy.load_from_document(self.document)
                 self.view.frame().add_markup(copy)
                 copy.setSelected(True)
@@ -2699,7 +2979,7 @@ class MainWindow(QMainWindow):
                     copy = item.clone()
                     if copy is None:
                         continue
-                    if isinstance(copy, ImageItem):
+                    if hasattr(copy, "load_from_document"):
                         copy.load_from_document(self.document)
                     copy.setPos(item.pos() + offset)
                     self.view.frame().add_markup(copy)
@@ -2986,6 +3266,55 @@ class MainWindow(QMainWindow):
             self.status_problems.setText("No problems")
             self.status_problems.setStyleSheet("")
             self.status_problems.setToolTip("Everything in the document evaluated")
+
+    def find_a_tool(self) -> None:
+        """Type what you want to do; it says which tool does it.
+
+        Fifty tools is more than anybody keeps in their head, and the answer
+        to "how do I cloud this" should not be hunting along a toolbar. What
+        is searched is every tool's name, what it is for, and the key it is
+        on, so "revision", "cloud" and "C" all find the same thing.
+        """
+        from PySide6.QtWidgets import QInputDialog
+
+        wanted, said = QInputDialog.getText(
+            self, "Find a tool", "What do you want to do?")
+        if not said or not wanted.strip():
+            return
+        found = self.tools_matching(wanted)
+        if not found:
+            self.status_hint.setText(f"Nothing here matches “{wanted.strip()}”")
+            return
+        best = found[0]
+        self.select_tool(best.key)
+        others = ", ".join(tool.label for tool in found[1:4])
+        self.status_hint.setText(
+            f"{best.label}"
+            + (f" · {best.shortcut}" if best.shortcut else "")
+            + (f" — also: {others}" if others else ""))
+
+    @staticmethod
+    def tools_matching(wanted: str) -> list:
+        """Every tool whose name, description or key matches, best first."""
+        words = [word for word in wanted.lower().split() if word]
+        if not words:
+            return []
+        scored = []
+        for tool in TOOLS:
+            haystack = f"{tool.label} {tool.hint} {tool.category}".lower()
+            key = tool.shortcut.lower()
+            score = 0
+            for word in words:
+                if word == tool.label.lower() or word == key:
+                    score += 10
+                elif tool.label.lower().startswith(word):
+                    score += 6
+                elif word in haystack:
+                    score += 2
+            if score:
+                scored.append((score, tool.label, tool))
+        scored.sort(key=lambda row: (-row[0], row[1]))
+        return [tool for _score, _label, tool in scored]
 
     def show_problems(self) -> None:
         self.dock_problems.show()
@@ -3613,6 +3942,97 @@ class MainWindow(QMainWindow):
     # ==================================================================
     # menus & help
     # ==================================================================
+    def _fill_outline_menu(self, menu, item, scene_pos: QPointF) -> None:
+        """What can be done to the point or the side under the pointer.
+
+        The same four things the held keys do, for anyone who would rather
+        read them than remember them: a point in or out, a corner rounded, a
+        side bent into an arc — and the drafting break symbol, which has no
+        key of its own.
+        """
+        local = item.mapFromScene(scene_pos)
+        reach = 12.0 / max(self.view.zoom(), 0.05)
+        vertex = self.view._point_near(item, local, reach)
+        segment = self.view._segment_near(item, local, reach)
+
+        outline = menu.addMenu("This outline")
+        if vertex is not None:
+            round_off = outline.addAction(
+                "Sharpen this corner" if item.is_rounded(vertex)
+                else "Round this corner off",
+                lambda: self._reshape(item, "round", vertex))
+            round_off.setToolTip("Ctrl and the pointer over a corner does this too")
+            if len(item.points) > 2:
+                take_out = outline.addAction(
+                    "Take this point out",
+                    lambda: self._reshape(item, "delete", vertex))
+                take_out.setToolTip("Shift and the pointer over a point does this too")
+        if segment is not None:
+            outline.addAction("Put a point in here",
+                              lambda: self._reshape(item, "add", segment, local))
+            outline.addAction(
+                "Straighten this side" if item.is_curved(segment)
+                else "Bend this side into an arc",
+                lambda: self._reshape(item, "curve", segment))
+            outline.addAction(
+                "Take the break symbol off" if item.broken.get(segment)
+                else "Insert a break symbol",
+                lambda: self._reshape(item, "break", segment))
+        if outline.isEmpty():
+            menu.removeAction(outline.menuAction())
+
+    def _reshape(self, item, what: str, index: int,
+                 local: Optional[QPointF] = None) -> None:
+        """One change to a shape's outline, as one undo step."""
+        self.view.begin_snapshot(self.view.involved_frames(item))
+        if what == "round":
+            item.round_corner(index)
+            said = "Round off a corner"
+        elif what == "delete":
+            item.delete_point(index)
+            said = "Take out a point"
+        elif what == "add":
+            item.insert_point(local if local is not None
+                              else item.curve_apex(index))
+            said = "Put in a point"
+        elif what == "break":
+            item.break_segment(index)
+            said = "Break symbol"
+        else:
+            item.curve_segment(index)
+            said = "Bend into an arc"
+        self.view.commit_snapshot(said)
+        self.refresh_selection()
+
+    def rectangle_to_polygon(self, item) -> None:
+        """Swap a rectangle for the same shape drawn as a polygon.
+
+        A rectangle has four sides and no points to speak of. Turning it into
+        a polygon is how its edges get a break symbol, a rounded corner or a
+        curve — which is what Bluebeam does too, rather than pretending a
+        rectangle can grow a fifth corner.
+        """
+        from ..items.shapes import PolyItem
+
+        box = item.local_rect().normalized()
+        corners = [box.topLeft(), box.topRight(), box.bottomRight(),
+                   box.bottomLeft()]
+        frame = item.parentItem()
+        self.view.begin_snapshot(self.view.involved_frames(item))
+        shape = PolyItem("polygon", [item.mapToParent(c) - item.pos()
+                                     for c in corners])
+        shape.style = item.style.copy()
+        shape.layer = item.layer
+        shape.author = item.author
+        shape.setPos(item.pos())
+        shape.setRotation(item.rotation())
+        frame.remove_markup(item)
+        frame.add_markup(shape)
+        self.view.scene().clearSelection()
+        shape.setSelected(True)
+        self.view.commit_snapshot("Turn into a polygon")
+        self.refresh_selection()
+
     def build_context_menu(self, item, scene_pos: QPointF) -> QMenu:
         menu = QMenu(self)
         if item is not None:
@@ -3672,7 +4092,12 @@ class MainWindow(QMainWindow):
                                             self.align_cells(k, item))
                     entry.setCheckable(True)
                     entry.setChecked(self._cells_aligned(item) == key)
+            if isinstance(item, PolyItem) and item.uses_vertex_handles \
+                    and item.kind not in ("ink", "highlighter"):
+                self._fill_outline_menu(menu, item, scene_pos)
             if isinstance(item, RectItem) and item.kind in SIZED_SHAPES:
+                menu.addAction("Turn into a polygon",
+                               lambda: self.rectangle_to_polygon(item))
                 menu.addAction("Set exact size…",
                                lambda: self.set_rectangle_size(item))
                 show = menu.addAction("Show its size")

@@ -124,8 +124,17 @@ def _style(annotation: dict) -> dict:
         "opacity": float(annotation.get("CA", 1.0) or 1.0),
         "fill_opacity": float(annotation.get("FillOpacity",
                                              annotation.get("CA", 1.0)) or 1.0),
-        "dash": "dash" if (border.get("S") == "D" or dash) else "solid",
+        # The line type. A dashed line used to come in solid, because what was
+        # set here was a key no markup has: the field is line_style, and the
+        # dashes themselves are worth keeping so the line looks the way it was
+        # drawn rather than merely "dashed".
+        "line_style": "dash" if (border.get("S") == "D" or dash) else "solid",
     }
+    if isinstance(dash, list) and dash:
+        steps = [float(step) for step in dash
+                 if isinstance(step, (int, float)) and float(step) > 0]
+        if steps:
+            style["dash_array"] = tuple(steps)
     if annotation.get("BM") == "Multiply":
         style["blend"] = "multiply"
     ends = annotation.get("LE")
@@ -274,9 +283,11 @@ def markup_from(annotation: dict, resources: dict, name: str = "") -> Optional[d
                        points=[flip(p) for p in points])
         pattern = annotation.get("PatternName")
         if isinstance(pattern, str) and pattern:
-            payload["style"] = dict(style,
-                                    fill=colour(annotation.get("PatternColor")))
-            payload["hatch"] = pattern
+            # A hatched section: the pattern is part of the look, so it goes
+            # on the style where it can be drawn, changed and kept.
+            payload["style"] = dict(style, hatch=pattern,
+                                    fill=colour(annotation.get("PatternColor"))
+                                    or style.get("fill", ""))
         return payload
     if subtype == "Ink":
         strokes = annotation.get("InkList") or []

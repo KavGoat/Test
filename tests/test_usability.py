@@ -6,15 +6,17 @@ and key presses with their text.  Calling a handler directly would hide exactly
 the bugs this file exists to catch.
 """
 import pytest
-from PySide6.QtCore import QEvent, QKeyCombination, QPoint, QPointF, Qt
+from PySide6.QtCore import (QEvent, QKeyCombination, QPoint, QPointF,
+                            QRectF, Qt)
 from PySide6.QtGui import QColor, QContextMenuEvent, QKeyEvent, QMouseEvent
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QLabel
 
 from calcforge.core.document import MM_TO_PT
 from calcforge.items.mathitem import MathItem
 from calcforge.items.measure import DIMENSION, MeasureItem
 from calcforge.items.shapes import PolyItem, RectItem
 from calcforge.items.tableitem import TableItem
+from calcforge.items.snapshot import SnapshotItem
 from calcforge.items.text import CalloutItem, TextItem
 
 
@@ -230,7 +232,7 @@ def test_escape_leaves_editing_then_returns_to_select(window):
 @pytest.mark.parametrize("character, tool_key", [
     ("c", "cloud"), ("r", "rect"), ("p", "polygon"), ("a", "arrow"),
     ("m", "measure_length"), ("q", "callout"), ("t", "text"), ("e", "ellipse"),
-    ("l", "line"), ("h", "highlighter"), ("k", "cloud_poly"), ("n", "polyline"),
+    ("l", "line"), ("h", "highlighter"), ("n", "polyline"),
     ("s", "stamp"), ("b", "table"),
 ])
 def test_letter_keys_pick_their_tool(window, character, tool_key):
@@ -1616,12 +1618,27 @@ def test_the_page_menu_can_set_the_scale(window):
 # ---------------------------------------------------------------------------
 
 def test_a_page_can_be_turned_a_quarter_turn(window):
+    """The paper itself turns — the shape of the sheet, not just its label."""
     page = window.current_page()
-    width, height = page.setup.width_mm, page.setup.height_mm
+    width, height = page.setup.width_pt, page.setup.height_pt
+    assert width < height                      # it starts portrait
     window.rotate_page(0, clockwise=True)
-    assert page.setup.width_mm == pytest.approx(height)
-    assert page.setup.height_mm == pytest.approx(width)
+    assert page.setup.width_pt == pytest.approx(height)
+    assert page.setup.height_pt == pytest.approx(width)
     assert page.setup.orientation == "landscape"
+    # A4 is 210 by 297 whichever way it is turned: the sheet has not changed
+    # size, only which way up it is being used.
+    assert page.setup.size_name == "A4"
+
+
+def test_the_page_frame_takes_the_new_shape(window):
+    """And the paper on screen is the new shape, not the old one."""
+    frame = window.view.frame()
+    before = frame.page_rect()
+    window.rotate_page(0, clockwise=True)
+    after = window.document.pages[0].frame.page_rect()
+    assert after.width() == pytest.approx(before.height(), abs=0.5)
+    assert after.height() == pytest.approx(before.width(), abs=0.5)
 
 
 def test_turning_a_page_turns_what_is_drawn_on_it(window):
@@ -1661,11 +1678,11 @@ def test_turning_a_page_turns_its_background_sheet(window, tmp_path, monkeypatch
 
 def test_turning_a_page_back_and_forth_leaves_it_as_it_was(window):
     page = window.current_page()
-    before = (page.setup.width_mm, page.setup.height_mm, page.setup.margin_left,
+    before = (page.setup.width_pt, page.setup.height_pt, page.setup.margin_left,
               page.setup.margin_top, page.setup.margin_right, page.setup.margin_bottom)
     window.rotate_page(0, clockwise=True)
     window.rotate_page(0, clockwise=False)
-    after = (page.setup.width_mm, page.setup.height_mm, page.setup.margin_left,
+    after = (page.setup.width_pt, page.setup.height_pt, page.setup.margin_left,
              page.setup.margin_top, page.setup.margin_right, page.setup.margin_bottom)
     assert after == pytest.approx(before)
 
@@ -1687,7 +1704,10 @@ def test_one_page_can_be_put_on_a_different_sheet(window):
 def test_the_page_menu_offers_rotating_and_paper_sizes(window):
     menu = window.page_menu(0)
     labels = [action.text() for action in menu.actions()]
-    assert "Rotate clockwise" in labels and "Rotate anticlockwise" in labels
+    # Named so it cannot be mistaken for turning the view, which is on the
+    # View menu and changes nothing about the document.
+    assert "Rotate page clockwise" in labels
+    assert "Rotate page anticlockwise" in labels
     paper = next(action.menu() for action in menu.actions()
                  if action.text() == "Paper size")
     sizes = [action.text() for action in paper.actions()]
@@ -1765,24 +1785,36 @@ def test_the_arrow_can_be_moved_once_the_callout_is_finished(window):
     assert moved.x() == pytest.approx(tip.x() + 40, abs=2)
 
 
-def test_the_elbow_slides_along_its_own_line(window):
-    """The elbow leaves the box square on, and can only be slid in and out."""
+def test_the_elbow_goes_where_it_is_dragged(window):
+    """It was pinned to a line out of one side, so dragging it round did nothing."""
     call = _callout(window)
     window.view.end_item_edit()
     window.select_tool("select")
     call.setSelected(True)
-    before = call.elbow()
-    normal = call.side_normal()
-    elbow = call.mapToScene(before)
-    drag(window.view, elbow.x(), elbow.y(),
-         elbow.x() + normal.x() * 30 + 18, elbow.y() + normal.y() * 30 - 14)
+
+    where = call.mapToScene(QPointF(call.local_rect().center().x(), -70))
+    elbow = call.mapToScene(call.elbow())
+    drag(window.view, elbow.x(), elbow.y(), where.x(), where.y())
 
     after = call.elbow()
-    # further out along the same line, and still square on to the side
-    assert call.elbow_reach > 24.0
-    side = call.side_point()
-    assert (after.x() - side.x()) * normal.y() == pytest.approx(
-        (after.y() - side.y()) * normal.x(), abs=0.01)
+    assert (after - call.mapFromScene(where)).manhattanLength() < 4
+
+
+def test_dragging_the_elbow_round_changes_the_side_it_leaves_by(window):
+    """Take the elbow over the top of the box and the line leaves by the top."""
+    call = _callout(window)
+    window.view.end_item_edit()
+    window.select_tool("select")
+    call.setSelected(True)
+    started_on = call.side()
+
+    box = call.local_rect().normalized()
+    above = call.mapToScene(QPointF(box.center().x(), box.top() - 60))
+    elbow = call.mapToScene(call.elbow())
+    drag(window.view, elbow.x(), elbow.y(), above.x(), above.y())
+
+    assert call.side() == "top" != started_on
+    assert call.side_point().y() == pytest.approx(box.top(), abs=0.5)
 
 
 def test_moving_the_box_leaves_the_arrow_pointing_at_the_same_thing(window):
@@ -1812,8 +1844,8 @@ def test_nudging_a_callout_leaves_its_arrow_alone(window):
 
 def test_the_arrow_handles_are_marked_out_as_the_arrow(window):
     call = _callout(window)
-    assert call.leader_handles() == {"l0", "elbow"}
-    assert set(call.handle_points()) >= {"l0", "elbow", "nw", "se"}
+    assert {"l0", "e0"} <= call.leader_handles()
+    assert set(call.handle_points()) >= {"l0", "e0", "nw", "se"}
 
 
 def test_an_empty_text_box_is_still_dropped(window):
@@ -2330,8 +2362,9 @@ def test_the_snap_menu_entry_is_there_and_on(window):
 # ---------------------------------------------------------------------------
 
 def test_a_cloud_callout_clouds_the_thing_and_notes_it(window):
-    """Bluebeam's: a cloud round what the comment is about, and the note on a
-    leader beside it — not a text box with a wobbly border."""
+    """Bluebeam's: a cloud round what the comment is about, and the note beside
+    it — and the two are one markup, not a cloud and a text box that happen to
+    be grouped."""
     from calcforge.items.shapes import RectItem
 
     window.select_tool("cloud_callout")
@@ -2342,15 +2375,60 @@ def test_a_cloud_callout_clouds_the_thing_and_notes_it(window):
     window.view.end_item_edit()
 
     assert isinstance(call, CalloutItem)
-    assert call.leader_shown
-    clouds = [i for i in markups(window)
-              if isinstance(i, RectItem) and i.kind == "cloud"]
-    assert len(clouds) == 1
-    # The leader points at the cloud, and the two are one thing.
-    tip = call.mapToScene(call.leader[0])
-    cloud_box = clouds[0].mapRectToScene(clouds[0].local_rect().normalized())
-    assert cloud_box.adjusted(-4, -4, 4, 4).contains(tip)
-    assert call.group and call.group == clouds[0].group
+    assert call.clouds_a_region()
+    # No arrow head: the cloud is what points at the thing, so the line only
+    # says which note goes with which cloud.
+    assert call.style.arrow_end == "none"
+    # And nothing separate was left on the page.
+    assert not [i for i in markups(window)
+                if isinstance(i, RectItem) and i.kind == "cloud"]
+    assert [i for i in markups(window) if isinstance(i, CalloutItem)] == [call]
+
+    # The clouded region is where it was dragged.
+    clouded = call.mapRectToScene(call.cloud_box()).normalized()
+    drawn = QRectF(QPointF(160, 260), QPointF(300, 340)).normalized()
+    assert clouded.adjusted(-4, -4, 4, 4).contains(drawn)
+
+    # The line runs between the note and the cloud, joining a corner or the
+    # middle of an edge at each end.
+    join = call.cloud_join()
+    corners_and_middles = []
+    points = call.cloud_points
+    for index, point in enumerate(points):
+        after = points[(index + 1) % len(points)]
+        corners_and_middles.append(point)
+        corners_and_middles.append((point + after) / 2)
+    assert any((join - candidate).manhattanLength() < 0.01
+               for candidate in corners_and_middles)
+    assert call.box_join() in (
+        QPointF(call.local_rect().normalized().left(),
+                call.local_rect().normalized().center().y()),
+        QPointF(call.local_rect().normalized().right(),
+                call.local_rect().normalized().center().y()),
+        QPointF(call.local_rect().normalized().center().x(),
+                call.local_rect().normalized().top()),
+        QPointF(call.local_rect().normalized().center().x(),
+                call.local_rect().normalized().bottom()),
+    )
+
+
+def test_a_cloud_callout_can_be_drawn_corner_by_corner(window):
+    """Cloud and Cloud+ are one tool: drag it for a rectangle, click each
+    corner for whatever shape the revision actually is."""
+    window.select_tool("cloud_callout")
+    click(window.view, 160, 260)                 # a click, not a drag
+    click(window.view, 300, 250)
+    click(window.view, 280, 350)
+    press_key(window.view, Qt.Key_Return)        # that closes the cloud
+    click(window.view, 430, 200)                 # and the words go here
+    call = window.view.editing_item()
+    call.set_text("this bit")
+    window.view.end_item_edit()
+
+    assert isinstance(call, CalloutItem)
+    assert call.clouds_a_region()
+    assert len(call.cloud_points) >= 3
+    assert call.style.arrow_end == "none"
 
 
 def test_escape_gets_out_of_a_half_drawn_cloud_callout(window):
@@ -2363,9 +2441,45 @@ def test_escape_gets_out_of_a_half_drawn_cloud_callout(window):
     press_key(window.view, Qt.Key_Escape)
     assert window.view._pending_cloud is None
     assert window.view.tool_key == "select"
-    # The cloud that was drawn stays: it is a markup in its own right.
-    assert [i for i in markups(window)
-            if isinstance(i, RectItem) and i.kind == "cloud"]
+    # Nothing is left behind: the cloud belongs to the note that was never
+    # placed, so cancelling the note cancels the cloud with it.
+    assert not [i for i in markups(window)
+                if isinstance(i, RectItem) and i.kind == "cloud"]
+    assert not [i for i in markups(window) if isinstance(i, CalloutItem)]
+
+
+def test_a_callout_can_have_as_many_leaders_as_you_like(window):
+    """One comment, three bolts: Bluebeam lets a call-out grow arrows."""
+    call = _callout(window)
+    assert len(call.leaders) == 1
+    call.add_leader()
+    call.add_leader()
+    assert len(call.leaders) == 3
+    # Each one gets its own pair of handles.
+    assert {"l0", "e0", "l1", "e1", "l2", "e2"} <= set(call.handle_points())
+    # And they do not land on top of each other.
+    tips = [(round(l.tip.x(), 3), round(l.tip.y(), 3)) for l in call.leaders]
+    assert len(set(tips)) == 3
+
+    call.remove_leader(1)
+    assert len(call.leaders) == 2
+    assert "l2" not in call.handle_points()
+
+
+def test_dragging_the_elbow_round_changes_the_side_it_leaves_by(window):
+    """The elbow is not pinned to one side: move it above the box and the
+    leader starts leaving from the top."""
+    call = _callout(window)
+    box = call.local_rect().normalized()
+    leader = call.leaders[0]
+
+    call.set_elbow_of(leader, QPointF(box.center().x(), box.top() - 40))
+    assert call.side_of(leader) == "top"
+    assert call.side_point_of(leader) == QPointF(box.center().x(), box.top())
+
+    call.set_elbow_of(leader, QPointF(box.right() + 40, box.center().y()))
+    assert call.side_of(leader) == "right"
+    assert call.side_point_of(leader) == QPointF(box.right(), box.center().y())
 
 
 def test_a_plain_callout_is_still_a_box(window):
@@ -2536,16 +2650,14 @@ def test_a_snapshot_is_a_picture_of_the_region(window):
     drag(window.view, 60, 80, 400, 320)
 
     payload = window._clipboard
-    assert [entry["type"] for entry in payload] == ["image"]
+    assert [entry["type"] for entry in payload] == ["snapshot"]
     assert window.document.asset(payload[0]["asset"])
     # and the marquee itself is not left on the page
     assert not [i for i in markups(window) if getattr(i, "kind", "") == "marquee"]
     assert "Snapshot taken" in window.status_hint.text()
 
 
-def test_a_snapshot_pastes_back_as_one_picture(window):
-    from calcforge.items.media import ImageItem
-
+def test_a_snapshot_pastes_back_as_one_thing(window):
     _calc(window, "b := 300 mm =", at=(90, 110))
     window.select_tool("snapshot")
     drag(window.view, 60, 80, 400, 200)
@@ -2557,7 +2669,7 @@ def test_a_snapshot_pastes_back_as_one_picture(window):
 
     after = markups(window)
     assert len(after) == before + 1
-    pasted = [i for i in after if isinstance(i, ImageItem) and i.pos().y() > 400]
+    pasted = [i for i in after if isinstance(i, SnapshotItem) and i.pos().y() > 400]
     assert len(pasted) == 1
 
 
@@ -2589,11 +2701,11 @@ def test_a_picture_copied_elsewhere_beats_the_last_snapshot(window):
     assert pasted[0].local_rect().width() == pytest.approx(120, abs=1)
 
 
-def test_a_snapshot_of_bare_paper_is_still_a_picture(window):
-    """Of blank paper, as asked — a snapshot is what is there, not what it holds."""
+def test_a_snapshot_is_its_own_kind_of_markup(window):
+    """Not an image with a different name: a snapshot of its own."""
     window.select_tool("snapshot")
     drag(window.view, 60, 500, 200, 560)
-    assert window._clipboard and window._clipboard[0]["type"] == "image"
+    assert window._clipboard and window._clipboard[0]["type"] == "snapshot"
 
 
 def test_a_snapshot_of_no_region_at_all_says_so(window):
@@ -2620,13 +2732,60 @@ def test_a_snapshot_takes_the_drawing_underneath_with_it(window, tmp_path, monke
     frame = window.document.pages[1].frame
     window.take_snapshot(frame, QRectF(20, 20, 120, 90))
     payload = window._clipboard
-    assert payload and payload[0]["type"] == "image"
+    assert payload and payload[0]["type"] == "snapshot"
     assert window.document.asset(payload[0]["asset"])
-    # taken at 300 dpi, so it holds up when it is zoomed into
-    from PySide6.QtGui import QImage
-    picture = QImage()
-    picture.loadFromData(window.document.asset(payload[0]["asset"]))
-    assert picture.width() > 120 * 3
+
+    # What was stored is the drawing, not pixels: it replays as drawing, and
+    # it holds up however far it is scaled.
+    from PySide6.QtGui import QPicture
+
+    recorded = QPicture()
+    recorded.setData(bytes(window.document.asset(payload[0]["asset"])))
+    assert not recorded.isNull()
+
+    window.paste_items()
+    pasted = [i for i in markups(window) if isinstance(i, SnapshotItem)]
+    assert len(pasted) == 1
+    assert pasted[0].picture() is not None
+    assert pasted[0].local_rect().width() == pytest.approx(120, abs=1)
+
+
+def test_a_snapshot_scaled_up_is_still_drawn_from_its_lines(window):
+    """Blown up, it is redrawn at the new size — not stretched from pixels."""
+    from PySide6.QtGui import QImage, QPainter
+
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 220, 180)
+    window.select_tool("snapshot")
+    drag(window.view, 90, 90, 240, 200)
+    window.paste_items()
+    shot = [i for i in markups(window) if isinstance(i, SnapshotItem)][0]
+
+    def ink(scale):
+        """The box the drawing covers when the snapshot is *scale* times over."""
+        taken = shot.natural_size()
+        shot.set_local_rect(QRectF(0, 0, taken.width() * scale,
+                                   taken.height() * scale))
+        sheet = QImage(int(taken.width() * scale) + 4,
+                       int(taken.height() * scale) + 4, QImage.Format_ARGB32)
+        sheet.fill(0xFFFFFFFF)
+        painter = QPainter(sheet)
+        shot.paint_content(painter)
+        painter.end()
+        marked = [(x, y) for x in range(sheet.width())
+                  for y in range(sheet.height())
+                  if QColor(sheet.pixel(x, y)) != QColor(Qt.white)]
+        assert marked, f"nothing was drawn at {scale}x"
+        xs = [x for x, _ in marked]
+        ys = [y for _, y in marked]
+        return max(xs) - min(xs), max(ys) - min(ys)
+
+    small = ink(1)
+    big = ink(4)
+    # Four times the size, and the drawing is four times across: it was drawn
+    # again at the new size rather than clipped or left where it was.
+    assert big[0] == pytest.approx(small[0] * 4, rel=0.2)
+    assert big[1] == pytest.approx(small[1] * 4, rel=0.2)
 
 
 def test_a_snapshot_puts_a_picture_on_the_clipboard_for_other_apps(window):
@@ -4544,7 +4703,7 @@ def test_the_markup_menu_has_everything_bluebeam_has(window):
 
     wanted = {"typewriter": "", "eraser": "Shift+E", "arc": "Shift+C",
               "flag": "Shift+F", "highlighter": "H", "polyline": "N",
-              "cloud_poly": "K", "cloud": "C"}
+              "cloud": "C"}
     for key, shortcut in wanted.items():
         assert key in TOOL_MAP, key
         assert TOOL_MAP[key].shortcut == shortcut, key
@@ -4829,7 +4988,7 @@ def test_a_text_box_can_be_given_a_leader_and_have_it_taken_away(window):
     window.set_leader(box, True)
     assert box.leader_shown
     assert "l0" in box.handle_points()
-    assert box.leader_handles() == {"l0", "elbow"}
+    assert box.leader_handles() == {"l0", "e0"}
 
     window.set_leader(box, False)
     assert not box.leader_shown
@@ -4933,9 +5092,7 @@ def _paints_something_other_than_grey(item):
     return colours
 
 
-def test_a_pasted_snapshot_holds_its_picture(window):
-    from calcforge.items.media import ImageItem
-
+def test_a_pasted_snapshot_holds_its_drawing(window):
     window.select_tool("rect")
     drag(window.view, 100, 100, 220, 180)
     window.select_tool("snapshot")
@@ -4945,10 +5102,10 @@ def test_a_pasted_snapshot_holds_its_picture(window):
     hover(window.view, 120, 520)
     window.paste_items()
 
-    pasted = [i for i in markups(window) if isinstance(i, ImageItem)][-1]
-    assert pasted.asset_key                       # it knows which picture
-    assert window.document.asset(pasted.asset_key)   # and the picture is there
-    assert pasted.pixmap() is not None and not pasted.pixmap().isNull()
+    pasted = [i for i in markups(window) if isinstance(i, SnapshotItem)][-1]
+    assert pasted.asset_key                        # it knows which recording
+    assert window.document.asset(pasted.asset_key)    # and the recording is there
+    assert pasted.picture() is not None and not pasted.picture().isNull()
 
 
 def test_a_picture_pasted_from_elsewhere_holds_its_picture(window):
@@ -6029,3 +6186,976 @@ def test_the_two_writing_keys_open_the_same_thing(window):
     kinds = sorted(type(m).__name__ for m in markups(window))
     assert kinds == ["MathItem", "TextItem"]
     assert window.document.workspace.get("b") is not None
+
+
+# ---------------------------------------------------------------------------
+# Turning the view, which is not turning the page
+# ---------------------------------------------------------------------------
+
+def test_the_view_can_be_turned_without_touching_the_page(window):
+    """For reading a drawing that came in sideways."""
+    page = window.current_page()
+    before = (page.setup.width_pt, page.setup.height_pt, page.setup.orientation)
+
+    window.view.rotate_view(True)
+    assert window.view.view_turn() == 90
+    # The page is exactly as it was: nothing to undo, nothing to save.
+    after = (page.setup.width_pt, page.setup.height_pt, page.setup.orientation)
+    assert after == before
+    assert window.undo_stack.count() == 0
+
+    window.view.rotate_view(True)
+    assert window.view.view_turn() == 180
+    window.view.reset_view_rotation()
+    assert window.view.view_turn() == 0
+
+
+def test_turning_the_view_turns_what_is_on_screen(window):
+    """The page really is drawn sideways, not merely marked as turned."""
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 140)
+    box = markups(window)[0]
+    upright = window.view.mapFromScene(box.sceneBoundingRect())
+
+    window.view.rotate_view(True)
+    turned = window.view.mapFromScene(box.sceneBoundingRect())
+    assert turned.boundingRect().width() / max(turned.boundingRect().height(), 1) \
+        == pytest.approx(upright.boundingRect().height()
+                         / max(upright.boundingRect().width(), 1), rel=0.15)
+
+
+def test_turning_the_view_is_on_the_view_menu(window):
+    labels = []
+    for menu in window.menuBar().actions():
+        if menu.text() == "&View":
+            labels = [a.text() for a in menu.menu().actions()]
+    assert "Turn view clockwise" in labels
+    assert "Turn view anticlockwise" in labels
+    assert "Turn view upright" in labels
+
+
+# ---------------------------------------------------------------------------
+# Control points: add, delete, round off and curve
+# ---------------------------------------------------------------------------
+
+def _polygon(window, points=((120, 120), (260, 120), (260, 240), (120, 240))):
+    """A polygon on the page, selected, drawn corner by corner."""
+    window.select_tool("polygon")
+    for x, y in points:
+        click(window.view, x, y)
+    press_key(window.view, Qt.Key_Return)
+    shape = [i for i in markups(window) if isinstance(i, PolyItem)][-1]
+    window.view.scene().clearSelection()
+    shape.setSelected(True)
+    return shape
+
+
+def test_shift_over_a_side_puts_a_point_in(window):
+    shape = _polygon(window)
+    before = len(shape.points)
+    middle = shape.mapToScene(shape.segment_ends(0)[0]
+                              + (shape.segment_ends(0)[1]
+                                 - shape.segment_ends(0)[0]) / 2)
+    click(window.view, middle.x(), middle.y(), modifiers=Qt.ShiftModifier)
+    assert len(shape.points) == before + 1
+
+
+def test_shift_over_a_point_takes_it_out(window):
+    shape = _polygon(window)
+    before = len(shape.points)
+    corner = shape.mapToScene(shape.points[1])
+    click(window.view, corner.x(), corner.y(), modifiers=Qt.ShiftModifier)
+    assert len(shape.points) == before - 1
+
+
+def test_ctrl_over_a_corner_rounds_it_off_and_back(window):
+    shape = _polygon(window)
+    corner = shape.mapToScene(shape.points[1])
+    click(window.view, corner.x(), corner.y(), modifiers=Qt.ControlModifier)
+    assert shape.is_rounded(1)
+    # A rounded corner gets a handle to set how round it is.
+    assert "r1" in shape.handle_points()
+    click(window.view, corner.x(), corner.y(), modifiers=Qt.ControlModifier)
+    assert not shape.is_rounded(1)
+
+
+def test_ctrl_over_a_side_bends_it_into_an_arc(window):
+    shape = _polygon(window)
+    start, end = shape.segment_ends(0)
+    middle = shape.mapToScene((start + end) / 2)
+    click(window.view, middle.x(), middle.y(), modifiers=Qt.ControlModifier)
+    assert shape.is_curved(0)
+    # Two handles, as Bluebeam has: how deep the curve is, and its lean.
+    handles = shape.handle_points()
+    assert "c0" in handles and "n0" in handles
+    click(window.view, middle.x(), middle.y(), modifiers=Qt.ControlModifier)
+    assert not shape.is_curved(0)
+
+
+def test_the_arc_handles_bend_and_lean_the_curve(window):
+    shape = _polygon(window)
+    shape.curve_segment(0)
+    deep, lean = shape.curved[0]
+    shape.move_handle("c0", shape.curve_apex(0) + QPointF(0, 30))
+    assert shape.curved[0][0] != deep
+    before = shape.curved[0][1]
+    start, end = shape.segment_ends(0)
+    shape.move_handle("n0", start + (end - start) * 0.8)
+    assert shape.curved[0][1] > before
+
+
+def test_the_radius_handle_sets_how_round_a_corner_is(window):
+    shape = _polygon(window)
+    shape.round_corner(1)
+    before = shape.rounded[1]
+    corner = shape.points[1]
+    shape.move_handle("r1", corner + QPointF(-40, 40))
+    assert shape.rounded[1] > before
+
+
+def test_a_break_symbol_goes_on_a_side_and_comes_off(window):
+    shape = _polygon(window)
+    plain = shape.build_path().length()
+    shape.break_segment(0)
+    assert shape.broken.get(0)
+    # The break jinks across the line, so the outline gets longer.
+    assert shape.build_path().length() > plain
+    shape.break_segment(0)
+    assert not shape.broken
+
+
+def test_the_outline_menu_offers_all_four(window):
+    shape = _polygon(window)
+    corner = shape.mapToScene(shape.points[1])
+    menu = window.build_context_menu(shape, corner)
+    outline = [a.menu() for a in menu.actions() if a.text() == "This outline"]
+    assert outline, "the outline submenu should be there"
+    labels = [a.text() for a in outline[0].actions()]
+    assert "Round this corner off" in labels
+    assert "Take this point out" in labels
+    assert any("break symbol" in label for label in labels)
+    assert any("arc" in label or "Straighten" in label for label in labels)
+
+
+def test_a_rectangle_can_become_a_polygon_to_be_reshaped(window):
+    """A rectangle has no points to add to — so it can become a polygon."""
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 260, 200)
+    box = [i for i in markups(window) if isinstance(i, RectItem)][-1]
+    box.setSelected(True)
+
+    labels = [a.text() for a in window.build_context_menu(box, QPointF(150, 150)).actions()]
+    assert "Turn into a polygon" in labels
+
+    window.rectangle_to_polygon(box)
+    shape = [i for i in markups(window) if isinstance(i, PolyItem)][-1]
+    assert len(shape.points) == 4
+    assert shape.closed
+    assert box not in markups(window)
+
+
+def test_a_reshaped_outline_survives_a_round_trip(window):
+    from calcforge.items.base import build_item
+
+    shape = _polygon(window)
+    shape.round_corner(1)
+    shape.curve_segment(2)
+    shape.break_segment(0)
+    clone = build_item(shape.serialize())
+    assert clone.is_rounded(1)
+    assert clone.is_curved(2)
+    assert clone.broken.get(0)
+
+
+def test_reshaping_can_be_undone(window):
+    shape = _polygon(window)
+    corner = shape.mapToScene(shape.points[1])
+    click(window.view, corner.x(), corner.y(), modifiers=Qt.ControlModifier)
+    assert shape.is_rounded(1)
+    window.undo_stack.undo()
+    shape = [i for i in markups(window) if isinstance(i, PolyItem)][-1]
+    assert not shape.is_rounded(1)
+
+
+def test_every_drawing_tool_is_on_the_insert_menu(window):
+    """Not only on the toolbar: findable by reading, as a menu bar is for."""
+    from calcforge.ui.tools import NONE, tools_in
+
+    insert = None
+    for entry in window.menuBar().actions():
+        if entry.text() == "&Insert":
+            insert = entry.menu()
+    assert insert is not None
+    subs = {a.text(): a.menu() for a in insert.actions() if a.menu()}
+    assert "Markup" in subs and "Measurement" in subs
+    drawn = [a.text() for a in subs["Markup"].actions()]
+    for tool in tools_in("Draw"):
+        if tool.mode != NONE:
+            assert tool.label in drawn, f"{tool.label} is not on Insert ▸ Markup"
+    measured = [a.text() for a in subs["Measurement"].actions()]
+    for tool in tools_in("Measure"):
+        if tool.mode != NONE:
+            assert tool.label in measured
+
+
+def test_selecting_something_draws_its_box_straight_away(window):
+    """No right-click needed to see what is selected."""
+    from PySide6.QtGui import QImage, QPainter
+
+    window.select_tool("rect")
+    drag(window.view, 120, 120, 260, 220)
+    window.view.scene().clearSelection()
+    window.selectionChangedAt = None
+
+    def painted():
+        """What the canvas looks like right now."""
+        sheet = QImage(window.view.viewport().size(), QImage.Format_ARGB32)
+        sheet.fill(0xFFFFFFFF)
+        painter = QPainter(sheet)
+        window.view.render(painter)
+        painter.end()
+        return sheet
+
+    box = [i for i in markups(window) if isinstance(i, RectItem)][-1]
+    empty = painted()
+    box.setSelected(True)
+    window.view.selectionChanged.emit()
+    QApplication.processEvents()
+    chosen = painted()
+    assert chosen != empty, "the selection should show without anything else happening"
+
+
+def test_pasting_a_page_says_where_it_will_land(window):
+    """Not just "Paste page": which page it goes after."""
+    window.load_sample()
+    window.copy_page(0)
+    labels = [a.text() for a in window.page_menu(1).actions()]
+    assert "Paste page after page 2" in labels
+    assert "Paste page before page 2" in labels
+
+
+def test_a_pasted_page_lands_where_it_said_and_is_shown(window):
+    window.load_sample()
+    before = len(window.document.pages)
+    window.copy_page(0)
+    window.paste_page(1)
+    assert len(window.document.pages) == before + 1
+    # It went in after page 2, and that is where the view now is.
+    assert window.current_index == 2
+    assert "page 3" in window.status_hint.text()
+
+    window.paste_page(0, before=True)
+    assert window.current_index == 0
+    assert "page 1" in window.status_hint.text()
+
+
+def test_paste_page_is_greyed_out_with_nothing_to_paste(window):
+    from PySide6.QtWidgets import QApplication
+
+    QApplication.clipboard().setText("")
+    paste = [a for a in window.page_menu(0).actions()
+             if a.text().startswith("Paste page")]
+    assert paste and not any(a.isEnabled() for a in paste)
+
+
+def test_the_format_painter_carries_a_brush(window):
+    """Bluebeam's paint brush, not a letter or a box."""
+    from calcforge.ui.icons import icon
+
+    assert not window.act_format_painter.icon().isNull()
+    assert not icon("format_painter").isNull()
+    # And it is its own drawing, not the same one another button uses.
+    brush = icon("format_painter").pixmap(24, 24).toImage()
+    other = icon("select").pixmap(24, 24).toImage()
+    assert brush != other
+
+
+# ---------------------------------------------------------------------------
+# Snapping: what it caught, and while a line is being drawn
+# ---------------------------------------------------------------------------
+
+def test_snapping_says_what_it_caught(window):
+    """Not just a mark on the page: the name of the thing it grabbed."""
+    window.document.settings.snap_to_items = True
+    window.select_tool("rect")
+    drag(window.view, 140, 140, 260, 220)
+    box = [i for i in markups(window) if isinstance(i, RectItem)][-1]
+    corner = box.mapToScene(box.local_rect().normalized().topRight())
+
+    caught = window.view.snap_to_item(QPointF(corner.x() + 1, corner.y() + 1))
+    assert caught is not None
+    assert window.view._snap_marker is not None
+    assert "corner" in window.view._snap_caught
+    assert "rectangle" in window.view._snap_caught.lower()
+
+    middle = box.mapToScene(QPointF(box.local_rect().center().x(),
+                                    box.local_rect().top()))
+    window.view.snap_to_item(QPointF(middle.x() + 1, middle.y()))
+    assert "middle" in window.view._snap_caught
+
+
+def test_dragging_a_drawn_point_snaps_to_what_is_there(window):
+    """Snapping used to work while a line was drawn and never again."""
+    window.document.settings.snap_to_items = True
+    window.select_tool("rect")
+    drag(window.view, 300, 300, 400, 380)
+    box = [i for i in markups(window) if isinstance(i, RectItem)][-1]
+    corner = box.mapToScene(box.local_rect().normalized().topLeft())
+
+    window.select_tool("line")
+    drag(window.view, 120, 500, 200, 520)
+    line = [i for i in markups(window) if isinstance(i, PolyItem)][-1]
+    window.view.scene().clearSelection()
+    line.setSelected(True)
+
+    # Take the far end of the line and drop it just beside the corner.
+    end = line.mapToScene(line.points[-1])
+    drag(window.view, end.x(), end.y(), corner.x() + 3, corner.y() + 3)
+    landed = line.mapToScene(line.points[-1])
+    assert abs(landed.x() - corner.x()) < 0.6
+    assert abs(landed.y() - corner.y()) < 0.6
+
+
+def test_holding_ctrl_lets_a_point_go_where_it_is_put(window):
+    window.document.settings.snap_to_items = True
+    window.view._control_held = True
+    try:
+        assert window.view.snapping_off_now()
+        assert window.view.snap_scene(QPointF(123.4, 234.5)) == QPointF(123.4, 234.5)
+        assert window.view._snap_caught == ""
+    finally:
+        window.view._control_held = False
+
+
+# ---------------------------------------------------------------------------
+# A grid that belongs to the page
+# ---------------------------------------------------------------------------
+
+def test_a_grid_belongs_to_the_page_it_is_on(window):
+    page = window.document.pages[0]
+    window.document.settings.show_grid = False
+    assert not page.shows_a_grid(window.document.settings)
+
+    window.set_page_grid(0, True)
+    assert page.shows_a_grid(window.document.settings)
+    # And the document's own setting no longer speaks for it.
+    window.document.settings.show_grid = False
+    assert page.shows_a_grid(window.document.settings)
+
+
+def test_an_inserted_pdf_page_comes_in_without_a_grid(window, tmp_path):
+    from PySide6.QtGui import QImage
+    from calcforge.io import pdfio
+
+    window.document.settings.show_grid = True
+    photo = QImage(400, 300, QImage.Format_ARGB32)
+    photo.fill(0xFF3366AA)
+    path = str(tmp_path / "drawing.png")
+    photo.save(path)
+    pdfio.import_image(window.document, path, at=1)
+    window.rebuild_scenes()
+
+    drawn_on = window.document.pages[1]
+    assert drawn_on.grid is False
+    assert not drawn_on.shows_a_grid(window.document.settings)
+    # The written pages still take the document's grid.
+    assert window.document.pages[0].shows_a_grid(window.document.settings)
+
+
+def test_the_page_grid_is_on_the_page_menu_and_undoes(window):
+    labels = [a.text() for a in window.page_menu(0).actions()]
+    assert "Grid on this page" in labels
+
+    window.set_page_grid(0, True)
+    assert window.document.pages[0].grid is True
+    window.undo_stack.undo()
+    assert window.document.pages[0].grid is None
+
+
+def test_a_page_grid_survives_saving(window):
+    from calcforge.core.document import Page
+
+    window.set_page_grid(0, True)
+    again = Page.from_dict(window.document.pages[0].to_dict())
+    assert again.grid is True
+    # A page written before pages had their own grid still follows the document.
+    older = Page.from_dict({"setup": {}, "items": []})
+    assert older.grid is None
+    window.document.settings.show_grid = True
+    assert older.shows_a_grid(window.document.settings)
+
+
+# ---------------------------------------------------------------------------
+# The running header and footer
+# ---------------------------------------------------------------------------
+
+def test_the_footer_stays_on_the_paper_when_there_is_no_margin(window, tmp_path):
+    """An imported page has no margins, and the footer used to fall off it."""
+    from PySide6.QtGui import QImage
+    from calcforge.io import pdfio
+
+    window.document.settings.show_footer = True
+    photo = QImage(600, 400, QImage.Format_ARGB32)
+    photo.fill(0xFFFFFFFF)
+    path = str(tmp_path / "drawing.png")
+    photo.save(path)
+    pdfio.import_image(window.document, path, at=1)
+    window.rebuild_scenes()
+    page = window.document.pages[1]
+    assert page.setup.margin_bottom == 0        # nothing to write in
+
+    sheet = page.frame.render_image(dpi=96, for_print=True)
+    # Something was written in the bottom band of the page, on the paper.
+    band = sheet.copy(0, int(sheet.height() * 0.9), sheet.width(),
+                      int(sheet.height() * 0.1) - 1)
+    inked = sum(1 for x in range(band.width()) for y in range(band.height())
+                if QColor(band.pixel(x, y)) != QColor(Qt.white))
+    assert inked > 0, "the footer should be printed inside the page"
+
+
+def test_a_page_can_be_left_out_of_the_header_and_footer(window):
+    window.document.settings.show_footer = True
+    page = window.document.pages[0]
+    assert page.shows_a_footer(window.document.settings)
+
+    window.set_page_running_text(0, "footer", False)
+    assert not page.shows_a_footer(window.document.settings)
+    # And the document's own setting no longer speaks for that page.
+    window.document.settings.show_footer = True
+    assert not page.shows_a_footer(window.document.settings)
+
+
+def test_the_header_and_footer_are_on_the_page_menu(window):
+    subs = {a.text(): a.menu() for a in window.page_menu(0).actions() if a.menu()}
+    assert "Header and footer" in subs
+    labels = [a.text() for a in subs["Header and footer"].actions()]
+    assert "Header on this page" in labels
+    assert "Footer on this page" in labels
+
+
+def test_a_run_of_pages_takes_the_footer_off_at_once(window):
+    window.load_sample()
+    window.document.settings.show_footer = True
+    window.pages_panel.rebuild(window.document, 0)
+    for row in (0, 1):
+        window.pages_panel.list.item(row).setSelected(True)
+    window.set_page_running_text(0, "footer", False)
+    assert not window.document.pages[0].shows_a_footer(window.document.settings)
+    assert not window.document.pages[1].shows_a_footer(window.document.settings)
+
+
+# ---------------------------------------------------------------------------
+# Pasting from Excel with the formulas
+# ---------------------------------------------------------------------------
+
+EXCEL_XML = """<?xml version="1.0"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+ <Worksheet ss:Name="Sheet1"><Table>
+  <Row><Cell><Data ss:Type="Number">2</Data></Cell>
+       <Cell><Data ss:Type="Number">3</Data></Cell>
+       <Cell ss:Formula="=RC[-2]*RC[-1]"><Data ss:Type="Number">6</Data></Cell></Row>
+  <Row><Cell><Data ss:Type="Number">4</Data></Cell>
+       <Cell><Data ss:Type="Number">5</Data></Cell>
+       <Cell ss:Formula="=RC[-2]*RC[-1]"><Data ss:Type="Number">20</Data></Cell></Row>
+ </Table></Worksheet>
+</Workbook>"""
+
+
+def _put_excel_on_the_clipboard(text=EXCEL_XML, plain="2\t3\t6\n4\t5\t20"):
+    from PySide6.QtCore import QByteArray, QMimeData
+    from PySide6.QtWidgets import QApplication
+
+    mime = QMimeData()
+    mime.setText(plain)
+    mime.setData("application/x-qt-windows-mime;value=\"XML Spreadsheet\"",
+                 QByteArray(text.encode("utf-8")))
+    QApplication.clipboard().setMimeData(mime)
+
+
+def test_pasting_from_excel_brings_the_formulas(window):
+    """The plain text holds only what the cells looked like."""
+    window.select_tool("table")
+    drag(window.view, 100, 120, 380, 260)
+    table = [i for i in markups(window) if isinstance(i, TableItem)][-1]
+    window.view.activate_table(table)
+    table.current = (0, 0)
+
+    _put_excel_on_the_clipboard()
+    assert window.view.paste_cells()
+
+    assert table.sheet.raw(0, 0) == "2"
+    assert table.sheet.raw(0, 2) == "=A1*B1"
+    # And it is relative: the row below refers to its own row.
+    assert table.sheet.raw(1, 2) == "=A2*B2"
+
+
+def test_a_formula_pasted_lower_down_still_points_at_its_own_row(window):
+    window.select_tool("table")
+    drag(window.view, 100, 120, 380, 300)
+    table = [i for i in markups(window) if isinstance(i, TableItem)][-1]
+    window.view.activate_table(table)
+    table.current = (2, 1)
+
+    _put_excel_on_the_clipboard()
+    assert window.view.paste_cells()
+    assert table.sheet.raw(2, 3) == "=B3*C3"
+    assert table.sheet.raw(3, 3) == "=B4*C4"
+
+
+def test_plain_text_from_anywhere_else_still_pastes_its_values(window):
+    from PySide6.QtWidgets import QApplication
+
+    window.select_tool("table")
+    drag(window.view, 100, 120, 380, 260)
+    table = [i for i in markups(window) if isinstance(i, TableItem)][-1]
+    window.view.activate_table(table)
+    table.current = (0, 0)
+
+    QApplication.clipboard().setText("7\t8\n9\t10")
+    assert window.view.paste_cells()
+    assert table.sheet.raw(0, 0) == "7"
+    assert table.sheet.raw(1, 1) == "10"
+
+
+def test_an_absolute_reference_stays_absolute(window):
+    from calcforge.core.excelxml import formula_to_a1
+
+    assert formula_to_a1("=RC[-1]*R1C1", 4, 3) == "=C5*$A$1"
+    assert formula_to_a1("=SUM(R[-3]C:R[-1]C)", 4, 1) == "=SUM(B2:B4)"
+
+
+# ---------------------------------------------------------------------------
+# Dropping a drawing on the pages panel
+# ---------------------------------------------------------------------------
+
+def test_a_dropped_image_becomes_a_page_where_the_line_was(window, tmp_path):
+    from PySide6.QtGui import QImage
+
+    window.load_sample()
+    before = len(window.document.pages)
+    photo = QImage(300, 200, QImage.Format_ARGB32)
+    photo.fill(0xFF227744)
+    path = str(tmp_path / "detail.png")
+    photo.save(path)
+
+    added = window.insert_files_at([path], 1)
+    assert added == 1
+    assert len(window.document.pages) == before + 1
+    # It went in as page 2, in front of what was page 2 before.
+    assert window.document.pages[1].source_note.endswith("detail.png")
+    assert window.current_index == 1
+    assert "page 2" in window.status_hint.text()
+
+
+def test_the_pages_panel_takes_a_dropped_drawing(window, tmp_path):
+    """The panel accepts the drag and works out which page it points at."""
+    from PySide6.QtCore import QMimeData, QPoint, QUrl
+    from PySide6.QtGui import QDragEnterEvent
+
+    panel = window.pages_panel
+    assert panel.list.acceptDrops()
+    assert panel.list.showDropIndicator()
+
+    photo = tmp_path / "sheet.pdf"
+    photo.write_bytes(b"%PDF-1.4\n")
+    data = QMimeData()
+    data.setUrls([QUrl.fromLocalFile(str(photo))])
+    assert panel._files_in(type("E", (), {"mimeData": lambda self: data})())
+
+    # And something it cannot use is left to the list itself.
+    other = QMimeData()
+    other.setUrls([QUrl.fromLocalFile("/tmp/notes.txt")])
+    assert not panel._files_in(type("E", (), {"mimeData": lambda self: other})())
+
+
+def test_where_a_drop_lands_follows_the_pointer(window):
+    window.load_sample()
+    panel = window.pages_panel
+    panel.rebuild(window.document, 0)
+    first = panel.list.visualItemRect(panel.list.item(0))
+    # Above the middle of the first thumbnail: in front of it.
+    assert panel.drop_row(first.center() - QPoint(0, first.height() // 3)) == 0
+    # Below its middle: after it.
+    assert panel.drop_row(first.center() + QPoint(0, first.height() // 3)) == 1
+    # Past the end of the strip: on the end.
+    assert panel.drop_row(QPoint(5, panel.list.height() * 4)) == panel.list.count()
+
+
+# ---------------------------------------------------------------------------
+# Finding a tool by what it does
+# ---------------------------------------------------------------------------
+
+def test_help_can_find_a_tool_by_what_it_does(window):
+    """Fifty tools is more than anybody keeps in their head."""
+    assert [t.key for t in window.tools_matching("cloud")][0] == "cloud"
+    # By what it is for, not only by its name.
+    assert "cloud" in [t.key for t in window.tools_matching("revision")]
+    assert "measure_area" in [t.key for t in window.tools_matching("area")]
+    # And by the key it is on.
+    assert "cloud" in [t.key for t in window.tools_matching("C")]
+    assert window.tools_matching("") == []
+    assert window.tools_matching("xyzzy") == []
+
+
+def test_find_a_tool_is_on_the_help_menu(window):
+    labels = []
+    for entry in window.menuBar().actions():
+        if entry.text() == "&Help":
+            labels = [a.text() for a in entry.menu().actions()]
+    assert "Find a tool…" in labels
+    assert window.act_find_tool.shortcut().toString() == "Shift+F1"
+
+
+def test_finding_a_tool_picks_it_up(window, monkeypatch):
+    from PySide6.QtWidgets import QInputDialog
+
+    monkeypatch.setattr(QInputDialog, "getText",
+                        staticmethod(lambda *a, **k: ("revision cloud", True)))
+    window.find_a_tool()
+    assert window.view.tool_key == "cloud"
+    assert "Cloud" in window.status_hint.text()
+
+
+# ---------------------------------------------------------------------------
+# Hatch patterns and line types
+# ---------------------------------------------------------------------------
+
+def test_a_hatched_fill_is_not_a_flat_one(window):
+    from PySide6.QtCore import Qt as QtNS
+    from calcforge.items.base import Style
+
+    plain = Style(fill="#888888")
+    assert plain.brush().style() == QtNS.SolidPattern
+    hatched = Style(fill="#888888", hatch="diagonal up")
+    assert hatched.brush().style() == QtNS.BDiagPattern
+
+
+def test_bluebeams_spellings_of_a_hatch_all_land(window):
+    from PySide6.QtCore import Qt as QtNS
+    from calcforge.items.base import hatch_named
+
+    assert hatch_named("Hatch-DiagonalUp") == QtNS.BDiagPattern
+    assert hatch_named("diagonal down") == QtNS.FDiagPattern
+    assert hatch_named("DiagonalCross") == QtNS.DiagCrossPattern
+    assert hatch_named("Horizontal") == QtNS.HorPattern
+    assert hatch_named("/Vertical") == QtNS.VerPattern
+    assert hatch_named("Concrete") == QtNS.Dense5Pattern
+    assert hatch_named("") == QtNS.SolidPattern
+    assert hatch_named("something nobody has heard of") == QtNS.SolidPattern
+
+
+def test_a_line_type_is_drawn_with_its_own_dashes(window):
+    from PySide6.QtCore import Qt as QtNS
+    from calcforge.items.base import Style
+
+    assert Style(line_style="solid").dashes() == []
+    assert Style(line_style="centre").dashes() == [10.0, 2.5, 2.0, 2.5]
+    pen = Style(line_style="hidden").pen()
+    assert pen.style() == QtNS.CustomDashLine
+    assert pen.dashPattern() == [3.0, 2.0]
+    # A pattern of its own beats the named one.
+    own = Style(line_style="solid", dash_array=(6.0, 1.0))
+    assert own.dashes() == [6.0, 1.0]
+
+
+def test_a_dashed_line_from_a_toolset_comes_in_dashed(window):
+    """It used to be written to a field no markup has, and came in solid."""
+    from calcforge.io.btx import _style
+
+    look = _style({"C": [0, 0, 0], "BS": {"W": 2.0, "S": "D", "D": [4, 3]}})
+    assert look["line_style"] == "dash"
+    assert look["dash_array"] == (4.0, 3.0)
+
+    plain = _style({"C": [0, 0, 0], "BS": {"W": 2.0}})
+    assert plain["line_style"] == "solid"
+    assert "dash_array" not in plain
+
+
+def test_the_line_and_hatch_lists_are_in_the_properties_panel(window):
+    from PySide6.QtWidgets import QComboBox
+
+    window.select_tool("rect")
+    drag(window.view, 120, 120, 260, 220)
+    box = markups(window)[-1]
+    box.setSelected(True)
+    window.properties_panel.show_items([box])
+
+    labels = [w.text() for w in window.properties_panel.findChildren(type(
+        window.properties_panel.findChild(QComboBox).parent()))] if False else []
+    boxes = window.properties_panel.findChildren(QComboBox)
+    entries = [[b.itemText(i) for i in range(b.count())] for b in boxes]
+    assert any("centre" in e for e in entries), "the line types should be there"
+    assert any("diagonal cross" in e for e in entries), "the hatches should be there"
+
+
+# ---------------------------------------------------------------------------
+# The page bar along the bottom
+# ---------------------------------------------------------------------------
+
+def test_the_page_bar_says_what_the_paper_is(window):
+    window.refresh_page_bar()
+    assert "A4" in window.status_size.text()
+    assert "210" in window.status_size.text() and "297" in window.status_size.text()
+    assert "Margins 10 mm" in window.status_size.toolTip()
+
+
+def test_the_page_bar_walks_through_the_pages(window):
+    window.load_sample()
+    window.go_to_page(0)
+    assert window.page_total.text() == f"of {len(window.document.pages)}"
+    assert not window.page_back.isEnabled()      # nothing before page 1
+    assert window.page_forward.isEnabled()
+
+    window.page_forward.click()
+    assert window.current_index == 1
+    window.page_back.click()
+    assert window.current_index == 0
+
+
+def test_the_grid_and_snap_buttons_are_on_the_bar(window):
+    window.set_page_grid(0, False)
+    window.refresh_page_bar()
+    assert not window.status_grid.isChecked()
+
+    window.status_grid.setChecked(True)
+    assert window.document.pages[0].grid is True
+
+    window.status_snap.setChecked(True)
+    assert window.document.settings.snap_to_grid
+    window.status_snap.setChecked(False)
+    assert not window.document.settings.snap_to_grid
+
+
+def test_the_bar_follows_the_page_it_is_on(window, tmp_path):
+    from PySide6.QtGui import QImage
+    from calcforge.io import pdfio
+
+    photo = QImage(1200, 800, QImage.Format_ARGB32)
+    photo.fill(0xFFFFFFFF)
+    path = str(tmp_path / "big.png")
+    photo.save(path)
+    pdfio.import_image(window.document, path, at=1)
+    window.rebuild_scenes()
+
+    window.go_to_page(1)
+    wide = window.status_size.text()
+    window.go_to_page(0)
+    assert window.status_size.text() != wide
+    assert "A4" in window.status_size.text()
+
+
+# ---------------------------------------------------------------------------
+# Dimensions
+# ---------------------------------------------------------------------------
+
+def _dimension(window):
+    window.select_tool("measure_dimension")
+    drag(window.view, 150, 300, 350, 300)
+    dim = [i for i in markups(window) if isinstance(i, MeasureItem)][-1]
+    window.view.scene().clearSelection()
+    dim.setSelected(True)
+    return dim
+
+
+def test_shift_click_pulls_the_number_off_the_line(window):
+    """Bluebeam's: take hold of the value, not of a small handle."""
+    dim = _dimension(window)
+    dim.custom_label = "600"
+    dim.refresh(page=window.current_page())
+    assert not dim.label_is_off_the_line()
+
+    on_the_number = dim.mapToScene(dim.label_rect().center())
+    drag(window.view, on_the_number.x(), on_the_number.y(),
+         on_the_number.x() + 40, on_the_number.y() - 60,
+         modifiers=Qt.ShiftModifier)
+    assert dim.label_is_off_the_line()
+
+
+def test_the_number_knows_where_it_is(window):
+    dim = _dimension(window)
+    dim.custom_label = "600"
+    dim.refresh(page=window.current_page())
+    assert dim.label_at(dim.label_rect().center())
+    assert not dim.label_at(dim.label_rect().center() + QPointF(0, 400))
+
+
+def test_a_dimensions_value_holds_still_while_its_text_is_turned(window, tmp_path):
+    """It used to be worked out against whatever page the view was on."""
+    from PySide6.QtGui import QImage
+    from calcforge.core.document import PageScale
+    from calcforge.io import pdfio
+
+    # Two pages at different scales, and a dimension on the second.
+    photo = QImage(400, 300, QImage.Format_ARGB32)
+    photo.fill(0xFFFFFFFF)
+    path = str(tmp_path / "sheet.png")
+    photo.save(path)
+    pdfio.import_image(window.document, path, at=1)
+    window.rebuild_scenes()
+    window.document.pages[0].scale = PageScale.from_ratio(1)
+    window.document.pages[1].scale = PageScale.from_ratio(100)
+
+    frame = window.document.pages[1].frame
+    dim = MeasureItem(DIMENSION)
+    dim.points = [QPointF(0, 0), QPointF(200, 0)]
+    frame.add_markup(dim, QPointF(40, 60))
+    dim.refresh(page=window.document.pages[1])
+    reading = dim.value_text
+    assert reading
+
+    # Now look at page 1 and turn the text on page 2's dimension.
+    window.go_to_page(0)
+    assert window.view.page_of(dim) is window.document.pages[1]
+    dim.refresh(page=window.view.page_of(dim))
+    assert dim.value_text == reading
+
+
+# ---------------------------------------------------------------------------
+# An inserted PDF brings its own line work
+# ---------------------------------------------------------------------------
+
+def _a_pdf_with_lines(window, tmp_path):
+    """Export a page with known geometry, so it can be read back in."""
+    from calcforge.io import export as export_io
+
+    window.select_tool("rect")
+    drag(window.view, 120, 150, 300, 260)
+    window.select_tool("line")
+    drag(window.view, 120, 320, 380, 320)
+    path = str(tmp_path / "drawing.pdf")
+    export_io.export_pdf(window.document, path)
+    return path
+
+
+def test_an_inserted_pdf_brings_its_own_lines(window, tmp_path):
+    """Not just a picture: geometry that can be snapped to and measured."""
+    from calcforge.io import pdfio
+
+    path = _a_pdf_with_lines(window, tmp_path)
+    strokes = pdfio.line_work(path, [0])
+    assert strokes, "the PDF's line work should be readable"
+
+    items = pdfio._items_from(strokes[0])
+    assert items
+    # The rectangle that was drawn at 120,150 comes back where it was drawn.
+    corners = [(round(i["x"]), round(i["y"])) for i in items]
+    assert (120, 150) in corners
+
+
+def test_the_lines_come_in_on_a_layer_of_their_own(window, tmp_path):
+    from calcforge.core.document import Document
+    from calcforge.io import pdfio
+
+    path = _a_pdf_with_lines(window, tmp_path)
+    fresh = Document()
+    pages = pdfio.import_pages(fresh, path, [0], vectors=True, at=1)
+    assert pages[0]._pending_items
+    assert all(item["layer"] == "Drawing" for item in pages[0]._pending_items)
+    assert "Drawing" in fresh.layer_names()
+    # And the picture is still there underneath, so the words still show.
+    assert pages[0].background_key
+
+
+def test_the_lines_can_be_left_out(window, tmp_path):
+    from calcforge.core.document import Document
+    from calcforge.io import pdfio
+
+    path = _a_pdf_with_lines(window, tmp_path)
+    fresh = Document()
+    pages = pdfio.import_pages(fresh, path, [0], vectors=False, at=1)
+    assert not pages[0]._pending_items
+    assert pages[0].background_key
+
+
+def test_a_file_that_cannot_be_read_that_way_still_comes_in(window, tmp_path):
+    from calcforge.io import pdfio
+
+    broken = tmp_path / "not-really.pdf"
+    broken.write_bytes(b"%PDF-1.4\nnothing to see here\n")
+    assert pdfio.line_work(str(broken), [0]) == {}
+
+
+def test_a_curve_comes_across_as_something_to_measure(window):
+    from calcforge.io import pdfio
+
+    run = pdfio._runs([["m", 0.0, 0.0], ["c", 0.0, 10.0, 10.0, 10.0, 10.0, 0.0]])
+    assert len(run) == 1
+    assert len(run[0]) > 4          # flattened into pieces, not dropped
+    assert run[0][0] == [0.0, 0.0]
+    assert run[0][-1] == [10.0, 0.0]
+
+
+def test_a_closed_path_comes_back_closed(window):
+    from calcforge.io import pdfio
+
+    run = pdfio._runs([["m", 0.0, 0.0], ["l", 10.0, 0.0], ["l", 10.0, 10.0], ["z"]])
+    assert run[0][0] == run[0][-1]
+
+
+# ---------------------------------------------------------------------------
+# The numbers in the properties panel
+# ---------------------------------------------------------------------------
+
+def test_the_properties_panel_says_where_it_is_and_how_big(window):
+    """Typed, not nudged: a detail that starts exactly 40 mm in."""
+    from PySide6.QtWidgets import QDoubleSpinBox, QGroupBox
+    from calcforge.core.document import MM_TO_PT, PT_TO_MM
+
+    window.select_tool("rect")
+    drag(window.view, 120, 150, 320, 250)
+    box = markups(window)[-1]
+    box.setSelected(True)
+    window.properties_panel.show_items([box])
+
+    groups = {g.title(): g for g in
+              window.properties_panel.findChildren(QGroupBox)}
+    assert "Position and size" in groups
+    labels = [w.text().rstrip(":") for w in groups["Position and size"].findChildren(
+        type(groups["Position and size"].findChild(QLabel)))]
+    for wanted in ("X", "Y", "Width", "Height", "Rotation"):
+        assert wanted in labels, f"{wanted} should be in the panel"
+
+    spins = groups["Position and size"].findChildren(QDoubleSpinBox)
+    # It reads what is actually there, in millimetres.
+    assert spins[0].value() == pytest.approx(box.pos().x() * PT_TO_MM, abs=0.1)
+    assert spins[2].value() == pytest.approx(
+        box.local_rect().width() * PT_TO_MM, abs=0.1)
+
+
+def test_typing_a_number_moves_and_resizes_it(window):
+    from PySide6.QtWidgets import QDoubleSpinBox, QGroupBox
+    from calcforge.core.document import MM_TO_PT
+
+    window.select_tool("rect")
+    drag(window.view, 120, 150, 320, 250)
+    box = markups(window)[-1]
+    box.setSelected(True)
+    window.properties_panel.show_items([box])
+    groups = {g.title(): g for g in
+              window.properties_panel.findChildren(QGroupBox)}
+    spins = groups["Position and size"].findChildren(QDoubleSpinBox)
+
+    spins[0].setValue(40.0)                       # 40 mm in from the left
+    assert box.pos().x() == pytest.approx(40.0 * MM_TO_PT, abs=0.5)
+    spins[2].setValue(60.0)                       # and 60 mm across
+    assert box.local_rect().width() == pytest.approx(60.0 * MM_TO_PT, abs=0.5)
+
+    # One undo step for the lot, not one per keystroke.
+    before = window.undo_stack.count()
+    spins[1].setValue(80.0)
+    assert window.undo_stack.count() <= before + 1
+
+
+def test_a_markup_that_cannot_be_resized_is_not_asked_about_its_size(window):
+    from PySide6.QtWidgets import QDoubleSpinBox, QGroupBox
+
+    window.select_tool("flag")
+    click(window.view, 200, 200)
+    flag = markups(window)[-1]
+    flag.setSelected(True)
+    window.properties_panel.show_items([flag])
+    groups = {g.title(): g for g in
+              window.properties_panel.findChildren(QGroupBox)}
+    spins = groups["Position and size"].findChildren(QDoubleSpinBox)
+    assert len(spins) == 2                        # only X and Y

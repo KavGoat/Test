@@ -17,7 +17,8 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox,
                                QVBoxLayout, QWidget)
 
 from ..core.units import format_quantity
-from ..items.base import ARROW_HEADS, LINE_STYLES, MarkupItem
+from ..items.base import (ARROW_HEADS, DASH_ARRAYS, HATCH_PATTERNS,
+                          LINE_STYLES, MarkupItem)
 from ..items.contents import ContentsItem
 from ..items.mathitem import MathItem
 from ..items.media import ImageItem
@@ -69,14 +70,76 @@ class PagesPanel(QWidget):
         self.list.setMovement(QListWidget.Static)
         self.list.setSpacing(6)
         self.list.setDragDropMode(QAbstractItemView.InternalMove)
-        self.list.setSelectionMode(QAbstractItemView.SingleSelection)
+        # The line that says where a dragged page will land. Without it a drag
+        # is a guess, and a page dropped one place out has to be dragged again.
+        self.list.setDropIndicatorShown(True)
+        # More than one page at a time: a header taken off a run of drawing
+        # sheets, or a block of pages dragged somewhere else, is one gesture
+        # rather than twenty.
+        self.list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.list.currentRowChanged.connect(self._row_changed)
         self.list.model().rowsMoved.connect(self._rows_moved)
         self.list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.list.customContextMenuRequested.connect(self._context_menu)
         self.list.installEventFilter(self)
+        # A PDF or an image dragged onto the strip goes in where the line is.
+        self.list.setAcceptDrops(True)
+        self.list.viewport().setAcceptDrops(True)
+        self.list.dragEnterEvent = self._drag_enter
+        self.list.dragMoveEvent = self._drag_move
+        self.list.dropEvent = self._drop
         layout.addWidget(self.list, 1)
         self._suppress = False
+
+    # -- dropping a file on the strip --------------------------------------
+    WELCOME = (".pdf", ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff")
+
+    def _files_in(self, event) -> list[str]:
+        """The paths being dragged that this panel can do something with."""
+        data = event.mimeData()
+        if not data.hasUrls():
+            return []
+        paths = [url.toLocalFile() for url in data.urls()]
+        return [path for path in paths
+                if path.lower().endswith(self.WELCOME)]
+
+    def _drag_enter(self, event) -> None:
+        if self._files_in(event):
+            event.setDropAction(Qt.CopyAction)
+            event.acceptProposedAction()
+            return
+        QListWidget.dragEnterEvent(self.list, event)
+
+    def _drag_move(self, event) -> None:
+        if self._files_in(event):
+            # Qt draws the insertion line itself, now that the drop indicator
+            # is on: what the drag needs is only to be allowed.
+            event.setDropAction(Qt.CopyAction)
+            event.acceptProposedAction()
+            return
+        QListWidget.dragMoveEvent(self.list, event)
+
+    def drop_row(self, position) -> int:
+        """Which page a drop at *position* goes in front of."""
+        entry = self.list.itemAt(position)
+        if entry is None:
+            return self.list.count()
+        row = self.list.row(entry)
+        box = self.list.visualItemRect(entry)
+        # Past the middle of a thumbnail means after it, which is how every
+        # other list reads a drop.
+        if position.y() > box.center().y():
+            row += 1
+        return row
+
+    def _drop(self, event) -> None:
+        files = self._files_in(event)
+        if not files:
+            QListWidget.dropEvent(self.list, event)
+            return
+        event.setDropAction(Qt.CopyAction)
+        event.accept()
+        self.window.insert_files_at(files, self.drop_row(event.position().toPoint()))
 
     def eventFilter(self, watched, event):
         """Ctrl+C and Ctrl+V on the thumbnails copy and paste whole pages."""
@@ -1281,6 +1344,8 @@ class PropertiesPanel(QScrollArea):
                 self._add_cloud(first)
             elif isinstance(first, PolyItem) and first.kind == "cloud":
                 self._add_cloud(first)
+        if len(self._items) == 1:
+            self._add_geometry(first)
         self._add_metadata(first)
         if len(self._items) == 1:
             self._add_defaults(first)
@@ -1334,6 +1399,66 @@ class PropertiesPanel(QScrollArea):
         """A change from a slider or a spin box: part of one continuous run."""
         self._apply(setter, description, coalesce=True)
 
+    def _add_geometry(self, item) -> None:
+        """Where it is, how big it is and which way it is turned — as numbers.
+
+        Dragging is fine for most things and useless for the rest: a detail
+        that has to start exactly 40 mm in, or two boxes that have to be the
+        same width, are typed rather than nudged. The numbers are in
+        millimetres because that is what the page is set up in, and they are
+        measured from the top-left corner of the paper.
+        """
+        from ..core.document import MM_TO_PT, PT_TO_MM
+
+        form = self._group("Position and size")
+        rect = item.local_rect().normalized()
+        rows = [
+            ("X", item.pos().x(), lambda i, v: i.setPos(v, i.pos().y()), False),
+            ("Y", item.pos().y(), lambda i, v: i.setPos(i.pos().x(), v), False),
+        ]
+        if item.RESIZABLE and rect.width() > 0 and rect.height() > 0:
+            rows += [
+                ("Width", rect.width(), self._set_width, True),
+                ("Height", rect.height(), self._set_height, True),
+            ]
+        for label, value, setter, is_size in rows:
+            box = QDoubleSpinBox()
+            box.setRange(0.1 if is_size else -20000.0, 20000.0)
+            box.setDecimals(1)
+            box.setSuffix(" mm")
+            box.setSingleStep(1.0)
+            box.setValue(value * PT_TO_MM)
+            box.setToolTip(f"{value:.1f} pt")
+            box.valueChanged.connect(
+                lambda millimetres, apply=setter:
+                self._slide(lambda i: apply(i, millimetres * MM_TO_PT),
+                            "Position and size"))
+            form.addRow(label, box)
+
+        if item.ROTATABLE:
+            turn = QDoubleSpinBox()
+            turn.setRange(-360.0, 360.0)
+            turn.setDecimals(1)
+            turn.setSuffix("°")
+            turn.setWrapping(True)
+            turn.setValue(item.rotation())
+            turn.valueChanged.connect(
+                lambda angle: self._slide(lambda i: i.setRotation(angle),
+                                          "Rotation"))
+            form.addRow("Rotation", turn)
+
+    @staticmethod
+    def _set_width(item, points: float) -> None:
+        rect = item.local_rect().normalized()
+        item.set_local_rect(QRectF(rect.x(), rect.y(), max(points, 0.1),
+                                   rect.height()))
+
+    @staticmethod
+    def _set_height(item, points: float) -> None:
+        rect = item.local_rect().normalized()
+        item.set_local_rect(QRectF(rect.x(), rect.y(), rect.width(),
+                                   max(points, 0.1)))
+
     # -- sections ----------------------------------------------------------
     def _add_appearance(self, first: MarkupItem) -> None:
         form = self._group("Appearance")
@@ -1359,12 +1484,24 @@ class PropertiesPanel(QScrollArea):
         form.addRow("Thickness", width)
 
         line_style = QComboBox()
-        line_style.addItems(list(LINE_STYLES))
+        line_style.addItems(list(DASH_ARRAYS))
         line_style.setCurrentText(first.style.line_style)
         line_style.currentTextChanged.connect(
-            lambda value: self._apply(lambda i: setattr(i.style, "line_style", value),
-                                      "Line style"))
+            lambda value: self._apply(
+                lambda i: (setattr(i.style, "line_style", value),
+                           setattr(i.style, "dash_array", ())),
+                "Line style"))
         form.addRow("Style", line_style)
+
+        # A hatch over the fill: how a section reads as concrete or as steel,
+        # and what a Bluebeam tool set full of sections needs to come in with.
+        hatch = QComboBox()
+        hatch.addItems(list(HATCH_PATTERNS))
+        hatch.setCurrentText(first.style.hatch or "")
+        hatch.currentTextChanged.connect(
+            lambda value: self._apply(lambda i: setattr(i.style, "hatch", value),
+                                      "Hatch"))
+        form.addRow("Hatch", hatch)
 
         opacity = LabeledSlider(5, 100, int(first.style.opacity * 100))
         opacity.valueChanged.connect(

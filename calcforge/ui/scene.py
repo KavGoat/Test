@@ -17,7 +17,7 @@ from typing import Optional
 
 from PySide6.QtCore import QByteArray, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (QBrush, QColor, QImage, QLinearGradient, QPainter,
-                           QPen, QPixmap)
+                           QPen, QPicture, QPixmap)
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QGraphicsScene
 
 from ..core.document import MM_TO_PT, Document, Page
@@ -31,6 +31,7 @@ PAPER = QColor("#ffffff")
 PAGE_EDGE = QColor(92, 98, 108)        # the line around the sheet
 PAGE_GAP = 26.0                        # points of desk between pages
 SHADOW_DEPTH = 7.0                     # how far the shadow reaches
+FOOTER_DEPTH = 14.0                    # how deep the running footer is
 
 
 def _order_key(item):
@@ -176,7 +177,7 @@ class PageFrame(QGraphicsObject):
 
     def _paint_grid(self, painter: QPainter, page_rect: QRectF) -> None:
         settings = self.document.settings
-        if not settings.show_grid:
+        if not self.page.shows_a_grid(settings):
             return
         step = max(settings.grid_mm, 1.0) * MM_TO_PT
         painter.save()
@@ -258,29 +259,39 @@ class PageFrame(QGraphicsObject):
         painter.save()
         painter.setFont(page_font("", 8.0))
         painter.setPen(QPen(QColor(90, 96, 106)))
-        if settings.show_header:
+        if self.page.shows_a_header(settings):
+            # The same the other way up: a header written above the top of
+            # the paper is a header nobody reads.
             # The band is as deep as it has to be for the logo, but never
             # deeper than the margin it lives in.
-            band = self._band(QRectF(left, top - 18, width, 14), "header", top)
+            band = self._band(QRectF(left, max(top - 18, 3), width, 14),
+                              "header", top)
             self._paint_three(painter, band, settings.header_left,
                               settings.header_center, settings.header_right,
                               index, "header")
             pen = QPen(QColor(190, 196, 206))
             pen.setWidthF(0.5)
             painter.setPen(pen)
-            painter.drawLine(QPointF(left, top - 4), QPointF(left + width, top - 4))
+            rule = band.bottom() + 4
+            painter.drawLine(QPointF(left, rule), QPointF(left + width, rule))
             painter.setPen(QPen(QColor(90, 96, 106)))
-        if settings.show_footer:
-            band = self._band(QRectF(left, top + height + 5, width, 14), "footer",
-                              self.page.height_pt - (top + height))
+        if self.page.shows_a_footer(settings):
+            # A page that came in from a PDF has no margins to speak of, so
+            # the footer used to be written five points below the bottom of
+            # the paper, where nothing can see it. Wherever the margin puts
+            # it, it is brought back far enough to be on the sheet.
+            room = self.page.height_pt - (top + height)
+            baseline = min(top + height + 5,
+                           self.page.height_pt - FOOTER_DEPTH - 3)
+            band = self._band(QRectF(left, baseline, width, 14), "footer", room)
             self._paint_three(painter, band, settings.footer_left,
                               settings.footer_center, settings.footer_right,
                               index, "footer")
             pen = QPen(QColor(190, 196, 206))
             pen.setWidthF(0.5)
             painter.setPen(pen)
-            painter.drawLine(QPointF(left, top + height + 3),
-                             QPointF(left + width, top + height + 3))
+            rule = band.top() - 2
+            painter.drawLine(QPointF(left, rule), QPointF(left + width, rule))
         painter.restore()
 
     def _band(self, box: QRectF, which: str, room: float) -> QRectF:
@@ -348,7 +359,7 @@ class PageFrame(QGraphicsObject):
             item.setPos(position)
         if not item.zValue():
             item.setZValue(self.next_z())
-        if isinstance(item, ImageItem):
+        if hasattr(item, "load_from_document"):
             item.load_from_document(self.document)
         item.setParentItem(self)
         item.refresh(self.workspace, self.page)
@@ -376,7 +387,7 @@ class PageFrame(QGraphicsObject):
             item = build_item(entry)
             if item is None:
                 continue
-            if isinstance(item, ImageItem):
+            if hasattr(item, "load_from_document"):
                 item.load_from_document(self.document)
             item.setParentItem(self)
         self.refresh_items()
@@ -430,24 +441,62 @@ class PageFrame(QGraphicsObject):
         # refresh, so the restore landed after the clearing.
         hidden_handles = [item for item in self.markups() if item._handles_visible]
         chrome: list = []
-        for item in self.markups():
-            if hasattr(item, "set_chrome") and item.show_chrome:
-                chrome.append(item)
-                item.set_chrome(False)
-            item._handles_visible = False
-        hidden = [item for item in self.markups()
-                  if for_print and (not item.printable or not self.layer_prints(item))]
-        for item in hidden:
-            item.setVisible(False)
-        source = self.mapRectToScene(self.page_rect())
-        scene.render(painter, target, source, Qt.IgnoreAspectRatio)
-        for item in hidden:
-            item.setVisible(self.document.layer(item.layer).visible)
-        for item in chrome:
-            item.set_chrome(True)
-        for item in hidden_handles:
-            item._handles_visible = True
-        self.print_mode = previous
+        hidden: list = []
+        try:
+            for item in self.markups():
+                if hasattr(item, "set_chrome") and item.show_chrome:
+                    chrome.append(item)
+                    item.set_chrome(False)
+                item._handles_visible = False
+            hidden = [item for item in self.markups()
+                      if for_print and (not item.printable
+                                        or not self.layer_prints(item))]
+            for item in hidden:
+                item.setVisible(False)
+            source = self.mapRectToScene(self.page_rect())
+            scene.render(painter, target, source, Qt.IgnoreAspectRatio)
+        finally:
+            # Whatever happened while it was being drawn, the page goes back
+            # to how it looks on screen. Leaving the handles off is how a
+            # selected markup came back with no box round it — the selection
+            # was there, but nothing was drawn to say so until something else
+            # forced a repaint.
+            for item in hidden:
+                item.setVisible(self.document.layer(item.layer).visible)
+            for item in chrome:
+                item.set_chrome(True)
+            for item in hidden_handles:
+                item._handles_visible = True
+                item.update()
+            self.print_mode = previous
+
+    def render_picture(self, region: QRectF) -> QPicture:
+        """Everything in *region*, recorded as drawing rather than pixels.
+
+        A snapshot is not a photograph of the page: it is the lines that were
+        under the marquee, kept as lines. Recorded this way it stays sharp
+        however far it is zoomed into, prints as vectors rather than as a
+        blurry rectangle, and still carries any image that happened to be in
+        the region — the picture keeps the draw calls, whatever they drew.
+
+        The recording is in the region's own coordinates, so its top-left
+        corner is the origin and its size is the size of the snapshot.
+        """
+        box = QRectF(region).normalized()
+        picture = QPicture()
+        if box.width() <= 0 or box.height() <= 0:
+            return picture
+        painter = QPainter()
+        painter.begin(picture)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setRenderHint(QPainter.TextAntialiasing, True)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        painter.setClipRect(QRectF(0, 0, box.width(), box.height()))
+        painter.translate(-box.left(), -box.top())
+        self.render_page(painter, QRectF(0, 0, self.page.width_pt,
+                                         self.page.height_pt), for_print=False)
+        painter.end()
+        return picture
 
     def render_image(self, dpi: float = 150.0, for_print: bool = True,
                      region: Optional[QRectF] = None) -> QImage:

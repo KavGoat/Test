@@ -22,7 +22,8 @@ CLICK = "click"      # single click places the item
 POLY = "poly"        # click for each vertex, double-click / Enter to finish
 FREE = "free"        # freehand: every mouse-move point is recorded
 ANCHOR = "anchor"    # click what it points at, then click where the words go
-CLOUD = "cloud"      # drag a cloud round it, then click where the words go
+CLOUD = "cloud"      # cloud it, then click where the words go
+CLOUDY = "cloudy"    # drag for a rectangle, or click corner by corner
 SNAPSHOT = "snapshot"  # drag a region and take a copy of what is in it
 ERASE = "erase"      # rub out the ink it is dragged over
 NONE = "none"        # navigation only
@@ -58,8 +59,8 @@ TOOLS: list[Tool] = [
     Tool("select", "Select", "select", NONE, "Navigate", "Esc",
          "Select, move and edit markups"),
     Tool("snapshot", "Snapshot", "snapshot", SNAPSHOT, "Navigate", "G",
-         "Drag a region to copy everything in it — paste it back and it is "
-         "still the markups and the drawing, not a picture of them",
+         "Drag a region to copy everything in it — what comes back is the "
+         "drawing itself, lines and all, so it stays sharp at any size",
          factory=_rect("marquee")),
     # H belongs to Highlight, as it does in Bluebeam. Panning is the space
     # bar, the middle button, or this button.
@@ -90,11 +91,10 @@ TOOLS: list[Tool] = [
     Tool("polygon", "Polygon", "polygon", POLY, "Draw", "P",
          "Click each vertex, double-click to close — not scaled",
          factory=_poly("polygon")),
-    Tool("cloud", "Cloud", "cloud", DRAG, "Draw", "C",
-         "Revision cloud around an area", factory=_rect("cloud")),
-    Tool("cloud_poly", "Cloud+", "cloud_plus", POLY, "Draw", "K",
-         "A revision cloud drawn corner by corner, around whatever shape the "
-         "revision actually is", factory=_poly("cloud")),
+    Tool("cloud", "Cloud", "cloud", CLOUDY, "Draw", "C",
+         "Drag a cloud round an area, or click each corner for whatever shape "
+         "the revision actually is — Enter or a right-click closes it",
+         factory=_rect("cloud")),
     Tool("highlight", "Highlight area", "highlight", DRAG, "Draw", "J",
          "Drag over anything to highlight it — it darkens what is underneath "
          "rather than covering it", factory=_rect("highlight")),

@@ -225,6 +225,15 @@ class PdfImportDialog(QDialog):
         self.dpi.setToolTip("Higher values look sharper when zoomed in, "
                             "but make the file larger")
         form.addRow("Render at", self.dpi)
+
+        self.vectors = QCheckBox("Bring the drawing's lines across as well")
+        self.vectors.setChecked(True)
+        self.vectors.setToolTip(
+            "The PDF's own line work comes in as real geometry on a layer of\n"
+            "its own, over the picture — so measurements snap to the ends of\n"
+            "lines rather than to a guess, and it stays sharp at any zoom.\n"
+            "Words stay part of the picture.")
+        form.addRow("", self.vectors)
         layout.addLayout(form)
 
         self.info = QLabel("")
@@ -287,9 +296,10 @@ class PdfImportDialog(QDialog):
                           f"{'s' if self._count != 1 else ''}")
         self.show_preview()
 
-    def selection(self) -> tuple[str, list[int], str, int]:
+    def selection(self) -> tuple[str, list[int], str, int, bool]:
         indices = pdfio.parse_page_range(self.pages.text(), self._count)
-        return self.path, indices, self.fit.currentData(), self.dpi.value()
+        return (self.path, indices, self.fit.currentData(), self.dpi.value(),
+                self.vectors.isChecked())
 
 
 class TableSizeDialog(QDialog):

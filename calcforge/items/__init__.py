@@ -13,6 +13,7 @@ from . import measure        # noqa: F401
 from . import media          # noqa: F401
 from . import plotitem       # noqa: F401
 from . import shapes         # noqa: F401
+from . import snapshot       # noqa: F401
 from . import tableitem      # noqa: F401
 from . import text           # noqa: F401
 

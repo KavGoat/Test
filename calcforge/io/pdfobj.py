@@ -23,6 +23,36 @@ DELIMITERS = b"()<>[]{}/%"
 NUMBER = re.compile(rb"[+-]?(?:\d+\.?\d*|\.\d+)")
 
 
+class Ref:
+    """An indirect reference: "12 0 R", one object pointing at another.
+
+    An annotation dictionary rarely uses them, so the reader that was written
+    for tool sets read the two numbers and the R as three separate tokens and
+    nothing minded. Reading a whole PDF does mind: the page's contents, its
+    resources and even the length of its own stream are all written this way.
+    """
+
+    __slots__ = ("number", "generation")
+
+    def __init__(self, number: int, generation: int = 0):
+        self.number = int(number)
+        self.generation = int(generation)
+
+    def __repr__(self) -> str:
+        return f"{self.number} {self.generation} R"
+
+    def __eq__(self, other) -> bool:
+        return (isinstance(other, Ref) and other.number == self.number
+                and other.generation == self.generation)
+
+    def __hash__(self) -> int:
+        return hash((self.number, self.generation))
+
+
+# "12 0 R", when what follows a pair of integers is the letter R.
+REFERENCE = re.compile(rb"(\d+)\s+(\d+)\s+R(?![A-Za-z0-9])")
+
+
 class Name(str):
     """A PDF name, ``/Square``. A string that remembers it was a name.
 
@@ -109,8 +139,14 @@ def _read_hex_string(data: bytes, i: int) -> tuple[str, int]:
     return bytes.fromhex(digits).decode("latin-1"), end + 1
 
 
-def parse(data: bytes, i: int = 0):
-    """One PDF object out of *data*, starting at *i*. Returns (value, index)."""
+def parse(data: bytes, i: int = 0, references: bool = False):
+    """One PDF object out of *data*, starting at *i*. Returns (value, index).
+
+    *references* makes "12 0 R" come back as a :class:`Ref` rather than as
+    the number 12 and two loose tokens. Off by default, because a tool set's
+    annotations do not use them and reading a bare number is what everything
+    already written expects.
+    """
     i = _skip(data, i)
     if i >= len(data):
         return None, i
@@ -128,12 +164,12 @@ def parse(data: bytes, i: int = 0):
                 break
             if data[i:i + 1] != b"/":
                 # Something that is not a key: step over it rather than spin.
-                value, i = parse(data, i)
+                value, i = parse(data, i, references)
                 if value is None and i < len(data):
                     i += 1
                 continue
             key, i = _read_name(data, i)
-            value, i = parse(data, i)
+            value, i = parse(data, i, references)
             found[str(key)] = value
         return found, i
 
@@ -148,7 +184,7 @@ def parse(data: bytes, i: int = 0):
             if i >= len(data) or data[i:i + 1] == b"]":
                 i = min(i + 1, len(data))
                 break
-            value, after = parse(data, i)
+            value, after = parse(data, i, references)
             if after == i:                  # no progress; do not spin
                 i += 1
                 continue
@@ -169,6 +205,12 @@ def parse(data: bytes, i: int = 0):
     if data[i:i + 4] == b"null":
         return None, i + 4
 
+    if references:
+        reference = REFERENCE.match(data, i)
+        if reference:
+            return (Ref(int(reference.group(1)), int(reference.group(2))),
+                    reference.end())
+
     match = NUMBER.match(data, i)
     if match:
         text = match.group(0).decode("ascii")
@@ -178,12 +220,12 @@ def parse(data: bytes, i: int = 0):
     return None, i
 
 
-def parse_dict(data: bytes) -> dict:
+def parse_dict(data: bytes, references: bool = False) -> dict:
     """The first dictionary in *data*, or an empty one."""
     start = data.find(b"<<")
     if start < 0:
         return {}
-    value, _ = parse(data, start)
+    value, _ = parse(data, start, references)
     return value if isinstance(value, dict) else {}
 
 

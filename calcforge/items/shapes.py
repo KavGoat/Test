@@ -298,6 +298,20 @@ class PolyItem(MarkupItem):
         self.points: list[QPointF] = [QPointF(p) for p in (points or [])]
         self.cloud_radius = 9.0
         self.smooth = kind in ("ink", "highlighter")
+        # A shape does not have to be all straight lines. Each corner can be
+        # rounded off, each segment can be bowed into an arc, and any segment
+        # can carry a drafting break symbol — the three things a structural
+        # drawing needs and a plain polygon cannot do.
+        #
+        # rounded: vertex index -> the radius of that corner, in points.
+        # curved:  segment index -> (how far it bows, where the apex sits
+        #          along it from 0 to 1). Two numbers, so an arc has the two
+        #          handles Bluebeam's has: one for the depth of the curve and
+        #          one for where it leans.
+        # broken:  segment index -> True, for the break symbol.
+        self.rounded: dict[int, float] = {}
+        self.curved: dict[int, tuple[float, float]] = {}
+        self.broken: dict[int, bool] = {}
         if kind == "arrow":
             self.style = Style(arrow_end="arrow", width=1.6)
         elif kind == "highlighter":
@@ -341,7 +355,108 @@ class PolyItem(MarkupItem):
         self.points = [QPointF(rect.x() + (p.x() - old.x()) * sx,
                                rect.y() + (p.y() - old.y()) * sy) for p in self.points]
 
+    # -- corners, curves and breaks ----------------------------------------
+    def segment_count(self) -> int:
+        """How many segments the shape has, the closing one included."""
+        if len(self.points) < 2:
+            return 0
+        return len(self.points) if self.closed else len(self.points) - 1
+
+    def segment_ends(self, index: int) -> tuple[QPointF, QPointF]:
+        """The two ends of segment *index*."""
+        start = self.points[index % len(self.points)]
+        end = self.points[(index + 1) % len(self.points)]
+        return QPointF(start), QPointF(end)
+
+    def is_rounded(self, vertex: int) -> bool:
+        return self.rounded.get(vertex, 0.0) > 0.01
+
+    def is_curved(self, segment: int) -> bool:
+        return abs(self.curved.get(segment, (0.0, 0.5))[0]) > 0.01
+
+    def round_corner(self, vertex: int, radius: Optional[float] = None) -> None:
+        """Round this corner off, or sharpen it again."""
+        self.prepareGeometryChange()
+        if radius is None:
+            radius = 0.0 if self.is_rounded(vertex) else self._natural_radius(vertex)
+        if radius <= 0.01:
+            self.rounded.pop(vertex, None)
+        else:
+            self.rounded[vertex] = float(radius)
+        self.touch()
+        self.geometryChanged.emit()
+
+    def curve_segment(self, segment: int, bow: Optional[float] = None,
+                      along: Optional[float] = None) -> None:
+        """Bow this segment into an arc, or straighten it again."""
+        self.prepareGeometryChange()
+        current = self.curved.get(segment, (0.0, 0.5))
+        if bow is None:
+            bow = 0.0 if self.is_curved(segment) else self._natural_bow(segment)
+        if along is None:
+            along = current[1]
+        if abs(bow) <= 0.01:
+            self.curved.pop(segment, None)
+        else:
+            self.curved[segment] = (float(bow), max(0.1, min(0.9, float(along))))
+        self.touch()
+        self.geometryChanged.emit()
+
+    def break_segment(self, segment: int, wanted: Optional[bool] = None) -> None:
+        """Put the drafting break symbol on this segment, or take it off."""
+        self.prepareGeometryChange()
+        if wanted is None:
+            wanted = not self.broken.get(segment)
+        if wanted:
+            self.broken[segment] = True
+        else:
+            self.broken.pop(segment, None)
+        self.touch()
+        self.geometryChanged.emit()
+
+    def _natural_radius(self, vertex: int) -> float:
+        """A first radius that suits the corner: a fifth of its shorter edge."""
+        if len(self.points) < 3:
+            return 8.0
+        before = self.points[(vertex - 1) % len(self.points)]
+        corner = self.points[vertex % len(self.points)]
+        after = self.points[(vertex + 1) % len(self.points)]
+        reach = min(_distance(before, corner), _distance(corner, after))
+        return max(min(reach / 5.0, 40.0), 2.0)
+
+    def _natural_bow(self, segment: int) -> float:
+        """A first bow that reads as a curve: a fifth of the segment."""
+        start, end = self.segment_ends(segment)
+        return max(_distance(start, end) * 0.2, 4.0)
+
+    def curve_apex(self, segment: int) -> QPointF:
+        """Where a bowed segment reaches out to."""
+        start, end = self.segment_ends(segment)
+        bow, along = self.curved.get(segment, (0.0, 0.5))
+        return _offset_along(start, end, along, bow)
+
+    def curve_lean(self, segment: int) -> QPointF:
+        """The second handle: it slides the apex along the segment."""
+        start, end = self.segment_ends(segment)
+        bow, along = self.curved.get(segment, (0.0, 0.5))
+        return _offset_along(start, end, along, bow * 0.45)
+
+    def radius_handle(self, vertex: int) -> QPointF:
+        """The handle that sets a rounded corner's radius."""
+        radius = self.rounded.get(vertex, 0.0)
+        corner = self.points[vertex % len(self.points)]
+        before = self.points[(vertex - 1) % len(self.points)]
+        after = self.points[(vertex + 1) % len(self.points)]
+        inward = _unit(_towards(corner, before)) + _unit(_towards(corner, after))
+        length = math.hypot(inward.x(), inward.y())
+        if length < 1e-6:
+            inward, length = QPointF(0, 1), 1.0
+        reach = radius * 1.15 + 2
+        return QPointF(corner.x() + inward.x() / length * reach,
+                       corner.y() + inward.y() / length * reach)
+
     def build_path(self) -> QPainterPath:
+        """The shape's geometry, with its rounded corners and its curves."""
         path = QPainterPath()
         if len(self.points) < 2:
             if self.points:
@@ -353,13 +468,77 @@ class PolyItem(MarkupItem):
             return _arc_path(self.points)
         if self.smooth:
             path = _smooth_path(self.points)
-        else:
+            if self.closed:
+                path.closeSubpath()
+            return path
+        if not self.rounded and not self.curved and not self.broken:
             path.moveTo(self.points[0])
             for point in self.points[1:]:
                 path.lineTo(point)
+            if self.closed:
+                path.closeSubpath()
+            return path
+        return self._shaped_path()
+
+    def _shaped_path(self) -> QPainterPath:
+        """Walk the shape segment by segment, rounding and bowing as told.
+
+        A rounded corner eats a little off the end of each edge that meets
+        it and turns through the gap; a bowed segment is a curve through the
+        point its handles put out to the side. Everything else is a line.
+        """
+        path = QPainterPath()
+        count = self.segment_count()
+        first_start, _ = self.segment_ends(0)
+        path.moveTo(self._corner_exit(0, first_start))
+        for index in range(count):
+            start, end = self.segment_ends(index)
+            leaves = self._corner_exit(index, start)
+            arrives = self._corner_entry(index, end)
+            if self.is_curved(index):
+                apex = self.curve_apex(index)
+                control = QPointF(2 * apex.x() - (leaves.x() + arrives.x()) / 2,
+                                  2 * apex.y() - (leaves.y() + arrives.y()) / 2)
+                path.quadTo(control, arrives)
+            elif self.broken.get(index):
+                jink = _break_symbol(leaves, arrives, self.break_size())
+                if jink.isEmpty():
+                    path.lineTo(arrives)
+                else:
+                    path.connectPath(jink)
+            else:
+                path.lineTo(arrives)
+            # Turn the corner at the far end, when it is rounded and there is
+            # another segment to turn into.
+            vertex = (index + 1) % len(self.points)
+            if self.is_rounded(vertex) and (self.closed or index < count - 1):
+                path.quadTo(end, self._corner_exit(index + 1, end))
         if self.closed:
             path.closeSubpath()
         return path
+
+    def break_size(self) -> float:
+        """How big the break symbol is drawn: with the line, not fixed."""
+        return max(self.style.width * 2.4, 5.0)
+
+    def _corner_exit(self, segment: int, start: QPointF) -> QPointF:
+        """Where a segment starts, allowing for a rounded corner behind it."""
+        vertex = segment % len(self.points)
+        radius = self.rounded.get(vertex, 0.0)
+        if radius <= 0.01 or (not self.closed and segment == 0):
+            return QPointF(start)
+        _, end = self.segment_ends(segment)
+        return _towards_by(start, end, min(radius, _distance(start, end) / 2.2))
+
+    def _corner_entry(self, segment: int, end: QPointF) -> QPointF:
+        """Where a segment stops, allowing for a rounded corner ahead of it."""
+        vertex = (segment + 1) % len(self.points)
+        radius = self.rounded.get(vertex, 0.0)
+        last = (not self.closed and segment == self.segment_count() - 1)
+        if radius <= 0.01 or last:
+            return QPointF(end)
+        start, _ = self.segment_ends(segment)
+        return _towards_by(end, start, min(radius, _distance(start, end) / 2.2))
 
     def shape(self) -> QPainterPath:
         from PySide6.QtGui import QPainterPathStroker
@@ -379,6 +558,15 @@ class PolyItem(MarkupItem):
     def handle_points(self) -> dict[str, QPointF]:
         if self.uses_vertex_handles:
             handles = {f"v{index}": QPointF(point) for index, point in enumerate(self.points)}
+            # A rounded corner gets a handle for its radius, and a bowed
+            # segment gets two: how far it curves, and which way it leans.
+            for vertex in sorted(self.rounded):
+                if 0 <= vertex < len(self.points) and self.is_rounded(vertex):
+                    handles[f"r{vertex}"] = self.radius_handle(vertex)
+            for segment in sorted(self.curved):
+                if 0 <= segment < self.segment_count() and self.is_curved(segment):
+                    handles[f"c{segment}"] = self.curve_apex(segment)
+                    handles[f"n{segment}"] = self.curve_lean(segment)
             if self.kind in ("polyline", "polygon", "cloud") and len(self.points) > 2:
                 rect = self.local_rect()
                 handles["rot"] = QPointF(rect.center().x(), rect.top() - 22)
@@ -397,7 +585,40 @@ class PolyItem(MarkupItem):
                 self.touch()
                 self.geometryChanged.emit()
             return
+        if key.startswith("r") and key != "rot":
+            # The radius controller: how far from the corner it is dragged is
+            # how big the rounding is.
+            vertex = int(key[1:]) % max(len(self.points), 1)
+            corner = self.points[vertex]
+            self.round_corner(vertex, max(_distance(corner, local_pos) - 2, 0.0) / 1.15)
+            return
+        if key.startswith("c") or key.startswith("n"):
+            # The two arc handles. The first says how deep the curve is and
+            # where its apex sits; the second only slides the apex along.
+            segment = int(key[1:])
+            if not 0 <= segment < self.segment_count():
+                return
+            start, end = self.segment_ends(segment)
+            along, sideways = _project(start, end, local_pos)
+            bow, was = self.curved.get(segment, (0.0, 0.5))
+            if key.startswith("c"):
+                self.curve_segment(segment, sideways, along)
+            else:
+                self.curve_segment(segment, bow, along)
+            return
         super().move_handle(key, local_pos, keep_ratio)
+
+    def handle_hint(self, key: str) -> str:
+        """What a handle does, for the status bar and the pointer."""
+        if key.startswith("r") and key != "rot":
+            return "Drag to set how round this corner is"
+        if key.startswith("c"):
+            return "Drag to bend the curve"
+        if key.startswith("n"):
+            return "Drag to lean the curve one way or the other"
+        if key.startswith("v"):
+            return "Drag to move this point"
+        return ""
 
     def insert_point(self, local_pos: QPointF) -> int:
         """Insert a vertex on the nearest segment; returns its index."""
@@ -514,6 +735,13 @@ class PolyItem(MarkupItem):
             "cloud_radius": self.cloud_radius,
             "smooth": self.smooth,
         })
+        if self.rounded:
+            data["rounded"] = {str(k): round(v, 3) for k, v in self.rounded.items()}
+        if self.curved:
+            data["curved"] = {str(k): [round(v[0], 3), round(v[1], 3)]
+                              for k, v in self.curved.items()}
+        if self.broken:
+            data["broken"] = sorted(self.broken)
         return data
 
     def deserialize(self, data: dict) -> None:
@@ -521,7 +749,79 @@ class PolyItem(MarkupItem):
         self.points = [QPointF(x, y) for x, y in data.get("points", [])]
         self.cloud_radius = float(data.get("cloud_radius", 9.0))
         self.smooth = bool(data.get("smooth", self.kind in ("ink", "highlighter")))
+        self.rounded = {int(k): float(v)
+                        for k, v in (data.get("rounded") or {}).items()}
+        self.curved = {int(k): (float(v[0]), float(v[1]))
+                       for k, v in (data.get("curved") or {}).items()}
+        self.broken = {int(k): True for k in (data.get("broken") or [])}
         self.load_base(data)
+
+
+def _distance(a: QPointF, b: QPointF) -> float:
+    return math.hypot(b.x() - a.x(), b.y() - a.y())
+
+
+def _towards(a: QPointF, b: QPointF) -> QPointF:
+    return QPointF(b.x() - a.x(), b.y() - a.y())
+
+
+def _unit(vector: QPointF) -> QPointF:
+    length = math.hypot(vector.x(), vector.y()) or 1.0
+    return QPointF(vector.x() / length, vector.y() / length)
+
+
+def _towards_by(start: QPointF, end: QPointF, distance: float) -> QPointF:
+    """*distance* along the way from *start* to *end*."""
+    step = _unit(_towards(start, end))
+    return QPointF(start.x() + step.x() * distance,
+                   start.y() + step.y() * distance)
+
+
+def _offset_along(start: QPointF, end: QPointF, along: float,
+                  sideways: float) -> QPointF:
+    """A point *along* the segment, pushed *sideways* off it."""
+    on = QPointF(start.x() + (end.x() - start.x()) * along,
+                 start.y() + (end.y() - start.y()) * along)
+    step = _unit(_towards(start, end))
+    return QPointF(on.x() - step.y() * sideways, on.y() + step.x() * sideways)
+
+
+def _project(start: QPointF, end: QPointF, point: QPointF) -> tuple[float, float]:
+    """Where *point* falls on the segment: how far along, and how far off."""
+    span = _towards(start, end)
+    length = math.hypot(span.x(), span.y()) or 1.0
+    along = _unit(span)
+    across = QPointF(-along.y(), along.x())
+    offset = _towards(start, point)
+    forward = (offset.x() * along.x() + offset.y() * along.y()) / length
+    sideways = offset.x() * across.x() + offset.y() * across.y()
+    return max(0.1, min(0.9, forward)), sideways
+
+
+def _break_symbol(start: QPointF, end: QPointF, size: float) -> QPainterPath:
+    """The drafting break: the line stops, jinks across itself and goes on.
+
+    The symbol every structural drawing uses to say "this carries on, and the
+    middle of it is not drawn to length".
+    """
+    length = _distance(start, end)
+    if length < size * 3:
+        return QPainterPath()
+    along = _unit(_towards(start, end))
+    across = QPointF(-along.y(), along.x())
+    middle = QPointF((start.x() + end.x()) / 2, (start.y() + end.y()) / 2)
+
+    def at(forward: float, sideways: float) -> QPointF:
+        return QPointF(middle.x() + along.x() * forward + across.x() * sideways,
+                       middle.y() + along.y() * forward + across.y() * sideways)
+
+    path = QPainterPath(start)
+    path.lineTo(at(-size * 1.4, 0))
+    path.lineTo(at(-size * 0.5, size))
+    path.lineTo(at(size * 0.5, -size))
+    path.lineTo(at(size * 1.4, 0))
+    path.lineTo(end)
+    return path
 
 
 def _segment_distance(a: QPointF, b: QPointF, p: QPointF) -> float:

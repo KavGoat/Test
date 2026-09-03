@@ -32,7 +32,8 @@ from ..items.tableitem import TableItem
 from ..items.text import CalloutItem, NoteItem, StampItem, TextItem, _TextBase
 from . import preferences
 from .commands import PageEditCommand
-from .tools import (ANCHOR, CLICK, CLOUD, DRAG, ERASE, FREE, NONE, POLY, SNAPSHOT,
+from .tools import (ANCHOR, CLICK, CLOUD, CLOUDY, DRAG, ERASE, FREE, NONE, POLY,
+                    SNAPSHOT,
                     TOOL_MAP, Tool)
 
 MIN_ZOOM = 0.08
@@ -45,6 +46,27 @@ SNAP_REACH = 9.0
 SIZED_SHAPES = ("rect", "ellipse")
 CELLS_MIME = "application/x-calcforge-cells"
 FREE_MIN_STEP = 1.2
+
+
+def typing_somewhere_else() -> bool:
+    """True when the keyboard belongs to a box somebody is typing into.
+
+    Panels are full of fields, and taking the focus off one mid-word would
+    lose the word. So the page only takes the keyboard back when nothing is
+    being typed anywhere.
+    """
+    from PySide6.QtWidgets import (QAbstractSpinBox, QApplication, QComboBox,
+                                   QLineEdit, QPlainTextEdit, QTextEdit)
+
+    widget = QApplication.focusWidget()
+    if widget is None:
+        return False
+    typers = (QLineEdit, QPlainTextEdit, QTextEdit, QAbstractSpinBox, QComboBox)
+    while widget is not None:
+        if isinstance(widget, typers):
+            return True
+        widget = widget.parentWidget()
+    return False
 
 
 class PageView(QGraphicsView):
@@ -111,6 +133,8 @@ class PageView(QGraphicsView):
         self._copy_on_move = False
         self._copied = False
         self._snap_marker: Optional[QPointF] = None
+        # What that marker is sitting on, in words.
+        self._snap_caught = ""
         # Held while a tool set's tool is in hand: something to place, or
         # properties for the next thing drawn.
         self._pending_stamp = None
@@ -130,9 +154,14 @@ class PageView(QGraphicsView):
         # the application, because the view hears the press first and because
         # a key held down is state, not an event.
         self._control_held = False
+        self._shift_held = False
         self._pending_anchor: Optional[QPointF] = None
         # The cloud a cloud call-out has already drawn, waiting for its words.
         self._pending_cloud = None
+        # How far the page is turned on screen, in degrees. This is a way of
+        # looking at the document, not a change to it: nothing is saved, and
+        # what prints is unaffected.
+        self._view_turn = 0
         self._shown_page = 0
         for bar in (self.verticalScrollBar(), self.horizontalScrollBar()):
             bar.valueChanged.connect(self._note_visible_page)
@@ -150,6 +179,18 @@ class PageView(QGraphicsView):
         """The page being worked on — the one the view is looking at."""
         frame = self.frame()
         return frame.page if frame is not None else None
+
+    def page_of(self, item):
+        """The page a markup is actually on.
+
+        A measurement means what it means on its own page: its own scale, not
+        the scale of whatever page the view happens to be looking at. Reading
+        the view's page is why a dimension's value used to change while its
+        text was being dragged and come right again on release.
+        """
+        frame = item.parentItem() if item is not None else None
+        page = getattr(frame, "page", None)
+        return page if page is not None else self.page()
 
     def frame(self):
         """The page frame the current gesture belongs to."""
@@ -324,7 +365,7 @@ class PageView(QGraphicsView):
 
         self.setTransformationAnchor(QGraphicsView.NoAnchor)
         self._zoom = factor
-        self.setTransform(QTransform().scale(factor, factor))
+        self.apply_view_transform()
         # Where that page point landed, and how far it has to come back.
         landed = self.mapFromScene(keep_scene)
         drift = QPointF(landed) - keep_view
@@ -333,6 +374,39 @@ class PageView(QGraphicsView):
         self.verticalScrollBar().setValue(
             self.verticalScrollBar().value() + round(drift.y()))
         self.zoomChanged.emit(factor)
+
+    def apply_view_transform(self) -> None:
+        """Set the view's transform from the zoom and the turn together."""
+        self.setTransform(QTransform().rotate(self._view_turn)
+                          .scale(self._zoom, self._zoom))
+
+    # -- turning the page on screen ----------------------------------------
+    def view_turn(self) -> int:
+        return self._view_turn
+
+    def rotate_view(self, clockwise: bool = True) -> int:
+        """Turn the page on screen a quarter turn, for reading it sideways.
+
+        Bluebeam keeps this apart from rotating the page, and so does this: a
+        drawing that came in the wrong way up is read by turning the view, and
+        nothing about the document changes — not the paper, not the markups,
+        not what prints. It is not on the undo stack for the same reason.
+        """
+        self._view_turn = (self._view_turn + (90 if clockwise else -90)) % 360
+        self.apply_view_transform()
+        self.fit_page()
+        self.statusMessage.emit(
+            "View turned back upright" if not self._view_turn
+            else f"View turned {self._view_turn}° — the page itself is unchanged")
+        return self._view_turn
+
+    def reset_view_rotation(self) -> None:
+        if not self._view_turn:
+            return
+        self._view_turn = 0
+        self.apply_view_transform()
+        self.fit_page()
+        self.statusMessage.emit("View turned back upright")
 
     def zoom_in(self) -> None:
         self.set_zoom(self._zoom * 1.25)
@@ -351,8 +425,12 @@ class PageView(QGraphicsView):
             return
         padded = rect.adjusted(-12, -12, 12, 12)
         available = self.viewport().rect()
-        self.set_zoom(min(available.width() / padded.width(),
-                          available.height() / padded.height()))
+        across, down = padded.width(), padded.height()
+        if self._view_turn % 180:
+            # Turned on its side, the page needs the window's height for its
+            # width and the other way about.
+            across, down = down, across
+        self.set_zoom(min(available.width() / across, available.height() / down))
         self.centerOn(rect.center())
 
     def fit_width(self) -> None:
@@ -467,6 +545,20 @@ class PageView(QGraphicsView):
             return True
         return bool(QApplication.keyboardModifiers() & Qt.ControlModifier)
 
+    def _held_modifiers(self):
+        """Which modifier keys are down, as this view has seen them.
+
+        The application's own answer misses keys sent to the view directly,
+        which is how a test drives it and how a key held before the window
+        was focused arrives.
+        """
+        held = QApplication.keyboardModifiers()
+        if self._control_held:
+            held |= Qt.ControlModifier
+        if self._shift_held:
+            held |= Qt.ShiftModifier
+        return held
+
     def snap(self, point: QPointF, force: bool = False) -> QPointF:
         """Snap a point given in page coordinates."""
         settings = self.document().settings
@@ -477,7 +569,7 @@ class PageView(QGraphicsView):
         step = max(settings.grid_mm, 0.5) * MM_TO_PT
         return QPointF(round(point.x() / step) * step, round(point.y() / step) * step)
 
-    def snap_scene(self, scene_pos: QPointF, frame=None) -> QPointF:
+    def snap_scene(self, scene_pos: QPointF, frame=None, ignore=()) -> QPointF:
         """Snap a canvas point to what is already drawn, then to the grid.
 
         A corner of something beats the grid: lining a markup up with the
@@ -487,8 +579,9 @@ class PageView(QGraphicsView):
         """
         if not preferences.current().snap_while_drawing or self.snapping_off_now():
             self._snap_marker = None
+            self._snap_caught = ""
             return QPointF(scene_pos)
-        caught = self.snap_to_item(scene_pos)
+        caught = self.snap_to_item(scene_pos, ignore)
         if caught is not None:
             return caught
         frame = frame or self.frame_at(scene_pos) or self.frame()
@@ -514,19 +607,49 @@ class PageView(QGraphicsView):
     @staticmethod
     def points_of(item) -> list:
         """One markup's own interesting points, in scene coordinates."""
+        return [point for point, _ in PageView.named_points_of(item)]
+
+    @staticmethod
+    def named_points_of(item) -> list:
+        """The same points, each with a word for what it is.
+
+        A snap that says "corner" or "middle" is a snap you can trust. One
+        that only draws a little square leaves you looking at the drawing
+        trying to work out what it caught.
+        """
         vertices = getattr(item, "points", None)
         if vertices:
-            return [item.mapToScene(point) for point in vertices]
+            named = []
+            last = len(vertices) - 1
+            for index, point in enumerate(vertices):
+                if index in (0, last) and not getattr(item, "closed", False):
+                    what = "end"
+                else:
+                    what = "point"
+                named.append((item.mapToScene(point), what))
+            return named
         rect = item.local_rect().normalized()
         if rect.isEmpty():
             return []
-        return [item.mapToScene(corner) for corner in (
-            rect.topLeft(), rect.topRight(), rect.bottomLeft(), rect.bottomRight(),
-            rect.center(),
-            QPointF(rect.center().x(), rect.top()),
-            QPointF(rect.center().x(), rect.bottom()),
-            QPointF(rect.left(), rect.center().y()),
-            QPointF(rect.right(), rect.center().y()))]
+        corners = ((rect.topLeft(), "corner"), (rect.topRight(), "corner"),
+                   (rect.bottomLeft(), "corner"), (rect.bottomRight(), "corner"),
+                   (rect.center(), "centre"),
+                   (QPointF(rect.center().x(), rect.top()), "middle"),
+                   (QPointF(rect.center().x(), rect.bottom()), "middle"),
+                   (QPointF(rect.left(), rect.center().y()), "middle"),
+                   (QPointF(rect.right(), rect.center().y()), "middle"))
+        return [(item.mapToScene(point), what) for point, what in corners]
+
+    def named_snap_targets(self, frame, ignore=()) -> list:
+        """Every point worth lining up with, and what each of them is."""
+        found: list = []
+        skip = set(ignore)
+        for item in frame.markups():
+            if item in skip or not item.isVisible():
+                continue
+            for point, what in self.named_points_of(item):
+                found.append((point, what, item))
+        return found
 
     def snap_moved(self, items: list, delta: QPointF) -> QPointF:
         """Nudge a move so a corner of what is dragged lands on a drawn point."""
@@ -560,6 +683,7 @@ class PageView(QGraphicsView):
     def snap_to_item(self, scene_pos: QPointF, ignore=()) -> Optional[QPointF]:
         """The nearest interesting point of another markup, if one is close."""
         self._snap_marker = None
+        self._snap_caught = ""
         if not self.document().settings.snap_to_items:
             return None
         frame = self.frame_at(scene_pos) or self.frame()
@@ -568,13 +692,18 @@ class PageView(QGraphicsView):
         reach = SNAP_REACH / max(self._zoom, 0.05)
         best = None
         best_distance = reach
-        for point in self.snap_targets(frame, ignore):
-            distance = math.hypot(point.x() - scene_pos.x(), point.y() - scene_pos.y())
+        for point, what, item in self.named_snap_targets(frame, ignore):
+            distance = math.hypot(point.x() - scene_pos.x(),
+                                  point.y() - scene_pos.y())
             if distance < best_distance:
-                best, best_distance = point, distance
+                best, best_distance = (point, what, item), distance
         if best is not None:
-            self._snap_marker = QPointF(best)
-        return best
+            point, what, item = best
+            self._snap_marker = QPointF(point)
+            self._snap_caught = f"{what} of {item.display_name().lower()}"
+            self.statusMessage.emit(f"Snapped to the {self._snap_caught}")
+            return QPointF(point)
+        return None
 
     @staticmethod
     def constrain(anchor: QPointF, point: QPointF) -> QPointF:
@@ -765,7 +894,34 @@ class PageView(QGraphicsView):
                 event.accept()
                 return
 
-        # 2. a resize handle on an already-selected item
+        # 2. Shift on a dimension's number takes hold of the number itself,
+        # so it can be pulled off the line onto a leader without having to
+        # find the small handle first.
+        if event.modifiers() & Qt.ShiftModifier:
+            for item in self.scene().selectedItems():
+                if not isinstance(item, MeasureItem) or not self.editable(item):
+                    continue
+                if item.label_at(item.mapFromScene(scene_pos)):
+                    self._handle_item = item
+                    self._handle_key = "lbl"
+                    self._mode = "resize"
+                    self.begin_snapshot()
+                    self.statusMessage.emit(
+                        "Drag the value where you want it — it keeps a leader "
+                        "back to the line")
+                    event.accept()
+                    return
+
+        # 3. reshaping an outline: Shift or Ctrl over one of its points or
+        # one of its sides. This comes before both the handles and the
+        # selection, because with a key held it is the only thing the click
+        # can have meant.
+        if self.reshape_at(scene_pos, event.modifiers()):
+            self._mode = "idle"
+            event.accept()
+            return
+
+        # 4. a resize handle on an already-selected item
         for item in self.scene().selectedItems():
             if not isinstance(item, MarkupItem) or not self.editable(item):
                 continue
@@ -881,6 +1037,19 @@ class PageView(QGraphicsView):
         table.update()
         self.cellChanged.emit(table)
 
+    def _add_poly_point(self, event: QMouseEvent, point: QPointF, tool: Tool) -> None:
+        """Another corner on the shape being clicked out."""
+        local = self._draft.mapFromScene(point)
+        if event.modifiers() & Qt.ShiftModifier and len(self._draft.points) >= 2:
+            local = self.constrain(self._draft.points[-2], local)
+        # Qt has to be told before the shape changes, not after, or the
+        # scene keeps indexing the item by a rectangle it no longer has.
+        self._draft.prepareGeometryChange()
+        self._draft.points[-1] = local
+        self._draft.points.append(QPointF(local))
+        if tool.max_points and len(self._draft.points) - 1 >= tool.max_points:
+            self.finish_poly()
+
     def _press_draw(self, event: QMouseEvent, scene_pos: QPointF, tool: Tool) -> None:
         frame = self.frame_at(scene_pos) or self.frame()
         point = self.snap_scene(scene_pos, frame)
@@ -891,10 +1060,22 @@ class PageView(QGraphicsView):
             self.finish_draft(scene_pos, clicked=True)
             event.accept()
             return
-        if tool.mode == CLOUD and self._pending_anchor is None:
-            # The cloud comes first: drag it round whatever the comment is
-            # about. Once it is down the tool waits, and the next click says
-            # where the words go.
+        if self._mode == "draw_poly" and self._draft is not None:
+            # Already collecting corners — from a POLY tool, or from a cloud
+            # that was clicked rather than dragged. Every click after the
+            # first is another corner, whatever started it: a cloud call-out
+            # used to fall through to the call-out branch here and take the
+            # second corner for the place its words went.
+            self._add_poly_point(event, point, tool)
+            event.accept()
+            return
+
+        if tool.mode in (CLOUDY, CLOUD) and self._pending_anchor is None:
+            # One gesture, two shapes. Drag and it is a rectangle round the
+            # area; click and let go and it starts collecting corners, so the
+            # cloud goes round whatever shape the revision actually is. Enter
+            # or a right-click closes it. Two tools for that was one tool too
+            # many, and picking the wrong one meant starting again.
             self.begin_snapshot()
             self._draft = RectItem("cloud")
             self._prepare_draft(self._draft)
@@ -903,7 +1084,8 @@ class PageView(QGraphicsView):
             frame.add_markup(self._draft)
             self._mode = "draw_drag"
             self.statusMessage.emit(
-                f"{tool.label}: drag the cloud round it · Esc to cancel")
+                f"{tool.label}: drag a cloud round it, or click each corner "
+                "· Esc to cancel")
             event.accept()
             return
 
@@ -932,27 +1114,15 @@ class PageView(QGraphicsView):
             return
 
         if tool.mode == POLY:
-            if self._mode != "draw_poly":
-                self.begin_snapshot()
-                self._draft = tool.factory()
-                self._prepare_draft(self._draft)
-                self._draft.setPos(frame.mapFromScene(point))
-                self._draft.points = [QPointF(0, 0), QPointF(0, 0)]
-                frame.add_markup(self._draft)
-                self._mode = "draw_poly"
-                self.statusMessage.emit(
-                    f"{tool.label}: click to add points · double-click or Enter to finish · Esc to cancel")
-            else:
-                local = self._draft.mapFromScene(point)
-                if event.modifiers() & Qt.ShiftModifier and len(self._draft.points) >= 2:
-                    local = self.constrain(self._draft.points[-2], local)
-                # Qt has to be told before the shape changes, not after, or the
-                # scene keeps indexing the item by a rectangle it no longer has.
-                self._draft.prepareGeometryChange()
-                self._draft.points[-1] = local
-                self._draft.points.append(QPointF(local))
-                if tool.max_points and len(self._draft.points) - 1 >= tool.max_points:
-                    self.finish_poly()
+            self.begin_snapshot()
+            self._draft = tool.factory()
+            self._prepare_draft(self._draft)
+            self._draft.setPos(frame.mapFromScene(point))
+            self._draft.points = [QPointF(0, 0), QPointF(0, 0)]
+            frame.add_markup(self._draft)
+            self._mode = "draw_poly"
+            self.statusMessage.emit(
+                f"{tool.label}: click to add points · double-click or Enter to finish · Esc to cancel")
             event.accept()
             return
 
@@ -1045,11 +1215,17 @@ class PageView(QGraphicsView):
             return
 
         if self._mode == "resize" and self._handle_item is not None:
-            local = self._handle_item.mapFromScene(self.snap(scene_pos))
+            # A point being dragged snaps to what is already drawn, exactly as
+            # it did while it was first put down. Only the grid applied here,
+            # so a line could be drawn onto a corner and then never edited
+            # back onto one.
+            caught = self.snap_scene(scene_pos, self._handle_item.parentItem(),
+                                     ignore={self._handle_item})
+            local = self._handle_item.mapFromScene(caught)
             self._handle_item.move_handle(self._handle_key, local,
                                           bool(event.modifiers() & Qt.ShiftModifier))
             if isinstance(self._handle_item, MeasureItem):
-                self._handle_item.refresh(page=self.page())
+                self._handle_item.refresh(page=self.page_of(self._handle_item))
             event.accept()
             return
 
@@ -1147,6 +1323,25 @@ class PageView(QGraphicsView):
         self.statusMessage.emit(message)
         return message
 
+    def _become_a_drawn_cloud(self, scene_pos: QPointF) -> None:
+        """Swap the rectangle being dragged for a cloud drawn corner by corner."""
+        draft = self._draft
+        frame = draft.parentItem()
+        at = draft.pos()
+        style = draft.style
+        detach(draft)
+        cloud = PolyItem("cloud")
+        cloud.style = style
+        self._prepare_draft(cloud)
+        cloud.setPos(at)
+        cloud.points = [QPointF(0, 0), QPointF(0, 0)]
+        frame.add_markup(cloud)
+        self._draft = cloud
+        self._mode = "draw_poly"
+        self.statusMessage.emit(
+            f"{self.current_tool().label}: click each corner · Enter or "
+            "right-click to close it · Esc to cancel")
+
     def _release_stale_mode(self) -> None:
         """Come back to rest after a drag whose release went missing."""
         mode = self._mode
@@ -1226,7 +1421,7 @@ class PageView(QGraphicsView):
             copy = build_item(data)
             if copy is None:
                 continue
-            if isinstance(copy, ImageItem):
+            if hasattr(copy, "load_from_document"):
                 copy.load_from_document(self.document())
             copy.setPos(origin)
             frame.add_markup(copy)
@@ -1244,9 +1439,103 @@ class PageView(QGraphicsView):
         else:
             item.setPos(position)
 
+    # -- editing a shape's control points ----------------------------------
+    def shaping_target(self, scene_pos: QPointF, modifiers) -> Optional[tuple]:
+        """What holding Shift or Ctrl here would do to a shape's outline.
+
+        Shift over a point takes it away, and over a length of line puts one
+        in. Ctrl over a point rounds the corner off, and over a length of line
+        bends it into an arc. Which one it is depends only on where the
+        pointer is, so there is nothing to pick from a menu first.
+
+        Says (item, what, index) — or nothing, when neither key is held or
+        the pointer is not over a shape that can be reshaped this way.
+        """
+        from ..items.shapes import PolyItem
+
+        shift = bool(modifiers & Qt.ShiftModifier)
+        control = bool(modifiers & Qt.ControlModifier)
+        if not (shift or control) or self.tool_key != "select":
+            return None
+        for item in self.scene().selectedItems():
+            if not isinstance(item, PolyItem) or not self.editable(item):
+                continue
+            if not item.uses_vertex_handles or item.kind in ("ink", "highlighter"):
+                continue
+            local = item.mapFromScene(scene_pos)
+            reach = SNAP_REACH / max(self.zoom(), 0.05)
+            vertex = self._point_near(item, local, reach)
+            if vertex is not None:
+                if shift and len(item.points) > 2:
+                    return (item, "delete", vertex)
+                if control:
+                    return (item, "round", vertex)
+                continue
+            segment = self._segment_near(item, local, reach)
+            if segment is not None:
+                return (item, "add" if shift else "curve", segment)
+        return None
+
+    @staticmethod
+    def _point_near(item, local: QPointF, reach: float) -> Optional[int]:
+        for index, point in enumerate(item.points):
+            if math.hypot(point.x() - local.x(), point.y() - local.y()) <= reach:
+                return index
+        return None
+
+    @staticmethod
+    def _segment_near(item, local: QPointF, reach: float) -> Optional[int]:
+        from ..items.shapes import _segment_distance
+
+        best, nearest = None, reach
+        for index in range(item.segment_count()):
+            start, end = item.segment_ends(index)
+            gap = _segment_distance(start, end, local)
+            if gap <= nearest:
+                best, nearest = index, gap
+        return best
+
+    def reshape_at(self, scene_pos: QPointF, modifiers) -> bool:
+        """Do whatever the held key promised. True when something happened."""
+        target = self.shaping_target(scene_pos, modifiers)
+        if target is None:
+            return False
+        item, what, index = target
+        self.begin_snapshot(self.involved_frames(item))
+        local = item.mapFromScene(scene_pos)
+        if what == "delete":
+            item.delete_point(index)
+            said = "Point taken out"
+        elif what == "add":
+            item.insert_point(local)
+            said = "Point added"
+        elif what == "round":
+            item.round_corner(index)
+            said = ("Corner rounded off" if item.is_rounded(index)
+                    else "Corner sharpened")
+        else:
+            item.curve_segment(index)
+            said = ("Curved into an arc" if item.is_curved(index)
+                    else "Straightened out")
+        self.commit_snapshot(said)
+        self.statusMessage.emit(said)
+        self.viewport().update()
+        return True
+
     def _update_hover_cursor(self, scene_pos: QPointF) -> None:
         """Say what the pointer would do here, before it is pressed."""
         if self.tool_key != "select":
+            return
+        shaping = self.shaping_target(scene_pos, self._held_modifiers())
+        if shaping is not None:
+            what = shaping[1]
+            self.setCursor(Qt.PointingHandCursor)
+            self.statusMessage.emit({
+                "delete": "Click to take this point out",
+                "add": "Click to put a point in here",
+                "round": "Click to round this corner off, or sharpen it",
+                "curve": "Click to bend this into an arc, or straighten it",
+            }[what])
             return
         # Words being typed: an I-beam over them, as in anything else that
         # holds text.
@@ -1366,6 +1655,13 @@ class PageView(QGraphicsView):
         if self._mode == "table_fill":
             self._mode = "idle"
             self._apply_fill()
+            event.accept()
+            return
+
+        if self._mode == "draw_drag" and self.current_tool().mode in (CLOUDY, CLOUD) \
+                and self._is_a_click(scene_pos) and isinstance(self._draft, RectItem):
+            # Clicked, not dragged: this cloud is being drawn corner by corner.
+            self._become_a_drawn_cloud(scene_pos)
             event.accept()
             return
 
@@ -1541,7 +1837,7 @@ class PageView(QGraphicsView):
         if commit and item is not None and item.custom_label != text:
             self.begin_snapshot(self.involved_frames(item))
             item.custom_label = text
-            item.refresh(page=self.page())
+            item.refresh(page=self.page_of(item))
             self.commit_snapshot("Dimension text")
             self.selectionChanged.emit()
         self.setFocus(Qt.OtherFocusReason)
@@ -1611,7 +1907,7 @@ class PageView(QGraphicsView):
             item = build_item(data)
             if item is None:
                 continue
-            if isinstance(item, ImageItem):
+            if hasattr(item, "load_from_document"):
                 item.load_from_document(self.document())
             item.setPos(origin + QPointF(float(data.get("x", 0.0)),
                                          float(data.get("y", 0.0))))
@@ -1679,15 +1975,11 @@ class PageView(QGraphicsView):
         self._prepare_draft(item)
         frame = self.frame_at(point) or self.frame()
         frame.add_markup(item, frame.mapFromScene(point))
-        if anchor is not None:
+        if cloud:
+            item.set_cloud([item.mapFromScene(corner) for corner in cloud])
+        elif anchor is not None:
             item.tip = item.mapFromScene(anchor)
         item.refresh(self.document().workspace, self.page())
-        if cloud is not None and cloud.scene() is not None:
-            # The cloud and its note are one thing: moved, copied and kept in
-            # a tool set together, the way they were drawn.
-            group = os.urandom(6).hex()
-            cloud.group = item.group = group
-            item.style.stroke = cloud.style.stroke
         self.scene().clearSelection()
         item.setSelected(True)
         self.selectionChanged.emit()
@@ -1794,18 +2086,7 @@ class PageView(QGraphicsView):
             return
 
         if tool.mode == CLOUD:
-            # The cloud is down. Keep it, remember where the leader should
-            # point, and wait for the click that says where the words go.
-            draft.refresh(self.document().workspace, self.page())
-            self.scene().clearSelection()
-            draft.setSelected(True)
-            self.commit_snapshot("Add cloud")
-            self._pending_cloud = draft
-            box = draft.mapRectToScene(draft.local_rect().normalized())
-            self._pending_anchor = QPointF(box.center().x(), box.bottom())
-            self.statusMessage.emit(
-                f"{tool.label}: now click where the words go · Esc to cancel")
-            self.viewport().update()
+            self.hand_the_cloud_to_the_note(draft, tool)
             return
 
         draft.refresh(self.document().workspace, self.page())
@@ -1877,6 +2158,28 @@ class PageView(QGraphicsView):
             return 220.0, 160.0
         return 120.0, 80.0
 
+    def hand_the_cloud_to_the_note(self, draft, tool: Tool) -> None:
+        """The cloud is drawn; now the note it belongs to.
+
+        Its corners are remembered, the draft is thrown away, and the next
+        click says where the words go — the note carries the cloud, so what
+        lands is one markup rather than a cloud and a note that happen to be
+        side by side.
+        """
+        if isinstance(draft, PolyItem):
+            corners = [draft.mapToScene(point) for point in draft.points]
+        else:
+            box = draft.mapRectToScene(draft.local_rect().normalized())
+            corners = [box.topLeft(), box.topRight(),
+                       box.bottomRight(), box.bottomLeft()]
+        detach(draft)
+        self.forget_snapshot()
+        self._pending_cloud = corners
+        self._pending_anchor = QPointF(corners[0])
+        self.statusMessage.emit(
+            f"{tool.label}: now click where the words go · Esc to cancel")
+        self.viewport().update()
+
     def finish_poly(self) -> None:
         draft = self._draft
         self._mode = "idle"
@@ -1893,6 +2196,11 @@ class PageView(QGraphicsView):
             self.finish_tool()
             return
         if tool.key == "cutout_polygon" and self.take_out_of_an_area(draft, tool):
+            return
+        if tool.mode == CLOUD:
+            # A cloud call-out clicked out corner by corner: the shape is
+            # settled, and the note that carries it comes next.
+            self.hand_the_cloud_to_the_note(draft, tool)
             return
         draft.refresh(self.document().workspace, self.page())
         self.scene().clearSelection()
@@ -2795,6 +3103,21 @@ class PageView(QGraphicsView):
                 table.sheet.paste_payload(payload, row, col)
                 self._finish_paste(table, row, col, height, width)
                 return True
+        grid = self._excel_formulas(mime, row, col)
+        if grid is not None:
+            # Excel's own flavour, which carries the formulas. The plain text
+            # beside it holds only what the cells looked like, so pasting a
+            # column of subtotals used to bring numbers where it should have
+            # brought the sums.
+            height = len(grid)
+            width = max((len(line) for line in grid), default=0)
+            table.sheet.grow_to_fit(row, col, height, width)
+            for down, line in enumerate(grid):
+                for across, value in enumerate(line):
+                    if row + down < table.sheet.rows and col + across < table.sheet.cols:
+                        table.sheet.set_raw(row + down, col + across, value)
+            self._finish_paste(table, row, col, height, width)
+            return True
         text = mime.text()
         if not text:
             return False
@@ -2804,6 +3127,31 @@ class PageView(QGraphicsView):
         height, width = table.sheet.paste_text(text, row, col)
         self._finish_paste(table, row, col, height, width)
         return True
+
+    @staticmethod
+    def _excel_formulas(mime, row: int, col: int):
+        """The clipboard read as Excel's XML, if it put any there.
+
+        Nothing when it did not — copying out of a text editor, or out of a
+        spreadsheet that only offers plain text — and the paste falls back to
+        the values, which is all there is to have.
+        """
+        from ..core import excelxml
+
+        for flavour in mime.formats():
+            if "XML Spreadsheet" not in flavour and "spreadsheet" not in flavour.lower():
+                continue
+            try:
+                text = bytes(mime.data(flavour)).decode("utf-8", "replace")
+            except (TypeError, ValueError):
+                continue
+            text = text.split("\x00", 1)[0]
+            if not excelxml.looks_like_excel_xml(text):
+                continue
+            grid = excelxml.parse(text, row, col)
+            if grid:
+                return grid
+        return None
 
     def _finish_paste(self, table, row: int, col: int, height: int, width: int) -> None:
         table.anchor = (min(row + max(height, 1) - 1, table.sheet.rows - 1),
@@ -2913,7 +3261,7 @@ class PageView(QGraphicsView):
             item = build_item(dict(data, uid="preview"))
             if item is None:
                 continue
-            if isinstance(item, ImageItem):
+            if hasattr(item, "load_from_document"):
                 item.load_from_document(self.document())
             at = frame.mapToScene(origin + QPointF(float(data.get("x", 0.0)),
                                                    float(data.get("y", 0.0))))
@@ -3099,12 +3447,14 @@ class PageView(QGraphicsView):
         painter.restore()
 
     def _draw_pending_leader(self, painter: QPainter, anchor: QPointF) -> None:
-        """The callout's arrow, drawn the moment it is placed.
+        """The call-out as it will be, drawn while it is being placed.
 
-        Clicking what a callout points at used to leave nothing behind but the
-        same faint cross that marks any insert point, so there was no telling
-        whether the click had registered or what it had done. The arrow head
-        is drawn where it will be, with the leader trailing to the pointer.
+        Where the line meets the box is worked out the same way the placed
+        call-out works it out — the middle of the side facing what is being
+        pointed at. Drawing it to the pointer instead put the line on the
+        corner of the preview and then made it jump to the middle of a side
+        the moment the click landed, which is the sort of thing that makes
+        somebody place a call-out twice to see where it really goes.
         """
         from ..items.base import arrow_path
 
@@ -3114,51 +3464,90 @@ class PageView(QGraphicsView):
         pen = QPen(colour)
         pen.setWidthF(max(self.window.default_style.width, 1.0))
         painter.setPen(pen)
-        target = self._draft_leader_target()
+
+        box = self._pending_callout_box()
+        target = self._pending_leader_join(box, anchor)
         if target is not None:
             painter.drawLine(anchor, target)
             angle = math.atan2(anchor.y() - target.y(), anchor.x() - target.x())
         else:
             angle = -math.pi / 4
-        painter.setBrush(colour)
-        painter.drawPath(arrow_path(anchor, angle,
-                                    max(pen.widthF() * 4.5, 9.0), "arrow"))
-        # And the box, where the words will go. It lands at a set size and
-        # grows as it is written into, so showing that size is the whole
-        # answer to "where will it be and how big" — the same faded preview
-        # every other tool gets.
-        if target is not None and self._draft is None:
-            box = self._pending_callout_box(target)
+        arrowed = not self._pending_cloud
+        if arrowed:
+            painter.setBrush(colour)
+            painter.drawPath(arrow_path(anchor, angle,
+                                        max(pen.widthF() * 4.5, 9.0), "arrow"))
+        # And the box the words will go in. It lands at a set size and grows
+        # as it is written into, so showing that size is the whole answer to
+        # "where will it be and how big".
+        if box is not None and self._draft is None:
             painter.setOpacity(0.45)
             painter.setBrush(QBrush(QColor(255, 255, 255)))
+            painter.setPen(pen)
             painter.drawRoundedRect(box, 2.0, 2.0)
             painter.setOpacity(1.0)
         painter.restore()
 
-    def _pending_callout_box(self, at: QPointF) -> QRectF:
-        """Where a call-out's box would land if it were clicked down here."""
+    def _pending_callout_box(self) -> Optional[QRectF]:
+        """Where the note would land if it were clicked down now.
+
+        The same corner the click will put it at: a markup is positioned by
+        its top-left, so that is where the pointer is.
+        """
         from ..items.text import CalloutItem
 
+        if self._draft is not None:
+            return self._draft.mapRectToScene(self._draft.local_rect())
+        at = QPointF(self._last_scene_pos)
         width, height = self._default_size(CalloutItem())
         return QRectF(at.x(), at.y(), width, height)
 
-    def _draft_leader_target(self) -> Optional[QPointF]:
-        """Where the pending leader is heading: the box, or the pointer."""
-        draft = self._draft
-        if draft is not None and draft.scene() is not None:
-            return draft.mapToScene(draft.local_rect().center())
-        return QPointF(self._last_scene_pos)
+    @staticmethod
+    def _pending_leader_join(box: Optional[QRectF],
+                             anchor: QPointF) -> Optional[QPointF]:
+        """The middle of the side of *box* that faces *anchor*.
+
+        The same rule :meth:`CalloutItem.side_point_of` uses once the markup
+        is real, so the preview and the thing itself agree.
+        """
+        if box is None:
+            return None
+        centre = box.center()
+        across = (anchor.x() - centre.x()) / max(box.width() / 2, 1.0)
+        down = (anchor.y() - centre.y()) / max(box.height() / 2, 1.0)
+        if abs(across) >= abs(down):
+            return QPointF(box.left() if across < 0 else box.right(), centre.y())
+        return QPointF(centre.x(), box.top() if down < 0 else box.bottom())
 
     def _draw_snap_marker(self, painter: QPainter, point: QPointF) -> None:
-        """A small square where the pointer has caught hold of something."""
+        """Where the pointer has caught hold, and what it has caught.
+
+        A hairline square was too easy to miss on a busy drawing, which is
+        why snapping felt as though it was not happening. This is the marker
+        every CAD program draws: a filled square with a ring round it, at a
+        size that does not change with the zoom, and the name of what it
+        caught written beside it.
+        """
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing, True)
-        arm = 4.5 / max(self._zoom, 0.05)
-        pen = QPen(QColor("#e8590c"))
-        pen.setWidthF(0)
+        scale = max(self._zoom, 0.05)
+        arm = 5.0 / scale
+        colour = QColor("#e8590c")
+        pen = QPen(colour)
+        pen.setWidthF(1.6 / scale)
         painter.setPen(pen)
-        painter.setBrush(Qt.NoBrush)
+        painter.setBrush(QBrush(QColor(232, 89, 12, 70)))
         painter.drawRect(QRectF(point.x() - arm, point.y() - arm, arm * 2, arm * 2))
+        painter.setBrush(Qt.NoBrush)
+        ring = arm * 1.9
+        painter.drawEllipse(point, ring, ring)
+        if self._snap_caught:
+            font = painter.font()
+            font.setPointSizeF(max(8.0 / scale, 0.5))
+            painter.setFont(font)
+            painter.setPen(QPen(colour))
+            painter.drawText(QPointF(point.x() + ring + 3 / scale,
+                                     point.y() - ring), self._snap_caught)
         painter.restore()
 
     def typing_position(self) -> QPointF:
@@ -3176,6 +3565,32 @@ class PageView(QGraphicsView):
     def typing_frame(self):
         """The page a region opened by typing belongs to."""
         return self.frame_at(self._last_scene_pos) or self.frame()
+
+    def half_way_through_something(self) -> bool:
+        """True while a gesture is waiting on the next click or key.
+
+        Half-placed call-outs, a held stamp or look, a shape being clicked
+        out: all of them need a key press to finish or to cancel, and all of
+        them are stranded if the keyboard is somewhere else.
+        """
+        return (self._pending_anchor is not None
+                or self._pending_cloud is not None
+                or self._pending_stamp is not None
+                or self._pending_properties is not None
+                or self._draft is not None
+                or self._mode in ("draw_poly", "draw_click"))
+
+    def enterEvent(self, event) -> None:
+        """Take the keyboard back when the pointer comes back to the page.
+
+        Leaving the window half-way through placing a call-out used to leave
+        it stranded: the keyboard had gone to a panel, so Escape went there
+        too and there was no way to cancel. Coming back over the page takes
+        the focus back, and Escape means what it says again.
+        """
+        if self.half_way_through_something() and not typing_somewhere_else():
+            self.setFocus(Qt.MouseFocusReason)
+        super().enterEvent(event)
 
     def event(self, event) -> bool:
         """Take Tab before Qt spends it moving the focus.
@@ -3202,6 +3617,11 @@ class PageView(QGraphicsView):
             self._control_held = True
             self._snap_marker = None
             self.viewport().update()
+        if key == Qt.Key_Shift:
+            self._shift_held = True
+        if key in (Qt.Key_Control, Qt.Key_Shift) and self.tool_key == "select":
+            # What the pointer would do has just changed under it.
+            self._update_hover_cursor(self._last_scene_pos)
 
         # While a region or a cell is being edited every key belongs to it —
         # arrows move the caret, not the markup — apart from Escape, which
@@ -3490,6 +3910,11 @@ class PageView(QGraphicsView):
     def keyReleaseEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key_Control:
             self._control_held = False
+        if event.key() == Qt.Key_Shift:
+            self._shift_held = False
+        if event.key() in (Qt.Key_Control, Qt.Key_Shift) \
+                and self.tool_key == "select" and self._mode == "idle":
+            self._update_hover_cursor(self._last_scene_pos)
         if event.key() == Qt.Key_Space and not event.isAutoRepeat():
             self._space_pan = False
             self.setCursor(self._cursor_for_tool(self.current_tool()))
@@ -3500,6 +3925,11 @@ class PageView(QGraphicsView):
     def focusOutEvent(self, event) -> None:
         if getattr(self, "_editing_item", None) is not None:
             self.end_item_edit()
+        # A key held when the focus left is not held any more as far as this
+        # view can tell, and believing otherwise leaves snapping off and the
+        # pointer promising something it will not do.
+        self._control_held = False
+        self._shift_held = False
         super().focusOutEvent(event)
 
     # ------------------------------------------------------------------

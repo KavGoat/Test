@@ -27,6 +27,79 @@ LINE_STYLES = {
     "dashdotdot": Qt.DashDotDotLine,
 }
 
+# The dashes each named line type is drawn with, in multiples of the line
+# width — which is how PDF writes them, so a line type read out of a Bluebeam
+# file and one chosen from the list are the same thing.
+DASH_ARRAYS = {
+    "solid": [],
+    "dash": [4.0, 2.0],
+    "dot": [1.0, 2.0],
+    "dashdot": [4.0, 2.0, 1.0, 2.0],
+    "dashdotdot": [4.0, 2.0, 1.0, 2.0, 1.0, 2.0],
+    "long dash": [8.0, 3.0],
+    "centre": [10.0, 2.5, 2.0, 2.5],
+    "phantom": [10.0, 2.5, 2.0, 2.5, 2.0, 2.5],
+    "hidden": [3.0, 2.0],
+}
+
+# Hatch patterns, by the names Bluebeam uses for them. A hatched fill is how
+# a section is shown as concrete or as steel, and a tool set full of sections
+# is worth nothing if they all come in as flat colour.
+HATCH_PATTERNS = {
+    "": Qt.SolidPattern,
+    "solid": Qt.SolidPattern,
+    "horizontal": Qt.HorPattern,
+    "vertical": Qt.VerPattern,
+    "cross": Qt.CrossPattern,
+    "up": Qt.BDiagPattern,
+    "down": Qt.FDiagPattern,
+    "diagonal cross": Qt.DiagCrossPattern,
+    "dots": Qt.Dense5Pattern,
+    "dense": Qt.Dense3Pattern,
+}
+
+
+def hatch_named(name: str):
+    """Bluebeam's name for a hatch, as a brush pattern.
+
+    Its files spell these a dozen ways — "Hatch-DiagonalUp", "diagonal up",
+    "/FDiag" — so the name is read for what it says rather than matched
+    letter for letter.
+    """
+    # "DiagonalUp" is two words; so is "Hatch-Diagonal_Up". Split on a capital
+    # as well as on anything that is not a letter, or half the names it is
+    # given would come through as one word nobody recognises.
+    spaced = []
+    for index, character in enumerate(name or ""):
+        if not character.isalpha():
+            spaced.append(" ")
+            continue
+        if index and character.isupper() and (name[index - 1].islower()
+                                              or name[index - 1].isdigit()):
+            spaced.append(" ")
+        spaced.append(character)
+    words = set("".join(spaced).lower().split())
+    if not words or "solid" in words:
+        return Qt.SolidPattern
+    diagonal = bool(words & {"diagonal", "diag", "bdiag", "fdiag"})
+    if "cross" in words:
+        return Qt.DiagCrossPattern if diagonal else Qt.CrossPattern
+    if words & {"up", "bdiag", "forward"}:
+        return Qt.BDiagPattern
+    if words & {"down", "fdiag", "backward"}:
+        return Qt.FDiagPattern
+    if diagonal:
+        return Qt.FDiagPattern
+    if words & {"horizontal", "hor"}:
+        return Qt.HorPattern
+    if words & {"vertical", "ver"}:
+        return Qt.VerPattern
+    if words & {"dot", "dots", "dotted", "concrete", "gravel", "sand"}:
+        return Qt.Dense5Pattern
+    if words & {"dense", "steel", "solidfill"}:
+        return Qt.Dense3Pattern
+    return Qt.SolidPattern
+
 ARROW_HEADS = ["none", "arrow", "open", "dot", "square", "diamond", "slash", "half"]
 
 # Bluebeam-ish default palette offered in colour pickers.
@@ -60,14 +133,34 @@ class Style:
     blend: str = "normal"              # 'multiply' for highlighter
     corner_radius: float = 0.0
     padding: float = 4.0
+    # A hatch pattern over the fill, by name — "" is a plain fill.
+    hatch: str = ""
+    # A dash pattern of this line's own, in multiples of its width. Empty
+    # means the named line style decides, which is the usual case; a line
+    # read out of a Bluebeam file brings its own.
+    dash_array: tuple = ()
+
+    def dashes(self) -> list:
+        """The dashes this line is drawn with, in multiples of its width."""
+        if self.dash_array:
+            return [float(step) for step in self.dash_array if float(step) > 0]
+        return list(DASH_ARRAYS.get(self.line_style, []))
 
     def pen(self, scale: float = 1.0) -> QPen:
         colour = QColor(self.stroke or "#000000")
         colour.setAlphaF(max(0.0, min(1.0, self.opacity)))
         pen = QPen(colour)
         pen.setWidthF(max(self.width * scale, 0.01))
-        pen.setStyle(LINE_STYLES.get(self.line_style, Qt.SolidLine))
-        pen.setCapStyle(Qt.RoundCap)
+        dashes = self.dashes()
+        if dashes:
+            # A dash pattern of its own beats the named style, and a round cap
+            # would fill the gaps back in on a dotted line.
+            pen.setStyle(Qt.CustomDashLine)
+            pen.setDashPattern(dashes)
+            pen.setCapStyle(Qt.FlatCap)
+        else:
+            pen.setStyle(LINE_STYLES.get(self.line_style, Qt.SolidLine))
+            pen.setCapStyle(Qt.RoundCap)
         pen.setJoinStyle(Qt.RoundJoin)
         pen.setCosmetic(False)
         return pen
@@ -77,7 +170,7 @@ class Style:
             return QBrush(Qt.NoBrush)
         colour = QColor(self.fill)
         colour.setAlphaF(max(0.0, min(1.0, self.fill_opacity * self.opacity)))
-        return QBrush(colour)
+        return QBrush(colour, hatch_named(self.hatch))
 
     def font(self) -> QFont:
         return page_font(self.font_family, self.font_size, self.bold, self.italic,

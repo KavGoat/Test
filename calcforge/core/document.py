@@ -206,6 +206,17 @@ class Page:
         self.background_key: Optional[str] = None   # asset name of an imported PDF page
         self.background_opacity: float = 1.0
         self.source_note: str = ""                  # e.g. "drawing.pdf page 3"
+        # Whether this page carries a grid. A page written on wants one; a
+        # drawing that came in on a PDF has its own lines and a grid over the
+        # top only gets in the way, so an inserted page comes in without one.
+        # None means "whatever the document says", which is what a page saved
+        # before pages had their own grid comes back as.
+        self.grid: Optional[bool] = None
+        # The same for the running header and footer: a page can be left out
+        # of them — a drawing sheet with its own title block does not want a
+        # second one written over it. None means "as the document says".
+        self.header: Optional[bool] = None
+        self.footer: Optional[bool] = None
         self.frame = None                           # set by the UI layer
         self._pending_items: list[dict] = []
 
@@ -217,6 +228,22 @@ class Page:
     @property
     def height_pt(self) -> float:
         return self.setup.height_pt
+
+    def shows_a_grid(self, settings) -> bool:
+        """Whether to rule this page. Its own answer beats the document's."""
+        if self.grid is None:
+            return bool(settings.show_grid)
+        return self.grid
+
+    def shows_a_header(self, settings) -> bool:
+        if self.header is None:
+            return bool(settings.show_header)
+        return self.header
+
+    def shows_a_footer(self, settings) -> bool:
+        if self.footer is None:
+            return bool(settings.show_footer)
+        return self.footer
 
     # -- serialisation -----------------------------------------------------
     def to_dict(self) -> dict:
@@ -231,6 +258,9 @@ class Page:
             "background_key": self.background_key,
             "background_opacity": self.background_opacity,
             "source_note": self.source_note,
+            "grid": self.grid,
+            "header": self.header,
+            "footer": self.footer,
             "items": items,
         }
 
@@ -242,6 +272,9 @@ class Page:
         page.background_key = data.get("background_key")
         page.background_opacity = float(data.get("background_opacity", 1.0))
         page.source_note = data.get("source_note", "")
+        for which in ("grid", "header", "footer"):
+            said = data.get(which)
+            setattr(page, which, None if said is None else bool(said))
         page._pending_items = data.get("items", [])
         return page
 

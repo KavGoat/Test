@@ -11,3 +11,8 @@ htmlcov/
 *.cfx
 !examples/*.cfx
 .DS_Store
+
+# The session transcript: six megabytes of conversation, useful to read and
+# not something the repository should carry. my-inputs.md is kept, because
+# it is where docs/requirements.md comes from.
+transcript.md

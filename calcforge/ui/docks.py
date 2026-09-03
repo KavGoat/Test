@@ -202,6 +202,21 @@ class PanelDock(QDockWidget):
         self._bar.refresh()
         self.collapsedChanged.emit(collapsed)
 
+    def showEvent(self, event) -> None:
+        """Come back rolled up if that is how it was left.
+
+        Qt gives a dock its height back when it is shown, which is after a
+        restored arrangement has been applied — so a panel that was rolled up
+        when the application closed used to open unrolled. The constraint is
+        put back here, where being shown is the thing that took it away.
+        """
+        super().showEvent(event)
+        if self._collapsed:
+            body = self.widget()
+            if body is not None:
+                body.hide()
+            self.setMaximumHeight(self._bar.sizeHint().height() + 2)
+
 
 def _names(value) -> set[str]:
     """QSettings hands a one-item list back as a bare string."""

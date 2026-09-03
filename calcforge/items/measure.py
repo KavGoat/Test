@@ -222,6 +222,19 @@ class MeasureItem(MarkupItem):
             return
         super().move_handle(key, local_pos, keep_ratio)
 
+    def label_rect(self) -> QRectF:
+        """The box the value is written in, so it can be clicked on."""
+        centre = self._label_anchor() + self.label_offset
+        half_width = max(len(self.value_text), 3) * self.style.font_size * 0.34
+        half_height = self.style.font_size * 0.8
+        return QRectF(centre.x() - half_width, centre.y() - half_height,
+                      half_width * 2, half_height * 2)
+
+    def label_at(self, local_pos: QPointF) -> bool:
+        """Whether the pointer is on the value itself."""
+        return bool(self.show_label and self.value_text
+                    and self.label_rect().contains(local_pos))
+
     def _label_anchor(self) -> QPointF:
         if not self.points:
             return QPointF(0, 0)
