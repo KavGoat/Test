@@ -43,6 +43,8 @@ from .panels import (BookmarksPanel, FunctionsPanel, LayersPanel, MarkupsPanel,
                      PagesPanel, ProblemsPanel, PropertiesPanel,
                      ToolSetsPanel, VariablesPanel)
 from .docks import PanelDock, load_panel_state, save_panel_state
+from .rail import (AREAS, LEFT, RIGHT, PanelRail, RailBar, load_sides,
+                   save_sides)
 from .scene import DocumentScene, detach
 from .shortcuts import COMMAND, INSERT, SYMBOL, TOOL, ShortcutManager
 from . import toolsets
@@ -129,7 +131,8 @@ class MainWindow(QMainWindow):
         for dock in self.panels:
             dock.dockLocationChanged.connect(lambda *_: self.note_layout_change())
             dock.topLevelChanged.connect(lambda *_: self.note_layout_change())
-            dock.visibilityChanged.connect(lambda *_: self.note_layout_change())
+            dock.visibilityChanged.connect(lambda *_: (self.sync_rails(),
+                                                       self.note_layout_change()))
             dock.pinnedChanged.connect(lambda *_: self.note_layout_change())
             dock.collapsedChanged.connect(lambda *_: self.note_layout_change())
         for toolbar in self.toolbars:
@@ -183,8 +186,17 @@ class MainWindow(QMainWindow):
         bar.addWidget(self.cell_value)
         self.formula_bar.setVisible(False)
         layout.addWidget(self.formula_bar)
+
         layout.addWidget(self.view, 1)
         self.setCentralWidget(central)
+
+        # The rails go in the toolbar areas, which is what puts them hard
+        # against the window's own edges — outside the panels, the way
+        # Bluebeam's are.
+        self.left_rail = PanelRail(LEFT, self)
+        self.right_rail = PanelRail(RIGHT, self)
+        self.addToolBar(Qt.LeftToolBarArea, RailBar(self.left_rail, self))
+        self.addToolBar(Qt.RightToolBarArea, RailBar(self.right_rail, self))
 
     def give_icon(self, action, name: str):
         """Put an icon on an action and remember which, for the next theme.
@@ -489,21 +501,99 @@ class MainWindow(QMainWindow):
         self.bookmarks_panel.bookmarkActivated.connect(self.go_to_bookmark)
         self.dock_bookmarks = self._dock("Bookmarks", self.bookmarks_panel,
                                          Qt.BottomDockWidgetArea, "dock_bookmarks")
-        # Everything you look things up in goes in one place along the bottom:
-        # markups, variables, functions, layers and problems as tabs of the
-        # same panel, so the right-hand side is left to Properties alone.
         self.reference_docks = [self.dock_markups, self.dock_variables,
                                 self.dock_functions, self.dock_layers,
                                 self.dock_toolsets, self.dock_bookmarks,
                                 self.dock_problems]
-        for dock in self.reference_docks[1:]:
-            self.addDockWidget(Qt.BottomDockWidgetArea, dock)
-        for first, second in zip(self.reference_docks, self.reference_docks[1:]):
-            self.tabifyDockWidget(first, second)
-        self.dock_markups.raise_()
-        self.resizeDocks([self.dock_pages, self.dock_properties], [190, 320], Qt.Horizontal)
-        self.resizeDocks(self.reference_docks, [230] * len(self.reference_docks),
-                         Qt.Vertical)
+        self._build_rails()
+        self.resizeDocks([self.dock_pages, self.dock_properties], [220, 320],
+                         Qt.Horizontal)
+
+    # -- the icon rails ----------------------------------------------------
+    #
+    # Every panel is behind one icon on one of the two rails. Which side it is
+    # on is remembered; dragging its icon across moves it.
+    PANEL_ICONS = {
+        "dock_pages": ("Pages", "panel_pages"),
+        "dock_bookmarks": ("Bookmarks", "panel_bookmarks"),
+        "dock_toolsets": ("Tool sets", "panel_toolsets"),
+        "dock_markups": ("Markups", "panel_markups"),
+        "dock_properties": ("Properties", "panel_properties"),
+        "dock_variables": ("Variables", "panel_variables"),
+        "dock_functions": ("Functions", "panel_functions"),
+        "dock_layers": ("Layers", "panel_layers"),
+        "dock_problems": ("Problems", "panel_problems"),
+    }
+    DEFAULT_SIDES = {
+        "dock_pages": LEFT, "dock_bookmarks": LEFT, "dock_toolsets": LEFT,
+        "dock_markups": LEFT,
+        "dock_properties": RIGHT, "dock_variables": RIGHT,
+        "dock_functions": RIGHT, "dock_layers": RIGHT, "dock_problems": RIGHT,
+    }
+
+    def _build_rails(self) -> None:
+        self.panel_sides = load_sides(self.DEFAULT_SIDES)
+        self.docks_by_name = {dock.objectName(): dock for dock in self.panels}
+        for rail in (self.left_rail, self.right_rail):
+            rail.toggled.connect(self.show_panel)
+            rail.moved.connect(self.move_panel_to_side)
+        for name in self.PANEL_ICONS:
+            self._place_panel(name, self.panel_sides.get(name, LEFT), open_now=False)
+        # One panel open on each side to begin with, so the rails explain
+        # themselves without anything having to be read.
+        self.show_panel("dock_pages", True)
+        self.show_panel("dock_properties", True)
+
+    def _place_panel(self, name: str, side: str, open_now: bool) -> None:
+        dock = self.docks_by_name.get(name)
+        if dock is None:
+            return
+        label, icon_name = self.PANEL_ICONS[name]
+        rail = self.left_rail if side == LEFT else self.right_rail
+        other = self.right_rail if side == LEFT else self.left_rail
+        other.take(name)
+        if name not in rail.buttons:
+            rail.add(name, label, icon(icon_name))
+        self.panel_sides[name] = side
+        self.addDockWidget(AREAS[side], dock)
+        dock.setVisible(open_now)
+        rail.show_open(name, open_now)
+
+    def rail_for(self, name: str) -> PanelRail:
+        return (self.left_rail if self.panel_sides.get(name, LEFT) == LEFT
+                else self.right_rail)
+
+    def show_panel(self, name: str, open_now: bool) -> None:
+        """Open or close a panel from its icon."""
+        dock = self.docks_by_name.get(name)
+        if dock is None:
+            return
+        dock.setVisible(bool(open_now))
+        if open_now:
+            dock.raise_()
+        self.rail_for(name).show_open(name, bool(open_now))
+        self.note_layout_change()
+
+    def move_panel_to_side(self, name: str, side: str) -> None:
+        """Drag a panel's icon to the other rail and the panel goes with it."""
+        if self.panel_sides.get(name) == side:
+            return
+        dock = self.docks_by_name.get(name)
+        was_open = dock is not None and not dock.isHidden()
+        self._place_panel(name, side, was_open)
+        save_sides(self.panel_sides)
+        self.note_layout_change()
+
+    def sync_rails(self) -> None:
+        """Put the icons back in step with which panels are actually open.
+
+        isHidden rather than isVisible: a panel in a window that has not been
+        shown yet is not visible, but it has not been closed either, and its
+        icon should say so.
+        """
+        for name, dock in self.docks_by_name.items():
+            if name in self.PANEL_ICONS:
+                self.rail_for(name).show_open(name, not dock.isHidden())
 
     def _build_menus(self) -> None:
         bar = self.menuBar()

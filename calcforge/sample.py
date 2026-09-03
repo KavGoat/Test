@@ -167,7 +167,9 @@ def build_sample() -> Document:
     footing.setPos(QPointF(56, 84))
     footing.label = "Pad footing"
     footing.style.font_size = 9.0
-    # self-contained: nothing worked out here leaks into the document
+    # Self-contained, said so explicitly: a block shares its names by default,
+    # and nothing worked out here should leak into the document.
+    footing.local_scope = True
 
     column = RectItem("rect", QRectF(0, 0, COLUMN_PT, COLUMN_PT))
     column.setPos(QPointF(96 + (PAD_PT - COLUMN_PT) / 2, 486 + (PAD_PT - COLUMN_PT) / 2))

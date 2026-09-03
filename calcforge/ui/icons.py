@@ -375,6 +375,62 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
         for x in (5, 10, 15, 19):
             painter.drawLine(QPointF(x, 16), QPointF(x, 11))
         _glyph(painter, "?", WARM, 9, True, QRectF(6, 2, 12, 10))
+    # -- the panel rail: one icon per panel, none of them a tool's ---------
+    elif name == "panel_pages":
+        _pen(painter, INK, 1.3)
+        painter.drawRect(QRectF(3.5, 4.5, 7, 9))
+        painter.drawRect(QRectF(13.5, 4.5, 7, 9))
+        painter.drawRect(QRectF(3.5, 16.5, 7, 4))
+        painter.drawRect(QRectF(13.5, 16.5, 7, 4))
+    elif name == "panel_bookmarks":
+        _pen(painter, INK, 1.4)
+        painter.drawPolyline(QPolygonF([QPointF(7, 3), QPointF(7, 20),
+                                        QPointF(12, 15.5), QPointF(17, 20),
+                                        QPointF(17, 3), QPointF(7, 3)]))
+    elif name == "panel_toolsets":
+        # A tool chest: a box with a handle.
+        _pen(painter, INK, 1.3)
+        painter.drawRect(QRectF(3.5, 8.5, 17, 11))
+        painter.drawLine(QPointF(3.5, 12.5), QPointF(20.5, 12.5))
+        painter.drawPolyline(QPolygonF([QPointF(9, 8.5), QPointF(9, 5.5),
+                                        QPointF(15, 5.5), QPointF(15, 8.5)]))
+    elif name == "panel_markups":
+        _pen(painter, INK, 1.3)
+        for offset in range(3):
+            y = 6.5 + offset * 5
+            painter.drawRect(QRectF(3.5, y - 1.5, 3, 3))
+            painter.drawLine(QPointF(9, y), QPointF(20.5, y))
+    elif name == "panel_properties":
+        _pen(painter, INK, 1.3)
+        painter.drawRect(QRectF(3.5, 4.5, 17, 15))
+        painter.drawLine(QPointF(10, 4.5), QPointF(10, 19.5))
+        for offset in range(3):
+            y = 8 + offset * 4
+            painter.drawLine(QPointF(12, y), QPointF(18.5, y))
+    elif name == "panel_variables":
+        _glyph(painter, "x", INK, 11, False, QRectF(2, 3, 10, 12))
+        _glyph(painter, "y", INK, 11, False, QRectF(11, 8, 10, 12))
+        _pen(painter, INK, 1.2)
+        painter.drawLine(QPointF(3, 20), QPointF(20, 20))
+    elif name == "panel_functions":
+        _glyph(painter, "ƒ", INK, 15, False, QRectF(2, 1, 12, 20))
+        _pen(painter, INK, 1.3)
+        painter.drawArc(QRectF(11, 5, 5, 14), 260 * 16, 200 * 16)
+        painter.drawArc(QRectF(16, 5, 5, 14), 80 * 16, 200 * 16)
+    elif name == "panel_layers":
+        _pen(painter, INK, 1.3)
+        for offset in range(3):
+            y = 7 + offset * 4.6
+            painter.drawPolygon(QPolygonF([QPointF(12, y - 3), QPointF(20, y),
+                                           QPointF(12, y + 3), QPointF(4, y)]))
+    elif name == "panel_problems":
+        _pen(painter, INK, 1.4)
+        painter.drawPolygon(QPolygonF([QPointF(12, 3.5), QPointF(21, 19.5),
+                                       QPointF(3, 19.5)]))
+        painter.drawLine(QPointF(12, 9), QPointF(12, 14))
+        painter.setBrush(QBrush(QColor(INK)))
+        painter.drawEllipse(QPointF(12, 17), 0.9, 0.9)
+        painter.setBrush(Qt.NoBrush)
     elif name == "page":
         _pen(painter, INK, 1.4)
         painter.drawRect(QRectF(6, 3, 12, 18))

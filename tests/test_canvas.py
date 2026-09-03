@@ -504,3 +504,44 @@ def test_a_click_leaves_no_insertion_mark(window):
     assert not hasattr(window.view, "insert_point")
     assert not hasattr(window.view, "set_insert_point")
     assert window.view.pointer_scene_pos() is not None
+
+
+# ---------------------------------------------------------------------------
+# The panel rails
+# ---------------------------------------------------------------------------
+
+def test_every_panel_has_an_icon_on_one_rail_or_the_other(window):
+    on_rails = set(window.left_rail.buttons) | set(window.right_rail.buttons)
+    assert on_rails == set(window.PANEL_ICONS)
+    assert not (set(window.left_rail.buttons) & set(window.right_rail.buttons))
+
+
+def test_the_icon_opens_and_closes_its_panel(window):
+    button = window.left_rail.buttons["dock_bookmarks"]
+    assert window.dock_bookmarks.isHidden()
+
+    window.show_panel("dock_bookmarks", True)
+    assert not window.dock_bookmarks.isHidden()
+    assert button.isChecked()
+
+    window.show_panel("dock_bookmarks", False)
+    assert window.dock_bookmarks.isHidden()
+    assert not button.isChecked()
+
+
+def test_a_panel_dragged_to_the_other_rail_opens_on_that_side(window):
+    from PySide6.QtCore import Qt
+
+    window.show_panel("dock_bookmarks", True)
+    window.move_panel_to_side("dock_bookmarks", "right")
+
+    assert "dock_bookmarks" in window.right_rail.buttons
+    assert "dock_bookmarks" not in window.left_rail.buttons
+    assert window.dockWidgetArea(window.dock_bookmarks) == Qt.RightDockWidgetArea
+    assert not window.dock_bookmarks.isHidden()   # it was open, and stays open
+
+
+def test_closing_a_panel_any_other_way_unlights_its_icon(window):
+    window.show_panel("dock_pages", True)
+    window.dock_pages.close()
+    assert not window.left_rail.buttons["dock_pages"].isChecked()

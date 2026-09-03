@@ -829,11 +829,15 @@ def test_pipe_starts_a_table_and_at_starts_a_callout(window):
     assert isinstance(editing_item(window), CalloutItem)
 
 
-def test_unbound_keys_do_nothing_on_the_canvas(window):
-    before = len(markups(window))
-    for text in ("z", "q", "#", "5"):
-        _type_on_canvas(window, text)
-    assert len(markups(window)) == before
+def test_an_unbound_key_starts_a_calculation(window):
+    """There is one way to start writing on a page: type."""
+    from calcforge.items.mathitem import MathItem
+
+    _type_on_canvas(window, "5")
+    item = window.view.editing_item()
+    assert isinstance(item, MathItem)
+    assert item.source == "5"
+    window.view.end_item_edit()
     assert editing_item(window) is None
 
 
@@ -841,7 +845,7 @@ def test_bound_tool_letter_selects_its_tool(window):
     _type_on_canvas(window, "r")
     assert window.view.tool_key == "rect"
     window.select_tool("select")
-    _type_on_canvas(window, "k")
+    _type_on_canvas(window, "h")
     assert window.view.tool_key == "highlighter"
 
 
@@ -1387,9 +1391,8 @@ def test_the_context_menu_toggles_a_block_between_the_two(window):
 
     menu = window.build_context_menu(block, QPointF(120, 120))
     action = [a for a in menu.actions() if a.text() == "Self-contained block"][0]
-    assert action.isCheckable() and action.isChecked()   # a block starts closed
+    assert action.isCheckable() and not action.isChecked()  # a block starts open
 
-    action.setChecked(False)                     # emits toggled
     assert not block.local_scope
     assert window.document.workspace.get("y").to("m").magnitude == pytest.approx(6)
 
@@ -1409,6 +1412,7 @@ def test_a_block_keeps_its_values_to_itself(window):
     block = editing_item(window)
     block._editor.setPlainText("b_trib = 3 m\nw = q_floor*b_trib\nR = w*6 m/2")
     window.view.end_item_edit()
+    window.set_block_scope(True)                 # keep its names to itself
     block.setSelected(True)
 
     workspace = window.document.workspace
@@ -1430,6 +1434,7 @@ def test_a_block_can_read_globals_defined_above_it(window):
     block._editor.setPlainText("w = 12 kN/m\nM = w*L^2/8")
     window.view.end_item_edit()
     block.setSelected(True)
+    window.set_block_scope(True)
 
     assert [s.error for s in block.statements if s.error] == []
     assert block.local_values["M"].value.to("kN*m").magnitude == pytest.approx(54)
@@ -1442,6 +1447,7 @@ def test_a_later_line_cannot_see_inside_a_block(window):
     first._editor.setPlainText("a = 2 m\nb = 3 m")
     window.view.end_item_edit()
     first.setSelected(True)
+    window.set_block_scope(True)
 
     window.select_tool("math")
     drag(window.view, 80, 400, 300, 430)
@@ -1470,6 +1476,7 @@ def test_a_block_can_be_opened_up_to_the_document(window):
     block._editor.setPlainText("x = 2 m\ny = x*3")
     window.view.end_item_edit()
     block.setSelected(True)
+    window.set_block_scope(True)
     assert window.document.workspace.get("y") is None
 
     window.set_block_scope(False)
@@ -1483,6 +1490,7 @@ def test_block_locals_are_listed_for_reference(window):
     block._editor.setPlainText("x = 2 m\ny = x*3")
     window.view.end_item_edit()
     block.setSelected(True)
+    window.set_block_scope(True)
     rows = [window.variables_panel.table.item(r, 0).text()
             for r in range(window.variables_panel.table.rowCount())]
     sources = [window.variables_panel.table.item(r, 2).text()

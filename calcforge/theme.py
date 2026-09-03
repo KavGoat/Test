@@ -112,6 +112,17 @@ QDockWidget > QWidget {{ background: {surface}; }}
 #dockButton:hover {{ background: {accent_soft}; }}
 #dockButton:checked {{ background: {accent_deep}; }}
 
+/* The rails of panel icons down either edge of the canvas. */
+#panelRail {{
+    background: {chrome}; border-right: 1px solid {chrome_edge};
+    border-left: 1px solid {chrome_edge};
+}}
+#railButton {{
+    border: 0; border-radius: 4px; padding: 3px; margin: 0;
+}}
+#railButton:hover {{ background: {accent_soft}; }}
+#railButton:checked {{ background: {accent_deep}; }}
+
 QGroupBox {{
     border: 1px solid {chrome_edge}; border-radius: 4px; margin-top: 10px;
     background: {field}; font-weight: 600;
