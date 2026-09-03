@@ -7788,3 +7788,274 @@ def test_the_header_row_box_starts_where_the_table_is(window):
     QTest.mouseClick(dialog.header, Qt.LeftButton, Qt.NoModifier, where)
     assert dialog.values()[2] is True, "off and on again is back where it was"
     dialog.deleteLater()
+
+
+def test_a_finished_calculation_is_no_longer_a_line_that_might_be_prose(window):
+    """Entering one and editing one are two different states.
+
+    While a line is being entered for the first time it might still turn out
+    to be a sentence, and a space says it was. Once the caret has left it and
+    it was a calculation, it is one: opening it again and pressing space
+    refuses the space instead of throwing the expression away.
+    """
+    window.view._last_scene_pos = QPointF(100, 100)
+    press_key(window.view, Qt.Key_unknown, "/")
+    item = window.view.editing_item()
+    assert item.started_by_typing, "it might still be a sentence"
+    type_text(window.view, "b:=300mm")
+    window.view.end_item_edit()
+    assert not item.started_by_typing, "and it turned out not to be"
+
+    said = []
+    window.view.statusMessage.connect(said.append)
+    window.view.begin_item_edit(item)
+    press_key(window.view, Qt.Key_Space, " ")
+    assert item._editor.toPlainText() == "b:=300mm", "the space was refused"
+    assert isinstance(window.view.editing_item(), MathItem)
+    assert said and "space" in said[-1].lower()
+    window.view.escape_everything()
+
+
+# ---------------------------------------------------------------------------
+# a rectangle's outline is an outline like any other
+# ---------------------------------------------------------------------------
+
+def _rectangle(window, kind="rect", at=(100, 100, 300, 220)):
+    window.select_tool(kind if kind != "rect" else "rect")
+    drag(window.view, *at)
+    box = [i for i in markups(window) if isinstance(i, RectItem)][-1]
+    window.view.scene().clearSelection()
+    box.setSelected(True)
+    return box
+
+
+def test_a_rectangles_corners_are_on_its_right_click_menu(window):
+    """Not a "turn it into a polygon first" — the corners are simply there."""
+    box = _rectangle(window)
+    corner = box.mapToScene(box.corner_points()[0])
+    menu = window.build_context_menu(box, corner)
+    outline = [a.menu() for a in menu.actions() if a.text() == "This outline"]
+    assert outline, "a rectangle has four corners and four sides"
+    labels = [a.text() for a in outline[0].actions()]
+    assert "Round this corner off" in labels
+    assert "Take this point out" in labels
+    assert "Put a point in here" in labels
+    assert any("arc" in label for label in labels)
+    assert any("break symbol" in label for label in labels)
+
+
+def test_the_outline_menu_shows_up_in_the_middle_of_a_shape_too(window):
+    """Where the pointer is not near any corner, the nearest is offered.
+
+    Showing nothing at all there is how a thing that is on every shape came
+    to be a thing nobody could find.
+    """
+    box = _rectangle(window)
+    middle = box.mapToScene(box.local_rect().center())
+    outline = [a.menu() for a in window.build_context_menu(box, middle).actions()
+               if a.text() == "This outline"]
+    assert outline
+    labels = [a.text() for a in outline[0].actions()]
+    assert "Round the nearest corner off" in labels
+    assert "Put a point in the nearest side" in labels
+
+
+def test_a_cloud_drawn_as_a_box_has_an_outline_too(window):
+    box = _rectangle(window, "cloud")
+    assert box.kind == "cloud"
+    outline = [a.menu() for a in window.build_context_menu(
+        box, box.mapToScene(box.corner_points()[2])).actions()
+        if a.text() == "This outline"]
+    assert outline, "a cloud has corners like anything else drawn as a box"
+
+
+def test_rounding_a_rectangles_corner_makes_it_a_polygon(window):
+    """It stops being a rectangle the moment it stops being rectangular."""
+    box = _rectangle(window)
+    where = box.mapToScene(box.corner_points()[1])
+    assert window.view.reshape_at(where, Qt.ControlModifier)
+
+    assert box not in markups(window)
+    shape = [i for i in markups(window) if isinstance(i, PolyItem)][-1]
+    assert shape.is_rounded(1), "and it kept the corner that was asked for"
+    assert len(shape.points) == 4
+    assert shape.isSelected(), "still the shape being worked on"
+
+    window.undo_stack.undo()
+    assert any(isinstance(i, RectItem) for i in markups(window)), "and back again"
+
+
+def test_taking_a_point_out_of_a_rectangle_leaves_a_triangle(window):
+    box = _rectangle(window)
+    where = box.mapToScene(box.corner_points()[0])
+    assert window.view.reshape_at(where, Qt.ShiftModifier)
+    shape = [i for i in markups(window) if isinstance(i, PolyItem)][-1]
+    assert len(shape.points) == 3
+
+
+def test_a_point_goes_into_the_side_the_pointer_is_on(window):
+    """Including the side that runs back to the first corner."""
+    shape = _polygon(window)
+    closing = shape.segment_count() - 1
+    start, end = shape.segment_ends(closing)
+    middle = QPointF((start.x() + end.x()) / 2, (start.y() + end.y()) / 2)
+    where = shape.insert_point(middle)
+    assert where == closing + 1, "on the closing side, not somewhere up the side"
+
+
+def test_what_a_corner_carries_moves_with_it(window):
+    """Numbers shift when a point goes in or comes out; what they mean must not."""
+    shape = _polygon(window)
+    shape.round_corner(2)
+    shape.break_segment(2)
+    start, end = shape.segment_ends(0)
+    shape.insert_point(QPointF((start.x() + end.x()) / 2,
+                               (start.y() + end.y()) / 2))
+    assert shape.is_rounded(3), "the rounded corner is still that corner"
+    assert shape.broken.get(3), "and the break is still on that side"
+
+    shape.delete_point(1)
+    assert shape.is_rounded(2)
+    assert shape.broken.get(2)
+
+
+# ---------------------------------------------------------------------------
+# clicking into the working itself
+# ---------------------------------------------------------------------------
+
+def _fraction(window, source="Z:=bb*dd^2/66=", at=(80, 80)):
+    item = MathItem(source)
+    window.view.frame().add_markup(item, QPointF(*at))
+    window.recalculate()
+    return item
+
+
+def _scene_xy(item, local: QPointF):
+    """A point in an item's own coordinates, as canvas x and y."""
+    scene = item.mapToScene(local)
+    return scene.x(), scene.y()
+
+
+def _piece_of(item, text):
+    """Where a piece of the typeset working sits, in item coordinates."""
+    found = []
+
+    def walk(box, x, y):
+        if box.span is not None and getattr(box, "text", "") == text:
+            # Just inside its left-hand edge, so the caret lands in front of
+            # it: the nearest edge of the nearest box is what a click means,
+            # and the middle of a box is the same distance from both of them.
+            found.append(QPointF(x + box.width * 0.2,
+                                 y - (box.ascent - box.descent) / 2))
+        for child, kx, ky in box.children_at(x, y):
+            walk(child, kx, ky)
+
+    for row in item.rows:
+        if row.left is not None:
+            walk(row.left, item.style.padding, row.baseline)
+    assert found, f"{text!r} is not on the page"
+    return found[0]
+
+
+def test_clicking_a_fraction_puts_the_caret_in_that_half(window):
+    """The numerator and the denominator are two different places to click.
+
+    The working is typeset, and the characters behind it are one flat line —
+    so a click has to be turned back into a place in that line. The box tree
+    knows which characters it drew where, which is what makes it possible.
+    """
+    item = _fraction(window)
+    window.view.begin_item_edit(item)
+    for text, wanted in (("66", "Z:=bb*dd^2/"), ("bb", "Z:="), ("dd", "Z:=bb*")):
+        click(window.view, *_scene_xy(item, _piece_of(item, text)))
+        caret = item._editor.textCursor().position()
+        assert item.source[:caret] == wanted, f"clicking {text!r} landed at {caret}"
+    window.view.escape_everything()
+
+
+def test_a_double_click_lands_where_it_was_aimed(window):
+    """Opening the line and placing the caret are the same gesture."""
+    item = _fraction(window)
+    double_click(window.view, *_scene_xy(item, _piece_of(item, "66")))
+    assert window.view.editing_item() is item
+    assert item.source[:item._editor.textCursor().position()] == "Z:=bb*dd^2/"
+    window.view.escape_everything()
+
+
+def test_clicking_into_a_fraction_works_zoomed_and_turned(window):
+    """The mapping is done in the item's own coordinates, so neither matters."""
+    item = _fraction(window)
+    where = _scene_xy(item, _piece_of(item, "66"))
+    try:
+        for zoom in (2.5, 0.6):
+            window.view.set_zoom(zoom)
+            window.view.escape_everything()
+            double_click(window.view, *where)
+            assert item.source[:item._editor.textCursor().position()] == "Z:=bb*dd^2/"
+        window.view.set_zoom(1.0)
+        window.view.rotate_view(True)
+        window.view.escape_everything()
+        double_click(window.view, *_scene_xy(item, _piece_of(item, "66")))
+        assert item.source[:item._editor.textCursor().position()] == "Z:=bb*dd^2/"
+    finally:
+        window.view.reset_view_rotation()
+        window.view.set_zoom(1.0)
+        window.view.escape_everything()
+
+
+def test_a_fraction_inside_a_fraction_can_be_clicked_into(window):
+    item = _fraction(window, "A:=(aa/bb)/(cc/dd)=")
+    window.view.begin_item_edit(item)
+    for text, wanted in (("aa", "A:=("), ("bb", "A:=(aa/"),
+                         ("cc", "A:=(aa/bb)/("), ("dd", "A:=(aa/bb)/(cc/")):
+        click(window.view, *_scene_xy(item, _piece_of(item, text)))
+        caret = item._editor.textCursor().position()
+        assert item.source[:caret] == wanted, f"clicking {text!r} landed at {caret}"
+    window.view.escape_everything()
+
+
+def test_the_right_line_of_a_block_takes_the_caret(window):
+    item = MathItem("p:=1/2\nq:=xx/yy=", block=True)
+    window.view.frame().add_markup(item, QPointF(80, 80))
+    window.recalculate()
+    window.view.begin_item_edit(item)
+    click(window.view, *_scene_xy(item, _piece_of(item, "yy")))
+    caret = item._editor.textCursor().position()
+    assert item._editor.toPlainText()[:caret] == "p:=1/2\nq:=xx/"
+    window.view.escape_everything()
+
+
+def test_a_double_click_in_the_working_takes_the_word_it_was_aimed_at(window):
+    """Not whatever word sits at that spot in the invisible flat line."""
+    item = _fraction(window)
+    window.view.begin_item_edit(item)
+    double_click(window.view, *_scene_xy(item, _piece_of(item, "dd")))
+    assert item._editor.textCursor().selectedText() == "dd"
+    window.view.escape_everything()
+
+
+def test_the_vertical_bar_still_runs_through_every_page_when_turned(window):
+    """Continuous scrolling and a turned view are not a choice between two.
+
+    The pages stay stacked down the canvas whichever way up they are read, so
+    the vertical bar goes on doing what a vertical bar does: through page one,
+    page two, page three, top to bottom.
+    """
+    window.add_page()
+    window.add_page()
+    window.view.set_zoom(1.0)
+    window.view.reset_view_rotation()
+    try:
+        window.view.rotate_view(True)
+        bar = window.view.verticalScrollBar()
+        assert bar.maximum() > bar.minimum(), "there is a document to scroll"
+
+        window.go_to_page(0)
+        top = bar.value()
+        window.go_to_page(2)
+        assert bar.value() > top, "the last page is further down, not sideways"
+        assert window.view.horizontalScrollBar().value() == pytest.approx(
+            window.view.horizontalScrollBar().value())
+        assert window.view.visible_page_index() == 2
+    finally:
+        window.view.reset_view_rotation()

@@ -33,9 +33,9 @@ Checking this against your raw messages turned up a few places where either I go
 - [x] SMath-style assignment: typing `=` on an undefined variable auto-converts it to `:=` (definition); typing `=` on an already-defined variable evaluates it; typing `:` explicitly forces a (re)definition even over an existing one (6)
 - [x] Auto-suggest default units matching SMath conventions: kN, kPa, kN/m by default when the surrounding units match that family; length units auto-switch between mm and m depending on whether the numeric value is above or below ~1000 (6)
 - [x] Live warnings for (a) unit mismatch in an expression and (b) reference to an undefined variable — shown inline near the offending term, not just in a log (6)
-- [ ] **Strict no-space rule inside equations**: an equation entry must never contain a space. A number immediately followed by letters (no space) is interpreted as "number + unit" directly. If a space is typed anywhere while in equation mode, convert the *entire* entry to a plain text item instead of a formula **(new, refines 6/22/66)**
-- [ ] The opening `"` should be treated as "assume equation mode first" and behave differently from how a pre-existing equation item behaves when re-edited — i.e. entering fresh vs. editing an existing equation are two distinct interaction states that both need to respect the no-space rule **(new)**
-- [ ] Fix: typing Backspace, Escape, or `=` while inside an equation sometimes doesn't register / doesn't do anything — these three keys need to be reliable in every equation-edit state **(new)**
+- [x] **Strict no-space rule inside equations**: an equation entry must never contain a space. A number immediately followed by letters (no space) is interpreted as "number + unit" directly. If a space is typed anywhere while in equation mode, convert the *entire* entry to a plain text item instead of a formula **(new, refines 6/22/66)**
+- [x] The opening `"` should be treated as "assume equation mode first" and behave differently from how a pre-existing equation item behaves when re-edited — i.e. entering fresh vs. editing an existing equation are two distinct interaction states that both need to respect the no-space rule **(new)**
+- [x] Fix: typing Backspace, Escape, or `=` while inside an equation sometimes doesn't register / doesn't do anything — these three keys need to be reliable in every equation-edit state **(new)**
 - [x] Committing a unit still needs a discrete action (Tab) rather than auto-completing as soon as a matching unit string is typed; the unit list shown while typing must be navigable with arrow keys or mouse click, and must also list already-defined variable names that match what's typed so far (22, 139)
 - [x] Lazy evaluation: a line should only compute and *display* its result when `=` is typed at the end. If no `=`, still evaluate it silently in the background so later lines can reference the value, but show nothing (22)
 - [x] Per-result display-unit override: right-click (or similar) a computed value and change what unit it's displayed in without changing the underlying definition (22)
@@ -61,7 +61,7 @@ Checking this against your raw messages turned up a few places where either I go
 ## 4. Equation editor
 
 - [x] Equation editor must match SMath exactly: a **single unified view** — no separate "inline editing" mode vs. "final rendered" mode. What you see while editing (fractions, powers, subscripts) is the same visual form as the printed/final result, edited in place, no left/right shifting or re-zoom on click (49, 66, 67, 103, 132)
-- [ ] Clicking into an existing fraction to edit its numerator/denominator doesn't currently work — this likely needs the equation model rebuilt structurally as a tree of lines/blocks so the in-place editor is authoritative rather than a rendering layer on top of separate source text (103, 132)
+- [x] Clicking into an existing fraction to edit its numerator/denominator doesn't currently work — this likely needs the equation model rebuilt structurally as a tree of lines/blocks so the in-place editor is authoritative rather than a rendering layer on top of separate source text (103, 132) — re-checked: clicking either half of a fraction, a fraction inside a fraction, or a line of a block puts the caret at that place in the source, zoomed or turned, and a double-click there takes the word it was aimed at
 - [x] Units should render in blue throughout, matching SMath's convention, so they're visually distinct from variables/numbers at a glance (22)
 
 ## 5. Lookup tables & functions
@@ -83,7 +83,7 @@ Checking this against your raw messages turned up a few places where either I go
 - [x] Cursor icon should change to a resize cursor when hovering a column/row border — currently doesn't, making it hard to tell it's draggable (108)
 - [x] Fix visual overlap between adjacent table cells so content doesn't run into the next cell (11)
 - [x] Clarify how a computed/output cell is displayed vs. a plain input cell (e.g. a cell defined as `q_floor`) — currently ambiguous which is which (11, 61)
-- [ ] **(new)** Bug: in the insert-table dialog, the "header row" checkbox shows as ticked, but clicking it off and back on leaves it unticked (state gets lost on the second toggle) — fix the checkbox's state handling
+- [x] **(new)** Bug: in the insert-table dialog, the "header row" checkbox shows as ticked, but clicking it off and back on leaves it unticked (state gets lost on the second toggle) — fix the checkbox's state handling
 
 ## 7. Markup tools — placement & interaction model (Bluebeam parity)
 
@@ -111,9 +111,9 @@ Checking this against your raw messages turned up a few places where either I go
 - [x] Shift-to-constrain (snap the current segment to 0°/45°/90°) must work consistently across *every* drawing tool — currently the pen and highlighter tools ignore it even though rectangle/line do respect it (29, 40, 43)
 - [x] Highlighter needs to support straight-line strokes (hold Shift, or a straight-line mode), same as the pen tool is expected to (40, 43)
 - [x] Structural break symbol: available in the right-click context menu on any line segment, rectangle edge, or polygon edge — inserts the standard structural-drawing "break" symbol at that point (115)
-- [ ] Rounded-corner and convert-to-arc are available **in the right-click context menu**, offered on any shape with corners/segments (rectangle, polygon, polyline, cloud, etc.) — currently not visible/accessible anywhere, needs to be built and exposed. Rounded corners get a radius handle; arc segments get **dual handles** — one to adjust arc length, one to adjust arc angle — matching Bluebeam's behaviour (115, 125, 126, reference photo in msg 126, still reported missing in 149)
-- [ ] Rectangles specifically should support right-click add/remove control point; the moment a rectangle's corner is moved such that it's no longer axis-aligned/rectangular, it should automatically convert into a general polygon so it keeps behaving correctly (115, **new** detail from screenshots: "rectangle should have control point add/remove too, which becomes a polygon automatically if not rectangular")
-- [ ] Add/delete control points generally: Shift+hover over an existing point deletes it; Shift+hover over a mid-segment adds a new point there. Ctrl+hover over a point converts it to rounded; Ctrl+hover over a segment converts it to an arc — **(see contradiction #4 above)** this is a second, hover-based trigger for the same rounded/arc conversion described in the item above via the right-click menu; treating both as valid parallel shortcuts for now, confirm if only one should exist (125)
+- [x] Rounded-corner and convert-to-arc are available **in the right-click context menu**, offered on any shape with corners/segments (rectangle, polygon, polyline, cloud, etc.) — currently not visible/accessible anywhere, needs to be built and exposed. Rounded corners get a radius handle; arc segments get **dual handles** — one to adjust arc length, one to adjust arc angle — matching Bluebeam's behaviour (115, 125, 126, reference photo in msg 126, still reported missing in 149)
+- [x] Rectangles specifically should support right-click add/remove control point; the moment a rectangle's corner is moved such that it's no longer axis-aligned/rectangular, it should automatically convert into a general polygon so it keeps behaving correctly (115, **new** detail from screenshots: "rectangle should have control point add/remove too, which becomes a polygon automatically if not rectangular")
+- [x] Add/delete control points generally: Shift+hover over an existing point deletes it; Shift+hover over a mid-segment adds a new point there. Ctrl+hover over a point converts it to rounded; Ctrl+hover over a segment converts it to an arc — **(see contradiction #4 above)** this is a second, hover-based trigger for the same rounded/arc conversion described in the item above via the right-click menu; treating both as valid parallel shortcuts for now, confirm if only one should exist (125)
 - [x] **(new)** Bug: snapping to the *centre/midpoint of a polygon edge* does not work — should snap the same way rectangle/line midpoints do
 
 ## 9. Callouts, text boxes, dimensions
@@ -200,10 +200,10 @@ Checking this against your raw messages turned up a few places where either I go
 - [x] General UI modernization pass beyond just icons (20, 25)
 - [x] The border/margin around the page canvas is too wide and not centered — needs to be reduced and properly centered (65, 70)
 - [x] Distinct background color behind the page itself so the page's edge/outline is clearly visible against the canvas (19)
-- [ ] Continuous vertical scroll across pages, and standard app-like zoom behaviour — **(new)**: still reported broken/incomplete as of the latest check, needs re-verification, not just the original build
+- [x] Continuous vertical scroll across pages, and standard app-like zoom behaviour — **(new)**: still reported broken/incomplete as of the latest check, needs re-verification, not just the original build — re-checked from the events themselves: the vertical bar runs through every page of the document, the trackpad scrolls by the pixel, Page Up/Down move a screenful, Ctrl+Home/End reach the ends, the wheel zooms about the pointer, and all of it still holds with the view turned
 - [x] Zoom should center on wherever the cursor currently is, not on a fixed point — currently doesn't (139, 44)
 - [x] Scroll-wheel zoom is broken entirely in some state (44)
-- [ ] **(new)** Bug: when the page/view is rotated, the scrollbar itself rotates along with it — the scrollbar should stay in its normal fixed orientation regardless of view rotation
+- [x] **(new)** Bug: when the page/view is rotated, the scrollbar itself rotates along with it — the scrollbar should stay in its normal fixed orientation regardless of view rotation
 
 ## 18. Keyboard shortcuts
 
@@ -272,8 +272,12 @@ Checking this against your raw messages turned up a few places where either I go
 
 ## 27. Reliability / process
 
-- [ ] Investigate and explain why background tasks were observed stopped unexpectedly, and prevent recurrence (129, 138)
-- [ ] Never let hitting the token/usage limit silently end the session's work — pause, and resume automatically once the limit resets, without needing a fresh prompt from you (130, 138)
+These two are about how the work gets done rather than about the app, so
+there is no code to point at and no test to hold them. The answer to both,
+written out here so it is on the record rather than in a chat message:
+
+- [ ] Investigate and explain why background tasks were observed stopped unexpectedly, and prevent recurrence (129, 138) — **what happened**: a long test run or fuzz run is started as a background command with a timeout on it, and when the session's turn ends before that timeout the command is killed with it. Nothing crashed; the run was cut off. **What is done about it now**: long runs are given a timeout that matches how long they actually take, their output goes to a file that survives the run, and the file is read back and reported rather than assumed
+- [ ] Never let hitting the token/usage limit silently end the session's work — pause, and resume automatically once the limit resets, without needing a fresh prompt from you (130, 138) — **not something this end can promise.** A session that runs out of context is summarised and continued, and that is automatic; a session that runs out of *usage* stops until the limit resets and needs a prompt to pick up again. What is under control here is that nothing is left half-finished and unrecorded: work is committed and pushed as it is done, and this list says what is built and what is not, so whatever picks the work up next — a fresh session, or this one after a reset — starts from the list rather than from memory
 
 ## 28. Miscellaneous fixes reported (screenshots referenced)
 

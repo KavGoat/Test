@@ -4050,48 +4050,78 @@ class MainWindow(QMainWindow):
     # menus & help
     # ==================================================================
     def _fill_outline_menu(self, menu, item, scene_pos: QPointF) -> None:
-        """What can be done to the point or the side under the pointer.
+        """What can be done to this shape's corners and sides.
 
         The same four things the held keys do, for anyone who would rather
         read them than remember them: a point in or out, a corner rounded, a
         side bent into an arc — and the drafting break symbol, which has no
         key of its own.
+
+        The pointer picks which corner and which side, and when it is not near
+        either of them — right in the middle of a big rectangle, say — the
+        nearest are offered and the wording says so. This used to show nothing
+        at all in that case, which is how a feature that is on every shape
+        came to be one nobody could find.
         """
         local = item.mapFromScene(scene_pos)
         reach = 12.0 / max(self.view.zoom(), 0.05)
+        corners = item.corner_points()
         vertex = self.view._point_near(item, local, reach)
         segment = self.view._segment_near(item, local, reach)
+        on_a_corner = vertex is not None
+        on_a_side = segment is not None
+        if vertex is None:
+            vertex = self._nearest_corner(corners, local)
+        if segment is None:
+            segment = self.view._segment_near(item, local, float("inf"))
+        this_corner = "this" if on_a_corner else "the nearest"
+        this_side = "this" if on_a_side else "the nearest"
 
         outline = menu.addMenu("This outline")
         if vertex is not None:
             round_off = outline.addAction(
-                "Sharpen this corner" if item.is_rounded(vertex)
-                else "Round this corner off",
+                f"Sharpen {this_corner} corner" if item.is_rounded(vertex)
+                else f"Round {this_corner} corner off",
                 lambda: self._reshape(item, "round", vertex))
             round_off.setToolTip("Ctrl and the pointer over a corner does this too")
-            if len(item.points) > 2:
+            if len(corners) > 2:
                 take_out = outline.addAction(
-                    "Take this point out",
+                    f"Take {this_corner} point out",
                     lambda: self._reshape(item, "delete", vertex))
                 take_out.setToolTip("Shift and the pointer over a point does this too")
         if segment is not None:
-            outline.addAction("Put a point in here",
-                              lambda: self._reshape(item, "add", segment, local))
             outline.addAction(
-                "Straighten this side" if item.is_curved(segment)
-                else "Bend this side into an arc",
+                "Put a point in here" if on_a_side
+                else "Put a point in the nearest side",
+                lambda: self._reshape(item, "add", segment,
+                                      local if on_a_side else None))
+            outline.addAction(
+                f"Straighten {this_side} side" if item.is_curved(segment)
+                else f"Bend {this_side} side into an arc",
                 lambda: self._reshape(item, "curve", segment))
             outline.addAction(
                 "Take the break symbol off" if item.broken.get(segment)
-                else "Insert a break symbol",
+                else f"Insert a break symbol on {this_side} side",
                 lambda: self._reshape(item, "break", segment))
         if outline.isEmpty():
             menu.removeAction(outline.menuAction())
+
+    @staticmethod
+    def _nearest_corner(corners, local: QPointF) -> Optional[int]:
+        """Which corner is closest to the pointer, or nothing when there are none."""
+        best, nearest = None, None
+        for index, point in enumerate(corners):
+            gap = (point.x() - local.x()) ** 2 + (point.y() - local.y()) ** 2
+            if nearest is None or gap < nearest:
+                best, nearest = index, gap
+        return best
 
     def _reshape(self, item, what: str, index: int,
                  local: Optional[QPointF] = None) -> None:
         """One change to a shape's outline, as one undo step."""
         self.view.begin_snapshot(self.view.involved_frames(item))
+        # A rectangle cannot hold any of this, so it stops being one first.
+        item = self.view.swap_for_a_polygon(item)
         if what == "round":
             item.round_corner(index)
             said = "Round off a corner"
@@ -4114,29 +4144,12 @@ class MainWindow(QMainWindow):
     def rectangle_to_polygon(self, item) -> None:
         """Swap a rectangle for the same shape drawn as a polygon.
 
-        A rectangle has four sides and no points to speak of. Turning it into
-        a polygon is how its edges get a break symbol, a rounded corner or a
-        curve — which is what Bluebeam does too, rather than pretending a
-        rectangle can grow a fifth corner.
+        Asked for outright from the menu. It also happens on its own the
+        moment anything is done to a rectangle's outline that a rectangle
+        cannot hold — a fifth corner, a rounded one, a bowed side.
         """
-        from ..items.shapes import PolyItem
-
-        box = item.local_rect().normalized()
-        corners = [box.topLeft(), box.topRight(), box.bottomRight(),
-                   box.bottomLeft()]
-        frame = item.parentItem()
         self.view.begin_snapshot(self.view.involved_frames(item))
-        shape = PolyItem("polygon", [item.mapToParent(c) - item.pos()
-                                     for c in corners])
-        shape.style = item.style.copy()
-        shape.layer = item.layer
-        shape.author = item.author
-        shape.setPos(item.pos())
-        shape.setRotation(item.rotation())
-        frame.remove_markup(item)
-        frame.add_markup(shape)
-        self.view.scene().clearSelection()
-        shape.setSelected(True)
+        self.view.swap_for_a_polygon(item)
         self.view.commit_snapshot("Turn into a polygon")
         self.refresh_selection()
 
@@ -4199,8 +4212,10 @@ class MainWindow(QMainWindow):
                                             self.align_cells(k, item))
                     entry.setCheckable(True)
                     entry.setChecked(self._cells_aligned(item) == key)
-            if isinstance(item, PolyItem) and item.uses_vertex_handles \
-                    and item.kind not in ("ink", "highlighter"):
+            if self.view.has_an_outline(item):
+                # Rectangles and clouds included: four corners and four sides
+                # is an outline like any other, and everything offered on a
+                # polygon's is offered on theirs.
                 self._fill_outline_menu(menu, item, scene_pos)
             if isinstance(item, RectItem) and item.kind in SIZED_SHAPES:
                 menu.addAction("Turn into a polygon",

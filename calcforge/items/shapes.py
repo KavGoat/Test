@@ -90,6 +90,45 @@ class RectItem(MarkupItem):
     def set_local_rect(self, rect: QRectF) -> None:
         self._rect = QRectF(rect)
 
+    # -- the outline, for the four corners and the four sides ---------------
+    #
+    # A rectangle is four corners and four sides like any other closed shape,
+    # and everything offered on a polygon's outline — a point in or out, a
+    # corner rounded off, a side bent into an arc, a break symbol — is offered
+    # on a rectangle's. It stops being a rectangle at that moment, of course:
+    # a shape with five corners, or one rounded corner, is a polygon, and that
+    # is what it turns into. An ellipse has no corners and is left out.
+    CORNERED = ("rect", "cloud", "highlight", "redact")
+
+    def has_corners(self) -> bool:
+        return self.kind in self.CORNERED
+
+    def corner_points(self) -> list[QPointF]:
+        """Its four corners, going round, in item coordinates."""
+        box = self._rect.normalized()
+        return [QPointF(box.topLeft()), QPointF(box.topRight()),
+                QPointF(box.bottomRight()), QPointF(box.bottomLeft())]
+
+    def segment_count(self) -> int:
+        return 4 if self.has_corners() else 0
+
+    def segment_ends(self, index: int) -> tuple[QPointF, QPointF]:
+        corners = self.corner_points()
+        return corners[index % 4], corners[(index + 1) % 4]
+
+    # A rectangle's corners are all square and its sides are all straight —
+    # that is what makes it one. The menu asks anyway, because it asks the
+    # same questions of every shape, and this is the honest answer.
+    def is_rounded(self, vertex: int) -> bool:
+        return False
+
+    def is_curved(self, segment: int) -> bool:
+        return False
+
+    @property
+    def broken(self) -> dict:
+        return {}
+
     def shape(self) -> QPainterPath:
         path = QPainterPath()
         rect = self._rect.normalized()
@@ -356,6 +395,33 @@ class PolyItem(MarkupItem):
                                rect.y() + (p.y() - old.y()) * sy) for p in self.points]
 
     # -- corners, curves and breaks ----------------------------------------
+    def corner_points(self) -> list[QPointF]:
+        """Its corners, going round — the same question a rectangle answers."""
+        return self.points
+
+    @classmethod
+    def from_rectangle(cls, box) -> "PolyItem":
+        """The same shape, drawn as a polygon rather than as a rectangle.
+
+        What comes back stands exactly where the rectangle stood and looks
+        exactly like it — but it has four corners that can be moved, taken
+        out, added to, rounded off or bent, which a rectangle has not. A cloud
+        stays a cloud; everything else becomes a plain polygon.
+        """
+        kind = "cloud" if box.kind == "cloud" else "polygon"
+        shape = cls(kind, box.corner_points())
+        shape.style = box.style.copy()
+        shape.cloud_radius = getattr(box, "cloud_radius", 9.0)
+        shape.layer = box.layer
+        shape.author = box.author
+        shape.label = box.label
+        shape.locked = box.locked
+        shape.printable = box.printable
+        shape.setPos(box.pos())
+        shape.setRotation(box.rotation())
+        shape.setZValue(box.zValue())
+        return shape
+
     def segment_count(self) -> int:
         """How many segments the shape has, the closing one included."""
         if len(self.points) < 2:
@@ -621,22 +687,53 @@ class PolyItem(MarkupItem):
         return ""
 
     def insert_point(self, local_pos: QPointF) -> int:
-        """Insert a vertex on the nearest segment; returns its index."""
-        best_index, best_distance = 1, float("inf")
-        for index in range(len(self.points) - 1):
-            distance = _segment_distance(self.points[index], self.points[index + 1], local_pos)
+        """Insert a vertex on the nearest side; returns its index.
+
+        Every side, the closing one included: a point put on the bottom edge
+        of a four-cornered shape used to be inserted somewhere up the side,
+        because the run back to the first corner was not looked at.
+        """
+        best_segment, best_distance = 0, float("inf")
+        for segment in range(self.segment_count()):
+            start, end = self.segment_ends(segment)
+            distance = _segment_distance(start, end, local_pos)
             if distance < best_distance:
-                best_distance, best_index = distance, index + 1
+                best_distance, best_segment = distance, segment
+        where = best_segment + 1
         self.prepareGeometryChange()
-        self.points.insert(best_index, QPointF(local_pos))
+        self.points.insert(where, QPointF(local_pos))
+        # Everything remembered about a corner or a side is remembered by its
+        # number, and every number after this one has just moved along. The
+        # side that was split is not either of the two halves, so whatever it
+        # was carrying goes with it.
+        self.rounded = {(vertex if vertex < where else vertex + 1): radius
+                        for vertex, radius in self.rounded.items()}
+        self.curved = {(side if side < best_segment else side + 1): bow
+                       for side, bow in self.curved.items() if side != best_segment}
+        self.broken = {(side if side < best_segment else side + 1): on
+                       for side, on in self.broken.items() if side != best_segment}
         self.geometryChanged.emit()
-        return best_index
+        return where
 
     def delete_point(self, index: int) -> None:
-        if len(self.points) > 2 and 0 <= index < len(self.points):
-            self.prepareGeometryChange()
-            del self.points[index]
-            self.geometryChanged.emit()
+        """Take a corner out, and everything that was hanging off it."""
+        if not (len(self.points) > 2 and 0 <= index < len(self.points)):
+            return
+        self.prepareGeometryChange()
+        gone = self.segment_count()
+        before = (index - 1) % max(gone, 1)
+        del self.points[index]
+        self.rounded = {(vertex if vertex < index else vertex - 1): radius
+                        for vertex, radius in self.rounded.items()
+                        if vertex != index}
+        # The two sides that met at that corner become one, so neither of
+        # them keeps its curve or its break symbol.
+        merged = {index, before}
+        self.curved = {(side if side < index else side - 1): bow
+                       for side, bow in self.curved.items() if side not in merged}
+        self.broken = {(side if side < index else side - 1): on
+                       for side, on in self.broken.items() if side not in merged}
+        self.geometryChanged.emit()
 
     # -- painting ----------------------------------------------------------
     def paint_content(self, painter: QPainter) -> None:

@@ -1593,6 +1593,22 @@ class PageView(QGraphicsView):
             item.setPos(position)
 
     # -- editing a shape's control points ----------------------------------
+    @staticmethod
+    def has_an_outline(item) -> bool:
+        """Whether this shape has corners and sides to do anything with.
+
+        A polygon, a polyline, a line, a cloud — and a rectangle, which is
+        four corners and four sides like the rest of them. Freehand ink has
+        hundreds of points and no corners anybody means; an ellipse has none
+        at all.
+        """
+        from ..items.shapes import PolyItem, RectItem
+
+        if isinstance(item, PolyItem):
+            return item.uses_vertex_handles and item.kind not in ("ink",
+                                                                  "highlighter")
+        return isinstance(item, RectItem) and item.has_corners()
+
     def shaping_target(self, scene_pos: QPointF, modifiers) -> Optional[tuple]:
         """What holding Shift or Ctrl here would do to a shape's outline.
 
@@ -1604,22 +1620,18 @@ class PageView(QGraphicsView):
         Says (item, what, index) — or nothing, when neither key is held or
         the pointer is not over a shape that can be reshaped this way.
         """
-        from ..items.shapes import PolyItem
-
         shift = bool(modifiers & Qt.ShiftModifier)
         control = bool(modifiers & Qt.ControlModifier)
         if not (shift or control) or self.tool_key != "select":
             return None
         for item in self.scene().selectedItems():
-            if not isinstance(item, PolyItem) or not self.editable(item):
-                continue
-            if not item.uses_vertex_handles or item.kind in ("ink", "highlighter"):
+            if not (self.has_an_outline(item) and self.editable(item)):
                 continue
             local = item.mapFromScene(scene_pos)
             reach = SNAP_REACH / max(self.zoom(), 0.05)
             vertex = self._point_near(item, local, reach)
             if vertex is not None:
-                if shift and len(item.points) > 2:
+                if shift and len(item.corner_points()) > 2:
                     return (item, "delete", vertex)
                 if control:
                     return (item, "round", vertex)
@@ -1631,7 +1643,7 @@ class PageView(QGraphicsView):
 
     @staticmethod
     def _point_near(item, local: QPointF, reach: float) -> Optional[int]:
-        for index, point in enumerate(item.points):
+        for index, point in enumerate(item.corner_points()):
             if math.hypot(point.x() - local.x(), point.y() - local.y()) <= reach:
                 return index
         return None
@@ -1648,6 +1660,31 @@ class PageView(QGraphicsView):
                 best, nearest = index, gap
         return best
 
+    def swap_for_a_polygon(self, item):
+        """Put a polygon in a rectangle's place, and say which one.
+
+        A rectangle with a point taken out of it, or a fifth one put in, or
+        one corner rounded off, is not a rectangle any more — so at that
+        moment it stops being one. Nothing about it moves or changes colour;
+        it simply becomes the shape that can hold what was asked for. Anything
+        that is already a polygon comes back as it went in.
+        """
+        from ..items.shapes import PolyItem, RectItem
+
+        if not isinstance(item, RectItem):
+            return item
+        frame = item.parentItem()
+        if frame is None:
+            return item
+        shape = PolyItem.from_rectangle(item)
+        was_selected = item.isSelected()
+        frame.remove_markup(item)
+        frame.add_markup(shape)
+        if was_selected:
+            self.scene().clearSelection()
+            shape.setSelected(True)
+        return shape
+
     def reshape_at(self, scene_pos: QPointF, modifiers) -> bool:
         """Do whatever the held key promised. True when something happened."""
         target = self.shaping_target(scene_pos, modifiers)
@@ -1655,6 +1692,7 @@ class PageView(QGraphicsView):
             return False
         item, what, index = target
         self.begin_snapshot(self.involved_frames(item))
+        item = self.swap_for_a_polygon(item)
         local = item.mapFromScene(scene_pos)
         if what == "delete":
             item.delete_point(index)
@@ -1864,6 +1902,23 @@ class PageView(QGraphicsView):
         # Already editing this region: let the editor select a word.
         rect = self.editing_rect()
         if rect is not None and rect.contains(scene_pos):
+            item = self._editing_item
+            if isinstance(item, MathItem):
+                # Except in a calculation, where the editor holding the
+                # characters is invisible and laid out as one flat line —
+                # Qt's own word-picking would look up the word at whatever
+                # place in that line the pointer happens to sit over, which
+                # is not the word that was double-clicked. The box tree says
+                # which character was, and the word around it is the word.
+                self.place_caret(item, scene_pos)
+                editor = getattr(item, "_editor", None)
+                if editor is not None:
+                    cursor = editor.textCursor()
+                    cursor.select(QTextCursor.WordUnderCursor)
+                    editor.setTextCursor(cursor)
+                    item.update()
+                event.accept()
+                return
             super().mouseDoubleClickEvent(event)
             return
         item = self.markup_at(scene_pos)
@@ -2854,6 +2909,12 @@ class PageView(QGraphicsView):
                 self.documentEdited.emit()
                 return
             item.end_edit()
+            # It was a calculation when the caret left, so it is one now.
+            # Opening it again is editing an existing equation, which is its
+            # own state: a space there is refused, not taken as proof that the
+            # line was a sentence all along. Only a line still being entered
+            # for the first time can turn into words.
+            item.started_by_typing = False
             self.window.recalculate()
         else:
             item.end_edit()
