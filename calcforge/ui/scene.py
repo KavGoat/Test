@@ -424,13 +424,17 @@ class PageFrame(QGraphicsObject):
             return
         previous = self.print_mode
         self.print_mode = for_print
-        selected = [item for item in self.markups() if item.isSelected()]
+        # The selection is *hidden* for the render, not cleared and put back.
+        # Putting it back is how a page thumbnail resurrected a selection the
+        # reader had since let go of: the thumbnail is drawn from a queued
+        # refresh, so the restore landed after the clearing.
+        hidden_handles = [item for item in self.markups() if item._handles_visible]
         chrome: list = []
         for item in self.markups():
             if hasattr(item, "set_chrome") and item.show_chrome:
                 chrome.append(item)
                 item.set_chrome(False)
-            item.setSelected(False)
+            item._handles_visible = False
         hidden = [item for item in self.markups()
                   if for_print and (not item.printable or not self.layer_prints(item))]
         for item in hidden:
@@ -441,8 +445,8 @@ class PageFrame(QGraphicsObject):
             item.setVisible(self.document.layer(item.layer).visible)
         for item in chrome:
             item.set_chrome(True)
-        for item in selected:
-            item.setSelected(True)
+        for item in hidden_handles:
+            item._handles_visible = True
         self.print_mode = previous
 
     def render_image(self, dpi: float = 150.0, for_print: bool = True,

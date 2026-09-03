@@ -3217,10 +3217,11 @@ class PageView(QGraphicsView):
 
         if self._editing_item is not None or self._cell_editor is not None:
             if key == Qt.Key_Escape:
-                if self._cell_editor is not None:
-                    self.close_cell_editor(commit=False)
-                else:
-                    self.end_item_edit()
+                # All the way back, not just out of the words: this branch
+                # used to end the edit and stop there, which left the markup
+                # still selected and the tool still held — half-way out, which
+                # is not a state anybody presses Escape to reach.
+                self.escape_everything()
                 event.accept()
                 return
             # Pasting a block of cells into an open cell would put the whole

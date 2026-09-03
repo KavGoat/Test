@@ -16,8 +16,14 @@ in a conversation is a list that gets lost.
 - [x] Ctrl+Shift+M makes a block of one calculation instead of refusing.
 - [x] A section mark's label sits in the middle of its bubble: Bluebeam writes
   the alignment in `/DS`, not in `/Q`.
-- [ ] **Use the app.** A pass with hands on it, writing a real calculation
-  sheet from scratch, and fixing what gets in the way.
+- [x] **Use the app.** A whole sheet written from a blank page — heading,
+  inputs, a result, a change of mind, undo, a drawing, a measurement, a named
+  table read by its headings, saved and reopened — is a test now
+  (`tests/test_walkthrough.py`), along with the awkward moments: tool letters
+  while typing, Escape out of every half-finished thing, Delete and undo.
+  Two real faults came out of it: Escape from typing left the markup selected
+  and the tool held, and a page thumbnail put back a selection that had since
+  been let go of.
 
 ## Regressions — things that used to work
 
