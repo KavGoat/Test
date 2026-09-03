@@ -18,7 +18,8 @@ from PySide6.QtWidgets import (QApplication, QCompleter, QGraphicsProxyWidget,
 from ..core.document import MM_TO_PT
 from ..core.spreadsheet import make_ref, parse_clipboard_grid
 from ..core.units import parse_unit
-from ..items.base import HANDLE_CURSORS, MarkupItem, build_item
+from ..items.base import (HANDLE_CURSORS, MarkupItem, build_item,
+                          cursor_for_handle)
 from ..items.contents import ContentsItem
 from ..items.mathitem import LINE_STEP, MathItem
 from .scene import PageFrame, detach
@@ -421,6 +422,8 @@ class PageView(QGraphicsView):
         grid belongs to the page, not to the canvas, so a point is taken into
         page coordinates to be snapped and brought back again.
         """
+        if not preferences.current().snap_while_drawing:
+            return QPointF(scene_pos)
         caught = self.snap_to_item(scene_pos)
         if caught is not None:
             return caught
@@ -1019,26 +1022,46 @@ class PageView(QGraphicsView):
             item.setPos(position)
 
     def _update_hover_cursor(self, scene_pos: QPointF) -> None:
+        """Say what the pointer would do here, before it is pressed."""
         if self.tool_key != "select":
             return
+        # Words being typed: an I-beam over them, as in anything else that
+        # holds text.
+        editing = self._editing_item
+        if editing is not None and editing.scene() is not None:
+            if editing.handle_at(editing.mapFromScene(scene_pos)) is None:
+                rect = self.editing_rect()
+                if rect is not None and rect.contains(scene_pos):
+                    self.setCursor(Qt.IBeamCursor)
+                    return
         for item in self.scene().selectedItems():
             if isinstance(item, MarkupItem) and self.editable(item):
                 key = item.handle_at(item.mapFromScene(scene_pos))
                 if key:
-                    self.setCursor(HANDLE_CURSORS.get(key, Qt.SizeAllCursor))
+                    self.setCursor(cursor_for_handle(key))
                     return
-        if self.active_table is not None:
-            local = self.active_table.mapFromScene(scene_pos)
-            border = self.active_table.border_at(local)
+        # A table's column and row edges, whether it is open for typing into
+        # or just picked out on the page.
+        tables = [self.active_table] if self.active_table is not None else []
+        tables += [item for item in self.scene().selectedItems()
+                   if isinstance(item, TableItem) and item not in tables]
+        for table in tables:
+            local = table.mapFromScene(scene_pos)
+            border = table.border_at(local)
             if border is not None:
-                self.setCursor(Qt.SplitHCursor if border[0] == "col" else Qt.SplitVCursor)
+                self.setCursor(Qt.SplitHCursor if border[0] == "col"
+                               else Qt.SplitVCursor)
                 return
-            if self.active_table.fill_handle_rect().contains(local):
+            if table is self.active_table and table.fill_handle_rect().contains(local):
                 self.setCursor(Qt.CrossCursor)
                 return
         item = self.markup_at(scene_pos)
-        self.setCursor(Qt.SizeAllCursor if item is not None and self.editable(item)
-                       else Qt.ArrowCursor)
+        if item is None:
+            self.setCursor(Qt.ArrowCursor)
+        elif not self.editable(item):
+            self.setCursor(Qt.ForbiddenCursor)     # locked, or on a hidden layer
+        else:
+            self.setCursor(Qt.SizeAllCursor)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         scene_pos = self.mapToScene(event.position().toPoint())

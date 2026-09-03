@@ -4340,3 +4340,125 @@ def test_the_snapshot_marquee_looks_like_the_selection_marquee(window):
     marquee = RectItem("marquee")
     assert marquee.style.line_style == "dash"
     assert marquee.style.stroke == "#1971c2"      # the selection blue
+
+
+def test_a_line_being_drawn_catches_on_what_is_already_there(window):
+    """Snapping is for drawing, not only for moving things afterwards."""
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 160)
+
+    window.select_tool("line")
+    drag(window.view, 203, 163, 300, 260)          # three points off the corner
+    line = markups(window)[1]
+    start = line.mapToScene(line.points[0])
+    assert (start.x(), start.y()) == pytest.approx((200, 160), abs=0.5)
+
+
+def test_snapping_can_be_turned_off(window):
+    from calcforge.ui import preferences
+
+    prefs = preferences.current()
+    was = prefs.snap_while_drawing
+    prefs.snap_while_drawing = False
+    try:
+        window.select_tool("rect")
+        drag(window.view, 100, 100, 200, 160)
+        window.select_tool("line")
+        drag(window.view, 203, 163, 300, 260)
+        line = markups(window)[1]
+        start = line.mapToScene(line.points[0])
+        assert (start.x(), start.y()) == pytest.approx((203, 163), abs=0.5)
+    finally:
+        prefs.snap_while_drawing = was
+
+
+# ---------------------------------------------------------------------------
+# The pointer says what will happen
+# ---------------------------------------------------------------------------
+
+def test_the_pointer_changes_over_a_handle_a_vertex_and_a_table_edge(window):
+    from PySide6.QtCore import Qt
+
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 240, 180)
+    window.select_tool("select")
+    box = only(window, RectItem)[0]
+    box.setSelected(True)
+
+    corner = box.mapToScene(box.local_rect().bottomRight())
+    hover(window.view, corner.x(), corner.y())
+    assert window.view.cursor().shape() == Qt.SizeFDiagCursor
+
+    hover(window.view, 170, 140)                  # inside it
+    assert window.view.cursor().shape() == Qt.SizeAllCursor
+
+    hover(window.view, 600, 600)                  # bare paper
+    assert window.view.cursor().shape() == Qt.ArrowCursor
+
+
+def test_a_locked_markup_says_so_with_the_pointer(window):
+    from PySide6.QtCore import Qt
+
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 240, 180)
+    window.select_tool("select")
+    box = only(window, RectItem)[0]
+    box.locked = True
+    box.setSelected(False)
+
+    hover(window.view, 170, 140)
+    assert window.view.cursor().shape() == Qt.ForbiddenCursor
+
+
+def test_every_vertex_of_a_polyline_gets_the_same_pointer(window):
+    from PySide6.QtCore import Qt
+    from calcforge.items.base import cursor_for_handle
+
+    assert cursor_for_handle("v0") == Qt.PointingHandCursor
+    assert cursor_for_handle("v7") == Qt.PointingHandCursor
+    assert cursor_for_handle("elbow") == Qt.PointingHandCursor
+    assert cursor_for_handle("lblrot") == Qt.CrossCursor
+
+
+# ---------------------------------------------------------------------------
+# Nothing in the panel that has no answer
+# ---------------------------------------------------------------------------
+
+def test_a_callout_is_asked_only_about_the_end_that_points(window):
+    """Which arrow head goes on the end joined to the box is not a question."""
+    from PySide6.QtWidgets import QComboBox
+    from calcforge.items.text import CalloutItem
+
+    window.select_tool("callout")
+    click(window.view, 400, 400)
+    click(window.view, 150, 150)
+    window.view.end_item_edit()
+    window.select_tool("select")
+    callout = [i for i in markups(window) if isinstance(i, CalloutItem)][0]
+    callout.setSelected(True)
+    window.refresh_selection()
+
+    groups = _panel_groups(window, callout)
+    assert "Leader" in groups and "Ends" not in groups
+    boxes = {b.objectName(): b for b in window.properties_panel.findChildren(QComboBox)}
+    assert "Box" in [w.itemText(i) for w in window.properties_panel.findChildren(QComboBox)
+                     for i in range(w.count())]
+
+
+def test_a_callout_can_be_turned_into_a_cloud_afterwards(window):
+    from PySide6.QtWidgets import QComboBox
+    from calcforge.items.text import CalloutItem
+
+    window.select_tool("callout")
+    click(window.view, 400, 400)
+    click(window.view, 150, 150)
+    window.view.end_item_edit()
+    window.select_tool("select")
+    callout = [i for i in markups(window) if isinstance(i, CalloutItem)][0]
+    callout.setSelected(True)
+    window.refresh_selection()
+
+    shape = [w for w in window.properties_panel.findChildren(QComboBox)
+             if [w.itemText(i) for i in range(w.count())] == ["Box", "Cloud"]][0]
+    shape.setCurrentIndex(1)
+    assert callout.shape_kind == "cloud"

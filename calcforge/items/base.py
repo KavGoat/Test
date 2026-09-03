@@ -139,15 +139,34 @@ ROTATE_OFFSET = 22.0
 CORNER_HANDLES = ("nw", "n", "ne", "e", "se", "s", "sw", "w")
 
 HANDLE_CURSORS = {
+    # The eight corners and edges resize, and the pointer says which way.
     "nw": Qt.SizeFDiagCursor, "se": Qt.SizeFDiagCursor,
     "ne": Qt.SizeBDiagCursor, "sw": Qt.SizeBDiagCursor,
     "n": Qt.SizeVerCursor, "s": Qt.SizeVerCursor,
     "e": Qt.SizeHorCursor, "w": Qt.SizeHorCursor,
     "rot": Qt.CrossCursor,
-    # A callout's arrow: pointing at things, not resizing.
+    # A callout's arrow head and elbow: pointing at things, not resizing.
     "l0": Qt.PointingHandCursor, "l1": Qt.PointingHandCursor,
     "l2": Qt.PointingHandCursor, "l3": Qt.PointingHandCursor,
+    "elbow": Qt.PointingHandCursor,
+    # A measurement's own words: dragged to move them, turned to angle them.
+    "lbl": Qt.SizeAllCursor,
+    "lblrot": Qt.CrossCursor,
 }
+
+
+def cursor_for_handle(key: str):
+    """The pointer for a handle, including the numbered ones.
+
+    A polyline has as many handles as it has corners — v0, v1, v2 — so they
+    cannot be listed one by one. Every one of them moves a point, which is
+    what the pointing hand means everywhere else in the app.
+    """
+    if key in HANDLE_CURSORS:
+        return HANDLE_CURSORS[key]
+    if key.startswith("v") and key[1:].isdigit():
+        return Qt.PointingHandCursor
+    return Qt.SizeAllCursor
 
 
 # ---------------------------------------------------------------------------

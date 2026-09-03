@@ -1315,6 +1315,31 @@ class PropertiesPanel(QScrollArea):
         form.addRow("Vertical", valign)
 
     def _add_arrows(self, first: MarkupItem) -> None:
+        """What the ends of a line carry.
+
+        A callout's leader has one end that means anything — the one pointing
+        at the thing — so it is offered that and nothing else. Asking which
+        arrow head goes on the end joined to the box is a question with no
+        useful answer.
+        """
+        if isinstance(first, CalloutItem):
+            form = self._group("Leader")
+            head = QComboBox()
+            head.addItems(ARROW_HEADS)
+            head.setCurrentText(first.style.arrow_end)
+            head.currentTextChanged.connect(
+                lambda value: self._apply(
+                    lambda i: setattr(i.style, "arrow_end", value), "Arrow head"))
+            form.addRow("Arrow head", head)
+            shape = QComboBox()
+            shape.addItems(["Box", "Cloud"])
+            shape.setCurrentIndex(1 if first.shape_kind == "cloud" else 0)
+            shape.currentIndexChanged.connect(
+                lambda index: self._apply(
+                    lambda i: setattr(i, "shape_kind", "cloud" if index else "box"),
+                    "Callout shape"))
+            form.addRow("Drawn as", shape)
+            return
         form = self._group("Ends")
         start = QComboBox()
         start.addItems(ARROW_HEADS)
@@ -1343,7 +1368,7 @@ class PropertiesPanel(QScrollArea):
         font = value.font()
         font.setBold(True)
         value.setFont(font)
-        form.addRow("Measures", value)
+        form.addRow("It is", value)
 
         exact = QPushButton("Set exact size…")
         exact.clicked.connect(lambda: self.window.set_rectangle_size(item))
@@ -1606,7 +1631,7 @@ class PropertiesPanel(QScrollArea):
         subject.setToolTip("Measurements sharing a subject are totalled in the markups list")
         subject.textEdited.connect(
             lambda text: self._apply(lambda i: setattr(i, "subject", text), "Subject"))
-        form.addRow("Subject", subject)
+        form.addRow("Counts as", subject)
 
         if item.kind in ("area", "volume", "perimeter"):
             unit = UnitCombo(self.window.current_page().scale.area_unit)
@@ -1640,7 +1665,7 @@ class PropertiesPanel(QScrollArea):
                 "Text angle"))
         form.addRow("", inline)
 
-        label = QCheckBox("Show value label")
+        label = QCheckBox("Write the measurement on the page")
         label.setChecked(item.show_label)
         label.toggled.connect(
             lambda on: self._apply(lambda i: setattr(i, "show_label", on), "Label"))
@@ -1697,7 +1722,7 @@ class PropertiesPanel(QScrollArea):
         """Keep this one's look for the next one of its kind, or add it to a set."""
         from . import toolsets
 
-        form = self._group("This kind of markup")
+        form = self._group("Defaults")
         note = QLabel("Set how it is now as the way new ones are drawn, or keep "
                       "the whole thing in a tool set to use again.")
         note.setWordWrap(True)
