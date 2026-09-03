@@ -2329,20 +2329,43 @@ def test_the_snap_menu_entry_is_there_and_on(window):
 # A cloud callout, and a highlight that goes over anything
 # ---------------------------------------------------------------------------
 
-def test_a_cloud_callout_is_a_cloud_with_a_leader(window):
+def test_a_cloud_callout_clouds_the_thing_and_notes_it(window):
+    """Bluebeam's: a cloud round what the comment is about, and the note on a
+    leader beside it — not a text box with a wobbly border."""
+    from calcforge.items.shapes import RectItem
+
     window.select_tool("cloud_callout")
-    click(window.view, 200, 300)
-    drag(window.view, 300, 200, 460, 260)
+    drag(window.view, 160, 260, 300, 340)        # the cloud goes round it
+    click(window.view, 400, 200)                 # and the words go here
     call = window.view.editing_item()
     call.set_text("check this")
     window.view.end_item_edit()
 
     assert isinstance(call, CalloutItem)
-    assert call.shape_kind == "cloud"
+    assert call.leader_shown
+    clouds = [i for i in markups(window)
+              if isinstance(i, RectItem) and i.kind == "cloud"]
+    assert len(clouds) == 1
+    # The leader points at the cloud, and the two are one thing.
     tip = call.mapToScene(call.leader[0])
-    assert (tip.x(), tip.y()) == pytest.approx((200, 300), abs=1)
-    # the scallops bulge out past the box, and the item makes room for them
-    assert call.boundingRect().width() > call.local_rect().width() + call.cloud_radius
+    cloud_box = clouds[0].mapRectToScene(clouds[0].local_rect().normalized())
+    assert cloud_box.adjusted(-4, -4, 4, 4).contains(tip)
+    assert call.group and call.group == clouds[0].group
+
+
+def test_escape_gets_out_of_a_half_drawn_cloud_callout(window):
+    from calcforge.items.shapes import RectItem
+
+    window.select_tool("cloud_callout")
+    drag(window.view, 160, 260, 300, 340)
+    assert window.view._pending_cloud is not None
+
+    press_key(window.view, Qt.Key_Escape)
+    assert window.view._pending_cloud is None
+    assert window.view.tool_key == "select"
+    # The cloud that was drawn stays: it is a markup in its own right.
+    assert [i for i in markups(window)
+            if isinstance(i, RectItem) and i.kind == "cloud"]
 
 
 def test_a_plain_callout_is_still_a_box(window):
@@ -2354,15 +2377,16 @@ def test_a_cloud_callout_survives_a_round_trip(window):
     from calcforge.items.base import build_item
 
     window.select_tool("cloud_callout")
-    click(window.view, 200, 300)
-    drag(window.view, 300, 200, 460, 260)
+    drag(window.view, 160, 260, 300, 340)
+    click(window.view, 400, 200)
     call = window.view.editing_item()
     call.set_text("check this")
     window.view.end_item_edit()
 
     clone = build_item(call.serialize())
-    assert clone.shape_kind == "cloud"
     assert clone.text() == "check this"
+    assert clone.leader_shown
+    assert clone.group == call.group
 
 
 def test_the_highlight_goes_over_whatever_is_under_it(window):
@@ -5388,3 +5412,83 @@ def test_the_wheel_over_a_dropdown_scrolls_the_panel(window):
                         QPoint(0, -120), QPoint(0, -120), Qt.NoButton,
                         Qt.NoModifier, Qt.NoScrollPhase, False)
     assert kept.eventFilter(combo, wheel) is False
+
+
+# ---------------------------------------------------------------------------
+# Handles: the rotation grip, and control points that should not be showing
+# ---------------------------------------------------------------------------
+
+def test_the_rotation_grip_is_inside_the_item_it_belongs_to(window):
+    """Drawn outside its own rectangle, Qt clips it and smears it when it moves."""
+    window.select_tool("rect")
+    drag(window.view, 120, 120, 260, 200)
+    rect = markups(window)[0]
+    grip = rect.handle_points().get("rot")
+    assert grip is not None
+    assert rect.boundingRect().contains(grip)
+
+
+def test_a_grouped_shape_shows_no_control_points_of_its_own(window):
+    """The view draws one box round a group; a vertex handle inside it is noise."""
+    from PySide6.QtGui import QImage, QPainter
+
+    window.select_tool("polyline")
+    for point in [(120, 120), (200, 160), (260, 120)]:
+        click(window.view, *point)
+    press_key(window.view, Qt.Key_Return)
+    line = markups(window)[-1]
+    window.select_tool("rect")
+    drag(window.view, 300, 120, 380, 200)
+    box = markups(window)[-1]
+
+    window.scene.clearSelection()
+    line.setSelected(True)
+    box.setSelected(True)
+    window.group_selection()
+    assert line.group
+
+    def handles_drawn(item):
+        image = QImage(200, 200, QImage.Format_ARGB32)
+        image.fill(0)
+        painter = QPainter(image)
+        painter.translate(20, 20)
+        item.paint_handles(painter)
+        painter.end()
+        return any(image.pixel(x, y) >> 24
+                   for x in range(image.width()) for y in range(image.height()))
+
+    assert not handles_drawn(line)
+    window.ungroup_selection()
+    line.setSelected(True)
+    assert handles_drawn(line)
+
+
+def test_a_marquee_catches_a_shape_it_is_drawn_round(window):
+    """It is the markup that has to fit inside, not the room kept for its handles."""
+    window.select_tool("rect")
+    drag(window.view, 150, 150, 250, 210)
+    rect = markups(window)[0]
+    window.scene.clearSelection()
+
+    window.select_tool("select")
+    drag(window.view, 140, 140, 262, 222)     # barely round it, left to right
+    assert rect.isSelected()
+
+
+def test_the_callouts_box_shows_itself_before_it_lands(window):
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QImage, QPainter
+
+    window.select_tool("callout")
+    click(window.view, 200, 300)               # what it points at
+    hover(window.view, 340, 240)               # where the words would go
+
+    image = QImage(220, 200, QImage.Format_ARGB32)
+    image.fill(0)
+    painter = QPainter(image)
+    painter.translate(-320, -220)
+    window.view.drawForeground(painter, QRectF(320, 220, 220, 200))
+    painter.end()
+    painted = sum(1 for x in range(image.width()) for y in range(image.height())
+                  if image.pixel(x, y) >> 24)
+    assert painted > 400, "no box was drawn where the words would go"

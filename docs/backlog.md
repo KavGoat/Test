@@ -34,10 +34,10 @@ in a conversation is a list that gets lost.
 
 ## Markups
 
-- [ ] The **cloud call-out** must cloud the region and attach a text box on a
+- [x] The **cloud call-out** must cloud the region and attach a text box on a
   leader, the way the ordinary call-out does.
-- [ ] The call-out's **box shows a preview** while it is being dragged.
-- [ ] An **arrow shows a control point** when nothing is selected; and the
+- [x] The call-out's **box shows a preview** while it is being dragged.
+- [x] An **arrow shows a control point** when nothing is selected; and the
   **rotation handle** is cut off, and jumps when the markup moves.
 - [ ] **Control points on any shape**: Shift over a point takes it away, Shift
   over a segment adds one, Ctrl over a point rounds it, Ctrl over a segment

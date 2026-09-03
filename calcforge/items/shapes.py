@@ -479,7 +479,13 @@ class PolyItem(MarkupItem):
             painter.drawPath(arrow_path(tip, angle, size, self.style.arrow_start))
 
     def paint_handles(self, painter: QPainter) -> None:
-        if not self.isSelected():
+        # The same three guards the base draws under: not selected, handles
+        # turned off while something else is going on, and one member of a
+        # group, where the view draws one box round the lot and a vertex
+        # handle here would be a control point nobody can use.
+        if not self.isSelected() or not self._handles_visible or self.group:
+            return
+        if self.locked:
             return
         if not self.uses_vertex_handles:
             super().paint_handles(painter)

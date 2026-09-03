@@ -21,7 +21,8 @@ DRAG = "drag"        # press, drag, release
 CLICK = "click"      # single click places the item
 POLY = "poly"        # click for each vertex, double-click / Enter to finish
 FREE = "free"        # freehand: every mouse-move point is recorded
-ANCHOR = "anchor"    # click what it points at, then drag out the box
+ANCHOR = "anchor"    # click what it points at, then click where the words go
+CLOUD = "cloud"      # drag a cloud round it, then click where the words go
 SNAPSHOT = "snapshot"  # drag a region and take a copy of what is in it
 ERASE = "erase"      # rub out the ink it is dragged over
 NONE = "none"        # navigation only
@@ -109,9 +110,10 @@ TOOLS: list[Tool] = [
     Tool("callout", "Call-out", "callout", ANCHOR, "Annotate", "Q",
          "Click what it points at, then click where the words go",
          factory=lambda: CalloutItem("")),
-    Tool("cloud_callout", "Cloud call-out", "cloud_callout", ANCHOR, "Annotate", "Shift+Q",
-         "A revision cloud with a leader: click what it points at, then draw "
-         "the cloud", factory=lambda: CalloutItem("", shape="cloud")),
+    Tool("cloud_callout", "Cloud call-out", "cloud_callout", CLOUD, "Annotate", "Shift+Q",
+         "Cloud what the comment is about, then click where the words go — "
+         "the cloud and the note come out as one thing",
+         factory=lambda: CalloutItem("")),
     Tool("note", "Note", "note", CLICK, "Annotate", "",
          "Sticky note with a comment", factory=lambda: NoteItem("")),
     Tool("stamp", "Stamp", "stamp", DRAG, "Annotate", "S",

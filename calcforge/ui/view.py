@@ -9,8 +9,8 @@ from typing import Optional
 
 from PySide6.QtCore import (QEvent, QMimeData, QPoint, QPointF, QRectF, Qt,
                             QTimer, Signal)
-from PySide6.QtGui import (QColor, QCursor, QKeyEvent, QMouseEvent, QPainter,
-                           QPen, QPolygonF, QTextCursor, QTransform,
+from PySide6.QtGui import (QBrush, QColor, QCursor, QKeyEvent, QMouseEvent,
+                           QPainter, QPen, QPolygonF, QTextCursor, QTransform,
                            QWheelEvent)
 from PySide6.QtWidgets import (QApplication, QCompleter, QGraphicsProxyWidget,
                                QGraphicsView, QLineEdit)
@@ -32,7 +32,7 @@ from ..items.tableitem import TableItem
 from ..items.text import CalloutItem, NoteItem, StampItem, TextItem, _TextBase
 from . import preferences
 from .commands import PageEditCommand
-from .tools import (ANCHOR, CLICK, DRAG, ERASE, FREE, NONE, POLY, SNAPSHOT,
+from .tools import (ANCHOR, CLICK, CLOUD, DRAG, ERASE, FREE, NONE, POLY, SNAPSHOT,
                     TOOL_MAP, Tool)
 
 MIN_ZOOM = 0.08
@@ -127,6 +127,8 @@ class PageView(QGraphicsView):
         # Where the next thing typed, inserted or pasted will go, and
         # what a callout is about to point at.
         self._pending_anchor: Optional[QPointF] = None
+        # The cloud a cloud call-out has already drawn, waiting for its words.
+        self._pending_cloud = None
         self._shown_page = 0
         for bar in (self.verticalScrollBar(), self.horizontalScrollBar()):
             bar.valueChanged.connect(self._note_visible_page)
@@ -788,7 +790,7 @@ class PageView(QGraphicsView):
         if scene is None:
             return
         for item in items:
-            frame = scene.frame_at(item.sceneBoundingRect().center())
+            frame = scene.frame_at(self.markup_box(item).center())
             if frame is None or item.parentItem() is frame:
                 continue
             position = item.scenePos()
@@ -818,7 +820,23 @@ class PageView(QGraphicsView):
             self.finish_draft(scene_pos, clicked=True)
             event.accept()
             return
-        if tool.mode == ANCHOR:
+        if tool.mode == CLOUD and self._pending_anchor is None:
+            # The cloud comes first: drag it round whatever the comment is
+            # about. Once it is down the tool waits, and the next click says
+            # where the words go.
+            self.begin_snapshot()
+            self._draft = RectItem("cloud")
+            self._prepare_draft(self._draft)
+            self._draft.setPos(frame.mapFromScene(point))
+            self._draft.set_local_rect(QRectF(0, 0, 0, 0))
+            frame.add_markup(self._draft)
+            self._mode = "draw_drag"
+            self.statusMessage.emit(
+                f"{tool.label}: drag the cloud round it · Esc to cancel")
+            event.accept()
+            return
+
+        if tool.mode in (ANCHOR, CLOUD):
             # A callout is two clicks: what it points at, then where its words
             # go. There is no box to drag out — it comes at a sensible size
             # and grows as it is written into, which is what Bluebeam does and
@@ -1014,6 +1032,7 @@ class PageView(QGraphicsView):
         if self._pending_anchor is not None:
             self._pending_anchor = None
             undone.append("the call-out")
+        self._pending_cloud = None
         if self._mode in ("rubber", "lasso") and self._marquee:
             self.cancel_marquee()
             undone.append("the selection box")
@@ -1568,7 +1587,9 @@ class PageView(QGraphicsView):
         typing.
         """
         anchor = self._pending_anchor
+        cloud = self._pending_cloud
         self._pending_anchor = None
+        self._pending_cloud = None
         self.begin_snapshot()
         item = tool.factory()
         self._prepare_draft(item)
@@ -1577,6 +1598,12 @@ class PageView(QGraphicsView):
         if anchor is not None:
             item.tip = item.mapFromScene(anchor)
         item.refresh(self.document().workspace, self.page())
+        if cloud is not None and cloud.scene() is not None:
+            # The cloud and its note are one thing: moved, copied and kept in
+            # a tool set together, the way they were drawn.
+            group = os.urandom(6).hex()
+            cloud.group = item.group = group
+            item.style.stroke = cloud.style.stroke
         self.scene().clearSelection()
         item.setSelected(True)
         self.selectionChanged.emit()
@@ -1680,6 +1707,21 @@ class PageView(QGraphicsView):
             draft.refresh(page=self.page())
 
         if tool.key == "cutout_ellipse" and self.take_out_of_an_area(draft, tool):
+            return
+
+        if tool.mode == CLOUD:
+            # The cloud is down. Keep it, remember where the leader should
+            # point, and wait for the click that says where the words go.
+            draft.refresh(self.document().workspace, self.page())
+            self.scene().clearSelection()
+            draft.setSelected(True)
+            self.commit_snapshot("Add cloud")
+            self._pending_cloud = draft
+            box = draft.mapRectToScene(draft.local_rect().normalized())
+            self._pending_anchor = QPointF(box.center().x(), box.bottom())
+            self.statusMessage.emit(
+                f"{tool.label}: now click where the words go · Esc to cancel")
+            self.viewport().update()
             return
 
         draft.refresh(self.document().workspace, self.page())
@@ -2821,7 +2863,7 @@ class PageView(QGraphicsView):
         for item in scene.items(area) if scene is not None else []:
             if not isinstance(item, MarkupItem) or not self.editable(item):
                 continue
-            box = item.sceneBoundingRect()
+            box = self.markup_box(item)
             if crossing:
                 caught = polygon.intersects(QPolygonF(box))
             else:
@@ -2832,6 +2874,21 @@ class PageView(QGraphicsView):
                 for member in self.group_of(item):
                     member.setSelected(True)
         self.selectionChanged.emit()
+
+    @staticmethod
+    def markup_box(item) -> QRectF:
+        """What a markup *is*, in scene coordinates — not the room round it.
+
+        ``sceneBoundingRect`` includes the margin a markup keeps for its
+        handles and its rotation grip, which is drawing room, not the markup.
+        Anything that asks "is this inside that" — a marquee, the box drawn
+        round a group, which page a markup sits on — wants this instead, or a
+        rectangle dragged neatly round a rectangle would fail to catch it.
+        """
+        rect = item.local_rect().normalized()
+        if rect.width() <= 0 or rect.height() <= 0:
+            return item.sceneBoundingRect()
+        return item.mapRectToScene(rect)
 
     def cancel_marquee(self) -> None:
         self._marquee = []
@@ -2886,9 +2943,9 @@ class PageView(QGraphicsView):
         painter.setBrush(QColor(11, 107, 203, 12))
         margin = 5.0 / max(self._zoom, 0.05)
         for members in families.values():
-            box = members[0].sceneBoundingRect()
+            box = self.markup_box(members[0])
             for item in members[1:]:
-                box = box.united(item.sceneBoundingRect())
+                box = box.united(self.markup_box(item))
             painter.drawRect(box.adjusted(-margin, -margin, margin, margin))
         painter.restore()
 
@@ -2917,7 +2974,24 @@ class PageView(QGraphicsView):
         painter.setBrush(colour)
         painter.drawPath(arrow_path(anchor, angle,
                                     max(pen.widthF() * 4.5, 9.0), "arrow"))
+        # And the box, where the words will go. It lands at a set size and
+        # grows as it is written into, so showing that size is the whole
+        # answer to "where will it be and how big" — the same faded preview
+        # every other tool gets.
+        if target is not None and self._draft is None:
+            box = self._pending_callout_box(target)
+            painter.setOpacity(0.45)
+            painter.setBrush(QBrush(QColor(255, 255, 255)))
+            painter.drawRoundedRect(box, 2.0, 2.0)
+            painter.setOpacity(1.0)
         painter.restore()
+
+    def _pending_callout_box(self, at: QPointF) -> QRectF:
+        """Where a call-out's box would land if it were clicked down here."""
+        from ..items.text import CalloutItem
+
+        width, height = self._default_size(CalloutItem())
+        return QRectF(at.x(), at.y(), width, height)
 
     def _draft_leader_target(self) -> Optional[QPointF]:
         """Where the pending leader is heading: the box, or the pointer."""

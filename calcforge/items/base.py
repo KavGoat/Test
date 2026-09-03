@@ -238,7 +238,13 @@ class MarkupItem(QGraphicsObject):
 
     def boundingRect(self) -> QRectF:
         margin = self.style.width + HANDLE_SIZE + 4
-        return self.local_rect().normalized().adjusted(-margin, -margin, margin, margin)
+        box = self.local_rect().normalized().adjusted(-margin, -margin, margin, margin)
+        if self.ROTATABLE:
+            # The rotation handle stands off above the box. Left out of here it
+            # is painted outside the item's own rectangle, so Qt clips it and
+            # leaves a smear of it behind every time the markup moves.
+            box.setTop(box.top() - ROTATE_OFFSET - HANDLE_SIZE)
+        return box
 
     def shape(self) -> QPainterPath:
         path = QPainterPath()
