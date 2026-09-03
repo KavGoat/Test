@@ -13,10 +13,10 @@ from PySide6.QtGui import (QAction, QActionGroup, QColor, QFont, QImage,
                            QKeySequence, QTransform, QUndoStack)
 from PySide6.QtPrintSupport import QPrintDialog, QPrintPreviewDialog, QPrinter
 from PySide6.QtWidgets import (QApplication, QComboBox, QDockWidget, QDoubleSpinBox,
-                               QFileDialog, QHBoxLayout, QInputDialog, QLabel,
-                               QLineEdit, QMainWindow, QMenu, QMessageBox,
-                               QSpinBox, QStatusBar, QToolBar, QToolButton,
-                               QVBoxLayout, QWidget)
+                               QFileDialog, QGraphicsItem, QHBoxLayout,
+                               QInputDialog, QLabel, QLineEdit, QMainWindow,
+                               QMenu, QMessageBox, QSpinBox, QStatusBar,
+                               QToolBar, QToolButton, QVBoxLayout, QWidget)
 
 from ..core.document import (LANDSCAPE, MM_TO_PT, PAGE_SIZES, PORTRAIT,
                              PT_TO_MM, Document, Page, PageSetup)
@@ -35,7 +35,8 @@ from ..items.media import ImageItem
 from ..items.plotitem import PlotItem
 from ..items.shapes import PolyItem, RectItem
 from ..items.tableitem import TableItem
-from ..items.text import NoteItem, StampItem, _TextBase
+from ..items.text import (FlagItem, NoteItem, StampItem, TypewriterItem,
+                          _TextBase)
 from . import dialogs
 from .commands import DocumentStructureCommand
 from .icons import icon
@@ -81,6 +82,8 @@ class MainWindow(QMainWindow):
         # Automated runs turn that off and set the values directly.
         self.interactive_prompts = True
         self._clipboard: list[dict] = []
+        # The look the format painter is holding, if it is picked up.
+        self._held_style: dict | None = None
         self._suspend_recalc = False
         # The independent check is not cheap, so it runs once the document has
         # been left alone for a moment rather than on every keystroke.
@@ -341,6 +344,17 @@ class MainWindow(QMainWindow):
         self._act("ungroup", "Ungroup", self.ungroup_selection, "Ctrl+Shift+G")
         self._act("autosize", "Auto-size text box", self.autosize_text, "Alt+Z",
                   tip="Shrink the box around the words in it")
+        self._act("format_painter", "Format painter", self.format_painter,
+                  "Ctrl+Shift+C",
+                  tip="Take this one's look, then click another to paint it on")
+        self._act("hide", "Hide", self.hide_selection,
+                  tip="Take it off the screen and out of the print, without "
+                      "deleting it — its layer brings it back")
+        self._act("show_hidden", "Show hidden markups", self.show_hidden,
+                  tip="Bring back everything that was hidden")
+        self._act("flatten", "Flatten onto the page", self.flatten_selection,
+                  tip="Make it part of the drawing rather than a markup on top "
+                      "of it — it can no longer be moved or edited")
         self._act("preferences", "Preferences…", self.edit_preferences, "Ctrl+,",
                   tip="How the wheel behaves, how blocks start, spell checking")
         self._act("forget_defaults", "Forget markup defaults", self.forget_defaults,
@@ -650,6 +664,12 @@ class MainWindow(QMainWindow):
         markup_menu.addAction(self.act_group)
         markup_menu.addAction(self.act_ungroup)
         markup_menu.addAction(self.act_autosize)
+        markup_menu.addSeparator()
+        markup_menu.addAction(self.act_format_painter)
+        markup_menu.addAction(self.act_lock)
+        markup_menu.addAction(self.act_hide)
+        markup_menu.addAction(self.act_show_hidden)
+        markup_menu.addAction(self.act_flatten)
         markup_menu.addSeparator()
         markup_menu.addAction(self.act_forget_defaults)
         markup_menu.addSeparator()
@@ -1659,7 +1679,15 @@ class MainWindow(QMainWindow):
 
     def _apply_toolbar_style(self, item: MarkupItem) -> None:
         style = self.default_style
-        if isinstance(item, (NoteItem, ImageItem, StampItem, TableItem)):
+        if isinstance(item, (NoteItem, ImageItem, StampItem, TableItem, FlagItem)):
+            return
+        if isinstance(item, TypewriterItem):
+            # Words with no box round them is the whole of what a typewriter
+            # is. It takes the toolbar's text settings and leaves the border
+            # and the fill alone — either can still be turned on afterwards.
+            item.style.text_color = style.stroke or item.style.text_color
+            item.style.font_size = style.font_size
+            item.style.font_family = style.font_family
             return
         if isinstance(item, RectItem) and item.kind in ("highlight", "redact"):
             item.style.opacity = style.opacity
@@ -2791,6 +2819,163 @@ class MainWindow(QMainWindow):
         self.bookmarks_changed()
         self.status_hint.setText(f"Bookmarked “{title.strip()}”")
 
+    # -- format painter ----------------------------------------------------
+    #
+    # Bluebeam's: pick up one markup's look, then click others to paint it on.
+    # It is held until it is used or Esc is pressed, and the status bar says so
+    # the whole time, because an invisible mode that changes what clicking does
+    # is the kind of thing that ruins an afternoon.
+    def format_painter(self) -> None:
+        items = self.selected_items()
+        if self._held_style is not None:
+            self._held_style = None
+            self.status_hint.setText("Format painter put down")
+            return
+        if not items:
+            self.status_hint.setText("Pick the markup whose look you want first")
+            return
+        from . import toolsets
+        self._held_style = toolsets.properties_of(items[0])
+        self.status_hint.setText(
+            f"Format painter: click what should look like this "
+            f"{items[0].display_name().lower()} · Esc to put it down")
+
+    def put_the_format_painter_down(self) -> None:
+        """Drop the held look, if one is held. Escape's business."""
+        if self._held_style is not None:
+            self._held_style = None
+            self.status_hint.setText("Format painter put down")
+
+    def holding_a_format(self) -> bool:
+        return self._held_style is not None
+
+    def paint_format_onto(self, item) -> bool:
+        """Give *item* the look the format painter is holding."""
+        if self._held_style is None or item is None:
+            return False
+        from . import toolsets
+        self.view.begin_snapshot(self.view.involved_frames(item))
+        toolsets.apply_properties(item, self._held_style)
+        item.touch()
+        item.update()
+        self.view.commit_snapshot("Format painter")
+        self.refresh_selection()
+        return True
+
+    def hide_selection(self) -> None:
+        """Take the selected markups off the page without deleting them."""
+        items = [i for i in self.selected_items() if isinstance(i, MarkupItem)]
+        if not items:
+            return
+        self.view.begin_snapshot(self.view.involved_frames(*items))
+        for item in items:
+            item.hidden = True
+            item.setVisible(False)
+        self.view.commit_snapshot("Hide markup")
+        self.status_hint.setText(
+            f"{len(items)} markup(s) hidden — the layers panel brings them back")
+        self.refresh_selection()
+
+    def show_hidden(self) -> None:
+        """Bring back everything that was hidden."""
+        brought = 0
+        frames = [page.frame for page in self.document.pages if page.frame]
+        self.view.begin_snapshot(frames)
+        for frame in frames:
+            for item in frame.markups():
+                if getattr(item, "hidden", False):
+                    item.hidden = False
+                    item.setVisible(self.document.layer(item.layer).visible)
+                    brought += 1
+        self.view.commit_snapshot("Show hidden markups")
+        self.status_hint.setText(f"{brought} markup(s) brought back")
+
+    def flatten_selection(self) -> None:
+        """Make the selected markups part of the page's own drawing.
+
+        Flattened, they are no longer markups: they cannot be moved, edited or
+        picked out, and they print as part of the sheet. That is what makes it
+        worth asking first — it is not something an undo away from obvious.
+        """
+        items = [i for i in self.selected_items() if isinstance(i, MarkupItem)]
+        if not items:
+            return
+        if self.interactive_prompts and QMessageBox.question(
+                self, "Flatten",
+                f"Flatten {len(items)} markup(s) into the page?\n\n"
+                "They become part of the drawing: no longer movable, editable "
+                "or selectable. Undo will bring them back.") != QMessageBox.Yes:
+            return
+        self.view.begin_snapshot(self.view.involved_frames(*items))
+        for item in items:
+            item.flattened = True
+            item.locked = True
+            item.setFlag(QGraphicsItem.ItemIsSelectable, False)
+            item.setFlag(QGraphicsItem.ItemIsMovable, False)
+            item.setSelected(False)
+        self.view.commit_snapshot("Flatten")
+        self.status_hint.setText(f"{len(items)} markup(s) flattened onto the page")
+        self.refresh_selection()
+
+    def apply_to_pages(self, item) -> None:
+        """Put a copy of this markup on other pages, in the same place."""
+        if item is None or len(self.document.pages) < 2:
+            self.status_hint.setText("There is only one page to put it on")
+            return
+        here = self.document.index_of(self.current_page())
+        others = [index for index in range(len(self.document.pages)) if index != here]
+        choice, accepted = QInputDialog.getItem(
+            self, "Apply to pages", "Put a copy of this markup on:",
+            ["Every other page", "Every page after this one",
+             "Every page before this one"], 0, False)
+        if not accepted:
+            return
+        if choice.endswith("after this one"):
+            others = [index for index in others if index > here]
+        elif choice.endswith("before this one"):
+            others = [index for index in others if index < here]
+        if not others:
+            self.status_hint.setText("No pages to put it on")
+            return
+        payload = item.serialize()
+        frames = [self.document.pages[index].frame for index in others
+                  if self.document.pages[index].frame is not None]
+        self.view.begin_snapshot(frames)
+        for frame in frames:
+            copy = build_item(dict(payload, uid=os.urandom(8).hex()))
+            if copy is not None:
+                frame.add_markup(copy, QPointF(item.pos()))
+        self.recalculate()
+        self.view.commit_snapshot("Apply to pages")
+        self.status_hint.setText(f"Copied onto {len(frames)} page(s)")
+
+    def show_properties_panel(self) -> None:
+        self.show_panel("dock_properties", True)
+        self.refresh_selection()
+
+    def move_to_layer(self, name: str) -> None:
+        items = [i for i in self.selected_items() if isinstance(i, MarkupItem)]
+        if not items:
+            return
+        self.view.begin_snapshot(self.view.involved_frames(*items))
+        for item in items:
+            item.layer = name
+        self.view.commit_snapshot("Move to layer")
+        self.refresh_lists()
+
+    def set_leader(self, item, wanted: bool) -> None:
+        """Give a text box or call-out a leader, or take its leader away."""
+        if item is None or not isinstance(item, _TextBase):
+            return
+        if item.leader_shown == wanted:
+            return
+        self.view.begin_snapshot(self.view.involved_frames(item))
+        item.add_leader() if wanted else item.remove_leader()
+        item.touch()
+        item.update()
+        self.view.commit_snapshot("Add leader" if wanted else "Remove leader")
+        self.refresh_selection()
+
     def autosize_text(self) -> None:
         """Alt+Z: bring a text box or callout back in around its words."""
         items = [item for item in self.selected_items()
@@ -3118,23 +3303,44 @@ class MainWindow(QMainWindow):
                 menu.addAction(self.act_group)
             if any(getattr(i, "group", "") for i in self.selected_items()):
                 menu.addAction(self.act_ungroup)
+            if isinstance(item, _TextBase):
+                if item.leader_shown:
+                    menu.addAction("Remove leader",
+                                   lambda: self.set_leader(item, False))
+                else:
+                    menu.addAction("Add leader",
+                                   lambda: self.set_leader(item, True))
             menu.addAction("Set as default", lambda: self.set_as_default(item))
             menu.addAction("Add to a tool set…", lambda: self.add_to_toolset(item))
             menu.addSeparator()
             menu.addAction(self.act_cut)
             menu.addAction(self.act_copy)
+            menu.addAction(self.act_paste)
             menu.addAction(self.act_duplicate)
+            menu.addAction(self.act_format_painter)
             menu.addAction(self.act_delete)
             menu.addSeparator()
             order = menu.addMenu("Order")
             for action in (self.act_front, self.act_forward, self.act_backward, self.act_back):
                 order.addAction(action)
-            if len(self.selected_items()) > 1:
-                align = menu.addMenu("Align")
-                for key in ("left", "hcenter", "right", "top", "vcenter", "bottom"):
-                    align.addAction(getattr(self, f"act_align_{key}"))
+            align = menu.addMenu("Align")
+            align.setEnabled(len(self.selected_items()) > 1)
+            for key in ("left", "hcenter", "right", "top", "vcenter", "bottom"):
+                align.addAction(getattr(self, f"act_align_{key}"))
+            layers = menu.addMenu("Layer")
+            for layer in self.document.layers:
+                entry = layers.addAction(layer.name,
+                                         lambda _c=False, n=layer.name:
+                                         self.move_to_layer(n))
+                entry.setCheckable(True)
+                entry.setChecked(item.layer == layer.name)
             menu.addAction(self.act_array)
             menu.addAction(self.act_lock)
+            menu.addAction(self.act_hide)
+            menu.addSeparator()
+            menu.addAction(self.act_flatten)
+            menu.addAction("Apply to pages…", lambda: self.apply_to_pages(item))
+            menu.addAction("Properties", self.show_properties_panel)
         else:
             menu.addAction(self.act_paste)
             menu.addAction(self.act_paste_here)

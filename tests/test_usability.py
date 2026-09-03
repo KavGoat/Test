@@ -4462,3 +4462,376 @@ def test_a_callout_can_be_turned_into_a_cloud_afterwards(window):
              if [w.itemText(i) for i in range(w.count())] == ["Box", "Cloud"]][0]
     shape.setCurrentIndex(1)
     assert callout.shape_kind == "cloud"
+
+
+# ---------------------------------------------------------------------------
+# The markup tools that were missing
+# ---------------------------------------------------------------------------
+
+def test_the_markup_menu_has_everything_bluebeam_has(window):
+    """Typewriter, Eraser, Arc and Flag were on the menu and not in the app."""
+    from calcforge.ui.tools import TOOL_MAP
+
+    wanted = {"typewriter": "", "eraser": "Shift+E", "arc": "Shift+C",
+              "flag": "Shift+F", "highlighter": "H", "polyline": "N",
+              "cloud_poly": "K", "cloud": "C"}
+    for key, shortcut in wanted.items():
+        assert key in TOOL_MAP, key
+        assert TOOL_MAP[key].shortcut == shortcut, key
+    assert not window.shortcuts.conflicts()
+    # and no two tools share a name
+    labels = [tool.label for tool in TOOL_MAP.values()]
+    assert len(labels) == len(set(labels))
+
+
+def test_a_typewriter_puts_words_down_with_no_box(window):
+    from calcforge.items.text import TypewriterItem
+
+    window.select_tool("typewriter")
+    drag(window.view, 100, 100, 320, 140)
+    item = window.view.editing_item()
+    assert isinstance(item, TypewriterItem)
+    assert not item.style.stroke          # no border
+    assert not item.style.fill            # and nothing behind the words
+    window.view.end_item_edit()
+
+
+def test_an_arc_bends(window):
+    window.select_tool("arc")
+    drag(window.view, 100, 100, 260, 100)
+    arc = markups(window)[0]
+    assert arc.kind == "arc"
+    # longer than the straight line between its ends, because it is a curve
+    assert arc.build_path().length() > 150
+
+
+def test_a_flag_is_pinned_where_it_is_clicked(window):
+    from calcforge.items.text import FlagItem
+
+    window.select_tool("flag")
+    click(window.view, 300, 220)
+    flag = markups(window)[0]
+    assert isinstance(flag, FlagItem)
+    assert (flag.pos().x(), flag.pos().y()) == pytest.approx((300, 220), abs=12)
+
+
+def test_the_eraser_rubs_out_ink_and_leaves_shapes_alone(window):
+    window.select_tool("pen")
+    drag(window.view, 100, 400, 300, 420)
+    window.select_tool("rect")
+    drag(window.view, 100, 500, 300, 560)
+    assert len(markups(window)) == 2
+
+    window.select_tool("eraser")
+    drag(window.view, 150, 405, 260, 415)      # over the ink
+    assert len(markups(window)) == 1
+
+    window.select_tool("eraser")
+    drag(window.view, 150, 520, 260, 540)      # over the rectangle
+    assert len(markups(window)) == 1           # a drawn shape is not ink
+    window.undo_stack.undo()
+
+
+# ---------------------------------------------------------------------------
+# Cut-outs
+# ---------------------------------------------------------------------------
+
+def _area_measurement(window):
+    from calcforge.items.measure import MeasureItem
+
+    window.select_tool("measure_area")
+    for point in [(100, 100), (400, 100), (400, 300), (100, 300)]:
+        click(window.view, *point)
+    press_key(window.view, Qt.Key_Return)
+    window.recalculate()
+    return [i for i in markups(window) if isinstance(i, MeasureItem)][0]
+
+
+def test_a_cut_out_takes_its_area_off_the_measurement(window):
+    area = _area_measurement(window)
+    whole = area.raw_measure()[1]
+
+    window.select_tool("cutout_ellipse")
+    drag(window.view, 180, 150, 280, 240)
+    window.recalculate()
+
+    assert len(area.cutouts) == 1
+    assert area.raw_measure()[1] < whole
+    assert len(markups(window)) == 1           # the hole is not a markup of its own
+
+
+def test_a_polygon_cut_out_belongs_to_the_area_it_is_drawn_in(window):
+    area = _area_measurement(window)
+    whole = area.raw_measure()[1]
+
+    window.select_tool("cutout_polygon")
+    for point in [(300, 150), (370, 150), (370, 250)]:
+        click(window.view, *point)
+    press_key(window.view, Qt.Key_Return)
+    window.recalculate()
+
+    assert len(area.cutouts) == 1
+    assert area.raw_measure()[1] == pytest.approx(whole - 3500, abs=1)
+
+
+def test_a_cut_out_drawn_nowhere_says_so(window):
+    _area_measurement(window)
+    window.select_tool("cutout_ellipse")
+    drag(window.view, 600, 600, 680, 660)
+    assert len(markups(window)) == 1           # nothing left lying about
+
+
+def test_a_cut_out_survives_being_saved(window):
+    from calcforge.items.base import build_item
+
+    area = _area_measurement(window)
+    window.select_tool("cutout_ellipse")
+    drag(window.view, 180, 150, 280, 240)
+    window.recalculate()
+
+    clone = build_item(area.serialize())
+    assert len(clone.cutouts) == 1
+    assert clone.raw_measure()[1] == pytest.approx(area.raw_measure()[1])
+
+
+# ---------------------------------------------------------------------------
+# The rest of the right-click menu
+# ---------------------------------------------------------------------------
+
+def _a_rectangle(window, x0=120, y0=120, x1=240, y1=200):
+    window.select_tool("rect")
+    drag(window.view, x0, y0, x1, y1)
+    return markups(window)[-1]
+
+
+def test_the_markup_menu_offers_the_whole_of_bluebeams(window):
+    rect = _a_rectangle(window)
+    rect.setSelected(True)
+    labels = _menu_labels(window.build_context_menu(rect, QPointF(150, 150)))
+    for wanted in ("Cut", "Copy", "Paste", "Duplicate", "Format painter",
+                   "Delete", "Order", "Align", "Layer", "Lock / unlock",
+                   "Hide", "Flatten onto the page", "Apply to pages…",
+                   "Properties"):
+        assert wanted in labels, f"{wanted!r} missing from {labels}"
+
+
+def test_align_is_offered_but_dead_until_there_are_two(window):
+    rect = _a_rectangle(window)
+    rect.setSelected(True)
+    menu = window.build_context_menu(rect, QPointF(150, 150))
+    align = [a for a in menu.actions() if a.text() == "Align"][0]
+    assert not align.isEnabled()
+
+    other = _a_rectangle(window, 300, 120, 380, 200)
+    rect.setSelected(True)
+    other.setSelected(True)
+    menu = window.build_context_menu(rect, QPointF(150, 150))
+    align = [a for a in menu.actions() if a.text() == "Align"][0]
+    assert align.isEnabled()
+
+
+def test_the_format_painter_carries_one_markups_look_to_another(window):
+    first = _a_rectangle(window)
+    first.style.stroke = "#c92a2a"
+    first.style.width = 4.0
+    second = _a_rectangle(window, 300, 120, 380, 200)
+    second.style.stroke = "#1971c2"
+
+    first.setSelected(True)
+    window.format_painter()
+    assert window.holding_a_format()
+
+    window.paint_format_onto(second)
+    assert second.style.stroke == "#c92a2a"
+    assert second.style.width == pytest.approx(4.0)
+    # It painted the look, not the position or the size.
+    assert second.local_rect().width() == pytest.approx(80, abs=1)
+
+
+def test_clicking_with_the_format_painter_paints_that_markup(window):
+    first = _a_rectangle(window)
+    first.style.stroke = "#c92a2a"
+    second = _a_rectangle(window, 300, 120, 380, 200)
+    window.scene.clearSelection()
+    first.setSelected(True)
+    window.format_painter()
+
+    click(window.view, 340, 160)
+    assert second.style.stroke == "#c92a2a"
+
+
+def test_escape_puts_the_format_painter_down(window):
+    rect = _a_rectangle(window)
+    rect.setSelected(True)
+    window.format_painter()
+    press_key(window.view, Qt.Key_Escape)
+    assert not window.holding_a_format()
+
+
+def test_hidden_markups_go_away_and_come_back(window):
+    rect = _a_rectangle(window)
+    rect.setSelected(True)
+    window.hide_selection()
+    assert rect.hidden and not rect.isVisible()
+
+    window.show_hidden()
+    assert not rect.hidden and rect.isVisible()
+
+
+def test_a_hidden_markup_is_still_hidden_after_a_save(window):
+    from calcforge.items.base import build_item
+
+    rect = _a_rectangle(window)
+    rect.setSelected(True)
+    window.hide_selection()
+    assert build_item(rect.serialize()).hidden
+
+
+def test_flattening_takes_a_markup_out_of_reach(window):
+    rect = _a_rectangle(window)
+    rect.setSelected(True)
+    window.interactive_prompts = False
+    window.flatten_selection()
+
+    assert rect.flattened and rect.locked
+    assert not rect.flags() & rect.GraphicsItemFlag.ItemIsSelectable
+    click(window.view, 180, 160)
+    assert not rect.isSelected()
+
+
+def test_flattening_survives_a_save(window):
+    from calcforge.items.base import build_item
+
+    rect = _a_rectangle(window)
+    rect.setSelected(True)
+    window.interactive_prompts = False
+    window.flatten_selection()
+    clone = build_item(rect.serialize())
+    assert clone.flattened and clone.locked
+
+
+def test_a_markup_can_be_put_on_every_other_page(window, monkeypatch):
+    from PySide6.QtWidgets import QInputDialog
+
+    window.add_page()
+    window.add_page()
+    window.go_to_page(0)
+    rect = _a_rectangle(window)
+    rect.setSelected(True)
+    monkeypatch.setattr(QInputDialog, "getItem",
+                        lambda *a, **k: ("Every other page", True))
+    window.apply_to_pages(rect)
+
+    for index in (1, 2):
+        frame = window.document.pages[index].frame
+        copies = [i for i in frame.markups() if isinstance(i, RectItem)]
+        assert len(copies) == 1
+        assert copies[0].pos() == rect.pos()
+        assert copies[0].uid != rect.uid
+
+
+def test_moving_a_markup_to_another_layer(window):
+    rect = _a_rectangle(window)
+    rect.setSelected(True)
+    other = [layer.name for layer in window.document.layers
+             if layer.name != rect.layer]
+    if not other:
+        window.document.add_layer("Second")
+        other = ["Second"]
+    window.move_to_layer(other[0])
+    assert rect.layer == other[0]
+
+
+# ---------------------------------------------------------------------------
+# A leader on any text box, and Escape that goes all the way back
+# ---------------------------------------------------------------------------
+
+def test_a_text_box_can_be_given_a_leader_and_have_it_taken_away(window):
+    window.select_tool("text")
+    click(window.view, 200, 200)
+    window.view.end_item_edit()
+    box = markups(window)[-1]
+    assert isinstance(box, TextItem) and not box.leader_shown
+    assert "l0" not in box.handle_points()
+
+    window.set_leader(box, True)
+    assert box.leader_shown
+    assert "l0" in box.handle_points()
+    assert box.leader_handles() == {"l0", "elbow"}
+
+    window.set_leader(box, False)
+    assert not box.leader_shown
+    assert box.leader == []
+    assert "l0" not in box.handle_points()
+
+
+def test_the_menu_offers_a_leader_on_a_text_box_and_removal_on_a_callout(window):
+    window.select_tool("text")
+    click(window.view, 200, 200)
+    window.view.end_item_edit()
+    box = markups(window)[-1]
+    box.setSelected(True)
+    assert "Add leader" in _menu_labels(window.build_context_menu(box, box.pos()))
+
+    window.set_leader(box, True)
+    assert "Remove leader" in _menu_labels(window.build_context_menu(box, box.pos()))
+
+
+def test_a_text_boxs_leader_is_still_there_after_a_save(window):
+    from calcforge.items.base import build_item
+
+    window.select_tool("text")
+    click(window.view, 200, 200)
+    window.view.end_item_edit()
+    box = markups(window)[-1]
+    window.set_leader(box, True)
+    tip = QPointF(box.tip)
+
+    clone = build_item(box.serialize())
+    assert clone.leader_shown
+    assert clone.tip == tip
+    assert not build_item(TextItem().serialize()).leader_shown
+
+
+def test_one_escape_goes_all_the_way_back_to_nothing(window):
+    rect = _a_rectangle(window)
+    rect.setSelected(True)
+    window.select_tool("rect")
+    assert window.view.tool_key == "rect"
+
+    press_key(window.view, Qt.Key_Escape)
+    assert window.view.tool_key == "select"
+    assert not window.scene.selectedItems()
+    assert window.view._mode == "idle"
+
+
+def test_escape_gets_out_of_a_half_placed_callout(window):
+    window.select_tool("callout")
+    click(window.view, 200, 220)                 # the arrow goes down first
+    assert window.view._pending_anchor is not None
+
+    press_key(window.view, Qt.Key_Escape)
+    assert window.view._pending_anchor is None
+    assert window.view.tool_key == "select"
+    # And the callout tool is free to be used again straight away.
+    window.select_tool("callout")
+    click(window.view, 300, 320)
+    click(window.view, 380, 380)
+    assert any(isinstance(i, CalloutItem) for i in markups(window))
+
+
+def test_a_drag_whose_release_went_missing_lets_go_of_the_pointer(window):
+    rect = _a_rectangle(window)
+    rect.setSelected(True)
+    QApplication.sendEvent(window.view.viewport(),
+                           _mouse(window.view, QEvent.MouseButtonPress, 180, 160))
+    QApplication.sendEvent(window.view.viewport(),
+                           _mouse(window.view, QEvent.MouseMove, 200, 180,
+                                  Qt.LeftButton, Qt.LeftButton))
+    assert window.view._mode == "move"
+
+    # The release never arrives — a menu opened over it, say. The next plain
+    # move must find its way back rather than keeping the four-way arrow.
+    hover(window.view, 500, 500)
+    assert window.view._mode == "idle"
+    assert window.view.cursor().shape() == Qt.ArrowCursor

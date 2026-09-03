@@ -363,6 +363,20 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
         painter.drawEllipse(QRectF(4, 2, 15, 15))
         _arrow(painter, QPointF(11.5, 9.5), QPointF(4.2, 9.5), INK)
         _arrow(painter, QPointF(11.5, 9.5), QPointF(18.8, 9.5), INK)
+    elif name in ("cutout_polygon", "cutout_ellipse"):
+        _ruler(painter)
+        _pen(painter, INK, 1.4)
+        painter.setBrush(QBrush(QColor(INK).lighter(190)))
+        painter.drawPolygon(QPolygonF([QPointF(4, 14), QPointF(8, 4), QPointF(19, 6),
+                                       QPointF(17, 15)]))
+        painter.setBrush(QBrush(QColor(255, 255, 255)))
+        _pen(painter, INK, 1.1, Qt.DashLine)
+        if name == "cutout_polygon":
+            painter.drawPolygon(QPolygonF([QPointF(8, 11), QPointF(12, 7),
+                                           QPointF(15, 12)]))
+        else:
+            painter.drawEllipse(QRectF(8, 7, 7, 5))
+        painter.setBrush(Qt.NoBrush)
     elif name == "count":
         _pen(painter, MARKER, 1.5)
         for x in (5.5, 10, 14.5):

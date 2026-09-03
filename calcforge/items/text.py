@@ -6,9 +6,10 @@ from typing import Optional
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import (QAbstractTextDocumentLayout, QBrush, QColor, QPainter,
-                           QPainterPath, QPalette, QPen, QSyntaxHighlighter,
-                           QTextCharFormat, QTextCursor, QTextDocument,
-                           QTextOption)
+                           QPainterPath, QPainterPathStroker, QPalette, QPen,
+                           QPolygonF,
+                           QSyntaxHighlighter, QTextCharFormat, QTextCursor,
+                           QTextDocument, QTextOption)
 from PySide6.QtWidgets import (QGraphicsItem, QGraphicsTextItem,
                                QStyle, QStyleOptionGraphicsItem)
 
@@ -65,6 +66,7 @@ class _TextBase(MarkupItem):
     """Shared rich-text behaviour: document, layout, in-place editing."""
 
     HAS_TEXT = True
+    ELBOW_REACH = 24.0          # how far the elbow stands off the box by default
 
     def __init__(self, text: str = "", rect: Optional[QRectF] = None):
         super().__init__()
@@ -81,6 +83,12 @@ class _TextBase(MarkupItem):
         self._editor: Optional[QGraphicsTextItem] = None
         self._speller = None
         self._editing = False
+        # Any text box can have a leader; a call-out is simply one that starts
+        # with it shown. It is off here so a plain text box has no arrow until
+        # one is asked for.
+        self.leader_shown = False
+        self.elbow_reach = self.ELBOW_REACH
+        self.tip = QPointF(self._rect.left() - 60, self._rect.bottom() + 50)
         self.doc.contentsChanged.connect(self._on_contents_changed)
 
     # -- content -----------------------------------------------------------
@@ -161,10 +169,184 @@ class _TextBase(MarkupItem):
         self.apply_style()
         self._sync_editor()
 
+    # -- the leader --------------------------------------------------------
+    #
+    # A leader is a text box's arrow: it leaves the middle of whichever side
+    # faces what is being pointed at, turns one square corner, and runs to the
+    # tip. A call-out is a text box drawn with one; a plain text box or a
+    # typewriter can be given one afterwards, and a call-out can have its taken
+    # away. Everything below does nothing at all when there is no leader shown,
+    # so a text box without one costs nothing to draw and shows no handles it
+    # cannot use.
+
+    @property
+    def leader(self) -> list:
+        """The whole leader, tip first — worked out, not stored."""
+        if not self.leader_shown:
+            return []
+        return [QPointF(self.tip), self.elbow(), self.side_point()]
+
+    @leader.setter
+    def leader(self, points) -> None:
+        """Older documents kept the leader as a list of points."""
+        points = [QPointF(p) for p in points]
+        if points:
+            self.tip = QPointF(points[0])
+            self.leader_shown = True
+
+    def add_leader(self) -> None:
+        """Give the box a leader, starting below and to the left of it."""
+        if self.leader_shown:
+            return
+        self.prepareGeometryChange()
+        box = self._rect.normalized()
+        self.tip = QPointF(box.left() - 60, box.bottom() + 50)
+        self.elbow_reach = self.ELBOW_REACH
+        if self.style.arrow_end == "none":
+            self.style.arrow_end = "arrow"
+        self.leader_shown = True
+        self.geometryChanged.emit()
+
+    def remove_leader(self) -> None:
+        """Take the leader away, leaving the box where it is."""
+        if not self.leader_shown:
+            return
+        self.prepareGeometryChange()
+        self.leader_shown = False
+        self.geometryChanged.emit()
+
+    def side(self) -> str:
+        """Which side of the box the leader leaves by."""
+        rect = self._rect.normalized()
+        centre = rect.center()
+        half_width = max(rect.width() / 2, 1.0)
+        half_height = max(rect.height() / 2, 1.0)
+        across = (self.tip.x() - centre.x()) / half_width
+        down = (self.tip.y() - centre.y()) / half_height
+        if abs(across) >= abs(down):
+            return "left" if across < 0 else "right"
+        return "top" if down < 0 else "bottom"
+
+    def side_point(self) -> QPointF:
+        """The middle of the side the leader leaves by."""
+        rect = self._rect.normalized()
+        return {
+            "left": QPointF(rect.left(), rect.center().y()),
+            "right": QPointF(rect.right(), rect.center().y()),
+            "top": QPointF(rect.center().x(), rect.top()),
+            "bottom": QPointF(rect.center().x(), rect.bottom()),
+        }[self.side()]
+
+    def side_normal(self) -> QPointF:
+        """Straight out of that side, away from the box."""
+        return {"left": QPointF(-1, 0), "right": QPointF(1, 0),
+                "top": QPointF(0, -1), "bottom": QPointF(0, 1)}[self.side()]
+
+    def elbow(self) -> QPointF:
+        """The corner of the leader: square out of the side, then on to the tip."""
+        start = self.side_point()
+        normal = self.side_normal()
+        reach = max(self.elbow_reach, 0.0)
+        return QPointF(start.x() + normal.x() * reach,
+                       start.y() + normal.y() * reach)
+
+    def set_elbow_from(self, local_pos: QPointF) -> None:
+        """Slide the elbow along its own line; it cannot leave it."""
+        start = self.side_point()
+        normal = self.side_normal()
+        reach = ((local_pos.x() - start.x()) * normal.x()
+                 + (local_pos.y() - start.y()) * normal.y())
+        self.prepareGeometryChange()
+        self.elbow_reach = max(reach, 0.0)
+        self.geometryChanged.emit()
+
+    def leader_handles(self) -> set[str]:
+        """The handles that belong to the arrow rather than to the box."""
+        return {"l0", "elbow"} if self.leader_shown else set()
+
+    def move_keeping_leader(self, position: QPointF) -> None:
+        """Move the box and leave the arrow pointing where it was pointing."""
+        delta = position - self.pos()
+        if self.leader_shown and not delta.isNull():
+            self.prepareGeometryChange()
+            self.tip = QPointF(self.tip.x() - delta.x(), self.tip.y() - delta.y())
+        self.setPos(position)
+
+    def paint_leader(self, painter: QPainter) -> None:
+        """Draw the arrow, if there is one."""
+        if not self.leader_shown:
+            return
+        # A typewriter has no border, and a text box may have had its turned
+        # off — but a leader with no line is just a floating arrow head, so it
+        # borrows the text colour rather than disappearing.
+        pen = self.style.pen()
+        if not self.style.stroke or self.style.width <= 0:
+            pen = QPen(self.style.text_qcolor())
+            pen.setWidthF(1.0)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        elbow = self.elbow()
+        path = QPainterPath(self.tip)
+        path.lineTo(elbow)
+        path.lineTo(self.side_point())
+        painter.drawPath(path)
+        if self.style.arrow_end != "none":
+            angle = math.atan2(self.tip.y() - elbow.y(), self.tip.x() - elbow.x())
+            colour = QColor(pen.color())
+            colour.setAlphaF(self.style.opacity)
+            painter.setBrush(QBrush(colour))
+            painter.drawPath(arrow_path(self.tip, angle,
+                                        max(self.style.width * 4.5, 8.0),
+                                        self.style.arrow_end))
+
+    # -- geometry, once the leader is taken into account -------------------
+    def boundingRect(self) -> QRectF:
+        rect = QRectF(self._rect)
+        for point in self.leader:
+            rect = rect.united(QRectF(point.x() - 1, point.y() - 1, 2, 2))
+        margin = self.style.width + HANDLE_SIZE + 12
+        return rect.normalized().adjusted(-margin, -margin, margin, margin)
+
     def shape(self) -> QPainterPath:
         path = QPainterPath()
         path.addRect(self._rect.normalized().adjusted(-3, -3, 3, 3))
+        if self.leader_shown:
+            line = QPainterPath(self.tip)
+            line.lineTo(self.elbow())
+            line.lineTo(self.side_point())
+            stroker = QPainterPathStroker()
+            stroker.setWidth(max(self.style.width, 6.0) + 4)
+            path.addPath(stroker.createStroke(line))
         return path
+
+    def handle_points(self) -> dict[str, QPointF]:
+        handles = super().handle_points()
+        if not self.leader_shown:
+            return handles
+        handles.pop("rot", None)
+        handles["l0"] = QPointF(self.tip)
+        handles["elbow"] = self.elbow()
+        return handles
+
+    def move_handle(self, key: str, local_pos: QPointF, keep_ratio: bool = False) -> None:
+        if self.leader_shown:
+            if key == "l0":
+                self.prepareGeometryChange()
+                self.tip = QPointF(local_pos)
+                self.geometryChanged.emit()
+                return
+            if key == "elbow":
+                self.set_elbow_from(local_pos)
+                return
+            # Resizing the box must not drag the arrow along with it: the arrow
+            # points at something on the page, and stays pointing at it until
+            # it is moved on purpose.
+            pinned = self.mapToScene(self.tip)
+            super().move_handle(key, local_pos, keep_ratio)
+            self.prepareGeometryChange()
+            self.tip = self.mapFromScene(pinned)
+            return
+        super().move_handle(key, local_pos, keep_ratio)
 
     # -- editing -----------------------------------------------------------
     def begin_edit(self) -> None:
@@ -266,13 +448,23 @@ class _TextBase(MarkupItem):
             "rect": [self._rect.x(), self._rect.y(), self._rect.width(), self._rect.height()],
             "html": self.doc.toHtml(),
             "auto_size": self.auto_size,
+            "elbow_reach": self.elbow_reach,
         })
+        if self.leader_shown:
+            data["leader"] = [[self.tip.x(), self.tip.y()]]
         return data
 
     def deserialize(self, data: dict) -> None:
         values = data.get("rect", [0, 0, 160, 50])
         self._rect = QRectF(*values)
         self.auto_size = bool(data.get("auto_size", True))
+        self.elbow_reach = float(data.get("elbow_reach", self.ELBOW_REACH))
+        points = data.get("leader")
+        if points:
+            self.tip = QPointF(points[0][0], points[0][1])
+            self.leader_shown = True
+        elif points is not None:
+            self.leader_shown = False
         self.load_base(data)
         html = data.get("html")
         if html:
@@ -291,6 +483,7 @@ class TextItem(_TextBase):
 
     def paint_content(self, painter: QPainter) -> None:
         painter.setRenderHint(QPainter.Antialiasing, True)
+        self.paint_leader(painter)
         rect = self._rect.normalized()
         painter.setBrush(self.style.brush())
         painter.setPen(self.style.pen() if self.style.stroke and self.style.width > 0
@@ -303,6 +496,68 @@ class TextItem(_TextBase):
 
     def summary(self) -> str:
         return self.comment or self.text().strip().replace("\n", " ")[:120]
+
+
+@register_item
+class TypewriterItem(TextItem):
+    """Words straight onto the page, with no box around them.
+
+    Bluebeam's typewriter: for filling in a form, writing on a drawing, or
+    adding a line to a title block, where a border and a white fill would be
+    in the way. It is a text box in every other respect — it is only the
+    default look that differs, and either can be changed afterwards.
+    """
+
+    TYPE = "typewriter"
+    NAME = "Typewriter"
+
+    def __init__(self, text: str = "", rect: Optional[QRectF] = None):
+        super().__init__(text, rect)
+        self.style.stroke = ""
+        self.style.fill = ""
+        self.style.fill_opacity = 0.0
+        self.style.width = 0.0
+        self.style.text_color = "#111318"
+
+
+@register_item
+class FlagItem(MarkupItem):
+    """A small flag pinned to a spot, for marking somewhere to come back to."""
+
+    TYPE = "flag"
+    NAME = "Flag"
+    RESIZABLE = False
+    ROTATABLE = False
+    WIDTH = 18.0
+    HEIGHT = 22.0
+
+    def __init__(self, comment: str = ""):
+        super().__init__()
+        self.comment = comment
+        self.style = Style(stroke="#c92a2a", fill="#c92a2a", fill_opacity=1.0,
+                           width=1.0)
+
+    def local_rect(self) -> QRectF:
+        return QRectF(0, 0, self.WIDTH, self.HEIGHT)
+
+    def paint_content(self, painter: QPainter) -> None:
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        pole = QPen(QColor(self.style.stroke or "#c92a2a"))
+        pole.setWidthF(max(self.style.width, 0.8))
+        painter.setPen(pole)
+        painter.drawLine(QPointF(2, 0), QPointF(2, self.HEIGHT))
+        colour = QColor(self.style.fill or self.style.stroke or "#c92a2a")
+        colour.setAlphaF(max(0.0, min(1.0, self.style.fill_opacity * self.style.opacity)))
+        painter.setBrush(QBrush(colour))
+        painter.setPen(Qt.NoPen)
+        painter.drawPolygon(QPolygonF([QPointF(2.6, 1), QPointF(self.WIDTH, 5.5),
+                                       QPointF(2.6, 10)]))
+
+    def summary(self) -> str:
+        return self.comment.replace("\n", " ")[:160]
+
+    def serialize(self) -> dict:
+        return self.base_dict()
 
 
 @register_item
@@ -329,152 +584,17 @@ class CalloutItem(_TextBase):
         self.cloud_radius = 9.0
         self.style.arrow_end = "arrow"
         self.elbow_reach = self.ELBOW_REACH
+        self.leader_shown = True
         points = [QPointF(p) for p in (leader or [])]
         if points:
             self.tip = QPointF(points[0])
-        else:
-            box = self._rect
-            self.tip = QPointF(box.left() - 60, box.bottom() + 50)
-
-    # -- the leader --------------------------------------------------------
-    @property
-    def leader(self) -> list:
-        """The whole leader, tip first — worked out, not stored."""
-        return [QPointF(self.tip), self.elbow(), self.side_point()]
-
-    @leader.setter
-    def leader(self, points) -> None:
-        """Older documents kept the leader as a list of points."""
-        points = [QPointF(p) for p in points]
-        if points:
-            self.tip = QPointF(points[0])
-
-    def side(self) -> str:
-        """Which side of the box the leader leaves by."""
-        rect = self._rect.normalized()
-        centre = rect.center()
-        half_width = max(rect.width() / 2, 1.0)
-        half_height = max(rect.height() / 2, 1.0)
-        across = (self.tip.x() - centre.x()) / half_width
-        down = (self.tip.y() - centre.y()) / half_height
-        if abs(across) >= abs(down):
-            return "left" if across < 0 else "right"
-        return "top" if down < 0 else "bottom"
-
-    def side_point(self) -> QPointF:
-        """The middle of the side the leader leaves by."""
-        rect = self._rect.normalized()
-        return {
-            "left": QPointF(rect.left(), rect.center().y()),
-            "right": QPointF(rect.right(), rect.center().y()),
-            "top": QPointF(rect.center().x(), rect.top()),
-            "bottom": QPointF(rect.center().x(), rect.bottom()),
-        }[self.side()]
-
-    def side_normal(self) -> QPointF:
-        """Straight out of that side, away from the box."""
-        return {"left": QPointF(-1, 0), "right": QPointF(1, 0),
-                "top": QPointF(0, -1), "bottom": QPointF(0, 1)}[self.side()]
-
-    def elbow(self) -> QPointF:
-        """The corner of the leader: square out of the side, then on to the tip."""
-        start = self.side_point()
-        normal = self.side_normal()
-        reach = max(self.elbow_reach, 0.0)
-        return QPointF(start.x() + normal.x() * reach,
-                       start.y() + normal.y() * reach)
-
-    def set_elbow_from(self, local_pos: QPointF) -> None:
-        """Slide the elbow along its own line; it cannot leave it."""
-        start = self.side_point()
-        normal = self.side_normal()
-        reach = ((local_pos.x() - start.x()) * normal.x()
-                 + (local_pos.y() - start.y()) * normal.y())
-        self.prepareGeometryChange()
-        self.elbow_reach = max(reach, 0.0)
-        self.geometryChanged.emit()
-
-    def local_rect(self) -> QRectF:
-        return QRectF(self._rect)
-
-    def boundingRect(self) -> QRectF:
-        rect = QRectF(self._rect)
-        for point in self.leader:
-            rect = rect.united(QRectF(point.x() - 1, point.y() - 1, 2, 2))
-        margin = self.style.width + HANDLE_SIZE + 12
-        if self.shape_kind == "cloud":
-            margin += self.cloud_radius
-        return rect.normalized().adjusted(-margin, -margin, margin, margin)
-
-    def shape(self) -> QPainterPath:
-        path = QPainterPath()
-        path.addRect(self._rect.normalized().adjusted(-3, -3, 3, 3))
-        from PySide6.QtGui import QPainterPathStroker
-        line = QPainterPath(self.tip)
-        line.lineTo(self.elbow())
-        line.lineTo(self.side_point())
-        stroker = QPainterPathStroker()
-        stroker.setWidth(max(self.style.width, 6.0) + 4)
-        path.addPath(stroker.createStroke(line))
-        return path
-
-    def handle_points(self) -> dict[str, QPointF]:
-        handles = super().handle_points()
-        handles.pop("rot", None)
-        handles["l0"] = QPointF(self.tip)
-        handles["elbow"] = self.elbow()
-        return handles
-
-    def leader_handles(self) -> set[str]:
-        """The handles that belong to the arrow rather than to the box."""
-        return {"l0", "elbow"}
-
-    def move_keeping_leader(self, position: QPointF) -> None:
-        """Move the box and leave the arrow pointing where it was pointing."""
-        delta = position - self.pos()
-        if not delta.isNull():
-            self.prepareGeometryChange()
-            self.tip = QPointF(self.tip.x() - delta.x(), self.tip.y() - delta.y())
-        self.setPos(position)
-
-    def move_handle(self, key: str, local_pos: QPointF, keep_ratio: bool = False) -> None:
-        if key == "l0":
-            self.prepareGeometryChange()
-            self.tip = QPointF(local_pos)
-            self.geometryChanged.emit()
-            return
-        if key == "elbow":
-            self.set_elbow_from(local_pos)
-            return
-        # Resizing the box must not drag the arrow along with it: the arrow
-        # points at something on the page, and stays pointing at it until it
-        # is moved on purpose.
-        pinned = self.mapToScene(self.tip)
-        super().move_handle(key, local_pos, keep_ratio)
-        self.prepareGeometryChange()
-        self.tip = self.mapFromScene(pinned)
 
     def paint_content(self, painter: QPainter) -> None:
         painter.setRenderHint(QPainter.Antialiasing, True)
-        pen = self.style.pen()
-        painter.setPen(pen)
-        painter.setBrush(Qt.NoBrush)
-        elbow = self.elbow()
-        path = QPainterPath(self.tip)
-        path.lineTo(elbow)
-        path.lineTo(self.side_point())
-        painter.drawPath(path)
-        if self.style.arrow_end != "none":
-            angle = math.atan2(self.tip.y() - elbow.y(), self.tip.x() - elbow.x())
-            colour = QColor(self.style.stroke)
-            colour.setAlphaF(self.style.opacity)
-            painter.setBrush(QBrush(colour))
-            painter.drawPath(arrow_path(self.tip, angle,
-                                        max(self.style.width * 4.5, 8.0),
-                                        self.style.arrow_end))
+        self.paint_leader(painter)
         rect = self._rect.normalized()
         painter.setBrush(self.style.brush())
-        painter.setPen(pen)
+        painter.setPen(self.style.pen())
         if self.shape_kind == "cloud":
             from PySide6.QtGui import QPolygonF
             from .base import cloud_path
@@ -486,20 +606,21 @@ class CalloutItem(_TextBase):
                                     self.style.corner_radius)
         self.paint_text(painter)
 
+    def boundingRect(self) -> QRectF:
+        rect = super().boundingRect()
+        if self.shape_kind == "cloud":
+            radius = self.cloud_radius
+            rect = rect.adjusted(-radius, -radius, radius, radius)
+        return rect
+
     def serialize(self) -> dict:
         data = super().serialize()
-        data["leader"] = [[self.tip.x(), self.tip.y()]]
-        data["elbow_reach"] = self.elbow_reach
         data["shape_kind"] = self.shape_kind
         data["cloud_radius"] = self.cloud_radius
         return data
 
     def deserialize(self, data: dict) -> None:
         super().deserialize(data)
-        points = data.get("leader", [])
-        if points:
-            self.tip = QPointF(points[0][0], points[0][1])
-        self.elbow_reach = float(data.get("elbow_reach", self.ELBOW_REACH))
         self.shape_kind = data.get("shape_kind", "box")
         self.cloud_radius = float(data.get("cloud_radius", 9.0))
 

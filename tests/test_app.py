@@ -66,8 +66,12 @@ def editing_item(window):
 # tools
 # ---------------------------------------------------------------------------
 
-DRAG_TOOLS = [t.key for t in TOOLS if t.mode == DRAG and t.key not in ("image", "calibrate")]
-POLY_TOOLS = [t.key for t in TOOLS if t.mode == POLY]
+# The cut-out tools take a bite out of an area that is already there rather
+# than drawing anything of their own, so they are tested on their own terms in
+# test_usability.py, not by "does dragging make a new markup".
+NOT_NEW_MARKUPS = ("image", "calibrate", "cutout_ellipse", "cutout_polygon")
+DRAG_TOOLS = [t.key for t in TOOLS if t.mode == DRAG and t.key not in NOT_NEW_MARKUPS]
+POLY_TOOLS = [t.key for t in TOOLS if t.mode == POLY and t.key not in NOT_NEW_MARKUPS]
 FREE_TOOLS = [t.key for t in TOOLS if t.mode == FREE]
 
 

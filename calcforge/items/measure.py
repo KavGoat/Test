@@ -74,6 +74,9 @@ class MeasureItem(MarkupItem):
         # "2 no. @ 300 c/c" — instead of the measured value.
         self.custom_label = ""
         self.show_label = True
+        # Holes taken out of an area: a slab less its lift shafts. Each is a
+        # ring of points in this measurement's own coordinates.
+        self.cutouts: list[list[QPointF]] = []
         self.value = None               # last computed quantity
         self.value_text = ""
         self.measured_text = ""
@@ -290,7 +293,14 @@ class MeasureItem(MarkupItem):
             total += _distance(points[-1], points[0])
             return "length", total
         if self.kind in (AREA, VOLUME) and len(points) >= 3:
-            return "area", _polygon_area(points)
+            # Every hole taken out of it: a slab with two lift shafts in it is
+            # the slab less the shafts, which is the number the concrete is
+            # ordered against.
+            covered = _polygon_area(points)
+            for hole in self.cutouts:
+                if len(hole) >= 3:
+                    covered -= _polygon_area(hole)
+            return "area", max(covered, 0.0)
         if self.kind == ANGLE and len(points) >= 3:
             a, b, c = points[0], points[1], points[2]
             v1 = QPointF(a.x() - b.x(), a.y() - b.y())
@@ -331,6 +341,21 @@ class MeasureItem(MarkupItem):
         self.update()
 
     # -- painting ----------------------------------------------------------
+    def _paint_cutouts(self, painter: QPainter) -> None:
+        """The holes, outlined so it is obvious what has been taken out."""
+        if not self.cutouts:
+            return
+        pen = QPen(QColor(self.style.stroke or "#1971c2"))
+        pen.setWidthF(max(self.style.width, 0.6))
+        pen.setStyle(Qt.DashLine)
+        painter.save()
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        for hole in self.cutouts:
+            if len(hole) >= 3:
+                painter.drawPolygon(QPolygonF(hole))
+        painter.restore()
+
     def paint_content(self, painter: QPainter) -> None:
         painter.setRenderHint(QPainter.Antialiasing, True)
         path = self.build_path()
@@ -347,6 +372,7 @@ class MeasureItem(MarkupItem):
             self._paint_angle_arc(painter)
         if self.kind in (LENGTH, CALIBRATE, DIMENSION) and len(self.points) >= 2:
             self._paint_extension_ticks(painter)
+        self._paint_cutouts(painter)
         self._paint_arrows(painter)
         if self.show_label and self.value_text:
             self._paint_label(painter)
@@ -438,6 +464,8 @@ class MeasureItem(MarkupItem):
             "custom_label": self.custom_label,
             "depth_text": self.depth_text,
             "show_label": self.show_label,
+            "cutouts": [[[round(p.x(), 3), round(p.y(), 3)] for p in hole]
+                        for hole in self.cutouts],
         })
         return data
 
@@ -451,6 +479,8 @@ class MeasureItem(MarkupItem):
         self.depth_text = data.get("depth_text", "")
         self.custom_label = data.get("custom_label", "")
         self.show_label = bool(data.get("show_label", True))
+        self.cutouts = [[QPointF(x, y) for x, y in hole]
+                        for hole in data.get("cutouts", [])]
         self.load_base(data)
         self.refresh()
 

@@ -256,14 +256,41 @@ class RectItem(MarkupItem):
 # Point-based shapes
 # ---------------------------------------------------------------------------
 
+def _arc_path(points: list[QPointF]) -> QPainterPath:
+    """A curve through the points given.
+
+    Two points make a shallow bow — an arc has to bend somewhere, and bending
+    it a fixed fraction of its own length is what looks like an arc rather
+    than a line that has gone wrong. A third point says where to bend it to,
+    and the curve is drawn through that.
+    """
+    start, end = points[0], points[-1]
+    if len(points) >= 3:
+        through = points[1]
+    else:
+        middle = QPointF((start.x() + end.x()) / 2, (start.y() + end.y()) / 2)
+        dx, dy = end.x() - start.x(), end.y() - start.y()
+        length = math.hypot(dx, dy) or 1.0
+        bow = length * 0.22
+        through = QPointF(middle.x() - dy / length * bow,
+                          middle.y() + dx / length * bow)
+    # The control point that makes a quadratic curve pass through *through*.
+    control = QPointF(2 * through.x() - (start.x() + end.x()) / 2,
+                      2 * through.y() - (start.y() + end.y()) / 2)
+    path = QPainterPath(start)
+    path.quadTo(control, end)
+    return path
+
+
 @register_item
 class PolyItem(MarkupItem):
     """Lines, arrows, polylines, polygons, clouds, freehand ink and highlighter."""
 
     TYPE = "poly"
     NAME = "Line"
-    KINDS = ("line", "arrow", "polyline", "polygon", "cloud", "ink", "highlighter")
-    VERTEX_KINDS = ("line", "arrow", "polyline", "polygon", "cloud")
+    KINDS = ("line", "arrow", "polyline", "polygon", "cloud", "ink",
+             "highlighter", "arc")
+    VERTEX_KINDS = ("line", "arrow", "polyline", "polygon", "cloud", "arc")
 
     def __init__(self, kind: str = "line", points: Optional[list[QPointF]] = None):
         super().__init__()
@@ -283,7 +310,7 @@ class PolyItem(MarkupItem):
     def NAME_FOR_KIND(self) -> str:
         return {"line": "Line", "arrow": "Arrow", "polyline": "Polyline",
                 "polygon": "Polygon", "cloud": "Cloud", "ink": "Pen",
-                "highlighter": "Highlighter"}.get(self.kind, "Shape")
+                "highlighter": "Highlighter", "arc": "Arc"}.get(self.kind, "Shape")
 
     def display_name(self) -> str:
         return self.label or self.NAME_FOR_KIND
@@ -322,6 +349,8 @@ class PolyItem(MarkupItem):
             return path
         if self.kind == "cloud":
             return cloud_path(QPolygonF(self.points), self.cloud_radius, closed=True)
+        if self.kind == "arc" and len(self.points) >= 2:
+            return _arc_path(self.points)
         if self.smooth:
             path = _smooth_path(self.points)
         else:

@@ -13,7 +13,8 @@ from ..items.media import ImageItem
 from ..items.shapes import PolyItem, RectItem
 from ..items.plotitem import PlotItem
 from ..items.tableitem import TableItem
-from ..items.text import CalloutItem, NoteItem, StampItem, TextItem
+from ..items.text import (CalloutItem, FlagItem, NoteItem, StampItem,
+                          TextItem, TypewriterItem)
 
 # How a tool gathers its geometry from the mouse.
 DRAG = "drag"        # press, drag, release
@@ -22,6 +23,7 @@ POLY = "poly"        # click for each vertex, double-click / Enter to finish
 FREE = "free"        # freehand: every mouse-move point is recorded
 ANCHOR = "anchor"    # click what it points at, then drag out the box
 SNAPSHOT = "snapshot"  # drag a region and take a copy of what is in it
+ERASE = "erase"      # rub out the ink it is dragged over
 NONE = "none"        # navigation only
 
 
@@ -65,10 +67,16 @@ TOOLS: list[Tool] = [
     Tool("pen", "Pen", "pen", FREE, "Draw", "Alt+P", "Freehand ink", factory=_poly("ink")),
     Tool("highlighter", "Highlight", "highlighter", FREE, "Draw", "H",
          "Translucent freehand highlight", factory=_poly("highlighter")),
+    Tool("eraser", "Eraser", "eraser", ERASE, "Draw", "Shift+E",
+         "Drag over freehand ink and highlighting to rub it out — it does not "
+         "touch anything that was drawn as a shape"),
     Tool("line", "Line", "line", DRAG, "Draw", "L", "Straight line",
          max_points=2, factory=_poly("line")),
     Tool("arrow", "Arrow", "arrow", DRAG, "Draw", "A", "Arrow",
          max_points=2, factory=_poly("arrow")),
+    Tool("arc", "Arc", "arc", DRAG, "Draw", "Shift+C",
+         "A curve between two points — drag it, then move the middle handle to "
+         "bend it where you want", max_points=2, factory=_poly("arc")),
     Tool("polyline", "Polyline", "polyline", POLY, "Draw", "N",
          "Click each vertex, double-click to finish", factory=_poly("polyline")),
     Tool("rect", "Rectangle", "rect", DRAG, "Draw", "R",
@@ -86,7 +94,7 @@ TOOLS: list[Tool] = [
     Tool("cloud_poly", "Cloud+", "cloud_plus", POLY, "Draw", "K",
          "A revision cloud drawn corner by corner, around whatever shape the "
          "revision actually is", factory=_poly("cloud")),
-    Tool("highlight", "Highlight", "highlight", DRAG, "Draw", "J",
+    Tool("highlight", "Highlight area", "highlight", DRAG, "Draw", "J",
          "Drag over anything to highlight it — it darkens what is underneath "
          "rather than covering it", factory=_rect("highlight")),
     Tool("redact", "Redact", "redact", DRAG, "Draw", "",
@@ -94,6 +102,10 @@ TOOLS: list[Tool] = [
 
     Tool("text", "Text box", "text", DRAG, "Annotate", "T", "Text box",
          factory=lambda: TextItem("")),
+    Tool("typewriter", "Typewriter", "typewriter", DRAG, "Annotate", "",
+         "Words straight onto the page, with no box around them — for filling "
+         "in a form or writing on a drawing",
+         factory=lambda: TypewriterItem("")),
     Tool("callout", "Call-out", "callout", ANCHOR, "Annotate", "Q",
          "Click what it points at, then click where the words go",
          factory=lambda: CalloutItem("")),
@@ -104,6 +116,8 @@ TOOLS: list[Tool] = [
          "Sticky note with a comment", factory=lambda: NoteItem("")),
     Tool("stamp", "Stamp", "stamp", DRAG, "Annotate", "S",
          "Approval or status stamp", factory=lambda: StampItem("APPROVED")),
+    Tool("flag", "Flag", "flag", CLICK, "Annotate", "Shift+F",
+         "Pin a flag somewhere to come back to", factory=lambda: FlagItem()),
     Tool("image", "Image", "image", DRAG, "Annotate", "",
          "Place an image from disk", factory=lambda: ImageItem()),
 
@@ -148,6 +162,12 @@ TOOLS: list[Tool] = [
     Tool("measure_diameter", "Diameter", "measure_diameter", DRAG, "Measure",
          "Shift+Alt+D",
          "Measure a diameter", max_points=2, factory=_measure(measure_module.DIAMETER)),
+    Tool("cutout_polygon", "Polygon cut-out", "cutout_polygon", POLY, "Measure", "",
+         "Draw a hole in the area measurement under it — the hole comes off "
+         "the area", min_points=3, factory=_measure(measure_module.AREA)),
+    Tool("cutout_ellipse", "Ellipse cut-out", "cutout_ellipse", DRAG, "Measure", "",
+         "Drag a round hole in the area measurement under it",
+         factory=_rect("ellipse")),
     Tool("count", "Count", "count", CLICK, "Measure", "Shift+Alt+C",
          "Drop counting markers", factory=lambda: CountItem()),
     Tool("calibrate", "Set scale", "calibrate", DRAG, "Measure", "",

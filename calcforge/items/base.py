@@ -199,6 +199,11 @@ class MarkupItem(QGraphicsObject):
         self.modified = self.created
         self.locked = False
         self.printable = True
+        # Hidden: still in the document, just not shown — the layers panel and
+        # "Show hidden" bring it back. Flattened: made part of the drawing, no
+        # longer a markup that can be picked out or edited.
+        self.hidden = False
+        self.flattened = False
         # Markups sharing a group id are selected, moved and copied together.
         self.group = ""
         self._handles_visible = True
@@ -386,6 +391,8 @@ class MarkupItem(QGraphicsObject):
             "modified": self.modified,
             "locked": self.locked,
             "printable": self.printable,
+            "hidden": self.hidden,
+            "flattened": self.flattened,
             "group": self.group,
         }
 
@@ -407,7 +414,13 @@ class MarkupItem(QGraphicsObject):
         self.created = data.get("created", self.created)
         self.modified = data.get("modified", self.modified)
         self.printable = bool(data.get("printable", True))
-        self.set_locked(bool(data.get("locked", False)))
+        self.hidden = bool(data.get("hidden", False))
+        self.flattened = bool(data.get("flattened", False))
+        self.set_locked(bool(data.get("locked", False)) or self.flattened)
+        if self.flattened:
+            self.setFlag(QGraphicsItem.ItemIsSelectable, False)
+        if self.hidden:
+            self.setVisible(False)
         self.setRotation(float(data.get("rotation", 0)))
 
     def deserialize(self, data: dict) -> None:

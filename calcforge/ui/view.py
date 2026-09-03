@@ -23,7 +23,8 @@ from ..items.base import (HANDLE_CURSORS, MarkupItem, build_item,
 from ..items.contents import ContentsItem
 from ..items.mathitem import LINE_STEP, MathItem
 from .scene import PageFrame, detach
-from ..items.measure import CALIBRATE, DIMENSION, CountItem, MeasureItem
+from ..items.measure import (AREA, CALIBRATE, DIMENSION, VOLUME, CountItem,
+                             MeasureItem)
 from ..items.media import ImageItem
 from ..items.plotitem import PlotItem
 from ..items.shapes import PolyItem, RectItem
@@ -31,7 +32,7 @@ from ..items.tableitem import TableItem
 from ..items.text import CalloutItem, NoteItem, StampItem, TextItem, _TextBase
 from . import preferences
 from .commands import PageEditCommand
-from .tools import (ANCHOR, CLICK, DRAG, FREE, NONE, POLY, SNAPSHOT,
+from .tools import (ANCHOR, CLICK, DRAG, ERASE, FREE, NONE, POLY, SNAPSHOT,
                     TOOL_MAP, Tool)
 
 MIN_ZOOM = 0.08
@@ -593,6 +594,16 @@ class PageView(QGraphicsView):
             super().mousePressEvent(event)
             return
 
+        # The format painter is held between clicks: while it is, a left click
+        # on a markup gives that markup the held look and nothing else happens.
+        if (event.button() == Qt.LeftButton and self.window.holding_a_format()
+                and self.tool_key == "select"):
+            target = self.markup_at(scene_pos)
+            if target is not None and self.editable(target):
+                self.window.paint_format_onto(target)
+                event.accept()
+                return
+
         if self._pending_stamp is not None and event.button() == Qt.LeftButton:
             if self.place_pending_stamp(scene_pos):
                 event.accept()
@@ -602,7 +613,38 @@ class PageView(QGraphicsView):
         if tool.mode == NONE and tool.key == "select":
             self._press_select(event, scene_pos)
             return
+        if tool.mode == ERASE:
+            self._mode = "erase"
+            self.begin_snapshot()
+            self.erase_at(scene_pos)
+            event.accept()
+            return
         self._press_draw(event, scene_pos, tool)
+
+    ERASER_REACH = 7.0
+
+    def erase_at(self, scene_pos: QPointF) -> None:
+        """Rub out freehand ink under the pointer.
+
+        Only ink: a pen stroke or a highlight is drawn by hand and rubbed out
+        by hand, which is what an eraser means. A rectangle or a dimension is
+        a thing you drew on purpose, and it is deleted, not erased — so the
+        eraser passes straight over it rather than quietly destroying work
+        that took a decision to make.
+        """
+        reach = self.ERASER_REACH / max(self._zoom, 0.05)
+        frame = self.frame_at(scene_pos) or self.frame()
+        if frame is None:
+            return
+        for item in list(frame.markups()):
+            if not (isinstance(item, PolyItem) and item.kind in ("ink", "highlighter")):
+                continue
+            if not self.editable(item):
+                continue
+            local = item.mapFromScene(scene_pos)
+            if item.build_path().intersects(
+                    QRectF(local.x() - reach, local.y() - reach, reach * 2, reach * 2)):
+                detach(item)
 
     def _press_select(self, event: QMouseEvent, scene_pos: QPointF) -> None:
         # 1. an active spreadsheet takes clicks inside its own frame
@@ -838,13 +880,29 @@ class PageView(QGraphicsView):
         self._mode = "draw_free" if tool.mode == FREE else "draw_drag"
         event.accept()
 
+    # The modes that only make sense while a button is held down. If the
+    # button comes up somewhere the view never hears about — a menu opening
+    # mid-drag, a window losing focus, a dialog stealing the release — the mode
+    # would stay set for ever and the pointer would keep the four-way arrow
+    # with nothing selected and no way back. So each move checks.
+    HELD_MODES = ("move", "resize", "rubber", "lasso", "pan", "erase",
+                  "table_select", "table_resize", "table_fill", "draw_drag",
+                  "draw_free")
+
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         scene_pos = self.mapToScene(event.position().toPoint())
         self._last_scene_pos = scene_pos
         self.cursorMoved.emit(scene_pos)
+        if event.buttons() == Qt.NoButton and self._mode in self.HELD_MODES:
+            self._release_stale_mode()
         if (self._pending_anchor is not None or self._pending_stamp is not None
                 or self.current_tool().mode == CLICK):
             self.viewport().update()          # the leader, or the preview, follows
+
+        if self._mode == "erase":
+            self.erase_at(scene_pos)
+            event.accept()
+            return
 
         if self._editing_item is not None and self._mode == "idle":
             super().mouseMoveEvent(event)       # dragging selects text
@@ -938,6 +996,74 @@ class PageView(QGraphicsView):
 
         self._update_hover_cursor(scene_pos)
         super().mouseMoveEvent(event)
+
+    def escape_everything(self) -> str:
+        """One press of Escape, back to a blank slate.
+
+        Escape used to peel one layer at a time, which reads well on paper and
+        badly in the hand: half-way out of a call-out, with a tool still held
+        and something still selected, is not a state anybody meant to be in,
+        and if one of the layers failed to lift there was no way back at all.
+        So it unwinds the lot in one go — every held tool, every half-drawn
+        markup, every open editor, the selection and the tool — and says which
+        of them it actually put down.
+        """
+        undone = []
+        if self.clear_pending_tool():
+            undone.append("the held tool")
+        if self._pending_anchor is not None:
+            self._pending_anchor = None
+            undone.append("the call-out")
+        if self._mode in ("rubber", "lasso") and self._marquee:
+            self.cancel_marquee()
+            undone.append("the selection box")
+        if self._draft is not None:
+            self.cancel_draft()
+            undone.append("the markup being drawn")
+        if getattr(self, "_editing_item", None) is not None:
+            self.end_item_edit()
+            undone.append("the words being typed")
+        if self._unit_editor is not None:
+            self.close_unit_editor(commit=False)
+        if self._label_editor is not None:
+            self.close_label_editor(commit=False)
+        if self._cell_editor is not None:
+            self.close_cell_editor(commit=False)
+            undone.append("the cell")
+        if self.active_table is not None:
+            self.deactivate_table()
+            undone.append("the table")
+        if self.scene() is not None and self.scene().selectedItems():
+            self.scene().clearSelection()
+            undone.append("the selection")
+        if self._mode != "idle":
+            self._release_stale_mode()
+        else:
+            self.setCursor(Qt.ArrowCursor)
+        if self.tool_key != "select":
+            self.set_tool("select")
+            self.toolFinished.emit("select")
+        self.window.put_the_format_painter_down()
+        self.viewport().update()
+        message = "Back to nothing selected" if not undone else (
+            "Cancelled " + ", ".join(undone))
+        self.statusMessage.emit(message)
+        return message
+
+    def _release_stale_mode(self) -> None:
+        """Come back to rest after a drag whose release went missing."""
+        mode = self._mode
+        self._mode = "idle"
+        self._move_items = []
+        self._handle_item = None
+        self._handle_key = ""
+        self._snap_marker = None
+        if mode in ("rubber", "lasso"):
+            self._marquee = []
+        if mode in ("draw_drag", "draw_free") and self._draft is not None:
+            self.cancel_draft()
+        self.setCursor(self._cursor_for_tool(self.current_tool()))
+        self.viewport().update()
 
     def _update_draft(self, scene_pos: QPointF, modifiers) -> None:
         draft = self._draft
@@ -1073,6 +1199,13 @@ class PageView(QGraphicsView):
         if self._mode == "pan":
             self._mode = "idle"
             self.setCursor(self._cursor_for_tool(self.current_tool()))
+            event.accept()
+            return
+
+        if self._mode == "erase":
+            self._mode = "idle"
+            self.commit_snapshot("Erase")
+            self.finish_tool()
             event.accept()
             return
 
@@ -1546,6 +1679,9 @@ class PageView(QGraphicsView):
                 return
             draft.refresh(page=self.page())
 
+        if tool.key == "cutout_ellipse" and self.take_out_of_an_area(draft, tool):
+            return
+
         draft.refresh(self.document().workspace, self.page())
         self.scene().clearSelection()
         draft.setSelected(True)
@@ -1630,12 +1766,84 @@ class PageView(QGraphicsView):
             self.statusMessage.emit(f"{tool.label} needs at least {tool.min_points} points")
             self.finish_tool()
             return
+        if tool.key == "cutout_polygon" and self.take_out_of_an_area(draft, tool):
+            return
         draft.refresh(self.document().workspace, self.page())
         self.scene().clearSelection()
         draft.setSelected(True)
         self.commit_snapshot(f"Add {tool.label.lower()}")
         self.selectionChanged.emit()
         self.finish_tool()
+
+    def take_out_of_an_area(self, draft, tool: Tool) -> bool:
+        """Turn a drawn shape into a hole in the area measurement under it.
+
+        A cut-out is not a markup of its own: it belongs to the measurement it
+        came out of, so moving that measurement takes its holes with it and
+        the total always says what is left. False when there was no area
+        measurement under it to belong to, and the caller carries on.
+        """
+        ring = [draft.mapToScene(point) for point in self._draft_ring(draft)]
+        if len(ring) < 3:
+            return False
+        centre = QPointF(sum(p.x() for p in ring) / len(ring),
+                         sum(p.y() for p in ring) / len(ring))
+        target = self.area_under(centre, ignore=draft)
+        if target is None:
+            detach(draft)
+            self.statusMessage.emit(
+                f"{tool.label}: draw it inside an area measurement")
+            self.finish_tool()
+            return True
+        hole = [target.mapFromScene(point) for point in ring]
+        target.prepareGeometryChange()
+        target.cutouts.append(hole)
+        detach(draft)
+        target.refresh(self.document().workspace, self.page())
+        target.touch()
+        target.update()
+        self.scene().clearSelection()
+        target.setSelected(True)
+        self.commit_snapshot(f"Add {tool.label.lower()}")
+        self.selectionChanged.emit()
+        self.statusMessage.emit(f"Taken out: {target.value_text}")
+        self.finish_tool()
+        return True
+
+    @staticmethod
+    def _draft_ring(draft) -> list:
+        """The drawn shape as a ring of points, whatever it was drawn with."""
+        points = list(getattr(draft, "points", []) or [])
+        if points:
+            return points
+        rect = draft.local_rect().normalized()
+        if rect.width() <= 0 or rect.height() <= 0:
+            return []
+        if getattr(draft, "kind", "") == "ellipse":
+            # An ellipse as a ring of points: near enough for an area, and it
+            # keeps holes to one shape everywhere else in the code.
+            steps = 48
+            centre, rx, ry = rect.center(), rect.width() / 2, rect.height() / 2
+            return [QPointF(centre.x() + math.cos(2 * math.pi * i / steps) * rx,
+                            centre.y() + math.sin(2 * math.pi * i / steps) * ry)
+                    for i in range(steps)]
+        return [rect.topLeft(), rect.topRight(), rect.bottomRight(), rect.bottomLeft()]
+
+    def area_under(self, scene_pos: QPointF, ignore=None):
+        """The area measurement that point falls inside, if any."""
+        frame = self.frame_at(scene_pos) or self.frame()
+        if frame is None:
+            return None
+        for item in reversed(frame.ordered_markups()):
+            if item is ignore or not isinstance(item, MeasureItem):
+                continue
+            if item.kind not in (AREA, VOLUME) or not self.editable(item):
+                continue
+            ring = QPolygonF(item.points)
+            if ring.size() >= 3 and ring.containsPoint(item.mapFromScene(scene_pos),
+                                                       Qt.OddEvenFill):
+                return item
+        return None
         if isinstance(draft, MeasureItem) and draft.kind != DIMENSION:
             self.window.note_missing_scale()
 
@@ -2842,28 +3050,7 @@ class PageView(QGraphicsView):
             return
 
         if key == Qt.Key_Escape:
-            if self.clear_pending_tool():
-                self.statusMessage.emit("Put the tool back")
-                event.accept()
-                return
-            if self._pending_anchor is not None:
-                self._pending_anchor = None
-                self.statusMessage.emit("Callout cancelled")
-                event.accept()
-                return
-            if self._mode == "lasso":
-                self.cancel_marquee()
-            elif self._mode in ("draw_poly", "draw_click"):
-                self.cancel_draft()
-            elif getattr(self, "_editing_item", None) is not None:
-                self.end_item_edit()
-            elif self._cell_editor is not None:
-                self.close_cell_editor(commit=False)
-            elif self.active_table is not None:
-                self.deactivate_table()
-            else:
-                self.set_tool("select")
-                self.toolFinished.emit("select")
+            self.escape_everything()
             event.accept()
             return
 
