@@ -2139,7 +2139,8 @@ class MainWindow(QMainWindow):
                                     "could be brought across.")
             return False
         group = toolsets.add_toolset(group)
-        self.toolsets_panel.rebuild(keep=group.name)
+        self.toolsets_panel.rebuild()
+        self.toolsets_panel.select_set(group.name)
         self.show_panel("dock_toolsets", True)
         message = f"Imported {len(group.entries)} tool(s) into “{group.name}”"
         if skipped:

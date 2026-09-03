@@ -7,11 +7,12 @@ in a conversation is a list that gets lost.
 
 ## Regressions — things that used to work
 
-- [ ] **"Image missing"** on a snapshot, and on a picture pasted from
+- [x] **"Image missing"** on a snapshot, and on a picture pasted from
   elsewhere. Both come back empty.
-- [ ] **Ctrl+B** bookmarks while words are being typed or selected, where it
+- [x] **Ctrl+B** bookmarks while words are being typed or selected, where it
   should embolden them. It should only reach for a bookmark on the page.
-- [ ] **The table resize pointer** does not change over a column or row edge.
+- [x] **The table resize pointer** — it does change after all; a test holds it
+  now so it cannot quietly stop.
 
 ## The page, and what is on it
 
@@ -52,12 +53,12 @@ in a conversation is a list that gets lost.
 
 ## Tool sets
 
-- [ ] **Import Bluebeam .btx tool sets** — zlib-compressed, hex-encoded PDF
+- [x] **Import Bluebeam .btx tool sets** — zlib-compressed, hex-encoded PDF
   annotation dictionaries, groups and every markup type included. The fifteen
   files in `btx/` are the test.
-- [ ] The tool chest: **no dashed blue box** when placing, clicking an entry
+- [x] The tool chest: **no dashed blue box** when placing, clicking an entry
   arms it, and every tool set is shown at once.
-- [ ] Tool sets move onto the **right-click menu**, and properties mode
+- [x] Tool sets move onto the **right-click menu**, and properties mode
   becomes findable.
 
 ## Calculations

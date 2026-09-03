@@ -2716,15 +2716,10 @@ class PageView(QGraphicsView):
             painter.translate(at)
             item.paint_content(painter)
             painter.restore()
-        painter.setOpacity(1.0)
-        box = self.pending_extent()
-        top_left = frame.mapToScene(origin + box.topLeft())
-        pen = QPen(QColor(11, 107, 203, 170))
-        pen.setWidthF(0)
-        pen.setStyle(Qt.DashLine)
-        painter.setPen(pen)
-        painter.setBrush(Qt.NoBrush)
-        painter.drawRect(QRectF(top_left, box.size()))
+        # No box round it. The drawing under the pointer says where it will
+        # land and how big it is; a dashed rectangle on top of that says
+        # nothing the drawing has not already said, and gets in the way of
+        # lining the thing up with what is under it.
         painter.restore()
 
     def _draw_tool_preview(self, painter: QPainter) -> None:

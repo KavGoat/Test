@@ -904,6 +904,13 @@ def _menu_labels(menu):
     return [action.text() for action in menu.actions() if not action.isSeparator()]
 
 
+def _menu_entry(menu, label):
+    """One action out of a menu, by what it says."""
+    found = [action for action in menu.actions() if action.text() == label]
+    assert found, f"{label!r} not in {_menu_labels(menu)}"
+    return found[0]
+
+
 def test_the_page_menu_offers_everything_you_do_to_a_page(window):
     window.load_sample()
     labels = _menu_labels(window.page_menu(0))
@@ -3179,7 +3186,8 @@ def test_my_tools_is_always_there(window):
     from calcforge.ui import toolsets
 
     assert [g.name for g in toolsets.load_toolsets()][0] == toolsets.MY_TOOLS
-    assert window.toolsets_panel.sets.itemText(0) == toolsets.MY_TOOLS
+    tree = window.toolsets_panel.tree
+    assert tree.topLevelItem(0).text(0).startswith(toolsets.MY_TOOLS)
 
 
 def test_a_kept_markup_comes_back_exactly_as_it_was(window):
@@ -3246,7 +3254,7 @@ def test_tool_sets_can_be_made_renamed_and_deleted(window, monkeypatch):
     monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("Steel details", True))
     panel.new_set()
     assert "Steel details" in [g.name for g in toolsets.load_toolsets()]
-    assert panel.sets.currentText() == "Steel details"
+    assert panel.current_set_name() == "Steel details"
 
     monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("Steel", True))
     panel.rename_set()
@@ -3274,12 +3282,13 @@ def test_a_tool_can_be_switched_between_the_two_modes(window):
     drag(window.view, 100, 100, 200, 160)
     _kept(window, markups(window)[0])
     panel = window.toolsets_panel
-    panel.list.setCurrentRow(0)
+    panel.select_entry(toolsets.MY_TOOLS, 0)
     assert panel.current_entry().mode == toolsets.COPY
     panel.toggle_mode()
     assert panel.current_entry().mode == toolsets.PROPERTIES
-    assert panel.entry_buttons["mode"].isChecked()
-    assert "properties" in panel.list.item(0).toolTip()
+    draw = _menu_entry(panel.build_menu(), "Draw again with its properties")
+    assert draw.isChecked()
+    assert "properties" in panel.tree.currentItem().toolTip(0)
 
 
 def test_tools_can_be_reordered_and_removed(window):
@@ -3290,11 +3299,14 @@ def test_tools_can_be_reordered_and_removed(window):
     _kept(window, markups(window)[0])
     _kept(window, markups(window)[1])
 
+    from calcforge.ui import toolsets
+
     panel = window.toolsets_panel
-    panel.list.setCurrentRow(1)
-    panel._rows_moved(None, 1, 1, None, 0)        # dragged up the list
+    panel.select_entry(toolsets.MY_TOOLS, 1)
+    header = panel.tree.indexFromItem(panel.tree.topLevelItem(0))
+    panel._rows_moved(header, 1, 1, header, 0)     # dragged up the list
     assert panel.current_set().entries[0].payload["kind"] == "ellipse"
-    panel.list.setCurrentRow(0)
+    panel.select_entry(toolsets.MY_TOOLS, 0)
     panel.remove_entry()
     assert len(panel.current_set().entries) == 1
 
@@ -3309,7 +3321,7 @@ def test_tool_sets_are_remembered_between_sessions(window):
     second = MainWindow()
     second.confirm_discard = lambda: True
     try:
-        assert second.toolsets_panel.list.count() == 1
+        assert second.toolsets_panel.tree.topLevelItem(0).childCount() == 1
     finally:
         second.close()
         second.deleteLater()
@@ -3339,7 +3351,8 @@ def test_my_tools_are_numbered_in_the_panel(window):
     window.select_tool("rect")
     drag(window.view, 100, 100, 200, 160)
     _kept(window, markups(window)[0])
-    assert window.toolsets_panel.list.item(0).text().startswith("1.")
+    assert window.toolsets_panel.tree.topLevelItem(0).child(0).text(0)\
+        .startswith("1.")
 
 
 def test_a_number_key_does_nothing_while_you_are_typing(window):
@@ -4274,39 +4287,42 @@ def test_drawing_again_is_only_offered_where_it_means_something(window):
     assert not toolsets.can_be_properties(grouped.payload)
 
 
-def test_the_draw_again_button_is_greyed_out_for_a_calculation(window):
+def test_drawing_again_is_greyed_out_for_a_calculation(window):
+    """A calculation is nothing without its lines, so there is nothing to draw."""
     from calcforge.ui import toolsets
 
     panel = window.toolsets_panel
+    panel.select_set(toolsets.MY_TOOLS)
     group = panel.current_set()
     group.entries.append(toolsets.ToolEntry("A calculation", {"type": "math"}))
     group.entries.append(toolsets.ToolEntry("A rectangle", {"type": "rect"}))
-    panel.rebuild_entries()
+    toolsets.save_toolsets(panel.groups)
+    panel.rebuild(keep=toolsets.MY_TOOLS)
 
-    panel.list.setCurrentRow(len(group.entries) - 2)
-    assert not panel.entry_buttons["mode"].isEnabled()
-    panel.list.setCurrentRow(len(group.entries) - 1)
-    assert panel.entry_buttons["mode"].isEnabled()
-    del group.entries[-2:]
+    panel.select_entry(toolsets.MY_TOOLS, len(group.entries) - 2)
+    assert not _menu_entry(panel.build_menu(),
+                           "Draw again with its properties").isEnabled()
+    panel.select_entry(toolsets.MY_TOOLS, len(group.entries) - 1)
+    assert _menu_entry(panel.build_menu(),
+                       "Draw again with its properties").isEnabled()
 
 
 def test_tools_can_be_dragged_into_the_order_you_want(window):
     from calcforge.ui import toolsets
 
     panel = window.toolsets_panel
+    panel.select_set(toolsets.MY_TOOLS)
     group = panel.current_set()
-    kept = list(group.entries)
     group.entries[:] = [toolsets.ToolEntry("First", {"type": "rect"}),
                         toolsets.ToolEntry("Second", {"type": "rect"}),
                         toolsets.ToolEntry("Third", {"type": "rect"})]
-    panel.rebuild_entries()
+    toolsets.save_toolsets(panel.groups)
+    panel.rebuild(keep=toolsets.MY_TOOLS)
 
-    panel._rows_moved(None, 2, 2, None, 0)        # drag the third to the top
+    header = panel.tree.indexFromItem(panel.tree.topLevelItem(0))
+    panel._rows_moved(header, 2, 2, header, 0)     # drag the third to the top
     assert [entry.label for entry in panel.current_set().entries] == \
         ["Third", "First", "Second"]
-    group = panel.current_set()
-    group.entries[:] = kept
-    toolsets.save_toolsets(panel.groups)
 
 
 def test_a_click_placed_tool_shows_itself_before_it_lands(window):
@@ -5039,8 +5055,12 @@ def test_importing_a_bluebeam_tool_set_fills_the_tool_chest(window):
     labels = [entry.label for entry in group.entries]
     assert "Timber Post 200x200" in labels
     # And the panel is showing it, so it can be used straight away.
-    assert window.toolsets_panel.sets.currentText() == "Structures - Timber"
-    assert window.toolsets_panel.list.count() == len(group.entries)
+    tree = window.toolsets_panel.tree
+    header = [tree.topLevelItem(i) for i in range(tree.topLevelItemCount())
+              if tree.topLevelItem(i).text(0).startswith("Structures - Timber")]
+    assert len(header) == 1
+    assert header[0].childCount() == len(group.entries)
+    assert header[0].isExpanded()
 
 
 def test_an_imported_tool_can_be_put_on_the_page(window):
@@ -5048,9 +5068,10 @@ def test_an_imported_tool_can_be_put_on_the_page(window):
 
     window.import_toolset(_btx("Structures - Timber.btx"))
     panel = window.toolsets_panel
-    row = [i for i in range(panel.list.count())
-           if panel.list.item(i).text().startswith("Timber Post")][0]
-    panel.list.setCurrentRow(row)
+    group = next(g for g in panel.groups if g.name == "Structures - Timber")
+    row = [i for i, e in enumerate(group.entries)
+           if e.label.startswith("Timber Post")][0]
+    panel.select_entry("Structures - Timber", row)
     before = len(markups(window))
 
     hover(window.view, 200, 300)
@@ -5069,7 +5090,7 @@ def test_an_imported_steel_section_draws_as_a_drawing(window):
 
     window.import_toolset(_btx("Structural Steel UC Sections - 1-10 @ A1.btx"))
     panel = window.toolsets_panel
-    panel.list.setCurrentRow(0)
+    panel.select_entry("Structural Steel UC Sections - 1:10 @ A1", 0)
     hover(window.view, 250, 300)
     panel.use_selected()
     click(window.view, 250, 300)
@@ -5099,3 +5120,121 @@ def test_a_file_that_is_not_a_tool_set_is_refused_politely(window, tmp_path, mon
     before = len(toolsets.load_toolsets())
     assert window.import_toolset(str(path)) is False
     assert len(toolsets.load_toolsets()) == before
+
+
+# ---------------------------------------------------------------------------
+# The tool chest: every set showing, and everything on the right-click menu
+# ---------------------------------------------------------------------------
+
+def test_every_tool_set_is_showing_at_once(window):
+    from calcforge.ui import toolsets
+
+    window.import_toolset(_btx("Structures - Timber.btx"))
+    window.import_toolset(_btx("Structures - Welds.btx"))
+    tree = window.toolsets_panel.tree
+
+    headings = [tree.topLevelItem(i).text(0) for i in range(tree.topLevelItemCount())]
+    assert any(h.startswith(toolsets.MY_TOOLS) for h in headings)
+    assert any(h.startswith("Structures - Timber") for h in headings)
+    assert any(h.startswith("Strucutres - Welds") or h.startswith("Structures - Welds")
+               for h in headings)
+    # And each heading says how many are in it, so a set can be judged rolled up.
+    assert all("(" in heading for heading in headings)
+
+
+def test_a_tool_set_can_be_rolled_up_and_stays_rolled_up(window):
+    window.import_toolset(_btx("Structures - Timber.btx"))
+    panel = window.toolsets_panel
+    header = [panel.tree.topLevelItem(i) for i in range(panel.tree.topLevelItemCount())
+              if panel.tree.topLevelItem(i).text(0).startswith("Structures - Timber")][0]
+    assert header.isExpanded()
+
+    header.setExpanded(False)
+    panel.rebuild()
+    again = [panel.tree.topLevelItem(i) for i in range(panel.tree.topLevelItemCount())
+             if panel.tree.topLevelItem(i).text(0).startswith("Structures - Timber")][0]
+    assert not again.isExpanded()
+
+
+def test_clicking_a_tool_picks_it_up(window):
+    from calcforge.items.shapes import RectItem
+
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 160)
+    _kept(window, markups(window)[0])
+    panel = window.toolsets_panel
+    row = panel.tree.topLevelItem(0).child(0)
+
+    window.select_tool("select")
+    panel.tree.setCurrentItem(row)
+    panel._clicked(row, 0)
+    assert window.view._pending_stamp is not None    # it is on the pointer
+
+    hover(window.view, 220, 480)
+    click(window.view, 220, 480)
+    assert any(isinstance(i, RectItem) and i.pos().y() > 400
+               for i in markups(window))
+
+
+def test_clicking_a_set_heading_picks_nothing_up(window):
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 160)
+    _kept(window, markups(window)[0])
+    panel = window.toolsets_panel
+    header = panel.tree.topLevelItem(0)
+
+    window.select_tool("select")
+    panel.tree.setCurrentItem(header)
+    panel._clicked(header, 0)
+    assert window.view._pending_stamp is None
+
+
+def test_the_tool_chests_right_click_menu_carries_everything(window):
+    from calcforge.ui import toolsets
+
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 160)
+    _kept(window, markups(window)[0])
+    panel = window.toolsets_panel
+    panel.select_entry(toolsets.MY_TOOLS, 0)
+
+    labels = _menu_labels(panel.build_menu())
+    for wanted in ("Use", "Draw again with its properties", "Rename…", "Remove",
+                   "Rename this set…", "Delete this set", "New tool set…",
+                   "Import a tool set…"):
+        assert wanted in labels, f"{wanted!r} missing from {labels}"
+
+
+def test_the_menu_on_bare_panel_still_offers_a_new_set(window):
+    panel = window.toolsets_panel
+    panel.tree.setCurrentItem(None)
+    labels = _menu_labels(panel.build_menu())
+    assert "New tool set…" in labels
+    assert "Import a tool set…" in labels
+    assert "Use" not in labels          # nothing is picked out to use
+
+
+def test_nothing_is_placed_behind_a_dashed_box(window):
+    """The drawing under the pointer is the preview; a box round it is noise."""
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QImage, QPainter
+
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 160)
+    entry = _kept(window, markups(window)[0])
+    window.select_tool("select")
+    window.use_tool_entry(entry)
+    hover(window.view, 250, 480)
+
+    image = QImage(200, 200, QImage.Format_ARGB32)
+    image.fill(0)
+    painter = QPainter(image)
+    painter.translate(-150, -380)
+    window.view.drawForeground(painter, QRectF(150, 380, 200, 200))
+    painter.end()
+    # The preview draws the markup itself; nothing draws the pale blue dashes
+    # the placement box used to be outlined in.
+    dashes = QColor(11, 107, 203).rgb()
+    hits = sum(1 for x in range(image.width()) for y in range(image.height())
+               if (image.pixel(x, y) & 0x00FFFFFF) == (dashes & 0x00FFFFFF))
+    assert hits == 0

@@ -292,11 +292,17 @@ def do_toolset():
         do_click()
     elif what < 0.85:
         panel = win.toolsets_panel
-        if panel.list.count():
-            panel.list.setCurrentRow(rng.randrange(panel.list.count()))
+        tree = panel.tree
+        headers = [tree.topLevelItem(i) for i in range(tree.topLevelItemCount())]
+        headers = [h for h in headers if h.childCount()]
+        if headers:
+            header = rng.choice(headers)
+            header.setExpanded(rng.random() < 0.8)
+            row = header.child(rng.randrange(header.childCount()))
+            tree.setCurrentItem(row)
             rng.choice([panel.toggle_mode, panel.use_selected,
-                        lambda: panel.move_entry(rng.choice([-1, 1])),
-                        panel.remove_entry])()
+                        panel.remove_entry, panel.refresh_buttons,
+                        lambda: panel.build_menu()])()
     else:
         view.clear_pending_tool()
 

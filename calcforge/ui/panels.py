@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox,
                                QDoubleSpinBox, QInputDialog, QMessageBox,
                                QFontComboBox, QFormLayout, QGroupBox, QHBoxLayout,
                                QHeaderView, QLabel, QLineEdit, QListWidget,
-                               QListWidgetItem, QPlainTextEdit, QPushButton,
+                               QListWidgetItem, QMenu, QPlainTextEdit, QPushButton,
                                QScrollArea, QSpinBox, QTableWidget, QTableWidgetItem,
                                QToolButton, QTreeWidget, QTreeWidgetItem,
                                QVBoxLayout, QWidget)
@@ -531,160 +531,232 @@ class BookmarksPanel(QWidget):
 
 
 class ToolSetsPanel(QWidget):
-    """Bluebeam's tool chest: things you have made, kept to use again.
+    """Bluebeam's tool chest: every set you have, all showing at once.
 
-    Each entry can be put down two ways. **As a copy** it comes back exactly as
-    it was added, contents and all — a text box with its words in it, a
-    calculation with its lines. **As properties** it is a tool: draw a new one
-    where and how big you like, wearing the stored colours, thickness and font.
+    Bluebeam does not make you choose a set before you can see what is in it —
+    the sets stack down the panel, each one named, each one able to be rolled
+    up when it is in the way. That is what this is. Steel sections, weld
+    symbols and review stamps can all be on screen together, and the one you
+    want is the one you can see.
+
+    Clicking a tool picks it up: it goes on the pointer and the next click on
+    the page puts it down. Everything else — renaming, removing, starting a
+    set, importing one, and whether a tool comes back as a copy or as a set of
+    properties to draw again with — is on the right-click menu, where it is
+    out of the way until it is wanted.
     """
+
+    SET_ROLE = Qt.UserRole + 1          # which set a row belongs to
+    ENTRY_ROLE = Qt.UserRole + 2        # which tool within it, or -1 for the set
 
     def __init__(self, window):
         super().__init__()
         self.window = window
+        self.groups: list = []
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
 
-        top = QHBoxLayout()
-        self.sets = QComboBox()
-        self.sets.setToolTip("Which set of tools to show")
-        self.sets.currentIndexChanged.connect(lambda _index: self.rebuild_entries())
-        top.addWidget(self.sets, 1)
-        for label, tip, slot in (("New…", "Start another set", self.new_set),
-                                 ("Rename…", "Rename this set", self.rename_set),
-                                 ("Delete", "Delete this set", self.delete_set)):
-            button = QToolButton()
-            button.setText(label)
-            button.setToolTip(tip)
-            button.clicked.connect(slot)
-            top.addWidget(button)
-        layout.addLayout(top)
-
-        # The list shows the tools themselves, drawn small, rather than a line
-        # of words about them: what you are looking for is what it looks like.
-        self.list = QListWidget()
-        self.list.setIconSize(QSize(48, 34))
-        self.list.itemDoubleClicked.connect(lambda _entry: self.use_selected())
-        self.list.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.list.setDragDropMode(QAbstractItemView.InternalMove)
-        self.list.setDefaultDropAction(Qt.MoveAction)
-        self.list.model().rowsMoved.connect(self._rows_moved)
-        layout.addWidget(self.list, 1)
-
-        buttons = QHBoxLayout()
-        self.entry_buttons = {}
-        for key, label, tip, slot in (
-                ("use", "Use", "Put this one down on the page", self.use_selected),
-                ("add", "Add selection", "Keep what is selected on the page",
-                 self.add_selection),
-                ("mode", "Draw again", "Draw a new one wearing this one's "
-                 "colours and thickness, rather than putting a copy back",
-                 self.toggle_mode),
-                ("rename", "Rename…", "Rename this tool", self.rename_entry),
-                ("remove", "Remove", "Take this tool out of the set",
-                 self.remove_entry)):
-            button = QPushButton(label)
-            button.setToolTip(tip)
-            button.clicked.connect(slot)
-            buttons.addWidget(button)
-            self.entry_buttons[key] = button
-        self.entry_buttons["mode"].setCheckable(True)
-        buttons.addStretch(1)
-        layout.addLayout(buttons)
+        self.tree = QTreeWidget()
+        self.tree.setHeaderHidden(True)
+        self.tree.setIconSize(QSize(48, 34))
+        self.tree.setRootIsDecorated(True)
+        self.tree.setUniformRowHeights(False)
+        self.tree.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.tree.setDragDropMode(QAbstractItemView.InternalMove)
+        self.tree.setDefaultDropAction(Qt.MoveAction)
+        self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._menu_at)
+        self.tree.itemClicked.connect(self._clicked)
+        self.tree.itemDoubleClicked.connect(lambda *_: self.use_selected())
+        self.tree.currentItemChanged.connect(lambda *_: self.refresh_buttons())
+        self.tree.model().rowsMoved.connect(self._rows_moved)
+        layout.addWidget(self.tree, 1)
 
         self.hint = QLabel("")
         self.hint.setWordWrap(True)
         self.hint.setStyleSheet("color:#6b7280;")
         layout.addWidget(self.hint)
 
-        self.list.currentRowChanged.connect(lambda _row: self.refresh_buttons())
+        # Kept so the rest of the window can ask about the state of a tool
+        # without knowing how the panel is laid out.
+        self.entry_buttons: dict = {}
         self.rebuild()
 
-    # -- the sets ----------------------------------------------------------
+    # -- building ----------------------------------------------------------
     def rebuild(self, keep: str = "") -> None:
+        """Read every set back and redraw the whole chest."""
         from . import toolsets
 
+        wanted = keep or self.current_set_name()
+        rolled = self.rolled_up()
         self.groups = toolsets.load_toolsets()
-        wanted = keep or self.sets.currentText()
-        self.sets.blockSignals(True)
-        self.sets.clear()
-        self.sets.addItems([group.name for group in self.groups])
-        index = self.sets.findText(wanted)
-        self.sets.setCurrentIndex(index if index >= 0 else 0)
-        self.sets.blockSignals(False)
-        self.rebuild_entries()
+        self.tree.blockSignals(True)
+        self.tree.clear()
+        for group in self.groups:
+            header = QTreeWidgetItem([f"{group.name}  ({len(group.entries)})"])
+            header.setData(0, self.SET_ROLE, group.name)
+            header.setData(0, self.ENTRY_ROLE, -1)
+            header.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            font = header.font(0)
+            font.setBold(True)
+            header.setFont(0, font)
+            self.tree.addTopLevelItem(header)
+            self._fill(header, group)
+            header.setExpanded(group.name not in rolled)
+        self.tree.blockSignals(False)
+        if wanted:
+            self.show_set(wanted)
+        self.refresh_buttons()
 
-    def current_set(self):
-        index = self.sets.currentIndex()
-        return self.groups[index] if 0 <= index < len(self.groups) else None
-
-    def rebuild_entries(self) -> None:
+    def _fill(self, header, group) -> None:
         from . import toolsets
 
-        group = self.current_set()
-        self.list.clear()
-        if group is None:
-            return
         numbered = group.name == toolsets.MY_TOOLS
         for position, entry in enumerate(group.entries):
             prefix = f"{position + 1}.  " if numbered and position < 9 else ""
-            row = QListWidgetItem(f"{prefix}{entry.label}")
-            row.setIcon(QIcon(entry_thumbnail(entry)))
-            row.setToolTip(
-                "Put back exactly what was added" if entry.mode == toolsets.COPY
-                else "Draw a new one with these properties")
-            self.list.addItem(row)
-        self.hint.setText(
-            "The first nine are on the number keys · drag to reorder" if numbered
-            else "Anything can go in: a markup, a calculation, a table · "
-                 "drag to reorder")
-        self.refresh_buttons()
+            row = QTreeWidgetItem([f"{prefix}{entry.label}"])
+            row.setIcon(0, QIcon(entry_thumbnail(entry)))
+            row.setData(0, self.SET_ROLE, group.name)
+            row.setData(0, self.ENTRY_ROLE, position)
+            row.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsDragEnabled)
+            row.setToolTip(0,
+                           "Put back exactly what was added" if entry.mode == toolsets.COPY
+                           else "Draw a new one with these properties")
+            header.addChild(row)
+
+    def rebuild_entries(self) -> None:
+        """Redraw the rows of the set that is open, keeping where you were."""
+        name = self.current_set_name()
+        self.rebuild(keep=name)
+
+    def rolled_up(self) -> set:
+        """The sets that are currently collapsed, so a rebuild keeps them so."""
+        closed = set()
+        for index in range(self.tree.topLevelItemCount()):
+            header = self.tree.topLevelItem(index)
+            if not header.isExpanded():
+                closed.add(header.data(0, self.SET_ROLE))
+        return closed
+
+    # -- what is selected --------------------------------------------------
+    def current_set_name(self) -> str:
+        row = self.tree.currentItem()
+        return row.data(0, self.SET_ROLE) if row is not None else ""
+
+    def current_set(self):
+        name = self.current_set_name()
+        return next((g for g in self.groups if g.name == name), None)
+
+    def current_entry(self):
+        row = self.tree.currentItem()
+        group = self.current_set()
+        if row is None or group is None:
+            return None
+        index = row.data(0, self.ENTRY_ROLE)
+        if index is None or index < 0 or index >= len(group.entries):
+            return None
+        return group.entries[index]
+
+    def header_for(self, name: str):
+        for index in range(self.tree.topLevelItemCount()):
+            header = self.tree.topLevelItem(index)
+            if header.data(0, self.SET_ROLE) == name:
+                return header
+        return None
+
+    def show_set(self, name: str) -> None:
+        """Put the cursor back on a set, leaving it rolled up if it was."""
+        header = self.header_for(name)
+        if header is None:
+            return
+        if self.tree.currentItem() is None:
+            self.tree.setCurrentItem(header)
+        self.tree.scrollToItem(header)
+
+    def select_set(self, name: str) -> None:
+        """Open a set and put the cursor on it — for one just made or brought in."""
+        header = self.header_for(name)
+        if header is None:
+            return
+        header.setExpanded(True)
+        self.tree.setCurrentItem(header)
+        self.tree.scrollToItem(header)
+
+    def select_entry(self, set_name: str, index: int) -> None:
+        header = self.header_for(set_name)
+        if header is not None and 0 <= index < header.childCount():
+            header.setExpanded(True)
+            self.tree.setCurrentItem(header.child(index))
 
     def refresh_buttons(self) -> None:
-        """Only offer "Draw again" where drawing again means anything.
-
-        A calculation, a table, a graph or an image is nothing without what is
-        in it, and a group is several things at once — for those there is only
-        the copy, so the button is greyed out rather than left there to be
-        pressed and do something surprising.
-        """
+        """Say what clicking would do, in the line under the chest."""
         from . import toolsets
 
         entry = self.current_entry()
-        mode = self.entry_buttons["mode"]
-        allowed = entry is not None and toolsets.can_be_properties(entry.payload)
-        mode.setEnabled(allowed)
-        mode.blockSignals(True)
-        mode.setChecked(bool(entry is not None and entry.mode == toolsets.PROPERTIES))
-        mode.blockSignals(False)
-        if entry is not None and not allowed:
-            mode.setToolTip("This one only makes sense put back as it was")
-        else:
-            mode.setToolTip("Draw a new one wearing this one's colours and "
-                            "thickness, rather than putting a copy back")
-        for key in ("use", "rename", "remove"):
-            self.entry_buttons[key].setEnabled(entry is not None)
-
-    def _rows_moved(self, _parent, start, _end, _dest, row) -> None:
-        """A tool dragged up or down the list changes the order it is kept in."""
         group = self.current_set()
-        if group is None or not (0 <= start < len(group.entries)):
+        if entry is None:
+            self.hint.setText(
+                "Right-click for a new set, or to bring one in from Bluebeam"
+                if group is None else
+                "Click a tool to pick it up · right-click for more")
             return
-        target = row - 1 if row > start else row
-        entry = group.entries.pop(start)
-        group.entries.insert(max(0, min(target, len(group.entries))), entry)
+        numbered = group is not None and group.name == toolsets.MY_TOOLS
+        how = ("comes back exactly as it was" if entry.mode == toolsets.COPY
+               else "draws a new one with its properties")
+        extra = " · the first nine are on the number keys" if numbered else ""
+        self.hint.setText(f"“{entry.label}” {how}{extra}")
+
+    # -- using a tool ------------------------------------------------------
+    def _clicked(self, row, _column) -> None:
+        """One click picks the tool up, so the next click on the page puts it down."""
+        if row is None or row.data(0, self.ENTRY_ROLE) in (None, -1):
+            return
+        self.use_selected()
+
+    def use_selected(self) -> None:
+        entry = self.current_entry()
+        if entry is not None:
+            self.window.use_tool_entry(entry)
+
+    def add_selection(self) -> None:
+        self.window.add_to_toolset(None, into=self.current_set_name())
+
+    def toggle_mode(self) -> None:
         from . import toolsets
-        toolsets.save_toolsets(self.groups)
-        self.rebuild_entries()
-        self.list.setCurrentRow(target)
 
-    def _store(self) -> None:
-        from . import toolsets
+        entry = self.current_entry()
+        group = self.current_set()
+        if entry is None or not toolsets.can_be_properties(entry.payload):
+            return
+        entry.mode = (toolsets.PROPERTIES if entry.mode == toolsets.COPY
+                      else toolsets.COPY)
+        index = group.entries.index(entry)
+        self._store()
+        self.select_entry(group.name, index)
 
-        toolsets.save_toolsets(self.groups)
-        self.rebuild_entries()
+    def rename_entry(self) -> None:
+        entry = self.current_entry()
+        group = self.current_set()
+        if entry is None:
+            return
+        name, accepted = QInputDialog.getText(self, "Rename tool", "Name",
+                                              text=entry.label)
+        if accepted and name.strip():
+            index = group.entries.index(entry)
+            entry.label = name.strip()
+            self._store()
+            self.select_entry(group.name, index)
 
+    def remove_entry(self) -> None:
+        entry = self.current_entry()
+        group = self.current_set()
+        if entry is None or group is None:
+            return
+        group.entries.remove(entry)
+        self._store()
+
+    # -- the sets ----------------------------------------------------------
     def new_set(self) -> None:
         from . import toolsets
 
@@ -699,6 +771,7 @@ class ToolSetsPanel(QWidget):
         self.groups.append(toolsets.ToolSet(name))
         toolsets.save_toolsets(self.groups)
         self.rebuild(keep=name)
+        self.select_set(name)
 
     def rename_set(self) -> None:
         from . import toolsets
@@ -729,52 +802,95 @@ class ToolSetsPanel(QWidget):
         toolsets.save_toolsets(self.groups)
         self.rebuild()
 
-    # -- the tools ---------------------------------------------------------
-    def current_entry(self):
-        group = self.current_set()
-        row = self.list.currentRow()
-        if group is None or not (0 <= row < len(group.entries)):
-            return None
-        return group.entries[row]
+    def import_set(self) -> None:
+        self.window.import_toolset()
 
-    def add_selection(self) -> None:
-        self.window.add_to_toolset(None, into=self.sets.currentText())
+    # -- the right-click menu ----------------------------------------------
+    def _menu_at(self, point) -> None:
+        row = self.tree.itemAt(point)
+        if row is not None:
+            self.tree.setCurrentItem(row)
+        self.build_menu().exec(self.tree.viewport().mapToGlobal(point))
 
-    def use_selected(self) -> None:
-        entry = self.current_entry()
-        if entry is not None:
-            self.window.use_tool_entry(entry)
-
-    def toggle_mode(self) -> None:
+    def build_menu(self) -> QMenu:
+        """Everything that used to be a row of buttons."""
         from . import toolsets
 
+        menu = QMenu(self)
         entry = self.current_entry()
-        if entry is None or not toolsets.can_be_properties(entry.payload):
-            return
-        entry.mode = (toolsets.PROPERTIES if entry.mode == toolsets.COPY
-                      else toolsets.COPY)
-        row = self.list.currentRow()
-        self._store()
-        self.list.setCurrentRow(row)
-
-    def rename_entry(self) -> None:
-        entry = self.current_entry()
-        if entry is None:
-            return
-        name, accepted = QInputDialog.getText(self, "Rename tool", "Name",
-                                              text=entry.label)
-        if accepted and name.strip():
-            entry.label = name.strip()
-            self._store()
-
-    def remove_entry(self) -> None:
         group = self.current_set()
-        row = self.list.currentRow()
-        if group is None or not (0 <= row < len(group.entries)):
-            return
-        del group.entries[row]
-        self._store()
+        if entry is not None:
+            menu.addAction("Use", self.use_selected)
+            draw = menu.addAction("Draw again with its properties",
+                                  self.toggle_mode)
+            draw.setCheckable(True)
+            draw.setChecked(entry.mode == toolsets.PROPERTIES)
+            draw.setEnabled(toolsets.can_be_properties(entry.payload))
+            if not draw.isEnabled():
+                draw.setToolTip("This one only makes sense put back as it was")
+            menu.addAction("Rename…", self.rename_entry)
+            menu.addAction("Remove", self.remove_entry)
+            menu.addSeparator()
+        if group is not None:
+            menu.addAction(f"Add what is selected to “{group.name}”",
+                           self.add_selection)
+            menu.addAction("Rename this set…", self.rename_set)
+            menu.addAction("Delete this set", self.delete_set)
+            menu.addSeparator()
+        menu.addAction("New tool set…", self.new_set)
+        menu.addAction("Import a tool set…", self.import_set)
+        return menu
 
+    # -- order -------------------------------------------------------------
+    def _rows_moved(self, parent, start, _end, destination, row) -> None:
+        """A tool dragged up or down changes the order its set keeps it in."""
+        from . import toolsets
+
+        source = self.tree.itemFromIndex(parent) if parent.isValid() else None
+        target = self.tree.itemFromIndex(destination) if destination.isValid() else None
+        if source is None or target is None or source is not target:
+            # Dragged from one set into another: rebuild from what the tree
+            # now shows rather than trying to work out what moved where.
+            self._reorder_from_tree()
+            return
+        group = next((g for g in self.groups
+                      if g.name == source.data(0, self.SET_ROLE)), None)
+        if group is None or not (0 <= start < len(group.entries)):
+            return
+        landing = row - 1 if row > start else row
+        entry = group.entries.pop(start)
+        group.entries.insert(max(0, min(landing, len(group.entries))), entry)
+        toolsets.save_toolsets(self.groups)
+        self.rebuild()
+        self.select_entry(group.name, landing)
+
+    def _reorder_from_tree(self) -> None:
+        """Take the order and the membership straight off the tree."""
+        from . import toolsets
+
+        by_name = {group.name: group for group in self.groups}
+        old = {group.name: list(group.entries) for group in self.groups}
+        for top in range(self.tree.topLevelItemCount()):
+            header = self.tree.topLevelItem(top)
+            group = by_name.get(header.data(0, self.SET_ROLE))
+            if group is None:
+                continue
+            entries = []
+            for index in range(header.childCount()):
+                child = header.child(index)
+                came_from = old.get(child.data(0, self.SET_ROLE), [])
+                position = child.data(0, self.ENTRY_ROLE)
+                if position is not None and 0 <= position < len(came_from):
+                    entries.append(came_from[position])
+            group.entries = entries
+        toolsets.save_toolsets(self.groups)
+        self.rebuild()
+
+    def _store(self) -> None:
+        from . import toolsets
+
+        toolsets.save_toolsets(self.groups)
+        self.rebuild()
 
 
 def entry_thumbnail(entry, width: int = 48, height: int = 34) -> QPixmap:
