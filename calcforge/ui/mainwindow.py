@@ -2341,6 +2341,13 @@ class MainWindow(QMainWindow):
         self.apply_layers()
         self.status_hint.setText(f"Moved {len(items)} markup(s) to “{name}”")
 
+    def replace_image(self, item) -> None:
+        """Put a different picture in an image already on the page."""
+        self.view.begin_snapshot(self.view.involved_frames(item))
+        if self.load_image_into(item):
+            self.view.commit_snapshot("Replace image")
+            self.refresh_selection()
+
     def load_image_into(self, item: ImageItem) -> bool:
         path, _ = QFileDialog.getOpenFileName(
             self, "Insert image", "",

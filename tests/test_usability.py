@@ -3744,3 +3744,118 @@ def test_a_name_that_cannot_be_used_is_refused(window):
     window.rename_table(table, "2 bolts")
     assert table.table_name == ""
     assert "cannot be used" in window.status_hint.text()
+
+
+# ---------------------------------------------------------------------------
+# Changing things after they are drawn
+# ---------------------------------------------------------------------------
+
+def _panel_groups(window, item):
+    from PySide6.QtWidgets import QGroupBox
+
+    window.select_tool("select")
+    window.view.scene().clearSelection()
+    item.setSelected(True)
+    window.refresh_selection()
+    return [g.title() for g in window.properties_panel.findChildren(QGroupBox)]
+
+
+def test_a_contents_block_can_be_changed_afterwards(window):
+    from PySide6.QtWidgets import QCheckBox, QLineEdit
+    from calcforge.items.contents import ContentsItem
+
+    window.select_tool("contents")
+    drag(window.view, 60, 500, 360, 640)
+    block = next(i for i in markups(window) if isinstance(i, ContentsItem))
+    assert "Contents" in _panel_groups(window, block)
+
+    heading = [w for w in window.properties_panel.findChildren(QLineEdit)
+               if w.placeholderText() == "Contents"][0]
+    heading.setText("On these pages")
+    heading.textEdited.emit("On these pages")
+    assert block.title == "On these pages"
+
+    dots = [w for w in window.properties_panel.findChildren(QCheckBox)
+            if w.text() == "Leader dots"][0]
+    dots.setChecked(False)
+    assert not block.leader_dots
+
+
+def test_a_note_can_be_rewritten_in_the_panel(window):
+    from PySide6.QtWidgets import QPlainTextEdit
+    from calcforge.items.text import NoteItem
+
+    window.select_tool("note")
+    click(window.view, 200, 200)
+    note = next(i for i in markups(window) if isinstance(i, NoteItem))
+    assert "Note" in _panel_groups(window, note)
+    body = [w for w in window.properties_panel.findChildren(QPlainTextEdit)
+            if w.placeholderText() == "What this note says"][0]
+    body.setPlainText("check the bearing")
+    assert note.comment == "check the bearing"
+
+
+def test_a_measurement_says_what_you_type_in_the_panel(window):
+    from PySide6.QtWidgets import QLineEdit
+
+    window.select_tool("measure_length")
+    drag(window.view, 100, 200, 320, 200)
+    measure = markups(window)[0]
+    assert "Measurement" in _panel_groups(window, measure)
+
+    says = [w for w in window.properties_panel.findChildren(QLineEdit)
+            if w.toolTip().startswith("What this says")][0]
+    says.setText("3600 c/c")
+    says.editingFinished.emit()
+    assert measure.custom_label == "3600 c/c"
+    assert measure.value_text == "3600 c/c"
+
+
+def test_an_image_can_be_swapped_for_another(window, tmp_path, monkeypatch):
+    from PySide6.QtGui import QImage
+    from PySide6.QtWidgets import QFileDialog
+    from calcforge.items.media import ImageItem
+
+    first = str(tmp_path / "one.png")
+    QImage(60, 40, QImage.Format_ARGB32).save(first)
+    second = str(tmp_path / "two.png")
+    QImage(80, 20, QImage.Format_ARGB32).save(second)
+
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (first, ""))
+    window.select_tool("image")
+    drag(window.view, 100, 100, 300, 240)
+    image = next(i for i in markups(window) if isinstance(i, ImageItem))
+    original = image.asset_key
+    assert "Image" in _panel_groups(window, image)
+
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (second, ""))
+    window.replace_image(image)
+    assert image.asset_key != original
+    window.undo_stack.undo()
+    assert markups(window)[0].asset_key == original
+
+
+def test_every_markup_offers_its_own_settings(window):
+    """Each kind of markup has a panel section about what makes it that kind."""
+    expected = {
+        "rect": "Size", "ellipse": "Size", "cloud": "Cloud", "text": "Text",
+        "callout": "Text", "stamp": "Stamp", "table": "Table", "plot": "Plot",
+        "measure_length": "Measurement", "count": "Count",
+    }
+    for key, group in expected.items():
+        window.new_document()
+        window.select_tool(key)
+        if key == "count":
+            click(window.view, 200, 200)
+        else:
+            if key == "callout":
+                # A callout points at something first, then gets its box.
+                click(window.view, 120, 320)
+            drag(window.view, 150, 150, 380, 260)
+        if window.view.editing_item() is not None:
+            window.view.editing_item().set_text("words")
+            window.view.end_item_edit()
+        window.view.deactivate_table()
+        window.view.close_label_editor(commit=False)
+        item = markups(window)[0]
+        assert group in _panel_groups(window, item), f"{key} has no {group} section"

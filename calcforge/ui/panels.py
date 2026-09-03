@@ -17,7 +17,9 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox,
 
 from ..core.units import format_quantity
 from ..items.base import ARROW_HEADS, LINE_STYLES, MarkupItem
+from ..items.contents import ContentsItem
 from ..items.mathitem import MathItem
+from ..items.media import ImageItem
 from ..items.plotitem import PlotItem, Series
 from ..items.measure import CountItem, MeasureItem
 from ..items.shapes import PolyItem, RectItem
@@ -1025,6 +1027,12 @@ class PropertiesPanel(QScrollArea):
                 self._add_count(first)
             elif isinstance(first, StampItem):
                 self._add_stamp(first)
+            elif isinstance(first, ContentsItem):
+                self._add_contents(first)
+            elif isinstance(first, NoteItem):
+                self._add_note(first)
+            elif isinstance(first, ImageItem):
+                self._add_image(first)
             elif isinstance(first, RectItem) and first.kind in ("rect", "ellipse"):
                 self._add_size(first)
             elif isinstance(first, RectItem) and first.kind == "cloud":
@@ -1218,6 +1226,64 @@ class PropertiesPanel(QScrollArea):
                            i.refresh(page=self.window.current_page())),
                 "Show size"))
         form.addRow("", show)
+
+    def _add_contents(self, item) -> None:
+        form = self._group("Contents")
+        heading = QLineEdit(item.title)
+        heading.setPlaceholderText("Contents")
+        heading.textEdited.connect(
+            lambda text: self._apply(lambda i: setattr(i, "title", text), "Heading"))
+        form.addRow("Heading", heading)
+
+        for label, attribute in (("Page numbers", "show_page_numbers"),
+                                 ("Leader dots", "leader_dots")):
+            box = QCheckBox(label)
+            box.setChecked(getattr(item, attribute))
+            box.toggled.connect(
+                lambda on, a=attribute: self._apply(
+                    lambda i: setattr(i, a, on), "Contents"))
+            form.addRow("", box)
+
+        height = QDoubleSpinBox()
+        height.setRange(8.0, 60.0)
+        height.setValue(item.row_height)
+        height.setSuffix(" pt")
+        height.valueChanged.connect(
+            lambda value: self._apply(
+                lambda i: setattr(i, "row_height", value), "Contents"))
+        form.addRow("Line spacing", height)
+
+        note = QLabel(f"{len(item.entries())} bookmark(s) — add them from the "
+                      "bookmarks panel")
+        note.setWordWrap(True)
+        note.setStyleSheet("color:#6b7280;")
+        form.addRow(note)
+
+    def _add_note(self, item) -> None:
+        """A note is a pin on the page; its words are only in this panel."""
+        form = self._group("Note")
+        body = QPlainTextEdit(item.comment)
+        body.setFixedHeight(70)
+        body.setPlaceholderText("What this note says")
+        body.textChanged.connect(
+            lambda: self._apply(lambda i: setattr(i, "comment", body.toPlainText()),
+                                "Note text"))
+        form.addRow(body)
+
+    def _add_image(self, item) -> None:
+        form = self._group("Image")
+        replace = QPushButton("Replace image…")
+        replace.clicked.connect(lambda: self.window.replace_image(item))
+        form.addRow("", replace)
+        keep = QCheckBox("Keep its proportions")
+        keep.setChecked(item.keep_aspect)
+        keep.toggled.connect(
+            lambda on: self._apply(lambda i: setattr(i, "keep_aspect", on),
+                                   "Image"))
+        form.addRow("", keep)
+        colours = QPushButton("Change colours…")
+        colours.clicked.connect(lambda: self.window.recolour_item(item))
+        form.addRow("", colours)
 
     def _add_cloud(self, first) -> None:
         form = self._group("Cloud")
@@ -1422,6 +1488,25 @@ class PropertiesPanel(QScrollArea):
                     lambda i: (setattr(i, "depth_text", text),
                                i.refresh(page=self.window.current_page())), "Depth"))
             form.addRow("Depth", depth)
+
+        words = QLineEdit(item.custom_label)
+        words.setPlaceholderText(item.measured_text or "the measured value")
+        words.setToolTip("What this says on the drawing. Leave it empty and it "
+                         "shows what it measured.")
+        words.editingFinished.connect(
+            lambda: self._apply(
+                lambda i: (setattr(i, "custom_label", words.text().strip()),
+                           i.refresh(page=self.window.current_page())),
+                "Measurement text"))
+        form.addRow("Says", words)
+
+        inline = QCheckBox("Text in line with it")
+        inline.setChecked(item.label_angle is None)
+        inline.toggled.connect(
+            lambda on: self._apply(
+                lambda i: setattr(i, "label_angle", None if on else 0.0),
+                "Text angle"))
+        form.addRow("", inline)
 
         label = QCheckBox("Show value label")
         label.setChecked(item.show_label)
