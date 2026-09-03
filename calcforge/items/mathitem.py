@@ -125,6 +125,28 @@ def _blocks_keep_their_names() -> bool:
         return False
 
 
+def _parse_for_layout(statement) -> None:
+    """Give a freshly typed line the tree its layout needs, without running it.
+
+    A line is only parsed here, never evaluated: working a half-finished line
+    out against the document would define names that are still being spelt.
+    But the tree is what the typesetter reads, and without it the line falls
+    back to the source text — which is why a calculation used to turn into
+    ``b*d^2/6`` the moment the caret entered it and back into a fraction the
+    moment it left. There is one view now, and this is what keeps it.
+
+    A line that is genuinely half-typed — ``b*d^`` — cannot be parsed, and
+    that one line shows what has been typed so far until it can be.
+    """
+    if statement.tree is not None or not statement.expression:
+        return
+    try:
+        _code, tree = engine.compile_expression(statement.expression)
+    except Exception:                     # noqa: BLE001 — any half-typed line
+        return
+    statement.tree = tree
+
+
 @register_item
 class MathItem(MarkupItem):
     """A calculation region — one line by default, so each can be moved alone."""
@@ -371,13 +393,18 @@ class MathItem(MarkupItem):
             if statement.expression:
                 return setter.text(statement.expression, size)
             return None
-        if statement.ok and self._is_unit_literal(statement.tree):
+        written = statement.written
+        value = written if written is not None else statement.result
+        if statement.ok and value is not None and self._is_unit_literal(statement.tree):
             # "12 kN/m" is an input, not a calculation: show it as a quantity —
             # in the unit it was written in. Asking to see the answer in
             # newtons must not rewrite the kilonewtons on the other side of
             # the equals sign.
-            written = statement.written
-            value = written if written is not None else statement.result
+            #
+            # Only once there is a value to show. While the line is being
+            # typed there is none — nothing is evaluated until the caret
+            # leaves — and drawing the quantity anyway put an empty box where
+            # "300 mm" had just been typed.
             return setter.value_box(value, size, self.digits, self.number_format,
                                     color=setter.color)
         try:
@@ -561,6 +588,8 @@ class MathItem(MarkupItem):
         for index, line in enumerate(source.split("\n")):
             parsed = engine.parse_statement(line)
             kept = previous.get((index, parsed.raw))
+            if kept is None:
+                _parse_for_layout(parsed)
             fresh.append(kept if kept is not None else parsed)
         self.statements = fresh
         self.prepareGeometryChange()

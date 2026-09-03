@@ -63,14 +63,14 @@ in a conversation is a list that gets lost.
 
 ## Calculations
 
-- [ ] **One written-out equation view.** The edit view must be the final view:
-  fractions, powers, subscripts, no inline fallback. (The superscript itself
-  is fixed; what is left is the edit view.)
+- [x] **One written-out equation view.** Fractions, powers and subscripts are
+  typeset while they are being typed; only a line that cannot be parsed yet
+  waits as text.
 - [x] **One phi.** Two different characters are being used for it; every Greek
   letter wants checking, and the spacing around them fixing.
-- [ ] **Variable completion**: typing a name in an equation offers every
+- [x] **Variable completion**: typing a name in an equation offers every
   variable, and Tab fills it in.
-- [ ] The **unit list** appears in the wrong place.
+- [x] The **unit list** appears under the caret now, not at the foot of the block.
 - [x] **Only the bound key starts a calculation** — a bare keystroke must not,
   or the tool shortcuts stop working.
 - [ ] **How many figures** a result is shown to: decimal places, significant

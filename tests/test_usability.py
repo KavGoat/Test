@@ -5492,3 +5492,154 @@ def test_the_callouts_box_shows_itself_before_it_lands(window):
     painted = sum(1 for x in range(image.width()) for y in range(image.height())
                   if image.pixel(x, y) >> 24)
     assert painted > 400, "no box was drawn where the words would go"
+
+
+# ---------------------------------------------------------------------------
+# One equation view: what is typed into is what is printed
+# ---------------------------------------------------------------------------
+
+def _rows_of(block):
+    """Every laid-out row's left-hand box, so its shape can be asked about."""
+    return [row.left for row in block.rows]
+
+
+def _contains(box, kind):
+    """Whether a laid-out box has one of *kind* anywhere inside it."""
+    if isinstance(box, kind):
+        return True
+    for child, _x, _baseline in box.children_at(0.0, 0.0):
+        if _contains(child, kind):
+            return True
+    return False
+
+
+def test_a_fraction_stays_a_fraction_while_it_is_being_typed(window):
+    """The edit view is the printed view — there is no second, plainer one."""
+    from calcforge.core.mathrender import Fraction
+
+    window.view._last_scene_pos = QPointF(90, 110)
+    press_key(window.view, Qt.Key_unknown, "/")
+    block = window.view.editing_item()
+    block._editor.setPlainText("Z := b*d^2/6")
+    block.retypeset_live()
+
+    assert any(_contains(box, Fraction) for box in _rows_of(block) if box)
+    # And it is still one when the caret leaves.
+    window.view.end_item_edit()
+    assert any(_contains(box, Fraction) for box in _rows_of(block) if box)
+
+
+def test_a_unit_being_typed_still_reads_as_a_quantity(window):
+    window.view._last_scene_pos = QPointF(90, 110)
+    press_key(window.view, Qt.Key_unknown, "/")
+    block = window.view.editing_item()
+    block._editor.setPlainText("b := 300 mm")
+    block.retypeset_live()
+
+    row = [box for box in _rows_of(block) if box][0]
+    assert row.width > 0
+    painted = _text_in(row)
+    assert "300" in painted and "mm" in painted
+
+
+def _text_in(box) -> str:
+    """Every glyph inside a laid-out box, joined — for asking what it says."""
+    from calcforge.core.mathrender import Glyph
+
+    if isinstance(box, Glyph):
+        return box.text
+    return "".join(_text_in(child) for child, _x, _b in box.children_at(0.0, 0.0))
+
+
+def test_a_half_typed_line_shows_what_has_been_typed(window):
+    """"b*d^" cannot be laid out, and that one line waits rather than vanishing."""
+    window.view._last_scene_pos = QPointF(90, 110)
+    press_key(window.view, Qt.Key_unknown, "/")
+    block = window.view.editing_item()
+    block._editor.setPlainText("part := b*d^")
+    block.retypeset_live()
+
+    assert "b*d^" in _text_in([box for box in _rows_of(block) if box][0])
+
+
+def test_the_scripts_are_typeset_while_typing_too(window):
+    from calcforge.core.mathrender import Scripts
+
+    window.view._last_scene_pos = QPointF(90, 110)
+    press_key(window.view, Qt.Key_unknown, "/")
+    block = window.view.editing_item()
+    block._editor.setPlainText("L := sqrt(x_1^2 + y_1^2)")
+    block.retypeset_live()
+    assert any(_contains(box, Scripts) for box in _rows_of(block) if box)
+
+
+# ---------------------------------------------------------------------------
+# What the completion list offers, and where it appears
+# ---------------------------------------------------------------------------
+
+def test_typing_a_name_offers_the_documents_own_variables_first(window):
+    _calc(window, "sigma_y := 300 MPa\nsigma_c := 25 MPa", at=(90, 110))
+    window.recalculate()
+
+    window.view._last_scene_pos = QPointF(90, 300)
+    press_key(window.view, Qt.Key_unknown, "/")
+    block = window.view.editing_item()
+    type_text(window.view, "R := sig")
+
+    offered = window.view.completion_words("sig")
+    assert offered[:2] == ["sigma_c", "sigma_y"]
+    window.view.end_item_edit()
+
+
+def test_typing_after_a_number_offers_units_first(window):
+    _calc(window, "metric := 1", at=(90, 110))
+    window.recalculate()
+
+    window.view._last_scene_pos = QPointF(90, 300)
+    press_key(window.view, Qt.Key_unknown, "/")
+    type_text(window.view, "L := 300 m")
+    assert window.view.caret_follows_a_number()
+    offered = window.view.completion_words("m")
+    assert offered[0] in ("m", "mm", "m^2", "m²", "min", "mol")
+    assert "metric" not in offered[:3]
+    window.view.end_item_edit()
+
+
+def test_the_list_shows_up_for_a_name_and_tab_fills_it_in(window):
+    _calc(window, "sigma_y := 300 MPa", at=(90, 110))
+    window.recalculate()
+
+    window.view._last_scene_pos = QPointF(90, 300)
+    press_key(window.view, Qt.Key_unknown, "/")
+    block = window.view.editing_item()
+    type_text(window.view, "R := sigma_")
+    assert window.view.completions_showing()
+
+    press_key(window.view, Qt.Key_Tab)
+    assert block._editor.toPlainText().endswith("sigma_y")
+    window.view.end_item_edit()
+
+
+def test_the_list_appears_under_the_caret_not_under_the_block(window):
+    from PySide6.QtCore import QPoint
+
+    window.view._last_scene_pos = QPointF(90, 110)
+    press_key(window.view, Qt.Key_unknown, "/")
+    block = window.view.editing_item()
+    block._editor.setPlainText("a := 1\nb := 2\nc := 3\nd := 4\ne := 5\nf := m")
+    block.retypeset_live()
+    cursor = block._editor.textCursor()
+    cursor.movePosition(cursor.MoveOperation.End)
+    block._editor.setTextCursor(cursor)
+
+    window.view.show_completions()
+    assert window.view.completions_showing()
+    popup = window.view._completions
+    place = block.caret_place()
+    assert place is not None
+    caret = window.view.mapFromScene(block.mapToScene(QPointF(place[0], place[1])))
+    # Within a couple of lines of the caret, not down at the foot of the block.
+    assert abs(popup.pos().y() - caret.y()) < 40
+    assert abs(popup.pos().x() - caret.x()) < 40
+    window.view.hide_completions()
+    window.view.end_item_edit()

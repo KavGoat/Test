@@ -2082,8 +2082,15 @@ class PageView(QGraphicsView):
             return "", at            # part of a number, not a name
         return word, start
 
-    def completion_words(self, prefix: str) -> list[str]:
-        """Units and defined names starting with *prefix*, units first."""
+    def completion_words(self, prefix: str, units_first: Optional[bool] = None) -> list[str]:
+        """What could follow *prefix*: the document's own names, and units.
+
+        Which comes first depends on where the caret is. Straight after a
+        number — ``300 M`` — a unit is what is being typed, and the units go
+        first. Anywhere else it is a name: the variables, functions and tables
+        this document defines go first, because they are the ones being
+        reached for and there are a hundred units to wade past otherwise.
+        """
         from ..core.units import UNIT_MENU
 
         workspace = self.document().workspace
@@ -2092,14 +2099,30 @@ class PageView(QGraphicsView):
         units: list[str] = []
         for group in UNIT_MENU.values():
             units += [unit for unit in group if unit not in units]
-        wanted = [word for word in units if word.startswith(prefix)]
-        wanted += [word for word in names if word.startswith(prefix)
+        if units_first is None:
+            units_first = self.caret_follows_a_number()
+        first, second = (units, names) if units_first else (names, units)
+        wanted = [word for word in first if word.startswith(prefix)]
+        wanted += [word for word in second if word.startswith(prefix)
                    and word not in wanted]
         if not wanted:                      # nothing exact: try ignoring case
             lowered = prefix.lower()
-            wanted = [word for word in units + names
-                      if word.lower().startswith(lowered)]
+            wanted = [word for word in first + second
+                      if word.lower().startswith(lowered) and word not in wanted]
         return wanted[:40]
+
+    def caret_follows_a_number(self) -> bool:
+        """Whether what is being typed sits where a unit sits: after a number."""
+        item = self._editing_item
+        editor = getattr(item, "_editor", None) if item is not None else None
+        if editor is None:
+            return False
+        text = editor.toPlainText()
+        _word, start = self.completion_word()
+        index = start - 1
+        while index >= 0 and text[index] == " ":
+            index -= 1
+        return index >= 0 and (text[index].isdigit() or text[index] == ".")
 
     def show_completions(self) -> None:
         """Offer what could follow what is being typed, if anything could."""
@@ -2116,13 +2139,35 @@ class PageView(QGraphicsView):
         popup.addItems(words)
         popup.setCurrentRow(0)
         popup.resize(200, min(len(words), 8) * 18 + 6)
-        item = self._editing_item
-        editor = getattr(item, "_editor", None)
-        anchor = editor.mapToScene(editor.boundingRect().bottomLeft())
-        popup.move(self.mapFromScene(anchor) + QPoint(0, 2))
+        popup.move(self._completion_corner(popup))
         popup.show()
         popup.raise_()
         self._completing = True
+
+    def _completion_corner(self, popup) -> QPoint:
+        """Just under the caret, and inside the window.
+
+        The list used to hang off the bottom-left of the whole editor, which
+        for a block of eight lines is nowhere near the word being typed.
+        """
+        item = self._editing_item
+        anchor = None
+        place = item.caret_place() if hasattr(item, "caret_place") else None
+        if place is not None:
+            x, baseline, _ascent, descent = place
+            anchor = item.mapToScene(QPointF(x, baseline + descent + 2))
+        if anchor is None:
+            editor = getattr(item, "_editor", None)
+            if editor is None:
+                return QPoint(0, 0)
+            anchor = editor.mapToScene(editor.boundingRect().bottomLeft())
+        corner = self.mapFromScene(anchor) + QPoint(0, 2)
+        # Kept on screen: a list that runs off the bottom edge offers nothing.
+        room = self.viewport().rect()
+        corner.setX(max(0, min(corner.x(), room.width() - popup.width())))
+        if corner.y() + popup.height() > room.height():
+            corner.setY(max(0, corner.y() - popup.height() - 18))
+        return corner
 
     def _completer_popup(self):
         if self._completions is None:
