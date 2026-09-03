@@ -95,6 +95,29 @@ def _glyph(painter: QPainter, text: str, colour: str, size: float = 13.0,
     painter.drawText(rect or QRectF(0, 0, 24, 24), Qt.AlignCenter, text)
 
 
+def _cloud(painter: QPainter, colour: str, rect: QRectF) -> None:
+    """A revision cloud filling *rect* — scallops all the way round."""
+    _pen(painter, colour, 1.3)
+    radius = min(rect.width(), rect.height()) / 4.4
+    centre = rect.center()
+    count = 8
+    for index in range(count):
+        angle = 2 * math.pi * index / count
+        cx = centre.x() + math.cos(angle) * (rect.width() / 2 - radius * 0.85)
+        cy = centre.y() + math.sin(angle) * (rect.height() / 2 - radius * 0.85)
+        box = QRectF(cx - radius, cy - radius, radius * 2, radius * 2)
+        start = -math.degrees(angle) - 110
+        painter.drawArc(box, int(start * 16), int(220 * 16))
+
+
+def _ruler(painter: QPainter) -> None:
+    """The ruler edge every measuring tool carries along its bottom."""
+    _pen(painter, WARM, 1.2)
+    painter.drawLine(QPointF(3, 20.5), QPointF(21, 20.5))
+    for x in (4.5, 7.5, 10.5, 13.5, 16.5, 19.5):
+        painter.drawLine(QPointF(x, 20.5), QPointF(x, 17.5))
+
+
 def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon table
     if name == "select":
         _pen(painter, INK, 1.5)
@@ -103,12 +126,13 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
                                        QPointF(13, 19.5), QPointF(15, 18.6),
                                        QPointF(12.7, 13.8), QPointF(17, 13.2)]))
     elif name == "snapshot":
-        # A marquee with a corner lifted out of it.
+        # A marquee with a copy lifted out of it — the same ink as the rest of
+        # the toolbar, so no button stands out in a colour of its own.
         _pen(painter, INK, 1.3, Qt.DashLine)
-        painter.drawRect(QRectF(3.5, 5.5, 12, 11))
-        _pen(painter, ACCENT, 1.6)
-        painter.setBrush(QBrush(QColor(255, 255, 255, 0)))
-        painter.drawRect(QRectF(9.5, 9.5, 11, 9))
+        painter.drawRect(QRectF(3.5, 4.5, 12, 11))
+        _pen(painter, INK, 1.6)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRect(QRectF(9.5, 9.5, 11, 10))
     elif name == "pan":
         _pen(painter, INK, 1.5)
         path = QPainterPath(QPointF(8, 14))
@@ -121,56 +145,99 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
         path.cubicTo(16, 19, 12, 20, 9, 18)
         painter.drawPath(path)
     elif name == "pen":
+        # A pen nib, drawing: the same shape Bluebeam gives its Pen.
         _pen(painter, INK, 1.5)
-        painter.drawPolyline(QPolygonF([QPointF(5, 18), QPointF(6.5, 13), QPointF(15, 5)]))
-        painter.drawLine(QPointF(13.5, 3.5), QPointF(17.5, 7))
-        painter.drawLine(QPointF(15, 5), QPointF(17.5, 7))
+        painter.drawPolyline(QPolygonF([QPointF(4, 20), QPointF(6, 14), QPointF(15.5, 4.5)]))
+        painter.drawLine(QPointF(13.5, 3), QPointF(18, 7))
+        painter.drawLine(QPointF(15.5, 4.5), QPointF(18, 7))
+        painter.drawLine(QPointF(6, 14), QPointF(10, 18))
     elif name == "highlighter":
-        painter.fillRect(QRectF(4, 14, 16, 4), QColor(NOTE))
+        # A marker with a broad chisel tip and a band of ink under it.
         _pen(painter, INK, 1.4)
-        painter.drawPolyline(QPolygonF([QPointF(7, 12), QPointF(12, 5), QPointF(16, 8),
-                                        QPointF(11, 14)]))
+        painter.drawPolyline(QPolygonF([QPointF(7, 13), QPointF(13.5, 4), QPointF(18, 7.5),
+                                        QPointF(11.5, 16.5), QPointF(7, 13)]))
+        painter.drawLine(QPointF(7, 13), QPointF(5, 16.5))
+        painter.drawLine(QPointF(11.5, 16.5), QPointF(9, 19))
+        _pen(painter, INK, 2.6)
+        painter.drawLine(QPointF(4, 21), QPointF(20, 21))
+    elif name == "eraser":
+        _pen(painter, INK, 1.4)
+        painter.drawPolygon(QPolygonF([QPointF(4, 15), QPointF(12, 5), QPointF(19, 10),
+                                       QPointF(11, 20), QPointF(6, 20)]))
+        painter.drawLine(QPointF(8.5, 11.5), QPointF(15.5, 16.5))
     elif name == "line":
         _pen(painter, INK, 1.6)
-        painter.drawLine(QPointF(5, 18), QPointF(19, 6))
+        painter.drawLine(QPointF(4, 19), QPointF(20, 5))
     elif name == "arrow":
         _pen(painter, INK, 1.6)
-        _arrow(painter, QPointF(5, 18), QPointF(18, 6), INK)
+        _arrow(painter, QPointF(4, 19), QPointF(19, 5), INK)
+    elif name == "arc":
+        _pen(painter, INK, 1.6)
+        path = QPainterPath(QPointF(5, 19))
+        path.cubicTo(QPointF(5, 8), QPointF(13, 5), QPointF(19, 6))
+        painter.drawPath(path)
     elif name == "polyline":
         _pen(painter, INK, 1.6)
         painter.drawPolyline(QPolygonF([QPointF(4, 17), QPointF(9, 8), QPointF(14, 14),
                                         QPointF(20, 5)]))
     elif name == "rect":
         _pen(painter, INK, 1.6)
-        painter.drawRect(QRectF(5, 7, 14, 10))
+        painter.drawRect(QRectF(4.5, 6.5, 15, 11))
     elif name == "ellipse":
         _pen(painter, INK, 1.6)
-        painter.drawEllipse(QRectF(4, 7, 16, 10))
+        painter.drawEllipse(QRectF(3.5, 6, 17, 12))
     elif name == "polygon":
+        # An open-cornered polygon, the way Bluebeam draws its Polygon tool.
         _pen(painter, INK, 1.6)
-        painter.drawPolygon(QPolygonF([QPointF(12, 4), QPointF(20, 10), QPointF(17, 19),
-                                       QPointF(7, 19), QPointF(4, 10)]))
+        painter.drawPolygon(QPolygonF([QPointF(4, 6), QPointF(20, 6), QPointF(12, 13),
+                                       QPointF(20, 19), QPointF(4, 19)]))
     elif name in ("cloud", "cloud_rect"):
-        _pen(painter, INK, 1.3)
-        radius = 3.2
-        centres = [(7.5, 8), (12, 6.5), (16.5, 8), (18, 12), (16.5, 16), (12, 17.5),
-                   (7.5, 16), (6, 12)]
-        for index, (cx, cy) in enumerate(centres):
-            rect = QRectF(cx - radius, cy - radius, radius * 2, radius * 2)
-            start = 90 - index * (360 / len(centres))
-            painter.drawArc(rect, int((start - 110) * 16), int(220 * 16))
+        _cloud(painter, INK, QRectF(4, 5, 16, 14))
+    elif name == "cloud_plus":
+        # Cloud+ in Bluebeam: a cloud you draw a shape for, corner by corner.
+        _cloud(painter, INK, QRectF(3.5, 4.5, 14, 12))
+        _pen(painter, INK, 1.4)
+        painter.drawLine(QPointF(18, 16), QPointF(18, 22))
+        painter.drawLine(QPointF(15, 19), QPointF(21, 19))
     elif name == "highlight":
-        painter.fillRect(QRectF(4, 8, 16, 8), QColor(NOTE))
-        _pen(painter, NOTE_EDGE, 1.0)
+        # A block highlight over text, not a pen: two ruled lines behind it.
+        _pen(painter, FAINT, 1.0)
+        painter.drawLine(QPointF(4, 9), QPointF(20, 9))
+        painter.drawLine(QPointF(4, 15), QPointF(20, 15))
+        _pen(painter, INK, 1.4)
+        painter.drawRect(QRectF(4, 7, 16, 10))
+    elif name == "redact":
+        _pen(painter, INK, 1.2)
+        painter.setBrush(QBrush(QColor(INK)))
         painter.drawRect(QRectF(4, 8, 16, 8))
+        painter.setBrush(Qt.NoBrush)
     elif name == "text":
-        _glyph(painter, "T", INK, 14)
-        _pen(painter, INK, 1.0, Qt.DotLine)
-        painter.drawRect(QRectF(4, 5, 16, 14))
+        # Bluebeam's Text Box: a capital A in a box.
+        _pen(painter, INK, 1.3)
+        painter.drawRect(QRectF(3.5, 4.5, 17, 15))
+        _glyph(painter, "A", INK, 11, True, QRectF(3.5, 4.5, 17, 15))
+    elif name == "typewriter":
+        _glyph(painter, "A", INK, 12, False, QRectF(3, 3, 18, 15))
+        _pen(painter, INK, 1.3)
+        painter.drawLine(QPointF(4, 20), QPointF(20, 20))
     elif name == "callout":
         _pen(painter, INK, 1.4)
-        painter.drawRoundedRect(QRectF(8, 4, 12, 9), 2, 2)
-        _arrow(painter, QPointF(9, 12), QPointF(4, 19), INK)
+        painter.drawRect(QRectF(8.5, 3.5, 12, 9))
+        painter.drawPolyline(QPolygonF([QPointF(14.5, 12.5), QPointF(14.5, 16),
+                                        QPointF(4.5, 20)]))
+        painter.setBrush(QBrush(QColor(INK)))
+        painter.drawPolygon(QPolygonF([QPointF(4, 20.5), QPointF(9, 17.5),
+                                       QPointF(8.4, 20.5)]))
+        painter.setBrush(Qt.NoBrush)
+    elif name == "cloud_callout":
+        _cloud(painter, INK, QRectF(8, 3, 13, 10))
+        _pen(painter, INK, 1.4)
+        painter.drawPolyline(QPolygonF([QPointF(14, 13), QPointF(14, 16.5),
+                                        QPointF(4.5, 20)]))
+        painter.setBrush(QBrush(QColor(INK)))
+        painter.drawPolygon(QPolygonF([QPointF(4, 20.5), QPointF(9, 17.5),
+                                       QPointF(8.4, 20.5)]))
+        painter.setBrush(Qt.NoBrush)
     elif name == "note":
         _pen(painter, NOTE_EDGE, 1.2)
         painter.setBrush(QBrush(QColor(NOTE)))
@@ -178,10 +245,17 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
         _pen(painter, NOTE_RULE, 1.0)
         for offset in range(3):
             painter.drawLine(QPointF(8, 9 + offset * 3), QPointF(16, 9 + offset * 3))
+        painter.setBrush(Qt.NoBrush)
     elif name == "stamp":
         _pen(painter, WARM, 1.6)
         painter.drawRoundedRect(QRectF(3, 8, 18, 9), 2, 2)
         _glyph(painter, "OK", WARM, 6.5, True, QRectF(3, 8, 18, 9))
+    elif name == "flag":
+        _pen(painter, INK, 1.4)
+        painter.drawLine(QPointF(6, 3), QPointF(6, 21))
+        painter.setBrush(QBrush(QColor(INK)))
+        painter.drawPolygon(QPolygonF([QPointF(6, 4), QPointF(19, 7.5), QPointF(6, 11)]))
+        painter.setBrush(Qt.NoBrush)
     elif name == "image":
         _pen(painter, INK, 1.4)
         painter.drawRect(QRectF(4, 6, 16, 12))
@@ -191,23 +265,29 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
         painter.drawPolyline(QPolygonF([QPointF(5, 17), QPointF(10, 12), QPointF(13, 15),
                                         QPointF(16, 11), QPointF(19, 17)]))
     elif name == "math":
-        _pen(painter, ACCENT, 1.5)
-        painter.drawLine(QPointF(5, 12), QPointF(13, 12))
-        _glyph(painter, "x", ACCENT, 8, True, QRectF(4, 3, 10, 9))
-        _glyph(painter, "y", ACCENT, 8, True, QRectF(4, 12, 10, 9))
-        _glyph(painter, "=", ACCENT, 9, True, QRectF(13, 6, 10, 12))
+        # One line of working: a fraction and an equals sign.
+        _pen(painter, INK, 1.5)
+        painter.drawLine(QPointF(4, 12), QPointF(12, 12))
+        _glyph(painter, "x", INK, 8, False, QRectF(3, 3, 10, 9))
+        _glyph(painter, "y", INK, 8, False, QRectF(3, 12, 10, 9))
+        _glyph(painter, "=", INK, 10, False, QRectF(12, 6, 11, 12))
+    elif name == "mathblock":
+        # A block of working: several lines of it, ruled off.
+        _pen(painter, INK, 1.3)
+        painter.drawRect(QRectF(3.5, 4.5, 17, 15))
+        _pen(painter, INK, 1.2)
+        for offset in range(3):
+            y = 8.5 + offset * 3.6
+            painter.drawLine(QPointF(6, y), QPointF(14, y))
+            painter.drawLine(QPointF(16, y), QPointF(18, y))
     elif name == "plot":
         _pen(painter, INK, 1.2)
         painter.drawLine(QPointF(5, 4), QPointF(5, 19))
         painter.drawLine(QPointF(5, 19), QPointF(20, 19))
-        _pen(painter, ACCENT, 1.6)
+        _pen(painter, INK, 1.6)
         path = QPainterPath(QPointF(6, 16))
         path.cubicTo(QPointF(10, 4), QPointF(15, 4), QPointF(19, 13))
         painter.drawPath(path)
-        _pen(painter, WARM, 1.3)
-        path2 = QPainterPath(QPointF(6, 18))
-        path2.cubicTo(QPointF(11, 11), QPointF(15, 11), QPointF(19, 16))
-        painter.drawPath(path2)
     elif name == "table":
         _pen(painter, INK, 1.3)
         painter.drawRect(QRectF(4, 6, 16, 12))
@@ -215,28 +295,80 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
         painter.drawLine(QPointF(4, 14), QPointF(20, 14))
         painter.drawLine(QPointF(9.3, 6), QPointF(9.3, 18))
         painter.drawLine(QPointF(14.6, 6), QPointF(14.6, 18))
+    elif name == "contents":
+        _pen(painter, INK, 1.3)
+        painter.drawRect(QRectF(4, 4, 16, 16))
+        _pen(painter, INK, 1.1)
+        for offset in range(4):
+            y = 7.5 + offset * 3.3
+            painter.drawLine(QPointF(6.5, y), QPointF(14, y))
+            painter.drawLine(QPointF(16, y), QPointF(17.5, y))
+    # -- measuring: every one of these carries the little ruler edge that
+    #    Bluebeam puts on its measurement tools, so they read as a family.
     elif name == "measure_length":
-        _pen(painter, ACCENT, 1.5)
-        _arrow(painter, QPointF(6, 16), QPointF(18, 8), ACCENT)
-        _arrow(painter, QPointF(18, 8), QPointF(6, 16), ACCENT)
+        _ruler(painter)
+        _pen(painter, INK, 1.5)
+        _arrow(painter, QPointF(13, 9), QPointF(5, 9), INK)
+        _arrow(painter, QPointF(11, 9), QPointF(19, 9), INK)
+    elif name == "dimension":
+        _pen(painter, INK, 1.4)
+        painter.drawLine(QPointF(5, 4), QPointF(5, 20))
+        painter.drawLine(QPointF(19, 4), QPointF(19, 20))
+        _arrow(painter, QPointF(13, 12), QPointF(5, 12), INK)
+        _arrow(painter, QPointF(11, 12), QPointF(19, 12), INK)
+    elif name == "measure_polylength":
+        _ruler(painter)
+        _pen(painter, INK, 1.5)
+        painter.drawPolyline(QPolygonF([QPointF(4, 14), QPointF(9, 5), QPointF(14, 12),
+                                        QPointF(20, 4)]))
     elif name == "measure_area":
-        _pen(painter, ACCENT, 1.4)
-        painter.setBrush(QBrush(QColor(25, 113, 194, 55)))
-        painter.drawPolygon(QPolygonF([QPointF(4, 15), QPointF(9, 5), QPointF(19, 8),
-                                       QPointF(17, 18)]))
+        _ruler(painter)
+        _pen(painter, INK, 1.4)
+        painter.setBrush(QBrush(QColor(INK).lighter(190)))
+        painter.drawPolygon(QPolygonF([QPointF(4, 14), QPointF(8, 4), QPointF(19, 6),
+                                       QPointF(17, 15)]))
+        painter.setBrush(Qt.NoBrush)
+    elif name == "measure_perimeter":
+        _ruler(painter)
+        _pen(painter, INK, 1.5, Qt.DashLine)
+        painter.drawPolygon(QPolygonF([QPointF(4, 14), QPointF(8, 4), QPointF(19, 6),
+                                       QPointF(17, 15)]))
+        _pen(painter, INK, 1.5)
+    elif name == "measure_volume":
+        _ruler(painter)
+        _pen(painter, INK, 1.4)
+        painter.drawPolygon(QPolygonF([QPointF(4, 11), QPointF(11, 4), QPointF(20, 7),
+                                       QPointF(13, 14)]))
+        painter.drawLine(QPointF(4, 11), QPointF(4, 15))
+        painter.drawLine(QPointF(13, 14), QPointF(13, 18))
+        painter.drawLine(QPointF(20, 7), QPointF(20, 11))
+        painter.drawPolyline(QPolygonF([QPointF(4, 15), QPointF(13, 18), QPointF(20, 11)]))
     elif name == "measure_angle":
-        _pen(painter, ACCENT, 1.5)
-        painter.drawLine(QPointF(5, 18), QPointF(19, 18))
-        painter.drawLine(QPointF(5, 18), QPointF(16, 6))
-        painter.drawArc(QRectF(-1, 12, 12, 12), 0, 45 * 16)
+        _ruler(painter)
+        _pen(painter, INK, 1.5)
+        painter.drawLine(QPointF(4, 15), QPointF(20, 15))
+        painter.drawLine(QPointF(4, 15), QPointF(16, 4))
+        painter.drawArc(QRectF(-1, 9, 12, 12), 0, 43 * 16)
     elif name == "measure_radius":
-        _pen(painter, ACCENT, 1.4)
-        painter.drawEllipse(QRectF(4, 4, 16, 16))
-        _arrow(painter, QPointF(12, 12), QPointF(19, 8), ACCENT)
+        _ruler(painter)
+        _pen(painter, INK, 1.4)
+        painter.drawEllipse(QRectF(4, 2, 15, 15))
+        painter.setBrush(QBrush(QColor(INK)))
+        painter.drawEllipse(QPointF(11.5, 9.5), 1.1, 1.1)
+        painter.setBrush(Qt.NoBrush)
+        _arrow(painter, QPointF(11.5, 9.5), QPointF(19, 9.5), INK)
+    elif name == "measure_diameter":
+        _ruler(painter)
+        _pen(painter, INK, 1.4)
+        painter.drawEllipse(QRectF(4, 2, 15, 15))
+        _arrow(painter, QPointF(11.5, 9.5), QPointF(4.2, 9.5), INK)
+        _arrow(painter, QPointF(11.5, 9.5), QPointF(18.8, 9.5), INK)
     elif name == "count":
         _pen(painter, MARKER, 1.5)
-        painter.drawEllipse(QRectF(5, 5, 11, 11))
-        _glyph(painter, "3", MARKER, 8, True, QRectF(12, 10, 11, 11))
+        for x in (5.5, 10, 14.5):
+            painter.drawLine(QPointF(x, 5), QPointF(x, 15))
+        painter.drawLine(QPointF(17, 4), QPointF(19.5, 16))
+        _glyph(painter, "3", MARKER, 7, True, QRectF(12, 12, 11, 11))
     elif name == "calibrate":
         _pen(painter, WARM, 1.5)
         painter.drawLine(QPointF(4, 16), QPointF(20, 16))
@@ -274,16 +406,29 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
         painter.drawPolygon(QPolygonF([QPointF(6, 3), QPointF(14, 3), QPointF(18, 7),
                                        QPointF(18, 21), QPointF(6, 21)]))
         painter.drawPolyline(QPolygonF([QPointF(14, 3), QPointF(14, 7), QPointF(18, 7)]))
-    elif name == "undo":
+    elif name in ("undo", "redo"):
+        # An arrow that comes back on itself: a half-turn of a circle, with a
+        # head on the end that actually lines up with where the curve is going.
+        # The old pair had the head guessed at three fixed points, which is why
+        # they looked broken at any size.
+        back = name == "undo"
         _pen(painter, INK, 1.7)
-        painter.drawArc(QRectF(5, 6, 14, 12), 40 * 16, 220 * 16)
+        path = QPainterPath()
+        if back:
+            path.moveTo(19.5, 19)
+            path.cubicTo(QPointF(19.5, 9), QPointF(14, 6), QPointF(7, 6))
+        else:
+            path.moveTo(4.5, 19)
+            path.cubicTo(QPointF(4.5, 9), QPointF(10, 6), QPointF(17, 6))
+        painter.drawPath(path)
         painter.setBrush(QBrush(QColor(INK)))
-        painter.drawPolygon(QPolygonF([QPointF(5, 6), QPointF(11, 7), QPointF(6, 12)]))
-    elif name == "redo":
-        _pen(painter, INK, 1.7)
-        painter.drawArc(QRectF(5, 6, 14, 12), 280 * 16, 220 * 16)
-        painter.setBrush(QBrush(QColor(INK)))
-        painter.drawPolygon(QPolygonF([QPointF(19, 6), QPointF(13, 7), QPointF(18, 12)]))
+        painter.setPen(Qt.NoPen)
+        tip = QPointF(6.5, 6) if back else QPointF(17.5, 6)
+        wing = 4.6 if back else -4.6
+        painter.drawPolygon(QPolygonF([tip,
+                                       QPointF(tip.x() + wing, tip.y() - 3.4),
+                                       QPointF(tip.x() + wing, tip.y() + 3.4)]))
+        painter.setBrush(Qt.NoBrush)
     elif name == "zoom_in":
         _pen(painter, INK, 1.6)
         painter.drawEllipse(QRectF(4, 4, 12, 12))
