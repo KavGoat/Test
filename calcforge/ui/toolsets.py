@@ -35,7 +35,7 @@ PROPERTIES = "properties"    # draw a new one wearing its properties
 # properties-mode tool.
 CONTENT_KEYS = frozenset({
     "uid", "x", "y", "z", "rotation", "rect", "points", "leader", "source",
-    "text", "html", "sheet", "asset_key", "created", "modified", "subject",
+    "text", "html", "sheet", "asset", "asset_key", "created", "modified", "subject",
     "comment", "label", "named_cells", "table_name", "series", "index",
     "custom_label", "value", "background_key", "title",
 })

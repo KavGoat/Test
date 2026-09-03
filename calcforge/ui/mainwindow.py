@@ -10,7 +10,8 @@ from PySide6.QtCore import (QBuffer, QEvent, QIODevice, QMimeData, QPointF,
                             QRect, QRectF,
                             QSettings, QSize, Qt, QTimer)
 from PySide6.QtGui import (QAction, QActionGroup, QColor, QFont, QImage,
-                           QKeySequence, QTransform, QUndoStack)
+                           QKeySequence, QTextCharFormat, QTransform,
+                           QUndoStack)
 from PySide6.QtPrintSupport import QPrintDialog, QPrintPreviewDialog, QPrinter
 from PySide6.QtWidgets import (QApplication, QComboBox, QDockWidget, QDoubleSpinBox,
                                QFileDialog, QGraphicsItem, QHBoxLayout,
@@ -1932,7 +1933,7 @@ class MainWindow(QMainWindow):
             return
         data = bytes(buffer.data())
         key = self.document.put_asset(f"snapshot-{os.urandom(6).hex()}.png", data)
-        payload = [{"type": "image", "asset_key": key, "x": 0.0, "y": 0.0,
+        payload = [{"type": "image", "asset": key, "x": 0.0, "y": 0.0,
                     "rect": [0, 0, region.width(), region.height()],
                     "keep_aspect": True, "uid": os.urandom(8).hex()}]
         assets = {key: base64.b64encode(data).decode("ascii")}
@@ -1971,7 +1972,7 @@ class MainWindow(QMainWindow):
         # size; otherwise at its own size in points, so it lands legibly.
         scale = 300.0 / 72.0 if image.width() > 900 else 1.0
         width, height = image.width() / scale, image.height() / scale
-        payload = [{"type": "image", "asset_key": key, "x": 0.0, "y": 0.0,
+        payload = [{"type": "image", "asset": key, "x": 0.0, "y": 0.0,
                     "rect": [0, 0, width, height], "keep_aspect": True,
                     "uid": os.urandom(8).hex()}]
         self._paste_payload(payload)
@@ -2768,9 +2769,12 @@ class MainWindow(QMainWindow):
     # ==================================================================
     def add_bookmark_here(self) -> None:
         """Bookmark the page and place the reader is looking at."""
-        if self.view.busy_typing():
-            # Ctrl+B belongs to the words being typed, not to the bookmarks.
-            self.toggle_bold()
+        # Ctrl+B belongs to the words wherever there are words: a run selected
+        # inside a text box, the box being typed into, the cells picked out in
+        # a table, or a text markup picked out on the page. Only with none of
+        # those does it reach for a bookmark — being asked for a bookmark name
+        # half-way through emboldening a heading is nobody's idea of help.
+        if self.toggle_bold():
             return
         index = self.current_index
         page = self.document.pages[index]
@@ -3001,11 +3005,46 @@ class MainWindow(QMainWindow):
         self.view.viewport().update()
         self.status_hint.setText("Preferences saved")
 
-    def toggle_bold(self) -> None:
-        """Bold the text being typed, which is what Ctrl+B means in text."""
+    def toggle_bold(self) -> bool:
+        """Embolden the words. Says whether it found any.
+
+        Four places count, in the order the caret would be found in them: a
+        run of text selected inside a box being typed into, that whole box,
+        the cells picked out in a table, and the text markups selected on the
+        page. Returning False is what tells Ctrl+B it is free to mean
+        "bookmark" instead.
+        """
+        if self.bold_the_selected_run():
+            return True
+
         item = self.view.editing_item()
-        if item is None or not hasattr(item, "style"):
-            return
+        table = self.view.active_table
+        if item is None and table is None:
+            items = [i for i in self.selected_items()
+                     if isinstance(i, _TextBase) and not i.locked]
+            if not items:
+                return False
+            self.view.begin_snapshot(self.view.involved_frames(*items))
+            wanted = not all(i.style.bold for i in items)
+            for markup in items:
+                markup.style.bold = wanted
+                markup.apply_style()
+                markup.touch()
+                markup.update()
+            self.view.commit_snapshot("Bold")
+            return True
+
+        if item is None and table is not None and not table.locked:
+            cells = table.selected_cells()
+            self.view.begin_snapshot(self.view.involved_frames(table))
+            wanted = not all(table.cell_format(r, c).bold for r, c in cells)
+            table.apply_format(cells, bold=wanted)
+            table.touch()
+            self.view.commit_snapshot("Bold")
+            return True
+
+        if not hasattr(item, "style") or item.locked:
+            return False
         self.view.begin_snapshot(self.view.involved_frames(item))
         item.style.bold = not item.style.bold
         if hasattr(item, "apply_style"):
@@ -3013,6 +3052,21 @@ class MainWindow(QMainWindow):
         item.touch()
         item.update()
         self.view.commit_snapshot("Bold")
+        return True
+
+    def bold_the_selected_run(self) -> bool:
+        """Embolden just the words picked out under the caret, if any are."""
+        editor = self.view.text_editor()
+        if editor is None:
+            return False
+        cursor = editor.textCursor()
+        if not cursor.hasSelection():
+            return False
+        fmt = QTextCharFormat()
+        fmt.setFontWeight(QFont.Normal if cursor.charFormat().font().bold()
+                          else QFont.Bold)
+        cursor.mergeCharFormat(fmt)
+        return True
 
     def bookmarks_changed(self) -> None:
         self.bookmarks_panel.rebuild(self.document)

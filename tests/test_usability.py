@@ -2506,7 +2506,7 @@ def test_a_snapshot_is_a_picture_of_the_region(window):
 
     payload = window._clipboard
     assert [entry["type"] for entry in payload] == ["image"]
-    assert window.document.asset(payload[0]["asset_key"])
+    assert window.document.asset(payload[0]["asset"])
     # and the marquee itself is not left on the page
     assert not [i for i in markups(window) if getattr(i, "kind", "") == "marquee"]
     assert "Snapshot taken" in window.status_hint.text()
@@ -2590,11 +2590,11 @@ def test_a_snapshot_takes_the_drawing_underneath_with_it(window, tmp_path, monke
     window.take_snapshot(frame, QRectF(20, 20, 120, 90))
     payload = window._clipboard
     assert payload and payload[0]["type"] == "image"
-    assert window.document.asset(payload[0]["asset_key"])
+    assert window.document.asset(payload[0]["asset"])
     # taken at 300 dpi, so it holds up when it is zoomed into
     from PySide6.QtGui import QImage
     picture = QImage()
-    picture.loadFromData(window.document.asset(payload[0]["asset_key"]))
+    picture.loadFromData(window.document.asset(payload[0]["asset"]))
     assert picture.width() > 120 * 3
 
 
@@ -4637,6 +4637,7 @@ def test_the_format_painter_carries_one_markups_look_to_another(window):
     second = _a_rectangle(window, 300, 120, 380, 200)
     second.style.stroke = "#1971c2"
 
+    window.scene.clearSelection()
     first.setSelected(True)
     window.format_painter()
     assert window.holding_a_format()
@@ -4748,7 +4749,8 @@ def test_moving_a_markup_to_another_layer(window):
 
 def test_a_text_box_can_be_given_a_leader_and_have_it_taken_away(window):
     window.select_tool("text")
-    click(window.view, 200, 200)
+    drag(window.view, 200, 200, 340, 250)
+    type_text(window.view, "note")
     window.view.end_item_edit()
     box = markups(window)[-1]
     assert isinstance(box, TextItem) and not box.leader_shown
@@ -4767,7 +4769,8 @@ def test_a_text_box_can_be_given_a_leader_and_have_it_taken_away(window):
 
 def test_the_menu_offers_a_leader_on_a_text_box_and_removal_on_a_callout(window):
     window.select_tool("text")
-    click(window.view, 200, 200)
+    drag(window.view, 200, 200, 340, 250)
+    type_text(window.view, "note")
     window.view.end_item_edit()
     box = markups(window)[-1]
     box.setSelected(True)
@@ -4781,7 +4784,8 @@ def test_a_text_boxs_leader_is_still_there_after_a_save(window):
     from calcforge.items.base import build_item
 
     window.select_tool("text")
-    click(window.view, 200, 200)
+    drag(window.view, 200, 200, 340, 250)
+    type_text(window.view, "note")
     window.view.end_item_edit()
     box = markups(window)[-1]
     window.set_leader(box, True)
@@ -4835,3 +4839,179 @@ def test_a_drag_whose_release_went_missing_lets_go_of_the_pointer(window):
     hover(window.view, 500, 500)
     assert window.view._mode == "idle"
     assert window.view.cursor().shape() == Qt.ArrowCursor
+
+
+# ---------------------------------------------------------------------------
+# A pasted picture must actually be a picture
+# ---------------------------------------------------------------------------
+
+def _paints_something_other_than_grey(item):
+    """Whether the item draws a real picture rather than the missing-image box."""
+    from PySide6.QtGui import QImage, QPainter
+
+    box = item.local_rect().normalized()
+    canvas = QImage(max(int(box.width()), 4), max(int(box.height()), 4),
+                    QImage.Format_ARGB32)
+    canvas.fill(0xFFFFFFFF)
+    painter = QPainter(canvas)
+    painter.translate(-box.topLeft())
+    item.paint_content(painter)
+    painter.end()
+    colours = {canvas.pixel(x, y)
+               for x in range(0, canvas.width(), 3)
+               for y in range(0, canvas.height(), 3)}
+    return colours
+
+
+def test_a_pasted_snapshot_holds_its_picture(window):
+    from calcforge.items.media import ImageItem
+
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 220, 180)
+    window.select_tool("snapshot")
+    drag(window.view, 60, 60, 300, 250)
+
+    window.select_tool("select")
+    hover(window.view, 120, 520)
+    window.paste_items()
+
+    pasted = [i for i in markups(window) if isinstance(i, ImageItem)][-1]
+    assert pasted.asset_key                       # it knows which picture
+    assert window.document.asset(pasted.asset_key)   # and the picture is there
+    assert pasted.pixmap() is not None and not pasted.pixmap().isNull()
+
+
+def test_a_picture_pasted_from_elsewhere_holds_its_picture(window):
+    from PySide6.QtGui import QImage
+    from PySide6.QtWidgets import QApplication
+    from calcforge.items.media import ImageItem
+
+    foreign = QImage(120, 80, QImage.Format_ARGB32)
+    foreign.fill(0xFF2F9E44)
+    QApplication.clipboard().setImage(foreign)
+
+    window.select_tool("select")
+    hover(window.view, 120, 520)
+    window.paste_items()
+
+    pasted = [i for i in markups(window) if isinstance(i, ImageItem)][-1]
+    assert pasted.asset_key
+    assert pasted.pixmap() is not None and not pasted.pixmap().isNull()
+    # The green it was filled with is what comes out of it.
+    assert 0xFF2F9E44 in _paints_something_other_than_grey(pasted)
+
+
+def test_a_pasted_picture_is_still_there_after_a_save(window, tmp_path):
+    from PySide6.QtGui import QImage
+    from PySide6.QtWidgets import QApplication
+    from calcforge.core.document import Document
+    from calcforge.io import project as project_io
+    from calcforge.items.base import build_item
+    from calcforge.items.media import ImageItem
+
+    foreign = QImage(90, 60, QImage.Format_ARGB32)
+    foreign.fill(0xFF1971C2)
+    QApplication.clipboard().setImage(foreign)
+    window.select_tool("select")
+    hover(window.view, 120, 520)
+    window.paste_items()
+
+    path = str(tmp_path / "picture.cfx")
+    project_io.save_document(window.document, path)
+    reopened = Document()
+    project_io.load_document(reopened, path)
+
+    stored = [entry for entry in reopened.pages[0].to_dict()["items"]
+              if entry.get("type") == "image"]
+    assert len(stored) == 1
+    item = build_item(stored[0])
+    assert isinstance(item, ImageItem)
+    item.load_from_document(reopened)
+    assert item.pixmap() is not None and not item.pixmap().isNull()
+
+
+# ---------------------------------------------------------------------------
+# Ctrl+B, and the pointer over a table's edges
+# ---------------------------------------------------------------------------
+
+def test_ctrl_b_emboldens_a_selected_text_box_rather_than_bookmarking(window):
+    window.select_tool("text")
+    drag(window.view, 200, 200, 340, 250)
+    type_text(window.view, "shear")
+    window.view.end_item_edit()
+    box = markups(window)[-1]
+    window.scene.clearSelection()
+    box.setSelected(True)
+    before = len(window.document.bookmarks)
+
+    assert window.toggle_bold() is True
+    assert box.style.bold
+    assert len(window.document.bookmarks) == before
+
+    window.toggle_bold()
+    assert not box.style.bold
+
+
+def test_ctrl_b_emboldens_the_run_picked_out_in_a_text_box(window):
+    from PySide6.QtGui import QTextCursor
+
+    window.select_tool("text")
+    drag(window.view, 200, 200, 340, 250)
+    editor = window.view.text_editor()
+    assert editor is not None
+    editor.setPlainText("beam shear check")
+    cursor = editor.textCursor()
+    cursor.setPosition(0)
+    cursor.setPosition(4, QTextCursor.KeepAnchor)      # "beam"
+    editor.setTextCursor(cursor)
+
+    assert window.toggle_bold() is True
+    box = markups(window)[-1]
+    # Only the run picked out is bold; the box itself is not turned bold.
+    assert not box.style.bold
+    check = editor.textCursor()
+    check.setPosition(2)
+    assert check.charFormat().font().bold()
+    check.setPosition(10)
+    assert not check.charFormat().font().bold()
+
+
+def test_ctrl_b_emboldens_the_cells_picked_out_in_a_table(window):
+    table = _capacity_table(window)
+    window.view.activate_table(table)
+    table.current = (1, 0)
+    table.anchor = (1, 2)
+
+    assert window.toggle_bold() is True
+    assert table.cell_format(1, 0).bold
+    assert table.cell_format(1, 2).bold
+    assert not table.cell_format(2, 0).bold
+
+
+def test_ctrl_b_still_bookmarks_when_there_are_no_words(window, monkeypatch):
+    from PySide6.QtWidgets import QInputDialog
+
+    window.scene.clearSelection()
+    assert window.toggle_bold() is False
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("Shear", True))
+    before = len(window.document.bookmarks)
+    window.add_bookmark_here()
+    assert len(window.document.bookmarks) == before + 1
+
+
+def test_the_pointer_says_resize_over_a_table_edge(window):
+    table = _capacity_table(window)
+    window.view.activate_table(table)
+
+    # The column divider lives in the strip above the grid.
+    origin = table.grid_origin()
+    gw, gh = table.gutter_size()
+    x = origin.x() + table.sheet.col_width(0)
+    edge = table.mapToScene(QPointF(x, origin.y() - gh / 2))
+    hover(window.view, edge.x(), edge.y())
+    assert window.view.cursor().shape() == Qt.SplitHCursor
+
+    y = origin.y() + table.sheet.row_height(0)
+    edge = table.mapToScene(QPointF(origin.x() - gw / 2, y))
+    hover(window.view, edge.x(), edge.y())
+    assert window.view.cursor().shape() == Qt.SplitVCursor

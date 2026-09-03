@@ -1868,6 +1868,22 @@ class PageView(QGraphicsView):
     def editing_item(self):
         return self._editing_item
 
+    def text_editor(self):
+        """The live text editor under the caret, if the caret is in words.
+
+        A text box, a call-out and a maths line all put a QGraphicsTextItem on
+        the page while they are being typed into; anything that wants to act
+        on the run of characters picked out — emboldening it, say — needs that
+        editor rather than the markup it belongs to.
+        """
+        item = self._editing_item
+        if item is None:
+            return None
+        editor = getattr(item, "_editor", None)
+        if editor is None or not hasattr(editor, "textCursor"):
+            return None
+        return editor
+
     def is_editing(self) -> bool:
         """True when a keystroke belongs to something being typed into.
 

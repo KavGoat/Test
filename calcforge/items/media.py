@@ -74,7 +74,11 @@ class ImageItem(MarkupItem):
         return data
 
     def deserialize(self, data: dict) -> None:
-        self.asset_key = data.get("asset", "")
+        # "asset_key" is what the attribute is called, and clipboard payloads
+        # written by hand have used that spelling; the stored key is "asset".
+        # Both are read, so neither an old file nor an old clipboard comes
+        # back as a grey box saying the image is missing.
+        self.asset_key = data.get("asset") or data.get("asset_key") or ""
         self.keep_aspect = bool(data.get("keep_aspect", True))
         self._rect = QRectF(*data.get("rect", [0, 0, 200, 150]))
         self.load_base(data)
