@@ -5015,3 +5015,87 @@ def test_the_pointer_says_resize_over_a_table_edge(window):
     edge = table.mapToScene(QPointF(origin.x() - gw / 2, y))
     hover(window.view, edge.x(), edge.y())
     assert window.view.cursor().shape() == Qt.SplitVCursor
+
+
+# ---------------------------------------------------------------------------
+# Bringing a Bluebeam tool set in
+# ---------------------------------------------------------------------------
+
+def _btx(name):
+    import os
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(here, "btx", name)
+
+
+def test_importing_a_bluebeam_tool_set_fills_the_tool_chest(window):
+    from calcforge.ui import toolsets
+
+    assert window.import_toolset(_btx("Structures - Timber.btx"))
+    names = [group.name for group in toolsets.load_toolsets()]
+    assert "Structures - Timber" in names
+
+    group = next(g for g in toolsets.load_toolsets()
+                 if g.name == "Structures - Timber")
+    labels = [entry.label for entry in group.entries]
+    assert "Timber Post 200x200" in labels
+    # And the panel is showing it, so it can be used straight away.
+    assert window.toolsets_panel.sets.currentText() == "Structures - Timber"
+    assert window.toolsets_panel.list.count() == len(group.entries)
+
+
+def test_an_imported_tool_can_be_put_on_the_page(window):
+    from calcforge.items.shapes import PolyItem, RectItem
+
+    window.import_toolset(_btx("Structures - Timber.btx"))
+    panel = window.toolsets_panel
+    row = [i for i in range(panel.list.count())
+           if panel.list.item(i).text().startswith("Timber Post")][0]
+    panel.list.setCurrentRow(row)
+    before = len(markups(window))
+
+    hover(window.view, 200, 300)
+    panel.use_selected()
+    click(window.view, 200, 300)
+
+    added = markups(window)[before:]
+    assert len(added) > 1                       # the post and its hatching
+    assert all(isinstance(i, (RectItem, PolyItem)) for i in added)
+    # Put down as one thing, so it moves and copies as one thing.
+    assert len({i.group for i in added}) == 1 and added[0].group
+
+
+def test_an_imported_steel_section_draws_as_a_drawing(window):
+    from calcforge.items.shapes import SketchItem
+
+    window.import_toolset(_btx("Structural Steel UC Sections - 1-10 @ A1.btx"))
+    panel = window.toolsets_panel
+    panel.list.setCurrentRow(0)
+    hover(window.view, 250, 300)
+    panel.use_selected()
+    click(window.view, 250, 300)
+
+    sections = [i for i in markups(window) if isinstance(i, SketchItem)]
+    assert len(sections) == 1
+    assert len(sections[0].strokes) > 10
+
+
+def test_importing_the_same_set_twice_does_not_lose_the_first(window):
+    from calcforge.ui import toolsets
+
+    window.import_toolset(_btx("Structures - Timber.btx"))
+    window.import_toolset(_btx("Structures - Timber.btx"))
+    names = [group.name for group in toolsets.load_toolsets()]
+    assert "Structures - Timber" in names
+    assert "Structures - Timber (2)" in names
+
+
+def test_a_file_that_is_not_a_tool_set_is_refused_politely(window, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+    from calcforge.ui import toolsets
+
+    path = tmp_path / "nope.btx"
+    path.write_bytes(b"this is not xml")
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: QMessageBox.Ok)
+    before = len(toolsets.load_toolsets())
+    assert window.import_toolset(str(path)) is False
+    assert len(toolsets.load_toolsets()) == before

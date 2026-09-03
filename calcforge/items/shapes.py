@@ -535,3 +535,147 @@ def _constrain(anchor: QPointF, point: QPointF) -> QPointF:
     angle = math.radians(round(math.degrees(math.atan2(dy, dx)) / 15.0) * 15.0)
     return QPointF(anchor.x() + math.cos(angle) * length,
                    anchor.y() + math.sin(angle) * length)
+
+
+# ---------------------------------------------------------------------------
+# Drawn artwork brought in from somewhere else
+# ---------------------------------------------------------------------------
+
+@register_item
+class SketchItem(MarkupItem):
+    """A piece of drawn artwork: many strokes, each with its own colours.
+
+    Bluebeam's steel-section tools are stamps whose picture is a PDF drawing —
+    a UB in section, a weld symbol, a bolt — and a section is not a rectangle
+    or a polyline, so none of the other markups can hold one. This can: it
+    keeps the strokes as they were drawn, each with the colour, fill and width
+    it was drawn with, inside a box that can be moved and resized like
+    anything else. The drawing scales with the box, so it stays a drawing
+    rather than becoming a photograph of one.
+
+    It is not drawn by hand — there is no sketch tool. It exists so that
+    artwork imported from a tool set has somewhere to live.
+    """
+
+    TYPE = "sketch"
+    NAME = "Drawing"
+
+    def __init__(self, strokes: Optional[list[dict]] = None,
+                 rect: Optional[QRectF] = None):
+        super().__init__()
+        # Each stroke: {"path": [(op, x, y, …)], "stroke": "#rrggbb" or "",
+        #               "fill": "#rrggbb" or "", "width": float}
+        self.strokes: list[dict] = [dict(s) for s in (strokes or [])]
+        self._cache: Optional[list[tuple[QPainterPath, dict]]] = None
+        self.source_box = QRectF(rect) if rect else self._strokes_box()
+        self._rect = QRectF(self.source_box)
+        self.style = Style(stroke="", fill="", width=0.0)
+
+    # -- geometry ----------------------------------------------------------
+    def _strokes_box(self) -> QRectF:
+        box = QRectF()
+        for path, _ in self.paths():
+            box = path.boundingRect() if box.isNull() else box.united(path.boundingRect())
+        return box if not box.isNull() else QRectF(0, 0, 1, 1)
+
+    def local_rect(self) -> QRectF:
+        return QRectF(self._rect)
+
+    def set_local_rect(self, rect: QRectF) -> None:
+        self.prepareGeometryChange()
+        self._rect = QRectF(rect)
+
+    def paths(self) -> list[tuple[QPainterPath, dict]]:
+        """The strokes as painter paths, in the coordinates they were drawn in."""
+        if self._cache is None:
+            self._cache = [(_sketch_path(stroke.get("path", ())), stroke)
+                           for stroke in self.strokes]
+        return self._cache
+
+    def _transform(self) -> tuple[float, float, float, float]:
+        """How the drawn box maps onto the box on the page: (sx, sy, dx, dy)."""
+        source = self.source_box
+        target = self._rect.normalized()
+        sx = target.width() / source.width() if source.width() else 1.0
+        sy = target.height() / source.height() if source.height() else 1.0
+        return sx, sy, target.x() - source.x() * sx, target.y() - source.y() * sy
+
+    def shape(self) -> QPainterPath:
+        path = QPainterPath()
+        path.addRect(self._rect.normalized())
+        return path
+
+    # -- painting ----------------------------------------------------------
+    def paint_content(self, painter: QPainter) -> None:
+        if not self.strokes:
+            return
+        sx, sy, dx, dy = self._transform()
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setOpacity(self.style.opacity)
+        painter.translate(dx, dy)
+        painter.scale(sx, sy)
+        # The pen is scaled with the drawing, so a hairline stays a hairline
+        # rather than growing into a band when the section is made bigger.
+        thickness = max(abs(sx), abs(sy), 0.01)
+        for path, stroke in self.paths():
+            fill = stroke.get("fill", "")
+            painter.setBrush(QBrush(QColor(fill)) if fill else Qt.NoBrush)
+            colour = stroke.get("stroke", "")
+            if colour:
+                pen = QPen(QColor(colour))
+                pen.setWidthF(max(float(stroke.get("width", 1.0)), 0.1) / thickness)
+                pen.setCosmetic(False)
+                pen.setJoinStyle(Qt.RoundJoin)
+                pen.setCapStyle(Qt.RoundCap)
+                painter.setPen(pen)
+            else:
+                painter.setPen(Qt.NoPen)
+            painter.drawPath(path)
+        painter.restore()
+
+    # -- serialisation -----------------------------------------------------
+    def serialize(self) -> dict:
+        data = self.base_dict()
+        box = self.source_box
+        data.update({
+            "strokes": [dict(s) for s in self.strokes],
+            "source_box": [box.x(), box.y(), box.width(), box.height()],
+            "rect": [self._rect.x(), self._rect.y(),
+                     self._rect.width(), self._rect.height()],
+        })
+        return data
+
+    def deserialize(self, data: dict) -> None:
+        self.strokes = [dict(s) for s in data.get("strokes", [])]
+        self._cache = None
+        box = data.get("source_box")
+        self.source_box = QRectF(*box) if box else self._strokes_box()
+        self._rect = QRectF(*data.get("rect", [0, 0, 1, 1]))
+        self.load_base(data)
+
+
+def _sketch_path(commands) -> QPainterPath:
+    """A painter path from the flat command list a sketch stores.
+
+    ``["m", x, y]`` moves, ``["l", x, y]`` draws, ``["c", …six…]`` curves and
+    ``["z"]`` closes — the same four the drawing came in as, so nothing has to
+    be worked out twice or guessed at on the way back in.
+    """
+    path = QPainterPath()
+    for command in commands or ():
+        if not command:
+            continue
+        op = command[0]
+        try:
+            if op == "m":
+                path.moveTo(float(command[1]), float(command[2]))
+            elif op == "l":
+                path.lineTo(float(command[1]), float(command[2]))
+            elif op == "c":
+                path.cubicTo(*[float(v) for v in command[1:7]])
+            elif op == "z":
+                path.closeSubpath()
+        except (IndexError, TypeError, ValueError):
+            continue
+    return path

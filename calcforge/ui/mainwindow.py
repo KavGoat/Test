@@ -238,6 +238,9 @@ class MainWindow(QMainWindow):
         self._act("save_as", "Save as…", self.save_document_as, "Ctrl+Shift+S")
         self._act("insert_pdf", "Insert PDF pages…", lambda: self.insert_pdf(),
                   "Ctrl+I", "pdf")
+        self._act("import_toolset", "Import a tool set…",
+                  lambda: self.import_toolset(),
+                  tip="Bring in a Bluebeam tool set — a .btx file")
         self._act("insert_image_page", "Insert image as a page…",
                   lambda: self.insert_image_page(), "", "image")
         self._act("export_pdf", "Export to PDF…", self.export_pdf, "Ctrl+E", "pdf")
@@ -616,6 +619,7 @@ class MainWindow(QMainWindow):
         file_menu = bar.addMenu("&File")
         for action in (self.act_new, self.act_open, None, self.act_save, self.act_save_as,
                        None, self.act_insert_pdf, self.act_insert_image_page,
+                       self.act_import_toolset,
                        None, self.act_export_pdf,
                        self.act_export_png, self.act_export_markups, self.act_export_vars,
                        None, self.act_preview, self.act_print, None, self.act_quit):
@@ -2106,6 +2110,42 @@ class MainWindow(QMainWindow):
         self.status_hint.setText(
             f"Kept {kept} tool(s) in “{chosen}” — double-click one to put "
             "it down again")
+
+    def import_toolset(self, path: str = "") -> bool:
+        """Bring a Bluebeam tool set in from a ``.btx`` file.
+
+        Years of an engineer's own tools live in those files — sections, weld
+        symbols, review stamps — and nobody rebuilds that by hand. What comes
+        in are ordinary markups: they can be recoloured, resized, put in
+        another set and drawn again like anything else.
+        """
+        if not path:
+            path, _filter = QFileDialog.getOpenFileName(
+                self, "Import a tool set", "",
+                "Bluebeam tool sets (*.btx);;All files (*)")
+            if not path:
+                return False
+        from ..io import btx
+        try:
+            group, skipped = toolsets.toolset_from_btx(path)
+        except btx.BtxError as problem:
+            QMessageBox.warning(self, "Import a tool set",
+                                f"That file could not be read as a Bluebeam "
+                                f"tool set.\n\n{problem}")
+            return False
+        if not group.entries:
+            QMessageBox.information(self, "Import a tool set",
+                                    "There was nothing in that tool set that "
+                                    "could be brought across.")
+            return False
+        group = toolsets.add_toolset(group)
+        self.toolsets_panel.rebuild(keep=group.name)
+        self.show_panel("dock_toolsets", True)
+        message = f"Imported {len(group.entries)} tool(s) into “{group.name}”"
+        if skipped:
+            message += f" — {skipped} could not be read"
+        self.status_hint.setText(message)
+        return True
 
     def paste_with_preview(self) -> None:
         """Take the clipboard in hand and show it before it is put down.

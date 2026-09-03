@@ -225,6 +225,46 @@ def entry_for_many(items: list, label: str = "") -> ToolEntry:
 GROUP = "__group__"     # what a multi-markup entry's payload calls itself
 
 
+# ---------------------------------------------------------------------------
+# bringing a Bluebeam tool set in
+# ---------------------------------------------------------------------------
+
+def toolset_from_btx(path) -> tuple["ToolSet", int]:
+    """Read a Bluebeam ``.btx`` file into a tool set. Returns it and what it
+    could not read.
+
+    A tool made of one markup becomes one entry; a tool made of several — a
+    section with its centre line and its label, say — becomes a group entry,
+    so it comes back onto the page in one piece exactly as it went in.
+    """
+    from ..io import btx
+
+    imported = btx.read(path)
+    entries = []
+    for tool in imported.tools:
+        if len(tool.payloads) == 1:
+            payload = dict(tool.payloads[0])
+        else:
+            payload = {"type": GROUP, "items": [dict(p) for p in tool.payloads]}
+        entries.append(ToolEntry(tool.name or "Tool", payload, COPY))
+    return ToolSet(imported.name, entries), imported.skipped
+
+
+def add_toolset(group: "ToolSet") -> "ToolSet":
+    """Store a tool set, giving it a fresh name if that one is taken."""
+    sets = load_toolsets()
+    taken = {existing.name for existing in sets}
+    name = group.name
+    suffix = 2
+    while name in taken:
+        name = f"{group.name} ({suffix})"
+        suffix += 1
+    group.name = name
+    sets.append(group)
+    save_toolsets(sets)
+    return group
+
+
 def describe(item) -> str:
     """A short name for a markup, for the row in the panel."""
     words = (getattr(item, "summary", lambda: "")() or "").strip().replace("\n", " ")
