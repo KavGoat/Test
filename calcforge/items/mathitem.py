@@ -102,12 +102,15 @@ class _MathRow:
     """One laid-out source line."""
 
     __slots__ = ("statement", "left", "result", "error_box", "top", "height",
-                 "baseline", "line")
+                 "baseline", "line", "head_width")
 
     def __init__(self, statement, left: Optional[Box], result: Optional[Box],
                  error_box: Optional[Box], line: int = 0):
         self.statement = statement
         self.left = left
+        # How wide the name and its "≔" are, so a click on the left of the
+        # line can be put in the name rather than dragged into the expression.
+        self.head_width = 0.0
         self.result = result
         self.error_box = error_box
         self.line = line
@@ -367,6 +370,8 @@ class MathItem(MarkupItem):
                                setter.unit_text_box(statement.target_unit, size * 0.95,
                                                     style.comment_color)]
             left = Row(left_parts)
+            head_width = sum(part.width for part in left_parts[:4]) \
+                if statement.kind in (engine.DEFINE, engine.FUNCTION) else 0.0
 
             result: Optional[Box] = None
             error_box: Optional[Box] = None
@@ -389,8 +394,9 @@ class MathItem(MarkupItem):
                 note = setter.text("   " + statement.comment, size * 0.9, italic=True,
                                    color=style.comment_color)
                 result = Row([result, Spacer(size * 0.4), note]) if result else note
-            rows.append(_MathRow(statement, left, result, error_box,
-                                 line_number))
+            row = _MathRow(statement, left, result, error_box, line_number)
+            row.head_width = head_width
+            rows.append(row)
 
         self.rows = rows
         self._measure()
@@ -835,6 +841,17 @@ class MathItem(MarkupItem):
             if row.left is None:
                 continue
             distance = abs(point.y() - row.baseline)
+            # Left of the "≔" is the name being defined, and clicking it must
+            # put the caret in the name — not shove it to the first character
+            # of the expression, which is what happens when only the boxes the
+            # expression built are looked at.
+            head_end = self.style.padding + row.head_width
+            if row.head_width and point.x() < head_end and distance < best[2]:
+                name = row.statement.name or ""
+                across = (point.x() - self.style.padding) / max(row.head_width, 1.0)
+                column = min(max(round(across * len(name)), 0), len(name))
+                best = (row.line, column, distance)
+                continue
             offset = offset_in(row.left, self.style.padding, row.baseline, point)
             if offset is None:
                 continue

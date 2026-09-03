@@ -100,7 +100,7 @@ DEFAULT_BINDINGS: list[Binding] = [
     Binding("command.fit_width", "Fit width", "Ctrl+1", COMMAND, "View", "fit_width"),
     Binding("command.split_lines", "Split calculation into lines", "Ctrl+Shift+L",
             COMMAND, "Document", "split_calculation"),
-    Binding("command.merge_lines", "Merge calculations", "Ctrl+Shift+M",
+    Binding("command.merge_lines", "Make one block of the selection", "Ctrl+Shift+M",
             COMMAND, "Document", "merge_calculations"),
     Binding("command.problems", "Show problems", "Ctrl+Shift+P", COMMAND, "Document",
             "show_problems"),
@@ -120,12 +120,45 @@ class ShortcutManager(QObject):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        # Registered as the window builds its actions, so that every key the
+        # application answers to is in one list and can be changed. Only the
+        # ones that belong to the words being typed — Ctrl+B, Ctrl+I, Ctrl+U —
+        # stay out of it: those mean bold, italic and underline in a text box
+        # in every program there has ever been, and nothing else may take them.
+        self._extra: list[Binding] = []
         self._sequences: dict[str, str] = {b.action_id: b.default for b in DEFAULT_BINDINGS}
         self.load()
 
+    def register(self, action_id: str, label: str, default: str,
+                 category: str = "Document", payload: str = "") -> str:
+        """Add a binding the window owns, and give back the key to use.
+
+        Called once per action as the window is built. A binding that has been
+        changed keeps the change: what is registered is the *default*.
+        """
+        known = BY_ID.get(action_id)
+        if known is None:
+            binding = Binding(action_id, label, default, COMMAND, category, payload)
+            BY_ID[action_id] = binding
+            self._extra.append(binding)
+        elif not any(b.action_id == action_id for b in self._extra) \
+                and known not in DEFAULT_BINDINGS:
+            # A second window in the same process: the binding is already in
+            # the shared list, but this manager's own copy of the sequences
+            # was read before it existed.
+            self._extra.append(known)
+        if action_id not in self._sequences:
+            # Registered after load(), so its own stored value is read here.
+            settings = self._settings()
+            settings.beginGroup(self.SETTINGS_GROUP)
+            stored = settings.value(action_id, None)
+            settings.endGroup()
+            self._sequences[action_id] = default if stored is None else str(stored)
+        return self._sequences[action_id]
+
     # -- access ------------------------------------------------------------
     def bindings(self) -> list[Binding]:
-        return list(DEFAULT_BINDINGS)
+        return list(DEFAULT_BINDINGS) + list(self._extra)
 
     def sequence(self, action_id: str) -> str:
         return self._sequences.get(action_id, "")
@@ -145,7 +178,7 @@ class ShortcutManager(QObject):
 
     def reset(self, action_id: Optional[str] = None) -> None:
         if action_id is None:
-            self._sequences = {b.action_id: b.default for b in DEFAULT_BINDINGS}
+            self._sequences = {b.action_id: b.default for b in self.bindings()}
         elif action_id in BY_ID:
             self._sequences[action_id] = BY_ID[action_id].default
         self.changed.emit()

@@ -5783,3 +5783,170 @@ def test_the_figures_menu_is_on_a_calculations_right_click(window):
     assert "Significant figures" in labels
     assert "Decimal places" in labels
     assert "Scientific" in labels
+
+
+# ---------------------------------------------------------------------------
+# Every key in one list, and Ctrl lets go of the grid
+# ---------------------------------------------------------------------------
+
+def test_every_key_the_application_answers_to_is_in_the_shortcut_list(window):
+    """One place to see them all, and one place to change them."""
+    bindings = window.shortcuts.bindings()
+    sequences = {window.shortcuts.sequence(b.action_id) for b in bindings}
+    missing = []
+    for name in dir(window):
+        if not name.startswith("act_"):
+            continue
+        shortcut = getattr(window, name).shortcut().toString()
+        if not shortcut or shortcut in window.RESERVED_FOR_TEXT:
+            continue
+        if shortcut not in sequences:
+            missing.append((name, shortcut))
+    assert not missing, f"not in the shortcut list: {missing}"
+
+
+def test_bold_italic_and_underline_belong_to_the_words(window):
+    """Nothing in the document may take Ctrl+B, Ctrl+I or Ctrl+U."""
+    taken = {window.shortcuts.sequence(b.action_id).lower()
+             for b in window.shortcuts.bindings()}
+    for reserved in window.RESERVED_FOR_TEXT:
+        assert reserved.lower() not in taken
+
+
+def test_no_two_actions_want_the_same_key(window):
+    assert window.shortcuts.conflicts() == {}
+
+
+def test_a_rebound_key_reaches_its_action(window):
+    window.shortcuts.set_sequence("command.paste_in_place", "Ctrl+Alt+P")
+    window.apply_shortcuts()
+    assert window.act_paste_in_place.shortcut().toString() == "Ctrl+Alt+P"
+    window.shortcuts.set_sequence("command.paste_in_place", "Ctrl+Shift+V")
+    window.apply_shortcuts()
+
+
+def test_holding_ctrl_lets_go_of_the_grid_while_drawing(window):
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QKeyEvent
+
+    window.document.settings.snap_to_grid = True
+    window.document.settings.grid_mm = 5.0
+    awkward = QPointF(103.7, 147.3)
+
+    assert window.view.snap_scene(awkward) != awkward       # caught by the grid
+    _hold_control(window.view, True)
+    try:
+        assert window.view.snapping_off_now()
+        assert window.view.snap_scene(awkward) == awkward   # exactly where I point
+    finally:
+        _hold_control(window.view, False)
+
+
+def _hold_control(view, down: bool) -> None:
+    """Press or release Ctrl on the view, as a hand would."""
+    kind = QEvent.KeyPress if down else QEvent.KeyRelease
+    modifiers = Qt.ControlModifier if down else Qt.NoModifier
+    QApplication.sendEvent(view, QKeyEvent(kind, Qt.Key_Control, modifiers))
+
+
+def test_ctrl_lets_go_of_the_grid_for_a_calibration_too(window):
+    """The two ends of a printed dimension are never on the grid."""
+    window.document.settings.snap_to_grid = True
+    window.select_tool("calibrate")
+    _hold_control(window.view, True)
+    try:
+        assert window.view.snapping_off_now()
+        point = QPointF(211.3, 96.7)
+        assert window.view.snap_scene(point) == point
+    finally:
+        _hold_control(window.view, False)
+
+
+def test_ctrl_dragging_a_copy_still_snaps(window):
+    """Ctrl held from the start of a drag means copy, and snapping carries on."""
+    window.document.settings.snap_to_grid = True
+    window.view._copy_on_move = True
+    try:
+        assert not window.view.snapping_off_now()
+    finally:
+        window.view._copy_on_move = False
+
+
+def test_ctrl_shift_m_makes_a_block_of_one_calculation(window):
+    block = _calc(window, "a := 1", at=(90, 110))
+    assert not block.block
+    window.scene.clearSelection()
+    block.setSelected(True)
+    before = len(markups(window))
+
+    window.merge_calculations()
+    assert block.block
+    assert len(markups(window)) == before      # made a block, did not copy it
+    assert markups(window)[0] is block         # the same one, where it was
+
+
+def test_ctrl_shift_m_still_joins_several(window):
+    first = _calc(window, "a := 1", at=(90, 110))
+    second = _calc(window, "b := 2", at=(90, 200))
+    window.scene.clearSelection()
+    first.setSelected(True)
+    second.setSelected(True)
+    window.merge_calculations()
+
+    assert len(markups(window)) == 1
+    assert markups(window)[0].source == "a := 1\nb := 2"
+    assert markups(window)[0].block
+
+
+# ---------------------------------------------------------------------------
+# Clicking into typeset maths, the way SMath does
+# ---------------------------------------------------------------------------
+
+def _typeset(window, source, at=(90, 110)):
+    """A calculation, open for typing, laid out as it will print."""
+    window.view._last_scene_pos = QPointF(*at)
+    press_key(window.view, Qt.Key_unknown, "/")
+    block = window.view.editing_item()
+    block._editor.setPlainText(source)
+    block.retypeset_live()
+    return block
+
+
+def _click_in(window, block, x, y):
+    point = block.mapToScene(QPointF(x, y))
+    click(window.view, point.x(), point.y())
+    return block._editor.textCursor().position()
+
+
+def test_clicking_a_numerator_puts_the_caret_in_the_numerator(window):
+    """The editor holding the characters is invisible and laid out flat; the
+    caret must follow the typeset maths, not that."""
+    block = _typeset(window, "Zed := b*d^2/6")
+
+    assert _click_in(window, block, 45, 12) == 7      # the b, above the rule
+    assert _click_in(window, block, 55, 12) == 9      # the d beside it
+    assert _click_in(window, block, 55, 34) == 13     # the 6, below the rule
+
+
+def test_clicking_the_name_puts_the_caret_in_the_name(window):
+    block = _typeset(window, "Zed := b*d^2/6")
+    assert _click_in(window, block, 20, 24) == 1      # between Z and ed
+    # At the far left of the name, not shoved along to the expression.
+    assert _click_in(window, block, 6.0, 24) <= 1
+    # And the far right of the name is still the name, not the "b" after it.
+    assert _click_in(window, block, 30, 24) <= 3
+
+
+def test_typing_after_a_click_lands_where_the_caret_is(window):
+    block = _typeset(window, "Zed := b*d^2/6")
+    _click_in(window, block, 55, 34)                  # in the denominator
+    type_text(window.view, "1")
+    assert block._editor.toPlainText() == "Zed := b*d^2/16"
+    window.view.end_item_edit()
+
+
+def test_a_click_does_not_snap_back_to_the_start(window):
+    """The release used to hand the click to Qt, which placed it again."""
+    block = _typeset(window, "Zed := b*d^2/6")
+    for _ in range(3):
+        assert _click_in(window, block, 45, 12) == 7

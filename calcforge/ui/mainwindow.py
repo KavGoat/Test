@@ -68,6 +68,47 @@ def _command_id(method: str) -> str:
             "renumber_counts": "renumber_counts"}.get(method, method)
 
 
+# Which part of the shortcut list each action belongs in, so a long list is
+# still findable. Anything not named here goes under "Document".
+# Actions the shortcut list already knows under another name, so that they
+# are not entered twice and do not read as clashing with themselves.
+_ALREADY_BOUND = {
+    "recalc": "command.recalculate", "fit_page": "command.fit_page",
+    "fit_width": "command.fit_width", "split_lines": "command.split_lines",
+    "merge_lines": "command.merge_lines", "problems": "command.problems",
+    "renumber_counts": "command.renumber_counts",
+}
+
+_SHORTCUT_GROUPS = {
+    "new": "File", "open": "File", "save": "File", "save_as": "File",
+    "insert_pdf": "File", "insert_image_page": "File", "import_toolset": "File",
+    "export_pdf": "File", "export_png": "File", "export_markups": "File",
+    "export_vars": "File", "preview": "File", "print": "File", "quit": "File",
+    "undo": "Edit", "redo": "Edit", "cut": "Edit", "copy": "Edit",
+    "paste": "Edit", "paste_in_place": "Edit", "paste_here": "Edit",
+    "duplicate": "Edit", "delete": "Edit", "select_all": "Edit",
+    "lock": "Edit", "array": "Edit", "preferences": "Edit",
+    "front": "Order", "back": "Order", "forward": "Order", "backward": "Order",
+    "align_left": "Order", "align_right": "Order", "align_top": "Order",
+    "align_bottom": "Order", "align_hcenter": "Order", "align_vcenter": "Order",
+    "zoom_in": "View", "zoom_out": "View", "zoom_sel": "View",
+    "fit_page": "View", "fit_width": "View", "actual_size": "View",
+    "prev_page": "View", "next_page": "View", "grid": "View", "snap": "View",
+    "snap_items": "View", "margins": "View", "dark": "View",
+    "group": "Markup", "ungroup": "Markup", "autosize": "Markup",
+    "format_painter": "Markup", "hide": "Markup", "show_hidden": "Markup",
+    "flatten": "Markup", "forget_defaults": "Markup",
+    "add_page": "Page", "duplicate_page": "Page", "delete_page": "Page",
+    "page_setup": "Page", "scale": "Page", "header_footer": "Page",
+    "bookmark": "Page", "contents": "Page", "doc_props": "Page",
+    "recalc": "Calculate", "verify": "Calculate", "split_lines": "Calculate",
+    "merge_lines": "Calculate", "problems": "Calculate",
+    "renumber_counts": "Calculate",
+    "shortcuts": "Help", "edit_shortcuts": "Help", "sample": "Help",
+    "about": "Help",
+}
+
+
 class MainWindow(QMainWindow):
     """Everything the user sees: canvas, toolbars, panels and menus."""
 
@@ -80,6 +121,8 @@ class MainWindow(QMainWindow):
         self.current_index = 0
         self.default_style = Style()
         self.shortcuts = ShortcutManager(self)
+        # Which binding each action carries, so a rebinding can find it again.
+        self.action_ids: dict[str, str] = {}
         # Drawing a rectangle on a scaled page, or a dimension, asks a question.
         # Automated runs turn that off and set the values directly.
         self.interactive_prompts = True
@@ -231,12 +274,34 @@ class MainWindow(QMainWindow):
         self._icon_names[action] = name
         return action
 
+    # The three that belong to the words, not to the document. Bold, italic
+    # and underline mean what they mean in every program there has ever been,
+    # so they are not offered for rebinding and nothing else may take them.
+    RESERVED_FOR_TEXT = ("Ctrl+B", "Ctrl+I", "Ctrl+U")
+
     def _act(self, key: str, text: str, slot, shortcut: str = "", icon_name: str = "",
              checkable: bool = False, tip: str = "") -> QAction:
         action = QAction(text, self)
         if icon_name:
             self.give_icon(action, icon_name)
         if shortcut:
+            # Every key the application answers to goes in the shortcut list,
+            # so it can be seen in one place and changed. What is registered
+            # is the default; a binding already changed keeps the change.
+            already = _ALREADY_BOUND.get(key)
+            if shortcut in self.RESERVED_FOR_TEXT:
+                pass                     # the words keep bold, italic, underline
+            elif already:
+                # This command is already in the list under its own name; a
+                # second entry for the same key would read as a clash with
+                # itself.
+                shortcut = self.shortcuts.sequence(already) or shortcut
+                self.action_ids[key] = already
+            else:
+                shortcut = self.shortcuts.register(
+                    f"command.{key}", text.rstrip("…"), shortcut,
+                    _SHORTCUT_GROUPS.get(key, "Document"))
+                self.action_ids[key] = f"command.{key}"
             action.setShortcut(QKeySequence(shortcut))
         action.setCheckable(checkable)
         action.setToolTip(tip or text)
@@ -268,12 +333,19 @@ class MainWindow(QMainWindow):
         self._act("preview", "Print preview…", self.print_preview)
         self._act("quit", "Exit", self.close, "Ctrl+Q")
 
+        # Undo and redo come from the stack itself rather than from _act, so
+        # they are entered in the shortcut list by hand — every key the
+        # application answers to belongs there.
         self.act_undo = self.undo_stack.createUndoAction(self, "Undo")
-        self.act_undo.setShortcut(QKeySequence.Undo)
+        self.act_undo.setShortcut(QKeySequence(self.shortcuts.register(
+            "command.undo", "Undo", "Ctrl+Z", "Edit")))
         self.give_icon(self.act_undo, "undo")
+        self.action_ids["undo"] = "command.undo"
         self.act_redo = self.undo_stack.createRedoAction(self, "Redo")
-        self.act_redo.setShortcut(QKeySequence.Redo)
+        self.act_redo.setShortcut(QKeySequence(self.shortcuts.register(
+            "command.redo", "Redo", "Ctrl+Shift+Z", "Edit")))
         self.give_icon(self.act_redo, "redo")
+        self.action_ids["redo"] = "command.redo"
 
         self._act("cut", "Cut", self.cut_selection, "Ctrl+X")
         self._act("copy", "Copy", self.copy_selection, "Ctrl+C")
@@ -326,13 +398,17 @@ class MainWindow(QMainWindow):
         self._act("add_page", "Add page", lambda: self.add_page())
         self._act("duplicate_page", "Duplicate page", lambda: self.duplicate_page())
         self._act("delete_page", "Delete page", lambda: self.delete_page())
-        self._act("page_setup", "Page setup…", self.page_setup, "Ctrl+Shift+P", "page")
+        # No key: Ctrl+Shift+P shows the problems panel, and page setup is on
+        # the Page menu and on a page's own right-click menu.
+        self._act("page_setup", "Page setup…", self.page_setup, "", "page")
         self._act("scale", "Page scale…", self.calibrate_dialog, "", "calibrate")
         self._act("doc_props", "Document properties…", lambda: self.document_properties())
         self._act("header_footer", "Header and footer…", self.edit_header_footer, "",
                   tip="Page numbers, the date, a title and a logo on every page")
 
-        self._act("grid", "Show grid", self.toggle_grid, "Ctrl+G", checkable=True)
+        # Ctrl+G is Group, here as in Bluebeam, so the grid takes the key
+        # next to it rather than fighting for one. Ctrl+Alt+G is Greek gamma.
+        self._act("grid", "Show grid", self.toggle_grid, "Ctrl+'", checkable=True)
         self._act("snap", "Snap to grid", self.toggle_snap, "", checkable=True)
         self._act("snap_items", "Snap to what is drawn", self.toggle_item_snap, "",
                   checkable=True,
@@ -354,7 +430,7 @@ class MainWindow(QMainWindow):
                   tip="Permanently remove what the black boxes cover")
         self._act("split_lines", "Split into separate lines", self.split_calculation, "",
                   tip="Turn a multi-line calculation into one movable region per line")
-        self._act("merge_lines", "Merge into one block", self.merge_calculations, "",
+        self._act("merge_lines", "Make one block", self.merge_calculations, "",
                   tip="Combine the selected calculations into a single region")
 
         self._act("shortcuts", "Keyboard shortcuts…", self.show_shortcuts, "F1",
@@ -1568,6 +1644,18 @@ class MainWindow(QMainWindow):
             sequence = self.shortcuts.sequence(f"command.{_command_id(method)}")
             if action is not None and sequence:
                 action.setShortcut(QKeySequence(sequence))
+        # And everything else the window owns, which registered itself as it
+        # was built.
+        for key, action_id in self.action_ids.items():
+            action = getattr(self, f"act_{key}", None)
+            if action is None:
+                continue
+            sequence = self.shortcuts.sequence(action_id)
+            current = action.shortcut().toString()
+            if current in self.RESERVED_FOR_TEXT:
+                continue
+            action.setShortcut(QKeySequence(sequence) if sequence
+                               else QKeySequence())
         for action_id, action in getattr(self, "symbol_actions", {}).items():
             action.setShortcut(QKeySequence(self.shortcuts.sequence(action_id)))
 
@@ -2059,6 +2147,11 @@ class MainWindow(QMainWindow):
         image = QImage()
         data = self.document.asset(getattr(item, "asset_key", ""))
         if not data or not image.loadFromData(data) or image.isNull():
+            # Doing nothing at all, silently, is how this looked broken: the
+            # menu entry was there and clicking it appeared to do nothing.
+            QMessageBox.information(
+                self, "Change colours",
+                "There is no picture in this one to recolour.")
             return
         changed = self._ask_recolour(image)
         if changed is None:
@@ -2787,11 +2880,32 @@ class MainWindow(QMainWindow):
         self.refresh_selection()
 
     def merge_calculations(self) -> None:
-        """Join the selected calculations into one region, in reading order."""
+        """Make one block of what is selected.
+
+        Two or more calculations are joined into one region, in reading order.
+        One on its own becomes a block where it stands — a block is what holds
+        several lines and makes Enter open the next one inside it — without
+        being moved, copied or rebuilt, which is what "make a block of this"
+        should mean and did not.
+        """
         from ..ui.scene import reading_order
         blocks = [i for i in self.selected_items() if isinstance(i, MathItem)]
-        if len(blocks) < 2:
-            self.status_hint.setText("Select two or more calculations to merge.")
+        if not blocks:
+            self.status_hint.setText("Select a calculation to make a block of.")
+            return
+        if len(blocks) == 1:
+            one = blocks[0]
+            if one.block:
+                self.status_hint.setText("That is already a block")
+                return
+            self.view.begin_snapshot(self.view.involved_frames(one))
+            one.block = True
+            one.touch()
+            one.update()
+            self.view.commit_snapshot("Make a block")
+            self.refresh_selection()
+            self.status_hint.setText(
+                "Now a block — Enter opens the next line inside it")
             return
         blocks = reading_order(blocks)
         first = blocks[0]

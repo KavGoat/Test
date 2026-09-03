@@ -126,6 +126,10 @@ class PageView(QGraphicsView):
         self._last_scene_pos = QPointF(60, 60)
         # Where the next thing typed, inserted or pasted will go, and
         # what a callout is about to point at.
+        # Whether Ctrl is down, as this view saw it. Kept as well as asking
+        # the application, because the view hears the press first and because
+        # a key held down is state, not an event.
+        self._control_held = False
         self._pending_anchor: Optional[QPointF] = None
         # The cloud a cloud call-out has already drawn, waiting for its words.
         self._pending_cloud = None
@@ -409,9 +413,35 @@ class PageView(QGraphicsView):
     # ------------------------------------------------------------------
     # snapping
     # ------------------------------------------------------------------
+    def snapping_off_now(self) -> bool:
+        """Whether Ctrl is being held to let go of the grid, right now.
+
+        Ctrl means "leave it exactly where I am pointing" everywhere a point
+        is taken from the pointer — drawing, resizing, measuring, calibrating
+        the page scale. It used to mean that only while a markup was being
+        moved, so the one place it is needed most, putting the two ends of a
+        calibration on the two ends of a printed dimension, was the one place
+        it did not work.
+
+        The live modifier state is read rather than passed down from the
+        event: every one of those paths goes through :meth:`snap` or
+        :meth:`snap_scene`, and threading a flag through all of them would
+        leave one of them out.
+
+        Ctrl held from the start of a drag means "copy" instead, and there
+        snapping carries on as usual.
+        """
+        if self._copy_on_move:
+            return False
+        if self._control_held:
+            return True
+        return bool(QApplication.keyboardModifiers() & Qt.ControlModifier)
+
     def snap(self, point: QPointF, force: bool = False) -> QPointF:
         """Snap a point given in page coordinates."""
         settings = self.document().settings
+        if self.snapping_off_now() and not force:
+            return point
         if not (settings.snap_to_grid or force):
             return point
         step = max(settings.grid_mm, 0.5) * MM_TO_PT
@@ -425,7 +455,8 @@ class PageView(QGraphicsView):
         grid belongs to the page, not to the canvas, so a point is taken into
         page coordinates to be snapped and brought back again.
         """
-        if not preferences.current().snap_while_drawing:
+        if not preferences.current().snap_while_drawing or self.snapping_off_now():
+            self._snap_marker = None
             return QPointF(scene_pos)
         caught = self.snap_to_item(scene_pos)
         if caught is not None:
@@ -569,6 +600,16 @@ class PageView(QGraphicsView):
                        if self.editable(item) else None)
             rect = self.editing_rect()
             if grabbed is None and rect is not None and rect.contains(scene_pos):
+                if isinstance(item, MathItem):
+                    # A calculation is typeset, and the editor holding its
+                    # characters is invisible and laid out as one flat line.
+                    # Letting Qt place the caret from the click puts it in the
+                    # wrong place every time — near the start, wherever in the
+                    # fraction the pointer actually was. The box tree knows
+                    # which characters it drew where, so it does the mapping.
+                    self.place_caret(item, scene_pos)
+                    event.accept()
+                    return
                 super().mousePressEvent(event)
                 return
             self.end_item_edit()
@@ -923,6 +964,13 @@ class PageView(QGraphicsView):
             return
 
         if self._editing_item is not None and self._mode == "idle":
+            if isinstance(self._editing_item, MathItem) \
+                    and event.buttons() & Qt.LeftButton:
+                # Dragging across typeset maths selects from where the press
+                # landed to where the pointer is, both mapped through the box
+                # tree rather than through the hidden flat editor.
+                self.drag_select(self._editing_item, event)
+                return
             super().mouseMoveEvent(event)       # dragging selects text
             return
 
@@ -1212,6 +1260,12 @@ class PageView(QGraphicsView):
         scene_pos = self.mapToScene(event.position().toPoint())
 
         if self._editing_item is not None and self._mode == "idle":
+            if isinstance(self._editing_item, MathItem):
+                # The press already put the caret where the typeset maths was
+                # clicked. Handing the release to Qt's own editor would let it
+                # place the caret again from its flat layout and undo that.
+                event.accept()
+                return
             super().mouseReleaseEvent(event)
             return
 
@@ -1936,6 +1990,26 @@ class PageView(QGraphicsView):
         return (self._editing_item is not None or self._cell_editor is not None
                 or self._unit_editor is not None or self._label_editor is not None
                 or self.active_table is not None)
+
+    def drag_select(self, item, event) -> None:
+        """Extend the selection to the pointer, in typeset coordinates."""
+        editor = getattr(item, "_editor", None)
+        if editor is None:
+            return
+        scene_pos = self.mapToScene(event.position().toPoint())
+        line, column = item.offset_at(item.mapFromScene(scene_pos))
+        if line < 0:
+            return
+        block = editor.document().findBlockByNumber(line)
+        if not block.isValid():
+            return
+        cursor = editor.textCursor()
+        cursor.setPosition(block.position()
+                           + min(max(column, 0), block.length() - 1),
+                           QTextCursor.KeepAnchor)
+        editor.setTextCursor(cursor)
+        item.update()
+        event.accept()
 
     @staticmethod
     def place_caret(item, scene_pos: QPointF) -> None:
@@ -3094,6 +3168,10 @@ class PageView(QGraphicsView):
     def keyPressEvent(self, event: QKeyEvent) -> None:
         key = event.key()
         modifiers = event.modifiers()
+        if key == Qt.Key_Control:
+            self._control_held = True
+            self._snap_marker = None
+            self.viewport().update()
 
         # While a region or a cell is being edited every key belongs to it —
         # arrows move the caret, not the markup — apart from Escape, which
@@ -3379,6 +3457,8 @@ class PageView(QGraphicsView):
         return False
 
     def keyReleaseEvent(self, event: QKeyEvent) -> None:
+        if event.key() == Qt.Key_Control:
+            self._control_held = False
         if event.key() == Qt.Key_Space and not event.isAutoRepeat():
             self._space_pan = False
             self.setCursor(self._cursor_for_tool(self.current_tool()))
