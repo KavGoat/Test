@@ -342,3 +342,58 @@ def test_the_cell_editor_lines_up_the_way_the_cell_does(window):
     window.view.open_cell_editor()
     assert window.view._cell_editor.alignment() & Qt.AlignRight
     window.view.close_cell_editor(commit=False)
+
+
+# ---------------------------------------------------------------------------
+# Formulas follow the cells they read
+# ---------------------------------------------------------------------------
+
+def test_inserting_a_row_moves_the_references_with_it():
+    from calcforge.core.spreadsheet import Sheet
+
+    sheet = Sheet(rows=6, cols=4)
+    sheet.set_raw(1, 0, "12")
+    sheet.set_raw(2, 0, "=A2*2")
+    sheet.set_raw(3, 0, "=$A$2+1")
+
+    sheet.insert_rows(1)
+    assert sheet.raw(3, 0) == "=A3*2"          # the 12 is on row 3 now
+    assert sheet.raw(4, 0) == "=$A$3+1"        # absolute, but still the same cell
+    sheet.recalculate()
+    assert sheet.value(3, 0) == 24
+
+
+def test_deleting_a_row_brings_the_references_back():
+    from calcforge.core.spreadsheet import Sheet
+
+    sheet = Sheet(rows=6, cols=4)
+    sheet.set_raw(1, 0, "12")
+    sheet.set_raw(2, 0, "=A2*2")
+    sheet.insert_rows(1)
+    sheet.delete_rows(1)
+    assert sheet.raw(2, 0) == "=A2*2"
+    sheet.recalculate()
+    assert sheet.value(2, 0) == 24
+
+
+def test_deleting_the_cell_a_formula_reads_says_so():
+    """#REF!, as in Excel: the cell really is gone, and pretending is worse."""
+    from calcforge.core.spreadsheet import Sheet
+
+    sheet = Sheet(rows=6, cols=4)
+    sheet.set_raw(1, 0, "12")
+    sheet.set_raw(0, 2, "=A2*2")
+    sheet.delete_cols(0)
+    assert "#REF!" in sheet.raw(0, 1)
+
+
+def test_inserting_a_column_moves_the_references_across():
+    from calcforge.core.spreadsheet import Sheet
+
+    sheet = Sheet(rows=6, cols=4)
+    sheet.set_raw(1, 1, "8")
+    sheet.set_raw(1, 2, "=B2*3")
+    sheet.insert_cols(0)
+    assert sheet.raw(1, 3) == "=C2*3"
+    sheet.recalculate()
+    assert sheet.value(1, 3) == 24

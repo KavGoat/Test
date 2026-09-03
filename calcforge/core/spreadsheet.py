@@ -551,6 +551,56 @@ class Sheet:
         cell = self.cells.get((row, col))
         return cell.value if cell else None
 
+    def shift_references(self, at: int, count: int, down: bool) -> None:
+        """Move every formula's references along with the cells they name.
+
+        Inserting a row above a formula moves the values it reads, so "=A2*2"
+        has to become "=A3*2" or it quietly starts reading an empty cell and
+        answering zero — which is worse than an error, because nothing looks
+        wrong. Deleting the row a formula reads leaves #REF!, as it does in
+        Excel: the reference really is gone, and saying so is the honest
+        answer.
+
+        Absolute references move too. "$A$2" means "this cell however this
+        formula is copied", not "this cell whatever happens to the sheet".
+        """
+        for cell in list(self.cells.values()):
+            if cell.is_formula:
+                cell.raw = self._shift_formula(cell.raw, at, count, down)
+
+    @staticmethod
+    def _shift_formula(formula: str, at: int, count: int, down: bool) -> str:
+        if not formula.startswith("="):
+            return formula
+
+        def replace(match: re.Match) -> str:
+            text = match.group(0)
+            abs_col = text.startswith("$")
+            body = text[1:] if abs_col else text
+            abs_row = "$" in body
+            if abs_row:
+                letters, digits = body.split("$")
+            else:
+                found = _REF_RE.match(body)
+                if not found:
+                    return text
+                letters, digits = found.group(1), found.group(2)
+            row, col = int(digits) - 1, column_index(letters)
+            place = row if down else col
+            if count > 0:                      # inserting
+                if place >= at:
+                    place += count
+            else:                              # deleting
+                gone = -count
+                if at <= place < at + gone:
+                    return "#REF!"
+                if place >= at + gone:
+                    place -= gone
+            row, col = (place, col) if down else (row, place)
+            return make_ref(row, col, abs_row, abs_col)
+
+        return "=" + re.sub(r"\$?[A-Za-z]{1,3}\$?[0-9]{1,5}", replace, formula[1:])
+
     def insert_rows(self, at: int, count: int = 1) -> None:
         moved: dict[tuple[int, int], Cell] = {}
         for (row, col), cell in self.cells.items():
@@ -561,6 +611,7 @@ class Sheet:
             heights[row + count if row >= at else row] = height
         self.row_heights = heights
         self.rows += count
+        self.shift_references(at, count, down=True)
 
     def insert_cols(self, at: int, count: int = 1) -> None:
         moved: dict[tuple[int, int], Cell] = {}
@@ -576,6 +627,7 @@ class Sheet:
             units[col + count if col >= at else col] = unit
         self.column_units = units
         self.cols += count
+        self.shift_references(at, count, down=False)
 
     def delete_rows(self, at: int, count: int = 1) -> None:
         count = min(count, self.rows - 1)
@@ -591,6 +643,7 @@ class Sheet:
                             for r, h in self.row_heights.items()
                             if not at <= r < at + count}
         self.rows -= count
+        self.shift_references(at, -count, down=True)
 
     def delete_cols(self, at: int, count: int = 1) -> None:
         count = min(count, self.cols - 1)
@@ -609,6 +662,7 @@ class Sheet:
                              for c, u in self.column_units.items()
                              if not at <= c < at + count}
         self.cols -= count
+        self.shift_references(at, -count, down=False)
 
     def resize(self, rows: int, cols: int) -> None:
         rows = max(1, min(rows, MAX_ROWS))
