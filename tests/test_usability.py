@@ -230,7 +230,8 @@ def test_escape_leaves_editing_then_returns_to_select(window):
 @pytest.mark.parametrize("character, tool_key", [
     ("c", "cloud"), ("r", "rect"), ("p", "polygon"), ("a", "arrow"),
     ("m", "measure_length"), ("q", "callout"), ("t", "text"), ("e", "ellipse"),
-    ("l", "line"), ("k", "highlighter"), ("s", "stamp"), ("b", "table"),
+    ("l", "line"), ("h", "highlighter"), ("k", "cloud_poly"), ("n", "polyline"),
+    ("s", "stamp"), ("b", "table"),
 ])
 def test_letter_keys_pick_their_tool(window, character, tool_key):
     window.select_tool("select")
@@ -1998,12 +1999,14 @@ def test_the_two_calculation_tools_are_offered_separately(window):
 
 
 def test_a_block_keeps_its_working_to_itself(window):
+    """A block shares its names unless it is told to keep them."""
     window.select_tool("mathblock")
     drag(window.view, 80, 80, 400, 200)
     block = window.view.editing_item()
-    assert block.block and block.local_scope
+    assert block.block and not block.local_scope
     block._editor.setPlainText("t := 5 mm\nA := t*t =")
     window.view.end_item_edit()
+    block.local_scope = True
     window.recalculate()
     assert block.scoped
     assert window.document.workspace.get("t") is None
@@ -2853,16 +2856,41 @@ def test_the_editor_is_the_same_face_and_size_as_the_print(window):
     window.view.end_item_edit()
 
 
+def _paints_in(item, wanted, tolerance: int = 26) -> bool:
+    """Whether the region paints anything close to *wanted*.
+
+    Close rather than exact: text is drawn with antialiasing, so the middle of
+    a stroke is the colour asked for and everything around it is on the way to
+    the paper.
+    """
+    from PySide6.QtGui import QImage, QPainter
+
+    rect = item.local_rect()
+    image = QImage(max(int(rect.width()) + 8, 20), max(int(rect.height()) + 8, 20),
+                   QImage.Format_ARGB32)
+    image.fill(0xFFFFFFFF)
+    painter = QPainter(image)
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    painter.setRenderHint(QPainter.TextAntialiasing, True)
+    item.paint_content(painter)
+    painter.end()
+    for x in range(image.width()):
+        for y in range(image.height()):
+            colour = image.pixelColor(x, y)
+            if (abs(colour.red() - wanted.red()) <= tolerance
+                    and abs(colour.green() - wanted.green()) <= tolerance
+                    and abs(colour.blue() - wanted.blue()) <= tolerance):
+                return True
+    return False
+
+
 def test_units_are_blue_while_they_are_being_typed(window):
+    """The typeset working is what is on screen, being typed or not."""
     from calcforge.core.mathrender import MathStyle
 
     block = _calc(window, "w := 12 kN", at=(90, 110))
     window.view.begin_item_edit(block)
-    document = block._editor.document()
-    formats = document.firstBlock().layout().formats()
-    unit_colour = MathStyle().unit_color.name()
-    coloured = {fmt.format.foreground().color().name() for fmt in formats}
-    assert unit_colour in coloured
+    assert _paints_in(block, MathStyle().unit_color)
     window.view.end_item_edit()
 
 
@@ -2871,9 +2899,7 @@ def test_a_comment_is_grey_while_it_is_being_typed(window):
 
     block = _calc(window, "w := 12 kN   # dead load", at=(90, 110))
     window.view.begin_item_edit(block)
-    formats = block._editor.document().firstBlock().layout().formats()
-    grey = MathStyle().comment_color.name()
-    assert grey in {fmt.format.foreground().color().name() for fmt in formats}
+    assert _paints_in(block, MathStyle().comment_color)
     window.view.end_item_edit()
 
 
@@ -2895,12 +2921,16 @@ def test_the_answer_keeps_up_with_what_is_typed(window):
     window.view.end_item_edit()
 
 
-def test_the_editor_wraps_rather_than_scrolling_sideways(window):
+def test_a_long_line_widens_the_region_rather_than_running_off_it(window):
+    """The typeset working is what is drawn, and the region grows to hold it."""
     block = _calc(window, "L := 6 m", at=(90, 110))
+    narrow = block.local_rect().width()
     window.view.begin_item_edit(block)
-    editor = block._editor
-    assert editor.textWidth() > 0                 # a width to wrap at, not a scroller
-    assert editor.textWidth() <= block.local_rect().width()
+    block._editor.setPlainText(
+        "L := 6 m + 12 m + 3 m + 24 m + 9 m + 15 m + 30 m + 45 m =")
+    window.recalculate()
+    assert block.local_rect().width() > narrow
+    assert block.rows[0].left.width <= block.local_rect().width()
     window.view.end_item_edit()
 
 
@@ -3209,7 +3239,8 @@ def test_a_tool_can_be_switched_between_the_two_modes(window):
     assert panel.current_entry().mode == toolsets.COPY
     panel.toggle_mode()
     assert panel.current_entry().mode == toolsets.PROPERTIES
-    assert "properties" in panel.list.item(0).text()
+    assert panel.entry_buttons["mode"].isChecked()
+    assert "properties" in panel.list.item(0).toolTip()
 
 
 def test_tools_can_be_reordered_and_removed(window):
@@ -3222,8 +3253,9 @@ def test_tools_can_be_reordered_and_removed(window):
 
     panel = window.toolsets_panel
     panel.list.setCurrentRow(1)
-    panel.move_entry(-1)
+    panel._rows_moved(None, 1, 1, None, 0)        # dragged up the list
     assert panel.current_set().entries[0].payload["kind"] == "ellipse"
+    panel.list.setCurrentRow(0)
     panel.remove_entry()
     assert len(panel.current_set().entries) == 1
 
@@ -3724,8 +3756,9 @@ def test_the_properties_panel_names_a_table(window):
     table.setSelected(True)
     window.refresh_selection()
     boxes = [w for w in window.properties_panel.findChildren(QLineEdit)
-             if w.placeholderText() == "bolts"]
+             if (w.toolTip() or "").startswith("Name this table")]
     assert boxes
+    assert boxes[0].placeholderText() == ""        # no ghost name in the box
     boxes[0].setText("shear")
     boxes[0].editingFinished.emit()
     assert table.table_name == "shear"
@@ -4159,3 +4192,103 @@ def test_a_space_in_real_maths_is_just_a_space(window):
     item = window.view.editing_item()
     assert isinstance(item, MathItem)
     window.view.end_item_edit()
+
+
+# ---------------------------------------------------------------------------
+# The tool chest shows the tools themselves
+# ---------------------------------------------------------------------------
+
+def test_a_tool_set_entry_is_drawn_as_what_it_is(window):
+    from calcforge.ui import toolsets
+    from calcforge.ui.panels import entry_thumbnail
+
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 260, 180)
+    box = only(window, RectItem)[0]
+    box.style.stroke = "#c92a2a"
+
+    for mode in (toolsets.COPY, toolsets.PROPERTIES):
+        image = entry_thumbnail(toolsets.entry_for(box, mode=mode)).toImage()
+        inked = [image.pixelColor(x, y)
+                 for x in range(image.width()) for y in range(image.height())
+                 if image.pixelColor(x, y).alpha() > 40]
+        assert inked, mode
+        # drawn in the colour it was stored in, not in the toolbar's ink
+        assert any(colour.red() > 150 and colour.green() < 120 for colour in inked), mode
+
+
+def test_drawing_again_is_only_offered_where_it_means_something(window):
+    from calcforge.ui import toolsets
+
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 260, 180)
+    box = only(window, RectItem)[0]
+    assert toolsets.can_be_properties(toolsets.entry_for(box).payload)
+
+    window.select_tool("table")
+    drag(window.view, 100, 300, 400, 420)
+    window.view.deactivate_table()
+    table = [i for i in markups(window) if i.TYPE == "table"][0]
+    assert not toolsets.can_be_properties(toolsets.entry_for(table).payload)
+
+    grouped = toolsets.entry_for_many([box, table])
+    assert not toolsets.can_be_properties(grouped.payload)
+
+
+def test_the_draw_again_button_is_greyed_out_for_a_calculation(window):
+    from calcforge.ui import toolsets
+
+    panel = window.toolsets_panel
+    group = panel.current_set()
+    group.entries.append(toolsets.ToolEntry("A calculation", {"type": "math"}))
+    group.entries.append(toolsets.ToolEntry("A rectangle", {"type": "rect"}))
+    panel.rebuild_entries()
+
+    panel.list.setCurrentRow(len(group.entries) - 2)
+    assert not panel.entry_buttons["mode"].isEnabled()
+    panel.list.setCurrentRow(len(group.entries) - 1)
+    assert panel.entry_buttons["mode"].isEnabled()
+    del group.entries[-2:]
+
+
+def test_tools_can_be_dragged_into_the_order_you_want(window):
+    from calcforge.ui import toolsets
+
+    panel = window.toolsets_panel
+    group = panel.current_set()
+    kept = list(group.entries)
+    group.entries[:] = [toolsets.ToolEntry("First", {"type": "rect"}),
+                        toolsets.ToolEntry("Second", {"type": "rect"}),
+                        toolsets.ToolEntry("Third", {"type": "rect"})]
+    panel.rebuild_entries()
+
+    panel._rows_moved(None, 2, 2, None, 0)        # drag the third to the top
+    assert [entry.label for entry in panel.current_set().entries] == \
+        ["Third", "First", "Second"]
+    group = panel.current_set()
+    group.entries[:] = kept
+    toolsets.save_toolsets(panel.groups)
+
+
+def test_a_click_placed_tool_shows_itself_before_it_lands(window):
+    """A note or a count marker is not invisible until it is already down."""
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QImage, QPainter
+
+    def ink(x, y, size=60):
+        image = QImage(size, size, QImage.Format_ARGB32)
+        image.fill(0)
+        painter = QPainter(image)
+        painter.translate(-x + size / 2, -y + size / 2)
+        window.view.drawForeground(painter,
+                                   QRectF(x - size / 2, y - size / 2, size, size))
+        painter.end()
+        return sum(1 for a in range(size) for b in range(size) if image.pixel(a, b))
+
+    window.select_tool("note")
+    hover(window.view, 300, 300)
+    assert ink(300, 300) > 0
+
+    window.select_tool("select")
+    hover(window.view, 300, 300)
+    assert ink(300, 300) == 0            # nothing held, nothing drawn

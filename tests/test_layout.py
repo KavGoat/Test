@@ -335,7 +335,9 @@ def test_moving_a_panel_writes_the_layout_out_by_itself(window):
 
 def test_hiding_a_panel_schedules_a_save(window):
     window._layout_timer.stop()
-    panels(window)["dock_layers"].setVisible(False)
+    window.show_panel("dock_layers", True)
+    window._layout_timer.stop()
+    window.show_panel("dock_layers", False)
     assert window._layout_timer.isActive()
 
 
@@ -377,15 +379,18 @@ def test_everything_that_can_be_arranged_comes_back(window, qapp):
 # the reference panels live together
 # ---------------------------------------------------------------------------
 
-def test_the_lookup_panels_share_one_panel(window):
-    """Markups, variables, functions, layers and problems are tabs of one panel."""
-    assert [dock.objectName() for dock in window.reference_docks] == [
-        "dock_markups", "dock_variables", "dock_functions", "dock_layers",
-        "dock_toolsets", "dock_bookmarks", "dock_problems"]
+def test_the_lookup_panels_are_each_behind_their_own_icon(window):
+    """No stack of tabs along the bottom: every panel has an icon on a rail."""
+    from calcforge.ui.rail import LEFT, RIGHT
+
     for dock in window.reference_docks:
-        assert window.dockWidgetArea(dock) == Qt.BottomDockWidgetArea
-    together = window.tabifiedDockWidgets(window.dock_markups)
-    assert set(together) == set(window.reference_docks[1:])
+        name = dock.objectName()
+        assert name in window.PANEL_ICONS
+        side = window.panel_sides[name]
+        rail = window.left_rail if side == LEFT else window.right_rail
+        assert name in rail.buttons
+        assert window.dockWidgetArea(dock) in (Qt.LeftDockWidgetArea,
+                                               Qt.RightDockWidgetArea)
 
 
 def test_properties_keeps_the_right_side_to_itself(window):

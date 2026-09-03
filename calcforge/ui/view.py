@@ -117,6 +117,9 @@ class PageView(QGraphicsView):
         self._label_proxy: Optional[QGraphicsProxyWidget] = None
         self._label_item = None
         self._editing_item = None
+        # What the region being typed into said when the answers were last
+        # worked out.
+        self._last_recalculated = ""
 
         self._last_scene_pos = QPointF(60, 60)
         # Where the next thing typed, inserted or pasted will go, and
@@ -257,6 +260,7 @@ class PageView(QGraphicsView):
         self.close_unit_editor()
         self.close_cell_editor()
         self.tool_key = key if key in TOOL_MAP else "select"
+        self._preview_key = None            # the preview belongs to the old tool
         tool = self.current_tool()
         self.setCursor(self._cursor_for_tool(tool))
         self.statusMessage.emit(tool.hint or tool.label)
@@ -835,7 +839,8 @@ class PageView(QGraphicsView):
         scene_pos = self.mapToScene(event.position().toPoint())
         self._last_scene_pos = scene_pos
         self.cursorMoved.emit(scene_pos)
-        if self._pending_anchor is not None or self._pending_stamp is not None:
+        if (self._pending_anchor is not None or self._pending_stamp is not None
+                or self.current_tool().mode == CLICK):
             self.viewport().update()          # the leader, or the preview, follows
 
         if self._editing_item is not None and self._mode == "idle":
@@ -1694,6 +1699,7 @@ class PageView(QGraphicsView):
             item._enter_wired = True
         item.begin_edit()
         self._editing_item = item
+        self._last_recalculated = getattr(item, "source", "")
         if isinstance(item, MathItem) and not getattr(item, "_live_wired", False):
             # Wired once per region: a QTextDocument outlives one edit, and
             # asking Qt to disconnect something it never held prints a warning.
@@ -1750,9 +1756,13 @@ class PageView(QGraphicsView):
         if not isinstance(item, MathItem) or editor is None:
             return
         text = editor.toPlainText()
-        if text == item.source:
+        # The region keeps its own source level with the typing so the working
+        # stays typeset, so that is no longer a test of whether anything has
+        # changed since the last pass. What was last worked out is.
+        if text == self._last_recalculated:
             return
         item.source = text
+        self._last_recalculated = text
         self.window.recalculate()
 
     # -- completing a name or a unit ---------------------------------------
@@ -2423,6 +2433,8 @@ class PageView(QGraphicsView):
         self._draw_group_boxes(painter)
         if self._pending_stamp is not None:
             self._draw_pending_preview(painter)
+        else:
+            self._draw_tool_preview(painter)
         if self._snap_marker is not None:
             self._draw_snap_marker(painter, self._snap_marker)
         if self._pending_anchor is not None:
@@ -2467,6 +2479,55 @@ class PageView(QGraphicsView):
         painter.setBrush(Qt.NoBrush)
         painter.drawRect(QRectF(top_left, box.size()))
         painter.restore()
+
+    def _draw_tool_preview(self, painter: QPainter) -> None:
+        """Show a click-placed tool under the pointer before it is put down.
+
+        A tool you drag out shows itself as you drag. One that lands on a
+        single click — a note, a count marker, a stamp — used to be invisible
+        until it was already on the page, which is a poor moment to find out
+        how big it is or where its corner falls.
+        """
+        tool = self.current_tool()
+        if tool.mode != CLICK or self._mode != "idle":
+            return
+        if tool.factory is None or self.window.view.busy_typing():
+            return
+        item = self._preview_item(tool)
+        if item is None:
+            return
+        frame = self.frame_at(self._last_scene_pos) or self.frame()
+        if frame is None:
+            return
+        point = self.snap_scene(self._last_scene_pos, frame)
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setOpacity(0.5)
+        painter.translate(point)
+        try:
+            item.paint_content(painter)
+        except Exception:
+            pass
+        painter.restore()
+
+    def _preview_item(self, tool: Tool):
+        """One item of the tool's kind, made once and kept for the preview."""
+        if getattr(self, "_preview_key", None) != tool.key:
+            item = tool.factory()
+            if item is None:
+                return None
+            self.window.apply_default_style(item)
+            if self._pending_properties:
+                from . import toolsets
+                toolsets.apply_properties(item, self._pending_properties)
+            if isinstance(item, CountItem):
+                item.subject = self.count_subject
+                item.symbol = self.count_symbol
+            if isinstance(item, StampItem):
+                item.text = self.stamp_text
+            self._preview_key = tool.key
+            self._preview_cache = item
+        return getattr(self, "_preview_cache", None)
 
     # -- selecting with a marquee ------------------------------------------
     def marquee_polygon(self):

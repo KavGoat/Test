@@ -4,8 +4,9 @@ from __future__ import annotations
 import csv
 import re
 
-from PySide6.QtCore import QEvent, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence, QPixmap
+from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtGui import (QColor, QFont, QIcon, QKeySequence, QPainter,
+                           QPixmap)
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox,
                                QDoubleSpinBox, QInputDialog, QMessageBox,
                                QFontComboBox, QFormLayout, QGroupBox, QHBoxLayout,
@@ -560,39 +561,44 @@ class ToolSetsPanel(QWidget):
             top.addWidget(button)
         layout.addLayout(top)
 
+        # The list shows the tools themselves, drawn small, rather than a line
+        # of words about them: what you are looking for is what it looks like.
         self.list = QListWidget()
-        self.list.setAlternatingRowColors(True)
+        self.list.setIconSize(QSize(48, 34))
         self.list.itemDoubleClicked.connect(lambda _entry: self.use_selected())
         self.list.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.list.setDragDropMode(QAbstractItemView.InternalMove)
+        self.list.setDefaultDropAction(Qt.MoveAction)
+        self.list.model().rowsMoved.connect(self._rows_moved)
         layout.addWidget(self.list, 1)
 
         buttons = QHBoxLayout()
-        for label, tip, slot in (
-                ("Use", "Put this one down on the page", self.use_selected),
-                ("Add selection", "Keep what is selected on the page",
+        self.entry_buttons = {}
+        for key, label, tip, slot in (
+                ("use", "Use", "Put this one down on the page", self.use_selected),
+                ("add", "Add selection", "Keep what is selected on the page",
                  self.add_selection),
-                ("Mode", "Between putting back a copy and drawing a new one "
-                         "with its properties", self.toggle_mode),
-                ("Rename…", "Rename this tool", self.rename_entry),
-                ("Remove", "Take this tool out of the set", self.remove_entry)):
+                ("mode", "Draw again", "Draw a new one wearing this one's "
+                 "colours and thickness, rather than putting a copy back",
+                 self.toggle_mode),
+                ("rename", "Rename…", "Rename this tool", self.rename_entry),
+                ("remove", "Remove", "Take this tool out of the set",
+                 self.remove_entry)):
             button = QPushButton(label)
             button.setToolTip(tip)
             button.clicked.connect(slot)
             buttons.addWidget(button)
+            self.entry_buttons[key] = button
+        self.entry_buttons["mode"].setCheckable(True)
         buttons.addStretch(1)
         layout.addLayout(buttons)
 
-        move = QHBoxLayout()
-        for label, step in (("Move up", -1), ("Move down", 1)):
-            button = QPushButton(label)
-            button.clicked.connect(lambda _checked=False, s=step: self.move_entry(s))
-            move.addWidget(button)
         self.hint = QLabel("")
         self.hint.setWordWrap(True)
         self.hint.setStyleSheet("color:#6b7280;")
-        move.addWidget(self.hint, 1)
-        layout.addLayout(move)
+        layout.addWidget(self.hint)
 
+        self.list.currentRowChanged.connect(lambda _row: self.refresh_buttons())
         self.rebuild()
 
     # -- the sets ----------------------------------------------------------
@@ -622,16 +628,56 @@ class ToolSetsPanel(QWidget):
             return
         numbered = group.name == toolsets.MY_TOOLS
         for position, entry in enumerate(group.entries):
-            mode = "copy" if entry.mode == toolsets.COPY else "properties"
             prefix = f"{position + 1}.  " if numbered and position < 9 else ""
-            row = QListWidgetItem(f"{prefix}{entry.label}    ({mode})")
-            row.setIcon(icon(_icon_for_type(entry.type_name), 16))
-            row.setToolTip("Put back exactly what was added" if entry.mode == toolsets.COPY
-                           else "Draw a new one with these properties")
+            row = QListWidgetItem(f"{prefix}{entry.label}")
+            row.setIcon(QIcon(entry_thumbnail(entry)))
+            row.setToolTip(
+                "Put back exactly what was added" if entry.mode == toolsets.COPY
+                else "Draw a new one with these properties")
             self.list.addItem(row)
         self.hint.setText(
-            "The first nine are on the number keys" if numbered
-            else "Add anything: a markup, a calculation, a table")
+            "The first nine are on the number keys · drag to reorder" if numbered
+            else "Anything can go in: a markup, a calculation, a table · "
+                 "drag to reorder")
+        self.refresh_buttons()
+
+    def refresh_buttons(self) -> None:
+        """Only offer "Draw again" where drawing again means anything.
+
+        A calculation, a table, a graph or an image is nothing without what is
+        in it, and a group is several things at once — for those there is only
+        the copy, so the button is greyed out rather than left there to be
+        pressed and do something surprising.
+        """
+        from . import toolsets
+
+        entry = self.current_entry()
+        mode = self.entry_buttons["mode"]
+        allowed = entry is not None and toolsets.can_be_properties(entry.payload)
+        mode.setEnabled(allowed)
+        mode.blockSignals(True)
+        mode.setChecked(bool(entry is not None and entry.mode == toolsets.PROPERTIES))
+        mode.blockSignals(False)
+        if entry is not None and not allowed:
+            mode.setToolTip("This one only makes sense put back as it was")
+        else:
+            mode.setToolTip("Draw a new one wearing this one's colours and "
+                            "thickness, rather than putting a copy back")
+        for key in ("use", "rename", "remove"):
+            self.entry_buttons[key].setEnabled(entry is not None)
+
+    def _rows_moved(self, _parent, start, _end, _dest, row) -> None:
+        """A tool dragged up or down the list changes the order it is kept in."""
+        group = self.current_set()
+        if group is None or not (0 <= start < len(group.entries)):
+            return
+        target = row - 1 if row > start else row
+        entry = group.entries.pop(start)
+        group.entries.insert(max(0, min(target, len(group.entries))), entry)
+        from . import toolsets
+        toolsets.save_toolsets(self.groups)
+        self.rebuild_entries()
+        self.list.setCurrentRow(target)
 
     def _store(self) -> None:
         from . import toolsets
@@ -703,7 +749,7 @@ class ToolSetsPanel(QWidget):
         from . import toolsets
 
         entry = self.current_entry()
-        if entry is None:
+        if entry is None or not toolsets.can_be_properties(entry.payload):
             return
         entry.mode = (toolsets.PROPERTIES if entry.mode == toolsets.COPY
                       else toolsets.COPY)
@@ -729,18 +775,86 @@ class ToolSetsPanel(QWidget):
         del group.entries[row]
         self._store()
 
-    def move_entry(self, step: int) -> None:
-        group = self.current_set()
-        row = self.list.currentRow()
-        if group is None or not (0 <= row < len(group.entries)):
-            return
-        target = row + step
-        if not (0 <= target < len(group.entries)):
-            return
-        group.entries[row], group.entries[target] = \
-            group.entries[target], group.entries[row]
-        self._store()
-        self.list.setCurrentRow(target)
+
+
+def entry_thumbnail(entry, width: int = 48, height: int = 34) -> QPixmap:
+    """Draw a tool set entry as the thing it actually is.
+
+    A row that says "Rectangle (properties)" tells you nothing you can pick out
+    of a list of eleven rectangles. A small picture of the markup — in its own
+    colours, with its own line thickness, with its own words in it — tells you
+    everything at a glance. An entry kept as properties has no contents to
+    draw, so it is drawn as a plain example of that kind of markup wearing the
+    properties that were stored.
+    """
+    from ..items.base import build_item
+    from . import toolsets
+
+    pixmap = QPixmap(width, height)
+    pixmap.fill(Qt.transparent)
+    payload = entry.payload
+    parts = (payload.get("items") or []) if payload.get("type") == toolsets.GROUP \
+        else [payload]
+    items = []
+    for data in parts:
+        try:
+            item = build_item(dict(data))
+        except Exception:
+            item = None
+        if item is None:
+            continue
+        if entry.mode == toolsets.PROPERTIES:
+            _fill_example(item)
+        items.append(item)
+    if not items:
+        return icon(_icon_for_type(entry.type_name), max(width, height)).pixmap(
+            width, height)
+
+    bounds = QRectF()
+    for item in items:
+        rect = item.local_rect().translated(item.pos())
+        bounds = rect if bounds.isNull() else bounds.united(rect)
+    if bounds.width() <= 0 or bounds.height() <= 0:
+        bounds = QRectF(bounds.left(), bounds.top(), max(bounds.width(), 10.0),
+                        max(bounds.height(), 10.0))
+
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    painter.setRenderHint(QPainter.TextAntialiasing, True)
+    margin = 3.0
+    scale = min((width - 2 * margin) / bounds.width(),
+                (height - 2 * margin) / bounds.height(), 1.6)
+    painter.translate(width / 2, height / 2)
+    painter.scale(scale, scale)
+    painter.translate(-bounds.center())
+    for item in items:
+        painter.save()
+        painter.translate(item.pos())
+        try:
+            item.paint_content(painter)
+        except Exception:
+            pass
+        painter.restore()
+    painter.end()
+    for item in items:
+        item.setParentItem(None)
+    return pixmap
+
+
+def _fill_example(item) -> None:
+    """Give a properties-only entry something to show.
+
+    There is nothing in it — that is the point of the mode — so it is drawn as
+    a plain example of its kind: a box of the right shape, a couple of words,
+    a line. The colours, thickness and font are the stored ones, which are
+    what the entry is really about.
+    """
+    if hasattr(item, "set_text") and not (item.text() if hasattr(item, "text") else ""):
+        item.set_text("Aa")
+    if hasattr(item, "points") and len(getattr(item, "points", [])) < 2:
+        item.points = [QPointF(0, 18), QPointF(40, 0)]
+    if hasattr(item, "set_local_rect") and item.local_rect().width() < 4:
+        item.set_local_rect(QRectF(0, 0, 44, 26))
 
 
 def _icon_for_type(type_name: str) -> str:

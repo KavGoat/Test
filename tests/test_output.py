@@ -260,11 +260,12 @@ def test_a_logo_never_spills_past_the_margin(window):
     settings = window.document.settings
     settings.logo_key = _logo(window.document)
     settings.logo_slot = "header_left"
-    settings.logo_height_mm = 60.0            # taller than the 15 mm margin
+    settings.logo_height_mm = 60.0            # taller than the margin
     settings.show_header = True
     frame = window.document.pages[0].frame
-    band = frame._band(_header_box(frame), "header", 42.5)
-    assert band.height() <= 42.5
+    margin = frame.page.setup.content_rect_pt[1]
+    band = frame._band(_header_box(frame), "header", margin)
+    assert band.height() <= margin
     assert band.top() >= 0
     assert frame._logo_rect(band, "header_left").height() <= band.height()
 

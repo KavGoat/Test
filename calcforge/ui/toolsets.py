@@ -140,6 +140,18 @@ class ToolEntry:
         return str(self.payload.get("type", ""))
 
 
+# Only a single markup can be kept "as properties": a calculation, a table, a
+# graph or an image has nothing worth drawing again without its contents, and
+# a group is several things at once.
+PROPERTIES_TYPES = {"rect", "poly", "text", "callout", "note", "stamp",
+                    "measure", "count"}
+
+
+def can_be_properties(payload: dict) -> bool:
+    """Whether this entry could sensibly be drawn again as a fresh markup."""
+    return str(payload.get("type", "")) in PROPERTIES_TYPES
+
+
 @dataclass
 class ToolSet:
     """A named collection of tools."""
