@@ -534,7 +534,13 @@ class Typesetter:
             base = self._wrap(node.left, size, 8)
             exp_size = max(size * self.style.script_ratio, self.style.min_size)
             exponent = self.build(node.right, exp_size)
-            return Row([base, Shifted(exponent, -size * 0.48)])
+            # Lifted clear of the base's own ink rather than by a fixed
+            # fraction of the size: an italic f is far taller than a 2, and
+            # "f²" set with one rule for both puts the exponent through the
+            # top of the f. A hair of space to its left as well, because an
+            # italic letter leans into whatever follows it.
+            lift = max(base.ascent * 0.58, size * 0.46) + exponent.descent
+            return Row([base, Spacer(size * 0.07), Shifted(exponent, -lift)])
 
         if op is ast.Mult and isinstance(node.left, ast.Constant) and isinstance(node.right, ast.Name):
             # "5 m" reads better than "5 · m"

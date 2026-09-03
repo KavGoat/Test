@@ -213,3 +213,30 @@ def test_a_highlighter_stroke_is_one_even_band(qapp):
     shades = {image.pixelColor(x, 100).rgb() for x in range(50, 150)}
     assert len(shades) == 1
     assert shades != {0xFFFFFFFF}
+
+
+def test_an_exponent_clears_a_tall_base(qapp):
+    """"f²" must not put the 2 through the top of the f."""
+    import ast
+    from calcforge.core.mathrender import MathStyle, Shifted, Typesetter
+
+    setter = Typesetter(MathStyle())
+    size = 10.0
+
+    def parts(source):
+        tree = ast.parse(source, mode="eval").body
+        row = setter.build(tree, size)
+        base = row.children[0]
+        lifted = [c for c in row.children if isinstance(c, Shifted)][0]
+        return base, lifted
+
+    tall_base, tall_exp = parts("f ** 2")
+    short_base, short_exp = parts("2 ** 2")
+
+    # The exponent's lowest ink sits above the base's own top.
+    bottom = -tall_exp.dy - tall_exp.child.descent
+    assert bottom > tall_base.ascent * 0.5
+    # A taller base lifts it further than a short one does.
+    assert -tall_exp.dy >= -short_exp.dy
+    # And there is a gap between the two, not just a shift.
+    assert tall_base.width + tall_exp.width < parts("f ** 2")[0].width + 40
