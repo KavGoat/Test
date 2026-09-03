@@ -137,7 +137,47 @@ def _style(annotation: dict) -> dict:
     size = _font_size(annotation)
     if size:
         style["font_size"] = size
+    style.update(_text_look(annotation))
     return style
+
+
+# How a FreeText lines its words up, and in what colour. Bluebeam writes it in
+# two places: /Q, which PDF has always had, and the CSS-ish /DS string, which
+# is where the vertical alignment and the colour actually live. Ignoring them
+# is why a section mark's "S1" sat in the top-left corner of its own box
+# instead of in the middle of the circle it belongs to.
+_ALIGN = {0: "left", 1: "center", 2: "right"}
+
+
+def _text_look(annotation: dict) -> dict:
+    if str(annotation.get("Subtype", "")) != "FreeText":
+        return {}
+    look: dict = {}
+    quadding = annotation.get("Q")
+    if isinstance(quadding, (int, float)):
+        look["align"] = _ALIGN.get(int(quadding), "left")
+    settings = annotation.get("DS")
+    if isinstance(settings, str):
+        across = re.search(r"text-align\s*:\s*(left|center|centre|right)", settings)
+        if across:
+            found = across.group(1)
+            look["align"] = "center" if found in ("center", "centre") else found
+        down = re.search(r"text-valign\s*:\s*(top|middle|center|bottom)", settings)
+        if down:
+            found = down.group(1)
+            look["valign"] = "middle" if found in ("middle", "center") else found
+        colour_text = re.search(r"color\s*:\s*(#[0-9A-Fa-f]{6})", settings)
+        if colour_text:
+            look["text_color"] = colour_text.group(1).lower()
+    # /DA sets the colour the words are painted in: "1 0 0 rg" is red.
+    appearance = annotation.get("DA")
+    if isinstance(appearance, str) and "text_color" not in look:
+        painted = re.search(r"([\d.]+(?:\s+[\d.]+){0,3})\s+(?:rg|g|k)\b", appearance)
+        if painted:
+            found = colour([float(v) for v in painted.group(1).split()])
+            if found:
+                look["text_color"] = found
+    return look
 
 
 def _font_size(annotation: dict) -> float:

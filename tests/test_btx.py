@@ -232,3 +232,75 @@ def test_a_tool_whose_raw_field_is_rubbish_is_skipped(tmp_path):
     assert imported.name == "Half a set"
     assert len(imported.tools) == 1        # the good one still comes through
     assert imported.skipped == 1           # and the bad one is counted, not hidden
+
+
+# ---------------------------------------------------------------------------
+# A section mark has to look like a section mark
+# ---------------------------------------------------------------------------
+
+def test_a_labels_words_are_lined_up_the_way_bluebeam_lined_them_up(qapp):
+    """"S1" belongs in the middle of its bubble, not in the corner of its box.
+
+    Bluebeam writes the alignment in the CSS-ish /DS string rather than in
+    PDF's own /Q, so reading only /Q leaves every label hard against the
+    top-left of the box it sits in — which is what made a section mark look
+    broken rather than merely plain.
+    """
+    marks = btx.read(os.path.join(HERE, "btx", "Structures - Sketch Tools.btx"))
+    tool = marks.tools[0]
+    labels = [p for p in tool.payloads if p["type"] == "text"]
+    assert labels, "the section mark has no words in it"
+    for label in labels:
+        assert label["style"]["align"] == "center"
+        assert label["style"]["valign"] == "middle"
+
+
+def test_the_alignment_reaches_the_markup(qapp):
+    marks = btx.read(os.path.join(HERE, "btx", "Structures - Sketch Tools.btx"))
+    label = [p for p in marks.tools[0].payloads if p["type"] == "text"][0]
+    item = build_item(label)
+    assert item.style.align == "center"
+    assert item.style.valign == "middle"
+
+
+def test_a_labels_colour_comes_across_from_either_place():
+    """/DS says one colour and /DA another; the stylesheet wins, as it should."""
+    assert btx._text_look({"Subtype": "FreeText",
+                           "DS": "font: Helvetica 8pt; color:#c92a2a"}) \
+        ["text_color"] == "#c92a2a"
+    assert btx._text_look({"Subtype": "FreeText",
+                           "DA": "1 0 0 rg /Helv 8 Tf"})["text_color"] == "#ff0000"
+    assert btx._text_look({"Subtype": "FreeText", "Q": 2})["align"] == "right"
+    assert btx._text_look({"Subtype": "Square", "Q": 2}) == {}
+
+
+def test_the_parts_of_a_section_mark_line_up_with_each_other(qapp):
+    """The cut line runs through the middle of the bubble, not past it."""
+    from calcforge.items.shapes import PolyItem, RectItem
+
+    marks = btx.read(os.path.join(HERE, "btx", "Structures - Sketch Tools.btx"))
+    tool = marks.tools[0]
+    items = [build_item(p) for p in tool.payloads]
+    circles = [i for i in items if isinstance(i, RectItem) and i.kind == "ellipse"]
+    lines = [i for i in items if isinstance(i, PolyItem) and i.kind == "line"]
+    assert circles and lines
+
+    bubble = circles[0].mapRectToParent(circles[0].local_rect())
+    for line in lines:
+        ends = [line.mapToParent(point) for point in line.points]
+        heights = [point.y() for point in ends]
+        # Level, and level with the middle of the bubble.
+        assert abs(heights[0] - heights[-1]) < 1.0
+        assert abs(heights[0] - bubble.center().y()) < 1.5
+
+
+def test_every_label_in_every_file_keeps_its_own_look(qapp):
+    """Whatever the file says about a label, the markup wears it."""
+    for path in FILES:
+        for tool in btx.read(path).tools:
+            for payload in tool.payloads:
+                if payload["type"] not in ("text", "callout"):
+                    continue
+                style = payload["style"]
+                assert style["align"] in ("left", "center", "right")
+                assert style.get("valign", "top") in ("top", "middle", "bottom")

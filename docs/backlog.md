@@ -5,6 +5,20 @@ worked. Each entry is one job: it is struck off only when it is written,
 tested and pushed. Kept in the repository on purpose — a list that lives only
 in a conversation is a list that gets lost.
 
+## What came back from using it
+
+- [x] Clicking into a fraction put the caret near the start of the line — the
+  press and the release both went to the invisible flat editor. Both go
+  through the typeset boxes now.
+- [x] Every key is in the shortcut list, all 117, except Ctrl+B/I/U which
+  belong to the words.
+- [x] Ctrl lets go of the grid everywhere, calibration included.
+- [x] Ctrl+Shift+M makes a block of one calculation instead of refusing.
+- [x] A section mark's label sits in the middle of its bubble: Bluebeam writes
+  the alignment in `/DS`, not in `/Q`.
+- [ ] **Use the app.** A pass with hands on it, writing a real calculation
+  sheet from scratch, and fixing what gets in the way.
+
 ## Regressions — things that used to work
 
 - [x] **"Image missing"** on a snapshot, and on a picture pasted from
