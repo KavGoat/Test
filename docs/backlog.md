@@ -73,9 +73,9 @@ in a conversation is a list that gets lost.
 - [x] The **unit list** appears under the caret now, not at the foot of the block.
 - [x] **Only the bound key starts a calculation** — a bare keystroke must not,
   or the tool shortcuts stop working.
-- [ ] **How many figures** a result is shown to: decimal places, significant
+- [x] **How many figures** a result is shown to: decimal places, significant
   figures or scientific notation, from its right-click menu.
-- [ ] An **equation inside a paragraph**: a backslash in a text box opens a
+- [x] An **equation inside a paragraph**: a backslash in a text box opens a
   field where a variable name prints as name = value with its unit, or a
   calculation is worked out in place.
 
@@ -83,7 +83,7 @@ in a conversation is a list that gets lost.
 
 - [x] A table can be **read by its column headings** as well as by A, B, C.
 - [x] **Alignment for cells**, left, centre and right, the way Excel offers it.
-- [ ] **Subscript and superscript** from `_` and `^` in a text box and in a
+- [x] **Subscript and superscript** from `_` and `^` in a text box and in a
   table cell.
 - [ ] **Pasting from Excel** carries relative formulas across where it can.
 

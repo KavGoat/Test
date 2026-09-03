@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+import re
 from typing import Optional
 
 from PySide6.QtCore import QPointF, QRectF, Qt
@@ -45,6 +46,81 @@ class _InlineEditor(QGraphicsTextItem):
         trimmed.state &= ~QStyle.State_Selected
         super().paint(painter, trimmed, widget)
 
+    # What ends a run of subscript or superscript: anything that is not part
+    # of the same token. A space, an operator, a bracket — the moment the
+    # writing moves on, so does the level.
+    ENDS_A_RUN = set(" \t,;:()[]{}+-*/=<>")
+
+    def keyPressEvent(self, event) -> None:
+        """``_`` drops what follows; ``^`` lifts it — as they do in maths.
+
+        Writing "150x50 SG8 at 400 c/c" needs no help, but "A_g", "m^2" and
+        "f'_c" are on every page of a calculation, and reaching for a menu to
+        set one character is not writing. So the two characters an engineer
+        already types for it do it: what follows a ``_`` is set as a
+        subscript and what follows a ``^`` as a superscript, until a space or
+        an operator says the word has finished.
+        """
+        text = event.text()
+        if text == "\\" and not (event.modifiers() & Qt.ControlModifier):
+            # A field: what goes between the two marks is worked out from the
+            # document and printed in its place. The caret lands between them,
+            # so what follows is typed straight into the field.
+            cursor = self.textCursor()
+            cursor.insertText("\\\\")
+            cursor.movePosition(QTextCursor.Left)
+            self.setTextCursor(cursor)
+            event.accept()
+            return
+        if text in ("_", "^") and not (event.modifiers() & Qt.ControlModifier):
+            self.set_script("sub" if text == "_" else "super")
+            event.accept()
+            return
+        if text and (text in self.ENDS_A_RUN or event.key() in (Qt.Key_Return,
+                                                                Qt.Key_Enter)):
+            self.set_script("")
+        super().keyPressEvent(event)
+
+    def set_script(self, level: str) -> None:
+        """Put the caret into subscript, superscript or back on the line."""
+        cursor = self.textCursor()
+        fmt = QTextCharFormat()
+        fmt.setVerticalAlignment({
+            "sub": QTextCharFormat.AlignSubScript,
+            "super": QTextCharFormat.AlignSuperScript,
+        }.get(level, QTextCharFormat.AlignNormal))
+        if cursor.hasSelection():
+            cursor.mergeCharFormat(fmt)
+        else:
+            # A graphics text item has no "current char format" of its own,
+            # so the level is put on the cursor and the cursor put back: the
+            # next character typed comes out wearing it.
+            cursor.mergeBlockCharFormat(fmt)
+            cursor.setCharFormat(_merged(cursor.charFormat(), fmt))
+        self.setTextCursor(cursor)
+
+
+def _as_text(value, digits: int = 4) -> str:
+    """A value as it would be written in a sentence."""
+    from ..core.units import Quantity, format_number, format_quantity
+
+    if value is None:
+        return "—"
+    if isinstance(value, Quantity):
+        return format_quantity(value, digits, "auto")
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, (int, float)):
+        return format_number(value, digits)
+    return str(value)
+
+
+def _merged(base: QTextCharFormat, extra: QTextCharFormat) -> QTextCharFormat:
+    """*base* with *extra* laid over it — the font and colour are kept."""
+    out = QTextCharFormat(base)
+    out.merge(extra)
+    return out
+
 
 class _SpellHighlighter(QSyntaxHighlighter):
     """Red squiggles under the words the dictionary does not know."""
@@ -87,15 +163,68 @@ class _TextBase(MarkupItem):
         # with it shown. It is off here so a plain text box has no arrow until
         # one is asked for.
         self.leader_shown = False
+        # What was typed, fields and all. The document holds what is *shown*,
+        # which is the same thing once the fields have been worked out.
+        self.written = text
+        self.digits = 4
         self.elbow_reach = self.ELBOW_REACH
         self.tip = QPointF(self._rect.left() - 60, self._rect.bottom() + 50)
         self.doc.contentsChanged.connect(self._on_contents_changed)
+
+    # -- fields ------------------------------------------------------------
+    #
+    # A paragraph on a calculation sheet nearly always wants to quote a number
+    # that is worked out somewhere else: "the design moment of \\M_n\\ governs".
+    # Typing the number in by hand means it is wrong the moment anything above
+    # it changes. A field between two backslashes is worked out from the
+    # document every time the sheet is recalculated, so it cannot go stale.
+    #
+    # A field holding a bare name that the document defines prints as
+    # "name = value unit", because that is how it would be written by hand.
+    # Anything else is worked out and its answer printed on its own.
+    FIELD = re.compile(r"\\([^\\\n]+)\\")
+
+    def has_fields(self) -> bool:
+        return bool(self.FIELD.search(self.written))
+
+    def resolve_fields(self, workspace) -> str:
+        """*written* with every field replaced by what it comes to."""
+        from ..core import engine
+        from ..core.units import format_quantity
+
+        def answer(match) -> str:
+            source = match.group(1).strip()
+            if not source:
+                return match.group(0)
+            try:
+                if workspace is not None and workspace.has(source):
+                    value = workspace.get(source)
+                    shown = _as_text(value, self.digits)
+                    return f"{source} = {shown}"
+                if workspace is None:
+                    return match.group(0)
+                value = workspace.evaluate(source)
+            except Exception:                # noqa: BLE001 — any bad field
+                return f"[{source}?]"
+            return _as_text(value, self.digits)
+
+        return self.FIELD.sub(answer, self.written)
+
+    def refresh(self, workspace=None, page=None) -> None:
+        """Work every field out again, so the prose keeps up with the sheet."""
+        if self._editing or not self.has_fields():
+            return
+        shown = self.resolve_fields(workspace)
+        if shown != self.doc.toPlainText():
+            self.doc.setPlainText(shown)
+            self.apply_style()
 
     # -- content -----------------------------------------------------------
     def text(self) -> str:
         return self.doc.toPlainText()
 
     def set_text(self, text: str) -> None:
+        self.written = text
         self.doc.setPlainText(text)
         self.apply_style()
 
@@ -352,6 +481,10 @@ class _TextBase(MarkupItem):
     def begin_edit(self) -> None:
         if self.locked:
             return
+        # The fields come back as they were typed, so they can be edited
+        # rather than having their answers typed over.
+        if self.has_fields() and self.doc.toPlainText() != self.written:
+            self.doc.setPlainText(self.written)
         self.check_spelling(True)
         if self._editor is None:
             self._editor = _InlineEditor(self)
@@ -387,6 +520,7 @@ class _TextBase(MarkupItem):
             self._speller = None
 
     def end_edit(self) -> None:
+        self.written = self.doc.toPlainText()
         self.check_spelling(False)
         if self._editor is not None:
             self._editor.setTextInteractionFlags(Qt.NoTextInteraction)
@@ -449,6 +583,8 @@ class _TextBase(MarkupItem):
             "html": self.doc.toHtml(),
             "auto_size": self.auto_size,
             "elbow_reach": self.elbow_reach,
+            "written": self.written,
+            "digits": self.digits,
         })
         if self.leader_shown:
             data["leader"] = [[self.tip.x(), self.tip.y()]]
@@ -471,6 +607,8 @@ class _TextBase(MarkupItem):
             self.doc.setHtml(html)
         else:
             self.doc.setPlainText(data.get("text", ""))
+        self.digits = int(data.get("digits", 4))
+        self.written = data.get("written") or self.doc.toPlainText()
         self.apply_style()
 
 

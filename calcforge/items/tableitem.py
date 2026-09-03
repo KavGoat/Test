@@ -527,7 +527,8 @@ class TableItem(MarkupItem):
                 # value steps aside for it rather than being written over it.
                 box.setLeft(box.left() + self._name_inset(painter, row, col))
                 painter.setClipRect(box.adjusted(-1, -1, 2, 2))
-                painter.drawText(box, self._alignment(row, col, cell), text)
+                _draw_with_scripts(painter, box, self._alignment(row, col, cell),
+                                   text, font)
                 painter.setClipping(False)
 
     def _name_inset(self, painter: QPainter, row: int, col: int) -> float:
@@ -637,3 +638,51 @@ class TableItem(MarkupItem):
         self.header_fill = data.get("header_fill", "#e9ecef")
         self.band_fill = data.get("band_fill", "#f6f8fa")
         self.load_base(data)
+
+
+def _draw_with_scripts(painter: QPainter, box: QRectF, alignment, text: str,
+                       font: QFont) -> None:
+    """Draw *text* in *box*, with ``A_g`` and ``m^2`` set as scripts.
+
+    A cell holds plain text, because that is what a formula reads and what a
+    published name is written in. What is drawn is what an engineer means by
+    it: the run after an underscore dropped, the run after a caret lifted,
+    both a size smaller.
+    """
+    from ..core.typography import script_runs
+
+    runs = script_runs(text)
+    if not any(level for _run, level in runs):
+        painter.drawText(box, alignment, text)
+        return
+
+    small = QFont(font)
+    small.setPointSizeF(max(font.pointSizeF() * 0.68, 4.5))
+    metrics = QFontMetricsF(font)
+    small_metrics = QFontMetricsF(small)
+    drop = metrics.xHeight() * 0.34
+    lift = metrics.ascent() * 0.42
+
+    widths = [(QFontMetricsF(small if level else font).horizontalAdvance(run))
+              for run, level in runs]
+    total = sum(widths)
+    if alignment & Qt.AlignRight:
+        x = box.right() - total
+    elif alignment & Qt.AlignHCenter:
+        x = box.center().x() - total / 2
+    else:
+        x = box.left()
+    baseline = box.center().y() + metrics.ascent() / 2 - metrics.descent() / 2
+
+    for (run, level), width in zip(runs, widths):
+        if level == "sub":
+            painter.setFont(small)
+            painter.drawText(QPointF(x, baseline + drop), run)
+        elif level == "super":
+            painter.setFont(small)
+            painter.drawText(QPointF(x, baseline - lift), run)
+        else:
+            painter.setFont(font)
+            painter.drawText(QPointF(x, baseline), run)
+        x += width
+    painter.setFont(font)

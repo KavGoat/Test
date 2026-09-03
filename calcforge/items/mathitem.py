@@ -170,6 +170,12 @@ class MathItem(MarkupItem):
         self.rows: list[_MathRow] = []
         self.digits = 4
         self.number_format = "auto"
+        # How one line's answer is shown, when it is not shown the way the
+        # rest of the region is: {line number: (digits, mode)}. A capacity
+        # wanted to three significant figures and a deflection wanted to two
+        # decimal places sit on the same sheet, and neither should force the
+        # other.
+        self.line_figures: dict[int, tuple] = {}
         self.show_definition_results = False
         # SMath puts the result immediately after the expression rather than in
         # a column down the right-hand side of the page.
@@ -376,8 +382,9 @@ class MathItem(MarkupItem):
                         value = convert(value, unit)
                     except Exception:
                         pass
+                digits, mode = self.figures_for(line_number)
                 result = Row([setter.text("=", size), Spacer(size * 0.34),
-                              setter.value_box(value, size, self.digits, self.number_format)])
+                              setter.value_box(value, size, digits, mode)])
             if statement.comment and statement.kind != engine.COMMENT and self.show_comments:
                 note = setter.text("   " + statement.comment, size * 0.9, italic=True,
                                    color=style.comment_color)
@@ -387,6 +394,26 @@ class MathItem(MarkupItem):
 
         self.rows = rows
         self._measure()
+
+    # -- how many figures ---------------------------------------------------
+    def figures_for(self, line: int) -> tuple:
+        """(digits, mode) for one line: its own, or the region's."""
+        found = self.line_figures.get(line)
+        if not found:
+            return self.digits, self.number_format
+        digits, mode = found
+        return digits, mode
+
+    def set_figures(self, line: int, digits: Optional[int], mode: str = "") -> None:
+        """How one line's answer is shown. *digits* None puts it back."""
+        if digits is None:
+            self.line_figures.pop(line, None)
+        else:
+            self.line_figures[int(line)] = (int(digits), mode or "auto")
+        self.prepareGeometryChange()
+        self.relayout()
+        self.touch()
+        self.update()
 
     def _expression_box(self, statement, setter: Typesetter, size: float) -> Optional[Box]:
         if statement.tree is None:
@@ -853,6 +880,8 @@ class MathItem(MarkupItem):
             "width": self._width,
             "line_gap": self.line_gap,
             "result_gap": self.result_gap,
+            "line_figures": {str(line): list(figures)
+                             for line, figures in self.line_figures.items()},
         })
         return data
 
@@ -860,6 +889,12 @@ class MathItem(MarkupItem):
         self.source = data.get("source", "")
         self.digits = int(data.get("digits", 4))
         self.number_format = data.get("number_format", "auto")
+        self.line_figures = {}
+        for line, figures in (data.get("line_figures") or {}).items():
+            try:
+                self.line_figures[int(line)] = (int(figures[0]), str(figures[1]))
+            except (TypeError, ValueError, IndexError):
+                continue
         # Documents written before results waited for a trailing "=" showed
         # every line, so they keep doing that when reopened.
         self.show_definition_results = bool(data.get("show_definition_results", True))

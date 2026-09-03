@@ -5643,3 +5643,143 @@ def test_the_list_appears_under_the_caret_not_under_the_block(window):
     assert abs(popup.pos().x() - caret.x()) < 40
     window.view.hide_completions()
     window.view.end_item_edit()
+
+
+# ---------------------------------------------------------------------------
+# Scripts, fields in prose, and how many figures a result is shown to
+# ---------------------------------------------------------------------------
+
+def test_underscore_and_caret_set_scripts_in_a_text_box(window):
+    from PySide6.QtGui import QTextCharFormat
+
+    window.select_tool("text")
+    drag(window.view, 100, 100, 340, 150)
+    type_text(window.view, "A_g = 150 m^2 ok")
+    editor = window.view.text_editor()
+
+    assert editor.toPlainText() == "Ag = 150 m2 ok"
+    cursor = editor.textCursor()
+    levels = []
+    for index in range(len(editor.toPlainText())):
+        cursor.setPosition(index + 1)
+        levels.append(cursor.charFormat().verticalAlignment())
+    assert levels[1] == QTextCharFormat.AlignSubScript      # the g of A_g
+    assert levels[10] == QTextCharFormat.AlignSuperScript   # the 2 of m^2
+    assert levels[0] == QTextCharFormat.AlignNormal
+    assert levels[-1] == QTextCharFormat.AlignNormal
+    window.view.end_item_edit()
+
+
+def test_a_table_cell_shows_its_scripts_too(window):
+    from calcforge.core.typography import script_runs
+
+    assert script_runs("A_g") == [("A", ""), ("g", "sub")]
+    assert script_runs("m^2") == [("m", ""), ("2", "super")]
+    assert script_runs("f'_c = 25") == [("f'", ""), ("c", "sub"), (" = 25", "")]
+    # What is stored stays what a formula can read.
+    table = _capacity_table(window)
+    table.set_cell(0, 0, "A_g")
+    assert table.sheet.raw(0, 0) == "A_g"
+
+
+def test_a_field_in_a_paragraph_quotes_a_value(window):
+    _calc(window, "M_n := 250 kN*m\nphi := 0.9", at=(90, 110))
+    window.recalculate()
+
+    window.select_tool("text")
+    drag(window.view, 100, 300, 400, 350)
+    box = window.view.editing_item()
+    box._editor.setPlainText(r"The moment \M_n\ governs, with \phi*M_n\ available.")
+    window.view.end_item_edit()
+    window.recalculate()
+
+    shown = box.text()
+    assert "M_n = 250" in shown            # a bare name prints name = value
+    assert "225" in shown                  # and an expression prints its answer
+    assert "\\" not in shown               # the marks themselves do not print
+
+
+def test_a_field_keeps_up_with_the_sheet(window):
+    block = _calc(window, "M_n := 250 kN*m", at=(90, 110))
+    window.select_tool("text")
+    drag(window.view, 100, 300, 400, 350)
+    box = window.view.editing_item()
+    box._editor.setPlainText(r"\M_n\ governs")
+    window.view.end_item_edit()
+    window.recalculate()
+    assert "250" in box.text()
+
+    block.source = "M_n := 400 kN*m"
+    block.refresh(window.document.workspace)
+    window.recalculate()
+    assert "400" in box.text()
+
+
+def test_a_field_comes_back_as_it_was_typed_to_be_edited(window):
+    _calc(window, "M_n := 250 kN*m", at=(90, 110))
+    window.recalculate()
+    window.select_tool("text")
+    drag(window.view, 100, 300, 400, 350)
+    box = window.view.editing_item()
+    box._editor.setPlainText(r"\M_n\ governs")
+    window.view.end_item_edit()
+    window.recalculate()
+    assert "250" in box.text()
+
+    box.begin_edit()
+    assert box._editor.toPlainText() == r"\M_n\ governs"
+    box.end_edit()
+
+
+def test_a_field_that_makes_no_sense_says_so_rather_than_vanishing(window):
+    window.select_tool("text")
+    drag(window.view, 100, 300, 400, 350)
+    box = window.view.editing_item()
+    box._editor.setPlainText(r"value is \nowhere_at_all\ here")
+    window.view.end_item_edit()
+    window.recalculate()
+    assert "?" in box.text() and "here" in box.text()
+
+
+def test_one_line_can_be_shown_to_its_own_number_of_figures(window):
+    block = _calc(window, "a := 1/3 =\nb := 1/3 =", at=(90, 110))
+    window.recalculate()
+
+    window.set_line_figures(block, 0, 2, "fixed")
+    assert block.figures_for(0) == (2, "fixed")
+    assert block.figures_for(1) == (block.digits, block.number_format)
+
+    shown = [row.result for row in block.rows]
+    assert _text_in(shown[0]).replace("=", "").strip() == "0.33"
+    assert _text_in(shown[1]).replace("=", "").strip() != "0.33"
+
+
+def test_a_lines_own_figures_can_be_put_back(window):
+    block = _calc(window, "a := 1/3 =", at=(90, 110))
+    window.recalculate()
+    window.set_line_figures(block, 0, 6, "fixed")
+    assert block.figures_for(0) == (6, "fixed")
+    window.set_line_figures(block, 0, None)
+    assert block.figures_for(0) == (block.digits, block.number_format)
+
+
+def test_a_lines_own_figures_survive_a_save(window):
+    from calcforge.items.base import build_item
+
+    block = _calc(window, "a := 1/3 =", at=(90, 110))
+    window.recalculate()
+    window.set_line_figures(block, 0, 3, "scientific")
+    clone = build_item(block.serialize())
+    assert clone.figures_for(0) == (3, "scientific")
+
+
+def test_the_figures_menu_is_on_a_calculations_right_click(window):
+    block = _calc(window, "a := 1/3 =", at=(90, 110))
+    block.setSelected(True)
+    menu = window.build_context_menu(block, block.pos())
+    figures = [a for a in menu.actions() if a.text() == "Figures on this line"]
+    assert figures
+    labels = [a.text() for a in figures[0].menu().actions() if not a.isSeparator()]
+    assert "Significant figures" in labels
+    assert "Decimal places" in labels
+    assert "Scientific" in labels

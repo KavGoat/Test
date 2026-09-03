@@ -3232,6 +3232,62 @@ class MainWindow(QMainWindow):
             self.cell_value.setText(table.sheet.display_text(row, col))
             self.cell_value.setStyleSheet("color:#3c5a86;")
 
+    def _fill_figures_menu(self, menu, item, scene_pos) -> None:
+        """How the answer on the line under the pointer is written out.
+
+        A capacity wanted to three significant figures and a deflection wanted
+        to two decimal places belong on the same sheet, so this is per line
+        rather than per region. "As the rest of this one" puts a line back to
+        whatever the region is set to.
+        """
+        from ..core.units import AUTO, ENGINEERING, FIXED, SCIENTIFIC
+
+        line = self._line_under(item, scene_pos)
+        current = item.line_figures.get(line)
+        back = menu.addAction("As the rest of this one",
+                              lambda: self.set_line_figures(item, line, None))
+        back.setCheckable(True)
+        back.setChecked(current is None)
+        menu.addSeparator()
+        significant = menu.addMenu("Significant figures")
+        decimals = menu.addMenu("Decimal places")
+        for count in range(1, 9):
+            for submenu, mode in ((significant, AUTO), (decimals, FIXED)):
+                entry = submenu.addAction(
+                    str(count),
+                    lambda _c=False, n=count, m=mode:
+                    self.set_line_figures(item, line, n, m))
+                entry.setCheckable(True)
+                entry.setChecked(current == (count, mode))
+        for label, mode in (("Scientific", SCIENTIFIC),
+                            ("Engineering", ENGINEERING)):
+            entry = menu.addAction(
+                label, lambda _c=False, m=mode:
+                self.set_line_figures(item, line, item.digits, m))
+            entry.setCheckable(True)
+            entry.setChecked(bool(current) and current[1] == mode)
+
+    @staticmethod
+    def _line_under(item, scene_pos) -> int:
+        """Which line of a calculation the pointer is over."""
+        try:
+            line, _column = item.offset_at(item.mapFromScene(scene_pos))
+        except Exception:                  # noqa: BLE001 — an empty region
+            return 0
+        return max(int(line), 0)
+
+    def set_line_figures(self, item, line: int, digits, mode: str = "") -> None:
+        self.view.begin_snapshot(self.view.involved_frames(item))
+        item.set_figures(line, digits, mode)
+        self.view.commit_snapshot("How many figures")
+        self.refresh_selection()
+        if digits is None:
+            self.status_hint.setText(f"Line {line + 1} shown as the rest of the block")
+        else:
+            named = {"auto": "significant figures", "fixed": "decimal places"}
+            self.status_hint.setText(
+                f"Line {line + 1} to {digits} {named.get(mode, mode)}")
+
     def align_cells(self, how: str, table=None) -> None:
         """Left, centre or right, for the cells picked out — as Excel does it.
 
@@ -3456,6 +3512,8 @@ class MainWindow(QMainWindow):
                 if row >= 0:
                     menu.addAction("Show this result in…",
                                    lambda r=row: self.view.open_unit_editor(item, r))
+                figures = menu.addMenu("Figures on this line")
+                self._fill_figures_menu(figures, item, scene_pos)
                 if not item.single_line:
                     menu.addAction(self.act_split_lines)
                 turn = menu.addAction("Keep as one block")
