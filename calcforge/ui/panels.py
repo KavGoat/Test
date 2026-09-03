@@ -1592,6 +1592,27 @@ class PropertiesPanel(QScrollArea):
                     lambda i: setattr(i, "shape_kind", "cloud" if index else "box"),
                     "Callout shape"))
             form.addRow("Drawn as", shape)
+            if first.leaders and not first.clouds_a_region():
+                stand_off = QDoubleSpinBox()
+                stand_off.setRange(first.LEAST_REACH, 400.0)
+                stand_off.setDecimals(0)
+                stand_off.setSuffix(" pt")
+                stand_off.setValue(first.leaders[0].reach)
+                stand_off.setToolTip(
+                    "How far the hinge stands off the box before the line "
+                    "turns towards\nwhat it points at. Dragging the hinge "
+                    "does the same thing.")
+                stand_off.valueChanged.connect(
+                    lambda value: self._slide(
+                        lambda i: setattr(i, "elbow_reach", value),
+                        "Leader stand-off"))
+                form.addRow("Hinge stands off", stand_off)
+                count = QLabel(f"{len(first.leaders)}"
+                               + (" arrow" if len(first.leaders) == 1
+                                  else " arrows"))
+                count.setToolTip("Right-click the call-out to add another, or "
+                                 "to take one away")
+                form.addRow("Leaders", count)
             return
         form = self._group("Ends")
         start = QComboBox()

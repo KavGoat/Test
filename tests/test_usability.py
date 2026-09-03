@@ -903,7 +903,15 @@ def test_nothing_is_drawn_where_the_page_was_clicked(window):
 # ---------------------------------------------------------------------------
 
 def _menu_labels(menu):
-    return [action.text() for action in menu.actions() if not action.isSeparator()]
+    """Every label on a menu, submenus opened out."""
+    found = []
+    for action in menu.actions():
+        if action.isSeparator():
+            continue
+        found.append(action.text())
+        if action.menu() is not None:
+            found += _menu_labels(action.menu())
+    return found
 
 
 def _menu_entry(menu, label):
@@ -1785,27 +1793,54 @@ def test_the_arrow_can_be_moved_once_the_callout_is_finished(window):
     assert moved.x() == pytest.approx(tip.x() + 40, abs=2)
 
 
-def test_the_elbow_goes_where_it_is_dragged(window):
-    """It was pinned to a line out of one side, so dragging it round did nothing."""
+def test_the_hinge_leaves_the_side_square_on(window):
+    """However it is dragged, it comes out of the middle of a side at right
+    angles — which is what a leader looks like on every drawing."""
     call = _callout(window)
     window.view.end_item_edit()
     window.select_tool("select")
     call.setSelected(True)
 
-    where = call.mapToScene(QPointF(call.local_rect().center().x(), -70))
+    for towards in (QPointF(-90, -70), QPointF(240, 30), QPointF(40, 200)):
+        where = call.mapToScene(towards)
+        elbow = call.mapToScene(call.elbow())
+        drag(window.view, elbow.x(), elbow.y(), where.x(), where.y())
+        start = call.side_point()
+        hinge = call.elbow()
+        # Square on: one of the two coordinates has not changed at all.
+        assert (abs(hinge.x() - start.x()) < 0.01
+                or abs(hinge.y() - start.y()) < 0.01), \
+            f"the hinge left {call.side()} at an angle"
+
+
+def test_dragging_the_hinge_out_pushes_it_further_from_the_box(window):
+    """It cannot come off the perpendicular, but it can slide along it."""
+    call = _callout(window)
+    window.view.end_item_edit()
+    window.select_tool("select")
+    call.setSelected(True)
+    call.leaders[0].tip = QPointF(-120, 25)
+    call.leader_moved()
+    before = call.leaders[0].reach
+
+    start = call.side_point()
+    further = call.mapToScene(QPointF(start.x() - 80, start.y()))
     elbow = call.mapToScene(call.elbow())
-    drag(window.view, elbow.x(), elbow.y(), where.x(), where.y())
+    drag(window.view, elbow.x(), elbow.y(), further.x(), further.y())
+    assert call.leaders[0].reach > before
+    assert call.side() == "left"
 
-    after = call.elbow()
-    assert (after - call.mapFromScene(where)).manhattanLength() < 4
 
-
-def test_dragging_the_elbow_round_changes_the_side_it_leaves_by(window):
-    """Take the elbow over the top of the box and the line leaves by the top."""
+def test_dragging_the_hinge_round_changes_the_side_it_leaves_by(window):
+    """Take the hinge over the top of the box and the line leaves by the top."""
     call = _callout(window)
     window.view.end_item_edit()
     window.select_tool("select")
     call.setSelected(True)
+    # Point it at something off to the left, so the top is not what it would
+    # have chosen for itself.
+    call.leaders[0].tip = QPointF(-120, 25)
+    call.leader_moved()
     started_on = call.side()
 
     box = call.local_rect().normalized()
@@ -2466,20 +2501,51 @@ def test_a_callout_can_have_as_many_leaders_as_you_like(window):
     assert "l2" not in call.handle_points()
 
 
-def test_dragging_the_elbow_round_changes_the_side_it_leaves_by(window):
-    """The elbow is not pinned to one side: move it above the box and the
-    leader starts leaving from the top."""
+def test_the_hinge_can_be_moved_to_another_side(window):
+    """It is not pinned to one side: put it above the box and the leader
+    leaves by the top — as long as that does not send the line back over the
+    words to reach the arrow head."""
     call = _callout(window)
     box = call.local_rect().normalized()
     leader = call.leaders[0]
+    leader.tip = QPointF(box.left() - 120, box.center().y())
+    call.leader_moved()
 
     call.set_elbow_of(leader, QPointF(box.center().x(), box.top() - 40))
     assert call.side_of(leader) == "top"
     assert call.side_point_of(leader) == QPointF(box.center().x(), box.top())
 
+    # The right-hand side is behind the box from where the arrow points, so
+    # that one is refused and the leader keeps the side it has.
+    call.set_elbow_of(leader, QPointF(box.right() + 40, box.center().y()))
+    assert call.side_of(leader) == "top"
+
+    # Point it the other way and the right becomes reasonable again.
+    leader.tip = QPointF(box.right() + 160, box.center().y())
+    call.leader_moved()
     call.set_elbow_of(leader, QPointF(box.right() + 40, box.center().y()))
     assert call.side_of(leader) == "right"
     assert call.side_point_of(leader) == QPointF(box.right(), box.center().y())
+
+
+def test_the_leader_never_runs_across_its_own_words(window):
+    """Whatever the hinge is dragged to, the line stays off the text box."""
+    from calcforge.items.text import _crosses
+
+    call = _callout(window)
+    box = call.local_rect().normalized()
+    leader = call.leaders[0]
+    for tip in (QPointF(-140, 20), QPointF(320, 20), QPointF(60, -160),
+                QPointF(60, 220)):
+        leader.tip = QPointF(tip)
+        call.leader_moved()
+        for towards in (QPointF(-80, 0), QPointF(280, 30), QPointF(70, -90),
+                        QPointF(70, 180)):
+            call.set_elbow_of(leader, towards)
+            hinge = call.elbow_of(leader)
+            assert not _crosses(box, hinge, leader.tip), \
+                f"the line crossed the words with the tip at {tip}"
+            assert not _crosses(box, call.side_point_of(leader), hinge)
 
 
 def test_a_plain_callout_is_still_a_box(window):
@@ -4645,7 +4711,13 @@ def test_every_vertex_of_a_polyline_gets_the_same_pointer(window):
 
     assert cursor_for_handle("v0") == Qt.PointingHandCursor
     assert cursor_for_handle("v7") == Qt.PointingHandCursor
-    assert cursor_for_handle("elbow") == Qt.PointingHandCursor
+    # A call-out's arrow heads and hinges are numbered too, and there is no
+    # limit to how many of them one comment may want.
+    assert cursor_for_handle("l0") == Qt.PointingHandCursor
+    assert cursor_for_handle("l9") == Qt.PointingHandCursor
+    # A hinge takes hold rather than points: it slides along its own line and
+    # hops from side to side.
+    assert cursor_for_handle("e0") == Qt.OpenHandCursor
     assert cursor_for_handle("lblrot") == Qt.CrossCursor
 
 
@@ -5003,10 +5075,12 @@ def test_the_menu_offers_a_leader_on_a_text_box_and_removal_on_a_callout(window)
     window.view.end_item_edit()
     box = markups(window)[-1]
     box.setSelected(True)
-    assert "Add leader" in _menu_labels(window.build_context_menu(box, box.pos()))
+    assert "Add a leader" in _menu_labels(window.build_context_menu(box, box.pos()))
 
     window.set_leader(box, True)
-    assert "Remove leader" in _menu_labels(window.build_context_menu(box, box.pos()))
+    labels = _menu_labels(window.build_context_menu(box, box.pos()))
+    assert "Add another leader" in labels
+    assert "Remove every leader" in labels
 
 
 def test_a_text_boxs_leader_is_still_there_after_a_save(window):
@@ -7159,3 +7233,174 @@ def test_a_markup_that_cannot_be_resized_is_not_asked_about_its_size(window):
               window.properties_panel.findChildren(QGroupBox)}
     spins = groups["Position and size"].findChildren(QDoubleSpinBox)
     assert len(spins) == 2                        # only X and Y
+
+
+# ---------------------------------------------------------------------------
+# The leader, rewritten: perpendicular, clear of the words, worked out again
+# ---------------------------------------------------------------------------
+
+def test_the_hinge_exists_while_the_callout_is_being_placed(window):
+    """The preview is the real thing, so what is shown is what lands."""
+    window.select_tool("callout")
+    click(window.view, 200, 300)                 # what it points at
+    hover(window.view, 420, 200)                 # where the words would go
+
+    preview = window.view._pending_callout()
+    assert preview is not None
+    leader = preview.leaders[0]
+    start = preview.side_point_of(leader)
+    hinge = preview.elbow_of(leader)
+    # There is a hinge, and it leaves the side square on.
+    assert (hinge - start).manhattanLength() > 1
+    assert abs(hinge.x() - start.x()) < 0.01 or abs(hinge.y() - start.y()) < 0.01
+
+
+def test_the_leader_does_not_move_when_the_click_lands(window):
+    """What the preview showed is exactly what is placed."""
+    window.select_tool("callout")
+    click(window.view, 200, 300)
+    hover(window.view, 420, 200)
+    preview = window.view._pending_callout()
+    shown = (preview.side_of(preview.leaders[0]),
+             preview.mapToScene(preview.elbow_of(preview.leaders[0])))
+
+    click(window.view, 420, 200)
+    call = window.view.editing_item()
+    placed = (call.side_of(call.leaders[0]),
+              call.mapToScene(call.elbow_of(call.leaders[0])))
+    window.view.end_item_edit()
+
+    # The same side, and the hinge in the same place — not on a corner during
+    # placement and on a side afterwards.
+    assert placed[0] == shown[0]
+    assert (placed[1] - shown[1]).manhattanLength() < 1.0
+
+
+def test_moving_the_arrow_head_works_the_hinge_out_again(window):
+    """It used to stay on whichever side it had been dragged to."""
+    call = _callout(window)
+    window.view.end_item_edit()
+    window.select_tool("select")
+    call.setSelected(True)
+    leader = call.leaders[0]
+    box = call.local_rect().normalized()
+
+    leader.tip = QPointF(box.left() - 140, box.center().y())
+    call.leader_moved()
+    call.set_elbow_of(leader, QPointF(box.center().x(), box.top() - 40))
+    assert call.side_of(leader) == "top" and leader.side == "top"
+
+    # Drag the arrow head round to the other side of the box.
+    handle = call.mapToScene(leader.tip)
+    target = call.mapToScene(QPointF(box.right() + 160, box.center().y()))
+    drag(window.view, handle.x(), handle.y(), target.x(), target.y())
+
+    assert leader.side == "", "the hand-picked side should have been given up"
+    assert call.side_of(leader) == "right"
+
+
+def test_moving_the_box_works_the_hinge_out_again(window):
+    call = _callout(window)
+    window.view.end_item_edit()
+    window.select_tool("select")
+    call.setSelected(True)
+    leader = call.leaders[0]
+    box = call.local_rect().normalized()
+    leader.tip = QPointF(box.left() - 140, box.center().y())
+    call.leader_moved()
+    call.set_elbow_of(leader, QPointF(box.center().x(), box.top() - 40))
+    assert leader.side == "top"
+
+    call.move_keeping_leader(call.pos() + QPointF(-400, 0))
+    assert leader.side == ""
+
+
+def test_a_leader_survives_a_round_trip_with_its_side_and_reach(window):
+    from calcforge.items.base import build_item
+
+    call = _callout(window)
+    window.view.end_item_edit()
+    leader = call.leaders[0]
+    box = call.local_rect().normalized()
+    leader.tip = QPointF(box.left() - 140, box.center().y())
+    call.leader_moved()
+    call.set_elbow_of(leader, QPointF(box.center().x(), box.top() - 55))
+
+    clone = build_item(call.serialize())
+    kept = clone.leaders[0]
+    assert kept.side == leader.side
+    assert kept.reach == pytest.approx(leader.reach, abs=0.01)
+    assert clone.side_of(kept) == call.side_of(leader)
+
+
+def test_a_document_written_before_this_still_opens(window):
+    """A leader saved as a free elbow comes back as a sensible one."""
+    from calcforge.items.base import build_item
+
+    older = {"type": "callout", "x": 0, "y": 0, "rect": [0, 0, 160, 60],
+             "text": "note", "uid": "old",
+             "leaders": [{"tip": [-120, 30], "elbow": [-40, -30], "reach": 30}]}
+    call = build_item(older)
+    assert call is not None
+    leader = call.leaders[0]
+    assert leader.tip == QPointF(-120, 30)
+    assert leader.reach == pytest.approx(30)
+    # The elbow it was saved with is gone; the hinge is worked out instead.
+    start = call.side_point_of(leader)
+    hinge = call.elbow_of(leader)
+    assert abs(hinge.x() - start.x()) < 0.01 or abs(hinge.y() - start.y()) < 0.01
+
+
+def test_the_menu_adds_and_removes_one_leader_at_a_time(window):
+    call = _callout(window)
+    window.view.end_item_edit()
+    assert len(call.leaders) == 1
+
+    menu = window.build_context_menu(call, call.mapToScene(QPointF(20, 20)))
+    labels = _menu_labels(menu)
+    assert "Add another leader" in labels
+
+    window.add_leader_to(call)
+    window.add_leader_to(call)
+    assert len(call.leaders) == 3
+
+    # Right-click on one of them, and that one can be taken away.
+    on_it = call.mapToScene(call.elbow_of(call.leaders[1]))
+    labels = _menu_labels(window.build_context_menu(call, on_it))
+    assert "Remove this leader" in labels
+    window.remove_leader_from(call, 1)
+    assert len(call.leaders) == 2
+
+
+def test_a_cloud_callout_is_not_offered_leaders(window):
+    """The cloud is what points at the thing; an arrow as well is nonsense."""
+    window.select_tool("cloud_callout")
+    drag(window.view, 160, 260, 300, 340)
+    click(window.view, 430, 200)
+    call = window.view.editing_item()
+    window.view.end_item_edit()
+
+    labels = _menu_labels(window.build_context_menu(call, call.pos()))
+    assert "Add another leader" not in labels
+    assert "Add a leader" not in labels
+
+
+def test_the_hinge_stand_off_can_be_typed(window):
+    from PySide6.QtWidgets import QDoubleSpinBox, QGroupBox
+
+    call = _callout(window)
+    window.view.end_item_edit()
+    call.setSelected(True)
+    window.properties_panel.show_items([call])
+
+    groups = {g.title(): g for g in
+              window.properties_panel.findChildren(QGroupBox)}
+    assert "Leader" in groups
+    spins = groups["Leader"].findChildren(QDoubleSpinBox)
+    assert spins, "the stand-off should be in the panel"
+    spins[0].setValue(70)
+    assert call.leaders[0].reach == pytest.approx(70, abs=0.5)
+    # And the hinge is still square out of its side.
+    start = call.side_point()
+    hinge = call.elbow()
+    assert abs(hinge.x() - start.x()) < 0.01 or abs(hinge.y() - start.y()) < 0.01

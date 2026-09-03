@@ -1973,6 +1973,11 @@ class PageView(QGraphicsView):
         self.begin_snapshot()
         item = tool.factory()
         self._prepare_draft(item)
+        # The size the preview showed, so the box that lands is the box that
+        # was drawn under the pointer — and the leader meets it in the same
+        # place, rather than shifting when the click goes down.
+        width, height = self._default_size(item)
+        item.set_local_rect(QRectF(0, 0, width, height))
         frame = self.frame_at(point) or self.frame()
         frame.add_markup(item, frame.mapFromScene(point))
         if cloud:
@@ -2095,12 +2100,11 @@ class PageView(QGraphicsView):
         self.selectionChanged.emit()
 
         if isinstance(draft, CalloutItem) and self._pending_anchor is not None:
-            # Point the leader at whatever was clicked before the box was drawn.
-            target = draft.mapFromScene(self._pending_anchor)
-            box = draft.local_rect()
-            elbow = QPointF((target.x() + box.center().x()) / 2,
-                            (target.y() + box.center().y()) / 2)
-            draft.leader = [QPointF(target), elbow]
+            # Point the leader at whatever was clicked before the box was
+            # drawn. Where it bends is the leader's own business — it comes
+            # square out of the side facing what it points at — so nothing is
+            # set here but the arrow head.
+            draft.tip = draft.mapFromScene(self._pending_anchor)
             self._pending_anchor = None
 
         if tool.mode == SNAPSHOT:
@@ -3449,44 +3453,60 @@ class PageView(QGraphicsView):
     def _draw_pending_leader(self, painter: QPainter, anchor: QPointF) -> None:
         """The call-out as it will be, drawn while it is being placed.
 
-        Where the line meets the box is worked out the same way the placed
-        call-out works it out — the middle of the side facing what is being
-        pointed at. Drawing it to the pointer instead put the line on the
-        corner of the preview and then made it jump to the middle of a side
-        the moment the click landed, which is the sort of thing that makes
-        somebody place a call-out twice to see where it really goes.
+        Not a drawing of one: the real thing. A call-out is built where the
+        click would put it, told what it points at, and asked to paint its
+        own leader — so the hinge, the side it leaves by and the arrow head
+        are not merely similar to what lands, they are the same code. Drawing
+        a straight line to the pointer instead is why the leader used to have
+        no hinge and then jump the moment the click landed.
         """
-        from ..items.base import arrow_path
-
+        preview = self._pending_callout()
+        if preview is None:
+            return
+        box = preview.mapRectToScene(preview.local_rect())
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing, True)
-        colour = QColor(self.window.default_style.stroke or "#e8590c")
-        pen = QPen(colour)
-        pen.setWidthF(max(self.window.default_style.width, 1.0))
-        painter.setPen(pen)
-
-        box = self._pending_callout_box()
-        target = self._pending_leader_join(box, anchor)
-        if target is not None:
-            painter.drawLine(anchor, target)
-            angle = math.atan2(anchor.y() - target.y(), anchor.x() - target.x())
-        else:
-            angle = -math.pi / 4
-        arrowed = not self._pending_cloud
-        if arrowed:
-            painter.setBrush(colour)
-            painter.drawPath(arrow_path(anchor, angle,
-                                        max(pen.widthF() * 4.5, 9.0), "arrow"))
+        painter.translate(box.topLeft())
+        preview.paint_leader(painter)
         # And the box the words will go in. It lands at a set size and grows
         # as it is written into, so showing that size is the whole answer to
         # "where will it be and how big".
-        if box is not None and self._draft is None:
+        if self._draft is None:
             painter.setOpacity(0.45)
             painter.setBrush(QBrush(QColor(255, 255, 255)))
+            pen = preview.style.pen()
             painter.setPen(pen)
-            painter.drawRoundedRect(box, 2.0, 2.0)
+            painter.drawRoundedRect(preview.local_rect(), 2.0, 2.0)
             painter.setOpacity(1.0)
         painter.restore()
+
+    def _pending_callout(self):
+        """The call-out that would land if the click came now.
+
+        Made and thrown away every time the pointer moves, which costs
+        nothing and means the preview cannot drift out of step with what is
+        actually placed.
+        """
+        from ..items.text import CalloutItem
+
+        anchor = self._pending_anchor
+        if anchor is None:
+            return None
+        box = self._pending_callout_box()
+        if box is None:
+            return None
+        item = CalloutItem("")
+        self.window.apply_default_style(item)
+        item.set_local_rect(QRectF(0, 0, box.width(), box.height()))
+        item.setPos(box.topLeft())
+        if self._pending_cloud:
+            # A cloud call-out: the cloud is what points, so no arrow head,
+            # and the line runs to the cloud rather than to a tip.
+            item.set_cloud([item.mapFromScene(corner)
+                            for corner in self._pending_cloud])
+        else:
+            item.tip = item.mapFromScene(anchor)
+        return item
 
     def _pending_callout_box(self) -> Optional[QRectF]:
         """Where the note would land if it were clicked down now.
@@ -3502,31 +3522,15 @@ class PageView(QGraphicsView):
         width, height = self._default_size(CalloutItem())
         return QRectF(at.x(), at.y(), width, height)
 
-    @staticmethod
-    def _pending_leader_join(box: Optional[QRectF],
-                             anchor: QPointF) -> Optional[QPointF]:
-        """The middle of the side of *box* that faces *anchor*.
-
-        The same rule :meth:`CalloutItem.side_point_of` uses once the markup
-        is real, so the preview and the thing itself agree.
-        """
-        if box is None:
-            return None
-        centre = box.center()
-        across = (anchor.x() - centre.x()) / max(box.width() / 2, 1.0)
-        down = (anchor.y() - centre.y()) / max(box.height() / 2, 1.0)
-        if abs(across) >= abs(down):
-            return QPointF(box.left() if across < 0 else box.right(), centre.y())
-        return QPointF(centre.x(), box.top() if down < 0 else box.bottom())
-
     def _draw_snap_marker(self, painter: QPainter, point: QPointF) -> None:
-        """Where the pointer has caught hold, and what it has caught.
+        """Where the pointer has caught hold.
 
         A hairline square was too easy to miss on a busy drawing, which is
         why snapping felt as though it was not happening. This is the marker
         every CAD program draws: a filled square with a ring round it, at a
-        size that does not change with the zoom, and the name of what it
-        caught written beside it.
+        size that does not change with the zoom. What it caught is said in
+        the status bar — writing it on the drawing put a word next to every
+        markup that then had to be waited out.
         """
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing, True)
@@ -3541,13 +3545,6 @@ class PageView(QGraphicsView):
         painter.setBrush(Qt.NoBrush)
         ring = arm * 1.9
         painter.drawEllipse(point, ring, ring)
-        if self._snap_caught:
-            font = painter.font()
-            font.setPointSizeF(max(8.0 / scale, 0.5))
-            painter.setFont(font)
-            painter.setPen(QPen(colour))
-            painter.drawText(QPointF(point.x() + ring + 3 / scale,
-                                     point.y() - ring), self._snap_caught)
         painter.restore()
 
     def typing_position(self) -> QPointF:

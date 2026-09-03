@@ -155,6 +155,16 @@ against memory.
 - [x] Pasting a page says where it will land — m147
 - [x] The selection box draws without needing a right-click — m148
 
+## The leader, put right (message 155)
+
+- [x] No words written beside a markup that then have to be waited out — m155
+- [x] The hinge is there while the call-out is being placed, because the
+      preview *is* a call-out — m155
+- [x] Add and remove a leader on the right-click menu, one at a time — m155
+- [x] The hinge leaves the side square on, always — m155
+- [x] It is never allowed where the line would cross the words — m155
+- [x] Moving the arrow head or the box works the hinge out again — m155
+
 ## Outstanding
 
 Nothing. Every request above is built and held by a test.

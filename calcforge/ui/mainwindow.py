@@ -1507,7 +1507,12 @@ class MainWindow(QMainWindow):
         dialog = dialogs.PdfImportDialog(self, self.current_page().setup)
         if dialog.exec() != dialogs.QDialog.Accepted:
             return
-        path, indices, fit, dpi, vectors = dialog.selection()
+        chosen = dialog.selection()
+        # A dialog written before the line work could be brought across says
+        # nothing about it, and that is taken as "yes" — it is what the real
+        # dialog offers by default.
+        path, indices, fit, dpi = chosen[:4]
+        vectors = bool(chosen[4]) if len(chosen) > 4 else True
         if not path or not indices:
             QMessageBox.information(self, "Insert PDF", "No pages were selected.")
             return
@@ -3527,6 +3532,48 @@ class MainWindow(QMainWindow):
         self.view.commit_snapshot("Move to layer")
         self.refresh_lists()
 
+    def _fill_leader_menu(self, menu, item, scene_pos: QPointF) -> None:
+        """Adding and taking away arrows, on the menu where they can be found.
+
+        One comment about three bolts wants three arrows, and the only way to
+        get the second one used to be to know that dragging did something. So
+        it is written down: another arrow, and — when the pointer is on one —
+        that arrow away.
+        """
+        leaders = menu.addMenu("Leaders") if item.leaders else menu
+        add = leaders.addAction("Add another leader" if item.leaders
+                                else "Add a leader",
+                                lambda: self.add_leader_to(item))
+        add.setToolTip("As many as the comment needs; each one points at "
+                       "whatever you drag it to")
+        which = item.leader_near(item.mapFromScene(scene_pos))
+        if which is not None:
+            leaders.addAction("Remove this leader",
+                              lambda i=which: self.remove_leader_from(item, i))
+        if item.leaders:
+            leaders.addAction("Remove every leader",
+                              lambda: self.set_leader(item, False))
+
+    def add_leader_to(self, item) -> None:
+        """Another arrow on this call-out, clear of the ones it already has."""
+        self.view.begin_snapshot(self.view.involved_frames(item))
+        item.add_leader()
+        item.touch()
+        item.update()
+        self.view.commit_snapshot("Add leader")
+        self.refresh_selection()
+        self.status_hint.setText(
+            f"{len(item.leaders)} leader(s) — drag the arrow head to what it "
+            "points at")
+
+    def remove_leader_from(self, item, index: int) -> None:
+        self.view.begin_snapshot(self.view.involved_frames(item))
+        item.remove_leader(index)
+        item.touch()
+        item.update()
+        self.view.commit_snapshot("Remove leader")
+        self.refresh_selection()
+
     def set_leader(self, item, wanted: bool) -> None:
         """Give a text box or call-out a leader, or take its leader away."""
         if item is None or not isinstance(item, _TextBase):
@@ -4119,13 +4166,8 @@ class MainWindow(QMainWindow):
                 menu.addAction(self.act_group)
             if any(getattr(i, "group", "") for i in self.selected_items()):
                 menu.addAction(self.act_ungroup)
-            if isinstance(item, _TextBase):
-                if item.leader_shown:
-                    menu.addAction("Remove leader",
-                                   lambda: self.set_leader(item, False))
-                else:
-                    menu.addAction("Add leader",
-                                   lambda: self.set_leader(item, True))
+            if isinstance(item, _TextBase) and not item.clouds_a_region():
+                self._fill_leader_menu(menu, item, scene_pos)
             menu.addAction("Set as default", lambda: self.set_as_default(item))
             menu.addAction("Add to a tool set…", lambda: self.add_to_toolset(item))
             menu.addSeparator()

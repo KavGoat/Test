@@ -115,35 +115,88 @@ def _as_text(value, digits: int = 4) -> str:
     return str(value)
 
 
-class _Leader:
-    """One arrow: where it points, where it turns, and how far out it turns.
+def _crosses(rect: QRectF, a: QPointF, b: QPointF) -> bool:
+    """Whether the line from *a* to *b* runs across *rect*.
 
-    The elbow is remembered as a point once it has been dragged, and worked
-    out from *reach* until then. Keeping both is what lets a leader that has
-    never been touched follow the box around while one that has been placed
-    by hand stays where it was put.
+    Used to keep a leader off its own words: a hinge put on the far side of
+    the box would send the line back over the writing to reach the arrow
+    head, and that is not somewhere the hinge is allowed to be.
+
+    The box is shrunk a whisker first, so a line that only grazes an edge —
+    which is what every leader does where it leaves the box — does not count
+    as crossing it.
+    """
+    box = QRectF(rect).normalized().adjusted(0.75, 0.75, -0.75, -0.75)
+    if box.width() <= 0 or box.height() <= 0:
+        return False
+    if box.contains(a) or box.contains(b):
+        return True
+    corners = [box.topLeft(), box.topRight(), box.bottomRight(),
+               box.bottomLeft()]
+    for index in range(4):
+        if _segments_cross(a, b, corners[index], corners[(index + 1) % 4]):
+            return True
+    return False
+
+
+def _distance_to_segment(a: QPointF, b: QPointF, p: QPointF) -> float:
+    """How far *p* is from the line between *a* and *b*."""
+    dx, dy = b.x() - a.x(), b.y() - a.y()
+    if dx == 0 and dy == 0:
+        return math.hypot(p.x() - a.x(), p.y() - a.y())
+    along = max(0.0, min(1.0, ((p.x() - a.x()) * dx + (p.y() - a.y()) * dy)
+                         / (dx * dx + dy * dy)))
+    return math.hypot(p.x() - (a.x() + along * dx), p.y() - (a.y() + along * dy))
+
+
+def _segments_cross(a: QPointF, b: QPointF, c: QPointF, d: QPointF) -> bool:
+    """Whether two line segments meet anywhere."""
+    def side(p: QPointF, q: QPointF, r: QPointF) -> float:
+        return ((q.x() - p.x()) * (r.y() - p.y())
+                - (q.y() - p.y()) * (r.x() - p.x()))
+
+    one, two = side(a, b, c), side(a, b, d)
+    three, four = side(c, d, a), side(c, d, b)
+    return ((one > 0) != (two > 0)) and ((three > 0) != (four > 0))
+
+
+class _Leader:
+    """One arrow: what it points at, which side it leaves by, how far out.
+
+    The hinge is not a point that gets stored. It is worked out, every time,
+    from the side and the reach: the middle of that side, straight out at
+    right angles, *reach* away. That is what makes it perpendicular to the
+    side however the box or the arrow head is moved, and it is why moving
+    either of them puts the hinge somewhere sensible instead of leaving it
+    where it was last dropped.
+
+    *side* is normally empty, meaning "whichever side faces what this points
+    at" — which is what a leader does when nobody has touched it. Dragging
+    the hinge round to another side of the box fills it in; moving the arrow
+    head or the box empties it again, and the hinge goes back to working
+    itself out.
     """
 
-    __slots__ = ("tip", "elbow", "reach")
+    __slots__ = ("tip", "side", "reach")
 
-    def __init__(self, tip: QPointF, elbow: Optional[QPointF] = None,
-                 reach: float = 24.0):
+    SIDES = ("left", "right", "top", "bottom")
+
+    def __init__(self, tip: QPointF, side: str = "", reach: float = 24.0):
         self.tip = QPointF(tip)
-        self.elbow = QPointF(elbow) if elbow is not None else None
-        self.reach = float(reach)
+        self.side = side if side in self.SIDES else ""
+        self.reach = max(float(reach), 6.0)
 
     def to_dict(self) -> dict:
         data = {"tip": [self.tip.x(), self.tip.y()], "reach": self.reach}
-        if self.elbow is not None:
-            data["elbow"] = [self.elbow.x(), self.elbow.y()]
+        if self.side:
+            data["side"] = self.side
         return data
 
     @classmethod
     def from_dict(cls, data: dict) -> "_Leader":
         tip = data.get("tip") or [0.0, 0.0]
-        elbow = data.get("elbow")
         return cls(QPointF(float(tip[0]), float(tip[1])),
-                   QPointF(float(elbow[0]), float(elbow[1])) if elbow else None,
+                   str(data.get("side") or ""),
                    float(data.get("reach", 24.0)))
 
 
@@ -174,7 +227,8 @@ class _TextBase(MarkupItem):
     """Shared rich-text behaviour: document, layout, in-place editing."""
 
     HAS_TEXT = True
-    ELBOW_REACH = 24.0          # how far the elbow stands off the box by default
+    ELBOW_REACH = 24.0          # how far the hinge stands off the box by default
+    LEAST_REACH = 8.0           # and the closest it may ever be dragged in
 
     def __init__(self, text: str = "", rect: Optional[QRectF] = None):
         super().__init__()
@@ -397,7 +451,7 @@ class _TextBase(MarkupItem):
         self.prepareGeometryChange()
         if tip is None:
             tip = self._room_for_another_leader()
-        leader = _Leader(QPointF(tip), None, self.ELBOW_REACH)
+        leader = _Leader(QPointF(tip), "", self.ELBOW_REACH)
         self.leaders.append(leader)
         if self.style.arrow_end == "none":
             self.style.arrow_end = "arrow"
@@ -428,64 +482,159 @@ class _TextBase(MarkupItem):
                        box.bottom() + 50 + step * 26)
 
     # -- where each one leaves the box -------------------------------------
-    def side_of(self, leader: "_Leader") -> str:
-        """Which side of the box this leader leaves by.
+    #
+    # The whole shape of a leader comes out of two numbers: which side it
+    # leaves by, and how far out it turns its corner. Everything else follows.
+    # It leaves the middle of that side square on, turns once, and runs to
+    # what it points at — which is the shape a call-out has on every drawing
+    # anybody has ever read.
 
-        Its elbow decides, when it has one: the elbow is the corner nearest
-        the box, so the side it faces is the side the line should come out
-        of. Without one — a leader that has never been dragged — the tip
-        decides, which is the same answer for a leader that goes straight out.
+    def facing_side(self, leader: "_Leader") -> str:
+        """The side that faces what this leader points at.
+
+        Worked out from the arrow head against the corners of the box, so a
+        tip out beyond a corner picks the side it is most beyond rather than
+        the one it is nearest the middle of.
         """
         rect = self._rect.normalized()
         centre = rect.center()
-        towards = leader.elbow if leader.elbow is not None else leader.tip
         half_width = max(rect.width() / 2, 1.0)
         half_height = max(rect.height() / 2, 1.0)
-        across = (towards.x() - centre.x()) / half_width
-        down = (towards.y() - centre.y()) / half_height
+        across = (leader.tip.x() - centre.x()) / half_width
+        down = (leader.tip.y() - centre.y()) / half_height
         if abs(across) >= abs(down):
             return "left" if across < 0 else "right"
         return "top" if down < 0 else "bottom"
 
+    def side_of(self, leader: "_Leader") -> str:
+        """Which side this leader actually leaves by."""
+        if leader.side and self.side_is_usable(leader, leader.side):
+            return leader.side
+        return self.facing_side(leader)
+
+    def side_is_usable(self, leader: "_Leader", side: str) -> bool:
+        """Whether a leader could leave by *side* without crossing the words.
+
+        A hinge put on the far side of the box sends the line back across
+        the writing to reach the arrow head, which is unreadable — so those
+        sides are simply not offered. Anything else is allowed, including the
+        two sides at right angles to the obvious one, which is how a leader
+        gets tucked out of the way of another markup.
+        """
+        rect = self._rect.normalized()
+        hinge = self.hinge_on(side, leader.reach)
+        return not _crosses(rect, hinge, leader.tip)
+
     def side_point_of(self, leader: "_Leader") -> QPointF:
         """The middle of the side this leader leaves by."""
+        return self.middle_of(self.side_of(leader))
+
+    def middle_of(self, side: str) -> QPointF:
         rect = self._rect.normalized()
         return {
             "left": QPointF(rect.left(), rect.center().y()),
             "right": QPointF(rect.right(), rect.center().y()),
             "top": QPointF(rect.center().x(), rect.top()),
             "bottom": QPointF(rect.center().x(), rect.bottom()),
-        }[self.side_of(leader)]
+        }.get(side, rect.center())
 
-    def side_normal_of(self, leader: "_Leader") -> QPointF:
+    @staticmethod
+    def normal_of(side: str) -> QPointF:
         """Straight out of that side, away from the box."""
         return {"left": QPointF(-1, 0), "right": QPointF(1, 0),
-                "top": QPointF(0, -1), "bottom": QPointF(0, 1)}[self.side_of(leader)]
+                "top": QPointF(0, -1),
+                "bottom": QPointF(0, 1)}.get(side, QPointF(-1, 0))
+
+    def side_normal_of(self, leader: "_Leader") -> QPointF:
+        return self.normal_of(self.side_of(leader))
+
+    def hinge_on(self, side: str, reach: float) -> QPointF:
+        """Where the corner would be if it left by *side*, *reach* out."""
+        start = self.middle_of(side)
+        normal = self.normal_of(side)
+        out = max(float(reach), self.LEAST_REACH)
+        return QPointF(start.x() + normal.x() * out, start.y() + normal.y() * out)
 
     def elbow_of(self, leader: "_Leader") -> QPointF:
-        """Where this leader turns its corner."""
-        if leader.elbow is not None:
-            return QPointF(leader.elbow)
-        start = self.side_point_of(leader)
-        normal = self.side_normal_of(leader)
-        reach = max(leader.reach, 0.0)
-        return QPointF(start.x() + normal.x() * reach,
-                       start.y() + normal.y() * reach)
+        """Where this leader turns its corner: square out of its own side."""
+        return self.hinge_on(self.side_of(leader), leader.reach)
 
     def set_elbow_of(self, leader: "_Leader", local_pos: QPointF) -> None:
-        """Put this leader's elbow where the pointer is.
+        """Put the hinge where the pointer asks, as near as it is allowed.
 
-        Anywhere: the elbow used to be pinned to a line straight out of one
-        side, so dragging it round to another side of the box did nothing at
-        all. Now the side follows the elbow, which is what dragging it round
-        looks like it should do.
+        Which side is taken from where the pointer is; how far out is how far
+        the pointer is from that side, along its perpendicular. So dragging
+        it round to the top makes the leader leave from the top, and dragging
+        it away from the box pushes the corner further out — but it never
+        comes off the perpendicular, and it is never put somewhere that would
+        send the line back across the words.
         """
         self.prepareGeometryChange()
-        leader.elbow = QPointF(local_pos)
-        start = self.side_point_of(leader)
-        leader.reach = math.hypot(local_pos.x() - start.x(),
-                                  local_pos.y() - start.y())
+        wanted = self._nearest_side(local_pos)
+        out = self._reach_towards(wanted, local_pos)
+        if not self.side_is_usable(_Leader(leader.tip, wanted, out), wanted):
+            # That side would drag the line back over the writing. Nothing
+            # changes: the pointer is off beside a side the leader cannot
+            # use, so how far out it is there says nothing about how far out
+            # the hinge should stand on the side it is actually on.
+            return
+        leader.side = "" if wanted == self.facing_side(leader) else wanted
+        leader.reach = out
+        self.touch()
         self.geometryChanged.emit()
+
+    def _nearest_side(self, local_pos: QPointF) -> str:
+        """Which side of the box the pointer is off, by its own perpendicular."""
+        rect = self._rect.normalized()
+        centre = rect.center()
+        half_width = max(rect.width() / 2, 1.0)
+        half_height = max(rect.height() / 2, 1.0)
+        across = (local_pos.x() - centre.x()) / half_width
+        down = (local_pos.y() - centre.y()) / half_height
+        if abs(across) >= abs(down):
+            return "left" if across < 0 else "right"
+        return "top" if down < 0 else "bottom"
+
+    def _reach_towards(self, side: str, local_pos: QPointF) -> float:
+        """How far out along that side's perpendicular the pointer is."""
+        start = self.middle_of(side)
+        normal = self.normal_of(side)
+        along = ((local_pos.x() - start.x()) * normal.x()
+                 + (local_pos.y() - start.y()) * normal.y())
+        return max(along, self.LEAST_REACH)
+
+    def clouds_a_region(self) -> bool:
+        """A plain text box never clouds anything; a call-out may."""
+        return False
+
+    def leader_near(self, local_pos: QPointF,
+                    reach: float = 14.0) -> Optional[int]:
+        """Which leader the pointer is on, if it is on one.
+
+        Anywhere along it counts — the arrow head, the hinge, or the line
+        between them — because "this one" means the one being pointed at, not
+        the one whose handle was found first.
+        """
+        best, nearest = None, reach
+        for index, leader in enumerate(self.leaders):
+            start = self.side_point_of(leader)
+            hinge = self.elbow_of(leader)
+            for a, b in ((start, hinge), (hinge, leader.tip)):
+                gap = _distance_to_segment(a, b, local_pos)
+                if gap < nearest:
+                    best, nearest = index, gap
+        return best
+
+    def leader_moved(self) -> None:
+        """The arrow head or the box moved: work the hinges out again.
+
+        A hinge that was dragged to a particular side made sense against the
+        arrow head as it then was. Moved somewhere else, that side may now
+        be behind the box, so the choice is given up and the leader goes back
+        to leaving by whichever side faces what it points at.
+        """
+        for leader in self.leaders:
+            leader.side = ""
 
     # -- the one-leader spellings, kept for everything that uses them ------
     def side(self) -> str:
@@ -523,9 +672,9 @@ class _TextBase(MarkupItem):
             for leader in self.leaders:
                 leader.tip = QPointF(leader.tip.x() - delta.x(),
                                      leader.tip.y() - delta.y())
-                if leader.elbow is not None:
-                    leader.elbow = QPointF(leader.elbow.x() - delta.x(),
-                                           leader.elbow.y() - delta.y())
+            # The box has moved, so a side that was chosen by hand may now be
+            # the wrong one. The hinges work themselves out again.
+            self.leader_moved()
         self.setPos(position)
 
     # -- painting ----------------------------------------------------------
@@ -613,6 +762,9 @@ class _TextBase(MarkupItem):
             if part == "tip":
                 self.prepareGeometryChange()
                 leader.tip = QPointF(local_pos)
+                # The arrow head has been moved: the hinge follows it round
+                # rather than staying on a side that no longer faces it.
+                self.leader_moved()
                 self.geometryChanged.emit()
             else:
                 self.set_elbow_of(leader, local_pos)
@@ -621,15 +773,12 @@ class _TextBase(MarkupItem):
             # Resizing the box must not drag the arrows along with it: each
             # points at something on the page, and stays pointing at it until
             # it is moved on purpose.
-            pinned = [(self.mapToScene(leader.tip),
-                       self.mapToScene(leader.elbow) if leader.elbow is not None
-                       else None) for leader in self.leaders]
+            pinned = [self.mapToScene(leader.tip) for leader in self.leaders]
             super().move_handle(key, local_pos, keep_ratio)
             self.prepareGeometryChange()
-            for leader, (tip, elbow) in zip(self.leaders, pinned):
+            for leader, tip in zip(self.leaders, pinned):
                 leader.tip = self.mapFromScene(tip)
-                if elbow is not None:
-                    leader.elbow = self.mapFromScene(elbow)
+            self.leader_moved()
             return
         super().move_handle(key, local_pos, keep_ratio)
 
@@ -759,7 +908,7 @@ class _TextBase(MarkupItem):
             reach = float(data.get("elbow_reach", self.ELBOW_REACH))
             if points:
                 self.leaders = [_Leader(QPointF(float(points[0][0]),
-                                                float(points[0][1])), None, reach)]
+                                                float(points[0][1])), "", reach)]
             elif points is not None:
                 self.leaders = []
         self.load_base(data)

@@ -238,10 +238,9 @@ HANDLE_CURSORS = {
     "n": Qt.SizeVerCursor, "s": Qt.SizeVerCursor,
     "e": Qt.SizeHorCursor, "w": Qt.SizeHorCursor,
     "rot": Qt.CrossCursor,
-    # A callout's arrow head and elbow: pointing at things, not resizing.
-    "l0": Qt.PointingHandCursor, "l1": Qt.PointingHandCursor,
-    "l2": Qt.PointingHandCursor, "l3": Qt.PointingHandCursor,
-    "elbow": Qt.PointingHandCursor,
+    # A call-out's arrow heads and hinges are numbered — l0, e0, l1, e1 —
+    # because there is no limit to how many a comment may need, so they are
+    # matched by their shape below rather than listed here.
     # A measurement's own words: dragged to move them, turned to angle them.
     "lbl": Qt.SizeAllCursor,
     "lblrot": Qt.CrossCursor,
@@ -257,8 +256,14 @@ def cursor_for_handle(key: str):
     """
     if key in HANDLE_CURSORS:
         return HANDLE_CURSORS[key]
-    if key.startswith("v") and key[1:].isdigit():
-        return Qt.PointingHandCursor
+    letter, rest = key[:1], key[1:]
+    if rest.isdigit():
+        if letter == "e":
+            # A hinge slides along a line and hops from side to side: an open
+            # hand says "take hold of this", which is what it is for.
+            return Qt.OpenHandCursor
+        if letter in ("v", "l", "c", "n", "r"):
+            return Qt.PointingHandCursor
     return Qt.SizeAllCursor
 
 
