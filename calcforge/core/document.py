@@ -369,6 +369,27 @@ class Document:
         self.pages.insert(max(0, min(target, len(self.pages))), page)
         self.modified = True
 
+    def move_pages(self, source: int, count: int, target: int) -> int:
+        """Move a run of *count* pages so it starts at *target*.
+
+        A block of sheets picked out together is dragged as a block, and
+        arrives in the order it left in whichever way it is going. Says the
+        row the run actually starts at afterwards.
+        """
+        count = max(int(count), 1)
+        if not 0 <= source < len(self.pages):
+            return source
+        moving = self.pages[source:source + count]
+        if not moving or (source == target and count == 1):
+            return source
+        for page in moving:
+            self.pages.remove(page)
+        landing = max(0, min(int(target), len(self.pages)))
+        for offset, page in enumerate(moving):
+            self.pages.insert(landing + offset, page)
+        self.modified = True
+        return landing
+
     # -- layers ------------------------------------------------------------
     def layer(self, name: str) -> Layer:
         for layer in self.layers:

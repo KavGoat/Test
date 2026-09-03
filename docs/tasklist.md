@@ -224,7 +224,7 @@ Checking this against your raw messages turned up a few places where either I go
 ## 19. Pages & document structure
 
 - [x] Right-click a page, or a multi-page selection, for: Delete, Duplicate, Insert Before, Insert After, Insert PDF, Insert Photo (23, 60, 123)
-- [ ] **(new)** Bug: several pages cannot be deleted at once. Picking more than one page in the pages panel has to work properly and everything that acts on a page has to act on the whole picked set — delete, move (reorder by dragging), copy and duplicate
+- [x] **(new)** Bug: several pages cannot be deleted at once. Picking more than one page in the pages panel has to work properly and everything that acts on a page has to act on the whole picked set — delete, move (reorder by dragging), copy and duplicate
 - [x] Dragging a PDF file directly onto the page panel should show an insertion cursor/indicator and insert it at that exact point in the page order (114)
 - [x] Insert-PDF must bring in the actual PDF content (vector text/lines), not a blank page and not a 150dpi raster snapshot of it — figure out what's required to preserve full fidelity, and ask if a specific library/dependency choice needs sign-off (25, 120)
 - [x] **(new)** Insert-PDF must not ask for a DPI at all. There is no resolution to choose: everything in the file comes through as the PDF has it, vector work included. Drop the question from the dialog

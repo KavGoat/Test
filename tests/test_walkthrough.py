@@ -10,6 +10,7 @@ import tempfile
 
 import pytest
 from PySide6.QtCore import QPointF, Qt
+from PySide6.QtWidgets import QApplication
 
 from calcforge.core.document import Document
 from calcforge.io import project as project_io
@@ -25,11 +26,17 @@ from test_usability import (click, double_click, drag, hover, markups,
 def test_a_whole_calculation_sheet_from_a_blank_page(window):
     workspace = window.document.workspace
 
-    # A heading, typed as prose.
+    # A heading, typed as prose. The quotation mark opens a line that is a
+    # calculation until it is told otherwise, and Shift with the space bar
+    # tells it: a plain space is refused, so that a stray one cannot throw a
+    # half-typed expression away.
     window.view._last_scene_pos = QPointF(70, 70)
     press_key(window.view, Qt.Key_unknown, '"')
-    assert window.view.editing_item() is not None, 'the " key opens a text box'
-    type_text(window.view, "Beam B1 - bending check")
+    assert window.view.editing_item() is not None, 'the " key opens a line'
+    type_text(window.view, "Beam")
+    press_key(window.view, Qt.Key_Space, " ", Qt.ShiftModifier)
+    QApplication.processEvents()
+    type_text(window.view, "B1 - bending check")
     window.view.end_item_edit()
     assert markups(window)[0].text() == "Beam B1 - bending check"
 

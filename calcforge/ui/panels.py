@@ -39,7 +39,10 @@ class PagesPanel(QWidget):
     """Thumbnail strip with reordering and page commands."""
 
     pageSelected = Signal(int)
-    pagesReordered = Signal(int, int)
+    # Where a run of pages was dragged to: the first of them, how many, and
+    # the page number the run now starts at. A run, because a block of sheets
+    # picked out together is dragged as a block.
+    pagesReordered = Signal(int, int, int)
 
     def __init__(self, window):
         super().__init__()
@@ -53,8 +56,14 @@ class PagesPanel(QWidget):
         # that would otherwise arrive as the page to act on.
         for label, tip, slot in (
                 ("+", "Add a page", lambda: self.window.add_page()),
-                ("⧉", "Duplicate this page", lambda: self.window.duplicate_page()),
-                ("−", "Delete this page", lambda: self.window.delete_page())):
+                ("⧉", "Duplicate the page, or the pages picked out",
+                 lambda: self.window.duplicate_page(
+                     self.window.selected_pages()[0]
+                     if self.window.selected_pages() else None)),
+                ("−", "Delete the page, or the pages picked out",
+                 lambda: self.window.delete_page(
+                     self.window.selected_pages()[0]
+                     if self.window.selected_pages() else None))):
             button = QToolButton()
             button.setText(label)
             button.setToolTip(tip)
@@ -158,6 +167,13 @@ class PagesPanel(QWidget):
         index = self.list.row(entry) if entry is not None else self.list.currentRow()
         if index < 0:
             return
+        # Right-clicking inside a picked-out run keeps the run: the menu is
+        # about all of them. Right-clicking anywhere else is about that page,
+        # so the run is dropped rather than acted on by surprise.
+        if entry is not None and not entry.isSelected():
+            self.list.clearSelection()
+            entry.setSelected(True)
+            self.list.setCurrentItem(entry)
         menu = self.window.page_menu(index)
         menu.exec(self.list.viewport().mapToGlobal(point))
 
@@ -165,11 +181,18 @@ class PagesPanel(QWidget):
         if not self._suppress and row >= 0:
             self.pageSelected.emit(row)
 
-    def _rows_moved(self, _parent, start, _end, _dest, row) -> None:
+    def _rows_moved(self, _parent, start, end, _dest, row) -> None:
+        """A run of pages has been dragged somewhere else in the strip.
+
+        Qt says where the run began and ended and the row it was dropped in
+        front of. Only the first page used to be passed on, so dragging six
+        sheets moved one of them and left five behind.
+        """
         if self._suppress:
             return
-        target = row - 1 if row > start else row
-        self.pagesReordered.emit(start, target)
+        count = max(end - start + 1, 1)
+        target = row - count if row > start else row
+        self.pagesReordered.emit(start, count, max(target, 0))
 
     def rebuild(self, document, current: int) -> None:
         self._suppress = True

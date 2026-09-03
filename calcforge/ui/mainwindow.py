@@ -1439,33 +1439,48 @@ class MainWindow(QMainWindow):
         self.add_page(index, before=True)
 
     def duplicate_page(self, index: Optional[int] = None) -> None:
-        which = self.page_index(index)
-        source = self.document.pages[which].to_dict()
-        target = which + 1
+        """Copy the page — or the whole picked run — in after the last of it."""
+        wanted = self.pages_acted_on(index)
+        sources = [self.document.pages[which].to_dict() for which in wanted]
+        target = wanted[-1] + 1
 
         def mutate():
-            copy = Page.from_dict(source)
-            copy.uid = os.urandom(8).hex()
-            self.document.pages.insert(target, copy)
+            for offset, source in enumerate(sources):
+                copy = Page.from_dict(source)
+                copy.uid = os.urandom(8).hex()
+                self.document.pages.insert(target + offset, copy)
             self.current_index = target
-        self._structural_change("Duplicate page", mutate)
+        self._structural_change("Duplicate page" if len(sources) == 1
+                                else f"Duplicate {len(sources)} pages", mutate)
 
     def copy_page(self, index: Optional[int] = None) -> None:
-        """Put a whole page on the clipboard, background and markups and all."""
-        which = self.page_index(index)
-        page = self.document.pages[which].to_dict()
-        source = self.document.pages[which]
-        keys = set(source.frame.assets_used()) if source.frame is not None else set()
-        if source.background_key:
-            keys.add(source.background_key)
+        """Put a page — or the whole picked run — on the clipboard.
+
+        Backgrounds and markups and all, so what is pasted is what was copied
+        and not a page with its drawing missing.
+        """
+        wanted = self.pages_acted_on(index)
+        keys: set = set()
+        for which in wanted:
+            source = self.document.pages[which]
+            if source.frame is not None:
+                keys |= set(source.frame.assets_used())
+            if source.background_key:
+                keys.add(source.background_key)
         assets = {}
         for key in keys:
             blob = self.document.asset(key)
             if blob:
                 assets[key] = base64.b64encode(blob).decode("ascii")
-        payload = {"calcforge_page": page, "assets": assets}
+        pages = [self.document.pages[which].to_dict() for which in wanted]
+        # The single-page key stays for anything written against it, including
+        # a clipboard put there by an older version of this app.
+        payload = {"calcforge_page": pages[0], "calcforge_pages": pages,
+                   "assets": assets}
         QApplication.clipboard().setText(json.dumps(payload))
-        self.status_hint.setText(f"Copied page {which + 1}")
+        self.status_hint.setText(
+            f"Copied page {wanted[0] + 1}" if len(wanted) == 1
+            else f"Copied {len(wanted)} pages")
 
     def page_on_the_clipboard(self) -> Optional[dict]:
         """The page waiting on the clipboard, if there is one."""
@@ -1493,12 +1508,16 @@ class MainWindow(QMainWindow):
                 except (ValueError, TypeError):
                     pass
 
+        waiting = payload.get("calcforge_pages") or [payload["calcforge_page"]]
+
         def mutate():
-            page = Page.from_dict(payload["calcforge_page"])
-            page.uid = os.urandom(8).hex()
-            self.document.pages.insert(target, page)
+            for offset, source in enumerate(waiting):
+                page = Page.from_dict(source)
+                page.uid = os.urandom(8).hex()
+                self.document.pages.insert(target + offset, page)
             self.current_index = target
-        self._structural_change("Paste page", mutate)
+        self._structural_change("Paste page" if len(waiting) == 1
+                                else f"Paste {len(waiting)} pages", mutate)
         # Land on it, and say where it went: a page inserted somewhere out of
         # sight is a page nobody can find.
         self.go_to_page(target)
@@ -1506,23 +1525,38 @@ class MainWindow(QMainWindow):
         self.status_hint.setText(f"Page pasted in as page {target + 1}")
 
     def delete_page(self, index: Optional[int] = None) -> None:
+        """Take out the page — or the whole run picked out in the panel."""
         if len(self.document.pages) <= 1:
             QMessageBox.information(self, "Delete page", "A document needs at least one page.")
             return
-        which = self.page_index(index)
-        if QMessageBox.question(self, "Delete page",
-                                f"Delete page {which + 1}?") != QMessageBox.Yes:
+        going = self.pages_acted_on(index)
+        # Never all of them: a document has to keep a page. The last one in
+        # the run stays behind rather than the first, so what is left is the
+        # end of what was there rather than the start of it.
+        if len(going) >= len(self.document.pages):
+            going = going[:len(self.document.pages) - 1]
+        if not going:
+            return
+        asked = (f"Delete page {going[0] + 1}?" if len(going) == 1
+                 else f"Delete these {len(going)} pages?")
+        if QMessageBox.question(self, "Delete page", asked) != QMessageBox.Yes:
             return
 
         def mutate():
-            self.document.remove_page(which)
-            self.current_index = max(0, which - 1)
-        self._structural_change("Delete page", mutate)
+            # Backwards, so each removal leaves the ones still to go where
+            # they were.
+            for which in reversed(going):
+                self.document.remove_page(which)
+            self.current_index = max(0, going[0] - 1)
+        self._structural_change("Delete page" if len(going) == 1
+                                else f"Delete {len(going)} pages", mutate)
 
-    def move_page(self, source: int, target: int) -> None:
+    def move_page(self, source: int, target: int, count: int = 1) -> None:
+        """Move a page, or a run of them, to start at *target*."""
+        count = max(int(count), 1)
+
         def mutate():
-            self.document.move_page(source, target)
-            self.current_index = target
+            self.current_index = self.document.move_pages(source, count, target)
         self._structural_change("Reorder pages", mutate)
 
     def page_setup(self) -> None:
@@ -1739,6 +1773,21 @@ class MainWindow(QMainWindow):
                 for entry in self.pages_panel.list.selectedItems()]
         return sorted(row for row in rows if 0 <= row < len(self.document.pages))
 
+    def pages_acted_on(self, index: Optional[int] = None) -> list[int]:
+        """The pages a page command applies to, in order.
+
+        A run picked out in the pages panel is what the command acts on, so
+        taking a header off six drawing sheets is one gesture rather than six.
+        Anything done to a page outside that run is done to that page alone —
+        right-clicking page nine while pages one to three are picked out means
+        page nine, not a set nobody was pointing at.
+        """
+        which = self.page_index(index)
+        picked = self.selected_pages()
+        if len(picked) > 1 and which in picked:
+            return picked
+        return [which]
+
     def set_page_size(self, index: Optional[int] = None, name: str = "A4") -> None:
         """Put one page onto a different sheet of paper, keeping its way up."""
         which = self.page_index(index)
@@ -1757,13 +1806,21 @@ class MainWindow(QMainWindow):
         self.view.fit_page()
 
     def page_menu(self, index: int) -> QMenu:
-        """Everything you can do to one page, for its right-click menu."""
+        """Everything you can do to one page — or to the run picked out.
+
+        The wording says which: with six sheets picked out, "Delete these 6
+        pages" is what the menu offers, so nothing is taken away by a command
+        that read as being about one page.
+        """
         index = self.page_index(index)
+        acting = self.pages_acted_on(index)
+        several = len(acting) > 1
+        these = f"these {len(acting)} pages" if several else "page"
         menu = QMenu(self)
         menu.addAction("Go to this page", lambda: self.go_to_page(index))
         menu.addAction("Add to bookmarks…", lambda: self.bookmark_page(index))
         menu.addSeparator()
-        menu.addAction("Copy page", lambda: self.copy_page(index))
+        menu.addAction(f"Copy {these}", lambda: self.copy_page(index))
         # Named with the place it lands, because "Paste page" on its own does
         # not say where the page goes and there is nothing on screen to say
         # so either.
@@ -1781,7 +1838,7 @@ class MainWindow(QMainWindow):
         menu.addAction("Insert blank page before",
                        lambda: self.add_page_before(index))
         menu.addAction("Insert blank page after", lambda: self.add_page(index))
-        menu.addAction("Duplicate page", lambda: self.duplicate_page(index))
+        menu.addAction(f"Duplicate {these}", lambda: self.duplicate_page(index))
         menu.addSeparator()
         menu.addAction("Insert PDF pages before…",
                        lambda: self.insert_pdf(index, before=True))
@@ -1791,10 +1848,13 @@ class MainWindow(QMainWindow):
         menu.addAction("Insert image after…",
                        lambda: self.insert_image_page(index))
         menu.addSeparator()
-        up = menu.addAction("Move up", lambda: self.move_page(index, index - 1))
-        up.setEnabled(index > 0)
-        down = menu.addAction("Move down", lambda: self.move_page(index, index + 1))
-        down.setEnabled(index < len(self.document.pages) - 1)
+        first, last = acting[0], acting[-1]
+        up = menu.addAction("Move up", lambda: self.move_page(
+            first, first - 1, len(acting)))
+        up.setEnabled(first > 0)
+        down = menu.addAction("Move down", lambda: self.move_page(
+            first, first + 1, len(acting)))
+        down.setEnabled(last < len(self.document.pages) - 1)
         menu.addSeparator()
         menu.addSeparator()
         turn_cw = menu.addAction("Rotate page clockwise",
@@ -1834,7 +1894,7 @@ class MainWindow(QMainWindow):
         recolour = menu.addAction("Change colours…",
                                   lambda: self.recolour_page(index))
         recolour.setEnabled(bool(self.document.pages[index].background_key))
-        delete = menu.addAction("Delete page", lambda: self.delete_page(index))
+        delete = menu.addAction(f"Delete {these}", lambda: self.delete_page(index))
         delete.setEnabled(len(self.document.pages) > 1)
         return menu
 

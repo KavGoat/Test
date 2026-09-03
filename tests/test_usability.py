@@ -6281,7 +6281,12 @@ def test_the_two_writing_keys_open_the_same_thing(window):
 
     window.view._last_scene_pos = QPointF(90, 300)
     press_key(window.view, Qt.Key_unknown, '"')
-    type_text(window.view, "check the bolt group")
+    # Shift and the space bar says this one is prose. A plain space would be
+    # refused: it is the calculation that is being protected.
+    type_text(window.view, "check")
+    press_key(window.view, Qt.Key_Space, " ", Qt.ShiftModifier)
+    QApplication.processEvents()
+    type_text(window.view, "the bolt group")
     window.view.end_item_edit()
     window.recalculate()
 
@@ -8103,3 +8108,107 @@ def test_saving_settles_the_line_being_typed(window):
     sources = [i.get("source") for page in reopened.pages
                for i in page.to_dict()["items"]]
     assert "b:=300mm" in sources
+
+
+# ---------------------------------------------------------------------------
+# several pages at once
+# ---------------------------------------------------------------------------
+
+def _pick_pages(window, rows):
+    """Pick a run of pages out in the pages panel, the way a person does."""
+    listing = window.pages_panel.list
+    listing.clearSelection()
+    for row in rows:
+        listing.item(row).setSelected(True)
+    listing.setCurrentRow(rows[-1])
+    return window.selected_pages()
+
+
+def test_several_pages_are_deleted_together(window, monkeypatch):
+    """The whole picked run goes, in one undo step, after one question."""
+    from PySide6.QtWidgets import QMessageBox
+
+    for _ in range(4):
+        window.add_page()
+    window.pages_panel.rebuild(window.document, window.current_index)
+    assert len(window.document.pages) == 5
+    keep = window.document.pages[0].uid, window.document.pages[4].uid
+
+    asked = []
+    monkeypatch.setattr(QMessageBox, "question",
+                        lambda *a, **k: asked.append(a[2]) or QMessageBox.Yes)
+    assert _pick_pages(window, [1, 2, 3]) == [1, 2, 3]
+    window.delete_page(2)
+
+    assert len(window.document.pages) == 2, "all three went"
+    assert asked and "3 pages" in asked[0], asked
+    assert [p.uid for p in window.document.pages] == list(keep)
+    window.undo_stack.undo()
+    assert len(window.document.pages) == 5, "and came back in one step"
+
+
+def test_a_page_outside_the_picked_run_is_on_its_own(window, monkeypatch):
+    """Right-clicking page five while pages one to three are picked means five."""
+    from PySide6.QtWidgets import QMessageBox
+
+    for _ in range(4):
+        window.add_page()
+    window.pages_panel.rebuild(window.document, window.current_index)
+    _pick_pages(window, [0, 1, 2])
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
+
+    assert window.pages_acted_on(4) == [4]
+    window.delete_page(4)
+    assert len(window.document.pages) == 4
+
+
+def test_several_pages_are_duplicated_together(window):
+    for _ in range(2):
+        window.add_page()
+    window.pages_panel.rebuild(window.document, window.current_index)
+    before = [p.uid for p in window.document.pages]
+    _pick_pages(window, [0, 1])
+    window.duplicate_page(1)
+
+    assert len(window.document.pages) == 5
+    uids = [p.uid for p in window.document.pages]
+    assert uids[:2] == before[:2], "the originals stayed where they were"
+    assert len(set(uids)) == 5, "and the copies are their own pages"
+
+
+def test_several_pages_are_copied_and_pasted_together(window):
+    for _ in range(2):
+        window.add_page()
+    window.pages_panel.rebuild(window.document, window.current_index)
+    _pick_pages(window, [0, 1])
+    window.copy_page(0)
+    window.paste_page(2)
+    assert len(window.document.pages) == 5
+
+
+def test_a_run_of_pages_is_dragged_as_a_run(window):
+    """Dragging six sheets used to move one of them and leave five behind."""
+    for _ in range(4):
+        window.add_page()
+    window.pages_panel.rebuild(window.document, window.current_index)
+    uids = [p.uid for p in window.document.pages]
+
+    window.move_page(3, 0, 2)          # pages four and five, to the front
+    moved = [p.uid for p in window.document.pages]
+    assert moved[:2] == uids[3:5], "both of them, in the order they were in"
+    assert moved[2:] == uids[:3] + uids[5:]
+
+
+def test_the_menu_says_how_many_pages_it_is_about(window):
+    for _ in range(3):
+        window.add_page()
+    window.pages_panel.rebuild(window.document, window.current_index)
+    _pick_pages(window, [1, 2])
+    labels = [a.text() for a in window.page_menu(2).actions()]
+    assert "Delete these 2 pages" in labels
+    assert "Duplicate these 2 pages" in labels
+    assert "Copy these 2 pages" in labels
+
+    _pick_pages(window, [1])
+    labels = [a.text() for a in window.page_menu(1).actions()]
+    assert "Delete page" in labels
