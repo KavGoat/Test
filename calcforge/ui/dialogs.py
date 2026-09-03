@@ -1256,3 +1256,67 @@ class ToolbarDialog(QDialog):
 
     def chosen(self) -> set:
         return {key for key, box in self.boxes.items() if box.isChecked()}
+
+
+class PreferencesDialog(QDialog):
+    """The choices that belong to the person rather than to the document."""
+
+    def __init__(self, prefs, parent=None):
+        super().__init__(parent)
+        from . import preferences as prefs_module
+
+        self.setWindowTitle("Preferences")
+        self.prefs = prefs
+        layout = QVBoxLayout(self)
+
+        canvas = QGroupBox("Canvas")
+        form = QFormLayout(canvas)
+        self.wheel = QComboBox()
+        self.wheel.addItem("Zooms in and out", prefs_module.WHEEL_ZOOM)
+        self.wheel.addItem("Scrolls up and down", prefs_module.WHEEL_SCROLL)
+        self.wheel.setCurrentIndex(0 if prefs.wheel_zooms() else 1)
+        self.wheel.setToolTip("Ctrl and the wheel always zoom, whichever this is;\n"
+                              "a trackpad always scrolls")
+        form.addRow("Mouse wheel", self.wheel)
+        self.snapping = QCheckBox("Catch on what is already drawn")
+        self.snapping.setChecked(prefs.snap_while_drawing)
+        self.snapping.setToolTip("Corners, midpoints and line ends pull the "
+                                 "pointer to them while you draw")
+        form.addRow("", self.snapping)
+        layout.addWidget(canvas)
+
+        writing = QGroupBox("Writing")
+        form = QFormLayout(writing)
+        self.blocks = QCheckBox("A new block keeps its names to itself")
+        self.blocks.setChecked(prefs.self_contained_blocks)
+        self.blocks.setToolTip("Off: a block defines names for the whole document, "
+                               "as a calculation sheet reads.\n"
+                               "On: its names stay inside it.")
+        form.addRow("", self.blocks)
+        self.autosize = QCheckBox("A text box grows to fit what is typed")
+        self.autosize.setChecked(prefs.autosize_text)
+        form.addRow("", self.autosize)
+        self.spelling = QCheckBox("Check spelling as I type")
+        self.spelling.setChecked(prefs.check_spelling)
+        form.addRow("", self.spelling)
+        self.dictionary = QComboBox()
+        self.dictionary.addItem("New Zealand English", "en_NZ")
+        self.dictionary.setCurrentIndex(0)
+        self.dictionary.setToolTip("British spelling, with the words an engineer "
+                                   "here writes")
+        form.addRow("Dictionary", self.dictionary)
+        layout.addWidget(writing)
+
+        layout.addStretch(1)
+        layout.addWidget(_buttons(self))
+
+    def result_preferences(self):
+        from . import preferences as prefs_module
+
+        return prefs_module.Preferences(
+            wheel=self.wheel.currentData(),
+            self_contained_blocks=self.blocks.isChecked(),
+            check_spelling=self.spelling.isChecked(),
+            dictionary=self.dictionary.currentData(),
+            snap_while_drawing=self.snapping.isChecked(),
+            autosize_text=self.autosize.isChecked())

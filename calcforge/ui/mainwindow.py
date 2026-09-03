@@ -327,6 +327,10 @@ class MainWindow(QMainWindow):
         self._act("group", "Group", self.group_selection, "Ctrl+G",
                   tip="Make the selected markups one thing to click and move")
         self._act("ungroup", "Ungroup", self.ungroup_selection, "Ctrl+Shift+G")
+        self._act("autosize", "Auto-size text box", self.autosize_text, "Alt+Z",
+                  tip="Shrink the box around the words in it")
+        self._act("preferences", "Preferences…", self.edit_preferences, "Ctrl+,",
+                  tip="How the wheel behaves, how blocks start, spell checking")
         self._act("forget_defaults", "Forget markup defaults", self.forget_defaults,
                   tip="Put every kind of markup back to how it started")
         self._act("bookmark", "Add bookmark here", self.add_bookmark_here, "Ctrl+B",
@@ -427,19 +431,25 @@ class MainWindow(QMainWindow):
         self.font_spin.valueChanged.connect(self._style_font)
         style_bar.addWidget(self.font_spin)
         style_bar.addSeparator()
+        # The stamp's wording and the count's subject only mean anything while
+        # those tools are in hand, and reading "APPROVED" across the top of the
+        # window while drawing a rectangle is just noise. Both come and go with
+        # the tool they belong to.
         self.stamp_combo = QComboBox()
         from ..items.text import STAMP_PRESETS
         self.stamp_combo.addItems(list(STAMP_PRESETS))
         self.stamp_combo.setEditable(True)
-        self.stamp_combo.setToolTip("Text used by the stamp tool")
+        self.stamp_combo.setToolTip("What the stamp says")
         self.stamp_combo.currentTextChanged.connect(
             lambda text: setattr(self.view, "stamp_text", text))
-        style_bar.addWidget(QLabel(" Stamp "))
-        style_bar.addWidget(self.stamp_combo)
+        self.stamp_label = QLabel(" Stamp ")
+        self._stamp_widgets = [style_bar.addWidget(self.stamp_label),
+                               style_bar.addWidget(self.stamp_combo)]
         count_button = QToolButton()
         count_button.setText("Count subject…")
         count_button.clicked.connect(self.choose_count_subject)
-        style_bar.addWidget(count_button)
+        self._count_widgets = [style_bar.addWidget(count_button)]
+        self._show_tool_extras("select")
         self._add_toolbar(style_bar)
 
     def _dock(self, title: str, widget: QWidget, area: Qt.DockWidgetArea,
@@ -517,6 +527,8 @@ class MainWindow(QMainWindow):
         align_menu = edit_menu.addMenu("Align")
         for key in ("left", "hcenter", "right", "top", "vcenter", "bottom"):
             align_menu.addAction(getattr(self, f"act_align_{key}"))
+        edit_menu.addSeparator()
+        edit_menu.addAction(self.act_preferences)
 
         view_menu = bar.addMenu("&View")
         for action in (self.act_zoom_in, self.act_zoom_out, self.act_actual_size,
@@ -547,6 +559,7 @@ class MainWindow(QMainWindow):
         markup_menu = bar.addMenu("Mar&kup")
         markup_menu.addAction(self.act_group)
         markup_menu.addAction(self.act_ungroup)
+        markup_menu.addAction(self.act_autosize)
         markup_menu.addSeparator()
         markup_menu.addAction(self.act_forget_defaults)
         markup_menu.addSeparator()
@@ -1077,6 +1090,55 @@ class MainWindow(QMainWindow):
             self.current_index = target
         self._structural_change("Duplicate page", mutate)
 
+    def copy_page(self, index: Optional[int] = None) -> None:
+        """Put a whole page on the clipboard, background and markups and all."""
+        which = self.page_index(index)
+        page = self.document.pages[which].to_dict()
+        source = self.document.pages[which]
+        keys = set(source.frame.assets_used()) if source.frame is not None else set()
+        if source.background_key:
+            keys.add(source.background_key)
+        assets = {}
+        for key in keys:
+            blob = self.document.asset(key)
+            if blob:
+                assets[key] = base64.b64encode(blob).decode("ascii")
+        payload = {"calcforge_page": page, "assets": assets}
+        QApplication.clipboard().setText(json.dumps(payload))
+        self.status_hint.setText(f"Copied page {which + 1}")
+
+    def page_on_the_clipboard(self) -> Optional[dict]:
+        """The page waiting on the clipboard, if there is one."""
+        try:
+            payload = json.loads(QApplication.clipboard().text() or "")
+        except (ValueError, TypeError):
+            return None
+        if not isinstance(payload, dict) or "calcforge_page" not in payload:
+            return None
+        return payload
+
+    def paste_page(self, index: Optional[int] = None) -> None:
+        """Put the copied page in after this one."""
+        payload = self.page_on_the_clipboard()
+        if payload is None:
+            self.status_hint.setText("There is no page on the clipboard")
+            return
+        which = self.page_index(index)
+        target = which + 1
+        for key, encoded in (payload.get("assets") or {}).items():
+            if not self.document.asset(key):
+                try:
+                    self.document.put_asset(key, base64.b64decode(encoded))
+                except (ValueError, TypeError):
+                    pass
+
+        def mutate():
+            page = Page.from_dict(payload["calcforge_page"])
+            page.uid = os.urandom(8).hex()
+            self.document.pages.insert(target, page)
+            self.current_index = target
+        self._structural_change("Paste page", mutate)
+
     def delete_page(self, index: Optional[int] = None) -> None:
         if len(self.document.pages) <= 1:
             QMessageBox.information(self, "Delete page", "A document needs at least one page.")
@@ -1238,6 +1300,10 @@ class MainWindow(QMainWindow):
         index = self.page_index(index)
         menu = QMenu(self)
         menu.addAction("Go to this page", lambda: self.go_to_page(index))
+        menu.addAction("Add to bookmarks…", lambda: self.bookmark_page(index))
+        menu.addSeparator()
+        menu.addAction("Copy page", lambda: self.copy_page(index))
+        menu.addAction("Paste page", lambda: self.paste_page(index))
         menu.addSeparator()
         menu.addAction("Insert blank page before",
                        lambda: self.add_page_before(index))
@@ -1430,6 +1496,14 @@ class MainWindow(QMainWindow):
         action = self.tool_actions.get(key)
         if action is not None and not action.isChecked():
             action.setChecked(True)
+        self._show_tool_extras(key)
+
+    def _show_tool_extras(self, key: str) -> None:
+        """Show the toolbar bits that belong to the tool now in hand."""
+        for action in getattr(self, "_stamp_widgets", ()):
+            action.setVisible(key == "stamp")
+        for action in getattr(self, "_count_widgets", ()):
+            action.setVisible(key == "count")
 
     def toggle_sticky(self, on: bool) -> None:
         self.view.sticky_tool = on
@@ -2065,9 +2139,8 @@ class MainWindow(QMainWindow):
             return
         self.view.begin_snapshot()
         self.view.scene().clearSelection()
-        # A paste lands where the page was last clicked, if anywhere; otherwise
-        # just beside what was copied, as it always did.
-        target = self.view.insert_point()
+        # A paste lands under the pointer, the way it does in Bluebeam.
+        target = self.view.pointer_scene_pos()
         offset = None
         if target is not None and payload:
             frame = self.view.typing_frame()
@@ -2543,9 +2616,13 @@ class MainWindow(QMainWindow):
     # ==================================================================
     def add_bookmark_here(self) -> None:
         """Bookmark the page and place the reader is looking at."""
+        if self.view.busy_typing():
+            # Ctrl+B belongs to the words being typed, not to the bookmarks.
+            self.toggle_bold()
+            return
         index = self.current_index
         page = self.document.pages[index]
-        anchor = self.view.insert_point()
+        anchor = self.view.pointer_scene_pos()
         y = 0.0
         if anchor is not None and page.frame is not None:
             y = max(page.frame.mapFromScene(anchor).y(), 0.0)
@@ -2576,6 +2653,57 @@ class MainWindow(QMainWindow):
             if distance < best_distance:
                 best, best_distance = written, distance
         return best
+
+    def bookmark_page(self, index: int) -> None:
+        """Bookmark a page from the pages panel, top of the page."""
+        index = self.page_index(index)
+        page = self.document.pages[index]
+        suggestion = page.label or self._nearby_heading(page, 0.0) or f"Page {index + 1}"
+        title, accepted = QInputDialog.getText(self, "Add bookmark", "Name",
+                                               text=suggestion)
+        if not accepted or not title.strip():
+            return
+        self.document.add_bookmark(title.strip(), index, 0.0)
+        self.bookmarks_changed()
+        self.status_hint.setText(f"Bookmarked “{title.strip()}”")
+
+    def autosize_text(self) -> None:
+        """Alt+Z: bring a text box or callout back in around its words."""
+        items = [item for item in self.selected_items()
+                 if hasattr(item, "size_to_text")]
+        editing = self.view.editing_item()
+        if not items and editing is not None and hasattr(editing, "size_to_text"):
+            items = [editing]
+        if not items:
+            return
+        self.view.begin_snapshot(self.view.involved_frames(*items))
+        for item in items:
+            item.size_to_text()
+        self.view.commit_snapshot("Auto-size text box")
+
+    def edit_preferences(self) -> None:
+        """The settings that stay the same whatever document is open."""
+        from . import preferences as prefs_module
+
+        dialog = dialogs.PreferencesDialog(prefs_module.current(), self)
+        if dialog.exec() != dialogs.QDialog.Accepted:
+            return
+        prefs_module.apply(dialog.result_preferences())
+        self.view.viewport().update()
+        self.status_hint.setText("Preferences saved")
+
+    def toggle_bold(self) -> None:
+        """Bold the text being typed, which is what Ctrl+B means in text."""
+        item = self.view.editing_item()
+        if item is None or not hasattr(item, "style"):
+            return
+        self.view.begin_snapshot(self.view.involved_frames(item))
+        item.style.bold = not item.style.bold
+        if hasattr(item, "apply_style"):
+            item.apply_style()
+        item.touch()
+        item.update()
+        self.view.commit_snapshot("Bold")
 
     def bookmarks_changed(self) -> None:
         self.bookmarks_panel.rebuild(self.document)
@@ -2859,6 +2987,8 @@ class MainWindow(QMainWindow):
                 straight.toggled.connect(
                     lambda on, i=item: self.set_label_angle(i, None if on else 0.0))
                 menu.addAction("Page scale…", self.calibrate_dialog)
+            if hasattr(item, "size_to_text"):
+                menu.addAction(self.act_autosize)
             menu.addSeparator()
             if len([i for i in self.selected_items() if isinstance(i, MarkupItem)]) > 1:
                 menu.addAction(self.act_group)

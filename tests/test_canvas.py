@@ -256,12 +256,31 @@ def _three_pages(window):
     window.go_to_page(0)
 
 
-def test_the_wheel_scrolls_the_document(window):
+def test_the_wheel_zooms_the_document(window):
+    """Bluebeam zooms on the wheel, so this does too."""
     _three_pages(window)
-    bar = window.view.verticalScrollBar()
-    before = bar.value()
-    wheel(window.view, -240)
-    assert bar.value() > before
+    before = window.view.zoom()
+    wheel(window.view, 240)
+    assert window.view.zoom() > before
+    wheel(window.view, -480)
+    assert window.view.zoom() < before
+
+
+def test_the_wheel_can_be_set_to_scroll_instead(window):
+    from calcforge.ui import preferences
+
+    _three_pages(window)
+    prefs = preferences.current()
+    was = prefs.wheel
+    prefs.wheel = preferences.WHEEL_SCROLL
+    try:
+        bar = window.view.verticalScrollBar()
+        before = bar.value()
+        wheel(window.view, -240)
+        assert bar.value() > before
+        assert window.view.zoom() == 1.0
+    finally:
+        prefs.wheel = was
 
 
 def test_shift_and_the_wheel_scroll_sideways(window):
@@ -478,3 +497,10 @@ def test_changing_the_area_unit_leaves_the_calculations_alone(window):
 
     window.set_area_unit("mm^2")
     assert window.document.workspace.get("b").to("mm").magnitude == pytest.approx(300)
+
+
+def test_a_click_leaves_no_insertion_mark(window):
+    """There is no insertion point: things land where the pointer is."""
+    assert not hasattr(window.view, "insert_point")
+    assert not hasattr(window.view, "set_insert_point")
+    assert window.view.pointer_scene_pos() is not None

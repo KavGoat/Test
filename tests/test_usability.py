@@ -59,6 +59,12 @@ def drag(view, x0, y0, x1, y1, modifiers=Qt.NoModifier):
                                   modifiers=modifiers))
 
 
+def hover(view, x, y):
+    """Move the pointer without pressing anything."""
+    QApplication.sendEvent(view.viewport(),
+                           _mouse(view, QEvent.MouseMove, x, y, Qt.NoButton))
+
+
 def right_click(view, x, y):
     local = view.mapFromScene(QPointF(x, y))
     QApplication.sendEvent(view, QContextMenuEvent(
@@ -843,22 +849,12 @@ def test_a_bare_letter_types_rather_than_picking_a_tool(window):
 
 
 # ---------------------------------------------------------------------------
-# clicking bare paper marks the spot
+# things land where the pointer is
 # ---------------------------------------------------------------------------
 
-def test_clicking_empty_paper_marks_where_things_will_go(window):
+def test_typing_starts_where_the_pointer_is(window):
     window.select_tool("select")
-    assert window.view.insert_point() is None
-    click(window.view, 260, 340)
-    marked = window.view.insert_point()
-    assert marked is not None
-    assert marked.x() == pytest.approx(260, abs=4)
-    assert marked.y() == pytest.approx(340, abs=4)
-
-
-def test_typing_starts_where_the_page_was_clicked(window):
-    window.select_tool("select")
-    click(window.view, 300, 500)
+    hover(window.view, 300, 500)
     press_key(window.view, Qt.Key_unknown, "/")
     block = window.view.editing_item()
     assert block is not None
@@ -866,7 +862,7 @@ def test_typing_starts_where_the_page_was_clicked(window):
     assert block.pos().y() == pytest.approx(500, abs=6)
 
 
-def test_a_paste_lands_where_the_page_was_clicked(window):
+def test_a_paste_lands_under_the_pointer(window):
     window.select_tool("rect")
     drag(window.view, 80, 80, 180, 160)
     window.select_tool("select")
@@ -874,7 +870,7 @@ def test_a_paste_lands_where_the_page_was_clicked(window):
     original.setSelected(True)
     window.copy_selection()
 
-    click(window.view, 320, 520)
+    hover(window.view, 320, 520)
     window.paste_items()
     copies = [i for i in only(window, RectItem) if i is not original]
     assert len(copies) == 1
@@ -882,26 +878,21 @@ def test_a_paste_lands_where_the_page_was_clicked(window):
     assert copies[0].pos().y() == pytest.approx(520, abs=6)
 
 
-def test_the_mark_is_drawn_on_the_canvas(window):
-    """It is no use marking a spot the user cannot see."""
+def test_nothing_is_drawn_where_the_page_was_clicked(window):
+    """A click leaves no mark behind: there is no insertion point any more."""
     from PySide6.QtCore import QRectF
     from PySide6.QtGui import QImage, QPainter
 
     window.select_tool("select")
     click(window.view, 260, 340)
 
-    def ink(view) -> int:
-        image = QImage(80, 80, QImage.Format_ARGB32)
-        image.fill(0)
-        painter = QPainter(image)
-        painter.translate(-220, -300)          # look at the marked spot
-        view.drawForeground(painter, QRectF(220, 300, 80, 80))
-        painter.end()
-        return sum(1 for x in range(80) for y in range(80) if image.pixel(x, y))
-
-    assert ink(window.view) > 0, "the insertion mark was not drawn"
-    window.view.set_insert_point(None)
-    assert ink(window.view) == 0, "the mark outstayed its welcome"
+    image = QImage(80, 80, QImage.Format_ARGB32)
+    image.fill(0)
+    painter = QPainter(image)
+    painter.translate(-220, -300)              # look where the click landed
+    window.view.drawForeground(painter, QRectF(220, 300, 80, 80))
+    painter.end()
+    assert sum(1 for x in range(80) for y in range(80) if image.pixel(x, y)) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -2123,21 +2114,20 @@ def test_resizing_a_callout_leaves_the_arrow_where_it_points(window):
         assert moved.y() == pytest.approx(aimed_at.y(), abs=0.5), handle
 
 
-def test_a_callout_is_drawn_arrow_first_then_like_a_rectangle(window):
+def test_a_callout_is_arrow_first_then_where_the_words_go(window):
+    """Two clicks and it is on the page, at a size that holds a line or two."""
     window.select_tool("callout")
     click(window.view, 200, 300)
     assert window.view._pending_anchor is not None      # the arrow head is set
-    click(window.view, 300, 200)                        # first corner
-    assert window.view._mode == "draw_click"
-    hover(window.view, 460, 260)
-    click(window.view, 460, 260)                        # second corner
+    click(window.view, 300, 200)                        # where the words go
 
     call = markups(window)[0]
     assert isinstance(call, CalloutItem)
-    assert call.local_rect().width() == pytest.approx(160, abs=2)
-    assert call.local_rect().height() == pytest.approx(60, abs=2)
+    assert call.local_rect().width() > 40
+    assert call.local_rect().height() > 20
     tip = call.mapToScene(call.leader[0])
     assert (tip.x(), tip.y()) == pytest.approx((200, 300), abs=1)
+    window.view.end_item_edit()
 
 
 # ---------------------------------------------------------------------------
@@ -2529,7 +2519,7 @@ def test_a_snapshot_pastes_back_as_real_markups(window):
     before = len(markups(window))
 
     window.select_tool("select")
-    window.view.set_insert_point(QPointF(80, 500))
+    hover(window.view, 80, 500)
     window.paste_items()
 
     after = markups(window)
@@ -3002,7 +2992,7 @@ def test_copying_a_group_makes_a_group_of_its_own(window):
     original = first.group
 
     window.copy_selection()
-    window.view.set_insert_point(QPointF(120, 400))
+    hover(window.view, 120, 400)
     window.paste_items()
 
     pasted = [i for i in markups(window) if i.pos().y() > 300]
@@ -3480,18 +3470,21 @@ def test_dragging_left_takes_what_it_crosses(window):
     assert first.isSelected() and second.isSelected()
 
 
-def test_a_click_on_bare_paper_still_just_marks_the_spot(window):
-    _spread(window)
+def test_a_click_on_bare_paper_starts_nothing(window):
+    """A click clears the selection. It does not begin a lasso."""
+    first, second = _spread(window)
+    first.setSelected(True)
     click(window.view, 500, 500)
-    assert window.view.insert_point() is not None
+    assert not first.isSelected()
+    assert window.view.marquee_polygon().isEmpty()
     press_key(window.view, Qt.Key_unknown, "/")
     assert window.view.editing_item() is not None      # typing still works
     window.view.end_item_edit()
 
 
-def test_clicking_out_a_lasso_selects_what_is_inside_it(window):
+def test_shift_clicking_out_a_lasso_selects_what_is_inside_it(window):
     first, second = _spread(window)
-    click(window.view, 60, 60)
+    click(window.view, 60, 60, modifiers=Qt.ShiftModifier)
     click(window.view, 240, 60)
     click(window.view, 240, 220)
     click(window.view, 60, 220)
@@ -3503,7 +3496,7 @@ def test_clicking_out_a_lasso_selects_what_is_inside_it(window):
 
 def test_a_lasso_takes_only_what_is_wholly_inside(window):
     first, _second = _spread(window)
-    click(window.view, 60, 60)
+    click(window.view, 60, 60, modifiers=Qt.ShiftModifier)
     click(window.view, 150, 60)
     click(window.view, 150, 220)
     click(window.view, 60, 220)
@@ -3513,7 +3506,7 @@ def test_a_lasso_takes_only_what_is_wholly_inside(window):
 
 def test_escape_abandons_a_half_drawn_lasso(window):
     _spread(window)
-    click(window.view, 60, 60)
+    click(window.view, 60, 60, modifiers=Qt.ShiftModifier)
     click(window.view, 240, 60)
     assert window.view._mode == "lasso"
     press_key(window.view, Qt.Key_Escape)
@@ -3859,3 +3852,225 @@ def test_every_markup_offers_its_own_settings(window):
         window.view.close_label_editor(commit=False)
         item = markups(window)[0]
         assert group in _panel_groups(window, item), f"{key} has no {group} section"
+
+
+# ---------------------------------------------------------------------------
+# Showing an answer in another unit changes only that answer
+# ---------------------------------------------------------------------------
+
+def test_asking_for_newtons_leaves_the_kilonewtons_written(window):
+    """"1 kN → N" is one kilonewton shown in newtons, not one newton."""
+    from calcforge.items.mathitem import MathItem
+
+    item = MathItem("test := 1 kN =")
+    item.setPos(60, 60)
+    window.view.frame().add_markup(item)
+    window.recalculate()
+
+    assert item.set_display_unit(0, "N")
+    window.recalculate()
+    statement = item.rows[0].statement
+    assert statement.result_text() == "1000 N"      # the answer, as asked
+    assert f"{statement.written:~P}".startswith("1.0 kN")   # what was written
+
+
+def test_the_other_lines_keep_their_own_units(window):
+    from calcforge.items.mathitem import MathItem
+
+    block = MathItem("test := 1 kN =\ntest =", block=True)
+    block.setPos(60, 60)
+    window.view.frame().add_markup(block)
+    window.recalculate()
+
+    assert block.set_display_unit(1, "N")
+    window.recalculate()
+    assert block.rows[0].statement.result_text() == "1 kN"
+    assert block.rows[1].statement.result_text() == "1000 N"
+
+
+# ---------------------------------------------------------------------------
+# Toolbar options belong to the tool they are for
+# ---------------------------------------------------------------------------
+
+def test_the_stamp_wording_is_only_shown_for_the_stamp(window):
+    """Reading "APPROVED" across the top while drawing a box means nothing."""
+    stamp = window._stamp_widgets[0]
+    counting = window._count_widgets[0]
+
+    window.select_tool("rect")
+    assert not stamp.isVisible() and not counting.isVisible()
+    window.select_tool("stamp")
+    assert stamp.isVisible() and not counting.isVisible()
+    window.select_tool("count")
+    assert counting.isVisible() and not stamp.isVisible()
+
+
+# ---------------------------------------------------------------------------
+# One undo step for a drag, not one per value
+# ---------------------------------------------------------------------------
+
+def test_dragging_a_slider_is_one_undo_step(window):
+    """Sliding opacity from 100 to 50 is one change of mind."""
+    window.select_tool("rect")
+    drag(window.view, 80, 80, 220, 180)
+    window.select_tool("select")
+    box = only(window, RectItem)[0]
+    box.setSelected(True)
+    window.refresh_selection()
+    was = box.style.opacity
+    steps = window.undo_stack.count()
+
+    for value in range(100, 49, -1):            # every pixel of the drag
+        window.properties_panel._slide(
+            lambda i, v=value: setattr(i.style, "opacity", v / 100.0), "Opacity")
+
+    assert window.undo_stack.count() == steps + 1
+    assert box.style.opacity == pytest.approx(0.5)
+    window.undo_stack.undo()
+    assert only(window, RectItem)[0].style.opacity == pytest.approx(was)
+
+
+def test_a_pause_starts_a_new_undo_step(window):
+    from calcforge.ui import commands
+
+    window.select_tool("rect")
+    drag(window.view, 80, 80, 220, 180)
+    window.select_tool("select")
+    box = only(window, RectItem)[0]
+    box.setSelected(True)
+    window.refresh_selection()
+    steps = window.undo_stack.count()
+
+    window.properties_panel._slide(
+        lambda i: setattr(i.style, "opacity", 0.8), "Opacity")
+    top = window.undo_stack.command(window.undo_stack.count() - 1)
+    top.stamp -= commands.MERGE_PAUSE * 2       # a long think, mid-drag
+    window.properties_panel._slide(
+        lambda i: setattr(i.style, "opacity", 0.4), "Opacity")
+
+    assert window.undo_stack.count() == steps + 2
+
+
+# ---------------------------------------------------------------------------
+# Whole pages copy and paste
+# ---------------------------------------------------------------------------
+
+def test_a_page_can_be_copied_and_pasted(window):
+    window.select_tool("rect")
+    drag(window.view, 80, 80, 220, 180)
+    window.select_tool("select")
+    pages = len(window.document.pages)
+
+    window.copy_page(0)
+    assert window.page_on_the_clipboard() is not None
+    window.paste_page(0)
+
+    assert len(window.document.pages) == pages + 1
+    copied = window.document.pages[1]
+    assert copied.uid != window.document.pages[0].uid
+    assert len(copied.to_dict()["items"]) == 1
+    window.undo_stack.undo()
+    assert len(window.document.pages) == pages
+
+
+def test_pasting_with_nothing_copied_says_so(window):
+    from PySide6.QtWidgets import QApplication
+
+    QApplication.clipboard().setText("not a page")
+    pages = len(window.document.pages)
+    window.paste_page(0)
+    assert len(window.document.pages) == pages
+
+
+def test_a_page_can_be_bookmarked_from_its_thumbnail(window, monkeypatch):
+    from PySide6.QtWidgets import QInputDialog
+
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("Loads", True))
+    window.bookmark_page(0)
+    assert [b.title for b in window.document.bookmarks] == ["Loads"]
+
+
+def test_ctrl_b_while_typing_belongs_to_the_text(window):
+    """It bolds what is being written; it does not add a bookmark."""
+    window.select_tool("text")
+    drag(window.view, 100, 100, 300, 160)
+    item = window.view.editing_item()
+    assert item is not None
+    was = item.style.bold
+
+    window.add_bookmark_here()                 # what Ctrl+B is wired to
+    assert window.document.bookmarks == []
+    assert item.style.bold is not was
+    window.view.end_item_edit()
+
+
+# ---------------------------------------------------------------------------
+# Callouts and text boxes size themselves
+# ---------------------------------------------------------------------------
+
+def test_a_callout_takes_two_clicks_and_no_dragging(window):
+    from calcforge.items.text import CalloutItem
+
+    window.select_tool("callout")
+    click(window.view, 400, 420)                 # what it points at
+    assert not [i for i in markups(window) if isinstance(i, CalloutItem)]
+    click(window.view, 200, 200)                 # where the words go
+
+    boxes = [i for i in markups(window) if isinstance(i, CalloutItem)]
+    assert len(boxes) == 1
+    callout = boxes[0]
+    assert callout.local_rect().width() > 40     # a real box, not a dot
+    tip = callout.mapToScene(callout.tip)         # snapped to the grid nearby
+    assert tip.x() == pytest.approx(400, abs=25)
+    assert tip.y() == pytest.approx(420, abs=25)
+    assert window.view.editing_item() is callout  # ready to be typed into
+    window.view.end_item_edit()
+
+
+def test_a_text_box_grows_with_its_text_and_does_not_shrink(window):
+    window.select_tool("text")
+    drag(window.view, 100, 100, 260, 130)
+    box = window.view.editing_item()
+    started = box.local_rect().height()
+
+    box.set_text("one\ntwo\nthree\nfour\nfive\nsix")
+    grown = box.local_rect().height()
+    assert grown > started
+
+    box.set_text("one")
+    assert box.local_rect().height() == pytest.approx(grown)
+    window.view.end_item_edit()
+
+
+def test_alt_z_brings_the_box_back_in_around_the_words(window):
+    window.select_tool("text")
+    drag(window.view, 100, 100, 260, 130)
+    box = window.view.editing_item()
+    box.set_text("one\ntwo\nthree\nfour\nfive\nsix")
+    tall = box.local_rect().height()
+    box.set_text("one")
+
+    window.autosize_text()                       # what Alt+Z is wired to
+    assert box.local_rect().height() < tall
+    window.view.end_item_edit()
+
+
+def test_misspelt_words_are_underlined_only_while_typing(window):
+    """The squiggle helps whoever is writing; it never reaches the paper."""
+    from PySide6.QtGui import QTextCharFormat
+
+    window.select_tool("text")
+    drag(window.view, 100, 100, 320, 150)
+    box = window.view.editing_item()
+    box.set_text("the colour of teh beam")
+    assert box._speller is not None
+
+    formats = box.doc.findBlockByNumber(0).layout().formats()
+    squiggles = [f for f in formats
+                 if f.format.underlineStyle() == QTextCharFormat.SpellCheckUnderline]
+    assert len(squiggles) == 1
+    assert squiggles[0].start == "the colour of teh beam".index("teh")
+
+    window.view.end_item_edit()
+    assert box._speller is None
+    assert not box.doc.findBlockByNumber(0).layout().formats()

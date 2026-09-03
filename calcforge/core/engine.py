@@ -699,6 +699,7 @@ class Statement:
     result: Any = None
     error: str = ""
     tree: Optional[ast.AST] = None
+    written: Any = None          # the value as written, before any → conversion
     forced: bool = True          # written with ":=" or ":" rather than a bare "="
     show_result: bool = False    # the line ends with "=", so print the answer
     auto_unit: bool = True       # let the engine pick a readable display unit
@@ -877,6 +878,11 @@ def evaluate_statement(statement: Statement, workspace: Workspace, source: str =
         workspace.resolve_units(code, namespace)
         value = evaluate_code(code, namespace)
 
+        # What the author wrote is kept apart from what they asked to see it
+        # in. "1 kN → N" is one kilonewton shown in newtons: the answer is in
+        # newtons, but the line still reads "1 kN", because that is what it
+        # says.
+        statement.written = simplify_units(value)
         if statement.target_unit:
             try:
                 value = convert(value, statement.target_unit)

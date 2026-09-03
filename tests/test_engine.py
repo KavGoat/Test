@@ -346,3 +346,45 @@ def test_a_check_answers_itself_without_being_asked():
     check = statements[1]
     assert check.show_result is True
     assert check.result is True
+
+
+# ---------------------------------------------------------------------------
+# Spelling, in New Zealand English
+# ---------------------------------------------------------------------------
+
+def test_the_dictionary_speaks_new_zealand_english():
+    from calcforge.core.spelling import SpellChecker
+
+    checker = SpellChecker()
+    assert checker.ready(), "the shipped word list is missing"
+    for right in ("colour", "analyse", "utilisation", "kauri", "reinforcement"):
+        assert checker.knows(right), right
+    for wrong in ("color", "analyze", "recieve", "teh"):
+        assert not checker.knows(wrong), wrong
+
+
+def test_the_dictionary_leaves_engineering_shorthand_alone():
+    from calcforge.core.spelling import SpellChecker
+
+    checker = SpellChecker()
+    for left_alone in ("M16", "f_c", "kN", "SESOC", "A", "300PLUS"):
+        assert checker.knows(left_alone), left_alone
+
+
+def test_a_word_can_be_learnt():
+    from calcforge.core.spelling import SpellChecker
+
+    checker = SpellChecker()
+    assert not checker.knows("Kavindith")
+    checker.learn("Kavindith")
+    assert checker.knows("Kavindith")
+
+
+def test_mistakes_are_reported_with_where_they_are():
+    from calcforge.core.spelling import SpellChecker
+
+    checker = SpellChecker()
+    found = checker.mistakes("the colour of teh beam")
+    assert [word for _start, _length, word in found] == ["teh"]
+    start, length, _word = found[0]
+    assert "the colour of teh beam"[start:start + length] == "teh"

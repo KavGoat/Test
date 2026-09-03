@@ -4,8 +4,8 @@ from __future__ import annotations
 import csv
 import re
 
-from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QIcon, QPixmap
+from PySide6.QtCore import QEvent, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence, QPixmap
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox,
                                QDoubleSpinBox, QInputDialog, QMessageBox,
                                QFontComboBox, QFormLayout, QGroupBox, QHBoxLayout,
@@ -73,8 +73,20 @@ class PagesPanel(QWidget):
         self.list.model().rowsMoved.connect(self._rows_moved)
         self.list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.list.customContextMenuRequested.connect(self._context_menu)
+        self.list.installEventFilter(self)
         layout.addWidget(self.list, 1)
         self._suppress = False
+
+    def eventFilter(self, watched, event):
+        """Ctrl+C and Ctrl+V on the thumbnails copy and paste whole pages."""
+        if watched is self.list and event.type() == QEvent.KeyPress:
+            if event.matches(QKeySequence.Copy):
+                self.window.copy_page(self.list.currentRow())
+                return True
+            if event.matches(QKeySequence.Paste):
+                self.window.paste_page(self.list.currentRow())
+                return True
+        return super().eventFilter(watched, event)
 
     def _context_menu(self, point) -> None:
         """Right-click a thumbnail for everything you can do to that page."""
@@ -1067,7 +1079,14 @@ class PropertiesPanel(QScrollArea):
         self.layout.addWidget(box)
         return form
 
-    def _apply(self, setter, description: str) -> None:
+    def _apply(self, setter, description: str, coalesce: bool = False) -> None:
+        """Change every selected item, and record one undo step for it.
+
+        *coalesce* is for the controls that send a value continuously — a
+        slider being dragged, a spin box being held down. Those belong in the
+        undo history as the one change they are, not as every value passed
+        through on the way.
+        """
         if self._building:
             return
         self.window.view.begin_snapshot()
@@ -1078,8 +1097,12 @@ class PropertiesPanel(QScrollArea):
             if hasattr(item, "apply_style"):
                 item.apply_style()
             item.update()
-        self.window.view.commit_snapshot(description)
+        self.window.view.commit_snapshot(description, coalesce=coalesce)
         self.changed.emit(description)
+
+    def _slide(self, setter, description: str) -> None:
+        """A change from a slider or a spin box: part of one continuous run."""
+        self._apply(setter, description, coalesce=True)
 
     # -- sections ----------------------------------------------------------
     def _add_appearance(self, first: MarkupItem) -> None:
@@ -1102,7 +1125,7 @@ class PropertiesPanel(QScrollArea):
         width.setValue(first.style.width)
         width.setSuffix(" pt")
         width.valueChanged.connect(
-            lambda value: self._apply(lambda i: setattr(i.style, "width", value), "Line width"))
+            lambda value: self._slide(lambda i: setattr(i.style, "width", value), "Line width"))
         form.addRow("Thickness", width)
 
         line_style = QComboBox()
@@ -1115,21 +1138,15 @@ class PropertiesPanel(QScrollArea):
 
         opacity = LabeledSlider(5, 100, int(first.style.opacity * 100))
         opacity.valueChanged.connect(
-            lambda value: self._apply(lambda i: setattr(i.style, "opacity", value), "Opacity"))
+            lambda value: self._slide(lambda i: setattr(i.style, "opacity", value), "Opacity"))
         form.addRow("Opacity", opacity)
 
         fill_opacity = LabeledSlider(0, 100, int(first.style.fill_opacity * 100))
         fill_opacity.valueChanged.connect(
-            lambda value: self._apply(lambda i: setattr(i.style, "fill_opacity", value),
+            lambda value: self._slide(lambda i: setattr(i.style, "fill_opacity", value),
                                       "Fill opacity"))
         form.addRow("Fill opacity", fill_opacity)
 
-        blend = QCheckBox("Multiply (highlighter)")
-        blend.setChecked(first.style.blend == "multiply")
-        blend.toggled.connect(
-            lambda on: self._apply(lambda i: setattr(i.style, "blend",
-                                                     "multiply" if on else "normal"), "Blend"))
-        form.addRow("", blend)
 
     def _add_text(self, first: MarkupItem) -> None:
         form = self._group("Text")
@@ -1146,7 +1163,7 @@ class PropertiesPanel(QScrollArea):
         size.setValue(first.style.font_size)
         size.setSuffix(" pt")
         size.valueChanged.connect(
-            lambda value: self._apply(lambda i: setattr(i.style, "font_size", value), "Font size"))
+            lambda value: self._slide(lambda i: setattr(i.style, "font_size", value), "Font size"))
         form.addRow("Size", size)
 
         row = QHBoxLayout()
@@ -1249,7 +1266,7 @@ class PropertiesPanel(QScrollArea):
         height.setValue(item.row_height)
         height.setSuffix(" pt")
         height.valueChanged.connect(
-            lambda value: self._apply(
+            lambda value: self._slide(
                 lambda i: setattr(i, "row_height", value), "Contents"))
         form.addRow("Line spacing", height)
 
@@ -1292,7 +1309,7 @@ class PropertiesPanel(QScrollArea):
         radius.setValue(first.cloud_radius)
         radius.setSuffix(" pt")
         radius.valueChanged.connect(
-            lambda value: self._apply(lambda i: setattr(i, "cloud_radius", value), "Cloud size"))
+            lambda value: self._slide(lambda i: setattr(i, "cloud_radius", value), "Cloud size"))
         form.addRow("Arc size", radius)
 
     def _add_math(self, item: MathItem) -> None:
@@ -1301,7 +1318,7 @@ class PropertiesPanel(QScrollArea):
         digits.setRange(1, 12)
         digits.setValue(item.digits)
         digits.valueChanged.connect(
-            lambda value: self._apply(lambda i: (setattr(i, "digits", value), i.relayout()),
+            lambda value: self._slide(lambda i: (setattr(i, "digits", value), i.relayout()),
                                       "Precision"))
         form.addRow("Significant digits", digits)
 
@@ -1357,7 +1374,7 @@ class PropertiesPanel(QScrollArea):
         rows.setRange(1, 2000)
         rows.setValue(item.sheet.rows)
         rows.valueChanged.connect(
-            lambda value: self._apply(
+            lambda value: self._slide(
                 lambda i: i.sheet.resize(value, i.sheet.cols), "Table size"))
         form.addRow("Rows", rows)
 
@@ -1365,7 +1382,7 @@ class PropertiesPanel(QScrollArea):
         cols.setRange(1, 200)
         cols.setValue(item.sheet.cols)
         cols.valueChanged.connect(
-            lambda value: self._apply(
+            lambda value: self._slide(
                 lambda i: i.sheet.resize(i.sheet.rows, value), "Table size"))
         form.addRow("Columns", cols)
 
@@ -1373,7 +1390,7 @@ class PropertiesPanel(QScrollArea):
         digits.setRange(1, 12)
         digits.setValue(item.sheet.digits)
         digits.valueChanged.connect(
-            lambda value: self._apply(lambda i: setattr(i.sheet, "digits", value), "Precision"))
+            lambda value: self._slide(lambda i: setattr(i.sheet, "digits", value), "Precision"))
         form.addRow("Digits", digits)
 
         for label, attribute in (("Header row", "header_row"), ("Banded rows", "banded"),
@@ -1393,7 +1410,8 @@ class PropertiesPanel(QScrollArea):
         form.addRow("", publish)
 
         name = QLineEdit(item.table_name)
-        name.setPlaceholderText("bolts")
+        # No ghost name in the box: an empty field says "unnamed", and a
+        # greyed-out "bolts" reads as a name this table already has.
         name.setToolTip("Name this table and a calculation can read it:\n"
                         "    V := bolts(d, A, B)\n"
                         "which finds d in column A and gives back column B")
@@ -1436,7 +1454,7 @@ class PropertiesPanel(QScrollArea):
         samples.setRange(2, 2000)
         samples.setValue(item.samples)
         samples.valueChanged.connect(
-            lambda value: self._apply(lambda i: setattr(i, "samples", value), "Plot samples"))
+            lambda value: self._slide(lambda i: setattr(i, "samples", value), "Plot samples"))
         form.addRow("Points", samples)
 
         for label, attribute in (("Title", "title"), ("X label", "x_label"),

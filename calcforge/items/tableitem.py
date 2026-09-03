@@ -562,6 +562,28 @@ class TableItem(MarkupItem):
             horizontal = Qt.AlignRight if numeric else Qt.AlignLeft
         return horizontal | Qt.AlignVCenter
 
+    def editor_alignment(self, row: int, col: int,
+                         text: Optional[str] = None) -> Qt.AlignmentFlag:
+        """How the cell editor should line its text up: the way the cell does.
+
+        A number that is written on the right of its cell should be typed on
+        the right of it too, rather than starting on the left and jumping
+        across the moment Enter is pressed.
+        """
+        cell = self.sheet.cell(row, col)
+        aligned = self._alignment(row, col, cell) & Qt.AlignHorizontal_Mask
+        written = self.sheet.raw(row, col) if text is None else text
+        if cell is None or cell.value is None:
+            # Nothing worked out for this cell yet — go by what is written.
+            fmt = cell.fmt if cell else None
+            if fmt is None or fmt.align == "auto":
+                try:
+                    float((written or "").strip())
+                except (TypeError, ValueError):
+                    return Qt.AlignLeft
+                return Qt.AlignRight
+        return aligned
+
     def _paint_selection(self, painter: QPainter) -> None:
         r0, c0, r1, c1 = self.selection()
         box = self.range_rect((r0, c0), (r1, c1))

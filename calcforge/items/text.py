@@ -6,8 +6,9 @@ from typing import Optional
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import (QAbstractTextDocumentLayout, QBrush, QColor, QPainter,
-                           QPainterPath, QPalette, QPen, QTextCursor,
-                           QTextDocument, QTextOption)
+                           QPainterPath, QPalette, QPen, QSyntaxHighlighter,
+                           QTextCharFormat, QTextCursor, QTextDocument,
+                           QTextOption)
 from PySide6.QtWidgets import (QGraphicsItem, QGraphicsTextItem,
                                QStyle, QStyleOptionGraphicsItem)
 
@@ -44,6 +45,22 @@ class _InlineEditor(QGraphicsTextItem):
         super().paint(painter, trimmed, widget)
 
 
+class _SpellHighlighter(QSyntaxHighlighter):
+    """Red squiggles under the words the dictionary does not know."""
+
+    def highlightBlock(self, text: str) -> None:
+        from ..core.spelling import shared
+
+        checker = shared()
+        if not checker.ready():
+            return
+        style = QTextCharFormat()
+        style.setUnderlineColor(QColor("#e03131"))
+        style.setUnderlineStyle(QTextCharFormat.SpellCheckUnderline)
+        for start, length, _word in checker.mistakes(text):
+            self.setFormat(start, length, style)
+
+
 class _TextBase(MarkupItem):
     """Shared rich-text behaviour: document, layout, in-place editing."""
 
@@ -62,6 +79,7 @@ class _TextBase(MarkupItem):
         self.doc.setDocumentMargin(0)
         self.doc.setPlainText(text)
         self._editor: Optional[QGraphicsTextItem] = None
+        self._speller = None
         self._editing = False
         self.doc.contentsChanged.connect(self._on_contents_changed)
 
@@ -106,10 +124,33 @@ class _TextBase(MarkupItem):
         return self._rect.normalized().adjusted(pad, pad, -pad, -pad)
 
     def _fit_height(self) -> None:
+        """Grow to hold what has been typed — and never shrink on its own.
+
+        A box that closed up every time a word was deleted would jump about
+        under the caret. Growing is help; shrinking is interference. Alt+Z
+        (:meth:`size_to_text`) is how a box is brought back in when its size
+        really is wrong.
+        """
         self.doc.setTextWidth(max(self.text_rect().width(), 8.0))
         needed = self.doc.size().height() + 2 * self.style.padding
         if needed > self._rect.height():
             self._rect.setHeight(needed)
+
+    def size_to_text(self) -> None:
+        """Shrink-wrap the box around the words in it."""
+        pad = self.style.padding
+        self.prepareGeometryChange()
+        self.doc.setTextWidth(max(self.text_rect().width(), 8.0))
+        ideal = self.doc.idealWidth() + 2 * pad
+        rect = QRectF(self._rect.normalized())
+        rect.setWidth(max(min(rect.width(), max(ideal, 24.0)), 24.0))
+        self._rect = rect
+        self.doc.setTextWidth(max(self.text_rect().width(), 8.0))
+        height = self.doc.size().height() + 2 * pad
+        self._rect.setHeight(max(height, 2 * pad + 8.0))
+        self.apply_style()
+        self.touch()
+        self.update()
 
     # -- geometry ----------------------------------------------------------
     def local_rect(self) -> QRectF:
@@ -129,6 +170,7 @@ class _TextBase(MarkupItem):
     def begin_edit(self) -> None:
         if self.locked:
             return
+        self.check_spelling(True)
         if self._editor is None:
             self._editor = _InlineEditor(self)
             self._editor.setDocument(self.doc)
@@ -144,7 +186,26 @@ class _TextBase(MarkupItem):
         self._editor.setTextCursor(cursor)
         self.update()
 
+    def check_spelling(self, on: bool) -> None:
+        """Underline misspelt words — while they are being typed, and only then.
+
+        The squiggle is a hint to whoever is writing, not part of the drawing,
+        so it goes away with the caret and never reaches the printed page.
+        """
+        if on and self._speller is None:
+            from ..ui import preferences
+            if not preferences.current().check_spelling:
+                return
+            from ..core.spelling import shared
+            if not shared().ready():
+                return
+            self._speller = _SpellHighlighter(self.doc)
+        elif not on and self._speller is not None:
+            self._speller.setDocument(None)
+            self._speller = None
+
     def end_edit(self) -> None:
+        self.check_spelling(False)
         if self._editor is not None:
             self._editor.setTextInteractionFlags(Qt.NoTextInteraction)
             self._editor.clearFocus()

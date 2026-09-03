@@ -394,13 +394,37 @@ class PolyItem(MarkupItem):
             filled = QPainterPath(path)
             filled.closeSubpath()
             painter.fillPath(filled, self.style.brush())
-        pen = self.style.pen()
         if self.kind == "highlighter":
-            pen.setCapStyle(Qt.FlatCap)
-        painter.setPen(pen)
+            # A highlighter lays down one flat band of ink. Stroking the path
+            # would draw every part of it separately, so where the stroke
+            # crosses itself the colour doubles up and the round ends leave
+            # notches behind — which is what a real highlighter never does.
+            # Merging the whole stroke into a single outline and filling that
+            # once gives one even band, whichever way it was drawn.
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(self.highlight_colour()))
+            painter.drawPath(self.band_path(path))
+            self._paint_arrows(painter)
+            return
+        painter.setPen(self.style.pen())
         painter.setBrush(Qt.NoBrush)
         painter.drawPath(path)
         self._paint_arrows(painter)
+
+    def highlight_colour(self) -> QColor:
+        colour = QColor(self.style.stroke or "#ffd43b")
+        colour.setAlphaF(max(0.0, min(1.0, self.style.opacity)))
+        return colour
+
+    def band_path(self, path: QPainterPath) -> QPainterPath:
+        """The whole stroke as one outline, with the overlaps merged away."""
+        from PySide6.QtGui import QPainterPathStroker
+
+        stroker = QPainterPathStroker()
+        stroker.setWidth(max(self.style.width, 0.4))
+        stroker.setCapStyle(Qt.FlatCap)
+        stroker.setJoinStyle(Qt.RoundJoin)
+        return stroker.createStroke(path).simplified()
 
     def _paint_arrows(self, painter: QPainter) -> None:
         if len(self.points) < 2:

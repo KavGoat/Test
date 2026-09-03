@@ -305,3 +305,40 @@ def test_a_column_that_is_not_there_is_reported():
     bolts = LookupTable("bolts", _capacity_sheet())
     with pytest.raises(ValueError, match="no column"):
         bolts(Q_(16, "mm"), "A", "Z")
+
+
+def test_an_arrow_key_puts_the_value_in_and_moves_on(window):
+    """A column of numbers is typed the way it is in Excel."""
+    from tests.test_usability import double_click, drag, press_key
+    from PySide6.QtCore import Qt
+
+    window.select_tool("table")
+    drag(window.view, 100, 100, 400, 260)
+    table = window.view.scene().ordered_markups()[0]
+    double_click(window.view, 140, 130)
+    assert window.view.active_table is table
+    table.current = (0, 0)
+
+    window.view.open_cell_editor(initial="12")
+    press_key(window.view, Qt.Key_Down)
+    assert window.view._cell_editor is None
+    assert table.sheet.raw(0, 0) == "12"
+    assert table.current == (1, 0)
+
+
+def test_the_cell_editor_lines_up_the_way_the_cell_does(window):
+    from tests.test_usability import double_click, drag
+    from PySide6.QtCore import Qt
+
+    window.select_tool("table")
+    drag(window.view, 100, 100, 400, 260)
+    table = window.view.scene().ordered_markups()[0]
+    table.sheet.set_raw(1, 0, "42")
+    table.current = (1, 0)
+    double_click(window.view, 140, 130)
+    window.view.active_table = table
+    table.current = (1, 0)
+
+    window.view.open_cell_editor()
+    assert window.view._cell_editor.alignment() & Qt.AlignRight
+    window.view.close_cell_editor(commit=False)

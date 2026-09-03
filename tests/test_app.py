@@ -2109,3 +2109,47 @@ def test_the_import_dialog_previews_the_page_it_will_bring_in(window, tmp_path, 
         assert dialog.preview.text() == "No pages in that range"
     finally:
         dialog.deleteLater()
+
+
+# ---------------------------------------------------------------------------
+# Preferences
+# ---------------------------------------------------------------------------
+
+def test_preferences_survive_being_saved_and_read_back(qapp, tmp_path, monkeypatch):
+    from PySide6.QtCore import QSettings
+    from calcforge.ui import preferences
+
+    monkeypatch.setattr(QSettings, "setValue", QSettings.setValue)
+    prefs = preferences.Preferences(wheel=preferences.WHEEL_SCROLL,
+                                    self_contained_blocks=True,
+                                    check_spelling=False)
+    preferences.save(prefs)
+    try:
+        read = preferences.load()
+        assert read.wheel == preferences.WHEEL_SCROLL
+        assert read.self_contained_blocks is True
+        assert read.check_spelling is False
+    finally:
+        preferences.save(preferences.Preferences())
+        preferences.forget()
+
+
+def test_a_new_block_shares_its_names_by_default(qapp):
+    from calcforge.items.mathitem import MathItem
+    from calcforge.ui import preferences
+
+    preferences.forget()
+    assert MathItem("x := 1", block=True).local_scope is False
+
+
+def test_a_block_can_be_made_self_contained_by_default(qapp):
+    from calcforge.items.mathitem import MathItem
+    from calcforge.ui import preferences
+
+    prefs = preferences.current()
+    was = prefs.self_contained_blocks
+    prefs.self_contained_blocks = True
+    try:
+        assert MathItem("x := 1", block=True).local_scope is True
+    finally:
+        prefs.self_contained_blocks = was

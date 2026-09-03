@@ -189,3 +189,25 @@ def test_measurement_without_a_label_has_a_tight_rect(qapp):
     item.show_label = True
     item.value_text = "12.345 m"
     assert item.boundingRect().height() > tight.height()
+
+
+def test_a_highlighter_stroke_is_one_even_band(qapp):
+    """Drawn back over itself, a highlighter must not darken or leave holes."""
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QImage, QPainter
+    from calcforge.items.shapes import PolyItem
+
+    item = PolyItem(kind="highlighter")
+    item.points = [QPointF(40, 100), QPointF(160, 100), QPointF(100, 100),
+                   QPointF(100, 40)]
+    image = QImage(200, 200, QImage.Format_ARGB32_Premultiplied)
+    image.fill(0xFFFFFFFF)
+    painter = QPainter(image)
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    item.paint(painter, None, None)
+    painter.end()
+
+    # Along the middle of the band: one shade, and no white showing through.
+    shades = {image.pixelColor(x, 100).rgb() for x in range(50, 150)}
+    assert len(shades) == 1
+    assert shades != {0xFFFFFFFF}

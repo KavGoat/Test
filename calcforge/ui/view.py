@@ -28,6 +28,7 @@ from ..items.plotitem import PlotItem
 from ..items.shapes import PolyItem, RectItem
 from ..items.tableitem import TableItem
 from ..items.text import CalloutItem, NoteItem, StampItem, TextItem, _TextBase
+from . import preferences
 from .commands import PageEditCommand
 from .tools import (ANCHOR, CLICK, DRAG, FREE, NONE, POLY, SNAPSHOT,
                     TOOL_MAP, Tool)
@@ -120,7 +121,6 @@ class PageView(QGraphicsView):
         self._last_scene_pos = QPointF(60, 60)
         # Where the next thing typed, inserted or pasted will go, and
         # what a callout is about to point at.
-        self._insert_point: Optional[QPointF] = None
         self._pending_anchor: Optional[QPointF] = None
         self._shown_page = 0
         for bar in (self.verticalScrollBar(), self.horizontalScrollBar()):
@@ -217,7 +217,7 @@ class PageView(QGraphicsView):
         scene = self.scene()
         return list(scene.frames) if scene is not None else []
 
-    def commit_snapshot(self, text: str) -> None:
+    def commit_snapshot(self, text: str, coalesce: bool = False) -> None:
         """Record an edit for undo, and leave the document consistent.
 
         Reading order decides what resolves, so *moving* a calculation changes
@@ -237,7 +237,8 @@ class PageView(QGraphicsView):
             stack.beginMacro(text)
         for frame, before in changed:
             self.push_command(PageEditCommand(frame, before, frame.serialize_items(),
-                                              text, on_apply=self.after_undo))
+                                              text, on_apply=self.after_undo,
+                                              coalesce=coalesce))
         if len(changed) > 1:
             stack.endMacro()
         self.documentEdited.emit()
@@ -364,23 +365,28 @@ class PageView(QGraphicsView):
         self.centerOn(rect.center())
 
     def wheelEvent(self, event: QWheelEvent) -> None:
-        """Wheel scrolls, Shift scrolls sideways, Ctrl zooms at the pointer.
+        """A notch of the wheel zooms at the pointer, as Bluebeam does.
 
-        The same three gestures every document reader uses. A trackpad sends
-        pixelDelta, which is honoured directly so two-finger scrolling is
-        smooth rather than notched.
+        Shift scrolls sideways, and Ctrl zooms whichever way the wheel is set,
+        because that is what Ctrl does everywhere else. A trackpad sends
+        pixelDelta and means panning by it, so two-finger scrolling still
+        scrolls smoothly however the wheel is set. Whoever prefers the wheel
+        to scroll can say so in the preferences.
         """
-        if event.modifiers() & Qt.ControlModifier:
-            delta = event.angleDelta().y() or event.pixelDelta().y()
-            if delta:
-                self.set_zoom(self._zoom * (1.0015 ** delta), anchor_mouse=True)
-            event.accept()
-            return
         pixels = event.pixelDelta()
+        notches = event.angleDelta().y()
         if event.modifiers() & Qt.ShiftModifier:
-            step = pixels.y() or pixels.x() or event.angleDelta().y()
+            step = pixels.y() or pixels.x() or notches
             bar = self.horizontalScrollBar()
             bar.setValue(bar.value() - step)
+            event.accept()
+            return
+        zooming = (event.modifiers() & Qt.ControlModifier
+                   or (preferences.current().wheel_zooms() and pixels.isNull()))
+        if zooming:
+            delta = notches or pixels.y()
+            if delta:
+                self.set_zoom(self._zoom * (1.0015 ** delta), anchor_mouse=True)
             event.accept()
             return
         if not pixels.isNull():
@@ -665,21 +671,27 @@ class PageView(QGraphicsView):
                 return
         if item is None:
             if self._mode == "lasso":
-                # Another corner of the lasso — and the spot for anything typed
-                # next, so a click on bare paper always marks where you are.
+                # Another corner of the lasso.
                 self._marquee.append(QPointF(scene_pos))
-                self.set_insert_point(self.snap_scene(scene_pos))
                 self.viewport().update()
                 event.accept()
                 return
             self.deactivate_table()
-            self._keep_selection = bool(
-                event.modifiers() & (Qt.ShiftModifier | Qt.ControlModifier))
+            self._keep_selection = bool(event.modifiers() & Qt.ControlModifier)
             if not self._keep_selection:
                 self.scene().clearSelection()
-            # Clicking bare paper marks the spot: whatever is typed, inserted
-            # or pasted next goes there.
-            self.set_insert_point(self.snap_scene(scene_pos))
+                self.selectionChanged.emit()
+            if event.modifiers() & Qt.ShiftModifier:
+                # Shift on bare paper draws a shape around what you want, a
+                # corner at a time. Without it, a click is only ever a click.
+                self._mode = "lasso"
+                self._marquee = [QPointF(scene_pos), QPointF(scene_pos)]
+                self.statusMessage.emit(
+                    "Lasso: click each corner · double-click or Enter to "
+                    "select what is inside · Esc to cancel")
+                self.viewport().update()
+                event.accept()
+                return
             self._mode = "rubber"
             self._marquee = [QPointF(scene_pos), QPointF(scene_pos)]
             self.viewport().update()
@@ -757,14 +769,19 @@ class PageView(QGraphicsView):
             self.finish_draft(scene_pos, clicked=True)
             event.accept()
             return
-        if tool.mode == ANCHOR and self._pending_anchor is None:
-            # A callout is drawn the way Bluebeam draws one: click what it
-            # points at first, then drag out the box.
-            self._pending_anchor = QPointF(point)
-            self.set_insert_point(point)
-            self.statusMessage.emit(
-                f"{tool.label}: now drag out the box · Esc to start again")
-            self.viewport().update()
+        if tool.mode == ANCHOR:
+            # A callout is two clicks: what it points at, then where its words
+            # go. There is no box to drag out — it comes at a sensible size
+            # and grows as it is written into, which is what Bluebeam does and
+            # what saves the fiddling.
+            if self._pending_anchor is None:
+                self._pending_anchor = QPointF(point)
+                self.statusMessage.emit(
+                    f"{tool.label}: now click where the words go · Esc to start again")
+                self.viewport().update()
+                event.accept()
+                return
+            self.place_callout(tool, point)
             event.accept()
             return
         if tool.mode == CLICK:
@@ -1033,14 +1050,11 @@ class PageView(QGraphicsView):
 
         if self._mode == "rubber":
             if self._is_a_click(scene_pos):
-                # A click rather than a drag: the marquee becomes a lasso, and
-                # the next clicks put its corners in.
-                self._mode = "lasso"
-                self._marquee = [QPointF(self._press_scene), QPointF(scene_pos)]
-                self.statusMessage.emit(
-                    "Lasso: click each corner · double-click or Enter to select "
-                    "what is inside · Esc to cancel")
-                self.viewport().update()
+                # A click on bare paper only clears the selection, which the
+                # press already did. Dragging is what draws a marquee, and
+                # Shift is what starts a lasso.
+                self._mode = "idle"
+                self.cancel_marquee()
                 event.accept()
                 return
             # select_in_marquee reads the mode to know what shape it is, so
@@ -1385,6 +1399,30 @@ class PageView(QGraphicsView):
         self.selectionChanged.emit()
         return item
 
+    def place_callout(self, tool: Tool, point: QPointF) -> None:
+        """Put a callout down at *point*, pointing at what was clicked first.
+
+        The box arrives at a size that holds a line or two and grows from
+        there, so the second click is the last thing you have to do before
+        typing.
+        """
+        anchor = self._pending_anchor
+        self._pending_anchor = None
+        self.begin_snapshot()
+        item = tool.factory()
+        self._prepare_draft(item)
+        frame = self.frame_at(point) or self.frame()
+        frame.add_markup(item, frame.mapFromScene(point))
+        if anchor is not None:
+            item.tip = item.mapFromScene(anchor)
+        item.refresh(self.document().workspace, self.page())
+        self.scene().clearSelection()
+        item.setSelected(True)
+        self.selectionChanged.emit()
+        self.commit_snapshot(f"Add {tool.label.lower()}")
+        self.finish_tool()
+        self.begin_item_edit(item)
+
     def edit_note(self, note) -> bool:
         """Ask for a note's text. False when the author changed their mind."""
         from PySide6.QtWidgets import QInputDialog
@@ -1493,7 +1531,6 @@ class PageView(QGraphicsView):
                             (target.y() + box.center().y()) / 2)
             draft.leader = [QPointF(target), elbow]
             self._pending_anchor = None
-            self.set_insert_point(None)
 
         if tool.mode == SNAPSHOT:
             # The marquee is not a markup: it says which part of the page to
@@ -2047,8 +2084,16 @@ class PageView(QGraphicsView):
         self.begin_snapshot()
         editor = QLineEdit()
         editor.setText(initial if initial is not None else table.sheet.raw(row, col))
+        # The editor sits on the paper, so it takes the paper's colours rather
+        # than the interface's: black on white whatever theme the window is in.
+        # Left to the palette, dark mode would put white text on white paper.
         editor.setStyleSheet(
-            "QLineEdit { border: 2px solid #1971c2; background: #ffffff; padding: 0 2px; }")
+            "QLineEdit { border: 2px solid #1971c2; background: #ffffff; "
+            "color: #111318; selection-background-color: #a5d8ff; "
+            "selection-color: #111318; padding: 0 2px; }")
+        # And it lines up the way the cell does — a number stays on the right
+        # while it is being typed, rather than jumping across on Enter.
+        editor.setAlignment(table.editor_alignment(row, col, editor.text()))
         font = table.style.font()
         font.setPointSizeF(max(table.style.font_size, 6.0))
         editor.setFont(font)
@@ -2294,6 +2339,17 @@ class PageView(QGraphicsView):
     # ------------------------------------------------------------------
     # keyboard
     # ------------------------------------------------------------------
+    def busy_typing(self) -> bool:
+        """True while words are being typed into something on the page.
+
+        A shortcut that acts on the document has no business firing while a
+        sentence is being written: Ctrl+B belongs to the text under the caret,
+        not to the bookmarks.
+        """
+        return (self._editing_item is not None or self.active_table is not None
+                or self._cell_editor is not None or self._unit_editor is not None
+                or getattr(self, "_label_editor", None) is not None)
+
     def idle_on_canvas(self) -> bool:
         """True when a keystroke should be read as "start something here".
 
@@ -2307,18 +2363,18 @@ class PageView(QGraphicsView):
                 and self._cell_editor is None and quiet
                 and self.tool_key in ("select", "pan"))
 
-    def set_insert_point(self, scene_pos: Optional[QPointF]) -> None:
-        """Remember where the next thing put on the page should go."""
-        self._insert_point = QPointF(scene_pos) if scene_pos is not None else None
-        if scene_pos is not None:
-            self._last_scene_pos = QPointF(scene_pos)
-        self.viewport().update()
+    def pointer_scene_pos(self) -> QPointF:
+        """Where the pointer last was, in canvas coordinates.
 
-    def insert_point(self) -> Optional[QPointF]:
-        return QPointF(self._insert_point) if self._insert_point is not None else None
+        Everything that has to land somewhere — a paste, something typed, a
+        tool put down — lands here. There is no separate insertion point to
+        set first and remember afterwards: what you are pointing at is where
+        it goes, which is the one rule that needs no explaining.
+        """
+        return QPointF(self._last_scene_pos)
 
     def drawForeground(self, painter: QPainter, rect: QRectF) -> None:
-        """Draw the insertion point, so it is obvious where things will land."""
+        """Whatever floats above the page: marquee, previews, leaders."""
         super().drawForeground(painter, rect)
         if self._marquee:
             self._draw_marquee(painter)
@@ -2329,21 +2385,6 @@ class PageView(QGraphicsView):
             self._draw_snap_marker(painter, self._snap_marker)
         if self._pending_anchor is not None:
             self._draw_pending_leader(painter, self._pending_anchor)
-            return
-        point = self._insert_point
-        if point is None:
-            return
-        painter.save()
-        painter.setRenderHint(QPainter.Antialiasing, True)
-        arm = 6.0 / max(self._zoom, 0.05)
-        pen = QPen(QColor("#0b6bcb"))
-        pen.setWidthF(0)
-        painter.setPen(pen)
-        painter.drawLine(QPointF(point.x() - arm, point.y()),
-                         QPointF(point.x() + arm, point.y()))
-        painter.drawLine(QPointF(point.x(), point.y() - arm),
-                         QPointF(point.x(), point.y() + arm))
-        painter.restore()
 
     def _draw_pending_preview(self, painter: QPainter) -> None:
         """Show what is about to be put down, under the pointer.
@@ -2540,7 +2581,7 @@ class PageView(QGraphicsView):
 
     def typing_position(self) -> QPointF:
         """Where a region opened by typing should appear, in page coordinates."""
-        anchor = self._insert_point or self._last_scene_pos
+        anchor = QPointF(self._last_scene_pos)
         frame = self.frame_at(anchor) or self.frame()
         if frame is None:
             return QPointF(self._last_scene_pos)
@@ -2552,8 +2593,7 @@ class PageView(QGraphicsView):
 
     def typing_frame(self):
         """The page a region opened by typing belongs to."""
-        anchor = self._insert_point or self._last_scene_pos
-        return self.frame_at(anchor) or self.frame()
+        return self.frame_at(self._last_scene_pos) or self.frame()
 
     def event(self, event) -> bool:
         """Take Tab before Qt spends it moving the focus.
@@ -2648,6 +2688,13 @@ class PageView(QGraphicsView):
                 self.point_at(start[0] + step[0], start[1] + step[1])
                 event.accept()
                 return
+            # Typing a value and pressing an arrow puts it in and moves on,
+            # which is how a column of numbers gets entered in Excel.
+            if (self._cell_editor is not None and key in (Qt.Key_Up, Qt.Key_Down)
+                    and not (modifiers & Qt.ControlModifier)):
+                self.close_cell_editor(move=(-1 if key == Qt.Key_Up else 1, 0))
+                event.accept()
+                return
             if self._cell_editor is not None and key in (Qt.Key_Tab, Qt.Key_Backtab):
                 self.close_cell_editor(move=(0, -1 if key == Qt.Key_Backtab else 1))
                 event.accept()
@@ -2675,7 +2722,6 @@ class PageView(QGraphicsView):
                 return
             if self._pending_anchor is not None:
                 self._pending_anchor = None
-                self.set_insert_point(None)
                 self.statusMessage.emit("Callout cancelled")
                 event.accept()
                 return

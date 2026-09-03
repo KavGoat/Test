@@ -149,6 +149,15 @@ class _MathRow:
         self.baseline = 0.0
 
 
+def _blocks_keep_their_names() -> bool:
+    """Whether a new block keeps its names to itself, per the preferences."""
+    try:
+        from ..ui import preferences
+        return preferences.current().self_contained_blocks
+    except Exception:            # the engine is usable with no interface at all
+        return False
+
+
 @register_item
 class MathItem(MarkupItem):
     """A calculation region — one line by default, so each can be moved alone."""
@@ -180,10 +189,11 @@ class MathItem(MarkupItem):
         self.result_gap = 10.0
         self.title = ""
         # By default every calculation defines for the whole document, which is
-        # what a calculation sheet reads like.  Turning this on makes a block
-        # self-contained: it still reads what is defined above it, but its own
-        # names stay inside it.
-        self.local_scope = bool(block)
+        # what a calculation sheet reads like — a block included. Turning this
+        # on makes a block self-contained: it still reads what is defined
+        # above it, but its own names stay inside it. Whoever works the other
+        # way round can say so once, in the preferences.
+        self.local_scope = _blocks_keep_their_names() if block else False
         self.local_values: dict[str, Any] = {}
         self.auto_width = True
         self._width = 260.0
@@ -389,8 +399,13 @@ class MathItem(MarkupItem):
                 return setter.text(statement.expression, size)
             return None
         if statement.ok and self._is_unit_literal(statement.tree):
-            # "12 kN/m" is an input, not a calculation: show it as a quantity.
-            return setter.value_box(statement.result, size, self.digits, self.number_format,
+            # "12 kN/m" is an input, not a calculation: show it as a quantity —
+            # in the unit it was written in. Asking to see the answer in
+            # newtons must not rewrite the kilonewtons on the other side of
+            # the equals sign.
+            written = statement.written
+            value = written if written is not None else statement.result
+            return setter.value_box(value, size, self.digits, self.number_format,
                                     color=setter.color)
         try:
             return setter.build(statement.tree.body if isinstance(statement.tree, ast.Expression)

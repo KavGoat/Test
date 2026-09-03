@@ -45,10 +45,13 @@ class PageSetup:
     height_mm: float = 297.0
     orientation: str = PORTRAIT
     # Even margins, so the printable area sits in the middle of the sheet.
-    margin_left: float = 15.0
-    margin_top: float = 15.0
-    margin_right: float = 15.0
-    margin_bottom: float = 15.0
+    # Ten millimetres is the narrowest most printers will hold, and a
+    # calculation sheet wants the paper it is paying for: wider than this and
+    # the page reads as a frame with a little writing in it.
+    margin_left: float = 10.0
+    margin_top: float = 10.0
+    margin_right: float = 10.0
+    margin_bottom: float = 10.0
 
     @classmethod
     def from_name(cls, name: str, orientation: str = PORTRAIT) -> "PageSetup":
