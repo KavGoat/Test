@@ -2495,9 +2495,8 @@ def test_there_is_a_key_for_bookmarking_where_you_are(window):
 # Snapshot
 # ---------------------------------------------------------------------------
 
-def test_a_snapshot_copies_what_is_in_the_region_as_itself(window):
-    from calcforge.items.mathitem import MathItem
-
+def test_a_snapshot_is_a_picture_of_the_region(window):
+    """It is what that part of the page looks like, not a rebuilt copy of it."""
     _calc(window, "L := 6 m\nA := L*L =", at=(90, 110))
     window.select_tool("rect")
     drag(window.view, 100, 200, 220, 260)
@@ -2506,15 +2505,15 @@ def test_a_snapshot_copies_what_is_in_the_region_as_itself(window):
     drag(window.view, 60, 80, 400, 320)
 
     payload = window._clipboard
-    kinds = [entry["type"] for entry in payload]
-    assert "math" in kinds and "rect" in kinds
+    assert [entry["type"] for entry in payload] == ["image"]
+    assert window.document.asset(payload[0]["asset_key"])
     # and the marquee itself is not left on the page
     assert not [i for i in markups(window) if getattr(i, "kind", "") == "marquee"]
-    assert "copied" in window.status_hint.text()
+    assert "Snapshot taken" in window.status_hint.text()
 
 
-def test_a_snapshot_pastes_back_as_real_markups(window):
-    from calcforge.items.mathitem import MathItem
+def test_a_snapshot_pastes_back_as_one_picture(window):
+    from calcforge.items.media import ImageItem
 
     _calc(window, "b := 300 mm =", at=(90, 110))
     window.select_tool("snapshot")
@@ -2527,15 +2526,50 @@ def test_a_snapshot_pastes_back_as_real_markups(window):
 
     after = markups(window)
     assert len(after) == before + 1
-    pasted = [i for i in after if isinstance(i, MathItem) and i.pos().y() > 400]
+    pasted = [i for i in after if isinstance(i, ImageItem) and i.pos().y() > 400]
     assert len(pasted) == 1
-    assert "b :=" in pasted[0].source            # the calculation, not a picture
 
 
-def test_a_snapshot_of_nothing_says_so(window):
+def test_a_picture_copied_elsewhere_beats_the_last_snapshot(window):
+    """What is on the clipboard is what gets pasted."""
+    from PySide6.QtGui import QImage
+    from PySide6.QtWidgets import QApplication
+    from calcforge.items.media import ImageItem
+
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 220, 180)
+    window.select_tool("snapshot")
+    drag(window.view, 60, 60, 300, 250)
+    assert window._clipboard                     # a snapshot is held
+
+    foreign = QImage(120, 80, QImage.Format_ARGB32)
+    foreign.fill(0xFF2F9E44)
+    QApplication.clipboard().setImage(foreign)   # copied in another program
+
+    window.select_tool("select")
+    hover(window.view, 120, 520)
+    before = len(markups(window))
+    window.paste_items()
+
+    pasted = [i for i in markups(window) if isinstance(i, ImageItem)
+              and i.pos().y() > 400]
+    assert len(markups(window)) == before + 1
+    assert len(pasted) == 1
+    assert pasted[0].local_rect().width() == pytest.approx(120, abs=1)
+
+
+def test_a_snapshot_of_bare_paper_is_still_a_picture(window):
+    """Of blank paper, as asked — a snapshot is what is there, not what it holds."""
     window.select_tool("snapshot")
     drag(window.view, 60, 500, 200, 560)
-    assert "Nothing in that region" in window.status_hint.text()
+    assert window._clipboard and window._clipboard[0]["type"] == "image"
+
+
+def test_a_snapshot_of_no_region_at_all_says_so(window):
+    from PySide6.QtCore import QRectF
+
+    window.take_snapshot(window.view.frame(), QRectF(60, 500, 0, 0))
+    assert "drag a region" in window.status_hint.text()
 
 
 def test_a_snapshot_takes_the_drawing_underneath_with_it(window, tmp_path, monkeypatch):
@@ -2557,6 +2591,11 @@ def test_a_snapshot_takes_the_drawing_underneath_with_it(window, tmp_path, monke
     payload = window._clipboard
     assert payload and payload[0]["type"] == "image"
     assert window.document.asset(payload[0]["asset_key"])
+    # taken at 300 dpi, so it holds up when it is zoomed into
+    from PySide6.QtGui import QImage
+    picture = QImage()
+    picture.loadFromData(window.document.asset(payload[0]["asset_key"]))
+    assert picture.width() > 120 * 3
 
 
 def test_a_snapshot_puts_a_picture_on_the_clipboard_for_other_apps(window):
@@ -4292,3 +4331,12 @@ def test_a_click_placed_tool_shows_itself_before_it_lands(window):
     window.select_tool("select")
     hover(window.view, 300, 300)
     assert ink(300, 300) == 0            # nothing held, nothing drawn
+
+
+def test_the_snapshot_marquee_looks_like_the_selection_marquee(window):
+    """The same gesture meaning the same thing, drawn the same way."""
+    from calcforge.items.shapes import RectItem
+
+    marquee = RectItem("marquee")
+    assert marquee.style.line_style == "dash"
+    assert marquee.style.stroke == "#1971c2"      # the selection blue

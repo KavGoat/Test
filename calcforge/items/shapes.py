@@ -69,9 +69,11 @@ class RectItem(MarkupItem):
         elif kind == "redact":
             self.style = Style(stroke="#000000", fill="#000000", fill_opacity=1.0, width=0.8)
         elif kind == "marquee":
-            # The snapshot region: drawn while dragging, never kept.
-            self.style = Style(stroke="#1971c2", fill="#1971c2", fill_opacity=0.10,
-                               width=1.0, line_style="dash")
+            # The snapshot region: drawn while dragging, never kept. The same
+            # dashed blue as the selection marquee, because it is the same
+            # gesture meaning the same thing — this part of the page.
+            self.style = Style(stroke="#1971c2", fill="#1971c2", fill_opacity=0.11,
+                               width=0.0, line_style="dash")
 
     @property
     def NAME_FOR_KIND(self) -> str:

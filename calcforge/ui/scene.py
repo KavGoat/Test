@@ -445,17 +445,33 @@ class PageFrame(QGraphicsObject):
             item.setSelected(True)
         self.print_mode = previous
 
-    def render_image(self, dpi: float = 150.0, for_print: bool = True) -> QImage:
+    def render_image(self, dpi: float = 150.0, for_print: bool = True,
+                     region: Optional[QRectF] = None) -> QImage:
+        """The page as pixels — or just *region* of it, in page coordinates.
+
+        Rendering a whole A4 sheet at 300 dpi to take a picture of one detail
+        of it costs about thirty megabytes and most of a second, all of which
+        is then thrown away. Asking for the part that is wanted costs what
+        that part is worth.
+        """
         scale = dpi / 72.0
-        width = max(int(self.page.width_pt * scale), 1)
-        height = max(int(self.page.height_pt * scale), 1)
+        box = QRectF(0, 0, self.page.width_pt, self.page.height_pt)
+        if region is not None:
+            box = QRectF(region).normalized().intersected(box)
+        if box.width() <= 0 or box.height() <= 0:
+            return QImage()
+        width = max(int(box.width() * scale), 1)
+        height = max(int(box.height() * scale), 1)
         image = QImage(width, height, QImage.Format_ARGB32)
         image.fill(Qt.white)
         painter = QPainter(image)
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setRenderHint(QPainter.TextAntialiasing, True)
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
-        self.render_page(painter, QRectF(0, 0, width, height), for_print)
+        painter.translate(-box.left() * scale, -box.top() * scale)
+        self.render_page(painter,
+                         QRectF(0, 0, self.page.width_pt * scale,
+                                self.page.height_pt * scale), for_print)
         painter.end()
         return image
 

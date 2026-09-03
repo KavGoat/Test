@@ -1870,61 +1870,85 @@ class MainWindow(QMainWindow):
         self.view.commit_snapshot("Delete markup")
         self.refresh_selection()
 
-    def take_snapshot(self, frame, region: QRectF) -> None:
-        """Copy everything inside *region* on *frame*, keeping it as itself.
+    SNAPSHOT_DPI = 300.0
 
-        Bluebeam's snapshot, but what comes back is not a picture: every
-        markup, calculation and table in the region is copied as the thing it
-        is, so pasting it puts real items down that stay sharp at any zoom and
-        can still be edited. Only the page's own background sheet — the raster
-        a PDF or a photo came in on — can be nothing but pixels, so that part
-        is cropped at the resolution it was imported at.
+    def take_snapshot(self, frame, region: QRectF) -> None:
+        """Take a picture of *region* on *frame*.
+
+        A snapshot is a picture, the way Bluebeam's is: what comes back is
+        what that part of the page looks like, not a rebuilt copy of the
+        markups and calculations that made it. That is the point of taking
+        one — you want the drawing as it stands, not fifteen items that will
+        recalculate, renumber and shift about when they land somewhere else.
+
+        It is taken at 300 dpi, so it holds up when it is zoomed into or
+        printed, and it goes on the system clipboard as an ordinary image, so
+        it can be pasted into an email or a report as easily as back onto the
+        page.
         """
         region = region.normalized()
         if frame is None or region.width() < 2 or region.height() < 2:
             self.status_hint.setText("Snapshot: drag a region to copy")
             return
-        payload: list[dict] = []
-        assets: dict[str, str] = {}
 
-        cropped = self._crop_background(frame.page, region)
-        if cropped is not None:
-            key, data = cropped
-            assets[key] = base64.b64encode(data).decode("ascii")
-            payload.append({"type": "image", "asset_key": key, "x": 0.0, "y": 0.0,
-                            "rect": [0, 0, region.width(), region.height()],
-                            "keep_aspect": False, "uid": os.urandom(8).hex()})
-
-        for item in frame.ordered_markups():
-            box = item.mapRectToParent(item.boundingRect())
-            if not region.intersects(box):
-                continue
-            entry = item.serialize()
-            entry["x"] = float(entry.get("x", 0.0)) - region.left()
-            entry["y"] = float(entry.get("y", 0.0)) - region.top()
-            payload.append(entry)
-            key = entry.get("asset_key")
-            if key and key not in assets:
-                data = self.document.asset(key)
-                if data:
-                    assets[key] = base64.b64encode(data).decode("ascii")
-
-        if len(payload) <= (1 if cropped is not None else 0) and not payload:
+        cut = frame.render_image(dpi=self.SNAPSHOT_DPI, for_print=False,
+                                 region=region)
+        if cut.isNull():
             self.status_hint.setText("Nothing in that region to copy")
             return
+
+        buffer = QBuffer()
+        buffer.open(QIODevice.WriteOnly)
+        if not cut.save(buffer, "PNG"):
+            self.status_hint.setText("The snapshot could not be taken")
+            return
+        data = bytes(buffer.data())
+        key = self.document.put_asset(f"snapshot-{os.urandom(6).hex()}.png", data)
+        payload = [{"type": "image", "asset_key": key, "x": 0.0, "y": 0.0,
+                    "rect": [0, 0, region.width(), region.height()],
+                    "keep_aspect": True, "uid": os.urandom(8).hex()}]
+        assets = {key: base64.b64encode(data).decode("ascii")}
 
         self._clipboard = payload
         mime = QMimeData()
         mime.setText(json.dumps({CLIPBOARD_TAG: payload, "assets": assets}))
-        picture = frame.render_image(dpi=150.0, for_print=False)
-        scale = 150.0 / 72.0
-        mime.setImageData(picture.copy(
-            QRect(int(region.left() * scale), int(region.top() * scale),
-                  max(int(region.width() * scale), 1),
-                  max(int(region.height() * scale), 1))))
+        mime.setImageData(cut)
         QApplication.clipboard().setMimeData(mime)
         self.status_hint.setText(
-            f"Snapshot: {len(payload)} item(s) copied — paste it anywhere")
+            "Snapshot taken — paste it back, or into anything else")
+
+    def _clipboard_is_a_foreign_picture(self) -> bool:
+        """Whether the clipboard holds a picture that did not come from here."""
+        mime = QApplication.clipboard().mimeData()
+        if mime is None or not mime.hasImage():
+            return False
+        text = (mime.text() or "").strip()
+        if text.startswith("{") and CLIPBOARD_TAG in text:
+            return False               # our own snapshot, with its items
+        return True
+
+    def paste_picture_from_clipboard(self) -> bool:
+        """Put a picture from another program onto the page."""
+        image = QApplication.clipboard().image()
+        if image.isNull():
+            return False
+        buffer = QBuffer()
+        buffer.open(QIODevice.WriteOnly)
+        if not image.save(buffer, "PNG"):
+            self.status_hint.setText("That picture could not be pasted")
+            return False
+        data = bytes(buffer.data())
+        key = self.document.put_asset(f"pasted-{os.urandom(6).hex()}.png", data)
+        # At 300 dpi if it is big enough to have come from a screen at that
+        # size; otherwise at its own size in points, so it lands legibly.
+        scale = 300.0 / 72.0 if image.width() > 900 else 1.0
+        width, height = image.width() / scale, image.height() / scale
+        payload = [{"type": "image", "asset_key": key, "x": 0.0, "y": 0.0,
+                    "rect": [0, 0, width, height], "keep_aspect": True,
+                    "uid": os.urandom(8).hex()}]
+        self._paste_payload(payload)
+        self.status_hint.setText("Picture pasted")
+        return True
 
     def _crop_background(self, page, region: QRectF):
         """The part of the page's background sheet inside the region."""
@@ -2200,6 +2224,12 @@ class MainWindow(QMainWindow):
             return
         payload = self._clipboard
         text = QApplication.clipboard().text()
+        # A picture copied in another program is what the person wants pasted,
+        # not whatever this window happened to copy last. Only the clipboard
+        # knows what is really on it, so it is asked first.
+        if self._clipboard_is_a_foreign_picture():
+            if self.paste_picture_from_clipboard():
+                return
         # A table picked out on the page is where a block of cells belongs,
         # without having to open one of its cells first.
         if not payload and looks_like_a_grid(text):
@@ -2227,6 +2257,10 @@ class MainWindow(QMainWindow):
                 pass
         if not payload:
             return
+        self._paste_payload(payload)
+
+    def _paste_payload(self, payload: list) -> None:
+        """Put a clipboard payload down under the pointer."""
         self.view.begin_snapshot()
         self.view.scene().clearSelection()
         # A paste lands under the pointer, the way it does in Bluebeam.

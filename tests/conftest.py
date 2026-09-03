@@ -27,6 +27,13 @@ def settings_sandbox(tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def fresh_clipboard(qapp):
+    """No test inherits what the one before it copied."""
+    yield
+    qapp.clipboard().clear()
+
+
+@pytest.fixture(autouse=True)
 def fresh_settings(settings_sandbox):
     """Every test starts from the shipped defaults.
 
@@ -49,6 +56,10 @@ def qapp(settings_sandbox):
     from PySide6.QtWidgets import QApplication
     application = QApplication.instance() or build_application([])
     yield application
+    # A picture left on the clipboard outlives the application that owns it,
+    # and the X server it was handed to is torn down underneath it — which
+    # crashes on the way out and makes a clean run look like a broken one.
+    application.clipboard().clear()
 
 
 @pytest.fixture
