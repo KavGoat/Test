@@ -33,9 +33,10 @@ Checking this against your raw messages turned up a few places where either I go
 - [x] SMath-style assignment: typing `=` on an undefined variable auto-converts it to `:=` (definition); typing `=` on an already-defined variable evaluates it; typing `:` explicitly forces a (re)definition even over an existing one (6)
 - [x] Auto-suggest default units matching SMath conventions: kN, kPa, kN/m by default when the surrounding units match that family; length units auto-switch between mm and m depending on whether the numeric value is above or below ~1000 (6)
 - [x] Live warnings for (a) unit mismatch in an expression and (b) reference to an undefined variable — shown inline near the offending term, not just in a log (6)
-- [x] **Strict no-space rule inside equations**: an equation entry must never contain a space. A number immediately followed by letters (no space) is interpreted as "number + unit" directly. If a space is typed anywhere while in equation mode, convert the *entire* entry to a plain text item instead of a formula **(new, refines 6/22/66)**
+- [x] **Strict no-space rule inside equations — rewritten, latest message wins**: an equation entry must never contain a space, and a number immediately followed by letters (no space) is "number + unit". This line used to end "if a space is typed anywhere while in equation mode, convert the *entire* entry to a plain text item" — **that half is withdrawn.** Your latest message reports the conversion as a bug: "whenever I'm in an equation, adding a spacing will change to text line". So a space in an equation is simply **refused** — nothing is converted, the entry stays the equation it was, and the status bar says why. That holds in every equation state: a fresh entry, one opened with `"`, and one being re-edited (6/22/66, refined, then corrected)
 - [x] The opening `"` should be treated as "assume equation mode first" and behave differently from how a pre-existing equation item behaves when re-edited — i.e. entering fresh vs. editing an existing equation are two distinct interaction states that both need to respect the no-space rule **(new)**
-- [x] Fix: typing Backspace, Escape, or `=` while inside an equation sometimes doesn't register / doesn't do anything — these three keys need to be reliable in every equation-edit state **(new)**
+- [x] Fix: typing Backspace, Escape, or `=` while inside an equation sometimes doesn't register / doesn't do anything — these three keys need to be reliable in every equation-edit state **(new; reported again, but that report was against a build made before the fix — the cause was the view closing the line whenever it lost the keyboard, which a right-click menu or a click on a toolbar button does)**. Re-checked since with 360 randomised keystrokes through the real event queue, with the live recalculation firing in the middle of them: not one Backspace, `=` or character dropped. If it still happens on a build that has this, say what was clicked just before
+- [x] **(new)** Bug: `kpa` is not recognised as a unit and no unit list comes up while typing it. A unit typed in the wrong case must still be found and offered — the list is what corrects the case, so it has to appear for `kpa` and offer `kPa`
 - [x] Committing a unit still needs a discrete action (Tab) rather than auto-completing as soon as a matching unit string is typed; the unit list shown while typing must be navigable with arrow keys or mouse click, and must also list already-defined variable names that match what's typed so far (22, 139)
 - [x] Lazy evaluation: a line should only compute and *display* its result when `=` is typed at the end. If no `=`, still evaluate it silently in the background so later lines can reference the value, but show nothing (22)
 - [x] Per-result display-unit override: right-click (or similar) a computed value and change what unit it's displayed in without changing the underlying definition (22)
@@ -84,6 +85,7 @@ Checking this against your raw messages turned up a few places where either I go
 - [x] Fix visual overlap between adjacent table cells so content doesn't run into the next cell (11)
 - [x] Clarify how a computed/output cell is displayed vs. a plain input cell (e.g. a cell defined as `q_floor`) — currently ambiguous which is which (11, 61)
 - [x] **(new)** Bug: in the insert-table dialog, the "header row" checkbox shows as ticked, but clicking it off and back on leaves it unticked (state gets lost on the second toggle) — fix the checkbox's state handling
+- [ ] **(new)** Dragging out a table must add and take away rows and columns as it goes, at a fixed default cell size — not stretch a fixed 6×4 grid to whatever the box is. The drag says how many cells, not how big they are
 
 ## 7. Markup tools — placement & interaction model (Bluebeam parity)
 
@@ -91,6 +93,7 @@ Checking this against your raw messages turned up a few places where either I go
 - [x] "Properties mode" (place a new copy using the last-used style/properties rather than an exact one-to-one duplicate) should only be selectable for a single markup object — for calc blocks, images, graphs, and groups it should be greyed out or simply not offered, since it doesn't make sense for those (41)
 - [x] Selection tool: a click-drag draws a rectangular marquee select; a plain click (no drag) instead falls back to a polygon/lasso-style custom selection area (39)
 - [x] Rectangle marquee direction matters: dragging left-to-right selects only items fully enclosed by the box; dragging right-to-left selects enclosed **and** intersecting items. This left/right distinction is for the rectangle marquee only — it does not apply to the polygon/lasso selection (39)
+- [ ] **(new)** Selecting as it stands — click, and click-drag for a rectangular marquee, with no key held — is right and stays as it is. What Shift adds: **Shift and click point after point draws a polygon to select inside**, closed by clicking the first point again or by Enter
 - [x] **(contradiction — later message wins)** A plain click on empty canvas must not start a select-drag; a rectangular marquee begins on a click-drag and a lasso on Shift+click-drag. The original half of this (msg 53: a click sets an *insertion point* for pastes) was withdrawn by msgs 46 and 74 ("remove the insert click point thing and remove other dependent functionality") — there is no insertion point; what you are pointing at is where things land (53, superseded by 46/74)
 - [x] Escape must always fully clear selection and exit whatever edit/tool sub-state you're in, in one press, regardless of how deep the current mode is nested (81, 92)
 - [x] Fix: it's possible to get permanently stuck inside a tool (e.g. right after placing a callout's arrow) with no way out — Escape doesn't help and no other tool can be switched to (82, 110)
@@ -133,6 +136,10 @@ Checking this against your raw messages turned up a few places where either I go
 - [x] **(new)** The leader line must never be allowed to visually cross through/over the text box itself — constrain valid hinge positions so that geometry is impossible
 - [x] **Resolved (was contradiction #5):** moving the arrow head, or moving/resizing the text box, always resets the hinge back to its auto-computed position — this takes priority over any prior manual drag, which only holds until the next move. Currently the hinge is frozen wherever it was first set and never updates, which is the bug to fix
 - [x] **(new)** Remove the small floating description/label that appears on markups and fades out after a moment — not wanted on any markup type
+- [ ] **(new)** Bug: the cloud part of a cloud call-out vanishes partway through placing it and comes back at the end — it has to be there, unbroken, from the first click
+- [ ] **(new)** A cloud call-out is a call-out: the same hinge, the same clear-of-the-box rule, the same automatic re-computation, and the same several leaders — the only difference is that its leaders are drawn as clouds rather than as arrows. One set of behaviour, not two
+- [ ] **(new)** "Add leader" belongs in the right-click menu itself, not inside a sub-menu — and choosing it asks which kind: an arrow leader or a cloud leader
+- [ ] **(new)** A call-out or cloud call-out whose last leader is taken away becomes a plain text box; a text box that is given a leader becomes a call-out. The three are one object in different states, and moving between them is what adding or removing the last leader means
 
 ## 10. Snapshot tool
 
@@ -217,8 +224,10 @@ Checking this against your raw messages turned up a few places where either I go
 ## 19. Pages & document structure
 
 - [x] Right-click a page, or a multi-page selection, for: Delete, Duplicate, Insert Before, Insert After, Insert PDF, Insert Photo (23, 60, 123)
+- [ ] **(new)** Bug: several pages cannot be deleted at once. Picking more than one page in the pages panel has to work properly and everything that acts on a page has to act on the whole picked set — delete, move (reorder by dragging), copy and duplicate
 - [x] Dragging a PDF file directly onto the page panel should show an insertion cursor/indicator and insert it at that exact point in the page order (114)
 - [x] Insert-PDF must bring in the actual PDF content (vector text/lines), not a blank page and not a 150dpi raster snapshot of it — figure out what's required to preserve full fidelity, and ask if a specific library/dependency choice needs sign-off (25, 120)
+- [x] **(new)** Insert-PDF must not ask for a DPI at all. There is no resolution to choose: everything in the file comes through as the PDF has it, vector work included. Drop the question from the dialog
 - [x] Rotating a page must rotate the page shape **and every markup on it** together as one unit — currently the markups don't follow the page rotation (118, still broken as of msg 145)
 - [x] Separate "Rotate View" command (View menu) that visually rotates the on-screen display of pages for reading convenience only, without altering the actual stored page rotation/orientation (119)
 - [x] Fix: footer content renders outside the visible page bounds specifically on imported PDF pages (122)

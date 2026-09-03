@@ -4472,73 +4472,85 @@ def test_typing_a_calculation_keeps_the_working_up_with_it(window):
     window.view.end_item_edit()
 
 
-def test_a_second_word_turns_what_was_typed_into_a_text_box(window):
-    """Maths needs no spaces, so two words with no operator is a sentence."""
+def test_shift_and_the_space_bar_asks_for_a_text_box(window):
+    """Turning a line into a note is asked for, not walked into.
+
+    A plain space used to do it, and every calculation is started by typing —
+    so the space that follows a comma out of habit, or lands while you think,
+    threw the expression away and left a sentence behind. Shift and the space
+    bar says it deliberately.
+    """
     from calcforge.items.text import TextItem
 
     window.select_tool("select")
     press_key(window.view, Qt.Key_unknown, "/")
-    type_text(window.view, "check bolt")
-    press_key(window.view, Qt.Key_Space, " ")
+    type_text(window.view, "check")
+    press_key(window.view, Qt.Key_Space, " ", Qt.ShiftModifier)
+    QApplication.processEvents()
 
     box = window.view.editing_item()
     assert isinstance(box, TextItem)
-    assert box.text() == "check bolt "
+    type_text(window.view, "bolt")
     window.view.end_item_edit()
     assert [type(i).__name__ for i in markups(window)] == ["TextItem"]
 
 
-def test_one_word_and_a_space_is_a_sentence(window):
-    """There is no waiting to see: a space is a space, and this is prose.
+def test_a_space_never_takes_a_calculation_away_from_you(window):
+    """It is refused, and the line carries on being the line it was.
 
-    It used to wait — ``sigma`` on its own could still have been a variable
-    about to get its ``:=`` — and waiting meant the rule could not be
-    predicted. A calculation has no spaces in it, so the first one settles it.
+    A space used to turn the whole entry into a note. Every calculation is
+    started by typing, so that rule fired on every stray space — which is why
+    it is gone: the space simply does not land, and the expression is still
+    there.
     """
-    from calcforge.items.text import TextItem
-
     window.select_tool("select")
     press_key(window.view, Qt.Key_unknown, "/")
     type_text(window.view, "sigma")
+    said = []
+    window.view.statusMessage.connect(said.append)
     press_key(window.view, Qt.Key_Space, " ")
     QApplication.processEvents()
-    assert isinstance(window.view.editing_item(), TextItem)
 
-    type_text(window.view, "checked by hand")
+    item = window.view.editing_item()
+    assert isinstance(item, MathItem), "still a calculation"
+    assert item._editor.toPlainText() == "sigma", "and the space never landed"
+    assert said and "space" in said[-1].lower(), said
+
+    type_text(window.view, ":=5MPa")
     window.view.end_item_edit()
-    assert [type(i).__name__ for i in markups(window)] == ["TextItem"]
+    assert [type(i).__name__ for i in markups(window)] == ["MathItem"]
+    assert window.document.workspace.get("sigma") is not None
 
 
 def test_a_lone_word_left_behind_becomes_a_note_after_all(window):
-    """Once the caret has gone, a word and a space was plainly a sentence."""
+    """A word with a space in it, when the caret goes, was a sentence.
+
+    Nothing can put that space there by typing any more, so this is for text
+    that arrived some other way — pasted in, or built from something else.
+    """
     from calcforge.items.text import TextItem
 
     window.select_tool("select")
     press_key(window.view, Qt.Key_unknown, "/")
-    type_text(window.view, "checked")
-    press_key(window.view, Qt.Key_Space, " ")
+    item = window.view.editing_item()
+    item._editor.setPlainText("checked by hand")
     window.view.end_item_edit()
 
     assert [type(i).__name__ for i in markups(window)] == ["TextItem"]
-    assert markups(window)[0].text().strip() == "checked"
+    assert markups(window)[0].text().strip() == "checked by hand"
 
 
 def test_there_is_no_such_thing_as_a_space_in_maths(window):
-    """Not even with an operator in front of it.
-
-    ``5+`` used to make the space innocent. One rule is easier to live with
-    than a rule with an exception in it, so a space in a line opened by typing
-    turns the line into words wherever it lands.
-    """
-    from calcforge.items.text import TextItem
-
+    """Nowhere in it, and with nothing happening when one is typed."""
     window.select_tool("select")
     press_key(window.view, Qt.Key_unknown, "/")
     type_text(window.view, "5+")
     press_key(window.view, Qt.Key_Space, " ")
     QApplication.processEvents()
-    assert isinstance(window.view.editing_item(), TextItem)
-    window.view.end_item_edit()
+    item = window.view.editing_item()
+    assert isinstance(item, MathItem)
+    assert item._editor.toPlainText() == "5+"
+    window.view.escape_everything()
 
 
 # ---------------------------------------------------------------------------
@@ -7674,15 +7686,27 @@ def test_a_space_is_refused_in_a_calculation(window):
     window.view.escape_everything()
 
 
-def test_a_space_turns_a_typed_line_into_words(window):
-    """Opened by typing, so it was only maths until it proved otherwise."""
+def test_a_space_is_refused_in_a_line_being_entered_too(window):
+    """Every equation state, one rule: the space does not land."""
     item = _open_calculation(window, typed=True)
     type_text(window.view, "check")
     press_key(window.view, Qt.Key_Space, " ")
     QApplication.processEvents()
-    assert item.scene() is None, "the calculation gave way to a text box"
-    box = [i for i in markups(window) if isinstance(i, TextItem)]
-    assert box and box[0].text().startswith("check")
+    assert item.scene() is not None, "the calculation is still there"
+    assert item._editor.toPlainText() == "check"
+    assert not [i for i in markups(window) if isinstance(i, TextItem)]
+    window.view.escape_everything()
+
+
+def test_shift_and_space_is_refused_in_a_placed_calculation(window):
+    """Nothing throws away a calculation that has already been settled."""
+    item = _open_calculation(window, "b:=300mm", typed=False)
+    said = []
+    window.view.statusMessage.connect(said.append)
+    press_key(window.view, Qt.Key_Space, " ", Qt.ShiftModifier)
+    QApplication.processEvents()
+    assert window.view.editing_item() is item
+    assert said and "note" in said[-1].lower()
     window.view.escape_everything()
 
 

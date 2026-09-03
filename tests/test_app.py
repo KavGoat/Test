@@ -2193,3 +2193,28 @@ def test_a_block_can_be_made_self_contained_by_default(qapp):
         assert MathItem("x := 1", block=True).local_scope is True
     finally:
         prefs.self_contained_blocks = was
+
+
+def test_the_import_dialog_does_not_ask_for_a_resolution(window):
+    """There is no resolution to choose, so there is no question about one.
+
+    Everything the file holds comes across as the file has it — the line work
+    as real geometry, the rest as a picture behind it, made as good as the
+    sheet allows. The only question left is one about this document: what size
+    the imported pages should be.
+    """
+    from PySide6.QtWidgets import QLabel
+    from calcforge.ui import dialogs
+    from calcforge.io import pdfio
+
+    dialog = dialogs.PdfImportDialog(window)
+    try:
+        assert not hasattr(dialog, "dpi"), "nobody is asked for a dpi"
+        assert not hasattr(dialog, "vectors"), "the line work always comes"
+        labels = [label.text() for label in dialog.findChildren(QLabel)]
+        assert not any("Render at" in text for text in labels)
+        _path, _pages, _fit, dpi, vectors = dialog.selection()
+        assert dpi == pdfio.BEST_DPI
+        assert vectors is True
+    finally:
+        dialog.deleteLater()

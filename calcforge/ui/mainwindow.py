@@ -1129,10 +1129,12 @@ class MainWindow(QMainWindow):
         super().keyPressEvent(event)
 
     def closeEvent(self, event) -> None:
-        # Whatever was being typed is settled before anybody is asked about
-        # unsaved changes, so the question is asked about the real state of
-        # the document rather than the state it was in a word ago.
-        self.view.end_item_edit()
+        # Nothing is settled here on purpose. Finishing an open line runs a
+        # whole recalculation, which touches the panels — and the arrangement
+        # written a few lines further down would then be the arrangement that
+        # recalculation left, not the one that was on screen. There is nothing
+        # to lose by leaving it: a line's text is kept level with the typing
+        # as it goes, so what is in the document is what was typed either way.
         if not self.confirm_discard():
             event.ignore()
             return
@@ -1542,10 +1544,11 @@ class MainWindow(QMainWindow):
         if dialog.exec() != dialogs.QDialog.Accepted:
             return
         chosen = dialog.selection()
-        # A dialog written before the line work could be brought across says
-        # nothing about it, and that is taken as "yes" — it is what the real
-        # dialog offers by default.
-        path, indices, fit, dpi = chosen[:4]
+        # A dialog written before any of this says nothing about the last two,
+        # and the answer to both is now fixed anyway: everything the file holds
+        # comes across, at the best the sheet allows.
+        path, indices, fit = chosen[:3]
+        dpi = chosen[3] if len(chosen) > 3 else pdfio.BEST_DPI
         vectors = bool(chosen[4]) if len(chosen) > 4 else True
         if not path or not indices:
             QMessageBox.information(self, "Insert PDF", "No pages were selected.")

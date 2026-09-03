@@ -218,22 +218,13 @@ class PdfImportDialog(QDialog):
         self.fit.addItem("Fit to this document's page size", pdfio.FIT_CURRENT)
         form.addRow("Page size", self.fit)
 
-        self.dpi = QSpinBox()
-        self.dpi.setRange(72, 600)
-        self.dpi.setValue(150)
-        self.dpi.setSuffix(" dpi")
-        self.dpi.setToolTip("Higher values look sharper when zoomed in, "
-                            "but make the file larger")
-        form.addRow("Render at", self.dpi)
-
-        self.vectors = QCheckBox("Bring the drawing's lines across as well")
-        self.vectors.setChecked(True)
-        self.vectors.setToolTip(
-            "The PDF's own line work comes in as real geometry on a layer of\n"
-            "its own, over the picture — so measurements snap to the ends of\n"
-            "lines rather than to a guess, and it stays sharp at any zoom.\n"
-            "Words stay part of the picture.")
-        form.addRow("", self.vectors)
+        # Neither a resolution nor a "bring the lines across as well" is asked
+        # about any more. There was never a right answer to either: everything
+        # in the file comes across as the file has it — the line work as real
+        # geometry, so measurements snap to the ends of lines, and the rest as
+        # a picture behind it, made as good as the sheet allows. The only
+        # question left is one about this document, which is what size of page
+        # the imported ones should be.
         layout.addLayout(form)
 
         self.info = QLabel("")
@@ -296,10 +287,9 @@ class PdfImportDialog(QDialog):
                           f"{'s' if self._count != 1 else ''}")
         self.show_preview()
 
-    def selection(self) -> tuple[str, list[int], str, int, bool]:
+    def selection(self) -> tuple[str, list[int], str, float, bool]:
         indices = pdfio.parse_page_range(self.pages.text(), self._count)
-        return (self.path, indices, self.fit.currentData(), self.dpi.value(),
-                self.vectors.isChecked())
+        return (self.path, indices, self.fit.currentData(), pdfio.BEST_DPI, True)
 
 
 class TableSizeDialog(QDialog):

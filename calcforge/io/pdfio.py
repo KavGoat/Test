@@ -16,6 +16,14 @@ from ..core.document import PT_TO_MM, LANDSCAPE, PORTRAIT, Page, PageSetup
 # and A4 at 600, which is more than enough to read a drawing.
 MAX_PIXELS = 48_000_000
 
+# What an imported page is rendered at, with nobody asked. There is no
+# resolution to choose: everything the file holds comes across as the file has
+# it — the line work as real geometry, the rest as a picture behind it — and
+# the picture is made as good as the sheet allows. 600 dpi is more than an A4
+# needs; a big drawing sheet is scaled down from it by the pixel cap above,
+# which is the only limit that actually matters.
+BEST_DPI = 600.0
+
 FIT_ORIGINAL = "original"       # page takes the PDF page's own size
 FIT_A4 = "a4"                   # scale into A4
 FIT_CURRENT = "current"         # scale into the document's current page size

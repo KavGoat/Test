@@ -47,26 +47,36 @@ class _MathEditor(QGraphicsTextItem):
         return
 
     # Nothing in maths needs a space. A unit goes straight after its number —
-    # 5kN, not 5 kN — and an operator needs no room around it. So a space is
-    # never just a space in a calculation: either this was words all along, or
-    # it is a keystroke with no meaning here.
+    # 5kN, not 5 kN — and an operator needs no room around it. So a space in a
+    # calculation is a keystroke with no meaning, and it is refused.
+    #
+    # It used to turn the whole entry into a note instead. That reads well
+    # written down and badly in the hand: every calculation is started by
+    # typing, so every stray space — the one that follows a comma out of
+    # habit, the one that lands while you think — threw the expression away
+    # and left a sentence behind. Turning a line into a note is now something
+    # you ask for, with Shift and the space bar, and never something that
+    # happens to you.
     MATHS_MARKS = set("+-*/^()=:<>,")
 
     def keyPressEvent(self, event) -> None:
-        if event.text() == " " and not (event.modifiers() & Qt.ShiftModifier):
-            if self.owner.started_by_typing:
-                # Opened by typing a quotation mark: it began as maths, and
-                # the space says it was prose. The whole entry becomes words,
-                # whatever has been typed so far — one rule, no exceptions to
-                # remember.
+        if event.text() == " ":
+            deliberate = bool(event.modifiers() & Qt.ShiftModifier)
+            if deliberate and self.owner.started_by_typing:
+                # A line still being entered for the first time: nothing has
+                # been worked out yet, so there is nothing to lose in saying
+                # it was prose after all.
                 self.owner.wantsWords.emit()
+            elif deliberate:
+                self.owner.saySomething.emit(
+                    "This is a calculation, not a note — Escape, then the text "
+                    "tool, for words")
             else:
-                # A calculation that was put down as a calculation. There is
-                # nothing a space can mean in it, so it is refused rather than
-                # left to break the expression quietly.
                 self.owner.saySomething.emit(
                     "A calculation has no spaces in it — a unit goes straight "
-                    "after its number, as in 5kN")
+                    "after its number, as in 5kN"
+                    + (". Shift and the space bar makes this a note instead"
+                       if self.owner.started_by_typing else ""))
             event.accept()
             return
         if event.key() in (Qt.Key_Return, Qt.Key_Enter):

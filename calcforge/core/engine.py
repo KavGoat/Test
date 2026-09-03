@@ -498,6 +498,24 @@ def name_problem(name: str, taken: Optional[set] = None) -> str:
     return ""
 
 
+def _a_unit_spelt_like(name: str) -> str:
+    """" — did you mean kPa?", when the only thing wrong was the capitals.
+
+    Units live or die by their capitals: kpa is nothing, kPa is a hundred
+    thousand pascals, and the two look the same at a glance. Saying only that
+    kpa is not defined leaves somebody staring at a line that is plainly
+    right. This says what it is.
+    """
+    from .units import UNIT_MENU
+
+    wanted = name.lower()
+    for group in UNIT_MENU.values():
+        for unit in group:
+            if unit != name and unit.lower() == wanted:
+                return f" — did you mean {unit}?"
+    return ""
+
+
 def friendly_error(exc: Exception) -> str:
     if isinstance(exc, pint.DimensionalityError):
         return (f"Units do not match: cannot combine "
@@ -506,7 +524,10 @@ def friendly_error(exc: Exception) -> str:
         return f"Unknown unit or name: {exc.unit_names}"
     if isinstance(exc, NameError):
         match = re.search(r"'([^']+)'", str(exc))
-        return f"'{match.group(1)}' is not defined" if match else str(exc)
+        if not match:
+            return str(exc)
+        name = match.group(1)
+        return f"'{name}' is not defined{_a_unit_spelt_like(name)}"
     if isinstance(exc, ZeroDivisionError):
         return "Division by zero"
     if isinstance(exc, SyntaxError):
