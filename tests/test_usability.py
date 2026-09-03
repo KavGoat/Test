@@ -203,11 +203,11 @@ def test_enter_opens_the_next_calculation_line(window):
     window.view._last_scene_pos = QPointF(100, 100)
     press_key(window.view, Qt.Key_unknown, "/")
     first = window.view.editing_item()
-    type_text(window.view, "L = 6 m")
+    type_text(window.view, "L=6m")
     press_key(window.view, Qt.Key_Return)
     second = window.view.editing_item()
     assert second is not first
-    type_text(window.view, "w = 2 kN/m")
+    type_text(window.view, "w=2kN/m")
     window.view.end_item_edit()
     workspace = window.document.workspace
     assert workspace.get("L").to("m").magnitude == pytest.approx(6)
@@ -1198,9 +1198,9 @@ def test_the_multiply_key_types_a_multiply_sign(window):
     window.view._last_scene_pos = QPointF(120, 120)
     press_key(window.view, Qt.Key_unknown, "/")
     block = window.view.editing_item()
-    type_text(window.view, "a := 4 ")
+    type_text(window.view, "a:=4")
     window.symbol_actions["symbol.multiply"].trigger()
-    type_text(window.view, " 3")
+    type_text(window.view, "3")
     window.view.end_item_edit()
     assert "×" in block.source
     assert window.document.workspace.get("a") == 12
@@ -1210,11 +1210,11 @@ def test_the_root_key_brings_its_bracket_and_leaves_room_inside(window):
     window.view._last_scene_pos = QPointF(120, 260)
     press_key(window.view, Qt.Key_unknown, "/")
     block = window.view.editing_item()
-    type_text(window.view, "r := ")
+    type_text(window.view, "r:=")
     window.symbol_actions["symbol.root"].trigger()
     type_text(window.view, "16")
     window.view.end_item_edit()
-    assert block.source == "r := √(16)"
+    assert block.source == "r:=√(16)"
     assert window.document.workspace.get("r") == 4
 
 
@@ -1260,7 +1260,7 @@ def test_a_symbol_bound_to_a_bare_key_still_types_itself(window):
         window.view._last_scene_pos = QPointF(120, 320)
         press_key(window.view, Qt.Key_unknown, "/")
         block = window.view.editing_item()
-        type_text(window.view, "c := 2 ")
+        type_text(window.view, "c:=2")
         assert window.run_typed_binding(";", Qt.NoModifier, QPointF(0, 0))
         window.view.end_item_edit()
         assert "π" in block.source
@@ -2101,9 +2101,9 @@ def test_enter_in_a_block_makes_another_line_not_another_region(window):
     window.select_tool("mathblock")
     drag(window.view, 80, 80, 400, 200)
     block = window.view.editing_item()
-    type_text(window.view, "a := 1")
+    type_text(window.view, "a:=1")
     press_key(window.view, Qt.Key_Return)
-    type_text(window.view, "b := 2")
+    type_text(window.view, "b:=2")
     assert window.view.editing_item() is block
     window.view.end_item_edit()
     assert len([l for l in block.source.split("\n") if l.strip()]) == 2
@@ -2114,7 +2114,7 @@ def test_enter_in_a_line_opens_the_next_line_below(window):
     window.view._last_scene_pos = QPointF(100, 100)
     press_key(window.view, Qt.Key_unknown, "/")
     first = window.view.editing_item()
-    type_text(window.view, "a := 1")
+    type_text(window.view, "a:=1")
     press_key(window.view, Qt.Key_Return)
     assert window.view.editing_item() is not first
     window.view.end_item_edit()
@@ -3070,14 +3070,14 @@ def _typing(window, text, at=(100, 120)):
 
 def test_typing_offers_units_and_the_names_you_have_defined(window):
     _calc(window, "L_span := 6 m", at=(90, 500))
-    _typing(window, "w := 3 kN")
+    _typing(window, "w:=3kN")
     popup = window.view._completions
     assert window.view.completions_showing()
     words = [popup.item(row).text() for row in range(popup.count())]
     assert "kN" in words
     window.view.end_item_edit()
 
-    _typing(window, "x := L_", at=(90, 560))
+    _typing(window, "x:=L_", at=(90, 560))
     words = [window.view._completions.item(row).text()
              for row in range(window.view._completions.count())]
     assert "L_span" in words
@@ -3085,15 +3085,15 @@ def test_typing_offers_units_and_the_names_you_have_defined(window):
 
 
 def test_nothing_is_completed_until_tab_is_pressed(window):
-    block = _typing(window, "w := 3 kN")
-    assert block._editor.toPlainText() == "w := 3 kN"     # exactly what was typed
+    block = _typing(window, "w:=3kN")
+    assert block._editor.toPlainText() == "w:=3kN"        # exactly what was typed
     press_key(window.view, Qt.Key_Tab)
-    assert block._editor.toPlainText().startswith("w := 3 k")
+    assert block._editor.toPlainText().startswith("w:=3k")
     window.view.end_item_edit()
 
 
 def test_the_arrows_move_through_the_list_and_tab_takes_one(window):
-    block = _typing(window, "w := 3 k")
+    block = _typing(window, "w:=3k")
     popup = window.view._completions
     assert window.view.completions_showing()
     first = popup.currentItem().text()
@@ -3101,21 +3101,26 @@ def test_the_arrows_move_through_the_list_and_tab_takes_one(window):
     second = popup.currentItem().text()
     assert second != first
     press_key(window.view, Qt.Key_Tab)
-    assert block._editor.toPlainText() == f"w := 3 {second}"
+    assert block._editor.toPlainText() == f"w:=3{second}"
     window.view.end_item_edit()
 
 
-def test_escape_puts_the_list_away_without_ending_the_edit(window):
-    block = _typing(window, "w := 3 kN")
+def test_escape_takes_the_list_and_the_line_together(window):
+    """One press, all the way out — the list does not get to keep it.
+
+    Escape used to put the list away and stop there. The list is offered
+    unasked and half the time it is not being looked at, so that read as an
+    Escape that did nothing at all.
+    """
+    _typing(window, "w:=3kN")
     assert window.view.completions_showing()
     press_key(window.view, Qt.Key_Escape)
     assert not window.view.completions_showing()
-    assert window.view.editing_item() is block          # still typing
-    window.view.end_item_edit()
+    assert window.view.editing_item() is None
 
 
 def test_a_number_on_its_own_is_not_a_word_to_complete(window):
-    _typing(window, "w := 300")
+    _typing(window, "w:=300")
     assert not window.view.completions_showing()
     window.view.end_item_edit()
 
@@ -4483,20 +4488,25 @@ def test_a_second_word_turns_what_was_typed_into_a_text_box(window):
     assert [type(i).__name__ for i in markups(window)] == ["TextItem"]
 
 
-def test_one_word_and_a_space_waits_to_see_what_follows(window):
-    """"L " is a variable waiting for its ":=", not the start of a sentence."""
-    from calcforge.items.mathitem import MathItem
+def test_one_word_and_a_space_is_a_sentence(window):
+    """There is no waiting to see: a space is a space, and this is prose.
+
+    It used to wait — ``sigma`` on its own could still have been a variable
+    about to get its ``:=`` — and waiting meant the rule could not be
+    predicted. A calculation has no spaces in it, so the first one settles it.
+    """
+    from calcforge.items.text import TextItem
 
     window.select_tool("select")
     press_key(window.view, Qt.Key_unknown, "/")
     type_text(window.view, "sigma")
     press_key(window.view, Qt.Key_Space, " ")
-    assert isinstance(window.view.editing_item(), MathItem)
+    QApplication.processEvents()
+    assert isinstance(window.view.editing_item(), TextItem)
 
-    type_text(window.view, ":= 5MPa")
+    type_text(window.view, "checked by hand")
     window.view.end_item_edit()
-    assert [type(i).__name__ for i in markups(window)] == ["MathItem"]
-    assert window.document.workspace.get("sigma") is not None
+    assert [type(i).__name__ for i in markups(window)] == ["TextItem"]
 
 
 def test_a_lone_word_left_behind_becomes_a_note_after_all(window):
@@ -4513,15 +4523,21 @@ def test_a_lone_word_left_behind_becomes_a_note_after_all(window):
     assert markups(window)[0].text().strip() == "checked"
 
 
-def test_a_space_in_real_maths_is_just_a_space(window):
-    from calcforge.items.mathitem import MathItem
+def test_there_is_no_such_thing_as_a_space_in_maths(window):
+    """Not even with an operator in front of it.
+
+    ``5+`` used to make the space innocent. One rule is easier to live with
+    than a rule with an exception in it, so a space in a line opened by typing
+    turns the line into words wherever it lands.
+    """
+    from calcforge.items.text import TextItem
 
     window.select_tool("select")
     press_key(window.view, Qt.Key_unknown, "/")
     type_text(window.view, "5+")
     press_key(window.view, Qt.Key_Space, " ")
-    item = window.view.editing_item()
-    assert isinstance(item, MathItem)
+    QApplication.processEvents()
+    assert isinstance(window.view.editing_item(), TextItem)
     window.view.end_item_edit()
 
 
@@ -5815,7 +5831,7 @@ def test_typing_a_name_offers_the_documents_own_variables_first(window):
     window.view._last_scene_pos = QPointF(90, 300)
     press_key(window.view, Qt.Key_unknown, "/")
     block = window.view.editing_item()
-    type_text(window.view, "R := sig")
+    type_text(window.view, "R:=sig")
 
     offered = window.view.completion_words("sig")
     assert offered[:2] == ["sigma_c", "sigma_y"]
@@ -5828,7 +5844,7 @@ def test_typing_after_a_number_offers_units_first(window):
 
     window.view._last_scene_pos = QPointF(90, 300)
     press_key(window.view, Qt.Key_unknown, "/")
-    type_text(window.view, "L := 300 m")
+    type_text(window.view, "L:=300m")
     assert window.view.caret_follows_a_number()
     offered = window.view.completion_words("m")
     assert offered[0] in ("m", "mm", "m^2", "m²", "min", "mol")
@@ -5843,7 +5859,7 @@ def test_the_list_shows_up_for_a_name_and_tab_fills_it_in(window):
     window.view._last_scene_pos = QPointF(90, 300)
     press_key(window.view, Qt.Key_unknown, "/")
     block = window.view.editing_item()
-    type_text(window.view, "R := sigma_")
+    type_text(window.view, "R:=sigma_")
     assert window.view.completions_showing()
 
     press_key(window.view, Qt.Key_Tab)
@@ -6248,7 +6264,7 @@ def test_the_two_writing_keys_open_the_same_thing(window):
     window.view._last_scene_pos = QPointF(90, 110)
     press_key(window.view, Qt.Key_unknown, '"')
     assert isinstance(window.view.editing_item(), MathItem)
-    type_text(window.view, "b := 300 mm")
+    type_text(window.view, "b:=300mm")
     window.view.end_item_edit()
 
     window.view._last_scene_pos = QPointF(90, 300)
@@ -7404,3 +7420,371 @@ def test_the_hinge_stand_off_can_be_typed(window):
     start = call.side_point()
     hinge = call.elbow()
     assert abs(hinge.x() - start.x()) < 0.01 or abs(hinge.y() - start.y()) < 0.01
+
+
+# ---------------------------------------------------------------------------
+# Snapping: three kinds, each doing its own job
+# ---------------------------------------------------------------------------
+
+def _quiet_snapping(window):
+    """Every kind of snapping off, so one can be turned on at a time."""
+    settings = window.document.settings
+    settings.snap_to_grid = False
+    settings.snap_to_items = False
+    settings.snap_to_content = False
+    settings.snap_to_alignment = False
+    return settings
+
+
+def test_turning_the_grid_snap_off_actually_stops_it(window):
+    settings = _quiet_snapping(window)
+    odd = QPointF(123.7, 234.3)
+    assert window.view.snap_scene(odd) == odd
+
+    settings.snap_to_grid = True
+    assert window.view.snap_scene(odd) != odd
+
+    settings.snap_to_grid = False
+    assert window.view.snap_scene(odd) == odd
+
+
+def test_the_menu_and_the_page_bar_agree_about_snapping(window):
+    """Two switches for one setting used to disagree with each other."""
+    window.toggle_snap(True)
+    assert window.act_snap.isChecked() and window.status_snap.isChecked()
+
+    window.status_snap.setChecked(False)          # the bar
+    assert not window.document.settings.snap_to_grid
+    assert not window.act_snap.isChecked()        # and the menu follows
+
+    window.act_snap.setChecked(True)              # the menu
+    assert window.document.settings.snap_to_grid
+    assert window.status_snap.isChecked()         # and the bar follows
+
+
+def test_the_middle_of_a_polygon_side_can_be_caught(window):
+    settings = _quiet_snapping(window)
+    settings.snap_to_items = True
+
+    window.select_tool("polygon")
+    for x, y in ((400, 300), (560, 300), (560, 420)):
+        click(window.view, x, y)
+    press_key(window.view, Qt.Key_Return)
+    poly = [i for i in markups(window) if isinstance(i, PolyItem)][-1]
+
+    middle = poly.mapToScene((poly.points[0] + poly.points[1]) / 2)
+    caught = window.view.snap_to_item(middle + QPointF(2, 2))
+    assert caught is not None
+    assert (caught - middle).manhattanLength() < 0.01
+    assert "middle" in window.view._snap_caught
+
+
+def test_a_new_markup_lines_up_with_one_already_drawn(window):
+    """Level with that corner, or directly under it."""
+    settings = _quiet_snapping(window)
+    settings.snap_to_items = True
+    settings.snap_to_alignment = True
+
+    window.select_tool("rect")
+    drag(window.view, 300, 200, 420, 260)
+    box = markups(window)[-1]
+    corner = box.mapToScene(box.local_rect().normalized().topLeft())
+
+    # A long way below it, but almost exactly in line.
+    lined = window.view.snap_scene(QPointF(corner.x() + 2, corner.y() + 300))
+    assert lined.x() == pytest.approx(corner.x(), abs=0.01)
+    assert lined.y() == pytest.approx(corner.y() + 300, abs=0.01)
+    assert window.view._snap_guides
+    assert "in line" in window.view._snap_caught
+
+    settings.snap_to_alignment = False
+    loose = window.view.snap_scene(QPointF(corner.x() + 2, corner.y() + 300))
+    assert loose.x() == pytest.approx(corner.x() + 2, abs=0.01)
+
+
+def test_the_drawing_underneath_offers_corners_but_no_guides(window):
+    """A PDF's line work is full of lines; every one would be a guide."""
+    from calcforge.items.shapes import PolyItem as Poly
+
+    settings = _quiet_snapping(window)
+    settings.snap_to_content = True
+    settings.snap_to_alignment = True
+
+    frame = window.view.frame()
+    line = Poly("polyline", [QPointF(0, 0), QPointF(120, 0), QPointF(120, 90)])
+    line.layer = "Drawing"
+    frame.add_markup(line, QPointF(200, 500))
+    assert window.view.is_drawing(line)
+
+    end = line.mapToScene(line.points[0])
+    caught = window.view.snap_to_item(end + QPointF(2, 2))
+    assert caught is not None and (caught - end).manhattanLength() < 0.01
+
+    # But the middle of one of its segments is not offered.
+    middle = line.mapToScene((line.points[0] + line.points[1]) / 2)
+    assert window.view.snap_to_item(middle + QPointF(2, 2)) is None
+
+    # And it offers no alignment guides at all.
+    across, down = window.view.alignment_lines(frame)
+    assert not across and not down
+
+
+def test_snapping_to_the_drawing_can_be_turned_off_on_its_own(window):
+    from calcforge.items.shapes import PolyItem as Poly
+
+    settings = _quiet_snapping(window)
+    settings.snap_to_items = True
+
+    frame = window.view.frame()
+    line = Poly("polyline", [QPointF(0, 0), QPointF(120, 0)])
+    line.layer = "Drawing"
+    frame.add_markup(line, QPointF(200, 500))
+    end = line.mapToScene(line.points[0])
+
+    settings.snap_to_content = False
+    assert window.view.snap_to_item(end + QPointF(2, 2)) is None
+    settings.snap_to_content = True
+    assert window.view.snap_to_item(end + QPointF(2, 2)) is not None
+
+
+def test_the_first_point_of_a_line_shows_the_snap_marker(window):
+    """It only started marking from the second point onward."""
+    settings = _quiet_snapping(window)
+    settings.snap_to_items = True
+
+    window.select_tool("rect")
+    drag(window.view, 300, 200, 420, 260)
+    box = markups(window)[-1]
+    corner = box.mapToScene(box.local_rect().normalized().bottomRight())
+
+    window.select_tool("line")
+    window.view._snap_marker = None
+    hover(window.view, corner.x() + 2, corner.y() + 2)
+    assert window.view._snap_marker is not None, \
+        "the marker should be there before the first click"
+    assert (window.view._snap_marker - corner).manhattanLength() < 0.01
+
+
+def test_the_three_snaps_are_on_the_view_menu(window):
+    labels = []
+    for entry in window.menuBar().actions():
+        if entry.text() == "&View":
+            labels = [a.text() for a in entry.menu().actions()]
+    assert "Snap to grid" in labels
+    assert "Snap to what is drawn" in labels
+    assert "Snap to the drawing" in labels
+    assert "Snap in line with what is drawn" in labels
+
+
+# ---------------------------------------------------------------------------
+# Turning the view without turning the scrollbars
+# ---------------------------------------------------------------------------
+
+def test_turning_the_view_leaves_the_scrollbars_alone(window):
+    """A vertical bar that scrolls sideways is worse than no rotation."""
+    window.load_sample()
+    window.view.reset_view_rotation()
+    upright = window.view.transform()
+
+    window.view.rotate_view(True)
+    assert window.view.view_turn() == 90
+    # The view's own transform holds the zoom and nothing else: no rotation,
+    # so the scrollbars still point the way they scroll.
+    turned = window.view.transform()
+    assert turned.m12() == pytest.approx(0.0, abs=1e-9)
+    assert turned.m21() == pytest.approx(0.0, abs=1e-9)
+    assert turned.m11() == pytest.approx(turned.m22())
+
+    # The pages are what turned.
+    frame = window.document.pages[0].frame
+    assert frame.rotation() % 360 == 90
+
+    window.view.reset_view_rotation()
+    assert window.document.pages[0].frame.rotation() % 360 == 0
+    assert window.view.transform().m11() == pytest.approx(upright.m11())
+
+
+def test_a_turned_page_still_lies_on_the_canvas_the_right_way_up(window):
+    """Turned, the sheet is wider than it is tall — and still on the canvas."""
+    window.view.reset_view_rotation()
+    frame = window.view.frame()
+    upright = frame.mapRectToScene(frame.page_rect()).normalized()
+    assert upright.height() > upright.width()
+
+    window.view.rotate_view(True)
+    sideways = frame.mapRectToScene(frame.page_rect()).normalized()
+    assert sideways.width() > sideways.height()
+    assert sideways.width() == pytest.approx(upright.height(), abs=0.5)
+    # And it has not wandered off above or to the left of the canvas.
+    assert window.view.scene().sceneRect().contains(sideways.center())
+    window.view.reset_view_rotation()
+
+
+def test_the_pages_stay_in_order_when_the_view_is_turned(window):
+    window.load_sample()
+    window.view.reset_view_rotation()
+
+    def tops():
+        return [p.frame.mapRectToScene(p.frame.page_rect()).top()
+                for p in window.document.pages]
+
+    before = tops()
+    assert before == sorted(before)          # stacked down the canvas
+    window.view.rotate_view(True)
+    after = tops()
+    assert after == sorted(after)            # and still stacked down it
+    window.view.reset_view_rotation()
+
+
+def test_turning_the_view_changes_nothing_about_the_document(window):
+    page = window.current_page()
+    before = (page.setup.width_pt, page.setup.height_pt, page.setup.orientation)
+    window.view.rotate_view(True)
+    try:
+        assert (page.setup.width_pt, page.setup.height_pt,
+                page.setup.orientation) == before
+        assert window.undo_stack.count() == 0
+    finally:
+        window.view.reset_view_rotation()
+
+
+# ---------------------------------------------------------------------------
+# the keys a calculation is typed with
+# ---------------------------------------------------------------------------
+
+def _open_calculation(window, source="", block=False, typed=False):
+    """A calculation on the page with the caret in it."""
+    item = MathItem(source, block=block)
+    item.started_by_typing = typed
+    window.view.frame().add_markup(item)
+    window.view.setFocus()
+    window.view.begin_item_edit(item)
+    return item
+
+
+def test_a_space_is_refused_in_a_calculation(window):
+    """5 kN is not a thing anybody types: the unit goes straight after."""
+    item = _open_calculation(window, typed=False)
+    said = []
+    window.view.statusMessage.connect(said.append)
+    type_text(window.view, "5")
+    press_key(window.view, Qt.Key_Space, " ")
+    assert item._editor.toPlainText() == "5", "the space never landed"
+    assert said and "space" in said[-1].lower(), said
+    window.view.escape_everything()
+
+
+def test_a_space_turns_a_typed_line_into_words(window):
+    """Opened by typing, so it was only maths until it proved otherwise."""
+    item = _open_calculation(window, typed=True)
+    type_text(window.view, "check")
+    press_key(window.view, Qt.Key_Space, " ")
+    QApplication.processEvents()
+    assert item.scene() is None, "the calculation gave way to a text box"
+    box = [i for i in markups(window) if isinstance(i, TextItem)]
+    assert box and box[0].text().startswith("check")
+    window.view.escape_everything()
+
+
+def test_one_escape_leaves_a_calculation_with_the_list_up(window):
+    """The completion list must not swallow the first Escape.
+
+    It is offered unasked and half the time it is not being looked at, so an
+    Escape that only put the list away read as an Escape that did nothing.
+    """
+    _open_calculation(window)
+    type_text(window.view, "kN")
+    assert window.view.completions_showing(), "the list is offering units"
+    press_key(window.view, Qt.Key_Escape)
+    assert not window.view.completions_showing()
+    assert window.view.is_editing() is False, "and out in one press"
+
+
+def test_the_calculation_keys_survive_the_keyboard_wandering_off(window):
+    """A click on a button must not take Backspace with it.
+
+    The focus goes to a toolbar button, a panel, a menu — and the caret is
+    still sitting in the expression. Backspace, "=" and Enter used to go to
+    whatever had been clicked, which had no use for them.
+    """
+    from PySide6.QtGui import QFocusEvent
+
+    item = _open_calculation(window)
+    type_text(window.view, "b:=12")
+    # The keyboard goes to a button on a toolbar. The caret is still in the
+    # expression, and the keys the button has no use for end up at the window,
+    # which is where they are handed back.
+    window.view.focusOutEvent(QFocusEvent(QEvent.FocusOut, Qt.MouseFocusReason))
+    QApplication.processEvents()
+    assert window.view.is_editing(), "the line is still open"
+
+    def to_the_focus(key, text=""):
+        QApplication.sendEvent(window,
+                               QKeyEvent(QEvent.KeyPress, key, Qt.NoModifier, text))
+        QApplication.processEvents()
+
+    to_the_focus(Qt.Key_Backspace)
+    assert item._editor.toPlainText() == "b:=1"
+    to_the_focus(Qt.Key_Equal, "=")
+    assert item._editor.toPlainText() == "b:=1="
+    before = len([i for i in markups(window) if isinstance(i, MathItem)])
+    to_the_focus(Qt.Key_Return, "\r")
+    assert len([i for i in markups(window) if isinstance(i, MathItem)]) == before + 1
+    to_the_focus(Qt.Key_Escape)
+    assert not window.view.is_editing()
+
+
+def test_a_menu_over_a_calculation_does_not_close_it(window):
+    """Right-clicking the expression being typed keeps the caret in it."""
+    item = _open_calculation(window)
+    type_text(window.view, "b:=12")
+    from PySide6.QtGui import QFocusEvent
+
+    window.view.focusOutEvent(QFocusEvent(QEvent.FocusOut, Qt.PopupFocusReason))
+    assert window.view.is_editing(), "the menu did not end the line"
+    assert item._editor.toPlainText() == "b:=12"
+    window.view.escape_everything()
+
+
+def test_starting_another_calculation_settles_the_first(window):
+    """One caret at a time, whatever the keyboard is doing."""
+    first = _open_calculation(window, "a:=1")
+    second = _open_calculation(window, "b:=2")
+    assert window.view._editing_item is second
+    assert first.editing is False
+    window.view.escape_everything()
+
+
+# ---------------------------------------------------------------------------
+# the new-table question
+# ---------------------------------------------------------------------------
+
+def test_the_header_row_box_starts_where_the_table_is(window):
+    """It used to open unticked whatever the table was doing.
+
+    A new table starts with a header row, so the box disagreed with the table
+    in front of it — and pressing OK quietly took the header away. Ticking it
+    off and on again to check left it off, which is the state it had been
+    lying about all along.
+    """
+    from PySide6.QtCore import QPoint
+    from PySide6.QtTest import QTest
+    from calcforge.ui import dialogs
+
+    window.select_tool("table")
+    drag(window.view, 100, 100, 380, 220)
+    table = window.view.active_table
+    assert table is not None and table.sheet.header_row, "a table starts with one"
+    window.view.deactivate_table()
+
+    dialog = dialogs.TableSizeDialog(table.sheet.rows, table.sheet.cols,
+                                     table.sheet.header_row, window)
+    assert dialog.header.isChecked(), "the box says what the table says"
+    assert dialog.values()[2] is True
+
+    where = QPoint(8, dialog.header.height() // 2)
+    QTest.mouseClick(dialog.header, Qt.LeftButton, Qt.NoModifier, where)
+    assert dialog.values()[2] is False
+    QTest.mouseClick(dialog.header, Qt.LeftButton, Qt.NoModifier, where)
+    assert dialog.values()[2] is True, "off and on again is back where it was"
+    dialog.deleteLater()

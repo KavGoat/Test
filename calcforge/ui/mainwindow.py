@@ -52,7 +52,7 @@ from .shortcuts import COMMAND, INSERT, SYMBOL, TOOL, ShortcutManager
 from . import toolsets
 from .tools import CATEGORIES, NONE, TOOL_MAP, TOOLS, tools_in
 from .view import SIZED_SHAPES
-from .view import PageView
+from .view import PageView, typing_somewhere_else
 from .widgets import ColorButton, keep_the_wheel_with_the_scroller
 
 APP_NAME = "CalcForge"
@@ -94,7 +94,8 @@ _SHORTCUT_GROUPS = {
     "zoom_in": "View", "zoom_out": "View", "zoom_sel": "View",
     "fit_page": "View", "fit_width": "View", "actual_size": "View",
     "prev_page": "View", "next_page": "View", "grid": "View", "snap": "View",
-    "snap_items": "View", "margins": "View", "dark": "View",
+    "snap_items": "View", "snap_content": "View", "snap_alignment": "View",
+    "margins": "View", "dark": "View",
     "turn_view_cw": "View", "turn_view_acw": "View",
     "turn_view_reset": "View",
     "group": "Markup", "ungroup": "Markup", "autosize": "Markup",
@@ -429,12 +430,24 @@ class MainWindow(QMainWindow):
         self._act("snap", "Snap to grid", self.toggle_snap, "", checkable=True)
         self._act("snap_items", "Snap to what is drawn", self.toggle_item_snap, "",
                   checkable=True,
-                  tip="Catch corners, centres and line ends of markups already "
-                      "on the page")
+                  tip="Catch corners, centres, side middles and line ends of "
+                      "the markups already on the page")
+        self._act("snap_content", "Snap to the drawing", self.toggle_content_snap,
+                  "", checkable=True,
+                  tip="Catch the corners and ends of the line work that came "
+                      "in on the page — and only those, because a drawing has "
+                      "thousands of them")
+        self._act("snap_alignment", "Snap in line with what is drawn",
+                  self.toggle_alignment_snap, "", checkable=True,
+                  tip="Line a new markup up level with, or directly under, a "
+                      "point on one already drawn. Never off the drawing "
+                      "underneath — every line on that would offer a guide")
         self._act("dark", "Dark theme", self.toggle_theme, "", checkable=True)
         self._act("margins", "Show margins", self.toggle_margins, "", checkable=True)
         self.act_margins.setChecked(True)
         self.act_snap_items.setChecked(True)
+        self.act_snap_content.setChecked(True)
+        self.act_snap_alignment.setChecked(True)
         self._act("sticky", "Keep the tool active", self.toggle_sticky, "", "pin",
                   checkable=True,
                   tip="Stay on the current tool after drawing instead of returning to Select")
@@ -762,7 +775,8 @@ class MainWindow(QMainWindow):
                        self.act_fit_width, self.act_zoom_sel, None,
                        self.act_turn_view_cw, self.act_turn_view_acw,
                        self.act_turn_view_reset, None, self.act_grid,
-                       self.act_snap, self.act_snap_items, self.act_margins,
+                       self.act_snap, self.act_snap_items, self.act_snap_content,
+                       self.act_snap_alignment, self.act_margins,
                        self.act_dark, None,
                        self.act_prev_page,
                        self.act_next_page):
@@ -1096,6 +1110,18 @@ class MainWindow(QMainWindow):
             self.view.escape_everything()
             event.accept()
             return
+        # And the same for the rest of a calculation's keys. A click on a
+        # toolbar button or a panel takes the keyboard with it while the caret
+        # is still in the expression, and from there Backspace, "=" and Enter
+        # went to a button that has no use for them: keys that had apparently
+        # stopped working. A key nothing else wanted goes back to the
+        # calculation — unless somebody is typing in a field, whose Backspace
+        # is its own.
+        if self.view.is_editing() and not typing_somewhere_else():
+            self.view.setFocus(Qt.OtherFocusReason)
+            self.view.keyPressEvent(event)
+            if event.isAccepted():
+                return
         super().keyPressEvent(event)
 
     def closeEvent(self, event) -> None:
@@ -1880,11 +1906,10 @@ class MainWindow(QMainWindow):
         self.status_size.setToolTip(
             f"{setup.size_name}, {setup.orientation} — {wide:.0f} × {tall:.0f} mm\n"
             f"Margins {room}\nClick to change the paper or the margins")
-        for button, on in ((self.status_grid, page.shows_a_grid(self.document.settings)),
-                           (self.status_snap, self.document.settings.snap_to_grid)):
-            button.blockSignals(True)
-            button.setChecked(bool(on))
-            button.blockSignals(False)
+        self.status_grid.blockSignals(True)
+        self.status_grid.setChecked(bool(page.shows_a_grid(self.document.settings)))
+        self.status_grid.blockSignals(False)
+        self._say_snap_state()
 
     # ==================================================================
     # tools & style
@@ -2152,7 +2177,8 @@ class MainWindow(QMainWindow):
         """
         if not self.interactive_prompts:
             return
-        dialog = dialogs.TableSizeDialog(table.sheet.rows, table.sheet.cols, self)
+        dialog = dialogs.TableSizeDialog(table.sheet.rows, table.sheet.cols,
+                                         table.sheet.header_row, self)
         if dialog.exec() != dialogs.QDialog.Accepted:
             return
         rows, cols, header = dialog.values()
@@ -3922,10 +3948,44 @@ class MainWindow(QMainWindow):
         self._refresh_all_scenes()
 
     def toggle_snap(self, on: bool) -> None:
-        self.document.settings.snap_to_grid = on
+        """Snap to the page grid, or stop.
+
+        Two things switch this — the View menu and the button on the page bar
+        — and until now neither told the other. Turn it off on the bar and the
+        menu still read "on"; turn it off in the menu and the bar still looked
+        armed. Whichever is used, both now say the same thing, which is the
+        whole of "the toggle isn't being respected".
+        """
+        self.document.settings.snap_to_grid = bool(on)
+        self._say_snap_state()
+
+    def _say_snap_state(self) -> None:
+        """Put every control that shows a snap setting back in step."""
+        settings = self.document.settings
+        for widget, value in (
+                (getattr(self, "act_snap", None), settings.snap_to_grid),
+                (getattr(self, "status_snap", None), settings.snap_to_grid),
+                (getattr(self, "act_snap_items", None), settings.snap_to_items),
+                (getattr(self, "act_snap_content", None), settings.snap_to_content),
+                (getattr(self, "act_snap_alignment", None),
+                 settings.snap_to_alignment)):
+            if widget is None or widget.isChecked() == bool(value):
+                continue
+            widget.blockSignals(True)
+            widget.setChecked(bool(value))
+            widget.blockSignals(False)
 
     def toggle_item_snap(self, on: bool) -> None:
-        self.document.settings.snap_to_items = on
+        self.document.settings.snap_to_items = bool(on)
+        self._say_snap_state()
+
+    def toggle_content_snap(self, on: bool) -> None:
+        self.document.settings.snap_to_content = bool(on)
+        self._say_snap_state()
+
+    def toggle_alignment_snap(self, on: bool) -> None:
+        self.document.settings.snap_to_alignment = bool(on)
+        self._say_snap_state()
 
     def toggle_margins(self, on: bool) -> None:
         self.document.settings.show_margins = on
@@ -4440,6 +4500,9 @@ class MainWindow(QMainWindow):
             self.act_grid.setChecked(self.document.settings.show_grid)
             self.act_snap.setChecked(self.document.settings.snap_to_grid)
             self.act_snap_items.setChecked(self.document.settings.snap_to_items)
+            self.act_snap_content.setChecked(self.document.settings.snap_to_content)
+            self.act_snap_alignment.setChecked(
+                self.document.settings.snap_to_alignment)
             self.act_margins.setChecked(self.document.settings.show_margins)
             self._refresh_all_scenes()
             self.update_title()

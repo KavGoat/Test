@@ -135,6 +135,9 @@ class PageView(QGraphicsView):
         self._snap_marker: Optional[QPointF] = None
         # What that marker is sitting on, in words.
         self._snap_caught = ""
+        # The levels and uprights the pointer is currently lined up with,
+        # drawn right across the page so it is obvious what it caught.
+        self._snap_guides: list = []
         # Held while a tool set's tool is in hand: something to place, or
         # properties for the next thing drawn.
         self._pending_stamp = None
@@ -376,9 +379,14 @@ class PageView(QGraphicsView):
         self.zoomChanged.emit(factor)
 
     def apply_view_transform(self) -> None:
-        """Set the view's transform from the zoom and the turn together."""
-        self.setTransform(QTransform().rotate(self._view_turn)
-                          .scale(self._zoom, self._zoom))
+        """Set the view's transform. Only the zoom lives here.
+
+        The turn does not: rotating the view rotates its scrollbars with it,
+        so the vertical bar starts moving the page sideways. The pages are
+        turned on the canvas instead, which leaves the canvas the shape it
+        always was and the scrollbars pointing the way they scroll.
+        """
+        self.setTransform(QTransform().scale(self._zoom, self._zoom))
 
     # -- turning the page on screen ----------------------------------------
     def view_turn(self) -> int:
@@ -393,18 +401,25 @@ class PageView(QGraphicsView):
         not what prints. It is not on the undo stack for the same reason.
         """
         self._view_turn = (self._view_turn + (90 if clockwise else -90)) % 360
-        self.apply_view_transform()
+        self.turn_the_pages()
         self.fit_page()
         self.statusMessage.emit(
             "View turned back upright" if not self._view_turn
             else f"View turned {self._view_turn}° — the page itself is unchanged")
         return self._view_turn
 
+    def turn_the_pages(self) -> None:
+        """Lay the pages out at the reading angle they are being viewed at."""
+        scene = self.scene()
+        if scene is not None and hasattr(scene, "set_reading_turn"):
+            scene.set_reading_turn(self._view_turn)
+        self.viewport().update()
+
     def reset_view_rotation(self) -> None:
         if not self._view_turn:
             return
         self._view_turn = 0
-        self.apply_view_transform()
+        self.turn_the_pages()
         self.fit_page()
         self.statusMessage.emit("View turned back upright")
 
@@ -425,12 +440,8 @@ class PageView(QGraphicsView):
             return
         padded = rect.adjusted(-12, -12, 12, 12)
         available = self.viewport().rect()
-        across, down = padded.width(), padded.height()
-        if self._view_turn % 180:
-            # Turned on its side, the page needs the window's height for its
-            # width and the other way about.
-            across, down = down, across
-        self.set_zoom(min(available.width() / across, available.height() / down))
+        self.set_zoom(min(available.width() / padded.width(),
+                          available.height() / padded.height()))
         self.centerOn(rect.center())
 
     def fit_width(self) -> None:
@@ -570,24 +581,73 @@ class PageView(QGraphicsView):
         return QPointF(round(point.x() / step) * step, round(point.y() / step) * step)
 
     def snap_scene(self, scene_pos: QPointF, frame=None, ignore=()) -> QPointF:
-        """Snap a canvas point to what is already drawn, then to the grid.
+        """Snap a canvas point to what is drawn, then to a line-up, then to
+        the grid.
 
-        A corner of something beats the grid: lining a markup up with the
-        thing it is about is what the pointer is usually trying to do. The
-        grid belongs to the page, not to the canvas, so a point is taken into
-        page coordinates to be snapped and brought back again.
+        In that order, because that is the order they are worth. A corner of
+        something beats everything: lining a markup up with the thing it is
+        about is what the pointer is usually trying to do. Level with a corner
+        comes next. The grid is the last resort, and only when it is switched
+        on — it used to be applied whatever the switch said, because the two
+        halves of this were doing their own thing.
         """
         if not preferences.current().snap_while_drawing or self.snapping_off_now():
-            self._snap_marker = None
-            self._snap_caught = ""
+            self.forget_snap()
             return QPointF(scene_pos)
         caught = self.snap_to_item(scene_pos, ignore)
         if caught is not None:
             return caught
         frame = frame or self.frame_at(scene_pos) or self.frame()
+        lined_up = self.snap_to_alignment(scene_pos, frame, ignore)
+        if lined_up is not None:
+            return lined_up
         if frame is None:
             return self.snap(scene_pos)
         return frame.mapToScene(self.snap(frame.mapFromScene(scene_pos)))
+
+    def forget_snap(self) -> None:
+        """Nothing is caught: take the marker off."""
+        self._snap_marker = None
+        self._snap_caught = ""
+        self._snap_guides = []
+
+    def snap_to_alignment(self, scene_pos: QPointF, frame,
+                          ignore=()) -> Optional[QPointF]:
+        """Line the pointer up with a level or an upright already on the page.
+
+        Not a point to land on — a line to sit on. Level with the top of that
+        rectangle, or directly under the end of that line. The guide is drawn
+        so it is obvious which one has been caught.
+        """
+        if frame is None:
+            return None
+        across, down = self.alignment_lines(frame, ignore)
+        if not across and not down:
+            return None
+        reach = SNAP_REACH / max(self._zoom, 0.05)
+        x, y = scene_pos.x(), scene_pos.y()
+        guides: list = []
+        nearest_y = min((value for value in across), key=lambda v: abs(v - y),
+                        default=None)
+        nearest_x = min((value for value in down), key=lambda v: abs(v - x),
+                        default=None)
+        if nearest_y is not None and abs(nearest_y - y) <= reach:
+            y = nearest_y
+            guides.append(("across", nearest_y))
+        if nearest_x is not None and abs(nearest_x - x) <= reach:
+            x = nearest_x
+            guides.append(("down", nearest_x))
+        if not guides:
+            return None
+        self._snap_marker = QPointF(x, y)
+        self._snap_guides = guides
+        caught = ("level and in line with what is drawn" if len(guides) > 1
+                  else "level with what is drawn" if guides[0][0] == "across"
+                  else "in line with what is drawn")
+        if caught != self._snap_caught:
+            self.statusMessage.emit(f"Snapped {caught}")
+        self._snap_caught = caught
+        return QPointF(x, y)
 
     def snap_targets(self, frame, ignore=()) -> list:
         """The points on a page worth lining something up with.
@@ -610,23 +670,47 @@ class PageView(QGraphicsView):
         return [point for point, _ in PageView.named_points_of(item)]
 
     @staticmethod
-    def named_points_of(item) -> list:
-        """The same points, each with a word for what it is.
+    def is_drawing(item) -> bool:
+        """Whether this came in on a PDF page rather than being drawn here.
 
-        A snap that says "corner" or "middle" is a snap you can trust. One
-        that only draws a little square leaves you looking at the drawing
-        trying to work out what it caught.
+        The line work read out of an imported drawing goes on its own layer.
+        It is worth catching hold of — the end of a beam, the corner of a
+        column — but it is not worth lining new markups up against, because
+        a drawing is already full of lines and every one of them would offer
+        a guide.
+        """
+        return getattr(item, "layer", "") == "Drawing"
+
+    @staticmethod
+    def named_points_of(item) -> list:
+        """The points on one markup worth catching, each with a word for it.
+
+        Every corner and every end, and the middle of every side — of a box,
+        and of each side of a drawn shape too. A polygon's edge midpoints
+        used to be missing entirely, which is why the middle of a polygon
+        side could not be caught the way the middle of a rectangle side can.
         """
         vertices = getattr(item, "points", None)
         if vertices:
             named = []
             last = len(vertices) - 1
+            closed = bool(getattr(item, "closed", False))
             for index, point in enumerate(vertices):
-                if index in (0, last) and not getattr(item, "closed", False):
+                if index in (0, last) and not closed:
                     what = "end"
                 else:
                     what = "point"
                 named.append((item.mapToScene(point), what))
+            # The middle of each side. A run of freehand ink has hundreds of
+            # points and no sides anybody aims at, so it is left out.
+            if len(vertices) <= 60 and not getattr(item, "smooth", False):
+                sides = len(vertices) if closed else len(vertices) - 1
+                for index in range(max(sides, 0)):
+                    start = vertices[index]
+                    end = vertices[(index + 1) % len(vertices)]
+                    middle = QPointF((start.x() + end.x()) / 2,
+                                     (start.y() + end.y()) / 2)
+                    named.append((item.mapToScene(middle), "middle"))
             return named
         rect = item.local_rect().normalized()
         if rect.isEmpty():
@@ -640,16 +724,73 @@ class PageView(QGraphicsView):
                    (QPointF(rect.right(), rect.center().y()), "middle"))
         return [(item.mapToScene(point), what) for point, what in corners]
 
+    @staticmethod
+    def content_points_of(item) -> list:
+        """What is worth catching on an imported drawing: corners and ends.
+
+        Only those. A drawing's own line work is what a measurement is taken
+        off, so its ends and its corners matter and the middles of its
+        segments do not — there are thousands of them and none of them mean
+        anything.
+        """
+        vertices = getattr(item, "points", None)
+        if vertices:
+            last = len(vertices) - 1
+            closed = bool(getattr(item, "closed", False))
+            named = []
+            for index, point in enumerate(vertices):
+                what = "end" if (index in (0, last) and not closed) else "corner"
+                named.append((item.mapToScene(point), what))
+            return named
+        rect = item.local_rect().normalized()
+        if rect.isEmpty():
+            return []
+        return [(item.mapToScene(corner), "corner") for corner in
+                (rect.topLeft(), rect.topRight(),
+                 rect.bottomLeft(), rect.bottomRight())]
+
     def named_snap_targets(self, frame, ignore=()) -> list:
-        """Every point worth lining up with, and what each of them is."""
+        """Every point worth catching hold of, and what each of them is.
+
+        Two sources, each with its own switch: the markups drawn here, and
+        the line work that came in on the page. Either can be turned off
+        without touching the other.
+        """
+        settings = self.document().settings
         found: list = []
         skip = set(ignore)
         for item in frame.markups():
             if item in skip or not item.isVisible():
                 continue
-            for point, what in self.named_points_of(item):
-                found.append((point, what, item))
+            if self.is_drawing(item):
+                if settings.snap_to_content:
+                    for point, what in self.content_points_of(item):
+                        found.append((point, what, item))
+            elif settings.snap_to_items:
+                for point, what in self.named_points_of(item):
+                    found.append((point, what, item))
         return found
+
+    def alignment_lines(self, frame, ignore=()) -> tuple:
+        """The levels and the uprights worth lining a new markup up with.
+
+        Only from what has been drawn here. An imported drawing is left out:
+        it is already full of lines, and every one of them would offer a
+        guide, which is no guide at all.
+        """
+        settings = self.document().settings
+        if not (settings.snap_to_items and settings.snap_to_alignment):
+            return ([], [])
+        across: list = []
+        down: list = []
+        skip = set(ignore)
+        for item in frame.markups():
+            if item in skip or not item.isVisible() or self.is_drawing(item):
+                continue
+            for point, _what in self.named_points_of(item):
+                across.append(point.y())
+                down.append(point.x())
+        return (across, down)
 
     def snap_moved(self, items: list, delta: QPointF) -> QPointF:
         """Nudge a move so a corner of what is dragged lands on a drawn point."""
@@ -684,8 +825,7 @@ class PageView(QGraphicsView):
         """The nearest interesting point of another markup, if one is close."""
         self._snap_marker = None
         self._snap_caught = ""
-        if not self.document().settings.snap_to_items:
-            return None
+        self._snap_guides = []
         frame = self.frame_at(scene_pos) or self.frame()
         if frame is None:
             return None
@@ -700,8 +840,13 @@ class PageView(QGraphicsView):
         if best is not None:
             point, what, item = best
             self._snap_marker = QPointF(point)
-            self._snap_caught = f"{what} of {item.display_name().lower()}"
-            self.statusMessage.emit(f"Snapped to the {self._snap_caught}")
+            caught = f"{what} of {item.display_name().lower()}"
+            if caught != self._snap_caught:
+                # Only when it changes: the pointer crossing the same corner
+                # a hundred times should not write the same line a hundred
+                # times over whatever else the status bar was saying.
+                self.statusMessage.emit(f"Snapped to the {caught}")
+            self._snap_caught = caught
             return QPointF(point)
         return None
 
@@ -1157,6 +1302,14 @@ class PageView(QGraphicsView):
         if (self._pending_anchor is not None or self._pending_stamp is not None
                 or self.current_tool().mode == CLICK):
             self.viewport().update()          # the leader, or the preview, follows
+
+        if self._mode == "idle" and self.current_tool().mode not in (NONE, ERASE):
+            # Nothing is being drawn yet, so nothing calls the snapping code —
+            # which is why the first point of a line never showed a marker and
+            # every point after it did. Working it out on the way past costs
+            # nothing and means the marker is there from the first click.
+            self.snap_scene(scene_pos)
+            self.viewport().update()
 
         if self._mode == "erase":
             self.erase_at(scene_pos)
@@ -2392,6 +2545,11 @@ class PageView(QGraphicsView):
     def begin_item_edit(self, item) -> None:
         if self._mode == "lasso":
             self.cancel_marquee()
+        if self._editing_item is not None and self._editing_item is not item:
+            # One caret at a time. Opening a second region without settling the
+            # first left the first one's editor on the page, still showing a
+            # caret, with nothing able to close it.
+            self.end_item_edit()
         # The region may be on a page other than the one on screen — somebody
         # can scroll while a calculation is open — so its own page is what has
         # to be recorded, not whichever the chrome calls current.
@@ -2401,6 +2559,7 @@ class PageView(QGraphicsView):
         if isinstance(item, MathItem) and not getattr(item, "_enter_wired", False):
             item.enterPressed.connect(self._open_next_line)
             item.wantsWords.connect(lambda i=item: self.turn_into_words(i))
+            item.saySomething.connect(self.statusMessage)
             item._enter_wired = True
         item.begin_edit()
         self._editing_item = item
@@ -2495,7 +2654,17 @@ class PageView(QGraphicsView):
             start -= 1
         word = text[start:at]
         if word and word[0].isdigit():
-            return "", at            # part of a number, not a name
+            # A unit written straight after its number — 300MPa, which is the
+            # only way it can be written now that a calculation takes no
+            # spaces. The number is not a name and offers nothing; the letters
+            # after it are the unit being typed.
+            letters = 0
+            while letters < len(word) and (word[letters].isdigit()
+                                           or word[letters] == "."):
+                letters += 1
+            if letters >= len(word):
+                return "", at        # all number, nothing to complete
+            return word[letters:], start + letters
         return word, start
 
     def completion_words(self, prefix: str, units_first: Optional[bool] = None) -> list[str]:
@@ -3239,6 +3408,8 @@ class PageView(QGraphicsView):
             self._draw_pending_preview(painter)
         else:
             self._draw_tool_preview(painter)
+        if self._snap_guides:
+            self._draw_snap_guides(painter, rect)
         if self._snap_marker is not None:
             self._draw_snap_marker(painter, self._snap_marker)
         if self._pending_anchor is not None:
@@ -3522,6 +3693,28 @@ class PageView(QGraphicsView):
         width, height = self._default_size(CalloutItem())
         return QRectF(at.x(), at.y(), width, height)
 
+    def _draw_snap_guides(self, painter: QPainter, rect: QRectF) -> None:
+        """The level or the upright the pointer has lined itself up with.
+
+        Drawn right across the view, the way every drawing program draws
+        them, because a short stub near the pointer does not say *what* it
+        has lined up with.
+        """
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing, False)
+        pen = QPen(QColor(232, 89, 12, 150))
+        pen.setWidthF(0.8 / max(self._zoom, 0.05))
+        pen.setStyle(Qt.DashLine)
+        painter.setPen(pen)
+        for which, value in self._snap_guides:
+            if which == "across":
+                painter.drawLine(QPointF(rect.left(), value),
+                                 QPointF(rect.right(), value))
+            else:
+                painter.drawLine(QPointF(value, rect.top()),
+                                 QPointF(value, rect.bottom()))
+        painter.restore()
+
     def _draw_snap_marker(self, painter: QPainter, point: QPointF) -> None:
         """Where the pointer has caught hold.
 
@@ -3569,8 +3762,15 @@ class PageView(QGraphicsView):
         Half-placed call-outs, a held stamp or look, a shape being clicked
         out: all of them need a key press to finish or to cancel, and all of
         them are stranded if the keyboard is somewhere else.
+
+        An open calculation counts too. A click on a toolbar button or a panel
+        takes the keyboard with it, and the caret is still sitting in the
+        expression — so Backspace, Escape, "=" and Enter all went to whatever
+        was clicked and looked like keys that had simply stopped working.
         """
-        return (self._pending_anchor is not None
+        return (self._editing_item is not None
+                or self._cell_editor is not None
+                or self._pending_anchor is not None
                 or self._pending_cloud is not None
                 or self._pending_stamp is not None
                 or self._pending_properties is not None
@@ -3606,6 +3806,26 @@ class PageView(QGraphicsView):
                 if event.isAccepted():
                     return True
         return super().event(event)
+
+    def give_the_keys_back_to_the_caret(self) -> None:
+        """Point the scene's focus at whatever is being typed into.
+
+        A click on a toolbar button takes the keyboard away from the page, and
+        Qt drops the scene's focus with it. The keys the button has no use for
+        come back here — and without this they would arrive with nothing in the
+        scene to receive them, which is how Backspace, "=" and Enter came to
+        look like keys that had stopped working.
+        """
+        item = self._editing_item
+        editor = getattr(item, "_editor", None) if item is not None else None
+        if editor is None or editor.scene() is not self.scene():
+            return
+        scene = self.scene()
+        if scene is None or scene.focusItem() is editor:
+            return
+        if not scene.hasFocus():
+            scene.setFocus(Qt.OtherFocusReason)
+        editor.setFocus(Qt.OtherFocusReason)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         key = event.key()
@@ -3643,10 +3863,12 @@ class PageView(QGraphicsView):
             # The completion list takes the keys that drive it, and nothing
             # else: everything it does not use goes on to the text.
             if self.completions_showing():
-                if key == Qt.Key_Escape:
-                    self.hide_completions()
-                    event.accept()
-                    return
+                # Escape is deliberately not in this list. It used to put the
+                # list away and stop there, which meant the first Escape out of
+                # a calculation did nothing anybody could see — the list is
+                # small, it is offered unasked, and half the time it is not
+                # even being looked at. Escape means the same thing everywhere:
+                # out, in one press, list and all.
                 if key in (Qt.Key_Tab, Qt.Key_Backtab):
                     if self.accept_completion():
                         event.accept()
@@ -3663,6 +3885,7 @@ class PageView(QGraphicsView):
                     return
 
         if self._editing_item is not None or self._cell_editor is not None:
+            self.give_the_keys_back_to_the_caret()
             if key == Qt.Key_Escape:
                 # All the way back, not just out of the words: this branch
                 # used to end the edit and stop there, which left the markup
@@ -3920,8 +4143,20 @@ class PageView(QGraphicsView):
         super().keyReleaseEvent(event)
 
     def focusOutEvent(self, event) -> None:
-        if getattr(self, "_editing_item", None) is not None:
-            self.end_item_edit()
+        """Losing the keyboard is not the same as finishing the line.
+
+        This used to close whatever was being typed the moment the focus went
+        anywhere else, and the focus goes somewhere else for all sorts of
+        reasons that have nothing to do with being finished: a right-click menu
+        opening over the very expression being edited, a click on a toolbar
+        button, another window coming forward. The caret vanished, and from
+        then on Backspace, Escape, "=" and Enter all went somewhere that had no
+        use for them — keys that had apparently stopped working.
+
+        So the line stays open. It is finished by the things that mean
+        finished: clicking somewhere else on the page, Escape, turning the
+        page, or starting to type into something else.
+        """
         # A key held when the focus left is not held any more as far as this
         # view can tell, and believing otherwise leaves snapping off and the
         # pointer promising something it will not do.

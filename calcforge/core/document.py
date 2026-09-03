@@ -289,6 +289,15 @@ class DocumentSettings:
     snap_to_grid: bool = False
     # Pick up the corners, centres and ends of what is already drawn.
     snap_to_items: bool = True
+    # Snapping to the drawing that came in on a PDF page, rather than to the
+    # markups drawn on top of it. Kept apart because they want different
+    # things: a corner of a beam is worth catching exactly, and the alignment
+    # guides that help when laying markups out only get in the way over a
+    # drawing that is already full of lines.
+    snap_to_content: bool = True
+    # Lining a markup up with the ones already drawn — level with this, in
+    # line with that. Only for what has been drawn here, never for the PDF.
+    snap_to_alignment: bool = True
     grid_mm: float = 5.0
     show_margins: bool = True
     math_font: str = "Cambria Math"

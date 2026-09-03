@@ -305,7 +305,7 @@ class PdfImportDialog(QDialog):
 class TableSizeDialog(QDialog):
     """How many rows and columns a new table starts with."""
 
-    def __init__(self, rows: int, cols: int, parent=None):
+    def __init__(self, rows: int, cols: int, header: bool = True, parent=None):
         super().__init__(parent)
         self.setWindowTitle("New table")
         layout = QVBoxLayout(self)
@@ -323,6 +323,11 @@ class TableSizeDialog(QDialog):
         self.cols.setValue(cols)
         form.addRow("Columns", self.cols)
         self.header = QCheckBox("First row is a header")
+        # Ticked or not according to the table itself. It used to open
+        # unticked whatever the table was doing, and a new table starts with a
+        # header — so the box disagreed with the table in front of it, and
+        # pressing OK quietly took the header away.
+        self.header.setChecked(bool(header))
         form.addRow(self.header)
         layout.addLayout(form)
         layout.addWidget(_buttons(self))

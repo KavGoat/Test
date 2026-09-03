@@ -825,10 +825,16 @@ def test_quote_starts_writing_where_the_cursor_is(window):
 
 
 def test_slash_starts_a_calculation(window):
+    """And it stays a calculation, because there is not a space in it.
+
+    A calculation never contains a space — a unit goes straight after its
+    number — so ``q=5kPa`` is what somebody types, and what used to be written
+    here as ``q = 5 kPa`` is now a sentence and turns into one.
+    """
     _type_on_canvas(window, "/")
     item = editing_item(window)
     assert isinstance(item, MathItem)
-    item._editor.setPlainText("q = 5 kPa")
+    item._editor.setPlainText("q=5kPa")
     window.view.end_item_edit()
     assert window.document.workspace.get("q").to("kPa").magnitude == pytest.approx(5)
 

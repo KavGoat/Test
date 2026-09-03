@@ -114,7 +114,7 @@ Checking this against your raw messages turned up a few places where either I go
 - [ ] Rounded-corner and convert-to-arc are available **in the right-click context menu**, offered on any shape with corners/segments (rectangle, polygon, polyline, cloud, etc.) — currently not visible/accessible anywhere, needs to be built and exposed. Rounded corners get a radius handle; arc segments get **dual handles** — one to adjust arc length, one to adjust arc angle — matching Bluebeam's behaviour (115, 125, 126, reference photo in msg 126, still reported missing in 149)
 - [ ] Rectangles specifically should support right-click add/remove control point; the moment a rectangle's corner is moved such that it's no longer axis-aligned/rectangular, it should automatically convert into a general polygon so it keeps behaving correctly (115, **new** detail from screenshots: "rectangle should have control point add/remove too, which becomes a polygon automatically if not rectangular")
 - [ ] Add/delete control points generally: Shift+hover over an existing point deletes it; Shift+hover over a mid-segment adds a new point there. Ctrl+hover over a point converts it to rounded; Ctrl+hover over a segment converts it to an arc — **(see contradiction #4 above)** this is a second, hover-based trigger for the same rounded/arc conversion described in the item above via the right-click menu; treating both as valid parallel shortcuts for now, confirm if only one should exist (125)
-- [ ] **(new)** Bug: snapping to the *centre/midpoint of a polygon edge* does not work — should snap the same way rectangle/line midpoints do
+- [x] **(new)** Bug: snapping to the *centre/midpoint of a polygon edge* does not work — should snap the same way rectangle/line midpoints do
 
 ## 9. Callouts, text boxes, dimensions
 
@@ -144,13 +144,13 @@ Checking this against your raw messages turned up a few places where either I go
 
 ## 11. Snapping, grid, alignment
 
-- [ ] Two distinct snap types needed: (1) **snap to grid** — the regular page grid; (2) **snap to content** — snaps only to flattened/PDF line-item corners and endpoints (existing drawing content), *not* to generic vertical/horizontal alignment guides (29, **new** clarification: "snap to content... only snap to pdf line item corners and ends, and the vertical/horizontal line snapping is not needed" for that mode specifically)
-- [ ] Separately, snapping to **items you've drawn** (your own markups, not the underlying PDF) should include snapping to vertical/horizontal alignment based on the points of whatever else is already drawn on the page **(new)**
+- [x] Two distinct snap types needed: (1) **snap to grid** — the regular page grid; (2) **snap to content** — snaps only to flattened/PDF line-item corners and endpoints (existing drawing content), *not* to generic vertical/horizontal alignment guides (29, **new** clarification: "snap to content... only snap to pdf line item corners and ends, and the vertical/horizontal line snapping is not needed" for that mode specifically)
+- [x] Separately, snapping to **items you've drawn** (your own markups, not the underlying PDF) should include snapping to vertical/horizontal alignment based on the points of whatever else is already drawn on the page **(new)**
 - [x] Holding Ctrl disables all snapping for as long as it's held, across drawing, calibration, and measuring tools alike (29, 136)
-- [ ] **(new)** Bug: turning "snap to grid" off doesn't actually stop points from snapping to the grid — the toggle isn't being respected
+- [x] **(new)** Bug: turning "snap to grid" off doesn't actually stop points from snapping to the grid — the toggle isn't being respected
 - [x] Fix: no visual indicator shows when you're actively snapping to another markup/existing item — there should be a highlight or marker the moment a snap engages (112)
-- [ ] Fix: snapping doesn't work on the very *first* point placed while drawing a new line — it only starts working from the second point onward; it should be active from the first click (113, **new**: "when drawing something the first point does not show the snap indicator, only the point after shows it — show it for all points whenever snap is on")
-- [ ] **(new)** The live placement preview (the ghost shape shown before you click to commit) must use the exact same snapping logic as the final placed geometry — right now they can disagree
+- [x] Fix: snapping doesn't work on the very *first* point placed while drawing a new line — it only starts working from the second point onward; it should be active from the first click (113, **new**: "when drawing something the first point does not show the snap indicator, only the point after shows it — show it for all points whenever snap is on")
+- [x] **(new)** The live placement preview (the ghost shape shown before you click to commit) must use the exact same snapping logic as the final placed geometry — right now they can disagree
 - [x] New markups/drawing tools should snap to both the grid and existing items while being drawn, generally (72)
 
 ## 12. Move, duplicate, group

@@ -46,15 +46,27 @@ class _MathEditor(QGraphicsTextItem):
         """
         return
 
-    # Nothing in maths needs a space: a unit goes straight after its number,
-    # and an operator needs no room around it. So spaces, typed into something
-    # that has not become maths yet, mean this was never a calculation.
+    # Nothing in maths needs a space. A unit goes straight after its number —
+    # 5kN, not 5 kN — and an operator needs no room around it. So a space is
+    # never just a space in a calculation: either this was words all along, or
+    # it is a keystroke with no meaning here.
     MATHS_MARKS = set("+-*/^()=:<>,")
 
     def keyPressEvent(self, event) -> None:
-        if (event.text() == " " and not (event.modifiers() & Qt.ShiftModifier)
-                and self.owner.looks_like_words(this_space_included=True)):
-            self.owner.wantsWords.emit()
+        if event.text() == " " and not (event.modifiers() & Qt.ShiftModifier):
+            if self.owner.started_by_typing:
+                # Opened by typing a quotation mark: it began as maths, and
+                # the space says it was prose. The whole entry becomes words,
+                # whatever has been typed so far — one rule, no exceptions to
+                # remember.
+                self.owner.wantsWords.emit()
+            else:
+                # A calculation that was put down as a calculation. There is
+                # nothing a space can mean in it, so it is refused rather than
+                # left to break the expression quietly.
+                self.owner.saySomething.emit(
+                    "A calculation has no spaces in it — a unit goes straight "
+                    "after its number, as in 5kN")
             event.accept()
             return
         if event.key() in (Qt.Key_Return, Qt.Key_Enter):
@@ -160,6 +172,7 @@ class MathItem(MarkupItem):
 
     enterPressed = Signal()
     wantsWords = Signal()        # a space, typed before this became maths
+    saySomething = Signal(str)   # a line for the status bar
 
     def __init__(self, source: str = DEFAULT_SOURCE, block: bool = False):
         super().__init__()
@@ -555,18 +568,19 @@ class MathItem(MarkupItem):
         self.update()
 
     def looks_like_words(self, this_space_included: bool = False) -> bool:
-        """Whether what has been typed reads as prose rather than as maths.
+        """Whether what is in the region reads as prose rather than as maths.
 
-        Two things say it is not prose. An operator, an equals sign or a
-        bracket: that is a calculation, and a space in it is just a space. And
-        a *single* word so far: ``L`` waiting for its ``:=`` is the commonest
-        thing on a calculation sheet, and turning it into a text box the moment
-        the space after it is typed would be maddening. It takes a second word
-        with nothing mathematical between them before this is prose.
+        A space can no longer be typed into a calculation at all — the editor
+        refuses it, and in a region opened by typing it turns the whole entry
+        into words there and then — so this is not what decides that any more.
+        What is left for it is text that never went through a keystroke:
+        pasted in, or built from something else. For that, two things say it
+        is not prose. An operator, an equals sign or a bracket: that is a
+        calculation, and a space in it came from whatever wrote it. And a
+        *single* word: ``L`` waiting for its ``:=`` is the commonest thing on a
+        calculation sheet.
 
-        *this_space_included* counts the space now being typed as one of them,
-        which is what the editor needs when it has to decide before the space
-        has landed.
+        *this_space_included* counts the space now being typed as one of them.
         """
         if not self.started_by_typing:
             return False
@@ -575,18 +589,15 @@ class MathItem(MarkupItem):
             return False
         words = text.split()
         if this_space_included:
-            # A space now: prose if there is already a whole word behind it
-            # and a space somewhere before that.
             return len(words) >= 2 and text[-1:] != " "
         return len(words) >= 2
 
     def reads_as_a_sentence(self) -> bool:
-        """A line finished with a space in it and nothing mathematical about it.
+        """A finished line with a space in it and nothing mathematical about it.
 
-        ``sigma`` waiting for its ``:=`` looks the same as the first word of a
-        sentence while it is being typed, so the space after it is let through.
-        Once the caret has left, a line that never grew an operator, a number
-        or a second line, and does have a space in it, was a sentence.
+        The other half of the same job, for a line the caret has left. A line
+        that never grew an operator, a number or a second line, and does have
+        a space in it, was a sentence — however it got there.
         """
         if not self.started_by_typing:
             return False

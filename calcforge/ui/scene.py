@@ -539,6 +539,9 @@ class DocumentScene(QGraphicsScene):
         super().__init__()
         self.document = document
         self.workspace = document.workspace
+        # How far the pages are turned for reading, in degrees. A way of
+        # looking at the document; nothing about the document itself.
+        self.reading_turn = 0
         self.frames: list[PageFrame] = []
         self.print_mode = False
         # Markups are dragged, resized and re-laid-out constantly, and a
@@ -569,17 +572,48 @@ class DocumentScene(QGraphicsScene):
         self.frames = []
 
     def layout_pages(self) -> None:
-        """Stack the pages down the canvas, centred on the widest one."""
-        widest = max((frame.page.width_pt for frame in self.frames), default=0.0)
+        """Stack the pages down the canvas, centred on the widest one.
+
+        A page turned for reading is turned *here*, as the page's own
+        rotation on the canvas, rather than by turning the whole view. Turning
+        the view turns its scrollbars with it — the vertical bar starts moving
+        the page sideways — and a scrollbar that does not scroll the way it
+        points is worse than no rotation at all. Done this way the canvas
+        stays the shape it always was and the pages simply lie on their side.
+        """
+        turned = self.reading_turn % 360 in (90, 270)
+        def across(frame):
+            return frame.page.height_pt if turned else frame.page.width_pt
+
+        def down(frame):
+            return frame.page.width_pt if turned else frame.page.height_pt
+
+        widest = max((across(frame) for frame in self.frames), default=0.0)
         y = 0.0
         for frame in self.frames:
-            frame.setPos((widest - frame.page.width_pt) / 2.0, y)
-            y += frame.page.height_pt + PAGE_GAP
+            frame.setTransformOriginPoint(0, 0)
+            frame.setRotation(self.reading_turn)
+            # A rotated item hangs off its own corner, so it is pushed back
+            # by however far the turn took it.
+            left = (widest - across(frame)) / 2.0
+            offset = {
+                0: QPointF(0, 0),
+                90: QPointF(across(frame), 0),
+                180: QPointF(across(frame), down(frame)),
+                270: QPointF(0, down(frame)),
+            }.get(self.reading_turn % 360, QPointF(0, 0))
+            frame.setPos(left + offset.x(), y + offset.y())
+            y += down(frame) + PAGE_GAP
         height = max(y - PAGE_GAP, 0.0)
         # A generous margin of desk, so the first and last pages are not welded
         # to the edge of the window.
         self.setSceneRect(QRectF(-PAGE_GAP, -PAGE_GAP,
                                  widest + 2 * PAGE_GAP, height + 2 * PAGE_GAP))
+
+    def set_reading_turn(self, degrees: int) -> None:
+        """Turn every page on the canvas for reading. Changes no document."""
+        self.reading_turn = int(degrees) % 360
+        self.layout_pages()
 
     def frame_for(self, page: Page) -> Optional[PageFrame]:
         for frame in self.frames:
