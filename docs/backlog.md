@@ -7,6 +7,14 @@ in a conversation is a list that gets lost.
 
 ## What came back from using it
 
+- [x] The wheel zooms about the point under the pointer, whatever the view
+  believes about where the pointer is.
+- [x] `"` and `/` open the same thing: a line that is maths until a second
+  word with nothing mathematical between them says it is a sentence.
+- [x] A number and its unit are joined by the same raised dot the answer uses.
+- [x] The section cuts assemble. X and Y are the annotation's *bottom-left*,
+  which is where PDF puts a Rect's origin.
+
 - [x] Clicking into a fraction put the caret near the start of the line — the
   press and the release both went to the invisible flat editor. Both go
   through the typeset boxes now.

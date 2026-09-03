@@ -585,8 +585,16 @@ def _tool_from(element, resources: dict) -> Optional[Tool]:
         payload = markup_from(annotation, resources)
         if payload is None:
             continue
+        # Where each part of a tool sits. X and Y are the annotation's
+        # *bottom-left* corner, which is where PDF puts the origin of a Rect —
+        # so the top edge, which is what a markup is positioned by here, is a
+        # height further up. Reading Y as the top instead scattered the parts
+        # of a section mark by their own heights: the two labels swapped
+        # halves of the bubble, the arrow slid off it, and the heavy bar at
+        # the end of the cut line ended up a hundred points away from the line.
+        _x, _y, _w, height = _rect(annotation.get("Rect", []))
         payload["x"] = float(payload.get("x", 0.0)) + offset_x
-        payload["y"] = float(payload.get("y", 0.0)) - offset_y
+        payload["y"] = float(payload.get("y", 0.0)) + offset_y - height
         if not label:
             label = payload.get("label", "")
         group_name = group_name or _group_name(annotation)

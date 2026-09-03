@@ -88,10 +88,15 @@ def _symbol_bindings() -> list[Binding]:
 # The two canvas typing modes come first because they are the ones people reach
 # for without thinking about tools at all.
 DEFAULT_BINDINGS: list[Binding] = [
-    Binding("insert.text", "Start typing text", '"', INSERT, "Typing", "text"),
-    # Typing anything unbound already starts a calculation; this is for people
-    # who would rather say so first.
-    Binding("insert.math", "Start typing maths", "/", INSERT, "Typing", "math"),
+    # The two keys that start writing on bare paper. Both open the same thing:
+    # a line that is maths until it turns out to be a sentence, which it does
+    # the moment a second word is typed with nothing mathematical between them.
+    # Two keys because both are reached for — the quotation mark by anybody
+    # expecting to write words, the slash by anybody expecting to write maths —
+    # and having them do different things was only ever a way to pick wrong.
+    Binding("insert.text", "Start writing here", '"', INSERT, "Typing", "math"),
+    Binding("insert.math", "Start writing here (maths)", "/", INSERT, "Typing",
+            "math"),
     Binding("insert.table", "Start a table here", "|", INSERT, "Typing", "table"),
     Binding("insert.callout", "Start a callout here", "@", INSERT, "Typing", "callout"),
 ] + _tool_bindings() + [

@@ -805,14 +805,23 @@ def _type_on_canvas(window, text, x=140.0, y=180.0):
     key(window.view, Qt.Key_unknown, text)
 
 
-def test_quote_starts_a_text_region_where_the_cursor_is(window):
+def test_quote_starts_writing_where_the_cursor_is(window):
+    """Both keys open the same thing: a line that is maths until it is prose.
+
+    The quotation mark is what somebody expecting to write words reaches for
+    and the slash is what somebody expecting to write maths reaches for.
+    Having them open different things was only ever a way to pick wrong: what
+    is typed decides, not which key started it.
+    """
     _type_on_canvas(window, '"')
     item = editing_item(window)
-    assert isinstance(item, TextItem)
+    assert isinstance(item, MathItem)
     assert item.pos().x() == pytest.approx(140, abs=1)
-    item.set_text("a note")
+    assert item.started_by_typing, "it can still turn out to be a sentence"
+    item._editor.setPlainText("a note here")
     window.view.end_item_edit()
     assert len(markups(window)) == 1
+    assert isinstance(markups(window)[0], TextItem), "and it did"
 
 
 def test_slash_starts_a_calculation(window):

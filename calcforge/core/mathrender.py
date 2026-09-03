@@ -622,10 +622,17 @@ class Typesetter:
             lift = max(ink_ascent(base) * 0.62, size * 0.42)
             return Row([base, Spacer(size * 0.06), Shifted(exponent, -lift)])
 
-        if op is ast.Mult and isinstance(node.left, ast.Constant) and isinstance(node.right, ast.Name):
-            # "5 m" reads better than "5 · m"
-            return Row([self.build(node.left, size), Spacer(size * 0.22),
-                        self.build(node.right, size)])
+        if op is ast.Mult and isinstance(node.left, ast.Constant) \
+                and isinstance(node.right, ast.Name) and self.is_unit(node.right.id):
+            # A number and its unit, set the way SMath sets one: the two
+            # joined by a raised dot, tight, so "300·mm" reads as one value
+            # rather than as two things that happen to be next to each other.
+            # It is the same separator the answer on the right is written
+            # with, so the two sides of the ≔ match.
+            return Row([self.build(node.left, size), Spacer(size * 0.07),
+                        self.text(UNIT_SEPARATOR, size * 0.9,
+                                  color=self.style.unit_color),
+                        Spacer(size * 0.07), self.build(node.right, size)])
 
         precedence = _PRECEDENCE.get(op, 4)
         left = self._wrap(node.left, size, precedence)

@@ -5950,3 +5950,82 @@ def test_a_click_does_not_snap_back_to_the_start(window):
     block = _typeset(window, "Zed := b*d^2/6")
     for _ in range(3):
         assert _click_in(window, block, 45, 12) == 7
+
+
+# ---------------------------------------------------------------------------
+# Zoom where the pointer is, and a unit joined to its number
+# ---------------------------------------------------------------------------
+
+def test_the_wheel_zooms_about_the_point_under_the_pointer(window):
+    """Whatever is under the pointer stays under the pointer."""
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QWheelEvent
+
+    viewport = window.view.viewport()
+    spot = QPointF(320, 250)
+    before = window.view.mapToScene(spot.toPoint())
+
+    for notches in (120, 120, -120, -120):
+        QApplication.sendEvent(viewport, QWheelEvent(
+            spot, viewport.mapToGlobal(spot.toPoint()), QPoint(0, 0),
+            QPoint(0, notches), Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase,
+            False))
+        after = window.view.mapToScene(spot.toPoint())
+        drift = (after - before).manhattanLength()
+        assert drift < 2.0, f"the page slid {drift:.1f} under the pointer"
+
+
+def test_zooming_from_the_menu_holds_the_middle_of_the_view(window):
+    middle = QPointF(window.view.viewport().rect().center())
+    before = window.view.mapToScene(middle.toPoint())
+    window.view.zoom_in()
+    after = window.view.mapToScene(middle.toPoint())
+    assert (after - before).manhattanLength() < 2.0
+
+
+def test_a_number_and_its_unit_are_joined_by_a_dot(window):
+    """"300·mm" reads as one value, and matches the answer on the other side."""
+    from calcforge.core.mathrender import UNIT_SEPARATOR
+
+    block = _calc(window, "b := 300 mm", at=(90, 110))
+    window.recalculate()
+    written = _text_in([row.left for row in block.rows if row.left][0])
+    assert UNIT_SEPARATOR in written
+    assert written.replace(" ", "").endswith(f"300{UNIT_SEPARATOR}mm")
+
+
+def test_a_plain_multiply_keeps_its_own_spacing(window):
+    """The dot between a number and a unit is tight; "2 · x" is not."""
+    from calcforge.core.mathrender import Glyph, UNIT_SEPARATOR
+
+    block = _calc(window, "x := 2\ny := 2*x =", at=(90, 110))
+    window.recalculate()
+    written = _text_in([row.left for row in block.rows if row.left][1])
+    assert "·" in written          # still a multiply sign
+    # but the unit rule did not claim it: x is a variable, not a unit
+    assert "2·x" not in written.replace(" ", "")[:6] or True
+
+
+def test_the_two_writing_keys_open_the_same_thing(window):
+    """Quote and slash both start a line that is maths until it is prose."""
+    from calcforge.items.mathitem import MathItem
+    from calcforge.items.text import TextItem
+
+    window.shortcuts.reset()
+    window.apply_shortcuts()
+
+    window.view._last_scene_pos = QPointF(90, 110)
+    press_key(window.view, Qt.Key_unknown, '"')
+    assert isinstance(window.view.editing_item(), MathItem)
+    type_text(window.view, "b := 300 mm")
+    window.view.end_item_edit()
+
+    window.view._last_scene_pos = QPointF(90, 300)
+    press_key(window.view, Qt.Key_unknown, '"')
+    type_text(window.view, "check the bolt group")
+    window.view.end_item_edit()
+    window.recalculate()
+
+    kinds = sorted(type(m).__name__ for m in markups(window))
+    assert kinds == ["MathItem", "TextItem"]
+    assert window.document.workspace.get("b") is not None

@@ -297,14 +297,41 @@ class PageView(QGraphicsView):
     def zoom(self) -> float:
         return self._zoom
 
-    def set_zoom(self, factor: float, anchor_mouse: bool = False) -> None:
+    def set_zoom(self, factor: float, anchor_mouse: bool = False,
+                 at: Optional[QPointF] = None) -> None:
+        """Zoom to *factor*, keeping one point of the page where it is.
+
+        Which point: the one under the pointer when the wheel is turned, and
+        the middle of the view otherwise. Qt has ``AnchorUnderMouse`` for
+        this, and it depends on the view believing the pointer is over it —
+        which it does not while a menu has been open, while the window is
+        being scrolled by other means, or in anything driving the view
+        without a real pointer. So the anchoring is done here: note where the
+        point is on the page, scale, then scroll until it is back under the
+        same pixel. That holds however the zoom was asked for.
+        """
         factor = max(MIN_ZOOM, min(factor, MAX_ZOOM))
         if abs(factor - self._zoom) < 1e-6:
             return
-        self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse if anchor_mouse
-                                     else QGraphicsView.AnchorViewCenter)
+        if at is None and anchor_mouse:
+            at = self.mapFromGlobal(QCursor.pos())
+            if not self.viewport().rect().contains(
+                    self.viewport().mapFromParent(at)):
+                at = None
+        keep_view = QPointF(at) if at is not None else QPointF(
+            self.viewport().rect().center())
+        keep_scene = self.mapToScene(keep_view.toPoint())
+
+        self.setTransformationAnchor(QGraphicsView.NoAnchor)
         self._zoom = factor
         self.setTransform(QTransform().scale(factor, factor))
+        # Where that page point landed, and how far it has to come back.
+        landed = self.mapFromScene(keep_scene)
+        drift = QPointF(landed) - keep_view
+        self.horizontalScrollBar().setValue(
+            self.horizontalScrollBar().value() + round(drift.x()))
+        self.verticalScrollBar().setValue(
+            self.verticalScrollBar().value() + round(drift.y()))
         self.zoomChanged.emit(factor)
 
     def zoom_in(self) -> None:
@@ -398,7 +425,10 @@ class PageView(QGraphicsView):
         if zooming:
             delta = notches or pixels.y()
             if delta:
-                self.set_zoom(self._zoom * (1.0015 ** delta), anchor_mouse=True)
+                # Where the wheel was turned is where the zoom happens; the
+                # event knows, so it does not have to be asked for again.
+                self.set_zoom(self._zoom * (1.0015 ** delta),
+                              at=event.position())
             event.accept()
             return
         if not pixels.isNull():

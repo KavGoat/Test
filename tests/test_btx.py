@@ -304,3 +304,67 @@ def test_every_label_in_every_file_keeps_its_own_look(qapp):
                 style = payload["style"]
                 assert style["align"] in ("left", "center", "right")
                 assert style.get("valign", "top") in ("top", "middle", "bottom")
+
+
+def test_a_section_marks_parts_are_assembled_not_scattered(qapp):
+    """X and Y are the annotation's bottom-left, as PDF puts a Rect's origin.
+
+    Read as the top instead, every part slid up by its own height: the two
+    labels swapped halves of the bubble, the arrow came off it, and the heavy
+    bar at the end of the cut line ended up a hundred points from the line.
+    """
+    from calcforge.items.shapes import PolyItem, RectItem
+    from calcforge.items.text import TextItem
+
+    marks = btx.read(os.path.join(HERE, "btx", "Structures - Sketch Tools.btx"))
+    section = next(t for t in marks.tools if t.name == "Section")
+    items = [build_item(p) for p in section.payloads]
+
+    bubble = [i for i in items if isinstance(i, RectItem) and i.kind == "ellipse"]
+    assert bubble, "a section mark has a bubble"
+    circle = bubble[0].mapRectToParent(bubble[0].local_rect())
+
+    labels = [i for i in items if isinstance(i, TextItem)]
+    assert len(labels) == 2
+    boxes = sorted((i.mapRectToParent(i.local_rect()) for i in labels),
+                   key=lambda r: r.top())
+    # Both labels sit inside the bubble, one above the middle and one below.
+    for box in boxes:
+        assert circle.adjusted(-2, -2, 2, 2).contains(box.center())
+    assert boxes[0].center().y() < circle.center().y() < boxes[1].center().y()
+
+    # The number is the upper one, the sheet reference the lower — as drawn.
+    assert labels[boxes.index(boxes[0])] is not None
+    upper = min(labels, key=lambda i: i.mapRectToParent(i.local_rect()).top())
+    assert upper.text().strip() == "1"
+
+    # The arrow overlaps the bubble rather than floating off on its own.
+    arrows = [i for i in items if isinstance(i, PolyItem) and i.kind == "polygon"]
+    assert arrows
+    head = arrows[0].mapRectToParent(arrows[0].local_rect())
+    assert head.intersects(circle)
+
+    # And the heavy bar at the end of the cut is on the line, not adrift.
+    bars = [i for i in items if isinstance(i, RectItem) and i.kind == "rect"]
+    lines = [i for i in items if isinstance(i, PolyItem) and i.kind == "line"]
+    assert bars and lines
+    bar = bars[0].mapRectToParent(bars[0].local_rect())
+    reach = None
+    for line in lines:
+        for point in (line.mapToParent(p) for p in line.points):
+            gap = (point - bar.center()).manhattanLength()
+            reach = gap if reach is None else min(reach, gap)
+    assert reach < 30, f"the bar is {reach:.0f} points from any cut line"
+
+
+def test_every_tool_still_fits_in_a_sensible_box(qapp):
+    """A part placed by the wrong rule shows up as a tool the size of a page."""
+    for path in FILES:
+        for tool in btx.read(path).tools:
+            box = None
+            for payload in tool.payloads:
+                item = build_item(payload)
+                here = item.local_rect().translated(item.pos())
+                box = here if box is None else box.united(here)
+            assert box.width() < 700 and box.height() < 700, \
+                f"{tool.name} came out {box.width():.0f}x{box.height():.0f}"
