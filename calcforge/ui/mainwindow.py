@@ -1061,6 +1061,10 @@ class MainWindow(QMainWindow):
         self.update_title()
 
     def save_document(self) -> bool:
+        # A line still being typed is part of the document being saved, so it
+        # is settled first — its answers worked out, its region kept or turned
+        # into the note it turned out to be.
+        self.view.end_item_edit()
         if not self.document.path:
             return self.save_document_as()
         try:
@@ -1125,6 +1129,10 @@ class MainWindow(QMainWindow):
         super().keyPressEvent(event)
 
     def closeEvent(self, event) -> None:
+        # Whatever was being typed is settled before anybody is asked about
+        # unsaved changes, so the question is asked about the real state of
+        # the document rather than the state it was in a word ago.
+        self.view.end_item_edit()
         if not self.confirm_discard():
             event.ignore()
             return

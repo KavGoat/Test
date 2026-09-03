@@ -8059,3 +8059,23 @@ def test_the_vertical_bar_still_runs_through_every_page_when_turned(window):
         assert window.view.visible_page_index() == 2
     finally:
         window.view.reset_view_rotation()
+
+
+def test_saving_settles_the_line_being_typed(window):
+    """What is on the page when it is saved is what gets saved."""
+    import tempfile, os
+    from calcforge.io import project as project_io
+
+    item = _open_calculation(window)
+    type_text(window.view, "b:=300mm")
+    path = os.path.join(tempfile.mkdtemp(), "sheet.cfx")
+    window.document.path = path
+    assert window.save_document()
+    assert not window.view.is_editing(), "the line was settled first"
+
+    from calcforge.core.document import Document
+    reopened = Document()
+    project_io.load_document(reopened, path)
+    sources = [i.get("source") for page in reopened.pages
+               for i in page.to_dict()["items"]]
+    assert "b:=300mm" in sources
