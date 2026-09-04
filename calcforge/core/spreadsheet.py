@@ -373,9 +373,13 @@ def prepare_formula(body: str, rows: int, cols: int) -> tuple[str, set[tuple[int
                     output.append(lowered)
                     index += 1
                     continue
-        elif token.type == tokenize.OP:
+        elif token.type in (tokenize.OP, tokenize.ERRORTOKEN):
             # Excel comparison spellings: "=" means equality, "<>" means not-equal.
             following = usable[index + 1] if index + 1 < len(usable) else None
+            if text == "<>":
+                output.append("!=")
+                index += 1
+                continue
             if text == "<" and following is not None and following.string == ">":
                 output.append("!=")
                 index += 2

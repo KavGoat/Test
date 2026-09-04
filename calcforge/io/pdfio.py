@@ -337,7 +337,7 @@ def import_image(document, path: str, fit: str = FIT_ORIGINAL,
         document.pages[-1].setup if document.pages else None)
     page = Page(setup_for(info, fit, template))
     page.background_key = key
-    page.source_note = path.rsplit("/", 1)[-1]
+    page.source_note = os.path.basename(path)
     page.grid = False
     page.label = page.source_note
     if at is None:

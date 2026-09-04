@@ -1412,7 +1412,9 @@ def test_a_block_defines_for_the_document_unless_told_otherwise(window):
     assert workspace.get("w").to("kN/m").magnitude == pytest.approx(15)
 
 
-def test_the_context_menu_toggles_a_block_between_the_two(window):
+def test_the_properties_panel_toggles_a_blocks_scope(window):
+    from PySide6.QtWidgets import QCheckBox
+
     window.select_tool("mathblock")
     drag(window.view, 80, 100, 300, 180)
     block = editing_item(window)
@@ -1421,14 +1423,15 @@ def test_the_context_menu_toggles_a_block_between_the_two(window):
     window.select_tool("select")
     block.setSelected(True)
 
-    menu = window.build_context_menu(block, QPointF(120, 120))
-    action = [a for a in menu.actions() if a.text() == "Self-contained block"][0]
-    assert action.isCheckable() and not action.isChecked()  # a block starts open
+    window.properties_panel.show_items([block])
+    scope = [box for box in window.properties_panel.findChildren(QCheckBox)
+             if box.text() == "Self-contained"][0]
+    assert not scope.isChecked()  # a block starts open
 
     assert not block.local_scope
     assert window.document.workspace.get("y").to("m").magnitude == pytest.approx(6)
 
-    action.setChecked(True)
+    scope.setChecked(True)
     assert block.local_scope
     assert window.document.workspace.get("y") is None
 

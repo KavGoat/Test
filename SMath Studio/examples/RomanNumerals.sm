@@ -1,0 +1,234 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<?application progid="SMath Studio" version="0.96"?>
+<regions xmlns="http://smath.info/schemas/worksheet/1.0">
+  <settings>
+    <identity>
+      <id>da42d2d8-5e75-4ffb-8198-684036e56e3e</id>
+      <revision>2</revision>
+    </identity>
+    <metadata lang="rus">
+      <title>Преобразование арабских чисел в римские</title>
+      <author>Андрей Ивашов, Fred Swartz</author>
+      <description>Алгоритм преобразования чисел, записанных арабскими  цифрами, в римские.
+Пользователь определяет арабское число для преобразования. По окончании работы программы выводится ответ в виде римского числа.</description>
+      <company>SMath, http://smath.info/</company>
+      <keywords>Числа, римские, арабские, преобразование</keywords>
+    </metadata>
+    <metadata lang="ind">
+      <title>Konversi angka Arab ke angka Romawi</title>
+      <author>Andrey Ivashov, Fred Swartz</author>
+      <translator>Waluyo Adi Siswanto</translator>
+      <description>Algoritma untuk mengkonversi angka Arab ke angka Romawi.
+Prngguna perlu menuliskan angka Arab. Program ini akan menampilkan hasil konversi ke angka Romawi.</description>
+      <company>SMath, http://smath.info/</company>
+      <keywords>Angka, Romawi, Arab</keywords>
+    </metadata>
+    <metadata lang="eng">
+      <title>Arabic to Roman numeral conversion</title>
+      <author>Andrey Ivashov, Fred Swartz</author>
+      <translator>Andrey Ivashov</translator>
+      <description>Algorithm for conversion Arabic numerals to Roman numerals.
+User specifies a number using Arabic digits. Program shows a result of conversion in Roman numerals form.</description>
+      <company>SMath, http://smath.info/</company>
+      <keywords>Numbers, Roman, Arabic</keywords>
+    </metadata>
+    <calculation>
+      <precision>4</precision>
+      <exponentialThreshold>5</exponentialThreshold>
+      <fractions>decimal</fractions>
+    </calculation>
+    <pageModel active="false" printAreas="true" simpleEqualsOnly="false" printBackgroundImages="true">
+      <paper id="1" orientation="Portrait" width="850" height="1100" />
+      <margins left="39" right="39" top="39" bottom="39" />
+      <header alignment="Center" color="#a9a9a9">&amp;[DATE] &amp;[TIME] - &amp;[FILENAME]</header>
+      <footer alignment="Center" color="#a9a9a9">&amp;[PAGENUM] / &amp;[COUNT]</footer>
+      <backgrounds />
+    </pageModel>
+    <dependences>
+      <assembly name="SMath Studio" version="0.96" guid="a37cba83-b69c-4c71-9992-55ff666763bd" />
+      <assembly name="Text Region" version="1.9.4884.25041" guid="485d28c5-349a-48b6-93be-12a35a1c1e39" />
+      <assembly name="Math Region" version="0.96" guid="02f1ab51-215b-466e-a74d-5d8b1cf85e8d" />
+      <assembly name="Special Functions" version="1.10.4884.25035" guid="2814e667-4e12-48b1-8d51-194e480eabc5" />
+    </dependences>
+  </settings>
+  <region id="0" left="9" top="9" width="151" height="28" color="#0000ff" bgColor="#ffffff" fontSize="12">
+    <text lang="rus">
+      <p bold="true">Римские числа</p>
+    </text>
+    <text lang="ind">
+      <p bold="true">Angka Romawi</p>
+    </text>
+    <text lang="eng">
+      <p bold="true">Roman numerals</p>
+    </text>
+  </region>
+  <region id="1" left="9" top="36" width="102" height="24" border="true" color="#000000" bgColor="#dddddd" fontSize="10">
+    <text lang="rus">
+      <p>Начальные данные:</p>
+    </text>
+    <text lang="ind">
+      <p>Data masukan:</p>
+    </text>
+    <text lang="eng">
+      <p>Input data:</p>
+    </text>
+  </region>
+  <region id="2" left="9" top="63" width="109" height="24" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <input>
+        <e type="operand">arabic</e>
+        <e type="operand">1984</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+  <region id="3" left="9" top="90" width="111" height="24" border="true" color="#000000" bgColor="#dddddd" fontSize="10">
+    <text lang="rus">
+      <p>Вычисление:</p>
+    </text>
+    <text lang="ind">
+      <p>Perhitungan:</p>
+    </text>
+    <text lang="eng">
+      <p>Calculation:</p>
+    </text>
+  </region>
+  <region id="4" left="9" top="117" width="76" height="24" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <description active="true" position="Right" lang="rus">
+        <p>Значение должно быть в диапазоне от 1 до 3999.</p>
+      </description>
+      <description active="true" position="Right" lang="eng">
+        <p>Value must be in the range 1-3999.</p>
+      </description>
+      <input>
+        <e type="operand">error</e>
+        <e type="operand">0</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+  <region id="5" left="9" top="144" width="579" height="44" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <input>
+        <e type="operand">relation</e>
+        <e type="operand">1000</e>
+        <e type="operand">900</e>
+        <e type="operand">500</e>
+        <e type="operand">400</e>
+        <e type="operand">100</e>
+        <e type="operand">90</e>
+        <e type="operand">50</e>
+        <e type="operand">40</e>
+        <e type="operand">10</e>
+        <e type="operand">9</e>
+        <e type="operand">5</e>
+        <e type="operand">4</e>
+        <e type="operand">1</e>
+        <e type="operand" style="string">M</e>
+        <e type="operand" style="string">CM</e>
+        <e type="operand" style="string">D</e>
+        <e type="operand" style="string">CD</e>
+        <e type="operand" style="string">C</e>
+        <e type="operand" style="string">XC</e>
+        <e type="operand" style="string">L</e>
+        <e type="operand" style="string">XL</e>
+        <e type="operand" style="string">X</e>
+        <e type="operand" style="string">IX</e>
+        <e type="operand" style="string">V</e>
+        <e type="operand" style="string">IV</e>
+        <e type="operand" style="string">I</e>
+        <e type="operand">2</e>
+        <e type="operand">13</e>
+        <e type="function" preserve="true" args="28">mat</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+  <region id="6" left="9" top="189" width="346" height="176" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <input>
+        <e type="operand">arabic</e>
+        <e type="operand">0</e>
+        <e type="operator" args="2">≤</e>
+        <e type="bracket">(</e>
+        <e type="operand">arabic</e>
+        <e type="operand">4000</e>
+        <e type="operator" args="2">≥</e>
+        <e type="bracket">(</e>
+        <e type="operator" args="2">|</e>
+        <e type="operand">roman</e>
+        <e type="operand">error</e>
+        <e type="function" preserve="true" args="1">description</e>
+        <e type="operator" args="2">:</e>
+        <e type="operand">roman</e>
+        <e type="operand" style="string" />
+        <e type="operator" args="2">:</e>
+        <e type="operand">j</e>
+        <e type="operand">1</e>
+        <e type="operator" args="2">:</e>
+        <e type="operand">j</e>
+        <e type="operand">relation</e>
+        <e type="function" preserve="true" args="1">cols</e>
+        <e type="operator" args="2">≤</e>
+        <e type="operand">j</e>
+        <e type="operand">j</e>
+        <e type="operand">1</e>
+        <e type="operator" args="2">+</e>
+        <e type="operator" args="2">:</e>
+        <e type="operand">arabic</e>
+        <e type="operand">relation</e>
+        <e type="operand">1</e>
+        <e type="operand">j</e>
+        <e type="function" preserve="true" args="3">el</e>
+        <e type="operator" args="2">≥</e>
+        <e type="operand">arabic</e>
+        <e type="operand">arabic</e>
+        <e type="operand">relation</e>
+        <e type="operand">1</e>
+        <e type="operand">j</e>
+        <e type="function" preserve="true" args="3">el</e>
+        <e type="operator" args="2">-</e>
+        <e type="operator" args="2">:</e>
+        <e type="operand">roman</e>
+        <e type="operand">roman</e>
+        <e type="operand">relation</e>
+        <e type="operand">2</e>
+        <e type="operand">j</e>
+        <e type="function" preserve="true" args="3">el</e>
+        <e type="function" preserve="true" args="2">concat</e>
+        <e type="operator" args="2">:</e>
+        <e type="operand">2</e>
+        <e type="operand">1</e>
+        <e type="function" preserve="true" args="4">line</e>
+        <e type="function" preserve="true" args="2">while</e>
+        <e type="function" preserve="true" args="4">for</e>
+        <e type="operand">2</e>
+        <e type="operand">1</e>
+        <e type="function" preserve="true" args="4">line</e>
+        <e type="function" preserve="true" args="3">if</e>
+      </input>
+    </math>
+  </region>
+  <region id="7" left="9" top="369" width="70" height="24" border="true" color="#000000" bgColor="#dddddd" fontSize="10">
+    <text lang="rus">
+      <p>Результат:</p>
+    </text>
+    <text lang="ind">
+      <p>Hasil:</p>
+    </text>
+    <text lang="eng">
+      <p>Result:</p>
+    </text>
+  </region>
+  <region id="8" left="9" top="396" width="169" height="24" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <input>
+        <e type="operand">roman</e>
+      </input>
+      <result action="numeric">
+        <e type="operand" style="string">MCMLXXXIV</e>
+      </result>
+    </math>
+  </region>
+</regions>

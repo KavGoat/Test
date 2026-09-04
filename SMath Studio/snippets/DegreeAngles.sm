@@ -1,0 +1,197 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<?application progid="SMath Studio" version="0.96"?>
+<regions xmlns="http://smath.info/schemas/worksheet/1.0">
+  <settings>
+    <shortcut>degrees</shortcut>
+    <identity>
+      <id>e215d300-9b83-460e-9a62-b2c688006d7d</id>
+      <revision>2</revision>
+    </identity>
+    <metadata lang="rus">
+      <title>Вычисления в градусах</title>
+      <author>Андрей Ивашов</author>
+      <description>Представляет собой набор переопределённых тригонометрических функций, подготовленных для работы с градусами вместо радиан.</description>
+      <company>SMath, http://smath.info/</company>
+      <keywords>Заготовка, Углы, Градусы</keywords>
+    </metadata>
+    <metadata lang="eng">
+      <title>Evaluation in Degrees</title>
+      <author>Andrey Ivashov</author>
+      <description>Contains list of redefined trigonometric functions prepared to work with degrees instead of radians.</description>
+      <company>SMath, http://smath.info/</company>
+      <keywords>Snippet, Angles, Degrees</keywords>
+    </metadata>
+    <calculation>
+      <precision>4</precision>
+      <exponentialThreshold>5</exponentialThreshold>
+      <fractions>decimal</fractions>
+    </calculation>
+    <pageModel active="false" printAreas="true" simpleEqualsOnly="false" printBackgroundImages="true">
+      <paper id="1" orientation="Portrait" width="850" height="1100" />
+      <margins left="39" right="39" top="39" bottom="39" />
+      <header alignment="Center" color="#a9a9a9">&amp;[DATE] &amp;[TIME] - &amp;[FILENAME]</header>
+      <footer alignment="Center" color="#a9a9a9">&amp;[PAGENUM] / &amp;[COUNT]</footer>
+      <backgrounds />
+    </pageModel>
+    <dependences>
+      <assembly name="SMath Studio" version="0.96" guid="a37cba83-b69c-4c71-9992-55ff666763bd" />
+      <assembly name="Math Region" version="0.96" guid="02f1ab51-215b-466e-a74d-5d8b1cf85e8d" />
+    </dependences>
+  </settings>
+  <region id="0" left="207" top="9" width="137" height="43" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <input>
+        <e type="operand">α</e>
+        <e type="function" preserve="true" args="1">asin</e>
+        <e type="operand">α</e>
+        <e type="function" preserve="true" args="1">asin</e>
+        <e type="operand" style="unit">deg</e>
+        <e type="operator" args="2">/</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+  <region id="1" left="9" top="18" width="131" height="26" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <input>
+        <e type="operand">α</e>
+        <e type="function" preserve="true" args="1">sin</e>
+        <e type="operand">α</e>
+        <e type="operand" style="unit">°</e>
+        <e type="operator" args="2">*</e>
+        <e type="function" preserve="true" args="1">sin</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+  <region id="2" left="207" top="45" width="137" height="43" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <input>
+        <e type="operand">α</e>
+        <e type="function" preserve="true" args="1">acos</e>
+        <e type="operand">α</e>
+        <e type="function" preserve="true" args="1">acos</e>
+        <e type="operand" style="unit">deg</e>
+        <e type="operator" args="2">/</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+  <region id="3" left="9" top="54" width="131" height="26" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <input>
+        <e type="operand">α</e>
+        <e type="function" preserve="true" args="1">cos</e>
+        <e type="operand">α</e>
+        <e type="operand" style="unit">°</e>
+        <e type="operator" args="2">*</e>
+        <e type="function" preserve="true" args="1">cos</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+  <region id="4" left="207" top="81" width="137" height="43" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <input>
+        <e type="operand">α</e>
+        <e type="function" preserve="true" args="1">atan</e>
+        <e type="operand">α</e>
+        <e type="function" preserve="true" args="1">atan</e>
+        <e type="operand" style="unit">deg</e>
+        <e type="operator" args="2">/</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+  <region id="5" left="9" top="90" width="131" height="26" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <input>
+        <e type="operand">α</e>
+        <e type="function" preserve="true" args="1">tan</e>
+        <e type="operand">α</e>
+        <e type="operand" style="unit">°</e>
+        <e type="operator" args="2">*</e>
+        <e type="function" preserve="true" args="1">tan</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+  <region id="6" left="207" top="117" width="137" height="43" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <input>
+        <e type="operand">α</e>
+        <e type="function" preserve="true" args="1">acot</e>
+        <e type="operand">α</e>
+        <e type="function" preserve="true" args="1">acot</e>
+        <e type="operand" style="unit">deg</e>
+        <e type="operator" args="2">/</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+  <region id="7" left="9" top="126" width="131" height="26" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <input>
+        <e type="operand">α</e>
+        <e type="function" preserve="true" args="1">cot</e>
+        <e type="operand">α</e>
+        <e type="operand" style="unit">°</e>
+        <e type="operator" args="2">*</e>
+        <e type="function" preserve="true" args="1">cot</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+  <region id="8" left="207" top="153" width="137" height="43" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <input>
+        <e type="operand">α</e>
+        <e type="function" preserve="true" args="1">asec</e>
+        <e type="operand">α</e>
+        <e type="function" preserve="true" args="1">asec</e>
+        <e type="operand" style="unit">deg</e>
+        <e type="operator" args="2">/</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+  <region id="9" left="9" top="162" width="131" height="26" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <input>
+        <e type="operand">α</e>
+        <e type="function" preserve="true" args="1">sec</e>
+        <e type="operand">α</e>
+        <e type="operand" style="unit">°</e>
+        <e type="operator" args="2">*</e>
+        <e type="function" preserve="true" args="1">sec</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+  <region id="10" left="207" top="189" width="137" height="43" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <input>
+        <e type="operand">α</e>
+        <e type="function" preserve="true" args="1">acsc</e>
+        <e type="operand">α</e>
+        <e type="function" preserve="true" args="1">acsc</e>
+        <e type="operand" style="unit">deg</e>
+        <e type="operator" args="2">/</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+  <region id="11" left="9" top="198" width="131" height="26" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <input>
+        <e type="operand">α</e>
+        <e type="function" preserve="true" args="1">csc</e>
+        <e type="operand">α</e>
+        <e type="operand" style="unit">°</e>
+        <e type="operator" args="2">*</e>
+        <e type="function" preserve="true" args="1">csc</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+</regions>

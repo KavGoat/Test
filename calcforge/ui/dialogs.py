@@ -129,12 +129,12 @@ class ScaleDialog(QDialog):
                           "Type the real-world length it stands for.")
             note.setWordWrap(True)
             form.addRow(note)
-            self.known = QLineEdit("5 m")
+            self.known = QLineEdit()
             self.known.setPlaceholderText("5 m, 12 ft, 3600 mm…")
             form.addRow("It represents", self.known)
             layout.addWidget(box)
         else:
-            self.known = QLineEdit("5 m")
+            self.known = QLineEdit()
             self.known.hide()
             pick = QPushButton("Calibrate — pick two points on the drawing…")
             pick.setToolTip("Click one end of something you know the length of, "
@@ -185,6 +185,41 @@ class ScaleDialog(QDialog):
         scale.area_unit = self.area_unit.currentText() or "m^2"
         scale.precision = self.precision.value()
         return scale
+
+
+class CalibrationLengthDialog(QDialog):
+    """Name the real length after two calibration points are picked."""
+
+    def __init__(self, measured_pt: float, parent=None):
+        super().__init__(parent)
+        self.measured_pt = measured_pt
+        self.setWindowTitle("Calibrate scale")
+        layout = QVBoxLayout(self)
+        note = QLabel(
+            f"The picked line is {measured_pt:.1f} pt on the page. "
+            "Enter the real length it represents.")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        form = QFormLayout()
+        self.known = QLineEdit()
+        self.known.setPlaceholderText("10 mm")
+        form.addRow("Length", self.known)
+        layout.addLayout(form)
+        layout.addWidget(_buttons(self))
+
+    def length_text(self) -> Optional[str]:
+        text = self.known.text().strip()
+        try:
+            value = parse_unit(text)
+            valid = value is not None and value.check("[length]")
+        except Exception:  # noqa: BLE001 - invalid user-entered units
+            valid = False
+        if not valid:
+            QMessageBox.warning(
+                self, "Calibrate scale",
+                "Enter a length with compatible units, such as 10 mm or 2 m.")
+            return None
+        return text
 
 
 class PdfImportDialog(QDialog):

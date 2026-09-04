@@ -1,0 +1,314 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<?application progid="SMath Studio" version="0.96"?>
+<regions xmlns="http://smath.info/schemas/worksheet/1.0">
+  <settings>
+    <identity>
+      <id>8e8f0f9f-cf86-4a6d-b5d9-99f41fba6b51</id>
+      <revision>2</revision>
+    </identity>
+    <metadata lang="rus">
+      <title>Планетарный механизм с внутренним зацеплением</title>
+      <author>Fridel Selitsky</author>
+      <translator>Fridel Selitsky</translator>
+      <description>Анимация в программе, показанная на примере планетарного механизма с внутренним зацеплением</description>
+      <keywords>Пример, анимация, планетарный механизм</keywords>
+    </metadata>
+    <metadata lang="eng">
+      <title>Planetary gear with internal teeth</title>
+      <author>Fridel Selitsky</author>
+      <translator>Fridel Selitsky</translator>
+      <description>Animation in SMath Studio shown by the example of planetary gear with internal teeth.</description>
+      <keywords>Example, animation, planetary gear</keywords>
+    </metadata>
+    <calculation>
+      <precision>4</precision>
+      <exponentialThreshold>5</exponentialThreshold>
+      <fractions>decimal</fractions>
+    </calculation>
+    <pageModel active="false" printAreas="true" simpleEqualsOnly="false" printBackgroundImages="true">
+      <paper id="1" orientation="Portrait" width="850" height="1100" />
+      <margins left="39" right="39" top="39" bottom="39" />
+      <header alignment="Center" color="#a9a9a9">&amp;[DATE] &amp;[TIME] - &amp;[FILENAME]</header>
+      <footer alignment="Center" color="#a9a9a9">&amp;[PAGENUM] / &amp;[COUNT]</footer>
+      <backgrounds />
+    </pageModel>
+    <dependences>
+      <assembly name="SMath Studio" version="0.96" guid="a37cba83-b69c-4c71-9992-55ff666763bd" />
+      <assembly name="Text Region" version="1.9.4884.25041" guid="485d28c5-349a-48b6-93be-12a35a1c1e39" />
+      <assembly name="Math Region" version="0.96" guid="02f1ab51-215b-466e-a74d-5d8b1cf85e8d" />
+      <assembly name="Area Region" version="0.96" guid="4974b228-4974-44cf-8274-bf2936b4a766" />
+      <assembly name="Special Functions" version="1.10.4884.25035" guid="2814e667-4e12-48b1-8d51-194e480eabc5" />
+      <assembly name="Plot Region" version="1.8.4884.25023" guid="c451c2b5-798b-4f08-b9ec-b90963d1ddaa" />
+    </dependences>
+  </settings>
+  <region id="0" left="9" top="9" width="348" height="28" color="#0000ff" bgColor="#ffffff" fontSize="12">
+    <text lang="rus">
+      <p bold="true">Планетарный механизм с внутренним зацеплением</p>
+    </text>
+    <text lang="eng">
+      <p bold="true">Planetary gear with internal teeth</p>
+    </text>
+  </region>
+  <region id="1" left="9" top="36" width="102" height="24" border="true" color="#000000" bgColor="#dddddd" fontSize="10">
+    <text lang="rus">
+      <p>Входные данные:</p>
+    </text>
+    <text lang="ind">
+      <p>Data masukan:</p>
+    </text>
+    <text lang="eng">
+      <p>Input data:</p>
+    </text>
+  </region>
+  <region id="2" left="9" top="63" width="43" height="24" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <description active="true" position="Right" lang="rus">
+        <p>Радиус подвижного колеса</p>
+      </description>
+      <description active="true" position="Right" lang="eng">
+        <p>Radius of rolling wheel</p>
+      </description>
+      <input>
+        <e type="operand">r</e>
+        <e type="operand">3</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+  <region id="3" left="9" top="90" width="43" height="24" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <description active="true" position="Right" lang="rus">
+        <p>Расстояние между центрами колес</p>
+      </description>
+      <description active="true" position="Right" lang="eng">
+        <p>The distance between the centers of wheels</p>
+      </description>
+      <input>
+        <e type="operand">L</e>
+        <e type="operand">2</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+  <region id="4" left="9" top="117" width="43" height="24" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <description active="true" position="Right" lang="rus">
+        <p>Длина стержня</p>
+      </description>
+      <description active="true" position="Right" lang="eng">
+        <p>Bar length</p>
+      </description>
+      <input>
+        <e type="operand">d</e>
+        <e type="operand">5</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+  <region id="5" top="144" color="#000000" bgColor="#ffffff">
+    <area collapsed="true" />
+    <region id="6" left="9" top="162" width="111" height="24" border="true" color="#000000" bgColor="#dddddd" fontSize="10">
+      <text lang="rus">
+        <p>Вычисление:</p>
+      </text>
+      <text lang="ind">
+        <p>Perhitungan:</p>
+      </text>
+      <text lang="eng">
+        <p>Calculation:</p>
+      </text>
+    </region>
+    <region id="7" left="9" top="189" width="116" height="24" color="#000000" bgColor="#ffffff" fontSize="10">
+      <math>
+        <description active="true" position="Right" lang="rus">
+          <p>границы изменения переменной t</p>
+        </description>
+        <input>
+          <e type="operand">step</e>
+          <e type="operand">1</e>
+          <e type="operand">108</e>
+          <e type="function" preserve="true" args="2">range</e>
+          <e type="operator" args="2">:</e>
+        </input>
+      </math>
+    </region>
+    <region id="8" left="9" top="216" width="68" height="24" color="#000000" bgColor="#ffffff" fontSize="10">
+      <math optimize="2">
+        <input>
+          <e type="operand">path</e>
+          <e type="operand">0</e>
+          <e type="operator" args="2">:</e>
+        </input>
+      </math>
+    </region>
+    <region id="9" left="9" top="243" width="63" height="41" color="#000000" bgColor="#ffffff" fontSize="10">
+      <math>
+        <description active="true" position="Right" lang="rus">
+          <p>шаг изменения угла поворота центра колеса  </p>
+        </description>
+        <input>
+          <e type="operand">Δθ</e>
+          <e type="operand">π</e>
+          <e type="operand">18</e>
+          <e type="operator" args="2">/</e>
+          <e type="operator" args="2">:</e>
+        </input>
+      </math>
+    </region>
+    <region id="10" left="9" top="279" width="87" height="41" color="#000000" bgColor="#ffffff" fontSize="10">
+      <math>
+        <description active="true" position="Right" lang="rus">
+          <p>шаг изменения угла поворота  колеса  </p>
+        </description>
+        <input>
+          <e type="operand">Δφ</e>
+          <e type="operand">L</e>
+          <e type="operator" args="1">-</e>
+          <e type="operand">r</e>
+          <e type="operator" args="2">/</e>
+          <e type="operand">Δθ</e>
+          <e type="operator" args="2">*</e>
+          <e type="operator" args="2">:</e>
+        </input>
+      </math>
+    </region>
+    <region id="11" left="9" top="324" width="344" height="296" color="#000000" bgColor="#ffffff" fontSize="10">
+      <math>
+        <input>
+          <e type="operand">path</e>
+          <e type="operand">t</e>
+          <e type="function" args="2">f</e>
+          <e type="operand">xC</e>
+          <e type="operand">L</e>
+          <e type="operand">Δθ</e>
+          <e type="operand">t</e>
+          <e type="operator" args="2">*</e>
+          <e type="function" preserve="true" args="1">sin</e>
+          <e type="operator" args="2">*</e>
+          <e type="operator" args="2">:</e>
+          <e type="operand">yC</e>
+          <e type="operand">L</e>
+          <e type="operand">Δθ</e>
+          <e type="operand">t</e>
+          <e type="operator" args="2">*</e>
+          <e type="function" preserve="true" args="1">cos</e>
+          <e type="operator" args="2">*</e>
+          <e type="operator" args="2">:</e>
+          <e type="operand">xD</e>
+          <e type="operand">xC</e>
+          <e type="operand">d</e>
+          <e type="operand">Δφ</e>
+          <e type="operand">t</e>
+          <e type="operator" args="2">*</e>
+          <e type="function" preserve="true" args="1">sin</e>
+          <e type="operator" args="2">*</e>
+          <e type="operator" args="2">+</e>
+          <e type="function" preserve="true" args="1">eval</e>
+          <e type="operator" args="2">:</e>
+          <e type="operand">yD</e>
+          <e type="operand">yC</e>
+          <e type="operand">d</e>
+          <e type="operand">Δφ</e>
+          <e type="operand">t</e>
+          <e type="operator" args="2">*</e>
+          <e type="function" preserve="true" args="1">cos</e>
+          <e type="operator" args="2">*</e>
+          <e type="operator" args="2">+</e>
+          <e type="function" preserve="true" args="1">eval</e>
+          <e type="operator" args="2">:</e>
+          <e type="operand">path</e>
+          <e type="operand">0</e>
+          <e type="operator" args="2">≡</e>
+          <e type="operand">path</e>
+          <e type="operand">xD</e>
+          <e type="operand">yD</e>
+          <e type="operand">1</e>
+          <e type="operand">2</e>
+          <e type="function" preserve="true" args="4">mat</e>
+          <e type="operator" args="2">:</e>
+          <e type="operand">path</e>
+          <e type="operand">path</e>
+          <e type="operand">xD</e>
+          <e type="operand">yD</e>
+          <e type="operand">1</e>
+          <e type="operand">2</e>
+          <e type="function" preserve="true" args="4">mat</e>
+          <e type="function" preserve="true" args="2">stack</e>
+          <e type="operator" args="2">:</e>
+          <e type="function" preserve="true" args="3">if</e>
+          <e type="operand">xC</e>
+          <e type="operand">yC</e>
+          <e type="operand">xD</e>
+          <e type="operand">yD</e>
+          <e type="operand">2</e>
+          <e type="operand">2</e>
+          <e type="function" preserve="true" args="6">mat</e>
+          <e type="operand">path</e>
+          <e type="operand">xD</e>
+          <e type="operand">yD</e>
+          <e type="operand" style="string">.</e>
+          <e type="operand">10</e>
+          <e type="operand" style="string"> Red</e>
+          <e type="operand">xC</e>
+          <e type="operand">yC</e>
+          <e type="operand" style="string">.</e>
+          <e type="operand">20</e>
+          <e type="operand" style="string">Blue</e>
+          <e type="operand">xC</e>
+          <e type="operand">yC</e>
+          <e type="operand" style="string">.</e>
+          <e type="operand">125</e>
+          <e type="operand" style="string">Light Blue</e>
+          <e type="operand">0</e>
+          <e type="operand">0</e>
+          <e type="operand" style="string">o</e>
+          <e type="operand">185</e>
+          <e type="operand" style="string">Green</e>
+          <e type="operand">4</e>
+          <e type="operand">5</e>
+          <e type="function" preserve="true" args="22">mat</e>
+          <e type="operand">3</e>
+          <e type="operand">1</e>
+          <e type="function" preserve="true" args="5">sys</e>
+          <e type="operand">6</e>
+          <e type="operand">1</e>
+          <e type="function" preserve="true" args="8">line</e>
+          <e type="operator" args="2">:</e>
+        </input>
+      </math>
+    </region>
+    <region id="12" left="333" top="333" width="438" height="24" color="#000000" bgColor="#ffff80" fontSize="10">
+      <text lang="rus">
+        <p>Зависимость координат центра (C) колеса от времени t</p>
+      </text>
+    </region>
+    <region id="13" left="333" top="378" width="439" height="24" color="#000000" bgColor="#ffff80" fontSize="10">
+      <text lang="rus">
+        <p>Зависимость координат конца стержня (D) от времени t</p>
+      </text>
+    </region>
+    <region id="14" top="621" color="#000000" bgColor="#ffffff">
+      <area terminator="true" />
+    </region>
+  </region>
+  <region id="15" left="9" top="639" width="70" height="24" border="true" color="#000000" bgColor="#dddddd" fontSize="10">
+    <text lang="rus">
+      <p>Результат:</p>
+    </text>
+    <text lang="ind">
+      <p>Hasil:</p>
+    </text>
+    <text lang="eng">
+      <p>Result:</p>
+    </text>
+  </region>
+  <region id="16" left="9" top="666" width="227" height="219" color="#000000" bgColor="#ffffff" fontSize="10" showInputData="False">
+    <plot grid="false" axes="false" type="2d" render="lines" scale_x="2.441136626358" scale_y="2.441136626358" scale_z="2.441136626358" rotate_x="0" rotate_y="0" rotate_z="0" transpose_x="0" transpose_y="-7" transpose_z="0" animate="step" frameRate="20">
+      <input>
+        <e type="operand">path</e>
+        <e type="operand">t</e>
+        <e type="function" args="2">f</e>
+      </input>
+    </plot>
+  </region>
+</regions>

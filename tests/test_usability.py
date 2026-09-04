@@ -370,17 +370,12 @@ def test_a_dimension_carries_its_own_text(window):
     assert dimension.value_text == dimension.measured_text
 
 
-def test_the_rectangle_prompt_only_appears_on_a_scaled_page(window, monkeypatch):
+def test_the_rectangle_size_prompt_appears_after_scale_is_known(window, monkeypatch):
     from calcforge.ui import dialogs
     asked = []
     monkeypatch.setattr(dialogs.RectangleSizeDialog, "exec",
                         lambda self: asked.append(True) or dialogs.QDialog.Rejected)
     window.interactive_prompts = True
-
-    window.select_tool("rect")
-    drag(window.view, 100, 100, 200, 180)
-    assert asked == []                      # markup on an unscaled page: no nagging
-
     scaled_page(window)
     window.select_tool("rect")
     drag(window.view, 300, 100, 400, 180)
@@ -1244,6 +1239,7 @@ def test_symbol_keys_survive_being_rebound_and_reopened(window):
 
     second = MainWindow()
     second.confirm_discard = lambda: True
+    second.interactive_prompts = False
     try:
         assert second.shortcuts.sequence("symbol.multiply") == "Ctrl+Alt+9"
         assert second.symbol_actions["symbol.multiply"].shortcut() == \
@@ -1427,13 +1423,13 @@ def test_the_unit_box_counts_as_typing(window):
     assert not window.view.is_editing()
 
 
-def test_the_menu_can_change_the_unit_too(window):
+def test_the_calculation_menu_does_not_duplicate_result_unit_editing(window):
     block = _calc(window, "b := 300 mm\nA := b*b =")
     window.select_tool("select")
     point = _result_point(window, block)
     menu = window.build_context_menu(block, point)
     labels = [action.text() for action in menu.actions()]
-    assert "Show this result in…" in labels
+    assert "Show this result in…" not in labels
 
 
 # ---------------------------------------------------------------------------
@@ -1561,6 +1557,70 @@ def test_the_scale_dialog_offers_picking_two_points_from_a_standing_start(window
         dialog.deleteLater()
 
 
+def test_calibration_has_a_visible_rebindable_shortcut(window):
+    assert window.act_scale.shortcut().toString() == "Ctrl+Shift+K"
+    binding = [b for b in window.shortcuts.bindings()
+               if b.action_id == "command.scale"]
+    assert binding and binding[0].label == "Page scale"
+
+
+@pytest.mark.parametrize("entered", ["10mm", "10 mm"])
+def test_the_calibration_length_prompt_accepts_joined_or_spaced_units(
+        window, entered):
+    from calcforge.ui import dialogs
+
+    dialog = dialogs.CalibrationLengthDialog(200.0, window)
+    try:
+        assert not dialog.known.text()
+        dialog.known.setText(entered)
+        assert dialog.length_text() == entered
+    finally:
+        dialog.deleteLater()
+
+
+def test_the_calibration_length_prompt_rejects_incompatible_units(
+        window, monkeypatch):
+    from calcforge.ui import dialogs
+    warned = []
+    monkeypatch.setattr(dialogs.QMessageBox, "warning",
+                        lambda *args: warned.append(args))
+    dialog = dialogs.CalibrationLengthDialog(200.0, window)
+    try:
+        dialog.known.setText("10 kPa")
+        assert dialog.length_text() is None
+        assert warned and "compatible units" in warned[0][2]
+    finally:
+        dialog.deleteLater()
+
+
+def test_hovering_a_function_shows_its_signature_and_purpose(window):
+    from PySide6.QtGui import QHelpEvent
+    from PySide6.QtWidgets import QToolTip
+
+    listing = window.functions_panel.list
+    item = next(listing.item(row) for row in range(listing.count())
+                if listing.item(row).text() == "sqrt")
+    assert "sqrt(x)" in item.toolTip()
+    assert "square root" in item.toolTip()
+
+    point = listing.visualItemRect(item).center()
+    QApplication.sendEvent(
+        listing.viewport(),
+        QHelpEvent(QEvent.ToolTip, point,
+                   listing.viewport().mapToGlobal(point)))
+    assert "sqrt(x)" in QToolTip.text()
+    QToolTip.hideText()
+
+
+def test_typing_a_function_shows_its_signature_and_purpose(window):
+    window.view._last_scene_pos = QPointF(100, 100)
+    press_key(window.view, Qt.Key_unknown, "/")
+    type_text(window.view, "sqrt(")
+
+    assert "sqrt(x)" in window.status_hint.text()
+    assert "square root" in window.status_hint.text()
+
+
 def test_choosing_to_pick_points_starts_the_calibrate_tool(window, monkeypatch):
     from calcforge.ui import dialogs
 
@@ -1571,18 +1631,51 @@ def test_choosing_to_pick_points_starts_the_calibrate_tool(window, monkeypatch):
     assert "click one end" in window.status_hint.text().lower()
 
 
+@pytest.mark.parametrize("tool", ["rect", "ellipse", "measure_length",
+                                   "measure_area"])
+def test_the_first_scaled_tool_click_prompts_before_drawing(
+        window, monkeypatch, tool):
+    from calcforge.core.document import PageScale
+
+    asked = []
+
+    def calibrate():
+        asked.append(tool)
+        window.current_page().scale = PageScale.from_ratio(100)
+
+    monkeypatch.setattr(window, "calibrate_dialog", calibrate)
+    window.interactive_prompts = True
+    window.select_tool(tool)
+    click(window.view, 100, 300)
+
+    assert asked == [tool]
+    assert window.view._draft is not None
+
+
+def test_cancelling_the_first_scale_prompt_does_not_create_a_markup(
+        window, monkeypatch):
+    monkeypatch.setattr(window, "calibrate_dialog", lambda: None)
+    window.interactive_prompts = True
+    window.select_tool("measure_length")
+
+    click(window.view, 100, 300)
+
+    assert window.view._draft is None
+    assert markups(window) == []
+
+
 def test_two_clicks_and_a_length_set_the_scale(window, monkeypatch):
     from calcforge.ui import dialogs
 
     asked = {}
 
-    class Stub(dialogs.ScaleDialog):
+    class Stub(dialogs.CalibrationLengthDialog):
         def exec(self):
             asked["measured"] = self.measured_pt
             self.known.setText("10 m")
             return dialogs.QDialog.Accepted
 
-    monkeypatch.setattr(dialogs, "ScaleDialog", Stub)
+    monkeypatch.setattr(dialogs, "CalibrationLengthDialog", Stub)
     window.select_tool("calibrate")
     click(window.view, 100, 300)
     click(window.view, 300, 300)
@@ -1595,7 +1688,7 @@ def test_two_clicks_and_a_length_set_the_scale(window, monkeypatch):
 
 def test_a_calibration_line_is_not_left_on_the_page(window, monkeypatch):
     from calcforge.ui import dialogs
-    monkeypatch.setattr(dialogs.ScaleDialog, "exec",
+    monkeypatch.setattr(dialogs.CalibrationLengthDialog, "exec",
                         lambda self: dialogs.QDialog.Rejected)
     window.select_tool("calibrate")
     drag(window.view, 100, 300, 300, 300)
@@ -2107,6 +2200,21 @@ def test_a_line_defines_for_the_whole_document(window):
     window.view.end_item_edit()
     window.recalculate()
     assert window.document.workspace.get("t").to("mm").magnitude == pytest.approx(5)
+
+
+def test_a_line_does_not_expose_block_only_scope_controls(window):
+    from PySide6.QtWidgets import QCheckBox
+
+    window.select_tool("math")
+    drag(window.view, 80, 300, 400, 330)
+    line = window.view.editing_item()
+    window.view.end_item_edit()
+    line.setSelected(True)
+    window.properties_panel.show_items([line])
+
+    labels = [box.text() for box in
+              window.properties_panel.findChildren(QCheckBox)]
+    assert "Self-contained" not in labels
 
 
 def test_enter_in_a_block_makes_another_line_not_another_region(window):
@@ -3388,6 +3496,7 @@ def test_a_default_is_remembered_between_sessions(window):
 
     second = MainWindow()
     second.confirm_discard = lambda: True
+    second.interactive_prompts = False
     try:
         second.select_tool("rect")
         drag(second.view, 100, 100, 200, 160)
@@ -4227,6 +4336,36 @@ def test_an_image_can_be_swapped_for_another(window, tmp_path, monkeypatch):
     assert markups(window)[0].asset_key == original
 
 
+def test_a_raster_image_has_no_line_or_fill_style_controls(window, tmp_path):
+    from PySide6.QtGui import QImage
+    from PySide6.QtWidgets import QFileDialog, QGroupBox
+    from calcforge.items.media import ImageItem
+
+    path = str(tmp_path / "photo.png")
+    QImage(60, 40, QImage.Format_ARGB32).save(path)
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (path, ""))
+    try:
+        window.select_tool("image")
+        drag(window.view, 100, 100, 300, 240)
+    finally:
+        monkeypatch.undo()
+    image = next(i for i in markups(window) if isinstance(i, ImageItem))
+    image.style.stroke = "#123456"
+    image.setSelected(True)
+    window.properties_panel.show_items([image])
+
+    appearance = next(group for group in
+                      window.properties_panel.findChildren(QGroupBox)
+                      if group.title() == "Appearance")
+    labels = [label.text() for label in appearance.findChildren(QLabel)]
+    assert "Line" not in labels and "Fill" not in labels
+
+    before = image.style.stroke
+    window._style_stroke("#c92a2a")
+    assert image.style.stroke == before
+
+
 def test_every_markup_offers_its_own_settings(window):
     """Each kind of markup has a panel section about what makes it that kind."""
     expected = {
@@ -4302,6 +4441,21 @@ def test_the_stamp_wording_is_only_shown_for_the_stamp(window):
     assert stamp.isVisible() and not counting.isVisible()
     window.select_tool("count")
     assert counting.isVisible() and not stamp.isVisible()
+
+
+def test_count_stays_armed_and_numbers_each_click_until_escape(window):
+    from calcforge.items.measure import CountItem
+
+    window.select_tool("count")
+    click(window.view, 120, 160)
+    click(window.view, 180, 160)
+    click(window.view, 240, 160)
+
+    counts = [item for item in markups(window) if isinstance(item, CountItem)]
+    assert [item.index for item in counts] == [1, 2, 3]
+    assert window.view.tool_key == "count"
+    press_key(window.view, Qt.Key_Escape)
+    assert window.view.tool_key == "select"
 
 
 # ---------------------------------------------------------------------------
@@ -4857,11 +5011,11 @@ def test_a_callout_can_be_turned_into_a_cloud_afterwards(window):
 # The markup tools that were missing
 # ---------------------------------------------------------------------------
 
-def test_the_markup_menu_has_everything_bluebeam_has(window):
-    """Typewriter, Eraser, Arc and Flag were on the menu and not in the app."""
+def test_the_markup_menu_omits_typewriter_but_keeps_the_other_tools(window):
+    """Typewriter is retired without disturbing the remaining markup tools."""
     from calcforge.ui.tools import TOOL_MAP
 
-    wanted = {"typewriter": "", "eraser": "Shift+E", "arc": "Shift+C",
+    wanted = {"eraser": "Shift+E", "arc": "Shift+C",
               "flag": "Shift+F", "highlighter": "H", "polyline": "N",
               "cloud": "C"}
     for key, shortcut in wanted.items():
@@ -4871,18 +5025,19 @@ def test_the_markup_menu_has_everything_bluebeam_has(window):
     # and no two tools share a name
     labels = [tool.label for tool in TOOL_MAP.values()]
     assert len(labels) == len(set(labels))
+    assert "typewriter" not in TOOL_MAP
+    assert all(binding.action_id != "tool.typewriter"
+               for binding in window.shortcuts.bindings())
 
 
-def test_a_typewriter_puts_words_down_with_no_box(window):
+def test_an_old_typewriter_item_still_loads_without_exposing_its_tool(window):
+    from calcforge.items.base import build_item
     from calcforge.items.text import TypewriterItem
 
-    window.select_tool("typewriter")
-    drag(window.view, 100, 100, 320, 140)
-    item = window.view.editing_item()
+    item = build_item(TypewriterItem("Old note").serialize())
     assert isinstance(item, TypewriterItem)
     assert not item.style.stroke          # no border
     assert not item.style.fill            # and nothing behind the words
-    window.view.end_item_edit()
 
 
 def test_an_arc_bends(window):
@@ -5054,8 +5209,42 @@ def test_escape_puts_the_format_painter_down(window):
     rect = _a_rectangle(window)
     rect.setSelected(True)
     window.format_painter()
+    assert not window.view.cursor().pixmap().isNull()
     press_key(window.view, Qt.Key_Escape)
     assert not window.holding_a_format()
+    assert window.view.cursor().shape() == Qt.ArrowCursor
+
+
+def test_format_painter_never_copies_cloud_geometry(window):
+    cloud = _a_rectangle(window)
+    cloud.kind = "cloud"
+    cloud.style.stroke = "#c92a2a"
+    target = _a_rectangle(window, 300, 120, 380, 200)
+    target.kind = "rect"
+    window.scene.clearSelection()
+    cloud.setSelected(True)
+
+    window.format_painter()
+    window.paint_format_onto(target)
+
+    assert target.kind == "rect"
+    assert target.style.stroke == "#c92a2a"
+
+
+def test_format_painter_does_not_copy_callout_leaders(window):
+    first = _callout(window)
+    window.view.end_item_edit()
+    window.add_leader_to(first)
+    second = _callout(window)
+    window.view.end_item_edit()
+    before = [(leader.kind, QPointF(leader.tip)) for leader in second.leaders]
+    window.scene.clearSelection()
+    first.setSelected(True)
+
+    window.format_painter()
+    window.paint_format_onto(second)
+
+    assert [(leader.kind, leader.tip) for leader in second.leaders] == before
 
 
 def test_hidden_markups_go_away_and_come_back(window):
@@ -5170,14 +5359,16 @@ def test_the_menu_offers_a_leader_on_a_text_box_and_removal_on_a_callout(window)
     box = markups(window)[-1]
     box.setSelected(True)
     labels = _menu_labels(window.build_context_menu(box, box.pos()))
-    assert "Add leader" in labels, "on the menu itself, not inside a sub-menu"
-    assert "Arrow" in labels and "Cloud" in labels, "and it asks which kind"
+    assert "Add arrow leader" in labels
+    assert "Add cloud leader" in labels
 
     window.set_leader(box, True)
     call = [i for i in markups(window) if isinstance(i, CalloutItem)][-1]
     labels = _menu_labels(window.build_context_menu(call, call.pos()))
-    assert "Add leader" in labels
-    assert "Remove leaders" in labels
+    assert "Add arrow leader" in labels
+    assert "Add cloud leader" in labels
+    assert "Remove leader" in labels
+    assert "Remove leaders" not in labels
 
 
 def test_a_text_boxs_leader_is_still_there_after_a_save(window):
@@ -6102,16 +6293,19 @@ def test_a_lines_own_figures_survive_a_save(window):
     assert clone.figures_for(0) == (3, "scientific")
 
 
-def test_the_figures_menu_is_on_a_calculations_right_click(window):
+def test_a_calculations_right_click_only_offers_merge_from_its_calc_commands(window):
     block = _calc(window, "a := 1/3 =", at=(90, 110))
     block.setSelected(True)
     menu = window.build_context_menu(block, block.pos())
-    figures = [a for a in menu.actions() if a.text() == "Figures on this line"]
-    assert figures
-    labels = [a.text() for a in figures[0].menu().actions() if not a.isSeparator()]
-    assert "Significant figures" in labels
-    assert "Decimal places" in labels
-    assert "Scientific" in labels
+    labels = _menu_labels(menu)
+    assert not ({"Edit…", "Show this result in…", "Figures on this line",
+                 "Keep as one block", "Self-contained block", "Split"} & set(labels))
+
+    other = _calc(window, "b := 2", at=(90, 210))
+    block.setSelected(True)
+    other.setSelected(True)
+    labels = _menu_labels(window.build_context_menu(other, other.pos()))
+    assert labels.count("Merge") == 1
 
 
 # ---------------------------------------------------------------------------
@@ -6247,14 +6441,23 @@ def _click_in(window, block, x, y):
     return block._editor.textCursor().position()
 
 
+def _click_at_source_offset(window, block, offset):
+    """Click the painted caret location for a source offset."""
+    cursor = block._editor.textCursor()
+    cursor.setPosition(offset)
+    block._editor.setTextCursor(cursor)
+    x, baseline, _ascent, _descent = block.caret_place()
+    return _click_in(window, block, x, baseline)
+
+
 def test_clicking_a_numerator_puts_the_caret_in_the_numerator(window):
     """The editor holding the characters is invisible and laid out flat; the
     caret must follow the typeset maths, not that."""
     block = _typeset(window, "Zed := b*d^2/6")
 
-    assert _click_in(window, block, 45, 12) == 7      # the b, above the rule
-    assert _click_in(window, block, 55, 12) == 9      # the d beside it
-    assert _click_in(window, block, 55, 34) == 13     # the 6, below the rule
+    assert _click_at_source_offset(window, block, 7) == 7   # the b, above the rule
+    assert _click_at_source_offset(window, block, 9) == 9   # the d beside it
+    assert _click_at_source_offset(window, block, 13) == 13  # the denominator
 
 
 def test_clicking_the_name_puts_the_caret_in_the_name(window):
@@ -6268,7 +6471,7 @@ def test_clicking_the_name_puts_the_caret_in_the_name(window):
 
 def test_typing_after_a_click_lands_where_the_caret_is(window):
     block = _typeset(window, "Zed := b*d^2/6")
-    _click_in(window, block, 55, 34)                  # in the denominator
+    _click_at_source_offset(window, block, 13)        # in the denominator
     type_text(window.view, "1")
     assert block._editor.toPlainText() == "Zed := b*d^2/16"
     window.view.end_item_edit()
@@ -6278,7 +6481,7 @@ def test_a_click_does_not_snap_back_to_the_start(window):
     """The release used to hand the click to Qt, which placed it again."""
     block = _typeset(window, "Zed := b*d^2/6")
     for _ in range(3):
-        assert _click_in(window, block, 45, 12) == 7
+        assert _click_at_source_offset(window, block, 7) == 7
 
 
 # ---------------------------------------------------------------------------
@@ -7098,10 +7301,47 @@ def test_the_grid_and_snap_buttons_are_on_the_bar(window):
     window.status_grid.setChecked(True)
     assert window.document.pages[0].grid is True
 
-    window.status_snap.setChecked(True)
+    window.act_snap.setChecked(True)
     assert window.document.settings.snap_to_grid
-    window.status_snap.setChecked(False)
+    window.act_snap.setChecked(False)
     assert not window.document.settings.snap_to_grid
+
+    labels = [action.text() for action in window.status_snap.menu().actions()]
+    assert labels == ["Grid snap", "Markup snap", "PDF snap", "Align snap"]
+
+
+def test_the_snap_dropdown_toggles_a_target_through_qt(window):
+    from PySide6.QtCore import QTimer
+    from PySide6.QtTest import QTest
+
+    window.act_snap.setChecked(False)
+    menu = window.status_snap.menu()
+    grid_action = menu.actions()[0]
+
+    def choose_grid():
+        assert menu.isVisible()
+        QTest.mouseClick(menu, Qt.LeftButton, Qt.NoModifier,
+                         menu.actionGeometry(grid_action).center())
+
+    QTimer.singleShot(0, choose_grid)
+    QTest.mouseClick(window.status_snap, Qt.LeftButton)
+    assert window.document.settings.snap_to_grid
+
+
+def test_clicking_the_page_grid_does_not_move_the_view(window):
+    from PySide6.QtTest import QTest
+
+    window.load_sample()
+    window.go_to_page(1)
+    horizontal = window.view.horizontalScrollBar()
+    vertical = window.view.verticalScrollBar()
+    horizontal.setValue(horizontal.minimum() + 7)
+    vertical.setValue(min(vertical.maximum(), vertical.value() + 43))
+    before = (horizontal.value(), vertical.value())
+
+    QTest.mouseClick(window.status_grid, Qt.LeftButton)
+
+    assert (horizontal.value(), vertical.value()) == before
 
 
 def test_the_bar_follows_the_page_it_is_on(window, tmp_path):
@@ -7461,7 +7701,8 @@ def test_the_menu_adds_and_removes_one_leader_at_a_time(window):
 
     menu = window.build_context_menu(call, call.mapToScene(QPointF(20, 20)))
     labels = _menu_labels(menu)
-    assert "Add leader" in labels
+    assert "Add arrow leader" in labels
+    assert "Add cloud leader" in labels
 
     window.add_leader_to(call)
     window.add_leader_to(call)
@@ -7491,8 +7732,8 @@ def test_a_cloud_callout_is_offered_more_leaders_of_either_kind(window):
     assert [leader.kind for leader in call.leaders] == ["cloud"]
 
     labels = _menu_labels(window.build_context_menu(call, call.pos()))
-    assert "Add leader" in labels
-    assert "Arrow" in labels and "Cloud" in labels
+    assert "Add arrow leader" in labels
+    assert "Add cloud leader" in labels
 
     window.add_leader_to(call, "arrow")
     assert [leader.kind for leader in call.leaders] == ["cloud", "arrow"]
@@ -7548,17 +7789,19 @@ def test_turning_the_grid_snap_off_actually_stops_it(window):
 
 
 def test_the_menu_and_the_page_bar_agree_about_snapping(window):
-    """Two switches for one setting used to disagree with each other."""
+    """The dropdown and View menu share one action and cannot disagree."""
+    grid = window.status_snap.menu().actions()[0]
+    assert grid is window.act_snap
     window.toggle_snap(True)
-    assert window.act_snap.isChecked() and window.status_snap.isChecked()
+    assert grid.isChecked()
 
-    window.status_snap.setChecked(False)          # the bar
+    grid.setChecked(False)                        # the bar
     assert not window.document.settings.snap_to_grid
     assert not window.act_snap.isChecked()        # and the menu follows
 
     window.act_snap.setChecked(True)              # the menu
     assert window.document.settings.snap_to_grid
-    assert window.status_snap.isChecked()         # and the bar follows
+    assert grid.isChecked()                       # and the bar follows
 
 
 def test_the_middle_of_a_polygon_side_can_be_caught(window):
@@ -7669,10 +7912,10 @@ def test_the_three_snaps_are_on_the_view_menu(window):
     for entry in window.menuBar().actions():
         if entry.text() == "&View":
             labels = [a.text() for a in entry.menu().actions()]
-    assert "Snap to grid" in labels
-    assert "Snap to what is drawn" in labels
-    assert "Snap to the drawing" in labels
-    assert "Snap in line with what is drawn" in labels
+    assert "Grid snap" in labels
+    assert "Markup snap" in labels
+    assert "PDF snap" in labels
+    assert "Align snap" in labels
 
 
 # ---------------------------------------------------------------------------

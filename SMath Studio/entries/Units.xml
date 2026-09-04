@@ -1,0 +1,837 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<entries lang:default="eng" xmlns="http://smath.info/schemas/entries/1.0" xmlns:lang="http://smath.info/schemas/entries/1.0">
+  <prefixes>
+    <add factor="1"    exp="-24" name="y yocto" lang:rus="и иокто"  />
+    <add factor="1"    exp="-21" name="z zepto" lang:rus="з зепто"  />
+    <add factor="1"    exp="-18" name="a atto"  lang:rus="а атто"   />
+    <add factor="1"    exp="-15" name="f femto" lang:rus="ф фемто"  />
+    <add factor="1"    exp="-12" name="p pico"  lang:rus="п пико"   />
+    <add factor="1"    exp="-9"  name="n nano"  lang:rus="н нано"   />
+    <add factor="1"    exp="-6"  name="μ micro" lang:rus="мк микро" />
+    <add factor="1"    exp="-3"  name="m milli" lang:rus="м милли"  />
+    <add factor="1"    exp="-2"  name="c centi" lang:rus="с санти"  />
+    <add factor="1"    exp="-1"  name="d deci"  lang:rus="д деци"   />
+    <add factor="1"    exp="1"   name="da deka" lang:rus="да дека"  />
+    <add factor="1"    exp="2"   name="h hecto" lang:rus="г гекто"  />
+    <add factor="1"    exp="3"   name="k kilo"  lang:rus="к кило"   />
+    <add factor="1"    exp="6"   name="M mega"  lang:rus="М мега"   />
+    <add factor="1"    exp="9"   name="G giga"  lang:rus="Г гига"   />
+    <add factor="1"    exp="12"  name="T tera"  lang:rus="Т тера"   />
+    <add factor="1"    exp="15"  name="P peta"  lang:rus="П пета"   />
+    <add factor="1"    exp="18"  name="E exa"   lang:rus="Э экза"   />
+    <add factor="1"    exp="21"  name="Z zetta" lang:rus="З зетта"  />
+    <add factor="1"    exp="24"  name="Y yotta" lang:rus="И иотта"  />
+    <add factor="2^10"           name="ki kibi" lang:rus="ки киби"  />
+    <add factor="2^20"           name="Mi mebi" lang:rus="Ми меби"  />
+    <add factor="2^30"           name="Gi gibi" lang:rus="Ги гиби"  />
+    <add factor="2^40"           name="Ti tebi" lang:rus="Ти теби"  />
+  </prefixes>
+
+  <dimensions>
+    <add                                                id="613" />
+    <add baseunit="sr"                                  id="588" />
+    <add baseunit="m"                                   id="268" />
+    <add baseunit="s"                                   id="284" />
+    <add baseunit="kg"                                  id="273" />
+    <add baseunit="K"                                   id="283" />
+    <add baseunit="bit"                                 id="423" />
+    <add baseunit="A"                                   id="259" />
+    <add baseunit="cd"                                  id="269" />
+    <add baseunit="mol"                                 id="282" />
+    <add baseunit="dB"                                  id="591" />
+    <add baseunit="L"   connection="m^3"                id="289" />
+    <add baseunit="Hz"  connection="s^-1"               id="265" />
+    <add baseunit="C"   connection="A*s"                id="256" />
+    <add baseunit="D"   connection="A*s*m"              id="595" />
+    <add baseunit="R"   connection="{A*s}/kg"           id="594" />
+    <add baseunit="Gy"  connection="m^2/s^2"            id="258" />
+    <add baseunit="T"   connection="kg/{A*s^2}"         id="272" />
+    <add baseunit="Pa"  connection="kg/{m*s^2}"         id="279" />
+    <add baseunit="N"   connection="{kg*m}/s^2"         id="262" />
+    <add baseunit="J"   connection="{kg*m^2}/s^2"       id="260" />
+    <add baseunit="W"   connection="{kg*m^2}/s^3"       id="278" />
+    <add baseunit="Wb"  connection="{kg*m^2}/{A*s^2}"   id="592" />
+    <add baseunit="V"   connection="{kg*m^2}/{A*s^3}"   id="277" />
+    <add baseunit="H"   connection="{kg*m^2}/{A^2*s^2}" id="267" />
+    <add baseunit="Ω"   connection="{kg*m^2}/{A^2*s^3}" id="280" />
+    <add baseunit="S"   connection="{A^2*s^3}/{kg*m^2}" id="593" />
+    <add baseunit="F"   connection="{A^2*s^4}/{kg*m^2}" id="254" />
+    <add baseunit="lx"  connection="{cd*sr}/m^2"        id="590" />
+    <add baseunit="lm"  connection="cd*sr"              id="589" />
+    <add baseunit="kat" connection="mol/s"              id="255" />
+    <add baseunit="P"   connection="kg/{m*s}"           id="287" />
+    <add baseunit="St"  connection="m^2/s"              id="288" />
+    <add baseunit="Oe"  connection="A/m"                id="597" />
+    <add                connection="kg/m"               id="596" />
+    <add                connection="cd/m^2"             id="266" />
+    <add                connection="m^-1"               id="281" />
+    <add                connection="m^2"                id="253" />
+    <add                connection="m/s"                id="286" />
+    <add                connection="m/s^2"              id="250" />
+  </dimensions>
+
+  <units>
+    <property dimension="613" id="252">
+      <add factor="1" exp="-2" system="All" id="634">
+        <synonym name="%" />
+      </add>
+
+      <add factor="1" exp="-3" system="All" id="635">
+        <synonym name="‰" />
+      </add>
+
+      <add factor="1" exp="-6" system="All" id="636">
+        <synonym name="ppm" />
+      </add>
+
+      <add factor="1" exp="-9" system="All" id="637">
+        <synonym name="ppb" />
+      </add>
+
+      <add factor="1" system="All" id="294">
+        <synonym name="rad" lang:rus="рад" />
+      </add>
+
+      <add factor="π/180" system="All" id="293">
+        <synonym name="° deg" lang:ger="°" lang:dan="° grader" />
+      </add>
+
+      <add factor="π/{180*60}" system="All" id="679">
+        <synonym name="\0027\ arcmin" />
+      </add>
+
+      <add factor="π/{180*60*60}" system="All" id="680">
+        <synonym name="\0022\ arcsec" />
+      </add>
+
+      <add factor="π/200" system="All" id="517">
+        <synonym name="grad gon" lang:rus="град гон" lang:dan="gon nygrader" lang:ger="Gon" />
+      </add>
+
+      <add factor="2*π" system="All" id="454">
+        <synonym name="rev" lang:dan="omgange" lang:ger="U" />
+      </add>
+    </property>
+
+    <property dimension="265" id="540">
+      <add factor="π/30" system="All" id="465">
+        <synonym name="rpm" />
+      </add>
+
+      <add factor="π/1800" system="All" id="541">
+        <synonym name="rph" />
+      </add>
+    </property>
+
+    <property dimension="253">
+      <add factor="4.0468564224" exp="3" system="Imperial" id="295">
+        <synonym name="acre" lang:rus="акр" />
+      </add>
+
+      <add factor="1" exp="-28" system="All" id="312">
+        <synonym name="barn" lang:rus="б бн" />
+      </add>
+
+      <add factor="1" exp="2" system="Metric" id="638">
+        <synonym name="a" lang:rus="а" lang:ger="ar"/>
+
+        <extension for="a" lang:rus="а">
+          <prefix name="c" id="640"/>
+          <prefix name="da" id="639"/>
+          <prefix name="h" id="313"/>
+        </extension>
+      </add>
+    </property>
+
+    <property dimension="254">
+      <add factor="1" system="All" id="383">
+        <synonym name="F farad" lang:rus="Ф" />
+
+        <extension for="F" lang:rus="Ф">
+          <prefix name="m" id="384" />
+          <prefix name="μ" id="385" />
+          <prefix name="n" id="386" />
+          <prefix name="p" id="387" />
+        </extension>
+      </add>
+    </property>
+
+    <property dimension="255">
+      <add factor="1" system="All" id="417">
+        <synonym name="kat katal" />
+      </add>
+    </property>
+
+    <property dimension="256">
+      <add factor="1" system="All" id="388">
+        <synonym name="C" lang:rus="Кл" lang:dan="C" />
+
+        <extension for="C" lang:rus="Кл" lang:dan="C">
+          <prefix name="m" id="389" />
+          <prefix name="μ" id="390" />
+          <prefix name="n" id="391" />
+          <prefix name="p" id="392" />
+        </extension>
+      </add>
+
+      <add factor="3.33564095" exp="-10" system="All" id="681">
+        <!-- 'statC:{'cm^{3/2}*'g^{1/2}}/'s -->
+        <synonym name="Fr statC" lang:rus="Фр" />
+      </add>
+
+      <add factor="9.64853328959" exp="4" system="All" id="682">
+        <synonym name="Fd faraday" lang:rus="фарадей" />
+      </add>
+    </property>
+
+    <property dimension="258">
+      <add factor="1" system="Metric" id="405">
+        <synonym name="Gy" lang:rus="Гр" />
+      </add>
+
+      <add factor="1" system="Metric" id="406">
+        <synonym name="Sv" lang:rus="Зв" />
+      </add>
+    </property>
+
+    <property dimension="259">
+      <add factor="1" system="Metric" id="393">
+        <synonym name="A" lang:rus="А" />
+
+        <extension for="A" lang:rus="А">
+          <prefix name="k" id="394" />
+          <prefix name="m" id="395" />
+          <prefix name="μ" id="396" />
+          <prefix name="n" id="397" />
+          <prefix name="p" id="398" />
+        </extension>
+      </add>
+
+      <add factor="10/{4*π}" system="Metric" id="598">
+        <synonym name="Gi" lang:rus="Гб" />
+      </add>
+    </property>
+
+    <property dimension="260">
+      <add factor="1" system="Metric" id="355">
+        <synonym name="J joule" lang:rus="Дж" />
+
+        <extension for="J" lang:rus="Дж">
+          <prefix name="T" id="356" />
+          <prefix name="G" id="357" />
+          <prefix name="M" id="358" />
+          <prefix name="k" id="359" />
+          <prefix name="m" id="360" />
+          <prefix name="μ" />
+          <prefix name="n" />
+          <prefix name="p" />
+        </extension>
+      </add>
+
+      <add factor="4.1868" system="Metric" id="361">
+        <synonym name="cal" lang:rus="кал" />
+
+        <extension for="cal" lang:rus="кал">
+          <prefix name="k" id="362" />
+        </extension>
+      </add>
+
+      <add factor="1.05505585262" exp="3" system="Imperial" id="440">
+        <synonym name="BTU" />
+      </add>
+
+      <add factor="1" exp="-7" system="All" id="468">
+        <synonym name="erg" lang:rus="эрг" />
+      </add>
+    </property>
+
+    <property dimension="262">
+      <add factor="1" system="Metric" id="340">
+        <synonym name="N" lang:rus="Н" />
+
+        <extension for="N" lang:rus="Н">
+          <prefix name="T" id="341" />
+          <prefix name="G" id="342" />
+          <prefix name="M" id="343" />
+          <prefix name="k" id="344" />
+          <prefix name="m" id="345" />
+          <prefix name="μ" id="346" />
+          <prefix name="n" />
+          <prefix name="p" />
+        </extension>
+      </add>
+
+      <add factor="1" exp="-5" system="Metric" id="347">
+        <synonym name="dyn dyne" lang:rus="дин" />
+      </add>
+
+      <add factor="4.4482216152605" system="Imperial" id="437">
+        <synonym name="lbf" />
+      </add>
+
+      <add factor="9.80665" exp="-3" system="All" title="Gram-force" lang:rus="Грамм-сила">
+        <synonym name="gf" lang:rus="гс" />
+      </add>
+
+      <add factor="9.80665" system="All" id="455">
+        <synonym name="kgf" lang:rus="кгс" lang:ger="kp" />
+      </add>
+
+      <add factor="9.80665" exp="3" system="All" id="456">
+        <synonym name="tonnef" lang:rus="тс" lang:ger="Mp" />
+      </add>
+
+      <add factor="8.896443230521" exp="3" system="All" id="457">
+        <synonym name="tonf" />
+      </add>
+
+      <add factor="4.4482216152605" exp="3" system="All" id="458">
+        <synonym name="kip" />
+      </add>
+    </property>
+
+    <property dimension="265">
+      <add factor="1" system="Metric" id="324">
+        <synonym name="Hz" lang:rus="Гц" />
+
+        <extension for="Hz" lang:rus="Гц">
+          <prefix name="T" />
+          <prefix name="G" id="325" />
+          <prefix name="M" id="326" />
+          <prefix name="k" id="327" />
+        </extension>
+      </add>
+
+      <add factor="1/60" system="All" id="466">
+        <synonym name="radpm" />
+      </add>
+    </property>
+
+    <property dimension="590">
+      <add factor="1" system="Metric" id="407">
+        <synonym name="lx" lang:rus="лк" />
+
+        <extension for="lx" lang:rus="лк">
+          <prefix name="k" />
+        </extension>
+      </add>
+    </property>
+
+    <property dimension="267">
+      <add factor="1" system="Metric" id="399">
+        <synonym name="H henry" lang:rus="Гн" />
+
+        <extension for="H" lang:rus="Гн">
+          <prefix name="m" id="400" />
+          <prefix name="μ" id="401" />
+          <prefix name="n" title="Nanohenry" lang:rus="Наногенри" />
+        </extension>
+      </add>
+    </property>
+
+    <property dimension="423">
+      <add factor="1" system="All" id="424">
+        <synonym name="bit" lang:rus="бит" />
+
+        <extension for="bit" lang:rus="бит">
+          <prefix name="T" id="584" />
+          <prefix name="G" id="585" />
+          <prefix name="M" id="586" />
+          <prefix name="k" id="587" />
+        </extension>
+      </add>
+
+      <add factor="8" system="All" id="425">
+        <synonym name="B byte" lang:rus="Б байт" />
+
+        <extension for="B" lang:rus="Б">
+          <prefix name="T" id="427" />
+          <prefix name="G" id="428" />
+          <prefix name="M" id="429" />
+          <prefix name="k" id="430" />
+          <prefix name="Ti" id="432" />
+          <prefix name="Gi" id="433" />
+          <prefix name="Mi" id="434" />
+          <prefix name="ki" id="435" />
+        </extension>
+      </add>
+    </property>
+
+    <property dimension="268">
+      <add factor="1" system="Metric" id="296">
+        <synonym name="m" lang:rus="м" />
+        <synonym name="micron" prefix="μ" />
+
+        <extension for="m" lang:rus="м">
+          <prefix name="p" id="304" />
+          <prefix name="n" id="303" />
+          <prefix name="μ" id="302" />
+          <prefix name="m" id="301" />
+          <prefix name="c" id="300" />
+          <prefix name="d" id="299" />
+          <prefix name="k" id="298" />
+        </extension>
+      </add>
+
+      <add factor="1.609344" exp="3" system="All" id="297">
+        <synonym name="mi mile" lang:rus="миль" />
+      </add>
+
+      <add factor="1.852" exp="3" system="All" id="683">
+        <synonym name="nmi" />
+      </add>
+
+      <add factor="1" exp="-10" system="Metric" id="305">
+        <synonym name="Angstrom Å" lang:rus="ангстрем Å" lang:dan="Ångstrøm Å" />
+      </add>
+
+      <add factor="5.291772108" exp="-11" system="All" id="306">
+        <synonym name="bohr" />
+      </add>
+
+      <add factor="3.048" exp="-1" system="Imperial" id="307">
+        <synonym name="ft" lang:rus="фут" />
+      </add>
+
+      <add factor="1.495978707" exp="11" system="All" id="684">
+        <synonym name="au" lang:rus="а\002E\е\002E\" lang:ger="AE" />
+      </add>
+
+      <add factor="9.4607304725808" exp="15" system="All" id="685">
+        <synonym name="ly" lang:rus="св\002E\год\002E\" lang:ger="LJ" />
+      </add>
+
+      <add factor="3.08567758149137" exp="16" system="All" id="686">
+        <synonym name="pc" lang:rus="пк" />
+      </add>
+
+      <add factor="2.01168" exp="2" system="Imperial" id="308">
+        <synonym name="furlong" lang:rus="фурлонг" />
+      </add>
+
+      <add factor="2.54" exp="-2" system="Imperial" id="309">
+        <synonym name="in" lang:rus="дюйм" lang:dan="tommer in" />
+      </add>
+
+      <add factor="9.144" exp="-1" system="Imperial" id="310">
+        <synonym name="yd" lang:rus="ярд" lang:dan="yd yard" />
+      </add>
+
+      <add factor="1.7018" system="Imperial" id="311">
+        <synonym name="Smoot" lang:rus="смут" />
+      </add>
+    </property>
+
+    <property dimension="269">
+      <add factor="1" system="Metric" id="408">
+        <synonym name="cd" lang:rus="кд" />
+      </add>
+    </property>
+
+    <property dimension="272">
+      <add factor="1" system="Metric" id="410">
+        <synonym name="T tesla" lang:rus="Тл" />
+
+        <extension for="T" lang:rus="Тл">
+          <prefix name="m" />
+          <prefix name="μ" />
+        </extension>
+      </add>
+
+      <add factor="1" exp="-4" system="Imperial" id="411">
+        <synonym name="G gauss" lang:rus="Гс" />
+      </add>
+    </property>
+
+    <property dimension="273">
+      <add factor="1" exp="-3" system="Metric" id="332">
+        <synonym name="g gram" lang:rus="г" />
+
+        <extension for="g" lang:rus="г">
+          <prefix name="k" id="328" />
+          <prefix name="M" id="329" />
+          <prefix name="m" id="333" />
+          <prefix name="μ" id="334" />
+        </extension>
+      </add>
+
+      <add factor="2" exp="-4" system="All" id="599">
+        <synonym name="ct" lang:rus="кар" />
+      </add>
+
+      <add factor="1" exp="3" system="All" id="330">
+        <synonym name="t tonne" lang:rus="т" />
+      </add>
+
+      <add factor="9.0718474" exp="2" system="Imperial" id="331">
+        <synonym name="ton" />
+      </add>
+
+      <add factor="2.8349523125" exp="-2" system="Imperial" id="335">
+        <synonym name="oz ounce" />
+      </add>
+
+      <add factor="4.5359237" exp="-1" system="Imperial" id="336">
+        <synonym name="lb lb.m lbm pound" lang:dan="pund lb lb.m lbm" />
+      </add>
+
+      <add factor="1.45939029372064" exp="1" system="Imperial" id="436">
+        <synonym name="slug" />
+      </add>
+    </property>
+
+    <property dimension="277">
+      <add factor="1" system="Metric" id="373">
+        <synonym name="V volt" lang:rus="В" />
+
+        <extension for="V" lang:rus="В">
+          <prefix name="k" id="374" />
+          <prefix name="m" id="375" />
+          <prefix name="μ" id="376" />
+          <prefix name="n" id="377" />
+          <prefix name="p" id="378" />
+        </extension>
+      </add>
+    </property>
+
+    <property dimension="278">
+      <add factor="1" system="Metric" id="363">
+        <synonym name="W watt" lang:rus="Вт" />
+
+        <extension for="W" lang:rus="Вт">
+          <prefix name="G" id="364" />
+          <prefix name="M" id="365" />
+          <prefix name="k" id="366" />
+          <prefix name="m" id="367" />
+          <prefix name="μ" id="368" />
+          <prefix name="n" id="369" />
+          <prefix name="p" id="370" />
+        </extension>
+      </add>
+
+      <add factor="7.456998715822702" exp="2" system="Imperial" id="371">
+        <synonym name="hp" lang:dan="hk" />
+      </add>
+
+      <add factor="7.46043" exp="2" system="Imperial" id="372">
+        <synonym name="hhp" />
+      </add>
+    </property>
+
+    <property dimension="279">
+      <add factor="1" system="Metric" id="348">
+        <synonym name="Pa" lang:rus="Па" />
+
+        <extension for="Pa" lang:rus="Па">
+          <prefix name="G" id="349" />
+          <prefix name="M" id="350" />
+          <prefix name="k" id="351" />
+        </extension>
+      </add>
+
+      <add factor="1.01325" exp="5" system="All" id="352">
+        <synonym name="atm" lang:rus="атм" />
+      </add>
+
+      <add factor="1" exp="5" system="Metric" id="353">
+        <synonym name="bar" lang:rus="бар" />
+      </add>
+
+      <add factor="1.3332236842105263" exp="2" system="Metric" id="688">
+        <synonym name="torr" lang:rus="торр" lang:ger="Torr" />
+      </add>
+
+      <add factor="1.33322387415" exp="2" system="Metric" id="354">
+        <synonym name="mmHg" lang:rus="мм\0020\рт\002E\ст\002E\" />
+      </add>
+
+      <add factor="3.386389" exp="3" system="Imperial" id="687">
+        <synonym name="inHg" />
+      </add>
+
+      <add factor="6.89475729316836" exp="3" system="Imperial" id="438">
+        <synonym name="psi" />
+
+        <extension for="psi">
+          <prefix name="k" />
+        </extension>
+      </add>
+
+      <add factor="4.78802589803358" exp="1" system="Imperial" id="439">
+        <synonym name="psf" />
+      </add>
+
+      <add factor="6.89475729316836" exp="6" system="Imperial" id="464">
+        <synonym name="ksi" />
+      </add>
+
+      <add factor="4.78802589803358" exp="4" system="Imperial" id="467">
+        <synonym name="ksf" />
+      </add>
+    </property>
+
+    <property dimension="280">
+      <add factor="1" system="Metric" id="402">
+        <synonym name="Ω ohm" lang:rus="Ом Ω" />
+
+        <extension for="Ω ohm" lang:rus="Ом Ω">
+          <prefix name="M" id="403" />
+          <prefix name="k" id="404" />
+          <prefix name="m" id="583" />
+        </extension>
+      </add>
+    </property>
+
+    <property dimension="281">
+      <add factor="3.937007874015748" exp="1" system="All" id="418">
+        <synonym name="dpi" />
+      </add>
+    </property>
+
+    <property dimension="282">
+      <add factor="1" system="Metric" id="379">
+        <synonym name="mol" lang:rus="моль" lang:dan="mol" />
+
+        <extension for="mol" lang:rus="моль" lang:dan="mol">
+          <prefix name="k" id="380" />
+          <prefix name="m" id="381" />
+          <prefix name="μ" id="382" />
+          <prefix name="n"/>
+        </extension>
+      </add>
+
+      <add factor="1.6605391" exp="-24" system="All" id="689">
+        <synonym name="atom" lang:rus="атом" />
+      </add>
+
+      <add factor="4.5359237" exp="2" system="Imperial" id="547">
+        <synonym name="lbmol" />
+      </add>
+    </property>
+
+    <property dimension="283">
+      <add factor="1" system="Metric" id="421">
+        <synonym name="K" lang:rus="К" />
+      </add>
+
+      <add factor="5/9" system="Imperial" id="422">
+        <synonym name="°Ra" />
+      </add>
+
+      <add factor="1" system="Metric" id="617">
+        <synonym name="Δ°C" />
+      </add>
+
+      <add factor="5/4" system="Metric" id="619">
+        <synonym name="Δ°Re" />
+      </add>
+
+      <add factor="5/9" system="Metric" id="618">
+        <synonym name="Δ°F" />
+      </add>
+
+      <!-- Non-linear units -->
+      <add factor="1" offset="273.15" system="Metric" id="290">
+        <synonym name="°C" />
+      </add>
+
+      <add factor="5/4" offset="273.15" system="All" id="291">
+        <synonym name="°Re" />
+      </add>
+
+      <add factor="5/9" offset="273.15-32*5/9" system="Imperial" id="292">
+        <synonym name="°F" />
+      </add>
+    </property>
+
+    <property dimension="284">
+      <add factor="1" system="All" id="314">
+        <synonym name="s sec" lang:rus="с" lang:dan="s sek" />
+
+        <extension for="s" lang:rus="с" lang:dan="s">
+          <prefix name="k" id="319" />
+          <prefix name="m" id="320" />
+          <prefix name="μ" id="321" />
+          <prefix name="n" id="322" />
+          <prefix name="p" id="323" />
+        </extension>
+      </add>
+
+      <add factor="365.2425*24*60*60" system="All" id="315">
+        <synonym name="yr" lang:rus="год" lang:dan="år" lang:ger="a" />
+      </add>
+
+      <add factor="30.436875*24*60*60" system="All" id="690">
+        <synonym name="month" lang:rus="мес" />
+      </add>
+
+      <add factor="7*24*60*60" system="All" id="691">
+        <synonym name="week" lang:rus="нед" />
+      </add>
+
+      <add factor="24*60*60" system="All" id="316">
+        <synonym name="day" lang:rus="сут" lang:dan="dag" lang:ger="d" />
+      </add>
+
+      <add factor="60*60" system="All" id="317">
+        <synonym name="hr" lang:rus="ч" lang:dan="timer" />
+      </add>
+
+      <add factor="60" system="All" id="318">
+        <synonym name="min" lang:rus="мин" lang:dan="minutter min" />
+      </add>
+    </property>
+
+    <property dimension="286">
+      <add factor="5/18" system="Metric" id="414">
+        <synonym name="kph" lang:rus="км\002F\ч кмч" lang:ger="kmh" />
+      </add>
+
+      <add factor="4.4704" exp="-1" system="Imperial" id="415">
+        <synonym name="mph" lang:rus="миля\002F\ч" />
+      </add>
+
+      <add factor="5.14444" exp="-1" system="Imperial" id="413">
+        <synonym name="knot kn" lang:rus="уз" lang:dan="knob" lang:ger="Knoten" />
+      </add>
+    </property>
+
+    <property dimension="287">
+      <add factor="1" exp="-1" system="Metric" id="416">
+        <synonym name="P poise" lang:rus="пз" />
+      </add>
+    </property>
+
+    <property dimension="288">
+      <add factor="1" exp="-4" system="Imperial" id="419">
+        <synonym name="St stokes" lang:rus="Ст" />
+      </add>
+    </property>
+
+    <property dimension="289">
+      <add factor="1" exp="-3" system="Metric" id="337">
+        <synonym name="L" lang:rus="л" lang:ger="l" />
+
+        <extension for="L" lang:rus="л" lang:ger="l">
+          <prefix name="m" id="338" />
+        </extension>
+      </add>
+
+      <add factor="3.7854119678" exp="-3" system="Metric" id="339">
+        <synonym name="gal" lang:rus="гал" />
+      </add>
+    </property>
+
+    <property dimension="265">
+      <add factor="1" system="Metric" id="600">
+        <synonym name="Bq" lang:rus="Бк" />
+
+        <extension for="Bq" lang:rus="Бк">
+          <prefix name="k" id="641"/>
+          <prefix name="M" id="642"/>
+          <prefix name="G" id="643"/>
+        </extension>
+      </add>
+
+      <add factor="3.7" exp="10" system="Imperial" id="601">
+        <synonym name="Ci" lang:rus="Ки" />
+
+        <extension for="Ci" lang:rus="Ки">
+          <prefix name="μ" id="622"/>
+          <prefix name="m" id="623"/>
+        </extension>
+      </add>
+    </property>
+
+    <property dimension="588">
+      <add factor="1" system="All" id="602">
+        <synonym name="sr" lang:rus="ср" />
+      </add>
+    </property>
+
+    <property dimension="589">
+      <add factor="1" system="All" id="409">
+        <synonym name="lm" lang:rus="лм" />
+
+        <extension for="lm" lang:rus="лм">
+          <prefix name="k" />
+        </extension>
+      </add>
+    </property>
+
+    <property dimension="592">
+      <add factor="1" system="Metric" id="603">
+        <synonym name="Wb" lang:rus="Вб" />
+
+        <extension for="Wb" lang:rus="Вб">
+          <prefix name="m" />
+          <prefix name="μ" />
+        </extension>
+      </add>
+
+      <add factor="1" exp="-8" system="All" id="604">
+        <synonym name="Mx" lang:rus="Мкс" />
+      </add>
+    </property>
+
+    <property dimension="591">
+      <add factor="1" exp="1" system="All">
+        <synonym name="B" lang:rus="Б" />
+
+        <extension for="B" lang:rus="Б">
+          <prefix name="d" id="605"/>
+          <prefix name="da" id="644" />
+          <exclude name="B" />
+        </extension>
+      </add>
+    </property>
+
+    <property dimension="593">
+      <add factor="1" system="Metric" id="606">
+        <synonym name="S" lang:rus="См" />
+
+        <extension for="S" lang:rus="См">
+          <prefix name="p" id="645"/>
+          <prefix name="μ" id="646"/>
+          <prefix name="m" id="647"/>
+          <prefix name="d" id="648"/>
+        </extension>
+      </add>
+    </property>
+
+    <property dimension="594">
+      <add factor="1" exp="-2" system="Imperial" id="607">
+        <synonym name="R" lang:rus="Р" />
+
+        <extension for="R" lang:rus="Р">
+          <prefix name="μ" id="620"/>
+          <prefix name="m" id="621"/>
+        </extension>
+      </add>
+    </property>
+
+    <property dimension="595">
+      <add factor="3.33564095" exp="-30" system="Metric" id="608">
+        <synonym name="D" lang:rus="Д" />
+      </add>
+    </property>
+
+    <property dimension="596">
+      <add factor="1.11" exp="-7" system="Metric" id="609">
+        <synonym name="den" lang:rus="ден" />
+      </add>
+    </property>
+
+    <property dimension="597">
+      <add factor="7.95775" exp="1" system="Metric" id="610">
+        <synonym name="Oe" lang:rus="Э" />
+      </add>
+    </property>
+
+    <property dimension="266">
+      <add factor="1" exp="4" system="Metric" id="611">
+        <synonym name="sb" lang:rus="сб" />
+      </add>
+    </property>
+  </units>
+</entries>

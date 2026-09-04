@@ -13,8 +13,7 @@ from ..items.media import ImageItem
 from ..items.shapes import PolyItem, RectItem
 from ..items.plotitem import PlotItem
 from ..items.tableitem import TableItem
-from ..items.text import (CalloutItem, FlagItem, NoteItem, StampItem,
-                          TextItem, TypewriterItem)
+from ..items.text import CalloutItem, FlagItem, NoteItem, StampItem, TextItem
 
 # How a tool gathers its geometry from the mouse.
 DRAG = "drag"        # press, drag, release
@@ -103,10 +102,6 @@ TOOLS: list[Tool] = [
 
     Tool("text", "Text box", "text", DRAG, "Annotate", "T", "Text box",
          factory=lambda: TextItem("")),
-    Tool("typewriter", "Typewriter", "typewriter", DRAG, "Annotate", "",
-         "Words straight onto the page, with no box around them — for filling "
-         "in a form or writing on a drawing",
-         factory=lambda: TypewriterItem("")),
     Tool("callout", "Call-out", "callout", ANCHOR, "Annotate", "Q",
          "Click what it points at, then click where the words go",
          factory=lambda: CalloutItem("")),

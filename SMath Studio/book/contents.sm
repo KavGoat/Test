@@ -1,0 +1,88 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<?application progid="SMath Studio Desktop" version="0.96.5151.4700"?>
+<regions xmlns="http://smath.info/schemas/worksheet/1.0">
+  <settings>
+    <editable>false</editable>
+    <identity>
+      <id>215d97bc-c09d-4d8d-91c1-ba7bdc6a6d0b</id>
+      <revision>2</revision>
+    </identity>
+    <metadata lang="rus">
+      <title>Математический справочник</title>
+      <author>Андрей Ивашов</author>
+      <description>Краткий математический справочник с общими правилами в различных областях.</description>
+      <company>SMath, http://smath.info/</company>
+      <keywords>математика, справочник, формулы, правила</keywords>
+    </metadata>
+    <metadata lang="eng">
+      <title>Math reference book</title>
+      <author>Andrey Ivashov</author>
+      <description>Math reference book with common math rules of different subjects.</description>
+      <company>SMath, http://smath.info/</company>
+      <keywords>math, reference book, formulas, rules</keywords>
+    </metadata>
+    <calculation>
+      <precision>4</precision>
+      <exponentialThreshold>5</exponentialThreshold>
+      <fractions>decimal</fractions>
+    </calculation>
+    <pageModel viewMode="1" printAreas="true" simpleEqualsOnly="false" printBackgroundImages="true">
+      <paper id="1" orientation="Portrait" width="850" height="1100" />
+      <margins left="39" right="39" top="39" bottom="39" />
+      <header alignment="Center" color="#a9a9a9">&amp;[DATE] &amp;[TIME] - &amp;[FILENAME]</header>
+      <footer alignment="Center" color="#a9a9a9">&amp;[PAGENUM] / &amp;[COUNT]</footer>
+      <backgrounds />
+    </pageModel>
+    <dependences>
+      <assembly name="SMath Studio Desktop" version="0.96.5151.4700" guid="a37cba83-b69c-4c71-9992-55ff666763bd" />
+      <assembly name="Text Region" version="1.9.5151.4716" guid="485d28c5-349a-48b6-93be-12a35a1c1e39" />
+      <assembly name="Math Region" version="0.96.5151.4700" guid="02f1ab51-215b-466e-a74d-5d8b1cf85e8d" />
+    </dependences>
+  </settings>
+  <region id="0" left="0" top="0" width="78" height="24" color="#000000" bgColor="#ffffff" fontSize="10">
+    <text lang="eng">
+      <p bold="true" build-in="true">0</p>
+    </text>
+  </region>
+  <region id="1" top="27" color="#000000" bgColor="#ffffff">
+    <area single="true" collapsed="true" />
+  </region>
+  <region id="2" left="0" top="45" width="94" height="24" color="#000000" bgColor="#ffffff" fontSize="10">
+    <text lang="eng">
+      <p bold="false" href="1.sm" build-in="true">1</p>
+    </text>
+  </region>
+  <region id="3" left="0" top="63" width="111" height="24" color="#000000" bgColor="#ffffff" fontSize="10">
+    <text lang="eng">
+      <p bold="false" href="4.sm" build-in="true">17</p>
+    </text>
+  </region>
+  <region id="4" left="0" top="81" width="94" height="24" color="#000000" bgColor="#ffffff" fontSize="10">
+    <text lang="eng">
+      <p bold="false" href="5.sm" build-in="true">35</p>
+    </text>
+  </region>
+  <region id="5" left="0" top="99" width="103" height="24" color="#000000" bgColor="#ffffff" fontSize="10">
+    <text lang="eng">
+      <p bold="false" href="9.sm" build-in="true">62</p>
+    </text>
+  </region>
+  <region id="6" left="0" top="117" width="61" height="24" color="#000000" bgColor="#ffffff" fontSize="10">
+    <text lang="eng">
+      <p bold="false" href="10.sm" build-in="true">69</p>
+    </text>
+  </region>
+  <region id="7" left="0" top="135" width="86" height="24" color="#000000" bgColor="#ffffff" fontSize="10">
+    <text lang="eng">
+      <p bold="false" href="13.sm" build-in="true">78</p>
+    </text>
+  </region>
+  <region id="8" left="0" top="153" width="61" height="24" color="#000000" bgColor="#ffffff" fontSize="10">
+    <text lang="eng">
+      <p bold="false" href="16.sm" build-in="true">89</p>
+    </text>
+  </region>
+  <region id="9" top="180" color="#000000" bgColor="#ffffff">
+    <area single="true" collapsed="true" />
+  </region>
+</regions>

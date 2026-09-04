@@ -1,15 +1,16 @@
 # CalcForge — start here
 
-**If you are an agent picking this project up, read this file first and read
-nothing else until you have.** It is the whole context you need: what the app
-is, how it is built, what is done, what is not, and how the work is tracked.
-It exists so that no session has to re-read three days of chat to be useful.
+**If you are an agent picking this project up, read this file first.** It gives
+the product context, code map, validation approach and task-tracking rules
+needed to work safely without re-reading earlier chat.
 
 - Repository: `KavGoat/Test`
 - Branch: **`claude/engineering-calc-markup-app-2twiqs`** — all work goes here.
   Never push to another branch without being asked.
 - The living task list: **`docs/tasklist.md`** — read it, work from it, keep it
-  updated. Rules for it are below and repeated in its own header.
+  updated. `docs/tasklist.xlsx` is the user's companion status sheet: column A
+  is blank for open work and `1` for user-confirmed completion. Rules for both
+  are below and repeated in the task-list header.
 
 ---
 
@@ -138,8 +139,10 @@ The suite prints `TypeError: Unknown return type ... (that may be a signal)`
 lines on teardown. That is PySide noise, not a failure. Grep them out:
 `| grep -vE "Unknown return type|propagateSize"`.
 
-**A box in the task list is only ticked when the behaviour is in the code
-*and* held there by a test.** Not "I wrote it", not "it looks right".
+**Task-list status belongs to the user.** Agents may validate behavior, report
+evidence, and add or clarify requirement text, but must never mark a Markdown
+task complete or change any status. The user maintains completion in
+`docs/tasklist.xlsx` column A and can explicitly request a synchronization.
 
 ### One known flake
 
@@ -157,30 +160,45 @@ in isolation first.
 
 ## 4. How the work is tracked — follow this exactly
 
-### `docs/tasklist.md` is the single source of truth
+### The requirements register and user status sheet
 
-It holds every feature and bug the user has ever asked for, grouped by topic,
-with `- [ ]` / `- [x]` boxes. The user asked for it to live in the repository
-and be kept current. The rules, which they set:
+`docs/tasklist.md` holds every feature and bug the user has asked for, grouped
+by topic. `docs/tasklist.xlsx` is a spreadsheet copy where column A is the
+user's completion field and column B is the task text. The Markdown is the
+agent-facing requirements register; the workbook is the user-owned status
+record. The rules are:
 
 1. **Nothing is ever deleted.** Not a completed item, not a superseded one.
-2. **When a later message contradicts an earlier one, rewrite the existing
-   line** to say what was most recently asked for — and say in the line that
-   it was rewritten and why. Do not add a second, contradicting line.
-   (Example already in the file: the space-in-an-equation rule, which was
-   reversed. The line records both the old rule and the reversal.)
+2. **When a later message changes an earlier request, rewrite the existing
+  line** to state the current intended behavior. Do not retain competing
+  alternatives in the active task.
 3. **Every new request from the user goes in as soon as it arrives**, before
    you start work on it, so nothing is lost if the session ends.
-4. **Tick a box only when code + test exist.** If a thing turns out to have
-   been built already, tick it and append what you checked.
-5. Items that are about *how the agent works* rather than about the app stay
-   unticked, with the honest answer written into the line.
+4. **Never mark work complete or change status.** Only the user changes
+  completion status in `docs/tasklist.xlsx`; agents instead report their
+  verification result and leave task state unchanged.
+5. Items about how the agent works remain requirements, with an honest note
+  where a platform limitation prevents the requested behavior.
 
 ### The per-session task tool
 
 Use `TaskCreate` / `TaskUpdate` for the handful of things you are working on
 right now. That list is scratch — it does not survive, and it is not the
 record. `docs/tasklist.md` is the record.
+
+### Agent operating protocol
+
+1. Read this handover and the current open requirements in `docs/tasklist.md`.
+2. When the user gives a new requirement or defect, add or consolidate it in
+  the task list immediately, using the existing section structure.
+3. Do not mark any task complete, edit user-owned completion status, or claim
+  a feature is finished without current evidence.
+4. For implementation work, find the controlling code path, make the smallest
+  safe change, and validate it through the real Qt event queue. Exercise
+  mouse movement, clicks, drags, modifier keys, keyboard navigation,
+  shortcuts, focus changes and Escape where relevant.
+5. Preserve existing user changes, keep commits scoped, and report the exact
+  validation performed along with any remaining limitation.
 
 ### Commits
 
@@ -213,57 +231,34 @@ and a cloud call-out are **one object in three states**: the last leader
 coming off makes a text box, the first going on makes a call-out
 (`MainWindow.becomes_a_callout` / `becomes_a_text_box`).
 
-**The equation space rule.** A space cannot be typed into a calculation at
-all — it is refused and the status bar says why. Shift+Space turns a line
-still being entered into a text box. This was reversed once (it used to
-convert on any space); the task list line records the reversal.
+**The equation space rule.** In a single calculation line, units attach
+directly to their number (for example `5kPa`, rendered as `5·kPa`). Typing a
+space converts the current fresh calculation entry into plain text. Keep this
+rule aligned with the active task-list requirement and validate it through
+real key events.
 
 **`.btx` import.** Bluebeam tool sets are XML with zlib-compressed,
 hex-encoded PDF annotation dictionaries. Sample files are in the repo and the
 importer is tested against them, not against synthetic files. X/Y in a `.btx`
 annotation is the **bottom-left** corner.
 
-**Focus.** The view no longer ends an edit when it loses keyboard focus — a
-right-click menu or a toolbar click used to close the line being typed, which
-is what made Backspace, `=` and Enter look like broken keys. If you touch
-`focusOutEvent`, do not put that back.
+**Focus.** Equation and text editing are sensitive to focus changes from
+right-click menus and toolbar actions. Exercise focus-loss and return paths,
+including Backspace, `=`, arrow navigation and Escape, whenever these areas
+change.
 
 ---
 
-## 6. Where things stand
+## 6. Current status
 
-As of this writing: **191 of 203 boxes in `docs/tasklist.md` are ticked.**
-The suite is green and three seeded fuzz runs are clean.
+`docs/tasklist.md` is the active requirements register and
+`docs/tasklist.xlsx` is the user-owned completion record. Agents add and
+consolidate requirements but never change their status. Begin with the user's
+newest report, find or add its task, then validate behavior through real
+canvas, keyboard and menu interaction before changing code.
 
-The open items are listed in `docs/tasklist.md` — search it for `- [ ]`.
-At the time of writing they are, in rough priority order:
-
-1. Orange square placement markers still appearing on markups.
-2. Calculation editing: `=` misbehaving, text that cannot be deleted, the gap
-   before `=`, and — the big one — **making the editing view and the final
-   view genuinely identical**, verified by typing.
-3. Unit editing zooming in instead of changing in place; the unit list
-   appearing in odd places.
-4. Menu cleanup: labels down to one or two words everywhere, "Property mode"
-   as the name, and the calculation right-click group ("Figures on this
-   line", "Edit…", "Show this result in…", "Keep as one block",
-   "Self-contained block", split/merge) taken out and what is worth keeping
-   moved to the main menu bar.
-5. Placement anchors: call-out text box by its left middle; images,
-   snapshots, tool-set items, groups and cloud items by their bottom left.
-6. My Tools: a property-mode entry shows a default icon in that style and
-   carries a "properties" tag.
-7. Two process items about token limits and background tasks, which are about
-   how the agent works and carry their honest answer in the line.
-
-None of these have been started. They were logged, deliberately, without
-being built — the user asked for the batch to be written down rather than
-worked on, so the next session starts from a full list and a green suite.
-
-Two of these are worth a word of warning. **"One style for editing and
-final"** is not a small change — it is the thing the user has raised most
-often and it means the box tree must be the only view of a calculation, with
-the editor purely a keystroke sink. Verify it by driving real key events and
-comparing what is painted, not by reading the code. And **the orange squares**
-have been reported more than once, so search for every path that paints a
-placement marker rather than fixing the first one you find.
+Prioritize safety-critical calculation/unit behavior and workflows that leave
+the UI stuck or prevent ordinary editing. For interactive work, use the real
+Qt event queue and test pointer movement, modifier keys, focus changes,
+keyboard arrows, shortcuts and Escape cancellation rather than relying only on
+direct method calls.

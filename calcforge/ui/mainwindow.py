@@ -9,7 +9,7 @@ from typing import Optional
 from PySide6.QtCore import (QBuffer, QEvent, QIODevice, QMimeData, QPointF,
                             QRect, QRectF,
                             QSettings, QSize, Qt, QTimer)
-from PySide6.QtGui import (QAction, QActionGroup, QColor, QFont, QImage,
+from PySide6.QtGui import (QAction, QActionGroup, QColor, QCursor, QFont, QImage,
                            QKeySequence, QTextCharFormat, QTransform,
                            QUndoStack)
 from PySide6.QtPrintSupport import QPrintDialog, QPrintPreviewDialog, QPrinter
@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QDockWidget, QDoubleSpin
                                QToolBar, QToolButton, QVBoxLayout, QWidget)
 
 from ..core.document import (LANDSCAPE, MM_TO_PT, PAGE_SIZES, PORTRAIT,
-                             PT_TO_MM, Document, Page, PageSetup)
+                             PT_TO_MM, Document, Page, PageScale, PageSetup)
 from ..core.engine import name_problem
 from ..core.spreadsheet import (MAX_COLS, MAX_ROWS, looks_like_a_grid,
                                 parse_clipboard_grid)
@@ -419,7 +419,8 @@ class MainWindow(QMainWindow):
         # No key: Ctrl+Shift+P shows the problems panel, and page setup is on
         # the Page menu and on a page's own right-click menu.
         self._act("page_setup", "Page setup…", self.page_setup, "", "page")
-        self._act("scale", "Page scale…", self.calibrate_dialog, "", "calibrate")
+        self._act("scale", "Page scale…", self.calibrate_dialog,
+                  "Ctrl+Shift+K", "calibrate")
         self._act("doc_props", "Document properties…", lambda: self.document_properties())
         self._act("header_footer", "Header and footer…", self.edit_header_footer, "",
                   tip="Page numbers, the date, a title and a logo on every page")
@@ -427,17 +428,18 @@ class MainWindow(QMainWindow):
         # Ctrl+G is Group, here as in Bluebeam, so the grid takes the key
         # next to it rather than fighting for one. Ctrl+Alt+G is Greek gamma.
         self._act("grid", "Show grid", self.toggle_grid, "Ctrl+'", checkable=True)
-        self._act("snap", "Snap to grid", self.toggle_snap, "", checkable=True)
-        self._act("snap_items", "Snap to what is drawn", self.toggle_item_snap, "",
+        self._act("snap", "Grid snap", self.toggle_snap, "", checkable=True,
+                  tip="Snap points to the page grid")
+        self._act("snap_items", "Markup snap", self.toggle_item_snap, "",
                   checkable=True,
                   tip="Catch corners, centres, side middles and line ends of "
                       "the markups already on the page")
-        self._act("snap_content", "Snap to the drawing", self.toggle_content_snap,
+        self._act("snap_content", "PDF snap", self.toggle_content_snap,
                   "", checkable=True,
                   tip="Catch the corners and ends of the line work that came "
                       "in on the page — and only those, because a drawing has "
                       "thousands of them")
-        self._act("snap_alignment", "Snap in line with what is drawn",
+        self._act("snap_alignment", "Align snap",
                   self.toggle_alignment_snap, "", checkable=True,
                   tip="Line a new markup up level with, or directly under, a "
                       "point on one already drawn. Never off the drawing "
@@ -458,9 +460,9 @@ class MainWindow(QMainWindow):
                       "anything that does not come back the same")
         self._act("apply_redactions", "Apply redactions…", self.apply_redactions, "",
                   tip="Permanently remove what the black boxes cover")
-        self._act("split_lines", "Split into separate lines", self.split_calculation, "",
+        self._act("split_lines", "Split", self.split_calculation, "",
                   tip="Turn a multi-line calculation into one movable region per line")
-        self._act("merge_lines", "Make one block", self.merge_calculations, "",
+        self._act("merge_lines", "Merge", self.merge_calculations, "",
                   tip="Combine the selected calculations into a single region")
 
         self._act("shortcuts", "Keyboard shortcuts…", self.show_shortcuts, "F1",
@@ -941,11 +943,14 @@ class MainWindow(QMainWindow):
 
         self.status_snap = QToolButton()
         self.status_snap.setAutoRaise(True)
-        self.status_snap.setCheckable(True)
         self.status_snap.setText("Snap")
-        self.status_snap.setToolTip("Snap what is drawn to the grid — hold "
-                                    "Ctrl to let go of it for a moment")
-        self.status_snap.toggled.connect(self.toggle_snap)
+        self.status_snap.setToolTip("Choose what drawing points snap to")
+        snap_menu = QMenu(self.status_snap)
+        for action in (self.act_snap, self.act_snap_items,
+                       self.act_snap_content, self.act_snap_alignment):
+            snap_menu.addAction(action)
+        self.status_snap.setMenu(snap_menu)
+        self.status_snap.setPopupMode(QToolButton.InstantPopup)
         status.addPermanentWidget(self.status_snap)
 
         self.status_size = QToolButton()
@@ -1397,14 +1402,22 @@ class MainWindow(QMainWindow):
         return {"pages": [page.to_dict() for page in self.document.pages],
                 "current": self.current_index}
 
-    def _restore_structure(self, snapshot: dict) -> None:
+    def _restore_structure(self, snapshot: dict, preserve_view: bool = False) -> None:
+        scroll = (self.view.horizontalScrollBar().value(),
+                  self.view.verticalScrollBar().value())
         self.document.pages = [Page.from_dict(entry) for entry in snapshot["pages"]]
         self.current_index = snapshot.get("current", 0)
         self.rebuild_scenes()
+        if preserve_view:
+            self.view.horizontalScrollBar().setValue(scroll[0])
+            self.view.verticalScrollBar().setValue(scroll[1])
         self.update_title()
 
-    def _structural_change(self, description: str, mutate) -> None:
+    def _structural_change(self, description: str, mutate,
+                           preserve_view: bool = False) -> None:
         before = self._structure_snapshot()
+        scroll = (self.view.horizontalScrollBar().value(),
+                  self.view.verticalScrollBar().value())
         mutate()
         self.rebuild_scenes()
         # Adding or removing a page moves the reader to it, the way inserting a
@@ -1412,13 +1425,19 @@ class MainWindow(QMainWindow):
         # a short page (a photo, a small PDF sheet) leaves the next page over
         # the middle of the view, and that must not steal the selection back.
         target = self.current_index
-        self.view.go_to_page_top(target)
+        if preserve_view:
+            self.view.horizontalScrollBar().setValue(scroll[0])
+            self.view.verticalScrollBar().setValue(scroll[1])
+        else:
+            self.view.go_to_page_top(target)
         self.current_index = target
         self.view._shown_page = target
         self.follow_scrolled_page(target)
         after = self._structure_snapshot()
+        restore = (lambda snapshot: self._restore_structure(snapshot, True)) \
+            if preserve_view else self._restore_structure
         self.undo_stack.push(DocumentStructureCommand(before, after, description,
-                                                      self._restore_structure))
+                                                      restore))
         self.mark_modified()
 
     def page_index(self, index: Optional[int] = None) -> int:
@@ -1743,7 +1762,7 @@ class MainWindow(QMainWindow):
         def mutate():
             for which in pages:
                 self.document.pages[which].grid = bool(on)
-        self._structural_change("Grid on this page", mutate)
+        self._structural_change("Grid on this page", mutate, preserve_view=True)
         self.view.viewport().update()
         many = f" on {len(pages)} pages" if len(pages) > 1 else ""
         self.status_hint.setText(f"Grid {'on' if on else 'off'}{many}")
@@ -1903,6 +1922,21 @@ class MainWindow(QMainWindow):
     # ==================================================================
     def calibrate_scale(self, measured_pt: Optional[float] = None) -> None:
         """Set the page scale, from a drawn distance or straight from a ratio."""
+        if measured_pt is not None:
+            dialog = dialogs.CalibrationLengthDialog(measured_pt, self)
+            if dialog.exec() != dialogs.QDialog.Accepted:
+                return
+            length = dialog.length_text()
+            if length is None:
+                return
+            old = self.current_page().scale
+            scale = PageScale.from_calibration(
+                measured_pt, length, display_unit=old.display_unit)
+            scale.area_unit = old.area_unit
+            scale.precision = old.precision
+            self.current_page().scale = scale
+            self.apply_scale_change()
+            return
         dialog = dialogs.ScaleDialog(self.current_page().scale, measured_pt, self)
         answer = dialog.exec()
         if answer == dialogs.ScaleDialog.PICK:
@@ -2109,7 +2143,9 @@ class MainWindow(QMainWindow):
 
     def _style_stroke(self, colour: str) -> None:
         self.default_style.stroke = colour
-        self._push_style(lambda style: setattr(style, "stroke", colour), "Line colour")
+        self._push_style(lambda style: setattr(style, "stroke", colour),
+                         "Line colour",
+                         predicate=lambda item: not isinstance(item, ImageItem))
 
     def _style_fill(self, colour: str) -> None:
         self.default_style.fill = colour
@@ -2127,8 +2163,10 @@ class MainWindow(QMainWindow):
         self.default_style.font_size = value
         self._push_style(lambda style: setattr(style, "font_size", value), "Font size")
 
-    def _push_style(self, mutate, description: str) -> None:
+    def _push_style(self, mutate, description: str, predicate=None) -> None:
         items = self.selected_items()
+        if predicate is not None:
+            items = [item for item in items if predicate(item)]
         if not items:
             return
         self.view.begin_snapshot()
@@ -3494,14 +3532,26 @@ class MainWindow(QMainWindow):
     def format_painter(self) -> None:
         items = self.selected_items()
         if self._held_style is not None:
-            self._held_style = None
-            self.status_hint.setText("Format painter put down")
+            self.put_the_format_painter_down()
             return
         if not items:
             self.status_hint.setText("Pick the markup whose look you want first")
             return
-        from . import toolsets
-        self._held_style = toolsets.properties_of(items[0])
+        source = items[0]
+        style = source.style
+        self._held_style = {
+            "source_type": source.TYPE,
+            "style": {key: getattr(style, key) for key in
+                      ("stroke", "fill", "width")},
+        }
+        if isinstance(source, CalloutItem):
+            self._held_style["callout"] = {
+                key: getattr(style, key) for key in
+                ("arrow_start", "arrow_end", "font_family", "font_size",
+                 "bold", "italic", "underline", "text_color", "align", "valign")
+            }
+        brush = icon("format_painter").pixmap(24, 24)
+        self.view.setCursor(QCursor(brush, 2, 22))
         self.status_hint.setText(
             f"Format painter: click what should look like this "
             f"{items[0].display_name().lower()} · Esc to put it down")
@@ -3510,6 +3560,7 @@ class MainWindow(QMainWindow):
         """Drop the held look, if one is held. Escape's business."""
         if self._held_style is not None:
             self._held_style = None
+            self.view.setCursor(self.view._cursor_for_tool(self.view.current_tool()))
             self.status_hint.setText("Format painter put down")
 
     def holding_a_format(self) -> bool:
@@ -3519,9 +3570,23 @@ class MainWindow(QMainWindow):
         """Give *item* the look the format painter is holding."""
         if self._held_style is None or item is None:
             return False
-        from . import toolsets
+        if isinstance(item, ImageItem):
+            self.status_hint.setText("Format painter: image content has no markup style")
+            return False
         self.view.begin_snapshot(self.view.involved_frames(item))
-        toolsets.apply_properties(item, self._held_style)
+        linework = isinstance(item, (RectItem, PolyItem, MeasureItem, _TextBase))
+        fillable = isinstance(item, (RectItem, _TextBase))
+        held = self._held_style["style"]
+        if linework:
+            item.style.stroke = held["stroke"]
+            item.style.width = held["width"]
+        if fillable:
+            item.style.fill = held["fill"]
+        if (self._held_style.get("source_type") == CalloutItem.TYPE
+                and isinstance(item, CalloutItem)):
+            for key, value in self._held_style.get("callout", {}).items():
+                setattr(item.style, key, value)
+            item.apply_style()
         item.touch()
         item.update()
         self.view.commit_snapshot("Format painter")
@@ -3642,24 +3707,19 @@ class MainWindow(QMainWindow):
         region. They are the same leader drawn two ways, and one call-out can
         carry both.
         """
-        add = menu.addMenu("Add leader")
-        add.setToolTip("As many as the comment needs; each one points at "
-                       "whatever you drag it to")
-        arrow = add.addAction("Arrow", lambda: self.add_leader_to(item, "arrow"))
+        arrow = menu.addAction("Add arrow leader",
+                               lambda: self.add_leader_to(item, "arrow"))
         arrow.setToolTip("A line with a head on it, dragged to what it is about")
-        cloud = add.addAction("Cloud", lambda: self.add_leader_to(item, "cloud"))
+        cloud = menu.addAction("Add cloud leader",
+                               lambda: self.add_leader_to(item, "cloud"))
         cloud.setToolTip("A revision cloud round the area, joined to the note "
                          "by a plain line")
         which = item.leader_near(item.mapFromScene(scene_pos))
+        if which is None and item.leaders:
+            which = len(item.leaders) - 1
         if which is not None:
             menu.addAction("Remove leader",
                            lambda i=which: self.remove_leader_from(item, i))
-        if item.leaders:
-            last = menu.addAction("Remove leaders",
-                                  lambda: self.set_leader(item, False))
-            if isinstance(item, CalloutItem):
-                last.setToolTip("A call-out with no leaders left is a text "
-                                "box, and becomes one")
 
     def add_leader_to(self, item, kind: str = "arrow") -> None:
         """Another leader on this note, clear of the ones it already has.
@@ -4108,7 +4168,6 @@ class MainWindow(QMainWindow):
         settings = self.document.settings
         for widget, value in (
                 (getattr(self, "act_snap", None), settings.snap_to_grid),
-                (getattr(self, "status_snap", None), settings.snap_to_grid),
                 (getattr(self, "act_snap_items", None), settings.snap_to_items),
                 (getattr(self, "act_snap_content", None), settings.snap_to_content),
                 (getattr(self, "act_snap_alignment", None),
@@ -4300,37 +4359,11 @@ class MainWindow(QMainWindow):
     def build_context_menu(self, item, scene_pos: QPointF) -> QMenu:
         menu = QMenu(self)
         if item is not None:
-            if isinstance(item, (MathItem, _TextBase)):
+            if isinstance(item, _TextBase):
                 menu.addAction("Edit…", lambda: self.view.begin_item_edit(item))
             if isinstance(item, MathItem):
-                row = item.result_at(item.mapFromScene(scene_pos))
-                if row < 0:
-                    row = next((i for i, r in enumerate(item.rows)
-                                if r.result is not None), -1)
-                if row >= 0:
-                    menu.addAction("Show this result in…",
-                                   lambda r=row: self.view.open_unit_editor(item, r))
-                figures = menu.addMenu("Figures on this line")
-                self._fill_figures_menu(figures, item, scene_pos)
-                if not item.single_line:
-                    menu.addAction(self.act_split_lines)
-                turn = menu.addAction("Keep as one block")
-                turn.setCheckable(True)
-                turn.setChecked(item.block)
-                turn.setToolTip("A block holds several lines and Enter makes a "
-                                "new one.\nA line is one line, and Enter opens "
-                                "the next line below it.")
-                turn.toggled.connect(self.set_block_kind)
                 if len([i for i in self.selected_items() if isinstance(i, MathItem)]) > 1:
                     menu.addAction(self.act_merge_lines)
-                scope = menu.addAction("Self-contained block")
-                scope.setCheckable(True)
-                scope.setChecked(item.local_scope)
-                scope.setEnabled(item.block)
-                scope.setToolTip(
-                    "Keep this block's own names inside it. It can still read\n"
-                    "anything the document defines above it.")
-                scope.toggled.connect(self.set_block_scope)
             if isinstance(item, ImageItem):
                 menu.addAction("Change colours…", lambda: self.recolour_item(item))
             if isinstance(item, PlotItem):

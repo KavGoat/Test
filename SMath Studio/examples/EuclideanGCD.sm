@@ -1,0 +1,218 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<?application progid="SMath Studio" version="0.96"?>
+<regions xmlns="http://smath.info/schemas/worksheet/1.0">
+  <settings>
+    <identity>
+      <id>9dfdb119-8a54-4059-a209-9dfdfe5c657a</id>
+      <revision>2</revision>
+    </identity>
+    <metadata lang="rus">
+      <title>Алгоритм Евклида (определение НОД)</title>
+      <author>Андрей Ивашов</author>
+      <description>Эффективный метод вычисления наибольшего общего делителя (НОД), также известный как алгоритм Евклида.
+Пользователь задаёт два числа для которых будет вычислен НОД. Пример является численным и демонстрирует работу с циклом типа While.</description>
+      <company>SMath, http://smath.info/</company>
+      <keywords>Примеры, НОД, Евклид</keywords>
+    </metadata>
+    <metadata lang="ind">
+      <title>Algoritman Euclid yaitu untuk menghitung FPB</title>
+      <author>Andrey Ivashov</author>
+      <translator>Waluyo Adi Siswanto</translator>
+      <description>Algotritma Euclid merupakan metode yang efisien untuk menghitung Greatest Common Divisor (GCD), atau di Indonesia dikenal sebagai Faktor Persekutuan terBesar (FPB). Pemakai program ini perlu menuliskan dua angka yang akan dihitung FPB nya. Program ini menggunakan operasi gelung dengan perintah While.</description>
+      <company>SMath, http://smath.info/</company>
+      <keywords>Contoh, GCD, FPB, Algoritma Euclid</keywords>
+    </metadata>
+    <metadata lang="eng">
+      <title>Euclidean algorithm (calculating the GCD)</title>
+      <author>Andrey Ivashov</author>
+      <translator>Andrey Ivashov</translator>
+      <description>Efficient method for computing the greatest common divisor (GCD), also known as the greatest common factor (GCF) or highest common factor (HCF). The algorithm is also called Euclid's algorithm.
+User fills in two numbers to find out the GCD. This is a simple Numeric example, that uses While Loop inside.</description>
+      <company>SMath, http://smath.info/</company>
+      <keywords>Examples, GCD, Euclid</keywords>
+    </metadata>
+    <calculation>
+      <precision>4</precision>
+      <exponentialThreshold>5</exponentialThreshold>
+      <fractions>decimal</fractions>
+    </calculation>
+    <pageModel active="false" printAreas="true" simpleEqualsOnly="false" printBackgroundImages="true">
+      <paper id="1" orientation="Portrait" width="850" height="1100" />
+      <margins left="39" right="39" top="39" bottom="39" />
+      <header alignment="Center" color="#a9a9a9">&amp;[DATE] &amp;[TIME] - &amp;[FILENAME]</header>
+      <footer alignment="Center" color="#a9a9a9">&amp;[PAGENUM] / &amp;[COUNT]</footer>
+      <backgrounds />
+    </pageModel>
+    <dependences>
+      <assembly name="SMath Studio" version="0.96" guid="a37cba83-b69c-4c71-9992-55ff666763bd" />
+      <assembly name="Text Region" version="1.9.4884.25041" guid="485d28c5-349a-48b6-93be-12a35a1c1e39" />
+      <assembly name="Math Region" version="0.96" guid="02f1ab51-215b-466e-a74d-5d8b1cf85e8d" />
+      <assembly name="Special Functions" version="1.10.4884.25035" guid="2814e667-4e12-48b1-8d51-194e480eabc5" />
+    </dependences>
+  </settings>
+  <region id="0" left="9" top="9" width="221" height="48" color="#0000ff" bgColor="#ffffff" fontSize="12">
+    <text lang="rus">
+      <p bold="true">Алгоритм Евклида(определение НОД)</p>
+    </text>
+    <text lang="ind">
+      <p bold="true">Algoritma Eucliduntuk perhitungan Faktor Persekutuan terBesar (FPB)</p>
+    </text>
+    <text lang="eng">
+      <p bold="true">Euclidean algorithm(calculating the GCD)</p>
+    </text>
+  </region>
+  <region id="1" left="9" top="54" width="102" height="24" border="true" color="#000000" bgColor="#dddddd" fontSize="10">
+    <text lang="rus">
+      <p>Начальные данные:</p>
+    </text>
+    <text lang="ind">
+      <p>Data masukan:</p>
+    </text>
+    <text lang="eng">
+      <p>Input data:</p>
+    </text>
+  </region>
+  <region id="2" left="9" top="81" width="76" height="24" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <input>
+        <e type="operand">a</e>
+        <e type="operand">20405</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+  <region id="3" left="99" top="81" width="76" height="24" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <input>
+        <e type="operand">b</e>
+        <e type="operand">84645</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+  <region id="4" left="9" top="108" width="111" height="24" border="true" color="#000000" bgColor="#dddddd" fontSize="10">
+    <text lang="rus">
+      <p>Вычисление:</p>
+    </text>
+    <text lang="ind">
+      <p>Perhitungan:</p>
+    </text>
+    <text lang="eng">
+      <p>Calculation:</p>
+    </text>
+  </region>
+  <region id="5" left="9" top="135" width="49" height="26" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <input>
+        <e type="operand">x</e>
+        <e type="operand">a</e>
+        <e type="function" preserve="true" args="1">abs</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+  <region id="6" left="99" top="135" width="49" height="26" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <input>
+        <e type="operand">y</e>
+        <e type="operand">b</e>
+        <e type="function" preserve="true" args="1">abs</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+  <region id="7" left="9" top="162" width="158" height="114" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <input>
+        <e type="operand">x</e>
+        <e type="operand">0</e>
+        <e type="operator" args="2">≠</e>
+        <e type="bracket">(</e>
+        <e type="operand">y</e>
+        <e type="operand">0</e>
+        <e type="operator" args="2">≠</e>
+        <e type="bracket">(</e>
+        <e type="operator" args="2">&amp;</e>
+        <e type="operand">x</e>
+        <e type="operand">y</e>
+        <e type="operator" args="2">&gt;</e>
+        <e type="operand">x</e>
+        <e type="operand">x</e>
+        <e type="operand">y</e>
+        <e type="function" preserve="true" args="2">mod</e>
+        <e type="operator" args="2">:</e>
+        <e type="operand">y</e>
+        <e type="operand">y</e>
+        <e type="operand">x</e>
+        <e type="function" preserve="true" args="2">mod</e>
+        <e type="operator" args="2">:</e>
+        <e type="function" preserve="true" args="3">if</e>
+        <e type="function" preserve="true" args="2">while</e>
+        <e type="operand">GCD</e>
+        <e type="operand">x</e>
+        <e type="operand">y</e>
+        <e type="operator" args="2">+</e>
+        <e type="operator" args="2">:</e>
+        <e type="operand">2</e>
+        <e type="operand">1</e>
+        <e type="function" preserve="true" args="4">line</e>
+      </input>
+    </math>
+  </region>
+  <region id="8" left="9" top="279" width="70" height="24" border="true" color="#000000" bgColor="#dddddd" fontSize="10">
+    <text lang="rus">
+      <p>Результат:</p>
+    </text>
+    <text lang="ind">
+      <p>Hasil:</p>
+    </text>
+    <text lang="eng">
+      <p>Result:</p>
+    </text>
+  </region>
+  <region id="9" left="9" top="306" width="78" height="24" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <input>
+        <e type="operand">GCD</e>
+      </input>
+      <result action="numeric">
+        <e type="operand">55</e>
+      </result>
+    </math>
+  </region>
+  <region id="10" left="9" top="333" width="78" height="24" border="true" color="#000000" bgColor="#dddddd" fontSize="10">
+    <text lang="rus">
+      <p>Проверка:</p>
+    </text>
+    <text lang="ind">
+      <p>Kontrol:</p>
+    </text>
+    <text lang="eng">
+      <p>Control:</p>
+    </text>
+  </region>
+  <region id="11" left="9" top="351" width="91" height="41" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <input>
+        <e type="operand">a</e>
+        <e type="operand">GCD</e>
+        <e type="operator" args="2">/</e>
+      </input>
+      <result action="numeric">
+        <e type="operand">371</e>
+      </result>
+    </math>
+  </region>
+  <region id="12" left="99" top="351" width="99" height="41" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <input>
+        <e type="operand">b</e>
+        <e type="operand">GCD</e>
+        <e type="operator" args="2">/</e>
+      </input>
+      <result action="numeric">
+        <e type="operand">1539</e>
+      </result>
+    </math>
+  </region>
+</regions>

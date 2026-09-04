@@ -329,6 +329,10 @@ class PageView(QGraphicsView):
         return QCursor(Qt.PointingHandCursor)
 
     def finish_tool(self) -> None:
+        if self.tool_key == "count":
+            self.statusMessage.emit(
+                "Count: click to place the next marker — Esc to finish")
+            return
         if not self.sticky_tool:
             self._pending_properties = None
         if not self.sticky_tool and self.tool_key not in ("select", "pan"):
@@ -1201,6 +1205,19 @@ class PageView(QGraphicsView):
 
     def _press_draw(self, event: QMouseEvent, scene_pos: QPointF, tool: Tool) -> None:
         frame = self.frame_at(scene_pos) or self.frame()
+        scale_tools = {"rect", "ellipse", "measure_length", "measure_polylength",
+                       "measure_area", "measure_volume"}
+        if (self._mode == "idle" and tool.key in scale_tools
+                and self.window.interactive_prompts
+                and not self.page().scale.is_calibrated()):
+            original_tool = tool.key
+            self.window.calibrate_dialog()
+            # Cancel consumes this first click; choosing point calibration has
+            # deliberately changed tools, so its first point is the next click.
+            if (not self.page().scale.is_calibrated()
+                    or self.current_tool().key != original_tool):
+                event.accept()
+                return
         point = self.snap_scene(scene_pos, frame)
         if self._mode == "draw_click":
             # The second click of a click-click drawing.
@@ -4017,6 +4034,16 @@ class PageView(QGraphicsView):
                 return
             super().keyPressEvent(event)
             if self._editing_item is not None and self._cell_editor is None:
+                if event.text() == "(":
+                    editor = getattr(self._editing_item, "_editor", None)
+                    text = editor.toPlainText() if editor is not None else ""
+                    at = editor.textCursor().position() - 1 if editor is not None else 0
+                    match = re.search(r"[A-Za-z_]\w*$", text[:max(at, 0)])
+                    if match:
+                        from ..core.functions import FUNCTIONS, function_help
+                        name = match.group(0)
+                        if name in FUNCTIONS:
+                            self.statusMessage.emit(function_help(name))
                 if event.text().isalnum() or event.text() == "_":
                     self.show_completions()
                 elif key in (Qt.Key_Backspace, Qt.Key_Delete):

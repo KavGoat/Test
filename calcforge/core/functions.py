@@ -7,6 +7,7 @@ dimensionless argument (trigonometry, logarithms, ...).
 from __future__ import annotations
 
 import math
+import inspect
 from typing import Any, Callable, Iterable
 
 import numpy as np
@@ -700,3 +701,19 @@ FUNCTION_HELP: dict[str, str] = {
     "symsolve": "symsolve(expr, x) — symbolic solve via SymPy",
     "symdiff": "symdiff(expr, x) — symbolic derivative",
 }
+
+
+def function_help(name: str) -> str:
+    """Concise signature and purpose for function browsers and editors."""
+    curated = FUNCTION_HELP.get(name)
+    if curated:
+        return curated
+    function = FUNCTIONS.get(name)
+    try:
+        signature = str(inspect.signature(function))
+    except (TypeError, ValueError):
+        signature = "(…)"
+    doc = inspect.getdoc(function) if function is not None else ""
+    purpose = doc.splitlines()[0].rstrip(".") if doc else (
+        name.replace("_", " ").capitalize() + " calculation")
+    return f"{name}{signature} — {purpose}"

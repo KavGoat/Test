@@ -487,7 +487,7 @@ class FunctionsPanel(QWidget):
 
     def __init__(self):
         super().__init__()
-        from ..core.functions import FUNCTION_HELP, FUNCTIONS
+        from ..core.functions import FUNCTIONS, function_help
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
@@ -505,7 +505,7 @@ class FunctionsPanel(QWidget):
 
         self._entries = []
         for name in sorted(FUNCTIONS):
-            self._entries.append((name, FUNCTION_HELP.get(name, f"{name}(…)")))
+            self._entries.append((name, function_help(name)))
         self.filter.textChanged.connect(self._rebuild)
         self.list.currentRowChanged.connect(self._show_help)
         self.list.itemDoubleClicked.connect(
@@ -517,8 +517,10 @@ class FunctionsPanel(QWidget):
         self.list.clear()
         self._visible = [(name, help_text) for name, help_text in self._entries
                          if not needle or needle in name.lower() or needle in help_text.lower()]
-        for name, _help in self._visible:
-            self.list.addItem(name)
+        for name, help_text in self._visible:
+            entry = QListWidgetItem(name)
+            entry.setToolTip(help_text)
+            self.list.addItem(entry)
 
     def _show_help(self, row: int) -> None:
         if 0 <= row < len(self._visible):
@@ -1486,6 +1488,14 @@ class PropertiesPanel(QScrollArea):
     def _add_appearance(self, first: MarkupItem) -> None:
         form = self._group("Appearance")
 
+        if isinstance(first, ImageItem):
+            opacity = LabeledSlider(5, 100, int(first.style.opacity * 100))
+            opacity.valueChanged.connect(
+                lambda value: self._slide(
+                    lambda i: setattr(i.style, "opacity", value), "Opacity"))
+            form.addRow("Opacity", opacity)
+            return
+
         stroke = ColorButton(first.style.stroke, allow_none=True, label="Line colour")
         stroke.colorChanged.connect(
             lambda colour: self._apply(lambda i: setattr(i.style, "stroke", colour), "Line colour"))
@@ -1776,26 +1786,19 @@ class PropertiesPanel(QScrollArea):
                     lambda i: (setattr(i, a, on), i.relayout()), "Calculation layout"))
             form.addRow("", box)
 
-        scope = QCheckBox("Self-contained block")
-        scope.setChecked(item.local_scope)
-        scope.setToolTip(
-            "Off by default: a calculation defines for the whole document.\n"
-            "Turn it on and this block keeps its own names to itself, so its\n"
-            "working values cannot collide with the rest of the document. It\n"
-            "can still read anything defined above it. A calculation line\n"
-            "always defines for the whole document.")
-        scope.setEnabled(item.block)
-        scope.toggled.connect(
-            lambda on: self._apply(lambda i: setattr(i, "local_scope", on), "Block scope"))
-        form.addRow("", scope)
-        if not item.block:
-            note = QLabel("A calculation line always defines for the whole document. "
-                          "Draw a calculation block for working you want kept to itself.")
-            note.setWordWrap(True)
-            note.setStyleSheet("color:#6b7280;")
-            form.addRow("", note)
+        if item.block:
+            scope = QCheckBox("Self-contained")
+            scope.setChecked(item.local_scope)
+            scope.setToolTip(
+                "Off by default. Keep this block's working names local while "
+                "still allowing it to read document values defined above.")
+            scope.toggled.connect(
+                lambda on: self._apply(
+                    lambda i: setattr(i, "local_scope", on), "Block scope"))
+            form.addRow("", scope)
 
-        edit = QPushButton("Edit calculation…")
+        edit = QPushButton("Edit")
+        edit.setToolTip("Edit this calculation")
         edit.clicked.connect(lambda: self.window.view.begin_item_edit(item))
         form.addRow("", edit)
 

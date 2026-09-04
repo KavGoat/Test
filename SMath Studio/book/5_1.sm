@@ -1,0 +1,85 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<?application progid="SMath Studio" version="0.55"?>
+<regions>
+  <settings>
+    <Editable>false</Editable>
+    <Home>contents.sm</Home>
+    <Back>5.sm</Back>
+    <pageModel viewMode="1"></pageModel>
+  </settings>
+  <region id="0" left="0" top="0" width="177" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="true" href="" build-in="true">36</p>
+    </text>
+  </region>
+  <region id="1" left="0" top="27" width="10" height="15" color="#000000" background-color="#ffffff">
+    <area single="true" is-collapsed="false" name="" show-name="false" />
+  </region>
+  <region id="2" left="180" top="36" width="45" height="25" font-size="10" color="#000000" background-color="#ffffff">
+    <math>
+      <e type="operand">a</e>
+      <e type="operand">c</e>
+      <e type="operator" args="2">^</e>
+      <e type="operand">b</e>
+      <e type="operator" args="2">=</e>
+    </math>
+  </region>
+  <region id="3" left="0" top="45" width="12" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="false" href="">●</p>
+    </text>
+  </region>
+  <region id="4" left="18" top="45" width="82" height="24" font-size="10" color="#000000" background-color="#ffffff">
+    <math>
+      <e type="operand">b</e>
+      <e type="operand">a</e>
+      <e type="function" args="2">log</e>
+      <e type="operand">c</e>
+      <e type="operator" args="2">=</e>
+    </math>
+  </region>
+  <region id="5" left="126" top="45" width="29" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="false" href="">&lt;=&gt;</p>
+    </text>
+  </region>
+  <region id="6" left="18" top="72" width="29" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="false" href="" build-in="true">123</p>
+    </text>
+  </region>
+  <region id="7" left="72" top="72" width="33" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <math>
+      <e type="operand">a</e>
+      <e type="operand">1</e>
+      <e type="operator" args="2">≠</e>
+    </math>
+  </region>
+  <region id="8" left="72" top="90" width="33" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <math>
+      <e type="operand">a</e>
+      <e type="operand">0</e>
+      <e type="operator" args="2">&gt;</e>
+    </math>
+  </region>
+  <region id="9" left="72" top="108" width="33" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <math>
+      <e type="operand">b</e>
+      <e type="operand">0</e>
+      <e type="operator" args="2">&gt;</e>
+    </math>
+  </region>
+  <region id="10" left="0" top="126" width="10" height="15" color="#000000" background-color="#ffffff">
+    <area single="true" is-collapsed="false" name="" show-name="false" />
+  </region>
+  <region id="11" left="0" top="144" width="78" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="false" href="5.sm" build-in="true">35</p>
+    </text>
+  </region>
+  <region id="12" left="0" top="162" width="86" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="false" href="contents.sm" build-in="true">0</p>
+    </text>
+  </region>
+</regions>
