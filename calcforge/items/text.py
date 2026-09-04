@@ -175,29 +175,82 @@ class _Leader:
     the hinge round to another side of the box fills it in; moving the arrow
     head or the box empties it again, and the hinge goes back to working
     itself out.
+
+    A leader points at something in one of two ways. An *arrow* leader ends in
+    an arrow head at the place it is about. A *cloud* leader ends at a region
+    drawn round with a cloud, and has no head — the cloud is what does the
+    pointing, and the line only says which note belongs to which cloud. They
+    are the same leader otherwise: the same hinge, the same rule about not
+    crossing the box, the same several-at-once, and one call-out can carry
+    both kinds at the same time.
     """
 
-    __slots__ = ("tip", "side", "reach")
+    __slots__ = ("tip", "side", "reach", "kind", "cloud")
 
     SIDES = ("left", "right", "top", "bottom")
+    KINDS = ("arrow", "cloud")
 
-    def __init__(self, tip: QPointF, side: str = "", reach: float = 24.0):
+    def __init__(self, tip: QPointF, side: str = "", reach: float = 24.0,
+                 kind: str = "arrow", cloud=None):
         self.tip = QPointF(tip)
         self.side = side if side in self.SIDES else ""
         self.reach = max(float(reach), 6.0)
+        self.kind = kind if kind in self.KINDS else "arrow"
+        # The region a cloud leader is about, in the item's own coordinates.
+        self.cloud: list[QPointF] = [QPointF(p) for p in (cloud or [])]
+
+    # -- the clouded region ------------------------------------------------
+    def clouds(self) -> bool:
+        return self.kind == "cloud" and len(self.cloud) >= 3
+
+    def cloud_box(self) -> QRectF:
+        """The rectangle the clouded region sits in."""
+        if not self.cloud:
+            return QRectF()
+        xs = [p.x() for p in self.cloud]
+        ys = [p.y() for p in self.cloud]
+        return QRectF(min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
+
+    def join_nearest(self, to: QPointF) -> QPointF:
+        """Where the line meets the cloud: the corner or edge middle nearest *to*.
+
+        So the line takes the shortest way across and lands somewhere that
+        reads as a deliberate join rather than as a line that stops near it.
+        """
+        if not self.cloud:
+            return QPointF(self.tip)
+        candidates = list(self.cloud)
+        for index, point in enumerate(self.cloud):
+            following = self.cloud[(index + 1) % len(self.cloud)]
+            candidates.append(QPointF((point.x() + following.x()) / 2,
+                                      (point.y() + following.y()) / 2))
+        return min(candidates, key=lambda point:
+                   (point.x() - to.x()) ** 2 + (point.y() - to.y()) ** 2)
+
+    def move_by(self, dx: float, dy: float) -> None:
+        """Shift the whole leader — its tip and, for a cloud, its region."""
+        self.tip = QPointF(self.tip.x() + dx, self.tip.y() + dy)
+        self.cloud = [QPointF(p.x() + dx, p.y() + dy) for p in self.cloud]
 
     def to_dict(self) -> dict:
         data = {"tip": [self.tip.x(), self.tip.y()], "reach": self.reach}
         if self.side:
             data["side"] = self.side
+        if self.kind != "arrow":
+            data["kind"] = self.kind
+        if self.cloud:
+            data["cloud"] = [[p.x(), p.y()] for p in self.cloud]
         return data
 
     @classmethod
     def from_dict(cls, data: dict) -> "_Leader":
         tip = data.get("tip") or [0.0, 0.0]
+        cloud = [QPointF(float(p[0]), float(p[1]))
+                 for p in (data.get("cloud") or [])]
         return cls(QPointF(float(tip[0]), float(tip[1])),
                    str(data.get("side") or ""),
-                   float(data.get("reach", 24.0)))
+                   float(data.get("reach", 24.0)),
+                   str(data.get("kind") or "arrow"), cloud)
 
 
 def _merged(base: QTextCharFormat, extra: QTextCharFormat) -> QTextCharFormat:
@@ -500,8 +553,9 @@ class _TextBase(MarkupItem):
         centre = rect.center()
         half_width = max(rect.width() / 2, 1.0)
         half_height = max(rect.height() / 2, 1.0)
-        across = (leader.tip.x() - centre.x()) / half_width
-        down = (leader.tip.y() - centre.y()) / half_height
+        tip = self.tip_of(leader)
+        across = (tip.x() - centre.x()) / half_width
+        down = (tip.y() - centre.y()) / half_height
         if abs(across) >= abs(down):
             return "left" if across < 0 else "right"
         return "top" if down < 0 else "bottom"
@@ -523,7 +577,7 @@ class _TextBase(MarkupItem):
         """
         rect = self._rect.normalized()
         hinge = self.hinge_on(side, leader.reach)
-        return not _crosses(rect, hinge, leader.tip)
+        return not _crosses(rect, hinge, self.tip_of(leader))
 
     def side_point_of(self, leader: "_Leader") -> QPointF:
         """The middle of the side this leader leaves by."""
@@ -572,7 +626,8 @@ class _TextBase(MarkupItem):
         self.prepareGeometryChange()
         wanted = self._nearest_side(local_pos)
         out = self._reach_towards(wanted, local_pos)
-        if not self.side_is_usable(_Leader(leader.tip, wanted, out), wanted):
+        trial = _Leader(leader.tip, wanted, out, leader.kind, leader.cloud)
+        if not self.side_is_usable(trial, wanted):
             # That side would drag the line back over the writing. Nothing
             # changes: the pointer is off beside a side the leader cannot
             # use, so how far out it is there says nothing about how far out
@@ -619,7 +674,7 @@ class _TextBase(MarkupItem):
         for index, leader in enumerate(self.leaders):
             start = self.side_point_of(leader)
             hinge = self.elbow_of(leader)
-            for a, b in ((start, hinge), (hinge, leader.tip)):
+            for a, b in ((start, hinge), (hinge, self.tip_of(leader))):
                 gap = _distance_to_segment(a, b, local_pos)
                 if gap < nearest:
                     best, nearest = index, gap
@@ -670,8 +725,9 @@ class _TextBase(MarkupItem):
         if self.leaders and not delta.isNull():
             self.prepareGeometryChange()
             for leader in self.leaders:
-                leader.tip = QPointF(leader.tip.x() - delta.x(),
-                                     leader.tip.y() - delta.y())
+                # The whole leader stays where it was — its head, and the
+                # region a cloud leader is drawn round.
+                leader.move_by(-delta.x(), -delta.y())
             # The box has moved, so a side that was chosen by hand may now be
             # the wrong one. The hinges work themselves out again.
             self.leader_moved()
@@ -693,26 +749,50 @@ class _TextBase(MarkupItem):
             painter.setPen(pen)
             painter.setBrush(Qt.NoBrush)
             elbow = self.elbow_of(leader)
-            path = QPainterPath(leader.tip)
+            tip = self.tip_of(leader)
+            path = QPainterPath(tip)
             path.lineTo(elbow)
             path.lineTo(self.side_point_of(leader))
             painter.drawPath(path)
+            if leader.clouds():
+                # The cloud is what points at the thing, so there is no head
+                # on the line: it only says which note goes with which cloud.
+                from .base import cloud_path
+                painter.drawPath(cloud_path(QPolygonF(list(leader.cloud)),
+                                            self.cloud_radius_of(leader)))
+                continue
             if self.style.arrow_end != "none":
-                angle = math.atan2(leader.tip.y() - elbow.y(),
-                                   leader.tip.x() - elbow.x())
+                angle = math.atan2(tip.y() - elbow.y(), tip.x() - elbow.x())
                 colour = QColor(pen.color())
                 colour.setAlphaF(self.style.opacity)
                 painter.setBrush(QBrush(colour))
-                painter.drawPath(arrow_path(leader.tip, angle,
+                painter.drawPath(arrow_path(tip, angle,
                                             max(self.style.width * 4.5, 8.0),
                                             self.style.arrow_end))
 
+    def cloud_radius_of(self, _leader) -> float:
+        """How big the puffs on a cloud leader are."""
+        return getattr(self, "cloud_radius", 9.0)
+
+    def tip_of(self, leader) -> QPointF:
+        """Where the leader's line ends.
+
+        An arrow leader ends at the place it points to. A cloud leader ends
+        where its line meets the cloud — the nearest corner or edge middle to
+        the note — so the join moves with the box and the region rather than
+        being remembered from wherever it was first drawn.
+        """
+        if leader.clouds():
+            return leader.join_nearest(self._rect.normalized().center())
+        return QPointF(leader.tip)
+
     def leader_points(self) -> list:
-        """Every point every arrow passes through, for measuring the item."""
+        """Every point every leader passes through, for measuring the item."""
         points = []
         for leader in self.leaders:
-            points += [QPointF(leader.tip), self.elbow_of(leader),
+            points += [self.tip_of(leader), self.elbow_of(leader),
                        self.side_point_of(leader)]
+            points += [QPointF(p) for p in leader.cloud]
         return points
 
     # -- geometry, once the leader is taken into account -------------------
@@ -730,10 +810,12 @@ class _TextBase(MarkupItem):
             stroker = QPainterPathStroker()
             stroker.setWidth(max(self.style.width, 6.0) + 4)
             for leader in self.leaders:
-                line = QPainterPath(leader.tip)
+                line = QPainterPath(self.tip_of(leader))
                 line.lineTo(self.elbow_of(leader))
                 line.lineTo(self.side_point_of(leader))
                 path.addPath(stroker.createStroke(line))
+                if leader.clouds():
+                    path.addPolygon(QPolygonF(list(leader.cloud)))
         return path
 
     def handle_points(self) -> dict[str, QPointF]:
@@ -742,7 +824,10 @@ class _TextBase(MarkupItem):
             return handles
         handles.pop("rot", None)
         for index, leader in enumerate(self.leaders):
-            handles[f"l{index}"] = QPointF(leader.tip)
+            # A cloud leader has no arrow head to take hold of, so its handle
+            # sits on the cloud: dragging it carries the whole region.
+            handles[f"l{index}"] = (leader.cloud_box().center() if leader.clouds()
+                                    else QPointF(leader.tip))
             handles[f"e{index}"] = self.elbow_of(leader)
         return handles
 
@@ -761,9 +846,16 @@ class _TextBase(MarkupItem):
         if leader is not None:
             if part == "tip":
                 self.prepareGeometryChange()
-                leader.tip = QPointF(local_pos)
-                # The arrow head has been moved: the hinge follows it round
-                # rather than staying on a side that no longer faces it.
+                if leader.clouds():
+                    # The whole clouded region travels, keeping its shape.
+                    was = leader.cloud_box().center()
+                    leader.move_by(local_pos.x() - was.x(),
+                                   local_pos.y() - was.y())
+                else:
+                    leader.tip = QPointF(local_pos)
+                # What the leader points at has been moved: the hinge follows
+                # it round rather than staying on a side that no longer faces
+                # it.
                 self.leader_moved()
                 self.geometryChanged.emit()
             else:
@@ -773,11 +865,14 @@ class _TextBase(MarkupItem):
             # Resizing the box must not drag the arrows along with it: each
             # points at something on the page, and stays pointing at it until
             # it is moved on purpose.
-            pinned = [self.mapToScene(leader.tip) for leader in self.leaders]
+            pinned = [(self.mapToScene(leader.tip),
+                       [self.mapToScene(p) for p in leader.cloud])
+                      for leader in self.leaders]
             super().move_handle(key, local_pos, keep_ratio)
             self.prepareGeometryChange()
-            for leader, tip in zip(self.leaders, pinned):
+            for leader, (tip, cloud) in zip(self.leaders, pinned):
                 leader.tip = self.mapFromScene(tip)
+                leader.cloud = [self.mapFromScene(p) for p in cloud]
             self.leader_moved()
             return
         super().move_handle(key, local_pos, keep_ratio)
@@ -1030,12 +1125,11 @@ class CalloutItem(_TextBase):
         super().__init__(text, rect)
         self.shape_kind = shape if shape in self.SHAPES else "box"
         self.cloud_radius = 9.0
-        # The region a cloud call-out is about, as a polygon in this item's
-        # own coordinates — four corners when it was dragged out, as many as
-        # were clicked when it was drawn point by point. One markup, not a
-        # cloud and a note that happen to be grouped: moved, copied, coloured
-        # and kept in a tool set as one thing, because it is one thing.
-        self.cloud_points: list[QPointF] = []
+        # The region a cloud call-out is about lives on the leader that points
+        # at it, not on the call-out — because a call-out can have several
+        # leaders, and each of them is either an arrow at a place or a cloud
+        # round a region. One markup either way: moved, copied, coloured and
+        # kept in a tool set as one thing, because it is one thing.
         self.style.arrow_end = "arrow"
         self.leader_shown = True
         points = [QPointF(p) for p in (leader or [])]
@@ -1044,24 +1138,65 @@ class CalloutItem(_TextBase):
 
     # -- the clouded region ------------------------------------------------
     def clouds_a_region(self) -> bool:
-        return len(self.cloud_points) >= 3
+        return any(leader.clouds() for leader in self.leaders)
+
+    def cloud_leader(self):
+        """The first leader that clouds something, if there is one."""
+        for leader in self.leaders:
+            if leader.clouds():
+                return leader
+        return None
+
+    @property
+    def cloud_points(self) -> list:
+        """The first clouded region — the spelling everything else knows."""
+        leader = self.cloud_leader()
+        return leader.cloud if leader is not None else []
+
+    @cloud_points.setter
+    def cloud_points(self, points) -> None:
+        self.set_cloud(points)
 
     def set_cloud(self, points) -> None:
         """Cloud a region, or stop clouding one.
 
-        A call-out that clouds something needs no arrow head: the cloud is
-        what does the pointing, and the line only says which note belongs to
-        which cloud. So the head comes off, and goes back on if the cloud is
-        taken away.
+        The region goes on a leader of its own, so a call-out can point at one
+        thing with an arrow and at another with a cloud at the same time. A
+        cloud leader has no arrow head — the cloud is what does the pointing,
+        and the line only says which note belongs to which cloud — but that is
+        decided when it is drawn, not by taking the heads off every leader the
+        call-out has.
         """
         self.prepareGeometryChange()
-        self.cloud_points = [QPointF(p) for p in (points or [])]
-        if self.clouds_a_region():
-            self.leaders = []
-            self.style.arrow_end = "none"
-        elif self.style.arrow_end == "none":
-            self.style.arrow_end = "arrow"
+        wanted = [QPointF(p) for p in (points or [])]
+        leader = self.cloud_leader()
+        if len(wanted) < 3:
+            if leader is not None:
+                self.leaders.remove(leader)
+            self.geometryChanged.emit()
+            return
+        if leader is None:
+            middle = QPointF(sum(p.x() for p in wanted) / len(wanted),
+                             sum(p.y() for p in wanted) / len(wanted))
+            leader = _Leader(middle, "", self.ELBOW_REACH, "cloud", wanted)
+            self.leaders.append(leader)
+        else:
+            leader.cloud = wanted
+        self.leader_moved()
         self.geometryChanged.emit()
+
+    def add_cloud_leader(self, points) -> "_Leader":
+        """Another leader, clouding *points*, beside whatever is already there."""
+        self.prepareGeometryChange()
+        wanted = [QPointF(p) for p in (points or [])]
+        middle = (QPointF(sum(p.x() for p in wanted) / len(wanted),
+                          sum(p.y() for p in wanted) / len(wanted))
+                  if wanted else QPointF(self._rect.center()))
+        leader = _Leader(middle, "", self.ELBOW_REACH, "cloud", wanted)
+        self.leaders.append(leader)
+        self.leader_moved()
+        self.geometryChanged.emit()
+        return leader
 
     def set_cloud_rect(self, rect: Optional[QRectF]) -> None:
         """Cloud a rectangle — the four corners of one."""
@@ -1073,43 +1208,23 @@ class CalloutItem(_TextBase):
                         box.bottomRight(), box.bottomLeft()])
 
     def cloud_box(self) -> QRectF:
-        """The rectangle the clouded region sits in."""
-        if not self.cloud_points:
-            return QRectF()
-        xs = [p.x() for p in self.cloud_points]
-        ys = [p.y() for p in self.cloud_points]
-        return QRectF(min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
+        """The rectangle the first clouded region sits in."""
+        leader = self.cloud_leader()
+        return leader.cloud_box() if leader is not None else QRectF()
 
     def cloud_join(self) -> QPointF:
-        """Where the line meets the cloud: its nearest corner or edge middle.
-
-        Every corner of the cloud, and the middle of every edge between them —
-        whichever is closest to the note, so the line takes the shortest way
-        across and lands somewhere that reads as a deliberate join rather than
-        as a line that stops near it.
-        """
-        centre = self._rect.normalized().center()
-        points = self.cloud_points
-        candidates = list(points)
-        for index, point in enumerate(points):
-            following = points[(index + 1) % len(points)]
-            candidates.append(QPointF((point.x() + following.x()) / 2,
-                                      (point.y() + following.y()) / 2))
-        return min(candidates, key=lambda point:
-                   (point.x() - centre.x()) ** 2 + (point.y() - centre.y()) ** 2)
+        """Where the line meets the cloud: its nearest corner or edge middle."""
+        leader = self.cloud_leader()
+        if leader is None:
+            return QPointF()
+        return leader.join_nearest(self._rect.normalized().center())
 
     def box_join(self) -> QPointF:
         """Where the line leaves the note: the middle of the side facing the cloud."""
-        rect = self._rect.normalized()
-        centre = rect.center()
-        towards = self.cloud_join()
-        half_width = max(rect.width() / 2, 1.0)
-        half_height = max(rect.height() / 2, 1.0)
-        across = (towards.x() - centre.x()) / half_width
-        down = (towards.y() - centre.y()) / half_height
-        if abs(across) >= abs(down):
-            return QPointF(rect.left() if across < 0 else rect.right(), centre.y())
-        return QPointF(centre.x(), rect.top() if down < 0 else rect.bottom())
+        leader = self.cloud_leader()
+        if leader is None:
+            return self._rect.normalized().center()
+        return self.side_point_of(leader)
 
     def cloud_polygon(self):
         from PySide6.QtGui import QPolygonF
@@ -1118,9 +1233,9 @@ class CalloutItem(_TextBase):
 
     def paint_content(self, painter: QPainter) -> None:
         painter.setRenderHint(QPainter.Antialiasing, True)
+        # Every leader, clouds and arrows alike: they are the same thing drawn
+        # two ways, so they are drawn in the same place by the same code.
         self.paint_leader(painter)
-        if self.clouds_a_region():
-            self.paint_cloud(painter)
         rect = self._rect.normalized()
         painter.setBrush(self.style.brush())
         painter.setPen(self.style.pen())
@@ -1140,85 +1255,63 @@ class CalloutItem(_TextBase):
         return QPolygonF([rect.topLeft(), rect.topRight(),
                           rect.bottomRight(), rect.bottomLeft()])
 
-    def paint_cloud(self, painter: QPainter) -> None:
-        """The clouded region, and the plain line joining it to the note."""
-        from .base import cloud_path
-
-        pen = self.style.pen()
-        painter.setPen(pen)
-        painter.setBrush(Qt.NoBrush)
-        painter.drawPath(cloud_path(self.cloud_polygon(), self.cloud_radius))
-        # A plain line, with no head on it: the cloud is what points at the
-        # thing, and the line only says which note goes with which cloud.
-        painter.drawLine(self.box_join(), self.cloud_join())
-
     def boundingRect(self) -> QRectF:
         rect = super().boundingRect()
         radius = self.cloud_radius
         if self.shape_kind == "cloud":
             rect = rect.adjusted(-radius, -radius, radius, radius)
-        if self.clouds_a_region():
-            room = self.cloud_box().adjusted(-radius - 2, -radius - 2,
-                                             radius + 2, radius + 2)
-            rect = rect.united(room)
+        for leader in self.leaders:
+            if leader.clouds():
+                rect = rect.united(leader.cloud_box().adjusted(
+                    -radius - 2, -radius - 2, radius + 2, radius + 2))
         return rect
-
-    def shape(self) -> QPainterPath:
-        path = super().shape()
-        if self.clouds_a_region():
-            path.addPolygon(self.cloud_polygon())
-        return path
 
     def handle_points(self) -> dict[str, QPointF]:
         handles = super().handle_points()
-        # Every corner of the cloud is its own handle, so a shape drawn point
-        # by point can be adjusted point by point.
-        for index, point in enumerate(self.cloud_points):
-            handles[f"c{index}"] = QPointF(point)
+        # Every corner of every cloud is its own handle, so a shape drawn
+        # point by point can be adjusted point by point. The key says which
+        # leader's cloud and which corner of it.
+        for which, leader in enumerate(self.leaders):
+            for index, point in enumerate(leader.cloud):
+                handles[f"c{which}_{index}"] = QPointF(point)
         return handles
 
     def leader_handles(self) -> set[str]:
         keys = super().leader_handles()
-        keys |= {f"c{index}" for index in range(len(self.cloud_points))}
+        for which, leader in enumerate(self.leaders):
+            keys |= {f"c{which}_{index}" for index in range(len(leader.cloud))}
         return keys
 
-    def cloud_point_at(self, key: str) -> int:
-        if key.startswith("c") and key[1:].isdigit():
-            index = int(key[1:])
-            if 0 <= index < len(self.cloud_points):
-                return index
-        return -1
+    def cloud_point_at(self, key: str):
+        """The leader and the corner of its cloud a handle key names."""
+        if not key.startswith("c") or "_" not in key:
+            return None, -1
+        which, _, index = key[1:].partition("_")
+        if not (which.isdigit() and index.isdigit()):
+            return None, -1
+        which, index = int(which), int(index)
+        if 0 <= which < len(self.leaders):
+            leader = self.leaders[which]
+            if 0 <= index < len(leader.cloud):
+                return leader, index
+        return None, -1
 
     def move_handle(self, key: str, local_pos: QPointF,
                     keep_ratio: bool = False) -> None:
-        corner = self.cloud_point_at(key)
-        if corner >= 0:
+        leader, corner = self.cloud_point_at(key)
+        if leader is not None:
             self.prepareGeometryChange()
-            self.cloud_points[corner] = QPointF(local_pos)
+            leader.cloud[corner] = QPointF(local_pos)
             self.geometryChanged.emit()
             return
-        if self.clouds_a_region() and key not in self.leader_handles():
-            # Resizing the note must leave the cloud where it is, the way it
-            # leaves an arrow pointing where it pointed.
-            pinned = [self.mapToScene(point) for point in self.cloud_points]
-            super().move_handle(key, local_pos, keep_ratio)
-            self.prepareGeometryChange()
-            self.cloud_points = [self.mapFromScene(point) for point in pinned]
-            return
         super().move_handle(key, local_pos, keep_ratio)
-
-    def move_keeping_leader(self, position: QPointF) -> None:
-        delta = position - self.pos()
-        if self.cloud_points and not delta.isNull():
-            self.prepareGeometryChange()
-            self.cloud_points = [QPointF(p.x() - delta.x(), p.y() - delta.y())
-                                 for p in self.cloud_points]
-        super().move_keeping_leader(position)
 
     def serialize(self) -> dict:
         data = super().serialize()
         data["shape_kind"] = self.shape_kind
         data["cloud_radius"] = self.cloud_radius
+        # The region travels on its leader now. This is written as well so a
+        # file saved here still opens in a version that expects it there.
         if self.cloud_points:
             data["cloud_points"] = [[p.x(), p.y()] for p in self.cloud_points]
         return data
@@ -1227,15 +1320,15 @@ class CalloutItem(_TextBase):
         super().deserialize(data)
         self.shape_kind = data.get("shape_kind", "box")
         self.cloud_radius = float(data.get("cloud_radius", 9.0))
+        if self.clouds_a_region():
+            return                    # it came in on its leader, as it should
         points = data.get("cloud_points")
         if points:
-            self.cloud_points = [QPointF(float(p[0]), float(p[1])) for p in points]
+            self.set_cloud([QPointF(float(p[0]), float(p[1])) for p in points])
         else:
             stored = data.get("cloud_rect")       # written before it was a shape
             if stored:
                 self.set_cloud_rect(QRectF(*stored))
-            else:
-                self.cloud_points = []
 
     def summary(self) -> str:
         return self.comment or self.text().strip().replace("\n", " ")[:120]

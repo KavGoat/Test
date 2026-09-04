@@ -36,8 +36,8 @@ from ..items.media import ImageItem
 from ..items.plotitem import PlotItem
 from ..items.shapes import PolyItem, RectItem
 from ..items.tableitem import TableItem
-from ..items.text import (FlagItem, NoteItem, StampItem, TypewriterItem,
-                          _TextBase)
+from ..items.text import (CalloutItem, FlagItem, NoteItem, StampItem,
+                          TextItem, TypewriterItem, _TextBase)
 from . import dialogs
 from .commands import DocumentStructureCommand
 from .icons import icon
@@ -3630,59 +3630,132 @@ class MainWindow(QMainWindow):
         self.refresh_lists()
 
     def _fill_leader_menu(self, menu, item, scene_pos: QPointF) -> None:
-        """Adding and taking away arrows, on the menu where they can be found.
+        """Adding and taking away leaders, on the menu itself.
 
-        One comment about three bolts wants three arrows, and the only way to
+        One comment about three bolts wants three leaders, and the only way to
         get the second one used to be to know that dragging did something. So
-        it is written down: another arrow, and — when the pointer is on one —
-        that arrow away.
+        it is written down — and written down on the menu rather than inside a
+        sub-menu of it, because a thing you have to open a sub-menu to find is
+        a thing nobody finds.
+
+        Adding one asks which kind: an arrow at a place, or a cloud round a
+        region. They are the same leader drawn two ways, and one call-out can
+        carry both.
         """
-        leaders = menu.addMenu("Leaders") if item.leaders else menu
-        add = leaders.addAction("Add another leader" if item.leaders
-                                else "Add a leader",
-                                lambda: self.add_leader_to(item))
+        add = menu.addMenu("Add leader")
         add.setToolTip("As many as the comment needs; each one points at "
                        "whatever you drag it to")
+        arrow = add.addAction("Arrow", lambda: self.add_leader_to(item, "arrow"))
+        arrow.setToolTip("A line with a head on it, dragged to what it is about")
+        cloud = add.addAction("Cloud", lambda: self.add_leader_to(item, "cloud"))
+        cloud.setToolTip("A revision cloud round the area, joined to the note "
+                         "by a plain line")
         which = item.leader_near(item.mapFromScene(scene_pos))
         if which is not None:
-            leaders.addAction("Remove this leader",
-                              lambda i=which: self.remove_leader_from(item, i))
+            menu.addAction("Remove leader",
+                           lambda i=which: self.remove_leader_from(item, i))
         if item.leaders:
-            leaders.addAction("Remove every leader",
-                              lambda: self.set_leader(item, False))
+            last = menu.addAction("Remove leaders",
+                                  lambda: self.set_leader(item, False))
+            if isinstance(item, CalloutItem):
+                last.setToolTip("A call-out with no leaders left is a text "
+                                "box, and becomes one")
 
-    def add_leader_to(self, item) -> None:
-        """Another arrow on this call-out, clear of the ones it already has."""
+    def add_leader_to(self, item, kind: str = "arrow") -> None:
+        """Another leader on this note, clear of the ones it already has.
+
+        A text box given a leader is a call-out, so it becomes one — the three
+        are one object in different states, and this is the state changing.
+        """
         self.view.begin_snapshot(self.view.involved_frames(item))
-        item.add_leader()
+        item = self.becomes_a_callout(item)
+        if kind == "cloud":
+            item.add_cloud_leader(self.room_for_a_cloud(item))
+        else:
+            item.add_leader()
         item.touch()
         item.update()
         self.view.commit_snapshot("Add leader")
         self.refresh_selection()
         self.status_hint.setText(
-            f"{len(item.leaders)} leader(s) — drag the arrow head to what it "
-            "points at")
+            f"{len(item.leaders)} leader(s) — drag it to what it points at")
+
+    @staticmethod
+    def room_for_a_cloud(item) -> list:
+        """Where a fresh cloud leader starts out: beside the note, clear of it."""
+        rect = item.local_rect().normalized()
+        width = max(rect.width() * 0.7, 60.0)
+        height = max(rect.height() * 0.9, 40.0)
+        left = rect.right() + 48.0
+        top = rect.center().y() - height / 2
+        box = QRectF(left, top, width, height)
+        return [box.topLeft(), box.topRight(), box.bottomRight(), box.bottomLeft()]
 
     def remove_leader_from(self, item, index: int) -> None:
+        """Take one leader off — and the note with it, if it was the last."""
         self.view.begin_snapshot(self.view.involved_frames(item))
         item.remove_leader(index)
+        item = self.becomes_a_text_box(item)
         item.touch()
         item.update()
         self.view.commit_snapshot("Remove leader")
         self.refresh_selection()
 
     def set_leader(self, item, wanted: bool) -> None:
-        """Give a text box or call-out a leader, or take its leader away."""
+        """Give a text box or call-out a leader, or take its leaders away."""
         if item is None or not isinstance(item, _TextBase):
             return
         if item.leader_shown == wanted:
             return
         self.view.begin_snapshot(self.view.involved_frames(item))
-        item.add_leader() if wanted else item.remove_leader()
+        if wanted:
+            item = self.becomes_a_callout(item)
+            item.add_leader()
+        else:
+            item.remove_leader()
+            item = self.becomes_a_text_box(item)
         item.touch()
         item.update()
         self.view.commit_snapshot("Add leader" if wanted else "Remove leader")
         self.refresh_selection()
+
+    # -- one object, three states -----------------------------------------
+    #
+    # A text box, a call-out and a cloud call-out are the same thing with
+    # different leaders on it: none, an arrow, a cloud. So they are not three
+    # things to convert between by hand — the last leader coming off makes a
+    # text box, and the first one going on makes a call-out, and neither is
+    # something anybody has to ask for.
+    def becomes_a_callout(self, item):
+        """A text box given a leader is a call-out. Says which item to use."""
+        if isinstance(item, CalloutItem) or not isinstance(item, TextItem):
+            return item
+        return self._swap_text_kind(item, CalloutItem)
+
+    def becomes_a_text_box(self, item):
+        """A call-out whose last leader has gone is a text box."""
+        if not isinstance(item, CalloutItem) or item.leaders:
+            return item
+        return self._swap_text_kind(item, TextItem)
+
+    def _swap_text_kind(self, item, kind):
+        """Put a *kind* in this item's place, keeping everything about it."""
+        frame = item.parentItem()
+        if frame is None:
+            return item
+        data = item.serialize()
+        fresh = kind()
+        fresh.deserialize(data)
+        fresh.setPos(item.pos())
+        fresh.setRotation(item.rotation())
+        fresh.setZValue(item.zValue())
+        was_selected = item.isSelected()
+        frame.remove_markup(item)
+        frame.add_markup(fresh)
+        if was_selected:
+            self.view.scene().clearSelection()
+            fresh.setSelected(True)
+        return fresh
 
     def autosize_text(self) -> None:
         """Alt+Z: bring a text box or callout back in around its words."""
@@ -4312,7 +4385,7 @@ class MainWindow(QMainWindow):
                 menu.addAction(self.act_group)
             if any(getattr(i, "group", "") for i in self.selected_items()):
                 menu.addAction(self.act_ungroup)
-            if isinstance(item, _TextBase) and not item.clouds_a_region():
+            if isinstance(item, _TextBase):
                 self._fill_leader_menu(menu, item, scene_pos)
             menu.addAction("Set as default", lambda: self.set_as_default(item))
             menu.addAction("Add to a tool set…", lambda: self.add_to_toolset(item))

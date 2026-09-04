@@ -2,6 +2,10 @@
 
 Extracted from your 154 messages (2026‑09‑01 to 2026‑09‑03) plus the 6 new screenshots/prompts you just sent. Grouped by topic, deduplicated (several messages were verbatim repeats/recaps of earlier ones — merged those), and expanded so each item explains the actual expected behaviour, not just a label. Message numbers in parentheses trace back to `myinputs.md`; items marked **(new)** come from the screenshots in this message.
 
+> **New here?** Read `docs/HANDOVER.md` first — what the app is, how the
+> code is laid out, how to test it, and how this list is kept. Then come
+> back and work from this file.
+
 **This is the living list.** It is kept in the repository and updated as
 things are asked for and as they are built. Nothing is removed: where a later
 message contradicts an earlier one, the existing line is rewritten to say what
@@ -36,7 +40,11 @@ Checking this against your raw messages turned up a few places where either I go
 - [x] **Strict no-space rule inside equations — rewritten, latest message wins**: an equation entry must never contain a space, and a number immediately followed by letters (no space) is "number + unit". This line used to end "if a space is typed anywhere while in equation mode, convert the *entire* entry to a plain text item" — **that half is withdrawn.** Your latest message reports the conversion as a bug: "whenever I'm in an equation, adding a spacing will change to text line". So a space in an equation is simply **refused** — nothing is converted, the entry stays the equation it was, and the status bar says why. That holds in every equation state: a fresh entry, one opened with `"`, and one being re-edited (6/22/66, refined, then corrected)
 - [x] The opening `"` should be treated as "assume equation mode first" and behave differently from how a pre-existing equation item behaves when re-edited — i.e. entering fresh vs. editing an existing equation are two distinct interaction states that both need to respect the no-space rule **(new)**
 - [x] Fix: typing Backspace, Escape, or `=` while inside an equation sometimes doesn't register / doesn't do anything — these three keys need to be reliable in every equation-edit state **(new; reported again, but that report was against a build made before the fix — the cause was the view closing the line whenever it lost the keyboard, which a right-click menu or a click on a toolbar button does)**. Re-checked since with 360 randomised keystrokes through the real event queue, with the live recalculation firing in the middle of them: not one Backspace, `=` or character dropped. If it still happens on a build that has this, say what was clicked just before
-- [x] **(new)** Bug: `kpa` is not recognised as a unit and no unit list comes up while typing it. A unit typed in the wrong case must still be found and offered — the list is what corrects the case, so it has to appear for `kpa` and offer `kPa`
+- [x] **(new)** Bug: `kpa` is not recognised as a unit and no unit list comes up while typing it.
+- [ ] **(new, reported again)** In a calculation line or block, `=` still misbehaves: sometimes nothing can be typed, sometimes text can be typed but not deleted. There is also still a "weird gap" before the `=`
+- [ ] **(new)** The editing view and the final view of a calculation are still too different. There must be **one** style only — what is on the page while typing is exactly what is on the page afterwards. Verify this by actually typing into it, not by reading the code
+- [ ] **(new)** Editing a result's unit zooms in a long way. It should be changed in place, at the size it already is
+- [ ] **(new)** The unit list appears in odd places on the screen — it belongs under the thing being typed A unit typed in the wrong case must still be found and offered — the list is what corrects the case, so it has to appear for `kpa` and offer `kPa`
 - [x] Committing a unit still needs a discrete action (Tab) rather than auto-completing as soon as a matching unit string is typed; the unit list shown while typing must be navigable with arrow keys or mouse click, and must also list already-defined variable names that match what's typed so far (22, 139)
 - [x] Lazy evaluation: a line should only compute and *display* its result when `=` is typed at the end. If no `=`, still evaluate it silently in the background so later lines can reference the value, but show nothing (22)
 - [x] Per-result display-unit override: right-click (or similar) a computed value and change what unit it's displayed in without changing the underlying definition (22)
@@ -90,6 +98,7 @@ Checking this against your raw messages turned up a few places where either I go
 ## 7. Markup tools — placement & interaction model (Bluebeam parity)
 
 - [x] Every placeable object (markups, toolset items, groups) should show a live, cursor-following preview of exactly what will be placed, before you click to commit it (37, 41)
+- [ ] **(new)** Where a placed thing sits relative to the pointer: a call-out's text box goes by its **left middle** (the top-left is the corner that must be got right); an image, a snapshot, a tool-set item, a group or a cloud item goes by its **bottom left**. Property-mode tools are the exception and keep what they have
 - [x] "Properties mode" (place a new copy using the last-used style/properties rather than an exact one-to-one duplicate) should only be selectable for a single markup object — for calc blocks, images, graphs, and groups it should be greyed out or simply not offered, since it doesn't make sense for those (41)
 - [x] Selection tool: a click-drag draws a rectangular marquee select; a plain click (no drag) instead falls back to a polygon/lasso-style custom selection area (39)
 - [x] Rectangle marquee direction matters: dragging left-to-right selects only items fully enclosed by the box; dragging right-to-left selects enclosed **and** intersecting items. This left/right distinction is for the rectangle marquee only — it does not apply to the polygon/lasso selection (39)
@@ -136,6 +145,7 @@ Checking this against your raw messages turned up a few places where either I go
 - [x] **(new)** The leader line must never be allowed to visually cross through/over the text box itself — constrain valid hinge positions so that geometry is impossible
 - [x] **Resolved (was contradiction #5):** moving the arrow head, or moving/resizing the text box, always resets the hinge back to its auto-computed position — this takes priority over any prior manual drag, which only holds until the next move. Currently the hinge is frozen wherever it was first set and never updates, which is the bug to fix
 - [x] **(new)** Remove the small floating description/label that appears on markups and fades out after a moment — not wanted on any markup type
+- [ ] **(new, reported again)** Orange square placement markers still show up on many markups and only go away after clicking something else. They are not wanted on any markup, at any time — find every path that draws one and take it out
 - [ ] **(new)** Bug: the cloud part of a cloud call-out vanishes partway through placing it and comes back at the end — it has to be there, unbroken, from the first click
 - [ ] **(new)** A cloud call-out is a call-out: the same hinge, the same clear-of-the-box rule, the same automatic re-computation, and the same several leaders — the only difference is that its leaders are drawn as clouds rather than as arrows. One set of behaviour, not two
 - [ ] **(new)** "Add leader" belongs in the right-click menu itself, not inside a sub-menu — and choosing it asks which kind: an arrow leader or a cloud leader
@@ -175,6 +185,7 @@ Checking this against your raw messages turned up a few places where either I go
 
 ## 14. Toolsets / "My Tools"
 
+- [ ] **(new)** In My Tools, a tool in **Property mode** shows a default icon drawn in that style, and carries a "properties" tag on the entry so it is obvious which mode it is in
 - [x] Support multiple custom toolset groups, each able to hold any mix of content — markups, calc blocks, anything (36)
 - [x] Two distinct paste modes, matching Bluebeam: "one-to-one" (exact duplicate including contents — e.g. a saved text box keeps its saved text) vs. "properties only" (reuses the style but not the content) (36, 41)
 - [x] A "My Tools" section for quick access; items numbered 1, 2, 3…; pressing that number key while not in an edit mode places that tool directly (36)
@@ -278,6 +289,8 @@ Checking this against your raw messages turned up a few places where either I go
 - [x] Every capability (page operations, line operations, etc.) must be reachable from the main menu bar somewhere, not only via right-click or a shortcut (128)
 - [x] Preferences/settings should live under a "Settings" top-level menu (128)
 - [x] Help menu should include a searchable command/tool search (128)
+- [ ] **(new)** Right-click menu on a calculation: take out "Figure on this line", "Edit", "Show result in", and the rest of that group. What is worth keeping belongs on the main menu bar instead of only in the right-click menu
+- [ ] **(new)** Every button and menu label in the app should be one or two words, the way Bluebeam's are — not a sentence explaining what the thing does. The explanation goes in the tooltip. In particular "draw again" and friends are called **Property mode**, everywhere
 
 ## 27. Reliability / process
 

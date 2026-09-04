@@ -2412,8 +2412,10 @@ def test_a_cloud_callout_clouds_the_thing_and_notes_it(window):
     assert isinstance(call, CalloutItem)
     assert call.clouds_a_region()
     # No arrow head: the cloud is what points at the thing, so the line only
-    # says which note goes with which cloud.
-    assert call.style.arrow_end == "none"
+    # says which note goes with which cloud. That is decided by the leader
+    # being a cloud leader, not by taking the heads off the whole call-out —
+    # an arrow leader added to the same note keeps its head.
+    assert [leader.kind for leader in call.leaders] == ["cloud"]
     # And nothing separate was left on the page.
     assert not [i for i in markups(window)
                 if isinstance(i, RectItem) and i.kind == "cloud"]
@@ -2463,7 +2465,7 @@ def test_a_cloud_callout_can_be_drawn_corner_by_corner(window):
     assert isinstance(call, CalloutItem)
     assert call.clouds_a_region()
     assert len(call.cloud_points) >= 3
-    assert call.style.arrow_end == "none"
+    assert [leader.kind for leader in call.leaders] == ["cloud"]
 
 
 def test_escape_gets_out_of_a_half_drawn_cloud_callout(window):
@@ -5131,12 +5133,18 @@ def test_a_text_box_can_be_given_a_leader_and_have_it_taken_away(window):
     assert isinstance(box, TextItem) and not box.leader_shown
     assert "l0" not in box.handle_points()
 
-    window.set_leader(box, True)
-    assert box.leader_shown
-    assert "l0" in box.handle_points()
-    assert box.leader_handles() == {"l0", "e0"}
+    # A text box given a leader is a call-out — the two are one object in
+    # different states, so what comes back is the call-out it became.
+    call = window.becomes_a_callout(box)
+    window.set_leader(call, True)
+    call = [i for i in markups(window) if isinstance(i, CalloutItem)][-1]
+    assert call.leader_shown
+    assert "l0" in call.handle_points()
+    assert call.leader_handles() == {"l0", "e0"}
 
-    window.set_leader(box, False)
+    # And taking the last one off makes it a text box again.
+    window.set_leader(call, False)
+    box = [i for i in markups(window) if isinstance(i, TextItem)][-1]
     assert not box.leader_shown
     assert box.leader == []
     assert "l0" not in box.handle_points()
@@ -5149,12 +5157,15 @@ def test_the_menu_offers_a_leader_on_a_text_box_and_removal_on_a_callout(window)
     window.view.end_item_edit()
     box = markups(window)[-1]
     box.setSelected(True)
-    assert "Add a leader" in _menu_labels(window.build_context_menu(box, box.pos()))
+    labels = _menu_labels(window.build_context_menu(box, box.pos()))
+    assert "Add leader" in labels, "on the menu itself, not inside a sub-menu"
+    assert "Arrow" in labels and "Cloud" in labels, "and it asks which kind"
 
     window.set_leader(box, True)
-    labels = _menu_labels(window.build_context_menu(box, box.pos()))
-    assert "Add another leader" in labels
-    assert "Remove every leader" in labels
+    call = [i for i in markups(window) if isinstance(i, CalloutItem)][-1]
+    labels = _menu_labels(window.build_context_menu(call, call.pos()))
+    assert "Add leader" in labels
+    assert "Remove leaders" in labels
 
 
 def test_a_text_boxs_leader_is_still_there_after_a_save(window):
@@ -5166,9 +5177,10 @@ def test_a_text_boxs_leader_is_still_there_after_a_save(window):
     window.view.end_item_edit()
     box = markups(window)[-1]
     window.set_leader(box, True)
-    tip = QPointF(box.tip)
+    call = [i for i in markups(window) if isinstance(i, CalloutItem)][-1]
+    tip = QPointF(call.tip)
 
-    clone = build_item(box.serialize())
+    clone = build_item(call.serialize())
     assert clone.leader_shown
     assert clone.tip == tip
     assert not build_item(TextItem().serialize()).leader_shown
@@ -7437,7 +7449,7 @@ def test_the_menu_adds_and_removes_one_leader_at_a_time(window):
 
     menu = window.build_context_menu(call, call.mapToScene(QPointF(20, 20)))
     labels = _menu_labels(menu)
-    assert "Add another leader" in labels
+    assert "Add leader" in labels
 
     window.add_leader_to(call)
     window.add_leader_to(call)
@@ -7446,22 +7458,34 @@ def test_the_menu_adds_and_removes_one_leader_at_a_time(window):
     # Right-click on one of them, and that one can be taken away.
     on_it = call.mapToScene(call.elbow_of(call.leaders[1]))
     labels = _menu_labels(window.build_context_menu(call, on_it))
-    assert "Remove this leader" in labels
+    assert "Remove leader" in labels
     window.remove_leader_from(call, 1)
     assert len(call.leaders) == 2
 
 
-def test_a_cloud_callout_is_not_offered_leaders(window):
-    """The cloud is what points at the thing; an arrow as well is nonsense."""
+def test_a_cloud_callout_is_offered_more_leaders_of_either_kind(window):
+    """A cloud call-out is a call-out, so it takes leaders like one.
+
+    This used to be the opposite — a clouded note was offered no leaders at
+    all, on the grounds that the cloud does the pointing. But one note about
+    two things needs two leaders, and there is no reason the second cannot be
+    an arrow while the first is a cloud.
+    """
     window.select_tool("cloud_callout")
     drag(window.view, 160, 260, 300, 340)
     click(window.view, 430, 200)
     call = window.view.editing_item()
     window.view.end_item_edit()
+    assert [leader.kind for leader in call.leaders] == ["cloud"]
 
     labels = _menu_labels(window.build_context_menu(call, call.pos()))
-    assert "Add another leader" not in labels
-    assert "Add a leader" not in labels
+    assert "Add leader" in labels
+    assert "Arrow" in labels and "Cloud" in labels
+
+    window.add_leader_to(call, "arrow")
+    assert [leader.kind for leader in call.leaders] == ["cloud", "arrow"]
+    window.add_leader_to(call, "cloud")
+    assert [leader.kind for leader in call.leaders] == ["cloud", "arrow", "cloud"]
 
 
 def test_the_hinge_stand_off_can_be_typed(window):

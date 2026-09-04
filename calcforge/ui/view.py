@@ -2197,6 +2197,9 @@ class PageView(QGraphicsView):
         frame = self.frame_at(point) or self.frame()
         frame.add_markup(item, frame.mapFromScene(point))
         if cloud:
+            # A cloud call-out points with its cloud, so the leader it was
+            # built with is the cloud leader and not an arrow beside it.
+            item.leaders = []
             item.set_cloud([item.mapFromScene(corner) for corner in cloud])
         elif anchor is not None:
             item.tip = item.mapFromScene(anchor)
@@ -3758,6 +3761,7 @@ class PageView(QGraphicsView):
         if self._pending_cloud:
             # A cloud call-out: the cloud is what points, so no arrow head,
             # and the line runs to the cloud rather than to a tip.
+            item.leaders = []
             item.set_cloud([item.mapFromScene(corner)
                             for corner in self._pending_cloud])
         else:
