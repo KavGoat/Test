@@ -1741,19 +1741,31 @@ def test_a_new_table_asks_how_many_rows_and_columns(window, monkeypatch):
     assert table.sheet.header_row
 
 
-def test_saying_no_to_the_size_leaves_the_default(window, monkeypatch):
+def test_saying_no_to_the_size_leaves_what_was_dragged(window, monkeypatch):
+    """Cancelling the question leaves the table the drag made.
+
+    It used to leave a fixed six-by-four, because the drag only stretched
+    that. The drag counts the cells now, so what is on the page when the
+    dialog opens is already the answer — and saying no keeps it rather than
+    throwing it away for a default nobody asked for.
+    """
+    from calcforge.core.spreadsheet import DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT
     from calcforge.ui import dialogs
 
+    across, down = 4, 7
     window.interactive_prompts = True
     monkeypatch.setattr(dialogs.TableSizeDialog, "exec",
                         lambda self: dialogs.QDialog.Rejected)
     try:
         window.select_tool("table")
-        drag(window.view, 80, 300, 420, 460)
+        drag(window.view, 80, 300,
+             80 + across * DEFAULT_COL_WIDTH + 3,
+             300 + down * DEFAULT_ROW_HEIGHT + 3)
     finally:
         window.interactive_prompts = False
     table = window.view.active_table
-    assert (table.sheet.rows, table.sheet.cols) == (6, 4)
+    assert (table.sheet.rows, table.sheet.cols) == (down, across)
+    assert table.sheet.col_width(0) == DEFAULT_COL_WIDTH
 
 
 # ---------------------------------------------------------------------------
