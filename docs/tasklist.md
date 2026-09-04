@@ -303,6 +303,8 @@ written out here so it is on the record rather than in a chat message:
 
 - [x] **(new)** Write a context document so a session does not have to re-read every past chat: what the app is, who it is for, how the code is laid out, how to test it, what is done and what is not, and how this list is kept. **Done** — `docs/HANDOVER.md`, which is the first thing any agent picking this up should read. This list stays the record of what is asked for and built; the handover is the map to everything else
 
+- [ ] **(found here, not reported by you)** Two layout tests — `test_everything_that_can_be_arranged_comes_back` and `test_a_rolled_up_panel_comes_back_rolled_up` — fail intermittently, but only in a **full** suite run. Both pass on their own, and both pass when every file that runs before them is run with them, so nothing earlier is leaving a mess behind: it is a race that shows up only when the machine is busy. Both save an arrangement and then build a second window to check it came back, so the suspect is a 1.5-second layout-save timer on a window still alive, firing between the save and the second window reading it. Worth chasing rather than re-running until it passes — the same race could lose a real arrangement on a slow machine
+
 ## 28. Miscellaneous fixes reported (screenshots referenced)
 
 - [x] "Stamp: Approved" text is showing at the top of objects that aren't stamps at all — fix the condition that triggers it (69)

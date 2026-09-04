@@ -141,6 +141,18 @@ lines on teardown. That is PySide noise, not a failure. Grep them out:
 **A box in the task list is only ticked when the behaviour is in the code
 *and* held there by a test.** Not "I wrote it", not "it looks right".
 
+### One known flake
+
+`tests/test_layout.py::test_everything_that_can_be_arranged_comes_back`
+and `::test_a_rolled_up_panel_comes_back_rolled_up` fail intermittently in
+a **full** run and pass every time on their own — including when run after
+every file that precedes them. It is a race, not pollution: both save an
+arrangement and immediately build a second window to check it came back,
+and there is a 1.5-second layout-save timer that can fire in between. It is
+logged in `docs/tasklist.md`. Do not read a green full run as proof it is
+fixed, and do not read these two as your own breakage without checking them
+in isolation first.
+
 ---
 
 ## 4. How the work is tracked — follow this exactly
