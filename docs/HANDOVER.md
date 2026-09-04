@@ -220,7 +220,7 @@ is what made Backspace, `=` and Enter look like broken keys. If you touch
 
 ## 6. Where things stand
 
-As of this writing: **~181 of ~197 boxes in `docs/tasklist.md` are ticked.**
+As of this writing: **191 of 203 boxes in `docs/tasklist.md` are ticked.**
 The suite is green and three seeded fuzz runs are clean.
 
 The open items are listed in `docs/tasklist.md` — search it for `- [ ]`.
@@ -233,14 +233,20 @@ At the time of writing they are, in rough priority order:
 3. Unit editing zooming in instead of changing in place; the unit list
    appearing in odd places.
 4. Menu cleanup: labels down to one or two words everywhere, "Property mode"
-   as the name, calculation right-click entries removed and moved to the menu
-   bar.
+   as the name, and the calculation right-click group ("Figures on this
+   line", "Edit…", "Show this result in…", "Keep as one block",
+   "Self-contained block", split/merge) taken out and what is worth keeping
+   moved to the main menu bar.
 5. Placement anchors: call-out text box by its left middle; images,
    snapshots, tool-set items, groups and cloud items by their bottom left.
 6. My Tools: a property-mode entry shows a default icon in that style and
    carries a "properties" tag.
 7. Two process items about token limits and background tasks, which are about
    how the agent works and carry their honest answer in the line.
+
+None of these have been started. They were logged, deliberately, without
+being built — the user asked for the batch to be written down rather than
+worked on, so the next session starts from a full list and a green suite.
 
 Two of these are worth a word of warning. **"One style for editing and
 final"** is not a small change — it is the thing the user has raised most
