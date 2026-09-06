@@ -137,9 +137,9 @@ class ScaleDialog(QDialog):
             self.known = QLineEdit()
             self.known.hide()
             pick = QPushButton("Calibrate…")
-            pick.setToolTip("Pick two points on the drawing to calibrate its scale")
-            pick.setToolTip("Click one end of something you know the length of, "
-                            "then the other, then type that length")
+            pick.setToolTip("Pick two points on the drawing to calibrate its "
+                            "scale: click one end of something you know the "
+                            "length of, then the other, then type that length")
             pick.clicked.connect(lambda: self.done(self.PICK))
             layout.addWidget(pick)
 

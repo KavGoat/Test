@@ -2197,7 +2197,9 @@ class MainWindow(QMainWindow):
         recolour = menu.addAction("Change colours…",
                                   lambda: self.recolour_page(index))
         recolour.setEnabled(bool(self.document.pages[index].background_key))
-        delete = menu.addAction(f"Delete {these}", lambda: self.delete_page(index))
+        delete = menu.addAction("Delete pages" if several else "Delete page",
+                                lambda: self.delete_page(index))
+        delete.setToolTip(f"Delete {these}")
         delete.setEnabled(len(self.document.pages) > 1)
         return menu
 

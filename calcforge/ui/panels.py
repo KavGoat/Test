@@ -1048,7 +1048,8 @@ class ToolSetsPanel(QWidget):
             menu.addAction("Delete this set", self.delete_set)
             menu.addSeparator()
         menu.addAction("New tool set…", self.new_set)
-        menu.addAction("Import a tool set…", self.import_set)
+        imported = menu.addAction("Import tools…", self.import_set)
+        imported.setToolTip("Import a Bluebeam tool set (.btx) as a new set")
         return menu
 
     # -- order -------------------------------------------------------------

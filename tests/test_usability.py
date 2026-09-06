@@ -152,7 +152,7 @@ def test_right_click_offers_a_menu_for_the_item_under_it(window):
     menu = window.build_context_menu(markups(window)[0], QPointF(160, 150))
     labels = [a.text() for a in menu.actions() if a.text()]
     assert "Cut" in labels and "Duplicate" in labels
-    assert any("offset" in label for label in labels)
+    assert any("offset" in label.lower() for label in labels)
 
 
 def test_right_click_on_empty_paper_offers_insertions(window):
@@ -1895,9 +1895,12 @@ def test_the_scale_dialog_offers_picking_two_points_from_a_standing_start(window
 
     dialog = dialogs.ScaleDialog(window.current_page().scale, None, window)
     try:
+        # The button is labelled in one or two words; what it does is in the
+        # tooltip, so that is where "pick two points" has to be findable.
         picks = [b for b in dialog.findChildren(QPushButton)
-                 if "pick two points" in b.text().lower()]
+                 if "pick two points" in b.toolTip().lower()]
         assert picks and picks[0].isEnabled()
+        assert picks[0].text() == "Calibrate…"
     finally:
         dialog.deleteLater()
 
@@ -7718,6 +7721,12 @@ def test_holding_ctrl_lets_go_of_the_grid_while_drawing(window):
     window.document.settings.grid_mm = 5.0
     awkward = QPointF(103.7, 147.3)
 
+    # snapping_off_now() reads the live modifier state on purpose, so that a
+    # Ctrl held before this window had the keyboard still counts. That makes
+    # "Ctrl is not down" a precondition to establish rather than assume: an
+    # earlier Ctrl-modified event leaves QApplication.keyboardModifiers()
+    # reporting Ctrl, and the grid then appears not to catch anything.
+    assert not window.view.snapping_off_now()
     assert window.view.snap_scene(awkward) != awkward       # caught by the grid
     _hold_control(window.view, True)
     try:
@@ -8213,9 +8222,14 @@ def test_pasting_a_page_says_where_it_will_land(window):
     """Not just "Paste page": which page it goes after."""
     window.load_sample()
     window.copy_page(0)
-    labels = [a.text() for a in window.page_menu(1).actions()]
-    assert "Paste page after page 2" in labels
-    assert "Paste page before page 2" in labels
+    actions = window.page_menu(1).actions()
+    labels = [a.text() for a in actions]
+    assert "Paste after" in labels
+    assert "Paste before" in labels
+    # The label is two words; which page it lands on is in the tooltip.
+    tips = {a.text(): a.toolTip() for a in actions}
+    assert tips["Paste after"] == "Paste a page after page 2"
+    assert tips["Paste before"] == "Paste a page before page 2"
 
 
 def test_a_pasted_page_lands_where_it_said_and_is_shown(window):
@@ -9945,12 +9959,20 @@ def test_a_rectangles_corners_are_on_its_right_click_menu(window):
     menu = window.build_context_menu(box, corner)
     outline = [a.menu() for a in menu.actions() if a.text() == "This outline"]
     assert outline, "a rectangle has four corners and four sides"
-    labels = [a.text() for a in outline[0].actions()]
-    assert "Round this corner off" in labels
-    assert "Take this point out" in labels
-    assert "Put a point in here" in labels
-    assert any("arc" in label for label in labels)
-    assert any("break symbol" in label for label in labels)
+    actions = outline[0].actions()
+    labels = [a.text() for a in actions]
+    tips = [a.toolTip() for a in actions]
+    # One or two words on the entry; what it does to which corner or side is
+    # in the tooltip.
+    assert "Round corner" in labels
+    assert "Remove point" in labels
+    assert "Add point" in labels
+    assert any("arc" in label.lower() for label in labels)
+    assert any("break" in label.lower() for label in labels)
+    assert any("round this corner" in tip.lower() for tip in tips)
+    assert any("remove this point" in tip.lower() for tip in tips)
+    assert any("put a point in this side" in tip.lower() for tip in tips)
+    assert any("break symbol" in tip.lower() for tip in tips)
 
 
 def test_the_outline_menu_shows_up_in_the_middle_of_a_shape_too(window):
@@ -10284,14 +10306,24 @@ def test_the_menu_says_how_many_pages_it_is_about(window):
         window.add_page()
     window.pages_panel.rebuild(window.document, window.current_index)
     _pick_pages(window, [1, 2])
-    labels = [a.text() for a in window.page_menu(2).actions()]
-    assert "Delete these 2 pages" in labels
-    assert "Duplicate these 2 pages" in labels
-    assert "Copy these 2 pages" in labels
+    actions = window.page_menu(2).actions()
+    labels = [a.text() for a in actions]
+    # Two-word labels; how many pages the command is about is in the tooltip,
+    # so a command about six sheets still cannot read as being about one.
+    assert "Delete pages" in labels
+    assert "Duplicate pages" in labels
+    assert "Copy pages" in labels
+    tips = {a.text(): a.toolTip() for a in actions}
+    assert tips["Delete pages"] == "Delete these 2 pages"
+    assert tips["Duplicate pages"] == "Duplicate these 2 pages"
+    assert tips["Copy pages"] == "Copy these 2 pages"
 
     _pick_pages(window, [1])
-    labels = [a.text() for a in window.page_menu(1).actions()]
+    actions = window.page_menu(1).actions()
+    labels = [a.text() for a in actions]
+    tips = {a.text(): a.toolTip() for a in actions}
     assert "Delete page" in labels
+    assert tips["Delete page"] == "Delete page"
 
 
 # ---------------------------------------------------------------------------

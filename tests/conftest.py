@@ -34,6 +34,30 @@ def fresh_clipboard(qapp):
 
 
 @pytest.fixture(autouse=True)
+def fresh_modifiers(qapp):
+    """No test inherits a modifier key the one before it left down.
+
+    ``QTest.keyClick`` records the modifiers it is given and they stay
+    recorded: after a Ctrl+Alt shortcut the application still answers
+    ``keyboardModifiers() == ControlModifier``. The view reads that live state
+    on purpose — a Ctrl held before the window had the keyboard has to count —
+    so a leaked Ctrl quietly turns grid snapping off for whatever runs next,
+    and the test that catches it is never the test that caused it.
+    """
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QApplication, QWidget
+
+    yield
+    if QApplication.keyboardModifiers() != Qt.NoModifier:
+        spare = QWidget()
+        spare.show()
+        QTest.keyClick(spare, Qt.Key_Shift, Qt.NoModifier)
+        spare.close()
+        spare.deleteLater()
+
+
+@pytest.fixture(autouse=True)
 def fresh_settings(settings_sandbox):
     """Every test starts from the shipped defaults.
 
