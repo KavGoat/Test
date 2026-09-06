@@ -3185,6 +3185,16 @@ class PageView(QGraphicsView):
             lowered = prefix.lower()
             wanted = [word for word in first + second
                       if word.lower().startswith(lowered) and word not in wanted]
+        # What was actually typed goes to the top. The lists are in their own
+        # sensible order — the unit menu groups millimetres beside metres —
+        # and that order put "mm" above "m" for somebody who had typed exactly
+        # "m", so the first thing offered was not the thing they had written.
+        for candidate in (prefix, prefix.lower()):
+            for position, word in enumerate(wanted):
+                if word == candidate or word.lower() == candidate:
+                    if position:
+                        wanted.insert(0, wanted.pop(position))
+                    return wanted[:40]
         return wanted[:40]
 
     def caret_follows_a_number(self) -> bool:
@@ -4386,20 +4396,24 @@ class PageView(QGraphicsView):
         painter.restore()
 
     def _draw_insertion_point(self, painter: QPainter, point: QPointF) -> None:
-        """Draw the optional remembered home for the next calculation."""
+        """Draw the optional remembered home for the next calculation.
+
+        A small crosshair, and nothing more. It marks a spot on a drawing that
+        already has plenty on it, so it has to be findable without being one
+        more thing in the way: two short strokes the same length, drawn at a
+        fixed size on screen so it neither disappears when the page is zoomed
+        out nor grows into a marker when it is zoomed in.
+        """
         painter.save()
         scale = max(self._zoom, 0.05)
-        height = 16.0 / scale
-        tick = 3.0 / scale
+        arm = 5.0 / scale
         pen = QPen(QColor("#1971c2"))
-        pen.setWidthF(1.6 / scale)
+        pen.setWidthF(1.2 / scale)
         painter.setPen(pen)
-        painter.drawLine(QPointF(point.x(), point.y() - height / 2),
-                         QPointF(point.x(), point.y() + height / 2))
-        painter.drawLine(QPointF(point.x() - tick, point.y() - height / 2),
-                         QPointF(point.x() + tick, point.y() - height / 2))
-        painter.drawLine(QPointF(point.x() - tick, point.y() + height / 2),
-                         QPointF(point.x() + tick, point.y() + height / 2))
+        painter.drawLine(QPointF(point.x() - arm, point.y()),
+                         QPointF(point.x() + arm, point.y()))
+        painter.drawLine(QPointF(point.x(), point.y() - arm),
+                         QPointF(point.x(), point.y() + arm))
         painter.restore()
 
     def typing_position(self) -> QPointF:
@@ -4551,6 +4565,13 @@ class PageView(QGraphicsView):
                 if self.completions_showing() and self.accept_completion():
                     event.accept()
                     return
+                # Nothing matched. Tab still does not belong in an equation:
+                # letting it through typed a literal tab character into the
+                # source, so "300zzq" became "300zzq\t" and the line stopped
+                # parsing for a reason nothing on screen explained.
+                event.accept()
+                self.statusMessage.emit("Nothing to complete")
+                return
 
         if self._editing_item is not None or self._cell_editor is not None:
             self.give_the_keys_back_to_the_caret()
@@ -4678,6 +4699,8 @@ class PageView(QGraphicsView):
                 step = 1.0 if modifiers & Qt.ShiftModifier else LINE_STEP
                 direction = -1.0 if key == Qt.Key_Up else 1.0
                 self._insertion_point += QPointF(0, direction * step)
+                self.follow_off_screen(QRectF(self._insertion_point, self._insertion_point)
+                                       .adjusted(-12, -12, 12, 12))
                 self.viewport().update()
                 self.statusMessage.emit("Insertion point moved")
                 event.accept()
@@ -4693,11 +4716,18 @@ class PageView(QGraphicsView):
                     self._place(item, item.pos() + delta)
                 self.settle_pages(items)
                 self.commit_snapshot("Nudge markup")
+                box = items[0].sceneBoundingRect()
+                for item in items[1:]:
+                    box = box.united(item.sceneBoundingRect())
+                self.follow_off_screen(box)
                 event.accept()
                 return
-            # Nothing selected: the arrows scroll the document, as they would
-            # in anything else you read.
-            self.scroll_by(delta * 3)
+            # Nothing is selected and there is no insertion point, so there is
+            # nothing for an arrow key to move. It used to scroll the document
+            # here, the way a reader does — but this is a drawing, and a key
+            # that quietly slid the page under the pointer moved what the next
+            # click would land on. Scrolling is the wheel, the scrollbars and
+            # the space bar; the arrows only ever move something.
             event.accept()
             return
 
@@ -4709,6 +4739,29 @@ class PageView(QGraphicsView):
     # ------------------------------------------------------------------
     # getting about
     # ------------------------------------------------------------------
+    def follow_off_screen(self, box: QRectF) -> None:
+        """Scroll only as far as it takes to keep *box* on screen.
+
+        The arrows do not scroll the page. The one thing they may do is follow
+        what they are moving: the caret, or the markup being nudged, walking
+        off the edge of the view is the one time the view has to come with it,
+        and then only by the amount that brings it back inside.
+        """
+        seen = self.mapToScene(self.viewport().rect()).boundingRect()
+        if seen.contains(box):
+            return
+        dx = dy = 0.0
+        if box.left() < seen.left():
+            dx = box.left() - seen.left()
+        elif box.right() > seen.right():
+            dx = box.right() - seen.right()
+        if box.top() < seen.top():
+            dy = box.top() - seen.top()
+        elif box.bottom() > seen.bottom():
+            dy = box.bottom() - seen.bottom()
+        if dx or dy:
+            self.scroll_by(QPointF(dx, dy))
+
     def scroll_by(self, delta: QPointF) -> None:
         """Scroll the canvas by *delta*, given in scene units."""
         self.horizontalScrollBar().setValue(

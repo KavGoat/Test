@@ -1101,6 +1101,85 @@ def test_nothing_is_drawn_where_the_page_was_clicked(window):
     assert sum(1 for x in range(80) for y in range(80) if image.pixel(x, y)) == 0
 
 
+def test_the_arrows_never_scroll_the_page_on_their_own(window):
+    """Arrows move something or do nothing. They do not slide the drawing.
+
+    They used to scroll the document when nothing was selected, the way they
+    do in a reader — but this is a drawing, and a key that quietly slides the
+    page under the pointer changes what the next click lands on.
+    """
+    window.select_tool("select")
+    window.view.scene().clearSelection()
+    QApplication.processEvents()          # let the view settle where it opens
+    before = (window.view.horizontalScrollBar().value(),
+              window.view.verticalScrollBar().value())
+    for key in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down):
+        press_key(window.view, key)
+        QApplication.processEvents()
+    after = (window.view.horizontalScrollBar().value(),
+             window.view.verticalScrollBar().value())
+    assert after == before, "nothing was selected, so nothing should have moved"
+
+
+def test_the_view_follows_a_markup_nudged_off_the_bottom_of_it(window):
+    """The one time an arrow may scroll: to keep what it is moving in sight."""
+    window.select_tool("rect")
+    drag(window.view, 120, 120, 240, 200)
+    window.select_tool("select")
+    box = markups(window)[0]
+    box.setSelected(True)
+    QApplication.processEvents()
+
+    bar = window.view.verticalScrollBar()
+    assert bar.maximum() > bar.minimum(), "the document has somewhere to scroll to"
+
+    # Scroll until the markup has gone off the top of the view, then nudge it
+    # further the same way: the view has to come with it.
+    while bar.value() < bar.maximum():
+        seen = window.view.mapToScene(window.view.viewport().rect()).boundingRect()
+        if seen.top() > box.sceneBoundingRect().bottom():
+            break
+        bar.setValue(bar.value() + 40)
+        QApplication.processEvents()
+    seen = window.view.mapToScene(window.view.viewport().rect()).boundingRect()
+    assert not seen.intersects(box.sceneBoundingRect()), "it is off screen now"
+
+    before = bar.value()
+    press_key(window.view, Qt.Key_Up)
+    QApplication.processEvents()
+    assert bar.value() < before, \
+        "the view comes with the markup rather than losing it off the edge"
+    seen = window.view.mapToScene(window.view.viewport().rect()).boundingRect()
+    assert seen.intersects(box.sceneBoundingRect()), "and it is back in sight"
+
+
+def test_the_insertion_point_is_drawn_as_a_small_crosshair(window):
+    from calcforge.ui import preferences
+
+    prefs = preferences.current()
+    was = prefs.insertion_point
+    try:
+        prefs.insertion_point = True
+        preferences.apply(prefs)
+        window.select_tool("select")
+        click(window.view, 260, 340)
+        assert window.view._insertion_point is not None
+
+        strokes = []
+        class Recorder:
+            def save(self): pass
+            def restore(self): pass
+            def setPen(self, pen): pass
+            def drawLine(self, a, b): strokes.append((a, b))
+        window.view._draw_insertion_point(Recorder(), window.view._insertion_point)
+        assert len(strokes) == 2, "a crosshair is two strokes, not a bracketed marker"
+        lengths = sorted((a - b).manhattanLength() for a, b in strokes)
+        assert lengths[0] == pytest.approx(lengths[1]), "and both arms the same length"
+    finally:
+        prefs.insertion_point = was
+        preferences.apply(prefs)
+
+
 def test_the_optional_insertion_point_places_and_moves_the_next_calculation(window):
     from calcforge.items.mathitem import LINE_STEP
     from calcforge.ui import preferences
@@ -7305,6 +7384,43 @@ def test_typing_a_name_offers_the_documents_own_variables_first(window):
     offered = window.view.completion_words("sig")
     assert offered[:2] == ["sigma_c", "sigma_y"]
     window.view.end_item_edit()
+
+
+def test_the_unit_you_typed_is_the_first_one_offered(window):
+    """"m" typed exactly should not be offered under "mm".
+
+    The unit menu groups millimetres beside metres, and that order decided the
+    list, so somebody who had written exactly the unit they wanted found
+    something else at the top of it and Tab took the wrong one.
+    """
+    _calc(window, "metric := 1", at=(90, 110))
+    window.recalculate()
+    window.view._last_scene_pos = QPointF(90, 300)
+    press_key(window.view, Qt.Key_unknown, '"')
+    type_text(window.view, "L:=300m")
+    assert window.view.completion_words("m")[0] == "m"
+    assert window.view.completion_words("mm")[0] == "mm"
+    # Case is corrected by the list, so the wrong case still finds the unit.
+    assert window.view.completion_words("kpa")[:1] == ["kPa"]
+    window.view.end_item_edit()
+
+
+def test_tab_with_nothing_to_complete_leaves_the_equation_alone(window):
+    """It used to type a literal tab into the source and stop it parsing."""
+    window.view._last_scene_pos = QPointF(90, 300)
+    press_key(window.view, Qt.Key_unknown, '"')
+    type_text(window.view, "L:=300zzq")
+    item = window.view.editing_item()
+    before = item._editor.toPlainText()
+    assert window.view.completion_words("zzq") == [], "nothing matches zzq"
+
+    said = []
+    window.view.statusMessage.connect(said.append)
+    press_key(window.view, Qt.Key_Tab, "\t")
+    QApplication.processEvents()
+    assert item._editor.toPlainText() == before, "no tab character went in"
+    assert said and "complete" in said[-1].lower()
+    window.view.escape_everything()
 
 
 def test_typing_after_a_number_offers_units_first(window):

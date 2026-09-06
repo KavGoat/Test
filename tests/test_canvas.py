@@ -378,12 +378,21 @@ def test_ctrl_home_and_end_reach_the_ends_of_the_document(window):
     assert bar.value() == bar.minimum()
 
 
-def test_arrows_scroll_when_nothing_is_selected(window):
+def test_arrows_do_not_scroll_when_nothing_is_selected(window):
+    """They used to, the way they do in a reader.
+
+    This is a drawing, though, and a key that quietly slides the page under
+    the pointer changes what the next click lands on. The arrows move
+    something now, or they do nothing; scrolling is the wheel, the scrollbars
+    and the space bar.
+    """
     _three_pages(window)
     bar = window.view.verticalScrollBar()
-    before = bar.value()
-    press(window.view, Qt.Key_Down)
-    assert bar.value() > before
+    across = window.view.horizontalScrollBar()
+    before = (across.value(), bar.value())
+    for key in (Qt.Key_Down, Qt.Key_Up, Qt.Key_Left, Qt.Key_Right):
+        press(window.view, key)
+    assert (across.value(), bar.value()) == before
 
 
 def test_arrows_still_nudge_a_selected_markup(window):
