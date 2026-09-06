@@ -2,7 +2,7 @@
 
 Audited: 2026-09-06 against `claude/engineering-calc-markup-app-2twiqs`.
 
-The 21 entries below are what the audit could not show working. Each says
+The 19 entries below are what the audit could not show working. Each says
 what is missing or blocking it. Several are tasks whose base behaviour is
 finished and whose recent amendment is not; those name the part that is done so
 the remaining work is clear.
@@ -14,11 +14,6 @@ This is not the user-owned completion record. It changes no checkbox in
 
 - **(new)** Support multiple open documents at once: PDF review documents and `.cfx` CalcForge documents appear in separate tabs, can be viewed side-by-side in a split view, and can be moved into independent application windows. Each document keeps its own pages, state and active tool without leaking into another tab/window.
   - **Missing:** Not started: the app builds one MainWindow (calcforge/app.py:57) and has no document tabs, split view or second-window path.
-
-## 2. Calculation engine — variables & units
-
-- **(consolidated)** Variable and unit completion is available only while editing an equation or inline equation, never during ordinary text entry. Unit matching is case-insensitive and ranks an exact unit match first (`m` before `mm`); accepting a listed unit always requires Tab, which replaces typed casing with the canonical unit spelling. If no listed unit matches, Tab does not complete it. The completion list is navigable with arrow keys or mouse and may also offer matching already-defined variables.
-  - **Missing:** Two clauses fail, verified in the running app. Exact match is not ranked first: completion_words('m') returns ['mm','m','mile',...]. And Tab with no matching unit inserts a literal tab into the equation: 'L:=300zzq' becomes 'L:=300zzq\t'. Suppression in ordinary prose and Tab-to-accept do work.
 
 ## 4. Equation editor
 
@@ -32,11 +27,6 @@ This is not the user-owned completion record. It changes no checkbox in
 
 - Cursor icon should change to a resize cursor when hovering a column/row border — currently doesn't, making it hard to tell it's draggable (108)
   - **Missing:** Not implemented: neither calcforge/items/tableitem.py nor the view sets any cursor over a column or row border — tableitem.py contains no setCursor call at all. The SizeHor/SizeVerCursor in items/base.py belong to markup resize handles, not table borders.
-
-## 7. Markup tools — placement & interaction model (Bluebeam parity)
-
-- **(supersedes prior removal, amended)** Provide an optional canvas insertion point for calculation placement. When enabled, clicking empty canvas sets the insertion point and arrow keys move it up/down; new calculation lines use that point. The insertion point renders as a tiny crosshair, not a large marker. The setting must be independently toggleable so ordinary selection/marquee behavior remains available when it is off. Left, Right, Up and Down must never scroll the page view or change pages during ordinary navigation; the single exception is that the view may auto-scroll when the insertion point, or an item being moved with the arrows, is about to leave the visible area.
-  - **Missing:** Base feature is there and tested (off by default, places and moves the next calculation, Escape clears it, Preferences exposes it) but the amendment is not: view.py:4699 still ends the arrow-key path with 'Nothing selected: the arrows scroll the document' and calls scroll_by, which the amended task forbids outside the follow-the-caret-off-screen case. The marker drawn by _draw_insertion_point (view.py:4388) is a 16px I-beam caret with end ticks, not the crosshair the task asks for.
 
 ## 10. Snapshot tool
 

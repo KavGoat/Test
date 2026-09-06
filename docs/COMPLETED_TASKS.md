@@ -2,7 +2,7 @@
 
 Audited: 2026-09-06 against `claude/engineering-calc-markup-app-2twiqs`.
 
-Every open line in `docs/tasklist.md` was gone through one at a time. The 140
+Every open line in `docs/tasklist.md` was gone through one at a time. The 142
 below are the ones the current source implements and something actually
 exercises — an event-driven test that drives the real Qt queue, or a check
 against the running application. Each carries the evidence it rests on.
@@ -46,6 +46,9 @@ behaviour it extends.
 
 - **(new)** The unit list appears in odd places on the screen — it belongs under the thing being typed
   - **Evidence:** The completion list opens under the caret, and the result-unit list under its in-place editor. Evidence: test_the_list_appears_under_the_caret_not_under_the_block, test_the_result_unit_list_opens_below_its_in_place_editor.
+
+- **(consolidated)** Variable and unit completion is available only while editing an equation or inline equation, never during ordinary text entry. Unit matching is case-insensitive and ranks an exact unit match first (`m` before `mm`); accepting a listed unit always requires Tab, which replaces typed casing with the canonical unit spelling. If no listed unit matches, Tab does not complete it. The completion list is navigable with arrow keys or mouse and may also offer matching already-defined variables.
+  - **Evidence:** Fixed. completion_words now promotes what was actually typed to the head of the list, so 'm' leads over 'mm' while the case-insensitive pass still puts kPa first for 'kpa'; and Tab in an item editor is swallowed whether or not it completes, instead of falling through and typing a literal tab into the source. Evidence: test_the_unit_you_typed_is_the_first_one_offered, test_tab_with_nothing_to_complete_leaves_the_equation_alone, alongside the existing test_nothing_is_completed_until_tab_is_pressed, test_the_arrows_move_through_the_list_and_tab_takes_one and test_completion_is_only_offered_inside_an_inline_equation.
 
 - Add right-click options for output formatting: choose decimal places, scientific notation, or significant figures per result (121)
   - **Evidence:** Right-click offers Significant figures, Decimal places and Scientific submenus per result (mainwindow.py:4727-4737), and a line's own figures persist. Evidence: test_one_line_can_be_shown_to_its_own_number_of_figures, test_a_lines_own_figures_can_be_put_back, test_a_lines_own_figures_survive_a_save.
@@ -102,6 +105,9 @@ behaviour it extends.
 
 - **(new)** Selecting as it stands — click, and click-drag for a rectangular marquee, with no key held — is right and stays as it is. What Shift adds: **Shift and click point after point draws a polygon to select inside**, closed by clicking the first point again or by Enter
   - **Evidence:** Plain click and rectangular marquee unchanged; Shift clicks out a selection polygon, closed by returning to the first point or Enter, and Escape abandons it. Evidence: test_shift_clicking_out_a_lasso_selects_what_is_inside_it, test_a_lasso_takes_only_what_is_wholly_inside, test_escape_abandons_a_half_drawn_lasso.
+
+- **(supersedes prior removal, amended)** Provide an optional canvas insertion point for calculation placement. When enabled, clicking empty canvas sets the insertion point and arrow keys move it up/down; new calculation lines use that point. The insertion point renders as a tiny crosshair, not a large marker. The setting must be independently toggleable so ordinary selection/marquee behavior remains available when it is off. Left, Right, Up and Down must never scroll the page view or change pages during ordinary navigation; the single exception is that the view may auto-scroll when the insertion point, or an item being moved with the arrows, is about to leave the visible area.
+  - **Evidence:** Fixed. The arrow keys no longer scroll: with nothing selected and no insertion point they do nothing, and the one exception the task allows is served by follow_off_screen, which brings the caret or the nudged markup back into view by exactly the amount needed. The insertion point is now a crosshair of two equal arms at a fixed on-screen size rather than the 16pt bracketed I-beam. Evidence: test_the_arrows_never_scroll_the_page_on_their_own, test_the_view_follows_a_markup_nudged_off_the_bottom_of_it, test_the_insertion_point_is_drawn_as_a_small_crosshair, plus the existing insertion-point tests; tests/test_canvas.py::test_arrows_do_not_scroll_when_nothing_is_selected replaces the test that asserted the old rule.
 
 - Escape must always fully clear selection and exit whatever edit/tool sub-state you're in, in one press, regardless of how deep the current mode is nested (81, 92)
   - **Evidence:** escape_everything (view.py:1634) unwinds held tool, pending call-out anchor, insertion point, pending cloud and cloud leader, marquee, editors and selection in one press and reports what it put down. Exercised from 41 places in tests/test_usability.py.
