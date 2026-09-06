@@ -4,6 +4,12 @@ Last audited: 2026-09-06
 
 This file lists requirements for which the current source has implementation and validation evidence. It is provided for user review and is not the authoritative completion record. Only the user marks completion in `docs/tasklist.xlsx` or changes task checkboxes.
 
+## Audit note, 2026-09-06
+
+This file was created at commit `cad6468`, in the same change that reduced `docs/UNADDRESSED_TASKS.md` from 125 items to 5. The full suite was re-run at that commit as part of auditing it: 1254 tests, 11 failures. Three were an environment fault (`cryptography` without `_cffi_backend`) and not the branch's. The remaining eight were real, and two of them were cited as evidence by entries in this file — the two page-menu entries below, whose wording has been corrected to match what the code now does. The failures are fixed in `c91d4f3` and the suite is green at 1254 passed, verified against the running application as well as the harness.
+
+Every one of the 66 test names cited in this file exists in `tests/`. That is not on its own evidence that the behaviour still holds: the two entries below cited tests that were failing at the time the claim was written.
+
 ## Calculation and equation editing
 
 - The live calculation pass builds an ordered variable dependency graph for calculation lines, blocks, and tables. Redefining a variable refreshes only the changed node and its transitive downstream consumers, while unaffected cached outputs are safely replayed into a clean reading-order workspace; structural changes fall back to a full live pass and the independent verifier remains a full source re-evaluation. Evidence: three focused dependency/redefinition/cache-rebuild tests, 110 calculation/table/unit focused tests, and 145 verifier/validation/property tests passed on 2026-09-05.
@@ -92,8 +98,8 @@ This file lists requirements for which the current source has implementation and
 - Pages can be renamed from their context menu; Reset restores the imported/source label or the normal generated number, and the centred thumbnail caption reflects it. Evidence: three focused page-label tests passed on 2026-09-05.
 - Pages can be included/excluded from print and export through a checkable page-menu command; excluded thumbnails are grey, PDF/image export omits them, and the flag survives `.cfx` persistence. Evidence: five focused page/export tests passed on 2026-09-05.
 - The current page number and custom label are centred in the bottom navigation area, and Pages thumbnails occupy centred responsive grid cells. Evidence: five focused footer, scrolling, label, scale-caption, and thumbnail-layout tests passed on 2026-09-05.
-- Multiple selected pages can be deleted, duplicated, copied/pasted, and reordered as a run. Evidence: page-run tests from `test_several_pages_are_deleted_together` through `test_the_menu_says_how_many_pages_it_is_about`.
-- Pasted pages show an insertion location and land there. Evidence: `test_pasting_a_page_says_where_it_will_land`, `test_a_pasted_page_lands_where_it_said_and_is_shown`.
+- Multiple selected pages can be deleted, duplicated, copied/pasted, and reordered as a run. The menu entry is two words ("Delete pages", "Duplicate pages", "Copy pages") and names how many pages it is about in its tooltip. Evidence: page-run tests from `test_several_pages_are_deleted_together` through `test_the_menu_says_how_many_pages_it_is_about`, re-verified 2026-09-06 after `c91d4f3`; `test_the_menu_says_how_many_pages_it_is_about` was failing when this entry was first written.
+- Pasted pages show an insertion location and land there. The entry reads "Paste after" / "Paste before" and names the page it lands on in its tooltip. Evidence: `test_pasting_a_page_says_where_it_will_land`, `test_a_pasted_page_lands_where_it_said_and_is_shown`, re-verified 2026-09-06 after `c91d4f3`; the first of those was failing when this entry was first written.
 - Every panel has a rail icon and panels can move between left and right rails. Evidence: rail tests in `tests/test_canvas.py` and `tests/test_layout.py`.
 - Each rail keeps at most one panel open while the opposite rail remains independent; rail clicks, dock menu toggles, moves, reset, and restored layouts share the rule. Evidence: eight focused panel event/layout tests passed on 2026-09-05.
 - The Properties dock can be squeezed to one pixel (effectively zero width) and expanded back to its working width; child/title size hints no longer impose a 237-pixel floor. Evidence: three focused dock sizing/title/collapse tests passed on 2026-09-05.
