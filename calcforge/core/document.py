@@ -98,6 +98,14 @@ class PageScale:
 
     ``length_per_pt`` is the real-world length represented by one point on the
     page, stored as a pint quantity so measurements come out unit-aware.
+
+    ``calibrated`` says whether a scale was chosen, and it is a separate thing
+    from what the scale turned out to be. It used to be read back off the
+    label — anything not reading "1:1" had been set — which left no way to say
+    "this drawing really is full size". A page deliberately calibrated to 1:1
+    was indistinguishable from one nobody had touched, so it went on being
+    treated as unscaled and every scale-dependent markup drawn on it kept
+    asking for a scale it already had.
     """
 
     label: str = "1:1"
@@ -105,6 +113,7 @@ class PageScale:
     precision: int = 2
     display_unit: str = "m"
     area_unit: str = "m^2"
+    calibrated: bool = False
 
     def __post_init__(self):
         if self.length_per_pt is None:
@@ -113,7 +122,8 @@ class PageScale:
     @classmethod
     def from_ratio(cls, ratio: float, display_unit: str = "m") -> "PageScale":
         """``ratio`` of 100 means 1:100 — one page mm is 100 real mm."""
-        scale = cls(label=f"1:{ratio:g}", display_unit=display_unit)
+        scale = cls(label=f"1:{ratio:g}", display_unit=display_unit,
+                    calibrated=True)
         scale.length_per_pt = Q_(ratio * PT_TO_MM, "mm")
         return scale
 
@@ -126,7 +136,7 @@ class PageScale:
             return cls()
         per_pt = real / page_distance_pt
         scale = cls(label=f"{format_quantity(real, 4)} = {page_distance_pt:.1f} pt",
-                    display_unit=display_unit)
+                    display_unit=display_unit, calibrated=True)
         scale.length_per_pt = per_pt
         return scale
 
@@ -137,7 +147,7 @@ class PageScale:
         return (self.length_per_pt ** 2) * square_points
 
     def is_calibrated(self) -> bool:
-        return self.label != "1:1"
+        return self.calibrated
 
     def to_dict(self) -> dict:
         quantity = self.length_per_pt
@@ -148,14 +158,20 @@ class PageScale:
             "precision": self.precision,
             "display_unit": self.display_unit,
             "area_unit": self.area_unit,
+            "calibrated": self.calibrated,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "PageScale":
-        scale = cls(label=data.get("label", "1:1"),
+        label = data.get("label", "1:1")
+        # Documents written before the flag existed carry the old rule in their
+        # label, so read it back the old way for them rather than declaring
+        # every one of them uncalibrated.
+        scale = cls(label=label,
                     precision=int(data.get("precision", 2)),
                     display_unit=data.get("display_unit", "m"),
-                    area_unit=data.get("area_unit", "m^2"))
+                    area_unit=data.get("area_unit", "m^2"),
+                    calibrated=bool(data.get("calibrated", label != "1:1")))
         try:
             scale.length_per_pt = Q_(float(data["magnitude"]), data["units"])
         except Exception:

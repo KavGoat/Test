@@ -1,8 +1,8 @@
 # CalcForge tasks still requiring work
 
-Audited: 2026-09-06 against `d7342b1` on `claude/engineering-calc-markup-app-2twiqs`.
+Audited: 2026-09-06 against `claude/engineering-calc-markup-app-2twiqs`.
 
-The 22 entries below are what the audit could not show working. Each says
+The 21 entries below are what the audit could not show working. Each says
 what is missing or blocking it. Several are tasks whose base behaviour is
 finished and whose recent amendment is not; those name the part that is done so
 the remaining work is clear.
@@ -84,9 +84,6 @@ This is not the user-owned completion record. It changes no checkbox in
 
 - **(amended)** Recompute each callout leader hinge completely when its arrow tip, text box or cloud moves. Do not retain a prior manually adjusted hinge length after any of those changes. In a multi-leader callout each leader's hinge is computed independently: moving the cloud or the text box must not force every leader to share a single hinge length.
   - **Missing:** The recompute-on-move behaviour is there and tested (the hinge tests), but the amended per-leader clause is unverified: no test covers a multi-leader call-out keeping independent hinge lengths when the cloud or the box moves.
-
-- **(new)** "No scale" must be a different state from a true 1:1. The app currently treats 1:1 as the unset/default scale, so a page cannot actually be calibrated to a genuine 1:1 — a scale-dependent markup drawn afterwards still misbehaves. An explicit 1:1 calibration must be stored as a real, deliberate scale, distinct from "uncalibrated".
-  - **Missing:** Confirmed exactly as reported. PageScale.is_calibrated (core/document.py:139-140) is `return self.label != "1:1"`, so a page deliberately calibrated to a genuine 1:1 is indistinguishable from one that was never calibrated, and everything keyed off it — note_missing_scale, the scale-dependent draw prompt — treats it as unset.
 
 - **(new)** Count tool defects: the marker number is visually cut off; Escape must cancel the entire count session immediately rather than lagging behind the keypress; and the ghost `1` marker left behind after cancellation must disappear on its own, without needing a further click.
   - **Missing:** First defect confirmed and root-caused: CountItem.paint_content (items/measure.py:563) draws the index into a box hard-coded to 16x10 points regardless of style.font_size, while local_rect stays 16x16. At the shipped 7pt the glyph is 8.9x8.1 and fits; at 9pt it is 11.4x10.5 and the box clips it, and from 11pt it also runs past boundingRect. The Escape-lag and ghost-1-marker defects are not yet reproduced.

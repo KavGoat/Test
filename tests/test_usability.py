@@ -361,6 +361,38 @@ def test_a_page_starts_without_a_scale_and_can_be_given_one(window):
     assert measure.value.to("m").magnitude == pytest.approx(3.53, rel=2e-2)
 
 
+def test_a_page_set_to_a_real_one_to_one_is_not_an_unscaled_page(window):
+    """Choosing 1:1 is a decision, and it has to survive being written down.
+
+    The flag used to be read back off the label, so a drawing that really is
+    full size looked exactly like a page nobody had calibrated: every
+    scale-dependent markup went on asking for a scale the page already had.
+    """
+    from calcforge.core.document import PageScale
+    from calcforge.io import project as project_io
+
+    page = window.current_page()
+    assert not page.scale.is_calibrated(), "a fresh page has no scale"
+
+    page.scale = PageScale.from_ratio(1)
+    assert page.scale.label == "1:1"
+    assert page.scale.is_calibrated(), "1:1 chosen on purpose is a scale"
+
+    window.select_tool("measure_length")
+    drag(window.view, 100, 400, 300, 400)
+    assert "no scale" not in window.status_hint.text()
+
+    there_and_back = PageScale.from_dict(page.scale.to_dict())
+    assert there_and_back.is_calibrated(), "and it survives a save"
+
+    # A document written before the flag existed has only its label to go on.
+    old = page.scale.to_dict()
+    del old["calibrated"]
+    assert not PageScale.from_dict(old).is_calibrated()
+    old["label"] = "1:50"
+    assert PageScale.from_dict(old).is_calibrated()
+
+
 def test_length_and_area_read_real_dimensions(window):
     page = scaled_page(window)
     window.select_tool("measure_length")

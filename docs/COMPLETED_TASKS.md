@@ -1,8 +1,8 @@
 # CalcForge completed-work evidence
 
-Audited: 2026-09-06 against `d7342b1` on `claude/engineering-calc-markup-app-2twiqs`.
+Audited: 2026-09-06 against `claude/engineering-calc-markup-app-2twiqs`.
 
-Every open line in `docs/tasklist.md` was gone through one at a time. The 139
+Every open line in `docs/tasklist.md` was gone through one at a time. The 140
 below are the ones the current source implements and something actually
 exercises — an event-driven test that drives the real Qt queue, or a check
 against the running application. Each carries the evidence it rests on.
@@ -11,13 +11,10 @@ This is not the user-owned completion record and nothing here is marked
 complete. No checkbox in `docs/tasklist.md` and no status in
 `docs/tasklist.xlsx` was touched. Only the user marks a task complete.
 
-The full suite was green when this was written: 1254 tests, no failures.
-
 A caveat worth keeping: a passing test proves the behaviour held when it ran,
 not that the requirement is finished in every respect a person might mean. Where
 a task has recently been amended, the amendment was audited separately from the
-behaviour it extends, and several of those amendments are in the unaddressed
-register even though their base behaviour is here.
+behaviour it extends.
 
 ## 1. Core concept
 
@@ -484,6 +481,9 @@ register even though their base behaviour is here.
 
 - **(new)** Decide whether pasting from Excel can build a real table at all, and act on the decision. The §6 requirement to convert pasted Excel cells into a table object is to be withdrawn outright if it is not achievable — Excel may not reliably expose the data. Pasting as plain values is an acceptable outcome; if that is the conclusion, remove the conversion attempt entirely rather than leaving a half-working path in place.
   - **Evidence:** Decision made, with evidence: Excel paste CAN build a real table, so the §6 requirement is kept, not withdrawn. Pasting Excel cells creates a table object and carries relative formulas across, falling back to values where translation is impossible. Evidence: test_pasting_excel_cells_onto_the_page_makes_a_table, test_pasting_from_excel_brings_the_formulas, test_formulas_pasted_as_text_stay_formulas, test_excel_quoting_survives_the_trip, plus calcforge/core/excelxml.py.
+
+- **(new)** "No scale" must be a different state from a true 1:1. The app currently treats 1:1 as the unset/default scale, so a page cannot actually be calibrated to a genuine 1:1 — a scale-dependent markup drawn afterwards still misbehaves. An explicit 1:1 calibration must be stored as a real, deliberate scale, distinct from "uncalibrated".
+  - **Evidence:** Fixed. PageScale now carries its own `calibrated` flag instead of inferring it from the label (core/document.py), so a page deliberately set to 1:1 is a scaled page and one nobody touched is not. from_ratio and from_calibration set it; to_dict/from_dict persist it, and a document saved before the flag existed still reads its label the old way. Evidence: test_a_page_set_to_a_real_one_to_one_is_not_an_unscaled_page drives the real measure tool and checks the status hint, the save round trip, and both legacy-document cases; test_a_page_starts_without_a_scale_and_can_be_given_one still passes. Full suite 1255 passed, 0 failed.
 
 - **(new)** Display formatting never alters stored values. Significant-figure and decimal-place settings affect only the rendered final answer — never the stored value, and never the typed equation text.
   - **Evidence:** Formatting is a render-time property of the item, not of the value: MathItem holds digits and number_format (items/mathitem.py:180-181) and applies them per line at layout through figures_for (mathitem.py:399); the workspace keeps the quantity. Evidence: test_one_line_can_be_shown_to_its_own_number_of_figures, test_a_lines_own_figures_can_be_put_back, test_a_lines_own_figures_survive_a_save.
