@@ -12,7 +12,8 @@ from PySide6.QtGui import (QAbstractTextDocumentLayout, QBrush, QColor, QPainter
                            QSyntaxHighlighter, QTextCharFormat, QTextCursor,
                            QTextDocument, QTextOption)
 from PySide6.QtWidgets import (QGraphicsItem, QGraphicsTextItem,
-                               QStyle, QStyleOptionGraphicsItem)
+                               QInputDialog, QMenu, QStyle,
+                               QStyleOptionGraphicsItem)
 
 from .base import HANDLE_SIZE, MarkupItem, Style, arrow_path, register_item
 
@@ -51,6 +52,12 @@ class _InlineEditor(QGraphicsTextItem):
     # writing moves on, so does the level.
     ENDS_A_RUN = set(" \t,;:()[]{}+-*/=<>")
 
+    def inside_field(self) -> bool:
+        """Whether the caret is between a pair of inline-equation marks."""
+        cursor = self.textCursor()
+        before = self.toPlainText()[:cursor.position()]
+        return before.count("\\") % 2 == 1
+
     def keyPressEvent(self, event) -> None:
         """``_`` drops what follows; ``^`` lifts it — as they do in maths.
 
@@ -72,7 +79,8 @@ class _InlineEditor(QGraphicsTextItem):
             self.setTextCursor(cursor)
             event.accept()
             return
-        if text in ("_", "^") and not (event.modifiers() & Qt.ControlModifier):
+        if (text in ("_", "^") and not self.inside_field()
+                and not (event.modifiers() & Qt.ControlModifier)):
             self.set_script("sub" if text == "_" else "super")
             event.accept()
             return
@@ -98,6 +106,53 @@ class _InlineEditor(QGraphicsTextItem):
             cursor.mergeBlockCharFormat(fmt)
             cursor.setCharFormat(_merged(cursor.charFormat(), fmt))
         self.setTextCursor(cursor)
+
+    def spelling_menu(self, cursor: Optional[QTextCursor] = None) -> Optional[QMenu]:
+        """Correction choices for the misspelt word at *cursor*."""
+        from ..core.spelling import shared
+
+        cursor = QTextCursor(cursor or self.textCursor())
+        if not cursor.hasSelection():
+            cursor.select(QTextCursor.WordUnderCursor)
+        word = cursor.selectedText()
+        checker = shared()
+        if not word or checker.knows(word):
+            return None
+        menu = QMenu()
+        for suggestion in checker.suggestions(word):
+            action = menu.addAction(suggestion)
+            action.triggered.connect(
+                lambda _checked=False, replacement=suggestion,
+                at=QTextCursor(cursor): self._replace_spelling(at, replacement))
+        if menu.actions():
+            menu.addSeparator()
+        change = menu.addAction("Spelling…")
+        change.setToolTip("Type a replacement for this misspelt word")
+        change.triggered.connect(
+            lambda _checked=False, at=QTextCursor(cursor), old=word:
+            self._ask_spelling(at, old))
+        return menu
+
+    def _replace_spelling(self, cursor: QTextCursor, replacement: str) -> None:
+        cursor.insertText(replacement)
+        self.setTextCursor(cursor)
+
+    def _ask_spelling(self, cursor: QTextCursor, word: str) -> None:
+        parent = self.scene().views()[0] if self.scene() and self.scene().views() else None
+        replacement, accepted = QInputDialog.getText(
+            parent, "Change spelling", "Word", text=word)
+        if accepted and replacement.strip():
+            self._replace_spelling(cursor, replacement.strip())
+
+    def contextMenuEvent(self, event) -> None:
+        position = self.document().documentLayout().hitTest(event.pos(), Qt.FuzzyHit)
+        cursor = QTextCursor(self.document())
+        cursor.setPosition(max(position, 0))
+        menu = self.spelling_menu(cursor)
+        if menu is None:
+            super().contextMenuEvent(event)
+            return
+        menu.exec(event.screenPos())
 
 
 def _as_text(value, digits: int = 4) -> str:
@@ -298,6 +353,7 @@ class _TextBase(MarkupItem):
         self._editor: Optional[QGraphicsTextItem] = None
         self._speller = None
         self._editing = False
+        self._edit_rotation: Optional[float] = None
         # Any text box can have a leader; a call-out is simply one that starts
         # with it shown. It is off here so a plain text box has no arrow until
         # one is asked for.
@@ -321,7 +377,7 @@ class _TextBase(MarkupItem):
     #
     # A field holding a bare name that the document defines prints as
     # "name = value unit", because that is how it would be written by hand.
-    # Anything else is worked out and its answer printed on its own.
+    # Anything else keeps the expression and prints its answer beside it.
     FIELD = re.compile(r"\\([^\\\n]+)\\")
 
     def has_fields(self) -> bool:
@@ -346,7 +402,7 @@ class _TextBase(MarkupItem):
                 value = workspace.evaluate(source)
             except Exception:                # noqa: BLE001 — any bad field
                 return f"[{source}?]"
-            return _as_text(value, self.digits)
+            return f"{source} = {_as_text(value, self.digits)}"
 
         return self.FIELD.sub(answer, self.written)
 
@@ -684,12 +740,14 @@ class _TextBase(MarkupItem):
         """The arrow head or the box moved: work the hinges out again.
 
         A hinge that was dragged to a particular side made sense against the
-        arrow head as it then was. Moved somewhere else, that side may now
-        be behind the box, so the choice is given up and the leader goes back
-        to leaving by whichever side faces what it points at.
+        arrow head as it then was. Its manually adjusted stand-off belongs to
+        that old geometry too. Moved somewhere else, both choices are given
+        up: the leader leaves by whichever side now faces its target and uses
+        the normal stand-off again.
         """
         for leader in self.leaders:
             leader.side = ""
+            leader.reach = self.ELBOW_REACH
 
     # -- the one-leader spellings, kept for everything that uses them ------
     def side(self) -> str:
@@ -878,9 +936,40 @@ class _TextBase(MarkupItem):
         super().move_handle(key, local_pos, keep_ratio)
 
     # -- editing -----------------------------------------------------------
+    def _leader_scene_geometry(self) -> list[tuple[QPointF, list[QPointF]]]:
+        return [(self.mapToScene(leader.tip),
+                 [self.mapToScene(point) for point in leader.cloud])
+                for leader in self.leaders]
+
+    def _restore_leader_scene_geometry(
+            self, geometry: list[tuple[QPointF, list[QPointF]]]) -> None:
+        for leader, (tip, cloud) in zip(self.leaders, geometry):
+            leader.tip = self.mapFromScene(tip)
+            leader.cloud = [self.mapFromScene(point) for point in cloud]
+
+    def _upright_for_edit(self) -> None:
+        angle = float(self.rotation()) % 360.0
+        if angle > 180.0:
+            angle -= 360.0
+        self._edit_rotation = 0.0 if abs(angle) <= 2.0 else angle
+        leaders = self._leader_scene_geometry()
+        self.set_item_rotation(0.0)
+        self._restore_leader_scene_geometry(leaders)
+
+    def _restore_after_edit(self) -> None:
+        angle = self._edit_rotation
+        self._edit_rotation = None
+        if angle is None:
+            return
+        leaders = self._leader_scene_geometry()
+        self.set_item_rotation(angle)
+        self._restore_leader_scene_geometry(leaders)
+
     def begin_edit(self) -> None:
         if self.locked:
             return
+        if not self._editing:
+            self._upright_for_edit()
         # The fields come back as they were typed, so they can be edited
         # rather than having their answers typed over.
         if self.has_fields() and self.doc.toPlainText() != self.written:
@@ -937,6 +1026,7 @@ class _TextBase(MarkupItem):
             self._editor = None
         self._editing = False
         self.apply_style()
+        self._restore_after_edit()
         self.update()
 
     @property

@@ -278,6 +278,7 @@ class CellFormat:
     digits: Optional[int] = None
     number_format: str = ""        # '' inherits, else auto/fixed/scientific/engineering
     unit: str = ""                 # display-unit override
+    font_size: Optional[float] = None
     border_top: bool = False
     border_bottom: bool = False
     border_left: bool = False

@@ -46,37 +46,19 @@ class _MathEditor(QGraphicsTextItem):
         """
         return
 
-    # Nothing in maths needs a space. A unit goes straight after its number —
-    # 5kN, not 5 kN — and an operator needs no room around it. So a space in a
-    # calculation is a keystroke with no meaning, and it is refused.
-    #
-    # It used to turn the whole entry into a note instead. That reads well
-    # written down and badly in the hand: every calculation is started by
-    # typing, so every stray space — the one that follows a comma out of
-    # habit, the one that lands while you think — threw the expression away
-    # and left a sentence behind. Turning a line into a note is now something
-    # you ask for, with Shift and the space bar, and never something that
-    # happens to you.
+    # A single calculation line and prose share the explicit quote trigger.
+    # The first space says the line is prose and the view converts it without
+    # losing what was typed. Blocks remain calculations and never admit spaces.
     MATHS_MARKS = set("+-*/^()=:<>,")
 
     def keyPressEvent(self, event) -> None:
         if event.text() == " ":
-            deliberate = bool(event.modifiers() & Qt.ShiftModifier)
-            if deliberate and self.owner.started_by_typing:
-                # A line still being entered for the first time: nothing has
-                # been worked out yet, so there is nothing to lose in saying
-                # it was prose after all.
+            if not self.owner.block:
                 self.owner.wantsWords.emit()
-            elif deliberate:
-                self.owner.saySomething.emit(
-                    "This is a calculation, not a note — Escape, then the text "
-                    "tool, for words")
             else:
                 self.owner.saySomething.emit(
-                    "A calculation has no spaces in it — a unit goes straight "
-                    "after its number, as in 5kN"
-                    + (". Shift and the space bar makes this a note instead"
-                       if self.owner.started_by_typing else ""))
+                    "Calculation blocks do not use spaces — attach units "
+                    "directly, as in 5kN")
             event.accept()
             return
         if event.key() in (Qt.Key_Return, Qt.Key_Enter):
@@ -124,7 +106,7 @@ class _MathRow:
     """One laid-out source line."""
 
     __slots__ = ("statement", "left", "result", "error_box", "top", "height",
-                 "baseline", "line", "head_width")
+                 "baseline", "line", "head_width", "offset")
 
     def __init__(self, statement, left: Optional[Box], result: Optional[Box],
                  error_box: Optional[Box], line: int = 0):
@@ -133,6 +115,7 @@ class _MathRow:
         # How wide the name and its "≔" are, so a click on the left of the
         # line can be put in the name rather than dragged into the expression.
         self.head_width = 0.0
+        self.offset = 0.0
         self.result = result
         self.error_box = error_box
         self.line = line
@@ -202,13 +185,15 @@ class MathItem(MarkupItem):
         # decimal places sit on the same sheet, and neither should force the
         # other.
         self.line_figures: dict[int, tuple] = {}
+        self.line_alignments: dict[int, str] = {}
+        self.line_font_sizes: dict[int, float] = {}
         self.show_definition_results = False
         # SMath puts the result immediately after the expression rather than in
         # a column down the right-hand side of the page.
         self.align_results = False
         self.show_comments = True
         self.line_gap = 4.0
-        self.result_gap = 10.0
+        self.result_gap = 4.0
         self.title = ""
         # By default every calculation defines for the whole document, which is
         # what a calculation sheet reads like — a block included. Turning this
@@ -306,10 +291,10 @@ class MathItem(MarkupItem):
         self.auto_width = False
         self.relayout()
 
-    def math_style(self) -> MathStyle:
+    def math_style(self, size: Optional[float] = None) -> MathStyle:
         return MathStyle(
             family=self.style.font_family if self.style.font_family else "Cambria Math",
-            size=self.style.font_size,
+            size=self.style.font_size if size is None else size,
             color=QColor(self.style.text_color),
             result_color=QColor(self.style.text_color),
         )
@@ -350,11 +335,12 @@ class MathItem(MarkupItem):
 
     def relayout(self) -> None:
         style = self.math_style()
-        setter = Typesetter(style, variables=getattr(self, "_known_names", set()))
-        size = style.size
         rows: list[_MathRow] = []
 
         for line_number, statement in enumerate(self.statements):
+            size = self.line_font_sizes.get(line_number, style.size)
+            setter = Typesetter(self.math_style(size),
+                                variables=getattr(self, "_known_names", set()))
             if statement.kind == engine.BLANK:
                 blank = _MathRow(statement, Spacer(0, size * 0.5, 0), None, None,
                                  line_number)
@@ -537,7 +523,31 @@ class MathItem(MarkupItem):
             self._width = widest + 2 * pad
         else:
             self._width = max(self._width, 40.0)
+        for row in self.rows:
+            left_width = row.left.width if row.left else 0.0
+            extra = row.result.width if row.result else 0.0
+            extra = max(extra, row.error_box.width if row.error_box else 0.0)
+            content = left_width
+            if extra:
+                content = ((self._left_column if self.align_results else left_width)
+                           + self.result_gap + extra)
+            room = max(self._width - 2 * pad - content, 0.0)
+            alignment = self.line_alignments.get(row.line, "left")
+            row.offset = (room if alignment == "right" else room / 2
+                          if alignment == "center" else 0.0)
         self.update()
+
+    def set_line_alignment(self, line: int, alignment: str) -> None:
+        alignment = alignment if alignment in ("left", "center", "right") else "left"
+        self.line_alignments[int(line)] = alignment
+        self.auto_width = False
+        self._width = max(self._width, 260.0)
+        self.relayout()
+
+    def change_line_font_size(self, line: int, delta: float) -> None:
+        current = self.line_font_sizes.get(int(line), self.style.font_size)
+        self.line_font_sizes[int(line)] = max(3.0, min(current + delta, 96.0))
+        self.relayout()
 
     # -- editing -----------------------------------------------------------
     @property
@@ -680,7 +690,7 @@ class MathItem(MarkupItem):
         if box is None:
             return QRectF()
         pad = self.style.padding
-        x = pad + (self._left_column if self.align_results
+        x = pad + row.offset + (self._left_column if self.align_results
                    else (row.left.width if row.left else 0.0)) + self.result_gap
         return QRectF(x, row.top, box.width, row.height)
 
@@ -761,8 +771,8 @@ class MathItem(MarkupItem):
         pad = self.style.padding
         for row in self.rows:
             if row.left is not None:
-                row.left.draw(painter, pad, row.baseline)
-            x = pad + (self._left_column if self.align_results
+                row.left.draw(painter, pad + row.offset, row.baseline)
+            x = pad + row.offset + (self._left_column if self.align_results
                        else (row.left.width if row.left else 0.0)) + self.result_gap
             if row.result is not None:
                 row.result.draw(painter, x, row.baseline)
@@ -847,12 +857,13 @@ class MathItem(MarkupItem):
         written = column - self.expression_column(row.statement)
         forward, _backward = self.alignment(row.statement)
         offset = self._nearest(forward, max(written, 0))
-        found = caret_in(row.left, self.style.padding, row.baseline, offset)
+        origin = self.style.padding + row.offset
+        found = caret_in(row.left, origin, row.baseline, offset)
         if found is not None:
             return found
         # Off the end of what could be typeset — the caret sits just past the
         # last thing drawn, which is where the next character will go.
-        return (self.style.padding + row.left.width, row.baseline,
+        return (origin + row.left.width, row.baseline,
                 row.left.ascent, row.left.descent)
 
     def offset_at(self, point) -> tuple:
@@ -866,14 +877,15 @@ class MathItem(MarkupItem):
             # put the caret in the name — not shove it to the first character
             # of the expression, which is what happens when only the boxes the
             # expression built are looked at.
-            head_end = self.style.padding + row.head_width
+            origin = self.style.padding + row.offset
+            head_end = origin + row.head_width
             if row.head_width and point.x() < head_end and distance < best[2]:
                 name = row.statement.name or ""
-                across = (point.x() - self.style.padding) / max(row.head_width, 1.0)
+                across = (point.x() - origin) / max(row.head_width, 1.0)
                 column = min(max(round(across * len(name)), 0), len(name))
                 best = (row.line, column, distance)
                 continue
-            offset = offset_in(row.left, self.style.padding, row.baseline, point)
+            offset = offset_in(row.left, origin, row.baseline, point)
             if offset is None:
                 continue
             if distance < best[2]:
@@ -920,6 +932,10 @@ class MathItem(MarkupItem):
             "result_gap": self.result_gap,
             "line_figures": {str(line): list(figures)
                              for line, figures in self.line_figures.items()},
+            "line_alignments": {str(line): value
+                                for line, value in self.line_alignments.items()},
+            "line_font_sizes": {str(line): value
+                                for line, value in self.line_font_sizes.items()},
         })
         return data
 
@@ -933,6 +949,19 @@ class MathItem(MarkupItem):
                 self.line_figures[int(line)] = (int(figures[0]), str(figures[1]))
             except (TypeError, ValueError, IndexError):
                 continue
+        self.line_alignments = {}
+        for line, value in (data.get("line_alignments") or {}).items():
+            try:
+                if str(value) in ("left", "center", "right"):
+                    self.line_alignments[int(line)] = str(value)
+            except (TypeError, ValueError):
+                continue
+        self.line_font_sizes = {}
+        for line, value in (data.get("line_font_sizes") or {}).items():
+            try:
+                self.line_font_sizes[int(line)] = float(value)
+            except (TypeError, ValueError):
+                continue
         # Documents written before results waited for a trailing "=" showed
         # every line, so they keep doing that when reopened.
         self.show_definition_results = bool(data.get("show_definition_results", True))
@@ -944,5 +973,8 @@ class MathItem(MarkupItem):
         self.align_results = bool(data.get("align_results", False))
         self._width = float(data.get("width", 260.0))
         self.line_gap = float(data.get("line_gap", 4.0))
-        self.result_gap = float(data.get("result_gap", 10.0))
+        # The old fixed ten-pixel gutter left a conspicuous hole before the
+        # result equals sign. There is no user-facing gap setting, so migrate
+        # that legacy value while preserving any already tighter document.
+        self.result_gap = min(float(data.get("result_gap", 4.0)), 4.0)
         self.load_base(data)

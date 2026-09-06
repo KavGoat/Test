@@ -44,6 +44,12 @@ class Preferences:
     autosize_text: bool = True
     """Whether a text box grows to fit what is typed into it."""
 
+    insertion_point: bool = False
+    """Whether an empty-canvas click leaves a calculation insertion point."""
+
+    recover_flattened: bool = True
+    """Keep source item data when content is flattened into the page."""
+
     def wheel_zooms(self) -> bool:
         return self.wheel == WHEEL_ZOOM
 

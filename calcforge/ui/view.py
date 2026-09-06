@@ -5,24 +5,26 @@ import json
 import math
 import os
 import re
+from copy import deepcopy
 from typing import Optional
 
 from PySide6.QtCore import (QEvent, QMimeData, QPoint, QPointF, QRectF, Qt,
                             QTimer, Signal)
-from PySide6.QtGui import (QBrush, QColor, QCursor, QKeyEvent, QMouseEvent,
-                           QPainter, QPen, QPolygonF, QTextCursor, QTransform,
-                           QWheelEvent)
+from PySide6.QtGui import (QBrush, QColor, QCursor, QFontMetricsF, QKeyEvent,
+                           QMouseEvent, QPainter, QPen, QPolygonF, QTextCursor,
+                           QPixmap, QTransform, QWheelEvent)
 from PySide6.QtWidgets import (QApplication, QCompleter, QGraphicsProxyWidget,
-                               QGraphicsView, QLineEdit)
+                               QGraphicsView, QHBoxLayout, QLabel, QLineEdit,
+                               QWidget)
 
 from ..core.document import MM_TO_PT
 from ..core.spreadsheet import make_ref, parse_clipboard_grid
 from ..core.units import parse_unit
-from ..items.base import (HANDLE_CURSORS, MarkupItem, build_item,
-                          cursor_for_handle)
+from ..items.base import (HANDLE_CURSORS, HANDLE_SIZE, MarkupItem, build_item,
+                          cloud_path, cursor_for_handle)
 from ..items.contents import ContentsItem
 from ..items.mathitem import LINE_STEP, MathItem
-from .scene import PageFrame, detach
+from .scene import DocumentScene, PageFrame, detach
 from ..items.measure import (AREA, CALIBRATE, DIMENSION, VOLUME, CountItem,
                              MeasureItem)
 from ..items.media import ImageItem
@@ -46,6 +48,53 @@ SNAP_REACH = 9.0
 SIZED_SHAPES = ("rect", "ellipse")
 CELLS_MIME = "application/x-calcforge-cells"
 FREE_MIN_STEP = 1.2
+_RESHAPE_CURSORS: dict[str, QCursor] = {}
+
+
+def _reshape_cursor(operation: str) -> QCursor:
+    """A compact point-add, point-remove, or curve affordance."""
+    kind = "curve" if operation in ("round", "curve") else operation
+    if kind in _RESHAPE_CURSORS:
+        return _RESHAPE_CURSORS[kind]
+    pixmap = QPixmap(28, 28)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    outline = QPen(QColor("#ffffff"), 4.0, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+    ink = QPen(QColor("#1971c2"), 2.0, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+    if kind == "curve":
+        for pen in (outline, ink):
+            painter.setPen(pen)
+            painter.drawArc(QRectF(3, 5, 19, 17), 25 * 16, 125 * 16)
+            painter.drawEllipse(QPointF(5, 20), 2.2, 2.2)
+            painter.drawEllipse(QPointF(22, 8), 2.2, 2.2)
+    else:
+        painter.setPen(outline)
+        painter.setBrush(QColor("#ffffff"))
+        painter.drawEllipse(QPointF(9, 9), 5.0, 5.0)
+        painter.setPen(ink)
+        painter.setBrush(QColor("#ffffff"))
+        painter.drawEllipse(QPointF(9, 9), 5.0, 5.0)
+        painter.drawLine(QPointF(17, 20), QPointF(25, 20))
+        if kind == "add":
+            painter.drawLine(QPointF(21, 16), QPointF(21, 24))
+    painter.end()
+    cursor = QCursor(pixmap, 9, 9)
+    _RESHAPE_CURSORS[kind] = cursor
+    return cursor
+
+
+class _SizeEdit(QLineEdit):
+    """A canvas size field whose Escape always cancels the drawing."""
+
+    escapePressed = Signal()
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key_Escape:
+            self.escapePressed.emit()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
 
 def typing_somewhere_else() -> bool:
@@ -103,7 +152,12 @@ class PageView(QGraphicsView):
         self._press_view = QPoint()
         self._handle_item: Optional[MarkupItem] = None
         self._handle_key = ""
+        self._group_handle_key = ""
+        self._group_resize_box = QRectF()
+        self._group_resize_items = []
         self._move_items: list[tuple[MarkupItem, QPointF]] = []
+        self._move_original_data: dict[str, dict] = {}
+        self._shift_click_selection = None
         self._snapshot: list[dict] = []
         # The selection marquee, in scene coordinates: two corners while it is
         # a rectangle, every corner while it is a lasso.
@@ -112,6 +166,7 @@ class PageView(QGraphicsView):
         self._space_pan = False
         self._pan_origin = QPoint()
         self._zoom = 1.0
+        self.scroll_mode = "continuous"
 
         self.active_table: Optional[TableItem] = None
         self._cell_editor: Optional[QLineEdit] = None
@@ -145,12 +200,18 @@ class PageView(QGraphicsView):
         self._label_editor: Optional[QLineEdit] = None
         self._label_proxy: Optional[QGraphicsProxyWidget] = None
         self._label_item = None
+        self._size_editor: Optional[QWidget] = None
+        self._size_proxy: Optional[QGraphicsProxyWidget] = None
+        self._size_width: Optional[QLineEdit] = None
+        self._size_height: Optional[QLineEdit] = None
+        self._typed_size = False
         self._editing_item = None
         # What the region being typed into said when the answers were last
         # worked out.
         self._last_recalculated = ""
 
         self._last_scene_pos = QPointF(60, 60)
+        self._insertion_point: Optional[QPointF] = None
         # Where the next thing typed, inserted or pasted will go, and
         # what a callout is about to point at.
         # Whether Ctrl is down, as this view saw it. Kept as well as asking
@@ -161,6 +222,9 @@ class PageView(QGraphicsView):
         self._pending_anchor: Optional[QPointF] = None
         # The cloud a cloud call-out has already drawn, waiting for its words.
         self._pending_cloud = None
+        # An existing text box/callout waiting for the user to drag the region
+        # of a new cloud leader. Nothing changes until that drag lands.
+        self._pending_cloud_leader = None
         # How far the page is turned on screen, in degrees. This is a way of
         # looking at the document, not a change to it: nothing is saved, and
         # what prints is unaffected.
@@ -305,6 +369,10 @@ class PageView(QGraphicsView):
         return TOOL_MAP.get(self.tool_key, TOOL_MAP["select"])
 
     def set_tool(self, key: str) -> None:
+        self.forget_snap()
+        self.close_size_editor()
+        if self._pending_cloud_leader is not None:
+            self.cancel_cloud_leader()
         if self._mode == "lasso":
             self.cancel_marquee()
         if self._draft is not None:
@@ -318,6 +386,31 @@ class PageView(QGraphicsView):
         self.statusMessage.emit(tool.hint or tool.label)
         if key != "select":
             self.deactivate_table()
+
+    def begin_cloud_leader(self, item) -> None:
+        """Arm a drag that chooses the region for a new cloud leader."""
+        if item is None or item.scene() is None or not self.editable(item):
+            return
+        if self.tool_key != "select":
+            self.set_tool("select")
+            self.toolFinished.emit("select")
+        self._pending_cloud_leader = item
+        self._mode = "idle"
+        self._marquee = []
+        self.setCursor(Qt.CrossCursor)
+        self.statusMessage.emit(
+            "Drag around the area for the cloud leader · Esc to cancel")
+        self.viewport().update()
+
+    def cancel_cloud_leader(self) -> None:
+        """Put down an unplaced cloud leader without changing the document."""
+        self._pending_cloud_leader = None
+        self._marquee = []
+        if self._mode == "cloud_leader":
+            self._mode = "idle"
+            self.forget_snapshot()
+        self.setCursor(self._cursor_for_tool(self.current_tool()))
+        self.viewport().update()
 
     def _cursor_for_tool(self, tool: Tool) -> QCursor:
         if tool.key == "select":
@@ -344,6 +437,23 @@ class PageView(QGraphicsView):
     # ------------------------------------------------------------------
     def zoom(self) -> float:
         return self._zoom
+
+    def setScene(self, scene) -> None:
+        super().setScene(scene)
+        self._update_desk_margin()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._update_desk_margin()
+
+    def _update_desk_margin(self) -> None:
+        """Keep enough off-page desk to centre a page edge or corner."""
+        scene = self.scene()
+        if not isinstance(scene, DocumentScene):
+            return
+        scale = max(getattr(self, "_zoom", 1.0), MIN_ZOOM)
+        scene.set_desk_margin(self.viewport().width() / (2.0 * scale) + 12.0,
+                              self.viewport().height() / (2.0 * scale) + 12.0)
 
     def set_zoom(self, factor: float, anchor_mouse: bool = False,
                  at: Optional[QPointF] = None) -> None:
@@ -373,6 +483,7 @@ class PageView(QGraphicsView):
         self.setTransformationAnchor(QGraphicsView.NoAnchor)
         self._zoom = factor
         self.apply_view_transform()
+        self._update_desk_margin()
         # Where that page point landed, and how far it has to come back.
         landed = self.mapFromScene(keep_scene)
         drift = QPointF(landed) - keep_view
@@ -513,6 +624,14 @@ class PageView(QGraphicsView):
             bar.setValue(bar.value() - step)
             event.accept()
             return
+        if (self.scroll_mode == "page"
+                and not event.modifiers() & Qt.ControlModifier):
+            delta = (pixels.y() if not pixels.isNull() else notches)
+            if delta:
+                step = -1 if delta > 0 else 1
+                self.window.go_to_page(self.window.current_index + step)
+            event.accept()
+            return
         zooming = (event.modifiers() & Qt.ControlModifier
                    or (preferences.current().wheel_zooms() and pixels.isNull()))
         if zooming:
@@ -560,14 +679,14 @@ class PageView(QGraphicsView):
             return True
         return bool(QApplication.keyboardModifiers() & Qt.ControlModifier)
 
-    def _held_modifiers(self):
+    def _held_modifiers(self, event_modifiers=Qt.NoModifier):
         """Which modifier keys are down, as this view has seen them.
 
         The application's own answer misses keys sent to the view directly,
         which is how a test drives it and how a key held before the window
         was focused arrives.
         """
-        held = QApplication.keyboardModifiers()
+        held = event_modifiers
         if self._control_held:
             held |= Qt.ControlModifier
         if self._shift_held:
@@ -881,6 +1000,22 @@ class PageView(QGraphicsView):
         self._press_scene = scene_pos
         self._press_view = event.position().toPoint()
 
+        if (self._pending_cloud_leader is not None
+                and event.button() == Qt.LeftButton):
+            point = self.snap_scene(scene_pos)
+            self._mode = "cloud_leader"
+            self._marquee = [QPointF(point), QPointF(point)]
+            self.begin_snapshot(self.involved_frames(self._pending_cloud_leader))
+            event.accept()
+            return
+
+        if self._size_editor is not None and event.button() == Qt.LeftButton:
+            proxy = self._size_proxy
+            if proxy is not None and proxy.sceneBoundingRect().contains(scene_pos):
+                super().mousePressEvent(event)
+                return
+            self.close_size_editor()
+
         if self._label_editor is not None and event.button() == Qt.LeftButton:
             proxy = self._label_proxy
             if proxy is not None and proxy.sceneBoundingRect().contains(scene_pos):
@@ -1053,7 +1188,25 @@ class PageView(QGraphicsView):
                 event.accept()
                 return
 
-        # 2. Shift on a dimension's number takes hold of the number itself,
+        # 2. a selected group owns one outer resize box. Check it before the
+        # modifier-specific reshape paths so Shift can release its ratio.
+        grouped = self._selected_group()
+        if grouped is not None:
+            members, box = grouped
+            key = self._group_handle_at(scene_pos, box)
+            if key:
+                self._group_handle_key = key
+                self._group_resize_box = QRectF(box)
+                self._group_resize_items = [
+                    (member, member.mapToScene(QPointF(0, 0)),
+                     QTransform(member.transform()))
+                    for member in members]
+                self._mode = "group_resize"
+                self.begin_snapshot(self.all_frames())
+                event.accept()
+                return
+
+        # 3. Shift on a dimension's number takes hold of the number itself,
         # so it can be pulled off the line onto a leader without having to
         # find the small handle first.
         if event.modifiers() & Qt.ShiftModifier:
@@ -1071,7 +1224,7 @@ class PageView(QGraphicsView):
                     event.accept()
                     return
 
-        # 3. reshaping an outline: Shift or Ctrl over one of its points or
+        # 4. reshaping an outline: Shift or Ctrl over one of its points or
         # one of its sides. This comes before both the handles and the
         # selection, because with a key held it is the only thing the click
         # can have meant.
@@ -1080,9 +1233,11 @@ class PageView(QGraphicsView):
             event.accept()
             return
 
-        # 4. a resize handle on an already-selected item
+        # 5. a resize handle on an already-selected item
         for item in self.scene().selectedItems():
             if not isinstance(item, MarkupItem) or not self.editable(item):
+                continue
+            if item.group:
                 continue
             key = item.handle_at(item.mapFromScene(scene_pos))
             if key:
@@ -1133,8 +1288,13 @@ class PageView(QGraphicsView):
         family = self.group_of(item)
         if event.modifiers() & Qt.ShiftModifier:
             wanted = not item.isSelected()
-            for member in family:
-                member.setSelected(wanted)
+            self._shift_click_selection = (family, wanted)
+            # Keep an already-selected item held until release. A Shift drag
+            # means constrain the selection, while a Shift click still toggles
+            # it off once Qt proves that no drag happened.
+            if wanted:
+                for member in family:
+                    member.setSelected(True)
         elif control:
             # Ctrl adds to the selection and arms a copy; it does not take
             # anything out of it, because Ctrl-dragging what you just clicked
@@ -1156,6 +1316,8 @@ class PageView(QGraphicsView):
         self._copied = False
         self._move_items = [(other, other.pos()) for other in self.scene().selectedItems()
                             if isinstance(other, MarkupItem) and self.editable(other)]
+        self._move_original_data = {
+            other.uid: deepcopy(other.serialize()) for other, _ in self._move_items}
         self.begin_snapshot(self.all_frames())
         event.accept()
 
@@ -1222,7 +1384,9 @@ class PageView(QGraphicsView):
         if self._mode == "draw_click":
             # The second click of a click-click drawing.
             self._mode = "idle"
-            self._update_draft(scene_pos, event.modifiers())
+            self.close_size_editor()
+            if not self._typed_size:
+                self._update_draft(scene_pos, event.modifiers())
             self.finish_draft(scene_pos, clicked=True)
             event.accept()
             return
@@ -1310,7 +1474,7 @@ class PageView(QGraphicsView):
     # mid-drag, a window losing focus, a dialog stealing the release — the mode
     # would stay set for ever and the pointer would keep the four-way arrow
     # with nothing selected and no way back. So each move checks.
-    HELD_MODES = ("move", "resize", "rubber", "lasso", "pan", "erase",
+    HELD_MODES = ("move", "resize", "group_resize", "rubber", "lasso", "pan", "erase",
                   "table_select", "table_resize", "table_fill", "draw_drag",
                   "draw_free")
 
@@ -1365,15 +1529,16 @@ class PageView(QGraphicsView):
         if self._mode == "move":
             delta = scene_pos - self._press_scene
             control = bool(event.modifiers() & Qt.ControlModifier)
+            if control:
+                # Ctrl is the copy modifier regardless of whether it arrived
+                # before the press or after Shift/movement had already begun.
+                self._copy_on_move = True
             if self._copy_on_move and not self._copied and not self._is_a_click(scene_pos):
                 self._leave_copies_behind()
             if event.modifiers() & Qt.ShiftModifier:
                 held = self.constrain(QPointF(0, 0), delta)
                 delta = QPointF(held.x(), held.y())
-            # Ctrl taken hold of after the drag started means "leave the
-            # snapping alone for a moment"; Ctrl held from the start means
-            # "copy", and snapping carries on as usual.
-            free = control and not self._copy_on_move
+            free = False
             if free:
                 self._snap_marker = None
             else:
@@ -1388,6 +1553,12 @@ class PageView(QGraphicsView):
             event.accept()
             return
 
+        if self._mode == "group_resize" and self._group_resize_items:
+            self._resize_selected_group(
+                scene_pos, release_ratio=bool(event.modifiers() & Qt.ShiftModifier))
+            event.accept()
+            return
+
         if self._mode == "resize" and self._handle_item is not None:
             # A point being dragged snaps to what is already drawn, exactly as
             # it did while it was first put down. Only the grid applied here,
@@ -1396,8 +1567,13 @@ class PageView(QGraphicsView):
             caught = self.snap_scene(scene_pos, self._handle_item.parentItem(),
                                      ignore={self._handle_item})
             local = self._handle_item.mapFromScene(caught)
+            keep_ratio = bool(event.modifiers() & Qt.ShiftModifier)
+            if getattr(self._handle_item, "keep_aspect", False):
+                # Images and snapshots protect their proportions by default;
+                # Shift is the deliberate exception that releases the lock.
+                keep_ratio = not keep_ratio
             self._handle_item.move_handle(self._handle_key, local,
-                                          bool(event.modifiers() & Qt.ShiftModifier))
+                                          keep_ratio)
             if isinstance(self._handle_item, MeasureItem):
                 self._handle_item.refresh(page=self.page_of(self._handle_item))
             event.accept()
@@ -1434,14 +1610,26 @@ class PageView(QGraphicsView):
             event.accept()
             return
 
+        if self._mode == "cloud_leader" and self._marquee:
+            self._marquee[-1] = self.snap_scene(scene_pos)
+            self.viewport().update()
+            event.accept()
+            return
+
         if self._mode in ("draw_drag", "draw_click", "draw_poly", "draw_free") \
                 and self._draft is not None:
             self._update_draft(scene_pos, event.modifiers())
             event.accept()
             return
 
-        self._update_hover_cursor(scene_pos)
+        self._update_hover_cursor(scene_pos, event.modifiers())
         super().mouseMoveEvent(event)
+
+    def viewportEvent(self, event) -> bool:
+        if event.type() == QEvent.Leave:
+            self.forget_snap()
+            self.viewport().update()
+        return super().viewportEvent(event)
 
     def escape_everything(self) -> str:
         """One press of Escape, back to a blank slate.
@@ -1455,12 +1643,19 @@ class PageView(QGraphicsView):
         of them it actually put down.
         """
         undone = []
+        self.forget_snap()
         if self.clear_pending_tool():
             undone.append("the held tool")
         if self._pending_anchor is not None:
             self._pending_anchor = None
             undone.append("the call-out")
+        if self._insertion_point is not None:
+            self._insertion_point = None
+            undone.append("the insertion point")
         self._pending_cloud = None
+        if self._pending_cloud_leader is not None:
+            self.cancel_cloud_leader()
+            undone.append("the cloud leader")
         if self._mode in ("rubber", "lasso") and self._marquee:
             self.cancel_marquee()
             undone.append("the selection box")
@@ -1519,11 +1714,30 @@ class PageView(QGraphicsView):
     def _release_stale_mode(self) -> None:
         """Come back to rest after a drag whose release went missing."""
         mode = self._mode
+        if mode == "group_resize":
+            for item, old_origin, old_transform in self._group_resize_items:
+                item.setTransform(old_transform)
+                parent = item.parentItem()
+                if parent is not None:
+                    correction = (parent.mapFromScene(old_origin)
+                                  - parent.mapFromScene(
+                                      item.mapToScene(QPointF(0, 0))))
+                    item.setPos(item.pos() + correction)
+                item.update()
+            self.forget_snapshot()
+        if mode == "cloud_leader":
+            self._pending_cloud_leader = None
+            self._marquee = []
+            self.forget_snapshot()
         self._mode = "idle"
         self._move_items = []
+        self._move_original_data = {}
+        self._shift_click_selection = None
         self._handle_item = None
         self._handle_key = ""
-        self._snap_marker = None
+        self._group_resize_items = []
+        self._group_handle_key = ""
+        self.forget_snap()
         if mode in ("rubber", "lasso"):
             self._marquee = []
         if mode in ("draw_drag", "draw_free") and self._draft is not None:
@@ -1531,9 +1745,17 @@ class PageView(QGraphicsView):
         self.setCursor(self._cursor_for_tool(self.current_tool()))
         self.viewport().update()
 
-    def _update_draft(self, scene_pos: QPointF, modifiers) -> None:
+    def _update_draft(self, scene_pos: QPointF, modifiers,
+                      final: bool = False) -> None:
         draft = self._draft
-        point = self.snap_scene(scene_pos)
+        freehand = self._mode == "draw_free"
+        # Freehand is sampled from the hand, not marched point-by-point across
+        # the grid. Only the first press and final release are intentional
+        # endpoints and therefore snap targets.
+        point = (self.snap_scene(scene_pos) if not freehand or final
+                 else QPointF(scene_pos))
+        if freehand and not final:
+            self.forget_snap()
         local = draft.mapFromScene(point)
         draft.prepareGeometryChange()
         if self._mode == "draw_free":
@@ -1591,7 +1813,8 @@ class PageView(QGraphicsView):
             frame = item.parentItem()
             if frame is None:
                 continue
-            data = item.serialize()
+            data = deepcopy(self._move_original_data.get(item.uid,
+                                                         item.serialize()))
             data["uid"] = os.urandom(8).hex()
             if data.get("group"):
                 data["group"] = self._copied_groups.setdefault(
@@ -1738,14 +1961,23 @@ class PageView(QGraphicsView):
         self.viewport().update()
         return True
 
-    def _update_hover_cursor(self, scene_pos: QPointF) -> None:
+    def _update_hover_cursor(self, scene_pos: QPointF,
+                             event_modifiers=Qt.NoModifier) -> None:
         """Say what the pointer would do here, before it is pressed."""
         if self.tool_key != "select":
             return
-        shaping = self.shaping_target(scene_pos, self._held_modifiers())
+        grouped = self._selected_group()
+        if grouped is not None:
+            _members, box = grouped
+            key = self._group_handle_at(scene_pos, box)
+            if key:
+                self.setCursor(cursor_for_handle(key))
+                return
+        shaping = self.shaping_target(
+            scene_pos, self._held_modifiers(event_modifiers))
         if shaping is not None:
             what = shaping[1]
-            self.setCursor(Qt.PointingHandCursor)
+            self.setCursor(_reshape_cursor(what))
             self.statusMessage.emit({
                 "delete": "Click to take this point out",
                 "add": "Click to put a point in here",
@@ -1764,6 +1996,8 @@ class PageView(QGraphicsView):
                     return
         for item in self.scene().selectedItems():
             if isinstance(item, MarkupItem) and self.editable(item):
+                if item.group:
+                    continue
                 key = item.handle_at(item.mapFromScene(scene_pos))
                 if key:
                     self.setCursor(cursor_for_handle(key))
@@ -1793,6 +2027,27 @@ class PageView(QGraphicsView):
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         scene_pos = self.mapToScene(event.position().toPoint())
+        self.forget_snap()
+        self.viewport().update()
+
+        if self._mode == "cloud_leader":
+            item = self._pending_cloud_leader
+            start = self._marquee[0] if self._marquee else scene_pos
+            finish = self.snap_scene(scene_pos)
+            rect = QRectF(start, finish).normalized()
+            if rect.width() < CLICK_SLOP and rect.height() < CLICK_SLOP:
+                rect = QRectF(finish.x() - 40, finish.y() - 25, 80, 50)
+            self._pending_cloud_leader = None
+            self._marquee = []
+            self._mode = "idle"
+            if item is not None and item.scene() is not None:
+                self.window.finish_cloud_leader(item, rect)
+            else:
+                self.forget_snapshot()
+            self.setCursor(self._cursor_for_tool(self.current_tool()))
+            self.viewport().update()
+            event.accept()
+            return
 
         if self._editing_item is not None and self._mode == "idle":
             if isinstance(self._editing_item, MathItem):
@@ -1820,10 +2075,17 @@ class PageView(QGraphicsView):
         if self._mode == "rubber":
             if self._is_a_click(scene_pos):
                 # A click on bare paper only clears the selection, which the
-                # press already did. Dragging is what draws a marquee, and
-                # Shift is what starts a lasso.
+                # press already did, unless the optional calculation insertion
+                # point is enabled. Dragging still draws a marquee.
+                if preferences.current().insertion_point:
+                    frame = self.frame_at(scene_pos)
+                    if frame is not None:
+                        self._insertion_point = self.snap_scene(scene_pos, frame)
+                        self.statusMessage.emit(
+                            "Insertion point set · Up/Down moves it · Esc clears it")
                 self._mode = "idle"
                 self.cancel_marquee()
+                self.viewport().update()
                 event.accept()
                 return
             # select_in_marquee reads the mode to know what shape it is, so
@@ -1839,10 +2101,30 @@ class PageView(QGraphicsView):
         if self._mode == "move":
             self._mode = "idle"
             self._snap_marker = None
+            if self._is_a_click(scene_pos) and self._shift_click_selection:
+                family, wanted = self._shift_click_selection
+                for member in family:
+                    member.setSelected(wanted)
+                self.selectionChanged.emit()
+            self._shift_click_selection = None
             self.settle_pages([item for item, _ in self._move_items])
             self.commit_snapshot("Copy markup" if self._copied else "Move markup")
             self._copy_on_move = False
             self._copied = False
+            self._move_original_data = {}
+            self._update_hover_cursor(scene_pos, event.modifiers())
+            event.accept()
+            return
+
+        if self._mode == "group_resize":
+            self._mode = "idle"
+            items = [entry[0] for entry in self._group_resize_items]
+            self._group_resize_items = []
+            self._group_handle_key = ""
+            self.settle_pages(items)
+            self.commit_snapshot("Resize group")
+            self.selectionChanged.emit()
+            self._update_hover_cursor(scene_pos, event.modifiers())
             event.accept()
             return
 
@@ -1854,12 +2136,14 @@ class PageView(QGraphicsView):
                 item.refresh(self.document().workspace, self.page())
             self.commit_snapshot("Resize markup")
             self.selectionChanged.emit()
+            self._update_hover_cursor(scene_pos, event.modifiers())
             event.accept()
             return
 
         if self._mode == "table_resize":
             self._mode = "idle"
             self.commit_snapshot("Resize column")
+            self._update_hover_cursor(scene_pos, event.modifiers())
             event.accept()
             return
 
@@ -1888,6 +2172,10 @@ class PageView(QGraphicsView):
                 # finish the markup then and there, which is where a measure
                 # tool got its 120 pt measurement from nowhere.
                 self._mode = "draw_click"
+                if (isinstance(self._draft, RectItem)
+                        and self._draft.kind in SIZED_SHAPES
+                        and self.page().scale.is_calibrated()):
+                    self.open_size_editor(self._draft)
                 self.statusMessage.emit(
                     f"{self.current_tool().label}: click again to finish · "
                     "Shift constrains · Esc to cancel")
@@ -1903,8 +2191,11 @@ class PageView(QGraphicsView):
             return
 
         if self._mode == "draw_free":
+            self._update_draft(scene_pos, event.modifiers(), final=True)
             self._mode = "idle"
             self.finish_draft(scene_pos)
+            self.forget_snap()
+            self.viewport().update()
             event.accept()
             return
 
@@ -2106,13 +2397,18 @@ class PageView(QGraphicsView):
         return [dict(entry.payload)]
 
     def pending_extent(self) -> QRectF:
-        """How big the held tool is, so it can be centred on the pointer."""
+        """The complete bounds of the exact markup or group being held."""
         boxes = QRectF()
         for data in self.pending_payloads():
-            rect = data.get("rect")
-            width, height = (float(rect[2]), float(rect[3])) if rect else (120.0, 40.0)
-            box = QRectF(float(data.get("x", 0.0)), float(data.get("y", 0.0)),
-                         width, height)
+            item = build_item(data)
+            if item is not None:
+                box = item.mapRectToParent(item.local_rect().normalized())
+            else:
+                rect = data.get("rect")
+                width, height = ((float(rect[2]), float(rect[3])) if rect
+                                 else (120.0, 40.0))
+                box = QRectF(float(data.get("x", 0.0)),
+                             float(data.get("y", 0.0)), width, height)
             boxes = box if boxes.isNull() else boxes.united(box)
         return boxes
 
@@ -2158,11 +2454,10 @@ class PageView(QGraphicsView):
         return bool(placed)
 
     def _pending_origin(self, frame, scene_pos: QPointF) -> QPointF:
-        """Where the held tool's top-left goes: centred on the pointer."""
+        """Offset an exact tool-set item from its bottom-left pointer anchor."""
         local = frame.mapFromScene(self.snap_scene(scene_pos, frame))
         extent = self.pending_extent()
-        return QPointF(local.x() - extent.width() / 2 - extent.left(),
-                       local.y() - extent.height() / 2 - extent.top())
+        return QPointF(local.x() - extent.left(), local.y() - extent.bottom())
 
     def _prepare_draft(self, item: MarkupItem) -> None:
         item.author = self.document().settings.default_author or self.document().author
@@ -2212,7 +2507,8 @@ class PageView(QGraphicsView):
         width, height = self._default_size(item)
         item.set_local_rect(QRectF(0, 0, width, height))
         frame = self.frame_at(point) or self.frame()
-        frame.add_markup(item, frame.mapFromScene(point))
+        local = frame.mapFromScene(point)
+        frame.add_markup(item, QPointF(local.x(), local.y() - height / 2))
         if cloud:
             # A cloud call-out points with its cloud, so the leader it was
             # built with is the cloud leader and not an arrow beside it.
@@ -2264,6 +2560,7 @@ class PageView(QGraphicsView):
                 and abs(scene_pos.y() - origin.y()) < CLICK_SLOP)
 
     def finish_draft(self, scene_pos: QPointF, clicked: bool = False) -> None:
+        self.close_size_editor()
         draft = self._draft
         self._draft = None
         if draft is None:
@@ -2312,6 +2609,11 @@ class PageView(QGraphicsView):
                 detach(draft)
                 self.finish_tool()
                 return
+            if tiny:
+                # A click-placed image hangs above the pointer from its
+                # bottom-left, matching snapshots, groups and kept tools.
+                draft.setPos(draft.pos()
+                             + QPointF(0, -draft.local_rect().normalized().height()))
         if isinstance(draft, RectItem) and draft.kind in SIZED_SHAPES:
             draft.refresh(page=self.page())
         if isinstance(draft, MeasureItem):
@@ -2330,6 +2632,22 @@ class PageView(QGraphicsView):
             self.hand_the_cloud_to_the_note(draft, tool)
             return
 
+        if tool.mode == SNAPSHOT:
+            # The marquee is not a markup: it says which part of the page to
+            # take a copy of, and then it goes. Handle it before the normal
+            # new-markup selection step so worksheet items explicitly
+            # selected before Snapshot remain selected for capture filtering.
+            region = draft.mapRectToParent(draft.local_rect().normalized())
+            frame = draft.parentItem()
+            detach(draft)
+            self.forget_snapshot()
+            # The tool is put away first: finishing it writes its own message
+            # into the status bar, which would wipe out what the snapshot has
+            # to say about what it took.
+            self.finish_tool()
+            self.window.take_snapshot(frame, region)
+            return
+
         draft.refresh(self.document().workspace, self.page())
         self.scene().clearSelection()
         draft.setSelected(True)
@@ -2342,20 +2660,6 @@ class PageView(QGraphicsView):
             # set here but the arrow head.
             draft.tip = draft.mapFromScene(self._pending_anchor)
             self._pending_anchor = None
-
-        if tool.mode == SNAPSHOT:
-            # The marquee is not a markup: it says which part of the page to
-            # take a copy of, and then it goes.
-            region = draft.mapRectToParent(draft.local_rect().normalized())
-            frame = draft.parentItem()
-            detach(draft)
-            self.forget_snapshot()
-            # The tool is put away first: finishing it writes its own message
-            # into the status bar, which would wipe out what the snapshot has
-            # to say about what it took.
-            self.finish_tool()
-            self.window.take_snapshot(frame, region)
-            return
 
         # Tools that ask a question do it now, while the markup is still fresh.
         note_scale = False
@@ -2526,10 +2830,95 @@ class PageView(QGraphicsView):
         self._snapshot = []
 
     def cancel_draft(self) -> None:
+        self.close_size_editor()
         if self._draft is not None:
             detach(self._draft)
             self._draft = None
         self._mode = "idle"
+        self.forget_snap()
+
+    def open_size_editor(self, draft: RectItem) -> None:
+        """Show live page-scale width/height entry after a shape's first click."""
+        self.close_size_editor()
+        panel = QWidget()
+        panel.setObjectName("canvasSizeEntry")
+        panel.setStyleSheet(
+            "QWidget#canvasSizeEntry { background:#ffffff; border:1px solid #1971c2; } "
+            "QLineEdit { min-width:72px; border:0; padding:2px; color:#111318; }")
+        layout = QHBoxLayout(panel)
+        layout.setContentsMargins(4, 2, 4, 2)
+        layout.setSpacing(3)
+        width = _SizeEdit()
+        height = _SizeEdit()
+        unit = self.page().scale.display_unit
+        if draft.kind == "ellipse":
+            width.setPlaceholderText(f"D1 ({unit})")
+            height.setPlaceholderText(f"D2 ({unit})")
+            width.setToolTip("Horizontal diameter")
+            height.setToolTip("Vertical diameter; leave blank to make a circle")
+        else:
+            width.setPlaceholderText(f"Width ({unit})")
+            height.setPlaceholderText(f"Height ({unit})")
+        layout.addWidget(width)
+        layout.addWidget(QLabel("×"))
+        layout.addWidget(height)
+        proxy = self.scene().addWidget(panel)
+        proxy.setZValue(20_000)
+        at = draft.mapToScene(QPointF(0, 0)) + QPointF(8, 8)
+        proxy.setPos(at)
+        width.textEdited.connect(self.update_typed_size)
+        height.textEdited.connect(self.update_typed_size)
+        width.escapePressed.connect(self.escape_everything)
+        height.escapePressed.connect(self.escape_everything)
+        self._size_editor = panel
+        self._size_proxy = proxy
+        self._size_width = width
+        self._size_height = height
+        self._typed_size = False
+        width.setFocus(Qt.OtherFocusReason)
+        self.statusMessage.emit(
+            "Type the size, then click to place · Esc to cancel")
+
+    @staticmethod
+    def _size_with_default_unit(text: str, unit: str) -> str:
+        stripped = text.strip()
+        if re.fullmatch(r"[+]?(?:\d+(?:\.\d*)?|\.\d+)", stripped):
+            return f"{stripped} {unit}"
+        return stripped
+
+    def update_typed_size(self) -> None:
+        draft = self._draft
+        if not isinstance(draft, RectItem) or self._size_width is None \
+                or self._size_height is None:
+            return
+        width = self._size_width.text().strip()
+        height = self._size_height.text().strip()
+        if draft.kind == "ellipse" and width and not height:
+            height = width
+        if not width or not height:
+            return
+        unit = self.page().scale.display_unit
+        if draft.set_real_size(self._size_with_default_unit(width, unit),
+                               self._size_with_default_unit(height, unit),
+                               self.page()):
+            self._typed_size = True
+            self.viewport().update()
+
+    def close_size_editor(self) -> None:
+        proxy = self._size_proxy
+        self._size_editor = None
+        self._size_proxy = None
+        self._size_width = None
+        self._size_height = None
+        if proxy is not None:
+            widget = proxy.widget()
+            if widget is not None:
+                widget.clearFocus()
+            if proxy.scene() is not None:
+                proxy.scene().removeItem(proxy)
+            proxy.deleteLater()
+        if self.hasFocus() is False:
+            self.setFocus(Qt.OtherFocusReason)
 
     # ------------------------------------------------------------------
     # item editing
@@ -2665,6 +3054,12 @@ class PageView(QGraphicsView):
         if item.scene() is None:
             return
         words = item.source
+        editor = getattr(item, "_editor", None)
+        cursor = editor.textCursor() if editor is not None else None
+        start = cursor.selectionStart() if cursor is not None else len(words)
+        end = cursor.selectionEnd() if cursor is not None else start
+        words = words[:start] + " " + words[end:]
+        caret = start + 1
         frame = item.parentItem()
         position = item.pos()
         style = item.style
@@ -2675,7 +3070,7 @@ class PageView(QGraphicsView):
         self.end_item_edit()
         self.begin_snapshot(self.involved_frames(item))
         detach(item)
-        box = TextItem(words + " ")
+        box = TextItem(words)
         box.style = style
         box.set_local_rect(QRectF(0, 0, max(item.local_rect().width(), 140.0),
                                   max(item.local_rect().height(), 22.0)))
@@ -2685,6 +3080,10 @@ class PageView(QGraphicsView):
         self.commit_snapshot("Write text")
         self.selectionChanged.emit()
         self.begin_item_edit(box)
+        text_cursor = box._editor.textCursor()
+        text_cursor.setPosition(caret)
+        box._editor.setTextCursor(text_cursor)
+        self.statusMessage.emit("Space changed this calculation line to text")
 
     def _note_live_edit(self) -> None:
         """Work the line out again shortly, so its answer keeps up with it."""
@@ -2750,6 +3149,15 @@ class PageView(QGraphicsView):
             return word[letters:], start + letters
         return word, start
 
+    def completion_allowed(self) -> bool:
+        """Names and units are offered only in equation-bearing editors."""
+        item = self._editing_item
+        if isinstance(item, MathItem):
+            return True
+        editor = getattr(item, "_editor", None) if item is not None else None
+        inside = getattr(editor, "inside_field", None)
+        return bool(callable(inside) and inside())
+
     def completion_words(self, prefix: str, units_first: Optional[bool] = None) -> list[str]:
         """What could follow *prefix*: the document's own names, and units.
 
@@ -2794,6 +3202,9 @@ class PageView(QGraphicsView):
 
     def show_completions(self) -> None:
         """Offer what could follow what is being typed, if anything could."""
+        if not self.completion_allowed():
+            self.hide_completions()
+            return
         word, _start = self.completion_word()
         if len(word) < 1:
             self.hide_completions()
@@ -2828,7 +3239,25 @@ class PageView(QGraphicsView):
             editor = getattr(item, "_editor", None)
             if editor is None:
                 return QPoint(0, 0)
-            anchor = editor.mapToScene(editor.boundingRect().bottomLeft())
+            cursor = editor.textCursor()
+            block = cursor.block()
+            layout = block.layout()
+            line = layout.lineForTextPosition(
+                max(cursor.position() - block.position(), 0)) if layout else None
+            if line is not None and line.isValid():
+                margin = editor.document().documentMargin()
+                position = max(cursor.position() - block.position(), 0)
+                # QTextLine.cursorToX() currently crashes in PySide 6 on
+                # Windows for a QGraphicsTextItem-backed document. Measure
+                # the visible part of this line instead.
+                prefix = block.text()[line.textStart():position]
+                advance = QFontMetricsF(cursor.charFormat().font()).horizontalAdvance(prefix)
+                local = QPointF(
+                    margin + layout.position().x() + line.x() + advance,
+                    margin + layout.position().y() + line.y() + line.height())
+                anchor = editor.mapToScene(local)
+            else:
+                anchor = editor.mapToScene(editor.boundingRect().bottomLeft())
         corner = self.mapFromScene(anchor) + QPoint(0, 2)
         # Kept on screen: a list that runs off the bottom edge offers nothing.
         room = self.viewport().rect()
@@ -3036,14 +3465,14 @@ class PageView(QGraphicsView):
             return False
         editor = QLineEdit()
         editor.setText(item.display_unit_of(index))
-        editor.setStyleSheet(
-            "QLineEdit { border: 2px solid #1971c2; background: #ffffff; "
-            "color: #1246a0; padding: 0 2px; }")
         font = item.style.font()
-        font.setPointSizeF(max(item.style.font_size, 6.0))
-        editor.setFont(font)
         editor.setCompleter(self._unit_completer(editor))
         proxy = self.scene().addWidget(editor)
+        editor.setStyleSheet(
+            "QLineEdit { border: 2px solid #1971c2; background: #ffffff; "
+            f"color: #1246a0; padding: 0 2px; font-size: "
+            f"{max(item.style.font_size, 6.0):g}px; }}")
+        editor.setFont(font)
         proxy.setZValue(10_000)
         proxy.setPos(item.mapToScene(rect.topLeft()))
         editor.setFixedSize(int(max(rect.width() + 24, 80)), int(max(rect.height(), 16)))
@@ -3119,6 +3548,75 @@ class PageView(QGraphicsView):
                   if getattr(other, "group", "") == name and self.editable(other)]
         return family or [item]
 
+    def _selected_group(self):
+        """The one complete selected group and its visible scene rectangle."""
+        selected = [item for item in self.scene().selectedItems()
+                    if isinstance(item, MarkupItem)] if self.scene() else []
+        names = {item.group for item in selected if item.group}
+        if len(names) != 1 or any(not item.group for item in selected):
+            return None
+        members = self.group_of(selected[0])
+        if set(members) != set(selected):
+            return None
+        box = self.markup_box(members[0])
+        for member in members[1:]:
+            box = box.united(self.markup_box(member))
+        return members, box
+
+    def _group_handle_at(self, scene_pos: QPointF, box: QRectF) -> str:
+        reach = HANDLE_SIZE / max(self.zoom(), 0.05)
+        points = {"nw": box.topLeft(), "ne": box.topRight(),
+                  "se": box.bottomRight(), "sw": box.bottomLeft()}
+        return next((key for key, point in points.items()
+                     if abs(point.x() - scene_pos.x()) <= reach
+                     and abs(point.y() - scene_pos.y()) <= reach), "")
+
+    def _resize_selected_group(self, scene_pos: QPointF,
+                               release_ratio: bool = False) -> None:
+        """Scale every member from one outer corner-handle gesture."""
+        old = self._group_resize_box.normalized()
+        if old.width() <= 0 or old.height() <= 0:
+            return
+        point = self.snap_scene(
+            scene_pos, ignore={entry[0] for entry in self._group_resize_items})
+        key = self._group_handle_key
+        if key == "se":
+            sx = (point.x() - old.left()) / old.width()
+            sy = (point.y() - old.top()) / old.height()
+        elif key == "nw":
+            sx = (old.right() - point.x()) / old.width()
+            sy = (old.bottom() - point.y()) / old.height()
+        elif key == "ne":
+            sx = (point.x() - old.left()) / old.width()
+            sy = (old.bottom() - point.y()) / old.height()
+        else:  # sw
+            sx = (old.right() - point.x()) / old.width()
+            sy = (point.y() - old.top()) / old.height()
+        sx, sy = max(sx, 0.05), max(sy, 0.05)
+        if not release_ratio:
+            factor = sx if abs(sx - 1.0) >= abs(sy - 1.0) else sy
+            sx = sy = factor
+
+        width, height = old.width() * sx, old.height() * sy
+        left = old.right() - width if "w" in key else old.left()
+        top = old.bottom() - height if "n" in key else old.top()
+        new_box = QRectF(left, top, width, height)
+        for item, old_origin, old_transform in self._group_resize_items:
+            x = new_box.left() + (old_origin.x() - old.left()) * sx
+            y = new_box.top() + (old_origin.y() - old.top()) * sy
+            wanted = QPointF(x, y)
+            transform = QTransform(old_transform)
+            transform.scale(sx, sy)
+            item.setTransform(transform)
+            parent = item.parentItem()
+            if parent is not None:
+                correction = (parent.mapFromScene(wanted)
+                              - parent.mapFromScene(item.mapToScene(QPointF(0, 0))))
+                item.setPos(item.pos() + correction)
+            item.touch()
+            item.update()
+        self.viewport().update()
+
     def markup_at(self, scene_pos: QPointF) -> Optional[MarkupItem]:
         for item in self.scene().items(scene_pos):
             if isinstance(item, MarkupItem):
@@ -3169,7 +3667,9 @@ class PageView(QGraphicsView):
         # while it is being typed, rather than jumping across on Enter.
         editor.setAlignment(table.editor_alignment(row, col, editor.text()))
         font = table.style.font()
-        font.setPointSizeF(max(table.style.font_size, 6.0))
+        cell_size = table.cell_format(row, col).font_size
+        font.setPointSizeF(max(cell_size if cell_size is not None
+                               else table.style.font_size, 6.0))
         editor.setFont(font)
         proxy = self.scene().addWidget(editor)
         proxy.setZValue(10_000)
@@ -3491,12 +3991,18 @@ class PageView(QGraphicsView):
         """Whatever floats above the page: marquee, previews, leaders."""
         super().drawForeground(painter, rect)
         if self._marquee:
-            self._draw_marquee(painter)
+            if self._mode == "cloud_leader":
+                self._draw_cloud_leader_preview(painter)
+            else:
+                self._draw_marquee(painter)
         self._draw_group_boxes(painter)
         if self._pending_stamp is not None:
             self._draw_pending_preview(painter)
         else:
             self._draw_tool_preview(painter)
+        if (preferences.current().insertion_point
+                and self._insertion_point is not None):
+            self._draw_insertion_point(painter, self._insertion_point)
         if self._snap_guides:
             self._draw_snap_guides(painter, rect)
         if self._snap_marker is not None:
@@ -3719,11 +4225,44 @@ class PageView(QGraphicsView):
         painter.setPen(pen)
         painter.setBrush(QColor(11, 107, 203, 12))
         margin = 5.0 / max(self._zoom, 0.05)
+        half = HANDLE_SIZE / max(self._zoom, 0.05) / 2
         for members in families.values():
             box = self.markup_box(members[0])
             for item in members[1:]:
                 box = box.united(self.markup_box(item))
             painter.drawRect(box.adjusted(-margin, -margin, margin, margin))
+            painter.setBrush(QColor("#ffffff"))
+            for point in (box.topLeft(), box.topRight(),
+                          box.bottomRight(), box.bottomLeft()):
+                painter.drawRect(QRectF(point.x() - half, point.y() - half,
+                                        half * 2, half * 2))
+            painter.setBrush(QColor(11, 107, 203, 12))
+        painter.restore()
+
+    def _draw_cloud_leader_preview(self, painter: QPainter) -> None:
+        """Show the cloud region and its connection while it is dragged."""
+        item = self._pending_cloud_leader
+        if item is None or len(self._marquee) < 2:
+            return
+        rect = QRectF(self._marquee[0], self._marquee[-1]).normalized()
+        if rect.width() < 1 or rect.height() < 1:
+            return
+        ring = QPolygonF([rect.topLeft(), rect.topRight(),
+                          rect.bottomRight(), rect.bottomLeft()])
+        box = item.mapRectToScene(item.local_rect()).normalized()
+        cloud_edge = min(ring, key=lambda point:
+                         (point.x() - box.center().x()) ** 2
+                         + (point.y() - box.center().y()) ** 2)
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        pen = item.style.pen()
+        if not item.style.stroke or item.style.width <= 0:
+            pen = QPen(item.style.text_qcolor())
+            pen.setWidthF(1.0)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawPath(cloud_path(ring, getattr(item, "cloud_radius", 9.0)))
+        painter.drawLine(box.center(), cloud_edge)
         painter.restore()
 
     def _draw_pending_leader(self, painter: QPainter, anchor: QPointF) -> None:
@@ -3788,8 +4327,8 @@ class PageView(QGraphicsView):
     def _pending_callout_box(self) -> Optional[QRectF]:
         """Where the note would land if it were clicked down now.
 
-        The same corner the click will put it at: a markup is positioned by
-        its top-left, so that is where the pointer is.
+        The pointer owns the middle of the left edge, which is also the anchor
+        used when the click places the actual text box.
         """
         from ..items.text import CalloutItem
 
@@ -3797,7 +4336,7 @@ class PageView(QGraphicsView):
             return self._draft.mapRectToScene(self._draft.local_rect())
         at = QPointF(self._last_scene_pos)
         width, height = self._default_size(CalloutItem())
-        return QRectF(at.x(), at.y(), width, height)
+        return QRectF(at.x(), at.y() - height / 2, width, height)
 
     def _draw_snap_guides(self, painter: QPainter, rect: QRectF) -> None:
         """The level or the upright the pointer has lined itself up with.
@@ -3824,31 +4363,50 @@ class PageView(QGraphicsView):
     def _draw_snap_marker(self, painter: QPainter, point: QPointF) -> None:
         """Where the pointer has caught hold.
 
-        A hairline square was too easy to miss on a busy drawing, which is
-        why snapping felt as though it was not happening. This is the marker
-        every CAD program draws: a filled square with a ring round it, at a
-        size that does not change with the zoom. What it caught is said in
-        the status bar — writing it on the drawing put a word next to every
-        markup that then had to be waited out.
+        A small blue target gives snap feedback without the persistent-looking
+        orange placement square that was mistaken for part of the markup.
+        What it caught is said in the status bar rather than written over the
+        drawing.
         """
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing, True)
         scale = max(self._zoom, 0.05)
         arm = 5.0 / scale
-        colour = QColor("#e8590c")
+        colour = QColor("#1971c2")
         pen = QPen(colour)
         pen.setWidthF(1.6 / scale)
         painter.setPen(pen)
-        painter.setBrush(QBrush(QColor(232, 89, 12, 70)))
-        painter.drawRect(QRectF(point.x() - arm, point.y() - arm, arm * 2, arm * 2))
         painter.setBrush(Qt.NoBrush)
-        ring = arm * 1.9
-        painter.drawEllipse(point, ring, ring)
+        painter.drawEllipse(point, arm, arm)
+        inner = arm * 0.45
+        painter.drawLine(QPointF(point.x() - inner, point.y()),
+                         QPointF(point.x() + inner, point.y()))
+        painter.drawLine(QPointF(point.x(), point.y() - inner),
+                         QPointF(point.x(), point.y() + inner))
+        painter.restore()
+
+    def _draw_insertion_point(self, painter: QPainter, point: QPointF) -> None:
+        """Draw the optional remembered home for the next calculation."""
+        painter.save()
+        scale = max(self._zoom, 0.05)
+        height = 16.0 / scale
+        tick = 3.0 / scale
+        pen = QPen(QColor("#1971c2"))
+        pen.setWidthF(1.6 / scale)
+        painter.setPen(pen)
+        painter.drawLine(QPointF(point.x(), point.y() - height / 2),
+                         QPointF(point.x(), point.y() + height / 2))
+        painter.drawLine(QPointF(point.x() - tick, point.y() - height / 2),
+                         QPointF(point.x() + tick, point.y() - height / 2))
+        painter.drawLine(QPointF(point.x() - tick, point.y() + height / 2),
+                         QPointF(point.x() + tick, point.y() + height / 2))
         painter.restore()
 
     def typing_position(self) -> QPointF:
         """Where a region opened by typing should appear, in page coordinates."""
-        anchor = QPointF(self._last_scene_pos)
+        anchor = QPointF(self._insertion_point if (
+            preferences.current().insertion_point
+            and self._insertion_point is not None) else self._last_scene_pos)
         frame = self.frame_at(anchor) or self.frame()
         if frame is None:
             return QPointF(self._last_scene_pos)
@@ -3860,7 +4418,10 @@ class PageView(QGraphicsView):
 
     def typing_frame(self):
         """The page a region opened by typing belongs to."""
-        return self.frame_at(self._last_scene_pos) or self.frame()
+        anchor = self._insertion_point if (
+            preferences.current().insertion_point
+            and self._insertion_point is not None) else self._last_scene_pos
+        return self.frame_at(anchor) or self.frame()
 
     def half_way_through_something(self) -> bool:
         """True while a gesture is waiting on the next click or key.
@@ -3878,6 +4439,7 @@ class PageView(QGraphicsView):
                 or self._cell_editor is not None
                 or self._pending_anchor is not None
                 or self._pending_cloud is not None
+                or self._pending_cloud_leader is not None
                 or self._pending_stamp is not None
                 or self._pending_properties is not None
                 or self._draft is not None
@@ -4044,7 +4606,8 @@ class PageView(QGraphicsView):
                         name = match.group(0)
                         if name in FUNCTIONS:
                             self.statusMessage.emit(function_help(name))
-                if event.text().isalnum() or event.text() == "_":
+                if ((event.text().isalnum() or event.text() == "_")
+                        and self.completion_allowed()):
                     self.show_completions()
                 elif key in (Qt.Key_Backspace, Qt.Key_Delete):
                     self.show_completions()
@@ -4083,7 +4646,7 @@ class PageView(QGraphicsView):
             return
 
         # A bare keystroke on the canvas only does something if it is bound:
-        # '"' starts text, '\\' starts maths, tool keys pick their tool.
+        # '"' starts a calculation-or-text entry; tool keys pick their tool.
         if self.idle_on_canvas():
             # The number keys reach for My Tools, before anything else is
             # asked about the keystroke: 1 to 9 are the first nine things in it.
@@ -4101,13 +4664,24 @@ class PageView(QGraphicsView):
             # was spoken for: a tool key that had not been bound yet, or a
             # keystroke meant for something that had just lost the focus,
             # started a calculation instead of doing nothing. Writing begins
-            # deliberately — "/" for maths, '"' for words — and those are on
-            # the shortcut list where they can be changed.
+            # deliberately with '"', which is on the shortcut list where it
+            # can be changed. Slash remains division inside an equation.
             if event.text() and event.text().isprintable():
                 event.accept()
                 return
 
         if key in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down):
+            if (key in (Qt.Key_Up, Qt.Key_Down)
+                    and preferences.current().insertion_point
+                    and self._insertion_point is not None
+                    and not self.scene().selectedItems()):
+                step = 1.0 if modifiers & Qt.ShiftModifier else LINE_STEP
+                direction = -1.0 if key == Qt.Key_Up else 1.0
+                self._insertion_point += QPointF(0, direction * step)
+                self.viewport().update()
+                self.statusMessage.emit("Insertion point moved")
+                event.accept()
+                return
             step = 1.0 if modifiers & Qt.ShiftModifier else 0.25 * MM_TO_PT * 4
             delta = {Qt.Key_Left: QPointF(-step, 0), Qt.Key_Right: QPointF(step, 0),
                      Qt.Key_Up: QPointF(0, -step), Qt.Key_Down: QPointF(0, step)}[key]

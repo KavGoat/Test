@@ -295,24 +295,23 @@ class RectItem(MarkupItem):
 # Point-based shapes
 # ---------------------------------------------------------------------------
 
-def _arc_path(points: list[QPointF]) -> QPainterPath:
-    """A curve through the points given.
-
-    Two points make a shallow bow — an arc has to bend somewhere, and bending
-    it a fixed fraction of its own length is what looks like an arc rather
-    than a line that has gone wrong. A third point says where to bend it to,
-    and the curve is drawn through that.
-    """
+def _arc_through(points: list[QPointF]) -> QPointF:
+    """The visible bend point for an Arc, explicit or naturally inferred."""
     start, end = points[0], points[-1]
     if len(points) >= 3:
-        through = points[1]
-    else:
-        middle = QPointF((start.x() + end.x()) / 2, (start.y() + end.y()) / 2)
-        dx, dy = end.x() - start.x(), end.y() - start.y()
-        length = math.hypot(dx, dy) or 1.0
-        bow = length * 0.22
-        through = QPointF(middle.x() - dy / length * bow,
-                          middle.y() + dx / length * bow)
+        return QPointF(points[1])
+    middle = QPointF((start.x() + end.x()) / 2, (start.y() + end.y()) / 2)
+    dx, dy = end.x() - start.x(), end.y() - start.y()
+    length = math.hypot(dx, dy) or 1.0
+    bow = length * 0.22
+    return QPointF(middle.x() - dy / length * bow,
+                   middle.y() + dx / length * bow)
+
+
+def _arc_path(points: list[QPointF]) -> QPainterPath:
+    """A curve through its endpoints and editable bend point."""
+    start, end = points[0], points[-1]
+    through = _arc_through(points)
     # The control point that makes a quadratic curve pass through *through*.
     control = QPointF(2 * through.x() - (start.x() + end.x()) / 2,
                       2 * through.y() - (start.y() + end.y()) / 2)
@@ -623,6 +622,13 @@ class PolyItem(MarkupItem):
     # -- handles -----------------------------------------------------------
     def handle_points(self) -> dict[str, QPointF]:
         if self.uses_vertex_handles:
+            if self.kind == "arc" and len(self.points) >= 2:
+                # Arc endpoints remain ordinary vertices. Its middle control
+                # point is always visible, even before the inferred bend has
+                # been moved and stored explicitly.
+                return {"v0": QPointF(self.points[0]),
+                        f"v{len(self.points) - 1}": QPointF(self.points[-1]),
+                        "c0": _arc_through(self.points)}
             handles = {f"v{index}": QPointF(point) for index, point in enumerate(self.points)}
             # A rounded corner gets a handle for its radius, and a bowed
             # segment gets two: how far it curves, and which way it leans.
@@ -640,6 +646,15 @@ class PolyItem(MarkupItem):
         return super().handle_points()
 
     def move_handle(self, key: str, local_pos: QPointF, keep_ratio: bool = False) -> None:
+        if self.kind == "arc" and key == "c0" and len(self.points) >= 2:
+            self.prepareGeometryChange()
+            if len(self.points) == 2:
+                self.points.insert(1, QPointF(local_pos))
+            else:
+                self.points[1] = QPointF(local_pos)
+            self.touch()
+            self.geometryChanged.emit()
+            return
         if key.startswith("v"):
             index = int(key[1:])
             if 0 <= index < len(self.points):

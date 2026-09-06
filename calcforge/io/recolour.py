@@ -1,10 +1,11 @@
-"""Changing the colours in a scanned or imported sheet.
+"""Changing the colours in a scanned or imported sheet or image.
 
 A drawing that came in as a PDF is a picture, so the only way to make its
 lines read differently under a markup is to change the pixels. Two things are
 worth doing: swapping one colour for another, and pulling everything dark
 enough to be a line onto one colour — which is what turns a black-and-white
-sheet grey so red markups sit on top of it.
+sheet grey so red markups sit on top of it. Photos additionally support
+greyscale conversion and making one selected colour transparent.
 """
 from __future__ import annotations
 
@@ -53,6 +54,31 @@ def recolour_lines(image: QImage, target: QColor, threshold: int = 128) -> QImag
                 round(255 - (255 - target.red()) * weight),
                 round(255 - (255 - target.green()) * weight),
                 round(255 - (255 - target.blue()) * weight), 255))
+    return out
+
+
+def to_greyscale(image: QImage) -> QImage:
+    """Convert RGB channels to luminance while preserving each pixel's alpha."""
+    out = image.convertToFormat(QImage.Format_ARGB32)
+    for y in range(out.height()):
+        for x in range(out.width()):
+            pixel = out.pixel(x, y)
+            grey = (qRed(pixel) * 299 + qGreen(pixel) * 587
+                    + qBlue(pixel) * 114) // 1000
+            out.setPixel(x, y, qRgba(grey, grey, grey, qAlpha(pixel)))
+    return out
+
+
+def make_colour_transparent(image: QImage, source: QColor,
+                            tolerance: int = 40) -> QImage:
+    """Clear alpha for pixels near *source*, retaining every other pixel."""
+    out = image.convertToFormat(QImage.Format_ARGB32)
+    for y in range(out.height()):
+        for x in range(out.width()):
+            pixel = out.pixel(x, y)
+            if qAlpha(pixel) and _distance(pixel, source) <= tolerance:
+                out.setPixel(x, y, qRgba(qRed(pixel), qGreen(pixel),
+                                         qBlue(pixel), 0))
     return out
 
 

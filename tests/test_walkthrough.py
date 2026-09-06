@@ -42,7 +42,7 @@ def test_a_whole_calculation_sheet_from_a_blank_page(window):
 
     # The inputs: one calculation, Enter between the lines.
     window.view._last_scene_pos = QPointF(70, 120)
-    press_key(window.view, Qt.Key_unknown, "/")
+    press_key(window.view, Qt.Key_unknown, '"')
     for line in ("b:=300mm", "d:=500mm", "fc:=25MPa"):
         assert window.view.editing_item() is not None
         type_text(window.view, line)
@@ -54,7 +54,7 @@ def test_a_whole_calculation_sheet_from_a_blank_page(window):
 
     # A result, asked for with a trailing "=".
     window.view._last_scene_pos = QPointF(70, 260)
-    press_key(window.view, Qt.Key_unknown, "/")
+    press_key(window.view, Qt.Key_unknown, '"')
     type_text(window.view, "Z:=b*d^2/6=")
     window.view.end_item_edit()
     window.recalculate()
@@ -104,7 +104,7 @@ def test_a_whole_calculation_sheet_from_a_blank_page(window):
     window.recalculate()
 
     window.view._last_scene_pos = QPointF(70, 560)
-    press_key(window.view, Qt.Key_unknown, "/")
+    press_key(window.view, Qt.Key_unknown, '"')
     type_text(window.view, "V:=bolts(16mm,Dia,Shear)=")
     window.view.end_item_edit()
     window.recalculate()
@@ -137,7 +137,7 @@ def test_tool_letters_fall_silent_while_words_are_being_typed(window):
 
 def test_tool_letters_fall_silent_inside_a_calculation(window):
     window.view._last_scene_pos = QPointF(100, 250)
-    press_key(window.view, Qt.Key_unknown, "/")
+    press_key(window.view, Qt.Key_unknown, '"')
     type_text(window.view, "cap:=5kN")
     assert window.view.editing_item()._editor.toPlainText() == "cap:=5kN"
     window.view.end_item_edit()

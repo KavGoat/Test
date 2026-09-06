@@ -494,8 +494,16 @@ class TableItem(MarkupItem):
                                         self.sheet.total_width(), self.sheet.row_height(row)),
                                  QColor(self.band_fill))
         for (row, col), cell in self.sheet.cells.items():
-            if row < self.sheet.rows and col < self.sheet.cols and cell.fmt.background:
-                painter.fillRect(self.cell_rect(row, col), QColor(cell.fmt.background))
+            if row >= self.sheet.rows or col >= self.sheet.cols:
+                continue
+            if cell.fmt.background:
+                painter.fillRect(self.cell_rect(row, col),
+                                 QColor(cell.fmt.background))
+            elif cell.is_formula:
+                # A computed cell is visibly different from entered data even
+                # when the formula bar is closed. Explicit cell formatting
+                # still wins over this quiet semantic tint.
+                painter.fillRect(self.cell_rect(row, col), QColor("#e7f5ff"))
 
     def _paint_grid(self, painter: QPainter, grid_rect: QRectF) -> None:
         if self.sheet.grid_lines:
@@ -541,6 +549,8 @@ class TableItem(MarkupItem):
                 cell = self.sheet.cells.get((row, col))
                 fmt = cell.fmt if cell else CellFormat()
                 font = QFont(base_font)
+                if fmt.font_size is not None:
+                    font.setPointSizeF(max(float(fmt.font_size), 3.0))
                 if fmt.bold or (row == 0 and self.sheet.header_row):
                     font.setBold(True)
                 if fmt.italic:
@@ -549,15 +559,23 @@ class TableItem(MarkupItem):
                 colour = QColor(fmt.color) if fmt.color else QColor(self.style.text_color)
                 if cell is not None and isinstance(cell.value, CellError):
                     colour = QColor("#c92a2a")
+                elif cell is not None and cell.is_formula and not fmt.color:
+                    colour = QColor("#1864ab")
                 painter.setPen(QPen(colour))
                 box = self.cell_rect(row, col).adjusted(pad, 1, -pad, -1)
                 # A published cell wears its name in the top-left corner; the
                 # value steps aside for it rather than being written over it.
                 box.setLeft(box.left() + self._name_inset(painter, row, col))
-                painter.setClipRect(box.adjusted(-1, -1, 2, 2))
+                # Never let a long value borrow the blank cell beside it. Use
+                # save/restore so this cell clip also respects any page/export
+                # clip the caller already established.
+                painter.save()
+                painter.setClipRect(
+                    self.cell_rect(row, col).adjusted(0.5, 0.5, -0.5, -0.5),
+                    Qt.IntersectClip)
                 _draw_with_scripts(painter, box, self._alignment(row, col, cell),
                                    text, font)
-                painter.setClipping(False)
+                painter.restore()
 
     def _name_inset(self, painter: QPainter, row: int, col: int) -> float:
         """How much room the published-name tag takes on the left of a cell."""

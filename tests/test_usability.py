@@ -201,7 +201,7 @@ def test_backspace_edits_text_rather_than_deleting_the_markup(window):
 
 def test_enter_opens_the_next_calculation_line(window):
     window.view._last_scene_pos = QPointF(100, 100)
-    press_key(window.view, Qt.Key_unknown, "/")
+    press_key(window.view, Qt.Key_unknown, '"')
     first = window.view.editing_item()
     type_text(window.view, "L=6m")
     press_key(window.view, Qt.Key_Return)
@@ -254,6 +254,52 @@ def test_modifier_shortcuts_are_bound_where_asked(window):
     assert sequences["tool.rect"] == "R"
     assert sequences["tool.arrow"] == "A"
     assert window.shortcuts.conflicts() == {}
+
+
+def test_arrow_tool_places_an_arrow_and_hides_handles_until_selected(window):
+    from PySide6.QtGui import QImage, QPainter
+
+    window.select_tool("arrow")
+    drag(window.view, 120, 180, 300, 240)
+    arrow = [item for item in markups(window)
+             if isinstance(item, PolyItem) and item.kind == "arrow"][-1]
+    assert arrow.style.arrow_end == "arrow"
+    arrow.setSelected(False)
+
+    def handles_image():
+        image = QImage(400, 300, QImage.Format_ARGB32)
+        image.fill(Qt.transparent)
+        painter = QPainter(image)
+        arrow.paint_handles(painter)
+        painter.end()
+        return image
+
+    hidden = handles_image()
+    assert all(hidden.pixelColor(x, y).alpha() == 0
+               for x in range(hidden.width()) for y in range(hidden.height()))
+    arrow.setSelected(True)
+    shown = handles_image()
+    assert any(shown.pixelColor(x, y).alpha() > 0
+               for x in range(shown.width()) for y in range(shown.height()))
+
+
+def test_cloud_tool_supports_dragged_and_point_by_point_clouds(window):
+    window.select_tool("cloud")
+    drag(window.view, 100, 100, 260, 200)
+    dragged = [item for item in markups(window)
+               if isinstance(item, RectItem) and item.kind == "cloud"]
+    assert len(dragged) == 1
+
+    window.select_tool("cloud")
+    click(window.view, 320, 300)
+    click(window.view, 460, 300)
+    click(window.view, 460, 410)
+    click(window.view, 320, 410)
+    press_key(window.view, Qt.Key_Return)
+    custom = [item for item in markups(window)
+              if isinstance(item, PolyItem) and item.kind == "cloud"]
+    assert len(custom) == 1
+    assert custom[0].closed and len(custom[0].points) == 4
 
 
 def test_the_modifier_tools_are_reachable_from_their_actions(window):
@@ -343,6 +389,60 @@ def test_a_rectangle_reports_its_real_size_and_accepts_an_exact_one(window):
     assert rect.local_rect().width() == pytest.approx(3000 / (50 * 25.4 / 72), rel=1e-6)
 
 
+def test_click_click_rectangle_has_live_scaled_size_entry(window, qapp):
+    from PySide6.QtTest import QTest
+    from calcforge.core.units import parse_unit
+
+    page = scaled_page(window, 100)
+    window.interactive_prompts = False
+    window.select_tool("rect")
+    click(window.view, 100, 100)
+
+    assert window.view._mode == "draw_click"
+    assert window.view._size_editor is not None
+    width = window.view._size_width
+    height = window.view._size_height
+    QTest.keyClicks(width, "3m")
+    height.setFocus()
+    QTest.keyClicks(height, "2m")
+    qapp.processEvents()
+    draft = window.view._draft
+    expected_width = float((parse_unit("3m") / page.scale.length(1))
+                           .to("dimensionless").magnitude)
+    expected_height = float((parse_unit("2m") / page.scale.length(1))
+                            .to("dimensionless").magnitude)
+    assert draft.local_rect().width() == pytest.approx(expected_width)
+    assert draft.local_rect().height() == pytest.approx(expected_height)
+
+    click(window.view, 420, 320)
+    placed = only(window, RectItem)[0]
+    assert window.view._size_editor is None
+    assert placed.local_rect().width() == pytest.approx(expected_width)
+    assert placed.local_rect().height() == pytest.approx(expected_height)
+
+
+def test_one_ellipse_diameter_makes_a_circle_and_escape_cancels(window, qapp):
+    from PySide6.QtTest import QTest
+
+    scaled_page(window, 50)
+    window.interactive_prompts = False
+    window.select_tool("ellipse")
+    click(window.view, 300, 120)
+    width = window.view._size_width
+    assert width.placeholderText().startswith("D1")
+    QTest.keyClicks(width, "1.5m")
+    qapp.processEvents()
+    draft = window.view._draft
+    assert draft.local_rect().width() == pytest.approx(draft.local_rect().height())
+
+    QTest.keyClick(width, Qt.Key_Escape)
+    qapp.processEvents()
+    assert window.view._draft is None
+    assert window.view._size_editor is None
+    assert window.view.tool_key == "select"
+    assert window.view.cursor().shape() == Qt.ArrowCursor
+
+
 def test_a_polygon_is_not_scaled(window):
     scaled_page(window)
     window.select_tool("polygon")
@@ -400,7 +500,7 @@ def test_an_exact_size_can_be_asked_for_from_the_right_click_menu(window, monkey
     rect.setSelected(True)
 
     menu = window.build_context_menu(rect, QPointF(150, 140))
-    assert "Set exact size…" in [a.text() for a in menu.actions() if a.text()]
+    assert "Exact size…" in [a.text() for a in menu.actions() if a.text()]
 
     monkeypatch.setattr(dialogs.RectangleSizeDialog, "exec",
                         lambda self: dialogs.QDialog.Accepted)
@@ -461,6 +561,32 @@ def test_move_by_an_offset_leaves_no_copies(window, monkeypatch):
 
     assert len(only(window, RectItem)) == 1
     assert rect.pos().y() == pytest.approx(origin.y() + 2000 / (50 * 25.4 / 72), abs=0.5)
+
+
+def test_repeat_along_an_axis_is_a_rebindable_shortcut(window, monkeypatch, qapp):
+    from PySide6.QtGui import QKeySequence
+    from PySide6.QtTest import QTest
+    from calcforge.ui import dialogs
+
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 160, 160)
+    window.select_tool("select")
+    only(window, RectItem)[0].setSelected(True)
+    monkeypatch.setattr(dialogs.ArrayDialog, "exec",
+                        lambda self: dialogs.QDialog.Accepted)
+    monkeypatch.setattr(dialogs.ArrayDialog, "offsets",
+                        lambda self: ("25 mm", "0", 1, True))
+    window.show()
+    window.view.setFocus()
+    qapp.processEvents()
+
+    QTest.keyClick(window.view, Qt.Key_D,
+                   Qt.ControlModifier | Qt.ShiftModifier)
+    qapp.processEvents()
+
+    binding = window.shortcuts.binding_for(QKeySequence("Ctrl+Shift+D"))
+    assert binding is not None and binding.action_id == "command.array"
+    assert len(only(window, RectItem)) == 2
 
 
 def test_offsets_are_paper_distances_without_a_scale(window):
@@ -822,18 +948,22 @@ def test_tool_keys_are_silent_inside_a_table(window):
     assert window.view.current_tool().key == "select"
 
 
-def test_document_commands_stay_live_while_typing(window):
-    """Save and zoom work mid-sentence, as they do in every other application.
-
-    Ctrl+Z is deliberately not in this list: while the cursor is in a text box
-    it undoes the typing, which is what a text box is supposed to do with it.
-    """
+def test_document_commands_are_silent_while_typing(window):
     window.select_tool("text")
     drag(window.view, 100, 100, 340, 150)
     assert window.view.is_editing()
-    assert not swallowed(window, Qt.Key_0, Qt.ControlModifier)
-    assert not swallowed(window, Qt.Key_S, Qt.ControlModifier)
-    assert not swallowed(window, Qt.Key_P, Qt.ControlModifier)
+    assert swallowed(window, Qt.Key_0, Qt.ControlModifier)
+    assert swallowed(window, Qt.Key_S, Qt.ControlModifier)
+    assert swallowed(window, Qt.Key_P, Qt.ControlModifier)
+
+
+def test_text_formatting_shortcuts_are_not_suppressed_while_typing(window):
+    window.select_tool("text")
+    drag(window.view, 100, 100, 340, 150)
+    assert window.view.is_editing()
+    assert not swallowed(window, Qt.Key_B, Qt.ControlModifier)
+    assert not swallowed(window, Qt.Key_I, Qt.ControlModifier)
+    assert not swallowed(window, Qt.Key_U, Qt.ControlModifier)
 
 
 def test_a_bare_letter_types_rather_than_picking_a_tool(window):
@@ -853,7 +983,7 @@ def test_a_bare_letter_types_rather_than_picking_a_tool(window):
 def test_typing_starts_where_the_pointer_is(window):
     window.select_tool("select")
     hover(window.view, 300, 500)
-    press_key(window.view, Qt.Key_unknown, "/")
+    press_key(window.view, Qt.Key_unknown, '"')
     block = window.view.editing_item()
     assert block is not None
     assert block.pos().x() == pytest.approx(300, abs=6)
@@ -877,7 +1007,7 @@ def test_a_paste_lands_under_the_pointer(window):
 
 
 def test_nothing_is_drawn_where_the_page_was_clicked(window):
-    """A click leaves no mark behind: there is no insertion point any more."""
+    """With the optional insertion point off, a click leaves no mark behind."""
     from PySide6.QtCore import QRectF
     from PySide6.QtGui import QImage, QPainter
 
@@ -891,6 +1021,98 @@ def test_nothing_is_drawn_where_the_page_was_clicked(window):
     window.view.drawForeground(painter, QRectF(220, 300, 80, 80))
     painter.end()
     assert sum(1 for x in range(80) for y in range(80) if image.pixel(x, y)) == 0
+
+
+def test_the_optional_insertion_point_places_and_moves_the_next_calculation(window):
+    from calcforge.items.mathitem import LINE_STEP
+    from calcforge.ui import preferences
+
+    prefs = preferences.current()
+    was = prefs.insertion_point
+    try:
+        prefs.insertion_point = True
+        preferences.apply(prefs)
+        window.select_tool("select")
+        click(window.view, 260, 340)
+        placed = QPointF(window.view._insertion_point)
+        assert window.view.frame_at(placed) is not None
+
+        press_key(window.view, Qt.Key_Down)
+        moved = QPointF(window.view._insertion_point)
+        assert moved.y() == pytest.approx(placed.y() + LINE_STEP)
+        hover(window.view, 500, 600)
+        press_key(window.view, Qt.Key_unknown, '"')
+
+        block = window.view.editing_item()
+        expected = block.parentItem().mapFromScene(moved)
+        assert block.pos().x() == pytest.approx(expected.x(), abs=1)
+        assert block.pos().y() == pytest.approx(expected.y(), abs=1)
+    finally:
+        prefs.insertion_point = was
+        preferences.apply(prefs)
+
+
+def test_the_optional_insertion_point_is_visible_and_escape_clears_it(window):
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QImage, QPainter
+    from calcforge.ui import preferences
+
+    prefs = preferences.current()
+    was = prefs.insertion_point
+    try:
+        prefs.insertion_point = True
+        preferences.apply(prefs)
+        click(window.view, 260, 340)
+
+        image = QImage(80, 80, QImage.Format_ARGB32)
+        image.fill(0)
+        painter = QPainter(image)
+        painter.translate(-220, -300)
+        window.view.drawForeground(painter, QRectF(220, 300, 80, 80))
+        painter.end()
+        assert any(image.pixelColor(x, y).alpha() > 0
+                   for x in range(80) for y in range(80))
+
+        press_key(window.view, Qt.Key_Escape)
+        assert window.view._insertion_point is None
+        assert window.view.cursor().shape() == Qt.ArrowCursor
+    finally:
+        prefs.insertion_point = was
+        preferences.apply(prefs)
+
+
+def test_preferences_exposes_the_optional_insertion_point(window, qapp):
+    from PySide6.QtTest import QTest
+    from calcforge.ui import dialogs, preferences
+
+    window.show()
+    qapp.processEvents()
+    dialog = dialogs.PreferencesDialog(preferences.current(), window)
+    dialog.show()
+    qapp.processEvents()
+    assert dialog.insertion.text() == "Insertion point"
+    assert not dialog.insertion.isChecked()
+    dialog.insertion.setFocus()
+    QTest.keyClick(dialog.insertion, Qt.Key_Space)
+    qapp.processEvents()
+    assert dialog.result_preferences().insertion_point
+    dialog.deleteLater()
+
+
+def test_preferences_exposes_recoverable_flattening(window, qapp):
+    from PySide6.QtTest import QTest
+    from calcforge.ui import dialogs, preferences
+
+    dialog = dialogs.PreferencesDialog(preferences.current(), window)
+    dialog.show()
+    qapp.processEvents()
+    assert dialog.recover_flattened.text() == "Recoverable flattening"
+    before = dialog.recover_flattened.isChecked()
+    dialog.recover_flattened.setFocus()
+    QTest.keyClick(dialog.recover_flattened, Qt.Key_Space)
+    qapp.processEvents()
+    assert dialog.result_preferences().recover_flattened is not before
+    dialog.deleteLater()
 
 
 # ---------------------------------------------------------------------------
@@ -919,11 +1141,74 @@ def _menu_entry(menu, label):
 def test_the_page_menu_offers_everything_you_do_to_a_page(window):
     window.load_sample()
     labels = _menu_labels(window.page_menu(0))
-    for wanted in ("Insert blank page before", "Insert blank page after",
-                   "Duplicate page", "Insert PDF pages before…",
-                   "Insert PDF pages after…", "Insert image before…",
-                   "Insert image after…", "Delete page", "Page setup…"):
+    for wanted in ("Blank before", "Blank after", "Duplicate page",
+                   "PDF before…", "PDF after…", "Image before…",
+                   "Image after…", "Delete page", "Page setup…"):
         assert wanted in labels
+
+
+def test_current_page_commands_are_reachable_from_the_menu_bar(window, qapp):
+    from PySide6.QtTest import QTest
+
+    window.show()
+    qapp.processEvents()
+    menu = window.current_page_menu
+    menu.popup(window.mapToGlobal(window.rect().center()))
+    qapp.processEvents()
+    labels = _menu_labels(menu)
+    assert {"Rename…", "Blank after", "Move down",
+            "Rotate clockwise", "Change colours…"} <= set(labels)
+
+    add = _menu_entry(menu, "Blank after")
+    QTest.mouseClick(menu, Qt.LeftButton, Qt.NoModifier,
+                     menu.actionGeometry(add).center())
+    qapp.processEvents()
+    assert len(window.document.pages) == 2
+
+
+def test_selected_table_commands_are_reachable_from_the_menu_bar(window, qapp):
+    from PySide6.QtTest import QTest
+
+    table = _table(window)
+    assert table.isSelected()
+    before = table.sheet.rows
+    window.show()
+    qapp.processEvents()
+    menu = window.selection_menu
+    menu.popup(window.mapToGlobal(window.rect().center()))
+    qapp.processEvents()
+    labels = _menu_labels(menu)
+    assert {"Named cells…", "Row below", "Autofit columns",
+            "Align cells", "Add tool…"} <= set(labels)
+
+    insert = _menu_entry(menu, "Row below")
+    QTest.mouseClick(menu, Qt.LeftButton, Qt.NoModifier,
+                     menu.actionGeometry(insert).center())
+    qapp.processEvents()
+    assert table.sheet.rows == before + 1
+
+
+def test_every_tool_and_application_action_is_reachable_from_the_menu_bar(window):
+    from calcforge.ui.tools import TOOLS
+
+    all_actions = set()
+
+    def collect(menu):
+        for action in menu.actions():
+            all_actions.add(action)
+            if action.menu() is not None:
+                collect(action.menu())
+
+    top = {action.text().replace("&", ""): action.menu()
+           for action in window.menuBar().actions()}
+    for menu in top.values():
+        collect(menu)
+    missing = [(name, getattr(window, name).text()) for name in dir(window)
+               if name.startswith("act_") and getattr(window, name) not in all_actions]
+    assert missing == []
+
+    insert_labels = set(_menu_labels(top["Insert"]))
+    assert {tool.label for tool in TOOLS} <= insert_labels
 
 
 def test_the_page_menu_does_not_offer_impossible_moves(window):
@@ -1191,7 +1476,7 @@ def test_every_maths_symbol_is_a_binding_you_can_change(window):
 
 def test_the_multiply_key_types_a_multiply_sign(window):
     window.view._last_scene_pos = QPointF(120, 120)
-    press_key(window.view, Qt.Key_unknown, "/")
+    press_key(window.view, Qt.Key_unknown, '"')
     block = window.view.editing_item()
     type_text(window.view, "a:=4")
     window.symbol_actions["symbol.multiply"].trigger()
@@ -1203,7 +1488,7 @@ def test_the_multiply_key_types_a_multiply_sign(window):
 
 def test_the_root_key_brings_its_bracket_and_leaves_room_inside(window):
     window.view._last_scene_pos = QPointF(120, 260)
-    press_key(window.view, Qt.Key_unknown, "/")
+    press_key(window.view, Qt.Key_unknown, '"')
     block = window.view.editing_item()
     type_text(window.view, "r:=")
     window.symbol_actions["symbol.root"].trigger()
@@ -1254,7 +1539,7 @@ def test_a_symbol_bound_to_a_bare_key_still_types_itself(window):
     window.apply_shortcuts()
     try:
         window.view._last_scene_pos = QPointF(120, 320)
-        press_key(window.view, Qt.Key_unknown, "/")
+        press_key(window.view, Qt.Key_unknown, '"')
         block = window.view.editing_item()
         type_text(window.view, "c:=2")
         assert window.run_typed_binding(";", Qt.NoModifier, QPointF(0, 0))
@@ -1270,7 +1555,7 @@ def test_symbol_keys_are_live_while_you_type(window):
     from PySide6.QtGui import QKeySequence
 
     window.view._last_scene_pos = QPointF(120, 380)
-    press_key(window.view, Qt.Key_unknown, "/")
+    press_key(window.view, Qt.Key_unknown, '"')
     assert window.view.is_editing()
     assert not window.shortcuts.is_canvas_binding(QKeySequence("Ctrl+Alt+8"))
     assert window.shortcuts.is_canvas_binding(QKeySequence("R"))
@@ -1283,7 +1568,7 @@ def test_symbol_keys_are_live_while_you_type(window):
 
 def _calc(window, text, at=(90, 110)):
     window.view._last_scene_pos = QPointF(*at)
-    press_key(window.view, Qt.Key_unknown, "/")
+    press_key(window.view, Qt.Key_unknown, '"')
     block = window.view.editing_item()
     block._editor.setPlainText(text)
     window.view.end_item_edit()
@@ -1320,6 +1605,26 @@ def test_typing_the_equals_later_makes_the_answer_appear(window):
     assert [s.name for s in block.statements if block._wants_result(s)] == ["A"]
 
 
+def test_equals_can_be_typed_deleted_and_retyped_without_a_result_gap(window):
+    window.view._last_scene_pos = QPointF(90, 110)
+    press_key(window.view, Qt.Key_unknown, '"')
+    block = window.view.editing_item()
+    type_text(window.view, "A:=2+2")
+    press_key(window.view, Qt.Key_Equal, "=")
+    assert block._editor.toPlainText().endswith("=")
+    press_key(window.view, Qt.Key_Backspace)
+    assert not block._editor.toPlainText().endswith("=")
+    press_key(window.view, Qt.Key_Equal, "=")
+    window.view.end_item_edit()
+    window.recalculate()
+
+    row = block.rows[0]
+    before_equals = block.style.padding + row.left.width
+    assert block.result_rect(0).left() - before_equals == pytest.approx(
+        block.result_gap)
+    assert block.result_gap <= block.style.font_size * 0.5
+
+
 def test_a_region_told_to_show_everything_still_does(window):
     block = _calc(window, "b := 300 mm\nA := b*b")
     block.show_definition_results = True
@@ -1347,6 +1652,46 @@ def test_double_clicking_an_answer_opens_its_unit(window):
     assert window.view._unit_editor is not None
     assert window.view.editing_item() is None          # not the source editor
     assert window.view._unit_editor.text() == "kN·m"
+
+
+def test_editing_an_answer_unit_stays_at_the_existing_zoom_and_result(window):
+    block = _calc(window, "L := 6m\nw := 12kN/m\nM := w*L^2/8 =")
+    window.select_tool("select")
+    window.view.set_zoom(2.4)
+    before = window.view.zoom()
+    row = next(i for i, entry in enumerate(block.rows) if entry.result is not None)
+    expected = block.mapToScene(block.result_rect(row).topLeft())
+    point = _result_point(window, block, row)
+
+    double_click(window.view, point.x(), point.y())
+
+    assert window.view.zoom() == pytest.approx(before)
+    assert window.view._unit_proxy.scenePos().x() == pytest.approx(expected.x(), abs=0.5)
+    assert window.view._unit_proxy.scenePos().y() == pytest.approx(expected.y(), abs=0.5)
+    assert window.view._unit_editor.font().pixelSize() == block.style.font().pixelSize()
+
+
+def test_the_result_unit_list_opens_below_its_in_place_editor(window, qapp):
+    from PySide6.QtTest import QTest
+
+    window.show()
+    qapp.processEvents()
+    block = _calc(window, "L := 6m\nL =")
+    window.select_tool("select")
+    point = _result_point(window, block)
+    double_click(window.view, point.x(), point.y())
+    editor = window.view._unit_editor
+    editor.clear()
+    QTest.keyClicks(editor, "m")
+    editor.completer().setCompletionPrefix("m")
+    editor.completer().complete()
+    qapp.processEvents()
+
+    popup = editor.completer().popup()
+    expected = editor.mapToGlobal(editor.rect().bottomLeft())
+    actual = popup.mapToGlobal(popup.rect().topLeft())
+    assert abs(actual.x() - expected.x()) <= 4
+    assert abs(actual.y() - expected.y()) <= 8
 
 
 def test_typing_a_unit_changes_what_the_answer_reads(window):
@@ -1614,7 +1959,7 @@ def test_hovering_a_function_shows_its_signature_and_purpose(window):
 
 def test_typing_a_function_shows_its_signature_and_purpose(window):
     window.view._last_scene_pos = QPointF(100, 100)
-    press_key(window.view, Qt.Key_unknown, "/")
+    press_key(window.view, Qt.Key_unknown, '"')
     type_text(window.view, "sqrt(")
 
     assert "sqrt(x)" in window.status_hint.text()
@@ -1704,9 +2049,41 @@ def test_the_page_list_says_what_scale_each_page_is_at(window):
 
     entries = [window.pages_panel.list.item(row).text()
                for row in range(window.pages_panel.list.count())]
-    assert entries[0] == "1"                    # no scale, no clutter
+    assert entries[0] == "1   Beam design"      # label, but no uncalibrated clutter
     assert "1:50" in entries[1]
     assert "Scale 1:50" in window.pages_panel.list.item(1).toolTip()
+
+
+def test_a_page_label_can_be_renamed_and_reset_from_its_menu(window, monkeypatch):
+    from PySide6.QtWidgets import QInputDialog
+
+    page = window.current_page()
+    page.source_note = "drawing.pdf page A1"
+    page.label = page.source_note
+    window.pages_panel.rebuild(window.document, 0)
+    monkeypatch.setattr(QInputDialog, "getText",
+                        lambda *args, **kwargs: ("Foundation", True))
+
+    menu = window.page_menu(0)
+    next(action for action in menu.actions()
+         if action.text() == "Rename…").trigger()
+    assert page.label == "Foundation"
+    assert "Foundation" in window.pages_panel.list.item(0).text()
+
+    menu = window.page_menu(0)
+    next(action for action in menu.actions()
+         if action.text() == "Reset label").trigger()
+    assert page.label == "drawing.pdf page A1"
+    assert "drawing.pdf page A1" in window.pages_panel.list.item(0).text()
+
+
+def test_resetting_a_blank_pages_label_restores_its_number(window):
+    page = window.current_page()
+    page.source_note = ""
+    page.label = "Temporary"
+    window.reset_page_label(0)
+    assert page.label == ""
+    assert window.pages_panel.list.item(0).text() == "1"
 
 
 def test_the_page_menu_can_set_the_scale(window):
@@ -1807,8 +2184,8 @@ def test_the_page_menu_offers_rotating_and_paper_sizes(window):
     labels = [action.text() for action in menu.actions()]
     # Named so it cannot be mistaken for turning the view, which is on the
     # View menu and changes nothing about the document.
-    assert "Rotate page clockwise" in labels
-    assert "Rotate page anticlockwise" in labels
+    assert "Rotate clockwise" in labels
+    assert "Rotate anticlockwise" in labels
     paper = next(action.menu() for action in menu.actions()
                  if action.text() == "Paper size")
     sizes = [action.text() for action in paper.actions()]
@@ -1873,6 +2250,23 @@ def _callout(window, target=(200, 300), box=(300, 200, 460, 260), text="note"):
     if text:
         item.set_text(text)
     return item
+
+
+def test_a_callouts_text_box_uses_the_pointers_left_middle(window):
+    _quiet_snapping(window)
+    window.select_tool("callout")
+    click(window.view, 180, 320)
+    hover(window.view, 360, 240)
+    preview = window.view._pending_callout_box()
+    assert preview.left() == pytest.approx(360, abs=1)
+    assert preview.center().y() == pytest.approx(240, abs=1)
+
+    click(window.view, 360, 240)
+
+    callout = window.view.editing_item()
+    box = window.view.markup_box(callout)
+    assert box.left() == pytest.approx(360, abs=1)
+    assert box.center().y() == pytest.approx(240, abs=1)
 
 
 def test_the_arrow_can_be_moved_straight_after_drawing_it(window):
@@ -2157,7 +2551,7 @@ def test_a_table_name_is_kept_when_the_document_is_saved(window, tmp_path):
 def test_naming_a_table_is_offered_on_its_menu(window):
     table = _capacity_table(window)
     labels = [a.text() for a in window.build_context_menu(table, table.pos()).actions()]
-    assert "Name this table…" in labels
+    assert "Table name…" in labels
 
 
 def test_a_named_table_shows_up_as_something_the_document_knows(window):
@@ -2217,6 +2611,55 @@ def test_a_line_does_not_expose_block_only_scope_controls(window):
     assert "Self-contained" not in labels
 
 
+def test_the_style_toolbar_scope_control_only_edits_a_block(window, qapp):
+    from PySide6.QtTest import QTest
+
+    window.show()
+    qapp.processEvents()
+    block = _open_calculation(window, "inside := 5", block=True)
+    window.view.end_item_edit()
+    window.select_tool("select")
+    block.setSelected(True)
+    window.refresh_selection()
+    assert window._scope_widget.isVisible()
+    assert not window.scope_button.isChecked()
+
+    QTest.mouseClick(window.scope_button, Qt.LeftButton)
+
+    assert block.local_scope
+    line = MathItem("outside := 6", block=False)
+    window.view.frame().add_markup(line, QPointF(80, 400))
+    window.view.scene().clearSelection()
+    line.setSelected(True)
+    window.refresh_selection()
+    assert not window._scope_widget.isVisible()
+
+
+def test_the_style_toolbar_can_set_the_default_for_new_blocks(window, qapp):
+    from PySide6.QtTest import QTest
+    from calcforge.ui import preferences
+
+    prefs = preferences.current()
+    was = prefs.self_contained_blocks
+    try:
+        prefs.self_contained_blocks = False
+        preferences.apply(prefs)
+        window.show()
+        qapp.processEvents()
+        window.view.scene().clearSelection()
+        window.select_tool("mathblock")
+        assert window._scope_widget.isVisible()
+        assert not window.scope_button.isChecked()
+
+        QTest.mouseClick(window.scope_button, Qt.LeftButton)
+
+        assert preferences.current().self_contained_blocks
+        assert MathItem("local := 1", block=True).local_scope
+    finally:
+        prefs.self_contained_blocks = was
+        preferences.apply(prefs)
+
+
 def test_enter_in_a_block_makes_another_line_not_another_region(window):
     window.select_tool("mathblock")
     drag(window.view, 80, 80, 400, 200)
@@ -2232,7 +2675,7 @@ def test_enter_in_a_block_makes_another_line_not_another_region(window):
 
 def test_enter_in_a_line_opens_the_next_line_below(window):
     window.view._last_scene_pos = QPointF(100, 100)
-    press_key(window.view, Qt.Key_unknown, "/")
+    press_key(window.view, Qt.Key_unknown, '"')
     first = window.view.editing_item()
     type_text(window.view, "a:=1")
     press_key(window.view, Qt.Key_Return)
@@ -2411,7 +2854,7 @@ def test_a_copy_can_be_undone_in_one_go(window):
     assert len(markups(window)) == 1
 
 
-def test_ctrl_taken_hold_of_mid_move_lets_go_of_the_grid(window):
+def test_ctrl_taken_hold_of_mid_move_switches_to_a_snapped_copy(window):
     from PySide6.QtCore import QEvent
     from PySide6.QtWidgets import QApplication
 
@@ -2422,14 +2865,19 @@ def test_ctrl_taken_hold_of_mid_move_lets_go_of_the_grid(window):
     window.select_tool("select")
     box = markups(window)[0]
     box.setSelected(True)
+    origin = QPointF(box.pos())
 
     centre = box.mapToScene(box.local_rect().center())
     QApplication.sendEvent(window.view.viewport(),
                            _mouse(window.view, QEvent.MouseButtonPress, centre.x(), centre.y()))
     QApplication.sendEvent(window.view.viewport(), _mouse(
+        window.view, QEvent.MouseMove, centre.x() + 15, centre.y() + 8,
+        Qt.NoButton, Qt.LeftButton))
+    assert len(markups(window)) == 1
+    QApplication.sendEvent(window.view.viewport(), _mouse(
         window.view, QEvent.MouseMove, centre.x() + 33, centre.y() + 17,
         Qt.NoButton, Qt.LeftButton, Qt.ControlModifier))
-    off_grid = box.pos()
+    assert len(markups(window)) == 2
     QApplication.sendEvent(window.view.viewport(), _mouse(
         window.view, QEvent.MouseMove, centre.x() + 33, centre.y() + 17,
         Qt.NoButton, Qt.LeftButton, Qt.NoModifier))
@@ -2439,7 +2887,77 @@ def test_ctrl_taken_hold_of_mid_move_lets_go_of_the_grid(window):
 
     step = 10.0 * MM_TO_PT
     assert abs(round(on_grid.x() / step) * step - on_grid.x()) < 0.01
-    assert off_grid != on_grid                      # it was free while Ctrl was held
+    assert len(markups(window)) == 2
+    assert any(item.pos() == origin for item in markups(window))
+
+
+def test_shift_first_then_ctrl_duplicates_and_keeps_the_move_constrained(window):
+    import math
+
+    window.document.settings.snap_to_grid = False
+    window.document.settings.snap_to_items = False
+    window.document.settings.snap_to_alignment = False
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 160)
+    window.select_tool("select")
+    box = markups(window)[0]
+    box.setSelected(True)
+    origin = QPointF(box.pos())
+    centre = box.mapToScene(box.local_rect().center())
+
+    QApplication.sendEvent(window.view.viewport(), _mouse(
+        window.view, QEvent.MouseButtonPress, centre.x(), centre.y(),
+        modifiers=Qt.ShiftModifier))
+    QApplication.sendEvent(window.view.viewport(), _mouse(
+        window.view, QEvent.MouseMove, centre.x() + 35, centre.y() + 12,
+        Qt.NoButton, Qt.LeftButton, Qt.ShiftModifier))
+    QApplication.sendEvent(window.view.viewport(), _mouse(
+        window.view, QEvent.MouseMove, centre.x() + 100, centre.y() + 38,
+        Qt.NoButton, Qt.LeftButton,
+        Qt.ControlModifier | Qt.ShiftModifier))
+    QApplication.sendEvent(window.view.viewport(), _mouse(
+        window.view, QEvent.MouseButtonRelease, centre.x() + 100,
+        centre.y() + 38, modifiers=Qt.ControlModifier | Qt.ShiftModifier))
+
+    assert len(markups(window)) == 2
+    moved = next(item for item in markups(window) if item is box)
+    delta = moved.pos() - origin
+    angle = abs(math.degrees(math.atan2(delta.y(), delta.x())))
+    assert min(abs(angle - expected) for expected in (0, 45, 90)) < 0.5
+    assert any(item is not box and item.pos() == origin for item in markups(window))
+
+
+def test_shift_can_be_added_and_removed_while_a_move_is_in_progress(window):
+    window.document.settings.snap_to_grid = False
+    window.document.settings.snap_to_items = False
+    window.document.settings.snap_to_alignment = False
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 160)
+    window.select_tool("select")
+    box = markups(window)[0]
+    box.setSelected(True)
+    origin = QPointF(box.pos())
+    centre = box.mapToScene(box.local_rect().center())
+
+    QApplication.sendEvent(window.view.viewport(), _mouse(
+        window.view, QEvent.MouseButtonPress, centre.x(), centre.y()))
+    QApplication.sendEvent(window.view.viewport(), _mouse(
+        window.view, QEvent.MouseMove, centre.x() + 100, centre.y() + 30,
+        Qt.NoButton, Qt.LeftButton))
+    assert (box.pos() - origin).y() == pytest.approx(30, abs=0.5)
+
+    QApplication.sendEvent(window.view.viewport(), _mouse(
+        window.view, QEvent.MouseMove, centre.x() + 100, centre.y() + 30,
+        Qt.NoButton, Qt.LeftButton, Qt.ShiftModifier))
+    assert (box.pos() - origin).y() == pytest.approx(0, abs=0.5)
+
+    QApplication.sendEvent(window.view.viewport(), _mouse(
+        window.view, QEvent.MouseMove, centre.x() + 100, centre.y() + 30,
+        Qt.NoButton, Qt.LeftButton))
+    assert (box.pos() - origin).y() == pytest.approx(30, abs=0.5)
+    QApplication.sendEvent(window.view.viewport(), _mouse(
+        window.view, QEvent.MouseButtonRelease, centre.x() + 100,
+        centre.y() + 30))
 
 
 # ---------------------------------------------------------------------------
@@ -2739,6 +3257,27 @@ def test_bookmarks_are_listed_in_page_order(window):
     assert pages == ["1", "3"]
 
 
+def test_bookmark_can_be_renamed_from_the_panel(window, monkeypatch, qapp):
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QInputDialog, QPushButton
+
+    window.document.add_bookmark("Old name", 0)
+    window.bookmarks_changed()
+    panel = window.bookmarks_panel
+    panel.tree.setCurrentItem(panel.tree.topLevelItem(0))
+    monkeypatch.setattr(QInputDialog, "getText",
+                        lambda *args, **kwargs: ("New name", True))
+    rename = next(button for button in panel.findChildren(QPushButton)
+                  if button.text() == "Rename")
+
+    QTest.mouseClick(rename, Qt.LeftButton)
+    qapp.processEvents()
+
+    assert window.document.bookmarks[0].title == "New name"
+    assert panel.tree.topLevelItem(0).text(0) == "New name"
+    assert window.document.modified
+
+
 def test_a_bookmark_follows_its_page_when_pages_move(window):
     window.load_sample()
     window.document.add_bookmark("Foundation", 2)
@@ -2857,8 +3396,11 @@ def test_a_snapshot_pastes_back_as_one_thing(window):
 
     after = markups(window)
     assert len(after) == before + 1
-    pasted = [i for i in after if isinstance(i, SnapshotItem) and i.pos().y() > 400]
+    pasted = [i for i in after if isinstance(i, SnapshotItem)]
     assert len(pasted) == 1
+    box = window.view.markup_box(pasted[0])
+    assert box.left() == pytest.approx(80, abs=3)
+    assert box.bottom() == pytest.approx(500, abs=3)
 
 
 def test_a_picture_copied_elsewhere_beats_the_last_snapshot(window):
@@ -2891,6 +3433,8 @@ def test_a_picture_copied_elsewhere_beats_the_last_snapshot(window):
 
 def test_a_snapshot_is_its_own_kind_of_markup(window):
     """Not an image with a different name: a snapshot of its own."""
+    window.select_tool("rect")
+    drag(window.view, 80, 510, 120, 540)
     window.select_tool("snapshot")
     drag(window.view, 60, 500, 200, 560)
     assert window._clipboard and window._clipboard[0]["type"] == "snapshot"
@@ -2904,7 +3448,7 @@ def test_a_snapshot_of_no_region_at_all_says_so(window):
 
 
 def test_a_snapshot_takes_the_drawing_underneath_with_it(window, tmp_path, monkeypatch):
-    from PySide6.QtGui import QImage
+    from PySide6.QtGui import QImage, QPainter, QPicture
     from calcforge.io import pdfio
 
     photo = QImage(400, 300, QImage.Format_ARGB32)
@@ -2918,24 +3462,67 @@ def test_a_snapshot_takes_the_drawing_underneath_with_it(window, tmp_path, monke
     from PySide6.QtCore import QRectF
 
     frame = window.document.pages[1].frame
+    line = PolyItem("polyline")
+    line.points = [QPointF(0, 0), QPointF(90, 0)]
+    line.style.stroke = "#111111"
+    line.style.width = 3.0
+    line.layer = "Drawing"
+    if "Drawing" not in window.document.layer_names():
+        from calcforge.core.document import Layer
+        window.document.layers.append(Layer("Drawing", locked=True))
+    frame.add_markup(line, QPointF(30, 55))
     window.take_snapshot(frame, QRectF(20, 20, 120, 90))
     payload = window._clipboard
     assert payload and payload[0]["type"] == "snapshot"
     assert window.document.asset(payload[0]["asset"])
 
-    # What was stored is the drawing, not pixels: it replays as drawing, and
-    # it holds up however far it is scaled.
-    from PySide6.QtGui import QPicture
-
     recorded = QPicture()
     recorded.setData(bytes(window.document.asset(payload[0]["asset"])))
     assert not recorded.isNull()
+    replay = QImage(120, 90, QImage.Format_ARGB32)
+    replay.fill(Qt.transparent)
+    painter = QPainter(replay)
+    painter.drawPicture(0, 0, recorded)
+    painter.end()
+    assert replay.pixelColor(55, 35).alpha() > 0       # imported vector linework
+    assert replay.pixelColor(10, 10).alpha() == 0      # no blue page background
 
     window.paste_items()
     pasted = [i for i in markups(window) if isinstance(i, SnapshotItem)]
     assert len(pasted) == 1
     assert pasted[0].picture() is not None
     assert pasted[0].local_rect().width() == pytest.approx(120, abs=1)
+
+
+def test_snapshot_skips_unselected_worksheet_content(window, monkeypatch):
+    calculation = _calc(window, "L:=6m", at=(90, 110))
+    window.select_tool("text")
+    drag(window.view, 90, 190, 280, 240)
+    words = window.view.editing_item()
+    type_text(window.view, "design note")
+    window.view.end_item_edit()
+    window.select_tool("rect")
+    drag(window.view, 90, 280, 220, 340)
+    shape = markups(window)[-1]
+    painted = []
+    monkeypatch.setattr(calculation, "paint_content",
+                        lambda _painter: painted.append("calculation"))
+    monkeypatch.setattr(words, "paint_content",
+                        lambda _painter: painted.append("text"))
+    monkeypatch.setattr(shape, "paint_content",
+                        lambda _painter: painted.append("markup"))
+    monkeypatch.setattr(window.view.frame(), "render_image",
+                        lambda **_kwargs: QImage())
+
+    window.select_tool("snapshot")
+    drag(window.view, 60, 80, 360, 370)
+    assert painted == ["markup"]
+
+    calculation.setSelected(True)
+    painted.clear()
+    window.select_tool("snapshot")
+    drag(window.view, 60, 80, 360, 370)
+    assert painted == ["calculation", "markup"]
 
 
 def test_a_snapshot_scaled_up_is_still_drawn_from_its_lines(window):
@@ -3082,6 +3669,31 @@ def test_a_blank_page_says_there_is_nothing_to_recolour(window, monkeypatch):
     assert "no drawing" in said.get("text", "")
 
 
+def test_image_colour_dialog_offers_greyscale_and_transparency(window):
+    from PySide6.QtGui import QColor, QImage, qAlpha, qBlue, qGreen, qRed
+    from PySide6.QtTest import QTest
+    from calcforge.ui.dialogs import RecolourDialog
+
+    image = QImage(2, 1, QImage.Format_ARGB32)
+    image.setPixelColor(0, 0, QColor("#ff0000"))
+    image.setPixelColor(1, 0, QColor("#0000ff"))
+    dialog = RecolourDialog(image, window)
+
+    QTest.mouseClick(dialog.grey_mode, Qt.LeftButton)
+    grey = dialog.apply_to(image)
+    pixel = grey.pixel(0, 0)
+    assert qRed(pixel) == qGreen(pixel) == qBlue(pixel)
+
+    dialog.from_colour.setItemData(0, QColor("#ff0000"))
+    dialog.from_colour.setCurrentIndex(0)
+    dialog.tolerance.setValue(0)
+    QTest.mouseClick(dialog.transparent_mode, Qt.LeftButton)
+    clear = dialog.apply_to(image)
+    assert qAlpha(clear.pixel(0, 0)) == 0
+    assert qAlpha(clear.pixel(1, 0)) == 255
+    dialog.deleteLater()
+
+
 def test_the_page_menu_only_offers_it_where_there_is_a_drawing(window, tmp_path):
     _sheet_page(window, tmp_path)
     blank = {a.text(): a for a in window.page_menu(0).actions()}
@@ -3184,7 +3796,7 @@ def test_typing_after_pointing_finishes_the_reference(window):
 
 def _typing(window, text, at=(100, 120)):
     window.view._last_scene_pos = QPointF(*at)
-    press_key(window.view, Qt.Key_unknown, "/")
+    press_key(window.view, Qt.Key_unknown, '"')
     for character in text:
         press_key(window.view, Qt.Key_unknown, character)
     return window.view.editing_item()
@@ -3396,6 +4008,64 @@ def test_a_group_moves_as_one(window):
     assert second.pos().y() == pytest.approx(before.y() + 40, abs=2)
 
 
+def test_a_group_scales_as_one_and_shift_releases_its_ratio(window):
+    from calcforge.items.base import build_item
+
+    first, second = _two_boxes(window)
+    first.setSelected(True)
+    second.setSelected(True)
+    window.group_selection()
+    before = window.view.markup_box(first).united(window.view.markup_box(second))
+    original_ratio = before.width() / before.height()
+    corner = before.bottomRight()
+
+    drag(window.view, corner.x(), corner.y(), corner.x() + 100, corner.y() + 10)
+
+    proportional = window.view.markup_box(first).united(window.view.markup_box(second))
+    assert proportional.width() / proportional.height() == pytest.approx(
+        original_ratio, rel=0.02)
+    assert first.transform().m11() == pytest.approx(first.transform().m22())
+    assert second.transform().m11() == pytest.approx(second.transform().m22())
+
+    corner = proportional.bottomRight()
+    drag(window.view, corner.x(), corner.y(), corner.x() + 80, corner.y() + 10,
+         modifiers=Qt.ShiftModifier)
+
+    released = window.view.markup_box(first).united(window.view.markup_box(second))
+    assert released.width() / released.height() != pytest.approx(original_ratio, rel=0.05)
+    assert first.transform().m11() != pytest.approx(first.transform().m22(), rel=0.05)
+    clone = build_item(first.serialize())
+    assert clone.transform().m11() == pytest.approx(first.transform().m11())
+    assert clone.transform().m22() == pytest.approx(first.transform().m22())
+
+
+def test_escape_cancels_a_group_resize_and_restores_the_cursor(window):
+    first, second = _two_boxes(window)
+    first.setSelected(True)
+    second.setSelected(True)
+    window.group_selection()
+    before = [(QPointF(item.pos()), item.transform()) for item in (first, second)]
+    box = window.view.markup_box(first).united(window.view.markup_box(second))
+    corner = box.bottomRight()
+
+    hover(window.view, corner.x(), corner.y())
+    assert window.view.cursor().shape() == Qt.SizeFDiagCursor
+    QApplication.sendEvent(window.view.viewport(), _mouse(
+        window.view, QEvent.MouseButtonPress, corner.x(), corner.y()))
+    QApplication.sendEvent(window.view.viewport(), _mouse(
+        window.view, QEvent.MouseMove, corner.x() + 80, corner.y() + 30,
+        Qt.NoButton, Qt.LeftButton))
+    assert first.transform() != before[0][1]
+
+    press_key(window.view, Qt.Key_Escape)
+
+    assert window.view._mode == "idle"
+    assert window.view.cursor().shape() == Qt.ArrowCursor
+    for item, (position, transform) in zip((first, second), before):
+        assert item.pos() == position
+        assert item.transform() == transform
+
+
 def test_ungrouping_puts_them_back_on_their_own(window):
     first, second = _two_boxes(window)
     first.setSelected(True)
@@ -3539,8 +4209,43 @@ def test_the_properties_panel_offers_it(window):
     box.setSelected(True)
     window.refresh_selection()
     labels = [b.text() for b in window.properties_panel.findChildren(QPushButton)]
-    assert "Set as default" in labels
-    assert "Add to a tool set…" in labels
+    assert "Set default" in labels
+    assert "Add tool…" in labels
+
+
+def test_the_style_toolbar_sets_the_selected_markup_as_default(window, qapp):
+    from PySide6.QtTest import QTest
+    from calcforge.ui import toolsets
+
+    window.show()
+    qapp.processEvents()
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 160)
+    box = markups(window)[0]
+    box.style.stroke = "#2f9e44"
+    window.select_tool("select")
+    box.setSelected(True)
+    window.refresh_selection()
+    assert window.default_button.isEnabled()
+
+    QTest.mouseClick(window.default_button, Qt.LeftButton)
+
+    stored = toolsets.load_defaults()[toolsets.default_key(box)]
+    assert stored["style"]["stroke"] == "#2f9e44"
+    assert "will look like this one" in window.status_hint.text()
+
+
+def test_a_markup_can_be_saved_to_a_tool_set_from_its_context_menu(window):
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 160)
+    box = markups(window)[0]
+    window.select_tool("select")
+    box.setSelected(True)
+
+    labels = _menu_labels(window.build_context_menu(
+        box, box.mapToScene(box.local_rect().center())))
+
+    assert "Add tool…" in labels
 
 
 # ---------------------------------------------------------------------------
@@ -3663,9 +4368,10 @@ def test_a_tool_can_be_switched_between_the_two_modes(window):
     assert panel.current_entry().mode == toolsets.COPY
     panel.toggle_mode()
     assert panel.current_entry().mode == toolsets.PROPERTIES
-    draw = _menu_entry(panel.build_menu(), "Draw again with its properties")
+    draw = _menu_entry(panel.build_menu(), "Property mode")
     assert draw.isChecked()
     assert "properties" in panel.tree.currentItem().toolTip(0)
+    assert "Property" in panel.tree.currentItem().text(0)
 
 
 def test_tools_can_be_reordered_and_removed(window):
@@ -3884,6 +4590,80 @@ def test_what_is_about_to_be_placed_is_shown_first(window):
     assert len(markups(window)) == 1               # still only the original
 
 
+def test_an_exact_toolset_item_hangs_from_the_pointers_bottom_left(window):
+    _quiet_snapping(window)
+    window.select_tool("text")
+    drag(window.view, 100, 100, 300, 140)
+    original = window.view.editing_item()
+    window.view.end_item_edit()
+    entry = _kept(window, original)
+    window.use_tool_entry(entry)
+
+    click(window.view, 420, 560)
+
+    placed = next(item for item in markups(window) if item is not original)
+    box = window.view.markup_box(placed)
+    assert box.left() == pytest.approx(420, abs=1)
+    assert box.bottom() == pytest.approx(560, abs=1)
+
+
+def test_a_kept_cloud_uses_its_bottom_left_as_the_anchor(window):
+    _quiet_snapping(window)
+    window.select_tool("cloud")
+    drag(window.view, 100, 100, 260, 180)
+    original = markups(window)[-1]
+    entry = _kept(window, original)
+    window.use_tool_entry(entry)
+
+    click(window.view, 420, 560)
+
+    placed = next(item for item in markups(window) if item is not original)
+    box = window.view.markup_box(placed)
+    assert box.left() == pytest.approx(420, abs=1)
+    assert box.bottom() == pytest.approx(560, abs=1)
+
+
+def test_a_toolset_group_uses_its_combined_bottom_left_as_the_anchor(window):
+    from calcforge.ui import toolsets
+
+    _quiet_snapping(window)
+    first, second = _two_boxes(window)
+    first.setSelected(True)
+    second.setSelected(True)
+    window.group_selection()
+    entry = toolsets.entry_for_many([first, second])
+    window.use_tool_entry(entry)
+
+    click(window.view, 420, 560)
+
+    originals = {first, second}
+    placed = [item for item in markups(window) if item not in originals]
+    box = window.view.markup_box(placed[0]).united(
+        window.view.markup_box(placed[1]))
+    assert box.left() == pytest.approx(420, abs=1)
+    assert box.bottom() == pytest.approx(560, abs=1)
+
+
+def test_a_click_placed_image_hangs_from_the_pointers_bottom_left(
+        window, monkeypatch):
+    from calcforge.items.media import ImageItem
+
+    _quiet_snapping(window)
+
+    def supply_image(item):
+        item.set_local_rect(QRectF(0, 0, 120, 60))
+        return True
+
+    monkeypatch.setattr(window, "load_image_into", supply_image)
+    window.select_tool("image")
+    click(window.view, 420, 560)
+
+    image = next(item for item in markups(window) if isinstance(item, ImageItem))
+    box = window.view.markup_box(image)
+    assert box.left() == pytest.approx(420, abs=1)
+    assert box.bottom() == pytest.approx(560, abs=1)
+
+
 def test_the_clipboard_can_be_carried_and_dropped(window):
     window.select_tool("rect")
     drag(window.view, 100, 100, 200, 160)
@@ -3938,7 +4718,7 @@ def test_a_click_on_bare_paper_starts_nothing(window):
     click(window.view, 500, 500)
     assert not first.isSelected()
     assert window.view.marquee_polygon().isEmpty()
-    press_key(window.view, Qt.Key_unknown, "/")
+    press_key(window.view, Qt.Key_unknown, '"')
     assert window.view.editing_item() is not None      # typing still works
     window.view.end_item_edit()
 
@@ -4044,6 +4824,40 @@ def test_freehand_is_still_freehand_without_shift(window):
     window.select_tool("pen")
     drag(window.view, 100, 100, 260, 190)
     assert len(markups(window)[0].points) > 2
+
+
+@pytest.mark.parametrize("tool", ["pen", "highlighter"])
+def test_freehand_snaps_only_its_start_and_end(window, tool):
+    settings = _quiet_snapping(window)
+    settings.snap_to_grid = True
+    settings.grid_mm = 5.0
+    view = window.view
+    window.select_tool(tool)
+    points = [(103.0, 107.0), (151.0, 139.0),
+              (207.0, 169.0), (263.0, 197.0)]
+    QApplication.sendEvent(view.viewport(), _mouse(
+        view, QEvent.MouseButtonPress, *points[0]))
+    for x, y in points[1:-1]:
+        QApplication.sendEvent(view.viewport(), _mouse(
+            view, QEvent.MouseMove, x, y, Qt.NoButton, Qt.LeftButton))
+    QApplication.sendEvent(view.viewport(), _mouse(
+        view, QEvent.MouseButtonRelease, *points[-1]))
+
+    stroke = markups(window)[-1]
+    scene_points = [stroke.mapToScene(point) for point in stroke.points]
+    step = settings.grid_mm * MM_TO_PT
+
+    def on_grid(point):
+        return (point.x() == pytest.approx(round(point.x() / step) * step)
+                and point.y() == pytest.approx(round(point.y() / step) * step))
+
+    assert on_grid(scene_points[0])
+    assert on_grid(scene_points[-1])
+    sample = min(scene_points[1:-1], key=lambda point:
+                 abs(point.x() - points[1][0]) + abs(point.y() - points[1][1]))
+    assert sample.x() == pytest.approx(points[1][0])
+    assert sample.y() == pytest.approx(points[1][1])
+    assert not on_grid(sample)
 
 
 # ---------------------------------------------------------------------------
@@ -4366,6 +5180,27 @@ def test_a_raster_image_has_no_line_or_fill_style_controls(window, tmp_path):
     assert image.style.stroke == before
 
 
+def test_an_image_keeps_its_aspect_ratio_unless_shift_releases_it(window):
+    from calcforge.items.media import ImageItem
+
+    image = ImageItem(rect=QRectF(0, 0, 200, 100))
+    window.view.frame().add_markup(image, QPointF(100, 100))
+    window.select_tool("select")
+    image.setSelected(True)
+    window.refresh_selection()
+    corner = image.mapToScene(image.handle_points()["se"])
+
+    drag(window.view, corner.x(), corner.y(), corner.x() + 100, corner.y() + 10)
+    assert image.local_rect().width() == pytest.approx(300, abs=2)
+    assert image.local_rect().height() == pytest.approx(150, abs=2)
+
+    corner = image.mapToScene(image.handle_points()["se"])
+    drag(window.view, corner.x(), corner.y(), corner.x() + 50, corner.y() + 80,
+         modifiers=Qt.ShiftModifier)
+    assert image.local_rect().width() == pytest.approx(350, abs=2)
+    assert image.local_rect().height() == pytest.approx(230, abs=2)
+
+
 def test_every_markup_offers_its_own_settings(window):
     """Each kind of markup has a panel section about what makes it that kind."""
     expected = {
@@ -4629,6 +5464,36 @@ def test_misspelt_words_are_underlined_only_while_typing(window):
     assert not box.doc.findBlockByNumber(0).layout().formats()
 
 
+def test_spellcheck_knows_requests_and_offers_a_correction(window):
+    from PySide6.QtTest import QTest
+    from calcforge.core.spelling import shared
+
+    assert shared().knows("requests")
+    assert not shared().knows("reqeusts")
+    assert "requests" in shared().suggestions("reqeusts")
+
+    window.select_tool("text")
+    drag(window.view, 100, 100, 320, 150)
+    box = window.view.editing_item()
+    box.set_text("reqeusts")
+    cursor = box._editor.textCursor()
+    cursor.setPosition(4)
+    box._editor.setTextCursor(cursor)
+    menu = box._editor.spelling_menu()
+    assert menu is not None
+    labels = [action.text() for action in menu.actions()]
+    assert "requests" in labels and "Spelling…" in labels
+
+    choice = next(action for action in menu.actions()
+                  if action.text() == "requests")
+    menu.popup(window.mapToGlobal(window.rect().center()))
+    QApplication.processEvents()
+    QTest.mouseClick(menu, Qt.LeftButton, Qt.NoModifier,
+                     menu.actionGeometry(choice).center())
+    assert box._editor.toPlainText() == "requests"
+    window.view.escape_everything()
+
+
 # ---------------------------------------------------------------------------
 # One view of a calculation, typed into where it is
 # ---------------------------------------------------------------------------
@@ -4677,7 +5542,7 @@ def test_clicking_a_fraction_puts_the_caret_in_that_part_of_it(window):
 
 def test_typing_a_calculation_keeps_the_working_up_with_it(window):
     window.select_tool("select")
-    press_key(window.view, Qt.Key_unknown, "/")
+    press_key(window.view, Qt.Key_unknown, '"')
     item = window.view.editing_item()
     assert item is not None
     type_text(window.view, "5kN+3kN=")
@@ -4687,17 +5552,11 @@ def test_typing_a_calculation_keeps_the_working_up_with_it(window):
 
 
 def test_shift_and_the_space_bar_asks_for_a_text_box(window):
-    """Turning a line into a note is asked for, not walked into.
-
-    A plain space used to do it, and every calculation is started by typing —
-    so the space that follows a comma out of habit, or lands while you think,
-    threw the expression away and left a sentence behind. Shift and the space
-    bar says it deliberately.
-    """
+    """Shift+Space follows the same conversion rule as an ordinary space."""
     from calcforge.items.text import TextItem
 
     window.select_tool("select")
-    press_key(window.view, Qt.Key_unknown, "/")
+    press_key(window.view, Qt.Key_unknown, '"')
     type_text(window.view, "check")
     press_key(window.view, Qt.Key_Space, " ", Qt.ShiftModifier)
     QApplication.processEvents()
@@ -4709,16 +5568,12 @@ def test_shift_and_the_space_bar_asks_for_a_text_box(window):
     assert [type(i).__name__ for i in markups(window)] == ["TextItem"]
 
 
-def test_a_space_never_takes_a_calculation_away_from_you(window):
-    """It is refused, and the line carries on being the line it was.
+def test_a_space_changes_a_typed_calculation_into_text(window):
+    """A typed single calculation becomes text at the same caret position."""
+    from calcforge.items.text import TextItem
 
-    A space used to turn the whole entry into a note. Every calculation is
-    started by typing, so that rule fired on every stray space — which is why
-    it is gone: the space simply does not land, and the expression is still
-    there.
-    """
     window.select_tool("select")
-    press_key(window.view, Qt.Key_unknown, "/")
+    press_key(window.view, Qt.Key_unknown, '"')
     type_text(window.view, "sigma")
     said = []
     window.view.statusMessage.connect(said.append)
@@ -4726,14 +5581,13 @@ def test_a_space_never_takes_a_calculation_away_from_you(window):
     QApplication.processEvents()
 
     item = window.view.editing_item()
-    assert isinstance(item, MathItem), "still a calculation"
-    assert item._editor.toPlainText() == "sigma", "and the space never landed"
-    assert said and "space" in said[-1].lower(), said
+    assert isinstance(item, TextItem)
+    assert item._editor.toPlainText() == "sigma "
+    assert said and "changed" in said[-1].lower(), said
 
-    type_text(window.view, ":=5MPa")
+    type_text(window.view, "check")
     window.view.end_item_edit()
-    assert [type(i).__name__ for i in markups(window)] == ["MathItem"]
-    assert window.document.workspace.get("sigma") is not None
+    assert [type(i).__name__ for i in markups(window)] == ["TextItem"]
 
 
 def test_a_lone_word_left_behind_becomes_a_note_after_all(window):
@@ -4745,7 +5599,7 @@ def test_a_lone_word_left_behind_becomes_a_note_after_all(window):
     from calcforge.items.text import TextItem
 
     window.select_tool("select")
-    press_key(window.view, Qt.Key_unknown, "/")
+    press_key(window.view, Qt.Key_unknown, '"')
     item = window.view.editing_item()
     item._editor.setPlainText("checked by hand")
     window.view.end_item_edit()
@@ -4754,15 +5608,14 @@ def test_a_lone_word_left_behind_becomes_a_note_after_all(window):
     assert markups(window)[0].text().strip() == "checked by hand"
 
 
-def test_there_is_no_such_thing_as_a_space_in_maths(window):
-    """Nowhere in it, and with nothing happening when one is typed."""
-    window.select_tool("select")
-    press_key(window.view, Qt.Key_unknown, "/")
-    type_text(window.view, "5+")
+def test_there_is_no_such_thing_as_a_space_in_a_calculation_block(window):
+    """Blocks remain calculations and refuse spaces."""
+    item = MathItem("5+", block=True)
+    window.view.frame().add_markup(item)
+    window.view.begin_item_edit(item)
     press_key(window.view, Qt.Key_Space, " ")
     QApplication.processEvents()
-    item = window.view.editing_item()
-    assert isinstance(item, MathItem)
+    assert window.view.editing_item() is item
     assert item._editor.toPlainText() == "5+"
     window.view.escape_everything()
 
@@ -4821,11 +5674,9 @@ def test_drawing_again_is_greyed_out_for_a_calculation(window):
     panel.rebuild(keep=toolsets.MY_TOOLS)
 
     panel.select_entry(toolsets.MY_TOOLS, len(group.entries) - 2)
-    assert not _menu_entry(panel.build_menu(),
-                           "Draw again with its properties").isEnabled()
+    assert not _menu_entry(panel.build_menu(), "Property mode").isEnabled()
     panel.select_entry(toolsets.MY_TOOLS, len(group.entries) - 1)
-    assert _menu_entry(panel.build_menu(),
-                       "Draw again with its properties").isEnabled()
+    assert _menu_entry(panel.build_menu(), "Property mode").isEnabled()
 
 
 def test_tools_can_be_dragged_into_the_order_you_want(window):
@@ -4963,6 +5814,46 @@ def test_every_vertex_of_a_polyline_gets_the_same_pointer(window):
     assert cursor_for_handle("lblrot") == Qt.CrossCursor
 
 
+def test_shape_modifiers_have_distinct_add_remove_and_curve_cursors(window):
+    box = _a_rectangle(window)
+    box.setSelected(True)
+    window.select_tool("select")
+
+    def hover_with(x, y, modifiers):
+        QApplication.sendEvent(window.view.viewport(), _mouse(
+            window.view, QEvent.MouseMove, x, y, Qt.NoButton, Qt.NoButton,
+            modifiers))
+
+    hover_with(180, 120, Qt.ShiftModifier)       # top side
+    add = window.view.cursor().pixmap().cacheKey()
+    assert add
+
+    hover_with(120, 120, Qt.ShiftModifier)       # top-left point
+    remove = window.view.cursor().pixmap().cacheKey()
+    assert remove and remove != add
+
+    hover_with(180, 120, Qt.ControlModifier)
+    curve = window.view.cursor().pixmap().cacheKey()
+    assert curve and curve not in (add, remove)
+    hover(window.view, 600, 600)
+    assert window.view.cursor().shape() == Qt.ArrowCursor
+
+
+def test_finishing_a_rectangle_resize_recomputes_the_cursor(window):
+    box = _a_rectangle(window)
+    box.setSelected(True)
+    window.select_tool("select")
+    edge = box.mapToScene(box.local_rect().center())
+    edge.setX(box.mapToScene(box.local_rect().topRight()).x())
+    hover(window.view, edge.x(), edge.y())
+    assert window.view.cursor().shape() == Qt.SizeHorCursor
+
+    drag(window.view, edge.x(), edge.y(), edge.x() + 60, edge.y())
+
+    assert window.view._mode == "idle"
+    assert window.view.cursor().shape() == Qt.SizeHorCursor
+
+
 # ---------------------------------------------------------------------------
 # Nothing in the panel that has no answer
 # ---------------------------------------------------------------------------
@@ -5047,6 +5938,25 @@ def test_an_arc_bends(window):
     assert arc.kind == "arc"
     # longer than the straight line between its ends, because it is a curve
     assert arc.build_path().length() > 150
+
+
+def test_an_arc_has_an_editable_bend_control_point(window):
+    window.select_tool("arc")
+    drag(window.view, 100, 100, 260, 100)
+    arc = markups(window)[0]
+    window.select_tool("select")
+    arc.setSelected(True)
+    assert set(arc.handle_points()) == {"v0", "v1", "c0"}
+    before = arc.build_path().boundingRect()
+    control = arc.mapToScene(arc.handle_points()["c0"])
+    target = control + QPointF(20, 55)
+
+    drag(window.view, control.x(), control.y(), target.x(), target.y())
+
+    assert len(arc.points) == 3
+    assert set(arc.handle_points()) == {"v0", "v2", "c0"}
+    after = arc.build_path().boundingRect()
+    assert after.height() > before.height()
 
 
 def test_a_flag_is_pinned_where_it_is_clicked(window):
@@ -5154,7 +6064,7 @@ def test_the_markup_menu_offers_the_whole_of_bluebeams(window):
     labels = _menu_labels(window.build_context_menu(rect, QPointF(150, 150)))
     for wanted in ("Cut", "Copy", "Paste", "Duplicate", "Format painter",
                    "Delete", "Order", "Align", "Layer", "Lock / unlock",
-                   "Hide", "Flatten onto the page", "Apply to pages…",
+                   "Hide", "Flatten selection", "Apply pages…",
                    "Properties"):
         assert wanted in labels, f"{wanted!r} missing from {labels}"
 
@@ -5287,6 +6197,95 @@ def test_flattening_survives_a_save(window):
     window.flatten_selection()
     clone = build_item(rect.serialize())
     assert clone.flattened and clone.locked
+
+
+def test_recover_restores_a_recoverably_flattened_item(window):
+    from calcforge.ui import preferences
+
+    rect = _a_rectangle(window)
+    rect.setSelected(True)
+    rect.set_locked(False)
+    prefs = preferences.current()
+    previous = prefs.recover_flattened
+    try:
+        prefs.recover_flattened = True
+        window.interactive_prompts = False
+        window.act_flatten.trigger()
+        assert rect.flattened and rect.flatten_recoverable
+
+        window.act_recover_flattened.trigger()
+        assert not rect.flattened and not rect.locked
+        assert rect.flags() & rect.GraphicsItemFlag.ItemIsSelectable
+    finally:
+        prefs.recover_flattened = previous
+
+
+def test_irreversible_flattening_keeps_only_a_vector_recording(window):
+    from calcforge.ui import preferences
+
+    rect = _a_rectangle(window)
+    rect.setSelected(True)
+    original_uid = rect.uid
+    prefs = preferences.current()
+    previous = prefs.recover_flattened
+    try:
+        prefs.recover_flattened = False
+        window.interactive_prompts = False
+        window.act_flatten.trigger()
+
+        assert rect.scene() is None
+        assert not any(item.uid == original_uid for item in markups(window))
+        baked = [item for item in markups(window) if isinstance(item, SnapshotItem)]
+        assert len(baked) == 1
+        assert baked[0].flattened and not baked[0].flatten_recoverable
+        assert baked[0].picture() is not None
+        assert window.document.asset(baked[0].asset_key)
+
+        window.act_recover_flattened.trigger()
+        assert baked[0].flattened
+        assert "No recoverable" in window.status_hint.text()
+    finally:
+        prefs.recover_flattened = previous
+
+
+def test_document_flattening_uses_the_classes_chosen(window, monkeypatch):
+    from calcforge.ui import dialogs, preferences
+
+    rect = _a_rectangle(window)
+    calculation = _calc(window, "a:=2", at=(90, 300))
+
+    class ChosenCalculations:
+        def __init__(self, *_args):
+            pass
+
+        def exec(self):
+            return dialogs.QDialog.Accepted
+
+        def chosen(self):
+            return {"calculations"}
+
+    monkeypatch.setattr(dialogs, "FlattenDialog", ChosenCalculations)
+    prefs = preferences.current()
+    previous = prefs.recover_flattened
+    try:
+        prefs.recover_flattened = True
+        window.act_flatten_document.trigger()
+        assert calculation.flattened
+        assert not rect.flattened
+    finally:
+        prefs.recover_flattened = previous
+
+
+def test_flatten_dialog_class_choices_follow_real_clicks(window):
+    from calcforge.ui.dialogs import FlattenDialog
+
+    dialog = FlattenDialog(True, window)
+    assert dialog.chosen() == {"markups"}
+    dialog.boxes["markups"].click()
+    dialog.boxes["calculations"].click()
+    dialog.boxes["tables"].click()
+    assert dialog.chosen() == {"calculations", "tables"}
+    dialog.deleteLater()
 
 
 def test_a_markup_can_be_put_on_every_other_page(window, monkeypatch):
@@ -5487,6 +6486,7 @@ def test_a_picture_pasted_from_elsewhere_holds_its_picture(window):
     pasted = [i for i in markups(window) if isinstance(i, ImageItem)][-1]
     assert pasted.asset_key
     assert pasted.pixmap() is not None and not pasted.pixmap().isNull()
+    assert pasted.style.stroke == "" and pasted.style.width == 0.0
     # The green it was filled with is what comes out of it.
     assert 0xFF2F9E44 in _paints_something_other_than_grey(pasted)
 
@@ -5773,9 +6773,9 @@ def test_the_tool_chests_right_click_menu_carries_everything(window):
     panel.select_entry(toolsets.MY_TOOLS, 0)
 
     labels = _menu_labels(panel.build_menu())
-    for wanted in ("Use", "Draw again with its properties", "Rename…", "Remove",
+    for wanted in ("Use", "Property mode", "Rename…", "Remove",
                    "Rename this set…", "Delete this set", "New tool set…",
-                   "Import a tool set…"):
+                   "Import tools…"):
         assert wanted in labels, f"{wanted!r} missing from {labels}"
 
 
@@ -5784,7 +6784,7 @@ def test_the_menu_on_bare_panel_still_offers_a_new_set(window):
     panel.tree.setCurrentItem(None)
     labels = _menu_labels(panel.build_menu())
     assert "New tool set…" in labels
-    assert "Import a tool set…" in labels
+    assert "Import tools…" in labels
     assert "Use" not in labels          # nothing is picked out to use
 
 
@@ -5875,7 +6875,7 @@ def test_alignment_is_on_the_tables_own_menu(window):
     align = [a for a in menu.actions() if a.text() == "Align cells"]
     assert align
     labels = [a.text() for a in align[0].menu().actions()]
-    assert labels == ["Left", "Centre", "Right", "As they come"]
+    assert labels == ["Left", "Centre", "Right", "Auto"]
 
 
 def test_a_table_can_be_read_by_its_column_headings(window):
@@ -5946,6 +6946,52 @@ def test_the_rotation_grip_is_inside_the_item_it_belongs_to(window):
     grip = rect.handle_points().get("rot")
     assert grip is not None
     assert rect.boundingRect().contains(grip)
+
+
+def test_a_rotated_text_box_turns_upright_only_while_it_is_edited(window):
+    item = TextItem("Turned note", QRectF(0, 0, 160, 50))
+    window.view.frame().add_markup(item, QPointF(180, 180))
+    item.set_item_rotation(30)
+    centre = item.center()
+
+    double_click(window.view, centre.x(), centre.y())
+    assert window.view.editing_item() is item
+    assert item.rotation() == pytest.approx(0)
+
+    window.view.escape_everything()
+    assert item.rotation() == pytest.approx(30)
+    assert item.center() == centre
+
+
+def test_an_almost_unrotated_text_box_snaps_back_to_zero_after_editing(window):
+    item = TextItem("Nearly straight", QRectF(0, 0, 160, 50))
+    window.view.frame().add_markup(item, QPointF(180, 180))
+    item.setRotation(359)
+    centre = item.center()
+
+    double_click(window.view, centre.x(), centre.y())
+    assert window.view.editing_item() is item
+    window.view.escape_everything()
+    assert item.rotation() == pytest.approx(0)
+
+
+def test_a_callout_leader_keeps_pointing_at_the_same_place_during_upright_edit(
+        window):
+    item = CalloutItem("Turned callout", QRectF(0, 0, 160, 50),
+                       [QPointF(-80, 90)])
+    window.view.frame().add_markup(item, QPointF(260, 180))
+    item.set_item_rotation(-25)
+    centre = item.center()
+    tip = item.mapToScene(item.tip)
+
+    double_click(window.view, centre.x(), centre.y())
+    assert window.view.editing_item() is item
+    assert item.rotation() == pytest.approx(0)
+    assert item.mapToScene(item.tip) == tip
+
+    window.view.escape_everything()
+    assert item.rotation() == pytest.approx(-25)
+    assert item.mapToScene(item.tip) == tip
 
 
 def test_a_grouped_shape_shows_no_control_points_of_its_own(window):
@@ -6038,7 +7084,7 @@ def test_a_fraction_stays_a_fraction_while_it_is_being_typed(window):
     from calcforge.core.mathrender import Fraction
 
     window.view._last_scene_pos = QPointF(90, 110)
-    press_key(window.view, Qt.Key_unknown, "/")
+    press_key(window.view, Qt.Key_unknown, '"')
     block = window.view.editing_item()
     block._editor.setPlainText("Z := b*d^2/6")
     block.retypeset_live()
@@ -6051,7 +7097,7 @@ def test_a_fraction_stays_a_fraction_while_it_is_being_typed(window):
 
 def test_a_unit_being_typed_still_reads_as_a_quantity(window):
     window.view._last_scene_pos = QPointF(90, 110)
-    press_key(window.view, Qt.Key_unknown, "/")
+    press_key(window.view, Qt.Key_unknown, '"')
     block = window.view.editing_item()
     block._editor.setPlainText("b := 300 mm")
     block.retypeset_live()
@@ -6060,6 +7106,33 @@ def test_a_unit_being_typed_still_reads_as_a_quantity(window):
     assert row.width > 0
     painted = _text_in(row)
     assert "300" in painted and "mm" in painted
+
+
+def test_a_one_letter_unit_is_blue_while_typed_and_at_rest(window):
+    """Direct attachment makes ``m`` a unit even though bare ``m`` may be a name."""
+    from calcforge.core.mathrender import Glyph
+
+    def glyphs(box):
+        if isinstance(box, Glyph):
+            return [box]
+        found = []
+        for child, _x, _baseline in box.children_at(0.0, 0.0):
+            found.extend(glyphs(child))
+        return found
+
+    window.view._last_scene_pos = QPointF(90, 110)
+    press_key(window.view, Qt.Key_unknown, '"')
+    item = window.view.editing_item()
+    type_text(window.view, "L:=2m")
+    expected = item.math_style().unit_color.name()
+    live = [g for row in _rows_of(item) if row for g in glyphs(row)
+            if g.text == "m"]
+    assert live and all(g.color.name() == expected for g in live)
+
+    window.view.end_item_edit()
+    resting = [g for row in _rows_of(item) if row for g in glyphs(row)
+               if g.text == "m"]
+    assert resting and all(g.color.name() == expected for g in resting)
 
 
 def _text_in(box) -> str:
@@ -6074,7 +7147,7 @@ def _text_in(box) -> str:
 def test_a_half_typed_line_shows_what_has_been_typed(window):
     """"b*d^" cannot be laid out, and that one line waits rather than vanishing."""
     window.view._last_scene_pos = QPointF(90, 110)
-    press_key(window.view, Qt.Key_unknown, "/")
+    press_key(window.view, Qt.Key_unknown, '"')
     block = window.view.editing_item()
     block._editor.setPlainText("part := b*d^")
     block.retypeset_live()
@@ -6086,11 +7159,53 @@ def test_the_scripts_are_typeset_while_typing_too(window):
     from calcforge.core.mathrender import Scripts
 
     window.view._last_scene_pos = QPointF(90, 110)
-    press_key(window.view, Qt.Key_unknown, "/")
+    press_key(window.view, Qt.Key_unknown, '"')
     block = window.view.editing_item()
     block._editor.setPlainText("L := sqrt(x_1^2 + y_1^2)")
     block.retypeset_live()
     assert any(_contains(box, Scripts) for box in _rows_of(block) if box)
+
+
+def test_a_defined_subscripted_name_stays_structural_after_colon_equals(window):
+    from calcforge.core.mathrender import Shifted
+
+    window.view._last_scene_pos = QPointF(90, 110)
+    press_key(window.view, Qt.Key_unknown, '"')
+    block = window.view.editing_item()
+    type_text(window.view, "trib_width")
+    type_text(window.view, ":=300mm")
+
+    assert block._editor.toPlainText() == "trib_width:=300mm"
+    assert any(_contains(box, Shifted) for box in _rows_of(block) if box)
+    row = block.rows[0]
+    assert row.head_width > 0
+    assert "_" not in _text_in(row.left)
+
+
+def test_a_definition_name_remains_editable_after_focus_leaves_and_returns(
+        window, qapp):
+    window.show()
+    qapp.processEvents()
+    block = _typeset(window, "trib_width:=300mm")
+    window.default_button.setFocus(Qt.OtherFocusReason)
+    qapp.processEvents()
+    assert window.view.editing_item() is block
+
+    row = block.rows[0]
+    local = QPointF(block.style.padding + row.head_width * 0.45, row.baseline)
+    scene = block.mapToScene(local)
+    click(window.view, scene.x(), scene.y())
+    position = block._editor.textCursor().position()
+    assert 1 <= position <= len("trib_width")
+
+    press_key(window.view, Qt.Key_Left)
+    assert block._editor.textCursor().position() == position - 1
+    press_key(window.view, Qt.Key_Right)
+    assert block._editor.textCursor().position() == position
+    before = block._editor.toPlainText()
+    press_key(window.view, Qt.Key_Backspace)
+    assert len(block._editor.toPlainText()) == len(before) - 1
+    assert ":=" in block._editor.toPlainText()
 
 
 # ---------------------------------------------------------------------------
@@ -6102,7 +7217,7 @@ def test_typing_a_name_offers_the_documents_own_variables_first(window):
     window.recalculate()
 
     window.view._last_scene_pos = QPointF(90, 300)
-    press_key(window.view, Qt.Key_unknown, "/")
+    press_key(window.view, Qt.Key_unknown, '"')
     block = window.view.editing_item()
     type_text(window.view, "R:=sig")
 
@@ -6116,7 +7231,7 @@ def test_typing_after_a_number_offers_units_first(window):
     window.recalculate()
 
     window.view._last_scene_pos = QPointF(90, 300)
-    press_key(window.view, Qt.Key_unknown, "/")
+    press_key(window.view, Qt.Key_unknown, '"')
     type_text(window.view, "L:=300m")
     assert window.view.caret_follows_a_number()
     offered = window.view.completion_words("m")
@@ -6130,7 +7245,7 @@ def test_the_list_shows_up_for_a_name_and_tab_fills_it_in(window):
     window.recalculate()
 
     window.view._last_scene_pos = QPointF(90, 300)
-    press_key(window.view, Qt.Key_unknown, "/")
+    press_key(window.view, Qt.Key_unknown, '"')
     block = window.view.editing_item()
     type_text(window.view, "R:=sigma_")
     assert window.view.completions_showing()
@@ -6144,7 +7259,7 @@ def test_the_list_appears_under_the_caret_not_under_the_block(window):
     from PySide6.QtCore import QPoint
 
     window.view._last_scene_pos = QPointF(90, 110)
-    press_key(window.view, Qt.Key_unknown, "/")
+    press_key(window.view, Qt.Key_unknown, '"')
     block = window.view.editing_item()
     block._editor.setPlainText("a := 1\nb := 2\nc := 3\nd := 4\ne := 5\nf := m")
     block.retypeset_live()
@@ -6217,6 +7332,67 @@ def test_a_field_in_a_paragraph_quotes_a_value(window):
     assert "M_n = 250" in shown            # a bare name prints name = value
     assert "225" in shown                  # and an expression prints its answer
     assert "\\" not in shown               # the marks themselves do not print
+
+
+def test_backslash_types_a_live_inline_expression_and_keeps_division(window):
+    _calc(window, "M_n:=250kN*m", at=(90, 110))
+    window.recalculate()
+    window.select_tool("text")
+    drag(window.view, 100, 300, 440, 350)
+    box = window.view.editing_item()
+    type_text(window.view, "Half is ")
+    press_key(window.view, Qt.Key_Backslash, "\\")
+    type_text(window.view, "M_n/2")
+    press_key(window.view, Qt.Key_Right)
+    type_text(window.view, ".")
+    assert box._editor.toPlainText() == r"Half is \M_n/2\."
+
+    window.view.end_item_edit()
+    window.recalculate()
+
+    assert "M_n/2 = 125" in box.text()
+    assert "kN" in box.text()
+    assert box.written == r"Half is \M_n/2\."
+
+
+def test_completion_is_only_offered_inside_an_inline_equation(window):
+    _calc(window, "M_n:=250kN*m", at=(90, 110))
+    window.recalculate()
+    window.select_tool("text")
+    drag(window.view, 100, 300, 440, 350)
+    box = window.view.editing_item()
+    type_text(window.view, "Ordinary M_")
+    assert not window.view.completions_showing()
+
+    press_key(window.view, Qt.Key_Backslash, "\\")
+    type_text(window.view, "M_")
+    assert window.view.completions_showing()
+    offered = [window.view._completions.item(index).text()
+               for index in range(window.view._completions.count())]
+    assert "M_n" in offered
+    for _ in range(offered.index("M_n")):
+        press_key(window.view, Qt.Key_Down)
+    assert window.view._completions.currentItem().text() == "M_n"
+    press_key(window.view, Qt.Key_Tab)
+    assert box._editor.toPlainText().endswith("\\M_n\\")
+
+
+def test_inline_completion_appears_below_its_caret(window):
+    _calc(window, "M_n:=250kN*m", at=(90, 110))
+    window.recalculate()
+    window.select_tool("text")
+    drag(window.view, 100, 300, 440, 390)
+    box = window.view.editing_item()
+    type_text(window.view, "First line")
+    press_key(window.view, Qt.Key_Return, "\r")
+    type_text(window.view, "Second line ")
+    press_key(window.view, Qt.Key_Backslash, "\\")
+    type_text(window.view, "M_")
+    popup = window.view._completions
+    assert window.view.completions_showing()
+    corner = window.view._completion_corner(popup)
+    assert popup.pos() == corner
+    assert corner.y() > window.view.mapFromScene(box.scenePos()).y()
 
 
 def test_a_field_keeps_up_with_the_sheet(window):
@@ -6293,6 +7469,75 @@ def test_a_lines_own_figures_survive_a_save(window):
     assert clone.figures_for(0) == (3, "scientific")
 
 
+def test_a_redefined_variable_recalculates_only_its_dependency_chain(window):
+    frame = window.view.frame()
+    source = frame.add_markup(MathItem("a := 1"), QPointF(80, 100))
+    table = TableItem()
+    table.sheet.set_raw(0, 0, "=a*2")
+    table.named_cells = {"b": "A1"}
+    frame.add_markup(table, QPointF(80, 180))
+    downstream = frame.add_markup(MathItem("c := b+1"), QPointF(80, 500))
+    unrelated = frame.add_markup(MathItem("quiet := 99"), QPointF(80, 580))
+    window.recalculate()
+
+    graph = window.document.dependency_graph
+    assert table.uid in graph.dependents_by_variable["a"]
+    assert downstream.uid in graph.dependents_by_variable["b"]
+    assert window.document.workspace.get("c") == pytest.approx(3)
+
+    source.source = "a := 4"
+    window.recalculate()
+
+    assert window._last_recalculated_items == {
+        source.uid, table.uid, downstream.uid}
+    assert unrelated.uid not in window._last_recalculated_items
+    assert window.document.workspace.get("a") == pytest.approx(4)
+    assert window.document.workspace.get("b") == pytest.approx(8)
+    assert window.document.workspace.get("c") == pytest.approx(9)
+    assert window.document.workspace.get("quiet") == pytest.approx(99)
+
+    window.recalculate()
+    assert window._last_recalculated_items == set()
+    assert window.document.workspace.get("c") == pytest.approx(9)
+
+
+def test_incremental_recalculation_preserves_reading_order_redefinitions(window):
+    frame = window.view.frame()
+    first = frame.add_markup(MathItem("a := 1"), QPointF(80, 100))
+    before = frame.add_markup(MathItem("before := a"), QPointF(80, 180))
+    frame.add_markup(MathItem("a := 10"), QPointF(80, 260))
+    after = frame.add_markup(MathItem("after := a"), QPointF(80, 340))
+    window.recalculate()
+
+    first.source = "a := 2"
+    window.recalculate()
+
+    assert before.uid in window._last_recalculated_items
+    assert after.uid in window._last_recalculated_items
+    assert window.document.workspace.get("before") == pytest.approx(2)
+    assert window.document.workspace.get("after") == pytest.approx(10)
+    assert window.document.workspace.get("a") == pytest.approx(10)
+
+
+def test_a_rebuilt_item_with_the_same_uid_cannot_replay_an_empty_cache(window):
+    from calcforge.items.base import build_item
+
+    frame = window.view.frame()
+    original = frame.add_markup(MathItem("a := 7"), QPointF(80, 100))
+    dependent = frame.add_markup(MathItem("b := a*2"), QPointF(80, 180))
+    window.recalculate()
+    clone = build_item(original.serialize())
+    frame.remove_markup(original)
+    frame.add_markup(clone)
+
+    window.recalculate()
+
+    assert clone.uid in window._last_recalculated_items
+    assert window.document.workspace.get("a") == pytest.approx(7)
+    assert window.document.workspace.get("b") == pytest.approx(14)
+    assert dependent.statements[0].ok
+
+
 def test_a_calculations_right_click_only_offers_merge_from_its_calc_commands(window):
     block = _calc(window, "a := 1/3 =", at=(90, 110))
     block.setSelected(True)
@@ -6346,6 +7591,123 @@ def test_a_rebound_key_reaches_its_action(window):
     assert window.act_paste_in_place.shortcut().toString() == "Ctrl+Alt+P"
     window.shortcuts.set_sequence("command.paste_in_place", "Ctrl+Shift+V")
     window.apply_shortcuts()
+
+
+def _show_for_shortcut(window, qapp):
+    """Give Qt a real active window and focused canvas for QAction routing."""
+    window.show()
+    window.raise_()
+    window.activateWindow()
+    window.view.setFocus()
+    qapp.processEvents()
+
+
+def test_text_alignment_and_size_shortcuts_format_the_selected_object(
+        window, qapp):
+    from PySide6.QtTest import QTest
+
+    window.select_tool("text")
+    drag(window.view, 100, 100, 360, 160)
+    item = window.view.editing_item()
+    item.set_text("Selected note")
+    window.view.end_item_edit()
+    item.setSelected(True)
+    _show_for_shortcut(window, qapp)
+
+    QTest.keyClick(window.view, Qt.Key_Right,
+                   Qt.ControlModifier | Qt.AltModifier)
+    QTest.keyClick(window.view, Qt.Key_Up,
+                   Qt.ControlModifier | Qt.AltModifier)
+    qapp.processEvents()
+
+    assert item.style.align == "right"
+    assert item.style.font_size == pytest.approx(11.0)
+
+
+def test_rebound_shortcut_formats_only_the_selected_text_run(window, qapp):
+    from PySide6.QtGui import QTextCursor
+    from PySide6.QtTest import QTest
+
+    window.select_tool("text")
+    drag(window.view, 100, 100, 360, 160)
+    item = window.view.editing_item()
+    item.set_text("first second")
+    cursor = item._editor.textCursor()
+    cursor.setPosition(6)
+    cursor.setPosition(12, QTextCursor.KeepAnchor)
+    item._editor.setTextCursor(cursor)
+    window.shortcuts.set_sequence("command.font_increase", "Ctrl+Alt+9")
+    window.apply_shortcuts()
+    _show_for_shortcut(window, qapp)
+
+    QTest.keyClick(window.view, Qt.Key_9,
+                   Qt.ControlModifier | Qt.AltModifier)
+    qapp.processEvents()
+
+    chosen = QTextCursor(item.doc)
+    chosen.setPosition(6)
+    chosen.setPosition(12, QTextCursor.KeepAnchor)
+    untouched = QTextCursor(item.doc)
+    untouched.setPosition(0)
+    untouched.setPosition(5, QTextCursor.KeepAnchor)
+    assert chosen.charFormat().fontPointSize() == pytest.approx(11.0)
+    assert untouched.charFormat().fontPointSize() != pytest.approx(11.0)
+
+
+def test_alignment_and_size_shortcuts_format_the_selected_table_cells(
+        window, qapp):
+    from PySide6.QtTest import QTest
+
+    table = _table(window)
+    table.current = table.anchor = (0, 0)
+    press_key(window.view, Qt.Key_Right, modifiers=Qt.ShiftModifier)
+    assert table.selected_cells() == [(0, 0), (0, 1)]
+    _show_for_shortcut(window, qapp)
+
+    QTest.keyClick(window.view, Qt.Key_Right,
+                   Qt.ControlModifier | Qt.AltModifier)
+    QTest.keyClick(window.view, Qt.Key_Up,
+                   Qt.ControlModifier | Qt.AltModifier)
+    qapp.processEvents()
+
+    for cell in ((0, 0), (0, 1)):
+        assert table.cell_format(*cell).align == "right"
+        assert table.cell_format(*cell).font_size == pytest.approx(9.5)
+    assert table.cell_format(1, 0).align == "auto"
+    assert table.cell_format(1, 0).font_size is None
+    assert table.sheet.row_height(0) >= 17.5
+
+
+def test_shortcuts_format_a_calculation_line_and_the_active_block_line(
+        window, qapp):
+    from PySide6.QtGui import QTextCursor
+    from PySide6.QtTest import QTest
+
+    line = _calc(window, "span := 6 m")
+    line.setSelected(True)
+    _show_for_shortcut(window, qapp)
+    QTest.keyClick(window.view, Qt.Key_Right,
+                   Qt.ControlModifier | Qt.AltModifier)
+    QTest.keyClick(window.view, Qt.Key_Up,
+                   Qt.ControlModifier | Qt.AltModifier)
+    qapp.processEvents()
+    assert line.line_alignments == {0: "right"}
+    assert line.line_font_sizes == {0: pytest.approx(11.0)}
+
+    line.setSelected(False)
+    block = _open_calculation(window, "a := 1\nb := 2", block=True)
+    cursor = block._editor.textCursor()
+    cursor.setPosition(len("a := 1\n"))
+    block._editor.setTextCursor(cursor)
+    _show_for_shortcut(window, qapp)
+    QTest.keyClick(window.view, Qt.Key_Home,
+                   Qt.ControlModifier | Qt.AltModifier)
+    QTest.keyClick(window.view, Qt.Key_Down,
+                   Qt.ControlModifier | Qt.AltModifier)
+    qapp.processEvents()
+
+    assert block.line_alignments == {1: "center"}
+    assert block.line_font_sizes == {1: pytest.approx(9.0)}
 
 
 def test_holding_ctrl_lets_go_of_the_grid_while_drawing(window):
@@ -6428,7 +7790,7 @@ def test_ctrl_shift_m_still_joins_several(window):
 def _typeset(window, source, at=(90, 110)):
     """A calculation, open for typing, laid out as it will print."""
     window.view._last_scene_pos = QPointF(*at)
-    press_key(window.view, Qt.Key_unknown, "/")
+    press_key(window.view, Qt.Key_unknown, '"')
     block = window.view.editing_item()
     block._editor.setPlainText(source)
     block.retypeset_live()
@@ -6528,18 +7890,28 @@ def test_a_number_and_its_unit_are_joined_by_a_dot(window):
 
 def test_a_plain_multiply_keeps_its_own_spacing(window):
     """The dot between a number and a unit is tight; "2 · x" is not."""
-    from calcforge.core.mathrender import Glyph, UNIT_SEPARATOR
+    import ast
+    from calcforge.core.mathrender import MathStyle, Spacer, Typesetter
 
     block = _calc(window, "x := 2\ny := 2*x =", at=(90, 110))
     window.recalculate()
     written = _text_in([row.left for row in block.rows if row.left][1])
     assert "·" in written          # still a multiply sign
-    # but the unit rule did not claim it: x is a variable, not a unit
-    assert "2·x" not in written.replace(" ", "")[:6] or True
+    # But the unit rule did not claim it: an ordinary product retains more
+    # air either side of its operator than a joined number-and-unit value.
+    setter = Typesetter(MathStyle(), variables={"x"})
+    product = setter.build(ast.parse("2*x", mode="eval").body, 10.0)
+    quantity = setter.build(ast.parse("2*mm", mode="eval").body, 10.0)
+    product_spaces = [part.width for part in product.children
+                      if isinstance(part, Spacer)]
+    quantity_spaces = [part.width for part in quantity.children
+                       if isinstance(part, Spacer)]
+    assert len(product_spaces) == len(quantity_spaces) == 2
+    assert min(product_spaces) > max(quantity_spaces)
 
 
-def test_the_two_writing_keys_open_the_same_thing(window):
-    """Quote and slash both start a line that is maths until it is prose."""
+def test_quote_is_the_only_calculation_entry_key(window):
+    """Quote starts entry; slash remains division inside an equation."""
     from calcforge.items.mathitem import MathItem
     from calcforge.items.text import TextItem
 
@@ -6549,23 +7921,16 @@ def test_the_two_writing_keys_open_the_same_thing(window):
     window.view._last_scene_pos = QPointF(90, 110)
     press_key(window.view, Qt.Key_unknown, '"')
     assert isinstance(window.view.editing_item(), MathItem)
-    type_text(window.view, "b:=300mm")
+    type_text(window.view, "b:=600mm/2")
     window.view.end_item_edit()
 
     window.view._last_scene_pos = QPointF(90, 300)
-    press_key(window.view, Qt.Key_unknown, '"')
-    # Shift and the space bar says this one is prose. A plain space would be
-    # refused: it is the calculation that is being protected.
-    type_text(window.view, "check")
-    press_key(window.view, Qt.Key_Space, " ", Qt.ShiftModifier)
-    QApplication.processEvents()
-    type_text(window.view, "the bolt group")
-    window.view.end_item_edit()
+    press_key(window.view, Qt.Key_Slash, "/")
     window.recalculate()
 
-    kinds = sorted(type(m).__name__ for m in markups(window))
-    assert kinds == ["MathItem", "TextItem"]
-    assert window.document.workspace.get("b") is not None
+    assert window.view.editing_item() is None
+    assert [type(m).__name__ for m in markups(window)] == ["MathItem"]
+    assert window.document.workspace.get("b").to("mm").magnitude == pytest.approx(300)
 
 
 # ---------------------------------------------------------------------------
@@ -6609,9 +7974,9 @@ def test_turning_the_view_is_on_the_view_menu(window):
     for menu in window.menuBar().actions():
         if menu.text() == "&View":
             labels = [a.text() for a in menu.menu().actions()]
-    assert "Turn view clockwise" in labels
-    assert "Turn view anticlockwise" in labels
-    assert "Turn view upright" in labels
+    assert "Turn clockwise" in labels
+    assert "Turn anticlockwise" in labels
+    assert "Reset turn" in labels
 
 
 # ---------------------------------------------------------------------------
@@ -6684,6 +8049,25 @@ def test_the_arc_handles_bend_and_lean_the_curve(window):
     assert shape.curved[0][1] > before
 
 
+def test_an_arc_preview_updates_during_a_real_handle_drag(window):
+    shape = _polygon(window)
+    shape.curve_segment(0)
+    before = shape.curved[0]
+    handle = shape.mapToScene(shape.handle_points()["c0"])
+    target = handle + QPointF(35, 45)
+
+    QApplication.sendEvent(window.view.viewport(), _mouse(
+        window.view, QEvent.MouseButtonPress, handle.x(), handle.y()))
+    QApplication.sendEvent(window.view.viewport(), _mouse(
+        window.view, QEvent.MouseMove, target.x(), target.y(),
+        Qt.NoButton, Qt.LeftButton))
+
+    assert shape.curved[0] != before
+    assert "c0" in shape.handle_points() and "n0" in shape.handle_points()
+    QApplication.sendEvent(window.view.viewport(), _mouse(
+        window.view, QEvent.MouseButtonRelease, target.x(), target.y()))
+
+
 def test_the_radius_handle_sets_how_round_a_corner_is(window):
     shape = _polygon(window)
     shape.round_corner(1)
@@ -6691,6 +8075,26 @@ def test_the_radius_handle_sets_how_round_a_corner_is(window):
     corner = shape.points[1]
     shape.move_handle("r1", corner + QPointF(-40, 40))
     assert shape.rounded[1] > before
+
+
+def test_a_rounded_corner_preview_updates_during_a_real_handle_drag(window):
+    shape = _polygon(window)
+    shape.round_corner(1)
+    before = shape.rounded[1]
+    handle = shape.mapToScene(shape.handle_points()["r1"])
+    corner = shape.mapToScene(shape.points[1])
+    target = corner + (handle - corner) * 1.8
+
+    QApplication.sendEvent(window.view.viewport(), _mouse(
+        window.view, QEvent.MouseButtonPress, handle.x(), handle.y()))
+    QApplication.sendEvent(window.view.viewport(), _mouse(
+        window.view, QEvent.MouseMove, target.x(), target.y(),
+        Qt.NoButton, Qt.LeftButton))
+
+    assert shape.rounded[1] > before
+    assert "r1" in shape.handle_points()
+    QApplication.sendEvent(window.view.viewport(), _mouse(
+        window.view, QEvent.MouseButtonRelease, target.x(), target.y()))
 
 
 def test_a_break_symbol_goes_on_a_side_and_comes_off(window):
@@ -6711,10 +8115,10 @@ def test_the_outline_menu_offers_all_four(window):
     outline = [a.menu() for a in menu.actions() if a.text() == "This outline"]
     assert outline, "the outline submenu should be there"
     labels = [a.text() for a in outline[0].actions()]
-    assert "Round this corner off" in labels
-    assert "Take this point out" in labels
-    assert any("break symbol" in label for label in labels)
-    assert any("arc" in label or "Straighten" in label for label in labels)
+    assert "Round corner" in labels
+    assert "Remove point" in labels
+    assert "Insert break" in labels
+    assert "Arc side" in labels
 
 
 def test_a_rectangle_can_become_a_polygon_to_be_reshaped(window):
@@ -6725,7 +8129,7 @@ def test_a_rectangle_can_become_a_polygon_to_be_reshaped(window):
     box.setSelected(True)
 
     labels = [a.text() for a in window.build_context_menu(box, QPointF(150, 150)).actions()]
-    assert "Turn into a polygon" in labels
+    assert "Convert polygon" in labels
 
     window.rectangle_to_polygon(box)
     shape = [i for i in markups(window) if isinstance(i, PolyItem)][-1]
@@ -6944,7 +8348,7 @@ def test_an_inserted_pdf_page_comes_in_without_a_grid(window, tmp_path):
 
 def test_the_page_grid_is_on_the_page_menu_and_undoes(window):
     labels = [a.text() for a in window.page_menu(0).actions()]
-    assert "Grid on this page" in labels
+    assert "Page grid" in labels
 
     window.set_page_grid(0, True)
     assert window.document.pages[0].grid is True
@@ -7007,10 +8411,10 @@ def test_a_page_can_be_left_out_of_the_header_and_footer(window):
 
 def test_the_header_and_footer_are_on_the_page_menu(window):
     subs = {a.text(): a.menu() for a in window.page_menu(0).actions() if a.menu()}
-    assert "Header and footer" in subs
-    labels = [a.text() for a in subs["Header and footer"].actions()]
-    assert "Header on this page" in labels
-    assert "Footer on this page" in labels
+    assert "Header/footer" in subs
+    labels = [a.text() for a in subs["Header/footer"].actions()]
+    assert "Show header" in labels
+    assert "Show footer" in labels
 
 
 def test_a_run_of_pages_takes_the_footer_off_at_once(window):
@@ -7154,12 +8558,102 @@ def test_where_a_drop_lands_follows_the_pointer(window):
     panel = window.pages_panel
     panel.rebuild(window.document, 0)
     first = panel.list.visualItemRect(panel.list.item(0))
-    # Above the middle of the first thumbnail: in front of it.
-    assert panel.drop_row(first.center() - QPoint(0, first.height() // 3)) == 0
-    # Below its middle: after it.
-    assert panel.drop_row(first.center() + QPoint(0, first.height() // 3)) == 1
+    if panel.list.uses_horizontal_slots():
+        before = first.center() - QPoint(first.width() // 3, 0)
+        after = first.center() + QPoint(first.width() // 3, 0)
+    else:
+        before = first.center() - QPoint(0, first.height() // 3)
+        after = first.center() + QPoint(0, first.height() // 3)
+    assert panel.drop_row(before) == 0
+    assert panel.drop_row(after) == 1
     # Past the end of the strip: on the end.
     assert panel.drop_row(QPoint(5, panel.list.height() * 4)) == panel.list.count()
+
+
+def test_a_wrapping_page_grid_uses_left_and_right_for_the_drop_slot(window, qapp):
+    window.add_page()
+    window.add_page()
+    panel = window.pages_panel
+    panel.rebuild(window.document, 0)
+    qapp.processEvents()
+    assert panel.list.uses_horizontal_slots()
+    first = panel.list.visualItemRect(panel.list.item(0))
+    assert panel.drop_row(first.center() - QPoint(first.width() // 3, 0)) == 0
+    assert panel.drop_row(first.center() + QPoint(first.width() // 3, 0)) == 1
+
+
+def test_an_external_page_drag_shows_and_uses_the_exact_slot(
+        window, tmp_path, qapp):
+    from pathlib import Path
+    from PySide6.QtCore import QMimeData, QUrl
+    from PySide6.QtGui import (QDragEnterEvent, QDragLeaveEvent,
+                               QDragMoveEvent, QDropEvent, QImage)
+
+    window.load_sample()
+    window.show()
+    panel = window.pages_panel
+    panel.rebuild(window.document, 0)
+    qapp.processEvents()
+    path = tmp_path / "dropped.png"
+    image = QImage(30, 20, QImage.Format_ARGB32)
+    image.fill(0xFF336699)
+    assert image.save(str(path))
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(path))])
+    first = panel.list.visualItemRect(panel.list.item(0))
+    spot = first.center() + QPoint(0, first.height() // 3)
+
+    enter = QDragEnterEvent(spot, Qt.CopyAction, mime,
+                            Qt.LeftButton, Qt.NoModifier)
+    QApplication.sendEvent(panel.list.viewport(), enter)
+    move = QDragMoveEvent(spot, Qt.CopyAction, mime,
+                          Qt.LeftButton, Qt.NoModifier)
+    QApplication.sendEvent(panel.list.viewport(), move)
+    qapp.processEvents()
+    assert move.isAccepted()
+    assert panel.list.external_drop_row == 1
+    start, end = panel.list.drop_indicator_line(1)
+    assert start.y() == end.y()
+    assert start.x() < end.x()
+
+    QApplication.sendEvent(panel.list.viewport(), QDragLeaveEvent())
+    assert panel.list.external_drop_row is None
+
+    captured = []
+    window.insert_files_at = lambda paths, row: captured.append((paths, row))
+    QApplication.sendEvent(panel.list.viewport(), QDragEnterEvent(
+        spot, Qt.CopyAction, mime, Qt.LeftButton, Qt.NoModifier))
+    QApplication.sendEvent(panel.list.viewport(), QDragMoveEvent(
+        spot, Qt.CopyAction, mime, Qt.LeftButton, Qt.NoModifier))
+    drop = QDropEvent(QPointF(spot), Qt.CopyAction, mime,
+                      Qt.LeftButton, Qt.NoModifier)
+    QApplication.sendEvent(panel.list.viewport(), drop)
+
+    assert drop.isAccepted()
+    assert len(captured) == 1 and captured[0][1] == 1
+    assert Path(captured[0][0][0]) == path
+    assert panel.list.external_drop_row is None
+
+
+def test_a_dropped_pdf_is_imported_at_the_indicated_row(window, tmp_path):
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QColor, QPainter, QPdfWriter
+
+    window.add_page()
+    window.add_page()
+    path = tmp_path / "one-sheet.pdf"
+    writer = QPdfWriter(str(path))
+    writer.setResolution(150)
+    painter = QPainter(writer)
+    painter.fillRect(QRectF(100, 100, 300, 200), QColor("#336699"))
+    painter.end()
+    before = [page.uid for page in window.document.pages]
+
+    assert window.insert_files_at([str(path)], 1) == 1
+
+    assert window.document.pages[0].uid == before[0]
+    assert window.document.pages[2].uid == before[1]
+    assert window.document.pages[1].source_note.endswith("one-sheet.pdf page 1")
 
 
 # ---------------------------------------------------------------------------
@@ -7183,7 +8677,7 @@ def test_find_a_tool_is_on_the_help_menu(window):
     for entry in window.menuBar().actions():
         if entry.text() == "&Help":
             labels = [a.text() for a in entry.menu().actions()]
-    assert "Find a tool…" in labels
+    assert "Find tool…" in labels
     assert window.act_find_tool.shortcut().toString() == "Shift+F1"
 
 
@@ -7267,6 +8761,118 @@ def test_the_line_and_hatch_lists_are_in_the_properties_panel(window):
     entries = [[b.itemText(i) for i in range(b.count())] for b in boxes]
     assert any("centre" in e for e in entries), "the line types should be there"
     assert any("diagonal cross" in e for e in entries), "the hatches should be there"
+
+
+def test_line_and_hatch_choices_have_real_pattern_previews(window):
+    from PySide6.QtWidgets import QComboBox
+
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 260, 220)
+    window.select_tool("select")
+    markups(window)[-1].setSelected(True)
+    window.refresh_selection()
+
+    line = window.properties_panel.findChild(QComboBox, "lineStyle")
+    hatch = window.properties_panel.findChild(QComboBox, "hatchPattern")
+    solid = line.iconSize()
+    assert solid.width() >= 70 and solid.height() >= 20
+    assert not line.itemIcon(line.findData("solid")).isNull()
+    assert (line.itemIcon(line.findData("solid")).pixmap(solid).toImage()
+            != line.itemIcon(line.findData("dash")).pixmap(solid).toImage())
+    assert hatch.itemText(hatch.findData("")) == "plain"
+    assert (hatch.itemIcon(hatch.findData("")).pixmap(hatch.iconSize()).toImage()
+            != hatch.itemIcon(hatch.findData("diagonal cross")).pixmap(
+                hatch.iconSize()).toImage())
+
+
+def _property_groups(window):
+    from PySide6.QtWidgets import QGroupBox
+
+    return {box.title() for box in window.properties_panel.findChildren(QGroupBox)}
+
+
+def test_properties_only_offers_controls_the_selected_kind_can_use(window):
+    from PySide6.QtWidgets import QComboBox
+
+    rect = _a_rectangle(window)
+    window.select_tool("select")
+    click(window.view, rect.sceneBoundingRect().center().x(),
+          rect.sceneBoundingRect().center().y())
+    assert {"Appearance", "Size"} <= _property_groups(window)
+    assert "Text" not in _property_groups(window)
+    assert window.properties_panel.findChild(QComboBox, "hatchPattern") is not None
+
+    window.select_tool("line")
+    drag(window.view, 320, 120, 460, 220)
+    line = markups(window)[-1]
+    window.select_tool("select")
+    click(window.view, 390, 170)
+    assert "Text" not in _property_groups(window)
+    assert window.properties_panel.findChild(QComboBox, "lineStyle") is not None
+    assert window.properties_panel.findChild(QComboBox, "hatchPattern") is None
+
+
+def test_calculations_and_images_do_not_get_shape_style_controls(window):
+    from calcforge.items.media import ImageItem
+    from PySide6.QtWidgets import QComboBox
+
+    calculation = _calc(window, "L:=6m", at=(90, 110))
+    window.select_tool("select")
+    click(window.view, calculation.sceneBoundingRect().center().x(),
+          calculation.sceneBoundingRect().center().y())
+    assert "Calculation" in _property_groups(window)
+    assert "Appearance" not in _property_groups(window)
+    assert "Text" not in _property_groups(window)
+
+    image = ImageItem(rect=QRectF(0, 0, 120, 80))
+    window.view.frame().add_markup(image, QPointF(90, 250))
+    click(window.view, 150, 290)
+    assert {"Appearance", "Image"} <= _property_groups(window)
+    assert "Text" not in _property_groups(window)
+    assert window.properties_panel.findChild(QComboBox, "lineStyle") is None
+    assert window.properties_panel.findChild(QComboBox, "hatchPattern") is None
+
+
+def test_style_toolbar_tracks_real_selection_and_the_active_tool(window):
+    from calcforge.ui.stylecaps import DASH, FILL, FONT, STROKE, WIDTH
+
+    window.view.escape_everything()
+    window.select_tool("line")
+    assert all(action.isVisible() for field in (STROKE, WIDTH, DASH)
+               for action in window._style_widgets[field])
+    assert all(not action.isVisible() for field in (FILL, FONT)
+               for action in window._style_widgets[field])
+
+    drag(window.view, 100, 100, 240, 180)
+    window.select_tool("select")
+    click(window.view, 170, 140)
+    assert all(action.isVisible() for field in (STROKE, WIDTH, DASH)
+               for action in window._style_widgets[field])
+    assert all(not action.isVisible() for field in (FILL, FONT)
+               for action in window._style_widgets[field])
+
+    calculation = _calc(window, "a:=2", at=(90, 280))
+    window.select_tool("select")
+    click(window.view, calculation.sceneBoundingRect().center().x(),
+          calculation.sceneBoundingRect().center().y())
+    assert all(action.isVisible() for action in window._style_widgets[FONT])
+    assert all(not action.isVisible() for field in (STROKE, FILL, WIDTH, DASH)
+               for action in window._style_widgets[field])
+
+
+def test_callout_properties_has_no_user_facing_multiply_control(window):
+    from PySide6.QtWidgets import QAbstractButton, QComboBox
+
+    callout = _callout(window)
+    window.view.end_item_edit()
+    window.select_tool("select")
+    click(window.view, callout.sceneBoundingRect().center().x(),
+          callout.sceneBoundingRect().center().y())
+    words = [button.text() for button in
+             window.properties_panel.findChildren(QAbstractButton)]
+    for combo in window.properties_panel.findChildren(QComboBox):
+        words.extend(combo.itemText(index) for index in range(combo.count()))
+    assert not any("multiply" in word.lower() for word in words)
 
 
 # ---------------------------------------------------------------------------
@@ -7632,6 +9238,7 @@ def test_moving_the_arrow_head_works_the_hinge_out_again(window):
     call.leader_moved()
     call.set_elbow_of(leader, QPointF(box.center().x(), box.top() - 40))
     assert call.side_of(leader) == "top" and leader.side == "top"
+    assert leader.reach > call.ELBOW_REACH
 
     # Drag the arrow head round to the other side of the box.
     handle = call.mapToScene(leader.tip)
@@ -7639,6 +9246,7 @@ def test_moving_the_arrow_head_works_the_hinge_out_again(window):
     drag(window.view, handle.x(), handle.y(), target.x(), target.y())
 
     assert leader.side == "", "the hand-picked side should have been given up"
+    assert leader.reach == pytest.approx(call.ELBOW_REACH)
     assert call.side_of(leader) == "right"
 
 
@@ -7653,9 +9261,11 @@ def test_moving_the_box_works_the_hinge_out_again(window):
     call.leader_moved()
     call.set_elbow_of(leader, QPointF(box.center().x(), box.top() - 40))
     assert leader.side == "top"
+    assert leader.reach > call.ELBOW_REACH
 
     call.move_keeping_leader(call.pos() + QPointF(-400, 0))
     assert leader.side == ""
+    assert leader.reach == pytest.approx(call.ELBOW_REACH)
 
 
 def test_a_leader_survives_a_round_trip_with_its_side_and_reach(window):
@@ -7738,7 +9348,73 @@ def test_a_cloud_callout_is_offered_more_leaders_of_either_kind(window):
     window.add_leader_to(call, "arrow")
     assert [leader.kind for leader in call.leaders] == ["cloud", "arrow"]
     window.add_leader_to(call, "cloud")
+    drag(window.view, 500, 330, 620, 400)
     assert [leader.kind for leader in call.leaders] == ["cloud", "arrow", "cloud"]
+
+
+def test_add_cloud_leader_uses_the_region_dragged_on_the_canvas(window):
+    call = _callout(window)
+    window.view.end_item_edit()
+    before = len(call.leaders)
+    window.add_leader_to(call, "cloud")
+
+    assert window.view._pending_cloud_leader is call
+    assert len(call.leaders) == before
+    drag(window.view, 500, 330, 620, 400)
+
+    assert window.view._pending_cloud_leader is None
+    assert len(call.leaders) == before + 1
+    cloud = call.leaders[-1]
+    assert cloud.kind == "cloud"
+    box = call.mapRectToScene(cloud.cloud_box()).normalized()
+    assert box.topLeft() == QPointF(500, 330)
+    assert box.bottomRight() == QPointF(620, 400)
+
+
+def test_escape_cancels_an_unplaced_cloud_leader(window):
+    call = _callout(window)
+    window.view.end_item_edit()
+    before = call.serialize()
+    window.add_leader_to(call, "cloud")
+
+    press_key(window.view, Qt.Key_Escape)
+
+    assert window.view._pending_cloud_leader is None
+    assert call.serialize() == before
+    assert window.view.cursor().shape() == Qt.ArrowCursor
+
+
+def test_a_cloud_and_its_callout_box_move_independently(window):
+    window.select_tool("cloud_callout")
+    drag(window.view, 160, 260, 300, 340)
+    click(window.view, 430, 200)
+    call = window.view.editing_item()
+    window.view.end_item_edit()
+    window.select_tool("select")
+    call.setSelected(True)
+    leader = call.leaders[0]
+
+    box_position = QPointF(call.pos())
+    cloud_before = [call.mapToScene(point) for point in leader.cloud]
+    cloud_handle = call.mapToScene(call.handle_points()["l0"])
+    drag(window.view, cloud_handle.x(), cloud_handle.y(),
+         cloud_handle.x() + 65, cloud_handle.y() + 35)
+
+    assert call.pos() == box_position
+    cloud_after = [call.mapToScene(point) for point in leader.cloud]
+    for before, after in zip(cloud_before, cloud_after):
+        assert after - before == QPointF(65, 35)
+
+    cloud_pinned = [QPointF(point) for point in cloud_after]
+    box = call.mapToScene(call.local_rect().center())
+    drag(window.view, box.x(), box.y(), box.x() - 80, box.y() + 45)
+
+    assert call.pos() - box_position == QPointF(-80, 45)
+    for before, after in zip(cloud_pinned,
+                             [call.mapToScene(point) for point in leader.cloud]):
+        assert after == before
+    assert leader.side == ""
+    assert leader.reach == pytest.approx(call.ELBOW_REACH)
 
 
 def test_the_hinge_stand_off_can_be_typed(window):
@@ -7844,6 +9520,65 @@ def test_a_new_markup_lines_up_with_one_already_drawn(window):
     assert loose.x() == pytest.approx(corner.x() + 2, abs=0.01)
 
 
+def _show_an_alignment_guide(window):
+    settings = _quiet_snapping(window)
+    settings.snap_to_items = True
+    settings.snap_to_alignment = True
+    window.select_tool("rect")
+    drag(window.view, 300, 200, 420, 260)
+    box = markups(window)[-1]
+    corner = box.mapToScene(box.local_rect().normalized().topLeft())
+    window.select_tool("line")
+    hover(window.view, corner.x() + 2, corner.y() + 300)
+    assert window.view._snap_guides
+    return corner + QPointF(2, 300)
+
+
+def test_snap_guides_clear_when_the_pointer_leaves(window):
+    _show_an_alignment_guide(window)
+    QApplication.sendEvent(window.view.viewport(), QEvent(QEvent.Leave))
+    assert window.view._snap_guides == []
+    assert window.view._snap_marker is None
+
+
+def test_snap_guides_clear_on_tool_change_and_escape(window):
+    _show_an_alignment_guide(window)
+    window.select_tool("ellipse")
+    assert window.view._snap_guides == []
+    _show_an_alignment_guide(window)
+    press_key(window.view, Qt.Key_Escape)
+    assert window.view._snap_guides == []
+    assert window.view._snap_marker is None
+
+
+def test_snap_guides_clear_when_the_point_is_committed(window):
+    point = _show_an_alignment_guide(window)
+    click(window.view, point.x(), point.y())
+    assert window.view._snap_guides == []
+    assert window.view._snap_marker is None
+
+
+def test_the_snapped_live_preview_is_the_geometry_that_gets_committed(window):
+    settings = _quiet_snapping(window)
+    settings.snap_to_grid = True
+    window.select_tool("line")
+    QApplication.sendEvent(window.view.viewport(), _mouse(
+        window.view, QEvent.MouseButtonPress, 103, 104))
+    QApplication.sendEvent(window.view.viewport(), _mouse(
+        window.view, QEvent.MouseMove, 241, 199, Qt.NoButton, Qt.LeftButton))
+    draft = window.view._draft
+    preview = [draft.mapToScene(point) for point in draft.points]
+
+    QApplication.sendEvent(window.view.viewport(), _mouse(
+        window.view, QEvent.MouseButtonRelease, 241, 199))
+
+    line = markups(window)[-1]
+    committed = [line.mapToScene(point) for point in line.points]
+    assert len(committed) == len(preview)
+    for shown, landed in zip(preview, committed):
+        assert (shown - landed).manhattanLength() < 0.01
+
+
 def test_the_drawing_underneath_offers_corners_but_no_guides(window):
     """A PDF's line work is full of lines; every one would be a guide."""
     from calcforge.items.shapes import PolyItem as Poly
@@ -7905,6 +9640,25 @@ def test_the_first_point_of_a_line_shows_the_snap_marker(window):
     assert window.view._snap_marker is not None, \
         "the marker should be there before the first click"
     assert (window.view._snap_marker - corner).manhattanLength() < 0.01
+
+
+def test_snap_feedback_is_a_blue_target_not_an_orange_square(window):
+    from PySide6.QtGui import QImage, QPainter
+
+    image = QImage(40, 40, QImage.Format_ARGB32)
+    image.fill(Qt.white)
+    painter = QPainter(image)
+    painter.translate(20, 20)
+    window.view._draw_snap_marker(painter, QPointF())
+    painter.end()
+
+    colours = [QColor(image.pixel(x, y))
+               for x in range(image.width()) for y in range(image.height())]
+    blue = [c for c in colours if c.blue() > 120 and c.blue() > c.red() * 1.2]
+    orange = [c for c in colours
+              if c.red() > 180 and 45 < c.green() < 150 and c.blue() < 100]
+    assert blue
+    assert not orange
 
 
 def test_the_three_snaps_are_on_the_view_menu(window):
@@ -8004,39 +9758,46 @@ def _open_calculation(window, source="", block=False, typed=False):
     return item
 
 
-def test_a_space_is_refused_in_a_calculation(window):
-    """5 kN is not a thing anybody types: the unit goes straight after."""
-    item = _open_calculation(window, typed=False)
+def test_a_space_changes_an_existing_single_calculation_to_text(window):
+    """Fresh and existing single lines obey the same space-to-text rule."""
+    item = _open_calculation(window, "checkbeam", typed=False)
     said = []
     window.view.statusMessage.connect(said.append)
-    type_text(window.view, "5")
+    cursor = item._editor.textCursor()
+    cursor.setPosition(5)
+    item._editor.setTextCursor(cursor)
     press_key(window.view, Qt.Key_Space, " ")
-    assert item._editor.toPlainText() == "5", "the space never landed"
-    assert said and "space" in said[-1].lower(), said
+    QApplication.processEvents()
+    text = window.view.editing_item()
+    assert isinstance(text, TextItem)
+    assert text._editor.toPlainText() == "check beam"
+    assert text._editor.textCursor().position() == 6
+    assert said and "changed" in said[-1].lower(), said
     window.view.escape_everything()
 
 
-def test_a_space_is_refused_in_a_line_being_entered_too(window):
-    """Every equation state, one rule: the space does not land."""
+def test_a_space_changes_a_fresh_single_calculation_to_text(window):
     item = _open_calculation(window, typed=True)
     type_text(window.view, "check")
     press_key(window.view, Qt.Key_Space, " ")
     QApplication.processEvents()
-    assert item.scene() is not None, "the calculation is still there"
-    assert item._editor.toPlainText() == "check"
-    assert not [i for i in markups(window) if isinstance(i, TextItem)]
+    assert item.scene() is None
+    text = window.view.editing_item()
+    assert isinstance(text, TextItem)
+    assert text._editor.toPlainText() == "check "
     window.view.escape_everything()
 
 
-def test_shift_and_space_is_refused_in_a_placed_calculation(window):
-    """Nothing throws away a calculation that has already been settled."""
-    item = _open_calculation(window, "b:=300mm", typed=False)
+def test_a_space_is_refused_in_a_calculation_block(window):
+    """Blocks are always calculations, so spaces never land in them."""
+    item = _open_calculation(window, "b:=300mm", block=True, typed=False)
     said = []
     window.view.statusMessage.connect(said.append)
-    press_key(window.view, Qt.Key_Space, " ", Qt.ShiftModifier)
+    press_key(window.view, Qt.Key_Space, " ")
     QApplication.processEvents()
     assert window.view.editing_item() is item
-    assert said and "note" in said[-1].lower()
+    assert item._editor.toPlainText() == "b:=300mm"
+    assert said and "blocks" in said[-1].lower()
     window.view.escape_everything()
 
 
@@ -8144,16 +9905,10 @@ def test_the_header_row_box_starts_where_the_table_is(window):
     dialog.deleteLater()
 
 
-def test_a_finished_calculation_is_no_longer_a_line_that_might_be_prose(window):
-    """Entering one and editing one are two different states.
-
-    While a line is being entered for the first time it might still turn out
-    to be a sentence, and a space says it was. Once the caret has left it and
-    it was a calculation, it is one: opening it again and pressing space
-    refuses the space instead of throwing the expression away.
-    """
+def test_a_finished_single_calculation_can_still_be_changed_to_prose(window):
+    """Re-entered single lines use the same space behavior as fresh ones."""
     window.view._last_scene_pos = QPointF(100, 100)
-    press_key(window.view, Qt.Key_unknown, "/")
+    press_key(window.view, Qt.Key_unknown, '"')
     item = window.view.editing_item()
     assert item.started_by_typing, "it might still be a sentence"
     type_text(window.view, "b:=300mm")
@@ -8164,9 +9919,9 @@ def test_a_finished_calculation_is_no_longer_a_line_that_might_be_prose(window):
     window.view.statusMessage.connect(said.append)
     window.view.begin_item_edit(item)
     press_key(window.view, Qt.Key_Space, " ")
-    assert item._editor.toPlainText() == "b:=300mm", "the space was refused"
-    assert isinstance(window.view.editing_item(), MathItem)
-    assert said and "space" in said[-1].lower()
+    assert isinstance(window.view.editing_item(), TextItem)
+    assert window.view.editing_item()._editor.toPlainText() == "b:=300mm "
+    assert said and "changed" in said[-1].lower()
     window.view.escape_everything()
 
 
@@ -8210,8 +9965,8 @@ def test_the_outline_menu_shows_up_in_the_middle_of_a_shape_too(window):
                if a.text() == "This outline"]
     assert outline
     labels = [a.text() for a in outline[0].actions()]
-    assert "Round the nearest corner off" in labels
-    assert "Put a point in the nearest side" in labels
+    assert "Round corner" in labels
+    assert "Add point" in labels
 
 
 def test_a_cloud_drawn_as_a_box_has_an_outline_too(window):

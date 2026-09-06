@@ -430,6 +430,20 @@ def _all_names(code) -> set[str]:
     return names
 
 
+def referenced_names(source: str, transformers=()) -> set[str]:
+    """Names read by an expression, before deciding whether they are units.
+
+    Document dependency tracking filters these against names declared by
+    calculations and tables. A broken or forward-referencing expression then
+    still gets revisited when its input becomes available.
+    """
+    try:
+        code, _tree = compile_expression(source, transformers)
+    except Exception:
+        return set()
+    return set(_all_names(code))
+
+
 # ---------------------------------------------------------------------------
 # Errors
 # ---------------------------------------------------------------------------

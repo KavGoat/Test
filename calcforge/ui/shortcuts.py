@@ -1,9 +1,8 @@
 """User-editable keyboard bindings.
 
-Two of these do more than pick a tool.  On an empty canvas a bare keypress does
-nothing at all unless it is bound — typing ``"`` opens a text region where the
-cursor is and typing ``/`` opens a calculation, which is how SMath decides what
-you meant before you have typed anything.
+Some bindings do more than pick a tool. On an empty canvas a bare keypress does
+nothing unless it is bound. Typing ``"`` opens a calculation entry; a space
+converts that single line to prose, while slash remains division in equations.
 """
 from __future__ import annotations
 
@@ -50,13 +49,13 @@ SYMBOLS: list[tuple[str, str, str, str]] = [
     # action name,      symbol, label,               default keys
     ("multiply",        "×",    "Multiply ×",        "Ctrl+Alt+8"),
     ("divide",          "÷",    "Divide ÷",          "Ctrl+Alt+/"),
-    ("power",           "^",    "To the power ^",    "Ctrl+Alt+6"),
+    ("power",           "^",    "Power ^",           "Ctrl+Alt+6"),
     ("root",            "√(",   "Square root √",     "Ctrl+Alt+R"),
     ("squared",         "²",    "Squared ²",         "Ctrl+Alt+2"),
     ("cubed",           "³",    "Cubed ³",           "Ctrl+Alt+3"),
-    ("plusminus",       "±",    "Plus or minus ±",   "Ctrl+Alt+="),
-    ("le",              "≤",    "Less or equal ≤",   "Ctrl+Alt+,"),
-    ("ge",              "≥",    "More or equal ≥",   "Ctrl+Alt+."),
+    ("plusminus",       "±",    "Plus/minus ±",      "Ctrl+Alt+="),
+    ("le",              "≤",    "At most ≤",         "Ctrl+Alt+,"),
+    ("ge",              "≥",    "At least ≥",        "Ctrl+Alt+."),
     ("ne",              "≠",    "Not equal ≠",       "Ctrl+Alt+N"),
     ("pi",              "π",    "Pi π",              "Ctrl+Alt+P"),
     ("degree",          "°",    "Degree °",          "Ctrl+Alt+D"),
@@ -85,20 +84,12 @@ def _symbol_bindings() -> list[Binding]:
             for name, symbol, label, keys in SYMBOLS]
 
 
-# The two canvas typing modes come first because they are the ones people reach
-# for without thinking about tools at all.
+# The canvas typing mode comes first because it is reached without choosing a
+# tool. One explicit trigger avoids consuming ordinary typing and operators.
 DEFAULT_BINDINGS: list[Binding] = [
-    # The two keys that start writing on bare paper. Both open the same thing:
-    # a line that is maths until it turns out to be a sentence, which it does
-    # the moment a second word is typed with nothing mathematical between them.
-    # Two keys because both are reached for — the quotation mark by anybody
-    # expecting to write words, the slash by anybody expecting to write maths —
-    # and having them do different things was only ever a way to pick wrong.
-    Binding("insert.text", "Start writing here", '"', INSERT, "Typing", "math"),
-    Binding("insert.math", "Start writing here (maths)", "/", INSERT, "Typing",
-            "math"),
-    Binding("insert.table", "Start a table here", "|", INSERT, "Typing", "table"),
-    Binding("insert.callout", "Start a callout here", "@", INSERT, "Typing", "callout"),
+    Binding("insert.text", "Calculation entry", '"', INSERT, "Typing", "math"),
+    Binding("insert.table", "Start table", "|", INSERT, "Typing", "table"),
+    Binding("insert.callout", "Start callout", "@", INSERT, "Typing", "callout"),
 ] + _tool_bindings() + [
     Binding("command.recalculate", "Recalculate", "F9", COMMAND, "Document", "recalculate"),
     Binding("command.fit_page", "Fit page", "Ctrl+0", COMMAND, "View", "fit_page"),
@@ -109,7 +100,7 @@ DEFAULT_BINDINGS: list[Binding] = [
             COMMAND, "Document", "merge_calculations"),
     Binding("command.problems", "Show problems", "Ctrl+Shift+P", COMMAND, "Document",
             "show_problems"),
-    Binding("command.renumber_counts", "Renumber count markers", "", COMMAND, "Document",
+    Binding("command.renumber_counts", "Renumber counts", "", COMMAND, "Document",
             "renumber_counts"),
 ] + _symbol_bindings()
 
@@ -217,6 +208,18 @@ class ShortcutManager(QObject):
                     QKeySequence.PortableText).lower() == wanted:
                 return True
         return False
+
+    def binding_for(self, sequence: "QKeySequence") -> Optional[Binding]:
+        """Return the configured binding that owns *sequence*, if any."""
+        if sequence.isEmpty():
+            return None
+        wanted = sequence.toString(QKeySequence.PortableText).lower()
+        for binding in self.bindings():
+            current = self._sequences.get(binding.action_id, "")
+            if (current and QKeySequence(current).toString(
+                    QKeySequence.PortableText).lower() == wanted):
+                return binding
+        return None
 
     def match_typed(self, text: str, modifiers) -> Optional[Binding]:
         """The binding a bare keypress on the canvas should run, if any."""

@@ -9,7 +9,7 @@ from typing import Optional
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (QBrush, QColor, QFont, QPainter, QPainterPath, QPen,
-                           QPolygonF)
+                           QPolygonF, QTransform)
 from PySide6.QtWidgets import (QGraphicsItem, QGraphicsObject,
                                QStyleOptionGraphicsItem, QWidget)
 
@@ -302,6 +302,12 @@ class MarkupItem(QGraphicsObject):
         # longer a markup that can be picked out or edited.
         self.hidden = False
         self.flattened = False
+        # Recoverable flattening keeps this complete source item in the .cfx
+        # file. Irreversible flattening replaces source items with one visual
+        # recording whose flag is False, so Recover never promises data that
+        # was deliberately discarded.
+        self.flatten_recoverable = True
+        self.locked_before_flatten = False
         # Markups sharing a group id are selected, moved and copied together.
         self.group = ""
         self._handles_visible = True
@@ -352,6 +358,32 @@ class MarkupItem(QGraphicsObject):
     def center(self) -> QPointF:
         return self.mapToScene(self.local_rect().center())
 
+    def set_item_rotation(self, angle: float, zero_snap: float = 2.0) -> None:
+        """Turn around the visible centre, normalising an almost-zero angle.
+
+        Qt's raw ``setRotation`` turns around (0, 0) unless a caller happened
+        to set an origin first.  A markup should instead stay centred however
+        its rotation was changed (handle, Properties, or an edit transition).
+        """
+        angle = float(angle) % 360.0
+        if angle > 180.0:
+            angle -= 360.0
+        if abs(angle) <= zero_snap:
+            angle = 0.0
+        centre = self.local_rect().center()
+        before = self.mapToScene(centre)
+        self.setTransformOriginPoint(centre)
+        self.setRotation(angle)
+        after = self.mapToScene(centre)
+        parent = self.parentItem()
+        if parent is not None:
+            correction = parent.mapFromScene(before) - parent.mapFromScene(after)
+        else:
+            correction = before - after
+        self.setPos(self.pos() + correction)
+        self.touch()
+        self.geometryChanged.emit()
+
     # -- handles -----------------------------------------------------------
     def handle_points(self) -> dict[str, QPointF]:
         if not self.RESIZABLE:
@@ -386,8 +418,8 @@ class MarkupItem(QGraphicsObject):
             centre = rect.center()
             angle = math.degrees(math.atan2(local_pos.y() - centre.y(),
                                             local_pos.x() - centre.x())) + 90
-            self.setTransformOriginPoint(centre)
-            self.setRotation(round(angle / (15 if keep_ratio else 1)) * (15 if keep_ratio else 1))
+            angle = round(angle / (15 if keep_ratio else 1)) * (15 if keep_ratio else 1)
+            self.set_item_rotation(angle)
             return
         left, top, right, bottom = rect.left(), rect.top(), rect.right(), rect.bottom()
         if "w" in key:
@@ -484,6 +516,9 @@ class MarkupItem(QGraphicsObject):
             "y": self.pos().y(),
             "z": self.zValue(),
             "rotation": self.rotation(),
+            "transform": [self.transform().m11(), self.transform().m12(),
+                          self.transform().m21(), self.transform().m22(),
+                          self.transform().dx(), self.transform().dy()],
             "style": self.style.to_dict(),
             "author": self.author,
             "subject": self.subject,
@@ -497,6 +532,8 @@ class MarkupItem(QGraphicsObject):
             "printable": self.printable,
             "hidden": self.hidden,
             "flattened": self.flattened,
+            "flatten_recoverable": self.flatten_recoverable,
+            "locked_before_flatten": self.locked_before_flatten,
             "group": self.group,
         }
 
@@ -507,6 +544,11 @@ class MarkupItem(QGraphicsObject):
         self.uid = data.get("uid", self.uid)
         self.setPos(QPointF(float(data.get("x", 0)), float(data.get("y", 0))))
         self.setZValue(float(data.get("z", 0)))
+        matrix = data.get("transform")
+        if isinstance(matrix, (list, tuple)) and len(matrix) == 6:
+            self.setTransform(QTransform(float(matrix[0]), float(matrix[1]),
+                                         float(matrix[2]), float(matrix[3]),
+                                         float(matrix[4]), float(matrix[5])))
         self.style = Style.from_dict(data.get("style", {}))
         self.group = str(data.get("group", ""))
         self.author = data.get("author", "")
@@ -520,11 +562,17 @@ class MarkupItem(QGraphicsObject):
         self.printable = bool(data.get("printable", True))
         self.hidden = bool(data.get("hidden", False))
         self.flattened = bool(data.get("flattened", False))
+        self.flatten_recoverable = bool(data.get("flatten_recoverable", True))
+        self.locked_before_flatten = bool(data.get("locked_before_flatten", False))
         self.set_locked(bool(data.get("locked", False)) or self.flattened)
         if self.flattened:
             self.setFlag(QGraphicsItem.ItemIsSelectable, False)
         if self.hidden:
             self.setVisible(False)
+        # Rotation is always about the visible object's centre.  Keeping the
+        # origin implicit at (0, 0) made a reopened rotated object orbit away
+        # from the position stored in the document.
+        self.setTransformOriginPoint(self.local_rect().center())
         self.setRotation(float(data.get("rotation", 0)))
 
     def deserialize(self, data: dict) -> None:

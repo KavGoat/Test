@@ -223,6 +223,8 @@ def import_pages(document, path: str, indices: list[int], fit: str = FIT_ORIGINA
     measurement can snap to the end of a beam rather than to a guess.
     """
     source = PdfSource(path)
+    with open(path, "rb") as handle:
+        pdf_key = document.add_asset(handle.read(), "pdf")
     template = document.pages[at - 1].setup if at else (
         document.pages[-1].setup if document.pages else None)
     drawn = line_work(path, indices) if vectors else {}
@@ -246,7 +248,9 @@ def import_pages(document, path: str, indices: list[int], fit: str = FIT_ORIGINA
                 page._pending_items = _items_from(
                     drawn[index], page.setup.width_pt / across)
             page.background_key = key
-            page.source_note = f"{path.rsplit('/', 1)[-1]} page {index + 1}"
+            page.pdf_key = pdf_key
+            page.pdf_page_index = index
+            page.source_note = f"{os.path.basename(path)} page {index + 1}"
             # A drawing has its own lines. A grid ruled over the top of it
             # only gets in the way, so a page that came in from a PDF starts
             # without one whatever the rest of the document does.

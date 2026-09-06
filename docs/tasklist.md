@@ -132,7 +132,7 @@ and explicitly requests a synchronization.
 
 ### 12. Move, duplicate, group
 
-- [ ] Ctrl+drag duplicates the item being dragged; Shift+drag constrains movement to 0/45/90°; Ctrl+Shift+drag duplicates *and* constrains to 0/45/90°; releasing Ctrl mid-drag re-enables snapping (29)
+- [ ] **(expanded)** Modifier-drag behavior must be order-independent: Ctrl added before or after movement duplicates the dragged selection; Shift added or removed before or during movement applies or releases the 0/45/90° constraint; Ctrl+Shift duplicates and constrains; releasing Ctrl after duplication must leave snapping in a consistent enabled state (29 and current report).
 - [ ] **(new)** Groups must be scalable as a single object, resizing all contained markups proportionally from the group bounding box.
 - [ ] **(new)** Image and group resizing is aspect-ratio locked by default. Holding Shift temporarily releases that lock for non-proportional resizing; the current inverse modifier behavior is wrong.
 
@@ -222,6 +222,7 @@ and explicitly requests a synchronization.
 - [ ] **(new)** Validate interactive changes through the real CalcForge UI, not only unit-level code inspection. Agents must drive the canvas with pointer moves, clicks, drags, keyboard arrows and configured shortcuts, including Escape/cancel paths, and look for stuck tools, lost focus, incorrect cursor states, blocked input, broken selections and other interaction regressions. Keep repeatable Qt event-driven tests for each defect found.
 - [ ] **(new)** Write a context document so a session does not have to re-read every past chat: what the app is, who it is for, how the code is laid out, how to test it, what is done and what is not, and how this list is kept. **Done** — `docs/HANDOVER.md`, which is the first thing any agent picking this up should read. This list stays the record of what is asked for and built; the handover is the map to everything else
 - [ ] **(new)** Maintain a separate Markdown review register of every task that has not yet been implemented and validated. Keep it synchronized as work is addressed, without changing task completion checkboxes in this file or completion status in `docs/tasklist.xlsx`; only the user marks tasks complete.
+- [ ] **(new)** Maintain a separate Markdown record of tasks that have implementation and validation evidence, for user review. This evidence record must not mark tasks complete in `docs/tasklist.md` or change the user-owned status in `docs/tasklist.xlsx`.
 
 ### 28. Miscellaneous fixes reported (screenshots referenced)
 
@@ -263,6 +264,8 @@ and explicitly requests a synchronization.
 - [ ] Show Pages-panel thumbnails centred within a grid layout.
 - [ ] Add a rebindable **Calibrate scale** shortcut. Calibration starts without an assumed `5 m` value, then opens a dedicated length-entry prompt after two points are selected; accept `10mm` and `10 mm`, and show a clear warning for invalid or incompatible units.
 - [ ] Add recoverable document flattening: choose which content classes to flatten (markups, calculations, tables and other supported items), retain recovery data by default, support individual-item flattening, and offer a Preferences setting to disable recoverability when deliberately producing an irreversible file.
+- [ ] I think the reason why zoom to curosr and zoom out to cursor is that currenlty the app cant pan off the page, therefore for example if the cursor in in the corner of th epage and i want to zoom to that but keep it central in the view its not possible to it doesnt zoom to thtat location, fix it (ability to pan off page)
+- [ ] add a functionaly in thr backend where a dependecnye tree is made for each variable, and when a varibale is redefonied, only these depennet lines/block/tabes are reevalted. clacluation must still work, this is just and efficiency thing
 
 ## Task List Rules
 

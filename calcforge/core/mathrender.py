@@ -87,6 +87,25 @@ def ink_ascent(box) -> float:
     return getattr(box, "ink_ascent", None) or box.ascent
 
 
+def _fallback_ink_ascent(text: str, size: float) -> float:
+    """Estimate visible height when Qt supplies only dummy square metrics.
+
+    The Windows offscreen paint engine can expose a valid-looking font whose
+    ascent, cap height, x-height and every tight glyph rectangle are identical.
+    That information cannot place scripts against their base.  The estimate is
+    deliberately used only for that degenerate backend: real font outlines
+    remain the source of truth everywhere else.
+    """
+    visible = [character for character in text if not character.isspace()]
+    if not visible:
+        return 0.0
+    ascenders = set("bdfhkltiij")
+    if any(character.isupper() or character.isdigit() or character in ascenders
+           for character in visible):
+        return size * 0.94
+    return size * 0.72
+
+
 class Box:
     """A laid-out fragment with a width and an ascent/descent about its baseline.
 
@@ -136,6 +155,9 @@ class Glyph(Box):
         self.descent = metrics.descent()
         ink = metrics.tightBoundingRect(text)
         self.ink_ascent = max(-ink.top(), 0.0) if text.strip() else 0.0
+        if (text.strip() and abs(metrics.capHeight() - metrics.xHeight()) < 0.01
+                and abs(metrics.ascent() - metrics.xHeight()) < 0.01):
+            self.ink_ascent = _fallback_ink_ascent(text, font.pixelSize())
 
     def draw(self, painter: QPainter, x: float, baseline: float) -> None:
         painter.setFont(self.font)
@@ -623,16 +645,20 @@ class Typesetter:
             return Row([base, Spacer(size * 0.06), Shifted(exponent, -lift)])
 
         if op is ast.Mult and isinstance(node.left, ast.Constant) \
-                and isinstance(node.right, ast.Name) and self.is_unit(node.right.id):
+                and isinstance(node.right, ast.Name) and is_unit_name(node.right.id):
             # A number and its unit, set the way SMath sets one: the two
             # joined by a raised dot, tight, so "300·mm" reads as one value
             # rather than as two things that happen to be next to each other.
             # It is the same separator the answer on the right is written
             # with, so the two sides of the ≔ match.
+            unit = self.text(node.right.id, size, italic=False,
+                             color=self.style.unit_color)
+            unit.span = (getattr(node.right, "col_offset", 0),
+                         getattr(node.right, "end_col_offset", 0))
             return Row([self.build(node.left, size), Spacer(size * 0.07),
                         self.text(UNIT_SEPARATOR, size * 0.9,
                                   color=self.style.unit_color),
-                        Spacer(size * 0.07), self.build(node.right, size)])
+                        Spacer(size * 0.07), unit])
 
         precedence = _PRECEDENCE.get(op, 4)
         left = self._wrap(node.left, size, precedence)

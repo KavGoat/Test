@@ -8,7 +8,7 @@ import zipfile
 DOCUMENT_ENTRY = "document.json"
 ASSET_PREFIX = "assets/"
 EXTENSION = ".cfx"
-FILTER = "CalcForge documents (*.cfx);;All files (*)"
+FILTER = "CalcForge and PDF documents (*.cfx *.pdf);;CalcForge documents (*.cfx);;PDF documents (*.pdf);;All files (*)"
 
 
 def save_document(document, path: str, enforce_extension: bool = True) -> None:
@@ -27,8 +27,11 @@ def save_document(document, path: str, enforce_extension: bool = True) -> None:
     for page in document.pages:
         if page.frame is not None:
             used |= page.frame.assets_used()
-        elif page.background_key:
-            used.add(page.background_key)
+        else:
+            if page.background_key:
+                used.add(page.background_key)
+            if page.pdf_key:
+                used.add(page.pdf_key)
     document.prune_assets(used)
 
     payload = json.dumps(document.to_dict(), indent=1, ensure_ascii=False)

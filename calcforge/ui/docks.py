@@ -7,7 +7,7 @@ along with a layout that is remembered between sessions.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QSettings, Qt, Signal
+from PySide6.QtCore import QSettings, QSize, Qt, Signal
 from PySide6.QtGui import QIcon, QPainter, QPen, QPixmap, QColor, QPolygonF
 from PySide6.QtCore import QPointF, QRectF
 from PySide6.QtWidgets import (QDockWidget, QHBoxLayout, QLabel, QSizePolicy,
@@ -102,6 +102,9 @@ class DockTitleBar(QWidget):
         button.setFocusPolicy(Qt.NoFocus)
         return button
 
+    def minimumSizeHint(self) -> QSize:
+        return QSize(0, 0)
+
     def refresh_icons(self) -> None:
         """Redraw the buttons after a theme change."""
         self.float_button.setIcon(_icon("float"))
@@ -149,10 +152,16 @@ class PanelDock(QDockWidget):
         # No floor of its own: the splitter can squeeze it away to nothing and
         # the reader can drag it back.
         widget.setMinimumSize(0, 0)
+        widget.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.setMinimumSize(0, 0)
         self._bar = DockTitleBar(self)
+        self._bar.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.setTitleBarWidget(self._bar)
         self.set_pinned(False)
+
+    def minimumSizeHint(self) -> QSize:
+        """Let the main-window splitter squeeze a dock fully out of view."""
+        return QSize(0, 0)
 
     @property
     def pinned(self) -> bool:

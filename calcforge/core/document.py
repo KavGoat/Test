@@ -204,6 +204,11 @@ class Page:
         self.scale = PageScale()
         self.label = label
         self.background_key: Optional[str] = None   # asset name of an imported PDF page
+        # The original PDF is retained separately from the screen-resolution
+        # PNG. Export can therefore place CalcForge's content over the real
+        # vector/text page instead of flattening the source drawing to pixels.
+        self.pdf_key: Optional[str] = None
+        self.pdf_page_index: Optional[int] = None
         self.background_opacity: float = 1.0
         self.source_note: str = ""                  # e.g. "drawing.pdf page 3"
         # Whether this page carries a grid. A page written on wants one; a
@@ -217,6 +222,7 @@ class Page:
         # second one written over it. None means "as the document says".
         self.header: Optional[bool] = None
         self.footer: Optional[bool] = None
+        self.printable: bool = True
         self.frame = None                           # set by the UI layer
         self._pending_items: list[dict] = []
 
@@ -256,11 +262,14 @@ class Page:
             "setup": self.setup.to_dict(),
             "scale": self.scale.to_dict(),
             "background_key": self.background_key,
+            "pdf_key": self.pdf_key,
+            "pdf_page_index": self.pdf_page_index,
             "background_opacity": self.background_opacity,
             "source_note": self.source_note,
             "grid": self.grid,
             "header": self.header,
             "footer": self.footer,
+            "printable": self.printable,
             "items": items,
         }
 
@@ -270,11 +279,15 @@ class Page:
         page.uid = data.get("uid", page.uid)
         page.scale = PageScale.from_dict(data.get("scale", {}))
         page.background_key = data.get("background_key")
+        page.pdf_key = data.get("pdf_key")
+        source_index = data.get("pdf_page_index")
+        page.pdf_page_index = None if source_index is None else int(source_index)
         page.background_opacity = float(data.get("background_opacity", 1.0))
         page.source_note = data.get("source_note", "")
         for which in ("grid", "header", "footer"):
             said = data.get(which)
             setattr(page, which, None if said is None else bool(said))
+        page.printable = bool(data.get("printable", True))
         page._pending_items = data.get("items", [])
         return page
 
@@ -333,6 +346,7 @@ class Document:
 
     def __init__(self):
         self.title = "Untitled"
+        self.mode = "worksheet"
         self.author = ""
         self.subject = ""
         self.project = ""
@@ -449,6 +463,7 @@ class Document:
         return {
             "version": self.VERSION,
             "title": self.title,
+            "mode": self.mode,
             "author": self.author,
             "subject": self.subject,
             "project": self.project,
@@ -460,6 +475,7 @@ class Document:
 
     def load_dict(self, data: dict) -> None:
         self.title = data.get("title", "Untitled")
+        self.mode = "pdf" if data.get("mode") == "pdf" else "worksheet"
         self.author = data.get("author", "")
         self.subject = data.get("subject", "")
         self.project = data.get("project", "")

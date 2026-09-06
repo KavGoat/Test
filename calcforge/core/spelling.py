@@ -15,6 +15,7 @@ added to the personal list, which is remembered between sessions.
 from __future__ import annotations
 
 import gzip
+import difflib
 import os
 import re
 from pathlib import Path
@@ -102,6 +103,18 @@ class SpellChecker:
             return True
         if lowered in vocabulary:
             return True
+        # Some system word lists contain a verb/noun stem and selected tense
+        # forms but omit the ordinary plural. Treat regular inflections as the
+        # same word instead of underlining everyday text such as "requests".
+        inflection_stems = []
+        if lowered.endswith("ies") and len(lowered) > 3:
+            inflection_stems.append(lowered[:-3] + "y")
+        if lowered.endswith("es") and len(lowered) > 2:
+            inflection_stems.append(lowered[:-2])
+        if lowered.endswith("s") and len(lowered) > 1:
+            inflection_stems.append(lowered[:-1])
+        if any(stem in vocabulary for stem in inflection_stems):
+            return True
         # "Beam's" and "beams'" are the possessive of a word that is spelt
         # correctly, and hyphenated compounds are right when both halves are.
         base = lowered.rstrip("'").removesuffix("'s")
@@ -120,6 +133,21 @@ class SpellChecker:
             if not self.knows(word):
                 found.append((match.start(), len(word), word))
         return found
+
+    def suggestions(self, word: str, limit: int = 5) -> list[str]:
+        """Likely dictionary replacements, closest first."""
+        cleaned = (word or "").strip().strip("'’-").lower()
+        if not cleaned or not self.words():
+            return []
+        vocabulary = self.words()
+        matches = difflib.get_close_matches(cleaned, vocabulary,
+                                            n=max(int(limit), 1), cutoff=0.72)
+        if cleaned.endswith("s"):
+            singular = difflib.get_close_matches(cleaned[:-1], vocabulary,
+                                                 n=max(int(limit), 1), cutoff=0.72)
+            matches = [candidate + "s" for candidate in singular
+                       if self.knows(candidate + "s")] + matches
+        return list(dict.fromkeys(matches))[:max(int(limit), 1)]
 
     def learn(self, word: str) -> None:
         """Add a word to the personal list, so it stops being flagged."""

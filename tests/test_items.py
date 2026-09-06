@@ -1,6 +1,7 @@
 """Item geometry, measurement maths and serialisation round-trips."""
 import pytest
-from PySide6.QtCore import QPointF, QRectF
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import QColor, QImage, QPainter
 
 from calcforge.core.document import Document, PageScale
 from calcforge.core.engine import Workspace
@@ -52,6 +53,22 @@ def test_serialisation_round_trip(qapp):
         assert clone.pos() == item.pos()
         assert clone.comment == "round trip"
         assert clone.style.stroke == "#123456"
+
+
+def test_line_and_cell_text_formatting_survives_a_round_trip(qapp):
+    calculation = MathItem("a := 1\nb := 2", block=True)
+    calculation.set_line_alignment(1, "right")
+    calculation.change_line_font_size(1, 2.0)
+    restored_calculation = build_item(calculation.serialize())
+    assert restored_calculation.line_alignments == {1: "right"}
+    assert restored_calculation.line_font_sizes == {1: pytest.approx(12.0)}
+
+    table = TableItem(2, 2)
+    table.cell_format(0, 1).align = "center"
+    table.cell_format(0, 1).font_size = 13.0
+    restored_table = build_item(table.serialize())
+    assert restored_table.cell_format(0, 1).align == "center"
+    assert restored_table.cell_format(0, 1).font_size == pytest.approx(13.0)
 
 
 def test_handles_present_for_resizable_items(qapp):
@@ -168,6 +185,44 @@ def test_table_cell_hit_testing(qapp):
     assert table.cell_at(QPointF(-40, -40)) is None
 
 
+def test_table_text_is_clipped_inside_its_own_cell(qapp):
+    table = TableItem(1, 2)
+    table.set_cell(0, 0, "a very long entered value that cannot fit in one cell")
+    table.cell_format(0, 1).background = "#ff00ff"
+    image = QImage(300, 80, QImage.Format_ARGB32)
+    image.fill(Qt.transparent)
+    painter = QPainter(image)
+    table.paint_content(painter)
+    painter.end()
+
+    second = table.cell_rect(0, 1).adjusted(2, 2, -2, -2).toAlignedRect()
+    assert all(image.pixelColor(x, y) == QColor("#ff00ff")
+               for x in range(second.left(), second.right() + 1)
+               for y in range(second.top(), second.bottom() + 1))
+
+
+def test_formula_cells_have_a_distinct_computed_appearance(qapp):
+    table = TableItem(1, 2)
+    table.sheet.header_row = False
+    table.set_cell(0, 0, "2")
+    table.set_cell(0, 1, "=A1*3")
+    table.refresh(Workspace())
+    image = QImage(300, 80, QImage.Format_ARGB32)
+    image.fill(Qt.transparent)
+    painter = QPainter(image)
+    table.paint_content(painter)
+    painter.end()
+
+    entered = table.cell_rect(0, 0)
+    computed = table.cell_rect(0, 1)
+    input_colour = image.pixelColor(int(entered.left() + 3),
+                                    int(entered.bottom() - 3))
+    output_colour = image.pixelColor(int(computed.left() + 3),
+                                     int(computed.bottom() - 3))
+    assert input_colour == QColor("#ffffff")
+    assert output_colour == QColor("#e7f5ff")
+
+
 def test_locked_items_do_not_offer_handles(qapp):
     rect = RectItem("rect", QRectF(0, 0, 50, 50))
     rect.set_locked(True)
@@ -268,3 +323,21 @@ def test_a_subscript_and_a_power_share_one_column(qapp):
     assert column.subscript is not None and column.superscript is not None
     # One slot wide, not two: the width is the wider of the two scripts.
     assert column.width == max(column.subscript.width, column.superscript.width)
+
+
+def test_every_greek_name_uses_its_one_canonical_glyph(qapp):
+    from calcforge.core import greek
+    from calcforge.core.mathrender import Glyph, MathStyle, Typesetter
+
+    def text_in(box):
+        if isinstance(box, Glyph):
+            return box.text
+        return "".join(text_in(child)
+                       for child, _x, _baseline in box.children_at(0, 0))
+
+    setter = Typesetter(MathStyle())
+    for name, glyph in greek.LETTERS.items():
+        assert text_in(setter.name_box(name, 10.0)) == glyph
+    assert greek.fold("φ") == greek.fold("ϕ") == "phi"
+    assert text_in(setter.name_box(greek.fold("φ"), 10.0)) == "φ"
+    assert text_in(setter.name_box(greek.fold("ϕ"), 10.0)) == "φ"

@@ -46,11 +46,13 @@ def test_a_panel_can_be_hidden_and_brought_back(window):
     assert properties.isVisibleTo(window)
 
 
-def test_show_every_panel_brings_them_all_back(window):
+def test_show_panels_brings_back_one_default_on_each_side(window):
     for dock in window.panels:
         dock.close()
     window.show_all_panels()
-    assert all(dock.isVisibleTo(window) for dock in window.panels)
+    visible = {dock.objectName() for dock in window.panels
+               if dock.isVisibleTo(window)}
+    assert visible == {"dock_pages", "dock_properties"}
 
 
 def test_a_pinned_panel_cannot_be_dragged_or_floated(window):
@@ -211,7 +213,9 @@ def test_resetting_the_layout_puts_everything_back(window):
 
     assert window.dockWidgetArea(pages) == Qt.LeftDockWidgetArea
     assert not any(dock.pinned for dock in window.panels)
-    assert all(dock.isVisibleTo(window) for dock in window.panels)
+    visible = {dock.objectName() for dock in window.panels
+               if dock.isVisibleTo(window)}
+    assert visible == {"dock_pages", "dock_properties"}
     assert all(bar.isMovable() for bar in window.toolbars)
     assert window.tool_actions["ellipse"].isVisible()
     assert QSettings("CalcForge", "CalcForge").value("window/state") is None
@@ -341,6 +345,13 @@ def test_hiding_a_panel_schedules_a_save(window):
     assert window._layout_timer.isActive()
 
 
+def test_a_direct_layout_save_consumes_the_pending_timer(window):
+    window.note_layout_change()
+    assert window._layout_timer.isActive()
+    window.save_layout()
+    assert not window._layout_timer.isActive()
+
+
 def test_everything_that_can_be_arranged_comes_back(window, qapp):
     """One restart, and the whole arrangement is as it was left."""
     from calcforge.theme import DARK
@@ -398,6 +409,44 @@ def test_properties_keeps_the_right_side_to_itself(window):
     assert window.dockWidgetArea(window.dock_pages) == Qt.LeftDockWidgetArea
 
 
+def test_page_navigation_and_label_are_centred_in_the_footer(window, qapp):
+    window.current_page().label = "Foundation"
+    window.refresh_page_bar()
+    window.show()
+    qapp.processEvents()
+
+    status = window.statusBar()
+    assert window.page_label.text() == "· Foundation"
+    assert abs(window.page_navigation.geometry().center().x()
+               - status.rect().center().x()) <= 1
+
+
+def test_page_thumbnail_uses_a_centred_responsive_grid_cell(window, qapp):
+    window.show()
+    qapp.processEvents()
+    page_list = window.pages_panel.list
+    entry = page_list.item(0)
+    box = page_list.visualItemRect(entry)
+
+    assert page_list.gridSize().width() == page_list.viewport().width()
+    assert abs(box.center().x() - page_list.viewport().rect().center().x()) <= 1
+    assert entry.textAlignment() & Qt.AlignHCenter
+
+
+def test_properties_can_be_squeezed_away_and_opened_out_again(window, qapp):
+    window.show()
+    qapp.processEvents()
+    dock = window.dock_properties
+
+    window.resizeDocks([dock], [0], Qt.Horizontal)
+    qapp.processEvents()
+    assert dock.width() <= 1
+
+    window.resizeDocks([dock], [320], Qt.Horizontal)
+    qapp.processEvents()
+    assert dock.width() >= 300
+
+
 def test_a_panel_rolls_up_to_its_title_bar(window):
     dock = panels(window)["dock_variables"]
     bar = dock.titleBarWidget()
@@ -443,11 +492,12 @@ def test_the_collapse_button_matches_the_state(window):
     assert not bar.collapse.isChecked()
 
 
-def test_showing_every_panel_unrolls_them(window):
+def test_showing_panels_unrolls_the_default_panels(window):
     for dock in window.panels:
         dock.set_collapsed(True)
     window.show_all_panels()
-    assert not any(dock.collapsed for dock in window.panels)
+    assert not window.dock_pages.collapsed
+    assert not window.dock_properties.collapsed
 
 
 def test_resetting_the_layout_unrolls_them(window):
@@ -528,8 +578,57 @@ def test_no_action_with_an_icon_was_left_out(window):
 
 
 def test_there_is_one_shortcuts_window_not_two(window):
-    help_menu = next(action.menu() for action in window.menuBar().actions()
-                     if action.text().replace("&", "") == "Help")
-    labels = [action.text().replace("&", "") for action in help_menu.actions()]
-    assert labels.count("Keyboard shortcuts…") == 1
+    labels = [entry.text().replace("&", "")
+              for top in window.menuBar().actions()
+              for entry in top.menu().actions()]
+    assert labels.count("Shortcuts…") == 1
     assert "Keyboard shortcuts" not in labels
+
+
+def test_preferences_and_shortcuts_live_under_settings(window):
+    menus = {action.text().replace("&", ""): action.menu()
+             for action in window.menuBar().actions()}
+    assert "Settings" in menus
+    labels = [action.text() for action in menus["Settings"].actions()]
+    assert labels == ["Preferences…", "Shortcuts…"]
+    edit = [action.text() for action in menus["Edit"].actions()]
+    help_labels = [action.text() for action in menus["Help"].actions()]
+    assert "Preferences…" not in edit
+    assert "Shortcuts…" not in help_labels
+
+
+def test_menu_labels_are_short_and_explanations_live_in_tooltips(window):
+    """Commands scan quickly; only the established paste phrase gets 3 words."""
+    import re
+    from PySide6.QtCore import QPointF
+    from calcforge.items.measure import MeasureItem
+    from calcforge.items.shapes import RectItem
+    from calcforge.items.tableitem import TableItem
+    from calcforge.items.text import CalloutItem
+
+    menus = [window.page_menu(0)]
+    for item in (RectItem("rect"), TableItem(), CalloutItem("note"),
+                 MeasureItem("length", [QPointF(0, 0), QPointF(100, 0)])):
+        window.view.frame().add_markup(item, QPointF(80, 80))
+        menus.append(window.build_context_menu(
+            item, item.mapToScene(item.local_rect().center())))
+    menus += [action.menu() for action in window.menuBar().actions()]
+
+    long = []
+
+    def inspect(menu, path=()):
+        for action in menu.actions():
+            if action.isSeparator():
+                continue
+            label = action.text().replace("&", "")
+            words = re.findall(r"[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)?", label)
+            explicit_phrases = {"Paste in place", "Add arrow leader",
+                                "Add cloud leader"}
+            if len(words) > 2 and label not in explicit_phrases:
+                long.append(" > ".join(path + (label,)))
+            if action.menu() is not None:
+                inspect(action.menu(), path + (label,))
+
+    for menu in menus:
+        inspect(menu)
+    assert long == []

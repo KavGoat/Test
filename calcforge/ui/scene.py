@@ -103,6 +103,7 @@ class PageFrame(QGraphicsObject):
         self._logo: Optional[QPixmap] = None
         self._logo_key = ""
         self.print_mode = False
+        self._pdf_overlay = False
         self.setFlag(QGraphicsItem.ItemIsSelectable, False)
         self.setFlag(QGraphicsItem.ItemIsMovable, False)
         # Behind every markup, and behind the desk's own shadow drawing.
@@ -136,15 +137,16 @@ class PageFrame(QGraphicsObject):
         rect = self.page_rect()
         if not self.print_mode:
             self._paint_shadow(painter, rect)
-        painter.fillRect(rect, PAPER)
-        if self._background is None and self.page.background_key:
-            self.load_background()
-        if self._background is not None:
-            painter.save()
-            painter.setOpacity(self.page.background_opacity)
-            painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
-            painter.drawPixmap(rect, self._background, QRectF(self._background.rect()))
-            painter.restore()
+        if not self._pdf_overlay:
+            painter.fillRect(rect, PAPER)
+            if self._background is None and self.page.background_key:
+                self.load_background()
+            if self._background is not None:
+                painter.save()
+                painter.setOpacity(self.page.background_opacity)
+                painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+                painter.drawPixmap(rect, self._background, QRectF(self._background.rect()))
+                painter.restore()
         if not self.print_mode:
             self._paint_grid(painter, rect)
             self._paint_margins(painter)
@@ -425,16 +427,21 @@ class PageFrame(QGraphicsObject):
             used |= item.assets_used()
         if self.page.background_key:
             used.add(self.page.background_key)
+        if self.page.pdf_key:
+            used.add(self.page.pdf_key)
         return used
 
     # -- rendering ---------------------------------------------------------
-    def render_page(self, painter: QPainter, target: QRectF, for_print: bool = True) -> None:
+    def render_page(self, painter: QPainter, target: QRectF, for_print: bool = True,
+                    pdf_overlay: bool = False) -> None:
         """Draw the whole page into *target*, hiding editing chrome."""
         scene = self.scene()
         if scene is None:
             return
         previous = self.print_mode
+        previous_overlay = self._pdf_overlay
         self.print_mode = for_print
+        self._pdf_overlay = bool(pdf_overlay)
         # The selection is *hidden* for the render, not cleared and put back.
         # Putting it back is how a page thumbnail resurrected a selection the
         # reader had since let go of: the thumbnail is drawn from a queued
@@ -450,7 +457,8 @@ class PageFrame(QGraphicsObject):
                 item._handles_visible = False
             hidden = [item for item in self.markups()
                       if for_print and (not item.printable
-                                        or not self.layer_prints(item))]
+                                        or not self.layer_prints(item)
+                                        or (pdf_overlay and item.layer == "Drawing"))]
             for item in hidden:
                 item.setVisible(False)
             source = self.mapRectToScene(self.page_rect())
@@ -469,22 +477,37 @@ class PageFrame(QGraphicsObject):
                 item._handles_visible = True
                 item.update()
             self.print_mode = previous
+            self._pdf_overlay = previous_overlay
 
     def render_picture(self, region: QRectF) -> QPicture:
-        """Everything in *region*, recorded as drawing rather than pixels.
+        """Snapshot drawing in *region*, recorded as vectors where possible.
 
-        A snapshot is not a photograph of the page: it is the lines that were
-        under the marquee, kept as lines. Recorded this way it stays sharp
-        however far it is zoomed into, prints as vectors rather than as a
-        blurry rectangle, and still carries any image that happened to be in
-        the region — the picture keeps the draw calls, whatever they drew.
+        The paper/background is deliberately absent. Imported PDF linework and
+        ordinary markups are copied, while calculation, table and text content
+        is included only when that item was explicitly selected before taking
+        the snapshot. This keeps a drawing-detail snapshot from silently
+        taking unrelated worksheet content with it.
 
         The recording is in the region's own coordinates, so its top-left
         corner is the origin and its size is the size of the snapshot.
         """
         box = QRectF(region).normalized()
+        from ..items.mathitem import MathItem
+        from ..items.tableitem import TableItem
+        from ..items.text import _TextBase
+
+        selective = (MathItem, TableItem, _TextBase)
+        items = [item for item in self.markups()
+                 if item.isVisible()
+                 and self.document.layer(item.layer).visible
+                 and (not isinstance(item, selective) or item.isSelected())]
+        return self.render_items_picture(items, box)
+
+    def render_items_picture(self, items, region: QRectF) -> QPicture:
+        """Record exactly *items* in page coordinates inside *region*."""
+        box = QRectF(region).normalized()
         picture = QPicture()
-        if box.width() <= 0 or box.height() <= 0:
+        if box.width() <= 0 or box.height() <= 0 or not items:
             return picture
         painter = QPainter()
         painter.begin(picture)
@@ -493,8 +516,14 @@ class PageFrame(QGraphicsObject):
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
         painter.setClipRect(QRectF(0, 0, box.width(), box.height()))
         painter.translate(-box.left(), -box.top())
-        self.render_page(painter, QRectF(0, 0, self.page.width_pt,
-                                         self.page.height_pt), for_print=False)
+        for item in sorted(items, key=lambda markup: markup.zValue()):
+            transform, ok = item.itemTransform(self)
+            if not ok:
+                continue
+            painter.save()
+            painter.setWorldTransform(transform, True)
+            item.paint_content(painter)
+            painter.restore()
         painter.end()
         return picture
 
@@ -544,6 +573,8 @@ class DocumentScene(QGraphicsScene):
         self.reading_turn = 0
         self.frames: list[PageFrame] = []
         self.print_mode = False
+        self._pages_rect = QRectF()
+        self._desk_margin = QPointF(PAGE_GAP, PAGE_GAP)
         # Markups are dragged, resized and re-laid-out constantly, and a
         # calculation changes shape every time a character is typed into it.
         # Qt's spatial index assumes the opposite, and any bounding rectangle
@@ -605,10 +636,19 @@ class DocumentScene(QGraphicsScene):
             frame.setPos(left + offset.x(), y + offset.y())
             y += down(frame) + PAGE_GAP
         height = max(y - PAGE_GAP, 0.0)
-        # A generous margin of desk, so the first and last pages are not welded
-        # to the edge of the window.
-        self.setSceneRect(QRectF(-PAGE_GAP, -PAGE_GAP,
-                                 widest + 2 * PAGE_GAP, height + 2 * PAGE_GAP))
+        self._pages_rect = QRectF(0, 0, widest, height)
+        self._apply_desk_margin()
+
+    def set_desk_margin(self, across: float, down: float) -> None:
+        """Leave enough canvas around the pages to centre any page edge."""
+        self._desk_margin = QPointF(max(float(across), PAGE_GAP),
+                                    max(float(down), PAGE_GAP))
+        self._apply_desk_margin()
+
+    def _apply_desk_margin(self) -> None:
+        x = self._desk_margin.x()
+        y = self._desk_margin.y()
+        self.setSceneRect(self._pages_rect.adjusted(-x, -y, x, y))
 
     def set_reading_turn(self, degrees: int) -> None:
         """Turn every page on the canvas for reading. Changes no document."""

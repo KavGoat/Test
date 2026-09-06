@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import csv
+import io
+import os
 from typing import Iterable, Optional
 
 from PySide6.QtCore import QMarginsF, QRectF, QSizeF
@@ -28,7 +30,8 @@ def _apply_layout(device, page) -> None:
 
 
 def paint_pages(device, document: Document, pages: Iterable, resolution: float,
-                per_page_layout: bool = True) -> None:
+                per_page_layout: bool = True,
+                pdf_overlay_pages: Optional[set[str]] = None) -> None:
     """Render *pages* onto a paged paint device.
 
     ``QPdfWriter`` accepts a new page size for every page, so an export can mix
@@ -56,9 +59,10 @@ def paint_pages(device, document: Document, pages: Iterable, resolution: float,
             painter.setRenderHint(QPainter.Antialiasing, True)
             painter.setRenderHint(QPainter.TextAntialiasing, True)
             painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
-            page.frame.render_page(painter, _target_rect(painter, page, resolution,
-                                                         per_page_layout),
-                                   for_print=True)
+            page.frame.render_page(
+                painter, _target_rect(painter, page, resolution, per_page_layout),
+                for_print=True,
+                pdf_overlay=bool(pdf_overlay_pages and page.uid in pdf_overlay_pages))
     finally:
         if started:
             painter.end()
@@ -119,14 +123,78 @@ def outline_and_links(document: Document, printed: list) -> tuple[list, list]:
     return outline, links
 
 
-def export_pdf(document: Document, path: str, pages: Optional[list] = None,
-               resolution: int = 300) -> None:
+def _preserved_pdf_pages(document: Document, pages: list) -> set[str]:
+    """Imported pages whose untouched source is available for vector export."""
+    return {page.uid for page in pages
+            if page.frame is not None and page.pdf_key
+            and page.pdf_page_index is not None
+            and page.background_opacity == 1.0
+            and document.asset(page.pdf_key)}
+
+
+def _paint_pdf(document: Document, path: str, pages: list, resolution: int,
+               overlays: Optional[set[str]] = None) -> None:
     writer = QPdfWriter(path)
     writer.setResolution(resolution)
     writer.setTitle(document.title)
     writer.setCreator("CalcForge")
-    printed = pages if pages is not None else document.pages
-    paint_pages(writer, document, printed, resolution)
+    paint_pages(writer, document, pages, resolution, pdf_overlay_pages=overlays)
+
+
+def _merge_preserved_pdf_pages(document: Document, path: str, pages: list,
+                               preserved: set[str]) -> None:
+    """Replace overlay pages with their original PDF page plus that overlay."""
+    from pypdf import PdfReader, PdfWriter
+
+    rendered_pages = [page for page in pages if page.frame is not None]
+    overlay = PdfReader(path)
+    if len(overlay.pages) != len(rendered_pages):
+        raise OSError("The PDF overlay page count did not match the document")
+    output = PdfWriter()
+    readers = []                 # keep source streams alive until writer.write
+    for page, overlay_page in zip(rendered_pages, overlay.pages):
+        if page.uid not in preserved:
+            output.add_page(overlay_page)
+            continue
+        reader = PdfReader(io.BytesIO(document.asset(page.pdf_key)), strict=False)
+        readers.append(reader)
+        index = int(page.pdf_page_index)
+        if not 0 <= index < len(reader.pages):
+            raise OSError("An imported PDF page no longer exists in its source")
+        source = reader.pages[index]
+        if source.rotation:
+            source.transfer_rotation_to_content()
+        source.scale_to(float(page.width_pt), float(page.height_pt))
+        source.merge_page(overlay_page, over=True)
+        output.add_page(source)
+    output.add_metadata({"/Title": document.title or "", "/Creator": "CalcForge"})
+    temporary = path + ".vector.tmp"
+    try:
+        with open(temporary, "wb") as handle:
+            output.write(handle)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.remove(temporary)
+
+
+def export_pdf(document: Document, path: str, pages: Optional[list] = None,
+               resolution: int = 300) -> None:
+    printed = [page for page in (pages if pages is not None else document.pages)
+               if page.printable]
+    if not printed:
+        raise ValueError("No pages are included in print and export")
+    preserved = _preserved_pdf_pages(document, printed)
+    if preserved:
+        try:
+            _paint_pdf(document, path, printed, resolution, preserved)
+            _merge_preserved_pdf_pages(document, path, printed, preserved)
+        except Exception:                              # noqa: BLE001
+            # A malformed/encrypted source still exports honestly from the
+            # screen raster rather than leaving a missing or corrupt page.
+            _paint_pdf(document, path, printed, resolution)
+    else:
+        _paint_pdf(document, path, printed, resolution)
     # Qt has no way to write an outline or a link, so both are appended to the
     # finished file. A failure there costs the bookmarks, never the document.
     from . import pdflinks
@@ -142,19 +210,23 @@ def pages_for_printer(document: Document, printer: QPrinter) -> list:
     try:
         selection = printer.printRange()
     except Exception:
-        return list(document.pages)
+        return [page for page in document.pages if page.printable]
     if selection == QPrinter.PageRange:
         first = max(printer.fromPage(), 1)
         last = printer.toPage() or len(document.pages)
-        return document.pages[first - 1:last]
+        return [page for page in document.pages[first - 1:last] if page.printable]
     if selection == QPrinter.CurrentPage:
-        return list(document.pages)
-    return list(document.pages)
+        return [page for page in document.pages if page.printable]
+    return [page for page in document.pages if page.printable]
 
 
 def print_document(document: Document, printer: QPrinter,
                    pages: Optional[list] = None) -> None:
-    chosen = pages if pages is not None else pages_for_printer(document, printer)
+    chosen = [page for page in (pages if pages is not None
+                                else pages_for_printer(document, printer))
+              if page.printable]
+    if not chosen:
+        raise ValueError("No pages are included in print and export")
     paint_pages(printer, document, chosen, printer.resolution(), per_page_layout=False)
 
 
@@ -162,7 +234,7 @@ def export_images(document: Document, folder: str, dpi: float = 200.0,
                   prefix: str = "page") -> list[str]:
     written = []
     for index, page in enumerate(document.pages):
-        if page.frame is None:
+        if page.frame is None or not page.printable:
             continue
         image = page.frame.render_image(dpi=dpi, for_print=True)
         path = f"{folder}/{prefix}_{index + 1:02d}.png"

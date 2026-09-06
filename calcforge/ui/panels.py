@@ -5,12 +5,12 @@ import csv
 import re
 
 from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import (QColor, QFont, QIcon, QKeySequence, QPainter,
-                           QPixmap)
+from PySide6.QtGui import (QBrush, QColor, QFont, QIcon, QKeySequence,
+                           QPainter, QPen, QPixmap)
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox,
                                QDoubleSpinBox, QInputDialog, QMessageBox,
                                QFontComboBox, QFormLayout, QGroupBox, QHBoxLayout,
-                               QHeaderView, QLabel, QLineEdit, QListWidget,
+                               QHeaderView, QLabel, QLineEdit, QListView, QListWidget,
                                QListWidgetItem, QMenu, QPlainTextEdit, QPushButton,
                                QScrollArea, QSpinBox, QTableWidget, QTableWidgetItem,
                                QToolButton, QTreeWidget, QTreeWidgetItem,
@@ -28,12 +28,100 @@ from ..items.shapes import PolyItem, RectItem
 from ..items.tableitem import TableItem
 from ..items.text import STAMP_PRESETS, CalloutItem, NoteItem, StampItem, TextItem
 from .icons import icon
+from .stylecaps import (DASH, FILL, FILL_OPACITY, HATCH, OPACITY, STROKE,
+                        WIDTH, common_capabilities)
 from .widgets import ColorButton, LabeledSlider, UnitCombo
+
+
+def _line_style_icon(name: str, colour: str, width: float) -> QIcon:
+    pixmap = QPixmap(76, 22)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    pen = QPen(QColor(colour or "#111318"))
+    pen.setWidthF(max(0.75, min(float(width), 6.0)))
+    dashes = DASH_ARRAYS.get(name, [])
+    if dashes:
+        pen.setStyle(Qt.CustomDashLine)
+        pen.setDashPattern(dashes)
+        pen.setCapStyle(Qt.FlatCap)
+    painter.setPen(pen)
+    painter.drawLine(3, 11, 73, 11)
+    painter.end()
+    return QIcon(pixmap)
+
+
+def _hatch_icon(name: str, colour: str) -> QIcon:
+    pixmap = QPixmap(76, 22)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    ink = QColor(colour or "#748096")
+    painter.setPen(QPen(ink.darker(135), 1))
+    painter.setBrush(QBrush(ink, HATCH_PATTERNS.get(name, Qt.SolidPattern)))
+    painter.drawRect(3, 3, 69, 15)
+    painter.end()
+    return QIcon(pixmap)
 
 
 # ---------------------------------------------------------------------------
 # Pages
 # ---------------------------------------------------------------------------
+
+class PageListWidget(QListWidget):
+    """A wrapping thumbnail grid whose cells stay centred across the row."""
+
+    CELL_WIDTH = 116
+    CELL_HEIGHT = 174
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.external_drop_row: int | None = None
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        width = max(self.viewport().width(), 1)
+        columns = max(width // self.CELL_WIDTH, 1)
+        self.setGridSize(QSize(max(width // columns, 1), self.CELL_HEIGHT))
+
+    def set_external_drop_row(self, row: int | None) -> None:
+        row = None if row is None else max(0, min(int(row), self.count()))
+        if row != self.external_drop_row:
+            self.external_drop_row = row
+            self.viewport().update()
+
+    def uses_horizontal_slots(self) -> bool:
+        """Whether successive thumbnails currently share a visual row."""
+        if self.count() > 1:
+            first = self.visualItemRect(self.item(0))
+            second = self.visualItemRect(self.item(1))
+            return abs(first.center().y() - second.center().y()) < \
+                max(first.height(), second.height()) / 2
+        return self.viewport().width() >= self.CELL_WIDTH * 2
+
+    def drop_indicator_line(self, row: int):
+        """The visible slot for an external page drop, in viewport pixels."""
+        if not self.count():
+            return QPointF(6, 6), QPointF(max(self.viewport().width() - 6, 6), 6)
+        if not self.uses_horizontal_slots():
+            reference = self.visualItemRect(
+                self.item(row if row < self.count() else self.count() - 1))
+            y = reference.top() if row < self.count() else reference.bottom()
+            return QPointF(reference.left() + 3, y), QPointF(reference.right() - 3, y)
+        reference = self.visualItemRect(
+            self.item(row if row < self.count() else self.count() - 1))
+        x = reference.left() if row < self.count() else reference.right()
+        return QPointF(x, reference.top() + 3), QPointF(x, reference.bottom() - 3)
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        if self.external_drop_row is None:
+            return
+        start, end = self.drop_indicator_line(self.external_drop_row)
+        painter = QPainter(self.viewport())
+        pen = QPen(QColor("#1971c2"), 3.0, Qt.SolidLine, Qt.RoundCap)
+        painter.setPen(pen)
+        painter.drawLine(start, end)
+        painter.end()
 
 class PagesPanel(QWidget):
     """Thumbnail strip with reordering and page commands."""
@@ -72,9 +160,11 @@ class PagesPanel(QWidget):
         buttons.addStretch(1)
         layout.addLayout(buttons)
 
-        self.list = QListWidget()
+        self.list = PageListWidget()
         self.list.setViewMode(QListWidget.IconMode)
         self.list.setIconSize(QSize(96, 128))
+        self.list.setFlow(QListView.LeftToRight)
+        self.list.setWrapping(True)
         self.list.setResizeMode(QListWidget.Adjust)
         self.list.setMovement(QListWidget.Static)
         self.list.setSpacing(6)
@@ -96,6 +186,7 @@ class PagesPanel(QWidget):
         self.list.viewport().setAcceptDrops(True)
         self.list.dragEnterEvent = self._drag_enter
         self.list.dragMoveEvent = self._drag_move
+        self.list.dragLeaveEvent = self._drag_leave
         self.list.dropEvent = self._drop
         layout.addWidget(self.list, 1)
         self._suppress = False
@@ -114,41 +205,62 @@ class PagesPanel(QWidget):
 
     def _drag_enter(self, event) -> None:
         if self._files_in(event):
+            self.list.set_external_drop_row(
+                self.drop_row(event.position().toPoint()))
             event.setDropAction(Qt.CopyAction)
             event.acceptProposedAction()
             return
+        self.list.set_external_drop_row(None)
         QListWidget.dragEnterEvent(self.list, event)
 
     def _drag_move(self, event) -> None:
         if self._files_in(event):
-            # Qt draws the insertion line itself, now that the drop indicator
-            # is on: what the drag needs is only to be allowed.
+            self.list.set_external_drop_row(
+                self.drop_row(event.position().toPoint()))
             event.setDropAction(Qt.CopyAction)
             event.acceptProposedAction()
             return
+        self.list.set_external_drop_row(None)
         QListWidget.dragMoveEvent(self.list, event)
+
+    def _drag_leave(self, event) -> None:
+        self.list.set_external_drop_row(None)
+        event.accept()
 
     def drop_row(self, position) -> int:
         """Which page a drop at *position* goes in front of."""
         entry = self.list.itemAt(position)
-        if entry is None:
-            return self.list.count()
-        row = self.list.row(entry)
-        box = self.list.visualItemRect(entry)
-        # Past the middle of a thumbnail means after it, which is how every
-        # other list reads a drop.
-        if position.y() > box.center().y():
-            row += 1
-        return row
+        if entry is not None:
+            row = self.list.row(entry)
+            box = self.list.visualItemRect(entry)
+            # A one-column strip reads top/bottom. A wrapping thumbnail grid
+            # reads left/right within each visual row.
+            after = (position.x() > box.center().x()
+                     if self.list.uses_horizontal_slots()
+                     else position.y() > box.center().y())
+            return row + int(after)
+        # In the gaps, find the first visual centre after the pointer rather
+        # than treating every empty pixel as the end of the document.
+        for row in range(self.list.count()):
+            box = self.list.visualItemRect(self.list.item(row))
+            if position.y() < box.top():
+                return row
+            if box.top() <= position.y() <= box.bottom() \
+                    and position.x() < box.center().x():
+                return row
+        return self.list.count()
 
     def _drop(self, event) -> None:
         files = self._files_in(event)
         if not files:
+            self.list.set_external_drop_row(None)
             QListWidget.dropEvent(self.list, event)
             return
+        row = self.drop_row(event.position().toPoint())
+        self.list.set_external_drop_row(None)
         event.setDropAction(Qt.CopyAction)
         event.accept()
-        self.window.insert_files_at(files, self.drop_row(event.position().toPoint()))
+        self.window.insert_files_at(files, row)
 
     def eventFilter(self, watched, event):
         """Ctrl+C and Ctrl+V on the thumbnails copy and paste whole pages."""
@@ -201,10 +313,19 @@ class PagesPanel(QWidget):
             # The scale rides with the page number: what a measurement on that
             # page means depends on it, and it belongs where the page is named.
             scale = page.scale.label if page.scale.is_calibrated() else ""
-            caption = f"{index + 1}   {scale}" if scale else f"{index + 1}"
+            parts = [str(index + 1)]
+            label = page.label.strip()
+            if label and label != parts[0]:
+                parts.append(label)
+            if scale:
+                parts.append(scale)
+            caption = "   ".join(parts)
             entry = QListWidgetItem(self._thumbnail(page), caption)
             entry.setTextAlignment(Qt.AlignHCenter)
             tip = page.label or page.source_note or f"Page {index + 1}"
+            if not page.printable:
+                entry.setForeground(QColor("#8b929c"))
+                tip += "\nExcluded from print and export"
             entry.setToolTip(f"{tip}\n{page.setup.size_name} {page.setup.orientation}"
                              f"\nScale {page.scale.label}")
             self.list.addItem(entry)
@@ -703,7 +824,8 @@ class ToolSetsPanel(QWidget):
         numbered = group.name == toolsets.MY_TOOLS
         for position, entry in enumerate(group.entries):
             prefix = f"{position + 1}.  " if numbered and position < 9 else ""
-            row = QTreeWidgetItem([f"{prefix}{entry.label}"])
+            mode_tag = "  · Property" if entry.mode == toolsets.PROPERTIES else ""
+            row = QTreeWidgetItem([f"{prefix}{entry.label}{mode_tag}"])
             row.setIcon(0, QIcon(entry_thumbnail(entry)))
             row.setData(0, self.SET_ROLE, group.name)
             row.setData(0, self.ENTRY_ROLE, position)
@@ -909,11 +1031,11 @@ class ToolSetsPanel(QWidget):
         group = self.current_set()
         if entry is not None:
             menu.addAction("Use", self.use_selected)
-            draw = menu.addAction("Draw again with its properties",
-                                  self.toggle_mode)
+            draw = menu.addAction("Property mode", self.toggle_mode)
             draw.setCheckable(True)
             draw.setChecked(entry.mode == toolsets.PROPERTIES)
             draw.setEnabled(toolsets.can_be_properties(entry.payload))
+            draw.setToolTip("Draw a fresh markup using this stored style")
             if not draw.isEnabled():
                 draw.setToolTip("This one only makes sense put back as it was")
             menu.addAction("Rename…", self.rename_entry)
@@ -1338,11 +1460,13 @@ class PropertiesPanel(QScrollArea):
         heading.setFont(font)
         self.layout.addWidget(heading)
 
-        self._add_appearance(first)
-        if any(getattr(i, "HAS_TEXT", False) or isinstance(i, (StampItem, TableItem, MathItem))
+        appearance = common_capabilities(self._items)
+        if appearance - {"font"}:
+            self._add_appearance(first, appearance)
+        if all(getattr(i, "HAS_TEXT", False) or isinstance(i, (StampItem, TableItem))
                for i in self._items):
             self._add_text(first)
-        if any(isinstance(i, (PolyItem, MeasureItem, CalloutItem)) for i in self._items):
+        if all(isinstance(i, (PolyItem, MeasureItem, CalloutItem)) for i in self._items):
             self._add_arrows(first)
         if len(self._items) == 1:
             if isinstance(first, MathItem):
@@ -1468,7 +1592,7 @@ class PropertiesPanel(QScrollArea):
             turn.setWrapping(True)
             turn.setValue(item.rotation())
             turn.valueChanged.connect(
-                lambda angle: self._slide(lambda i: i.setRotation(angle),
+                lambda angle: self._slide(lambda i: i.set_item_rotation(angle),
                                           "Rotation"))
             form.addRow("Rotation", turn)
 
@@ -1485,10 +1609,10 @@ class PropertiesPanel(QScrollArea):
                                    max(points, 0.1)))
 
     # -- sections ----------------------------------------------------------
-    def _add_appearance(self, first: MarkupItem) -> None:
+    def _add_appearance(self, first: MarkupItem, controls: set[str]) -> None:
         form = self._group("Appearance")
 
-        if isinstance(first, ImageItem):
+        if controls == {OPACITY}:
             opacity = LabeledSlider(5, 100, int(first.style.opacity * 100))
             opacity.valueChanged.connect(
                 lambda value: self._slide(
@@ -1496,56 +1620,79 @@ class PropertiesPanel(QScrollArea):
             form.addRow("Opacity", opacity)
             return
 
-        stroke = ColorButton(first.style.stroke, allow_none=True, label="Line colour")
-        stroke.colorChanged.connect(
-            lambda colour: self._apply(lambda i: setattr(i.style, "stroke", colour), "Line colour"))
-        form.addRow("Line", stroke)
+        if STROKE in controls:
+            stroke = ColorButton(first.style.stroke, allow_none=True, label="Line colour")
+            stroke.colorChanged.connect(
+                lambda colour: self._apply(
+                    lambda i: setattr(i.style, "stroke", colour), "Line colour"))
+            form.addRow("Line", stroke)
 
-        fill = ColorButton(first.style.fill, allow_none=True, label="Fill colour")
-        fill.colorChanged.connect(
-            lambda colour: self._apply(lambda i: setattr(i.style, "fill", colour), "Fill colour"))
-        form.addRow("Fill", fill)
+        if FILL in controls:
+            fill = ColorButton(first.style.fill, allow_none=True, label="Fill colour")
+            fill.colorChanged.connect(
+                lambda colour: self._apply(
+                    lambda i: setattr(i.style, "fill", colour), "Fill colour"))
+            form.addRow("Fill", fill)
 
-        width = QDoubleSpinBox()
-        width.setRange(0.0, 40.0)
-        width.setSingleStep(0.25)
-        width.setDecimals(2)
-        width.setValue(first.style.width)
-        width.setSuffix(" pt")
-        width.valueChanged.connect(
-            lambda value: self._slide(lambda i: setattr(i.style, "width", value), "Line width"))
-        form.addRow("Thickness", width)
+        if WIDTH in controls:
+            width = QDoubleSpinBox()
+            width.setRange(0.0, 40.0)
+            width.setSingleStep(0.25)
+            width.setDecimals(2)
+            width.setValue(first.style.width)
+            width.setSuffix(" pt")
+            width.valueChanged.connect(
+                lambda value: self._slide(
+                    lambda i: setattr(i.style, "width", value), "Line width"))
+            form.addRow("Thickness", width)
 
-        line_style = QComboBox()
-        line_style.addItems(list(DASH_ARRAYS))
-        line_style.setCurrentText(first.style.line_style)
-        line_style.currentTextChanged.connect(
-            lambda value: self._apply(
-                lambda i: (setattr(i.style, "line_style", value),
-                           setattr(i.style, "dash_array", ())),
-                "Line style"))
-        form.addRow("Style", line_style)
+        if DASH in controls:
+            line_style = QComboBox()
+            line_style.setObjectName("lineStyle")
+            line_style.setIconSize(QSize(76, 22))
+            for name in DASH_ARRAYS:
+                line_style.addItem(
+                    _line_style_icon(name, first.style.stroke, first.style.width),
+                    name, name)
+            line_style.setCurrentIndex(
+                max(line_style.findData(first.style.line_style), 0))
+            line_style.currentIndexChanged.connect(
+                lambda _index: self._apply(
+                    lambda i: (setattr(i.style, "line_style", line_style.currentData()),
+                               setattr(i.style, "dash_array", ())),
+                    "Line style"))
+            form.addRow("Style", line_style)
 
         # A hatch over the fill: how a section reads as concrete or as steel,
         # and what a Bluebeam tool set full of sections needs to come in with.
-        hatch = QComboBox()
-        hatch.addItems(list(HATCH_PATTERNS))
-        hatch.setCurrentText(first.style.hatch or "")
-        hatch.currentTextChanged.connect(
-            lambda value: self._apply(lambda i: setattr(i.style, "hatch", value),
-                                      "Hatch"))
-        form.addRow("Hatch", hatch)
+        if HATCH in controls:
+            hatch = QComboBox()
+            hatch.setObjectName("hatchPattern")
+            hatch.setIconSize(QSize(76, 22))
+            hatch_colour = first.style.fill or first.style.stroke
+            for name in HATCH_PATTERNS:
+                hatch.addItem(_hatch_icon(name, hatch_colour), name or "plain", name)
+            hatch.setCurrentIndex(max(hatch.findData(first.style.hatch or ""), 0))
+            hatch.currentIndexChanged.connect(
+                lambda _index: self._apply(
+                    lambda i: setattr(i.style, "hatch", hatch.currentData()),
+                                          "Hatch"))
+            form.addRow("Hatch", hatch)
 
-        opacity = LabeledSlider(5, 100, int(first.style.opacity * 100))
-        opacity.valueChanged.connect(
-            lambda value: self._slide(lambda i: setattr(i.style, "opacity", value), "Opacity"))
-        form.addRow("Opacity", opacity)
+        if OPACITY in controls:
+            opacity = LabeledSlider(5, 100, int(first.style.opacity * 100))
+            opacity.valueChanged.connect(
+                lambda value: self._slide(
+                    lambda i: setattr(i.style, "opacity", value), "Opacity"))
+            form.addRow("Opacity", opacity)
 
-        fill_opacity = LabeledSlider(0, 100, int(first.style.fill_opacity * 100))
-        fill_opacity.valueChanged.connect(
-            lambda value: self._slide(lambda i: setattr(i.style, "fill_opacity", value),
-                                      "Fill opacity"))
-        form.addRow("Fill opacity", fill_opacity)
+        if FILL_OPACITY in controls:
+            fill_opacity = LabeledSlider(0, 100, int(first.style.fill_opacity * 100))
+            fill_opacity.valueChanged.connect(
+                lambda value: self._slide(
+                    lambda i: setattr(i.style, "fill_opacity", value),
+                    "Fill opacity"))
+            form.addRow("Fill opacity", fill_opacity)
 
 
     def _add_text(self, first: MarkupItem) -> None:
@@ -1677,7 +1824,8 @@ class PropertiesPanel(QScrollArea):
         value.setFont(font)
         form.addRow("It is", value)
 
-        exact = QPushButton("Set exact size…")
+        exact = QPushButton("Exact size…")
+        exact.setToolTip("Set the scaled width and height or diameters")
         exact.clicked.connect(lambda: self.window.set_rectangle_size(item))
         form.addRow("", exact)
 
@@ -1971,7 +2119,8 @@ class PropertiesPanel(QScrollArea):
             lambda on: self._apply(lambda i: setattr(i, "show_label", on), "Label"))
         form.addRow("", label)
 
-        calibrate = QPushButton("Calibrate page scale…")
+        calibrate = QPushButton("Calibrate scale…")
+        calibrate.setToolTip("Pick a known distance on this page and enter its length")
         calibrate.clicked.connect(lambda: self.window.calibrate_dialog())
         form.addRow("", calibrate)
 
@@ -2029,17 +2178,18 @@ class PropertiesPanel(QScrollArea):
         note.setStyleSheet("color:#6b7280;")
         form.addRow(note)
 
-        default = QPushButton("Set as default")
+        default = QPushButton("Set default")
         default.setToolTip("New markups of this kind will be drawn like this one")
         default.clicked.connect(lambda: self.window.set_as_default(first))
         form.addRow("", default)
 
         if toolsets.default_key(first) in toolsets.load_defaults():
-            forget = QPushButton("Forget this default")
+            forget = QPushButton("Forget default")
+            forget.setToolTip("Restore the original defaults for this markup kind")
             forget.clicked.connect(lambda: self._forget_default(first))
             form.addRow("", forget)
 
-        add = QPushButton("Add to a tool set…")
+        add = QPushButton("Add tool…")
         add.setToolTip("Keep this markup, contents and all, to put down again")
         add.clicked.connect(lambda: self.window.add_to_toolset(first))
         form.addRow("", add)

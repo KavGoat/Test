@@ -9,6 +9,7 @@ next page belongs to that page afterwards.
 """
 import pytest
 from PySide6.QtCore import QPointF, Qt
+from PySide6.QtTest import QTest
 
 from calcforge.items.shapes import RectItem
 from calcforge.ui.scene import PAGE_GAP, DocumentScene, PageFrame
@@ -266,6 +267,28 @@ def test_the_wheel_zooms_the_document(window):
     assert window.view.zoom() < before
 
 
+def test_a_page_corner_can_be_centred_and_remains_under_zoom_cursor(window, qapp):
+    window.show()
+    qapp.processEvents()
+    view = window.view
+    corner = frames(window)[0].mapToScene(
+        frames(window)[0].page_rect().topLeft())
+    view.set_zoom(2.0)
+    view.centerOn(corner)
+    qapp.processEvents()
+    middle = QPointF(view.viewport().rect().center())
+
+    assert (QPointF(view.mapFromScene(corner)) - middle).manhattanLength() <= 2.0
+    visible = view.mapToScene(view.viewport().rect()).boundingRect()
+    assert visible.left() < corner.x() and visible.top() < corner.y()
+
+    for delta in (120, -120):
+        before = view.mapToScene(middle.toPoint())
+        wheel(view, delta, at=middle)
+        after = view.mapToScene(middle.toPoint())
+        assert (after - before).manhattanLength() < 1.5
+
+
 def test_the_wheel_can_be_set_to_scroll_instead(window):
     from calcforge.ui import preferences
 
@@ -281,6 +304,32 @@ def test_the_wheel_can_be_set_to_scroll_instead(window):
         assert window.view.zoom() == 1.0
     finally:
         prefs.wheel = was
+
+
+def test_the_footer_switches_between_continuous_and_page_scrolling(window):
+    _three_pages(window)
+    page_action = next(action for action in window.status_scroll.menu().actions()
+                       if action.text() == "Page")
+    page_action.trigger()
+    assert window.status_scroll.text() == "Page"
+    assert window.view.scroll_mode == "page"
+
+    wheel(window.view, -120)
+    assert window.current_index == 1
+    assert window.view.visible_page_index() == 1
+    wheel(window.view, 120)
+    assert window.current_index == 0
+
+    before = window.view.zoom()
+    wheel(window.view, 120, Qt.ControlModifier)
+    assert window.view.zoom() > before
+    assert window.current_index == 0
+
+    continuous = next(action for action in window.status_scroll.menu().actions()
+                      if action.text() == "Continuous")
+    continuous.trigger()
+    assert window.status_scroll.text() == "Continuous"
+    assert window.view.scroll_mode == "continuous"
 
 
 def test_shift_and_the_wheel_scroll_sideways(window):
@@ -499,10 +548,12 @@ def test_changing_the_area_unit_leaves_the_calculations_alone(window):
     assert window.document.workspace.get("b").to("mm").magnitude == pytest.approx(300)
 
 
-def test_a_click_leaves_no_insertion_mark(window):
-    """There is no insertion point: things land where the pointer is."""
-    assert not hasattr(window.view, "insert_point")
-    assert not hasattr(window.view, "set_insert_point")
+def test_the_calculation_insertion_point_is_off_by_default(window):
+    """Ordinary pointer placement remains the shipped behavior."""
+    from calcforge.ui import preferences
+
+    assert not preferences.current().insertion_point
+    assert window.view._insertion_point is None
     assert window.view.pointer_scene_pos() is not None
 
 
@@ -527,6 +578,36 @@ def test_the_icon_opens_and_closes_its_panel(window):
     window.show_panel("dock_bookmarks", False)
     assert window.dock_bookmarks.isHidden()
     assert not button.isChecked()
+
+
+def test_rail_click_keeps_one_panel_open_per_side(window, qapp):
+    pages = window.left_rail.buttons["dock_pages"]
+    bookmarks = window.left_rail.buttons["dock_bookmarks"]
+    properties = window.right_rail.buttons["dock_properties"]
+    assert pages.isChecked()
+    assert properties.isChecked()
+
+    QTest.mouseClick(bookmarks, Qt.LeftButton)
+    qapp.processEvents()
+
+    assert window.dock_pages.isHidden()
+    assert not window.dock_bookmarks.isHidden()
+    assert not pages.isChecked()
+    assert bookmarks.isChecked()
+    assert not window.dock_properties.isHidden()
+    assert properties.isChecked()
+
+
+def test_view_menu_panel_toggle_obeys_the_same_side_limit(window, qapp):
+    window.show()
+    qapp.processEvents()
+    window.move_panel_to_side("dock_bookmarks", "left")
+    window.dock_bookmarks.toggleViewAction().trigger()
+    qapp.processEvents()
+
+    assert window.dock_pages.isHidden()
+    assert not window.dock_bookmarks.isHidden()
+    assert not window.dock_properties.isHidden()
 
 
 def test_a_panel_dragged_to_the_other_rail_opens_on_that_side(window):

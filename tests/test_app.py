@@ -405,6 +405,32 @@ def test_export_pdf_and_images(window, tmp_path):
     assert all(os.path.getsize(p) > 1000 for p in written)
 
 
+def test_a_page_excluded_from_print_is_grey_and_is_not_exported(window, tmp_path):
+    from calcforge.core.document import Document
+    from calcforge.io import export as export_io, pdfio, project as project_io
+
+    window.add_page()
+    window.add_page()
+    menu = window.page_menu(1)
+    include = next(action for action in menu.actions() if action.text() == "Print")
+    assert include.isChecked()
+    include.setChecked(False)                 # the real QAction signal path
+
+    assert not window.document.pages[1].printable
+    assert window.pages_panel.list.item(1).foreground().color().name() == "#8b929c"
+
+    pdf_path = str(tmp_path / "included.pdf")
+    export_io.export_pdf(window.document, pdf_path)
+    assert pdfio.page_count(pdf_path) == 2
+    assert len(export_io.export_images(window.document, str(tmp_path), 40)) == 2
+
+    cfx_path = str(tmp_path / "included.cfx")
+    project_io.save_document(window.document, cfx_path)
+    reopened = Document()
+    project_io.load_document(reopened, cfx_path)
+    assert [page.printable for page in reopened.pages] == [True, False, True]
+
+
 def test_export_csv_reports(window, tmp_path):
     window.load_sample()
     from calcforge.io import export as export_io
@@ -806,13 +832,7 @@ def _type_on_canvas(window, text, x=140.0, y=180.0):
 
 
 def test_quote_starts_writing_where_the_cursor_is(window):
-    """Both keys open the same thing: a line that is maths until it is prose.
-
-    The quotation mark is what somebody expecting to write words reaches for
-    and the slash is what somebody expecting to write maths reaches for.
-    Having them open different things was only ever a way to pick wrong: what
-    is typed decides, not which key started it.
-    """
+    """The explicit quote trigger opens a line that can become prose."""
     _type_on_canvas(window, '"')
     item = editing_item(window)
     assert isinstance(item, MathItem)
@@ -824,19 +844,11 @@ def test_quote_starts_writing_where_the_cursor_is(window):
     assert isinstance(markups(window)[0], TextItem), "and it did"
 
 
-def test_slash_starts_a_calculation(window):
-    """And it stays a calculation, because there is not a space in it.
-
-    A calculation never contains a space — a unit goes straight after its
-    number — so ``q=5kPa`` is what somebody types, and what used to be written
-    here as ``q = 5 kPa`` is now a sentence and turns into one.
-    """
+def test_slash_on_bare_canvas_starts_nothing(window):
+    """Slash is division inside equations, not a second entry trigger."""
     _type_on_canvas(window, "/")
-    item = editing_item(window)
-    assert isinstance(item, MathItem)
-    item._editor.setPlainText("q=5kPa")
-    window.view.end_item_edit()
-    assert window.document.workspace.get("q").to("kPa").magnitude == pytest.approx(5)
+    assert editing_item(window) is None
+    assert markups(window) == []
 
 
 def test_pipe_starts_a_table_and_at_starts_a_callout(window):
@@ -861,11 +873,13 @@ def test_an_unbound_key_starts_nothing_at_all(window):
     assert not markups(window)
 
 
-def test_the_maths_key_starts_a_calculation(window):
-    """"/" is what opens one, and it is on the shortcut list to be changed."""
+def test_the_calculation_entry_key_is_in_the_shortcut_list(window):
+    """The one explicit entry key is visible and can be rebound."""
     from calcforge.items.mathitem import MathItem
 
-    _type_on_canvas(window, "/")
+    assert window.shortcuts.sequence("insert.text") == '"'
+    assert window.shortcuts.sequence("insert.math") == ""
+    _type_on_canvas(window, '"')
     item = window.view.editing_item()
     assert isinstance(item, MathItem)
     item._editor.setPlainText("5")
@@ -896,21 +910,21 @@ def test_typing_is_ignored_while_editing_or_in_a_table(window):
 
 def test_shortcuts_can_be_rebound_and_reset(window):
     manager = window.shortcuts
-    assert manager.sequence("insert.math") == "/"
-    manager.set_sequence("insert.math", "!")
+    assert manager.sequence("insert.text") == '"'
+    manager.set_sequence("insert.text", "!")
     window.apply_shortcuts()
     _type_on_canvas(window, "!")
     assert isinstance(editing_item(window), MathItem)
     window.view.end_item_edit()
-    manager.reset("insert.math")
-    assert manager.sequence("insert.math") == "/"
+    manager.reset("insert.text")
+    assert manager.sequence("insert.text") == '"'
 
 
 def test_shortcut_conflicts_are_detectable(window):
     manager = window.shortcuts
     assert manager.conflicts() == {}
-    manager.set_sequence("tool.rect", "/")
-    assert "/" in manager.conflicts()
+    manager.set_sequence("tool.rect", '"')
+    assert '"' in manager.conflicts()
     manager.reset()
 
 
@@ -1230,7 +1244,7 @@ def test_typing_still_works_with_something_selected(window):
     window.select_tool("select")
     markups(window)[0].setSelected(True)
     window.view._last_scene_pos = QPointF(300, 400)
-    key(window.view, Qt.Key_unknown, "/")
+    key(window.view, Qt.Key_unknown, '"')
     assert isinstance(editing_item(window), MathItem)
 
 
@@ -1752,6 +1766,18 @@ def test_every_markup_tool_is_reachable_from_the_toolbar(window):
     assert {"toolbar_main", "toolbar_tools", "toolbar_style"} <= names
 
 
+def test_the_ambiguous_blue_check_is_not_presented_as_a_toolbar_tool(window):
+    """Independent verification stays available, but not as a mystery tool."""
+    from PySide6.QtWidgets import QToolBar
+
+    main = window.findChild(QToolBar, "toolbar_main")
+    assert window.act_verify not in main.actions()
+    assert window.act_verify.shortcut().toString() == "F10"
+    calculate = next(action.menu() for action in window.menuBar().actions()
+                     if action.text().replace("&", "") == "Calculate")
+    assert window.act_verify in calculate.actions()
+
+
 # ---------------------------------------------------------------------------
 # page operations must not touch what is on the other pages
 # ---------------------------------------------------------------------------
@@ -1843,7 +1869,7 @@ def test_the_manager_lists_every_binding_including_the_chords(window):
     dialog = dialogs.ShortcutManagerDialog(window.shortcuts, window)
     ids = set(dialog.editors)
     assert "tool.measure_dimension" in ids and "tool.measure_area" in ids
-    assert "tool.rect" in ids and "insert.math" in ids
+    assert "tool.rect" in ids and "insert.text" in ids
     assert dialog.editors["tool.measure_dimension"].text() == "Alt+M"
     assert dialog.editors["tool.rect"].text() == "R"
     dialog.deleteLater()
@@ -2010,7 +2036,7 @@ def test_removing_the_logo_takes_it_off_every_page(window):
 def test_the_header_and_footer_have_a_menu_entry_of_their_own(window):
     from calcforge.ui import dialogs
 
-    assert window.act_header_footer.text() == "Header and footer…"
+    assert window.act_header_footer.text() == "Header/footer…"
     dialog = dialogs.DocumentPropertiesDialog(window.document)
     dialog.show_tab("header")
     assert "Header" in dialog.tabs.tabText(dialog.tabs.currentIndex())
@@ -2043,6 +2069,32 @@ def _drawing_pdf(path, colour="#3366aa"):
     return path
 
 
+def _text_pdf(path, text="SELECTABLE SOURCE TEXT"):
+    """A one-page PDF containing real text, not a raster image."""
+    from pypdf import PdfWriter
+    from pypdf.generic import (DecodedStreamObject, DictionaryObject,
+                               NameObject)
+
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=595, height=842)
+    font = DictionaryObject({
+        NameObject("/Type"): NameObject("/Font"),
+        NameObject("/Subtype"): NameObject("/Type1"),
+        NameObject("/BaseFont"): NameObject("/Helvetica"),
+    })
+    page[NameObject("/Resources")] = DictionaryObject({
+        NameObject("/Font"): DictionaryObject({
+            NameObject("/F1"): writer._add_object(font),
+        }),
+    })
+    stream = DecodedStreamObject()
+    stream.set_data(f"BT /F1 18 Tf 100 700 Td ({text}) Tj ET".encode("ascii"))
+    page[NameObject("/Contents")] = writer._add_object(stream)
+    with open(path, "wb") as handle:
+        writer.write(handle)
+    return path
+
+
 def _ink(image) -> int:
     return sum(1 for y in range(0, image.height(), 5)
                for x in range(0, image.width(), 5)
@@ -2058,6 +2110,15 @@ def _import_pdf(window, monkeypatch, path, indices=(0,)):
     window.insert_pdf()
 
 
+def _open_pdf(window, monkeypatch, path):
+    from PySide6.QtWidgets import QFileDialog
+
+    monkeypatch.setattr(QFileDialog, "getOpenFileName",
+                        lambda *args, **kwargs: (path, "PDF documents (*.pdf)"))
+    window.act_open.trigger()
+    QApplication.processEvents()
+
+
 def test_an_inserted_pdf_page_carries_the_drawing(window, tmp_path, monkeypatch):
     path = _drawing_pdf(str(tmp_path / "plan.pdf"))
     _import_pdf(window, monkeypatch, path)
@@ -2066,7 +2127,106 @@ def test_an_inserted_pdf_page_carries_the_drawing(window, tmp_path, monkeypatch)
     page = window.document.pages[1]
     assert page.background_key
     assert window.document.asset(page.background_key)
+    assert page.pdf_key
+    assert window.document.asset(page.pdf_key).startswith(b"%PDF")
+    assert page.pdf_page_index == 0
     assert _ink(page.frame.render_image(dpi=48.0)) > 100     # not a blank sheet
+
+
+def test_opening_a_pdf_creates_a_focused_review_document(
+        window, tmp_path, monkeypatch):
+    from calcforge.core.document import Document
+    from calcforge.io import project as project_io
+
+    path = _drawing_pdf(str(tmp_path / "review.pdf"))
+    _open_pdf(window, monkeypatch, path)
+
+    assert window.document.mode == "pdf"
+    assert len(window.document.pages) == 1
+    assert window.document.pages[0].pdf_key
+    assert not window.calculate_menu.menuAction().isVisible()
+    assert not window.symbol_menu.menuAction().isVisible()
+    assert not window.tool_actions["math"].isVisible()
+    assert not window.tool_actions["table"].isVisible()
+    assert window.tool_actions["snapshot"].isVisible()
+    assert window.tool_actions["measure_length"].isVisible()
+    assert not window.dock_variables.toggleViewAction().isVisible()
+
+    saved = str(tmp_path / "review.cfx")
+    project_io.save_document(window.document, saved)
+    reopened = Document()
+    project_io.load_document(reopened, saved)
+    assert reopened.mode == "pdf"
+    assert reopened.pages[0].pdf_key
+
+    window.new_document(confirm=False)
+    assert window.document.mode == "worksheet"
+    assert window.calculate_menu.menuAction().isVisible()
+    assert window.tool_actions["math"].isVisible()
+    assert window.dock_variables.toggleViewAction().isVisible()
+
+
+def test_pdf_review_mode_blocks_calculation_entry_but_keeps_snapshot_key(
+        window, tmp_path, monkeypatch):
+    path = _drawing_pdf(str(tmp_path / "review.pdf"))
+    _open_pdf(window, monkeypatch, path)
+    window.view.setFocus()
+
+    QApplication.sendEvent(
+        window.view, QKeyEvent(QEvent.KeyPress, Qt.Key_QuoteDbl, Qt.NoModifier, '"'))
+    assert not [item for item in markups(window) if isinstance(item, MathItem)]
+    assert "unavailable" in window.status_hint.text().lower()
+
+    QApplication.sendEvent(
+        window.view, QKeyEvent(QEvent.KeyPress, Qt.Key_G, Qt.NoModifier, "g"))
+    assert window.view.current_tool().key == "snapshot"
+
+
+def test_pdf_review_snapshot_survives_edit_save_reopen_and_export(
+        window, tmp_path, monkeypatch):
+    from pypdf import PdfReader
+    from calcforge.core.document import Document
+    from calcforge.io import export as export_io, project as project_io
+    from calcforge.items.shapes import PolyItem
+    from calcforge.items.snapshot import SnapshotItem
+
+    path = _drawing_pdf(str(tmp_path / "review.pdf"))
+    _open_pdf(window, monkeypatch, path)
+    frame = window.document.pages[0].frame
+    drawing = [item for item in frame.markups() if item.layer == "Drawing"]
+    assert drawing, "the imported PDF fixture supplied no vector drawing"
+
+    QApplication.sendEvent(
+        window.view, QKeyEvent(QEvent.KeyPress, Qt.Key_G, Qt.NoModifier, "g"))
+    for kind, x, y, button, buttons in (
+            (QEvent.MouseButtonPress, 40, 40, Qt.LeftButton, Qt.LeftButton),
+            (QEvent.MouseMove, 500, 500, Qt.NoButton, Qt.LeftButton),
+            (QEvent.MouseButtonRelease, 500, 500, Qt.LeftButton, Qt.NoButton)):
+        QApplication.sendEvent(
+            window.view.viewport(),
+            _event(window.view, kind, x, y, button, buttons))
+    assert window._clipboard and window._clipboard[0]["type"] == "snapshot"
+    window.paste_items()
+    shot = [item for item in frame.markups() if isinstance(item, SnapshotItem)]
+    assert len(shot) == 1
+
+    # Ordinary review work after the Snapshot must not disturb it.
+    line = PolyItem("line", [QPointF(20, 20), QPointF(80, 20)])
+    frame.add_markup(line)
+    assert shot[0] in frame.markups()
+
+    saved = str(tmp_path / "review.cfx")
+    project_io.save_document(window.document, saved)
+    reopened = Document()
+    project_io.load_document(reopened, saved)
+    snapshots = [entry for entry in reopened.pages[0]._pending_items
+                 if entry.get("type") == "snapshot"]
+    assert len(snapshots) == 1
+    assert reopened.asset(snapshots[0]["asset"])
+
+    exported = str(tmp_path / "review-export.pdf")
+    export_io.export_pdf(window.document, exported, resolution=150)
+    assert len(PdfReader(exported).pages) == 1
 
 
 def test_an_inserted_pdf_page_survives_saving_and_reopening(window, tmp_path, monkeypatch):
@@ -2080,8 +2240,10 @@ def test_an_inserted_pdf_page_survives_saving_and_reopening(window, tmp_path, mo
 
     reopened = Document()
     project_io.load_document(reopened, saved)
-    key = reopened.pages[1].background_key
-    assert key and reopened.asset(key)
+    page = reopened.pages[1]
+    assert page.background_key and reopened.asset(page.background_key)
+    assert page.pdf_key and reopened.asset(page.pdf_key).startswith(b"%PDF")
+    assert page.pdf_page_index == 0
 
 
 def test_an_inserted_pdf_page_prints(window, tmp_path, monkeypatch):
@@ -2098,6 +2260,21 @@ def test_an_inserted_pdf_page_prints(window, tmp_path, monkeypatch):
     finally:
         source.close()
     assert _ink(image) > 100
+
+
+def test_an_inserted_pdf_keeps_selectable_text_when_exported(
+        window, tmp_path, monkeypatch):
+    from pypdf import PdfReader
+    from calcforge.io import export as export_io
+
+    path = _text_pdf(str(tmp_path / "notes.pdf"))
+    _import_pdf(window, monkeypatch, path)
+    out = str(tmp_path / "out.pdf")
+    export_io.export_pdf(window.document, out, resolution=150)
+
+    reader = PdfReader(out)
+    assert len(reader.pages) == 2
+    assert "SELECTABLE SOURCE TEXT" in (reader.pages[1].extract_text() or "")
 
 
 def test_undoing_an_insert_and_redoing_it_keeps_the_drawing(window, tmp_path, monkeypatch):
@@ -2165,13 +2342,15 @@ def test_preferences_survive_being_saved_and_read_back(qapp, tmp_path, monkeypat
     monkeypatch.setattr(QSettings, "setValue", QSettings.setValue)
     prefs = preferences.Preferences(wheel=preferences.WHEEL_SCROLL,
                                     self_contained_blocks=True,
-                                    check_spelling=False)
+                                    check_spelling=False,
+                                    recover_flattened=False)
     preferences.save(prefs)
     try:
         read = preferences.load()
         assert read.wheel == preferences.WHEEL_SCROLL
         assert read.self_contained_blocks is True
         assert read.check_spelling is False
+        assert read.recover_flattened is False
     finally:
         preferences.save(preferences.Preferences())
         preferences.forget()

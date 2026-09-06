@@ -81,4 +81,11 @@ class ImageItem(MarkupItem):
         self.asset_key = data.get("asset") or data.get("asset_key") or ""
         self.keep_aspect = bool(data.get("keep_aspect", True))
         self._rect = QRectF(*data.get("rect", [0, 0, 200, 150]))
+        image_default = self.style
         self.load_base(data)
+        # Clipboard image payloads contain no markup style. Generic
+        # deserialisation used to replace the image's borderless default with
+        # the red line default shared by drawn markups, putting a red frame
+        # around every pasted photo.
+        if "style" not in data:
+            self.style = image_default

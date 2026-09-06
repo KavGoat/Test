@@ -136,7 +136,8 @@ class ScaleDialog(QDialog):
         else:
             self.known = QLineEdit()
             self.known.hide()
-            pick = QPushButton("Calibrate — pick two points on the drawing…")
+            pick = QPushButton("Calibrate…")
+            pick.setToolTip("Pick two points on the drawing to calibrate its scale")
             pick.setToolTip("Click one end of something you know the length of, "
                             "then the other, then type that length")
             pick.clicked.connect(lambda: self.done(self.PICK))
@@ -548,6 +549,14 @@ class RecolourDialog(QDialog):
         swap.addRow("Tolerance", self.tolerance)
         layout.addLayout(swap)
 
+        self.grey_mode = QRadioButton("Black and white")
+        self.grey_mode.setToolTip("Convert the image to greyscale")
+        layout.addWidget(self.grey_mode)
+        self.transparent_mode = QRadioButton("Make transparent")
+        self.transparent_mode.setToolTip(
+            "Make the selected source colour transparent using the tolerance above")
+        layout.addWidget(self.transparent_mode)
+
         self.preview = QLabel()
         self.preview.setAlignment(Qt.AlignCenter)
         self.preview.setMinimumHeight(180)
@@ -580,7 +589,12 @@ class RecolourDialog(QDialog):
         if self.lines_mode.isChecked():
             return recolour.recolour_lines(image, self.line_target,
                                            self.threshold.value())
+        if self.grey_mode.isChecked():
+            return recolour.to_greyscale(image)
         source = self.from_colour.currentData() or QColor("#000000")
+        if self.transparent_mode.isChecked():
+            return recolour.make_colour_transparent(
+                image, source, self.tolerance.value())
         return recolour.swap_colour(image, source, self.to_target,
                                     self.tolerance.value())
 
@@ -1059,7 +1073,8 @@ class ShortcutManagerDialog(QDialog):
         buttons = QHBoxLayout()
         clear_row = QPushButton("Clear")
         clear_row.clicked.connect(lambda: self._set_current(""))
-        reset_row = QPushButton("Reset this one")
+        reset_row = QPushButton("Reset one")
+        reset_row.setToolTip("Reset the selected shortcut")
         reset_row.clicked.connect(self._reset_row)
         reset_all = QPushButton("Reset all")
         reset_all.clicked.connect(self._reset_all)
@@ -1298,6 +1313,42 @@ class ToolbarDialog(QDialog):
         return {key for key, box in self.boxes.items() if box.isChecked()}
 
 
+class FlattenDialog(QDialog):
+    """Choose the document content classes to make part of the page."""
+
+    CLASSES = (("markups", "Markups"),
+               ("calculations", "Calculations"),
+               ("tables", "Tables"))
+
+    def __init__(self, recoverable: bool, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Flatten")
+        layout = QVBoxLayout(self)
+        note = QLabel(
+            "Choose what to flatten on every page. Flatten Selection remains "
+            "available for individual items.")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        self.boxes = {}
+        for key, label in self.CLASSES:
+            box = QCheckBox(label)
+            box.setChecked(key == "markups")
+            self.boxes[key] = box
+            layout.addWidget(box)
+        recovery = QLabel(
+            "Original item data will be retained and can be restored with Recover."
+            if recoverable else
+            "Recovery data is disabled in Preferences. This discards the chosen "
+            "items' editable source when the file is saved.")
+        recovery.setWordWrap(True)
+        recovery.setStyleSheet("color:#6b7280;" if recoverable else "color:#b3261e;")
+        layout.addWidget(recovery)
+        layout.addWidget(_buttons(self))
+
+    def chosen(self) -> set[str]:
+        return {key for key, box in self.boxes.items() if box.isChecked()}
+
+
 class PreferencesDialog(QDialog):
     """The choices that belong to the person rather than to the document."""
 
@@ -1323,6 +1374,17 @@ class PreferencesDialog(QDialog):
         self.snapping.setToolTip("Corners, midpoints and line ends pull the "
                                  "pointer to them while you draw")
         form.addRow("", self.snapping)
+        self.insertion = QCheckBox("Insertion point")
+        self.insertion.setChecked(prefs.insertion_point)
+        self.insertion.setToolTip(
+            "Click empty paper to place a calculation caret; Up and Down move it")
+        form.addRow("", self.insertion)
+        self.recover_flattened = QCheckBox("Recoverable flattening")
+        self.recover_flattened.setChecked(prefs.recover_flattened)
+        self.recover_flattened.setToolTip(
+            "Keep the original item data in a .cfx file so Markup > Recover can restore it.\n"
+            "Turn this off only when deliberately producing an irreversible file.")
+        form.addRow("", self.recover_flattened)
         layout.addWidget(canvas)
 
         writing = QGroupBox("Writing")
@@ -1359,4 +1421,6 @@ class PreferencesDialog(QDialog):
             check_spelling=self.spelling.isChecked(),
             dictionary=self.dictionary.currentData(),
             snap_while_drawing=self.snapping.isChecked(),
-            autosize_text=self.autosize.isChecked())
+            autosize_text=self.autosize.isChecked(),
+            insertion_point=self.insertion.isChecked(),
+            recover_flattened=self.recover_flattened.isChecked())
