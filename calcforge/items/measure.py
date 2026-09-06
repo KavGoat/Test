@@ -523,6 +523,27 @@ class CountItem(MarkupItem):
         half = self.SIZE / 2
         return QRectF(-half, -half, self.SIZE, self.SIZE)
 
+    def index_rect(self) -> QRectF:
+        """Where the number under the marker goes, sized to the number.
+
+        It used to be a box fixed at the symbol's width and ten points tall
+        whatever the font said. At the size it ships in that just fits, so the
+        number looked right until somebody made it bigger — and then it was
+        cut off at the bottom, and past about eleven points it was drawn
+        outside the item altogether and Qt clipped it.
+        """
+        metrics = QFontMetricsF(self.style.font())
+        text = str(self.index)
+        width = max(metrics.horizontalAdvance(text) + 2.0, self.SIZE)
+        rect = self.local_rect()
+        return QRectF(-width / 2, rect.bottom() + 1, width, metrics.height())
+
+    def boundingRect(self) -> QRectF:
+        # The number hangs below the symbol, so the item has to own that space
+        # too or it is painted outside its own rectangle and clipped.
+        box = super().boundingRect()
+        return box.united(self.index_rect()) if self.show_index else box
+
     def display_name(self) -> str:
         return self.label or f"Count · {self.subject}"
 
@@ -560,7 +581,7 @@ class CountItem(MarkupItem):
             font = self.style.font()
             painter.setFont(font)
             painter.setPen(QPen(self.style.text_qcolor()))
-            painter.drawText(QRectF(rect.left(), rect.bottom() + 1, rect.width(), 10),
+            painter.drawText(self.index_rect(),
                              Qt.AlignHCenter | Qt.AlignTop, str(self.index))
 
     def serialize(self) -> dict:

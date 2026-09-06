@@ -256,6 +256,52 @@ def test_modifier_shortcuts_are_bound_where_asked(window):
     assert window.shortcuts.conflicts() == {}
 
 
+def test_a_count_marker_shows_its_whole_number_at_any_size(window):
+    """The number used to be drawn into a box fixed at ten points tall.
+
+    At the size it ships in that just fits, so it looked right until somebody
+    made the marker bigger — and then the number was cut off at the bottom,
+    and past about eleven points it was painted outside the item's own
+    rectangle and clipped away entirely.
+    """
+    from PySide6.QtGui import QFontMetricsF
+    from calcforge.items.measure import CountItem
+
+    window.select_tool("count")
+    for x in (150, 200, 250):
+        click(window.view, x, 200)
+    markers = [i for i in markups(window) if isinstance(i, CountItem)]
+    assert [m.index for m in markers] == [1, 2, 3]
+
+    marker = markers[0]
+    for size in (7.0, 9.0, 11.0, 14.0, 18.0):
+        marker.style.font_size = size
+        marker.index = 128           # the widest number a sheet is likely to reach
+        metrics = QFontMetricsF(marker.style.font())
+        box = marker.index_rect()
+        assert metrics.horizontalAdvance("128") <= box.width(), size
+        assert metrics.height() <= box.height(), size
+        assert marker.boundingRect().contains(box), size
+    window.view.escape_everything()
+
+
+def test_escape_puts_the_count_tool_down_at_once(window):
+    """One press, and nothing of the count session is left behind."""
+    from calcforge.items.measure import CountItem
+
+    window.select_tool("count")
+    for x in (150, 200):
+        click(window.view, x, 200)
+    assert len([i for i in markups(window) if isinstance(i, CountItem)]) == 2
+
+    press_key(window.view, Qt.Key_Escape)
+    QApplication.processEvents()
+    assert window.view.tool_key == "select", "the tool is put down on the press"
+    assert window.view._draft is None, "and no half-placed marker is left"
+    placed = [i for i in markups(window) if isinstance(i, CountItem)]
+    assert [m.index for m in placed] == [1, 2], "what was placed stays placed"
+
+
 def test_arrow_tool_places_an_arrow_and_hides_handles_until_selected(window):
     from PySide6.QtGui import QImage, QPainter
 
