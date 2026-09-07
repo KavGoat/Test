@@ -1,8 +1,9 @@
 # MarkForge — evidence record
 
-Audited: 2026-09-07 against `claude/markforge-python`, at commit `5d69361`,
-with the suite green (792 tests) and `tools/session_fuzz.py` clean over two
-hundred rounds.
+Audited: 2026-09-07 against `claude/markforge-python`, with the suite green
+and `tools/session_fuzz.py` clean over two hundred rounds. Re-checked the same
+day by driving the running application and looking at it, which is where the
+last section came from.
 
 **This is not the completion record.** It changes no checkbox in
 `docs/tasklist.md` and no status in `docs/tasklist.xlsx`; only the user marks a
@@ -342,19 +343,89 @@ Evidence: `test_spellcheck_knows_requests_and_offers_a_correction`.
 
 ---
 
+## Found by walking the application
+
+The audit above reads the code and the tests. This section is what came of
+opening the window, drawing one of everything, opening a drawing, marking it
+up and looking at the result, and from a fuzz run. Six bugs, all now fixed
+and held.
+
+- **The footer drew three things on top of one another.** The page navigation
+  was parented to the status bar, moved to the middle and raised, so on a
+  marked-up drawing the bottom of the window read
+  "of 140.9, 246.8 mm drawing.pdf page 1" — the page count, the cursor
+  position and the page label in one place. It is in the layout now, between
+  two stretches, and nothing in a layout can overlap anything else. Evidence:
+  `test_nothing_in_the_footer_is_drawn_on_top_of_anything_else`,
+  `test_page_navigation_and_label_are_centred_in_the_footer`.
+- **`Ctrl+I` inserted a PDF.** The requirement says Ctrl+B/I/U must never
+  insert a page; Ctrl+I was Insert PDF's shortcut, and because keys reserved
+  for the text are deliberately kept out of the shortcut list it was a binding
+  nobody could see and nobody could change. Insert PDF is on `Ctrl+Shift+I`,
+  and italic and underline are commands of their own — they had none at all
+  before, only bold did. Evidence:
+  `test_ctrl_i_italicises_rather_than_inserting_a_pdf`,
+  `test_italic_and_underline_reach_the_markup_that_is_picked`,
+  `test_italic_and_underline_reach_only_the_run_picked_out`.
+- **A right click did not close a shape being clicked out**, though the cloud
+  tool's own tooltip promises "Enter or a right-click closes it". It opened a
+  context menu over the half-drawn shape. Evidence:
+  `test_a_right_click_closes_a_shape_being_clicked_out`,
+  `test_a_right_click_closes_a_lasso_being_clicked_out`.
+- **The style toolbar was an empty band with one stranded button.** With
+  nothing selected and the Select tool held, every control on it is hidden and
+  what was left was a full row of chrome carrying a disabled "Set default". It
+  goes until there is something to put on it. Evidence:
+  `test_the_style_toolbar_goes_when_it_has_nothing_to_offer`.
+- **An unrecognised unit raised out of a Qt slot.** Found by the fuzzer typing
+  "lc" into the exact-size box: `parse_unit` let pint's own `UndefinedUnitError`
+  escape, and an exception raised inside a Qt override is not an error message,
+  it is a crash a few events later. It returns None now, which is what every
+  caller already reads as "that is not a length". Evidence:
+  `test_a_size_typed_in_a_unit_nobody_knows_is_refused_not_raised`.
+- **Four labels were sentences, and one of them made the Properties panel
+  wider than the dock it lives in** — "Write the measurement on the page" as a
+  checkbox pushed the panel's minimum width to 335 against a 320-wide dock, so
+  a measurement's properties opened with a horizontal scrollbar. They are
+  "Show value", "Show size", "Inline text" and "Print" now, with the sentence
+  in the tooltip, and the minimum is 276. Evidence:
+  `test_every_label_the_user_reads_is_one_or_two_words`.
+
+## Corrected by this audit
+
+Four things an earlier pass called missing, which the code and now a test show
+are built. They are here so the record does not go on being wrong about them.
+
+- **Property mode is greyed out for what cannot use it**, with a tooltip
+  saying why. Evidence: `test_property_mode_is_greyed_out_for_what_cannot_use_it`.
+- **A rectangle takes a point in or out** from its own right-click menu, and
+  becomes a polygon by doing it rather than by a separate command. Evidence:
+  `test_a_rectangle_takes_a_point_in_or_out_and_becomes_a_polygon`.
+- **Turning the grid switch off stops grid snapping.** Reported as not
+  respected; measured as respected. Evidence:
+  `test_the_grid_switch_actually_stops_grid_snapping`.
+- **Groups scale as one object**, Shift releasing the ratio. Evidence:
+  `test_a_group_scales_as_one_and_shift_releases_its_ratio`.
+
+## Built, and now held
+
+Four things the first audit listed as real but untested. Each has a test now.
+
+- **The page scale beside the page number in the pages panel**, and nothing
+  said for an unscaled page. Evidence:
+  `test_the_page_scale_is_shown_beside_the_page_in_the_panel`.
+- **Contents-block lines as working links in the exported PDF**, one `/Link`
+  per line, each with a destination. Evidence:
+  `test_a_contents_line_is_a_working_link_in_the_exported_pdf`.
+- **The scrollbars while the view is turned**: no rotation in the view's
+  transform, and the vertical bar still runs down the document. Evidence:
+  `test_turning_the_view_leaves_the_scrollbars_the_way_they_scroll`.
+- **Where pasted pages landed**, said the way a drop says it — the slot line
+  at the landing place and the pages picked out. Evidence:
+  `test_pasting_a_page_says_where_it_landed`.
+
 ## Built, but nothing holds it
 
-Real behaviour with no focused test. Each is a candidate for the next test
-somebody writes, because this is where a regression would go unnoticed.
-
-- **The page scale beside the page number in the pages panel.**
-  `panels.py` builds the caption from `page.scale.label`; no test reads it.
 - **The `.btx` sketch-tool fidelity repair.** The tool sets load and every tool
   in them reads, but nothing compares an imported structural symbol against
   what Bluebeam draws — see `docs/UNADDRESSED_TASKS.md`.
-- **Contents-block links as working links in the exported PDF.**
-  `io/export.outline_and_links` builds them and `io/pdflinks.add_outline_and_links`
-  writes them; the outline is tested, the link annotations are not.
-- **The scrollbars while the view is turned.** `apply_view_transform` holds the
-  zoom only and rotates the pages rather than the view, which is what keeps the
-  scrollbars upright; nothing asserts it.

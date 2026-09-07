@@ -16,8 +16,9 @@ from PySide6.QtPrintSupport import QPrintDialog, QPrintPreviewDialog, QPrinter
 from PySide6.QtWidgets import (QTabBar, QApplication, QComboBox, QDockWidget, QDoubleSpinBox,
                                QFileDialog, QGraphicsItem, QHBoxLayout,
                                QInputDialog, QLabel, QLineEdit, QMainWindow,
-                               QMenu, QMessageBox, QSpinBox, QStatusBar,
-                               QToolBar, QToolButton, QVBoxLayout, QWidget)
+                               QMenu, QMessageBox, QSizePolicy, QSpinBox,
+                               QStatusBar, QToolBar, QToolButton, QVBoxLayout,
+                               QWidget)
 
 from ..core.document import (LANDSCAPE, MM_TO_PT, PAGE_SIZES, PORTRAIT,
                              PT_TO_MM, Document, Page, PageScale,
@@ -64,7 +65,16 @@ def _command_id(method: str) -> str:
 
 
 class CenteredStatusBar(QStatusBar):
-    """Status bar with a page-navigation widget centred in the window."""
+    """Status bar with the page navigation centred in the room it has.
+
+    It used to be centred by hand — parented to the bar, moved to the middle
+    and raised above everything. Which is exactly what it did: the page
+    navigation was drawn *over* the cursor position and the page label, and on
+    a marked-up drawing the footer read "of 140.9, 246.8 mm drawing.pdf page 1"
+    with three texts on top of one another. Nothing in a layout can overlap
+    anything else, so it is in the layout now, between two stretches that keep
+    it in the middle of whatever space the rest leaves it.
+    """
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -72,22 +82,16 @@ class CenteredStatusBar(QStatusBar):
 
     def set_center_widget(self, widget: QWidget) -> None:
         self.center_widget = widget
-        widget.setParent(self)
-        widget.show()
-        self.position_center_widget()
+        self.addWidget(_stretch(self), 1)
+        self.addWidget(widget)
+        self.addWidget(_stretch(self), 1)
 
-    def position_center_widget(self) -> None:
-        widget = self.center_widget
-        if widget is None:
-            return
-        widget.adjustSize()
-        widget.move(max((self.width() - widget.width()) // 2, 0),
-                    max((self.height() - widget.height()) // 2, 0))
-        widget.raise_()
 
-    def resizeEvent(self, event) -> None:
-        super().resizeEvent(event)
-        self.position_center_widget()
+def _stretch(parent) -> QWidget:
+    """An empty widget that exists only to take up room."""
+    spacer = QWidget(parent)
+    spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+    return spacer
 
 
 # Which part of the shortcut list each action belongs in, so a long list is
@@ -113,6 +117,7 @@ _SHORTCUT_GROUPS = {
     "align_bottom": "Order", "align_hcenter": "Order", "align_vcenter": "Order",
     "text_left": "Text", "text_center": "Text", "text_right": "Text",
     "font_increase": "Text", "font_decrease": "Text",
+    "bold": "Text", "italic": "Text", "underline": "Text",
     "zoom_in": "View", "zoom_out": "View", "zoom_sel": "View",
     "fit_page": "View", "fit_width": "View", "actual_size": "View",
     "prev_page": "View", "next_page": "View", "grid": "View", "snap": "View",
@@ -313,8 +318,13 @@ class MainWindow(QMainWindow):
         self._act("open", "Open…", self.open_document, "Ctrl+O", "open")
         self._act("save", "Save", self.save_document, "Ctrl+S", "save")
         self._act("save_as", "Save as…", self.save_document_as, "Ctrl+Shift+S")
+        # Not Ctrl+I. That belongs to italic wherever there are words, and
+        # while somebody was typing it inserted a PDF instead — which is the
+        # exact thing the requirement says must never happen. It never reached
+        # the shortcut list either, because keys reserved for the text are not
+        # registered, so it was a binding nobody could see or change.
         self._act("insert_pdf", "Insert PDF…", lambda: self.insert_pdf(),
-                  "Ctrl+I", "pdf")
+                  "Ctrl+Shift+I", "pdf")
         self._act("import_toolset", "Import tools…",
                   lambda: self.import_toolset(),
                   tip="Bring in a Bluebeam tool set — a .btx file")
@@ -364,7 +374,8 @@ class MainWindow(QMainWindow):
         self._act("duplicate", "Duplicate", self.duplicate_selection, "Ctrl+D")
         self._act("delete", "Delete", self.delete_selection, "", "delete")
         self._act("select_all", "Select all", self.select_all, "Ctrl+A")
-        self._act("lock", "Lock / unlock", self.toggle_lock, "Ctrl+L")
+        self._act("lock", "Lock", self.toggle_lock, "Ctrl+L",
+                  tip="Lock the selection so it cannot be moved, or let it go")
         self._act("array", "Offset copies…", self.array_selection,
                   "Ctrl+Shift+D",
                   tip="Repeat the selection at a fixed spacing, any number of times")
@@ -377,6 +388,16 @@ class MainWindow(QMainWindow):
                            ("right", "Align right"), ("top", "Align top"),
                            ("vcenter", "Align middles"), ("bottom", "Align bottom")):
             self._act(f"align_{key}", label, lambda _=False, k=key: self.align_items(k))
+        # Bold has always been reachable — Ctrl+B tries the words before it
+        # reaches for a bookmark. Italic and underline had nothing at all:
+        # Ctrl+I inserted a PDF and Ctrl+U did nothing. They are commands now,
+        # on the keys they have in every program there has ever been.
+        self._act("bold", "Bold", self.toggle_bold, "",
+                  tip="Embolden the words picked out, or the whole markup")
+        self._act("italic", "Italic", self.toggle_italic, "Ctrl+I",
+                  tip="Italicise the words picked out, or the whole markup")
+        self._act("underline", "Underline", self.toggle_underline, "Ctrl+U",
+                  tip="Underline the words picked out, or the whole markup")
         self._act("text_left", "Text left",
                   lambda: self.format_content(alignment="left"), "Ctrl+Alt+Left")
         self._act("text_center", "Text centre",
@@ -627,7 +648,8 @@ class MainWindow(QMainWindow):
             "Use the selected markup's compatible style for new markups of this kind")
         self.default_button.setEnabled(False)
         self.default_button.clicked.connect(self.set_selected_as_default)
-        style_bar.addWidget(self.default_button)
+        self._default_action = style_bar.addWidget(self.default_button)
+        self.style_bar = style_bar
         # The stamp's wording and the count's subject only mean anything while
         # those tools are in hand, and reading "APPROVED" across the top of the
         # window while drawing a rectangle is just noise. Both come and go with
@@ -821,7 +843,8 @@ class MainWindow(QMainWindow):
         for key in ("left", "hcenter", "right", "top", "vcenter", "bottom"):
             align_menu.addAction(getattr(self, f"act_align_{key}"))
         text_menu = edit_menu.addMenu("Text")
-        for action in (self.act_text_left, self.act_text_center, self.act_text_right,
+        for action in (self.act_bold, self.act_italic, self.act_underline, None,
+                       self.act_text_left, self.act_text_center, self.act_text_right,
                        None, self.act_font_increase, self.act_font_decrease):
             text_menu.addSeparator() if action is None else text_menu.addAction(action)
         view_menu = bar.addMenu("&View")
@@ -931,12 +954,16 @@ class MainWindow(QMainWindow):
     def _build_status(self) -> None:
         status = CenteredStatusBar()
         self.setStatusBar(status)
+        # What is going on and where the pointer is are both things the footer
+        # says rather than things it offers, so they sit together on the left.
+        # The controls are permanent widgets and gather on the right, and the
+        # page navigation goes in the middle of what is left between them.
         self.status_hint = QLabel("Ready")
-        status.addWidget(self.status_hint, 1)
+        status.addWidget(self.status_hint)
 
         self.status_position = QLabel("")
-        self.status_position.setMinimumWidth(190)
-        status.addPermanentWidget(self.status_position)
+        self.status_position.setMinimumWidth(150)
+        status.addWidget(self.status_position)
 
 
         self.status_scale = QToolButton()
@@ -1795,6 +1822,9 @@ class MainWindow(QMainWindow):
             self.current_index = target
         self._structural_change("Paste page" if len(waiting) == 1
                                 else f"Paste {len(waiting)} pages", mutate)
+        # Where they went, said the way a drop says it: the slot line at the
+        # landing place and the pages themselves picked out.
+        self.pages_panel.show_where_it_landed(target, len(waiting))
         # Land on it, and say where it went: a page inserted somewhere out of
         # sight is a page nobody can find.
         self.go_to_page(target)
@@ -2346,7 +2376,6 @@ class MainWindow(QMainWindow):
         self.page_forward.setEnabled(self.current_index < total - 1)
         page = self.current_page()
         self.page_label.setText(f"· {page.label.strip()}" if page.label.strip() else "")
-        self.statusBar().position_center_widget()
         setup = page.setup
         # The paper and the room round the writing, which is what somebody is
         # actually asking when they look down here.
@@ -2518,6 +2547,12 @@ class MainWindow(QMainWindow):
         for field, actions in self._style_widgets.items():
             for action in actions:
                 action.setVisible(field in supported)
+        # With nothing selected and a tool that styles nothing, every control
+        # on this bar is hidden and what is left is an empty band with one
+        # disabled button stranded in it. A toolbar with nothing to offer is
+        # not a toolbar, so it goes until there is something to put on it.
+        self._default_action.setVisible(bool(supported))
+        self.style_bar.setVisible(bool(supported))
         if active is None:
             return
         controls = ((self.stroke_button, active.style.stroke, "set_color"),
@@ -4274,6 +4309,54 @@ class MainWindow(QMainWindow):
 
     def bold_the_selected_run(self) -> bool:
         """Embolden just the words picked out under the caret, if any are."""
+        return self._style_the_selected_run("bold")
+
+    def toggle_italic(self) -> bool:
+        """Italicise the words, in the same four places Bold looks in."""
+        return self._toggle_text_style("italic")
+
+    def toggle_underline(self) -> bool:
+        """Underline the words, in the same four places Bold looks in."""
+        return self._toggle_text_style("underline")
+
+    def _toggle_text_style(self, which: str) -> bool:
+        """Bold, italic or underline, wherever the words happen to be."""
+        if self._style_the_selected_run(which):
+            return True
+        item = self.view.editing_item()
+        if item is None:
+            items = [i for i in self.selected_items()
+                     if isinstance(i, _TextBase) and not i.locked]
+            if not items:
+                return False
+            self.view.begin_snapshot(self.view.involved_frames(*items))
+            wanted = not all(getattr(i.style, which) for i in items)
+            for markup in items:
+                setattr(markup.style, which, wanted)
+                markup.apply_style()
+                markup.touch()
+                markup.update()
+            self.view.commit_snapshot(which.capitalize())
+            return True
+        if not hasattr(item, "style") or item.locked:
+            return False
+        self.view.begin_snapshot(self.view.involved_frames(item))
+        setattr(item.style, which, not getattr(item.style, which))
+        if hasattr(item, "apply_style"):
+            item.apply_style()
+        item.touch()
+        item.update()
+        self.view.commit_snapshot(which.capitalize())
+        return True
+
+    def _style_the_selected_run(self, which: str) -> bool:
+        """Style just the words picked out under the caret, if any are.
+
+        The run, not the box. Picking three words out of a sentence and
+        pressing Ctrl+B has to embolden those three and leave the rest of the
+        sentence alone; the whole-box style is what happens when nothing is
+        picked out.
+        """
         editor = self.view.text_editor()
         if editor is None:
             return False
@@ -4281,8 +4364,13 @@ class MainWindow(QMainWindow):
         if not cursor.hasSelection():
             return False
         fmt = QTextCharFormat()
-        fmt.setFontWeight(QFont.Normal if cursor.charFormat().font().bold()
-                          else QFont.Bold)
+        current = cursor.charFormat().font()
+        if which == "bold":
+            fmt.setFontWeight(QFont.Normal if current.bold() else QFont.Bold)
+        elif which == "italic":
+            fmt.setFontItalic(not current.italic())
+        else:
+            fmt.setFontUnderline(not current.underline())
         cursor.mergeCharFormat(fmt)
         return True
 

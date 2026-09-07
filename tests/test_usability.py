@@ -460,6 +460,82 @@ def test_a_second_window_keeps_its_own_document(window):
         QApplication.processEvents()
 
 
+def test_the_style_toolbar_goes_when_it_has_nothing_to_offer(window, qapp):
+    """An empty band with one stranded button is not a toolbar.
+
+    With nothing selected and the Select tool held, every control on the style
+    bar is hidden and what was left was a full row of chrome carrying a
+    disabled "Set default".
+    """
+    window.show()
+    window.select_tool("select")
+    window.view.scene().clearSelection()
+    window.refresh_selection()
+    qapp.processEvents()
+    assert not window.style_bar.isVisible()
+
+    box = _a_rectangle(window)
+    window.select_tool("select")
+    box.setSelected(True)
+    window.refresh_selection()
+    qapp.processEvents()
+    assert window.style_bar.isVisible(), "a rectangle has a line, a fill and a width"
+
+
+def test_every_label_the_user_reads_is_one_or_two_words(window, qapp):
+    """Bluebeam's labels are one or two words; the explanation is the tooltip.
+
+    Checked over the menus and over the Properties panel for every markup
+    there is, because that is where a label turns into a sentence: "Write the
+    measurement on the page" was a checkbox, and it made the panel wider than
+    the dock it lives in.
+    """
+    from PySide6.QtWidgets import QCheckBox, QPushButton
+    from tests.probe_audit import make
+    from markforge.ui.tools import TOOLS
+
+    def words(text):
+        return len(text.replace("&", "").replace("…", "").split())
+
+    long: list[str] = []
+    for entry in window.menuBar().actions():
+        menu = entry.menu()
+        if menu is None:
+            continue
+
+        def walk(one, where):
+            for action in one.actions():
+                if action.menu() is not None:
+                    walk(action.menu(), where)
+                elif action.text() and words(action.text()) > 2:
+                    long.append(f"{where}: {action.text()!r}")
+
+        walk(menu, entry.text().replace("&", ""))
+
+    for tool in TOOLS:
+        if tool.mode == "none" or tool.factory is None:
+            continue
+        if tool.key in ("image", "snapshot", "calibrate"):
+            continue
+        window.new_document()
+        window.interactive_prompts = False
+        item = make(window, tool.key)
+        if item is None:
+            continue
+        window.select_tool("select")
+        window.view.scene().clearSelection()
+        item.setSelected(True)
+        window.refresh_selection()
+        for kind in (QCheckBox, QPushButton):
+            for widget in window.properties_panel.findChildren(kind):
+                if widget.text() and words(widget.text()) > 2:
+                    long.append(f"{tool.key}: {widget.text()!r}")
+
+    # "Paste in place" is what Bluebeam calls it, so it stays as it is.
+    long = [entry for entry in long if "Paste in place" not in entry]
+    assert not long, "labels of more than two words:\n" + "\n".join(sorted(set(long)))
+
+
 def test_one_idea_has_one_name_in_the_properties_panel(window):
     """The Properties audit asked for one name per idea, and short ones.
 
@@ -5042,7 +5118,7 @@ def test_the_markup_menu_offers_the_whole_of_bluebeams(window):
     rect.setSelected(True)
     labels = _menu_labels(window.build_context_menu(rect, QPointF(150, 150)))
     for wanted in ("Cut", "Copy", "Paste", "Duplicate", "Format painter",
-                   "Delete", "Order", "Align", "Lock / unlock",
+                   "Delete", "Order", "Align", "Lock",
                    "Hide", "Flatten selection", "Apply pages…",
                    "Properties"):
         assert wanted in labels, f"{wanted!r} missing from {labels}"
@@ -5714,8 +5790,8 @@ def test_the_tool_chests_right_click_menu_carries_everything(window):
 
     labels = _menu_labels(panel.build_menu())
     for wanted in ("Use", "Property mode", "Rename…", "Remove",
-                   "Rename this set…", "Delete this set", "New tool set…",
-                   "Import tools…"):
+                   "Add selection", "Rename set…", "Delete set",
+                   "New tool set…", "Import tools…"):
         assert wanted in labels, f"{wanted!r} missing from {labels}"
 
 
@@ -8425,3 +8501,265 @@ def test_the_pages_own_line_work_is_not_dragged_about(window, tmp_path):
     theirs = [item for item in pages[0]._pending_items if item.get("from_drawing")]
     assert theirs, "the page's own line work should have come in"
     assert all(item.get("locked") for item in theirs)
+
+
+# ---------------------------------------------------------------------------
+# Bold, italic and underline belong to the words
+# ---------------------------------------------------------------------------
+
+def test_ctrl_i_italicises_rather_than_inserting_a_pdf(window):
+    """It inserted a PDF. The requirement says it must never insert a page.
+
+    Ctrl+I was given to Insert PDF, and because keys reserved for the text are
+    deliberately kept out of the shortcut list, it was a binding nobody could
+    see and nobody could change.
+    """
+    assert window.act_italic.shortcut().toString() == "Ctrl+I"
+    assert window.act_underline.shortcut().toString() == "Ctrl+U"
+    assert window.act_insert_pdf.shortcut().toString() != "Ctrl+I"
+
+
+def test_italic_and_underline_reach_the_markup_that_is_picked(window):
+    box = _words(window, "300 kerb", at=(90, 110))
+    window.select_tool("select")
+    window.view.scene().clearSelection()
+    box.setSelected(True)
+
+    assert window.toggle_italic()
+    assert box.style.italic
+    assert window.toggle_underline()
+    assert box.style.underline
+    assert window.toggle_italic()
+    assert not box.style.italic
+
+
+def test_italic_and_underline_reach_only_the_run_picked_out(window):
+    """Three words picked out of a sentence, and the rest left alone."""
+    from PySide6.QtGui import QTextCursor
+
+    item = _open_words(window, "600 dia pile")
+    editor = item._editor
+    cursor = editor.textCursor()
+    cursor.setPosition(4)
+    cursor.setPosition(7, QTextCursor.KeepAnchor)
+    editor.setTextCursor(cursor)
+
+    assert window.toggle_italic()
+    assert window.toggle_underline()
+    assert not item.style.italic, "the box itself is not italic"
+
+    document = editor.document()
+    inside = QTextCursor(document)
+    inside.setPosition(5)
+    assert inside.charFormat().font().italic()
+    assert inside.charFormat().font().underline()
+    outside = QTextCursor(document)
+    outside.setPosition(1)
+    assert not outside.charFormat().font().italic()
+    assert not outside.charFormat().font().underline()
+    window.view.escape_everything()
+
+
+def test_the_grid_switch_actually_stops_grid_snapping(window):
+    """Reported as not being respected. It is; this holds it that way."""
+    from PySide6.QtCore import QPointF
+
+    settings = window.document.settings
+    settings.grid_mm = 5.0
+    settings.snap_to_items = False
+    settings.snap_to_content = False
+    settings.snap_to_alignment = False
+    frame = window.document.pages[0].frame
+    where = frame.mapToScene(QPointF(103.7, 61.2))
+
+    settings.snap_to_grid = True
+    caught = frame.mapFromScene(window.view.snap_scene(where, frame))
+    assert (caught.x(), caught.y()) != (pytest.approx(103.7), pytest.approx(61.2))
+
+    settings.snap_to_grid = False
+    loose = frame.mapFromScene(window.view.snap_scene(where, frame))
+    assert loose.x() == pytest.approx(103.7, abs=0.01)
+    assert loose.y() == pytest.approx(61.2, abs=0.01)
+
+
+def test_property_mode_is_greyed_out_for_what_cannot_use_it(window):
+    """An image has nothing worth drawing again without its contents."""
+    from markforge.ui import toolsets
+
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 160)
+    _kept(window, markups(window)[0])
+    panel = window.toolsets_panel
+    panel.select_entry(toolsets.MY_TOOLS, 0)
+    offered = [a for a in panel.build_menu().actions() if a.text() == "Property mode"]
+    assert offered and offered[0].isEnabled(), "a rectangle can be drawn again"
+
+    entry = panel.current_entry()
+    entry.payload = dict(entry.payload, type="image")
+    offered = [a for a in panel.build_menu().actions() if a.text() == "Property mode"]
+    assert offered and not offered[0].isEnabled()
+    assert "only makes sense" in offered[0].toolTip()
+
+
+def test_pasting_a_page_says_where_it_landed(window, qapp):
+    """A drop shows the slot it is about to land in; a paste has no pointer.
+
+    So it says it afterwards: the same blue slot line at the landing place,
+    and the pasted pages picked out in the panel.
+    """
+    window.add_page()
+    window.add_page()
+    window.go_to_page(0)
+    window.copy_page(0)
+    window.paste_page(1)
+    qapp.processEvents()
+
+    panel = window.pages_panel
+    assert panel.list.external_drop_row == 2, "the slot the page went into"
+    picked = [panel.list.row(entry) for entry in panel.list.selectedItems()]
+    assert picked == [2]
+    assert "page 3" in window.status_hint.text()
+
+
+def test_turning_the_view_leaves_the_scrollbars_the_way_they_scroll(window, qapp):
+    """Reported: the scrollbar turns with the page and stops scrolling down.
+
+    It does not, and this is why: the turn goes on the pages laid out on the
+    canvas, never on the view's own transform, so the canvas keeps the shape
+    it always had.
+    """
+    window.show()
+    window.add_page()
+    window.add_page()
+    qapp.processEvents()
+
+    bar = window.view.verticalScrollBar()
+    window.view.fit_width()
+    qapp.processEvents()
+    reach = bar.maximum()
+    assert reach > 0, "a three-page document scrolls downwards"
+
+    try:
+        window.view.rotate_view(True)
+        qapp.processEvents()
+        assert window.view.transform().m12() == 0.0, "no rotation in the transform"
+        assert window.view.transform().m21() == 0.0
+        window.view.fit_width()
+        qapp.processEvents()
+        assert window.view.verticalScrollBar().maximum() > 0, \
+            "and the vertical bar still runs down the document"
+    finally:
+        window.view.reset_view_rotation()
+        qapp.processEvents()
+
+
+def test_the_page_scale_is_shown_beside_the_page_in_the_panel(window):
+    """Asked for so a scaled sheet can be told from an unscaled one at a glance."""
+    from markforge.core.document import PageScale
+
+    window.add_page()
+    window.document.pages[1].scale = PageScale.from_ratio(50)
+    window.pages_panel.rebuild(window.document, 0)
+
+    scaled = window.pages_panel.list.item(1)
+    assert "1:50" in scaled.text(), scaled.text()
+    assert "1:50" in scaled.toolTip()
+    assert "1:" not in window.pages_panel.list.item(0).text(), \
+        "an unscaled page says nothing rather than saying 1:1"
+
+
+def test_a_right_click_closes_a_shape_being_clicked_out(window):
+    """The cloud tool says "Enter or a right-click closes it". It has to.
+
+    A right click opened a context menu over the half-drawn shape instead,
+    which left the shape unfinished and the menu about nothing.
+    """
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QContextMenuEvent
+
+    window.select_tool("polygon")
+    for x, y in ((120, 120), (260, 120), (260, 240)):
+        click(window.view, x, y)
+        hover(window.view, x, y)
+    assert window.view._mode == "draw_poly"
+
+    where = window.view.mapFromScene(QPointF(260, 240))
+    window.view.contextMenuEvent(
+        QContextMenuEvent(QContextMenuEvent.Mouse, where,
+                          window.view.mapToGlobal(where)))
+    QApplication.processEvents()
+    assert window.view._mode != "draw_poly", "the shape was closed"
+    assert [i for i in markups(window) if isinstance(i, PolyItem)]
+
+
+def test_a_right_click_closes_a_lasso_being_clicked_out(window):
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QContextMenuEvent
+
+    box = _a_rectangle(window, 140, 140, 220, 200)
+    window.select_tool("select")
+    window.view.scene().clearSelection()
+    for x, y in ((100, 100), (300, 100), (300, 300), (100, 300)):
+        click(window.view, x, y, modifiers=Qt.ShiftModifier)
+    assert window.view._mode == "lasso"
+
+    where = window.view.mapFromScene(QPointF(100, 300))
+    window.view.contextMenuEvent(
+        QContextMenuEvent(QContextMenuEvent.Mouse, where,
+                          window.view.mapToGlobal(where)))
+    QApplication.processEvents()
+    assert window.view._mode != "lasso"
+    assert box.isSelected(), "and it took what it was drawn round"
+
+
+def test_a_rectangle_takes_a_point_in_or_out_and_becomes_a_polygon(window):
+    """Four corners and four sides is an outline like any other.
+
+    A rectangle cannot hold a fifth corner and stay a rectangle, so the moment
+    one is asked for it stops being one — which is the automatic conversion
+    the report asks for, arrived at by doing the thing rather than by choosing
+    a command called "convert".
+    """
+    from markforge.items.shapes import PolyItem, RectItem
+
+    box = _a_rectangle(window, 120, 120, 320, 240)
+    window.select_tool("select")
+    window.view.scene().clearSelection()
+    box.setSelected(True)
+
+    middle = box.mapToScene(box.local_rect().center())
+    menu = window.build_context_menu(box, middle)
+    outline = [a.menu() for a in menu.actions() if a.text() == "This outline"]
+    assert outline, "a rectangle has corners and sides like anything else"
+    labels = [a.text() for a in outline[0].actions()]
+    assert "Add point" in labels and "Remove point" in labels
+
+    add = [a for a in outline[0].actions() if a.text() == "Add point"][0]
+    add.trigger()
+    QApplication.processEvents()
+
+    made = [i for i in markups(window) if isinstance(i, PolyItem)]
+    assert made, "it is a polygon now"
+    assert len(made[0].points) == 5, "with the point that was asked for"
+    assert not [i for i in markups(window) if isinstance(i, RectItem)]
+
+
+def test_a_size_typed_in_a_unit_nobody_knows_is_refused_not_raised(window):
+    """It raised out of a Qt slot, which is a crash a few events later.
+
+    Found by the fuzzer typing "lc" into the exact-size box. Every caller of
+    parse_unit already reads None as "that is not a length"; only pint's own
+    error was getting past them.
+    """
+    from markforge.core.units import parse_unit
+
+    assert parse_unit("10 mm") is not None
+    assert parse_unit("10 lc") is None, "an unknown unit is not a length"
+    assert parse_unit("//") is None
+    assert parse_unit("") is None
+
+    box = _a_rectangle(window, 120, 120, 220, 200)
+    before = box.local_rect().width()
+    assert not box.set_real_size("10 lc", "10 lc", window.current_page())
+    assert box.local_rect().width() == before, "and nothing was resized"
+    assert box.set_real_size("50 mm", "20 mm", window.current_page())

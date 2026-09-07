@@ -800,6 +800,15 @@ class PolyItem(MarkupItem):
             # notches behind — which is what a real highlighter never does.
             # Merging the whole stroke into a single outline and filling that
             # once gives one even band, whichever way it was drawn.
+            #
+            # That holds within one stroke. Two separate strokes crossing each
+            # other still double up, because each is its own markup composited
+            # over what is already on the page: measured, one band is #ffe99d
+            # and the crossing is #ffde6c. Making them read as one wash needs
+            # every highlighter on the page painted into one layer and that
+            # layer composited once, which is a change to how the page is
+            # painted rather than to how a stroke is. Recorded in
+            # docs/UNADDRESSED_TASKS.md rather than half-done here.
             painter.setPen(Qt.NoPen)
             painter.setBrush(QBrush(self.highlight_colour()))
             painter.drawPath(self.band_path(path))

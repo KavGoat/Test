@@ -3983,6 +3983,18 @@ class PageView(QGraphicsView):
     # context menu
     # ------------------------------------------------------------------
     def contextMenuEvent(self, event) -> None:
+        # A shape being clicked out corner by corner is closed by a right
+        # click, which is what the cloud tool's own tooltip has always
+        # promised — "Enter or a right-click closes it". It opened a context
+        # menu over the half-drawn shape instead.
+        if self._mode == "draw_poly" and self._draft is not None:
+            self.finish_poly()
+            event.accept()
+            return
+        if self._mode == "lasso":
+            self.select_in_marquee()
+            event.accept()
+            return
         scene_pos = self.mapToScene(event.pos())
         item = self.markup_at(scene_pos)
         if item is not None and not item.isSelected():

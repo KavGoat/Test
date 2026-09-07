@@ -315,8 +315,38 @@ def test_page_navigation_and_label_are_centred_in_the_footer(window, qapp):
 
     status = window.statusBar()
     assert window.page_label.text() == "· Foundation"
-    assert abs(window.page_navigation.geometry().center().x()
-               - status.rect().center().x()) <= 1
+    # Centred in the room the rest of the footer leaves it. Not centred in the
+    # window: that is what it used to be, and it was drawn on top of the other
+    # things down there rather than beside them.
+    left = window.status_position.geometry().right()
+    right = window.status_scale.geometry().left()
+    middle = window.page_navigation.geometry().center().x()
+    assert abs(middle - (left + right) // 2) <= 40
+
+
+def test_nothing_in_the_footer_is_drawn_on_top_of_anything_else(window, qapp):
+    """It was: "of 140.9, 246.8 mm drawing.pdf page 1", three texts in one place.
+
+    The page navigation was parented to the status bar, moved to the middle
+    and raised, which put it over the cursor position and the page label.
+    Nothing in a layout can overlap anything else, so it is in the layout.
+    """
+    window.current_page().label = "drawing.pdf page 1"
+    window.status_hint.setText("Cancelled the call-out, the selection")
+    window.status_position.setText("140.9, 246.8 mm")
+    window.refresh_page_bar()
+    window.show()
+    window.resize(1200, 800)
+    qapp.processEvents()
+
+    down_there = [window.status_hint, window.status_position,
+                  window.page_navigation, window.status_scale,
+                  window.status_fit, window.status_size, window.zoom_combo]
+    for index, one in enumerate(down_there):
+        for other in down_there[index + 1:]:
+            assert not one.geometry().intersects(other.geometry()), \
+                f"{one.objectName() or type(one).__name__} overlaps " \
+                f"{other.objectName() or type(other).__name__}"
 
 
 def test_page_thumbnail_uses_a_centred_responsive_grid_cell(window, qapp):

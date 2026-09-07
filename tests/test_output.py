@@ -453,3 +453,36 @@ def test_flattened_content_stays_part_of_the_sheet(window, tmp_path):
     kinds = [str(mark["/Subtype"]) for mark in printed.markups()]
     assert kinds == ["/Circle"], \
         "only the ellipse is still a markup; the rectangle is the page now"
+
+
+def test_a_contents_line_is_a_working_link_in_the_exported_pdf(window, tmp_path):
+    """A contents block prints the bookmarks; each line has to go to its page.
+
+    The outline was held; the links were not, so the block could have exported
+    as a list of page numbers nobody could click.
+    """
+    from markforge.items.contents import ContentsItem
+
+    window.add_page()
+    window.add_page()
+    window.document.add_bookmark("Foundation plan", 1, 40.0)
+    window.document.add_bookmark("Roof framing", 2, 60.0)
+    window.go_to_page(0)
+    window.select_tool("contents")
+    _drag(window, 60, 400, 400, 560)
+    block = next(i for i in window.document.pages[0].frame.markups()
+                 if isinstance(i, ContentsItem))
+    assert block.rows, "the block lists the bookmarks it found"
+
+    path = str(tmp_path / "contents.pdf")
+    export_io.export_pdf(window.document, path)
+
+    from pypdf import PdfReader
+    reader = PdfReader(path)
+    links = [entry.get_object() for entry in (reader.pages[0].get("/Annots") or [])
+             if str(entry.get_object().get("/Subtype")) == "/Link"]
+    assert len(links) == len(block.rows), \
+        f"{len(block.rows)} contents lines, {len(links)} links"
+    for link in links:
+        destination = link.get("/Dest") or link.get("/A", {}).get("/D")
+        assert destination, "a link with nowhere to go is not a link"

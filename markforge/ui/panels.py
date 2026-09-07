@@ -4,7 +4,7 @@ from __future__ import annotations
 import csv
 import re
 
-from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, QTimer, Qt, Signal
 from PySide6.QtGui import (QBrush, QColor, QFont, QIcon, QKeySequence,
                            QPainter, QPen, QPixmap)
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox,
@@ -258,6 +258,31 @@ class PagesPanel(QWidget):
         event.setDropAction(Qt.CopyAction)
         event.accept()
         self.window.insert_files_at(files, row)
+
+    def show_where_it_landed(self, row: int, count: int = 1) -> None:
+        """Say where pasted pages went: the slot line, and the pages picked out.
+
+        A drop shows the slot it is about to land in, because the pointer is
+        there to show it. A paste has no pointer, so it says it afterwards
+        instead — the same blue line at the slot the pages went into, and the
+        pages themselves picked out, so it is never a question where they are.
+        """
+        self.list.set_external_drop_row(row)
+        self.list.clearSelection()
+        for offset in range(max(count, 1)):
+            entry = self.list.item(row + offset)
+            if entry is not None:
+                entry.setSelected(True)
+        last = self.list.item(row)
+        if last is not None:
+            self.list.scrollToItem(last)
+        # Long enough to be seen and short enough not to be mistaken for a
+        # drop about to happen. Tied to the list rather than left loose: a
+        # timer with a bare lambda outlives the window that owns it and comes
+        # back nine hundred milliseconds later to paint a widget C++ has
+        # already deleted.
+        QTimer.singleShot(900, self.list,
+                          lambda: self.list.set_external_drop_row(None))
 
     def eventFilter(self, watched, event):
         """Ctrl+C and Ctrl+V on the thumbnails copy and paste whole pages."""
@@ -939,10 +964,12 @@ class ToolSetsPanel(QWidget):
             menu.addAction("Remove", self.remove_entry)
             menu.addSeparator()
         if group is not None:
-            menu.addAction(f"Add what is selected to “{group.name}”",
-                           self.add_selection)
-            menu.addAction("Rename this set…", self.rename_set)
-            menu.addAction("Delete this set", self.delete_set)
+            add = menu.addAction("Add selection", self.add_selection)
+            add.setToolTip(f"Keep what is selected on the page in “{group.name}”")
+            rename = menu.addAction("Rename set…", self.rename_set)
+            rename.setToolTip(f"Rename “{group.name}”")
+            delete = menu.addAction("Delete set", self.delete_set)
+            delete.setToolTip(f"Delete “{group.name}” and everything in it")
             menu.addSeparator()
         menu.addAction("New tool set…", self.new_set)
         imported = menu.addAction("Import tools…", self.import_set)
@@ -1510,7 +1537,8 @@ class PropertiesPanel(QScrollArea):
         exact.clicked.connect(lambda: self.window.set_rectangle_size(item))
         form.addRow("", exact)
 
-        show = QCheckBox("Write the size on the shape")
+        show = QCheckBox("Show size")
+        show.setToolTip("Write the size across the shape itself")
         show.setChecked(item.show_size)
         show.toggled.connect(
             lambda on: self._apply(
@@ -1628,7 +1656,8 @@ class PropertiesPanel(QScrollArea):
                 "Measurement text"))
         form.addRow("Says", words)
 
-        inline = QCheckBox("Text in line with it")
+        inline = QCheckBox("Inline text")
+        inline.setToolTip("Keep the measurement text in line with its line")
         inline.setChecked(item.label_angle is None)
         inline.toggled.connect(
             lambda on: self._apply(
@@ -1636,7 +1665,8 @@ class PropertiesPanel(QScrollArea):
                 "Text angle"))
         form.addRow("", inline)
 
-        label = QCheckBox("Write the measurement on the page")
+        label = QCheckBox("Show value")
+        label.setToolTip("Write the measurement on the page beside its line")
         label.setChecked(item.show_label)
         label.toggled.connect(
             lambda on: self._apply(lambda i: setattr(i, "show_label", on), "Label"))
@@ -1749,7 +1779,8 @@ class PropertiesPanel(QScrollArea):
             lambda on: self._apply(lambda i: i.set_locked(on), "Lock"))
         form.addRow("", locked)
 
-        printable = QCheckBox("Include when printing")
+        printable = QCheckBox("Print")
+        printable.setToolTip("Include this markup when the page is printed")
         printable.setChecked(first.printable)
         printable.toggled.connect(
             lambda on: self._apply(lambda i: setattr(i, "printable", on), "Print flag"))

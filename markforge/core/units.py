@@ -148,12 +148,26 @@ def is_unit_name(name: str) -> bool:
 
 
 def parse_unit(text: str):
-    """Parse a unit expression such as ``kN/m^2`` into a pint unit."""
+    """A unit expression such as ``kN/m^2``, or None when it is not one.
+
+    None is what every caller here already reads as "that is not a length":
+    an empty box, and now also a box holding something the registry has never
+    heard of. It used to let pint's own error out instead, so typing an exact
+    size of "10 lc" raised out of the middle of a Qt slot rather than being
+    refused — and an exception raised inside a Qt override is not an error
+    message, it is a crash a few events later.
+    """
     text = (text or "").strip()
     if not text:
         return None
     text = text.replace("^", "**").replace("·", "*").replace("×", "*")
-    return ureg.parse_expression(text)
+    try:
+        return ureg.parse_expression(text)
+    except Exception:                                  # noqa: BLE001
+        # pint raises several kinds for text that is not a unit — an undefined
+        # name, a tokenising failure, a bare operator — and they all mean the
+        # same thing here.
+        return None
 
 
 def simplify_units(value: Any) -> Any:

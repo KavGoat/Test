@@ -271,6 +271,60 @@ mark.
   markups rather than under the drawing. *Built*. Evidence: four tests in
   `tests/test_usability.py`.
 
+### 31. Found by the first-run walk (2026-09-07)
+
+The §29 item asks for a walk of the whole application, and for what it finds to
+become its own list of tasks rather than one vague entry. This is that list.
+Each was found by opening the window and using it, and each was fixed in the
+same pass; none is ticked, because completion is the user's to mark.
+
+- [ ] **(found here)** The footer draws three things on top of one another. The
+  page navigation was parented to the status bar, moved to the middle and
+  raised above everything, so on a marked-up drawing the bottom of the window
+  read "of 140.9, 246.8 mm drawing.pdf page 1" — the page count, the cursor
+  position and the page label in one place. *Fixed*: it is in the layout now,
+  between two stretches, and the cursor position moved to the left beside the
+  status message, where information belongs and controls do not.
+- [ ] **(found here)** `Ctrl+I` inserts a PDF instead of italicising, which is
+  the exact thing §29 says must never happen. Because keys reserved for the
+  text are deliberately kept out of the shortcut list, it was a binding nobody
+  could see and nobody could change. *Fixed*: Insert PDF is on `Ctrl+Shift+I`,
+  and italic and underline are commands of their own on `Ctrl+I` and `Ctrl+U`.
+  They had none before — only bold did — so this also closes the run-level half
+  of the §9 styling item.
+- [ ] **(found here)** A right click does not close a shape being clicked out,
+  though the cloud tool's own tooltip promises "Enter or a right-click closes
+  it". It opened a context menu over the half-drawn shape. *Fixed*, for a
+  clicked-out shape and for a lasso.
+- [ ] **(found here)** The style toolbar is an empty band with one stranded
+  button. With nothing selected and the Select tool held, every control on it
+  is hidden and what is left is a full row of chrome carrying a disabled "Set
+  default". *Fixed*: the bar goes until there is something to put on it.
+- [ ] **(found here)** Four labels are sentences, and one of them makes the
+  Properties panel wider than the dock it lives in — "Write the measurement on
+  the page" as a checkbox pushed the panel's minimum width past the dock's, so
+  a measurement's properties opened with a horizontal scrollbar. *Fixed*:
+  "Show value", "Show size", "Inline text" and "Print", with the sentence in
+  the tooltip. A test now holds every menu and every markup's properties to the
+  one-or-two-word rule, which is the §26 item.
+- [ ] **(found here)** An unrecognised unit raises out of a Qt slot rather than
+  being refused. Typing an exact size of "10 lc" let pint's own error escape
+  `parse_unit`, and an exception raised inside a Qt override is not an error
+  message — it is a crash a few events later. Found by the fuzzer. *Fixed*: an
+  expression the registry has never heard of is not a unit, so it comes back as
+  None, which is what every caller already reads as "that is not a length".
+- [ ] **(found here)** Highlighter strokes that cross each other double up:
+  measured, one band is `#ffe99d` and the crossing is `#ffde6c`, so the overlap
+  reads as a darker patch through what should be one even wash. **Not fixed** —
+  it cannot be fixed on the stroke, and a blend mode does not do it either.
+  Every highlighter on a page has to be painted into one layer and that layer
+  composited once, which is a change to how the page is painted. Recorded in
+  `docs/UNADDRESSED_TASKS.md`.
+- [ ] **(found here)** The walk is not finished. It covered the toolbars, the
+  menus, the status bar, the Properties panel for every markup there is, and
+  opening a drawing and marking it up. It did not cover the dialogs, the tool
+  sets panel in use, printing, or a second window and a second tab.
+
 ## Withdrawn
 
 Asked for, built, and since told they are not wanted. Nothing is deleted from

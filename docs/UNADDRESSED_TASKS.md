@@ -1,6 +1,9 @@
 # MarkForge — tasks still requiring work
 
-Audited: 2026-09-07 against `claude/markforge-python`, at commit `5d69361`.
+Audited: 2026-09-07 against `claude/markforge-python`. Re-audited the same day
+after a run-through of the running application, which corrected four entries
+below and found five bugs — those are in `docs/COMPLETED_TASKS.md` under
+"Found by walking the application", with what was done about each.
 
 These are the open requirements the audit could **not** show working. Each says
 what is missing or blocking it; several have a base behaviour that is finished
@@ -31,15 +34,6 @@ This is not the user-owned completion record. It changes no checkbox in
 
 ## 7. Markup tools — placement and interaction
 
-- **Properties mode should be offered only for a single markup, and greyed out
-  or absent for images, snapshots and groups.**
-  - **Half done.** Properties mode works and is tested
-    (`test_a_tool_in_properties_mode_draws_a_new_one`), and
-    `ui/toolsets.PROPERTIES_TYPES` names the kinds that may be kept that way.
-    What is missing is the *offer*: nothing greys the command out or hides it
-    for a kind that cannot use it, so the restriction is enforced silently
-    rather than shown.
-
 - **It is possible to get permanently stuck inside a tool, with Escape not
   helping and no other tool selectable.**
   - **Cannot reproduce, and not closed.** Escape is held by six tests through
@@ -64,24 +58,7 @@ This is not the user-owned completion record. It changes no checkbox in
     right-click-or-Enter step from a finished cloud shape into placing its text
     box.
 
-- **Rectangles should support right-click add/remove control point.**
-  - **Half done.** A rectangle that stops being a rectangle becomes a polygon
-    (`MainWindow.rectangle_to_polygon`), and a polygon has add and remove.
-    **Not done:** add and remove offered on the rectangle itself, so that the
-    conversion happens as a consequence of moving a corner rather than as a
-    separate command.
-
 ## 9. Callouts, text boxes, dimensions
-
-- **Styling only the selected run — bold, italic, underline and font size —
-  rather than the whole text box.**
-  - **Bold and font size are done for a run**; `bold_the_selected_run` and the
-    `format_content` path both act on the selection when there is one.
-    Evidence: `test_ctrl_b_emboldens_the_run_picked_out_in_a_text_box`.
-    **Not done:** italic and underline have no run-level path at all — there is
-    no `italic_the_selected_run` and no `underline_the_selected_run`, so
-    `Ctrl+I` and `Ctrl+U` still fall through to Qt's own handling on the whole
-    box.
 
 - **Remove the small floating description/label that appears on markups and
   fades out.**
@@ -90,39 +67,6 @@ This is not the user-owned completion record. It changes no checkbox in
     something else — the orange placement marker (removed and held by
     `test_snap_feedback_is_a_blue_target_not_an_orange_square`) is the nearest
     thing. Needs a screenshot to identify.
-
-## 11. Snapping, grid, alignment
-
-- **Turning "snap to grid" off does not stop points snapping to the grid.**
-  - **Believed fixed, not held.** `snap_scene` returns the point untouched when
-    `snap_while_drawing` is off, and the grid step is applied only when the
-    document's `snap_to_grid` is on. There is no test that turns the grid
-    switch off and asserts an unsnapped point, so the reported behaviour cannot
-    be shown to be gone. Worth a test before it is called done.
-
-## 12. Move, duplicate, group
-
-- **Groups scalable as a single object, resizing the contents proportionally.**
-  - **Done, and listed here only to correct an earlier audit that called it
-    missing.** Evidence: `test_a_group_scales_as_one_and_shift_releases_its_ratio`,
-    `test_escape_cancels_a_group_resize_and_restores_the_cursor`.
-
-## 13. Copy / paste
-
-- **Pasting a page should show a clear insertion-location indicator.**
-  - **Not done for a paste.** A page *dropped* onto the panel shows its slot
-    (`test_a_wrapping_page_grid_uses_left_and_right_for_the_drop_slot`,
-    `test_a_dropped_pdf_is_imported_at_the_indicated_row`), and Ctrl+V into the
-    pages panel inserts pages, but nothing draws the indicator for the paste
-    the way the drop does.
-
-## 17. Dark mode, icons & canvas/viewport
-
-- **When the view is rotated, the scrollbar rotates with it.**
-  - **Believed fixed, not held.** The design is that rotation turns the pages
-    on the canvas and `apply_view_transform()` carries the zoom only, which is
-    what keeps the scrollbars upright and pointing the way they scroll. No test
-    asserts it, so the report cannot be shown to be answered.
 
 ## 19. Pages & document structure
 
@@ -134,15 +78,6 @@ This is not the user-owned completion record. It changes no checkbox in
     rendering behind that geometry: `pdfio.BEST_DPI` renders the page at 110
     dpi for display, re-rendered sharper as you zoom. Nothing is lost from the
     file, but the thing being looked at between zoom steps is a raster.
-
-## 22. Bookmarks & contents
-
-- **Bookmarks and any links must remain fully clickable in the exported PDF.**
-  - **Half held.** The outline is written and tested
-    (`test_bookmarks_still_work_when_the_markups_are_live`). The contents
-    block's per-line links are built by `io/export.outline_and_links` and
-    written by `io/pdflinks.add_outline_and_links`, but no test opens the
-    exported file and asserts a `/Link` annotation with a working destination.
 
 ## 23. Import / interoperability
 
@@ -160,15 +95,8 @@ This is not the user-owned completion record. It changes no checkbox in
   - **The tool is done and tested**; the icon is drawn as a brush
     (`icons.py`, `test_the_format_painter_carries_a_brush`) rather than a
     roller. A deliberate difference or an oversight — worth one word from the
-    user either way.
-
-## 26. Menus & discoverability
-
-- **Every button and menu label should be one or two words.**
-  - **Not audited end to end.** `test_one_idea_has_one_name_in_the_properties_panel`
-    holds the Properties panel to two words and to one name per idea. Nothing
-    holds the menus, the toolbars or the dialogs to the same rule. A pass over
-    every label, with a test like the panel's, is the work.
+    user either way. It is the only open item waiting on an answer rather than
+    on work.
 
 ## 27. Reliability / process
 
@@ -204,10 +132,17 @@ This is not the user-owned completion record. It changes no checkbox in
     is not identifiable from the description. Needs a screenshot.
 
 - **Highlighter leaves gaps where strokes overlap.**
-  - **One stroke is held; overlapping strokes are not.**
-    `test_a_highlighter_stroke_is_one_even_band` shows a single stroke draws as
-    one band rather than as stacked segments. Nothing tests two strokes
-    crossing, which is what the report is about.
+  - **Measured, real, and needs a change to how the page is painted.** One
+    stroke is already merged into a single band and filled once, so it has no
+    seams (`test_a_highlighter_stroke_is_one_even_band`). Two strokes crossing
+    do double up: measured on the real painter, one band is `#ffe99d` and the
+    crossing is `#ffde6c`, so the overlap reads as a darker patch through what
+    should be one even wash. It cannot be fixed on the stroke. A blend mode
+    does not do it either — Darken with a half-transparent colour still
+    composites the second stroke over the first, which was tried and measured
+    and put back. What it needs is every highlighter on a page painted into
+    one layer and that layer composited once, which is a change to
+    `PageFrame`'s painting rather than to `PolyItem`'s.
 
 ## 29. New requests awaiting review
 
@@ -252,6 +187,21 @@ This is not the user-owned completion record. It changes no checkbox in
     throw away the vectors, which is the whole point of a snapshot.
 
 ---
+
+## Not covered by the walk
+
+The run-through covered the toolbars, the menus, the status bar, the Properties
+panel for every markup there is, and opening a drawing and marking it up. It
+did not cover:
+
+- the dialogs — page setup, header and footer, document properties,
+  preferences, shortcuts, insert PDF, and the scale and calibrate prompts;
+- the tool sets panel in use, as against read;
+- printing and print preview;
+- a second window and a second tab, beyond the two tests that hold them.
+
+Each is somewhere a first-run walk would be worth the time, and none of it has
+had one.
 
 ## Left behind by the removals
 
