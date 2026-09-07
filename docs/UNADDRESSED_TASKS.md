@@ -2,7 +2,7 @@
 
 Audited: 2026-09-06 against `claude/engineering-calc-markup-app-2twiqs`.
 
-The 9 entries below are what the audit could not show working. Each says
+The 10 entries below are what the audit could not show working. Each says
 what is missing or blocking it. Several are tasks whose base behaviour is
 finished and whose recent amendment is not; those name the part that is done so
 the remaining work is clear.
@@ -44,3 +44,6 @@ This is not the user-owned completion record. It changes no checkbox in
 
 - **(new)** Walk the whole application as somebody meeting it for the first time and write down what is wrong with it: anything whose label does not say what it does, any button whose effect is a surprise, any gesture that is not what the rest of the drawing world does, and anything plainly missing. Then fix what that walk finds, as its own list of tasks rather than one vague entry.
   - **Missing:** Not started. A first-run walk of the whole application has not been done, and what it finds is meant to become its own list of tasks rather than staying one entry.
+
+- **(new)** Recolour a snapshot the way a page and an image can be recoloured. A snapshot is stored as a drawing recording rather than as its source line work, so there is nothing in it to change the colour of one line at a time; giving it the same swap, colourise and transparency the rest have means keeping what it was taken from, not repainting a picture of it.
+  - **Missing:** Logged rather than half-built. A snapshot is stored as a QPicture — a recording of drawing commands — not as the line work it was taken from, and a command stream cannot be replayed through a colour substitution. Giving a snapshot the same swap, colourise and transparency means keeping its source items alongside the recording so the picture can be rebuilt recoloured; repainting a raster of it would throw away the vectors, which is the whole point of a snapshot.

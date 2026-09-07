@@ -82,6 +82,92 @@ def make_colour_transparent(image: QImage, source: QColor,
     return out
 
 
+def colourise(image: QImage, colour: QColor) -> QImage:
+    """Tint the whole image one colour, keeping its light and shade.
+
+    Bluebeam's Colorize: the drawing becomes red, or green, or whatever is
+    asked for, and stays readable because each pixel keeps how light or dark
+    it was. Black and white is the same operation with a grey, which is why
+    that is not a separate thing to implement.
+    """
+    out = image.convertToFormat(QImage.Format_ARGB32)
+    red, green, blue = colour.red(), colour.green(), colour.blue()
+    for y in range(out.height()):
+        for x in range(out.width()):
+            pixel = out.pixel(x, y)
+            alpha = qAlpha(pixel)
+            if not alpha:
+                continue
+            # How light this pixel is, 0..1, used to scale the tint. White
+            # stays white so paper does not turn into a block of colour.
+            level = (qRed(pixel) * 299 + qGreen(pixel) * 587
+                     + qBlue(pixel) * 114) / 255000.0
+            out.setPixel(x, y, qRgba(
+                round(red + (255 - red) * level),
+                round(green + (255 - green) * level),
+                round(blue + (255 - blue) * level), alpha))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# The same operations on line work, which is what a PDF page actually holds
+# ---------------------------------------------------------------------------
+
+def _near(hex_colour: str, colour: QColor, tolerance: int) -> bool:
+    """Whether a stored "#rrggbb" is within *tolerance* of *colour*."""
+    if not hex_colour:
+        return False
+    other = QColor(hex_colour)
+    if not other.isValid():
+        return False
+    return max(abs(other.red() - colour.red()),
+               abs(other.green() - colour.green()),
+               abs(other.blue() - colour.blue())) <= tolerance
+
+
+def swap_line_colour(items, source: QColor, target: QColor,
+                     tolerance: int = 40) -> int:
+    """Change every line near *source* to *target*. Says how many changed.
+
+    A page that came in from a PDF keeps its line work as line work, so
+    changing its colours is a change to the lines rather than to a picture of
+    them: the drawing stays as sharp as it was and still prints as vectors.
+    Repainting only the raster underneath left the lines their old colour on
+    top of a recoloured picture, which is the one result nobody wanted.
+    """
+    name = target.name()
+    changed = 0
+    for item in items:
+        style = getattr(item, "style", None)
+        if style is None:
+            continue
+        for field in ("stroke", "fill"):
+            if _near(getattr(style, field, ""), source, tolerance):
+                setattr(style, field, name)
+                changed += 1
+        item.update()
+    return changed
+
+
+def colourise_lines(items, colour: QColor) -> int:
+    """Put every line onto *colour*, keeping fills lighter than strokes."""
+    name = colour.name()
+    lighter = QColor(colour).lighter(150).name()
+    changed = 0
+    for item in items:
+        style = getattr(item, "style", None)
+        if style is None:
+            continue
+        if getattr(style, "stroke", ""):
+            style.stroke = name
+            changed += 1
+        if getattr(style, "fill", ""):
+            style.fill = lighter
+            changed += 1
+        item.update()
+    return changed
+
+
 def common_colours(image: QImage, most: int = 8) -> list[QColor]:
     """The colours a sheet is mostly made of, for offering as the one to change."""
     small = image.scaled(160, 160, Qt.KeepAspectRatio)

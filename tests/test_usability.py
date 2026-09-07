@@ -3308,6 +3308,74 @@ def test_a_named_table_shows_up_as_something_the_document_knows(window):
 # A calculation is one thing, not two
 # ---------------------------------------------------------------------------
 
+def test_changing_a_pages_colours_changes_its_line_work_too(window):
+    """A PDF page is a picture and the lines that drew it.
+
+    Recolouring only the picture left every line its old colour on top of a
+    recoloured sheet, which looks like the change half worked — because it
+    did. The lines are real line work on a locked Drawing layer, so they
+    change as lines and the page stays as sharp as it was.
+    """
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QColor
+    from calcforge.io import recolour
+    from calcforge.items.shapes import PolyItem
+
+    lines = []
+    for colour in ("#000000", "#0a0a0a", "#c92a2a"):
+        line = PolyItem("polyline", [QPointF(0, 0), QPointF(10, 0)])
+        line.style.stroke = colour
+        line.layer = "Drawing"
+        lines.append(line)
+
+    changed = recolour.swap_line_colour(lines, QColor("#000000"),
+                                        QColor("#1971c2"), 40)
+    assert changed == 2, "the two near-black lines, and not the red one"
+    assert [i.style.stroke for i in lines] == ["#1971c2", "#1971c2", "#c92a2a"]
+
+    recolour.colourise_lines(lines, QColor("#2f9e44"))
+    assert all(i.style.stroke == "#2f9e44" for i in lines), "colourise takes them all"
+
+
+def test_colourise_keeps_the_light_and_shade(window):
+    """Bluebeam's Colorize: one colour, still readable, paper still paper."""
+    from PySide6.QtGui import QColor, QImage
+    from calcforge.io import recolour
+
+    image = QImage(4, 1, QImage.Format_ARGB32)
+    for x, level in enumerate((0, 80, 180, 255)):
+        image.setPixelColor(x, 0, QColor(level, level, level))
+
+    out = recolour.colourise(image, QColor("#c92a2a"))
+    assert out.pixelColor(0, 0).name() == "#c92a2a", "black becomes the colour"
+    assert out.pixelColor(3, 0).name() == "#ffffff", "and white stays paper"
+    middles = [out.pixelColor(x, 0).lightness() for x in range(4)]
+    assert middles == sorted(middles), "light and shade survive in order"
+
+    green = recolour.colourise(image, QColor("#2f9e44"))
+    assert green.pixelColor(0, 0).name() == "#2f9e44", "any colour, not just red"
+
+
+def test_a_colour_can_be_made_transparent_within_a_tolerance(window):
+    """Near enough to the picked colour counts, which is what tolerance is for."""
+    from PySide6.QtGui import QColor, QImage
+    from calcforge.io import recolour
+
+    image = QImage(3, 1, QImage.Format_ARGB32)
+    image.setPixelColor(0, 0, QColor(255, 255, 255))     # the colour picked
+    image.setPixelColor(1, 0, QColor(245, 245, 245))     # near it
+    image.setPixelColor(2, 0, QColor(20, 20, 20))        # nowhere near
+
+    tight = recolour.make_colour_transparent(image, QColor(255, 255, 255), 0)
+    assert tight.pixelColor(0, 0).alpha() == 0
+    assert tight.pixelColor(1, 0).alpha() == 255, "0 tolerance takes only the exact one"
+
+    loose = recolour.make_colour_transparent(image, QColor(255, 255, 255), 40)
+    assert loose.pixelColor(0, 0).alpha() == 0
+    assert loose.pixelColor(1, 0).alpha() == 0, "and a wider one takes its neighbours"
+    assert loose.pixelColor(2, 0).alpha() == 255, "but never the drawing"
+
+
 def test_prose_keeps_the_same_rhythm_as_the_working_beside_it(window):
     """A note beside a column of working refers to it line by line.
 

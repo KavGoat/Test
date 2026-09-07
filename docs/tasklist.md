@@ -278,6 +278,7 @@ and explicitly requests a synchronization.
 - [ ] **(new)** Remove the distinction between a calculation line and a calculation block — they are one thing now. Every calculation is a region that may hold one line or several, and no command, menu entry, property or panel may offer "line" and "block" as different kinds. Typing `"` and then a space makes a text line, which is the same region holding prose.
 - [ ] **(new)** Text set on several lines must lay out on the same rhythm as a calculation region holding several lines. A text box beside a calculation block, referring to its lines, should line up with them: the same line height and spacing, ignoring rows a tall fraction or a large script genuinely has to make room for.
 - [ ] **(new)** Walk the whole application as somebody meeting it for the first time and write down what is wrong with it: anything whose label does not say what it does, any button whose effect is a surprise, any gesture that is not what the rest of the drawing world does, and anything plainly missing. Then fix what that walk finds, as its own list of tasks rather than one vague entry.
+- [ ] **(new)** Recolour a snapshot the way a page and an image can be recoloured. A snapshot is stored as a drawing recording rather than as its source line work, so there is nothing in it to change the colour of one line at a time; giving it the same swap, colourise and transparency the rest have means keeping what it was taken from, not repainting a picture of it.
 
 ## Task List Rules
 

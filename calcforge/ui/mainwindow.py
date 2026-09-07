@@ -3274,7 +3274,9 @@ class MainWindow(QMainWindow):
                 "sheet you have written on, and the markups keep their own "
                 "colours.")
             return
-        changed = self._ask_recolour(image)
+        lines = [item for item in (page.frame.markups() if page.frame else [])
+                 if getattr(item, "layer", "") == "Drawing"]
+        changed = self._ask_recolour(image, lines)
         if changed is None:
             return
 
@@ -3316,11 +3318,19 @@ class MainWindow(QMainWindow):
             return None
         return image
 
-    def _ask_recolour(self, image) -> Optional[str]:
-        """Run the dialog and store the result; the new asset key, or None."""
+    def _ask_recolour(self, image, line_work=None) -> Optional[str]:
+        """Run the dialog and store the result; the new asset key, or None.
+
+        *line_work* is the page's own lines, when it has any. A PDF page keeps
+        its line work as line work on a locked Drawing layer, so a colour
+        change has to reach that too: repainting only the picture underneath
+        left every line its old colour on top of a recoloured sheet.
+        """
         dialog = dialogs.RecolourDialog(image, self)
         if dialog.exec() != dialogs.QDialog.Accepted:
             return None
+        if line_work:
+            dialog.apply_to_lines(line_work)
         recoloured = dialog.apply_to(image)
         buffer = QBuffer()
         buffer.open(QIODevice.WriteOnly)

@@ -549,6 +549,11 @@ class RecolourDialog(QDialog):
         swap.addRow("Tolerance", self.tolerance)
         layout.addLayout(swap)
 
+        self.colourise_mode = QRadioButton("Colourise")
+        self.colourise_mode.setToolTip(
+            "Put the whole drawing onto the “To” colour, keeping its light "
+            "and shade — Bluebeam's Colorize")
+        layout.addWidget(self.colourise_mode)
         self.grey_mode = QRadioButton("Black and white")
         self.grey_mode.setToolTip("Convert the image to greyscale")
         layout.addWidget(self.grey_mode)
@@ -582,6 +587,28 @@ class RecolourDialog(QDialog):
             self._show_colour(button, chosen)
             self.refresh_preview()
 
+    def apply_to_lines(self, items) -> int:
+        """Do the same thing to real line work, so it does not fall behind.
+
+        A page that came in from a PDF is a picture *and* the lines that drew
+        it. Changing one and not the other leaves the lines their old colour
+        on a recoloured sheet, which looks like the change half worked —
+        because it did.
+        """
+        from ..io import recolour
+
+        if self.grey_mode.isChecked():
+            return recolour.colourise_lines(items, QColor("#666666"))
+        if self.colourise_mode.isChecked():
+            return recolour.colourise_lines(items, self.to_target)
+        if self.lines_mode.isChecked():
+            return recolour.colourise_lines(items, self.line_target)
+        if self.transparent_mode.isChecked():
+            return 0          # nothing to make transparent about a line
+        source = self.from_colour.currentData() or QColor("#000000")
+        return recolour.swap_line_colour(items, source, self.to_target,
+                                         self.tolerance.value())
+
     def apply_to(self, image):
         """The recoloured version of *image*, however this dialog is set."""
         from ..io import recolour
@@ -589,6 +616,8 @@ class RecolourDialog(QDialog):
         if self.lines_mode.isChecked():
             return recolour.recolour_lines(image, self.line_target,
                                            self.threshold.value())
+        if self.colourise_mode.isChecked():
+            return recolour.colourise(image, self.to_target)
         if self.grey_mode.isChecked():
             return recolour.to_greyscale(image)
         source = self.from_colour.currentData() or QColor("#000000")
