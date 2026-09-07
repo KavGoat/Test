@@ -43,6 +43,16 @@ MAX_ZOOM = 16.0
 CLICK_SLOP = 3.0
 # How near the pointer has to be, in view pixels, to catch a drawn point.
 SNAP_REACH = 9.0
+
+# How many nearby straight runs are worth comparing for crossings. Every pair
+# of them is tested, so this is what keeps a sheet with thousands of segments
+# on it from turning one mouse move into a million comparisons. Around the
+# pointer there are rarely more than a handful.
+MOST_CROSSING_SIDES = 24
+
+# A shape with more corners than this is a traced curve rather than something
+# with sides anybody aims at, and its segments are not offered as crossings.
+MOST_SIDES = 200
 # The shapes drawn to a size somebody cares about, and so worth measuring,
 # asking an exact size for, and writing that size on.
 SIZED_SHAPES = ("rect", "ellipse")
@@ -922,6 +932,73 @@ class PageView(QGraphicsView):
                     found.append((point, what, item))
         return found
 
+    @staticmethod
+    def sides_of(item) -> list:
+        """One markup's straight runs, in scene coordinates.
+
+        What a crossing is made of. Freehand ink is left out: a run of
+        hundreds of tiny segments crosses everything and means none of it.
+        """
+        if getattr(item, "smooth", False):
+            return []
+        vertices = getattr(item, "points", None)
+        if vertices:
+            if len(vertices) < 2 or len(vertices) > MOST_SIDES:
+                return []
+            placed = [item.mapToScene(point) for point in vertices]
+            sides = list(zip(placed, placed[1:]))
+            if getattr(item, "closed", False):
+                sides.append((placed[-1], placed[0]))
+            return sides
+        rect = item.local_rect().normalized()
+        if rect.isEmpty():
+            return []
+        corners = [item.mapToScene(corner) for corner in
+                   (rect.topLeft(), rect.topRight(),
+                    rect.bottomRight(), rect.bottomLeft())]
+        return list(zip(corners, corners[1:])) + [(corners[-1], corners[0])]
+
+    def crossings_near(self, frame, scene_pos: QPointF, reach: float,
+                       ignore=()) -> list:
+        """Where drawn lines cross each other, close to the pointer.
+
+        The point a drawing is most often aimed at and the one there is no
+        vertex for: two grid lines meeting, a beam arriving at a column. Only
+        the segments actually passing near the pointer are considered — a
+        sheet holds thousands of them, and comparing every pair against every
+        other would cost more than the whole gesture.
+        """
+        settings = self.document().settings
+        skip = set(ignore)
+        near: list = []
+        for item in frame.markups():
+            if item in skip or not item.isVisible():
+                continue
+            if self.is_drawing(item):
+                if not settings.snap_to_content:
+                    continue
+            elif not settings.snap_to_items:
+                continue
+            box = item.sceneBoundingRect().adjusted(-reach, -reach, reach, reach)
+            if not box.contains(scene_pos):
+                continue
+            for start, end in self.sides_of(item):
+                if _passes_near(start, end, scene_pos, reach):
+                    near.append((start, end, item))
+                    if len(near) >= MOST_CROSSING_SIDES:
+                        break
+            if len(near) >= MOST_CROSSING_SIDES:
+                break
+        found: list = []
+        for index, (start, end, item) in enumerate(near):
+            for other_start, other_end, other in near[index + 1:]:
+                if other is item:
+                    continue           # a shape does not cross itself usefully
+                where = _crossing(start, end, other_start, other_end)
+                if where is not None and _within(where, scene_pos, reach):
+                    found.append((where, "crossing", item))
+        return found
+
     def alignment_lines(self, frame, ignore=()) -> tuple:
         """The levels and the uprights worth lining a new markup up with.
 
@@ -983,7 +1060,9 @@ class PageView(QGraphicsView):
         reach = SNAP_REACH / max(self._zoom, 0.05)
         best = None
         best_distance = reach
-        for point, what, item in self.named_snap_targets(frame, ignore):
+        candidates = self.named_snap_targets(frame, ignore)
+        candidates += self.crossings_near(frame, scene_pos, reach, ignore)
+        for point, what, item in candidates:
             distance = math.hypot(point.x() - scene_pos.x(),
                                   point.y() - scene_pos.y())
             if distance < best_distance:
@@ -991,7 +1070,9 @@ class PageView(QGraphicsView):
         if best is not None:
             point, what, item = best
             self._snap_marker = QPointF(point)
-            caught = f"{what} of {item.display_name().lower()}"
+            caught = (f"crossing at {item.display_name().lower()}"
+                      if what == "crossing"
+                      else f"{what} of {item.display_name().lower()}")
             if caught != self._snap_caught:
                 # Only when it changes: the pointer crossing the same corner
                 # a hundred times should not write the same line a hundred
@@ -3917,3 +3998,47 @@ class PageView(QGraphicsView):
 
 def _far_enough(a: QPointF, b: QPointF) -> bool:
     return math.hypot(b.x() - a.x(), b.y() - a.y()) >= FREE_MIN_STEP
+
+
+def _within(point: QPointF, of: QPointF, reach: float) -> bool:
+    return math.hypot(point.x() - of.x(), point.y() - of.y()) <= reach
+
+
+def _passes_near(start: QPointF, end: QPointF, point: QPointF,
+                 reach: float) -> bool:
+    """Whether a segment comes within *reach* of a point."""
+    across = end.x() - start.x()
+    down = end.y() - start.y()
+    length = across * across + down * down
+    if length < 1e-12:
+        return _within(start, point, reach)
+    along = ((point.x() - start.x()) * across
+             + (point.y() - start.y()) * down) / length
+    along = max(0.0, min(1.0, along))
+    return _within(QPointF(start.x() + across * along,
+                           start.y() + down * along), point, reach)
+
+
+def _crossing(one_start: QPointF, one_end: QPointF,
+              two_start: QPointF, two_end: QPointF) -> Optional[QPointF]:
+    """Where two segments cross, or None when they do not.
+
+    Where they actually cross, not where the lines through them would: two
+    grid lines that stop short of each other do not meet, and offering the
+    point they would have met at puts a measurement somewhere nothing is.
+    """
+    one_x = one_end.x() - one_start.x()
+    one_y = one_end.y() - one_start.y()
+    two_x = two_end.x() - two_start.x()
+    two_y = two_end.y() - two_start.y()
+    denominator = one_x * two_y - one_y * two_x
+    if abs(denominator) < 1e-9:
+        return None                                    # parallel, or a point
+    gap_x = two_start.x() - one_start.x()
+    gap_y = two_start.y() - one_start.y()
+    along_one = (gap_x * two_y - gap_y * two_x) / denominator
+    along_two = (gap_x * one_y - gap_y * one_x) / denominator
+    if not (0.0 <= along_one <= 1.0 and 0.0 <= along_two <= 1.0):
+        return None
+    return QPointF(one_start.x() + one_x * along_one,
+                   one_start.y() + one_y * along_one)

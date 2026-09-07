@@ -76,8 +76,11 @@ lets go of the snapping while it is held. Arrow keys nudge, and everything is
 undoable.
 
 **Snapping** picks up the grid and what is already drawn — corners, centres and
-edge midpoints of anything boxed, and every vertex of anything drawn as a line
-— and marks what it has caught with a small orange square. Snapping to the
+edge midpoints of anything boxed, every vertex of anything drawn as a line, and
+**where two lines cross**, which is the point a drawing is most often aimed at
+and the one nothing has a vertex for: two grid lines meeting, a beam arriving
+at a column. What it has caught is marked with a small orange square and named
+in the status bar. Snapping to the
 imported drawing's own line work is a separate switch from snapping to the
 markups over it, because they want different things: a corner of a beam is
 worth catching exactly, and the alignment guides that help when laying markups
@@ -94,9 +97,31 @@ is not a picture: the line work in it is copied as line work, so pasting puts
 something down that stays sharp at any zoom.
 
 The **Markups** panel is a live list of every annotation in the document —
-page, type, subject, measured value, author, date and comment — filterable, and
-exportable to CSV as a takeoff. Measurements and counts sharing a subject are
-totalled at the bottom.
+page, type, status, subject, measured value, layer, author, date and the last
+thing said about it — sortable, filterable, and exportable to CSV as a takeoff.
+Measurements and counts sharing a subject are totalled at the bottom. The list
+and the drawing are two views of one thing: pick a row and the markup is picked
+on the page, pick a markup and its row is picked in the list.
+
+### Working through a review
+
+Every markup carries a **status** — *Accepted*, *Rejected*, *Cancelled*,
+*Completed*, or none yet — set from the markup's own menu, from the Markup
+menu, or by right-clicking rows in the markups list to rule on a dozen at once.
+Each one is signed with the name in Document properties and the time it was
+set, because "rejected" with nobody's name on it is not an answer anybody can
+go back to. The list shows each status in its own colour, and its **Open**
+button leaves out everything that has been ruled on, so a reviewer works down
+what is still open rather than hunting the drawing.
+
+**Reply** adds to the conversation about a markup, so a review is a back and
+forth rather than one comment field somebody has to overwrite.
+
+None of this is a private convention: a status travels as a reply annotation
+carrying `/State` and `/StateModel /Review`, and a reply as one carrying words
+— which is exactly how Acrobat and Bluebeam both record a review. So a drawing
+marked up here goes back to the consultant with its statuses intact, and one
+that has been through their software arrives here with theirs.
 
 ### Defaults and tool sets
 
@@ -380,7 +405,7 @@ the PDF that comes out at the end.
 | File | What it promises |
 |---|---|
 | `test_pdf_engine.py` | The PDF engine, against real files: syntax, filters, damaged cross-references, incremental update, annotations |
-| `test_format.py` | What a saved document is — a PDF, the source page untouched, markups as annotations |
+| `test_format.py` | What a saved document is — a PDF, the source page untouched, markups as annotations, a review as reply annotations |
 | `test_btx.py` | Bluebeam tool sets, read from the real `.btx` files in `btx/` |
 | `test_items.py` | Serialisation, geometry and layout of every markup type |
 | `test_app.py` | The window: tools, panels, undo, files, printing |

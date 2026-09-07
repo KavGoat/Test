@@ -61,7 +61,9 @@ looks like work that has been done.
 The drawings are large, and they arrive from everywhere.
 
 - A page is drawn from its own line work, not from a picture of it, so it is
-  sharp at any zoom rather than magnified.
+  sharp at any zoom rather than magnified — and that line work can be caught
+  hold of: its ends, its corners, and where its lines cross, which is where a
+  dimension is actually taken from.
 - Somebody else's markups come in as markups — a Bluebeam cloud opens as a
   cloud that can be selected, recoloured and moved, not as part of the page.
 - A drawing opens in a moment, not in a minute. Opening a file is not a
@@ -75,6 +77,13 @@ The person receiving the markups has to be able to act on them without the
 author standing over them.
 
 - Every markup carries its author, its date, its subject and its comment.
+- Every markup carries **where it has got to** — accepted, rejected, cancelled,
+  completed, or nothing yet — signed with who said so and when. A ruling
+  nobody's name is on is not one anybody can go back to.
+- A review is a conversation, so a markup holds replies rather than one comment
+  field the next person has to overwrite.
+- All of that travels as the PDF's own reply annotations, so it reaches the
+  consultant's software and theirs reaches here.
 - The markups list is the take-off: every annotation in the document, its page,
   its measured value, filterable and exportable to CSV.
 - Measurements and counts sharing a subject are totalled, and the total is the

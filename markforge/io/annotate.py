@@ -360,6 +360,67 @@ def annotation_for(item, rect, page_height: float, appearance=None) -> dict:
     return annotation
 
 
+def replies_to(item, target, rect, page_height: float) -> list[dict]:
+    """The reply annotations that carry a markup's review, if it has one.
+
+    A status and a conversation are not fields on an annotation: each is an
+    annotation of its own pointing back at the markup through ``/IRT``. That
+    is how Acrobat and Bluebeam both record a review, and writing it their way
+    is the difference between a marked-up drawing somebody can answer and one
+    they can only look at.
+
+    *target* is whatever stands for the markup being answered — a reference in
+    the file being written.
+    """
+    where = [rect.left(), page_height - rect.bottom(),
+             rect.left() + 20.0, page_height - rect.bottom() + 20.0]
+    out: list[dict] = []
+    for reply in getattr(item, "replies", []) or []:
+        entry = {
+            "Type": Name("Annot"),
+            "Subtype": Name("Text"),
+            "Rect": list(where),
+            "F": 2,                                    # hidden: it is the thread
+            "IRT": target,
+            "RT": Name("R"),
+            "Contents": str(reply.get("text", "")),
+        }
+        if reply.get("author"):
+            entry["T"] = str(reply["author"])
+        stamp = _pdf_date(str(reply.get("at", "")))
+        if stamp:
+            entry["M"] = stamp
+        out.append(entry)
+    status = getattr(item, "status", "")
+    if status or getattr(item, "status_by", ""):
+        entry = {
+            "Type": Name("Annot"),
+            "Subtype": Name("Text"),
+            "Rect": list(where),
+            "F": 2,
+            "IRT": target,
+            "RT": Name("R"),
+            "State": status or "None",
+            "StateModel": "Review",
+            "Contents": f"Set status to {status or 'None'}.",
+        }
+        if getattr(item, "status_by", ""):
+            entry["T"] = item.status_by
+        stamp = _pdf_date(getattr(item, "status_at", ""))
+        if stamp:
+            entry["M"] = stamp
+        out.append(entry)
+    return out
+
+
+def _pdf_date(stamp: str) -> str:
+    """An ISO time as a PDF one. Empty when there is nothing to say."""
+    digits = "".join(character for character in stamp if character.isdigit())
+    if len(digits) < 8:
+        return ""
+    return "D:" + digits[:14].ljust(14, "0")
+
+
 def _add_the_geometry(annotation, item, rect, page_height: float) -> None:
     """Say what the markup is, not only where its box is.
 

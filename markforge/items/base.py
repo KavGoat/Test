@@ -271,6 +271,25 @@ def cursor_for_handle(key: str):
 # Base item
 # ---------------------------------------------------------------------------
 
+#: What a reviewer can say about a markup, and the order it reads in.
+#:
+#: These are the PDF's own review states, not names invented here: an
+#: annotation's status travels as a reply annotation carrying ``/State`` and
+#: ``/StateModel /Review``, which is how Acrobat and Bluebeam both record it.
+#: So a drawing marked up here comes back to the consultant with its statuses
+#: intact, and one they have been through arrives here with theirs.
+STATUSES = ["None", "Accepted", "Rejected", "Cancelled", "Completed"]
+
+#: What each status is drawn in, in the markups list. A colour is how a
+#: reviewer reads a page of them without reading any of them.
+STATUS_COLOURS = {
+    "Accepted": "#2f9e44",
+    "Rejected": "#e03131",
+    "Cancelled": "#868e96",
+    "Completed": "#1971c2",
+}
+
+
 class MarkupItem(QGraphicsObject):
     """Base class: selection handles, style, metadata and serialisation."""
 
@@ -292,7 +311,17 @@ class MarkupItem(QGraphicsObject):
         self.comment = ""
         self.label = ""
         self.layer = "Markups"
+        # Where a markup has got to in a review: one of :data:`STATUSES`, empty
+        # for one nobody has ruled on yet. Who said so and when are kept with
+        # it, because "rejected" without a name on it is not an answer anybody
+        # can go back to.
         self.status = ""
+        self.status_by = ""
+        self.status_at = ""
+        # The conversation about this markup, oldest first: each reply is
+        # ``{"author": …, "text": …, "at": …}``. A review is a back and forth,
+        # and a single comment field can only hold one end of it.
+        self.replies: list[dict] = []
         self.created = datetime.now().isoformat(timespec="seconds")
         self.modified = self.created
         self.locked = False
@@ -333,6 +362,32 @@ class MarkupItem(QGraphicsObject):
     def summary(self) -> str:
         """Text shown in the markups list."""
         return self.comment or self.label or ""
+
+    def set_status(self, status: str, who: str = "") -> None:
+        """Say where this markup has got to, and sign it.
+
+        "None" is a state a reviewer can deliberately go back to — it means
+        "no longer decided" rather than "never looked at" — so it is recorded
+        with its name and time like any other.
+        """
+        self.status = "" if status in ("", "None") else str(status)
+        self.status_by = who
+        self.status_at = datetime.now().isoformat(timespec="seconds") if who else ""
+        self.touch()
+
+    def add_reply(self, text: str, who: str = "") -> dict:
+        """Add to the conversation about this markup."""
+        reply = {"author": who, "text": str(text),
+                 "at": datetime.now().isoformat(timespec="seconds")}
+        self.replies.append(reply)
+        self.touch()
+        return reply
+
+    def latest_word(self) -> str:
+        """The last thing said about this markup, whoever said it."""
+        if self.replies:
+            return str(self.replies[-1].get("text", ""))
+        return self.summary()
 
     def set_locked(self, locked: bool) -> None:
         self.locked = bool(locked)
@@ -587,6 +642,9 @@ class MarkupItem(QGraphicsObject):
             "label": self.label,
             "layer": self.layer,
             "status": self.status,
+            "status_by": self.status_by,
+            "status_at": self.status_at,
+            "replies": [dict(reply) for reply in self.replies],
             "created": self.created,
             "modified": self.modified,
             "locked": self.locked,
@@ -618,6 +676,10 @@ class MarkupItem(QGraphicsObject):
         self.label = data.get("label", "")
         self.layer = data.get("layer", "Markups")
         self.status = data.get("status", "")
+        self.status_by = data.get("status_by", "")
+        self.status_at = data.get("status_at", "")
+        self.replies = [dict(reply) for reply in (data.get("replies") or [])
+                        if isinstance(reply, dict)]
         self.created = data.get("created", self.created)
         self.modified = data.get("modified", self.modified)
         self.printable = bool(data.get("printable", True))

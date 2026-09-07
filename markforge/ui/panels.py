@@ -350,11 +350,19 @@ class PagesPanel(QWidget):
 # ---------------------------------------------------------------------------
 
 class MarkupsPanel(QWidget):
-    """Every markup in the document, filterable and exportable — like a takeoff list."""
+    """Every markup in the document, filterable and exportable — like a takeoff list.
+
+    It is also how a review is worked through: pick a row and the markup is
+    picked on the page, set a status and the row says so in its colour. A
+    reviewer goes down the list rather than hunting the drawing.
+    """
 
     markupActivated = Signal(int, str)
+    markupPicked = Signal(int, str)
+    statusChosen = Signal(str)
 
-    COLUMNS = ["Page", "Type", "Subject", "Value", "Author", "Date", "Comment"]
+    COLUMNS = ["Page", "Type", "Status", "Subject", "Value", "Layer", "Author",
+               "Date", "Comment"]
 
     def __init__(self, window):
         super().__init__()
@@ -369,6 +377,12 @@ class MarkupsPanel(QWidget):
         self.filter.setClearButtonEnabled(True)
         self.filter.textChanged.connect(lambda _: self.rebuild(self.window.document))
         top.addWidget(self.filter, 1)
+        self.only_open = QToolButton()
+        self.only_open.setText("Open")
+        self.only_open.setCheckable(True)
+        self.only_open.setToolTip("Show only the markups nobody has ruled on yet")
+        self.only_open.toggled.connect(lambda _: self.rebuild(self.window.document))
+        top.addWidget(self.only_open)
         export = QToolButton()
         export.setText("CSV")
         export.setToolTip("Export the markups list to CSV")
@@ -383,8 +397,17 @@ class MarkupsPanel(QWidget):
         self.tree.setAlternatingRowColors(True)
         self.tree.setUniformRowHeights(True)
         self.tree.itemDoubleClicked.connect(self._activate)
+        self.tree.itemSelectionChanged.connect(self._picked)
+        self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._menu_at)
+        self.tree.setSelectionMode(QTreeWidget.ExtendedSelection)
         self.tree.header().setSectionResizeMode(QHeaderView.Interactive)
+        self.tree.setSortingEnabled(True)
         layout.addWidget(self.tree, 1)
+        # True while the list is being rebuilt or is following the canvas, so
+        # that putting a selection into it does not send that selection
+        # straight back out and fight whatever set it.
+        self._echoing = False
 
         self.totals = QLabel("")
         self.totals.setWordWrap(True)
@@ -392,38 +415,63 @@ class MarkupsPanel(QWidget):
         layout.addWidget(self.totals)
 
     def rebuild(self, document) -> None:
+        from ..items.base import STATUS_COLOURS
+
         needle = self.filter.text().strip().lower()
+        open_only = self.only_open.isChecked()
+        self._echoing = True
+        sorting = self.tree.isSortingEnabled()
+        self.tree.setSortingEnabled(False)
         self.tree.clear()
         rows = []
+        empty = [""] * len(self.COLUMNS)
         for index, page in enumerate(document.pages):
             if page.frame is None:
                 continue
-            page_node = QTreeWidgetItem([f"Page {index + 1}", "", "", "", "", "", ""])
+            page_node = QTreeWidgetItem([f"Page {index + 1}"] + empty[1:])
             font = page_node.font(0)
             font.setBold(True)
             page_node.setFont(0, font)
             added = False
             for item in page.frame.ordered_markups():
-                row = [str(index + 1), item.display_name(), item.subject,
-                       getattr(item, "value_text", ""), item.author,
-                       item.modified[:10], item.summary()]
+                row = [str(index + 1), item.display_name(), item.status,
+                       item.subject, getattr(item, "value_text", ""), item.layer,
+                       item.author, item.modified[:10], item.latest_word()]
+                if open_only and item.status:
+                    continue
                 if needle and not any(needle in str(cell).lower() for cell in row):
                     continue
                 node = QTreeWidgetItem(row)
                 node.setData(0, Qt.UserRole, (index, item.uid))
                 node.setIcon(1, icon(_icon_for(item), 16))
+                if item.status in STATUS_COLOURS:
+                    node.setForeground(2, QColor(STATUS_COLOURS[item.status]))
+                    weight = node.font(2)
+                    weight.setBold(True)
+                    node.setFont(2, weight)
+                if item.status_by:
+                    node.setToolTip(2, f"{item.status} by {item.status_by}"
+                                       f"{' on ' + item.status_at[:10] if item.status_at else ''}")
+                if len(item.replies) > 1:
+                    node.setToolTip(len(self.COLUMNS) - 1,
+                                    "\n".join(f"{reply.get('author') or 'Someone'}: "
+                                               f"{reply.get('text', '')}"
+                                               for reply in item.replies))
                 if item.locked:
                     node.setForeground(1, QColor("#8b93a1"))
                 page_node.addChild(node)
                 rows.append(row)
                 added = True
-            if added or not needle:
+            if added or not (needle or open_only):
                 self.tree.addTopLevelItem(page_node)
                 page_node.setExpanded(True)
         for column in range(len(self.COLUMNS)):
             self.tree.resizeColumnToContents(column)
+        self.tree.setSortingEnabled(sorting)
         self._rows = rows
         self.totals.setText(self._totals_text(document))
+        self._echoing = False
+        self.follow_the_canvas()
 
     @staticmethod
     def _totals_text(document) -> str:
@@ -456,6 +504,61 @@ class MarkupsPanel(QWidget):
         data = node.data(0, Qt.UserRole)
         if data:
             self.markupActivated.emit(data[0], data[1])
+
+    def _picked(self) -> None:
+        """One click picks the markup on the page, as a row in a list should."""
+        if self._echoing:
+            return
+        for node in self.tree.selectedItems():
+            data = node.data(0, Qt.UserRole)
+            if data:
+                self.markupPicked.emit(data[0], data[1])
+                return
+
+    def chosen_uids(self) -> list[str]:
+        """Which markups the rows picked out in the list are."""
+        out = []
+        for node in self.tree.selectedItems():
+            data = node.data(0, Qt.UserRole)
+            if data:
+                out.append(data[1])
+        return out
+
+    def follow_the_canvas(self) -> None:
+        """Pick out the rows for whatever is selected on the page.
+
+        The list and the drawing are two views of one thing, so picking a
+        markup on either should show it on the other.
+        """
+        scene = self.window.view.scene() if self.window.view else None
+        wanted = {item.uid for item in scene.selectedItems()} if scene else set()
+        self._echoing = True
+        try:
+            first = None
+            for index in range(self.tree.topLevelItemCount()):
+                parent = self.tree.topLevelItem(index)
+                for child in range(parent.childCount()):
+                    node = parent.child(child)
+                    data = node.data(0, Qt.UserRole)
+                    chosen = bool(data) and data[1] in wanted
+                    node.setSelected(chosen)
+                    if chosen and first is None:
+                        first = node
+            if first is not None:
+                self.tree.scrollToItem(first)
+        finally:
+            self._echoing = False
+
+    def _menu_at(self, where) -> None:
+        """Set a status on whatever is picked out, without leaving the list."""
+        from ..items.base import STATUSES
+
+        if not self.chosen_uids():
+            return
+        menu = QMenu(self)
+        for status in STATUSES:
+            menu.addAction(status, lambda name=status: self.statusChosen.emit(name))
+        menu.exec(self.tree.viewport().mapToGlobal(where))
 
     def export_csv(self) -> None:
         from PySide6.QtWidgets import QFileDialog
@@ -1273,6 +1376,7 @@ class PropertiesPanel(QScrollArea):
                 self._add_cloud(first)
         if len(self._items) == 1:
             self._add_geometry(first)
+        self._add_review(first)
         self._add_metadata(first)
         if len(self._items) == 1:
             self._add_defaults(first)
@@ -1821,6 +1925,45 @@ class PropertiesPanel(QScrollArea):
         self.window.status_hint.setText(
             f"New {item.display_name().lower()}s are back to their original look")
         self.show_items(self._items)
+
+    def _add_review(self, first: MarkupItem) -> None:
+        """Where this markup has got to, and what has been said about it."""
+        from ..items.base import STATUS_COLOURS, STATUSES
+
+        form = self._group("Review")
+        status = QComboBox()
+        status.addItems(STATUSES)
+        status.setCurrentText(first.status or "None")
+        status.setToolTip("Where this markup has got to in the review")
+        colour = STATUS_COLOURS.get(first.status)
+        if colour:
+            status.setStyleSheet(f"font-weight:600; color:{colour};")
+        status.activated.connect(
+            lambda _index: self.window.set_markup_status(status.currentText(),
+                                                         self._items))
+        form.addRow("Status", status)
+
+        if first.status_by:
+            said = f"{first.status_by}"
+            if first.status_at:
+                said += f", {first.status_at[:10]}"
+            who = QLabel(said)
+            who.setStyleSheet("color:#6b7280;")
+            form.addRow("", who)
+
+        if first.replies:
+            thread = QLabel("\n".join(
+                f"{reply.get('author') or 'Someone'}: {reply.get('text', '')}"
+                for reply in first.replies))
+            thread.setWordWrap(True)
+            thread.setStyleSheet("color:#4a5261;")
+            form.addRow("Said", thread)
+
+        reply = QPushButton("Reply…")
+        reply.setToolTip("Add to the conversation about this markup")
+        reply.setEnabled(len(self._items) == 1)
+        reply.clicked.connect(lambda: self.window.reply_to_markup(first))
+        form.addRow("", reply)
 
     def _add_metadata(self, first: MarkupItem) -> None:
         form = self._group("Details")

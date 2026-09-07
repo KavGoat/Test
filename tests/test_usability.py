@@ -1068,7 +1068,8 @@ def test_changing_the_page_scale_updates_the_takeoff_list(window, monkeypatch):
 
     def sizes():
         panel = window.markups_panel
-        return [panel.tree.topLevelItem(0).child(i).text(3)
+        column = panel.COLUMNS.index("Value")
+        return [panel.tree.topLevelItem(0).child(i).text(column)
                 for i in range(panel.tree.topLevelItem(0).childCount())]
 
     window.refresh_lists()
@@ -8226,3 +8227,215 @@ def test_the_style_toolbar_and_the_properties_panel_agree(window):
             disagreed.append(f"{tool.key}: toolbar {sorted(on_the_toolbar)} "
                              f"vs panel {sorted(in_the_panel)}")
     assert not disagreed, "\n".join(disagreed)
+
+
+# ---------------------------------------------------------------------------
+# Working through a review
+# ---------------------------------------------------------------------------
+
+def _rows_of_the_markups_list(window):
+    """Every markup row in the panel, under whichever page it is on."""
+    tree = window.markups_panel.tree
+    rows = []
+    for index in range(tree.topLevelItemCount()):
+        parent = tree.topLevelItem(index)
+        rows += [parent.child(child) for child in range(parent.childCount())]
+    return rows
+
+
+def test_a_status_set_on_the_page_shows_in_the_markups_list(window):
+    """The list is where a review is read, so it has to say where each is."""
+    window.document.settings.default_author = "K. Goat"
+    box = _a_rectangle(window)
+    box.subject = "Beam size"
+    window.view.scene().clearSelection()
+    box.setSelected(True)
+    window.set_markup_status("Rejected")
+
+    row = [node for node in _rows_of_the_markups_list(window)
+           if node.data(0, Qt.UserRole) and node.data(0, Qt.UserRole)[1] == box.uid]
+    assert row, "the rectangle should be in the list"
+    columns = window.markups_panel.COLUMNS
+    assert row[0].text(columns.index("Status")) == "Rejected"
+    assert "K. Goat" in row[0].toolTip(columns.index("Status"))
+
+
+def test_picking_a_row_picks_the_markup_and_the_other_way_round(window):
+    """The list and the drawing are two views of one thing."""
+    first = _a_rectangle(window, 120, 120, 240, 200)
+    second = _a_rectangle(window, 300, 120, 420, 200)
+    window.select_tool("select")
+    window.refresh_lists()
+
+    rows = {node.data(0, Qt.UserRole)[1]: node
+            for node in _rows_of_the_markups_list(window)
+            if node.data(0, Qt.UserRole)}
+    rows[second.uid].setSelected(True)
+    QApplication.processEvents()
+    assert second.isSelected() and not first.isSelected(), \
+        "picking a row should pick the markup"
+
+    window.view.scene().clearSelection()
+    first.setSelected(True)
+    window.refresh_selection()
+    QApplication.processEvents()
+    assert rows[first.uid].isSelected(), "and picking a markup should pick its row"
+    assert not rows[second.uid].isSelected()
+
+
+def test_the_open_filter_leaves_out_what_has_been_ruled_on(window):
+    """Going through a drawing means going through what is still open."""
+    done = _a_rectangle(window, 120, 120, 240, 200)
+    still_open = _a_rectangle(window, 300, 120, 420, 200)
+    window.view.scene().clearSelection()
+    done.setSelected(True)
+    window.set_markup_status("Completed")
+
+    window.markups_panel.only_open.setChecked(True)
+    try:
+        listed = {node.data(0, Qt.UserRole)[1]
+                  for node in _rows_of_the_markups_list(window)
+                  if node.data(0, Qt.UserRole)}
+        assert still_open.uid in listed
+        assert done.uid not in listed, "a completed markup is not still open"
+    finally:
+        window.markups_panel.only_open.setChecked(False)
+
+
+def test_a_status_is_undone_like_anything_else(window):
+    box = _a_rectangle(window)
+    window.view.scene().clearSelection()
+    box.setSelected(True)
+    window.set_markup_status("Accepted")
+    assert box.status == "Accepted"
+
+    window.undo_something()
+    QApplication.processEvents()
+    again = [item for item in markups(window) if item.uid == box.uid][0]
+    assert again.status == "", "undo should take the ruling back"
+
+
+def test_setting_a_status_on_several_at_once_rules_on_all_of_them(window):
+    """A reviewer clears a page of nits in one go, not one at a time."""
+    first = _a_rectangle(window, 120, 120, 240, 200)
+    second = _a_rectangle(window, 300, 120, 420, 200)
+    window.select_tool("select")
+    window.view.scene().clearSelection()
+    first.setSelected(True)
+    second.setSelected(True)
+    window.set_markup_status("Completed")
+    assert first.status == second.status == "Completed"
+
+
+def test_the_status_menu_says_which_one_it_is_on(window):
+    box = _a_rectangle(window)
+    window.view.scene().clearSelection()
+    box.setSelected(True)
+    window.set_markup_status("Rejected")
+
+    menu = window.build_context_menu(box, box.pos())
+    review = [action.menu() for action in menu.actions()
+              if action.text() == "Status" and action.menu()]
+    assert review, "a markup's menu should offer a status"
+    ticked = [action.text() for action in review[0].actions() if action.isChecked()]
+    assert ticked == ["Rejected"]
+
+
+def test_a_reply_is_added_to_the_conversation_not_over_it(window, monkeypatch):
+    from PySide6.QtWidgets import QInputDialog
+
+    window.document.settings.default_author = "K. Goat"
+    box = _a_rectangle(window)
+    box.add_reply("Which beam?", "A. Checker")
+    window.view.scene().clearSelection()
+    box.setSelected(True)
+
+    monkeypatch.setattr(QInputDialog, "getMultiLineText",
+                        staticmethod(lambda *_a, **_k: ("The transfer beam.", True)))
+    window.reply_to_markup(box)
+    assert [(reply["author"], reply["text"]) for reply in box.replies] == [
+        ("A. Checker", "Which beam?"), ("K. Goat", "The transfer beam.")]
+    assert box.latest_word() == "The transfer beam."
+
+
+# ---------------------------------------------------------------------------
+# Catching hold of where two lines cross
+# ---------------------------------------------------------------------------
+
+def _a_line(window, x0, y0, x1, y1):
+    window.select_tool("line")
+    drag(window.view, x0, y0, x1, y1)
+    window.select_tool("select")
+    return markups(window)[-1]
+
+
+def test_the_pointer_catches_where_two_lines_cross(window):
+    """The point a drawing is aimed at, and the one there is no vertex for.
+
+    Two grid lines meeting, a beam arriving at a column: nothing has a corner
+    there, so before this there was nothing to catch hold of and a dimension
+    taken off it was taken off a guess.
+    """
+    from PySide6.QtCore import QPointF
+
+    # Neither crossing point is either line's own midpoint, so what is caught
+    # is the crossing itself rather than a middle that happens to be there.
+    _a_line(window, 100, 300, 500, 300)          # across, middle at 300
+    _a_line(window, 250, 150, 250, 550)          # down, middle at 350
+    window.document.settings.snap_to_items = True
+
+    frame = window.document.pages[0].frame
+    crossing = frame.mapToScene(QPointF(250, 300))
+    caught = window.view.snap_scene(crossing + QPointF(3, -2))
+    assert abs(caught.x() - crossing.x()) < 0.5
+    assert abs(caught.y() - crossing.y()) < 0.5
+    assert "crossing" in window.view._snap_caught
+
+
+def test_lines_that_stop_short_of_each_other_do_not_cross(window):
+    """Where they would have met is not a place anything is."""
+    from PySide6.QtCore import QPointF
+
+    _a_line(window, 100, 300, 200, 300)          # stops well short
+    _a_line(window, 400, 150, 400, 450)
+    window.document.settings.snap_to_items = True
+
+    frame = window.document.pages[0].frame
+    would_be = frame.mapToScene(QPointF(400, 300))
+    caught = window.view.snap_scene(would_be + QPointF(3, -2))
+    assert "crossing" not in window.view._snap_caught, \
+        f"nothing crosses there, but it said {window.view._snap_caught!r}"
+
+
+def test_a_corner_still_beats_a_crossing_that_is_further_away(window):
+    """A crossing is one more thing to catch, not a thing that takes over."""
+    from PySide6.QtCore import QPointF
+
+    _a_line(window, 100, 300, 400, 300)
+    _a_line(window, 250, 150, 250, 450)
+    end = _a_line(window, 260, 300, 340, 380)    # its end is near the crossing
+    window.document.settings.snap_to_items = True
+
+    frame = window.document.pages[0].frame
+    near_the_end = frame.mapToScene(QPointF(260, 300)) + QPointF(1, 1)
+    caught = window.view.snap_scene(near_the_end)
+    wanted = end.mapToScene(end.points[0])
+    assert abs(caught.x() - wanted.x()) < 0.5 and abs(caught.y() - wanted.y()) < 0.5
+    assert "end" in window.view._snap_caught
+
+
+def test_crossings_are_left_alone_when_snapping_is_switched_off(window):
+    from PySide6.QtCore import QPointF
+
+    _a_line(window, 100, 300, 400, 300)
+    _a_line(window, 250, 150, 250, 450)
+    settings = window.document.settings
+    settings.snap_to_items = False
+    settings.snap_to_content = False
+    try:
+        frame = window.document.pages[0].frame
+        near = frame.mapToScene(QPointF(250, 300)) + QPointF(3, -2)
+        assert window.view.crossings_near(frame, near, 9.0) == []
+    finally:
+        settings.snap_to_items = True
+        settings.snap_to_content = True
