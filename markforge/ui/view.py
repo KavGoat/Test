@@ -232,7 +232,6 @@ class PageView(QGraphicsView):
         self._editing_item = None
         # What the region being typed into said when the answers were last
         # worked out.
-        self._last_recalculated = ""
 
         self._last_scene_pos = QPointF(60, 60)
         self._insertion_point: Optional[QPointF] = None
@@ -368,7 +367,6 @@ class PageView(QGraphicsView):
                    if frame.serialize_items() != before]
         if not changed:
             return
-        self.window.recalculate()
         stack = self.window.undo_stack
         if len(changed) > 1:
             stack.beginMacro(text)
@@ -1742,8 +1740,7 @@ class PageView(QGraphicsView):
             frame.add_markup(copy)
             copy.setSelected(False)
         if scene is not None:
-            self.window.recalculate()
-        self.statusMessage.emit(f"Copied {len(self._move_items)} markup(s)")
+            self.statusMessage.emit(f"Copied {len(self._move_items)} markup(s)")
 
     @staticmethod
     def _place(item, position: QPointF, keep_leader: bool = True) -> None:
@@ -2298,7 +2295,6 @@ class PageView(QGraphicsView):
             frame.add_markup(item)
             item.setSelected(True)
             placed.append(item)
-        self.window.recalculate()
         self.commit_snapshot(f"Place {entry.label}")
         self.selectionChanged.emit()
         self._pending_stamp = None

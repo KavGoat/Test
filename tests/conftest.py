@@ -118,7 +118,6 @@ def window(qapp):
     yield main
     main.document.modified = False
     main.undo_stack.clear()
-    main.view.deactivate_table()
     main.view.setScene(None)
     for page in main.document.pages:
         page.frame = None

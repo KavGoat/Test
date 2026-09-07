@@ -91,7 +91,6 @@ DEFAULT_BINDINGS: list[Binding] = [
     Binding("insert.table", "Start table", "|", INSERT, "Typing", "table"),
     Binding("insert.callout", "Start callout", "@", INSERT, "Typing", "callout"),
 ] + _tool_bindings() + [
-    Binding("command.recalculate", "Recalculate", "F9", COMMAND, "Document", "recalculate"),
     Binding("command.fit_page", "Fit page", "Ctrl+0", COMMAND, "View", "fit_page"),
     Binding("command.fit_width", "Fit width", "Ctrl+1", COMMAND, "View", "fit_width"),
     Binding("command.split_lines", "Split", "Ctrl+Shift+L",
