@@ -10169,7 +10169,9 @@ def test_an_inserted_pdf_brings_somebody_elses_markups_back_as_markups(
     placed = {(item["type"], item.get("kind"),
                round(item["x"]), round(item["y"])) for item in found[0]}
     assert ("rect", "rect", 120, 150) in placed
-    assert ("poly", "polyline", 120, 320) in placed
+    # Two points with an arrow on the end is a line annotation, and a line
+    # annotation is a line — not a polyline that happens to have two corners.
+    assert ("poly", "line", 120, 320) in placed
     assert all(item["layer"] == "Markups" for item in found[0])
 
 
