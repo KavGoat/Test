@@ -2,7 +2,7 @@
 
 Audited: 2026-09-06 against `claude/engineering-calc-markup-app-2twiqs`.
 
-Every open line in `docs/tasklist.md` was gone through one at a time. The 158
+Every open line in `docs/tasklist.md` was gone through one at a time. The 153
 below are the ones the current source implements and something actually
 exercises — an event-driven test that drives the real Qt queue, or a check
 against the running application. Each carries the evidence it rests on.
@@ -115,9 +115,6 @@ behaviour it extends.
 - **(new)** Selecting as it stands — click, and click-drag for a rectangular marquee, with no key held — is right and stays as it is. What Shift adds: **Shift and click point after point draws a polygon to select inside**, closed by clicking the first point again or by Enter
   - **Evidence:** Plain click and rectangular marquee unchanged; Shift clicks out a selection polygon, closed by returning to the first point or Enter, and Escape abandons it. Evidence: test_shift_clicking_out_a_lasso_selects_what_is_inside_it, test_a_lasso_takes_only_what_is_wholly_inside, test_escape_abandons_a_half_drawn_lasso.
 
-- **(supersedes prior removal, amended)** Provide an optional canvas insertion point for calculation placement. When enabled, clicking empty canvas sets the insertion point and arrow keys move it up/down; new calculation lines use that point. The insertion point renders as a tiny crosshair, not a large marker. The setting must be independently toggleable so ordinary selection/marquee behavior remains available when it is off. Left, Right, Up and Down must never scroll the page view or change pages during ordinary navigation; the single exception is that the view may auto-scroll when the insertion point, or an item being moved with the arrows, is about to leave the visible area.
-  - **Evidence:** Fixed. The arrow keys no longer scroll: with nothing selected and no insertion point they do nothing, and the one exception the task allows is served by follow_off_screen, which brings the caret or the nudged markup back into view by exactly the amount needed. The insertion point is now a crosshair of two equal arms at a fixed on-screen size rather than the 16pt bracketed I-beam. Evidence: test_the_arrows_never_scroll_the_page_on_their_own, test_the_view_follows_a_markup_nudged_off_the_bottom_of_it, test_the_insertion_point_is_drawn_as_a_small_crosshair, plus the existing insertion-point tests; tests/test_canvas.py::test_arrows_do_not_scroll_when_nothing_is_selected replaces the test that asserted the old rule.
-
 - Escape must always fully clear selection and exit whatever edit/tool sub-state you're in, in one press, regardless of how deep the current mode is nested (81, 92)
   - **Evidence:** escape_everything (view.py:1634) unwinds held tool, pending call-out anchor, insertion point, pending cloud and cloud leader, marquee, editors and selection in one press and reports what it put down. Exercised from 41 places in tests/test_usability.py.
 
@@ -167,9 +164,6 @@ behaviour it extends.
 - **(new)** Callout boxes and other text/shape items should rotate back to normal during editing and snap back to the default unrotated state when the base/default angle is zero/positive-unrotated, instead of remaining at a stale rotated angle
   - **Evidence:** An almost-unrotated box snaps back to zero after editing. Evidence: test_an_almost_unrotated_text_box_snaps_back_to_zero_after_editing.
 
-- Custom dimension tool (Alt+M): click first point, click second point, then place the dimension text directly with an in-place text cursor — no popup dialog. Text is blank by default until typed. It sits in-line with the dimension line by default, but Shift+click the number to drag it off the line, which then draws its own small leader connecting it back (10, 37, reference photo msg 116)
-  - **Evidence:** Dimension is on Alt+M (ui/tools.py:140) and carries the user's own text rather than the measured value. Evidence: test_a_dimension_carries_its_own_text.
-
 - **(new)** Full leader/hinge rewrite needed: the hinge point currently doesn't exist yet during placement (before the box is finalized), which breaks the interaction — it needs to be built from scratch so the in-progress placement behaves exactly like the finished, after-placement leader from the very first click, not as a separate/different code path
   - **Evidence:** The hinge exists during placement, before the box is finalised. Evidence: test_the_hinge_exists_while_the_callout_is_being_placed, test_the_hinge_leaves_the_side_square_on, test_dragging_the_hinge_out_pushes_it_further_from_the_box, test_the_hinge_can_be_moved_to_another_side.
 
@@ -207,9 +201,6 @@ behaviour it extends.
 
 - **(new)** Add Bluebeam-style photo/image colour operations: recolour an image to a selected colour, convert it to black-and-white, and make a selected source colour transparent. These are image-content operations, distinct from a markup's stroke/fill styling.
   - **Evidence:** Recolour, Black and white and make-a-colour-transparent are all offered (ui/dialogs.py:552 and io/recolour.py, which documents all three operations).
-
-- **(new, amended)** Pasted or placed images and snapshots must not acquire a red outline. The image tool's own default stroke must be settable and must default to none, and a snapshot's default stroke must be none; in both cases the visible frame must match the persisted or default style rather than a hard-coded red. A snapshot's stroke colour and width must then be settable by the user and honoured when set, and the style toolbar and the Properties panel must agree with each other on image and snapshot border state.
-  - **Evidence:** Fixed, and it settles task 157 with it. A snapshot is drawn linework rather than a photo, so it now carries STROKE and WIDTH capability: its outline still defaults to none (items/snapshot.py:38) and a set one is honoured (snapshot.py:91), and both the style toolbar and the Properties panel read the same stylecaps.capabilities, so they cannot disagree. A photo keeps no per-item border — a stroke colour on a raster image has nowhere to go — but capabilities now answers a second question, for_default, so with the Image tool active and nothing selected the toolbar offers Line and Width to set what a placed image starts with. Evidence: test_a_snapshot_has_a_border_that_starts_at_none_and_can_be_set, test_a_photos_own_border_is_not_offered_but_its_default_is, and the existing test_a_raster_image_has_no_line_or_fill_style_controls still passes.
 
 ## 11. Snapping, grid, alignment
 
@@ -458,9 +449,6 @@ behaviour it extends.
 - New pages start uncalibrated. The first scale-dependent rectangle, ellipse or measurement prompts for page scale instead of assuming a scale.
   - **Evidence:** note_missing_scale (mainwindow.py:2811) says once that the page has no scale and points at the status-bar control, and the draw path calls it for a scale-dependent item (view.py:2825). NOTE: it keys off PageScale.is_calibrated, which task 155 shows is wrong for a genuine 1:1.
 
-- **(amended)** After the first click of a rectangle or ellipse, show the numeric size entry as a small tooltip anchored near the bottom-right corner of the in-progress shape, tracking that corner as the drag proceeds. It live-updates width and height (or diameter) throughout the drag and accepts typed values at any point before the second click commits. Typed values update the preview at page scale; the second click places the markup and dismisses the entry.
-  - **Evidence:** Fixed. The size entry rides the shape's bottom-right corner — the one under the pointer — instead of being pinned once to its top-left, and it reports width and height at page scale as the drag proceeds instead of showing two empty boxes. It stops reporting the moment a size is typed, never overwrites a box being typed into, and says nothing at all before the shape has been dragged out, because a number already in the box is one the next keystroke would land on the end of; a box also selects its contents when focused so typing replaces rather than appends. Evidence: test_the_size_entry_rides_the_corner_and_says_the_size, plus the existing test_click_click_rectangle_has_live_scaled_size_entry and test_one_ellipse_diameter_makes_a_circle_and_escape_cancels, which caught the first version of this appending to a pre-filled value.
-
 - A cloud callout's cloud and text box must be independently movable. Moving the box moves only the box; moving the cloud moves only the cloud; the leader geometry updates without moving the whole callout.
   - **Evidence:** The cloud and the call-out box move independently. Evidence: test_a_cloud_and_its_callout_box_move_independently.
 
@@ -511,9 +499,6 @@ behaviour it extends.
 
 - Add a rebindable **Calibrate scale** shortcut. Calibration starts without an assumed `5 m` value, then opens a dedicated length-entry prompt after two points are selected; accept `10mm` and `10 mm`, and show a clear warning for invalid or incompatible units.
   - **Evidence:** Calibrate scale is a visible rebindable shortcut, and the length prompt takes joined or spaced units and rejects incompatible ones. Evidence: test_calibration_has_a_visible_rebindable_shortcut, test_the_calibration_length_prompt_accepts_joined_or_spaced_units, test_the_calibration_length_prompt_rejects_incompatible_units, test_the_scale_dialog_offers_picking_two_points_from_a_standing_start.
-
-- Add recoverable document flattening: choose which content classes to flatten (markups, calculations, tables and other supported items), retain recovery data by default, support individual-item flattening, and offer a Preferences setting to disable recoverability when deliberately producing an irreversible file.
-  - **Evidence:** Flattening is recoverable, selectable and preference-controlled, and survives a save. Evidence: test_flattening_takes_a_markup_out_of_reach, test_flattening_survives_a_save, test_preferences_exposes_recoverable_flattening, test_irreversible_flattening_keeps_only_a_vector_recording.
 
 - I think the reason why zoom to curosr and zoom out to cursor is that currenlty the app cant pan off the page, therefore for example if the cursor in in the corner of th epage and i want to zoom to that but keep it central in the view its not possible to it doesnt zoom to thtat location, fix it (ability to pan off page)
   - **Evidence:** The canvas already extends past the pages: DocumentScene.set_desk_margin / _apply_desk_margin (ui/scene.py:642-651) grow the scene rect by a desk margin so any page edge can be centred, which is the pan-off-the-page the report asks for. Evidence: test_a_page_corner_can_be_centred_and_remains_under_zoom_cursor.
