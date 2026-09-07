@@ -127,9 +127,6 @@ _SHORTCUT_GROUPS = {
     "page_setup": "Page", "scale": "Page", "header_footer": "Page",
     "bookmark": "Page", "contents": "Page", "doc_props": "Page",
     "renumber_counts": "Markup",
-    "status_none": "Markup", "status_accepted": "Markup",
-    "status_rejected": "Markup", "status_cancelled": "Markup",
-    "status_completed": "Markup", "reply": "Markup",
     "shortcuts": "Help", "sample": "Help",
     "find_tool": "Help",
     "about": "Help",
@@ -480,18 +477,6 @@ class MainWindow(QMainWindow):
                       "it and which key it is on")
         self._act("renumber_counts", "Renumber counts", self.renumber_counts,
                   tip="Renumber the count markers in page order")
-        # A status per entry rather than one dialog: a reviewer going through
-        # a drawing sets dozens of them, and each is worth a key of its own.
-        from ..items.base import STATUSES
-
-        self._status_actions = []
-        for name in STATUSES:
-            self._act(f"status_{name.lower()}", name,
-                      lambda _c=False, n=name: self.set_markup_status(n),
-                      tip=f"Mark the selected markups {name.lower()}")
-            self._status_actions.append(getattr(self, f"act_status_{name.lower()}"))
-        self._act("reply", "Reply…", self.reply_to_markup,
-                  tip="Add to the conversation about the selected markup")
         self._act("group", "Group", self.group_selection, "Ctrl+G",
                   tip="Make the selected markups one thing to click and move")
         self._act("ungroup", "Ungroup", self.ungroup_selection, "Ctrl+Shift+G")
@@ -889,11 +874,6 @@ class MainWindow(QMainWindow):
         markup_menu.addAction(self.act_flatten_document)
         markup_menu.addAction(self.act_recover_flattened)
         markup_menu.addSeparator()
-        review = markup_menu.addMenu("Status")
-        for action in self._status_actions:
-            review.addAction(action)
-        markup_menu.addAction(self.act_reply)
-        markup_menu.addSeparator()
         markup_menu.addAction(self.act_renumber_counts)
         markup_menu.addAction(self.act_forget_defaults)
         markup_menu.addSeparator()
@@ -1089,7 +1069,6 @@ class MainWindow(QMainWindow):
         self.pages_panel.pagesReordered.connect(self.move_page)
         self.markups_panel.markupActivated.connect(self.reveal_markup)
         self.markups_panel.markupPicked.connect(self.pick_markup)
-        self.markups_panel.statusChosen.connect(self.set_status_from_the_list)
         self.layers_panel.layersChanged.connect(self.apply_layers)
         self.undo_stack.cleanChanged.connect(lambda _clean: self.update_title())
 
@@ -3644,8 +3623,8 @@ class MainWindow(QMainWindow):
     def pick_markup(self, page_index: int, uid: str) -> None:
         """Select the markup a row in the markups list stands for.
 
-        Unlike a double-click it does not move the view: going down a list
-        setting statuses should not drag the drawing about under the reader.
+        Unlike a double-click it does not move the view: running an eye down
+        a list should not drag the drawing about under the reader.
         """
         if self.current_index != page_index:
             self.go_to_page(page_index)
@@ -3655,62 +3634,6 @@ class MainWindow(QMainWindow):
             if item.uid == uid:
                 item.setSelected(True)
                 break
-        self.refresh_selection()
-
-    # ==================================================================
-    # what a reviewer has said about a markup
-    # ==================================================================
-    def set_markup_status(self, status: str, items=None) -> None:
-        """Rule on the selected markups, and sign it.
-
-        A status is a decision somebody made, so it is recorded with their
-        name — the one in Document properties — and the time. Without those it
-        is an opinion the file cannot attribute to anybody.
-        """
-        items = list(items if items is not None else self.selected_items())
-        items = [item for item in items if not item.locked]
-        if not items:
-            self.status_hint.setText("Nothing selected to give a status to")
-            return
-        who = self.document.settings.default_author or self.document.author
-        self.view.begin_snapshot(self.view.involved_frames(*items))
-        for item in items:
-            item.set_status(status, who)
-        self.view.commit_snapshot(f"Status: {status}")
-        self.refresh_lists()
-        self.refresh_selection()
-        said = "no status" if status in ("", "None") else status.lower()
-        self.status_hint.setText(f"{len(items)} markup"
-                                 f"{'' if len(items) == 1 else 's'} set to {said}")
-
-    def set_status_from_the_list(self, status: str) -> None:
-        """The same, for the rows picked out in the markups panel."""
-        wanted = set(self.markups_panel.chosen_uids())
-        items = [item for page in self.document.pages if page.frame is not None
-                 for item in page.frame.markups() if item.uid in wanted]
-        self.set_markup_status(status, items)
-
-    def reply_to_markup(self, item=None) -> None:
-        """Add to the conversation about a markup."""
-        from PySide6.QtWidgets import QInputDialog
-
-        if item is None:
-            chosen = self.selected_items()
-            item = chosen[0] if len(chosen) == 1 else None
-        if item is None:
-            self.status_hint.setText("Pick one markup to reply to")
-            return
-        # No interactive_prompts guard: this is not a question asked in the
-        # middle of a gesture, it is the whole of what the command does.
-        said, accepted = QInputDialog.getMultiLineText(
-            self, "Reply", f"Reply to this {item.display_name().lower()}:", "")
-        if not accepted or not said.strip():
-            return
-        who = self.document.settings.default_author or self.document.author
-        self.view.begin_snapshot(self.view.involved_frames(item))
-        item.add_reply(said.strip(), who)
-        self.view.commit_snapshot("Reply")
-        self.refresh_lists()
         self.refresh_selection()
 
     def layer_visible(self, name: str) -> bool:
@@ -4786,18 +4709,6 @@ class MainWindow(QMainWindow):
             align.setEnabled(len(self.selected_items()) > 1)
             for key in ("left", "hcenter", "right", "top", "vcenter", "bottom"):
                 align.addAction(getattr(self, f"act_align_{key}"))
-            from ..items.base import STATUSES
-
-            review = menu.addMenu("Status")
-            review.setToolTip("Where this markup has got to in the review")
-            for name in STATUSES:
-                entry = review.addAction(
-                    name, lambda _c=False, n=name: self.set_markup_status(n))
-                entry.setCheckable(True)
-                entry.setChecked((item.status or "None") == name)
-            reply = menu.addAction("Reply…", lambda: self.reply_to_markup(item))
-            reply.setToolTip("Add to the conversation about this markup")
-            reply.setEnabled(len(self.selected_items()) <= 1)
             layers = menu.addMenu("Layer")
             for layer in self.document.layers:
                 entry = layers.addAction(layer.name,

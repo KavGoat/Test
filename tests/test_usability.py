@@ -8230,7 +8230,7 @@ def test_the_style_toolbar_and_the_properties_panel_agree(window):
 
 
 # ---------------------------------------------------------------------------
-# Working through a review
+# The list and the drawing, showing the same thing
 # ---------------------------------------------------------------------------
 
 def _rows_of_the_markups_list(window):
@@ -8243,21 +8243,6 @@ def _rows_of_the_markups_list(window):
     return rows
 
 
-def test_a_status_set_on_the_page_shows_in_the_markups_list(window):
-    """The list is where a review is read, so it has to say where each is."""
-    window.document.settings.default_author = "K. Goat"
-    box = _a_rectangle(window)
-    box.subject = "Beam size"
-    window.view.scene().clearSelection()
-    box.setSelected(True)
-    window.set_markup_status("Rejected")
-
-    row = [node for node in _rows_of_the_markups_list(window)
-           if node.data(0, Qt.UserRole) and node.data(0, Qt.UserRole)[1] == box.uid]
-    assert row, "the rectangle should be in the list"
-    columns = window.markups_panel.COLUMNS
-    assert row[0].text(columns.index("Status")) == "Rejected"
-    assert "K. Goat" in row[0].toolTip(columns.index("Status"))
 
 
 def test_picking_a_row_picks_the_markup_and_the_other_way_round(window):
@@ -8283,79 +8268,14 @@ def test_picking_a_row_picks_the_markup_and_the_other_way_round(window):
     assert not rows[second.uid].isSelected()
 
 
-def test_the_open_filter_leaves_out_what_has_been_ruled_on(window):
-    """Going through a drawing means going through what is still open."""
-    done = _a_rectangle(window, 120, 120, 240, 200)
-    still_open = _a_rectangle(window, 300, 120, 420, 200)
-    window.view.scene().clearSelection()
-    done.setSelected(True)
-    window.set_markup_status("Completed")
-
-    window.markups_panel.only_open.setChecked(True)
-    try:
-        listed = {node.data(0, Qt.UserRole)[1]
-                  for node in _rows_of_the_markups_list(window)
-                  if node.data(0, Qt.UserRole)}
-        assert still_open.uid in listed
-        assert done.uid not in listed, "a completed markup is not still open"
-    finally:
-        window.markups_panel.only_open.setChecked(False)
 
 
-def test_a_status_is_undone_like_anything_else(window):
-    box = _a_rectangle(window)
-    window.view.scene().clearSelection()
-    box.setSelected(True)
-    window.set_markup_status("Accepted")
-    assert box.status == "Accepted"
-
-    window.undo_something()
-    QApplication.processEvents()
-    again = [item for item in markups(window) if item.uid == box.uid][0]
-    assert again.status == "", "undo should take the ruling back"
 
 
-def test_setting_a_status_on_several_at_once_rules_on_all_of_them(window):
-    """A reviewer clears a page of nits in one go, not one at a time."""
-    first = _a_rectangle(window, 120, 120, 240, 200)
-    second = _a_rectangle(window, 300, 120, 420, 200)
-    window.select_tool("select")
-    window.view.scene().clearSelection()
-    first.setSelected(True)
-    second.setSelected(True)
-    window.set_markup_status("Completed")
-    assert first.status == second.status == "Completed"
 
 
-def test_the_status_menu_says_which_one_it_is_on(window):
-    box = _a_rectangle(window)
-    window.view.scene().clearSelection()
-    box.setSelected(True)
-    window.set_markup_status("Rejected")
-
-    menu = window.build_context_menu(box, box.pos())
-    review = [action.menu() for action in menu.actions()
-              if action.text() == "Status" and action.menu()]
-    assert review, "a markup's menu should offer a status"
-    ticked = [action.text() for action in review[0].actions() if action.isChecked()]
-    assert ticked == ["Rejected"]
 
 
-def test_a_reply_is_added_to_the_conversation_not_over_it(window, monkeypatch):
-    from PySide6.QtWidgets import QInputDialog
-
-    window.document.settings.default_author = "K. Goat"
-    box = _a_rectangle(window)
-    box.add_reply("Which beam?", "A. Checker")
-    window.view.scene().clearSelection()
-    box.setSelected(True)
-
-    monkeypatch.setattr(QInputDialog, "getMultiLineText",
-                        staticmethod(lambda *_a, **_k: ("The transfer beam.", True)))
-    window.reply_to_markup(box)
-    assert [(reply["author"], reply["text"]) for reply in box.replies] == [
-        ("A. Checker", "Which beam?"), ("K. Goat", "The transfer beam.")]
-    assert box.latest_word() == "The transfer beam."
 
 
 # ---------------------------------------------------------------------------

@@ -291,12 +291,7 @@ def _add_the_markups(storage: ObjectStorage, document, references) -> int:
         if form is None:
             continue
         annotation = annotate.annotation_for(item, rect, height, form)
-        reference = storage.add(annotation)
-        placed.setdefault(index, []).append(reference)
-        # The review of a markup is written as annotations that point back at
-        # it, so the markup has to be in the file before they can be made.
-        for reply in annotate.replies_to(item, reference, rect, height):
-            placed[index].append(storage.add(reply))
+        placed.setdefault(index, []).append(storage.add(annotation))
 
     for index, reference in enumerate(references):
         page = dictionary_of(storage.resolve(reference))

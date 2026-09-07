@@ -30,92 +30,23 @@ def markups_of_page(source, page: dict, flip: tuple,
     """Every annotation on one page, as markup payloads in page coordinates."""
     from .btx import colour
 
-    entries = list(source.resolve(page.get("Annots")) or [])
-    said = conversations(source, entries)
     found: list[dict] = []
-    for entry in entries:
+    for entry in source.resolve(page.get("Annots")) or []:
         annotation = source.resolve(entry)
         if not isinstance(annotation, dict):
             continue
         kind = str(annotation.get("Subtype") or "")
-        if kind in NOT_MARKUP or annotation.get("IRT") is not None:
-            continue                       # a reply is part of what it answers
+        if kind in NOT_MARKUP:
+            continue
         try:
             made = _one(source, annotation, kind, flip, scale, colour)
         except Exception:                              # noqa: BLE001
             made = None
         if made:
-            answers = said.get(_number_of(entry))
-            if answers:
-                made[0].update(answers)
             found.extend(made)
         if len(found) >= MOST_MARKUPS:
             break
     return found
-
-
-def _number_of(entry) -> Optional[int]:
-    """The object number an annotation is kept under, when it has one."""
-    return getattr(entry, "number", None)
-
-
-def conversations(source, entries: list) -> dict[int, dict]:
-    """What has been said back about each annotation, by the one it answers.
-
-    A reply is an annotation of its own that points at another through
-    ``/IRT``. Two kinds matter: one carrying ``/State`` and
-    ``/StateModel /Review`` is a reviewer saying where the markup has got to,
-    and one carrying words is somebody adding to the conversation. Both are
-    how Acrobat and Bluebeam record a review, so a drawing that has been
-    through either arrives here with its review on it.
-    """
-    out: dict[int, dict] = {}
-    for entry in entries:
-        annotation = source.resolve(entry)
-        if not isinstance(annotation, dict):
-            continue
-        target = _number_of(annotation.get("IRT"))
-        if target is None:
-            continue
-        author = _said(source, annotation.get("T"))
-        when = _when(_said(source, annotation.get("M")))
-        state = _said(source, annotation.get("State"))
-        model = _said(source, annotation.get("StateModel"))
-        holder = out.setdefault(target, {})
-        if state and model in ("", "Review"):
-            # "None" is a reviewer taking a decision back, which is a state
-            # like any other; it is simply the one this records as no status.
-            holder["status"] = "" if state == "None" else state
-            holder["status_by"] = author
-            holder["status_at"] = when
-            continue
-        words = _said(source, annotation.get("Contents"))
-        if words:
-            holder.setdefault("replies", []).append(
-                {"author": author, "text": words, "at": when})
-    return out
-
-
-def _said(source, value) -> str:
-    """One of an annotation's text entries, as text."""
-    found = source.resolve(value)
-    if isinstance(found, bytes):
-        return _readable(found).strip()
-    if isinstance(found, str):
-        return found.strip()
-    return ""
-
-
-def _when(stamp: str) -> str:
-    """A PDF date — ``D:20240117093000+13'00'`` — as an ordinary one."""
-    text = stamp[2:] if stamp.startswith("D:") else stamp
-    digits = "".join(character for character in text if character.isdigit())
-    if len(digits) < 8:
-        return stamp
-    out = f"{digits[0:4]}-{digits[4:6]}-{digits[6:8]}"
-    if len(digits) >= 14:
-        out += f"T{digits[8:10]}:{digits[10:12]}:{digits[12:14]}"
-    return out
 
 
 def _one(source, annotation: dict, kind: str, flip: tuple, scale: float,
