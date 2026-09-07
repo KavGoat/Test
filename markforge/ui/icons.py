@@ -438,24 +438,6 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
         for offset in range(3):
             y = 8 + offset * 4
             painter.drawLine(QPointF(12, y), QPointF(18.5, y))
-    elif name == "panel_variables":
-        _glyph(painter, "x", INK, 11, False, QRectF(2, 3, 10, 12))
-        _glyph(painter, "y", INK, 11, False, QRectF(11, 8, 10, 12))
-        _pen(painter, INK, 1.2)
-        painter.drawLine(QPointF(3, 20), QPointF(20, 20))
-    elif name == "panel_functions":
-        _glyph(painter, "ƒ", INK, 15, False, QRectF(2, 1, 12, 20))
-        _pen(painter, INK, 1.3)
-        painter.drawArc(QRectF(11, 5, 5, 14), 260 * 16, 200 * 16)
-        painter.drawArc(QRectF(16, 5, 5, 14), 80 * 16, 200 * 16)
-    elif name == "panel_problems":
-        _pen(painter, INK, 1.4)
-        painter.drawPolygon(QPolygonF([QPointF(12, 3.5), QPointF(21, 19.5),
-                                       QPointF(3, 19.5)]))
-        painter.drawLine(QPointF(12, 9), QPointF(12, 14))
-        painter.setBrush(QBrush(QColor(INK)))
-        painter.drawEllipse(QPointF(12, 17), 0.9, 0.9)
-        painter.setBrush(Qt.NoBrush)
     elif name == "page":
         _pen(painter, INK, 1.4)
         painter.drawRect(QRectF(6, 3, 12, 18))
@@ -526,14 +508,6 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
         painter.drawRect(QRectF(4, 5, 16, 14))
         painter.drawLine(QPointF(8, 9), QPointF(16, 9))
         painter.drawLine(QPointF(8, 15), QPointF(16, 15))
-    elif name == "variables":
-        font = QFont("Georgia")
-        font.setFamilies(["Cambria Math", "Georgia", "DejaVu Serif", "serif"])
-        font.setPointSizeF(14)
-        font.setItalic(True)
-        painter.setFont(font)
-        painter.setPen(QPen(QColor(ACCENT)))
-        painter.drawText(QRectF(0, 0, 24, 24), Qt.AlignCenter, "x")
     elif name == "delete":
         _pen(painter, DANGER, 1.5)
         painter.drawLine(QPointF(6, 6), QPointF(18, 18))

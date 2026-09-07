@@ -1,549 +1,360 @@
-# CalcForge completed-work evidence
-
-Audited: 2026-09-06 against `claude/engineering-calc-markup-app-2twiqs`.
-
-Every open line in `docs/tasklist.md` was gone through one at a time. The 160
-below are the ones the current source implements and something actually
-exercises — an event-driven test that drives the real Qt queue, or a check
-against the running application. Each carries the evidence it rests on.
-
-This is not the user-owned completion record and nothing here is marked
-complete. No checkbox in `docs/tasklist.md` and no status in
-`docs/tasklist.xlsx` was touched. Only the user marks a task complete.
-
-A caveat worth keeping: a passing test proves the behaviour held when it ran,
-not that the requirement is finished in every respect a person might mean. Where
-a task has recently been amended, the amendment was audited separately from the
-behaviour it extends.
-
-## 1. Core concept
-
-- **(new)** Support a markup-only PDF document mode for drawing-review work. Opening a PDF in this mode provides Bluebeam-style navigation, markup, measurement and Snapshot tools, but hides or disables calculation lines, calculation blocks, tables and other calculation-specific UI so the document behaves as a focused PDF editor.
-  - **Evidence:** PDF review mode: mode=='pdf' persists through save/reopen; calculate/symbol menus, math+table tools and the Variables dock hidden, snapshot+measure kept; quote key refused with a status hint. Evidence: the four `-k review` tests in tests/test_app.py, incl. test_opening_a_pdf_creates_a_focused_review_document and test_pdf_review_mode_blocks_calculation_entry_but_keeps_snapshot_key.
-
-## 2. Calculation engine — variables & units
-
-- **(consolidated)** Fresh and existing single calculation lines use identical equation-entry behavior. `"` starts a calculation entry; units bind directly to their number, so `5kPa` is valid and renders as `5·kPa`; and typing any space converts the complete current calculation line to plain text. Calculation blocks do not permit spaces. The status bar should explain the conversion, and the behavior must remain consistent when a line is left and re-entered.
-  - **Evidence:** Quote is the only entry key; a space converts a fresh or an existing single line to text at the caret and blocks refuse it, both with a statusMessage explaining why; a unit binds straight to its number. Evidence: test_quote_is_the_only_calculation_entry_key, test_a_space_changes_a_fresh_single_calculation_to_text, test_a_space_changes_an_existing_single_calculation_to_text, test_a_space_is_refused_in_a_calculation_block, test_a_unit_after_a_number_is_still_a_unit, test_a_number_and_its_unit_are_joined_by_a_dot.
-
-- Fix: typing Backspace, Escape, or `=` while inside an equation sometimes doesn't register / doesn't do anything — these three keys need to be reliable in every equation-edit state **(new; reported again, but that report was against a build made before the fix — the cause was the view closing the line whenever it lost the keyboard, which a right-click menu or a click on a toolbar button does)**. Re-checked since with 360 randomised keystrokes through the real event queue, with the live recalculation firing in the middle of them: not one Backspace, `=` or character dropped. If it still happens on a build that has this, say what was clicked just before
-  - **Evidence:** Backspace, Escape, = and ordinary characters survive the keyboard leaving the equation and coming back. Evidence: test_the_calculation_keys_survive_the_keyboard_wandering_off, test_a_menu_over_a_calculation_does_not_close_it.
-
-- **(new)** Bug: `kpa` is not recognised as a unit and no unit list comes up while typing it. A unit typed in the wrong case must still be found and offered — the list is what corrects the case, so it has to appear for `kpa` and offer `kPa`. **Done**: the list comes up for a unit typed straight after its number, and the error now reads "'kpa' is not defined — did you mean kPa?"
-  - **Evidence:** Verified in the running app: typing q:=5kpa leaves the completion popup visible offering ['kPa'], and engine.friendly_error reads "'kpa' is not defined — did you mean kPa?". completion_words('kpa') -> ['kPa'].
-
-- **(reported again)** Recognised units must render blue in every calculation state. For example, `2m` may parse and calculate correctly but currently leaves `m` black; visual syntax colouring must agree with the unit-aware engine.
-  - **Evidence:** Recognised units render blue while typed and at rest, including one-letter m. Evidence: test_units_are_blue_while_they_are_being_typed, test_a_one_letter_unit_is_blue_while_typed_and_at_rest.
-
-- **(new, reported again)** In a calculation line or block, `=` still misbehaves: sometimes nothing can be typed, sometimes text can be typed but not deleted. There is also still a "weird gap" before the `=`
-  - **Evidence:** = can be typed, deleted and retyped through the real event path, and the old fixed result gutter is gone. Evidence: test_equals_can_be_typed_deleted_and_retyped_without_a_result_gap plus the engine equals-semantics tests.
-
-- **(new)** Use one primary typeset expression renderer for a calculation while it is being edited and when it is at rest; do not maintain two competing edit/final rendering modes. An evaluated result triggered by `=` may render in addition to the expression, but the expression itself must not shift, restyle or become a different representation when editing begins or ends. Verify this by real typing.
-  - **Evidence:** One typeset renderer while editing and at rest. Evidence: test_a_fraction_stays_a_fraction_while_it_is_being_typed, test_the_scripts_are_typeset_while_typing_too, test_the_editor_is_the_same_face_and_size_as_the_print.
-
-- **(new)** Double-clicking a unit to edit it zooms too much; it should change in place, at the size it already is, without a large zoom jump
-  - **Evidence:** Double-clicking an answer's unit edits in place at the existing zoom. Evidence: test_editing_an_answer_unit_stays_at_the_existing_zoom_and_result.
-
-- **(new)** The unit list appears in odd places on the screen — it belongs under the thing being typed
-  - **Evidence:** The completion list opens under the caret, and the result-unit list under its in-place editor. Evidence: test_the_list_appears_under_the_caret_not_under_the_block, test_the_result_unit_list_opens_below_its_in_place_editor.
-
-- **(consolidated)** Variable and unit completion is available only while editing an equation or inline equation, never during ordinary text entry. Unit matching is case-insensitive and ranks an exact unit match first (`m` before `mm`); accepting a listed unit always requires Tab, which replaces typed casing with the canonical unit spelling. If no listed unit matches, Tab does not complete it. The completion list is navigable with arrow keys or mouse and may also offer matching already-defined variables.
-  - **Evidence:** Fixed. completion_words now promotes what was actually typed to the head of the list, so 'm' leads over 'mm' while the case-insensitive pass still puts kPa first for 'kpa'; and Tab in an item editor is swallowed whether or not it completes, instead of falling through and typing a literal tab into the source. Evidence: test_the_unit_you_typed_is_the_first_one_offered, test_tab_with_nothing_to_complete_leaves_the_equation_alone, alongside the existing test_nothing_is_completed_until_tab_is_pressed, test_the_arrows_move_through_the_list_and_tab_takes_one and test_completion_is_only_offered_inside_an_inline_equation.
-
-- Add right-click options for output formatting: choose decimal places, scientific notation, or significant figures per result (121)
-  - **Evidence:** Right-click offers Significant figures, Decimal places and Scientific submenus per result (mainwindow.py:4727-4737), and a line's own figures persist. Evidence: test_one_line_can_be_shown_to_its_own_number_of_figures, test_a_lines_own_figures_can_be_put_back, test_a_lines_own_figures_survive_a_save.
-
-- Audit every Greek letter glyph — phi in particular is rendering as two visually different glyphs depending on where it's used; needs to be one consistent glyph everywhere (96)
-  - **Evidence:** Every Greek name folds to one canonical glyph and phi is one variable, never the golden ratio. Evidence: test_every_greek_name_uses_its_one_canonical_glyph, test_the_two_unicode_phis_are_one_variable, test_phi_is_not_quietly_the_golden_ratio, test_every_greek_letter_folds_to_one_name.
-
-## 3. Calculation blocks vs. calculation lines
-
-- A calculation block's **Self-contained** toggle is available in the Properties panel and style toolbar, rather than buried in the calculation right-click menu. Its default is off; Preferences controls the app-wide default (11, 15, 71, 78).
-  - **Evidence:** Self-contained is in Properties and on the style toolbar, defaults off, and Preferences carries the app-wide default. Evidence: test_a_block_can_be_made_self_contained, test_a_block_can_be_made_self_contained_by_default.
-
-- A single `"` trigger starts a calculation entry; ordinary typing must never activate a calculation or markup shortcut. The no-space and direct-unit rules are defined by the consolidated equation-entry task above.
-  - **Evidence:** Quote is the only calculation-entry trigger and ordinary typing does not fire a tool shortcut. Evidence: test_quote_is_the_only_calculation_entry_key.
-
-- Inside a text box, typing `\` starts an inline equation. It displays the full formula and its live evaluated value together, preserving both the expression the user wrote and its result; `/` remains the division/fraction operation within an equation rather than replacing this inline-equation trigger.
-  - **Evidence:** A backslash in a text box opens a live inline equation showing formula and value, and slash stays division inside it. Evidence: test_backslash_types_a_live_inline_expression_and_keeps_division, test_completion_is_only_offered_inside_an_inline_equation, test_a_field_in_a_paragraph_quotes_a_value.
-
-- Ctrl+Shift+M converts an existing calculation line or selection into a block in place, without creating a duplicate copy (134)
-  - **Evidence:** Ctrl+Shift+M turns one calculation into a block in place and still joins several. Evidence: test_ctrl_shift_m_makes_a_block_of_one_calculation, test_ctrl_shift_m_still_joins_several.
-
-## 4. Equation editor
-
-- **(new)** Use the locally supplied `SMath Studio/` installation, especially its desktop UI, examples and snippets, as the behavior reference when resolving equation-editor interactions. Reproduce its navigation and structured-expression behavior by observing the application; do not copy proprietary implementation code.
-  - **Evidence:** Audited and written down in docs/smath-reference.md, from the worksheets and unit catalogue rather than the binaries — nothing was disassembled. Findings: SMath stores a math region as a typed postfix tree of operand, operator, function and bracket nodes and never keeps the characters typed, which is the model §4 asks for; a bracket is a stored node, so wrapping a selection is a structural change there too; arity is carried, so unary and binary minus are different operators (70 and 68 uses); and it separates define (':') from boolean equality ('=='), where CalcForge deliberately folds both onto '='. Comparing its 127 units against this registry found 14 unknown, of which five an engineer actually reaches for are now defined — ksf, tonf, lbm, rev, rph — with the rest left out on purpose because every name added is a name that can no longer be used as a variable. Evidence: test_the_engineering_units_read_from_smaths_catalogue_are_defined. Still open and recorded as such in that document: SMath itself could not be run, being a .NET application in a Linux container, so its live caret and selection behaviour has not been observed.
-
-- Clicking into an existing fraction to edit its numerator/denominator doesn't currently work — this likely needs the equation model rebuilt structurally as a tree of lines/blocks so the in-place editor is authoritative rather than a rendering layer on top of separate source text (103, 132) — re-checked: clicking either half of a fraction, a fraction inside a fraction, or a line of a block puts the caret at that place in the source, zoomed or turned, and a double-click there takes the word it was aimed at
-  - **Evidence:** Clicking into a fraction, a nested fraction, and a numerator places the caret there, including zoomed and rotated. Evidence: test_clicking_a_fraction_puts_the_caret_in_that_part_of_it, test_clicking_a_numerator_puts_the_caret_in_the_numerator, test_a_fraction_inside_a_fraction_can_be_clicked_into, test_clicking_into_a_fraction_works_zoomed_and_turned.
-
-- **(new)** Preserve equation subscript structure when defining a subscripted variable. `trib_width` must render with `width` as a subscript, and adding `:=` must not flatten it into literal inline text such as `trib_width`.
-  - **Evidence:** A subscripted definition name stays structural through :=. Evidence: test_a_defined_subscripted_name_stays_structural_after_colon_equals, test_a_subscript_and_a_power_share_one_column.
-
-- **(reported again)** Equation editing must retain its caret and allow Left/Right arrow navigation after focus leaves the equation and returns. Clicking out after defining a variable with `:` and returning must still allow the user to place the caret and delete or amend the variable name on the left of the definition; no expression region may become uneditable.
-  - **Evidence:** The definition name stays editable, with caret placement and Left/Right, after focus leaves and returns. Evidence: test_a_definition_name_remains_editable_after_focus_leaves_and_returns, test_the_calculation_keys_survive_the_keyboard_wandering_off.
-
-- **(new, extended)** Make equation editing structural rather than flat-text-like: arrow keys and pointer placement navigate the visible expression tree; selecting an expression and typing an opening bracket wraps the entire selected expression; selecting an expression and typing `/` turns that selection into the numerator of a fraction/division structure. Preserve the selected expression and its formatting when applying either transformation. The structure must also survive a syntax error: a calculation that does not parse keeps its structured typeset layout instead of collapsing back to inline text, operator precedence (BEDMAS) stays visible, `5/` renders as 5 over an empty denominator placeholder, and incomplete value, unit and power slots render as small SMath-style outline input boxes.
-  - **Evidence:** All three clauses done. Typing '(' over a selected expression wraps it instead of replacing it, and typing '/' makes it the numerator with the caret waiting in the denominator — bracketed on the way in when it contains an operator, because a+b over c is not a plus b/c, and not bracketed twice when it already is. A line that does not parse now keeps its structure rather than collapsing to plain characters: a tolerant parse fills the trailing hole with a slot, so '5/' sets as a fraction with an empty denominator, '2^' as a base with an empty box on its shoulder, and '3*' as a product with a slot; a genuinely malformed line, such as one with an unbalanced bracket, still shows as an error. Arrow and pointer navigation of the tree was already there. Evidence: test_a_bracket_typed_over_a_selection_wraps_it, test_a_slash_typed_over_a_selection_makes_it_a_numerator, test_a_half_written_calculation_keeps_its_shape, and test_a_half_typed_line_shows_what_has_been_typed rewritten to the amended rule; the existing clicking-into-a-fraction and scripts tests still pass.
-
-## 6. Spreadsheet (Excel-like) behavior
-
-- Pasting cells copied from Excel should create a real table object here, and should carry over relative formulas where translation is possible (fall back to values only where it isn't) (12, 23, 109)
-  - **Evidence:** Pasting Excel cells builds a real table and carries relative formulas across, falling back to values where it cannot translate. Evidence: test_pasting_excel_cells_onto_the_page_makes_a_table, test_pasting_from_excel_brings_the_formulas, test_formulas_pasted_as_text_stay_formulas, test_excel_quoting_survives_the_trip.
-
-- Cursor icon should change to a resize cursor when hovering a column/row border — currently doesn't, making it hard to tell it's draggable (108)
-  - **Evidence:** Behaviour is there and now covered; my first verdict was wrong because I grepped only items/tableitem.py, and the cursor is set in ui/view.py. Hovering a column or row border of a table that is open for typing gives Qt.SplitHCursor / Qt.SplitVCursor. It is offered exactly where the drag is possible: border_at measures from the A/B/C and 1/2/3 gutters, which exist only while the table is active. The view also listed merely-selected tables as candidates, but that branch could never fire — show_chrome is false then, so border_at returns None immediately — and set_chrome shifts the table by a gutter, so turning chrome on at selection would move the table under the pointer that just selected it. The dead branch is removed and the comment says why. Evidence: test_a_column_edge_says_it_can_be_dragged, driving real hover events.
-
-- Fix visual overlap between adjacent table cells so content doesn't run into the next cell (11)
-  - **Evidence:** Cell content is clipped inside its own cell rather than running into the next. Evidence: test_table_text_is_clipped_inside_its_own_cell.
-
-- Clarify how a computed/output cell is displayed vs. a plain input cell (e.g. a cell defined as `q_floor`) — currently ambiguous which is which (11, 61)
-  - **Evidence:** A formula/computed cell is drawn distinctly from a plain input cell. Evidence: test_formula_cells_have_a_distinct_computed_appearance.
-
-- **(new)** Bug: in the insert-table dialog, the "header row" checkbox shows as ticked, but clicking it off and back on leaves it unticked (state gets lost on the second toggle) — fix the checkbox's state handling
-  - **Evidence:** The insert-table dialog's header box opens matching the table, and real clicks off then on again return it to ticked. Evidence: test_the_header_row_box_starts_where_the_table_is, which drives QTest.mouseClick twice.
-
-## 7. Markup tools — placement & interaction model (Bluebeam parity)
-
-- **(new)** Where a placed thing sits relative to the pointer: a call-out's text box goes by its **left middle** (the top-left is the corner that must be got right); an image, a snapshot, a tool-set item, a group or a cloud item goes by its **bottom left**. Property-mode tools are the exception and keep what they have
-  - **Evidence:** Placement anchors are as specified. Evidence: test_a_callouts_text_box_uses_the_pointers_left_middle, test_an_exact_toolset_item_hangs_from_the_pointers_bottom_left, test_a_kept_cloud_uses_its_bottom_left_as_the_anchor, test_a_toolset_group_uses_its_combined_bottom_left_as_the_anchor, test_a_click_placed_image_hangs_from_the_pointers_bottom_left.
-
-- "Properties mode" (place a new copy using the last-used style/properties rather than an exact one-to-one duplicate) should only be selectable for a single markup object — for calc blocks, images, graphs, and groups it should be greyed out or simply not offered, since it doesn't make sense for those (41)
-  - **Evidence:** PROPERTIES_TYPES (ui/toolsets.py:146) is restricted to rect, poly, text, callout, note, stamp, measure and count — calc blocks, images, graphs and groups are excluded — and can_be_properties gates the menu entry's enabled state. Evidence: test_a_tool_in_properties_mode_draws_a_new_one plus the tool-chest menu tests.
-
-- **(new)** Selecting as it stands — click, and click-drag for a rectangular marquee, with no key held — is right and stays as it is. What Shift adds: **Shift and click point after point draws a polygon to select inside**, closed by clicking the first point again or by Enter
-  - **Evidence:** Plain click and rectangular marquee unchanged; Shift clicks out a selection polygon, closed by returning to the first point or Enter, and Escape abandons it. Evidence: test_shift_clicking_out_a_lasso_selects_what_is_inside_it, test_a_lasso_takes_only_what_is_wholly_inside, test_escape_abandons_a_half_drawn_lasso.
-
-- **(supersedes prior removal, amended)** Provide an optional canvas insertion point for calculation placement. When enabled, clicking empty canvas sets the insertion point and **all four** arrow keys move it — Left and Right along the line as well as Up and Down between lines, which currently do nothing; new calculation lines use that point. The insertion point renders as a tiny crosshair, not a large marker. The setting must be independently toggleable so ordinary selection/marquee behavior remains available when it is off. Left, Right, Up and Down must never scroll the page view or change pages during ordinary navigation; the single exception is that the view may auto-scroll when the insertion point, or an item being moved with the arrows, is about to leave the visible area.
-  - **Evidence:** Left and Right move the insertion point now, alongside Up and Down; they used to fall through to the nudge-or-scroll path and do nothing, so it could be moved down a page but never along a line. Shift still gives the fine step. Evidence: test_every_arrow_moves_the_insertion_point, plus the existing insertion-point and no-scroll tests.
-
-- Escape must always fully clear selection and exit whatever edit/tool sub-state you're in, in one press, regardless of how deep the current mode is nested (81, 92)
-  - **Evidence:** escape_everything (view.py:1634) unwinds held tool, pending call-out anchor, insertion point, pending cloud and cloud leader, marquee, editors and selection in one press and reports what it put down. Exercised from 41 places in tests/test_usability.py.
-
-- Fix: it's possible to get permanently stuck inside a tool (e.g. right after placing a callout's arrow) with no way out — Escape doesn't help and no other tool can be switched to (82, 110)
-  - **Evidence:** The stuck-in-a-tool case is covered by the same one-press unwind: clear_pending_tool and _pending_anchor are both released. Evidence: test_escape_gets_out_of_a_half_drawn_cloud_callout and the escape tests around it.
-
-- **(reported again)** Audit and repair cursor state throughout the app. The cursor must revert as a gesture ends and must never remain as a four-way move cursor after rectangle resizing or another completed interaction. Use a context-appropriate affordance for each action: resize arrows for resize handles, row/column resize cursors for table borders, a control-point-plus cursor when Shift can add a point, a control-point-minus cursor when Shift can delete one, and a curve/arc cursor when Ctrl can round a point or convert a line segment to an arc. Exercise these paths with real pointer movement, modifiers and cancellation so the cursor cannot become stuck (76, 110, current report).
-  - **Evidence:** Cursor reverts as a gesture ends and uses a context-appropriate affordance. Evidence: test_finishing_a_rectangle_resize_recomputes_the_cursor (the four-way-move complaint), test_escape_cancels_a_group_resize_and_restores_the_cursor, test_hovering_a_markup_changes_the_cursor, test_shape_modifiers_have_distinct_add_remove_and_curve_cursors.
-
-## 8. Markup tools — specific shapes
-
-- Cloud tool, shortcut **C** (10)
-  - **Evidence:** Cloud tool present on shortcut C (ui/tools.py:93). Evidence: test_cloud_tool_supports_dragged_and_point_by_point_clouds.
-
-- Arrow tool (10)
-  - **Evidence:** Arrow tool present on shortcut A (ui/tools.py:76). Evidence: test_arrow_tool_places_an_arrow_and_hides_handles_until_selected.
-
-- Cloud vs. Cloud+ and cloud-callout: a click-and-drag produces the simple rectangular cloud; clicking each point individually produces the custom-shaped cloud ("Cloud+"). The same click-drag-vs-click-each-point distinction governs whether a cloud callout comes out rectangular or custom-shaped. After the cloud shape is finished, right-click or Enter proceeds to placing its text box (143)
-  - **Evidence:** Drag gives the rectangular cloud, click-by-click gives the custom shape, and the same distinction governs the cloud call-out. Evidence: test_cloud_tool_supports_dragged_and_point_by_point_clouds, test_a_cloud_callout_can_be_drawn_corner_by_corner, test_a_cloud_callout_clouds_the_thing_and_notes_it.
-
-- Shift-to-constrain (snap the current segment to 0°/45°/90°) must work consistently across *every* drawing tool — currently the pen and highlighter tools ignore it even though rectangle/line do respect it (29, 40, 43)
-  - **Evidence:** Shift constrains in the free-draw path too (view.py:1761, 'held to 0deg, 45deg or 90deg like every other tool'). Evidence: test_shift_draws_a_straight_stroke_with_the_pen, test_the_highlighter_goes_straight_on_shift_too, test_freehand_is_still_freehand_without_shift.
-
-- Structural break symbol: available in the right-click context menu on any line segment, rectangle edge, or polygon edge — inserts the standard structural-drawing "break" symbol at that point (115)
-  - **Evidence:** Insert/remove break symbol is on the outline submenu for any side. Evidence: test_a_break_symbol_goes_on_a_side_and_comes_off.
-
-- Rounded-corner and convert-to-arc are available **in the right-click context menu**, offered on any shape with corners/segments (rectangle, polygon, polyline, cloud, etc.) — currently not visible/accessible anywhere, needs to be built and exposed. Rounded corners get a radius handle; arc segments get **dual handles** — one to adjust arc length, one to adjust arc angle — matching Bluebeam's behaviour (115, 125, 126, reference photo in msg 126, still reported missing in 149)
-  - **Evidence:** Round corner and Arc side are on the right-click outline submenu for any shape with corners or segments. Evidence: test_a_rectangles_corners_are_on_its_right_click_menu, test_the_outline_menu_shows_up_in_the_middle_of_a_shape_too, test_the_radius_handle_sets_how_round_a_corner_is.
-
-- Rectangles specifically should support right-click add/remove control point; the moment a rectangle's corner is moved such that it's no longer axis-aligned/rectangular, it should automatically convert into a general polygon so it keeps behaving correctly (115, **new** detail from screenshots: "rectangle should have control point add/remove too, which becomes a polygon automatically if not rectangular")
-  - **Evidence:** Add point and Remove point are on the rectangle's outline menu, and moving a corner out of square converts it to a polygon. Evidence: test_rounding_a_rectangles_corner_makes_it_a_polygon, test_a_rectangles_corners_are_on_its_right_click_menu.
-
-- **(new)** While editing a rounded/arc segment on a rectangle, render the current curve continuously in the canvas preview. Moving an arc handle must not make the curve disappear from the rectangle until the gesture finishes; the final render and in-progress render must show the same geometry. Reference: rectangle arc-handle image attached in this chat on 2026-09-04.
-  - **Evidence:** The curve is rendered continuously through a real handle drag. Evidence: test_an_arc_preview_updates_during_a_real_handle_drag, test_a_rounded_corner_preview_updates_during_a_real_handle_drag.
-
-- **(new)** Bug: snapping to the *centre/midpoint of a polygon edge* does not work — should snap the same way rectangle/line midpoints do
-  - **Evidence:** named_points_of (view.py:807) adds a polygon's edge midpoints explicitly. Evidence: test_the_middle_of_a_polygon_side_can_be_caught.
-
-## 9. Callouts, text boxes, dimensions
-
-- **(new)** Text selection inside a text box should allow styling only the selected run — bold, italic, underline, font size and similar formatting should apply to the chosen text, not to the entire text box as one object. The current whole-box style behaviour is wrong; the selected run should be styled independently and the rest of the text left alone
-  - **Evidence:** Formatting applies to the selected run only. Evidence: test_ctrl_b_emboldens_the_run_picked_out_in_a_text_box, test_rebound_shortcut_formats_only_the_selected_text_run, test_bold_italic_and_underline_belong_to_the_words.
-
-- **(new)** Text boxes, rectangles, callouts and similar placeable objects should support rotation cleanly; while editing, they should revert to their normal/unrotated orientation, and if the default rotation is effectively “zero/unrotated” they should snap back to that default rather than staying at a rotated angle
-  - **Evidence:** Rotation works and an item turns upright while edited. Evidence: test_a_rotated_text_box_turns_upright_only_while_it_is_edited, test_the_rotation_grip_is_inside_the_item_it_belongs_to, test_rotating_can_be_undone.
-
-- **(new)** Callout boxes and other text/shape items should rotate back to normal during editing and snap back to the default unrotated state when the base/default angle is zero/positive-unrotated, instead of remaining at a stale rotated angle
-  - **Evidence:** An almost-unrotated box snaps back to zero after editing. Evidence: test_an_almost_unrotated_text_box_snaps_back_to_zero_after_editing.
-
-- Custom dimension tool (Alt+M): click first point, click second point, then place the dimension text directly with an in-place text cursor — no popup dialog. Text is blank by default until typed. It sits in-line with the dimension line by default. Both the actual and the custom measure must look like the plain arrow-to-arrow dimension in the reference photo, with the value written along the line. The value carries a control dot: dragging that dot, constrained to perpendicular travel only, extends the witness lines out from the measured points; Shift and dragging the same dot moves the value off the line to wherever it is dropped, connected back by a perpendicular leader with a parallel hinged section (10, 37, reference photos msg 116 and the three-example photo)
-  - **Evidence:** Built. Both the measured dimension and the typed one are now the same drawing: two points, an arrow at each end, and the value written along the line with the line broken behind it, the break measured off the text's own metrics rather than an estimate of its width. The white box the value used to sit in is gone for anything drawn as a dimension (measure.DIMENSIONED), and a length measurement's value now starts on the line rather than above it, so the drawn one and the typed one match. The value carries a control dot (MeasureItem.control_dots, painted as a dot rather than a corner handle): dragging it sets witness_reach, taking only the perpendicular component of the drag so the line stays parallel to what it measures, and the witness lines then run from a little clear of each measured point to a little past the dimension line. Shift and the same dot moves the value to where it is dropped, joined back by leader_path() — perpendicular away from the dimension, then parallel into the text. Which of the two a drag is doing is latched at the press (view._latched_shift), so letting go of Shift half way through does not change the gesture. Ten tests: the perpendicular-only travel, the witness lines growing out, the value travelling with the line, the hinged leader's two runs, the line broken behind the value read out of a rendered page, the measured and typed dimensions matching, the dot existing only where there is a dimension line to adjust, the whole gesture through the pointer, and Shift released mid-drag.
-
-- **(new)** Full leader/hinge rewrite needed: the hinge point currently doesn't exist yet during placement (before the box is finalized), which breaks the interaction — it needs to be built from scratch so the in-progress placement behaves exactly like the finished, after-placement leader from the very first click, not as a separate/different code path
-  - **Evidence:** The hinge exists during placement, before the box is finalised. Evidence: test_the_hinge_exists_while_the_callout_is_being_placed, test_the_hinge_leaves_the_side_square_on, test_dragging_the_hinge_out_pushes_it_further_from_the_box, test_the_hinge_can_be_moved_to_another_side.
-
-- **(new)** The leader line must never be allowed to visually cross through/over the text box itself — constrain valid hinge positions so that geometry is impossible
-  - **Evidence:** The leader is constrained so it cannot run across the text. Evidence: test_the_leader_never_runs_across_its_own_words.
-
-- **(new)** Remove the small floating description/label that appears on markups and fades out after a moment — not wanted on any markup type
-  - **Evidence:** No fading description label exists on any markup: there is no fade or QTimer-driven label anywhere in calcforge/items/.
-
-- **(new, reported again)** Orange square placement markers still show up on many markups and only go away after clicking something else. They are not wanted on any markup, at any time — find every path that draws one and take it out
-  - **Evidence:** Placement feedback is a blue target, not an orange square. Evidence: test_snap_feedback_is_a_blue_target_not_an_orange_square.
-
-- **(new)** Bug: the cloud part of a cloud call-out vanishes partway through placing it and comes back at the end — it has to be there, unbroken, from the first click — **done**: the cloud lived on the call-out rather than on a leader, and the placement preview draws the leaders, so it was not drawn until the click landed. It is a leader now
-  - **Evidence:** The cloud is present unbroken from the first click. Evidence: test_a_cloud_callout_clouds_the_thing_and_notes_it, test_a_cloud_callout_can_be_drawn_corner_by_corner, test_the_hinge_exists_while_the_callout_is_being_placed.
-
-- **(new)** A cloud call-out is a call-out: the same hinge, the same clear-of-the-box rule, the same automatic re-computation, and the same several leaders — the only difference is that its leaders are drawn as clouds rather than as arrows. One set of behaviour, not two — **done**: a leader is either an arrow (head at the target) or a cloud (region drawn round, no head), and one call-out can carry both
-  - **Evidence:** A cloud call-out uses the same hinge, clear-of-the-box rule and multiple leaders as an arrow call-out. Evidence: the hinge tests above plus test_a_cloud_callout_survives_a_round_trip.
-
-- **(new)** "Add leader" belongs in the right-click menu itself, not inside a sub-menu — and choosing it asks which kind: an arrow leader or a cloud leader — **done**
-  - **Evidence:** Add leader is on the context menu itself and asks which kind (mainwindow.py:4354/4357 add arrow and cloud leaders directly).
-
-- **(new)** A call-out or cloud call-out whose last leader is taken away becomes a plain text box; a text box that is given a leader becomes a call-out. The three are one object in different states, and moving between them is what adding or removing the last leader means — **done**
-  - **Evidence:** The three states are one object: add_leader_to calls becomes_a_callout (mainwindow.py:4377), and removing the last leader returns a text box.
-
-## 10. Snapshot tool
-
-- **(new)** Pressing `G` while reviewing a PDF must reliably create a Snapshot from the selected PDF region, including in markup-only PDF mode. That snapshot must be saved into the current `.cfx` document and remain visible after save, reopen, export and ordinary document editing.
-  - **Evidence:** G makes a snapshot from the selected PDF region, in review mode too, and it survives save, reopen and export. Evidence: test_pdf_review_mode_blocks_calculation_entry_but_keeps_snapshot_key, test_pdf_review_snapshot_survives_edit_save_reopen_and_export.
-
-- Recolor tool for specific items (a snapshot, or a whole page) that remaps PDF line-work from one color to another, e.g. for redlines (29)
-  - **Evidence:** Done properly this time. A PDF page is a picture AND the line work that drew it, kept as real polylines on a locked Drawing layer — and recolouring only repainted the picture, so every line stayed its old colour on top of a recoloured sheet. Colours now change as lines: swap_line_colour rewrites stroke and fill within a tolerance, colourise_lines puts them all on one colour, and the page's raster is changed to match in the same action. The drawing stays vector and prints as vectors. Evidence: test_changing_a_pages_colours_changes_its_line_work_too, alongside the existing test_recolouring_a_page_can_be_undone.
-
-- **(new)** Restrict ordinary stroke-colour changes to markup types that actually draw editable linework. Do not offer or apply a stroke-colour change to raster photos/images, where it has no meaning; retain PDF/vector recolouring for imported vector page content.
-  - **Evidence:** A raster photo exposes no line or fill style controls. Evidence: test_a_raster_image_has_no_line_or_fill_style_controls.
-
-- **(new)** Add Bluebeam-style photo/image colour operations: recolour an image to a selected colour, convert it to black-and-white, and make a selected source colour transparent. These are image-content operations, distinct from a markup's stroke/fill styling.
-  - **Evidence:** Done, and now the same three operations everywhere they make sense. Colourise puts a drawing onto any colour keeping its light and shade, so black becomes the colour and paper stays paper — black and white is that operation with a grey rather than a separate thing. Making a colour transparent takes a tolerance, so near-enough pixels go and the drawing never does. Both are offered for images and for pages. Evidence: test_colourise_keeps_the_light_and_shade, test_a_colour_can_be_made_transparent_within_a_tolerance.
-
-- **(new, amended)** Pasted or placed images and snapshots must not acquire a red outline. The image tool's own default stroke must be settable and must default to none, and a snapshot's default stroke must be none; in both cases the visible frame must match the persisted or default style rather than a hard-coded red. A snapshot's stroke colour and width must then be settable by the user and honoured when set, and the style toolbar and the Properties panel must agree with each other on image and snapshot border state. **Reported again**: a snapshot still draws an outline on the current build. Whatever is drawing it is not the style the task describes, so find that path rather than changing the default again.
-  - **Evidence:** Fixed, and the earlier attempts had been aiming at the wrong thing. The default and the paint path were both already right; a snapshot payload carries no markup style, so generic deserialisation was replacing the borderless default with the red line every drawn markup starts with — the same fault pasted images had, and the same fix. A stroke deliberately set still survives the round trip. Evidence: test_a_snapshot_is_borderless_when_it_comes_back.
-
-## 11. Snapping, grid, alignment
-
-- **(new)** Bug: turning "snap to grid" off doesn't actually stop points from snapping to the grid — the toggle isn't being respected
-  - **Evidence:** The snap-to-grid toggle is respected, and item and drawing snapping can each be turned off separately. Evidence: test_snapping_can_be_turned_off, test_snapping_to_items_can_be_turned_off, test_snapping_to_the_drawing_can_be_turned_off_on_its_own.
-
-- Fix: snapping doesn't work on the very *first* point placed while drawing a new line — it only starts working from the second point onward; it should be active from the first click (113, **new**: "when drawing something the first point does not show the snap indicator, only the point after shows it — show it for all points whenever snap is on")
-  - **Evidence:** Snapping is live on the first point of a new line. Evidence: test_the_first_point_of_a_line_shows_the_snap_marker.
-
-- **(new)** The live placement preview (the ghost shape shown before you click to commit) must use the exact same snapping logic as the final placed geometry — right now they can disagree
-  - **Evidence:** Preview and committed geometry go through the same snap_scene call in the draw path (view.py:1755), so they cannot disagree.
-
-- **(new)** Snap alignment guides are transient feedback only. Every temporary vertical/horizontal snapping line must disappear immediately when the pointer leaves its snap target, the gesture ends, the active tool changes, or Escape cancels the operation; no guide may remain stuck on the canvas.
-  - **Evidence:** Guides are transient: they clear when the pointer leaves, on tool change and Escape, and when the point is committed. Evidence: test_snap_guides_clear_when_the_pointer_leaves, test_snap_guides_clear_on_tool_change_and_escape, test_snap_guides_clear_when_the_point_is_committed.
-
-- New markups/drawing tools should snap to both the grid and existing items while being drawn, generally (72)
-  - **Evidence:** New markups snap to both grid and items while being drawn; the snap menu exposes each target. Evidence: test_the_snap_menu_entry_is_there_and_on plus the snapping tests above.
-
-## 12. Move, duplicate, group
-
-- **(expanded)** Modifier-drag behavior must be order-independent: Ctrl added before or after movement duplicates the dragged selection; Shift added or removed before or during movement applies or releases the 0/45/90° constraint; Ctrl+Shift duplicates and constrains; releasing Ctrl after duplication must leave snapping in a consistent enabled state (29 and current report).
-  - **Evidence:** Modifier-drag is order-independent. Evidence: test_shift_first_then_ctrl_duplicates_and_keeps_the_move_constrained, test_ctrl_taken_hold_of_mid_move_switches_to_a_snapped_copy.
-
-- **(new)** Groups must be scalable as a single object, resizing all contained markups proportionally from the group bounding box.
-  - **Evidence:** A group resizes as one object: view.py:1199 captures the group box and every member's transform and drives them together under _mode 'group_resize'. Evidence: test_escape_cancels_a_group_resize_and_restores_the_cursor.
-
-- **(new)** Image and group resizing is aspect-ratio locked by default. Holding Shift temporarily releases that lock for non-proportional resizing; the current inverse modifier behavior is wrong.
-  - **Evidence:** Aspect ratio is locked by default and Shift releases it. Evidence: test_an_image_keeps_its_aspect_ratio_unless_shift_releases_it.
-
-## 13. Copy / paste
-
-- Pasting a page should also show a clear insertion-location indicator, same as pasting other content (147)
-  - **Evidence:** Pasting a page names where it will land. Evidence: test_pasting_a_page_says_where_it_will_land, re-verified this session against the running app.
-
-## 14. Toolsets / "My Tools"
-
-- **(new)** In My Tools, a tool in **Property mode** shows a default icon drawn in that style, and carries a "properties" tag on the entry so it is obvious which mode it is in
-  - **Evidence:** entry_thumbnail (ui/panels.py:1105) draws a properties-mode entry as a plain example of that markup type wearing the stored properties, and the row is tagged as properties.
-
-- Each toolset entry should show a real preview/thumbnail of the actual item, not a text description; when the entry is in properties mode, show a generic example of that markup type styled with its saved color/other properties (54)
-  - **Evidence:** entry_thumbnail draws each tool set entry as the actual item, in its own colours, thickness and words, rather than a text description (ui/panels.py:1105-1130).
-
-- Relocate the toolset "save" action to a right-click option on each item rather than a dedicated button, and make the "properties mode" toggle discoverable — currently can't be found in the UI at all (105)
-  - **Evidence:** Renaming, removing, starting a set, importing one and the Property mode toggle are all on the tool chest right-click menu (ui/panels.py:1034), not on dedicated buttons. Evidence: test_the_tool_chests_right_click_menu_carries_everything, test_the_menu_on_bare_panel_still_offers_a_new_set.
-
-- "Set as default" button in the Properties panel: applies the current object's properties as the default for that tool going forward (36)
-  - **Evidence:** Set as default is in the Properties panel (ui/panels.py:2184) and on the item's context menu (mainwindow.py:5185).
-
-- **(new)** Add the same **Set as default** command to the style toolbar, so the selected markup's current compatible style can become the default for future instances without opening the Properties panel.
-  - **Evidence:** The same command is a Set default button on the Style toolbar (mainwindow.py:660-667), enabled only for a single selection.
-
-## 15. Panels & layout
-
-- Bluebeam-style unified dock: Pages, Bookmarks, Variables, Toolsets/My Tools, Properties, and any other relevant panel should each be a togglable icon that can be dragged individually to dock on either the left or right side (45, 62)
-  - **Evidence:** Every panel is an icon on one rail or the other and can be dragged to the other side. Evidence: test_every_panel_has_an_icon_on_one_rail_or_the_other, test_a_panel_dragged_to_the_other_rail_opens_on_that_side.
-
-- The Properties panel should be resizable down to zero width (effectively hidden) and dragged back open again later (23)
-  - **Evidence:** Dock contents and the dock itself are setMinimumSize(0, 0) (ui/docks.py:154-156), so the panel closes to zero width and drags back open.
-
-- **(expanded)** Make the style toolbar and Properties panel selection-aware. Show only controls compatible with the selected markup type and hide or disable every irrelevant control: rectangles/ellipses expose shape geometry, stroke, fill and hatch but no text controls; lines, arrows, polylines and measurements expose their relevant stroke/endpoint controls but no hatch; text and callouts expose text formatting and only their applicable fill/stroke/leader controls; photos, snapshots and groups expose only their supported image/group operations. Surface important type-specific controls there too, including **Self-contained** for calculation blocks and table-specific editing controls for tables. Apply the same filtering when no item is selected, using the active tool's capabilities instead. A selected equation or calculation exposes decimal-places, significant-figures and scientific-notation controls in both the style toolbar and the Properties panel, not only through the right-click menu; markups expose their full colour, hatch and line controls; text exposes text controls; and callouts expose both.
-  - **Evidence:** Amended clause now done. The Style toolbar carries a Figures spinner and a number-format combo (auto, fixed, scientific, engineering) for a selected calculation, matching what Properties and the right-click menu already offered, and they hide again for anything with no answer to show. The base selection-aware filtering was already in place. Evidence: test_the_style_toolbar_offers_the_figures_an_answer_is_shown_to, plus test_a_raster_image_has_no_line_or_fill_style_controls and test_drawing_again_is_greyed_out_for_a_calculation.
-
-- **(new)** Line-style and hatch selectors in Properties must show a compact visual preview of the actual pattern, weight and colour alongside each option. Users should be able to identify a dashed/dotted line or hatch pattern without relying on a text-only name.
-  - **Evidence:** Line-style and hatch choices carry real pattern previews. Evidence: test_line_and_hatch_choices_have_real_pattern_previews.
-
-- **(new)** Only one panel should be open at a time in each side location: left-side panels and right-side panels should behave like Bluebeam, where a single panel is active in that side and you can move items into the panel toolbar, while the left and right sides can each be open independently but not multiple panels stacked in the same side at once
-  - **Evidence:** One panel is open per side and a rail click keeps it that way. Evidence: test_rail_click_keeps_one_panel_open_per_side.
-
-- Fix: scrolling the mouse wheel while the cursor happens to be over a dropdown inside the Properties panel changes the dropdown's selected value instead of scrolling the panel — this must never happen; scroll should always scroll the panel (80, 92)
-  - **Evidence:** The wheel over a dropdown scrolls the panel instead of changing the value. Evidence: test_the_wheel_over_a_dropdown_scrolls_the_panel.
-
-## 17. Dark mode, icons & canvas/viewport
-
-- **(reported again)** Zoom must remain exactly anchored to the page coordinate under the cursor, not merely approximately centered there. Wheel, toolbar and shortcut zoom operations must leave the pointer's target at the same screen position, without visible drift (139, 44, current report).
-  - **Evidence:** Zoom stays anchored to the page point under the cursor. Evidence: test_a_page_corner_can_be_centred_and_remains_under_zoom_cursor.
-
-- **(new)** Add a wheel-behaviour preference for canvas navigation. In the standard mode, an unmodified wheel scrolls the document and `Ctrl`+wheel zooms; offer direct-wheel zoom as an alternative mode where needed. Whichever mode is configured, holding `Ctrl` performs the opposite of it: in wheel-scrolls mode `Ctrl`+wheel zooms, and in wheel-zooms mode `Ctrl`+wheel scrolls. Do not let both unmodified wheel and `Ctrl`+wheel always zoom, because normal scrolling must remain available.
-  - **Evidence:** Fixed. Ctrl now does the opposite of whatever the wheel is doing in the current mode rather than zooming in every case: wheel-scrolls plus Ctrl zooms, wheel-zooms plus Ctrl scrolls, and in page-by-page mode — where the plain wheel turns pages whatever the preference says — Ctrl zooms. Evidence: test_ctrl_does_the_opposite_of_whatever_the_wheel_is_set_to exercises both continuous modes through real wheel events; test_the_footer_switches_between_continuous_and_page_scrolling covers the page-mode case; test_the_wheel_zooms_the_document, test_the_wheel_can_be_set_to_scroll_instead and test_a_trackpad_scrolls_smoothly still pass.
-
-- **(new)** Bug: when the page/view is rotated, the scrollbar itself rotates along with it — the scrollbar should stay in its normal fixed orientation regardless of view rotation
-  - **Evidence:** Rotating the view no longer rotates the scrollbars: apply_view_transform (view.py:496-502) holds the zoom only, so the scrollbars keep pointing the way they scroll.
-
-## 18. Keyboard shortcuts
-
-- All shortcuts must be disabled while actively in text-edit or equation-edit mode, **except** Ctrl+B/I/U which remain bold/italic/underline for text formatting (20, 131)
-  - **Evidence:** Shortcuts are suppressed in text and equation editing except Ctrl+B/I/U, which _act keeps via RESERVED_FOR_TEXT (mainwindow.py:341). Evidence: test_text_formatting_shortcuts_are_not_suppressed_while_typing, test_bold_italic_and_underline_belong_to_the_words.
-
-- Entry into text/equation mode must require the explicit `"` trigger (see the corrected §3 entry-trigger items and contradiction #2 above) — plain letter keys (q, c, a, etc.) must never be misinterpreted as starting a markup tool while you're trying to type (34, 83, 131, 138)
-  - **Evidence:** Entry needs the explicit quote trigger; plain letters do not start a calculation. Evidence: test_quote_is_the_only_calculation_entry_key.
-
-- Ctrl+B should mean "bookmark" everywhere **except** while inside text selection/edit mode, where it must remain Bold and not trigger bookmarking (104, 66, 66/92 bookmark-while-editing bug)
-  - **Evidence:** Ctrl+B bookmarks everywhere except inside text editing, where it stays Bold. Evidence: test_ctrl_b_emboldens_a_selected_text_box_rather_than_bookmarking, test_ctrl_b_emboldens_the_run_picked_out_in_a_text_box, test_ctrl_b_emboldens_the_cells_picked_out_in_a_table.
-
-- The repeat-placement-N-times-along-X/Y behaviour (see §12) should also be assignable/visible through the shortcut manager, not just accessible via modifier keys (23)
-  - **Evidence:** Offset copies is a registered action with a default binding of Ctrl+Shift+D (mainwindow.py:414), and _act puts every bound key into the shortcut manager (mainwindow.py:336-343).
-
-## 19. Pages & document structure
-
-- **(new)** Add a right-click page-panel command to include or exclude each page from printing/export. Pages excluded from print must remain in the document but appear visibly greyed out in the page panel, so the print set can be understood at a glance.
-  - **Evidence:** Pages can be excluded from print from the page menu, and stay in the document greyed out. Evidence: test_a_page_excluded_from_print_is_grey_and_is_not_exported.
-
-- **(new)** Support editable page labels in the page panel. A user can assign a custom label, and Reset restores the label sourced from the imported PDF page where one exists; blank/new pages use the normal generated page label.
-  - **Evidence:** Page labels can be renamed and reset from the page menu. Evidence: test_a_page_label_can_be_renamed_and_reset_from_its_menu.
-
-- **(new)** Bug: several pages cannot be deleted at once. Picking more than one page in the pages panel has to work properly and everything that acts on a page has to act on the whole picked set — delete, move (reorder by dragging), copy and duplicate
-  - **Evidence:** Several pages act as a run for delete, duplicate and copy/paste. Evidence: test_several_pages_are_deleted_together, test_several_pages_are_duplicated_together, test_several_pages_are_copied_and_pasted_together.
-
-- Dragging a PDF file directly onto the page panel should show an insertion cursor/indicator and insert it at that exact point in the page order (114)
-  - **Evidence:** Dropping a file on the pages panel computes the exact insertion row and shows an indicator while dragging (ui/panels.py:187-190, drop_row and set_external_drop_row at 240-262).
-
-- Insert-PDF must bring in the actual PDF content (vector text/lines), not a blank page and not a 150dpi raster snapshot of it — figure out what's required to preserve full fidelity, and ask if a specific library/dependency choice needs sign-off (25, 120)
-  - **Evidence:** Insert-PDF always brings vector content: PdfImportDialog.selection returns vectors=True (ui/dialogs.py:328) and import_pages is called with it (mainwindow.py:1854).
-
-- **(new)** Insert-PDF must not ask for a DPI at all. There is no resolution to choose: everything in the file comes through as the PDF has it, vector work included. Drop the question from the dialog
-  - **Evidence:** The DPI question is gone: the dialog returns a fixed pdfio.BEST_DPI rather than asking, and the code says so (mainwindow.py:1840-1844, dialogs.py:328).
-
-## 20. Page setup (headers/footers/scale/grid)
-
-- Current page scale should be displayed next to the page number in the page viewer/page panel (25, 31)
-  - **Evidence:** The page list says what scale each page is at. Evidence: test_the_page_list_says_what_scale_each_page_is_at.
-
-## 21. Measuring tools
-
-- **(new)** Count is a continuous placement tool: after Count is selected, every click must place the next marker for the active count subject, numbered `1`, `2`, `3`, and so on. It must remain armed until Escape, selection of another tool, or an explicit cancellation; users must not have to reselect Count after each marker.
-  - **Evidence:** Count stays armed and numbers each marker in turn, and renumbering closes gaps. Evidence: test_count_tool_places_numbered_markers, test_renumber_counts_closes_gaps. NOTE: the three newly reported count defects are a separate §29 entry.
-
-- **(new)** Make polygon and ellipse cut-outs discoverable in the measurement workflow. A cut-out is a hole owned by an existing area/volume measurement, not a standalone markup: the UI must clearly indicate that it is drawn inside that measurement, finished with Enter, and subtracts from its reported area. Polygon and ellipse cut-outs apply to any closed shape — polygons, area measurements, rectangles, circles and ellipses — not only to polygonal areas.
-  - **Evidence:** Fixed. Cutouts moved from MeasureItem onto MarkupItem, so any closed shape owns holes: a rectangle, a rounded rectangle, an ellipse, a cloud and a closed polygon each answer with their own outline_ring, and area_under now offers the topmost closed shape under the point rather than only an AREA or VOLUME measurement. A hole is subtracted from the fill so it is a real hole rather than a dashed outline on solid colour, and it is saved and read back with the shape. An open polyline encloses nothing and is never offered. Evidence: test_a_cut_out_belongs_to_any_closed_shape, test_an_open_polyline_is_not_offered_as_somewhere_to_put_a_hole, plus the existing test_a_cut_out_takes_its_area_off_the_measurement and test_a_polygon_cut_out_belongs_to_the_area_it_is_drawn_in. The unreachable code after area_under's return is gone.
-
-## 22. Bookmarks & table of contents
-
-- Bookmarks themselves should be renameable/editable after creation (60)
-  - **Evidence:** Bookmarks can be renamed after creation (ui/panels.py:684 and 725).
-
-- Bookmarks and any links must remain fully clickable/working as hyperlinks in the exported PDF (32)
-  - **Evidence:** Bookmarks become the exported PDF's own bookmarks. Evidence: test_bookmarks_become_the_pdfs_own_bookmarks, test_a_document_without_bookmarks_is_unchanged, test_bookmarks_are_listed_in_page_order.
-
-- Fix: the bookmark shortcut fires accidentally while you're actively typing/holding text selected — it must not trigger during text edit (66, 92)
-  - **Evidence:** The bookmark shortcut does not fire during text editing. Evidence: test_ctrl_b_emboldens_a_selected_text_box_rather_than_bookmarking.
-
-## 23. Import / interoperability
-
-- Import Bluebeam `.btx` toolset files — including tool sets, hatch patterns, line-type definitions, groups, and whatever other markup types are embedded in them. You've uploaded sample `.btx` files to the GitHub repo specifically for this to be tested against — verify import against those real files, not just synthetic ones (80, 92)
-  - **Evidence:** BTX import brings tool sets, hatches, line types and groups across from the real sample files. Evidence: test_importing_a_bluebeam_tool_set_fills_the_tool_chest, test_the_sample_tool_sets_are_where_the_tests_expect_them, test_bluebeams_spellings_of_a_hatch_all_land, plus the tests/test_btx.py suite.
-
-- **(reported again)** Repair BTX sketch-tool import fidelity. The real `btx/Structures - Sketch Tools.btx` sample currently imports incorrectly, including structural section-cut/circle symbols. Preserve the Bluebeam toolset's geometry, styles, groups, hatches and line types so imported symbols match the supplied structural-drafting reference; hold this with regression tests against the real BTX files (137, 139, 149, current report).
-  - **Evidence:** The Sketch Tools sample imports with its labels, colours and section marks intact. Evidence: test_a_labels_words_are_lined_up_the_way_bluebeam_lined_them_up, test_a_labels_colour_comes_across_from_either_place, test_every_label_in_every_file_keeps_its_own_look.
-
-- Format Painter tool, with an icon matching Bluebeam's paint-roller icon (146)
-  - **Evidence:** Format Painter exists and carries one markup's look to another. Evidence: test_the_format_painter_carries_one_markups_look_to_another, test_clicking_with_the_format_painter_paints_that_markup.
-
-- **(new)** Format Painter transfers only compatible visual style: fill colour, line/stroke colour and line thickness. It must never copy geometry, markup type or tool-specific behaviour. In particular, painting from a cloud onto another markup must not turn that markup into a cloud, and painting onto a cloud must leave it cloud-shaped; the same rule applies in either direction.
-  - **Evidence:** It transfers compatible style only, never geometry or type. Evidence: test_the_format_painter_carries_one_markups_look_to_another plus the two never-copies tests below.
-
-- **(new)** Format Painter must not copy callout leader count, leader positions, cloud geometry or any other callout structure. Between callouts it transfers only compatible appearance: line colour, arrowhead styling, fill and text properties.
-  - **Evidence:** It copies no callout structure. Evidence: test_format_painter_never_copies_cloud_geometry, test_format_painter_does_not_copy_callout_leaders.
-
-- **(new)** Make Format Painter's armed state unambiguous: while active it uses a paint-brush cursor consistent with Bluebeam, exposes a clear active state, and Escape cancels it immediately without applying style.
-  - **Evidence:** The armed state is unambiguous and Escape cancels it. Evidence: test_escape_puts_the_format_painter_down.
-
-## 25. Settings, persistence & spellcheck
-
-- **(reported again)** Repair spellcheck dictionary coverage and correction workflow. Valid ordinary words such as `requests` must not be falsely underlined red; a misspelled word should be marked inline and its right-click context menu must offer appropriate replacement suggestions and a command to change the spelling.
-  - **Evidence:** Ordinary words are not underlined and a misspelling offers a correction. Evidence: test_spellcheck_knows_requests_and_offers_a_correction.
-
-## 26. Menus & discoverability
-
-- Every capability (page operations, line operations, etc.) must be reachable from the main menu bar somewhere, not only via right-click or a shortcut (128)
-  - **Evidence:** Every tool and application action is reachable from the menu bar, including page and table commands. Evidence: test_every_tool_and_application_action_is_reachable_from_the_menu_bar, test_current_page_commands_are_reachable_from_the_menu_bar, test_selected_table_commands_are_reachable_from_the_menu_bar, test_every_markup_tool_is_reachable_from_the_toolbar.
-
-- Preferences/settings should live under a "Settings" top-level menu (128)
-  - **Evidence:** Preferences and shortcuts live under a Settings menu. Evidence: test_preferences_and_shortcuts_live_under_settings.
-
-- Help menu should include a searchable command/tool search (128)
-  - **Evidence:** Find tool… is on the Help menu (mainwindow.py:1008) on Shift+F1, and searches every tool's name, purpose and key (find_a_tool, mainwindow.py:3967).
-
-- **(new)** Right-click menu on a calculation is too long and says too much. Take out the whole calculation group — the exact entries, in `MainWindow.build_context_menu`, are **"Figures on this line"** (the submenu), **"Edit…"**, **"Show this result in…"**, **"Keep as one block"**, **"Self-contained block"**, and the split/merge entries. Whatever of that is worth keeping goes on the **main menu bar**, not in the right-click menu
-  - **Evidence:** The calculation context menu keeps only the compatible entries. Evidence: test_the_calculation_menu_does_not_duplicate_result_unit_editing, test_a_calculations_right_click_only_offers_merge_from_its_calc_commands.
-
-- **(new)** Every button and menu label in the app should be one or two words, the way Bluebeam's are — not a sentence explaining what the thing does. The explanation goes in the tooltip. In particular "draw again" and friends are called **Property mode**, everywhere
-  - **Evidence:** Labels are one or two words with the explanation in the tooltip. A scan of every addAction label in mainwindow.py leaves one phrase over three words ('As the rest of this one', a scope option that reads as a phrase). The last three stragglers — the tool chest's Import, the page menu's Delete, and the scale dialog's double-set tooltip — were fixed and verified in this session at c91d4f3, in the suite and against the running app.
-
-## 27. Reliability / process
-
-- Investigate and explain why background tasks were observed stopped unexpectedly, and prevent recurrence (129, 138) — **what happened**: a long test run or fuzz run is started as a background command with a timeout on it, and when the session's turn ends before that timeout the command is killed with it. Nothing crashed; the run was cut off. **What is done about it now**: long runs are given a timeout that matches how long they actually take, their output goes to a file that survives the run, and the file is read back and reported rather than assumed
-  - **Evidence:** Recorded in docs/HANDOVER.md §3: a long run is started in the background and its output read from the file, rather than held in the foreground where it can be cut off.
-
-- **(new)** Write a context document so a session does not have to re-read every past chat: what the app is, who it is for, how the code is laid out, how to test it, what is done and what is not, and how this list is kept. **Done** — `docs/HANDOVER.md`, which is the first thing any agent picking this up should read. This list stays the record of what is asked for and built; the handover is the map to everything else
-  - **Evidence:** docs/HANDOVER.md exists and carries what the app is, who it is for, the code map, how to test, the tracking rules and the parts most likely to bite.
-
-- **(new)** Maintain a separate Markdown review register of every task that has not yet been implemented and validated. Keep it synchronized as work is addressed, without changing task completion checkboxes in this file or completion status in `docs/tasklist.xlsx`; only the user marks tasks complete.
-  - **Evidence:** docs/UNADDRESSED_TASKS.md is maintained and was rebuilt from the current register in this session, with no checkbox or workbook status changed.
-
-- **(new)** Maintain a separate Markdown record of tasks that have implementation and validation evidence, for user review. This evidence record must not mark tasks complete in `docs/tasklist.md` or change the user-owned status in `docs/tasklist.xlsx`.
-  - **Evidence:** docs/COMPLETED_TASKS.md is maintained and holds only entries with validation evidence, changing no checkbox or workbook status.
-
-## 28. Miscellaneous fixes reported (screenshots referenced)
-
-- **(found here, not reported by you)** Two layout tests — `test_everything_that_can_be_arranged_comes_back` and `test_a_rolled_up_panel_comes_back_rolled_up` — fail intermittently, but only in a **full** suite run. Both pass on their own, and both pass when every file that runs before them is run with them, so nothing earlier is leaving a mess behind: it is a race that shows up only when the machine is busy. Both save an arrangement and then build a second window to check it came back, so the suspect is a 1.5-second layout-save timer on a window still alive, firing between the save and the second window reading it. Worth chasing rather than re-running until it passes — the same race could lose a real arrangement on a slow machine
-  - **Evidence:** Fixed at the cause. Stopping the timer on a direct save was not enough: arranging anything afterwards arms it again, and by the time it fires another window may have written or restored a newer arrangement, which this window's older state then lands on. Each save now stamps the settings and a delayed save checks the stamp before writing, so a pending one that has been overtaken stands down. Evidence: test_a_stale_delayed_save_does_not_land_on_a_newer_arrangement forces exactly that sequence by hand — arrange, save, arrange again, build a second window that saves, then fire the first window's delayed save — and checks the newer arrangement survives. The two tests HANDOVER names pass alongside it.
-
-- General inconsistent/odd spacing in rendered equations, per screenshot (97)
-  - **Evidence:** Equation spacing is normalised: compact result gutter, tight number-unit product, ordinary operator spacing kept, powers on the visible shoulder, subscript and power sharing one column. Evidence: test_a_plain_multiply_keeps_its_own_spacing, test_a_subscript_and_a_power_share_one_column, test_a_number_and_its_unit_are_joined_by_a_dot, test_equals_can_be_typed_deleted_and_retyped_without_a_result_gap.
-
-- The unit-selection dropdown list appears in the wrong screen position relative to what's being edited (98)
-  - **Evidence:** The unit list opens directly below the editor it belongs to. Evidence: test_the_result_unit_list_opens_below_its_in_place_editor, test_the_list_appears_under_the_caret_not_under_the_block.
-
-- Arrow markups show a small control-point handle even when the arrow isn't selected — handles should only be visible while selected (101)
-  - **Evidence:** An arrow hides its handles until it is selected. Evidence: test_arrow_tool_places_an_arrow_and_hides_handles_until_selected.
-
-- Rotation control point gets clipped at the shape's edge and visually glitches/smears while the item is being moved (102)
-  - **Evidence:** The rotation grip sits inside the item it belongs to rather than clipping at the edge. Evidence: test_the_rotation_grip_is_inside_the_item_it_belongs_to.
-
-- There's an unidentified "blue tool" in the UI that does nothing and can't even be selected/clicked — find and remove it (63)
-  - **Evidence:** No dead tool remains: the table holds 41 tools and every one has a factory except the eraser, which rubs out rather than creating. Evidence: test_every_markup_tool_is_reachable_from_the_toolbar, test_every_tool_and_application_action_is_reachable_from_the_menu_bar.
-
-- Audit every Properties-panel option for redundancy or unclear labeling — e.g. what does "multiply highlighter" in the callout properties actually do? Several options may not be needed at all (61)
-  - **Evidence:** Audited every Properties row and acted on what it found. One idea had three names: the Style toolbar said Figures, a calculation said Significant digits, a table said Digits. All three say Figures now, with what they do in the tooltip. 'Hinge stands off' was a four-word label carrying a sentence its tooltip already explained, so it is 'Hinge'. The reported example, a 'multiply highlighter' option, is not a Properties control at all — blend is set by the highlighter itself and is exposed nowhere, so there is nothing there to be confused by. Evidence: test_one_idea_has_one_name_in_the_properties_panel, which also holds every remaining row label to two words or fewer, so the next long one fails rather than accumulating.
-
-- Highlighter tool leaves odd gaps/holes depending on the stroke path used to draw it (58, 59)
-  - **Evidence:** A highlighter stroke is one even band with no holes where it overlaps itself. Evidence: test_a_highlighter_stroke_is_one_even_band, test_the_highlight_goes_over_whatever_is_under_it.
-
-- Table column/row resize doesn't show a resize cursor (108, duplicate of §6 item)
-  - **Evidence:** Behaviour is there and now covered; my first verdict was wrong because I grepped only items/tableitem.py, and the cursor is set in ui/view.py. Hovering a column or row border of a table that is open for typing gives Qt.SplitHCursor / Qt.SplitVCursor. It is offered exactly where the drag is possible: border_at measures from the A/B/C and 1/2/3 gutters, which exist only while the table is active. The view also listed merely-selected tables as candidates, but that branch could never fire — show_chrome is false then, so border_at returns None immediately — and set_chrome shifts the table by a gutter, so turning chrome on at selection would move the table under the pointer that just selected it. The dead branch is removed and the comment says why. Evidence: test_a_column_edge_says_it_can_be_dragged, driving real hover events. Same entry as the §6 one.
-
-- An object can get stuck showing a "move" cursor even when nothing is selected, and Escape doesn't clear it (110)
-  - **Evidence:** The cursor is recomputed when a gesture finishes and Escape restores it. Evidence: test_finishing_a_rectangle_resize_recomputes_the_cursor, test_escape_cancels_a_group_resize_and_restores_the_cursor.
-
-## 29. New requests awaiting review
-
-- Keep only **Merge** for calculation blocks in the calculation context menu; remove the unclear duplicate **Make one block** command. Merge must work correctly.
-  - **Evidence:** Only Merge remains on the calculation context menu and it works. Evidence: test_a_calculations_right_click_only_offers_merge_from_its_calc_commands, test_split_and_merge_calculations.
-
-- Distinguish calculation lines and blocks in the Properties panel. Only blocks expose **Self-contained**; line results are shown inline/on-hover without block-only controls.
-  - **Evidence:** Only blocks expose Self-contained; a line does not. Evidence: test_a_block_can_be_made_self_contained plus the Properties-panel tests.
-
-- Show a concise function-help tooltip when hovering a function in the Functions panel or after entering it in a calculation line/block. Include the accepted argument count, argument names and purpose.
-  - **Evidence:** Function help shows the signature and purpose on hover and after typing. Evidence: test_hovering_a_function_shows_its_signature_and_purpose, test_typing_a_function_shows_its_signature_and_purpose.
-
-- Add rebindable shortcuts for left/centre/right alignment and font-size increase/decrease. They apply to selected text, a selected table cell, a whole calculation line, or a selected line within a calculation block, according to the active editor.
-  - **Evidence:** Alignment and font-size shortcuts are rebindable and apply to the selected object, table cells, and a calculation line or active block line. Evidence: test_text_alignment_and_size_shortcuts_format_the_selected_object, test_alignment_and_size_shortcuts_format_the_selected_table_cells, test_shortcuts_format_a_calculation_line_and_the_active_block_line.
-
-- Every command shortcut, including equation/text-entry triggers, must be visible and rebindable in the shortcut manager.
-  - **Evidence:** _act registers every bound key in the shortcut manager (mainwindow.py:336-343). Evidence: test_repeat_along_an_axis_is_a_rebindable_shortcut, test_calibration_has_a_visible_rebindable_shortcut.
-
-- New pages start uncalibrated. The first scale-dependent rectangle, ellipse or measurement prompts for page scale instead of assuming a scale.
-  - **Evidence:** note_missing_scale (mainwindow.py:2811) says once that the page has no scale and points at the status-bar control, and the draw path calls it for a scale-dependent item (view.py:2825). NOTE: it keys off PageScale.is_calibrated, which task 155 shows is wrong for a genuine 1:1.
-
-- A cloud callout's cloud and text box must be independently movable. Moving the box moves only the box; moving the cloud moves only the cloud; the leader geometry updates without moving the whole callout.
-  - **Evidence:** The cloud and the call-out box move independently. Evidence: test_a_cloud_and_its_callout_box_move_independently.
-
-- Arced segments on Arc items expose a control point comparable to other arced line segments.
-  - **Evidence:** An arc exposes an editable bend control point. Evidence: test_an_arc_has_an_editable_bend_control_point.
-
-- Pen and highlighter strokes snap only at their start/end points. Intermediate sampled points must not snap to grid or items, so freehand strokes stay smooth.
-  - **Evidence:** Freehand snaps only its start and end. Evidence: test_freehand_snaps_only_its_start_and_end.
-
-- Put **Add arrow leader**, **Add cloud leader**, and **Remove leader** directly in the main callout context menu. Adding a cloud leader adds only that cloud leader and lets the user choose its attachment position; remove the broad **Remove all leaders** command.
-  - **Evidence:** Add arrow leader and Add cloud leader are on the call-out menu itself (mainwindow.py:4354/4357) and add only that leader.
-
-- Fix modifier-drag behavior: Ctrl+drag duplicates; adding Shift before or after movement constrains the duplicate to 0/45/90 degrees; Shift-first then Ctrl switches from snap-constrained movement to duplication without leaving snapping in an inconsistent state.
-  - **Evidence:** Modifier-drag is order-independent. Evidence: test_shift_first_then_ctrl_duplicates_and_keeps_the_move_constrained, test_ctrl_taken_hold_of_mid_move_switches_to_a_snapped_copy.
-
-- **(amended)** Recompute each callout leader hinge completely when its arrow tip, text box or cloud moves. Do not retain a prior manually adjusted hinge length after any of those changes. In a multi-leader callout each leader's hinge is computed independently: moving the cloud or the text box must not force every leader to share a single hinge length.
-  - **Evidence:** Verified rather than changed: the hinges were already worked out per leader, and there is now a test that says so. Three leaders pointing three ways end on three different sides after the box moves, each from its own tip, and the hand-placed one gives up its manual side and stand-off as the base task requires. Evidence: test_several_leaders_each_work_their_own_hinge_out, alongside test_moving_the_arrow_head_works_the_hinge_out_again and test_moving_the_box_works_the_hinge_out_again. One thing left deliberately: the Properties hinge slider reads leader[0] and writes every leader, which is one control acting on all of them by design — worth saying, because that is the one place a single hinge length is still shared.
-
-- Remove holes/gaps where overlapping highlighter strokes should form one continuous highlighted region.
-  - **Evidence:** Overlapping highlighter strokes form one even band. Evidence: test_a_highlighter_stroke_is_one_even_band, test_the_highlight_goes_over_whatever_is_under_it.
-
-- Snapshot must capture PDF vector linework and markups without carrying through the page background; it must not include unrelated calculation/table/text content unless those item types are explicitly selected for capture.
-  - **Evidence:** A snapshot takes the drawing underneath without the page background and skips unselected worksheet content. Evidence: test_a_snapshot_takes_the_drawing_underneath_with_it, test_snapshot_skips_unselected_worksheet_content, test_a_snapshot_is_a_picture_of_the_region.
-
-- Make the bottom canvas Snap control a dropdown that identifies and toggles the available targets, such as grid, PDF content and markups, rather than an ambiguous single button.
-  - **Evidence:** The Snap control is a dropdown naming and toggling each target. Evidence: test_the_snap_dropdown_toggles_a_target_through_qt, test_the_snap_menu_entry_is_there_and_on.
-
-- Centre the page number and page label within the page-view footer/navigation area.
-  - **Evidence:** Page navigation and label are centred in the footer. Evidence: test_page_navigation_and_label_are_centred_in_the_footer.
-
-- In the Pages panel, Ctrl+C/Ctrl+V copies and inserts pages with a visible insertion indicator. Support Ctrl and Shift multi-selection; Delete removes selected pages only after confirmation.
-  - **Evidence:** Ctrl+C/Ctrl+V on the thumbnails copy and paste whole pages (ui/panels.py:266) with a drop indicator, and multi-selection acts as a run. Evidence: test_several_pages_are_copied_and_pasted_together, test_several_pages_are_deleted_together, test_the_pages_panel_takes_a_dropped_drawing.
-
-- Remove the Typewriter markup tool and all related UI/shortcuts.
-  - **Evidence:** Typewriter is gone from the menus and an old saved one still loads without exposing the tool. Evidence: test_the_markup_menu_omits_typewriter_but_keeps_the_other_tools, test_an_old_typewriter_item_still_loads_without_exposing_its_tool.
-
-- Add a bottom-canvas scroll-mode control for continuous scrolling versus page-by-page viewing.
-  - **Evidence:** The footer switches between continuous and page-by-page scrolling. Evidence: test_the_footer_switches_between_continuous_and_page_scrolling.
-
-- Clicking a page-grid control must not move or reposition the page view.
-  - **Evidence:** Clicking the page grid control does not move the view. Evidence: test_clicking_the_page_grid_does_not_move_the_view.
-
-- While editing text, Ctrl+B/Ctrl+I/Ctrl+U format the selected text. Outside text/equation editing they retain their global commands; formatting keys must never insert a page or trigger unrelated commands.
-  - **Evidence:** Ctrl+B/I/U format inside text and keep their global commands outside. Evidence: test_bold_italic_and_underline_belong_to_the_words, test_ctrl_b_emboldens_a_selected_text_box_rather_than_bookmarking, test_text_formatting_shortcuts_are_not_suppressed_while_typing.
-
-- Show Pages-panel thumbnails centred within a grid layout.
-  - **Evidence:** Thumbnails sit centred in a responsive grid cell. Evidence: test_page_thumbnail_uses_a_centred_responsive_grid_cell.
-
-- Add a rebindable **Calibrate scale** shortcut. Calibration starts without an assumed `5 m` value, then opens a dedicated length-entry prompt after two points are selected; accept `10mm` and `10 mm`, and show a clear warning for invalid or incompatible units.
-  - **Evidence:** Calibrate scale is a visible rebindable shortcut, and the length prompt takes joined or spaced units and rejects incompatible ones. Evidence: test_calibration_has_a_visible_rebindable_shortcut, test_the_calibration_length_prompt_accepts_joined_or_spaced_units, test_the_calibration_length_prompt_rejects_incompatible_units, test_the_scale_dialog_offers_picking_two_points_from_a_standing_start.
-
-- I think the reason why zoom to curosr and zoom out to cursor is that currenlty the app cant pan off the page, therefore for example if the cursor in in the corner of th epage and i want to zoom to that but keep it central in the view its not possible to it doesnt zoom to thtat location, fix it (ability to pan off page)
-  - **Evidence:** The canvas already extends past the pages: DocumentScene.set_desk_margin / _apply_desk_margin (ui/scene.py:642-651) grow the scene rect by a desk margin so any page edge can be centred, which is the pan-off-the-page the report asks for. Evidence: test_a_page_corner_can_be_centred_and_remains_under_zoom_cursor.
-
-- add a functionaly in thr backend where a dependecnye tree is made for each variable, and when a varibale is redefonied, only these depennet lines/block/tabes are reevalted. clacluation must still work, this is just and efficiency thing
-  - **Evidence:** A variable dependency graph exists and a redefinition recalculates only its chain. Evidence: test_a_redefined_variable_recalculates_only_its_dependency_chain, test_workspace_dependencies, test_prepare_formula_marks_dependencies.
-
-- **(new)** Decide whether pasting from Excel can build a real table at all, and act on the decision. The §6 requirement to convert pasted Excel cells into a table object is to be withdrawn outright if it is not achievable — Excel may not reliably expose the data. Pasting as plain values is an acceptable outcome; if that is the conclusion, remove the conversion attempt entirely rather than leaving a half-working path in place.
-  - **Evidence:** Decision made, with evidence: Excel paste CAN build a real table, so the §6 requirement is kept, not withdrawn. Pasting Excel cells creates a table object and carries relative formulas across, falling back to values where translation is impossible. Evidence: test_pasting_excel_cells_onto_the_page_makes_a_table, test_pasting_from_excel_brings_the_formulas, test_formulas_pasted_as_text_stay_formulas, test_excel_quoting_survives_the_trip, plus calcforge/core/excelxml.py.
-
-- **(new)** "No scale" must be a different state from a true 1:1. The app currently treats 1:1 as the unset/default scale, so a page cannot actually be calibrated to a genuine 1:1 — a scale-dependent markup drawn afterwards still misbehaves. An explicit 1:1 calibration must be stored as a real, deliberate scale, distinct from "uncalibrated".
-  - **Evidence:** Fixed. PageScale now carries its own `calibrated` flag instead of inferring it from the label (core/document.py), so a page deliberately set to 1:1 is a scaled page and one nobody touched is not. from_ratio and from_calibration set it; to_dict/from_dict persist it, and a document saved before the flag existed still reads its label the old way. Evidence: test_a_page_set_to_a_real_one_to_one_is_not_an_unscaled_page drives the real measure tool and checks the status hint, the save round trip, and both legacy-document cases; test_a_page_starts_without_a_scale_and_can_be_given_one still passes. Full suite 1255 passed, 0 failed.
-
-- **(new)** Count tool defects: the marker number is visually cut off; Escape must cancel the entire count session immediately rather than lagging behind the keypress; and the ghost `1` marker left behind after cancellation must disappear on its own, without needing a further click.
-  - **Evidence:** One of three fixed, two not reproducible on this build and now covered by tests so a regression would show. FIXED — the clipped number: CountItem sizes the number's box from its font (index_rect) and owns that space in boundingRect, whole at 7, 9, 11, 14 and 18pt and up to three digits (test_a_count_marker_shows_its_whole_number_at_any_size). NOT REPRODUCED — Escape puts the count tool down on the press with no lag and no draft left behind, and no ghost 1 marker appears or lingers on either the hover-then-Escape or place-then-Escape path (test_escape_puts_the_count_tool_down_at_once). Both read as reports against an older build; worth a check against this one.
-
-- **(new)** A snapshot offers no colour-change control at all. Either add the option wherever it is meaningful for a snapshot, or deliberately exclude snapshots from stroke-colour controls — and if excluded, make that exclusion consistent between the style toolbar and the Properties panel rather than present in one and absent in the other.
-  - **Evidence:** Decided and implemented rather than excluded: a snapshot now offers stroke colour and width in both the style toolbar and Properties, through the same capability set, so there is nowhere for the two to disagree. See the entry above for the evidence.
-
-- **(new)** Undo must cover equation state transitions. Undo reverts a space-triggered equation-to-text conversion back to the live equation, and restores text removed by Backspace, down to an empty entry.
-  - **Evidence:** Fixed. Ctrl+Z now takes back the typing before the document change under it: while a line is open, undo goes to that editor's own document and only falls through to the document stack when there is nothing left to take back. Backspaced text comes back and a second undo returns to an empty entry, which is what the task asks for; the space-triggered conversion still undoes to the live equation. Evidence: test_undo_takes_back_the_typing_before_the_line_itself, test_undo_puts_a_converted_calculation_back_as_a_calculation.
-
-- **(new)** Cloud-leader placement feedback: when a cloud leader is being added, no provisional straight leader is drawn before the cloud itself is drawn, and the cursor changes to a cloud-drawing cursor for the duration of the placement.
-  - **Evidence:** Fixed. The pointer carries a drawn revision cloud for the whole of a cloud-leader placement instead of a stock crosshair (icons.cursor_pixmap feeds view.cloud_cursor, set in begin_cloud_leader), and it is put down again on Escape. Nothing provisional is drawn before the cloud: _draw_cloud_leader_preview returns until a region is actually being dragged. Evidence: test_placing_a_cloud_leader_shows_a_cloud_on_the_pointer.
-
-- **(new)** Display formatting never alters stored values. Significant-figure and decimal-place settings affect only the rendered final answer — never the stored value, and never the typed equation text.
-  - **Evidence:** Formatting is a render-time property of the item, not of the value: MathItem holds digits and number_format (items/mathitem.py:180-181) and applies them per line at layout through figures_for (mathitem.py:399); the workspace keeps the quantity. Evidence: test_one_line_can_be_shown_to_its_own_number_of_figures, test_a_lines_own_figures_can_be_put_back, test_a_lines_own_figures_survive_a_save.
-
-- **(new, restated)** This is a PDF editor that can also do calculations, and the format follows from that. A document is a PDF: every page carries real PDF line information, opening a PDF is just opening a document, inserting one is not a conversion, and a document with no calculations in it is a PDF and saves as one. Add calculations and it saves as `.cfx`, which is that same PDF with a calculation layer on top of it — the calculations are an added layer, never a replacement for the PDF underneath and never something that turns the file into a format of its own.
-  - **Evidence:** Built. A saved document is a real PDF: calcforge/io/pdfbase.py writes the pages as PDF pages — an imported page carried through as the source PDF's own page, so its real line information, its text and its vectors survive a round trip — and puts the calculation layer inside the file as an embedded attachment. project.save_document names the file for what is in it: .pdf while there are no calculations, .cfx the moment there is one, the same bytes either way. Opening branches on what the file holds rather than what it is called (project.carries_a_document), so a PDF carrying a layer is a document and a PDF that is not one is imported as before, and opening a plain PDF is opening a document — Save writes it back rather than asking for a new name. Documents written in the old zip form still open. A drawing opened for review is one command from being calculated on (File ▸ Add calculations). tests/test_format.py, 13 event-driven tests: the saved file is a readable PDF; a calculation-free document is named .pdf and one with a calculation .cfx; a .cfx renamed .pdf still opens; a round trip returns the items; an imported page's own text is still in the saved file; a PDF with no layer is not mistaken for a document; a document is recognised whatever it is called; old zip documents still load; what is drawn on the page is visible in the saved PDF; saving an opened PDF writes it back; a calculation moves the save to a .cfx beside the drawing.
-
-- **(new, restated)** Export to PDF must produce a PDF whose markups are still markups. Opened in Bluebeam, every annotation is selectable and movable exactly as it is here; the calculation layer is the one thing that does not travel, so each calculation exports as an ordinary movable markup showing the value it held at the moment of export. This follows from the format task above and replaces any export that flattens markups into artwork.
-  - **Evidence:** Built. calcforge/io/annotate.py writes each markup into the exported PDF as a real annotation — a /Square, /Circle, /PolyLine, /Polygon, /Ink or /Text where the PDF has one for that shape and a /Stamp otherwise — each with its own appearance form drawn from the item itself, so it looks the same anywhere and can be picked up and moved. The sheet is painted without them (render_page(without_markups=True)), so nothing is both placed and painted and a moved markup leaves no ghost. /RD, /Vertices and /InkList carry the real shape inside the annotation's box; author, comment and subject travel as /T, /Contents and /Subj. A calculation cannot travel as a calculation, so it exports as an ordinary movable /Stamp showing the value it held at export. Flattened content is the page and stays painted in. pdflinks now splices bookmark links into an annotation list already written in the page, so bookmarks and live markups coexist. Six tests in tests/test_output.py cover the subtypes, the absence of a painted ghost, the frozen calculation value, the carried-over author and comment, flattened content staying part of the sheet, and bookmarks still working; the file's existing print tests read markup text out of the appearance streams, which is where a reader now finds it.
-
-- **(new)** Remove the distinction between a calculation line and a calculation block — they are one thing now. Every calculation is a region that may hold one line or several, and no command, menu entry, property or panel may offer "line" and "block" as different kinds. Typing `"` and then a space makes a text line, which is the same region holding prose.
-  - **Evidence:** Done. There is one calculation tool, one kind of region, and the two things that used to differ are settings on the region instead of a choice made before it is drawn. A space always converts to prose — it used to convert in one kind and be refused with an explanation in the other, so the same keystroke did two things for a reason nothing on screen showed. Self-contained is offered on any calculation. Enter opens the next calculation below and Shift+Enter keeps the next line in this one, which is what the manual has said all along and preserves both old behaviours as a keystroke rather than a kind. Merge only merges now; with one selection there is nothing to convert and it says so. Documents written before the merge read their stored kind and drop it. Evidence: test_there_is_one_calculation_tool, test_a_space_turns_any_calculation_into_prose, test_a_space_converts_a_re_entered_calculation_too, test_self_contained_is_offered_on_any_calculation, test_the_style_toolbar_scope_control_edits_any_calculation, test_shift_enter_makes_another_line_in_the_same_calculation, test_merging_one_calculation_has_nothing_to_do, test_splitting_a_calculation_gives_one_region_per_line, test_an_older_document_loads_as_one_kind_of_calculation, test_keeping_a_calculations_names_to_itself_survives_a_round_trip.
-
-- **(new)** Text set on several lines must lay out on the same rhythm as a calculation region holding several lines. A text box beside a calculation block, referring to its lines, should line up with them: the same line height and spacing, ignoring rows a tall fraction or a large script genuinely has to make room for.
-  - **Evidence:** Done. Both now ask calculation_line_pitch for the number: a plain calculation row and a line of prose are pitched identically at 8, 10 and 12 point — 13.30, 15.62 and 17.95 — where before they were 15.62 against 14.0 at ten point, so ten lines down a reference pointed at the wrong row. Rows that genuinely need more room, a tall fraction or a big script, still take it. Evidence: test_prose_keeps_the_same_rhythm_as_the_working_beside_it.
+# MarkForge — evidence record
+
+Audited: 2026-09-07 against `claude/markforge-python`, at commit `5d69361`,
+with the suite green (792 tests) and `tools/session_fuzz.py` clean over two
+hundred rounds.
+
+**This is not the completion record.** It changes no checkbox in
+`docs/tasklist.md` and no status in `docs/tasklist.xlsx`; only the user marks a
+requirement complete. What it says is narrower and checkable: *here is the code
+that implements this, and here is the test that holds it*. Where something is
+built but nothing holds it, this says so — an untested feature is a feature
+that will break quietly.
+
+Everything below was re-checked against the branch as it stands, not carried
+over from an earlier audit. The previous version of this file described the
+calculation-era application and has been replaced; if you want that history it
+is in the git log.
+
+---
+
+## What a saved file is
+
+- **A saved document is a PDF, and saving adds to it rather than rewriting it.**
+  `io/pdfsave.py` writes an incremental update when the document is one source
+  PDF and its markups: the bytes that came in are the first bytes of the file
+  that goes out. Evidence:
+  `test_saving_a_marked_up_drawing_leaves_the_drawing_byte_for_byte`,
+  `test_an_updated_drawing_still_reads_as_a_pdf_everywhere`,
+  `test_saving_twice_leaves_one_record_to_read_back`,
+  `test_a_page_the_update_cannot_describe_is_assembled_instead`.
+- **Anything that has to be painted is assembled instead**, by `io/pdfbase.py`
+  — several sources, a dimmed page, a flattened markup, a running header or
+  footer. The conditions are in `pdfsave.source_bytes`.
+- **Every markup goes out as a real annotation**, with its own appearance
+  stream, in the PDF's own vocabulary: a cloud as a `/Square` or `/Polygon`
+  with a `/BE` cloudy border, a callout as a `/FreeText` with `/CL` and `/IT`,
+  a dimension as a `/Line` with `/Measure`, `/LL`, `/LLE`, `/Cap` and its line
+  endings. Evidence: `test_every_markup_goes_out_as_a_markup`,
+  `test_an_exported_markup_is_not_also_painted_into_the_sheet`,
+  `test_a_cloud_goes_out_as_a_cloud_not_a_drawing_of_one`,
+  `test_a_dimension_keeps_every_part_the_specification_names`,
+  `test_a_call_out_goes_out_with_its_leader`.
+- **What a PDF cannot hold rides along** as an embedded record, and what
+  decides how a file opens is what it holds rather than what it is called.
+  Evidence: `test_a_saved_document_comes_back_exactly`,
+  `test_a_saved_document_is_recognised_whatever_it_is_called`,
+  `test_a_pdf_that_is_not_a_document_is_not_opened_as_one`,
+  `test_documents_written_before_the_format_was_a_pdf_still_open`.
+- **Bookmarks reach the exported PDF as its own outline**, and go in after the
+  annotations without displacing them. Evidence:
+  `test_bookmarks_still_work_when_the_markups_are_live`.
+
+## The PDF engine
+
+`markforge/pdf/` is a reader and writer written from the specification rather
+than wrapped round somebody else's. Evidence: `tests/test_pdf_engine.py`, 24
+tests, run against real files from other people's software rather than files of
+its own making.
+
+- Syntax, filters and predictors: Flate, LZW, ASCIIHex, ASCII85, RunLength,
+  PNG and TIFF.
+- Classic cross-reference tables, cross-reference streams and object streams.
+- Recovery by scanning when the cross-reference table is wrong; refusal of a
+  file that is not a PDF at all.
+- Incremental update, verified byte-for-byte and cross-read with pypdf.
+- The annotation model: border effects, callout lines, measure dictionaries,
+  the ten line endings.
+
+## Opening somebody else's drawing
+
+- **A page comes in as its own line work**, not a picture of it, so it stays
+  sharp at any zoom. Evidence: `test_an_imported_page_keeps_the_source_pdfs_own_page`,
+  `test_the_lines_come_in_knowing_they_are_the_pages_own`.
+- **Their markups come in as markups.** Evidence:
+  `test_an_imported_pdf_brings_in_the_markups_somebody_else_made`,
+  `test_a_marked_up_drawing_opens_as_markups_that_can_be_worked_with`,
+  `test_a_cloud_is_a_border_effect_and_comes_back_as_one`,
+  `test_a_link_is_not_somebody_s_markup`.
+- **Opening a PDF is opening a document, not converting one**: Save writes it
+  back. Evidence: `test_opening_a_pdf_is_opening_a_document_not_converting_one`.
+- **The page's own line work is the page**, not a markup on it: locked, below
+  everything drawn on it, written as part of the page, not copied by a
+  snapshot, caught hold of but never offered as an alignment guide. Evidence:
+  `test_the_pages_own_line_work_is_not_dragged_about`,
+  `test_sending_to_the_back_stays_in_front_of_the_drawing`,
+  `test_snapshot_skips_unselected_typing`.
+- **Insert PDF asks no resolution question.** There is no answer to give:
+  everything comes across as the file has it. `dialogs.PdfImportDialog` asks
+  only which pages and what size of page.
+- **A drawing can be dropped straight onto the pages panel**, at the row
+  indicated. Evidence: `test_the_pages_panel_takes_a_dropped_drawing`,
+  `test_a_dropped_pdf_is_imported_at_the_indicated_row`.
+
+## Bluebeam tool sets
+
+`.btx` import is held against the real files in `btx/`, not synthetic ones.
+Evidence: `tests/test_btx.py`, 28 tests — `test_every_tool_set_reads_without_losing_a_tool`,
+`test_the_sample_tool_sets_are_where_the_tests_expect_them`,
+`test_importing_a_bluebeam_tool_set_fills_the_tool_chest`,
+`test_a_dashed_line_from_a_toolset_comes_in_dashed`,
+`test_bluebeams_spellings_of_a_hatch_all_land`,
+`test_every_label_in_every_file_keeps_its_own_look`,
+`test_a_file_that_is_not_a_tool_set_is_refused_politely`.
+
+## Drawing and editing
+
+- **Every tool draws both ways** — press and drag, or click and click — with
+  the shape following the pointer between. Evidence:
+  `test_a_click_placed_tool_shows_itself_before_it_lands`,
+  `test_cloud_tool_supports_dragged_and_point_by_point_clouds`,
+  `test_a_cloud_callout_can_be_drawn_corner_by_corner`.
+- **Where a placed thing sits relative to the pointer**: a callout's box by its
+  left middle, an image, snapshot, tool-set item or group by its bottom left.
+  Evidence: `test_a_callouts_text_box_uses_the_pointers_left_middle`,
+  `test_a_click_placed_image_hangs_from_the_pointers_bottom_left`,
+  `test_an_exact_toolset_item_hangs_from_the_pointers_bottom_left`,
+  `test_a_toolset_group_uses_its_combined_bottom_left_as_the_anchor`.
+- **Shift holds a line to 0°, 45° or 90° in every tool**, freehand included.
+  Evidence: `test_shift_holds_a_line_to_forty_five_degrees`,
+  `test_the_highlighter_goes_straight_on_shift_too`.
+- **Shift and click point after point lassoes a selection.** Evidence:
+  `test_shift_clicking_out_a_lasso_selects_what_is_inside_it`,
+  `test_a_lasso_takes_only_what_is_wholly_inside`,
+  `test_escape_abandons_a_half_drawn_lasso`.
+- **Escape goes all the way back in one press.** Evidence:
+  `test_escape_abandons_a_click_started_drawing`,
+  `test_escape_abandons_a_half_drawn_callout`,
+  `test_escape_cancels_an_unplaced_cloud_leader`,
+  `test_escape_puts_the_format_painter_down`,
+  `test_escape_cancels_a_group_resize_and_restores_the_cursor`.
+- **Cursors say what the gesture will do, and revert when it ends.** Evidence:
+  `test_hovering_a_markup_changes_the_cursor`,
+  `test_finishing_a_rectangle_resize_recomputes_the_cursor`,
+  `test_shape_modifiers_have_distinct_add_remove_and_curve_cursors`.
+- **Rounded corners and arcs**, on the right-click menu, with live preview
+  during the drag. Evidence: `test_ctrl_over_a_side_bends_it_into_an_arc`,
+  `test_the_arc_handles_bend_and_lean_the_curve`,
+  `test_an_arc_has_an_editable_bend_control_point`,
+  `test_a_rounded_corner_preview_updates_during_a_real_handle_drag`,
+  `test_an_arc_preview_updates_during_a_real_handle_drag`.
+- **The structural break symbol**, on any side. Evidence:
+  `test_a_break_symbol_goes_on_a_side_and_comes_off`.
+- **A rectangle becomes a polygon** when it stops being a rectangle.
+  `MainWindow.rectangle_to_polygon`, exercised in `tests/test_usability.py`.
+- **Modifier drags are order-independent.** Evidence:
+  `test_shift_first_then_ctrl_duplicates_and_keeps_the_move_constrained`,
+  `test_a_ctrl_click_does_not_copy_anything`.
+- **Images and groups keep their aspect ratio unless Shift releases it.**
+  Evidence: `test_an_image_keeps_its_aspect_ratio_unless_shift_releases_it`.
+- **Ordering**: bring front, send back, forward, backward, with the page's own
+  line work as the floor. Evidence:
+  `test_order_moves_a_markup_in_front_of_and_behind_the_others`,
+  `test_sending_to_the_back_stays_in_front_of_the_drawing`,
+  `test_a_new_markup_lands_on_top_of_the_ones_already_there`.
+
+## Callouts and text
+
+- **A text box, a callout and a cloud callout are one object in three states**,
+  and the leader is what moves between them. Evidence:
+  `test_a_callout_can_have_as_many_leaders_as_you_like`,
+  `test_a_cloud_callout_is_offered_more_leaders_of_either_kind`,
+  `test_a_leader_survives_a_round_trip_with_its_side_and_reach`,
+  `test_a_call_out_keeps_its_knee`.
+- **The hinge is computed, never stored**, so it stays perpendicular and
+  automatic. Evidence: `test_the_leader_leaves_the_middle_of_a_side`,
+  `test_resizing_a_callout_leaves_the_arrow_where_it_points`,
+  `test_a_callout_leader_keeps_pointing_at_the_same_place_during_upright_edit`.
+- **The cloud is there from the first click**, and cloud and box move
+  independently. Evidence:
+  `test_placing_a_cloud_leader_shows_a_cloud_on_the_pointer`,
+  `test_a_cloud_and_its_callout_box_move_independently`,
+  `test_add_cloud_leader_uses_the_region_dragged_on_the_canvas`.
+- **A rotated text markup turns upright to be edited and snaps back.**
+  Evidence: `test_a_rotated_text_box_turns_upright_only_while_it_is_edited`,
+  `test_an_almost_unrotated_text_box_snaps_back_to_zero_after_editing`.
+- **The rotation grip stays inside the item.** Evidence:
+  `test_the_rotation_grip_is_inside_the_item_it_belongs_to`.
+- **Typing lands where it was aimed.** Evidence:
+  `test_typing_after_a_click_lands_where_the_caret_is`,
+  `test_a_click_does_not_snap_back_to_the_start`,
+  `test_a_double_click_lands_where_it_was_aimed`,
+  `test_a_double_click_in_the_words_takes_the_word_it_was_aimed_at`,
+  `test_backspace_edits_text_rather_than_deleting_the_markup`,
+  `test_undo_takes_back_the_typing_before_the_markup_itself`,
+  `test_saving_settles_the_markup_being_typed`.
+- **The Typewriter tool is gone**, and an old document holding one still opens.
+  Evidence: `test_the_markup_menu_omits_typewriter_but_keeps_the_other_tools`,
+  `test_an_old_typewriter_item_still_loads_without_exposing_its_tool`.
+
+## Measuring and take-off
+
+- **Scale is per page, optional, and calibratable.** Evidence:
+  `test_a_page_starts_without_a_scale_and_can_be_given_one`,
+  `test_a_scale_turns_the_paper_size_into_a_real_one`,
+  `test_a_calibration_line_is_not_left_on_the_page`,
+  `test_a_page_set_to_a_real_one_to_one_is_not_an_unscaled_page`,
+  `test_the_first_scaled_tool_click_prompts_before_drawing`,
+  `test_cancelling_the_first_scale_prompt_does_not_create_a_markup`.
+- **A measurement carries the scale it was taken against**, into the file.
+  Evidence: `test_a_measurement_carries_the_scale_it_was_taken_against`,
+  `test_a_take_off_carries_the_scale_it_was_measured_against`,
+  `test_a_measurement_prints_the_dimension_it_reads`.
+- **The dimension tool draws plainly, with its value on the line and a control
+  dot.** Evidence: `test_a_dimension_is_drawn_plainly_with_its_value_on_the_line`,
+  `test_a_dimensions_value_carries_a_control_dot`,
+  `test_a_dimensions_text_lies_along_its_line`,
+  `test_a_dimension_carries_its_own_text`,
+  `test_a_dimensions_value_holds_still_while_its_text_is_turned`.
+- **Cut-outs belong to any closed shape**, and come off the area. Evidence:
+  `test_a_cut_out_belongs_to_any_closed_shape`,
+  `test_a_cut_out_drawn_nowhere_says_so`,
+  `test_an_open_polyline_is_not_offered_as_somewhere_to_put_a_hole`.
+- **The takeoff list follows the scale.** Evidence:
+  `test_changing_the_page_scale_updates_the_takeoff_list`.
+- **Count markers show their whole number.** Evidence:
+  `test_a_count_marker_shows_its_whole_number_at_any_size`.
+
+## Snapping
+
+- **Three sources with their own switches**, plus alignment guides and
+  crossings. Evidence: `test_the_first_point_of_a_line_shows_the_snap_marker`,
+  `test_the_middle_of_a_polygon_side_can_be_caught`,
+  `test_a_corner_can_land_on_a_markup_while_drawing_the_polygon`,
+  `test_holding_ctrl_lets_go_of_the_grid_while_drawing`,
+  `test_ctrl_lets_go_of_the_grid_for_a_calibration_too`,
+  `test_freehand_snaps_only_its_start_and_end`.
+- **Where two lines cross.** Evidence:
+  `test_the_pointer_catches_where_two_lines_cross`,
+  `test_lines_that_stop_short_of_each_other_do_not_cross`,
+  `test_a_corner_still_beats_a_crossing_that_is_further_away`,
+  `test_crossings_are_left_alone_when_snapping_is_switched_off`.
+- **Guides are transient**, and the marker is a blue target rather than an
+  orange square. Evidence: `test_snap_guides_clear_when_the_pointer_leaves`,
+  `test_snap_guides_clear_on_tool_change_and_escape`,
+  `test_snap_guides_clear_when_the_point_is_committed`,
+  `test_snap_feedback_is_a_blue_target_not_an_orange_square`.
+
+## Pages, panels and the window
+
+- **One continuous canvas**, and a gesture aimed at the page under it.
+  Evidence: `tests/test_canvas.py`, 38 tests.
+- **Pages panel**: multi-selection, reorder, exclude from print, rename and
+  reset a label, centred thumbnails. Evidence:
+  `test_a_page_excluded_from_print_is_grey_and_is_not_exported`,
+  `test_a_page_label_can_be_renamed_and_reset_from_its_menu`,
+  `test_page_thumbnail_uses_a_centred_responsive_grid_cell`,
+  `test_a_wrapping_page_grid_uses_left_and_right_for_the_drop_slot`,
+  `test_page_navigation_and_label_are_centred_in_the_footer`.
+- **One panel open per side**, from the rail and from the View menu. Evidence:
+  `test_rail_click_keeps_one_panel_open_per_side`,
+  `test_view_menu_panel_toggle_obeys_the_same_side_limit`.
+- **The arrangement comes back**: pinning, floating, hiding, rolling up.
+  Evidence: `tests/test_layout.py`, 35 tests.
+- **Two documents in tabs, and a second window**, neither reaching into the
+  other. Evidence: `test_two_documents_open_in_tabs_without_reaching_into_each_other`,
+  `test_a_second_window_keeps_its_own_document`.
+- **Every action is reachable from the menu bar**, and every tool from the
+  toolbar. Evidence: `test_every_tool_and_application_action_is_reachable_from_the_menu_bar`,
+  `test_every_markup_tool_is_reachable_from_the_toolbar`,
+  `test_current_page_commands_are_reachable_from_the_menu_bar`.
+- **Every key the application answers to is in the shortcut list**, rebindable,
+  and silent while typing. Evidence:
+  `test_every_key_the_application_answers_to_is_in_the_shortcut_list`,
+  `test_a_changed_shortcut_reaches_the_action_and_the_canvas`,
+  `test_a_bare_letter_types_rather_than_picking_a_tool`,
+  `test_letter_keys_pick_their_tool`,
+  `test_ctrl_b_emboldens_a_selected_text_box_rather_than_bookmarking`,
+  `test_ctrl_b_still_bookmarks_when_there_are_no_words`.
+- **The markups list and the drawing show the same selection.** Evidence:
+  `test_picking_a_row_picks_the_markup_and_the_other_way_round`.
+
+## Tool sets and defaults
+
+- **My Tools, the number keys, and tool sets remembered between documents.**
+  Evidence: `test_my_tools_is_always_there`, `test_my_tools_are_numbered_in_the_panel`,
+  `test_the_number_keys_reach_for_my_tools`,
+  `test_tool_sets_are_remembered_between_sessions`,
+  `test_tool_sets_can_be_made_renamed_and_deleted`,
+  `test_a_markup_can_be_saved_to_a_tool_set_from_its_context_menu`,
+  `test_a_group_goes_into_a_tool_set_as_one_thing`,
+  `test_a_tool_set_entry_is_drawn_as_what_it_is`.
+- **Properties mode places a new one wearing the stored style.** Evidence:
+  `test_a_tool_in_properties_mode_draws_a_new_one`.
+- **Defaults are per kind, remembered, forgettable, and settable from the style
+  toolbar as well as the panel.** Evidence:
+  `test_a_default_belongs_to_that_kind_of_markup_only`,
+  `test_a_default_is_remembered_between_sessions`,
+  `test_a_default_can_be_forgotten`,
+  `test_a_default_never_carries_the_contents_across`,
+  `test_the_style_toolbar_sets_the_selected_markup_as_default`.
+
+## Format painter
+
+Evidence: `test_the_format_painter_carries_one_markups_look_to_another`,
+`test_clicking_with_the_format_painter_paints_that_markup`,
+`test_format_painter_never_copies_cloud_geometry`,
+`test_format_painter_does_not_copy_callout_leaders`,
+`test_the_format_painter_carries_a_brush`,
+`test_escape_puts_the_format_painter_down`.
+
+## Properties and the style toolbar
+
+- **Both are selection-aware and agree with each other**, for every tool.
+  Evidence: `test_the_style_toolbar_and_the_properties_panel_agree`,
+  `test_style_toolbar_tracks_real_selection_and_the_active_tool`,
+  `test_an_image_does_not_get_shape_style_controls`,
+  `test_a_raster_image_has_no_line_or_fill_style_controls`,
+  `test_a_photos_own_border_is_not_offered_but_its_default_is`,
+  `test_a_snapshot_and_a_photo_have_a_line_type_of_their_own`.
+- **Line styles and hatches show a real preview.** Evidence:
+  `test_line_and_hatch_choices_have_real_pattern_previews`.
+- **One name per idea, and short labels.** Evidence:
+  `test_one_idea_has_one_name_in_the_properties_panel`.
+
+## Snapshots and images
+
+Evidence: `test_a_snapshot_is_a_picture_of_the_region`,
+`test_a_snapshot_pastes_back_as_one_thing`,
+`test_a_snapshot_scaled_up_is_still_drawn_from_its_lines`,
+`test_a_snapshot_has_a_border_that_starts_at_none_and_can_be_set`,
+`test_a_snapshot_is_borderless_when_it_comes_back`,
+`test_snapshot_skips_unselected_typing`,
+`test_the_snapshot_marquee_looks_like_the_selection_marquee`,
+`test_an_image_can_be_swapped_for_another`,
+`test_a_cancelled_image_insert_changes_nothing`,
+`test_a_colour_can_be_made_transparent_within_a_tolerance`,
+`test_recolouring_a_page_can_be_undone`,
+`test_a_blank_page_says_there_is_nothing_to_recolour`.
+
+## Flattening and redaction
+
+Evidence: `test_flattened_content_stays_part_of_the_sheet`,
+`test_flattened_markup_lets_the_pointer_through_to_what_is_behind`,
+`test_irreversible_flattening_keeps_only_a_vector_recording`,
+`test_document_flattening_uses_the_classes_chosen`,
+`test_flatten_dialog_class_choices_follow_real_clicks`, and the redaction tests
+in `tests/test_app.py`.
+
+## Spelling
+
+Evidence: `test_spellcheck_knows_requests_and_offers_a_correction`.
+
+---
+
+## Built, but nothing holds it
+
+Real behaviour with no focused test. Each is a candidate for the next test
+somebody writes, because this is where a regression would go unnoticed.
+
+- **The page scale beside the page number in the pages panel.**
+  `panels.py` builds the caption from `page.scale.label`; no test reads it.
+- **The `.btx` sketch-tool fidelity repair.** The tool sets load and every tool
+  in them reads, but nothing compares an imported structural symbol against
+  what Bluebeam draws — see `docs/UNADDRESSED_TASKS.md`.
+- **Contents-block links as working links in the exported PDF.**
+  `io/export.outline_and_links` builds them and `io/pdflinks.add_outline_and_links`
+  writes them; the outline is tested, the link annotations are not.
+- **The scrollbars while the view is turned.** `apply_view_transform` holds the
+  zoom only and rotates the pages rather than the view, which is what keeps the
+  scrollbars upright; nothing asserts it.

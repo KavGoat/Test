@@ -473,7 +473,7 @@ def test_actual_size_is_one_to_one(window):
 # a gesture is not always about the page the chrome calls current
 # ---------------------------------------------------------------------------
 
-def test_the_calculation_insertion_point_is_off_by_default(window):
+def test_the_insertion_point_is_off_by_default(window):
     """Ordinary pointer placement remains the shipped behavior."""
     from markforge.ui import preferences
 

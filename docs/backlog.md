@@ -45,8 +45,9 @@ in a conversation is a list that gets lost.
 ## The page, and what is on it
 
 - [ ] The **page bar**: page width and margins on it, the grid switches as
-  buttons along the bottom the way the layer switches are, and the page
-  controls in the middle with next and previous, as Bluebeam has them.
+  buttons along the bottom, and the page controls in the middle with next and
+  previous, as Bluebeam has them. (Was written comparing the grid switches to
+  "the layer switches"; layers were withdrawn on 2026-09-07.)
 - [ ] A **grid that belongs to the page**: on for a blank page, never on an
   inserted PDF page, printed with the sheet, and switched off page by page
   from the pages panel and from page setup.

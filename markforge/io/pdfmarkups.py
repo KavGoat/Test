@@ -14,7 +14,6 @@ drawing is what a sketch markup holds.
 from __future__ import annotations
 
 import os
-from typing import Optional
 
 # Annotations that are not somebody's markup and should not become one.
 NOT_MARKUP = {"Link", "Popup", "Widget", "FileAttachment", "Movie", "Screen",
