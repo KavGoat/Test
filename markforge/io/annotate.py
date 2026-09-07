@@ -16,10 +16,18 @@ import os
 import tempfile
 from typing import Optional
 
+from ..pdf.objects import Name
+
 # What each kind of markup becomes. A shape that a PDF has a real annotation
 # for gets that one, so a reader can edit it natively; everything else goes as
 # a stamp, which every reader can select, move and delete.
-STAMP = "/Stamp"
+#
+# Everything here is built as the plain dictionaries and names of
+# :mod:`markforge.pdf`, not as any library's object types. That is what lets
+# the same annotation be appended to a file MarkForge is updating in place and
+# handed to pypdf when a document is being assembled from several sources —
+# one description of what a markup is, written once.
+STAMP = "Stamp"
 
 # The appearance is drawn at this resolution and scaled back to points, which
 # is only about how finely Qt rounds its coordinates.
@@ -38,14 +46,14 @@ CLOUD_INTENSITY = 2.0
 # What each of our arrow heads is called in a PDF. Ten endings are defined and
 # a markup that came in wearing one should go back out wearing the same one.
 LINE_ENDINGS = {
-    "none": "/None",
-    "arrow": "/ClosedArrow",
-    "open": "/OpenArrow",
-    "dot": "/Circle",
-    "square": "/Square",
-    "diamond": "/Diamond",
-    "slash": "/Slash",
-    "half": "/OpenArrow",
+    "none": "None",
+    "arrow": "ClosedArrow",
+    "open": "OpenArrow",
+    "dot": "Circle",
+    "square": "Square",
+    "diamond": "Diamond",
+    "slash": "Slash",
+    "half": "OpenArrow",
 }
 
 
@@ -60,34 +68,34 @@ def subtype_for(item) -> str:
     kind = getattr(item, "kind", "")
     if item.TYPE == "rect":
         if kind == "ellipse":
-            return "/Circle"
+            return "Circle"
         # A cloud is a square with a cloudy border, not a different shape.
-        return "/Square"
+        return "Square"
     if item.TYPE == "poly":
         if kind in ("ink", "highlighter"):
-            return "/Ink"
+            return "Ink"
         if kind in ("polygon", "cloud"):
-            return "/Polygon"
+            return "Polygon"
         if kind in ("line", "arrow"):
-            return "/Line"
+            return "Line"
         if kind in ("polyline", "arc"):
-            return "/PolyLine"
+            return "PolyLine"
         return STAMP
     if item.TYPE == "measure":
         from ..items import measure as measure_module
 
         if kind in (measure_module.AREA, measure_module.PERIMETER,
                     measure_module.VOLUME):
-            return "/Polygon"
+            return "Polygon"
         if kind in measure_module.DIMENSIONED:
-            return "/Line"
+            return "Line"
         if kind in (measure_module.POLYLENGTH, measure_module.ANGLE):
-            return "/PolyLine"
+            return "PolyLine"
         return STAMP                       # radius and diameter draw a circle
     if item.TYPE == "note":
-        return "/Text"
+        return "Text"
     if item.TYPE in ("callout", "typewriter", "text"):
-        return "/FreeText"
+        return "FreeText"
     return STAMP
 
 
@@ -232,7 +240,10 @@ def _write_them(path: str, printed: list, appearances: Appearances) -> int:
             continue
         reference = writer._add_object(form.clone(writer))
         height = float(printed[index].height_pt)
-        writer.add_annotation(index, _annotation(item, rect, height, reference))
+        annotation = annotation_for(item, rect, height)
+        holder = as_pypdf(annotation)
+        _put_the_appearance_on(holder, reference)
+        writer.add_annotation(index, holder)
         written += 1
     if not written:
         return 0
@@ -245,6 +256,46 @@ def _write_them(path: str, printed: list, appearances: Appearances) -> int:
         if os.path.exists(temporary):
             os.remove(temporary)
     return written
+
+
+def as_pypdf(value):
+    """One of this module's values, as the object type pypdf writes.
+
+    The description of a markup is written once, in the PDF's own vocabulary.
+    This is the translation for the path that hands it to pypdf; the path that
+    appends it to a file MarkForge is updating writes it as it stands.
+    """
+    from pypdf.generic import (ArrayObject, BooleanObject, DictionaryObject,
+                               FloatObject, NameObject, NumberObject,
+                               TextStringObject)
+
+    if isinstance(value, Name):
+        return NameObject("/" + str(value))
+    if isinstance(value, bool):
+        return BooleanObject(value)
+    if isinstance(value, int):
+        return NumberObject(value)
+    if isinstance(value, float):
+        return FloatObject(value)
+    if isinstance(value, str):
+        return TextStringObject(value)
+    if isinstance(value, (list, tuple)):
+        return ArrayObject([as_pypdf(item) for item in value])
+    if isinstance(value, dict):
+        holder = DictionaryObject()
+        for key, item in value.items():
+            holder[NameObject("/" + str(key))] = as_pypdf(item)
+        return holder
+    return value
+
+
+def _put_the_appearance_on(holder, reference) -> None:
+    """Point a pypdf annotation at the form it shows itself with."""
+    from pypdf.generic import DictionaryObject, NameObject
+
+    look = DictionaryObject()
+    look[NameObject("/N")] = reference
+    holder[NameObject("/AP")] = look
 
 
 def _form_of(drawn, rect):
@@ -268,44 +319,44 @@ def _form_of(drawn, rect):
     return form
 
 
-def _annotation(item, rect, page_height: float, appearance):
-    """The annotation dictionary for one markup."""
-    from pypdf.generic import (ArrayObject, DictionaryObject, FloatObject,
-                               NameObject, NumberObject, TextStringObject)
+def annotation_for(item, rect, page_height: float, appearance=None) -> dict:
+    """The annotation dictionary for one markup.
 
-    annotation = DictionaryObject()
-    annotation[NameObject("/Type")] = NameObject("/Annot")
-    annotation[NameObject("/Subtype")] = NameObject(subtype_for(item))
-    annotation[NameObject("/Rect")] = ArrayObject([
-        FloatObject(rect.left()), FloatObject(page_height - rect.bottom()),
-        FloatObject(rect.right()), FloatObject(page_height - rect.top())])
-    annotation[NameObject("/F")] = NumberObject(4)          # printed, not hidden
-    annotation[NameObject("/NM")] = TextStringObject(item.uid)
+    A plain dictionary of :mod:`markforge.pdf` values. *appearance* is whatever
+    stands for the form the annotation shows itself with — a reference in a
+    file being updated, a cloned object in one being assembled — and may be
+    left out while the appearance is still being drawn.
+    """
+    annotation: dict = {
+        "Type": Name("Annot"),
+        "Subtype": Name(subtype_for(item)),
+        "Rect": [rect.left(), page_height - rect.bottom(),
+                 rect.right(), page_height - rect.top()],
+        "F": 4,                                         # printed, not hidden
+        "NM": item.uid,
+    }
     if item.author:
-        annotation[NameObject("/T")] = TextStringObject(item.author)
+        annotation["T"] = item.author
     said = item.comment or item.summary()
     if said:
-        annotation[NameObject("/Contents")] = TextStringObject(said)
+        annotation["Contents"] = said
     if item.subject:
-        annotation[NameObject("/Subj")] = TextStringObject(item.subject)
+        annotation["Subj"] = item.subject
     colour = _colour(getattr(item.style, "stroke", ""))
     if colour is not None:
-        annotation[NameObject("/C")] = colour
+        annotation["C"] = colour
     inside = _colour(getattr(item.style, "fill", ""))
     if inside is not None:
-        annotation[NameObject("/IC")] = inside
+        annotation["IC"] = inside
     opacity = float(getattr(item.style, "opacity", 1.0) or 1.0)
     if opacity < 1.0:
-        annotation[NameObject("/CA")] = FloatObject(opacity)
+        annotation["CA"] = opacity
     width = float(getattr(item.style, "width", 0.0) or 0.0)
     if width > 0:
-        border = DictionaryObject()
-        border[NameObject("/W")] = FloatObject(width)
-        annotation[NameObject("/BS")] = border
+        annotation["BS"] = {"W": width}
     _add_the_geometry(annotation, item, rect, page_height)
-    look = DictionaryObject()
-    look[NameObject("/N")] = appearance
-    annotation[NameObject("/AP")] = look
+    if appearance is not None:
+        annotation["AP"] = {"N": appearance}
     return annotation
 
 
@@ -323,77 +374,65 @@ def _add_the_geometry(annotation, item, rect, page_height: float) -> None:
     two drawn ticks. Written that way it stays that thing wherever it is
     opened, instead of arriving as a picture that happens to be movable.
     """
-    from pypdf.generic import ArrayObject, FloatObject, NameObject
-
-    subtype = str(annotation.get("/Subtype"))
+    subtype = str(annotation.get("Subtype"))
     kind = getattr(item, "kind", "")
-    if subtype in ("/Square", "/Circle"):
+    if subtype in ("Square", "Circle"):
         try:
             shape = item.mapRectToParent(item.local_rect()).normalized()
         except Exception:                              # noqa: BLE001
             return
-        annotation[NameObject("/RD")] = ArrayObject([
-            FloatObject(max(shape.left() - rect.left(), 0.0)),
-            FloatObject(max(shape.top() - rect.top(), 0.0)),
-            FloatObject(max(rect.right() - shape.right(), 0.0)),
-            FloatObject(max(rect.bottom() - shape.bottom(), 0.0))])
+        annotation["RD"] = [max(shape.left() - rect.left(), 0.0),
+                            max(shape.top() - rect.top(), 0.0),
+                            max(rect.right() - shape.right(), 0.0),
+                            max(rect.bottom() - shape.bottom(), 0.0)]
         if kind == "cloud":
             _cloudy(annotation, item)
         return
-    if subtype == "/FreeText":
+    if subtype == "FreeText":
         _free_text(annotation, item, rect, page_height)
         return
     points = _points_on_the_page(item, page_height)
     if not points:
         return
-    if subtype == "/Line":
-        annotation[NameObject("/L")] = ArrayObject([
-            FloatObject(points[0][0]), FloatObject(points[0][1]),
-            FloatObject(points[-1][0]), FloatObject(points[-1][1])])
+    if subtype == "Line":
+        annotation["L"] = [points[0][0], points[0][1],
+                           points[-1][0], points[-1][1]]
         _line_endings(annotation, item)
         if item.TYPE == "measure":
             _dimension(annotation, item, page_height)
         return
-    if subtype in ("/Polygon", "/PolyLine"):
-        annotation[NameObject("/Vertices")] = ArrayObject(
-            [FloatObject(value) for point in points for value in point])
+    if subtype in ("Polygon", "PolyLine"):
+        annotation["Vertices"] = [value for point in points for value in point]
         _line_endings(annotation, item)
         if kind == "cloud":
             _cloudy(annotation, item)
         elif item.TYPE == "measure":
             _measured(annotation, item, subtype)
         return
-    if subtype == "/Ink":
-        annotation[NameObject("/InkList")] = ArrayObject([ArrayObject(
-            [FloatObject(value) for point in points for value in point])])
+    if subtype == "Ink":
+        annotation["InkList"] = [[value for point in points for value in point]]
 
 
 def _cloudy(annotation, item) -> None:
     """A cloud is a border effect, not a shape drawn to look like one."""
-    from pypdf.generic import (DictionaryObject, FloatObject, NameObject,
-                               TextStringObject)
-
-    effect = DictionaryObject()
-    effect[NameObject("/S")] = NameObject("/C")
     # How pronounced the scallops are. Ours are drawn to a radius; the PDF
     # says it in steps of one, and two is the middle setting every reader has.
     radius = float(getattr(item, "cloud_radius", 9.0) or 9.0)
-    effect[NameObject("/I")] = FloatObject(1.0 if radius < 7.0
-                                           else (2.0 if radius < 14.0 else 3.0))
-    annotation[NameObject("/BE")] = effect
-    if str(annotation.get("/Subtype")) == "/Polygon":
-        annotation[NameObject("/IT")] = NameObject("/PolygonCloud")
+    annotation["BE"] = {
+        "S": Name("C"),
+        "I": 1.0 if radius < 7.0 else (2.0 if radius < 14.0 else 3.0),
+    }
+    if str(annotation.get("Subtype")) == "Polygon":
+        annotation["IT"] = Name("PolygonCloud")
 
 
 def _line_endings(annotation, item) -> None:
     """What is drawn on each end of a line, in the PDF's ten names."""
-    from pypdf.generic import ArrayObject, NameObject
-
-    start = LINE_ENDINGS.get(getattr(item.style, "arrow_start", "none"), "/None")
-    end = LINE_ENDINGS.get(getattr(item.style, "arrow_end", "none"), "/None")
-    if start == "/None" and end == "/None":
+    start = LINE_ENDINGS.get(getattr(item.style, "arrow_start", "none"), "None")
+    end = LINE_ENDINGS.get(getattr(item.style, "arrow_end", "none"), "None")
+    if start == "None" and end == "None":
         return
-    annotation[NameObject("/LE")] = ArrayObject([NameObject(start), NameObject(end)])
+    annotation["LE"] = [Name(start), Name(end)]
 
 
 def _dimension(annotation, item, page_height: float) -> None:
@@ -405,39 +444,35 @@ def _dimension(annotation, item, page_height: float) -> None:
     a rendered caption positioned inline; and the value dragged off onto a
     leader is that caption's offset.
     """
-    from pypdf.generic import (ArrayObject, BooleanObject, FloatObject,
-                               NameObject, TextStringObject)
     from ..items import measure as measure_module
 
     if item.kind not in measure_module.DIMENSIONED:
         return
-    annotation[NameObject("/IT")] = NameObject("/LineDimension")
+    annotation["IT"] = Name("LineDimension")
     reach = float(getattr(item, "witness_reach", 0.0) or 0.0)
     if reach:
-        annotation[NameObject("/LL")] = FloatObject(-reach)
-        annotation[NameObject("/LLE")] = FloatObject(measure_module.WITNESS_OVERSHOOT)
-        annotation[NameObject("/LLO")] = FloatObject(measure_module.WITNESS_GAP)
+        annotation["LL"] = -reach
+        annotation["LLE"] = float(measure_module.WITNESS_OVERSHOOT)
+        annotation["LLO"] = float(measure_module.WITNESS_GAP)
     if getattr(item, "show_label", False) and getattr(item, "value_text", ""):
-        annotation[NameObject("/Cap")] = BooleanObject(True)
-        annotation[NameObject("/CP")] = NameObject("/Inline")
+        annotation["Cap"] = True
+        annotation["CP"] = Name("Inline")
         offset = getattr(item, "label_offset", None)
         if offset is not None and (offset.x() or offset.y()):
-            annotation[NameObject("/CO")] = ArrayObject(
-                [FloatObject(offset.x()), FloatObject(-offset.y())])
-        annotation[NameObject("/Contents")] = TextStringObject(item.value_text)
+            annotation["CO"] = [offset.x(), -offset.y()]
+        annotation["Contents"] = item.value_text
     _measure_dictionary(annotation, item)
 
 
 def _measured(annotation, item, subtype: str) -> None:
     """A take-off says it is one, and says what it was measured against."""
-    from pypdf.generic import NameObject
     from ..items import measure as measure_module
 
     if item.kind in (measure_module.AREA, measure_module.VOLUME,
                      measure_module.PERIMETER):
-        annotation[NameObject("/IT")] = NameObject("/PolygonDimension")
+        annotation["IT"] = Name("PolygonDimension")
     elif item.kind == measure_module.POLYLENGTH:
-        annotation[NameObject("/IT")] = NameObject("/PolyLineDimension")
+        annotation["IT"] = Name("PolyLineDimension")
     _measure_dictionary(annotation, item)
 
 
@@ -448,9 +483,6 @@ def _measure_dictionary(annotation, item) -> None:
     the number means nothing to the reader it is opened in. With it, the scale
     travels: another editor can measure the same drawing and agree.
     """
-    from pypdf.generic import (ArrayObject, DictionaryObject, FloatObject,
-                               NameObject, NumberObject, TextStringObject)
-
     scale = getattr(item, "page_scale", None)
     scale = scale() if callable(scale) else None
     if scale is None:
@@ -467,62 +499,57 @@ def _measure_dictionary(annotation, item) -> None:
         return
     if not per_point:
         return
-    numbers = DictionaryObject()
-    numbers[NameObject("/Type")] = NameObject("/NumberFormat")
-    numbers[NameObject("/U")] = TextStringObject(unit)
-    numbers[NameObject("/C")] = FloatObject(per_point)
-    numbers[NameObject("/D")] = NumberObject(100)
-    numbers[NameObject("/F")] = NameObject("/D")
-    numbers[NameObject("/RD")] = TextStringObject(".")
-    numbers[NameObject("/RT")] = TextStringObject(",")
-    measure = DictionaryObject()
-    measure[NameObject("/Type")] = NameObject("/Measure")
-    measure[NameObject("/Subtype")] = NameObject("/RL")
-    measure[NameObject("/R")] = TextStringObject(str(scale.label))
-    measure[NameObject("/X")] = ArrayObject([numbers])
-    measure[NameObject("/D")] = ArrayObject([numbers])
-    measure[NameObject("/A")] = ArrayObject([numbers])
-    annotation[NameObject("/Measure")] = measure
+    numbers = {
+        "Type": Name("NumberFormat"),
+        "U": unit,
+        "C": per_point,
+        "D": 100,
+        "F": Name("D"),
+        "RD": ".",
+        "RT": ",",
+    }
+    annotation["Measure"] = {
+        "Type": Name("Measure"),
+        "Subtype": Name("RL"),
+        "R": str(scale.label),
+        "X": [numbers],
+        "D": [dict(numbers)],
+        "A": [dict(numbers)],
+    }
 
 
 def _free_text(annotation, item, rect, page_height: float) -> None:
     """Words on the page, and the leader that points at what they are about."""
-    from pypdf.generic import (ArrayObject, FloatObject, NameObject,
-                               NumberObject, TextStringObject)
-
     if item.TYPE == "typewriter":
-        annotation[NameObject("/IT")] = NameObject("/FreeTextTypeWriter")
+        annotation["IT"] = Name("FreeTextTypeWriter")
     written = ""
     try:
         written = item.text()
     except Exception:                                  # noqa: BLE001
         written = ""
     if written:
-        annotation[NameObject("/Contents")] = TextStringObject(written)
-    annotation[NameObject("/Q")] = NumberObject(_justification(item))
+        annotation["Contents"] = written
+    annotation["Q"] = _justification(item)
     colour = getattr(item.style, "text_color", "") or "#000000"
     numbers = _colour(colour)
     if numbers is not None:
-        annotation[NameObject("/DA")] = TextStringObject(
-            f"{float(numbers[0])} {float(numbers[1])} {float(numbers[2])} rg "
-            f"/Helv {float(item.style.font_size)} Tf")
+        annotation["DA"] = (f"{numbers[0]} {numbers[1]} {numbers[2]} rg "
+                            f"/Helv {float(item.style.font_size)} Tf")
     leader = _callout_line(item, page_height)
     if leader:
-        annotation[NameObject("/IT")] = NameObject("/FreeTextCallout")
-        annotation[NameObject("/CL")] = ArrayObject(
-            [FloatObject(value) for point in leader for value in point])
-        annotation[NameObject("/LE")] = NameObject(
+        annotation["IT"] = Name("FreeTextCallout")
+        annotation["CL"] = [value for point in leader for value in point]
+        annotation["LE"] = Name(
             LINE_ENDINGS.get(getattr(item.style, "arrow_end", "arrow"),
-                             "/ClosedArrow"))
+                             "ClosedArrow"))
     try:
         box = item.mapRectToParent(item.local_rect()).normalized()
     except Exception:                                  # noqa: BLE001
         return
-    annotation[NameObject("/RD")] = ArrayObject([
-        FloatObject(max(box.left() - rect.left(), 0.0)),
-        FloatObject(max(box.top() - rect.top(), 0.0)),
-        FloatObject(max(rect.right() - box.right(), 0.0)),
-        FloatObject(max(rect.bottom() - box.bottom(), 0.0))])
+    annotation["RD"] = [max(box.left() - rect.left(), 0.0),
+                        max(box.top() - rect.top(), 0.0),
+                        max(rect.right() - box.right(), 0.0),
+                        max(rect.bottom() - box.bottom(), 0.0)]
 
 
 def _justification(item) -> int:
@@ -572,10 +599,8 @@ def _points_on_the_page(item, page_height: float) -> list:
     return placed
 
 
-def _colour(value: str):
+def _colour(value: str) -> Optional[list]:
     """A ``#rrggbb`` as the three numbers a PDF annotation wants."""
-    from pypdf.generic import ArrayObject, FloatObject
-
     text = (value or "").strip()
     if not text.startswith("#") or len(text) not in (7, 9):
         return None
@@ -585,4 +610,4 @@ def _colour(value: str):
         blue = int(text[5:7], 16) / 255.0
     except ValueError:
         return None
-    return ArrayObject([FloatObject(red), FloatObject(green), FloatObject(blue)])
+    return [red, green, blue]

@@ -83,7 +83,31 @@ def layer_in(path: str) -> Optional[bytes]:
 
 # -- writing ---------------------------------------------------------------
 def write(document, path: str, appearance: bool = True) -> None:
-    """Write *document* to *path* as a PDF carrying its markup record."""
+    """Write *document* to *path* as a PDF carrying its markup record.
+
+    Two ways, and which one is used depends on what the document is.
+
+    A document that *is* one PDF with markups on it — a drawing opened, marked
+    up and saved — is written as an incremental update to that PDF by
+    :mod:`markforge.io.pdfsave`: the original bytes are kept exactly, and the
+    markups are appended. Anything else is assembled page by page here.
+    """
+    from . import pdfsave
+
+    original = pdfsave.source_bytes(document)
+    if original is not None:
+        try:
+            pdfsave.save(document, path, original, appearance=appearance)
+            return
+        except Exception:                              # noqa: BLE001
+            # Never lose a save over the clever path. The file is assembled
+            # instead, which is what every earlier version did.
+            pass
+    _assemble(document, path, appearance=appearance)
+
+
+def _assemble(document, path: str, appearance: bool = True) -> None:
+    """Build the file page by page, from whatever each page came from."""
     from pypdf import PdfWriter
 
     output = PdfWriter()

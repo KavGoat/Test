@@ -332,8 +332,13 @@ class DocumentSettings:
     footer_left: str = "{title}"
     footer_center: str = ""
     footer_right: str = "Page {page} of {pages}"
+    # Both off to begin with. A running footer belongs on a document this
+    # application wrote; stamping "Page 1 of 1" across somebody else's title
+    # block is not a thing a markup editor should do without being asked, and
+    # it is the difference between handing their drawing back and handing back
+    # a version of it. Page ▸ Header/footer turns them on.
     show_header: bool = False
-    show_footer: bool = True
+    show_footer: bool = False
     # A logo sits in one of the six header/footer slots; text in the same slot
     # steps aside for it.
     logo_key: str = ""

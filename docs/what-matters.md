@@ -26,10 +26,14 @@ markup that was not made. So:
 
 - **A saved file is a PDF**, not a container with a PDF inside it. Acrobat,
   Bluebeam, a browser and a phone all open it.
-- **The source page is preserved byte for byte.** Saving appends; it never
-  re-encodes, re-compresses or re-renders what came in. A signature still
-  verifies, an embedded font stays embedded, and a drawing office's export is
-  handed back exactly as it was received.
+- **The source page is preserved byte for byte** whenever the document is that
+  page and the markups on it. Saving appends; it never re-encodes,
+  re-compresses or re-renders what came in. A signature still verifies, an
+  embedded font stays embedded, and a drawing office's export is handed back
+  exactly as it was received. Where something has to be painted onto the page
+  — a markup flattened into it, a drawing dimmed, a running footer — the file
+  is built afresh, and the tool says which of the two it did rather than
+  claiming the stronger one.
 - **Every markup is a real annotation** with its own appearance stream — a
   cloud is a cloudy-bordered square, a callout is a free text with a callout
   line, a dimension is a measured line — so the next person can select it,

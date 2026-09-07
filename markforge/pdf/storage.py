@@ -23,6 +23,11 @@ class ObjectStorage:
                  trailer: Optional[dict] = None):
         self.objects: dict[int, Object] = dict(objects or {})
         self.trailer: dict = dict(trailer or {})
+        #: Numbers whose object has been replaced since it was read. An
+        #: incremental update appends only what changed, and an object that
+        #: was rewritten in place looks exactly like one that was not unless
+        #: somebody says so.
+        self.rewritten: set[int] = set()
 
     # -- reaching things ---------------------------------------------------
     def resolve(self, value: Any) -> Any:
@@ -82,10 +87,14 @@ class ObjectStorage:
         return Ref(number)
 
     def put(self, reference: Ref, value: Object) -> None:
+        if reference.number in self.objects:
+            self.rewritten.add(reference.number)
         self.objects[reference.number] = value
 
     def merge_into(self, reference: Ref, changes: dict) -> None:
         """Add *changes* to the dictionary *reference* points at."""
+        if isinstance(reference, Ref):
+            self.rewritten.add(reference.number)
         found = self.resolve(reference)
         if isinstance(found, Stream):
             found.dictionary.update(changes)

@@ -12,13 +12,17 @@ It is Bluebeam's job, done in the open:
 | A PDF reader | Pages read as one scroll, at any zoom, sharp because they are re-rendered rather than magnified |
 | Anything that has to open it afterwards | An ordinary PDF — the drawing untouched, the markups standard annotations |
 
-There is no proprietary file format. **The document is a PDF.** Saving writes
-an incremental update: the page that came in is preserved byte for byte, and
-the markups are appended as annotations. A signed drawing still verifies, and
-what MarkForge knows about a markup that PDF has no word for rides along inside
-the same file as an embedded record — so a round trip through MarkForge loses
-nothing, and a round trip through anything else loses only what that program
-never understood.
+There is no proprietary file format. **The document is a PDF.** Open a drawing,
+mark it up and save, and what is written is an *incremental update*: the file
+that came in is preserved byte for byte and the markups are appended after it,
+so a signature over the original still covers the original. What MarkForge
+knows about a markup that PDF has no word for rides along inside the same file
+as an embedded record — so a round trip through MarkForge loses nothing, and a
+round trip through anything else loses only what that program never understood.
+
+Assemble a document out of several files, or paint something into a page, and
+it is written afresh instead: that is not an addition to one file, and it says
+so rather than pretending.
 
 ---
 
@@ -241,9 +245,13 @@ it, or swaps one colour for another.
 A PDF. Not a PDF-shaped container, and not a PDF with a copy of the drawing
 inside it — the file you opened, plus an appended update.
 
-- **The source page is untouched.** Its bytes are the same bytes. Nothing is
-  re-encoded, re-compressed or re-rendered, so a signature still verifies, an
-  embedded font stays embedded and a CAD export keeps whatever it was doing.
+- **The source page is untouched.** When the document is that PDF and the
+  markups on it, its bytes are the same bytes: the update is appended after
+  them. Nothing is re-encoded, re-compressed or re-rendered, so a signature
+  still verifies, an embedded font stays embedded and a CAD export keeps
+  whatever it was doing. (Assemble pages from several files, dim a drawing,
+  flatten a markup into the sheet or turn on a running footer, and the page
+  has to be painted — then the file is built rather than added to.)
 - **Every markup is a real annotation.** A cloud is a `/Square` or `/Polygon`
   with a `/BE` cloudy border; a callout is a `/FreeText` with a `/CL` callout
   line and the right `/IT` intent; a measurement is a `/Line`, `/Polygon` or
@@ -329,8 +337,9 @@ markforge/
                images, snapshots, measurements, counts
   ui/          the scene and canvas, tools, key bindings, dock panels,
                dialogs, main window
-  io/          opening and saving PDFs, annotation writing, Bluebeam tool
-               sets, vector import, links, recolouring, export
+  io/          opening and saving PDFs, the incremental update, annotation
+               writing, Bluebeam tool sets, vector import, links, recolouring,
+               export
 btx/           the real Bluebeam tool sets the importer is tested against
 tests/         the suite: the engine, the items, the window, and real use
 ```
@@ -342,8 +351,10 @@ than wrapped round somebody else's. It reads classic cross-reference tables and
 cross-reference streams, object streams, Flate/LZW/ASCIIHex/ASCII85/RunLength
 with PNG and TIFF predictors, and it will recover a file whose cross-reference
 table is wrong by scanning for the objects. It writes incrementally: the
-original bytes, then only what changed. That is what makes "save" a promise
-rather than a re-export.
+original bytes, then only what changed. `io/pdfsave.py` is what uses it to
+save — it decides whether this document is an addition to one file, and when
+it is, appends the annotations, the pages that now point at them and the
+record. That is what makes "save" a promise rather than a re-export.
 
 **`io/annotate.py`** is the other half of that promise: the mapping from a
 markup on the canvas to the annotation dictionary that means the same thing —

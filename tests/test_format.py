@@ -152,6 +152,112 @@ def test_opening_a_pdf_is_opening_a_document_not_converting_one(window, tmp_path
 
 
 
+def test_saving_a_marked_up_drawing_leaves_the_drawing_byte_for_byte(
+        window, tmp_path):
+    """The file that comes out starts with the file that went in.
+
+    Not "the same drawing", not "the same pages" — the same bytes. That is
+    what makes a save an addition to somebody else's document rather than a
+    re-export of it: a signature over the original still covers the original,
+    an embedded font is still the font that was embedded, and nothing has been
+    quietly re-compressed on the way through.
+    """
+    from PySide6.QtCore import QRectF
+    from markforge.items.shapes import RectItem
+
+    source = str(tmp_path / "drawing.pdf")
+    _a_pdf_with_line_work(source)
+    with open(source, "rb") as handle:
+        original = handle.read()
+
+    window.open_path(source)
+    window.rebuild_scenes()
+    drawn = RectItem()
+    drawn.set_local_rect(QRectF(0, 0, 200, 120))
+    window.document.pages[0].frame.add_markup(drawn, QPointF(100, 100))
+
+    saved = str(tmp_path / "marked.pdf")
+    project_io.save_document(window.document, saved)
+    with open(saved, "rb") as handle:
+        written = handle.read()
+
+    assert written[:len(original)] == original, \
+        "the drawing that came in should still be there, exactly"
+    assert len(written) > len(original), "and the markups appended after it"
+    assert _readable_pdf(saved).pageCount() == 1
+
+
+def test_an_updated_drawing_still_reads_as_a_pdf_everywhere(window, tmp_path):
+    """An incremental update is a PDF, not a PDF with something stuck on it."""
+    from PySide6.QtCore import QRectF
+    from pypdf import PdfReader
+
+    from markforge.items.shapes import RectItem
+
+    source = str(tmp_path / "drawing.pdf")
+    _a_pdf_with_line_work(source)
+    window.open_path(source)
+    window.rebuild_scenes()
+    drawn = RectItem()
+    drawn.set_local_rect(QRectF(0, 0, 200, 120))
+    window.document.pages[0].frame.add_markup(drawn, QPointF(100, 100))
+    saved = str(tmp_path / "marked.pdf")
+    project_io.save_document(window.document, saved)
+
+    reader = PdfReader(saved)
+    assert len(reader.pages) == 1
+    assert "GRID LINE" in reader.pages[0].extract_text(), \
+        "the page's own words are still its own words"
+    annotations = reader.pages[0].get("/Annots") or []
+    assert len(annotations) == 1, "and the rectangle went in as an annotation"
+    assert str(annotations[0].get_object()["/Subtype"]) == "/Square"
+    assert project_io.carries_a_document(saved), \
+        "the record rides along in the update, not only in a fresh write"
+
+
+def test_saving_twice_leaves_one_record_to_read_back(window, tmp_path):
+    """Each save appends. The record read back has to be the last one."""
+    source = str(tmp_path / "drawing.pdf")
+    _a_pdf_with_line_work(source)
+    window.open_path(source)
+    window.rebuild_scenes()
+    saved = str(tmp_path / "marked.pdf")
+
+    window.document.title = "First"
+    project_io.save_document(window.document, saved)
+    window.document.title = "Second"
+    project_io.save_document(window.document, saved)
+
+    reopened = Document()
+    project_io.load_document(reopened, saved)
+    assert reopened.title == "Second"
+
+
+def test_a_page_the_update_cannot_describe_is_assembled_instead(window, tmp_path):
+    """A drawing that has been dimmed is not the drawing that came in.
+
+    The incremental path can only add to the source page; anything that
+    changes the page itself has to be painted, and then the file is built
+    rather than added to. It still has to be a correct PDF either way.
+    """
+    from markforge.io import pdfsave
+
+    source = str(tmp_path / "drawing.pdf")
+    _a_pdf_with_line_work(source)
+    window.open_path(source)
+    window.rebuild_scenes()
+    assert pdfsave.source_bytes(window.document) is not None
+
+    window.document.pages[0].background_opacity = 0.4
+    assert pdfsave.source_bytes(window.document) is None, \
+        "a dimmed page is not the source page"
+
+    saved = str(tmp_path / "dimmed.pdf")
+    project_io.save_document(window.document, saved)
+    assert _readable_pdf(saved).pageCount() == 1
+    assert project_io.carries_a_document(saved)
+
+
 def test_what_is_drawn_on_the_page_is_in_the_saved_pdf(window, tmp_path):
     """Any reader opening the file sees the markups, not an empty sheet."""
     from PySide6.QtCore import QRectF, QSize
