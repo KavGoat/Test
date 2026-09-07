@@ -31,7 +31,7 @@ from ..core.units import format_quantity, parse_unit
 from ..io import export as export_io
 from ..io import pdfio
 from ..io import project as project_io
-from ..items.base import MarkupItem, Style, build_item
+from ..items.base import HATCH_PATTERNS, MarkupItem, Style, build_item
 from ..items.contents import ContentsItem
 from ..items.mathitem import MathItem
 from ..items.measure import MeasureItem
@@ -53,8 +53,8 @@ from .rail import (AREAS, LEFT, RIGHT, PanelRail, RailBar, load_sides,
                    save_sides)
 from .scene import DocumentScene, detach
 from .shortcuts import COMMAND, INSERT, SYMBOL, TOOL, ShortcutManager
-from .stylecaps import (DASH, FILL, FONT, STROKE, WIDTH, capabilities,
-                        common_capabilities)
+from .stylecaps import (DASH, FILL, FILL_OPACITY, FONT, HATCH, OPACITY, STROKE,
+                        WIDTH, capabilities, common_capabilities)
 from . import toolsets
 from .tools import CATEGORIES, NONE, TOOL_MAP, TOOLS, tools_in
 from .view import SIZED_SHAPES
@@ -664,7 +664,8 @@ class MainWindow(QMainWindow):
         style_bar = QToolBar("Style")
         style_bar.setObjectName("toolbar_style")
         self._style_widgets: dict[str, list] = {
-            STROKE: [], FILL: [], WIDTH: [], DASH: [], FONT: []}
+            STROKE: [], FILL: [], WIDTH: [], DASH: [], FONT: [],
+            HATCH: [], OPACITY: [], FILL_OPACITY: []}
         self._style_widgets[STROKE].append(style_bar.addWidget(QLabel(" Line ")))
         self.stroke_button = ColorButton(self.default_style.stroke, True, "Line colour")
         self.stroke_button.colorChanged.connect(self._style_stroke)
@@ -693,6 +694,38 @@ class MainWindow(QMainWindow):
         self.font_spin.setSuffix(" pt")
         self.font_spin.valueChanged.connect(self._style_font)
         self._style_widgets[FONT].append(style_bar.addWidget(self.font_spin))
+        # Hatch and the two opacities were only ever in the Properties panel,
+        # so the two surfaces disagreed about every markup that has them: the
+        # panel offered a hatch and a transparency the toolbar had no way to
+        # reach. They are the same setting either way, so they are here too.
+        self._style_widgets[HATCH].append(style_bar.addWidget(QLabel(" Hatch ")))
+        self.hatch_combo = QComboBox()
+        self.hatch_combo.setObjectName("hatchPattern")
+        for name in HATCH_PATTERNS:
+            self.hatch_combo.addItem(name or "plain", name)
+        self.hatch_combo.setToolTip("Pattern drawn over the fill")
+        self.hatch_combo.currentIndexChanged.connect(
+            lambda _index: self._style_hatch(self.hatch_combo.currentData()))
+        self._style_widgets[HATCH].append(style_bar.addWidget(self.hatch_combo))
+        self._style_widgets[OPACITY].append(style_bar.addWidget(QLabel(" Opacity ")))
+        self.opacity_spin = QSpinBox()
+        self.opacity_spin.setRange(5, 100)
+        self.opacity_spin.setSuffix(" %")
+        self.opacity_spin.setToolTip("How much of what is underneath shows through")
+        self.opacity_spin.setValue(int(self.default_style.opacity * 100))
+        self.opacity_spin.valueChanged.connect(self._style_opacity)
+        self._style_widgets[OPACITY].append(style_bar.addWidget(self.opacity_spin))
+        self._style_widgets[FILL_OPACITY].append(
+            style_bar.addWidget(QLabel(" Fill % ")))
+        self.fill_opacity_spin = QSpinBox()
+        self.fill_opacity_spin.setRange(0, 100)
+        self.fill_opacity_spin.setSuffix(" %")
+        self.fill_opacity_spin.setToolTip(
+            "How solid the fill is, separately from the line round it")
+        self.fill_opacity_spin.setValue(int(self.default_style.fill_opacity * 100))
+        self.fill_opacity_spin.valueChanged.connect(self._style_fill_opacity)
+        self._style_widgets[FILL_OPACITY].append(
+            style_bar.addWidget(self.fill_opacity_spin))
         # How a calculation's answer reads. It was on the right-click menu and
         # in Properties only, so the two ways of styling a selected thing did
         # not offer the same things — and the figures a number is quoted to is
@@ -2776,7 +2809,13 @@ class MainWindow(QMainWindow):
                     (self.fill_button, active.style.fill, "set_color"),
                     (self.width_spin, active.style.width, "setValue"),
                     (self.dash_combo, active.style.line_style, "setCurrentText"),
-                    (self.font_spin, active.style.font_size, "setValue"))
+                    (self.font_spin, active.style.font_size, "setValue"),
+                    (self.hatch_combo, active.style.hatch or "plain",
+                     "setCurrentText"),
+                    (self.opacity_spin, int(round(active.style.opacity * 100)),
+                     "setValue"),
+                    (self.fill_opacity_spin,
+                     int(round(active.style.fill_opacity * 100)), "setValue"))
         for control, value, method in controls:
             control.blockSignals(True)
             getattr(control, method)(value)
@@ -2902,6 +2941,24 @@ class MainWindow(QMainWindow):
         self.default_style.font_size = value
         self._push_style(lambda style: setattr(style, "font_size", value), "Font size",
                          predicate=lambda item: FONT in capabilities(item))
+
+    def _style_hatch(self, value: str) -> None:
+        self.default_style.hatch = value or ""
+        self._push_style(lambda style: setattr(style, "hatch", value or ""), "Hatch",
+                         predicate=lambda item: HATCH in capabilities(item))
+
+    def _style_opacity(self, percent: int) -> None:
+        value = max(percent, 1) / 100.0
+        self.default_style.opacity = value
+        self._push_style(lambda style: setattr(style, "opacity", value), "Opacity",
+                         predicate=lambda item: OPACITY in capabilities(item))
+
+    def _style_fill_opacity(self, percent: int) -> None:
+        value = percent / 100.0
+        self.default_style.fill_opacity = value
+        self._push_style(lambda style: setattr(style, "fill_opacity", value),
+                         "Fill opacity",
+                         predicate=lambda item: FILL_OPACITY in capabilities(item))
 
     def _push_style(self, mutate, description: str, predicate=None) -> None:
         items = self.selected_items()

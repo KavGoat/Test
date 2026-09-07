@@ -11514,3 +11514,39 @@ def test_the_drawn_table_fits_inside_the_box_it_was_dragged(window):
     assert (table.sheet.cols, table.sheet.rows) == (4, 6), "whole cells only"
     assert table.local_rect().width() <= across + 1
     assert table.local_rect().height() <= down + 1
+
+
+def test_the_style_toolbar_and_the_properties_panel_agree(window):
+    """One markup, two places to change it, and the same list in both.
+
+    They used to disagree about every markup that has a hatch or a
+    transparency: the Properties panel offered both and the toolbar had no
+    such control at all, so which surface you happened to open decided what
+    you were allowed to change.
+    """
+    from tests.probe_audit import make
+    from calcforge.ui.stylecaps import capabilities
+    from calcforge.ui.tools import TOOLS
+
+    disagreed = []
+    for tool in TOOLS:
+        if tool.mode == "none" or tool.factory is None:
+            continue
+        if tool.key in ("image", "snapshot", "calibrate"):
+            continue
+        window.new_document()
+        window.interactive_prompts = False
+        item = make(window, tool.key)
+        if item is None:
+            continue                       # nothing this tool draws on its own
+        window.select_tool("select")
+        window.view.scene().clearSelection()
+        item.setSelected(True)
+        window.refresh_selection()
+        on_the_toolbar = {field for field, actions in window._style_widgets.items()
+                          if any(action.isVisible() for action in actions)}
+        in_the_panel = capabilities(item)
+        if on_the_toolbar != in_the_panel:
+            disagreed.append(f"{tool.key}: toolbar {sorted(on_the_toolbar)} "
+                             f"vs panel {sorted(in_the_panel)}")
+    assert not disagreed, "\n".join(disagreed)

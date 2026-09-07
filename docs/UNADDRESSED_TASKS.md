@@ -2,7 +2,7 @@
 
 Audited: 2026-09-06 against `claude/engineering-calc-markup-app-2twiqs`.
 
-The 8 entries below are what the audit could not show working. Each says
+The 7 entries below are what the audit could not show working. Each says
 what is missing or blocking it. Several are tasks whose base behaviour is
 finished and whose recent amendment is not; those name the part that is done so
 the remaining work is clear.
@@ -14,11 +14,6 @@ This is not the user-owned completion record. It changes no checkbox in
 
 - **(new)** Support multiple open documents at once: PDF review documents and `.cfx` CalcForge documents appear in separate tabs, can be viewed side-by-side in a split view, and can be moved into independent application windows. Each document keeps its own pages, state and active tool without leaking into another tab/window.
   - **Missing:** Two of the three parts done; split view is not. DONE — tabs: each open document has a tab with its own document, canvas, undo history, page and tool, and one view is handed a different canvas on a switch, so nothing is re-wired and nothing of one document reaches into another. The bar hides itself when only one document is open. File > New tab, Ctrl+T. DONE — independent windows: File > New window, Ctrl+Shift+N, each with its own document, view and undo stack; a window built this way is kept alive rather than collected as the call returns, and every tab's undo stack is released when the window closes so none of them calls back into a window that has gone. NOT DONE — side-by-side split view: that needs a second live PageView in the same window, which the shared-view design deliberately avoids, so it is a separate piece of work rather than a bolt-on. Also not done: PDF review documents opening into a tab of their own, which follows the split-view question. Evidence: test_two_documents_open_in_tabs_without_reaching_into_each_other, test_a_second_window_keeps_its_own_document.
-
-## 9. Callouts, text boxes, dimensions
-
-- Custom dimension tool (Alt+M): click first point, click second point, then place the dimension text directly with an in-place text cursor — no popup dialog. Text is blank by default until typed. It sits in-line with the dimension line by default. Both the actual and the custom measure must look like the plain arrow-to-arrow dimension in the reference photo, with the value written along the line. The value carries a control dot: dragging that dot, constrained to perpendicular travel only, extends the witness lines out from the measured points; Shift and dragging the same dot moves the value off the line to wherever it is dropped, connected back by a perpendicular leader with a parallel hinged section (10, 37, reference photos msg 116 and the three-example photo)
-  - **Missing:** Reopened and extended. The dimension carries its own text already (test_a_dimension_carries_its_own_text), but the amendment adds three things not built: both the actual and custom measure drawn as the plain arrow-to-arrow dimension in the reference photo with the value along the line; a control dot on the value that extends the witness lines when dragged, constrained to perpendicular travel; and Shift-dragging that dot to move the value off the line, joined back by a perpendicular leader with a parallel hinged section.
 
 ## 27. Reliability / process
 
