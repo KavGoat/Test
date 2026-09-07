@@ -267,9 +267,14 @@ class MainWindow(QMainWindow):
         self._icon_names[action] = name
         return action
 
-    # The three that belong to the words, not to the document. Bold, italic
-    # and underline mean what they mean in every program there has ever been,
-    # so they are not offered for rebinding and nothing else may take them.
+    # The three that belong to the words while words are being written. Bold,
+    # italic and underline mean what they mean in every program there has ever
+    # been, so inside a markup being typed into they format the text and no
+    # command fires — whatever a command may be bound to them outside it.
+    #
+    # They are in the shortcut list like everything else: a key the
+    # application answers to that cannot be seen or changed is a key nobody
+    # knows about, which is how Ctrl+I came to insert a PDF.
     RESERVED_FOR_TEXT = ("Ctrl+B", "Ctrl+I", "Ctrl+U")
     EDITOR_COMMANDS = {
         "command.text_left", "command.text_center", "command.text_right",
@@ -285,9 +290,7 @@ class MainWindow(QMainWindow):
             # so it can be seen in one place and changed. What is registered
             # is the default; a binding already changed keeps the change.
             already = _ALREADY_BOUND.get(key)
-            if shortcut in self.RESERVED_FOR_TEXT:
-                pass                     # the words keep bold, italic, underline
-            elif already:
+            if already:
                 # This command is already in the list under its own name; a
                 # second entry for the same key would read as a clash with
                 # itself.
@@ -1512,18 +1515,20 @@ class MainWindow(QMainWindow):
         """Let the editor keep keys that would otherwise run global commands.
 
         Qt asks with a ShortcutOverride before it fires a shortcut. Accepting
-        it means the key goes to whatever has focus instead. Symbol bindings
-        are editor input, not document commands, and Ctrl+B/I/U retain their
-        normal text-formatting meaning.
+        it means the key goes to whatever has focus instead — so while words
+        are being typed, no document command fires at all. Two things are let
+        through: a symbol binding, which is editor input rather than a
+        command, and the handful of editor commands that are about the words
+        themselves.
         """
         if event.type() == QEvent.ShortcutOverride and self.view.is_editing():
             sequence = QKeySequence(event.keyCombination())
-            portable = sequence.toString(QKeySequence.PortableText).lower()
-            reserved = {key.lower() for key in self.RESERVED_FOR_TEXT}
             binding = self.shortcuts.binding_for(sequence)
-            if portable not in reserved and not (
-                    binding is not None and (binding.kind == SYMBOL
+            if not (binding is not None and (binding.kind == SYMBOL
                                              or binding.action_id in self.EDITOR_COMMANDS)):
+                # Including Ctrl+B, Ctrl+I and Ctrl+U. Whatever is bound to
+                # them, it does not fire in the middle of a sentence; the view
+                # takes them and formats the words instead.
                 event.accept()
                 return True
         return super().eventFilter(watched, event)

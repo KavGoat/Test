@@ -359,12 +359,22 @@ and held.
   `test_nothing_in_the_footer_is_drawn_on_top_of_anything_else`,
   `test_page_navigation_and_label_are_centred_in_the_footer`.
 - **`Ctrl+I` inserted a PDF.** The requirement says Ctrl+B/I/U must never
-  insert a page; Ctrl+I was Insert PDF's shortcut, and because keys reserved
-  for the text are deliberately kept out of the shortcut list it was a binding
-  nobody could see and nobody could change. Insert PDF is on `Ctrl+Shift+I`,
-  and italic and underline are commands of their own — they had none at all
-  before, only bold did. Evidence:
+  insert a page. Ctrl+I was Insert PDF's shortcut, and the cause was the rule
+  meant to protect those keys: they were kept *out* of the shortcut list so
+  nothing could take them, and let through while typing so that whatever had
+  taken them anyway fired anyway. A key the application answers to that cannot
+  be seen or changed is a key nobody knows about.
+  Both halves are fixed. They are ordinary bindings in the list now — visible,
+  rebindable, and holding italic, underline and bookmark; and while words are
+  being typed *no* binding fires, whatever is on it, because the view takes
+  the key and formats the words instead. The editor has no handling of its own
+  for these three, so suppressing the shortcut alone would have left Ctrl+B
+  doing nothing at all. Insert PDF is on `Ctrl+Shift+I`. Evidence:
   `test_ctrl_i_italicises_rather_than_inserting_a_pdf`,
+  `test_bold_italic_and_underline_are_in_the_shortcut_list`,
+  `test_no_command_fires_from_ctrl_b_i_or_u_while_typing`,
+  `test_ctrl_b_i_and_u_format_the_words_being_typed`,
+  `test_a_key_bound_over_ctrl_b_still_does_not_fire_while_typing`,
   `test_italic_and_underline_reach_the_markup_that_is_picked`,
   `test_italic_and_underline_reach_only_the_run_picked_out`.
 - **A right click did not close a shape being clicked out**, though the cloud

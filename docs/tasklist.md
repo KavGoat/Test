@@ -285,13 +285,19 @@ same pass; none is ticked, because completion is the user's to mark.
   position and the page label in one place. *Fixed*: it is in the layout now,
   between two stretches, and the cursor position moved to the left beside the
   status message, where information belongs and controls do not.
-- [ ] **(found here)** `Ctrl+I` inserts a PDF instead of italicising, which is
-  the exact thing §29 says must never happen. Because keys reserved for the
-  text are deliberately kept out of the shortcut list, it was a binding nobody
-  could see and nobody could change. *Fixed*: Insert PDF is on `Ctrl+Shift+I`,
-  and italic and underline are commands of their own on `Ctrl+I` and `Ctrl+U`.
-  They had none before — only bold did — so this also closes the run-level half
-  of the §9 styling item.
+- [ ] **(found here, amended by the user 2026-09-07)** `Ctrl+I` inserts a PDF
+  instead of italicising, which is the exact thing §29 says must never happen.
+  The cause was the rule meant to protect those keys: Ctrl+B, Ctrl+I and
+  Ctrl+U were kept *out* of the shortcut list so nothing could take them, and
+  let through while typing so that whatever had taken them fired anyway.
+  *Fixed, as the user then asked for it*: all three are ordinary bindings in
+  the shortcut list — visible and rebindable — and while words are being typed
+  no binding fires at all, whatever is on it, because the view takes the key
+  and formats the words. The editor has no handling of its own for these
+  three, so suppressing the shortcut alone would leave Ctrl+B doing nothing.
+  Insert PDF is on `Ctrl+Shift+I`. Italic and underline are commands of their
+  own now — they had none before, only bold did — which also closes the
+  run-level half of the §9 styling item.
 - [ ] **(found here)** A right click does not close a shape being clicked out,
   though the cloud tool's own tooltip promises "Enter or a right-click closes
   it". It opened a context menu over the half-drawn shape. *Fixed*, for a

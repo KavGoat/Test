@@ -1323,13 +1323,20 @@ def test_document_commands_are_silent_while_typing(window):
     assert swallowed(window, Qt.Key_P, Qt.ControlModifier)
 
 
-def test_text_formatting_shortcuts_are_not_suppressed_while_typing(window):
+def test_no_command_fires_from_ctrl_b_i_or_u_while_typing(window):
+    """They are ordinary bindings now, and no binding fires mid-sentence.
+
+    They used to be the exception: kept out of the shortcut list so that
+    nothing could take them, and let through while typing so that whatever
+    *had* taken them fired anyway. Which is how Ctrl+I inserted a PDF into the
+    document somebody was writing in.
+    """
     window.select_tool("text")
     drag(window.view, 100, 100, 340, 150)
     assert window.view.is_editing()
-    assert not swallowed(window, Qt.Key_B, Qt.ControlModifier)
-    assert not swallowed(window, Qt.Key_I, Qt.ControlModifier)
-    assert not swallowed(window, Qt.Key_U, Qt.ControlModifier)
+    assert swallowed(window, Qt.Key_B, Qt.ControlModifier)
+    assert swallowed(window, Qt.Key_I, Qt.ControlModifier)
+    assert swallowed(window, Qt.Key_U, Qt.ControlModifier)
 
 
 def test_a_bare_letter_types_rather_than_picking_a_tool(window):
@@ -6090,12 +6097,19 @@ def test_every_key_the_application_answers_to_is_in_the_shortcut_list(window):
     assert not missing, f"not in the shortcut list: {missing}"
 
 
-def test_bold_italic_and_underline_belong_to_the_words(window):
-    """Nothing in the document may take Ctrl+B, Ctrl+I or Ctrl+U."""
+def test_bold_italic_and_underline_are_in_the_shortcut_list(window):
+    """A key the application answers to that cannot be seen is a key nobody
+    knows about — which is how Ctrl+I came to insert a PDF and stay that way.
+
+    So Ctrl+B, Ctrl+I and Ctrl+U are ordinary bindings in the list like every
+    other. What is special about them is not where they live, it is that while
+    words are being typed they format the words and no command fires.
+    """
     taken = {window.shortcuts.sequence(b.action_id).lower()
              for b in window.shortcuts.bindings()}
     for reserved in window.RESERVED_FOR_TEXT:
-        assert reserved.lower() not in taken
+        assert reserved.lower() in taken, f"{reserved} should be in the list"
+    assert window.shortcuts.conflicts() == {}
 
 
 def test_no_two_actions_want_the_same_key(window):
@@ -8510,13 +8524,15 @@ def test_the_pages_own_line_work_is_not_dragged_about(window, tmp_path):
 def test_ctrl_i_italicises_rather_than_inserting_a_pdf(window):
     """It inserted a PDF. The requirement says it must never insert a page.
 
-    Ctrl+I was given to Insert PDF, and because keys reserved for the text are
-    deliberately kept out of the shortcut list, it was a binding nobody could
-    see and nobody could change.
+    Ctrl+I was given to Insert PDF, and because keys reserved for the text
+    were kept out of the shortcut list, it was a binding nobody could see and
+    nobody could change.
     """
     assert window.act_italic.shortcut().toString() == "Ctrl+I"
     assert window.act_underline.shortcut().toString() == "Ctrl+U"
     assert window.act_insert_pdf.shortcut().toString() != "Ctrl+I"
+    listed = {window.shortcuts.sequence(b.action_id) for b in window.shortcuts.bindings()}
+    assert "Ctrl+I" in listed and "Ctrl+U" in listed, "and now they can be found"
 
 
 def test_italic_and_underline_reach_the_markup_that_is_picked(window):
@@ -8763,3 +8779,53 @@ def test_a_size_typed_in_a_unit_nobody_knows_is_refused_not_raised(window):
     assert not box.set_real_size("10 lc", "10 lc", window.current_page())
     assert box.local_rect().width() == before, "and nothing was resized"
     assert box.set_real_size("50 mm", "20 mm", window.current_page())
+
+
+def test_ctrl_b_i_and_u_format_the_words_being_typed(window):
+    """No command fires, and the words are still formatted.
+
+    Both halves matter. The editor has no handling of its own for these three
+    — checked, and it has not — so suppressing the shortcut without taking the
+    key would leave Ctrl+B doing nothing at all inside a text markup.
+    """
+    from PySide6.QtGui import QTextCursor
+
+    item = _open_words(window, "600 dia pile")
+    editor = item._editor
+    cursor = editor.textCursor()
+    cursor.setPosition(4)
+    cursor.setPosition(7, QTextCursor.KeepAnchor)
+    editor.setTextCursor(cursor)
+
+    for key in (Qt.Key_B, Qt.Key_I, Qt.Key_U):
+        press_key(window.view, key, "", Qt.ControlModifier)
+    QApplication.processEvents()
+
+    inside = QTextCursor(editor.document())
+    inside.setPosition(5)
+    face = inside.charFormat().font()
+    assert face.bold() and face.italic() and face.underline()
+
+    outside = QTextCursor(editor.document())
+    outside.setPosition(1)
+    rest = outside.charFormat().font()
+    assert not rest.bold() and not rest.italic() and not rest.underline()
+    window.view.escape_everything()
+
+
+def test_a_key_bound_over_ctrl_b_still_does_not_fire_while_typing(window):
+    """They are rebindable now, so something else can be put on them.
+
+    Whatever that is, it still must not go off in the middle of a sentence.
+    """
+    window.shortcuts.set_sequence("command.fit_page", "Ctrl+B")
+    window.apply_shortcuts()
+    try:
+        window.select_tool("text")
+        drag(window.view, 100, 100, 340, 150)
+        assert window.view.is_editing()
+        assert swallowed(window, Qt.Key_B, Qt.ControlModifier)
+    finally:
+        window.view.escape_everything()
+        window.shortcuts.reset("command.fit_page")
+        window.apply_shortcuts()

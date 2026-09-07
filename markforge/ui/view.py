@@ -42,6 +42,13 @@ MIN_ZOOM = 0.08
 MAX_ZOOM = 16.0
 CLICK_SLOP = 3.0
 # How near the pointer has to be, in view pixels, to catch a drawn point.
+#: What Ctrl+B, Ctrl+I and Ctrl+U do to the words being typed.
+_FORMATTING_KEYS = {
+    Qt.Key_B: lambda window: window.toggle_bold(),
+    Qt.Key_I: lambda window: window.toggle_italic(),
+    Qt.Key_U: lambda window: window.toggle_underline(),
+}
+
 SNAP_REACH = 9.0
 
 # How many nearby straight runs are worth comparing for crossings. Every pair
@@ -3753,6 +3760,15 @@ class PageView(QGraphicsView):
                 self.escape_everything()
                 event.accept()
                 return
+            # Bold, italic and underline, on the keys they have in every
+            # program there has ever been. Whatever command those keys carry
+            # outside a markup, inside one they belong to the words: the
+            # editor has no handling of its own for them, so without this the
+            # keys would be swallowed and nothing at all would happen.
+            if modifiers & Qt.ControlModifier and key in _FORMATTING_KEYS:
+                if _FORMATTING_KEYS[key](self.window):
+                    event.accept()
+                    return
             # And everything else is a letter of what is being written. It
             # goes down to the scene, which hands it to the caret; nothing
             # below here may look at it, because a markup being typed into
