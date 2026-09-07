@@ -2,7 +2,7 @@
 
 Audited: 2026-09-06 against `claude/engineering-calc-markup-app-2twiqs`.
 
-Every open line in `docs/tasklist.md` was gone through one at a time. The 144
+Every open line in `docs/tasklist.md` was gone through one at a time. The 145
 below are the ones the current source implements and something actually
 exercises — an event-driven test that drives the real Qt queue, or a check
 against the running application. Each carries the evidence it rests on.
@@ -273,6 +273,9 @@ behaviour it extends.
 
 - **(reported again)** Zoom must remain exactly anchored to the page coordinate under the cursor, not merely approximately centered there. Wheel, toolbar and shortcut zoom operations must leave the pointer's target at the same screen position, without visible drift (139, 44, current report).
   - **Evidence:** Zoom stays anchored to the page point under the cursor. Evidence: test_a_page_corner_can_be_centred_and_remains_under_zoom_cursor.
+
+- **(new)** Add a wheel-behaviour preference for canvas navigation. In the standard mode, an unmodified wheel scrolls the document and `Ctrl`+wheel zooms; offer direct-wheel zoom as an alternative mode where needed. Whichever mode is configured, holding `Ctrl` performs the opposite of it: in wheel-scrolls mode `Ctrl`+wheel zooms, and in wheel-zooms mode `Ctrl`+wheel scrolls. Do not let both unmodified wheel and `Ctrl`+wheel always zoom, because normal scrolling must remain available.
+  - **Evidence:** Fixed. Ctrl now does the opposite of whatever the wheel is doing in the current mode rather than zooming in every case: wheel-scrolls plus Ctrl zooms, wheel-zooms plus Ctrl scrolls, and in page-by-page mode — where the plain wheel turns pages whatever the preference says — Ctrl zooms. Evidence: test_ctrl_does_the_opposite_of_whatever_the_wheel_is_set_to exercises both continuous modes through real wheel events; test_the_footer_switches_between_continuous_and_page_scrolling covers the page-mode case; test_the_wheel_zooms_the_document, test_the_wheel_can_be_set_to_scroll_instead and test_a_trackpad_scrolls_smoothly still pass.
 
 - **(new)** Bug: when the page/view is rotated, the scrollbar itself rotates along with it — the scrollbar should stay in its normal fixed orientation regardless of view rotation
   - **Evidence:** Rotating the view no longer rotates the scrollbars: apply_view_transform (view.py:496-502) holds the zoom only, so the scrollbars keep pointing the way they scroll.

@@ -341,13 +341,37 @@ def test_shift_and_the_wheel_scroll_sideways(window):
     assert bar.value() > before
 
 
-def test_ctrl_and_the_wheel_zoom(window):
+def test_ctrl_does_the_opposite_of_whatever_the_wheel_is_set_to(window):
+    """Ctrl swaps the two gestures round; it does not zoom in both modes.
+
+    Zooming on both the plain wheel and Ctrl+wheel meant the preference turned
+    scrolling off rather than swapping it, so there was no way to scroll with
+    the wheel at all once zoom was chosen.
+    """
+    from calcforge.ui import preferences
+
     _three_pages(window)
-    before = window.view.zoom()
-    wheel(window.view, 240, Qt.ControlModifier)
-    assert window.view.zoom() > before
-    wheel(window.view, -480, Qt.ControlModifier)
-    assert window.view.zoom() < before
+    prefs = preferences.current()
+    was = prefs.wheel
+    try:
+        # Wheel scrolls: Ctrl zooms.
+        prefs.wheel = preferences.WHEEL_SCROLL
+        before = window.view.zoom()
+        wheel(window.view, 240, Qt.ControlModifier)
+        assert window.view.zoom() > before
+        wheel(window.view, -480, Qt.ControlModifier)
+        assert window.view.zoom() < before
+
+        # Wheel zooms: Ctrl scrolls, and leaves the zoom alone.
+        prefs.wheel = preferences.WHEEL_ZOOM
+        window.view.set_zoom(1.0)
+        bar = window.view.verticalScrollBar()
+        before_bar = bar.value()
+        wheel(window.view, -240, Qt.ControlModifier)
+        assert bar.value() > before_bar
+        assert window.view.zoom() == 1.0
+    finally:
+        prefs.wheel = was
 
 
 def test_a_trackpad_scrolls_smoothly(window):

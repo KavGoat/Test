@@ -610,11 +610,16 @@ class PageView(QGraphicsView):
     def wheelEvent(self, event: QWheelEvent) -> None:
         """A notch of the wheel zooms at the pointer, as Bluebeam does.
 
-        Shift scrolls sideways, and Ctrl zooms whichever way the wheel is set,
-        because that is what Ctrl does everywhere else. A trackpad sends
-        pixelDelta and means panning by it, so two-finger scrolling still
-        scrolls smoothly however the wheel is set. Whoever prefers the wheel
-        to scroll can say so in the preferences.
+        Shift scrolls sideways. Ctrl does the opposite of whatever the wheel
+        is doing here: with the wheel scrolling, Ctrl zooms; with the wheel
+        zooming, Ctrl scrolls; and in page-by-page mode, where the plain wheel
+        turns pages, Ctrl zooms. It used to zoom in every case, which left no
+        way at all to scroll with the wheel once zoom was the preference — the
+        setting turned one of the two gestures off rather than swapping them.
+
+        A trackpad sends pixelDelta and means panning by it, so two-finger
+        scrolling still scrolls smoothly however the wheel is set, and Ctrl
+        inverts that too.
         """
         pixels = event.pixelDelta()
         notches = event.angleDelta().y()
@@ -632,8 +637,13 @@ class PageView(QGraphicsView):
                 self.window.go_to_page(self.window.current_index + step)
             event.accept()
             return
-        zooming = (event.modifiers() & Qt.ControlModifier
-                   or (preferences.current().wheel_zooms() and pixels.isNull()))
+        # What the wheel would do here if nothing were held, then Ctrl turns
+        # that round. In page-by-page mode the plain wheel turns pages and
+        # never zooms, whatever the preference says, so Ctrl there is a zoom.
+        unmodified_zooms = (preferences.current().wheel_zooms()
+                            and pixels.isNull()
+                            and self.scroll_mode != "page")
+        zooming = unmodified_zooms != bool(event.modifiers() & Qt.ControlModifier)
         if zooming:
             delta = notches or pixels.y()
             if delta:

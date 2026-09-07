@@ -2,7 +2,7 @@
 
 Audited: 2026-09-06 against `claude/engineering-calc-markup-app-2twiqs`.
 
-The 17 entries below are what the audit could not show working. Each says
+The 16 entries below are what the audit could not show working. Each says
 what is missing or blocking it. Several are tasks whose base behaviour is
 finished and whose recent amendment is not; those name the part that is done so
 the remaining work is clear.
@@ -32,11 +32,6 @@ This is not the user-owned completion record. It changes no checkbox in
 
 - **(expanded)** Make the style toolbar and Properties panel selection-aware. Show only controls compatible with the selected markup type and hide or disable every irrelevant control: rectangles/ellipses expose shape geometry, stroke, fill and hatch but no text controls; lines, arrows, polylines and measurements expose their relevant stroke/endpoint controls but no hatch; text and callouts expose text formatting and only their applicable fill/stroke/leader controls; photos, snapshots and groups expose only their supported image/group operations. Surface important type-specific controls there too, including **Self-contained** for calculation blocks and table-specific editing controls for tables. Apply the same filtering when no item is selected, using the active tool's capabilities instead. A selected equation or calculation exposes decimal-places, significant-figures and scientific-notation controls in both the style toolbar and the Properties panel, not only through the right-click menu; markups expose their full colour, hatch and line controls; text exposes text controls; and callouts expose both.
   - **Missing:** Base filtering is done and tested (test_a_raster_image_has_no_line_or_fill_style_controls, test_drawing_again_is_greyed_out_for_a_calculation, the Self-contained panel tests). The amended clause is half done: the Properties panel does expose Significant digits and a Number format combo of auto/fixed/scientific/engineering for a calculation (ui/panels.py:1910-1926), but the Style toolbar carries only Line, Fill, Width, Dash, Text, Set default, Self-contained and Stamp (mainwindow.py:628-690) — no result-formatting control at all.
-
-## 17. Dark mode, icons & canvas/viewport
-
-- **(new)** Add a wheel-behaviour preference for canvas navigation. In the standard mode, an unmodified wheel scrolls the document and `Ctrl`+wheel zooms; offer direct-wheel zoom as an alternative mode where needed. Whichever mode is configured, holding `Ctrl` performs the opposite of it: in wheel-scrolls mode `Ctrl`+wheel zooms, and in wheel-zooms mode `Ctrl`+wheel scrolls. Do not let both unmodified wheel and `Ctrl`+wheel always zoom, because normal scrolling must remain available.
-  - **Missing:** The preference exists and both modes work (test_the_wheel_zooms_the_document, test_the_wheel_can_be_set_to_scroll_instead, test_ctrl_and_the_wheel_zoom), but the amended clause is unverified: nothing establishes that Ctrl inverts the configured mode in BOTH directions. test_ctrl_and_the_wheel_zoom only covers Ctrl+wheel zooming; there is no test of Ctrl+wheel scrolling while the wheel-zooms mode is set.
 
 ## 21. Measuring tools
 
