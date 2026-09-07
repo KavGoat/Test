@@ -410,6 +410,14 @@ class MarkupItem(QGraphicsObject):
         """Handles that move something other than the item's own box."""
         return set()
 
+    def control_dots(self) -> set[str]:
+        """Handles drawn as a dot rather than as a square.
+
+        A dimension's value carries one: it is a control point sitting on the
+        text, not a corner of a box, and it should not look like one.
+        """
+        return set()
+
     def handle_at(self, local_pos: QPointF, tolerance: float = HANDLE_SIZE) -> Optional[str]:
         if self.locked:
             return None
@@ -477,12 +485,17 @@ class MarkupItem(QGraphicsObject):
         # callout's arrow, for one. They are drawn as orange diamonds so it is
         # obvious which handle moves what.
         leader = self.leader_handles()
+        dots = self.control_dots()
         for key, point in points.items():
             if key == "rot":
                 painter.setBrush(QBrush(QColor(120, 200, 120)))
                 painter.drawEllipse(point, half, half)
                 painter.setBrush(QBrush(QColor(255, 255, 255)))
                 painter.drawLine(point, QPointF(rect.center().x(), rect.top()))
+            elif key in dots:
+                painter.setBrush(QBrush(QColor(20, 90, 200)))
+                painter.drawEllipse(point, half * 0.8, half * 0.8)
+                painter.setBrush(QBrush(QColor(255, 255, 255)))
             elif key in leader:
                 painter.setPen(QPen(QColor(200, 90, 20), 0.9))
                 painter.setBrush(QBrush(QColor(255, 170, 80)))

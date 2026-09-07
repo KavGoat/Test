@@ -5794,14 +5794,131 @@ def test_the_text_stays_the_right_way_up(window):
 
 
 def test_moving_the_text_off_the_line_gives_it_a_leader(window):
+    """Shift and the control dot: the value goes where it is dropped."""
     window.select_tool("measure_dimension")
     drag(window.view, 100, 200, 320, 200)
     dimension = markups(window)[0]
     window.view.close_label_editor(commit=False)
     assert not dimension.label_is_off_the_line()
 
-    dimension.move_handle("lbl", dimension._label_anchor() + QPointF(0, -60))
+    dimension.move_handle("lbl", dimension._label_anchor() + QPointF(0, -60),
+                          keep_ratio=True)
     assert dimension.label_is_off_the_line()
+    assert dimension.witness_reach == 0.0, "the line itself did not move"
+
+
+def test_dragging_the_control_dot_extends_the_witness_lines(window):
+    """Without Shift the dot pulls the dimension line off what it measures."""
+    window.select_tool("measure_dimension")
+    drag(window.view, 100, 200, 320, 200)
+    dimension = markups(window)[0]
+    window.view.close_label_editor(commit=False)
+    assert dimension.witness_reach == 0.0
+
+    dimension.move_handle("lbl", dimension._label_anchor() + QPointF(0, -40))
+    assert dimension.witness_reach == pytest.approx(-40, abs=0.5)
+    start, end = dimension.dimension_ends()
+    assert start.y() == pytest.approx(dimension.points[0].y() - 40, abs=0.5)
+    assert end.y() == pytest.approx(dimension.points[1].y() - 40, abs=0.5)
+    assert not dimension.label_is_off_the_line(), \
+        "the value travels with the line it belongs to"
+
+
+def test_the_control_dot_only_travels_perpendicular(window):
+    """However the pointer wanders, the line stays parallel to what it measures."""
+    window.select_tool("measure_dimension")
+    drag(window.view, 100, 200, 320, 200)
+    dimension = markups(window)[0]
+    window.view.close_label_editor(commit=False)
+
+    # Dragged well along the line as well as away from it.
+    dimension.move_handle("lbl", dimension._label_anchor() + QPointF(180, -30))
+    start, end = dimension.dimension_ends()
+    assert start.x() == pytest.approx(dimension.points[0].x(), abs=0.01), \
+        "the sideways part of the drag is ignored"
+    assert end.x() == pytest.approx(dimension.points[1].x(), abs=0.01)
+    assert start.y() == pytest.approx(end.y(), abs=0.01)
+
+
+def test_a_moved_value_hangs_off_a_hinged_leader(window):
+    """Perpendicular away from the dimension, then parallel into the text."""
+    window.select_tool("measure_dimension")
+    drag(window.view, 100, 200, 320, 200)
+    dimension = markups(window)[0]
+    window.view.close_label_editor(commit=False)
+    dimension.custom_label = "2400"
+    dimension.refresh(page=window.current_page())
+
+    dimension.move_handle("lbl", dimension._label_anchor() + QPointF(90, -70),
+                          keep_ratio=True)
+    anchor, elbow, end = dimension.leader_path()
+    assert elbow.x() == pytest.approx(anchor.x(), abs=0.01), \
+        "the first run leaves the dimension at right angles"
+    assert elbow.y() == pytest.approx(anchor.y() - 70, abs=0.5)
+    assert end.y() == pytest.approx(elbow.y(), abs=0.01), \
+        "and the second runs parallel to it, into the text"
+    assert end.x() > elbow.x()
+
+
+def _dimension_row(window, item, dpi=192.0):
+    """The pixels along the dimension's own line, and where its value sits."""
+    frame = window.document.pages[0].frame
+    sheet = frame.render_image(dpi=dpi, for_print=True)
+    scale = dpi / 72.0
+    on_page = item.mapToParent(item.dimension_ends()[0])
+    row = int(round(on_page.y() * scale))
+    start = item.mapToParent(item.dimension_ends()[0]).x() * scale
+    end = item.mapToParent(item.dimension_ends()[1]).x() * scale
+    return sheet, row, start, end
+
+
+def test_a_dimension_is_drawn_plainly_with_its_value_on_the_line(window):
+    """Arrow to arrow, the value written along it, no box behind it."""
+    window.select_tool("measure_dimension")
+    drag(window.view, 100, 300, 400, 300)
+    dimension = markups(window)[0]
+    window.view.close_label_editor(commit=False)
+    dimension.custom_label = "2400"
+    dimension.style.stroke = "#1971c2"
+    dimension.refresh(page=window.current_page())
+    window.view.scene().clearSelection()
+
+    sheet, row, start, end = _dimension_row(window, dimension)
+    line = QColor("#1971c2")
+
+    def near_the_line(x: int) -> bool:
+        for offset in (-1, 0, 1):
+            colour = QColor(sheet.pixel(x, row + offset))
+            if abs(colour.red() - line.red()) < 60 \
+                    and abs(colour.blue() - line.blue()) < 60 \
+                    and abs(colour.green() - line.green()) < 60:
+                return True
+        return False
+
+    quarter = int(start + (end - start) * 0.25)
+    middle = int((start + end) / 2)
+    assert near_the_line(quarter), "the dimension line is drawn"
+    assert not near_the_line(middle), \
+        "and broken where the value is written across it"
+
+
+def test_the_measured_and_the_typed_dimension_are_drawn_the_same(window):
+    """One shows what it measured and one shows what was typed; that is all."""
+    window.select_tool("measure_dimension")
+    drag(window.view, 100, 300, 400, 300)
+    typed = markups(window)[0]
+    window.view.close_label_editor(commit=False)
+    window.select_tool("measure_length")
+    drag(window.view, 100, 500, 400, 500)
+    measured = markups(window)[1]
+    window.view.scene().clearSelection()
+
+    assert typed.is_dimensioned() and measured.is_dimensioned()
+    assert typed.label_offset == measured.label_offset
+    assert typed.label_rotation() == pytest.approx(measured.label_rotation())
+    for item in (typed, measured):
+        assert item.style.arrow_start == "arrow"
+        assert item.style.arrow_end == "arrow"
 
 
 def test_the_text_can_be_turned_by_hand_and_put_back(window):
@@ -9948,6 +10065,41 @@ def test_shift_click_pulls_the_number_off_the_line(window):
     assert dim.label_is_off_the_line()
 
 
+def test_dragging_the_dot_with_the_mouse_pulls_the_line_off_the_drawing(window):
+    """The whole gesture, through the pointer: press the dot, drag, let go."""
+    dim = _dimension(window)
+    dim.custom_label = "600"
+    dim.refresh(page=window.current_page())
+    assert dim.witness_reach == 0.0
+
+    dot = dim.mapToScene(dim.handle_points()["lbl"])
+    drag(window.view, dot.x(), dot.y(), dot.x(), dot.y() - 50)
+    assert dim.witness_reach == pytest.approx(-50, abs=2)
+    assert not dim.label_is_off_the_line(), \
+        "the value went with the line, not away from it"
+
+
+def test_letting_go_of_shift_half_way_does_not_change_the_gesture(window):
+    """What the drag is was settled when it started."""
+    dim = _dimension(window)
+    dim.custom_label = "600"
+    dim.refresh(page=window.current_page())
+
+    dot = dim.mapToScene(dim.handle_points()["lbl"])
+    view = window.view
+    QApplication.sendEvent(view.viewport(), _mouse(
+        view, QEvent.MouseButtonPress, dot.x(), dot.y(),
+        modifiers=Qt.ShiftModifier))
+    for step in (0.5, 1.0):                       # Shift let go of half way
+        QApplication.sendEvent(view.viewport(), _mouse(
+            view, QEvent.MouseMove, dot.x() + 30 * step, dot.y() - 40 * step,
+            Qt.NoButton, Qt.LeftButton, Qt.NoModifier))
+    QApplication.sendEvent(view.viewport(), _mouse(
+        view, QEvent.MouseButtonRelease, dot.x() + 30, dot.y() - 40))
+    assert dim.label_is_off_the_line()
+    assert dim.witness_reach == 0.0
+
+
 def test_the_number_knows_where_it_is(window):
     dim = _dimension(window)
     dim.custom_label = "600"
@@ -10014,9 +10166,12 @@ def test_an_inserted_pdf_brings_its_own_lines(window, tmp_path):
 
     items = pdfio._items_from(strokes[0])
     assert items
-    # The rectangle that was drawn at 120,150 comes back where it was drawn.
+    # Each shape comes back where it was drawn — the rectangle and the line
+    # both, which is also what says each markup was drawn to its own size and
+    # not to the one before it.
     corners = [(round(i["x"]), round(i["y"])) for i in items]
     assert (120, 150) in corners
+    assert (120, 320) in corners
 
 
 def test_the_lines_come_in_on_a_layer_of_their_own(window, tmp_path):

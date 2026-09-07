@@ -191,6 +191,9 @@ class PageView(QGraphicsView):
         self._press_scene = QPointF()
         self._press_view = QPoint()
         self._handle_item: Optional[MarkupItem] = None
+        # Whether Shift was down when a handle drag started, for the handles
+        # where that decides what the drag is rather than how it behaves.
+        self._handle_shift: Optional[bool] = None
         self._handle_key = ""
         self._group_handle_key = ""
         self._group_resize_box = QRectF()
@@ -1123,6 +1126,7 @@ class PageView(QGraphicsView):
                 item.setSelected(True)
                 self._handle_item = item
                 self._handle_key = grabbed
+                self._handle_shift = self._latched_shift(item, grabbed, event)
                 self._mode = "resize"
                 self.begin_snapshot(self.involved_frames(item))
                 event.accept()
@@ -1269,6 +1273,7 @@ class PageView(QGraphicsView):
                 if item.label_at(item.mapFromScene(scene_pos)):
                     self._handle_item = item
                     self._handle_key = "lbl"
+                    self._handle_shift = True
                     self._mode = "resize"
                     self.begin_snapshot()
                     self.statusMessage.emit(
@@ -1296,6 +1301,7 @@ class PageView(QGraphicsView):
             if key:
                 self._handle_item = item
                 self._handle_key = key
+                self._handle_shift = self._latched_shift(item, key, event)
                 self._mode = "resize"
                 self.begin_snapshot()
                 event.accept()
@@ -1621,6 +1627,13 @@ class PageView(QGraphicsView):
                                      ignore={self._handle_item})
             local = self._handle_item.mapFromScene(caught)
             keep_ratio = bool(event.modifiers() & Qt.ShiftModifier)
+            if self._handle_shift is not None:
+                # A dimension's control dot does one thing or the other, and
+                # which it is was settled when the drag started. Reading Shift
+                # again on every move means letting go of it half way through
+                # changes what the drag is doing, which is not something
+                # anybody asks for.
+                keep_ratio = self._handle_shift
             if getattr(self._handle_item, "keep_aspect", False):
                 # Images and snapshots protect their proportions by default;
                 # Shift is the deliberate exception that releases the lock.
@@ -1788,6 +1801,7 @@ class PageView(QGraphicsView):
         self._shift_click_selection = None
         self._handle_item = None
         self._handle_key = ""
+        self._handle_shift = None
         self._group_resize_items = []
         self._group_handle_key = ""
         self.forget_snap()
@@ -3796,6 +3810,19 @@ class PageView(QGraphicsView):
             item.touch()
             item.update()
         self.viewport().update()
+
+    @staticmethod
+    def _latched_shift(item, key: str, event) -> Optional[bool]:
+        """Shift as it was when the drag began, for the handles it decides.
+
+        A dimension's control dot does one of two different things depending on
+        whether Shift is down — it pulls the line off what it measures, or it
+        takes the value away onto a leader. That is settled at the press;
+        everywhere else Shift keeps meaning whatever it means moment to moment.
+        """
+        if key == "lbl" and isinstance(item, MeasureItem) and item.is_dimensioned():
+            return bool(event.modifiers() & Qt.ShiftModifier)
+        return None
 
     def markup_at(self, scene_pos: QPointF) -> Optional[MarkupItem]:
         for item in self.scene().items(scene_pos):

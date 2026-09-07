@@ -28,6 +28,18 @@ MEASURE_NAMES = {
     DIAMETER: "Diameter", VOLUME: "Volume", CALIBRATE: "Calibration",
 }
 
+# The measurements drawn the way a dimension is drawn on a drawing: two points,
+# an arrow at each end, and the value written along the line between them. What
+# the value says is the only difference between them — the measurement, or
+# whatever the author typed instead.
+DIMENSIONED = (LENGTH, DIMENSION, CALIBRATE)
+
+# How far a witness line runs past the dimension line it reaches, and how far
+# it stands off the point it comes from — both the small conventions that stop
+# a dimension from touching what it measures.
+WITNESS_OVERSHOOT = 4.0
+WITNESS_GAP = 2.0
+
 
 def _distance(a: QPointF, b: QPointF) -> float:
     return math.hypot(b.x() - a.x(), b.y() - a.y())
@@ -64,15 +76,23 @@ class MeasureItem(MarkupItem):
         super().__init__()
         self.kind = kind
         self.points: list[QPointF] = [QPointF(p) for p in (points or [])]
-        # A dimension's text sits on the line, in line with it, the way a
-        # dimension is drawn; every other measurement's sits above it.
-        self.label_offset = QPointF(0, 0) if kind == DIMENSION else QPointF(0, -14)
+        # Anything drawn as a dimension has its value written along the line,
+        # the way a dimension is drawn — whether the value is what was measured
+        # or what the author typed instead. Every other measurement's sits
+        # above what it measures, where there is no line to write along.
+        self.label_offset = QPointF(0, 0) if kind in DIMENSIONED else QPointF(0, -14)
         # None means "follow the line"; a number means the author turned it.
         self.label_angle: Optional[float] = None
         self.depth_text = ""            # for volume: e.g. "150 mm"
         # A dimension carries whatever text the author wants on it — "varies",
         # "2 no. @ 300 c/c" — instead of the measured value.
         self.custom_label = ""
+        # How far the dimension line stands off the two points it measures.
+        # Dragging the control dot on the value sets it — the dot travels
+        # perpendicular to the dimension and nowhere else — and the witness
+        # lines then run out from the measured points to reach the line, the
+        # way a dimension is drawn on a drawing.
+        self.witness_reach = 0.0
         self.show_label = True
         # Holes taken out of an area: a slab less its lift shafts. Each is a
         # ring of points in this measurement's own coordinates.
@@ -129,6 +149,9 @@ class MeasureItem(MarkupItem):
 
     def boundingRect(self) -> QRectF:
         rect = self.local_rect()
+        if self.is_dimensioned() and abs(self.witness_reach) > 1e-9:
+            start, end = self.dimension_ends()
+            rect = rect.united(QRectF(start, end).normalized())
         if self.show_label:
             centre = self._label_anchor() + self.label_offset
             half_width = max(len(self.value_text), 6) * self.style.font_size * 0.42
@@ -138,9 +161,51 @@ class MeasureItem(MarkupItem):
         margin = self.style.width + HANDLE_SIZE + 12
         return rect.adjusted(-margin, -margin, margin, margin)
 
+    # -- the shape of a dimension -----------------------------------------
+    def is_dimensioned(self) -> bool:
+        """Whether this is drawn as a dimension: arrow to arrow, value along it."""
+        return self.kind in DIMENSIONED and len(self.points) >= 2
+
+    def dimension_normal(self) -> QPointF:
+        """The direction the dimension line moves when the dot is dragged."""
+        if len(self.points) < 2:
+            return QPointF(0, 0)
+        a, b = self.points[0], self.points[1]
+        length = _distance(a, b)
+        if length < 1e-9:
+            return QPointF(0, 0)
+        return QPointF(-(b.y() - a.y()) / length, (b.x() - a.x()) / length)
+
+    def dimension_direction(self) -> QPointF:
+        """Along the dimension, from the first measured point to the second."""
+        if len(self.points) < 2:
+            return QPointF(1, 0)
+        a, b = self.points[0], self.points[1]
+        length = _distance(a, b)
+        if length < 1e-9:
+            return QPointF(1, 0)
+        return QPointF((b.x() - a.x()) / length, (b.y() - a.y()) / length)
+
+    def dimension_ends(self) -> tuple[QPointF, QPointF]:
+        """Where the arrows sit: the measured points, pushed out by the reach."""
+        if len(self.points) < 2:
+            return QPointF(0, 0), QPointF(0, 0)
+        a, b = self.points[0], self.points[1]
+        if not self.is_dimensioned() or abs(self.witness_reach) < 1e-9:
+            return QPointF(a), QPointF(b)
+        normal = self.dimension_normal()
+        push = QPointF(normal.x() * self.witness_reach,
+                       normal.y() * self.witness_reach)
+        return a + push, b + push
+
     def build_path(self) -> QPainterPath:
         path = QPainterPath()
         if len(self.points) < 2:
+            return path
+        if self.is_dimensioned():
+            start, end = self.dimension_ends()
+            path.moveTo(start)
+            path.lineTo(end)
             return path
         if self.kind in (RADIUS, DIAMETER):
             centre, edge = self.points[0], self.points[1]
@@ -172,6 +237,10 @@ class MeasureItem(MarkupItem):
         handles = {f"v{index}": QPointF(point) for index, point in enumerate(self.points)}
         if self.show_label:
             centre = self._label_anchor() + self.label_offset
+            # The control dot sits on the value. Dragging it pulls the
+            # dimension line off what it measures; Shift and dragging it takes
+            # the value away onto a leader. One dot, both of the things a
+            # dimension is ever asked to do.
             handles["lbl"] = centre
             # A second handle to turn the text by, out along its own angle.
             angle = math.radians(self.label_rotation())
@@ -179,6 +248,10 @@ class MeasureItem(MarkupItem):
             handles["lblrot"] = QPointF(centre.x() + math.cos(angle) * reach,
                                         centre.y() + math.sin(angle) * reach)
         return handles
+
+    def control_dots(self) -> set[str]:
+        """The dot on the value, which is what a dimension is adjusted by."""
+        return {"lbl"} if self.is_dimensioned() and self.show_label else set()
 
     def label_rotation(self) -> float:
         """How the text is turned: with the line, unless it was turned by hand."""
@@ -202,6 +275,19 @@ class MeasureItem(MarkupItem):
 
     def move_handle(self, key: str, local_pos: QPointF, keep_ratio: bool = False) -> None:
         if key == "lbl":
+            if self.is_dimensioned() and not keep_ratio:
+                # The dot travels perpendicular to the dimension and nowhere
+                # else, so the line it carries stays parallel to what it
+                # measures however carelessly the pointer wanders.
+                self.prepareGeometryChange()
+                normal = self.dimension_normal()
+                middle = (self.points[0] + self.points[1]) / 2
+                away = local_pos - middle
+                self.witness_reach = away.x() * normal.x() + away.y() * normal.y()
+                self.label_offset = QPointF(0, 0)
+                self.update()
+                self.geometryChanged.emit()
+                return
             self.prepareGeometryChange()
             self.label_offset = local_pos - self._label_anchor()
             self.update()
@@ -248,6 +334,12 @@ class MeasureItem(MarkupItem):
             return _centroid(self.points)
         if self.kind == ANGLE and len(self.points) >= 2:
             return self.points[1]
+        if self.is_dimensioned():
+            # The middle of the dimension line, wherever the dot has put it,
+            # so the value travels with the line rather than being left behind
+            # on the thing it measures.
+            start, end = self.dimension_ends()
+            return (start + end) / 2
         if len(self.points) >= 2:
             mid = len(self.points) // 2
             if len(self.points) == 2:
@@ -368,9 +460,12 @@ class MeasureItem(MarkupItem):
             filled.addPolygon(QPolygonF(self.points))
             filled.closeSubpath()
             painter.fillPath(filled, self.style.brush())
-        painter.setPen(self.style.pen())
-        painter.setBrush(Qt.NoBrush)
-        painter.drawPath(path)
+        if self.is_dimensioned():
+            self._paint_dimension_line(painter)
+        else:
+            painter.setPen(self.style.pen())
+            painter.setBrush(Qt.NoBrush)
+            painter.drawPath(path)
 
         if self.kind == ANGLE and len(self.points) >= 3:
             self._paint_angle_arc(painter)
@@ -396,18 +491,36 @@ class MeasureItem(MarkupItem):
         painter.drawArc(rect, int(start * 16), int(span * 16))
 
     def _paint_extension_ticks(self, painter: QPainter) -> None:
+        """The witness lines, or the ticks that stand in for them.
+
+        A dimension line sitting on the two points it measures needs nothing
+        more than a tick at each end. Pull it off them with the control dot and
+        the ticks become real witness lines: they start a little clear of the
+        point, so the dimension never touches what it measures, and run a
+        little past the line they reach.
+        """
         a, b = self.points[0], self.points[1]
         length = _distance(a, b)
         if length < 1e-6:
             return
-        nx = -(b.y() - a.y()) / length
-        ny = (b.x() - a.x()) / length
-        size = max(self.style.width * 3.0, 4.0)
+        normal = self.dimension_normal()
         pen = self.style.pen()
         painter.setPen(pen)
+        reach = self.witness_reach if self.is_dimensioned() else 0.0
+        if abs(reach) < 1e-9:
+            size = max(self.style.width * 3.0, 4.0)
+            for point in (a, b):
+                painter.drawLine(
+                    QPointF(point.x() - normal.x() * size, point.y() - normal.y() * size),
+                    QPointF(point.x() + normal.x() * size, point.y() + normal.y() * size))
+            return
+        way = 1.0 if reach > 0 else -1.0
+        near = min(abs(reach), WITNESS_GAP) * way
+        far = (abs(reach) + WITNESS_OVERSHOOT) * way
         for point in (a, b):
-            painter.drawLine(QPointF(point.x() - nx * size, point.y() - ny * size),
-                             QPointF(point.x() + nx * size, point.y() + ny * size))
+            painter.drawLine(
+                QPointF(point.x() + normal.x() * near, point.y() + normal.y() * near),
+                QPointF(point.x() + normal.x() * far, point.y() + normal.y() * far))
 
     def _paint_arrows(self, painter: QPainter) -> None:
         if len(self.points) < 2 or self.closed:
@@ -417,6 +530,17 @@ class MeasureItem(MarkupItem):
         colour.setAlphaF(self.style.opacity)
         painter.setBrush(QBrush(colour))
         painter.setPen(QPen(colour, max(self.style.width * 0.8, 0.4)))
+        if self.is_dimensioned():
+            start, end = self.dimension_ends()
+            if self.style.arrow_end != "none":
+                painter.drawPath(arrow_path(
+                    end, math.atan2(end.y() - start.y(), end.x() - start.x()),
+                    size, self.style.arrow_end))
+            if self.style.arrow_start != "none":
+                painter.drawPath(arrow_path(
+                    start, math.atan2(start.y() - end.y(), start.x() - end.x()),
+                    size, self.style.arrow_start))
+            return
         if self.style.arrow_end != "none":
             tip, previous = self.points[-1], self.points[-2]
             painter.drawPath(arrow_path(tip, math.atan2(tip.y() - previous.y(),
@@ -438,24 +562,82 @@ class MeasureItem(MarkupItem):
         text = self.value_text
         width = metrics.horizontalAdvance(text) + 8
         height = metrics.height() + 4
+        plain = self.is_dimensioned()
 
         if self.label_is_off_the_line():
-            # Moved away from the line, so it needs a leader back to it.
             pen = QPen(QColor(self.style.stroke), max(self.style.width * 0.6, 0.4))
             pen.setStyle(Qt.SolidLine)
             painter.setPen(pen)
-            painter.drawLine(anchor, position)
+            if plain:
+                painter.drawPolyline(QPolygonF(self.leader_path()))
+            else:
+                painter.drawLine(anchor, position)
 
         painter.save()
         painter.translate(position)
         painter.rotate(self.label_rotation())
         box = QRectF(-width / 2, -height / 2, width, height)
+        if plain:
+            # A dimension's value is written on the line, not in a box on top
+            # of it. The line is broken behind it instead, which is how a
+            # dimension is drawn and what makes the drawn one and the typed one
+            # look like the same thing.
+            painter.setPen(QPen(self.style.text_qcolor()))
+            painter.drawText(box, Qt.AlignCenter, text)
+            painter.restore()
+            return
         painter.setBrush(QBrush(QColor(255, 255, 255, 215)))
         painter.setPen(QPen(QColor(self.style.stroke), 0.5))
         painter.drawRoundedRect(box, 2.5, 2.5)
         painter.setPen(QPen(self.style.text_qcolor()))
         painter.drawText(box, Qt.AlignCenter, text)
         painter.restore()
+
+    def leader_path(self) -> list:
+        """From the dimension line out to a value that has been moved off it.
+
+        Perpendicular away from the dimension first, then a section parallel to
+        it into the text — the hinged leader a drawing uses, rather than a
+        straight line cutting across at whatever angle the text ended up.
+        """
+        anchor = self._label_anchor()
+        position = anchor + self.label_offset
+        normal = self.dimension_normal()
+        along = self.dimension_direction()
+        away = position - anchor
+        out = away.x() * normal.x() + away.y() * normal.y()
+        elbow = QPointF(anchor.x() + normal.x() * out, anchor.y() + normal.y() * out)
+        # The parallel section stops at the near side of the text rather than
+        # running under it.
+        sideways = away.x() * along.x() + away.y() * along.y()
+        stop = max(abs(sideways) - self.label_rect().width() / 2, 0.0)
+        way = 1.0 if sideways >= 0 else -1.0
+        end = QPointF(elbow.x() + along.x() * stop * way,
+                      elbow.y() + along.y() * stop * way)
+        return [anchor, elbow, end]
+
+    def _paint_dimension_line(self, painter: QPainter) -> None:
+        """The dimension line, broken where the value is written across it."""
+        start, end = self.dimension_ends()
+        painter.setPen(self.style.pen())
+        painter.setBrush(Qt.NoBrush)
+        if not (self.show_label and self.value_text) or self.label_is_off_the_line():
+            painter.drawLine(start, end)
+            return
+        along = self.dimension_direction()
+        middle = (start + end) / 2
+        # The break is measured off the text itself, so the line stops exactly
+        # where the value starts rather than near it.
+        metrics = QFontMetricsF(self.style.font())
+        gap = metrics.horizontalAdvance(self.value_text) / 2 + 3.0
+        span = _distance(start, end)
+        if gap * 2 >= span:
+            painter.drawLine(start, end)
+            return
+        before = QPointF(middle.x() - along.x() * gap, middle.y() - along.y() * gap)
+        after = QPointF(middle.x() + along.x() * gap, middle.y() + along.y() * gap)
+        painter.drawLine(start, before)
+        painter.drawLine(after, end)
 
     # -- serialisation -----------------------------------------------------
     def serialize(self) -> dict:
@@ -466,6 +648,7 @@ class MeasureItem(MarkupItem):
             "label_offset": [self.label_offset.x(), self.label_offset.y()],
             "label_angle": self.label_angle,
             "custom_label": self.custom_label,
+            "witness_reach": round(self.witness_reach, 3),
             "depth_text": self.depth_text,
             "show_label": self.show_label,
             "cutouts": self.cutouts_as_data(),
@@ -481,6 +664,7 @@ class MeasureItem(MarkupItem):
         self.label_angle = float(angle) if angle is not None else None
         self.depth_text = data.get("depth_text", "")
         self.custom_label = data.get("custom_label", "")
+        self.witness_reach = float(data.get("witness_reach", 0.0) or 0.0)
         self.show_label = bool(data.get("show_label", True))
         self.cutouts_from_data(data)
         self.load_base(data)

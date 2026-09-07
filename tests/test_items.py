@@ -350,3 +350,17 @@ def test_every_greek_name_uses_its_one_canonical_glyph(qapp):
     assert greek.fold("φ") == greek.fold("ϕ") == "phi"
     assert text_in(setter.name_box(greek.fold("φ"), 10.0)) == "φ"
     assert text_in(setter.name_box(greek.fold("ϕ"), 10.0)) == "φ"
+
+
+def test_a_dimensions_value_carries_a_control_dot(qapp):
+    """Not a corner of a box — a control point sitting on the number."""
+    from PySide6.QtCore import QPointF
+    from calcforge.items.measure import DIMENSION, LENGTH, AREA, MeasureItem
+
+    for kind in (DIMENSION, LENGTH):
+        item = MeasureItem(kind, [QPointF(0, 0), QPointF(200, 0)])
+        assert item.control_dots() == {"lbl"}
+        assert "lbl" in item.handle_points()
+
+    area = MeasureItem(AREA, [QPointF(0, 0), QPointF(100, 0), QPointF(100, 80)])
+    assert area.control_dots() == set(), "an area has no dimension line to adjust"

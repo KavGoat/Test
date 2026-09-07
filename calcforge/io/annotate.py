@@ -57,19 +57,21 @@ def subtype_for(item) -> str:
 def exportable(frame, page, preserved: bool) -> list:
     """The markups on a page that should go out as annotations.
 
-    A page kept as its own PDF already holds its line work; that layer came
-    out of the file and belongs to it, so it is not written back over the top
-    as several thousand annotations. Nor does anything flattened come out as a
-    markup: flattening is the decision that it is part of the page now, and it
-    is painted into the sheet instead.
+    The Drawing layer is not markup: it is the page's own line work, read out
+    of the PDF it came from so that things can snap to it. It belongs to the
+    page and is written as part of it — as the original page where that has
+    been kept, and painted into the sheet where it has not. Turning several
+    thousand pieces of somebody else's drawing into several thousand
+    annotations would be wrong as well as slow.
+
+    Nor does anything flattened come out as a markup: flattening is the
+    decision that it is part of the page now, and it is painted in.
     """
     items = []
     for item in frame.ordered_markups():
         if not item.printable or not frame.layer_prints(item):
             continue
-        if item.flattened:
-            continue
-        if preserved and item.layer == "Drawing":
+        if item.flattened or item.layer == "Drawing":
             continue
         items.append(item)
     return items
@@ -119,10 +121,16 @@ class Appearances:
                 painter.setRenderHint(QPainter.TextAntialiasing, True)
                 painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
                 painter.save()
-                painter.scale(APPEARANCE_DPI / 72.0, APPEARANCE_DPI / 72.0)
+                # How many device units the writer gives to a point, asked of
+                # the device rather than assumed from the resolution that was
+                # requested: Qt does not always give back the resolution it was
+                # asked for, and a markup drawn to the wrong scale lands in the
+                # wrong place and the wrong size for everything that reads it.
+                across = max(painter.device().width(), 1) / max(rect.width(), 1e-6)
+                down = max(painter.device().height(), 1) / max(rect.height(), 1e-6)
+                painter.scale(across, down)
                 frame = item.parentItem()
-                picture = frame.render_items_picture([item], rect)
-                painter.drawPicture(0, 0, picture)
+                frame.paint_items(painter, [item], rect)
                 painter.restore()
         finally:
             if started:

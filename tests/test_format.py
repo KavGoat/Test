@@ -234,3 +234,37 @@ def test_a_drawing_opened_for_review_can_be_calculated_on(window, tmp_path):
     _a_calculation_on(window)
     assert window.save_document()
     assert window.document.path.endswith(".cfx")
+
+
+def test_an_imported_pdf_brings_in_the_markups_somebody_else_made(window, tmp_path):
+    """A marked-up drawing keeps its markups in annotations; bring them in."""
+    from PySide6.QtCore import QRectF
+    from calcforge.io import export as export_io, pdfio
+    from calcforge.items.shapes import RectItem
+
+    drawn = RectItem()
+    drawn.set_local_rect(QRectF(0, 0, 180, 110))
+    window.document.pages[0].frame.add_markup(drawn, QPointF(120, 150))
+    marked = str(tmp_path / "marked.pdf")
+    export_io.export_pdf(window.document, marked)
+
+    # The line work: the rectangle comes back where it was drawn.
+    found = pdfio.line_work(marked, [0])
+    corners = [(round(item["x"]), round(item["y"]))
+               for item in pdfio._items_from(found[0])]
+    assert (120, 150) in corners, \
+        "an annotation's own drawing is line work like any other"
+
+    # And the picture of the page shows it too.
+    source = pdfio.PdfSource(marked)
+    try:
+        data, _info = source.render_png(0, 96.0)
+    finally:
+        source.close()
+    from PySide6.QtGui import QImage
+    picture = QImage()
+    assert picture.loadFromData(data)
+    inked = sum(1 for y in range(0, picture.height(), 2)
+                for x in range(0, picture.width(), 2)
+                if picture.pixelColor(x, y).lightness() < 200)
+    assert inked > 50, "the markups should be in the picture of the page too"

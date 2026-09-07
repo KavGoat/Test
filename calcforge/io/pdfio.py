@@ -29,6 +29,19 @@ FIT_A4 = "a4"                   # scale into A4
 FIT_CURRENT = "current"         # scale into the document's current page size
 
 
+def _how_to_render() -> QPdfDocumentRenderOptions:
+    """How an imported page is drawn: everything that is on it.
+
+    A marked-up drawing keeps its clouds, dimensions and call-outs as
+    annotations rather than in the page, and Qt leaves those out unless it is
+    asked for them. Without this an imported PDF comes in with every markup
+    somebody else made missing from it.
+    """
+    options = QPdfDocumentRenderOptions()
+    options.setRenderFlags(QPdfDocumentRenderOptions.RenderFlag.Annotations)
+    return options
+
+
 @dataclass
 class PdfPageInfo:
     index: int
@@ -67,8 +80,7 @@ class PdfSource:
         scale = self._scale_for(info, dpi)
         width = max(int(round(info.width_pt * scale)), 1)
         height = max(int(round(info.height_pt * scale)), 1)
-        options = QPdfDocumentRenderOptions()
-        image = self.doc.render(index, QSize(width, height), options)
+        image = self.doc.render(index, QSize(width, height), _how_to_render())
         if image.isNull():
             raise OSError(f"Could not render page {index + 1} of this PDF")
         buffer = QBuffer()
@@ -277,7 +289,7 @@ def render_preview(path: str, index: int, box: int = 560):
         return source.doc.render(index, QSize(
             max(int(info.width_pt / longest * box), 1),
             max(int(info.height_pt / longest * box), 1)),
-            QPdfDocumentRenderOptions())
+            _how_to_render())
     finally:
         source.close()
 

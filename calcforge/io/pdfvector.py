@@ -261,9 +261,113 @@ def strokes_of_page(source: PdfFile, page: dict) -> list[dict]:
     # Move the origin to the box's corner, then flip.
     flip = (1.0, 0.0, 0.0, -1.0, -min(left, right), height + min(bottom, top))
     body = source.content_of(page)
-    if not body:
-        return []
-    return read_content(body, matrix=flip)
+    found = read_content(body, matrix=flip) if body else []
+    found.extend(strokes_of_annotations(source, page, flip))
+    return found
+
+
+def _compose(first: tuple, second: tuple) -> tuple:
+    """One transform and then the other, as a PDF matrix."""
+    a1, b1, c1, d1, e1, f1 = first
+    a2, b2, c2, d2, e2, f2 = second
+    return (a1 * a2 + b1 * c2, a1 * b2 + b1 * d2,
+            c1 * a2 + d1 * c2, c1 * b2 + d1 * d2,
+            e1 * a2 + f1 * c2 + e2, e1 * b2 + f1 * d2 + f2)
+
+
+def strokes_of_annotations(source: PdfFile, page: dict, flip: tuple) -> list[dict]:
+    """The line work inside a page's annotations.
+
+    A PDF that has been marked up keeps its clouds, dimensions and call-outs
+    as annotations rather than in the page itself, so a page read for its
+    geometry alone would come back nearly empty. What each annotation draws is
+    in its appearance, which is a drawing like any other: it is read the same
+    way and put where the annotation sits on the page.
+    """
+    from .btx import read_content
+
+    found: list[dict] = []
+    for entry in source.resolve(page.get("Annots")) or []:
+        annotation = source.resolve(entry)
+        if not isinstance(annotation, dict):
+            continue
+        if str(annotation.get("Subtype")) in ("Link", "Popup"):
+            continue
+        form = _appearance_of(source, annotation)
+        if form is None:
+            continue
+        body = inflate(form.get("__stream__", b""), form)
+        if not body:
+            continue
+        placed = _appearance_matrix(source, annotation, form)
+        if placed is None:
+            continue
+        try:
+            found.extend(read_content(body, matrix=_compose(placed, flip)))
+        except Exception:                                  # noqa: BLE001
+            continue
+    return found
+
+
+def _appearance_of(source: PdfFile, annotation: dict):
+    """An annotation's normal appearance, whichever state it is kept under."""
+    look = source.resolve(annotation.get("AP"))
+    if not isinstance(look, dict):
+        return None
+    normal = source.resolve(look.get("N"))
+    if not isinstance(normal, dict):
+        return None
+    if "__stream__" in normal:
+        return normal
+    # A form for each state — a tick box, say. The first is as good a guess
+    # as any, and better than reading nothing.
+    for value in normal.values():
+        candidate = source.resolve(value)
+        if isinstance(candidate, dict) and "__stream__" in candidate:
+            return candidate
+    return None
+
+
+def _appearance_matrix(source: PdfFile, annotation: dict, form: dict):
+    """Where the appearance lands: its own box, fitted into the annotation's.
+
+    That is what a PDF reader does with an appearance — transform it by its
+    matrix, then map the box that comes out onto the rectangle the annotation
+    occupies — and it is why a markup drawn at its own origin ends up in the
+    right place on the page.
+    """
+    rect = [float(source.resolve(v) or 0) for v in
+            (source.resolve(annotation.get("Rect")) or [])]
+    if len(rect) != 4:
+        return None
+    left, bottom = min(rect[0], rect[2]), min(rect[1], rect[3])
+    across, up = abs(rect[2] - rect[0]), abs(rect[3] - rect[1])
+    box = [float(source.resolve(v) or 0) for v in
+           (source.resolve(form.get("BBox")) or [])]
+    if len(box) != 4:
+        return (1.0, 0.0, 0.0, 1.0, left, bottom)
+    matrix = [float(source.resolve(v) or 0) for v in
+              (source.resolve(form.get("Matrix")) or [])]
+    own = tuple(matrix) if len(matrix) == 6 else (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+    corners = _transformed_box(box, own)
+    wide = max(corners[2] - corners[0], 1e-9)
+    high = max(corners[3] - corners[1], 1e-9)
+    scale_x = across / wide if across > 0 else 1.0
+    scale_y = up / high if up > 0 else 1.0
+    fit = (scale_x, 0.0, 0.0, scale_y,
+           left - corners[0] * scale_x, bottom - corners[1] * scale_y)
+    return _compose(own, fit)
+
+
+def _transformed_box(box: list, matrix: tuple) -> tuple:
+    """The bounding box of a box once the matrix has been applied to it."""
+    a, b, c, d, e, f = matrix
+    xs, ys = [], []
+    for x, y in ((box[0], box[1]), (box[2], box[1]),
+                 (box[2], box[3]), (box[0], box[3])):
+        xs.append(a * x + c * y + e)
+        ys.append(b * x + d * y + f)
+    return min(xs), min(ys), max(xs), max(ys)
 
 
 def read(path: str, indices: Optional[list[int]] = None) -> list[list[dict]]:

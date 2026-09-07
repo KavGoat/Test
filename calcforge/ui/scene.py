@@ -437,9 +437,10 @@ class PageFrame(QGraphicsObject):
         """Draw the whole page into *target*, hiding editing chrome.
 
         With *without_markups*, only the page itself is drawn — the paper, the
-        imported background, the grid, the running header and footer, and
-        anything that has been flattened into the sheet, which is part of it
-        now. That is what an export wants when the markups that are still
+        imported background, the grid, the running header and footer, the
+        Drawing layer, which is the page's own line work rather than anybody's
+        markup, and anything that has been flattened into the sheet, which is
+        part of it now. That is what an export wants when the markups that are still
         markups are going into the file as real annotations instead of being
         painted into it.
         """
@@ -464,7 +465,8 @@ class PageFrame(QGraphicsObject):
                     item.set_chrome(False)
                 item._handles_visible = False
             hidden = [item for item in self.markups()
-                      if (without_markups and not item.flattened)
+                      if (without_markups and not item.flattened
+                          and item.layer != "Drawing")
                       or (for_print and (not item.printable
                                          or not self.layer_prints(item)
                                          or (pdf_overlay and item.layer == "Drawing")))]
@@ -520,6 +522,22 @@ class PageFrame(QGraphicsObject):
             return picture
         painter = QPainter()
         painter.begin(picture)
+        self.paint_items(painter, items, box)
+        painter.end()
+        return picture
+
+    def paint_items(self, painter: QPainter, items, region: QRectF) -> None:
+        """Draw exactly *items* onto *painter*, with *region* as the origin.
+
+        Separate from the recording above because a recording is not always
+        what is wanted: exporting a markup as its own annotation draws it
+        straight onto the page being written, and going through a QPicture on
+        the way would quietly rescale it — a recording carries the resolution
+        it was made at, and is stretched by the ratio to whatever plays it.
+        """
+        box = QRectF(region).normalized()
+        if box.width() <= 0 or box.height() <= 0 or not items:
+            return
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setRenderHint(QPainter.TextAntialiasing, True)
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
@@ -533,8 +551,6 @@ class PageFrame(QGraphicsObject):
             painter.setWorldTransform(transform, True)
             item.paint_content(painter)
             painter.restore()
-        painter.end()
-        return picture
 
     def render_image(self, dpi: float = 150.0, for_print: bool = True,
                      region: Optional[QRectF] = None) -> QImage:
