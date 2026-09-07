@@ -34,7 +34,6 @@ class ContentsItem(MarkupItem):
         self.style = Style(stroke="#c6ccd6", fill="#ffffff", fill_opacity=1.0,
                            width=0.6, font_size=9.5, text_color="#111318",
                            padding=8.0)
-        self.layer = "Markups"
         # Filled in as it paints: one (rect, page index, y) per row, for the
         # click that follows a row and for the link in the exported PDF.
         self.rows: list[tuple[QRectF, int, float]] = []

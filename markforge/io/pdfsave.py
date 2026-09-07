@@ -256,7 +256,7 @@ def save(document, path: str, original: bytes, appearance: bool = True) -> None:
     written = 0
     if appearance:
         written = _add_the_markups(storage, document, references)
-    attach(storage, pdfbase.LAYER_ENTRY, pdfbase.layer_bytes(document))
+    attach(storage, pdfbase.RECORD_ENTRY, pdfbase.record_bytes(document))
 
     changed = {number: storage.objects[number] for number in storage.objects
                if number not in before or number in storage.rewritten}

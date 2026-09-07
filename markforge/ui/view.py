@@ -834,13 +834,12 @@ class PageView(QGraphicsView):
     def is_drawing(item) -> bool:
         """Whether this came in on a PDF page rather than being drawn here.
 
-        The line work read out of an imported drawing goes on its own layer.
-        It is worth catching hold of — the end of a beam, the corner of a
-        column — but it is not worth lining new markups up against, because
-        a drawing is already full of lines and every one of them would offer
-        a guide.
+        The line work read out of an imported drawing is worth catching hold
+        of — the end of a beam, the corner of a column — but it is not worth
+        lining new markups up against, because a drawing is already full of
+        lines and every one of them would offer a guide.
         """
-        return getattr(item, "layer", "") == "Drawing"
+        return bool(getattr(item, "from_drawing", False))
 
     @staticmethod
     def named_points_of(item) -> list:
@@ -2006,7 +2005,7 @@ class PageView(QGraphicsView):
         if item is None:
             self.setCursor(Qt.ArrowCursor)
         elif not self.editable(item):
-            self.setCursor(Qt.ForbiddenCursor)     # locked, or on a hidden layer
+            self.setCursor(Qt.ForbiddenCursor)     # locked, or part of the page
         else:
             self.setCursor(Qt.SizeAllCursor)
 
@@ -3022,7 +3021,7 @@ class PageView(QGraphicsView):
 
     @staticmethod
     def editable(item) -> bool:
-        """False when the markup itself is locked, or the layer under it is."""
+        """False when the markup is locked, or has been made part of the page."""
         from PySide6.QtWidgets import QGraphicsItem as _GraphicsItem
         return bool(item.flags() & _GraphicsItem.ItemIsMovable) and not item.locked
 
@@ -3148,8 +3147,6 @@ class PageView(QGraphicsView):
     def markup_at(self, scene_pos: QPointF) -> Optional[MarkupItem]:
         for item in self.scene().items(scene_pos):
             if isinstance(item, MarkupItem):
-                if item.layer and not self.window.layer_visible(item.layer):
-                    continue
                 if item.flattened:
                     # Flattened is part of the page, the way it is on a
                     # Bluebeam PDF. It was already unselectable, but it went on

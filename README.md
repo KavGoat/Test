@@ -8,7 +8,7 @@ It is Bluebeam's job, done in the open:
 
 | You would normally use… | MarkForge gives you |
 |---|---|
-| Bluebeam Revu | The full markup tool set, scaled measurement, takeoff, layers, tool sets |
+| Bluebeam Revu | The full markup tool set, scaled measurement, takeoff, tool sets |
 | A PDF reader | Pages read as one scroll, at any zoom, sharp because they are re-rendered rather than magnified |
 | Anything that has to open it afterwards | An ordinary PDF — the drawing untouched, the markups standard annotations |
 
@@ -52,7 +52,7 @@ On a headless machine (CI, a container) run with `QT_QPA_PLATFORM=offscreen`.
 ## Markup
 
 The complete annotation set, with a properties panel for colour, fill,
-thickness, dash pattern, hatch, opacity, arrowheads, font, layer, author and
+thickness, dash pattern, hatch, opacity, arrowheads, font, author and
 comment:
 
 - **Draw** — pen, highlighter, eraser, line, arrow, arc, polyline, rectangle,
@@ -97,7 +97,7 @@ is not a picture: the line work in it is copied as line work, so pasting puts
 something down that stays sharp at any zoom.
 
 The **Markups** panel is a live list of every annotation in the document —
-page, type, subject, measured value, layer, author, date and comment —
+page, type, subject, measured value, author, date and comment —
 sortable, filterable, and exportable to CSV as a takeoff. Measurements and
 counts sharing a subject are totalled at the bottom. The list and the drawing
 are two views of one thing: pick a row and the markup is picked on the page,
@@ -217,9 +217,14 @@ it, or swaps one colour for another.
 - Thumbnail panel for adding, duplicating, deleting and reordering pages.
 - Optional grid with snapping, margin guides, and header/footer templates with
   fields: `{title} {project} {author} {page} {pages} {date} {time} {file}`.
-- **Layers** with per-layer show, lock and print. An imported PDF's own line
-  work goes on a **Drawing** layer of its own, so it can be dimmed or hidden
-  without touching the markups over it.
+- **Order**: bring a markup to the front, send it to the back, or move it one
+  step either way (`Ctrl+Shift+]`, `Ctrl+Shift+[`, `Ctrl+]`, `Ctrl+[`). The
+  page's own imported line work always sits under everything drawn on it, so
+  sending a markup to the back puts it behind the other markups rather than
+  under the drawing, where nothing would be seen of it again.
+- **Hide** a markup you want out of the way without deleting it, and *Markup ▸
+  Show hidden* brings them all back. Anything can be left out of the print on
+  its own, and locked so it cannot be moved.
 - **Redaction that redacts**: draw the boxes, then *Markup ▸ Apply redactions*
   to overwrite the page underneath and delete the markups they cover. It says
   plainly that this cannot be undone, and that partly-overlapping markups are
@@ -322,6 +327,8 @@ written. Save, print and zoom stay live throughout, as they do everywhere else.
 | `Ctrl+Shift+V` | Carry what was copied on the pointer and click to drop it |
 | `Ctrl+B` | Bookmark this place |
 | `Ctrl+G` / `Ctrl+Shift+G` | Group · ungroup the selection |
+| `Ctrl+Shift+]` / `Ctrl+Shift+[` | Bring to the front · send to the back |
+| `Ctrl+]` / `Ctrl+[` | Bring forward · send backward one step |
 | `1` … `9` | Pick up that tool from **My Tools** |
 | `Ctrl+Alt+8` `Ctrl+Alt+R` … | Symbols — the full list under Insert ▸ Symbol |
 | `Ctrl+Z` / `Ctrl+Y` | Undo · redo |

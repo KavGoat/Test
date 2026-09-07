@@ -286,12 +286,12 @@ def export_markups_csv(document: Document, path: str) -> int:
         for item in page.frame.ordered_markups():
             rows.append([index + 1, item.display_name(), item.subject,
                          getattr(item, "value_text", ""), item.author,
-                         item.created[:10], item.modified[:10], item.layer,
+                         item.created[:10], item.modified[:10],
                          item.summary()])
     with open(path, "w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow(["Page", "Type", "Subject", "Value", "Author", "Created",
-                         "Modified", "Layer", "Comment"])
+                         "Modified", "Comment"])
         writer.writerows(rows)
     return len(rows)
 

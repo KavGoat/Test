@@ -2145,8 +2145,8 @@ def test_changing_a_pages_colours_changes_its_line_work_too(window):
 
     Recolouring only the picture left every line its old colour on top of a
     recoloured sheet, which looks like the change half worked — because it
-    did. The lines are real line work on a locked Drawing layer, so they
-    change as lines and the page stays as sharp as it was.
+    did. The lines are the page's own line work, so they change as lines and
+    the page stays as sharp as it was.
     """
     from PySide6.QtCore import QPointF
     from PySide6.QtGui import QColor
@@ -2157,7 +2157,7 @@ def test_changing_a_pages_colours_changes_its_line_work_too(window):
     for colour in ("#000000", "#0a0a0a", "#c92a2a"):
         line = PolyItem("polyline", [QPointF(0, 0), QPointF(10, 0)])
         line.style.stroke = colour
-        line.layer = "Drawing"
+        line.from_drawing = True
         lines.append(line)
 
     changed = recolour.swap_line_colour(lines, QColor("#000000"),
@@ -2838,10 +2838,7 @@ def test_a_snapshot_takes_the_drawing_underneath_with_it(window, tmp_path, monke
     line.points = [QPointF(0, 0), QPointF(90, 0)]
     line.style.stroke = "#111111"
     line.style.width = 3.0
-    line.layer = "Drawing"
-    if "Drawing" not in window.document.layer_names():
-        from markforge.core.document import Layer
-        window.document.layers.append(Layer("Drawing", locked=True))
+    line.from_drawing = True
     frame.add_markup(line, QPointF(30, 55))
     window.take_snapshot(frame, QRectF(20, 20, 120, 90))
     payload = window._clipboard
@@ -5027,9 +5024,17 @@ def _words(window, text="300 kerb", at=(90, 110), size=(190, 50)):
 
 
 def _a_rectangle(window, x0=120, y0=120, x1=240, y1=200):
+    """Draw one, and hand back that one.
+
+    By what appeared, not by what reads last: ordered_markups() is in reading
+    order, so the newest markup is only at the end of it when it happens to be
+    the furthest down the page.
+    """
+    before = set(markups(window))
     window.select_tool("rect")
     drag(window.view, x0, y0, x1, y1)
-    return markups(window)[-1]
+    made = [item for item in markups(window) if item not in before]
+    return made[-1] if made else markups(window)[-1]
 
 
 def test_the_markup_menu_offers_the_whole_of_bluebeams(window):
@@ -5037,7 +5042,7 @@ def test_the_markup_menu_offers_the_whole_of_bluebeams(window):
     rect.setSelected(True)
     labels = _menu_labels(window.build_context_menu(rect, QPointF(150, 150)))
     for wanted in ("Cut", "Copy", "Paste", "Duplicate", "Format painter",
-                   "Delete", "Order", "Align", "Layer", "Lock / unlock",
+                   "Delete", "Order", "Align", "Lock / unlock",
                    "Hide", "Flatten selection", "Apply pages…",
                    "Properties"):
         assert wanted in labels, f"{wanted!r} missing from {labels}"
@@ -5287,16 +5292,6 @@ def test_a_markup_can_be_put_on_every_other_page(window, monkeypatch):
         assert copies[0].uid != rect.uid
 
 
-def test_moving_a_markup_to_another_layer(window):
-    rect = _a_rectangle(window)
-    rect.setSelected(True)
-    other = [layer.name for layer in window.document.layers
-             if layer.name != rect.layer]
-    if not other:
-        window.document.add_layer("Second")
-        other = ["Second"]
-    window.move_to_layer(other[0])
-    assert rect.layer == other[0]
 
 
 # ---------------------------------------------------------------------------
@@ -7167,10 +7162,10 @@ def test_an_inserted_pdf_brings_somebody_elses_markups_back_as_markups(
     # Two points with an arrow on the end is a line annotation, and a line
     # annotation is a line — not a polyline that happens to have two corners.
     assert ("poly", "line", 120, 320) in placed
-    assert all(item["layer"] == "Markups" for item in found[0])
+    assert not any(item.get("from_drawing") for item in found[0])
 
 
-def test_the_lines_come_in_on_a_layer_of_their_own(window, tmp_path):
+def test_the_lines_come_in_knowing_they_are_the_pages_own(window, tmp_path):
     """The page's own drawing is the page's; a markup is somebody's."""
     from markforge.core.document import Document
     from markforge.io import pdfio
@@ -7178,10 +7173,9 @@ def test_the_lines_come_in_on_a_layer_of_their_own(window, tmp_path):
     path = _a_pdf_with_lines(window, tmp_path)
     fresh = Document()
     pages = pdfio.import_pages(fresh, path, [0], vectors=True, at=1)
-    layers = {item["layer"] for item in pages[0]._pending_items}
-    assert "Drawing" in layers, "the page's own line work"
-    assert "Markups" in layers, "and the markups that were made on it"
-    assert "Drawing" in fresh.layer_names()
+    told = {bool(item.get("from_drawing")) for item in pages[0]._pending_items}
+    assert True in told, "the page's own line work"
+    assert False in told, "and the markups that were made on it"
     # And the picture is still there underneath, so the words still show.
     assert pages[0].background_key
 
@@ -7193,8 +7187,8 @@ def test_the_lines_can_be_left_out_but_the_markups_never_are(window, tmp_path):
     path = _a_pdf_with_lines(window, tmp_path)
     fresh = Document()
     pages = pdfio.import_pages(fresh, path, [0], vectors=False, at=1)
-    layers = {item["layer"] for item in pages[0]._pending_items}
-    assert layers == {"Markups"}, \
+    told = {bool(item.get("from_drawing")) for item in pages[0]._pending_items}
+    assert told == {False}, \
         "the page's own line work was not asked for; the markups always are"
     assert pages[0].background_key
 
@@ -7728,7 +7722,7 @@ def test_the_drawing_underneath_offers_corners_but_no_guides(window):
 
     frame = window.view.frame()
     line = Poly("polyline", [QPointF(0, 0), QPointF(120, 0), QPointF(120, 90)])
-    line.layer = "Drawing"
+    line.from_drawing = True
     frame.add_markup(line, QPointF(200, 500))
     assert window.view.is_drawing(line)
 
@@ -7753,7 +7747,7 @@ def test_snapping_to_the_drawing_can_be_turned_off_on_its_own(window):
 
     frame = window.view.frame()
     line = Poly("polyline", [QPointF(0, 0), QPointF(120, 0)])
-    line.layer = "Drawing"
+    line.from_drawing = True
     frame.add_markup(line, QPointF(200, 500))
     end = line.mapToScene(line.points[0])
 
@@ -8359,3 +8353,75 @@ def test_crossings_are_left_alone_when_snapping_is_switched_off(window):
     finally:
         settings.snap_to_items = True
         settings.snap_to_content = True
+
+
+# ---------------------------------------------------------------------------
+# Which markup is in front
+# ---------------------------------------------------------------------------
+
+def test_order_moves_a_markup_in_front_of_and_behind_the_others(window):
+    first = _a_rectangle(window, 120, 120, 260, 220)
+    second = _a_rectangle(window, 180, 160, 320, 260)
+    assert second.zValue() > first.zValue(), "the newer one starts on top"
+
+    window.select_tool("select")
+    window.view.scene().clearSelection()
+    first.setSelected(True)
+    window.reorder("front")
+    assert first.zValue() > second.zValue()
+
+    window.reorder("back")
+    assert first.zValue() < second.zValue()
+
+
+def _the_pages_own_line(window, at=(60, 200)):
+    """A piece of line work that came in on the page, where an import puts it."""
+    from PySide6.QtCore import QPointF
+    from markforge.io.pdfio import DRAWING_Z
+    from markforge.items.shapes import PolyItem
+
+    line = PolyItem("polyline", [QPointF(0, 0), QPointF(300, 0)])
+    line.from_drawing = True
+    line.setZValue(DRAWING_Z)
+    window.document.pages[0].frame.add_markup(line, QPointF(*at))
+    return line
+
+
+def test_sending_to_the_back_stays_in_front_of_the_drawing(window):
+    """The page's own line work is the page, not the bottom of the pile.
+
+    Sending a markup behind it would put it under the drawing, where nothing
+    would be seen of it again — which is not what anybody means by "send to
+    back".
+    """
+    line = _the_pages_own_line(window)
+    box = _a_rectangle(window)
+    assert not box.from_drawing, "the helper should hand back the rectangle"
+
+    window.select_tool("select")
+    window.view.scene().clearSelection()
+    box.setSelected(True)
+    window.reorder("back")
+    assert box.zValue() > line.zValue(), \
+        "sent behind the other markups, but still over the drawing"
+
+
+def test_a_new_markup_lands_on_top_of_the_ones_already_there(window):
+    """Not one step above the imported line work, which is where the bottom is."""
+    line = _the_pages_own_line(window)
+    first = _a_rectangle(window, 120, 120, 260, 220)
+    second = _a_rectangle(window, 180, 160, 320, 260)
+    assert second.zValue() > first.zValue() > line.zValue()
+
+
+def test_the_pages_own_line_work_is_not_dragged_about(window, tmp_path):
+    """It is the drawing, not a markup on it: worth pointing at, not moving."""
+    from markforge.core.document import Document
+    from markforge.io import pdfio
+
+    path = _a_pdf_with_lines(window, tmp_path)
+    fresh = Document()
+    pages = pdfio.import_pages(fresh, path, [0], vectors=True, at=1)
+    theirs = [item for item in pages[0]._pending_items if item.get("from_drawing")]
+    assert theirs, "the page's own line work should have come in"
+    assert all(item.get("locked") for item in theirs)

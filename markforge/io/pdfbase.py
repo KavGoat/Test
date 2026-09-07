@@ -5,9 +5,9 @@ it opens in Bluebeam, in Acrobat, in a browser, in anything — and every markup
 in it is a real PDF annotation, so it can be picked up and moved wherever it is
 opened rather than being ink somebody else is stuck with.
 
-A PDF annotation cannot hold quite everything: the layer a markup is on, the
-hatch behind it, what it was measured against. Those ride along inside the same
-file as an embedded record, so opening the file here again gives back exactly
+A PDF annotation cannot hold quite everything: the hatch behind a markup, the
+holes cut out of it, what it was measured against. Those ride along inside the
+same file as an embedded record, so opening the file here again gives back exactly
 what was saved, and opening it anywhere else gives back a perfectly ordinary
 marked-up PDF. There is no second format and no other extension.
 """
@@ -22,7 +22,7 @@ from typing import Optional
 # The embedded file the markup record travels in. A PDF reader that knows
 # nothing about this application shows it as an attachment and is otherwise
 # unbothered by it.
-LAYER_ENTRY = "markups.json.zip"
+RECORD_ENTRY = "markups.json.zip"
 
 DOCUMENT_ENTRY = "document.json"
 ASSET_PREFIX = "assets/"
@@ -34,7 +34,7 @@ APPEARANCE_DPI = 200
 
 
 # -- the record ------------------------------------------------------------
-def layer_bytes(document) -> bytes:
+def record_bytes(document) -> bytes:
     """The markup record: the document's own account of itself, and its assets."""
     payload = json.dumps(document.to_dict(), indent=1, ensure_ascii=False)
     holder = io.BytesIO()
@@ -45,8 +45,8 @@ def layer_bytes(document) -> bytes:
     return holder.getvalue()
 
 
-def read_layer(data: bytes) -> tuple[dict, dict[str, bytes]]:
-    """A layer's document record and assets, back out of the bytes."""
+def read_record(data: bytes) -> tuple[dict, dict[str, bytes]]:
+    """The document record and its assets, back out of the bytes."""
     with zipfile.ZipFile(io.BytesIO(data), "r") as archive:
         record = json.loads(archive.read(DOCUMENT_ENTRY).decode("utf-8"))
         assets = {entry[len(ASSET_PREFIX):]: archive.read(entry)
@@ -63,7 +63,7 @@ def is_pdf(path: str) -> bool:
         return False
 
 
-def layer_in(path: str) -> Optional[bytes]:
+def record_in(path: str) -> Optional[bytes]:
     """The markup record inside the PDF at *path*, if it carries one."""
     if not is_pdf(path):
         return None
@@ -71,7 +71,7 @@ def layer_in(path: str) -> Optional[bytes]:
 
     try:
         reader = PdfReader(path, strict=False)
-        found = reader.attachments.get(LAYER_ENTRY)
+        found = reader.attachments.get(RECORD_ENTRY)
     except Exception:                                  # noqa: BLE001
         return None
     if not found:
@@ -116,7 +116,7 @@ def _assemble(document, path: str, appearance: bool = True) -> None:
         output.add_page(_page_body(document, page, keep_alive))
     if appearance:
         _draw_the_sheets_onto(output, document)
-    output.add_attachment(LAYER_ENTRY, layer_bytes(document))
+    output.add_attachment(RECORD_ENTRY, record_bytes(document))
     output.add_metadata({"/Title": document.title or "", "/Creator": "MarkForge"})
     temporary = path + ".tmp"
     with open(temporary, "wb") as handle:
@@ -167,7 +167,7 @@ def _source_page(document, page, keep_alive: list):
         return source
     except Exception:                                  # noqa: BLE001
         # A source that cannot be read is not worth losing the save over: the
-        # page still comes out, the layer still holds everything, and the
+        # page still comes out, the record still holds everything, and the
         # markups are still drawn onto it below.
         return None
 
@@ -245,10 +245,10 @@ def _rendered_overlay(document, drawn: list) -> Optional[str]:
 # -- reading ---------------------------------------------------------------
 def read(document, path: str) -> bool:
     """Load *path* into *document*. True when it carried a markup record."""
-    found = layer_in(path)
+    found = record_in(path)
     if found is None:
         return False
-    record, assets = read_layer(found)
+    record, assets = read_record(found)
     document.assets = assets
     document.load_dict(record)
     document.path = path

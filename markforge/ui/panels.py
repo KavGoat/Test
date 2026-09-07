@@ -1,4 +1,4 @@
-"""Dock panels: pages, the markups list, layers, bookmarks and properties."""
+"""Dock panels: pages, the markups list, bookmarks, tool sets and properties."""
 from __future__ import annotations
 
 import csv
@@ -359,8 +359,7 @@ class MarkupsPanel(QWidget):
     markupActivated = Signal(int, str)
     markupPicked = Signal(int, str)
 
-    COLUMNS = ["Page", "Type", "Subject", "Value", "Layer", "Author",
-               "Date", "Comment"]
+    COLUMNS = ["Page", "Type", "Subject", "Value", "Author", "Date", "Comment"]
 
     def __init__(self, window):
         super().__init__()
@@ -421,8 +420,8 @@ class MarkupsPanel(QWidget):
             added = False
             for item in page.frame.ordered_markups():
                 row = [str(index + 1), item.display_name(), item.subject,
-                       getattr(item, "value_text", ""), item.layer,
-                       item.author, item.modified[:10], item.summary()]
+                       getattr(item, "value_text", ""), item.author,
+                       item.modified[:10], item.summary()]
                 if needle and not any(needle in str(cell).lower() for cell in row):
                     continue
                 node = QTreeWidgetItem(row)
@@ -547,16 +546,7 @@ def _icon_for(item) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Variables
-# ---------------------------------------------------------------------------
-
-def _is_cell_ref(text: str) -> bool:
-    """A1, D2, or a range like A1:B4 — what a table records as an origin."""
-    return bool(re.fullmatch(r"[A-Z]{1,3}\d{1,5}(:[A-Z]{1,3}\d{1,5})?|column [A-Z]{1,3}", text))
-
-
-# ---------------------------------------------------------------------------
-# Layers
+# Bookmarks
 # ---------------------------------------------------------------------------
 
 class BookmarksPanel(QWidget):
@@ -1098,147 +1088,6 @@ def _icon_for_type(type_name: str) -> str:
             "measure": "measure_length",
             "count": "count", "contents": "page"}.get(type_name, "select")
 
-
-class LayersPanel(QWidget):
-    """Show, hide, lock and set printability per layer."""
-
-    layersChanged = Signal()
-
-    def __init__(self, window):
-        super().__init__()
-        self.window = window
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(4)
-
-        self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(["Show", "Lock", "Print", "Layer", "Items"])
-        self.table.verticalHeader().setVisible(False)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
-        self.table.itemChanged.connect(self._cell_changed)
-        layout.addWidget(self.table, 1)
-
-        buttons = QHBoxLayout()
-        for label, tip, slot in (("Add", "Add a layer", self.add_layer),
-                                 ("Rename", "Rename the selected layer", self.rename_layer),
-                                 ("Delete", "Delete the selected layer", self.delete_layer),
-                                 ("Move here", "Move the selected markups to this layer",
-                                  self.move_selection)):
-            button = QPushButton(label)
-            button.setToolTip(tip)
-            button.clicked.connect(slot)
-            buttons.addWidget(button)
-        buttons.addStretch(1)
-        layout.addLayout(buttons)
-        self._building = False
-
-    # -- display -----------------------------------------------------------
-    def rebuild(self) -> None:
-        self._building = True
-        document = self.window.document
-        counts: dict[str, int] = {}
-        for page in document.pages:
-            if page.frame is None:
-                continue
-            for item in page.frame.markups():
-                counts[item.layer] = counts.get(item.layer, 0) + 1
-        self.table.setRowCount(len(document.layers))
-        for row, layer in enumerate(document.layers):
-            for column, flag in enumerate((layer.visible, layer.locked, layer.printable)):
-                cell = QTableWidgetItem()
-                cell.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-                cell.setCheckState(Qt.Checked if flag else Qt.Unchecked)
-                self.table.setItem(row, column, cell)
-            name = QTableWidgetItem(layer.name)
-            self.table.setItem(row, 3, name)
-            count = QTableWidgetItem(str(counts.get(layer.name, 0)))
-            count.setFlags(Qt.ItemIsEnabled)
-            self.table.setItem(row, 4, count)
-        for column in (0, 1, 2, 4):
-            self.table.resizeColumnToContents(column)
-        self._building = False
-
-    def current_layer(self):
-        row = self.table.currentRow()
-        layers = self.window.document.layers
-        return layers[row] if 0 <= row < len(layers) else None
-
-    # -- edits -------------------------------------------------------------
-    def _cell_changed(self, cell: QTableWidgetItem) -> None:
-        if self._building:
-            return
-        row, column = cell.row(), cell.column()
-        layers = self.window.document.layers
-        if not 0 <= row < len(layers):
-            return
-        layer = layers[row]
-        if column in (0, 1, 2):
-            checked = cell.checkState() == Qt.Checked
-            if column == 0:
-                layer.visible = checked
-            elif column == 1:
-                layer.locked = checked
-            else:
-                layer.printable = checked
-        elif column == 3:
-            new_name = cell.text().strip() or layer.name
-            if new_name != layer.name:
-                self.window.rename_layer(layer.name, new_name)
-                layer.name = new_name
-        self.layersChanged.emit()
-
-    def add_layer(self) -> None:
-        from PySide6.QtWidgets import QInputDialog
-        name, accepted = QInputDialog.getText(self, "Add layer", "Layer name:")
-        if accepted and name.strip():
-            self.window.document.add_layer(name.strip())
-            self.rebuild()
-            self.layersChanged.emit()
-
-    def rename_layer(self) -> None:
-        from PySide6.QtWidgets import QInputDialog
-        layer = self.current_layer()
-        if layer is None:
-            return
-        name, accepted = QInputDialog.getText(self, "Rename layer", "Layer name:",
-                                              text=layer.name)
-        if accepted and name.strip() and name.strip() != layer.name:
-            self.window.rename_layer(layer.name, name.strip())
-            layer.name = name.strip()
-            self.rebuild()
-            self.layersChanged.emit()
-
-    def delete_layer(self) -> None:
-        from PySide6.QtWidgets import QMessageBox
-        layer = self.current_layer()
-        document = self.window.document
-        if layer is None or len(document.layers) < 2:
-            QMessageBox.information(self, "Delete layer",
-                                    "A document needs at least one layer.")
-            return
-        remaining = [l for l in document.layers if l is not layer][0]
-        if QMessageBox.question(
-                self, "Delete layer",
-                f"Delete “{layer.name}”?\nIts markups move to “{remaining.name}”."
-        ) != QMessageBox.Yes:
-            return
-        self.window.rename_layer(layer.name, remaining.name)
-        document.layers.remove(layer)
-        self.rebuild()
-        self.layersChanged.emit()
-
-    def move_selection(self) -> None:
-        layer = self.current_layer()
-        if layer is not None:
-            self.window.move_selection_to_layer(layer.name)
-            self.rebuild()
-
-
-# ---------------------------------------------------------------------------
-# Problems
-# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # Properties
@@ -1893,13 +1742,6 @@ class PropertiesPanel(QScrollArea):
         comment.textChanged.connect(
             lambda: self._apply(lambda i: setattr(i, "comment", comment.toPlainText()), "Comment"))
         form.addRow("Comment", comment)
-
-        layer = QComboBox()
-        layer.addItems([lyr.name for lyr in self.window.document.layers])
-        layer.setCurrentText(first.layer)
-        layer.currentTextChanged.connect(
-            lambda text: self._apply(lambda i: setattr(i, "layer", text), "Layer"))
-        form.addRow("Layer", layer)
 
         locked = QCheckBox("Locked")
         locked.setChecked(first.locked)

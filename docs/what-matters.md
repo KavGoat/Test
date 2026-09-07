@@ -63,7 +63,8 @@ The drawings are large, and they arrive from everywhere.
 - A page is drawn from its own line work, not from a picture of it, so it is
   sharp at any zoom rather than magnified — and that line work can be caught
   hold of: its ends, its corners, and where its lines cross, which is where a
-  dimension is actually taken from.
+  dimension is actually taken from. It is the drawing, not a markup on it, so
+  it is never dragged about and never ends up over what was drawn on it.
 - Somebody else's markups come in as markups — a Bluebeam cloud opens as a
   cloud that can be selected, recoloured and moved, not as part of the page.
 - A drawing opens in a moment, not in a minute. Opening a file is not a

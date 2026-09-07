@@ -298,6 +298,11 @@ def _scaled_markups(payloads: list[dict], scale: float) -> list[dict]:
     return moved
 
 
+#: What z the page's own line work is given: below every markup, above the
+#: sheet the frame itself draws.
+DRAWING_Z = -1.0
+
+
 def _items_from(strokes: list[dict], scale: float = 1.0) -> list[dict]:
     """Strokes as markup payloads: one polyline for each piece of line work.
 
@@ -324,7 +329,13 @@ def _items_from(strokes: list[dict], scale: float = 1.0) -> list[dict]:
                     "fill": "",
                     "width": max(float(stroke.get("width", 0.6)) * scale, 0.1),
                 },
-                "layer": "Drawing",
+                "from_drawing": True,
+                "locked": True,
+                # Below everything drawn on the page. It is the page, so
+                # "send to back" has to mean behind the other markups rather
+                # than underneath the drawing itself, where nothing would be
+                # seen of it again.
+                "z": DRAWING_Z,
                 "uid": os.urandom(8).hex(),
             })
     return items
@@ -375,7 +386,7 @@ def import_pages(document, path: str, indices: list[int], fit: str = FIT_ORIGINA
     """Load the chosen PDF pages into *document* as new pages.
 
     With *vectors*, the PDF's own line work comes across as well: real
-    geometry on a layer of its own, sitting exactly over the picture, so a
+    geometry of its own, sitting exactly over the picture, so a
     measurement can snap to the end of a beam rather than to a guess.
     """
     source = PdfSource(path)
@@ -392,12 +403,6 @@ def import_pages(document, path: str, indices: list[int], fit: str = FIT_ORIGINA
             key = document.add_asset(data, "png")
             page = Page(setup_for(info, fit, template))
             if index in drawn:
-                # The line work belongs on a layer of its own, so it can be
-                # turned off, locked, or left out of the print without
-                # touching anything drawn on top of it.
-                if "Drawing" not in document.layer_names():
-                    from ..core.document import Layer
-                    document.layers.append(Layer("Drawing", locked=True))
                 # The page's own line work, over the picture of it. The page
                 # may have been fitted to different paper, so it is scaled the
                 # same way the picture is.

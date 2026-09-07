@@ -141,7 +141,7 @@ def test_resetting_the_layout_puts_everything_back(window):
     window.addDockWidget(Qt.RightDockWidgetArea, pages)
     window.pin_all_panels(True)
     window.lock_toolbars(True)
-    panels(window)["dock_layers"].close()
+    panels(window)["dock_bookmarks"].close()
     window.visible_tools = {"select"}
     window.apply_visible_tools()
 
@@ -275,9 +275,9 @@ def test_moving_a_panel_writes_the_layout_out_by_itself(window):
 
 def test_hiding_a_panel_schedules_a_save(window):
     window._layout_timer.stop()
-    window.show_panel("dock_layers", True)
+    window.show_panel("dock_bookmarks", True)
     window._layout_timer.stop()
-    window.show_panel("dock_layers", False)
+    window.show_panel("dock_bookmarks", False)
     assert window._layout_timer.isActive()
 
 
@@ -346,7 +346,7 @@ def test_properties_can_be_squeezed_away_and_opened_out_again(window, qapp):
 
 
 def test_the_collapse_button_matches_the_state(window):
-    dock = panels(window)["dock_layers"]
+    dock = panels(window)["dock_bookmarks"]
     bar = dock.titleBarWidget()
     bar.collapse.setChecked(True)
     assert dock.collapsed

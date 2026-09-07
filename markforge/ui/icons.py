@@ -448,12 +448,6 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
         _pen(painter, INK, 1.3)
         painter.drawArc(QRectF(11, 5, 5, 14), 260 * 16, 200 * 16)
         painter.drawArc(QRectF(16, 5, 5, 14), 80 * 16, 200 * 16)
-    elif name == "panel_layers":
-        _pen(painter, INK, 1.3)
-        for offset in range(3):
-            y = 7 + offset * 4.6
-            painter.drawPolygon(QPolygonF([QPointF(12, y - 3), QPointF(20, y),
-                                           QPointF(12, y + 3), QPointF(4, y)]))
     elif name == "panel_problems":
         _pen(painter, INK, 1.4)
         painter.drawPolygon(QPolygonF([QPointF(12, 3.5), QPointF(21, 19.5),
@@ -532,11 +526,6 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
         painter.drawRect(QRectF(4, 5, 16, 14))
         painter.drawLine(QPointF(8, 9), QPointF(16, 9))
         painter.drawLine(QPointF(8, 15), QPointF(16, 15))
-    elif name == "layers":
-        _pen(painter, INK, 1.3)
-        for offset in (0, 4, 8):
-            painter.drawPolygon(QPolygonF([QPointF(12, 3 + offset), QPointF(20, 7 + offset),
-                                           QPointF(12, 11 + offset), QPointF(4, 7 + offset)]))
     elif name == "variables":
         font = QFont("Georgia")
         font.setFamilies(["Cambria Math", "Georgia", "DejaVu Serif", "serif"])

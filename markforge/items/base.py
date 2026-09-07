@@ -291,13 +291,19 @@ class MarkupItem(QGraphicsObject):
         self.subject = ""
         self.comment = ""
         self.label = ""
-        self.layer = "Markups"
+        # Whether this is the page's own line work rather than somebody's
+        # markup: read out of the PDF the page came in on, so that a
+        # measurement can snap to the end of a beam. It belongs to the page —
+        # it is written as part of it rather than as an annotation, it is not
+        # what a snapshot copies, and it is not offered as a guide to line new
+        # markups up with, because a drawing is already full of lines.
+        self.from_drawing = False
         self.created = datetime.now().isoformat(timespec="seconds")
         self.modified = self.created
         self.locked = False
         self.printable = True
-        # Hidden: still in the document, just not shown — the layers panel and
-        # "Show hidden" bring it back. Flattened: made part of the drawing, no
+        # Hidden: still in the document, just not shown — Markup ▸ Show hidden
+        # brings it back. Flattened: made part of the drawing, no
         # longer a markup that can be picked out or edited.
         self.hidden = False
         self.flattened = False
@@ -584,7 +590,7 @@ class MarkupItem(QGraphicsObject):
             "subject": self.subject,
             "comment": self.comment,
             "label": self.label,
-            "layer": self.layer,
+            "from_drawing": self.from_drawing,
             "created": self.created,
             "modified": self.modified,
             "locked": self.locked,
@@ -614,7 +620,10 @@ class MarkupItem(QGraphicsObject):
         self.subject = data.get("subject", "")
         self.comment = data.get("comment", "")
         self.label = data.get("label", "")
-        self.layer = data.get("layer", "Markups")
+        # Documents written while this was a layer rather than a flag say so
+        # the old way, and still open.
+        self.from_drawing = bool(data.get("from_drawing",
+                                          data.get("layer") == "Drawing"))
         self.created = data.get("created", self.created)
         self.modified = data.get("modified", self.modified)
         self.printable = bool(data.get("printable", True))
@@ -622,7 +631,12 @@ class MarkupItem(QGraphicsObject):
         self.flattened = bool(data.get("flattened", False))
         self.flatten_recoverable = bool(data.get("flatten_recoverable", True))
         self.locked_before_flatten = bool(data.get("locked_before_flatten", False))
-        self.set_locked(bool(data.get("locked", False)) or self.flattened)
+        # The page's own line work is never dragged about: it is the drawing,
+        # not a markup on it. It is worth catching hold of and pointing at,
+        # which is why it is here at all, but picking a beam up and moving it
+        # is not something anybody meant to do.
+        self.set_locked(bool(data.get("locked", False)) or self.flattened
+                        or self.from_drawing)
         if self.flattened:
             self.setFlag(QGraphicsItem.ItemIsSelectable, False)
         if self.hidden:

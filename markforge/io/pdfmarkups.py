@@ -167,7 +167,7 @@ def _style(source, annotation: dict, colour, scale: float) -> dict:
 
 def _common(source, annotation: dict) -> dict:
     """What the annotation says about itself, whoever it came from."""
-    out = {"layer": "Markups"}
+    out: dict = {}
     for key, field in (("T", "author"), ("Contents", "comment"),
                        ("Subj", "subject")):
         said = source.resolve(annotation.get(key))

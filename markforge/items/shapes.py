@@ -444,7 +444,7 @@ class PolyItem(MarkupItem):
         shape = cls(kind, box.corner_points())
         shape.style = box.style.copy()
         shape.cloud_radius = getattr(box, "cloud_radius", 9.0)
-        shape.layer = box.layer
+        shape.from_drawing = box.from_drawing
         shape.author = box.author
         shape.label = box.label
         shape.locked = box.locked

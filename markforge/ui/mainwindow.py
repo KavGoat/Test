@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (QTabBar, QApplication, QComboBox, QDockWidget, QD
                                QToolBar, QToolButton, QVBoxLayout, QWidget)
 
 from ..core.document import (LANDSCAPE, MM_TO_PT, PAGE_SIZES, PORTRAIT,
-                             PT_TO_MM, Document, Layer, Page, PageScale,
+                             PT_TO_MM, Document, Page, PageScale,
                              PageSetup)
 from ..core.units import format_quantity, parse_unit
 from ..io import export as export_io
@@ -37,7 +37,7 @@ from ..items.text import (CalloutItem, FlagItem, NoteItem, StampItem,
 from . import dialogs
 from .commands import DocumentStructureCommand
 from .icons import icon
-from .panels import (BookmarksPanel, LayersPanel, MarkupsPanel, PagesPanel,
+from .panels import (BookmarksPanel, MarkupsPanel, PagesPanel,
                      PropertiesPanel, ToolSetsPanel)
 from .docks import PanelDock, load_panel_state, save_panel_state
 from .rail import (AREAS, LEFT, RIGHT, PanelRail, RailBar, load_sides,
@@ -487,7 +487,7 @@ class MainWindow(QMainWindow):
                   tip="Take this one's look, then click another to paint it on")
         self._act("hide", "Hide", self.hide_selection,
                   tip="Take it off the screen and out of the print, without "
-                      "deleting it — its layer brings it back")
+                      "deleting it — Show hidden brings it back")
         self._act("show_hidden", "Show hidden", self.show_hidden,
                   tip="Bring back everything that was hidden")
         self._act("flatten", "Flatten selection", self.flatten_selection,
@@ -665,9 +665,6 @@ class MainWindow(QMainWindow):
         self.properties_panel = PropertiesPanel(self)
         self.dock_properties = self._dock("Properties", self.properties_panel,
                                           Qt.RightDockWidgetArea, "dock_properties")
-        self.layers_panel = LayersPanel(self)
-        self.dock_layers = self._dock("Layers", self.layers_panel,
-                                      Qt.RightDockWidgetArea, "dock_layers")
         self.markups_panel = MarkupsPanel(self)
         self.dock_markups = self._dock("Markups", self.markups_panel,
                                        Qt.BottomDockWidgetArea, "dock_markups")
@@ -678,7 +675,7 @@ class MainWindow(QMainWindow):
         self.bookmarks_panel.bookmarkActivated.connect(self.go_to_bookmark)
         self.dock_bookmarks = self._dock("Bookmarks", self.bookmarks_panel,
                                          Qt.BottomDockWidgetArea, "dock_bookmarks")
-        self.reference_docks = [self.dock_markups, self.dock_layers,
+        self.reference_docks = [self.dock_markups,
                                 self.dock_toolsets, self.dock_bookmarks]
         self._build_rails()
         self.resizeDocks([self.dock_pages, self.dock_properties], [220, 320],
@@ -694,12 +691,11 @@ class MainWindow(QMainWindow):
         "dock_toolsets": ("Tool sets", "panel_toolsets"),
         "dock_markups": ("Markups", "panel_markups"),
         "dock_properties": ("Properties", "panel_properties"),
-        "dock_layers": ("Layers", "panel_layers"),
     }
     DEFAULT_SIDES = {
         "dock_pages": LEFT, "dock_bookmarks": LEFT, "dock_toolsets": LEFT,
         "dock_markups": LEFT,
-        "dock_properties": RIGHT, "dock_layers": RIGHT,
+        "dock_properties": RIGHT,
     }
 
     def _build_rails(self) -> None:
@@ -1069,7 +1065,6 @@ class MainWindow(QMainWindow):
         self.pages_panel.pagesReordered.connect(self.move_page)
         self.markups_panel.markupActivated.connect(self.reveal_markup)
         self.markups_panel.markupPicked.connect(self.pick_markup)
-        self.layers_panel.layersChanged.connect(self.apply_layers)
         self.undo_stack.cleanChanged.connect(lambda _clean: self.update_title())
 
     # ==================================================================
@@ -1235,7 +1230,6 @@ class MainWindow(QMainWindow):
         self.page_spin.setValue(self.current_index + 1)
         self.page_spin.blockSignals(False)
         self.pages_panel.rebuild(self.document, self.current_index)
-        self.apply_layers()
         self.refresh_lists()
         self.refresh_scale_label()
 
@@ -1261,7 +1255,7 @@ class MainWindow(QMainWindow):
 
         A saved document is itself a PDF, so what decides between the two is
         what the file holds and not what it is called: a PDF carrying a
-        MarkForge layer is a document and opens as one, whatever its name.
+        MarkForge record is a document and opens as one, whatever its name.
         """
         if project_io.carries_a_document(path):
             project_io.load_document(self.document, path)
@@ -1270,7 +1264,6 @@ class MainWindow(QMainWindow):
         document.mode = "pdf"
         document.title = os.path.splitext(os.path.basename(path))[0]
         document.pages = []
-        document.layers = [Layer("Markups"), Layer("Drawing")]
         count = pdfio.page_count(path)
         if count < 1:
             raise OSError("The PDF contains no pages")
@@ -2992,7 +2985,7 @@ class MainWindow(QMainWindow):
                 "colours.")
             return
         lines = [item for item in (page.frame.markups() if page.frame else [])
-                 if getattr(item, "layer", "") == "Drawing"]
+                 if getattr(item, "from_drawing", False)]
         changed = self._ask_recolour(image, lines)
         if changed is None:
             return
@@ -3086,7 +3079,7 @@ class MainWindow(QMainWindow):
         """Run the dialog and store the result; the new asset key, or None.
 
         *line_work* is the page's own lines, when it has any. A PDF page keeps
-        its line work as line work on a locked Drawing layer, so a colour
+        its line work as the page's own line work, so a colour
         change has to reach that too: repainting only the picture underneath
         left every line its old colour on top of a recoloured sheet.
         """
@@ -3475,7 +3468,7 @@ class MainWindow(QMainWindow):
 
     def select_all(self) -> None:
         for item in self.view.frame().markups():
-            if self.layer_visible(item.layer):
+            if item.isVisible():
                 item.setSelected(True)
         self.refresh_selection()
 
@@ -3491,25 +3484,48 @@ class MainWindow(QMainWindow):
         self.refresh_selection()
 
     def reorder(self, mode: str) -> None:
-        items = self.selected_items()
+        items = [i for i in self.selected_items() if not i.from_drawing]
         if not items:
             return
         scene = self.view.scene()
         self.view.begin_snapshot()
-        others = [i for i in scene.markups() if i not in items]
+        # Only against what somebody drew. The page's own line work is the
+        # page, so "send to back" means behind the other markups — not under
+        # the drawing, where nothing would be seen of it again.
+        others = [i for i in scene.markups()
+                  if i not in items and not i.from_drawing]
+        floor = max((i.zValue() for i in scene.markups() if i.from_drawing),
+                    default=0.0)
         if mode == "front":
-            top = max((i.zValue() for i in others), default=0.0)
+            top = max((i.zValue() for i in others), default=floor)
             for offset, item in enumerate(items, start=1):
                 item.setZValue(top + offset)
         elif mode == "back":
-            bottom = min((i.zValue() for i in others), default=0.0)
+            bottom = min((i.zValue() for i in others), default=floor + 1.0)
             for offset, item in enumerate(items, start=1):
                 item.setZValue(bottom - offset)
         else:
             step = 1.5 if mode == "forward" else -1.5
             for item in items:
                 item.setZValue(item.zValue() + step)
+        self._keep_the_markups_over_the_drawing(floor)
         self.view.commit_snapshot("Change order")
+
+    def _keep_the_markups_over_the_drawing(self, floor: float) -> None:
+        """Nothing drawn on the page ends up under the page's own line work.
+
+        Send the only markup on a sheet to the back and there is nothing to go
+        behind, so it would go below the drawing itself and not be seen again.
+        When an order change pushes anything down that far, the whole pile is
+        renumbered from just above the drawing, keeping the order it has now.
+        """
+        drawn = [item for item in self.view.scene().markups()
+                 if not item.from_drawing]
+        if not drawn or min(item.zValue() for item in drawn) > floor:
+            return
+        for step, item in enumerate(sorted(drawn, key=lambda i: i.zValue()),
+                                    start=1):
+            item.setZValue(floor + step)
 
     def align_items(self, mode: str) -> None:
         items = [i for i in self.selected_items() if self.view.editable(i)]
@@ -3635,38 +3651,6 @@ class MainWindow(QMainWindow):
                 item.setSelected(True)
                 break
         self.refresh_selection()
-
-    def layer_visible(self, name: str) -> bool:
-        return self.document.layer(name).visible
-
-    def apply_layers(self) -> None:
-        """Push layer visibility, locking and print flags onto every page."""
-        for page in self.document.pages:
-            if page.frame is not None:
-                page.frame.apply_layers()
-        self.layers_panel.rebuild()
-        self.refresh_selection()
-
-    def rename_layer(self, old: str, new: str) -> None:
-        for page in self.document.pages:
-            if page.frame is None:
-                continue
-            for item in page.frame.markups():
-                if item.layer == old:
-                    item.layer = new
-        self.document.modified = True
-
-    def move_selection_to_layer(self, name: str) -> None:
-        items = self.selected_items()
-        if not items:
-            self.status_hint.setText("Select some markups first.")
-            return
-        self.view.begin_snapshot()
-        for item in items:
-            item.layer = name
-        self.view.commit_snapshot("Change layer")
-        self.apply_layers()
-        self.status_hint.setText(f"Moved {len(items)} markup(s) to “{name}”")
 
     def replace_image(self, item) -> None:
         """Put a different picture in an image already on the page."""
@@ -3903,7 +3887,7 @@ class MainWindow(QMainWindow):
             item.setVisible(False)
         self.view.commit_snapshot("Hide markup")
         self.status_hint.setText(
-            f"{len(items)} markup(s) hidden — the layers panel brings them back")
+            f"{len(items)} markup(s) hidden — Markup ▸ Show hidden brings them back")
         self.refresh_selection()
 
     def show_hidden(self) -> None:
@@ -3915,7 +3899,7 @@ class MainWindow(QMainWindow):
             for item in frame.markups():
                 if getattr(item, "hidden", False):
                     item.hidden = False
-                    item.setVisible(self.document.layer(item.layer).visible)
+                    item.setVisible(True)
                     brought += 1
         self.view.commit_snapshot("Show hidden markups")
         self.status_hint.setText(f"{brought} markup(s) brought back")
@@ -3971,7 +3955,7 @@ class MainWindow(QMainWindow):
         items = [item for page in self.document.pages if page.frame is not None
                  for item in page.frame.markups()
                  if not item.flattened
-                 and item.layer != "Drawing"
+                 and not item.from_drawing
                  and self._flatten_class(item) in chosen]
         if not items:
             self.status_hint.setText("Nothing matched those flatten choices")
@@ -4017,7 +4001,6 @@ class MainWindow(QMainWindow):
                 baked.set_picture(picture)
                 baked.source_rect = QRectF(0, 0, region.width(), region.height())
                 baked.source_page = self.document.pages.index(frame.page) + 1
-                baked.layer = "Markups"
                 baked.flattened = True
                 baked.flatten_recoverable = False
                 baked.set_locked(True)
@@ -4043,8 +4026,7 @@ class MainWindow(QMainWindow):
         for item in items:
             item.flattened = False
             item.set_locked(item.locked_before_flatten)
-            item.setFlag(QGraphicsItem.ItemIsSelectable,
-                         self.document.layer(item.layer).visible)
+            item.setFlag(QGraphicsItem.ItemIsSelectable, True)
             # Give the pointer back what flattening took away, or a recovered
             # markup is visible, listed and selectable in the panel and still
             # cannot be touched on the page.
@@ -4089,16 +4071,6 @@ class MainWindow(QMainWindow):
     def show_properties_panel(self) -> None:
         self.show_panel("dock_properties", True)
         self.refresh_selection()
-
-    def move_to_layer(self, name: str) -> None:
-        items = [i for i in self.selected_items() if isinstance(i, MarkupItem)]
-        if not items:
-            return
-        self.view.begin_snapshot(self.view.involved_frames(*items))
-        for item in items:
-            item.layer = name
-        self.view.commit_snapshot("Move to layer")
-        self.refresh_lists()
 
     def _fill_leader_menu(self, menu, item, scene_pos: QPointF) -> None:
         """Adding and taking away leaders, on the menu itself.
@@ -4709,13 +4681,6 @@ class MainWindow(QMainWindow):
             align.setEnabled(len(self.selected_items()) > 1)
             for key in ("left", "hcenter", "right", "top", "vcenter", "bottom"):
                 align.addAction(getattr(self, f"act_align_{key}"))
-            layers = menu.addMenu("Layer")
-            for layer in self.document.layers:
-                entry = layers.addAction(layer.name,
-                                         lambda _c=False, n=layer.name:
-                                         self.move_to_layer(n))
-                entry.setCheckable(True)
-                entry.setChecked(item.layer == layer.name)
             menu.addAction(self.act_array)
             menu.addAction(self.act_lock)
             menu.addAction(self.act_hide)

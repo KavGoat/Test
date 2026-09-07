@@ -79,7 +79,7 @@ def test_a_pdf_that_is_not_a_document_is_not_opened_as_one(tmp_path):
     plain = str(tmp_path / "plain.pdf")
     _a_pdf_with_line_work(plain)
     assert not project_io.carries_a_document(plain)
-    assert pdfbase.layer_in(plain) is None
+    assert pdfbase.record_in(plain) is None
 
 
 def test_a_saved_document_is_recognised_whatever_it_is_called(window, tmp_path):
@@ -145,7 +145,7 @@ def test_opening_a_pdf_is_opening_a_document_not_converting_one(window, tmp_path
     window.rebuild_scenes()
     assert window.save_document()
     assert project_io.carries_a_document(source), \
-        "saving should have put the markup layer into that same PDF"
+        "saving should have put the markup record into that same PDF"
     from pypdf import PdfReader
     assert "GRID LINE" in PdfReader(source).pages[0].extract_text()
 
@@ -343,7 +343,7 @@ def test_saving_leaves_the_markups_movable_in_another_editor(window, tmp_path):
         "a saved markup should still be a markup wherever the file is opened"
     assert "/AP" in marks[0]
     assert project_io.carries_a_document(path), \
-        "and the calculation layer is still in there"
+        "and the markup record is still in there"
 
 
 def test_a_marked_up_drawing_opens_as_markups_that_can_be_worked_with(
@@ -375,7 +375,7 @@ def test_a_marked_up_drawing_opens_as_markups_that_can_be_worked_with(
     window.open_path(theirs)
     window.rebuild_scenes()
     came_in = [item for item in window.document.pages[0].frame.markups()
-               if item.layer == "Markups"]
+               if not item.from_drawing]
     kinds = [(type(item).__name__, getattr(item, "kind", "")) for item in came_in]
     assert ("RectItem", "rect") in kinds
     assert ("RectItem", "ellipse") in kinds
@@ -544,7 +544,7 @@ def test_every_markup_comes_back_as_what_it_went_out_as(window, tmp_path):
     window.open_path(path)
     window.rebuild_scenes()
     came_back = [item for item in window.document.pages[0].frame.markups()
-                 if item.layer == "Markups"]
+                 if not item.from_drawing]
     kinds = [(type(item).__name__, getattr(item, "kind", ""))
              for item in came_back]
     assert ("RectItem", "cloud") in kinds, "a cloud is still a cloud"

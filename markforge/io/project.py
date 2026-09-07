@@ -76,7 +76,7 @@ def load_document(document, path: str) -> None:
 def carries_a_document(path: str) -> bool:
     """Whether opening this file restores a document rather than importing one."""
     if pdfbase.is_pdf(path):
-        return pdfbase.layer_in(path) is not None
+        return pdfbase.record_in(path) is not None
     return zipfile.is_zipfile(path)
 
 

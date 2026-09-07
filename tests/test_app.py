@@ -321,15 +321,6 @@ def test_context_menu_is_built_for_both_targets(window):
     assert any("Insert here" in a.text() for a in on_page.actions() if a.text())
 
 
-def test_hidden_layers_are_not_picked(window):
-    window.select_tool("rect")
-    drag(window.view, 100, 100, 200, 200)
-    item = markups(window)[0]
-    item.layer = "Markups"
-    assert window.view.markup_at(QPointF(150, 150)) is item
-    window.document.layers[0].visible = False
-    assert window.view.markup_at(QPointF(150, 150)) is None
-    window.document.layers[0].visible = True
 
 
 def test_page_scale_change_updates_measurements(window):
@@ -441,69 +432,14 @@ def test_renumber_counts_closes_gaps(window):
 
 
 
-def test_hiding_a_layer_hides_and_deselects_its_markups(window):
-    window.select_tool("rect")
-    drag(window.view, 100, 100, 200, 200)
-    window.select_tool("select")
-    item = markups(window)[0]
-    item.setSelected(True)
-    assert item.isVisible()
-
-    window.document.layer("Markups").visible = False
-    window.apply_layers()
-    assert not item.isVisible()
-    assert not item.isSelected()
-    assert window.view.markup_at(QPointF(150, 150)) is None
-
-    window.document.layer("Markups").visible = True
-    window.apply_layers()
-    assert item.isVisible()
 
 
-def test_locking_a_layer_stops_its_markups_moving(window):
-    window.select_tool("rect")
-    drag(window.view, 100, 100, 200, 200)
-    window.select_tool("select")
-    item = markups(window)[0]
-    window.document.layer("Markups").locked = True
-    window.apply_layers()
-    origin = item.pos()
-    press(window.view, 150, 150)
-    move(window.view, 260, 260)
-    release(window.view, 260, 260)
-    assert item.pos() == origin
 
 
-def test_non_printing_layers_are_left_out_of_output(window, tmp_path):
-    window.select_tool("rect")
-    drag(window.view, 100, 100, 200, 200)
-    window.select_tool("select")
-    scene = window.current_page().frame
-    with_layer = scene.render_image(dpi=60, for_print=True)
-    window.document.layer("Markups").printable = False
-    without_layer = scene.render_image(dpi=60, for_print=True)
-    assert with_layer != without_layer
 
 
-def test_layers_panel_moves_the_selection(window):
-    window.select_tool("rect")
-    drag(window.view, 100, 100, 200, 200)
-    window.select_tool("select")
-    item = markups(window)[0]
-    item.setSelected(True)
-    window.move_selection_to_layer("Drawing")
-    assert item.layer == "Drawing"
-    assert window.layers_panel.table.rowCount() == len(window.document.layers)
 
 
-def test_renaming_a_layer_carries_its_markups(window):
-    window.select_tool("rect")
-    drag(window.view, 100, 100, 200, 200)
-    item = markups(window)[0]
-    window.rename_layer("Markups", "Review")
-    window.document.layers[0].name = "Review"
-    assert item.layer == "Review"
-    assert window.layer_visible("Review")
 
 
 def test_applying_redactions_destroys_what_is_underneath(window, monkeypatch, tmp_path):
@@ -1010,7 +946,7 @@ def test_pdf_review_snapshot_survives_edit_save_reopen_and_export(
     path = _drawing_pdf(str(tmp_path / "review.pdf"))
     _open_pdf(window, monkeypatch, path)
     frame = window.document.pages[0].frame
-    drawing = [item for item in frame.markups() if item.layer == "Drawing"]
+    drawing = [item for item in frame.markups() if item.from_drawing]
     assert drawing, "the imported PDF fixture supplied no vector drawing"
 
     QApplication.sendEvent(

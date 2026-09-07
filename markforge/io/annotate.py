@@ -102,21 +102,21 @@ def subtype_for(item) -> str:
 def exportable(frame, page, preserved: bool) -> list:
     """The markups on a page that should go out as annotations.
 
-    The Drawing layer is not markup: it is the page's own line work, read out
-    of the PDF it came from so that things can snap to it. It belongs to the
-    page and is written as part of it — as the original page where that has
-    been kept, and painted into the sheet where it has not. Turning several
-    thousand pieces of somebody else's drawing into several thousand
-    annotations would be wrong as well as slow.
+    The page's own line work is not markup: it is read out of the PDF the page
+    came from so that things can snap to it. It belongs to the page and is
+    written as part of it — as the original page where that has been kept, and
+    painted into the sheet where it has not. Turning several thousand pieces of
+    somebody else's drawing into several thousand annotations would be wrong as
+    well as slow.
 
     Nor does anything flattened come out as a markup: flattening is the
     decision that it is part of the page now, and it is painted in.
     """
     items = []
     for item in frame.ordered_markups():
-        if not item.printable or not frame.layer_prints(item):
+        if not item.printable:
             continue
-        if item.flattened or item.layer == "Drawing":
+        if item.flattened or item.from_drawing:
             continue
         items.append(item)
     return items

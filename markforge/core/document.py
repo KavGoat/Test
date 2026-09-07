@@ -179,15 +179,6 @@ class PageScale:
 
 
 @dataclass
-class Layer:
-    name: str
-    visible: bool = True
-    locked: bool = False
-    printable: bool = True
-    color: str = "#8899aa"
-
-
-@dataclass
 class Bookmark:
     """A named place in the document.
 
@@ -368,10 +359,6 @@ class Document:
         self.project = ""
         self.settings = DocumentSettings()
         self.pages: list[Page] = [Page()]
-        # Two layers to begin with: what is drawn here, and what came in on
-        # the page. The second is where an imported PDF's own line work goes,
-        # so it can be hidden without hiding the markups over it.
-        self.layers: list[Layer] = [Layer("Markups"), Layer("Drawing")]
         self.bookmarks: list[Bookmark] = []
         self.assets: dict[str, bytes] = {}
         self.path: Optional[str] = None
@@ -422,28 +409,6 @@ class Document:
         self.modified = True
         return landing
 
-    # -- layers ------------------------------------------------------------
-    def layer(self, name: str) -> Layer:
-        for layer in self.layers:
-            if layer.name == name:
-                return layer
-        return Layer(name or "Markups")
-
-    def layer_names(self) -> list[str]:
-        return [layer.name for layer in self.layers]
-
-    def add_layer(self, name: str) -> Layer:
-        existing = set(self.layer_names())
-        candidate = name or "Layer"
-        index = 2
-        while candidate in existing:
-            candidate = f"{name} {index}"
-            index += 1
-        layer = Layer(candidate)
-        self.layers.append(layer)
-        self.modified = True
-        return layer
-
     def index_of(self, page: Page) -> int:
         try:
             return self.pages.index(page)
@@ -486,7 +451,6 @@ class Document:
             "subject": self.subject,
             "project": self.project,
             "settings": self.settings.to_dict(),
-            "layers": [asdict(layer) for layer in self.layers],
             "bookmarks": [mark.to_dict() for mark in self.bookmarks],
             "pages": [page.to_dict() for page in self.pages],
         }
@@ -498,7 +462,6 @@ class Document:
         self.subject = data.get("subject", "")
         self.project = data.get("project", "")
         self.settings = DocumentSettings.from_dict(data.get("settings", {}))
-        self.layers = [Layer(**layer) for layer in data.get("layers", [])] or [Layer("Markups")]
         self.bookmarks = [Bookmark.from_dict(mark) for mark in data.get("bookmarks", [])]
         self.pages = [Page.from_dict(page) for page in data.get("pages", [])] or [Page()]
         self.modified = False

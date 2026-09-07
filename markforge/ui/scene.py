@@ -493,8 +493,14 @@ class PageFrame(QGraphicsObject):
         self.itemsChanged.emit()
 
     def next_z(self) -> float:
-        markups = self.markups()
-        return (max((i.zValue() for i in markups), default=0.0) + 1.0) if markups else 1.0
+        """The z a new markup goes on: over everything already drawn here.
+
+        The page's own line work is not counted. It sits below every markup
+        deliberately, and a new markup starting one above it would be at the
+        bottom of the pile rather than the top.
+        """
+        drawn = [item for item in self.markups() if not item.from_drawing]
+        return (max((i.zValue() for i in drawn), default=0.0) + 1.0) if drawn else 1.0
 
     def serialize_items(self) -> list[dict]:
         return [item.serialize() for item in sorted(self.markups(), key=lambda i: i.zValue())]
@@ -517,21 +523,6 @@ class PageFrame(QGraphicsObject):
         for item in self.ordered_markups():
             item.refresh(page=self.page)
 
-    def apply_layers(self) -> None:
-        """Hide and lock items according to the layer they sit on."""
-        for item in self.markups():
-            layer = self.document.layer(item.layer)
-            item.setVisible(layer.visible)
-            movable = not item.locked and not layer.locked
-            item.setFlag(QGraphicsItem.ItemIsMovable, movable)
-            item.setFlag(QGraphicsItem.ItemIsSelectable, layer.visible)
-            if not layer.visible:
-                item.setSelected(False)
-
-    def layer_prints(self, item) -> bool:
-        layer = self.document.layer(item.layer)
-        return layer.printable and layer.visible
-
     def assets_used(self) -> set[str]:
         used: set[str] = set()
         for item in self.markups():
@@ -549,9 +540,8 @@ class PageFrame(QGraphicsObject):
 
         With *without_markups*, only the page itself is drawn — the paper, the
         imported background, the grid, the running header and footer, the
-        Drawing layer, which is the page's own line work rather than anybody's
-        markup, and anything that has been flattened into the sheet, which is
-        part of it now. That is what an export wants when the markups that are still
+        page's own line work rather than anybody's markup, and anything that
+        has been flattened into the sheet, which is part of it now. That is what an export wants when the markups that are still
         markups are going into the file as real annotations instead of being
         painted into it.
         """
@@ -577,10 +567,9 @@ class PageFrame(QGraphicsObject):
                 item._handles_visible = False
             hidden = [item for item in self.markups()
                       if (without_markups and not item.flattened
-                          and item.layer != "Drawing")
+                          and not item.from_drawing)
                       or (for_print and (not item.printable
-                                         or not self.layer_prints(item)
-                                         or (pdf_overlay and item.layer == "Drawing")))]
+                                         or (pdf_overlay and item.from_drawing)))]
             for item in hidden:
                 item.setVisible(False)
             source = self.mapRectToScene(self.page_rect())
@@ -592,7 +581,7 @@ class PageFrame(QGraphicsObject):
             # was there, but nothing was drawn to say so until something else
             # forced a repaint.
             for item in hidden:
-                item.setVisible(self.document.layer(item.layer).visible)
+                item.setVisible(not item.hidden)
             for item in chrome:
                 item.set_chrome(True)
             for item in hidden_handles:
@@ -628,7 +617,6 @@ class PageFrame(QGraphicsObject):
 
         return [item for item in self.markups()
                 if item.isVisible()
-                and self.document.layer(item.layer).visible
                 and (not isinstance(item, _TextBase) or item.isSelected())]
 
     def render_items_picture(self, items, region: QRectF) -> QPicture:
@@ -837,10 +825,6 @@ class DocumentScene(QGraphicsScene):
         for frame in self.frames:
             ordered.extend(frame.ordered_markups())
         return ordered
-
-    def apply_layers(self) -> None:
-        for frame in self.frames:
-            frame.apply_layers()
 
     def refresh_items(self) -> None:
         for frame in self.frames:
