@@ -11,8 +11,8 @@ import pytest
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtTest import QTest
 
-from calcforge.items.shapes import RectItem
-from calcforge.ui.scene import PAGE_GAP, DocumentScene, PageFrame
+from markforge.items.shapes import RectItem
+from markforge.ui.scene import PAGE_GAP, DocumentScene, PageFrame
 
 from tests.test_usability import click, drag, markups, on_page, only
 
@@ -188,7 +188,7 @@ def test_the_grid_belongs_to_the_page_not_the_canvas(window):
 # ---------------------------------------------------------------------------
 
 def test_the_desk_is_a_different_colour_from_the_paper(window):
-    from calcforge.theme import CANVAS, LIGHT
+    from markforge.theme import CANVAS, LIGHT
 
     desk = window.view.scene().backgroundBrush().color()
     assert desk.name() == CANVAS[LIGHT]
@@ -290,7 +290,7 @@ def test_a_page_corner_can_be_centred_and_remains_under_zoom_cursor(window, qapp
 
 
 def test_the_wheel_can_be_set_to_scroll_instead(window):
-    from calcforge.ui import preferences
+    from markforge.ui import preferences
 
     _three_pages(window)
     prefs = preferences.current()
@@ -348,7 +348,7 @@ def test_ctrl_does_the_opposite_of_whatever_the_wheel_is_set_to(window):
     scrolling off rather than swapping it, so there was no way to scroll with
     the wheel at all once zoom was chosen.
     """
-    from calcforge.ui import preferences
+    from markforge.ui import preferences
 
     _three_pages(window)
     prefs = preferences.current()
@@ -442,7 +442,7 @@ def test_ctrl_page_down_goes_to_the_next_page(window):
 
 
 def test_zoom_stays_within_its_limits(window):
-    from calcforge.ui.view import MAX_ZOOM, MIN_ZOOM
+    from markforge.ui.view import MAX_ZOOM, MIN_ZOOM
 
     for _ in range(60):
         window.view.zoom_in()
@@ -473,117 +473,9 @@ def test_actual_size_is_one_to_one(window):
 # a gesture is not always about the page the chrome calls current
 # ---------------------------------------------------------------------------
 
-def test_editing_a_region_on_another_page_is_still_recorded(window):
-    """Scrolling away while editing must not send the edit to the wrong page."""
-    window.add_page()
-    window.go_to_page(0)
-    window.select_tool("math")
-    drag(window.view, *on_page(window, 0, 80, 80), *on_page(window, 0, 320, 130))
-    block = window.view.editing_item()
-    block._editor.setPlainText("L = 6 m")
-
-    window.go_to_page(1)                 # the chrome now says page 2
-    assert window.view.frame() is window.document.pages[1].frame
-    assert block.parentItem() in window.view.involved_frames()
-
-    window.view.end_item_edit()
-    assert window.document.workspace.get("L").to("m").magnitude == pytest.approx(6)
-    assert window.document.pages[0].frame.markups() == [block]
-
-
-def test_deleting_across_two_pages_recalculates(window):
-    """A selection can span pages, and what it defined has to go with it."""
-    window.add_page()
-    for index, source in enumerate(("sigma = 275 MPa", "b = 300 mm")):
-        window.go_to_page(index)
-        window.select_tool("math")
-        drag(window.view, *on_page(window, index, 80, 80),
-             *on_page(window, index, 320, 130))
-        window.view.editing_item()._editor.setPlainText(source)
-        window.view.end_item_edit()
-    window.select_tool("select")
-    assert window.document.workspace.get("sigma") is not None
-
-    window.view.scene().clearSelection()
-    for frame in window.view.scene().frames:
-        for item in frame.markups():
-            item.setSelected(True)
-    window.delete_selection()
-
-    assert window.document.workspace.get("sigma") is None
-    assert window.document.workspace.get("b") is None
-    assert markups(window) == []
-
-
-def test_a_page_never_shows_a_result_another_page_no_longer_supports(window):
-    """The verifier's own complaint, as a test."""
-    from calcforge.core.verify import verify_document
-
-    window.add_page()
-    window.go_to_page(0)
-    window.select_tool("math")
-    drag(window.view, *on_page(window, 0, 80, 80), *on_page(window, 0, 320, 130))
-    window.view.editing_item()._editor.setPlainText("sigma = 275 MPa")
-    window.view.end_item_edit()
-
-    window.go_to_page(1)
-    window.select_tool("math")
-    drag(window.view, *on_page(window, 1, 80, 80), *on_page(window, 1, 320, 130))
-    second = window.view.editing_item()
-    second._editor.setPlainText("sigma = 275 MPa")     # a check, not a definition
-    window.view.end_item_edit()
-    window.select_tool("select")
-    assert second.statements[0].result is True
-
-    # Take the definition away from the page above; the check below must stop
-    # claiming to be true, without anybody pressing F9.
-    first = window.document.pages[0].frame.markups()[0]
-    window.view.scene().clearSelection()
-    first.setSelected(True)
-    window.delete_selection()
-
-    assert second.statements[0].result is not True
-    result = verify_document(window.document)
-    assert [p.message for p in result.problems if p.kind == "disagreement"] == []
-
-
-def test_changing_the_page_scale_does_not_turn_definitions_into_checks(window):
-    """Evaluating one page on its own is how "q = 5 kPa" starts reading true."""
-    from calcforge.core.document import PageScale
-    from calcforge.core.verify import verify_document
-
-    window.select_tool("math")
-    drag(window.view, *on_page(window, 0, 80, 80), *on_page(window, 0, 320, 130))
-    block = window.view.editing_item()
-    block._editor.setPlainText("q = 5 kPa")
-    window.view.end_item_edit()
-    window.select_tool("select")
-    assert window.document.workspace.get("q").to("kPa").magnitude == pytest.approx(5)
-
-    for ratio in (50, 100, 20):
-        window.current_page().scale = PageScale.from_ratio(ratio)
-        window.apply_scale_change()
-        assert block.statements[0].result is not True, \
-            "the definition became a check"
-        assert window.document.workspace.get("q").to("kPa").magnitude == pytest.approx(5)
-        assert [p.message for p in verify_document(window.document).problems
-                if p.kind == "disagreement"] == []
-
-
-def test_changing_the_area_unit_leaves_the_calculations_alone(window):
-    window.select_tool("math")
-    drag(window.view, *on_page(window, 0, 80, 80), *on_page(window, 0, 320, 130))
-    window.view.editing_item()._editor.setPlainText("b = 300 mm")
-    window.view.end_item_edit()
-    window.select_tool("select")
-
-    window.set_area_unit("mm^2")
-    assert window.document.workspace.get("b").to("mm").magnitude == pytest.approx(300)
-
-
 def test_the_calculation_insertion_point_is_off_by_default(window):
     """Ordinary pointer placement remains the shipped behavior."""
-    from calcforge.ui import preferences
+    from markforge.ui import preferences
 
     assert not preferences.current().insertion_point
     assert window.view._insertion_point is None

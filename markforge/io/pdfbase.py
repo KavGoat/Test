@@ -29,7 +29,7 @@ ASSET_PREFIX = "assets/"
 
 # What the markup appearance is drawn at when it has to be rasterised. The
 # imported page's own content is carried through as itself and never resampled;
-# this only governs what CalcForge draws on top.
+# this only governs what MarkForge draws on top.
 APPEARANCE_DPI = 200
 
 
@@ -93,7 +93,7 @@ def write(document, path: str, appearance: bool = True) -> None:
     if appearance:
         _draw_the_sheets_onto(output, document)
     output.add_attachment(LAYER_ENTRY, layer_bytes(document))
-    output.add_metadata({"/Title": document.title or "", "/Creator": "CalcForge"})
+    output.add_metadata({"/Title": document.title or "", "/Creator": "MarkForge"})
     temporary = path + ".tmp"
     with open(temporary, "wb") as handle:
         output.write(handle)
@@ -207,7 +207,7 @@ def _rendered_overlay(document, drawn: list) -> Optional[str]:
                        and document.asset(page.pdf_key)}
     writer = QPdfWriter(overlay_path)
     writer.setResolution(APPEARANCE_DPI)
-    writer.setCreator("CalcForge")
+    writer.setCreator("MarkForge")
     export.paint_pages(writer, document, drawn, APPEARANCE_DPI,
                        pdf_overlay_pages=over_the_source,
                        without_markups=True)

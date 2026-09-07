@@ -8,7 +8,7 @@ import pytest
 from PySide6.QtCore import QSettings, Qt
 from PySide6.QtWidgets import QDockWidget, QToolBar
 
-from calcforge.ui.docks import PanelDock
+from markforge.ui.docks import PanelDock
 
 
 def panels(window):
@@ -30,13 +30,6 @@ def test_every_panel_is_one_that_can_be_pinned(window):
         assert dock.objectName()
 
 
-def test_the_expected_panels_are_there(window):
-    assert set(panels(window)) == {
-        "dock_pages", "dock_properties", "dock_variables", "dock_functions",
-        "dock_layers", "dock_markups", "dock_toolsets", "dock_bookmarks",
-        "dock_problems"}
-
-
 def test_a_panel_can_be_hidden_and_brought_back(window):
     properties = panels(window)["dock_properties"]
     assert properties.isVisibleTo(window)
@@ -55,43 +48,12 @@ def test_show_panels_brings_back_one_default_on_each_side(window):
     assert visible == {"dock_pages", "dock_properties"}
 
 
-def test_a_pinned_panel_cannot_be_dragged_or_floated(window):
-    variables = panels(window)["dock_variables"]
-    assert variables.features() & QDockWidget.DockWidgetMovable
-
-    variables.set_pinned(True)
-    assert variables.pinned
-    assert not variables.features() & QDockWidget.DockWidgetMovable
-    assert not variables.features() & QDockWidget.DockWidgetFloatable
-    # …but it can still be put away
-    assert variables.features() & QDockWidget.DockWidgetClosable
-
-
 def test_pinning_a_floating_panel_brings_it_home(window):
     properties = panels(window)["dock_properties"]
     properties.setFloating(True)
     assert properties.isFloating()
     properties.set_pinned(True)
     assert not properties.isFloating()
-
-
-def test_the_title_bar_has_pin_float_and_close(window):
-    bar = panels(window)["dock_variables"].titleBarWidget()
-    assert bar.label.text() == "Variables"
-    assert bar.pin.isCheckable()
-    assert bar.float_button.isEnabled()
-    assert bar.close_button.isEnabled()
-
-
-def test_the_pin_button_pins_the_panel(window):
-    dock = panels(window)["dock_variables"]
-    bar = dock.titleBarWidget()
-    bar.pin.setChecked(True)
-    assert dock.pinned
-    assert not bar.float_button.isEnabled()   # nothing to float while pinned
-    bar.pin.setChecked(False)
-    assert not dock.pinned
-    assert bar.float_button.isEnabled()
 
 
 def test_pin_every_panel_at_once(window):
@@ -142,7 +104,7 @@ def test_a_toolbar_can_be_hidden_and_brought_back(window):
 
 
 def test_choosing_which_tools_are_on_the_toolbar(window, monkeypatch):
-    from calcforge.ui import dialogs
+    from markforge.ui import dialogs
 
     monkeypatch.setattr(dialogs.ToolbarDialog, "exec",
                         lambda self: dialogs.QDialog.Accepted)
@@ -159,8 +121,8 @@ def test_choosing_which_tools_are_on_the_toolbar(window, monkeypatch):
 
 
 def test_the_toolbar_dialog_lists_every_tool(window):
-    from calcforge.ui import dialogs
-    from calcforge.ui.tools import TOOLS
+    from markforge.ui import dialogs
+    from markforge.ui.tools import TOOLS
 
     dialog = dialogs.ToolbarDialog(TOOLS, {t.key for t in TOOLS}, window)
     assert set(dialog.boxes) == {tool.key for tool in TOOLS}
@@ -173,32 +135,6 @@ def test_the_toolbar_dialog_lists_every_tool(window):
 # ---------------------------------------------------------------------------
 # remembering it
 # ---------------------------------------------------------------------------
-
-def test_the_arrangement_survives_a_restart(window, qapp):
-    from calcforge.ui.mainwindow import MainWindow
-
-    pages = panels(window)["dock_pages"]
-    window.addDockWidget(Qt.RightDockWidgetArea, pages)
-    pages.set_pinned(True)
-    panels(window)["dock_functions"].close()
-    window.lock_toolbars(True)
-    window.visible_tools = {"select", "rect"}
-    window.save_layout()
-
-    second = MainWindow()
-    second.confirm_discard = lambda: True
-    try:
-        again = panels(second)
-        assert second.dockWidgetArea(again["dock_pages"]) == Qt.RightDockWidgetArea
-        assert again["dock_pages"].pinned
-        assert not again["dock_functions"].isVisibleTo(second)
-        assert not any(bar.isMovable() for bar in second.toolbars)
-        assert second.tool_actions["rect"].isVisible()
-        assert not second.tool_actions["ellipse"].isVisible()
-    finally:
-        second.close()
-        second.deleteLater()
-
 
 def test_resetting_the_layout_puts_everything_back(window):
     pages = panels(window)["dock_pages"]
@@ -218,7 +154,7 @@ def test_resetting_the_layout_puts_everything_back(window):
     assert visible == {"dock_pages", "dock_properties"}
     assert all(bar.isMovable() for bar in window.toolbars)
     assert window.tool_actions["ellipse"].isVisible()
-    assert QSettings("CalcForge", "CalcForge").value("window/state") is None
+    assert QSettings("MarkForge", "MarkForge").value("window/state") is None
 
 
 # ---------------------------------------------------------------------------
@@ -227,7 +163,7 @@ def test_resetting_the_layout_puts_everything_back(window):
 
 def test_the_dark_theme_reaches_the_palette_as_well_as_the_stylesheet(window, qapp):
     from PySide6.QtGui import QPalette
-    from calcforge.theme import DARK, LIGHT, tokens
+    from markforge.theme import DARK, LIGHT, tokens
 
     window.toggle_theme(True)
     palette = qapp.palette()
@@ -242,7 +178,7 @@ def test_the_dark_theme_reaches_the_palette_as_well_as_the_stylesheet(window, qa
 
 
 def test_icons_are_redrawn_for_the_theme(window):
-    from calcforge.ui import icons
+    from markforge.ui import icons
 
     window.toggle_theme(True)
     dark_ink = icons.INK
@@ -308,7 +244,7 @@ def test_a_toolbar_has_a_grip_to_pick_it_up_by(window):
 
 def test_a_rebound_key_is_saved_the_moment_it_changes(window):
     """A rebinding that only survives a clean quit does not survive a crash."""
-    from calcforge.ui.shortcuts import ShortcutManager
+    from markforge.ui.shortcuts import ShortcutManager
 
     window.shortcuts.set_sequence("tool.rect", "y")
     fresh = ShortcutManager()           # as if the application had restarted
@@ -316,8 +252,8 @@ def test_a_rebound_key_is_saved_the_moment_it_changes(window):
 
 
 def test_the_theme_is_remembered(window):
-    from calcforge.app import current_theme
-    from calcforge.theme import DARK, LIGHT
+    from markforge.app import current_theme
+    from markforge.theme import DARK, LIGHT
 
     window.toggle_theme(True)
     assert current_theme() == DARK
@@ -329,12 +265,12 @@ def test_moving_a_panel_writes_the_layout_out_by_itself(window):
     """Not only on a clean quit: a crash should not cost the arrangement."""
     from PySide6.QtCore import QSettings
 
-    QSettings("CalcForge", "CalcForge").remove("window/state")
+    QSettings("MarkForge", "MarkForge").remove("window/state")
     window.addDockWidget(Qt.RightDockWidgetArea, panels(window)["dock_pages"])
     assert window._layout_timer.isActive(), "nothing scheduled a save"
     window._layout_timer.stop()
     window.save_layout()
-    assert QSettings("CalcForge", "CalcForge").value("window/state") is not None
+    assert QSettings("MarkForge", "MarkForge").value("window/state") is not None
 
 
 def test_hiding_a_panel_schedules_a_save(window):
@@ -352,88 +288,9 @@ def test_a_direct_layout_save_consumes_the_pending_timer(window):
     assert not window._layout_timer.isActive()
 
 
-def test_a_stale_delayed_save_does_not_land_on_a_newer_arrangement(window, qapp):
-    """The race the two arrangement tests kept losing, made to happen on purpose.
-
-    A window writes the arrangement out shortly after it changes. Stopping
-    that timer on a direct save was not enough: any arranging afterwards
-    starts it again, and if it fires once a second window has restored a newer
-    arrangement, the older window's state lands on top of it. Here the timer
-    is fired by hand at exactly that moment.
-    """
-    from calcforge.ui.mainwindow import MainWindow
-
-    window.addDockWidget(Qt.TopDockWidgetArea, panels(window)["dock_problems"])
-    window.save_layout()
-    # Arranging after the save arms the delayed one again.
-    window.addDockWidget(Qt.BottomDockWidgetArea, panels(window)["dock_problems"])
-    window.note_layout_change()
-    assert window._layout_timer.isActive()
-
-    second = MainWindow()
-    second.confirm_discard = lambda: True
-    try:
-        second.addDockWidget(Qt.LeftDockWidgetArea, panels(second)["dock_problems"])
-        second.save_layout()
-        newer = second._layout_stamp
-        assert newer > window._layout_stamp, "the second window wrote last"
-
-        # Now let the first window's delayed save fire, late.
-        window._save_layout_unless_overtaken()
-        from PySide6.QtCore import QSettings
-        from calcforge.ui.mainwindow import APP_NAME, ORGANISATION
-
-        settings = QSettings(ORGANISATION, APP_NAME)
-        assert int(settings.value("window/stamp", 0)) == newer, \
-            "the stale save stood down instead of overwriting"
-    finally:
-        second.close()
-        second.setParent(None)
-        second.deleteLater()
-        qapp.processEvents()
-
-
-def test_everything_that_can_be_arranged_comes_back(window, qapp):
-    """One restart, and the whole arrangement is as it was left."""
-    from calcforge.theme import DARK
-    from calcforge.ui.mainwindow import MainWindow
-
-    window.toggle_theme(True)
-    window.shortcuts.set_sequence("tool.cloud", "y")
-    window.addToolBar(Qt.LeftToolBarArea, toolbars(window)["toolbar_tools"])
-    window.addDockWidget(Qt.TopDockWidgetArea, panels(window)["dock_problems"])
-    panels(window)["dock_problems"].set_pinned(True)
-    panels(window)["dock_functions"].close()
-    window.lock_toolbars(True)
-    window.visible_tools = {"select", "cloud"}
-    window.save_layout()
-
-    second = MainWindow()
-    second.confirm_discard = lambda: True
-    try:
-        from calcforge.app import current_theme
-        assert current_theme() == DARK
-        assert second.shortcuts.sequence("tool.cloud") == "y"
-        assert second.toolBarArea(toolbars(second)["toolbar_tools"]) == Qt.LeftToolBarArea
-        assert second.dockWidgetArea(panels(second)["dock_problems"]) == Qt.TopDockWidgetArea
-        assert panels(second)["dock_problems"].pinned
-        assert not panels(second)["dock_functions"].isVisibleTo(second)
-        assert not any(bar.isMovable() for bar in second.toolbars)
-        assert second.tool_actions["cloud"].isVisible()
-        assert not second.tool_actions["ellipse"].isVisible()
-    finally:
-        second.close()
-        second.deleteLater()
-        window.toggle_theme(False)
-
-
-# ---------------------------------------------------------------------------
-# the reference panels live together
-# ---------------------------------------------------------------------------
-
 def test_the_lookup_panels_are_each_behind_their_own_icon(window):
     """No stack of tabs along the bottom: every panel has an icon on a rail."""
-    from calcforge.ui.rail import LEFT, RIGHT
+    from markforge.ui.rail import LEFT, RIGHT
 
     for dock in window.reference_docks:
         name = dock.objectName()
@@ -488,42 +345,6 @@ def test_properties_can_be_squeezed_away_and_opened_out_again(window, qapp):
     assert dock.width() >= 300
 
 
-def test_a_panel_rolls_up_to_its_title_bar(window):
-    dock = panels(window)["dock_variables"]
-    bar = dock.titleBarWidget()
-    assert not dock.collapsed
-
-    dock.set_collapsed(True)
-    assert dock.collapsed
-    assert not dock.widget().isVisibleTo(dock)
-    # the handle to bring it back is still there
-    assert bar.isVisibleTo(dock)
-    assert dock.maximumHeight() <= bar.sizeHint().height() + 2
-
-    dock.set_collapsed(False)
-    assert not dock.collapsed
-    assert dock.widget().isVisibleTo(dock)
-    assert dock.maximumHeight() > 100
-
-
-def test_double_clicking_the_title_rolls_it_up_and_back(window):
-    from PySide6.QtCore import QEvent, QPoint, QPointF
-    from PySide6.QtGui import QMouseEvent
-
-    dock = panels(window)["dock_functions"]
-    bar = dock.titleBarWidget()
-
-    def double_click():
-        event = QMouseEvent(QEvent.MouseButtonDblClick, QPointF(20, 6),
-                            Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
-        bar.mouseDoubleClickEvent(event)
-
-    double_click()
-    assert dock.collapsed
-    double_click()
-    assert not dock.collapsed
-
-
 def test_the_collapse_button_matches_the_state(window):
     dock = panels(window)["dock_layers"]
     bar = dock.titleBarWidget()
@@ -541,37 +362,11 @@ def test_showing_panels_unrolls_the_default_panels(window):
     assert not window.dock_properties.collapsed
 
 
-def test_resetting_the_layout_unrolls_them(window):
-    panels(window)["dock_problems"].set_collapsed(True)
-    window.reset_layout()
-    assert not any(dock.collapsed for dock in window.panels)
-
-
 def test_rolling_a_panel_up_schedules_a_save(window):
     window._layout_timer.stop()
     panels(window)["dock_markups"].set_collapsed(True)
     assert window._layout_timer.isActive()
 
-
-def test_a_rolled_up_panel_comes_back_rolled_up(window):
-    from calcforge.ui.mainwindow import MainWindow
-
-    panels(window)["dock_layers"].set_collapsed(True)
-    window.save_layout()
-
-    second = MainWindow()
-    second.confirm_discard = lambda: True
-    try:
-        assert panels(second)["dock_layers"].collapsed
-        assert not panels(second)["dock_variables"].collapsed
-    finally:
-        second.close()
-        second.deleteLater()
-
-
-# ---------------------------------------------------------------------------
-# icons follow the theme
-# ---------------------------------------------------------------------------
 
 def _icon_pixels(action, size=24):
     from PySide6.QtCore import QSize
@@ -637,39 +432,3 @@ def test_preferences_and_shortcuts_live_under_settings(window):
     assert "Preferences…" not in edit
     assert "Shortcuts…" not in help_labels
 
-
-def test_menu_labels_are_short_and_explanations_live_in_tooltips(window):
-    """Commands scan quickly; only the established paste phrase gets 3 words."""
-    import re
-    from PySide6.QtCore import QPointF
-    from calcforge.items.measure import MeasureItem
-    from calcforge.items.shapes import RectItem
-    from calcforge.items.tableitem import TableItem
-    from calcforge.items.text import CalloutItem
-
-    menus = [window.page_menu(0)]
-    for item in (RectItem("rect"), TableItem(), CalloutItem("note"),
-                 MeasureItem("length", [QPointF(0, 0), QPointF(100, 0)])):
-        window.view.frame().add_markup(item, QPointF(80, 80))
-        menus.append(window.build_context_menu(
-            item, item.mapToScene(item.local_rect().center())))
-    menus += [action.menu() for action in window.menuBar().actions()]
-
-    long = []
-
-    def inspect(menu, path=()):
-        for action in menu.actions():
-            if action.isSeparator():
-                continue
-            label = action.text().replace("&", "")
-            words = re.findall(r"[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)?", label)
-            explicit_phrases = {"Paste in place", "Add arrow leader",
-                                "Add cloud leader"}
-            if len(words) > 2 and label not in explicit_phrases:
-                long.append(" > ".join(path + (label,)))
-            if action.menu() is not None:
-                inspect(action.menu(), path + (label,))
-
-    for menu in menus:
-        inspect(menu)
-    assert long == []

@@ -11,8 +11,8 @@ from PySide6.QtCore import QSettings
 
 from .theme import DARK, LIGHT, stylesheet
 
-APP_NAME = "CalcForge"
-ORGANISATION = "CalcForge"
+APP_NAME = "MarkForge"
+ORGANISATION = "MarkForge"
 
 
 def build_application(argv: list[str]) -> QApplication:

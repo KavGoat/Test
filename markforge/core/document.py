@@ -220,7 +220,7 @@ class Page:
         self.label = label
         self.background_key: Optional[str] = None   # asset name of an imported PDF page
         # The original PDF is retained separately from the screen-resolution
-        # PNG. Export can therefore place CalcForge's content over the real
+        # PNG. Export can therefore place MarkForge's content over the real
         # vector/text page instead of flattening the source drawing to pixels.
         self.pdf_key: Optional[str] = None
         self.pdf_page_index: Optional[int] = None

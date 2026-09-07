@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # out those locations once and keeps the answer. Without it the suite reads and
 # writes the real ones, so a test that saves an arrangement leaves it behind
 # for the next run — and for whoever is using the application on this machine.
-_SANDBOX = tempfile.mkdtemp(prefix="calcforge-tests-")
+_SANDBOX = tempfile.mkdtemp(prefix="markforge-tests-")
 for _variable in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME",
                   "XDG_STATE_HOME"):
     os.environ[_variable] = os.path.join(_SANDBOX, _variable.lower())
@@ -36,7 +36,7 @@ def settings_sandbox(tmp_path_factory):
     QSettings.setDefaultFormat(QSettings.IniFormat)
     QSettings.setPath(QSettings.IniFormat, QSettings.UserScope, folder)
     QSettings.setPath(QSettings.IniFormat, QSettings.SystemScope, folder)
-    written = QSettings("CalcForge", "CalcForge").fileName()
+    written = QSettings("MarkForge", "MarkForge").fileName()
     assert written.startswith(_SANDBOX), (
         f"the suite is writing its settings to {written}, which is somebody's "
         "real ones")
@@ -83,7 +83,7 @@ def fresh_settings(settings_sandbox):
     """
     from PySide6.QtCore import QSettings
 
-    settings = QSettings("CalcForge", "CalcForge")
+    settings = QSettings("MarkForge", "MarkForge")
     settings.clear()
     settings.sync()
     yield
@@ -93,7 +93,7 @@ def fresh_settings(settings_sandbox):
 
 @pytest.fixture(scope="session")
 def qapp(settings_sandbox):
-    from calcforge.app import build_application
+    from markforge.app import build_application
     from PySide6.QtWidgets import QApplication
     application = QApplication.instance() or build_application([])
     yield application
@@ -105,7 +105,7 @@ def qapp(settings_sandbox):
 
 @pytest.fixture
 def window(qapp):
-    from calcforge.ui.mainwindow import MainWindow
+    from markforge.ui.mainwindow import MainWindow
 
     main = MainWindow()
     # Nothing in the suite may block on a modal "save your changes?" dialog.

@@ -42,7 +42,7 @@ SNAP_REACH = 9.0
 # The shapes drawn to a size somebody cares about, and so worth measuring,
 # asking an exact size for, and writing that size on.
 SIZED_SHAPES = ("rect", "ellipse")
-CELLS_MIME = "application/x-calcforge-cells"
+CELLS_MIME = "application/x-markforge-cells"
 FREE_MIN_STEP = 1.2
 _RESHAPE_CURSORS: dict[str, QCursor] = {}
 
@@ -155,7 +155,7 @@ def typing_somewhere_else() -> bool:
 
 
 class PageView(QGraphicsView):
-    """Displays one :class:`~calcforge.ui.scene.PageScene` and edits it."""
+    """Displays one :class:`~markforge.ui.scene.PageScene` and edits it."""
 
     toolFinished = Signal(str)
     statusMessage = Signal(str)
@@ -1228,7 +1228,6 @@ class PageView(QGraphicsView):
                 event.accept()
                 return
         if item is None:
-            self.deactivate_table()
             self._keep_selection = bool(event.modifiers() & Qt.ControlModifier)
             if not self._keep_selection:
                 self.scene().clearSelection()
@@ -1304,7 +1303,7 @@ class PageView(QGraphicsView):
             position = item.scenePos()
             item.setParentItem(frame)
             item.setPos(frame.mapFromScene(position))
-            item.refresh(self.document().workspace, frame.page)
+            item.refresh(page=frame.page)
 
 
     def _add_poly_point(self, event: QMouseEvent, point: QPointF, tool: Tool) -> None:
@@ -2032,7 +2031,7 @@ class PageView(QGraphicsView):
             item = self._handle_item
             self._handle_item = None
             if item is not None:
-                item.refresh(self.document().workspace, self.page())
+                item.refresh(page=self.page())
             self.commit_snapshot("Resize markup")
             self.selectionChanged.emit()
             self._update_hover_cursor(scene_pos, event.modifiers())
@@ -2141,7 +2140,7 @@ class PageView(QGraphicsView):
                     and hasattr(item, "insert_point") and len(item.points) > 2):
                 self.begin_snapshot(self.involved_frames(item))
                 item.insert_point(item.mapFromScene(scene_pos))
-                item.refresh(self.document().workspace, self.page())
+                item.refresh(page=self.page())
                 self.commit_snapshot("Add vertex")
                 event.accept()
                 return
@@ -2372,7 +2371,7 @@ class PageView(QGraphicsView):
             item.set_cloud([item.mapFromScene(corner) for corner in cloud])
         elif anchor is not None:
             item.tip = item.mapFromScene(anchor)
-        item.refresh(self.document().workspace, self.page())
+        item.refresh(page=self.page())
         self.scene().clearSelection()
         item.setSelected(True)
         self.selectionChanged.emit()
@@ -2501,7 +2500,7 @@ class PageView(QGraphicsView):
             self.window.take_snapshot(frame, region)
             return
 
-        draft.refresh(self.document().workspace, self.page())
+        draft.refresh(page=self.page())
         self.scene().clearSelection()
         draft.setSelected(True)
         self.selectionChanged.emit()
@@ -2587,7 +2586,7 @@ class PageView(QGraphicsView):
             # settled, and the note that carries it comes next.
             self.hand_the_cloud_to_the_note(draft, tool)
             return
-        draft.refresh(self.document().workspace, self.page())
+        draft.refresh(page=self.page())
         self.scene().clearSelection()
         draft.setSelected(True)
         self.commit_snapshot(f"Add {tool.label.lower()}")
@@ -2618,7 +2617,7 @@ class PageView(QGraphicsView):
         target.prepareGeometryChange()
         target.cutouts.append(hole)
         detach(draft)
-        target.refresh(self.document().workspace, self.page())
+        target.refresh(page=self.page())
         target.touch()
         target.update()
         self.scene().clearSelection()

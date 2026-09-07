@@ -1,6 +1,6 @@
 """Opening and saving documents.
 
-A saved document is a PDF (see :mod:`calcforge.io.pdfbase`) — there is one
+A saved document is a PDF (see :mod:`markforge.io.pdfbase`) — there is one
 format and that is it. Documents written before that was true, when this
 application kept a zip of JSON and assets of its own, still open.
 """

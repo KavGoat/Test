@@ -3,37 +3,12 @@ import pytest
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QImage, QPainter
 
-from calcforge.core.document import Document, PageScale
-from calcforge.core.engine import Workspace
-from calcforge.items.base import ITEM_REGISTRY, build_item
-from calcforge.items.mathitem import MathItem
-from calcforge.items.measure import CountItem, MeasureItem
-from calcforge.items.media import ImageItem
-from calcforge.items.shapes import PolyItem, RectItem
-from calcforge.items.tableitem import TableItem
-from calcforge.items.text import CalloutItem, NoteItem, StampItem, TextItem
-
-
-def make_all(qapp):
-    return [
-        RectItem("rect", QRectF(0, 0, 100, 50)),
-        RectItem("ellipse", QRectF(0, 0, 80, 40)),
-        RectItem("cloud", QRectF(0, 0, 120, 60)),
-        PolyItem("line", [QPointF(0, 0), QPointF(50, 20)]),
-        PolyItem("arrow", [QPointF(0, 0), QPointF(60, 0)]),
-        PolyItem("polygon", [QPointF(0, 0), QPointF(40, 0), QPointF(20, 30)]),
-        PolyItem("ink", [QPointF(0, 0), QPointF(5, 6), QPointF(9, 2)]),
-        TextItem("hello"),
-        CalloutItem("note"),
-        NoteItem("a comment"),
-        StampItem("APPROVED"),
-        ImageItem(),
-        MeasureItem("length", [QPointF(0, 0), QPointF(100, 0)]),
-        MeasureItem("area", [QPointF(0, 0), QPointF(100, 0), QPointF(100, 50)]),
-        CountItem("Doors", 2, "star"),
-        MathItem("a := 2 m\nb := a*3"),
-        TableItem(3, 3),
-    ]
+from markforge.core.document import Document, PageScale
+from markforge.items.base import ITEM_REGISTRY, build_item
+from markforge.items.measure import CountItem, MeasureItem
+from markforge.items.media import ImageItem
+from markforge.items.shapes import PolyItem, RectItem
+from markforge.items.text import CalloutItem, NoteItem, StampItem, TextItem
 
 
 def test_every_item_type_is_registered(qapp):
@@ -53,22 +28,6 @@ def test_serialisation_round_trip(qapp):
         assert clone.pos() == item.pos()
         assert clone.comment == "round trip"
         assert clone.style.stroke == "#123456"
-
-
-def test_line_and_cell_text_formatting_survives_a_round_trip(qapp):
-    calculation = MathItem("a := 1\nb := 2", block=True)
-    calculation.set_line_alignment(1, "right")
-    calculation.change_line_font_size(1, 2.0)
-    restored_calculation = build_item(calculation.serialize())
-    assert restored_calculation.line_alignments == {1: "right"}
-    assert restored_calculation.line_font_sizes == {1: pytest.approx(12.0)}
-
-    table = TableItem(2, 2)
-    table.cell_format(0, 1).align = "center"
-    table.cell_format(0, 1).font_size = 13.0
-    restored_table = build_item(table.serialize())
-    assert restored_table.cell_format(0, 1).align == "center"
-    assert restored_table.cell_format(0, 1).font_size == pytest.approx(13.0)
 
 
 def test_handles_present_for_resizable_items(qapp):
@@ -115,123 +74,6 @@ def test_calibration_from_a_drawn_distance(qapp):
     assert scale.area(40000).to("m**2").magnitude == pytest.approx(25)
 
 
-def test_math_item_evaluates_and_lays_out(qapp):
-    workspace = Workspace()
-    item = MathItem("L := 6 m\nw := 12 kN/m\nM := w*L^2/8 -> kN*m")
-    item.local_scope = False
-    item.refresh(workspace)
-    assert workspace.get("M").to("kN*m").magnitude == pytest.approx(54)
-    assert item.local_rect().width() > 40
-    assert item.defined_names() == ["L", "w", "M"]
-
-
-def test_a_block_defines_for_the_document_by_default(qapp):
-    workspace = Workspace()
-    workspace.begin_pass()
-    block = MathItem("w = 12 kN/m\nM = w*6 m^2/8")
-    assert not block.local_scope and not block.scoped
-    block.refresh(workspace)
-    assert workspace.get("w").to("kN/m").magnitude == pytest.approx(12)
-
-
-def test_a_block_can_be_made_self_contained(qapp):
-    workspace = Workspace()
-    workspace.begin_pass()
-    MathItem("L = 6 m").refresh(workspace)          # a one-line region defines globally
-
-    block = MathItem("w = 12 kN/m\nM = w*L^2/8", block=True)
-    block.local_scope = True          # blocks share their names unless told not to
-    block.refresh(workspace)
-    assert block.scoped
-    assert workspace.get("L").to("m").magnitude == pytest.approx(6)   # read from above
-    assert workspace.get("M") is None and workspace.get("w") is None
-    assert block.local_values["M"].value.to("kN*m").magnitude == pytest.approx(54)
-
-
-def test_keeping_a_calculations_names_to_itself_survives_a_round_trip(qapp):
-    """Scope is the region's own answer, saved and read back.
-
-    It used to be tied to a region being a "block" — one of two kinds chosen
-    by which tool drew it. There is one kind now, so any calculation can be
-    asked to keep its working in, and the answer travels with the file.
-    """
-    item = MathItem("a = 1 m\nb = 2 m")
-    item.local_scope = True
-    clone = build_item(item.serialize())
-    assert clone.local_scope is True
-    assert clone.scoped is True, "so its names stay inside it"
-
-    shared = build_item(MathItem("a = 1 m").serialize())
-    assert shared.local_scope is False
-    assert shared.scoped is False, "and this one's do not"
-
-
-def test_math_item_marks_unit_literals(qapp):
-    item = MathItem("")
-    from calcforge.core.engine import compile_expression
-    _code, tree = compile_expression("24 kN/m^3")
-    assert item._is_unit_literal(tree)
-    _code, tree = compile_expression("w*L^2/8")
-    assert not item._is_unit_literal(tree)
-
-
-def test_table_publishes_named_cells(qapp):
-    workspace = Workspace()
-    table = TableItem(3, 2)
-    table.set_cell(0, 0, "10 kN")
-    table.set_cell(1, 0, "15 kN")
-    table.set_cell(2, 0, "=SUM(A1:A2)")
-    table.named_cells = {"N_total": "A3"}
-    table.refresh(workspace)
-    assert workspace.get("N_total").to("kN").magnitude == pytest.approx(25)
-
-
-def test_table_cell_hit_testing(qapp):
-    table = TableItem(4, 3)
-    table.show_chrome = True
-    rect = table.cell_rect(2, 1)
-    assert table.cell_at(rect.center()) == (2, 1)
-    assert table.cell_at(QPointF(-40, -40)) is None
-
-
-def test_table_text_is_clipped_inside_its_own_cell(qapp):
-    table = TableItem(1, 2)
-    table.set_cell(0, 0, "a very long entered value that cannot fit in one cell")
-    table.cell_format(0, 1).background = "#ff00ff"
-    image = QImage(300, 80, QImage.Format_ARGB32)
-    image.fill(Qt.transparent)
-    painter = QPainter(image)
-    table.paint_content(painter)
-    painter.end()
-
-    second = table.cell_rect(0, 1).adjusted(2, 2, -2, -2).toAlignedRect()
-    assert all(image.pixelColor(x, y) == QColor("#ff00ff")
-               for x in range(second.left(), second.right() + 1)
-               for y in range(second.top(), second.bottom() + 1))
-
-
-def test_formula_cells_have_a_distinct_computed_appearance(qapp):
-    table = TableItem(1, 2)
-    table.sheet.header_row = False
-    table.set_cell(0, 0, "2")
-    table.set_cell(0, 1, "=A1*3")
-    table.refresh(Workspace())
-    image = QImage(300, 80, QImage.Format_ARGB32)
-    image.fill(Qt.transparent)
-    painter = QPainter(image)
-    table.paint_content(painter)
-    painter.end()
-
-    entered = table.cell_rect(0, 0)
-    computed = table.cell_rect(0, 1)
-    input_colour = image.pixelColor(int(entered.left() + 3),
-                                    int(entered.bottom() - 3))
-    output_colour = image.pixelColor(int(computed.left() + 3),
-                                     int(computed.bottom() - 3))
-    assert input_colour == QColor("#ffffff")
-    assert output_colour == QColor("#e7f5ff")
-
-
 def test_locked_items_do_not_offer_handles(qapp):
     rect = RectItem("rect", QRectF(0, 0, 50, 50))
     rect.set_locked(True)
@@ -261,7 +103,7 @@ def test_a_highlighter_stroke_is_one_even_band(qapp):
     """Drawn back over itself, a highlighter must not darken or leave holes."""
     from PySide6.QtCore import QPointF
     from PySide6.QtGui import QImage, QPainter
-    from calcforge.items.shapes import PolyItem
+    from markforge.items.shapes import PolyItem
 
     item = PolyItem(kind="highlighter")
     item.points = [QPointF(40, 100), QPointF(160, 100), QPointF(100, 100),
@@ -279,83 +121,10 @@ def test_a_highlighter_stroke_is_one_even_band(qapp):
     assert shades != {0xFFFFFFFF}
 
 
-def test_an_exponent_rides_the_shoulder_of_its_base(qapp):
-    """"d²" reads as one thing: the 2 against the upper part of the d.
-
-    Floating it clear above the letter — which is what happens when it is
-    placed against the *font's* ascent rather than the letter's own ink —
-    reads as two things side by side, and is what a calculation sheet should
-    never look like.
-    """
-    import ast
-    from calcforge.core.mathrender import (MathStyle, Shifted, Typesetter,
-                                           ink_ascent)
-
-    setter = Typesetter(MathStyle())
-    size = 10.0
-
-    def parts(source):
-        tree = ast.parse(source, mode="eval").body
-        row = setter.build(tree, size)
-        base = row.children[0]
-        lifted = [c for c in row.children if isinstance(c, Shifted)][0]
-        return base, lifted
-
-    tall_base, tall_exp = parts("d ** 2")
-    short_base, short_exp = parts("x ** 2")
-
-    for base, lifted in ((tall_base, tall_exp), (short_base, short_exp)):
-        lift = -lifted.dy
-        top = lift + ink_ascent(lifted.child)
-        # It clears the top of what it belongs to …
-        assert top > ink_ascent(base)
-        # … but its own foot sits inside the letter, not above it.
-        assert lift < ink_ascent(base)
-        # and never so low that it reads as a second character on the line.
-        assert lift > size * 0.3
-
-    # A taller letter carries it higher than a short one.
-    assert -tall_exp.dy > -short_exp.dy
-
-
-def test_a_subscript_and_a_power_share_one_column(qapp):
-    """"x_1^2" is one letter with two scripts, not "x₁" followed by "²"."""
-    import ast
-    from calcforge.core.mathrender import (MathStyle, Scripts, Typesetter)
-    from calcforge.core.engine import python_form
-
-    setter = Typesetter(MathStyle())
-    row = setter.build(ast.parse(python_form("x_1^2").strip(), mode="eval").body, 10.0)
-    columns = [c for c in row.children if isinstance(c, Scripts)]
-    assert len(columns) == 1
-    column = columns[0]
-    assert column.subscript is not None and column.superscript is not None
-    # One slot wide, not two: the width is the wider of the two scripts.
-    assert column.width == max(column.subscript.width, column.superscript.width)
-
-
-def test_every_greek_name_uses_its_one_canonical_glyph(qapp):
-    from calcforge.core import greek
-    from calcforge.core.mathrender import Glyph, MathStyle, Typesetter
-
-    def text_in(box):
-        if isinstance(box, Glyph):
-            return box.text
-        return "".join(text_in(child)
-                       for child, _x, _baseline in box.children_at(0, 0))
-
-    setter = Typesetter(MathStyle())
-    for name, glyph in greek.LETTERS.items():
-        assert text_in(setter.name_box(name, 10.0)) == glyph
-    assert greek.fold("φ") == greek.fold("ϕ") == "phi"
-    assert text_in(setter.name_box(greek.fold("φ"), 10.0)) == "φ"
-    assert text_in(setter.name_box(greek.fold("ϕ"), 10.0)) == "φ"
-
-
 def test_a_dimensions_value_carries_a_control_dot(qapp):
     """Not a corner of a box — a control point sitting on the number."""
     from PySide6.QtCore import QPointF
-    from calcforge.items.measure import DIMENSION, LENGTH, AREA, MeasureItem
+    from markforge.items.measure import DIMENSION, LENGTH, AREA, MeasureItem
 
     for kind in (DIMENSION, LENGTH):
         item = MeasureItem(kind, [QPointF(0, 0), QPointF(200, 0)])
@@ -371,9 +140,9 @@ def test_a_snapshots_colours_can_be_changed(window):
     from PySide6.QtCore import QPointF, QRectF
     from PySide6.QtGui import QColor
 
-    from calcforge.io import recolour
-    from calcforge.items.shapes import PolyItem
-    from calcforge.items.snapshot import SnapshotItem
+    from markforge.io import recolour
+    from markforge.items.shapes import PolyItem
+    from markforge.items.snapshot import SnapshotItem
 
     frame = window.document.pages[0].frame
     for index, colour in enumerate(("#000000", "#0a0a0a", "#c92a2a")):
@@ -398,9 +167,9 @@ def test_a_snapshots_colours_can_be_changed(window):
 
 def test_a_snapshot_and_a_photo_have_a_line_type_of_their_own(window):
     """Neither is drawn with the toolbar's pen, so each remembers its own."""
-    from calcforge.ui import toolsets
-    from calcforge.items.media import ImageItem
-    from calcforge.items.snapshot import SnapshotItem
+    from markforge.ui import toolsets
+    from markforge.items.media import ImageItem
+    from markforge.items.snapshot import SnapshotItem
 
     for key, kind in (("snapshot", SnapshotItem), ("image", ImageItem)):
         window.select_tool(key)

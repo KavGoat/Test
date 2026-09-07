@@ -1,4 +1,4 @@
-"""Unit registry and quantity formatting for CalcForge.
+"""Unit registry and quantity formatting for MarkForge.
 
 Everything numeric that flows through the calculation engine is either a plain
 ``float``/``int``, a numpy array, or a :class:`pint.Quantity`.  This module owns

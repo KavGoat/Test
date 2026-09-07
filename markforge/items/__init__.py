@@ -1,7 +1,7 @@
 """The markups that go on a page.
 
 Importing this package registers every kind of markup, so
-:func:`calcforge.items.base.build_item` can rebuild anything that has been
+:func:`markforge.items.base.build_item` can rebuild anything that has been
 saved, copied or imported. Without that, whether a markup could be rebuilt
 would depend on which modules happened to have been imported first — which is
 the kind of bug that only shows up in the one place nobody looked.

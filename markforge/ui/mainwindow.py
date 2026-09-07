@@ -1,4 +1,4 @@
-"""The CalcForge main window."""
+"""The MarkForge main window."""
 from __future__ import annotations
 
 import base64
@@ -52,9 +52,9 @@ from .view import SIZED_SHAPES
 from .view import PageView, typing_somewhere_else
 from .widgets import ColorButton, keep_the_wheel_with_the_scroller
 
-APP_NAME = "CalcForge"
-ORGANISATION = "CalcForge"
-CLIPBOARD_TAG = "application/x-calcforge-items"
+APP_NAME = "MarkForge"
+ORGANISATION = "MarkForge"
+CLIPBOARD_TAG = "application/x-markforge-items"
 
 
 def _command_id(method: str) -> str:
@@ -1265,7 +1265,7 @@ class MainWindow(QMainWindow):
 
         A saved document is itself a PDF, so what decides between the two is
         what the file holds and not what it is called: a PDF carrying a
-        CalcForge layer is a document and opens as one, whatever its name.
+        MarkForge layer is a document and opens as one, whatever its name.
         """
         if project_io.carries_a_document(path):
             project_io.load_document(self.document, path)
@@ -1368,7 +1368,6 @@ class MainWindow(QMainWindow):
         if not self.confirm_discard():
             event.ignore()
             return
-        self.view.deactivate_table()
         self.save_layout()
         # This window's arrangement is written now. The timer must not fire
         # afterwards: a second later this window is gone, another may have
@@ -1439,7 +1438,7 @@ class MainWindow(QMainWindow):
             return False
         answer = QMessageBox.question(
             self, "Recover unsaved work",
-            "CalcForge found a document from a session that did not finish.\n\n"
+            "MarkForge found a document from a session that did not finish.\n\n"
             "Open the recovered copy?",
             QMessageBox.Yes | QMessageBox.No)
         if answer != QMessageBox.Yes:
@@ -1483,7 +1482,6 @@ class MainWindow(QMainWindow):
         # Anything half-finished belongs to the page being left, so it is
         # settled here rather than being carried onto the next one.
         self.view.end_item_edit()
-        self.view.deactivate_table()
         self.view.cancel_draft()
         self.current_index = index
         self.view._shown_page = index
@@ -1768,7 +1766,7 @@ class MainWindow(QMainWindow):
         pages = [self.document.pages[which].to_dict() for which in wanted]
         # The single-page key stays for anything written against it, including
         # a clipboard put there by an older version of this app.
-        payload = {"calcforge_page": pages[0], "calcforge_pages": pages,
+        payload = {"markforge_page": pages[0], "markforge_pages": pages,
                    "assets": assets}
         QApplication.clipboard().setText(json.dumps(payload))
         self.status_hint.setText(
@@ -1781,7 +1779,7 @@ class MainWindow(QMainWindow):
             payload = json.loads(QApplication.clipboard().text() or "")
         except (ValueError, TypeError):
             return None
-        if not isinstance(payload, dict) or "calcforge_page" not in payload:
+        if not isinstance(payload, dict) or "markforge_page" not in payload:
             return None
         return payload
 
@@ -1801,7 +1799,7 @@ class MainWindow(QMainWindow):
                 except (ValueError, TypeError):
                     pass
 
-        waiting = payload.get("calcforge_pages") or [payload["calcforge_page"]]
+        waiting = payload.get("markforge_pages") or [payload["markforge_page"]]
 
         def mutate():
             for offset, source in enumerate(waiting):
@@ -2443,14 +2441,7 @@ class MainWindow(QMainWindow):
             return False
         if binding.kind == INSERT:
             # The maths key opens one that could still turn into words.
-            if binding.payload == "math":
-                if self.document.mode == "pdf":
-                    self.status_hint.setText(
-                        "Calculation entry is unavailable in PDF review mode")
-                    return True
-                self.start_typing("", position)
-            else:
-                self._insert_at(binding.payload, position)
+            self._insert_at(binding.payload, position)
             return True
         if binding.kind == TOOL:
             self.select_tool(binding.payload)
@@ -2704,8 +2695,6 @@ class MainWindow(QMainWindow):
             mutate(item.style)
             if hasattr(item, "apply_style"):
                 item.apply_style()
-            if isinstance(item, MathItem):
-                item.relayout()
             item.prepareGeometryChange()
             item.update()
         self.view.commit_snapshot(description)
@@ -2741,7 +2730,7 @@ class MainWindow(QMainWindow):
 
     def _apply_toolbar_style(self, item: MarkupItem) -> None:
         style = self.default_style
-        if isinstance(item, (NoteItem, ImageItem, StampItem, TableItem, FlagItem,
+        if isinstance(item, (NoteItem, ImageItem, StampItem, FlagItem,
                              SnapshotItem)):
             # None of these is drawn with the pen the toolbar holds. A photo
             # and a snapshot each remember a look of their own, which is
@@ -2763,11 +2752,6 @@ class MainWindow(QMainWindow):
         if isinstance(item, PolyItem) and item.kind == "highlighter":
             if style.stroke:
                 item.style.stroke = style.stroke
-            return
-        if isinstance(item, MathItem):
-            item.style.font_size = self.document.settings.math_size
-            item.digits = self.document.settings.precision
-            item.number_format = self.document.settings.number_format
             return
         if isinstance(item, MeasureItem):
             item.style.width = style.width
@@ -2891,7 +2875,6 @@ class MainWindow(QMainWindow):
         items = [item for item in self.selected_items() if self.view.editable(item)]
         if not items:
             return
-        self.view.deactivate_table()
         self.view.begin_snapshot()
         for item in items:
             detach(item)
@@ -3089,7 +3072,7 @@ class MainWindow(QMainWindow):
         if not source:
             QMessageBox.information(
                 self, "Change colours",
-                "This snapshot was taken before CalcForge kept what a snapshot "
+                "This snapshot was taken before MarkForge kept what a snapshot "
                 "was made of, so there is nothing left in it to recolour. Take "
                 "it again and the colours will be yours to change.")
             return
@@ -3400,8 +3383,6 @@ class MainWindow(QMainWindow):
         if self.view.text_clipboard("copy"):
             self._clipboard = []
             return
-        if self.view.active_table is not None and self.view.copy_cells():
-            # Whatever markups were copied before, cells are what is on the
             # clipboard now — otherwise the next paste puts the old ones back.
             self._clipboard = []
             return
@@ -3416,16 +3397,11 @@ class MainWindow(QMainWindow):
         if self.view.text_clipboard("cut"):
             self._clipboard = []
             return
-        if self.view.active_table is not None and self.view.cut_cells():
-            self._clipboard = []
-            return
         self.copy_selection()
         self.delete_selection()
 
     def paste_items(self) -> None:
         if self.view.text_clipboard("paste"):
-            return
-        if self.view.active_table is not None and self.view.paste_cells():
             return
         payload = self._clipboard
         text = QApplication.clipboard().text()
@@ -3435,19 +3411,6 @@ class MainWindow(QMainWindow):
         if self._clipboard_is_a_foreign_picture():
             if self.paste_picture_from_clipboard():
                 return
-        # A table picked out on the page is where a block of cells belongs,
-        # without having to open one of its cells first.
-        if not payload and looks_like_a_grid(text):
-            selected = [i for i in self.selected_items() if isinstance(i, TableItem)]
-            if len(selected) == 1 and not selected[0].locked:
-                self.view.activate_table(selected[0])
-                if self.view.paste_cells():
-                    return
-        # Cells copied out of Excel with nowhere to go become a table of their
-        # own, which is how most sheets get into a calculation in the first place.
-        if not payload and looks_like_a_grid(text):
-            self.paste_grid_as_table(text)
-            return
         if text.strip().startswith("{"):
             try:
                 decoded = json.loads(text)
@@ -3765,30 +3728,6 @@ class MainWindow(QMainWindow):
 
 
 
-    @staticmethod
-    def _dependency_names(item, declared: set[str]) -> tuple[set[str], set[str]]:
-        """Variables read and published by one calculation region or table."""
-        inputs: set[str] = set()
-        if isinstance(item, MathItem):
-            for line in item.source.split("\n"):
-                statement = parse_statement(line)
-                if statement.expression:
-                    inputs |= referenced_names(statement.expression) - set(statement.params)
-            outputs = item.published_names()
-        else:
-            from ..core.spreadsheet import prepare_formula
-
-            for cell in item.sheet.cells.values():
-                if not cell.is_formula:
-                    continue
-                try:
-                    prepared, _cell_dependencies = prepare_formula(
-                        cell.raw[1:], item.sheet.rows, item.sheet.cols)
-                except Exception:
-                    continue
-                inputs |= referenced_names(prepared)
-            outputs = item.declared_names()
-        return inputs & declared, set(outputs)
 
 
 
@@ -4040,13 +3979,6 @@ class MainWindow(QMainWindow):
             return
         self._flatten_items(items, recoverable)
 
-    @staticmethod
-    def _flatten_class(item) -> str:
-        if isinstance(item, MathItem):
-            return "calculations"
-        if isinstance(item, TableItem):
-            return "tables"
-        return "markups"
 
     def flatten_document(self) -> None:
         """Choose content classes and flatten matching items on every page."""
@@ -4363,8 +4295,7 @@ class MainWindow(QMainWindow):
             return True
 
         item = self.view.editing_item()
-        table = self.view.active_table
-        if item is None and table is None:
+        if item is None:
             items = [i for i in self.selected_items()
                      if isinstance(i, _TextBase) and not i.locked]
             if not items:
@@ -4416,18 +4347,6 @@ class MainWindow(QMainWindow):
     def format_content(self, alignment: str = "", font_delta: float = 0.0) -> bool:
         """Align or resize the text-bearing selection in its active context."""
         item = self.view.editing_item()
-        if isinstance(item, MathItem) and not item.locked:
-            line = max(item.caret_line_and_column()[0], 0)
-            self.view.begin_snapshot(self.view.involved_frames(item))
-            if alignment:
-                item.set_line_alignment(line, alignment)
-            if font_delta:
-                item.change_line_font_size(line, font_delta)
-            item.touch()
-            item.update()
-            self.view.commit_snapshot("Format calculation")
-            self.status_hint.setText("Calculation line formatted")
-            return True
 
         editor = self.view.text_editor()
         if editor is not None and isinstance(item, _TextBase) and not item.locked:
@@ -4453,44 +4372,11 @@ class MainWindow(QMainWindow):
             self.status_hint.setText("Text formatted")
             return True
 
-        table = self.view.active_table
-        if table is not None and not table.locked:
-            cells = table.selected_cells()
-            self.view.begin_snapshot(self.view.involved_frames(table))
-            changes = {}
-            if alignment:
-                changes["align"] = alignment
-            if font_delta:
-                for row, col in cells:
-                    fmt = table.cell_format(row, col)
-                    current = fmt.font_size if fmt.font_size is not None \
-                        else table.style.font_size
-                    fmt.font_size = max(3.0, min(current + font_delta, 96.0))
-                    table.sheet.row_heights[row] = max(
-                        table.sheet.row_height(row),
-                        fmt.font_size + 8.0)
-            if changes:
-                table.apply_format(cells, **changes)
-            if self.view._cell_editor is not None:
-                row, col = table.current
-                self.view._cell_editor.setAlignment(
-                    table.editor_alignment(row, col, self.view._cell_editor.text()))
-                font = self.view._cell_editor.font()
-                size = table.cell_format(row, col).font_size or table.style.font_size
-                font.setPointSizeF(size)
-                self.view._cell_editor.setFont(font)
-            table.touch()
-            table.update()
-            self.view.commit_snapshot("Format cells")
-            self.status_hint.setText(f"{len(cells)} cell(s) formatted")
-            return True
-
         selected = [entry for entry in self.selected_items() if not entry.locked]
         text_items = [entry for entry in selected if isinstance(entry, _TextBase)]
-        math_items = [entry for entry in selected if isinstance(entry, MathItem)]
-        if not text_items and not math_items:
+        if not text_items:
             return False
-        acting = text_items + math_items
+        acting = text_items
         self.view.begin_snapshot(self.view.involved_frames(*acting))
         for entry in text_items:
             if alignment:
@@ -4586,7 +4472,7 @@ class MainWindow(QMainWindow):
 
     def _printer(self) -> QPrinter:
         printer = QPrinter(QPrinter.HighResolution)
-        printer.setDocName(self.document.title or "CalcForge document")
+        printer.setDocName(self.document.title or "MarkForge document")
         return printer
 
     def print_document(self) -> None:
@@ -4830,30 +4716,6 @@ class MainWindow(QMainWindow):
                 menu.addAction("Edit…", lambda: self.view.begin_item_edit(item))
             if isinstance(item, (ImageItem, SnapshotItem)):
                 menu.addAction("Change colours…", lambda: self.recolour_item(item))
-            if isinstance(item, PlotItem):
-                menu.addAction("Edit plot…", lambda: self.edit_plot(item))
-            if isinstance(item, TableItem):
-                menu.addAction("Edit table", lambda: self.view.activate_table(item))
-                menu.addAction("Named cells…", lambda: self.edit_named_cells(item))
-                table_name = menu.addAction("Table name…", lambda: self.name_table(item))
-                table_name.setToolTip("Name this table for formulas and the page label")
-                menu.addSeparator()
-                menu.addAction("Row above", lambda: self._table_op(item, "row_above"))
-                menu.addAction("Row below", lambda: self._table_op(item, "row_below"))
-                menu.addAction("Column left", lambda: self._table_op(item, "col_left"))
-                menu.addAction("Column right", lambda: self._table_op(item, "col_right"))
-                menu.addAction("Delete row", lambda: self._table_op(item, "del_row"))
-                menu.addAction("Delete column", lambda: self._table_op(item, "del_col"))
-                menu.addAction("Autofit columns", lambda: self._table_op(item, "autofit"))
-                menu.addSeparator()
-                align = menu.addMenu("Align cells")
-                for key, label in (("left", "Left"), ("center", "Centre"),
-                                   ("right", "Right"), ("auto", "Auto")):
-                    entry = align.addAction(label,
-                                            lambda _c=False, k=key:
-                                            self.align_cells(k, item))
-                    entry.setCheckable(True)
-                    entry.setChecked(self._cells_aligned(item) == key)
             if self.view.has_an_outline(item):
                 # Rectangles and clouds included: four corners and four sides
                 # is an outline like any other, and everything offered on a
@@ -4938,44 +4800,8 @@ class MainWindow(QMainWindow):
             menu.addAction(self.act_select_all)
         return menu
 
-    def set_block_kind(self, on: bool) -> None:
-        """Turn a calculation line into a block, or a block back into a line."""
-        items = [i for i in self.selected_items() if isinstance(i, MathItem)]
-        if not items:
-            return
-        self.view.begin_snapshot()
-        for item in items:
-            item.block = bool(on)
-            if not on:
-                item.local_scope = False
-            item.local_values.clear()
-        self.view.commit_snapshot("Calculation kind")
-        self.refresh_selection()
 
 
-    def start_typing(self, first: str, scene_point: QPointF) -> None:
-        """Open a calculation on bare paper, ready to become words instead.
-
-        The maths key opens a calculation, because that is what a calculation
-        sheet is mostly made of. But a line that has no operator, no bracket
-        and no equals sign in it yet could still turn out to be a sentence, and
-        the moment a space is typed into one that has not become maths, it
-        turns into a text box. Nothing needs to be chosen first, and nothing
-        needs to be undone if the guess was wrong.
-
-        Inserting a calculation from the menu is different: that is a
-        deliberate request for one, and a space in it is just a space.
-        """
-        self._insert_at("math", scene_point)
-        item = self.view.editing_item()
-        if not isinstance(item, MathItem):
-            return
-        item.started_by_typing = True
-        editor = getattr(item, "_editor", None)
-        if editor is not None:
-            cursor = editor.textCursor()
-            cursor.insertText(first)
-            editor.setTextCursor(cursor)
 
     def _insert_at(self, key: str, scene_point: QPointF) -> None:
         """Put a new markup on the page under *scene_point*."""
@@ -4987,7 +4813,7 @@ class MainWindow(QMainWindow):
         self.apply_default_style(item)
         item.author = self.document.settings.default_author or self.document.author
         width, height = self.view._default_size(item)
-        if (hasattr(item, "set_local_rect") and not isinstance(item, (TableItem, MathItem))):
+        if hasattr(item, "set_local_rect"):
             item.set_local_rect(QRectF(0, 0, width, height))
         if isinstance(item, ImageItem) and not self.load_image_into(item):
             return
@@ -4995,10 +4821,8 @@ class MainWindow(QMainWindow):
         self.view.scene().clearSelection()
         item.setSelected(True)
         self.view.commit_snapshot(f"Add {tool.label.lower()}")
-        if isinstance(item, (MathItem, _TextBase)):
+        if isinstance(item, _TextBase):
             self.view.begin_item_edit(item)
-        elif isinstance(item, TableItem):
-            self.view.activate_table(item)
         self.refresh_selection()
 
     def redaction_items(self) -> list[tuple]:

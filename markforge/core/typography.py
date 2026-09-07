@@ -1,6 +1,6 @@
 """Device-independent fonts.
 
-Every page coordinate in CalcForge is a PostScript point, so a "10 pt" font has
+Every page coordinate in MarkForge is a PostScript point, so a "10 pt" font has
 to occupy exactly 10 scene units — on screen, in an exported image, and on a
 600 dpi printer alike.  ``QFont.setPointSizeF`` cannot do that: Qt turns points
 into device pixels using the paint device's own DPI, so the same font comes out

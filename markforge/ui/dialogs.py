@@ -1199,9 +1199,9 @@ class ShortcutManagerDialog(QDialog):
 class AboutDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("About CalcForge")
+        self.setWindowTitle("About MarkForge")
         layout = QVBoxLayout(self)
-        title = QLabel("CalcForge")
+        title = QLabel("MarkForge")
         font = QFont()
         font.setPointSize(20)
         font.setBold(True)

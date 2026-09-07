@@ -625,15 +625,12 @@ class PageFrame(QGraphicsObject):
         asked anything, so changing a snapshot's colours later means having
         what it was taken of.
         """
-        from ..items.mathitem import MathItem
-        from ..items.tableitem import TableItem
         from ..items.text import _TextBase
 
-        selective = (MathItem, TableItem, _TextBase)
         return [item for item in self.markups()
                 if item.isVisible()
                 and self.document.layer(item.layer).visible
-                and (not isinstance(item, selective) or item.isSelected())]
+                and (not isinstance(item, _TextBase) or item.isSelected())]
 
     def render_items_picture(self, items, region: QRectF) -> QPicture:
         """Record exactly *items* in page coordinates inside *region*."""

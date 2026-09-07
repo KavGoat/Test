@@ -42,7 +42,7 @@ CONTENT_KEYS = frozenset({
 
 
 def _settings() -> QSettings:
-    return QSettings("CalcForge", "CalcForge")
+    return QSettings("MarkForge", "MarkForge")
 
 
 def default_key(item) -> str:

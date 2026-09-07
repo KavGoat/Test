@@ -141,7 +141,7 @@ class LivePages:
         if document.pageCount() < 1:
             return None
         # The buffer has to outlive the document that reads from it.
-        document._calcforge_buffer = holder
+        document._markforge_buffer = holder
         self._open[key] = document
         return document
 

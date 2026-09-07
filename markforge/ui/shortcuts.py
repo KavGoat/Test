@@ -238,7 +238,7 @@ class ShortcutManager(QObject):
 
     # -- persistence -------------------------------------------------------
     def _settings(self) -> QSettings:
-        return QSettings("CalcForge", "CalcForge")
+        return QSettings("MarkForge", "MarkForge")
 
     def load(self) -> None:
         settings = self._settings()

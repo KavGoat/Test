@@ -11,9 +11,9 @@ import zlib
 import pytest
 from PySide6.QtCore import QRectF
 
-from calcforge.io import btx
-from calcforge.io.pdfobj import Name, operations, parse, parse_dict
-from calcforge.items.base import build_item
+from markforge.io import btx
+from markforge.io.pdfobj import Name, operations, parse, parse_dict
+from markforge.items.base import build_item
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FILES = sorted(glob.glob(os.path.join(HERE, "btx", "*.btx")))
@@ -168,7 +168,7 @@ def test_a_drawing_keeps_its_colours_and_its_fills(qapp):
 
 
 def test_a_drawing_scales_with_its_box(qapp):
-    from calcforge.items.shapes import SketchItem
+    from markforge.items.shapes import SketchItem
 
     item = SketchItem([{"path": [["m", 0, 0], ["l", 10, 0], ["l", 10, 10], ["z"]],
                         "stroke": "#000000", "fill": "", "width": 1.0}])
@@ -178,7 +178,7 @@ def test_a_drawing_scales_with_its_box(qapp):
 
 
 def test_a_drawing_survives_a_save(qapp):
-    from calcforge.items.shapes import SketchItem
+    from markforge.items.shapes import SketchItem
 
     item = SketchItem([{"path": [["m", 0, 0], ["c", 1, 1, 2, 2, 3, 3]],
                         "stroke": "#123456", "fill": "#abcdef", "width": 0.5}])
@@ -276,7 +276,7 @@ def test_a_labels_colour_comes_across_from_either_place():
 
 def test_the_parts_of_a_section_mark_line_up_with_each_other(qapp):
     """The cut line runs through the middle of the bubble, not past it."""
-    from calcforge.items.shapes import PolyItem, RectItem
+    from markforge.items.shapes import PolyItem, RectItem
 
     marks = btx.read(os.path.join(HERE, "btx", "Structures - Sketch Tools.btx"))
     tool = marks.tools[0]
@@ -313,8 +313,8 @@ def test_a_section_marks_parts_are_assembled_not_scattered(qapp):
     labels swapped halves of the bubble, the arrow came off it, and the heavy
     bar at the end of the cut line ended up a hundred points from the line.
     """
-    from calcforge.items.shapes import PolyItem, RectItem
-    from calcforge.items.text import TextItem
+    from markforge.items.shapes import PolyItem, RectItem
+    from markforge.items.text import TextItem
 
     marks = btx.read(os.path.join(HERE, "btx", "Structures - Sketch Tools.btx"))
     section = next(t for t in marks.tools if t.name == "Section")

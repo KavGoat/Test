@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (QSizePolicy, QToolBar, QToolButton, QVBoxLayout,
                                QWidget)
 
 SIDES_KEY = "panels/sides"
-MIME = "application/x-calcforge-panel"
+MIME = "application/x-markforge-panel"
 
 LEFT = "left"
 RIGHT = "right"
@@ -160,7 +160,7 @@ class RailBar(QToolBar):
 
 def load_sides(default: dict[str, str]) -> dict[str, str]:
     """Which side each panel was last on."""
-    settings = QSettings("CalcForge", "CalcForge")
+    settings = QSettings("MarkForge", "MarkForge")
     stored = settings.value(SIDES_KEY, None)
     sides = dict(default)
     if isinstance(stored, dict):
@@ -171,4 +171,4 @@ def load_sides(default: dict[str, str]) -> dict[str, str]:
 
 
 def save_sides(sides: dict[str, str]) -> None:
-    QSettings("CalcForge", "CalcForge").setValue(SIDES_KEY, dict(sides))
+    QSettings("MarkForge", "MarkForge").setValue(SIDES_KEY, dict(sides))

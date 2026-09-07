@@ -28,9 +28,9 @@ from PySide6.QtGui import QKeyEvent, QMouseEvent
 from PySide6.QtWidgets import QApplication
 from PySide6.QtTest import QTest
 
-from calcforge.app import build_application
-from calcforge.ui.mainwindow import MainWindow
-from calcforge.ui.tools import TOOLS
+from markforge.app import build_application
+from markforge.ui.mainwindow import MainWindow
+from markforge.ui.tools import TOOLS
 
 SEED = int(sys.argv[1]) if len(sys.argv) > 1 else 1
 ROUNDS = int(sys.argv[2]) if len(sys.argv) > 2 else 400
@@ -256,7 +256,7 @@ def do_navigate():
 
 @guard("scale")
 def do_scale():
-    from calcforge.core.document import PageScale
+    from markforge.core.document import PageScale
     win.current_page().scale = (PageScale.from_ratio(rng.choice([20, 50, 100, 200]))
                                 if rng.random() < 0.7 else PageScale())
     win.apply_scale_change()
@@ -270,7 +270,7 @@ def do_recalc():
 @guard("toolset")
 def do_toolset():
     """Keep things in tool sets, take them out again, and put them down."""
-    from calcforge.ui import toolsets
+    from markforge.ui import toolsets
 
     what = rng.random()
     items = [i for i in view.scene().markups()]
@@ -362,7 +362,7 @@ try:
     view.deactivate_table()
     import tempfile
 
-    from calcforge.io import export as export_io
+    from markforge.io import export as export_io
     path = os.path.join(tempfile.gettempdir(), f"session_fuzz_{SEED}.pdf")
     export_io.export_pdf(win.document, path)
     from PySide6.QtPdf import QPdfDocument

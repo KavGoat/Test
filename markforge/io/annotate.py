@@ -137,7 +137,7 @@ class Appearances:
         os.close(handle)
         writer = QPdfWriter(path)
         writer.setResolution(int(APPEARANCE_DPI))
-        writer.setCreator("CalcForge")
+        writer.setCreator("MarkForge")
         painter = QPainter()
         started = False
         try:

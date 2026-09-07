@@ -7,7 +7,7 @@ and put on the page as real geometry.
 
 What is read here is the file's structure: its objects, its page tree and the
 content stream of each page. Turning that stream into strokes is already done,
-by :func:`calcforge.io.btx.read_content`.
+by :func:`markforge.io.btx.read_content`.
 
 Text is not read. Letters in a PDF are drawn from an embedded font, and
 rendering those properly is a typesetting job of its own; the raster page is

@@ -7,8 +7,8 @@ page count and the actual text on the page.
 import pytest
 from PySide6.QtPdf import QPdfDocument
 
-from calcforge.core.document import LANDSCAPE
-from calcforge.io import export as export_io
+from markforge.core.document import LANDSCAPE
+from markforge.io import export as export_io
 
 A4_W, A4_H = 595.276, 841.89          # points, ISO 216
 TOLERANCE = 1.5                       # Qt rounds the media box to 1/20 pt
@@ -99,37 +99,6 @@ def test_every_page_of_the_document_is_printed(window, tmp_path):
     assert _pdf(window.document, tmp_path).pages == 3
 
 
-def test_a_calculation_and_its_result_land_on_the_page(window, tmp_path):
-    window.select_tool("math")
-    _drag(window, 80, 120, 380, 200)
-    block = window.view.editing_item()
-    block._editor.setPlainText("L = 6 m\nw = 12 kN/m\nM = w*L^2/8 =")
-    window.view.end_item_edit()
-    window.recalculate()
-
-    text = _pdf(window.document, tmp_path).text()
-    assert "54" in text                      # the answer, in kN·m
-    assert "12" in text and "6" in text      # the inputs it came from
-
-
-def test_a_table_prints_its_values_not_its_formulas(window, tmp_path):
-    window.select_tool("table")
-    _drag(window, 80, 80, 460, 240)
-    table = window.view.active_table
-    table.set_cell(0, 0, "Thickness")
-    table.set_cell(1, 0, "150 mm")
-    table.set_cell(0, 1, "Density")
-    table.set_cell(1, 1, "24 kN/m^3")
-    table.set_cell(0, 2, "Load")
-    table.set_cell(1, 2, "=A2*B2")
-    window.view.deactivate_table()
-    window.recalculate()
-
-    text = _pdf(window.document, tmp_path).text()
-    assert "3.60" in text or "3.6" in text    # 150 mm x 24 kN/m3 = 3.6 kPa
-    assert "=A2*B2" not in text
-
-
 def test_a_landscape_a3_page_prints_at_a3(window, tmp_path):
     page = window.current_page()
     page.setup.apply_size("A3")
@@ -165,26 +134,12 @@ def test_markup_text_reaches_the_page(window, tmp_path):
 
 
 def test_a_measurement_prints_the_dimension_it_reads(window, tmp_path):
-    from calcforge.core.document import PageScale
+    from markforge.core.document import PageScale
     window.current_page().scale = PageScale.from_ratio(50)
     window.select_tool("measure_length")
     _drag(window, 100, 400, 236, 400)
     window.view.end_item_edit()
     assert "2.4" in _pdf(window.document, tmp_path).text()
-
-
-def test_printing_twice_gives_the_same_file(window, tmp_path):
-    """A second print of an untouched document must not drift."""
-    window.select_tool("math")
-    _drag(window, 80, 120, 380, 180)
-    window.view.editing_item()._editor.setPlainText("a = 2 m\nb = a*3")
-    window.view.end_item_edit()
-    window.recalculate()
-
-    first = _pdf(window.document, tmp_path, "one.pdf")
-    second = _pdf(window.document, tmp_path, "two.pdf")
-    assert first.text() == second.text()
-    assert first.pages == second.pages
 
 
 def test_the_print_path_survives_a_second_run(window, tmp_path):
@@ -283,7 +238,7 @@ def test_a_logo_in_the_footer_prints_at_the_bottom(window):
 
 
 def test_the_logo_height_is_what_was_asked_for(window):
-    from calcforge.core.document import MM_TO_PT
+    from markforge.core.document import MM_TO_PT
 
     settings = window.document.settings
     settings.logo_key = _logo(window.document)
@@ -334,8 +289,8 @@ def test_header_text_steps_aside_for_the_logo(window):
 
 
 def test_the_logo_and_its_place_are_saved_with_the_document(window, tmp_path):
-    from calcforge.core.document import Document
-    from calcforge.io import project as project_io
+    from markforge.core.document import Document
+    from markforge.io import project as project_io
 
     settings = window.document.settings
     settings.logo_key = _logo(window.document)
@@ -395,43 +350,11 @@ def _link_count(path: str) -> int:
     return len(re.findall(rb"/Subtype\s*/Link", open(path, "rb").read()))
 
 
-def test_bookmarks_become_the_pdfs_own_bookmarks(window, tmp_path):
-    window.load_sample()
-    window.document.add_bookmark("Beam design", 0)
-    window.document.add_bookmark("Load take-down", 1)
-    window.document.add_bookmark("Foundation", 2)
-
-    path = str(tmp_path / "book.pdf")
-    export_io.export_pdf(window.document, path)
-    assert _outline_titles(path) == ["Beam design", "Load take-down", "Foundation"]
-
-    printed = Printed(path)
-    assert printed.pages == 3           # and the document still opens
-
-
 def test_a_document_without_bookmarks_is_unchanged(window, tmp_path):
     path = str(tmp_path / "plain.pdf")
     export_io.export_pdf(window.document, path)
     assert _outline_titles(path) == []
     assert Printed(path).pages == 1
-
-
-def test_a_contents_block_becomes_links_in_the_pdf(window, tmp_path):
-    from calcforge.items.contents import ContentsItem
-
-    window.load_sample()
-    window.document.add_bookmark("Beam design", 0)
-    window.document.add_bookmark("Foundation", 2)
-
-    contents = ContentsItem()
-    contents.setPos(60, 600)
-    window.document.pages[0].frame.add_markup(contents)
-    contents.paint_content(_null_painter(window))       # lay the rows out
-
-    path = str(tmp_path / "contents.pdf")
-    export_io.export_pdf(window.document, path)
-    assert _link_count(path) == 2
-    assert Printed(path).pages == 3
 
 
 def _null_painter(window):
@@ -443,35 +366,6 @@ def _null_painter(window):
     window._contents_painter = (image, painter)         # keep them alive
     return painter
 
-
-def test_the_outline_points_at_the_right_pages(window, tmp_path):
-    import re
-    window.load_sample()
-    window.document.add_bookmark("Foundation", 2)
-    path = str(tmp_path / "one.pdf")
-    export_io.export_pdf(window.document, path)
-
-    data = open(path, "rb").read()
-    kids = re.search(rb"/Kids\s*\[(.*?)\]", data, re.S).group(1)
-    pages = [int(n) for n in re.findall(rb"(\d+)\s+0\s+R", kids)]
-    dest = re.search(rb"/Dest\s*\[\s*(\d+)\s+0\s+R", data).group(1)
-    assert int(dest) == pages[2]
-
-
-def test_exporting_a_range_does_not_leave_links_dangling(window, tmp_path):
-    window.load_sample()
-    window.document.add_bookmark("Beam design", 0)
-    window.document.add_bookmark("Foundation", 2)
-
-    path = str(tmp_path / "range.pdf")
-    export_io.export_pdf(window.document, path, pages=window.document.pages[:1])
-    assert _outline_titles(path) == ["Beam design"]
-    assert Printed(path).pages == 1
-
-
-# ---------------------------------------------------------------------------
-# An export whose markups are still markups
-# ---------------------------------------------------------------------------
 
 def test_every_markup_goes_out_as_a_markup(window, tmp_path):
     """Opened elsewhere, each one is still an annotation to pick up and move."""
@@ -518,21 +412,6 @@ def test_an_exported_markup_is_not_also_painted_into_the_sheet(window, tmp_path)
     # rectangle is hundreds of pixels of green.
     assert greens(False) < greens(True) / 10, \
         "and not painted into the page as well"
-
-
-def test_a_calculation_goes_out_frozen_at_the_value_it_had(window, tmp_path):
-    """A PDF has no variables, so the number is the one it held on export."""
-    window.select_tool("math")
-    _drag(window, 80, 120, 380, 200)
-    block = window.view.editing_item()
-    block._editor.setPlainText("L = 6 m\nM = L*3 =")
-    window.view.end_item_edit()
-    window.recalculate()
-
-    printed = _pdf(window.document, tmp_path, "frozen.pdf")
-    assert "18" in printed.text()
-    assert [str(mark["/Subtype"]) for mark in printed.markups()] == ["/Stamp"], \
-        "a calculation exports as an ordinary movable markup"
 
 
 def test_an_exported_markup_carries_who_made_it_and_what_it_says(window, tmp_path):

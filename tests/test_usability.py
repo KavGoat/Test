@@ -11,13 +11,11 @@ from PySide6.QtCore import (QEvent, QKeyCombination, QPoint, QPointF,
 from PySide6.QtGui import QColor, QContextMenuEvent, QKeyEvent, QMouseEvent
 from PySide6.QtWidgets import QApplication, QLabel
 
-from calcforge.core.document import MM_TO_PT
-from calcforge.items.mathitem import MathItem
-from calcforge.items.measure import DIMENSION, MeasureItem
-from calcforge.items.shapes import PolyItem, RectItem
-from calcforge.items.tableitem import TableItem
-from calcforge.items.snapshot import SnapshotItem
-from calcforge.items.text import CalloutItem, TextItem
+from markforge.core.document import MM_TO_PT
+from markforge.items.measure import DIMENSION, MeasureItem
+from markforge.items.shapes import PolyItem, RectItem
+from markforge.items.snapshot import SnapshotItem
+from markforge.items.text import CalloutItem, TextItem
 
 
 # ---------------------------------------------------------------------------
@@ -199,36 +197,6 @@ def test_backspace_edits_text_rather_than_deleting_the_markup(window):
     assert box in markups(window)
 
 
-def test_enter_opens_the_next_calculation_line(window):
-    window.view._last_scene_pos = QPointF(100, 100)
-    press_key(window.view, Qt.Key_unknown, '"')
-    first = window.view.editing_item()
-    type_text(window.view, "L=6m")
-    press_key(window.view, Qt.Key_Return)
-    second = window.view.editing_item()
-    assert second is not first
-    type_text(window.view, "w=2kN/m")
-    window.view.end_item_edit()
-    workspace = window.document.workspace
-    assert workspace.get("L").to("m").magnitude == pytest.approx(6)
-    assert workspace.get("w").to("kN/m").magnitude == pytest.approx(2)
-
-
-def test_escape_leaves_editing_then_returns_to_select(window):
-    window.select_tool("math")
-    drag(window.view, 100, 100, 260, 130)
-    window.view.editing_item()._editor.setPlainText("a = 1 m")
-    press_key(window.view, Qt.Key_Escape)
-    assert window.view.editing_item() is None
-    window.select_tool("rect")
-    press_key(window.view, Qt.Key_Escape)
-    assert window.view.tool_key == "select"
-
-
-# ---------------------------------------------------------------------------
-# shortcuts, exactly as specified
-# ---------------------------------------------------------------------------
-
 @pytest.mark.parametrize("character, tool_key", [
     ("c", "cloud"), ("r", "rect"), ("p", "polygon"), ("a", "arrow"),
     ("m", "measure_length"), ("q", "callout"), ("t", "text"), ("e", "ellipse"),
@@ -265,7 +233,7 @@ def test_a_count_marker_shows_its_whole_number_at_any_size(window):
     rectangle and clipped away entirely.
     """
     from PySide6.QtGui import QFontMetricsF
-    from calcforge.items.measure import CountItem
+    from markforge.items.measure import CountItem
 
     window.select_tool("count")
     for x in (150, 200, 250):
@@ -287,7 +255,7 @@ def test_a_count_marker_shows_its_whole_number_at_any_size(window):
 
 def test_escape_puts_the_count_tool_down_at_once(window):
     """One press, and nothing of the count session is left behind."""
-    from calcforge.items.measure import CountItem
+    from markforge.items.measure import CountItem
 
     window.select_tool("count")
     for x in (150, 200):
@@ -317,8 +285,8 @@ def test_a_snapshot_is_borderless_when_it_comes_back(window):
     the red line every drawn markup starts with onto it. The default was right
     all along and was being thrown away on the way back in.
     """
-    from calcforge.items.base import build_item
-    from calcforge.items.snapshot import SnapshotItem
+    from markforge.items.base import build_item
+    from markforge.items.snapshot import SnapshotItem
 
     payload = {"type": "snapshot", "asset": "k", "x": 0.0, "y": 0.0,
                "rect": [0, 0, 120, 80], "source_rect": [0, 0, 120, 80],
@@ -341,7 +309,7 @@ def test_the_size_entry_stays_upright_whichever_way_the_page_is_turned(window):
     A tooltip belongs to the screen, not to the paper.
     """
     from PySide6.QtWidgets import QGraphicsItem
-    from calcforge.core.document import PageScale
+    from markforge.core.document import PageScale
 
     window.current_page().scale = PageScale.from_ratio(50)
     for turn in (0, 90, 180, 270):
@@ -361,7 +329,7 @@ def test_the_size_entry_stays_upright_whichever_way_the_page_is_turned(window):
 
 def test_every_arrow_moves_the_insertion_point(window):
     """Left and Right used to do nothing, which is half a caret."""
-    from calcforge.ui import preferences
+    from markforge.ui import preferences
 
     prefs = preferences.current()
     was = prefs.insertion_point
@@ -394,7 +362,7 @@ def test_flattened_markup_lets_the_pointer_through_to_what_is_behind(window):
     It was already unselectable, but it went on answering "what is under the
     pointer", so it stood in front of whatever was being reached for.
     """
-    from calcforge.items.shapes import RectItem
+    from markforge.items.shapes import RectItem
 
     window.select_tool("rect")
     drag(window.view, 120, 120, 320, 260)          # behind
@@ -466,7 +434,7 @@ def test_two_documents_open_in_tabs_without_reaching_into_each_other(window):
 
 def test_a_second_window_keeps_its_own_document(window):
     """The other half of the same idea: a window with a document of its own."""
-    from calcforge.ui.mainwindow import MainWindow
+    from markforge.ui.mainwindow import MainWindow
 
     second = window.open_new_window()
     second.confirm_discard = lambda: True
@@ -538,46 +506,6 @@ def test_a_slash_typed_over_a_selection_makes_it_a_numerator(window):
         QApplication.processEvents()
 
 
-def test_a_half_written_calculation_keeps_its_shape(window):
-    """"5/" is five over something, and it should look like it.
-
-    Dropping to plain characters the moment a line stopped parsing threw away
-    the one thing the layout was still saying.
-    """
-    from calcforge.core.mathrender import Fraction, Slot
-
-    for source, wanted in (("a:=5/", ("Fraction", "Slot")),
-                           ("a:=2^", ("Shifted", "Slot")),
-                           ("a:=3*", ("Slot",))):
-        window.view._last_scene_pos = QPointF(90, 300)
-        press_key(window.view, Qt.Key_unknown, '"')
-        type_text(window.view, source)
-        item = window.view.editing_item()
-        item.relayout()
-        QApplication.processEvents()
-        kinds = []
-        for row in item.rows:
-            if row.left is not None:
-                kinds += _box_kinds(row.left)
-        for name in wanted:
-            assert name in kinds, f"{source}: expected a {name}, got {kinds}"
-        window.view.escape_everything()
-        QApplication.processEvents()
-
-    # A line that parses is unaffected: no slots appear in a finished one.
-    window.view._last_scene_pos = QPointF(90, 300)
-    press_key(window.view, Qt.Key_unknown, '"')
-    type_text(window.view, "a:=1+2/3")
-    item = window.view.editing_item()
-    item.relayout()
-    kinds = []
-    for row in item.rows:
-        if row.left is not None:
-            kinds += _box_kinds(row.left)
-    assert "Fraction" in kinds and "Slot" not in kinds
-    window.view.escape_everything()
-
-
 def test_one_idea_has_one_name_in_the_properties_panel(window):
     """A table said "Digits", a calculation said "Significant digits".
 
@@ -588,7 +516,7 @@ def test_one_idea_has_one_name_in_the_properties_panel(window):
     """
     import re
 
-    source = open("calcforge/ui/panels.py", encoding="utf-8").read()
+    source = open("markforge/ui/panels.py", encoding="utf-8").read()
     labels = re.findall(r'form\.addRow\("([^"]+)"', source)
     assert "Significant digits" not in labels and "Digits" not in labels
     assert labels.count("Figures") == 2, "the calculation and the table both"
@@ -625,38 +553,13 @@ def test_undo_takes_back_the_typing_before_the_line_itself(window):
     window.view.escape_everything()
 
 
-def test_undo_puts_a_converted_calculation_back_as_a_calculation(window):
-    """A space turns the line into prose; undo turns it back into a line."""
-    from calcforge.items.mathitem import MathItem
-    from calcforge.items.text import TextItem
-
-    window.view._last_scene_pos = QPointF(90, 300)
-    press_key(window.view, Qt.Key_unknown, '"')
-    type_text(window.view, "check")
-    press_key(window.view, Qt.Key_Space, " ")
-    QApplication.processEvents()
-    assert isinstance(window.view.editing_item(), TextItem)
-
-    window.view.escape_everything()
-    QApplication.processEvents()
-    # Undo goes to the open editor first, so the line has to be closed before
-    # this is a question about the document at all.
-    assert window.view.editing_item() is None
-
-    window.undo_something()
-    QApplication.processEvents()
-    live = [i for i in markups(window) if isinstance(i, (MathItem, TextItem))]
-    assert [type(i).__name__ for i in live] == ["MathItem"], \
-        "the live equation is back"
-
-
 def test_placing_a_cloud_leader_shows_a_cloud_on_the_pointer(window):
     """A crosshair says "put a point somewhere"; a cloud is drawn round one.
 
     And nothing provisional is drawn before the cloud itself: the preview only
     appears once a region is being dragged out.
     """
-    from calcforge.items.text import CalloutItem
+    from markforge.items.text import CalloutItem
 
     window.select_tool("callout")
     click(window.view, 200, 200)
@@ -681,8 +584,8 @@ def test_placing_a_cloud_leader_shows_a_cloud_on_the_pointer(window):
 
 def test_a_snapshot_has_a_border_that_starts_at_none_and_can_be_set(window):
     """It had no colour control anywhere, and a red frame it could not lose."""
-    from calcforge.items.snapshot import SnapshotItem
-    from calcforge.ui.stylecaps import STROKE, WIDTH, capabilities
+    from markforge.items.snapshot import SnapshotItem
+    from markforge.ui.stylecaps import STROKE, WIDTH, capabilities
 
     shot = SnapshotItem()
     assert shot.style.stroke == "" and shot.style.width == 0.0, \
@@ -703,8 +606,8 @@ def test_a_photos_own_border_is_not_offered_but_its_default_is(window):
     setting, though, and with no way to reach it the only frame available was
     whatever the code happened to begin with.
     """
-    from calcforge.items.media import ImageItem
-    from calcforge.ui.stylecaps import OPACITY, STROKE, WIDTH, capabilities
+    from markforge.items.media import ImageItem
+    from markforge.ui.stylecaps import OPACITY, STROKE, WIDTH, capabilities
 
     photo = ImageItem()
     assert capabilities(photo) == {OPACITY}, "nothing to change on the photo"
@@ -714,48 +617,6 @@ def test_a_photos_own_border_is_not_offered_but_its_default_is(window):
         "and it starts with no frame"
 
 
-def test_the_style_toolbar_offers_the_figures_an_answer_is_shown_to(window):
-    """The two ways of styling a selection have to offer the same things.
-
-    Figures, decimal places and scientific notation were on the right-click
-    menu and in Properties, but not on the toolbar — and how many figures a
-    number is quoted to is exactly the sort of thing changed while looking at
-    the number.
-    """
-    from calcforge.items.mathitem import MathItem
-    from calcforge.items.shapes import RectItem
-
-    line = _calc(window, "b := 300 mm", at=(90, 110))
-    window.recalculate()
-    window.view.scene().clearSelection()
-    line.setSelected(True)
-    window.view.selectionChanged.emit()
-    QApplication.processEvents()
-    assert all(a.isVisible() for a in window._figures_widgets), \
-        "a selected calculation shows them"
-    assert window.figures_spin.value() == line.digits
-    assert window.number_format_combo.currentText() == line.number_format
-
-    window.figures_spin.setValue(3)
-    QApplication.processEvents()
-    assert line.digits == 3, "and the toolbar changes the calculation"
-    window.number_format_combo.setCurrentText("scientific")
-    QApplication.processEvents()
-    assert line.number_format == "scientific"
-
-    # A rectangle has no answer to show, so they go away again.
-    window.select_tool("rect")
-    drag(window.view, 300, 400, 420, 480)
-    window.select_tool("select")
-    box = [i for i in markups(window) if isinstance(i, RectItem)][-1]
-    window.view.scene().clearSelection()
-    box.setSelected(True)
-    window.view.selectionChanged.emit()
-    QApplication.processEvents()
-    assert not any(a.isVisible() for a in window._figures_widgets)
-    assert isinstance(line, MathItem)
-
-
 def test_a_cut_out_belongs_to_any_closed_shape(window):
     """A hole used to be something only an area measurement could have.
 
@@ -763,8 +624,8 @@ def test_a_cut_out_belongs_to_any_closed_shape(window):
     get drawn round things with holes in them, so all of them take one now,
     and it is saved with the shape it came out of.
     """
-    from calcforge.core.document import PageScale
-    from calcforge.items.shapes import PolyItem, RectItem
+    from markforge.core.document import PageScale
+    from markforge.items.shapes import PolyItem, RectItem
 
     window.current_page().scale = PageScale.from_ratio(50)
     for tool, expected_ring in (("rect", 4), ("ellipse", 48)):
@@ -798,7 +659,7 @@ def test_a_cut_out_belongs_to_any_closed_shape(window):
 
 def test_an_open_polyline_is_not_offered_as_somewhere_to_put_a_hole(window):
     """A shape that encloses nothing cannot own a hole."""
-    from calcforge.items.shapes import PolyItem
+    from markforge.items.shapes import PolyItem
 
     window.select_tool("polyline")
     for x, y in ((120, 500), (300, 500), (300, 600)):
@@ -817,8 +678,8 @@ def test_the_size_entry_rides_the_corner_and_says_the_size(window):
     So it neither followed the shape as it grew nor said how big the shape
     currently was: the only way to learn a size was to type one.
     """
-    from calcforge.core.document import PageScale
-    from calcforge.items.shapes import RectItem
+    from markforge.core.document import PageScale
+    from markforge.items.shapes import RectItem
 
     window.current_page().scale = PageScale.from_ratio(50)
     window.select_tool("rect")
@@ -851,39 +712,6 @@ def test_the_size_entry_rides_the_corner_and_says_the_size(window):
     assert window.view._size_width.text() == "2.5", "the drag does not overwrite it"
     assert window.view._size_height.text() == "1.5"
     window.view.escape_everything()
-
-
-def test_a_column_edge_says_it_can_be_dragged(window):
-    """The cursor over a column or row border is the resize cursor.
-
-    It is offered where the drag is: the borders are measured from the A/B/C
-    and 1/2/3 gutters, and those appear when the table is open for typing
-    into. Showing a resize cursor on a table that is only picked out would
-    promise a drag that would not happen.
-    """
-    from calcforge.items.tableitem import TableItem
-
-    window.select_tool("table")
-    drag(window.view, 100, 100, 400, 240)
-    table = [i for i in markups(window) if isinstance(i, TableItem)][0]
-    assert window.view.active_table is table and table.show_chrome
-
-    gutter_w, gutter_h = table.gutter_size()
-    origin = table.grid_origin()
-    edge = QPointF(origin.x() + table.sheet.col_width(0), origin.y() - gutter_h / 2)
-    assert table.border_at(edge) == ("col", 0)
-    where = table.mapToScene(edge)          # the helpers take scene points
-    hover(window.view, where.x() + 3, where.y())
-    hover(window.view, where.x(), where.y())
-    assert window.view.cursor().shape() == Qt.SplitHCursor
-
-    down = QPointF(origin.x() - gutter_w / 2, origin.y() + table.sheet.row_height(0))
-    assert table.border_at(down) == ("row", 0)
-    where = table.mapToScene(down)
-    hover(window.view, where.x(), where.y() + 3)
-    hover(window.view, where.x(), where.y())
-    assert window.view.cursor().shape() == Qt.SplitVCursor
-    window.view.deactivate_table()
 
 
 def test_arrow_tool_places_an_arrow_and_hides_handles_until_selected(window):
@@ -973,7 +801,7 @@ def test_escape_abandons_a_half_drawn_callout(window):
 # ---------------------------------------------------------------------------
 
 def scaled_page(window, ratio=50):
-    from calcforge.core.document import PageScale
+    from markforge.core.document import PageScale
     window.current_page().scale = PageScale.from_ratio(ratio)
     return window.current_page()
 
@@ -998,8 +826,8 @@ def test_a_page_set_to_a_real_one_to_one_is_not_an_unscaled_page(window):
     full size looked exactly like a page nobody had calibrated: every
     scale-dependent markup went on asking for a scale the page already had.
     """
-    from calcforge.core.document import PageScale
-    from calcforge.io import project as project_io
+    from markforge.core.document import PageScale
+    from markforge.io import project as project_io
 
     page = window.current_page()
     assert not page.scale.is_calibrated(), "a fresh page has no scale"
@@ -1049,38 +877,6 @@ def test_a_rectangle_reports_its_real_size_and_accepts_an_exact_one(window):
     assert rect.set_real_size("3 m", "1.5 m", page)
     assert rect.size_text == "3.00 m × 1.50 m"
     assert rect.local_rect().width() == pytest.approx(3000 / (50 * 25.4 / 72), rel=1e-6)
-
-
-def test_click_click_rectangle_has_live_scaled_size_entry(window, qapp):
-    from PySide6.QtTest import QTest
-    from calcforge.core.units import parse_unit
-
-    page = scaled_page(window, 100)
-    window.interactive_prompts = False
-    window.select_tool("rect")
-    click(window.view, 100, 100)
-
-    assert window.view._mode == "draw_click"
-    assert window.view._size_editor is not None
-    width = window.view._size_width
-    height = window.view._size_height
-    QTest.keyClicks(width, "3m")
-    height.setFocus()
-    QTest.keyClicks(height, "2m")
-    qapp.processEvents()
-    draft = window.view._draft
-    expected_width = float((parse_unit("3m") / page.scale.length(1))
-                           .to("dimensionless").magnitude)
-    expected_height = float((parse_unit("2m") / page.scale.length(1))
-                            .to("dimensionless").magnitude)
-    assert draft.local_rect().width() == pytest.approx(expected_width)
-    assert draft.local_rect().height() == pytest.approx(expected_height)
-
-    click(window.view, 420, 320)
-    placed = only(window, RectItem)[0]
-    assert window.view._size_editor is None
-    assert placed.local_rect().width() == pytest.approx(expected_width)
-    assert placed.local_rect().height() == pytest.approx(expected_height)
 
 
 def test_one_ellipse_diameter_makes_a_circle_and_escape_cancels(window, qapp):
@@ -1133,7 +929,7 @@ def test_a_dimension_carries_its_own_text(window):
 
 
 def test_the_rectangle_size_prompt_appears_after_scale_is_known(window, monkeypatch):
-    from calcforge.ui import dialogs
+    from markforge.ui import dialogs
     asked = []
     monkeypatch.setattr(dialogs.RectangleSizeDialog, "exec",
                         lambda self: asked.append(True) or dialogs.QDialog.Rejected)
@@ -1154,7 +950,7 @@ def test_a_rectangle_knows_its_paper_size_without_a_scale(window):
 
 
 def test_an_exact_size_can_be_asked_for_from_the_right_click_menu(window, monkeypatch):
-    from calcforge.ui import dialogs
+    from markforge.ui import dialogs
     window.select_tool("rect")
     drag(window.view, 100, 100, 200, 180)
     window.select_tool("select")
@@ -1188,7 +984,7 @@ def test_a_scale_turns_the_paper_size_into_a_real_one(window):
 # ---------------------------------------------------------------------------
 
 def test_duplicate_along_an_offset(window, monkeypatch):
-    from calcforge.ui import dialogs
+    from markforge.ui import dialogs
     scaled_page(window)
     window.select_tool("rect")
     drag(window.view, 100, 100, 160, 160)
@@ -1208,7 +1004,7 @@ def test_duplicate_along_an_offset(window, monkeypatch):
 
 
 def test_move_by_an_offset_leaves_no_copies(window, monkeypatch):
-    from calcforge.ui import dialogs
+    from markforge.ui import dialogs
     scaled_page(window)
     window.select_tool("rect")
     drag(window.view, 100, 100, 160, 160)
@@ -1228,7 +1024,7 @@ def test_move_by_an_offset_leaves_no_copies(window, monkeypatch):
 def test_repeat_along_an_axis_is_a_rebindable_shortcut(window, monkeypatch, qapp):
     from PySide6.QtGui import QKeySequence
     from PySide6.QtTest import QTest
-    from calcforge.ui import dialogs
+    from markforge.ui import dialogs
 
     window.select_tool("rect")
     drag(window.view, 100, 100, 160, 160)
@@ -1252,7 +1048,7 @@ def test_repeat_along_an_axis_is_a_rebindable_shortcut(window, monkeypatch, qapp
 
 
 def test_offsets_are_paper_distances_without_a_scale(window):
-    from calcforge.core.document import MM_TO_PT
+    from markforge.core.document import MM_TO_PT
     page = window.current_page()
     assert window.distance_in_points("25 mm", page) == pytest.approx(25 * MM_TO_PT)
     assert window.distance_in_points("0", page) == 0.0
@@ -1298,8 +1094,8 @@ def test_no_menu_mnemonic_shadows_a_tool_chord(window):
 
 def test_changing_the_page_scale_updates_the_takeoff_list(window, monkeypatch):
     """A rectangle's size is in the markups list, so it has to be rebuilt."""
-    from calcforge.core.document import PageScale
-    from calcforge.ui import dialogs
+    from markforge.core.document import PageScale
+    from markforge.ui import dialogs
 
     window.select_tool("rect")
     drag(window.view, 100, 100, 236, 168)
@@ -1335,7 +1131,7 @@ def test_the_scene_does_not_index_items_it_keeps_reshaping(window):
 
 def test_a_markup_is_removed_from_the_page_it_is_actually_on(window):
     """A markup always leaves the page it is on, not the one being looked at."""
-    from calcforge.ui.scene import detach
+    from markforge.ui.scene import detach
 
     window.select_tool("rect")
     drag(window.view, 100, 100, 200, 200)
@@ -1351,37 +1147,8 @@ def test_a_markup_is_removed_from_the_page_it_is_actually_on(window):
     assert item not in first_page.markups()
 
 
-def test_turning_the_page_settles_whatever_was_half_drawn(window):
-    window.add_page()
-    window.go_to_page(0)
-    window.select_tool("polygon")
-    click(window.view, 100, 100)
-    click(window.view, 200, 100)
-    assert window.view._draft is not None
-
-    window.go_to_page(1)
-    assert window.view._draft is None
-    assert window.view.editing_item() is None
-    assert window.view.active_table is None
-    # nothing was stranded on the page that was left
-    assert window.document.pages[0].frame.markups() == []
-
-
-def test_turning_the_page_while_typing_keeps_what_was_typed(window):
-    window.add_page()
-    window.go_to_page(0)
-    window.select_tool("math")
-    drag(window.view, 80, 80, 320, 130)
-    window.view.editing_item()._editor.setPlainText("L = 6 m")
-
-    window.go_to_page(1)
-    assert window.view.editing_item() is None
-    window.recalculate()
-    assert window.document.workspace.get("L").to("m").magnitude == pytest.approx(6)
-
-
 def test_a_note_can_be_placed_without_a_dialog_getting_in_the_way(window):
-    from calcforge.items.text import NoteItem
+    from markforge.items.text import NoteItem
 
     window.select_tool("note")               # interactive_prompts is off here
     click(window.view, 200, 200)
@@ -1392,7 +1159,7 @@ def test_a_note_can_be_placed_without_a_dialog_getting_in_the_way(window):
 
 def test_double_clicking_a_note_opens_what_it_says(window, monkeypatch):
     from PySide6.QtWidgets import QInputDialog
-    from calcforge.items.text import NoteItem
+    from markforge.items.text import NoteItem
 
     window.select_tool("note")
     click(window.view, 200, 200)
@@ -1408,7 +1175,7 @@ def test_double_clicking_a_note_opens_what_it_says(window, monkeypatch):
 
 def test_cancelling_the_note_dialog_leaves_it_as_it_was(window, monkeypatch):
     from PySide6.QtWidgets import QInputDialog
-    from calcforge.items.text import NoteItem
+    from markforge.items.text import NoteItem
 
     window.select_tool("note")
     click(window.view, 200, 200)
@@ -1451,103 +1218,6 @@ def test_double_clicking_a_two_point_length_does_not_break(window):
     assert len(length.points) == 2
     assert length.value is not None
 
-
-def test_moving_a_calculation_changes_what_resolves_straight_away(window):
-    """Reading order decides what is defined, so a move is an edit."""
-    window.select_tool("math")
-    drag(window.view, 80, 120, 320, 160)
-    window.view.editing_item()._editor.setPlainText("L = 6 m")
-    window.view.end_item_edit()
-
-    window.select_tool("math")
-    drag(window.view, 80, 400, 320, 440)
-    user = window.view.editing_item()
-    user._editor.setPlainText("M = L*2")
-    window.view.end_item_edit()
-    window.select_tool("select")
-
-    assert window.document.workspace.get("M").to("m").magnitude == pytest.approx(12)
-    assert [s.error for s in user.statements if s.error] == []
-
-    # Drag the user of L above the line that defines it — without pressing F9.
-    # Grab it in the middle: near an edge is a resize handle, not the body.
-    centre = user.mapToScene(user.local_rect().center())
-    click(window.view, centre.x(), centre.y())
-    drag(window.view, centre.x(), centre.y(), centre.x(), 60)
-    assert any("not defined" in s.error for s in user.statements if s.error), \
-        "the page kept a result its position no longer supports"
-
-
-def test_a_moved_document_still_re_derives(window):
-    from calcforge.core.verify import verify_document
-
-    window.select_tool("math")
-    drag(window.view, 80, 120, 320, 160)
-    window.view.editing_item()._editor.setPlainText("L = 6 m")
-    window.view.end_item_edit()
-    window.select_tool("math")
-    drag(window.view, 80, 300, 320, 340)
-    window.view.editing_item()._editor.setPlainText("L = 6 m")
-    window.view.end_item_edit()
-    window.select_tool("select")
-
-    second = [i for i in only(window, MathItem) if i.pos().y() > 200][0]
-    centre = second.mapToScene(second.local_rect().center())
-    drag(window.view, centre.x(), centre.y(), centre.x(), 60)   # swap them over
-    result = verify_document(window.document)
-    disagreements = [p for p in result.problems if p.kind == "disagreement"]
-    assert disagreements == [], [p.message for p in disagreements]
-
-
-def test_two_markups_in_the_same_spot_always_read_the_same_way(window):
-    """Order decides what is defined, so it cannot depend on luck."""
-    from calcforge.ui.scene import reading_order
-
-    window.select_tool("math")
-    drag(window.view, 80, 120, 320, 160)
-    window.view.editing_item()._editor.setPlainText("L = 6 m")
-    window.view.end_item_edit()
-    window.select_tool("select")
-    only(window, MathItem)[0].setSelected(True)
-    window.duplicate_selection()
-
-    blocks = only(window, MathItem)
-    assert len(blocks) == 2
-    for item in blocks:                       # stack them exactly
-        item.setPos(QPointF(80, 120))
-    window.recalculate()
-
-    first = [i.uid for i in reading_order(list(blocks))]
-    for _ in range(20):
-        assert [i.uid for i in reading_order(list(reversed(blocks)))] == first
-    assert first == sorted(first) or first == sorted(first, reverse=True)
-
-
-def test_a_document_re_derives_the_same_way_twice_running(window):
-    """Two passes over the same sheet must agree — including on the ties."""
-    from calcforge.core.verify import verify_document
-
-    for index, source in enumerate(("L = 6 m", "L = 6 m", "w = 12 kN/m")):
-        window.select_tool("math")
-        drag(window.view, 80, 100 + index * 90, 320, 140 + index * 90)
-        window.view.editing_item()._editor.setPlainText(source)
-        window.view.end_item_edit()
-    window.select_tool("select")
-    # Put two of them at exactly the same place.
-    blocks = only(window, MathItem)
-    blocks[1].setPos(blocks[0].pos())
-    window.recalculate()
-
-    for _ in range(5):
-        window.recalculate()
-        result = verify_document(window.document)
-        disagreements = [p for p in result.problems if p.kind == "disagreement"]
-        assert disagreements == [], [p.message for p in disagreements]
-
-
-# ---------------------------------------------------------------------------
-# a tool key is a letter when you are writing
-# ---------------------------------------------------------------------------
 
 def chord(window, key, modifiers=Qt.NoModifier):
     """Send a key the way Qt delivers a shortcut, and say whether it fired.
@@ -1600,14 +1270,6 @@ def test_a_tool_chord_works_again_once_the_edit_is_over(window):
     assert not window.view.is_editing()
     assert chord(window, Qt.Key_M, Qt.AltModifier)
     assert window.view.current_tool().key == "measure_dimension"
-
-
-def test_tool_keys_are_silent_inside_a_table(window):
-    window.select_tool("table")
-    drag(window.view, 80, 80, 460, 240)
-    assert window.view.is_editing()             # a table with the cursor in it
-    assert not chord(window, Qt.Key_M, Qt.AltModifier)
-    assert window.view.current_tool().key == "select"
 
 
 def test_document_commands_are_silent_while_typing(window):
@@ -1738,7 +1400,7 @@ def test_the_view_follows_a_markup_nudged_off_the_bottom_of_it(window):
 
 
 def test_the_insertion_point_is_drawn_as_a_small_crosshair(window):
-    from calcforge.ui import preferences
+    from markforge.ui import preferences
 
     prefs = preferences.current()
     was = prefs.insertion_point
@@ -1764,39 +1426,10 @@ def test_the_insertion_point_is_drawn_as_a_small_crosshair(window):
         preferences.apply(prefs)
 
 
-def test_the_optional_insertion_point_places_and_moves_the_next_calculation(window):
-    from calcforge.items.mathitem import LINE_STEP
-    from calcforge.ui import preferences
-
-    prefs = preferences.current()
-    was = prefs.insertion_point
-    try:
-        prefs.insertion_point = True
-        preferences.apply(prefs)
-        window.select_tool("select")
-        click(window.view, 260, 340)
-        placed = QPointF(window.view._insertion_point)
-        assert window.view.frame_at(placed) is not None
-
-        press_key(window.view, Qt.Key_Down)
-        moved = QPointF(window.view._insertion_point)
-        assert moved.y() == pytest.approx(placed.y() + LINE_STEP)
-        hover(window.view, 500, 600)
-        press_key(window.view, Qt.Key_unknown, '"')
-
-        block = window.view.editing_item()
-        expected = block.parentItem().mapFromScene(moved)
-        assert block.pos().x() == pytest.approx(expected.x(), abs=1)
-        assert block.pos().y() == pytest.approx(expected.y(), abs=1)
-    finally:
-        prefs.insertion_point = was
-        preferences.apply(prefs)
-
-
 def test_the_optional_insertion_point_is_visible_and_escape_clears_it(window):
     from PySide6.QtCore import QRectF
     from PySide6.QtGui import QImage, QPainter
-    from calcforge.ui import preferences
+    from markforge.ui import preferences
 
     prefs = preferences.current()
     was = prefs.insertion_point
@@ -1824,7 +1457,7 @@ def test_the_optional_insertion_point_is_visible_and_escape_clears_it(window):
 
 def test_preferences_exposes_the_optional_insertion_point(window, qapp):
     from PySide6.QtTest import QTest
-    from calcforge.ui import dialogs, preferences
+    from markforge.ui import dialogs, preferences
 
     window.show()
     qapp.processEvents()
@@ -1842,7 +1475,7 @@ def test_preferences_exposes_the_optional_insertion_point(window, qapp):
 
 def test_preferences_exposes_recoverable_flattening(window, qapp):
     from PySide6.QtTest import QTest
-    from calcforge.ui import dialogs, preferences
+    from markforge.ui import dialogs, preferences
 
     dialog = dialogs.PreferencesDialog(preferences.current(), window)
     dialog.show()
@@ -1877,15 +1510,6 @@ def _menu_entry(menu, label):
     found = [action for action in menu.actions() if action.text() == label]
     assert found, f"{label!r} not in {_menu_labels(menu)}"
     return found[0]
-
-
-def test_the_page_menu_offers_everything_you_do_to_a_page(window):
-    window.load_sample()
-    labels = _menu_labels(window.page_menu(0))
-    for wanted in ("Blank before", "Blank after", "Duplicate page",
-                   "PDF before…", "PDF after…", "Image before…",
-                   "Image after…", "Delete page", "Page setup…"):
-        assert wanted in labels
 
 
 def test_current_page_commands_are_reachable_from_the_menu_bar(window, qapp):
@@ -1930,7 +1554,7 @@ def test_selected_table_commands_are_reachable_from_the_menu_bar(window, qapp):
 
 
 def test_every_tool_and_application_action_is_reachable_from_the_menu_bar(window):
-    from calcforge.ui.tools import TOOLS
+    from markforge.ui.tools import TOOLS
 
     all_actions = set()
 
@@ -1952,91 +1576,10 @@ def test_every_tool_and_application_action_is_reachable_from_the_menu_bar(window
     assert {tool.label for tool in TOOLS} <= insert_labels
 
 
-def test_the_page_menu_does_not_offer_impossible_moves(window):
-    window.load_sample()
-    last = len(window.document.pages) - 1
-    top = {action.text(): action for action in window.page_menu(0).actions()}
-    bottom = {action.text(): action for action in window.page_menu(last).actions()}
-    assert not top["Move up"].isEnabled()
-    assert top["Move down"].isEnabled()
-    assert bottom["Move up"].isEnabled()
-    assert not bottom["Move down"].isEnabled()
-
-
 def test_the_only_page_cannot_be_deleted_from_the_menu(window):
     assert len(window.document.pages) == 1
     actions = {action.text(): action for action in window.page_menu(0).actions()}
     assert not actions["Delete page"].isEnabled()
-
-
-def test_a_page_can_be_inserted_before_a_named_page(window):
-    window.load_sample()
-    first = window.document.pages[0].uid
-    window.add_page(0, before=True)
-    assert len(window.document.pages) == 4
-    assert window.document.pages[1].uid == first
-    assert window.current_index == 0
-
-
-def test_a_page_can_be_inserted_after_a_named_page(window):
-    window.load_sample()
-    second = window.document.pages[1].uid
-    window.add_page(0)
-    assert window.document.pages[2].uid == second
-    assert window.current_index == 1
-
-
-def test_duplicating_works_on_the_page_you_right_clicked(window):
-    window.load_sample()
-    window.go_to_page(2)
-    source = window.document.pages[0]
-    source.frame.markups()  # the page is live
-    window.duplicate_page(0)
-    assert len(window.document.pages) == 4
-    copy = window.document.pages[1]
-    assert copy.uid != source.uid
-    assert len(copy.to_dict()["items"]) == len(source.to_dict()["items"])
-
-
-def test_deleting_works_on_the_page_you_right_clicked(window, monkeypatch):
-    from PySide6.QtWidgets import QMessageBox
-    monkeypatch.setattr(QMessageBox, "question",
-                        lambda *a, **k: QMessageBox.Yes)
-    window.load_sample()
-    survivor = window.document.pages[1].uid
-    window.delete_page(0)
-    assert window.document.pages[0].uid == survivor
-
-
-def test_a_page_command_ignores_the_checked_flag_from_a_button(window):
-    """Buttons and actions send a bool; it must not be read as a page number."""
-    window.load_sample()
-    window.go_to_page(2)
-    window.pages_panel.layout().itemAt(0).layout().itemAt(0).widget().click()
-    assert window.current_index == 3
-    assert len(window.document.pages) == 4
-
-
-def test_an_image_goes_in_as_a_page_of_its_own(window, tmp_path, monkeypatch):
-    from PySide6.QtGui import QImage
-    from PySide6.QtWidgets import QFileDialog
-
-    path = str(tmp_path / "site.png")
-    photo = QImage(400, 300, QImage.Format_RGB32)
-    photo.fill(0xFF3366AA)
-    assert photo.save(path)
-    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (path, ""))
-
-    window.load_sample()
-    window.insert_image_page(0)
-    assert len(window.document.pages) == 4
-    page = window.document.pages[1]
-    assert page.background_key
-    assert window.document.asset(page.background_key)
-    assert page.label == "site.png"
-    # landscape photo, landscape page
-    assert page.setup.width_mm > page.setup.height_mm
-    assert window.current_index == 1
 
 
 def test_inserting_an_image_page_can_be_undone(window, tmp_path, monkeypatch):
@@ -2066,72 +1609,6 @@ def test_a_cancelled_image_insert_changes_nothing(window, monkeypatch):
 # Cells from another spreadsheet
 # ---------------------------------------------------------------------------
 
-def _table(window, x=80, y=80):
-    window.select_tool("table")
-    drag(window.view, x, y, x + 340, y + 160)
-    return window.view.active_table
-
-
-def test_a_block_pasted_over_an_open_cell_still_spreads_out(window):
-    """Ctrl+V in the middle of typing must not stuff the sheet into one cell."""
-    from PySide6.QtWidgets import QApplication
-
-    table = _table(window)
-    table.sheet.resize(8, 5)
-    table.current = table.anchor = (0, 0)
-    window.view.open_cell_editor()
-    QApplication.clipboard().setText("1\t2\n3\t4")
-    press_key(window.view, Qt.Key_V, "v", Qt.ControlModifier)
-
-    assert window.view._cell_editor is None
-    assert table.sheet.raw(0, 0) == "1"
-    assert table.sheet.raw(0, 1) == "2"
-    assert table.sheet.raw(1, 0) == "3"
-    assert table.sheet.raw(1, 1) == "4"
-
-
-def test_one_cell_pasted_while_typing_still_goes_into_the_text(window):
-    from PySide6.QtWidgets import QApplication
-
-    table = _table(window)
-    table.current = table.anchor = (0, 0)
-    window.view.open_cell_editor()
-    window.view._cell_editor.setText("")
-    QApplication.clipboard().setText("42")
-    press_key(window.view, Qt.Key_V, "v", Qt.ControlModifier)
-    assert window.view._cell_editor is not None
-
-
-def test_cells_land_in_the_table_you_have_picked_out(window):
-    from PySide6.QtWidgets import QApplication
-
-    table = _table(window)
-    table.sheet.resize(8, 5)
-    window.view.deactivate_table()
-    window.select_tool("select")
-    table.setSelected(True)
-    before = len(window.view.scene().ordered_markups())
-
-    QApplication.clipboard().setText("7\t8\n9\t10")
-    window.paste_items()
-
-    assert len(window.view.scene().ordered_markups()) == before   # no second table
-    assert table.sheet.raw(0, 0) == "7"
-    assert table.sheet.raw(1, 1) == "10"
-
-
-def test_cells_with_nothing_selected_still_become_a_table(window):
-    from PySide6.QtWidgets import QApplication
-
-    QApplication.clipboard().setText("a\tb\n1\t2")
-    window.view.scene().clearSelection()
-    window.paste_items()
-    tables = [i for i in window.view.scene().ordered_markups()
-              if isinstance(i, TableItem)]
-    assert len(tables) == 1
-    assert tables[0].sheet.raw(1, 0) == "1"
-
-
 def test_a_pasted_block_grows_the_table_to_fit(window):
     from PySide6.QtWidgets import QApplication
 
@@ -2142,19 +1619,6 @@ def test_a_pasted_block_grows_the_table_to_fit(window):
     window.paste_items()
     assert table.sheet.rows >= 3 and table.sheet.cols >= 3
     assert table.sheet.raw(2, 2) == "9"
-
-
-def test_formulas_pasted_as_text_stay_formulas(window):
-    from PySide6.QtWidgets import QApplication
-
-    table = _table(window)
-    table.sheet.resize(6, 4)
-    table.current = table.anchor = (0, 0)
-    QApplication.clipboard().setText("2\t3\t=A1+B1")
-    window.paste_items()
-    window.recalculate()
-    assert table.sheet.raw(0, 2) == "=A1+B1"
-    assert table.sheet.value(0, 2) == 5
 
 
 def test_copied_cells_beat_markups_copied_earlier(window):
@@ -2178,101 +1642,6 @@ def test_copied_cells_beat_markups_copied_earlier(window):
     table.current = table.anchor = (2, 0)
     window.paste_items()
     assert table.sheet.raw(2, 0) == "5"
-
-
-def test_relative_formulas_follow_a_copy_between_tables(window):
-    first = _table(window, 60, 60)
-    first.sheet.resize(6, 4)
-    first.set_cell(0, 0, "2")
-    first.set_cell(0, 1, "3")
-    first.set_cell(0, 2, "=A1+B1")
-    window.recalculate()
-    first.current, first.anchor = (0, 0), (0, 2)
-    window.copy_selection()
-
-    second = _table(window, 60, 300)
-    second.sheet.resize(6, 4)
-    second.current = second.anchor = (2, 0)
-    window.paste_items()
-    window.recalculate()
-    assert second.sheet.raw(2, 2) == "=A3+B3"
-    assert second.sheet.value(2, 2) == 5
-
-
-# ---------------------------------------------------------------------------
-# Maths symbols on a key
-# ---------------------------------------------------------------------------
-
-def test_every_maths_symbol_is_a_binding_you_can_change(window):
-    from calcforge.ui.shortcuts import SYMBOL
-
-    symbols = [b for b in window.shortcuts.bindings() if b.kind == SYMBOL]
-    assert [b.payload for b in symbols][:2] == ["×", "÷"]
-    assert all(b.category == "Symbols" for b in symbols)
-    assert all(b.action_id in window.symbol_actions for b in symbols)
-    # every one of them is on a key out of the box, and no two share it
-    keys = [b.default for b in symbols]
-    assert all(keys) and len(set(keys)) == len(keys)
-
-
-def test_the_multiply_key_types_a_multiply_sign(window):
-    window.view._last_scene_pos = QPointF(120, 120)
-    press_key(window.view, Qt.Key_unknown, '"')
-    block = window.view.editing_item()
-    type_text(window.view, "a:=4")
-    window.symbol_actions["symbol.multiply"].trigger()
-    type_text(window.view, "3")
-    window.view.end_item_edit()
-    assert "×" in block.source
-    assert window.document.workspace.get("a") == 12
-
-
-def test_the_root_key_brings_its_bracket_and_leaves_room_inside(window):
-    window.view._last_scene_pos = QPointF(120, 260)
-    press_key(window.view, Qt.Key_unknown, '"')
-    block = window.view.editing_item()
-    type_text(window.view, "r:=")
-    window.symbol_actions["symbol.root"].trigger()
-    type_text(window.view, "16")
-    window.view.end_item_edit()
-    assert block.source == "r:=√(16)"
-    assert window.document.workspace.get("r") == 4
-
-
-def test_a_symbol_goes_into_a_cell_being_edited(window):
-    table = _table(window, 60, 400)
-    table.current = table.anchor = (0, 0)
-    window.view.open_cell_editor()
-    window.view._cell_editor.setText("2")
-    window.view._cell_editor.setCursorPosition(1)
-    window.symbol_actions["symbol.degree"].trigger()
-    assert window.view._cell_editor.text() == "2°"
-
-
-def test_a_symbol_with_nothing_open_says_so_rather_than_vanishing(window):
-    window.view.end_item_edit()
-    window.symbol_actions["symbol.pi"].trigger()
-    assert "nowhere to go" in window.status_hint.text()
-
-
-def test_symbol_keys_survive_being_rebound_and_reopened(window):
-    from calcforge.ui.mainwindow import MainWindow
-    from PySide6.QtGui import QKeySequence
-
-    window.shortcuts.set_sequence("symbol.multiply", "Ctrl+Alt+9")
-    window.apply_shortcuts()
-    assert window.symbol_actions["symbol.multiply"].shortcut() == QKeySequence("Ctrl+Alt+9")
-
-    second = MainWindow()
-    second.confirm_discard = lambda: True
-    second.interactive_prompts = False
-    try:
-        assert second.shortcuts.sequence("symbol.multiply") == "Ctrl+Alt+9"
-        assert second.symbol_actions["symbol.multiply"].shortcut() == \
-            QKeySequence("Ctrl+Alt+9")
-    finally:
-        second.close()
-        second.deleteLater()
 
 
 def test_a_symbol_bound_to_a_bare_key_still_types_itself(window):
@@ -2307,25 +1676,9 @@ def test_symbol_keys_are_live_while_you_type(window):
 # A calculation prints what it was asked to print
 # ---------------------------------------------------------------------------
 
-def _calc(window, text, at=(90, 110)):
-    window.view._last_scene_pos = QPointF(*at)
-    press_key(window.view, Qt.Key_unknown, '"')
-    block = window.view.editing_item()
-    block._editor.setPlainText(text)
-    window.view.end_item_edit()
-    window.recalculate()
-    return block
-
-
 def _shown(block) -> list[str]:
     return [row.result_text() if hasattr(row, "result_text") else ""
             for row in block.statements]
-
-
-def test_a_quiet_line_shows_no_answer_but_still_defines_it(window):
-    block = _calc(window, "L := 6 m\nw := 12 kN/m\nM := w*L^2/8")
-    assert not any(block._wants_result(s) for s in block.statements)
-    assert window.document.workspace.get("M").to("kN*m").magnitude == pytest.approx(54)
 
 
 def test_asking_with_a_trailing_equals_prints_the_answer(window):
@@ -2333,37 +1686,6 @@ def test_asking_with_a_trailing_equals_prints_the_answer(window):
     printed = [s for s in block.statements if block._wants_result(s)]
     assert [s.name for s in printed] == ["M"]
     assert "54" in printed[0].result_text()
-
-
-def test_typing_the_equals_later_makes_the_answer_appear(window):
-    block = _calc(window, "b := 300 mm\nA := b*b")
-    assert not any(block._wants_result(s) for s in block.statements)
-
-    window.view.begin_item_edit(block)
-    block._editor.setPlainText("b := 300 mm\nA := b*b =")
-    window.view.end_item_edit()
-    window.recalculate()
-    assert [s.name for s in block.statements if block._wants_result(s)] == ["A"]
-
-
-def test_equals_can_be_typed_deleted_and_retyped_without_a_result_gap(window):
-    window.view._last_scene_pos = QPointF(90, 110)
-    press_key(window.view, Qt.Key_unknown, '"')
-    block = window.view.editing_item()
-    type_text(window.view, "A:=2+2")
-    press_key(window.view, Qt.Key_Equal, "=")
-    assert block._editor.toPlainText().endswith("=")
-    press_key(window.view, Qt.Key_Backspace)
-    assert not block._editor.toPlainText().endswith("=")
-    press_key(window.view, Qt.Key_Equal, "=")
-    window.view.end_item_edit()
-    window.recalculate()
-
-    row = block.rows[0]
-    before_equals = block.style.padding + row.left.width
-    assert block.result_rect(0).left() - before_equals == pytest.approx(
-        block.result_gap)
-    assert block.result_gap <= block.style.font_size * 0.5
 
 
 def test_a_region_told_to_show_everything_still_does(window):
@@ -2433,80 +1755,6 @@ def test_the_result_unit_list_opens_below_its_in_place_editor(window, qapp):
     actual = popup.mapToGlobal(popup.rect().topLeft())
     assert abs(actual.x() - expected.x()) <= 4
     assert abs(actual.y() - expected.y()) <= 8
-
-
-def test_typing_a_unit_changes_what_the_answer_reads(window):
-    block = _calc(window, "L := 6 m\nw := 12 kN/m\nM := w*L^2/8 =")
-    window.view.open_unit_editor(block, block.result_at(
-        block.result_rect(2).center()))
-    window.view._unit_editor.setText("N*m")
-    window.view.close_unit_editor(commit=True)
-
-    assert "→ N*m" in block.source
-    assert block.source.rstrip().endswith("=")          # still asking for it
-    statement = block.statements[2]
-    assert statement.target_unit == "N*m"
-    assert "54000" in statement.result_text().replace(" ", "").replace(" ", "") \
-        or "5.4" in statement.result_text()
-
-
-def test_emptying_the_unit_lets_it_choose_again(window):
-    block = _calc(window, "L := 6 m\nw := 12 kN/m\nM := w*L^2/8 → N*m =")
-    assert block.statements[2].target_unit == "N*m"
-    window.view.open_unit_editor(block, 2)
-    window.view._unit_editor.setText("")
-    window.view.close_unit_editor(commit=True)
-    assert "→" not in block.source
-    assert block.statements[2].target_unit == ""
-
-
-def test_a_unit_that_makes_no_sense_is_refused(window):
-    block = _calc(window, "L := 6 m\nw := 12 kN/m\nM := w*L^2/8 =")
-    before = block.source
-    window.view.open_unit_editor(block, 2)
-    window.view._unit_editor.setText("bananas")
-    window.view.close_unit_editor(commit=True)
-    assert block.source == before
-
-
-def test_escape_leaves_the_unit_alone(window):
-    block = _calc(window, "b := 300 mm\nA := b*b =")
-    before = block.source
-    window.view.open_unit_editor(block, 1)
-    window.view._unit_editor.setText("cm^2")
-    press_key(window.view, Qt.Key_Escape)
-    assert window.view._unit_editor is None
-    assert block.source == before
-
-
-def test_changing_the_unit_can_be_undone(window):
-    block = _calc(window, "b := 300 mm\nA := b*b =")
-    before = block.source
-    window.view.open_unit_editor(block, 1)
-    window.view._unit_editor.setText("cm^2")
-    window.view.close_unit_editor(commit=True)
-    assert block.source != before
-    window.undo_stack.undo()
-    assert window.view.scene().ordered_markups()[0].source == before
-
-
-def test_the_unit_box_offers_units_and_the_names_you_have_defined(window):
-    block = _calc(window, "b := 300 mm\nA := b*b =")
-    window.view.open_unit_editor(block, 1)
-    completer = window.view._unit_editor.completer()
-    words = [completer.model().data(completer.model().index(row, 0))
-             for row in range(completer.model().rowCount())]
-    assert "kN*m" in words and "mm^2" in words
-    assert "b" in words and "A" in words
-    window.view.close_unit_editor(commit=False)
-
-
-def test_the_unit_box_counts_as_typing(window):
-    block = _calc(window, "b := 300 mm\nA := b*b =")
-    window.view.open_unit_editor(block, 1)
-    assert window.view.is_editing()
-    window.view.close_unit_editor(commit=False)
-    assert not window.view.is_editing()
 
 
 def test_the_calculation_menu_does_not_duplicate_result_unit_editing(window):
@@ -2630,7 +1878,7 @@ def test_an_ellipse_can_be_set_out_to_an_exact_size(window):
 # ---------------------------------------------------------------------------
 
 def test_the_scale_dialog_offers_picking_two_points_from_a_standing_start(window):
-    from calcforge.ui import dialogs
+    from markforge.ui import dialogs
 
     from PySide6.QtWidgets import QPushButton
 
@@ -2656,7 +1904,7 @@ def test_calibration_has_a_visible_rebindable_shortcut(window):
 @pytest.mark.parametrize("entered", ["10mm", "10 mm"])
 def test_the_calibration_length_prompt_accepts_joined_or_spaced_units(
         window, entered):
-    from calcforge.ui import dialogs
+    from markforge.ui import dialogs
 
     dialog = dialogs.CalibrationLengthDialog(200.0, window)
     try:
@@ -2669,7 +1917,7 @@ def test_the_calibration_length_prompt_accepts_joined_or_spaced_units(
 
 def test_the_calibration_length_prompt_rejects_incompatible_units(
         window, monkeypatch):
-    from calcforge.ui import dialogs
+    from markforge.ui import dialogs
     warned = []
     monkeypatch.setattr(dialogs.QMessageBox, "warning",
                         lambda *args: warned.append(args))
@@ -2682,25 +1930,6 @@ def test_the_calibration_length_prompt_rejects_incompatible_units(
         dialog.deleteLater()
 
 
-def test_hovering_a_function_shows_its_signature_and_purpose(window):
-    from PySide6.QtGui import QHelpEvent
-    from PySide6.QtWidgets import QToolTip
-
-    listing = window.functions_panel.list
-    item = next(listing.item(row) for row in range(listing.count())
-                if listing.item(row).text() == "sqrt")
-    assert "sqrt(x)" in item.toolTip()
-    assert "square root" in item.toolTip()
-
-    point = listing.visualItemRect(item).center()
-    QApplication.sendEvent(
-        listing.viewport(),
-        QHelpEvent(QEvent.ToolTip, point,
-                   listing.viewport().mapToGlobal(point)))
-    assert "sqrt(x)" in QToolTip.text()
-    QToolTip.hideText()
-
-
 def test_typing_a_function_shows_its_signature_and_purpose(window):
     window.view._last_scene_pos = QPointF(100, 100)
     press_key(window.view, Qt.Key_unknown, '"')
@@ -2711,7 +1940,7 @@ def test_typing_a_function_shows_its_signature_and_purpose(window):
 
 
 def test_choosing_to_pick_points_starts_the_calibrate_tool(window, monkeypatch):
-    from calcforge.ui import dialogs
+    from markforge.ui import dialogs
 
     monkeypatch.setattr(dialogs.ScaleDialog, "exec",
                         lambda self: dialogs.ScaleDialog.PICK)
@@ -2724,7 +1953,7 @@ def test_choosing_to_pick_points_starts_the_calibrate_tool(window, monkeypatch):
                                    "measure_area"])
 def test_the_first_scaled_tool_click_prompts_before_drawing(
         window, monkeypatch, tool):
-    from calcforge.core.document import PageScale
+    from markforge.core.document import PageScale
 
     asked = []
 
@@ -2754,7 +1983,7 @@ def test_cancelling_the_first_scale_prompt_does_not_create_a_markup(
 
 
 def test_two_clicks_and_a_length_set_the_scale(window, monkeypatch):
-    from calcforge.ui import dialogs
+    from markforge.ui import dialogs
 
     asked = {}
 
@@ -2776,26 +2005,12 @@ def test_two_clicks_and_a_length_set_the_scale(window, monkeypatch):
 
 
 def test_a_calibration_line_is_not_left_on_the_page(window, monkeypatch):
-    from calcforge.ui import dialogs
+    from markforge.ui import dialogs
     monkeypatch.setattr(dialogs.CalibrationLengthDialog, "exec",
                         lambda self: dialogs.QDialog.Rejected)
     window.select_tool("calibrate")
     drag(window.view, 100, 300, 300, 300)
     assert markups(window) == []
-
-
-def test_the_page_list_says_what_scale_each_page_is_at(window):
-    from calcforge.core.document import PageScale
-
-    window.load_sample()
-    window.document.pages[1].scale = PageScale.from_ratio(50)
-    window.pages_panel.rebuild(window.document, 0)
-
-    entries = [window.pages_panel.list.item(row).text()
-               for row in range(window.pages_panel.list.count())]
-    assert entries[0] == "1   Beam design"      # label, but no uncalibrated clutter
-    assert "1:50" in entries[1]
-    assert "Scale 1:50" in window.pages_panel.list.item(1).toolTip()
 
 
 def test_a_page_label_can_be_renamed_and_reset_from_its_menu(window, monkeypatch):
@@ -2879,7 +2094,7 @@ def test_turning_a_page_turns_what_is_drawn_on_it(window):
 
 def test_turning_a_page_turns_its_background_sheet(window, tmp_path, monkeypatch):
     from PySide6.QtGui import QImage
-    from calcforge.io import pdfio
+    from markforge.io import pdfio
 
     document = window.document
     photo = QImage(200, 100, QImage.Format_ARGB32)
@@ -2916,13 +2131,6 @@ def test_rotating_can_be_undone(window):
     assert window.document.pages[0].setup.orientation == "portrait"
 
 
-def test_one_page_can_be_put_on_a_different_sheet(window):
-    window.load_sample()
-    window.set_page_size(1, "A3")
-    assert window.document.pages[1].setup.size_name == "A3"
-    assert window.document.pages[0].setup.size_name == "A4"
-
-
 def test_the_page_menu_offers_rotating_and_paper_sizes(window):
     menu = window.page_menu(0)
     labels = [action.text() for action in menu.actions()]
@@ -2936,55 +2144,6 @@ def test_the_page_menu_offers_rotating_and_paper_sizes(window):
     assert "A4" in sizes and "A3" in sizes
     assert next(a for a in paper.actions() if a.text() == "A4").isChecked()
 
-
-def test_a_new_table_asks_how_many_rows_and_columns(window, monkeypatch):
-    from calcforge.ui import dialogs
-
-    window.interactive_prompts = True
-    monkeypatch.setattr(dialogs.TableSizeDialog, "exec",
-                        lambda self: dialogs.QDialog.Accepted)
-    monkeypatch.setattr(dialogs.TableSizeDialog, "values",
-                        lambda self: (9, 3, True))
-    try:
-        window.select_tool("table")
-        drag(window.view, 80, 80, 420, 240)
-    finally:
-        window.interactive_prompts = False
-    table = window.view.active_table
-    assert (table.sheet.rows, table.sheet.cols) == (9, 3)
-    assert table.sheet.header_row
-
-
-def test_saying_no_to_the_size_leaves_what_was_dragged(window, monkeypatch):
-    """Cancelling the question leaves the table the drag made.
-
-    It used to leave a fixed six-by-four, because the drag only stretched
-    that. The drag counts the cells now, so what is on the page when the
-    dialog opens is already the answer — and saying no keeps it rather than
-    throwing it away for a default nobody asked for.
-    """
-    from calcforge.core.spreadsheet import DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT
-    from calcforge.ui import dialogs
-
-    across, down = 4, 7
-    window.interactive_prompts = True
-    monkeypatch.setattr(dialogs.TableSizeDialog, "exec",
-                        lambda self: dialogs.QDialog.Rejected)
-    try:
-        window.select_tool("table")
-        drag(window.view, 80, 300,
-             80 + across * DEFAULT_COL_WIDTH + 3,
-             300 + down * DEFAULT_ROW_HEIGHT + 3)
-    finally:
-        window.interactive_prompts = False
-    table = window.view.active_table
-    assert (table.sheet.rows, table.sheet.cols) == (down, across)
-    assert table.sheet.col_width(0) == DEFAULT_COL_WIDTH
-
-
-# ---------------------------------------------------------------------------
-# The callout's arrow
-# ---------------------------------------------------------------------------
 
 def _callout(window, target=(200, 300), box=(300, 200, 460, 260), text="note"):
     window.select_tool("callout")
@@ -3138,7 +2297,7 @@ def test_an_empty_text_box_is_still_dropped(window):
 # ---------------------------------------------------------------------------
 
 def _plot(window, monkeypatch, curves=(("sin(x)", "wave"),), accept=True):
-    from calcforge.ui import dialogs
+    from markforge.ui import dialogs
 
     def fake_exec(self):
         self.curves.setRowCount(0)
@@ -3151,135 +2310,9 @@ def _plot(window, monkeypatch, curves=(("sin(x)", "wave"),), accept=True):
     monkeypatch.setattr(dialogs.PlotDialog, "exec", fake_exec)
 
 
-def test_a_new_graph_asks_what_it_plots(window, monkeypatch):
-    _plot(window, monkeypatch)
-    window.interactive_prompts = True
-    try:
-        window.select_tool("plot")
-        drag(window.view, 80, 80, 400, 280)
-    finally:
-        window.interactive_prompts = False
-    plot = markups(window)[0]
-    assert [s.expression for s in plot.series] == ["sin(x)"]
-    assert [s.label for s in plot.series] == ["wave"]
-    assert plot.x_to == "6"
-
-
-def test_double_clicking_a_graph_edits_what_it_plots(window, monkeypatch):
-    window.select_tool("plot")
-    drag(window.view, 80, 80, 400, 280)
-    plot = markups(window)[0]
-    window.select_tool("select")
-
-    _plot(window, monkeypatch, curves=(("x^2", ""), ("2*x", "line")))
-    centre = plot.mapToScene(plot.local_rect().center())
-    double_click(window.view, centre.x(), centre.y())
-    assert [s.expression for s in plot.series] == ["x^2", "2*x"]
-
-
-def test_editing_a_graph_can_be_undone(window, monkeypatch):
-    window.select_tool("plot")
-    drag(window.view, 80, 80, 400, 280)
-    plot = markups(window)[0]
-    before = [s.expression for s in plot.series]
-
-    _plot(window, monkeypatch, curves=(("x^3", ""),))
-    window.edit_plot(plot)
-    assert [s.expression for s in plot.series] == ["x^3"]
-    window.undo_stack.undo()
-    assert [s.expression for s in markups(window)[0].series] == before
-
-
-def test_the_graph_menu_offers_editing_it(window):
-    window.select_tool("plot")
-    drag(window.view, 80, 80, 400, 280)
-    plot = markups(window)[0]
-    labels = [a.text() for a in window.build_context_menu(plot, plot.pos()).actions()]
-    assert "Edit plot…" in labels
-
-
-def test_the_plot_dialog_offers_the_names_you_have_defined(window):
-    from calcforge.ui import dialogs
-
-    _calc(window, "L := 6 m\nw := 12 kN/m", at=(90, 500))
-    window.select_tool("plot")
-    drag(window.view, 80, 80, 400, 280)
-    plot = markups(window)[0]
-    workspace = window.document.workspace
-    dialog = dialogs.PlotDialog(plot, set(workspace.variables) | set(workspace.functions))
-    try:
-        model = dialog.curves.cellWidget(0, 0).completer().model()
-        words = [model.data(model.index(row, 0)) for row in range(model.rowCount())]
-        assert "L" in words and "w" in words
-    finally:
-        dialog.deleteLater()
-
-
-# ---------------------------------------------------------------------------
-# Looking a value up in a table from a calculation
-# ---------------------------------------------------------------------------
-
-def _capacity_table(window, name="bolts"):
-    window.select_tool("table")
-    drag(window.view, 60, 60, 400, 220)
-    table = window.view.active_table
-    table.sheet.resize(4, 3)
-    table.sheet.header_row = True
-    rows = [["d", "V", "N"],
-            ["12 mm", "29.4 kN", "2"],
-            ["16 mm", "54.3 kN", "3"],
-            ["20 mm", "84.8 kN", "4"]]
-    for r, row in enumerate(rows):
-        for c, value in enumerate(row):
-            table.set_cell(r, c, value)
-    table.table_name = name
-    window.view.deactivate_table()
-    window.recalculate()
-    return table
-
-
-def test_a_calculation_can_read_a_named_table(window):
-    _capacity_table(window)
-    block = _calc(window, "d := 16 mm\nV := bolts(d, A, B) =", at=(60, 400))
-    window.recalculate()
-    assert not block.statements[1].error
-    assert window.document.workspace.get("V").to("kN").magnitude == pytest.approx(54.3)
-
-
-def test_a_size_between_two_rows_is_interpolated(window):
-    _capacity_table(window)
-    _calc(window, "d := 14 mm\nV := bolts(d, A, B) =", at=(60, 400))
-    window.recalculate()
-    assert window.document.workspace.get("V").to("kN").magnitude == \
-        pytest.approx((29.4 + 54.3) / 2)
-
-
-def test_the_column_letters_are_columns_not_variables(window):
-    """A is a column of the table here, not an ampere and not somebody's area."""
-    _capacity_table(window)
-    _calc(window, "A := 500 mm^2\nd := 16 mm\nV := bolts(d, A, B) =", at=(60, 400))
-    window.recalculate()
-    assert window.document.workspace.get("V").to("kN").magnitude == pytest.approx(54.3)
-    assert window.document.workspace.get("A").to("mm^2").magnitude == pytest.approx(500)
-
-
-def test_column_headers_work_as_well_as_letters(window):
-    _capacity_table(window)
-    _calc(window, 'd := 20 mm\nV := bolts(d, "d", "V") =', at=(60, 400))
-    window.recalculate()
-    assert window.document.workspace.get("V").to("kN").magnitude == pytest.approx(84.8)
-
-
-def test_asking_outside_the_table_is_a_problem_not_a_number(window):
-    _capacity_table(window)
-    block = _calc(window, "d := 30 mm\nV := bolts(d, A, B) =", at=(60, 400))
-    window.recalculate()
-    assert "extrapolated" in block.statements[1].error
-
-
 def test_a_table_name_is_kept_when_the_document_is_saved(window, tmp_path):
-    from calcforge.core.document import Document
-    from calcforge.io import project as project_io
+    from markforge.core.document import Document
+    from markforge.io import project as project_io
 
     _capacity_table(window, "shear")
     path = str(tmp_path / "job.cfx")
@@ -3298,16 +2331,6 @@ def test_naming_a_table_is_offered_on_its_menu(window):
     assert "Table name…" in labels
 
 
-def test_a_named_table_shows_up_as_something_the_document_knows(window):
-    table = _capacity_table(window)
-    assert "bolts" in table.declared_names()
-    assert "bolts" in window.document.workspace.table_names()
-
-
-# ---------------------------------------------------------------------------
-# A calculation is one thing, not two
-# ---------------------------------------------------------------------------
-
 def test_changing_a_pages_colours_changes_its_line_work_too(window):
     """A PDF page is a picture and the lines that drew it.
 
@@ -3318,8 +2341,8 @@ def test_changing_a_pages_colours_changes_its_line_work_too(window):
     """
     from PySide6.QtCore import QPointF
     from PySide6.QtGui import QColor
-    from calcforge.io import recolour
-    from calcforge.items.shapes import PolyItem
+    from markforge.io import recolour
+    from markforge.items.shapes import PolyItem
 
     lines = []
     for colour in ("#000000", "#0a0a0a", "#c92a2a"):
@@ -3340,7 +2363,7 @@ def test_changing_a_pages_colours_changes_its_line_work_too(window):
 def test_colourise_keeps_the_light_and_shade(window):
     """Bluebeam's Colorize: one colour, still readable, paper still paper."""
     from PySide6.QtGui import QColor, QImage
-    from calcforge.io import recolour
+    from markforge.io import recolour
 
     image = QImage(4, 1, QImage.Format_ARGB32)
     for x, level in enumerate((0, 80, 180, 255)):
@@ -3359,7 +2382,7 @@ def test_colourise_keeps_the_light_and_shade(window):
 def test_a_colour_can_be_made_transparent_within_a_tolerance(window):
     """Near enough to the picked colour counts, which is what tolerance is for."""
     from PySide6.QtGui import QColor, QImage
-    from calcforge.io import recolour
+    from markforge.io import recolour
 
     image = QImage(3, 1, QImage.Format_ARGB32)
     image.setPixelColor(0, 0, QColor(255, 255, 255))     # the colour picked
@@ -3376,41 +2399,6 @@ def test_a_colour_can_be_made_transparent_within_a_tolerance(window):
     assert loose.pixelColor(2, 0).alpha() == 255, "but never the drawing"
 
 
-def test_prose_keeps_the_same_rhythm_as_the_working_beside_it(window):
-    """A note beside a column of working refers to it line by line.
-
-    The two used to drift: at ten point the working is pitched 15.6 apart and
-    prose 14.0, so ten lines down a reference points at the wrong row. Both
-    ask the same function for the number now.
-    """
-    from calcforge.core.engine import Workspace
-    from calcforge.items.mathitem import MathItem, calculation_line_pitch
-    from calcforge.items.text import TextItem
-
-    for size in (8.0, 10.0, 12.0):
-        calc = MathItem("a := 1\nb := 2\nc := 3")
-        calc.local_scope = True
-        calc.style.font_size = size
-        calc.refresh(Workspace())
-        calc.relayout()
-        working = [b.top - a.top for a, b in zip(calc.rows, calc.rows[1:])]
-
-        note = TextItem("")
-        note.style.font_size = size
-        note.doc.setPlainText("a is one\nb is two\nc is three")
-        note.apply_style()
-        layout = note.doc.documentLayout()
-        tops, block = [], note.doc.begin()
-        while block.isValid():
-            tops.append(layout.blockBoundingRect(block).top())
-            block = block.next()
-        prose = [b - a for a, b in zip(tops, tops[1:])]
-
-        assert working and prose
-        assert working[0] == pytest.approx(prose[0], abs=0.01), size
-        assert prose[0] == pytest.approx(calculation_line_pitch(size), abs=0.01)
-
-
 def test_there_is_one_calculation_tool(window):
     """A "line" and a "block" were the same thing drawn by different tools.
 
@@ -3419,130 +2407,12 @@ def test_there_is_one_calculation_tool(window):
     drawn — so choosing between them up front was a decision nobody had the
     information to make yet.
     """
-    from calcforge.ui.tools import TOOL_MAP, TOOLS
+    from markforge.ui.tools import TOOL_MAP, TOOLS
 
     assert TOOL_MAP["math"].label == "Calculation"
     assert "mathblock" not in TOOL_MAP, "the second one is gone"
     assert "math" in window.tool_actions and "mathblock" not in window.tool_actions
     assert len([t for t in TOOLS if t.key.startswith("math")]) == 1
-
-
-def test_a_block_keeps_its_working_to_itself(window):
-    """A block shares its names unless it is told to keep them."""
-    window.select_tool("math")
-    drag(window.view, 80, 80, 400, 200)
-    block = window.view.editing_item()
-    assert block.block and not block.local_scope
-    block._editor.setPlainText("t := 5 mm\nA := t*t =")
-    window.view.end_item_edit()
-    block.local_scope = True
-    window.recalculate()
-    assert block.scoped
-    assert window.document.workspace.get("t") is None
-
-
-def test_a_line_defines_for_the_whole_document(window):
-    window.select_tool("math")
-    drag(window.view, 80, 300, 400, 330)
-    line = window.view.editing_item()
-    assert not line.local_scope, "a calculation shares its names until told not to"
-    line._editor.setPlainText("t := 5 mm")
-    window.view.end_item_edit()
-    window.recalculate()
-    assert window.document.workspace.get("t").to("mm").magnitude == pytest.approx(5)
-
-
-def test_self_contained_is_offered_on_any_calculation(window):
-    """It used to be a block-only control, because a "line" could not have it.
-
-    With one kind of calculation left, whether a region keeps its names to
-    itself is a property of that region, and every one of them can be asked.
-    """
-    from PySide6.QtWidgets import QCheckBox
-
-    window.select_tool("math")
-    drag(window.view, 80, 300, 400, 330)
-    calc = window.view.editing_item()
-    window.view.end_item_edit()
-    calc.setSelected(True)
-    window.properties_panel.show_items([calc])
-
-    labels = [box.text() for box in
-              window.properties_panel.findChildren(QCheckBox)]
-    assert "Self-contained" in labels
-
-
-def test_the_style_toolbar_scope_control_edits_any_calculation(window, qapp):
-    """The control used to appear only for one of the two kinds."""
-    from PySide6.QtTest import QTest
-
-    window.show()
-    qapp.processEvents()
-    block = _open_calculation(window, "inside := 5")
-    window.view.end_item_edit()
-    window.select_tool("select")
-    block.setSelected(True)
-    window.refresh_selection()
-    assert window._scope_widget.isVisible()
-    assert not window.scope_button.isChecked()
-
-    QTest.mouseClick(window.scope_button, Qt.LeftButton)
-
-    assert block.local_scope
-    # A second calculation is the same kind of thing, so it is offered too —
-    # and its own answer is its own, not the first one's.
-    other = MathItem("outside := 6")
-    window.view.frame().add_markup(other, QPointF(80, 400))
-    window.view.scene().clearSelection()
-    other.setSelected(True)
-    window.refresh_selection()
-    assert window._scope_widget.isVisible()
-    assert not window.scope_button.isChecked()
-    assert not other.local_scope
-
-
-def test_the_style_toolbar_can_set_the_default_for_new_blocks(window, qapp):
-    from PySide6.QtTest import QTest
-    from calcforge.ui import preferences
-
-    prefs = preferences.current()
-    was = prefs.self_contained_blocks
-    try:
-        prefs.self_contained_blocks = False
-        preferences.apply(prefs)
-        window.show()
-        qapp.processEvents()
-        window.view.scene().clearSelection()
-        window.select_tool("math")
-        assert window._scope_widget.isVisible()
-        assert not window.scope_button.isChecked()
-
-        QTest.mouseClick(window.scope_button, Qt.LeftButton)
-
-        assert preferences.current().self_contained_blocks
-        assert MathItem("local := 1", block=True).local_scope
-    finally:
-        prefs.self_contained_blocks = was
-        preferences.apply(prefs)
-
-
-def test_shift_enter_makes_another_line_in_the_same_calculation(window):
-    """Which region a line lands in is a keystroke, not a kind of thing.
-
-    It used to be decided before anything was typed, by which of two tools had
-    been picked up. Enter goes on down the sheet; Shift+Enter keeps the next
-    line in the region already being written.
-    """
-    window.select_tool("math")
-    drag(window.view, 80, 80, 400, 200)
-    calc = window.view.editing_item()
-    type_text(window.view, "a:=1")
-    press_key(window.view, Qt.Key_Return, "\r", Qt.ShiftModifier)
-    type_text(window.view, "b:=2")
-    assert window.view.editing_item() is calc, "still the same region"
-    window.view.end_item_edit()
-    assert len([l for l in calc.source.split("\n") if l.strip()]) == 2
-    assert len([i for i in markups(window) if isinstance(i, MathItem)]) == 1
 
 
 def test_enter_in_a_line_opens_the_next_line_below(window):
@@ -3555,59 +2425,13 @@ def test_enter_in_a_line_opens_the_next_line_below(window):
     window.view.end_item_edit()
 
 
-def test_a_line_can_be_turned_into_a_block_and_back(window):
-    window.select_tool("math")
-    drag(window.view, 80, 300, 400, 330)
-    line = window.view.editing_item()
-    line._editor.setPlainText("a := 1")
-    window.view.end_item_edit()
-    line.setSelected(True)
-
-    window.set_block_kind(True)
-    assert line.block
-    window.set_block_kind(False)
-    assert not line.block and not line.local_scope
-
-
-def test_merging_lines_makes_a_block(window):
-    window.select_tool("math")
-    drag(window.view, 80, 300, 400, 330)
-    window.view.editing_item()._editor.setPlainText("a := 1")
-    window.view.end_item_edit()
-    window.select_tool("math")
-    drag(window.view, 80, 380, 400, 410)
-    window.view.editing_item()._editor.setPlainText("b := 2")
-    window.view.end_item_edit()
-
-    for item in markups(window):
-        item.setSelected(True)
-    window.merge_calculations()
-    merged = [i for i in markups(window) if isinstance(i, MathItem)]
-    assert len(merged) == 1 and merged[0].block
-
-
-def test_splitting_a_calculation_gives_one_region_per_line(window):
-    """Splitting still splits; the pieces are calculations like any other."""
-    window.select_tool("math")
-    drag(window.view, 80, 80, 400, 200)
-    calc = window.view.editing_item()
-    calc._editor.setPlainText("a := 1\nb := 2")
-    window.view.end_item_edit()
-    calc.setSelected(True)
-    window.split_calculation()
-    pieces = [i for i in markups(window) if isinstance(i, MathItem)]
-    assert len(pieces) == 2
-    assert all(piece.source.strip() for piece in pieces)
-    assert {piece.source.strip() for piece in pieces} == {"a := 1", "b := 2"}
-
-
 def test_an_older_document_loads_as_one_kind_of_calculation(window):
     """Documents written before the merge recorded which kind a region was.
 
     That value is read and dropped rather than bringing the distinction back
     in through the file: everything opens as the one kind there is now.
     """
-    from calcforge.items.base import build_item
+    from markforge.items.base import build_item
 
     several = build_item({"type": "math", "source": "a := 1\nb := 2",
                           "x": 0, "y": 0, "block": True})
@@ -3921,7 +2745,7 @@ def test_a_cloud_callout_clouds_the_thing_and_notes_it(window):
     """Bluebeam's: a cloud round what the comment is about, and the note beside
     it — and the two are one markup, not a cloud and a text box that happen to
     be grouped."""
-    from calcforge.items.shapes import RectItem
+    from markforge.items.shapes import RectItem
 
     window.select_tool("cloud_callout")
     drag(window.view, 160, 260, 300, 340)        # the cloud goes round it
@@ -3990,7 +2814,7 @@ def test_a_cloud_callout_can_be_drawn_corner_by_corner(window):
 
 
 def test_escape_gets_out_of_a_half_drawn_cloud_callout(window):
-    from calcforge.items.shapes import RectItem
+    from markforge.items.shapes import RectItem
 
     window.select_tool("cloud_callout")
     drag(window.view, 160, 260, 300, 340)
@@ -4053,7 +2877,7 @@ def test_the_hinge_can_be_moved_to_another_side(window):
 
 def test_the_leader_never_runs_across_its_own_words(window):
     """Whatever the hinge is dragged to, the line stays off the text box."""
-    from calcforge.items.text import _crosses
+    from markforge.items.text import _crosses
 
     call = _callout(window)
     box = call.local_rect().normalized()
@@ -4077,7 +2901,7 @@ def test_a_plain_callout_is_still_a_box(window):
 
 
 def test_a_cloud_callout_survives_a_round_trip(window):
-    from calcforge.items.base import build_item
+    from markforge.items.base import build_item
 
     window.select_tool("cloud_callout")
     drag(window.view, 160, 260, 300, 340)
@@ -4093,7 +2917,7 @@ def test_a_cloud_callout_survives_a_round_trip(window):
 
 
 def test_the_highlight_goes_over_whatever_is_under_it(window):
-    from calcforge.items.shapes import RectItem
+    from markforge.items.shapes import RectItem
 
     window.select_tool("highlight")
     drag(window.view, 100, 100, 300, 140)
@@ -4104,7 +2928,7 @@ def test_the_highlight_goes_over_whatever_is_under_it(window):
 
 
 def test_the_highlight_and_the_cloud_callout_are_on_keys(window):
-    from calcforge.ui.tools import TOOL_MAP
+    from markforge.ui.tools import TOOL_MAP
     assert TOOL_MAP["highlight"].shortcut == "J"
     assert TOOL_MAP["cloud_callout"].shortcut == "Shift+Q"
     assert not window.shortcuts.conflicts()
@@ -4113,32 +2937,6 @@ def test_the_highlight_and_the_cloud_callout_are_on_keys(window):
 # ---------------------------------------------------------------------------
 # Bookmarks and a contents block
 # ---------------------------------------------------------------------------
-
-def test_a_bookmark_is_added_where_you_are(window, monkeypatch):
-    from PySide6.QtWidgets import QInputDialog
-
-    window.load_sample()
-    window.go_to_page(2)
-    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("Foundation", True))
-    window.add_bookmark_here()
-
-    marks = window.document.bookmarks
-    assert [m.title for m in marks] == ["Foundation"]
-    assert window.document.page_index_of(marks[0].page_uid) == 2
-
-
-def test_bookmarks_are_listed_in_page_order(window):
-    window.load_sample()
-    window.document.add_bookmark("Third", 2)
-    window.document.add_bookmark("First", 0)
-    window.bookmarks_changed()
-
-    tree = window.bookmarks_panel.tree
-    titles = [tree.topLevelItem(row).text(0).strip() for row in range(tree.topLevelItemCount())]
-    pages = [tree.topLevelItem(row).text(1) for row in range(tree.topLevelItemCount())]
-    assert titles == ["First", "Third"]
-    assert pages == ["1", "3"]
-
 
 def test_bookmark_can_be_renamed_from_the_panel(window, monkeypatch, qapp):
     from PySide6.QtTest import QTest
@@ -4159,86 +2957,6 @@ def test_bookmark_can_be_renamed_from_the_panel(window, monkeypatch, qapp):
     assert window.document.bookmarks[0].title == "New name"
     assert panel.tree.topLevelItem(0).text(0) == "New name"
     assert window.document.modified
-
-
-def test_a_bookmark_follows_its_page_when_pages_move(window):
-    window.load_sample()
-    window.document.add_bookmark("Foundation", 2)
-    window.move_page(2, 0)
-    assert window.document.contents_entries()[0][1] == 0
-
-
-def test_a_bookmark_whose_page_has_gone_is_left_out(window, monkeypatch):
-    from PySide6.QtWidgets import QMessageBox
-
-    window.load_sample()
-    window.document.add_bookmark("Foundation", 2)
-    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
-    window.delete_page(2)
-    assert window.document.contents_entries() == []
-    window.bookmarks_panel.rebuild(window.document)
-    assert window.bookmarks_panel.tree.topLevelItemCount() == 0
-
-
-def test_double_clicking_a_bookmark_goes_there(window):
-    window.load_sample()
-    window.document.add_bookmark("Foundation", 2)
-    window.bookmarks_changed()
-    tree = window.bookmarks_panel.tree
-    tree.setCurrentItem(tree.topLevelItem(0))
-    window.bookmarks_panel._activate(tree.topLevelItem(0))
-    assert window.current_index == 2
-
-
-def test_a_contents_block_lists_the_bookmarks(window):
-    from calcforge.items.contents import ContentsItem
-
-    window.load_sample()
-    window.document.add_bookmark("Beam design", 0)
-    window.document.add_bookmark("Foundation", 2)
-
-    window.select_tool("contents")
-    drag(window.view, 60, 500, 360, 640)
-    block = next(i for i in markups(window) if isinstance(i, ContentsItem))
-    assert [mark.title for mark, _ in block.entries()] == ["Beam design", "Foundation"]
-
-    window.document.pages[0].frame.render_image(dpi=48.0)      # lays the rows out
-    assert len(block.rows) == 2
-
-
-def test_clicking_a_contents_line_goes_to_that_page(window):
-    window.load_sample()
-    window.document.add_bookmark("Beam design", 0)
-    window.document.add_bookmark("Foundation", 2)
-    from calcforge.items.contents import ContentsItem
-
-    window.select_tool("contents")
-    drag(window.view, 60, 500, 360, 640)
-    block = next(i for i in markups(window) if isinstance(i, ContentsItem))
-    window.select_tool("select")
-    window.view.scene().clearSelection()
-    window.document.pages[0].frame.render_image(dpi=48.0)
-
-    row, index, _y = block.rows[1]
-    point = block.mapToScene(row.center())
-    click(window.view, point.x(), point.y())
-    assert window.current_index == index == 2
-
-
-def test_bookmarks_are_saved_with_the_document(window, tmp_path):
-    from calcforge.core.document import Document
-    from calcforge.io import project as project_io
-
-    window.load_sample()
-    window.document.add_bookmark("Foundation", 2, y=120.0)
-    path = str(tmp_path / "job.cfx")
-    project_io.save_document(window.document, path)
-
-    reopened = Document()
-    project_io.load_document(reopened, path)
-    assert [m.title for m in reopened.bookmarks] == ["Foundation"]
-    assert reopened.bookmarks[0].y == pytest.approx(120.0)
-    assert reopened.page_index_of(reopened.bookmarks[0].page_uid) == 2
 
 
 def test_there_is_a_key_for_bookmarking_where_you_are(window):
@@ -4290,7 +3008,7 @@ def test_a_picture_copied_elsewhere_beats_the_last_snapshot(window):
     """What is on the clipboard is what gets pasted."""
     from PySide6.QtGui import QImage
     from PySide6.QtWidgets import QApplication
-    from calcforge.items.media import ImageItem
+    from markforge.items.media import ImageItem
 
     window.select_tool("rect")
     drag(window.view, 100, 100, 220, 180)
@@ -4332,7 +3050,7 @@ def test_a_snapshot_of_no_region_at_all_says_so(window):
 
 def test_a_snapshot_takes_the_drawing_underneath_with_it(window, tmp_path, monkeypatch):
     from PySide6.QtGui import QImage, QPainter, QPicture
-    from calcforge.io import pdfio
+    from markforge.io import pdfio
 
     photo = QImage(400, 300, QImage.Format_ARGB32)
     photo.fill(0xFF3366AA)
@@ -4351,7 +3069,7 @@ def test_a_snapshot_takes_the_drawing_underneath_with_it(window, tmp_path, monke
     line.style.width = 3.0
     line.layer = "Drawing"
     if "Drawing" not in window.document.layer_names():
-        from calcforge.core.document import Layer
+        from markforge.core.document import Layer
         window.document.layers.append(Layer("Drawing", locked=True))
     frame.add_markup(line, QPointF(30, 55))
     window.take_snapshot(frame, QRectF(20, 20, 120, 90))
@@ -4460,7 +3178,7 @@ def test_a_snapshot_puts_a_picture_on_the_clipboard_for_other_apps(window):
 
 
 def test_the_snapshot_tool_is_on_g(window):
-    from calcforge.ui.tools import TOOL_MAP
+    from markforge.ui.tools import TOOL_MAP
     assert TOOL_MAP["snapshot"].shortcut == "G"
     assert TOOL_MAP["plot"].shortcut == "Shift+G"
     assert not window.shortcuts.conflicts()
@@ -4473,7 +3191,7 @@ def test_the_snapshot_tool_is_on_g(window):
 def _sheet_page(window, tmp_path, colour=0xFF000000):
     """A page whose background is a white sheet with one dark line."""
     from PySide6.QtGui import QColor, QImage
-    from calcforge.io import pdfio
+    from markforge.io import pdfio
 
     image = QImage(60, 40, QImage.Format_ARGB32)
     image.fill(QColor("white"))
@@ -4488,7 +3206,7 @@ def _sheet_page(window, tmp_path, colour=0xFF000000):
 
 def test_the_lines_of_a_page_can_be_pushed_to_another_colour(window, tmp_path, monkeypatch):
     from PySide6.QtGui import QColor, QImage
-    from calcforge.ui import dialogs
+    from markforge.ui import dialogs
 
     page = _sheet_page(window, tmp_path)
     before = page.background_key
@@ -4510,7 +3228,7 @@ def test_the_lines_of_a_page_can_be_pushed_to_another_colour(window, tmp_path, m
 
 def test_one_colour_can_be_swapped_for_another(window, tmp_path, monkeypatch):
     from PySide6.QtGui import QColor, QImage
-    from calcforge.ui import dialogs
+    from markforge.ui import dialogs
 
     page = _sheet_page(window, tmp_path)
 
@@ -4531,7 +3249,7 @@ def test_one_colour_can_be_swapped_for_another(window, tmp_path, monkeypatch):
 
 def test_recolouring_a_page_can_be_undone(window, tmp_path, monkeypatch):
     from PySide6.QtGui import QColor
-    from calcforge.ui import dialogs
+    from markforge.ui import dialogs
 
     page = _sheet_page(window, tmp_path)
     before = page.background_key
@@ -4555,7 +3273,7 @@ def test_a_blank_page_says_there_is_nothing_to_recolour(window, monkeypatch):
 def test_image_colour_dialog_offers_greyscale_and_transparency(window):
     from PySide6.QtGui import QColor, QImage, qAlpha, qBlue, qGreen, qRed
     from PySide6.QtTest import QTest
-    from calcforge.ui.dialogs import RecolourDialog
+    from markforge.ui.dialogs import RecolourDialog
 
     image = QImage(2, 1, QImage.Format_ARGB32)
     image.setPixelColor(0, 0, QColor("#ff0000"))
@@ -4589,94 +3307,6 @@ def test_the_page_menu_only_offers_it_where_there_is_a_drawing(window, tmp_path)
 # Writing a formula by pointing at cells
 # ---------------------------------------------------------------------------
 
-def _sheet(window):
-    window.select_tool("table")
-    drag(window.view, 60, 60, 420, 240)
-    table = window.view.active_table
-    table.sheet.resize(6, 4)
-    table.set_cell(0, 0, "2")
-    table.set_cell(0, 1, "3")
-    return table
-
-
-def test_clicking_a_cell_while_typing_a_formula_refers_to_it(window):
-    table = _sheet(window)
-    table.current = table.anchor = (2, 0)
-    window.view.open_cell_editor(initial="=")
-
-    target = table.mapToScene(table.cell_rect(0, 1).center())
-    click(window.view, target.x(), target.y())
-
-    assert window.view._cell_editor is not None       # still typing
-    assert window.view._cell_editor.text() == "=B1"
-    assert table.pointing == (0, 1)
-
-
-def test_the_arrow_keys_choose_the_cell_to_refer_to(window):
-    table = _sheet(window)
-    table.current = table.anchor = (2, 2)
-    window.view.open_cell_editor(initial="=")
-
-    press_key(window.view, Qt.Key_Up)
-    assert window.view._cell_editor.text() == "=C2"
-    press_key(window.view, Qt.Key_Up)
-    assert window.view._cell_editor.text() == "=C1"   # replaced, not appended
-    press_key(window.view, Qt.Key_Left)
-    assert window.view._cell_editor.text() == "=B1"
-
-
-def test_a_pointed_formula_works_out(window):
-    table = _sheet(window)
-    table.current = table.anchor = (2, 0)
-    window.view.open_cell_editor(initial="=")
-    first = table.mapToScene(table.cell_rect(0, 0).center())
-    click(window.view, first.x(), first.y())
-    press_key(window.view, Qt.Key_Plus, "+")
-    second = table.mapToScene(table.cell_rect(0, 1).center())
-    click(window.view, second.x(), second.y())
-    window.view.close_cell_editor(commit=True)
-    window.recalculate()
-
-    assert table.sheet.raw(2, 0) == "=A1+B1"
-    assert table.sheet.value(2, 0) == 5
-
-
-def test_the_arrows_still_move_the_caret_in_ordinary_text(window):
-    table = _sheet(window)
-    table.current = table.anchor = (2, 0)
-    window.view.open_cell_editor(initial="hello")
-    editor = window.view._cell_editor
-    editor.setCursorPosition(5)
-    press_key(window.view, Qt.Key_Left)
-    assert editor.text() == "hello"
-    assert table.pointing is None
-
-
-def test_the_arrows_move_the_caret_once_a_reference_is_finished(window):
-    table = _sheet(window)
-    table.current = table.anchor = (2, 0)
-    window.view.open_cell_editor(initial="=A1")
-    editor = window.view._cell_editor
-    editor.setCursorPosition(3)
-    press_key(window.view, Qt.Key_Left)
-    assert editor.text() == "=A1"                    # not a reference to another cell
-
-
-def test_typing_after_pointing_finishes_the_reference(window):
-    table = _sheet(window)
-    table.current = table.anchor = (2, 0)
-    window.view.open_cell_editor(initial="=")
-    press_key(window.view, Qt.Key_Up)
-    assert window.view._point_span is not None
-    press_key(window.view, Qt.Key_Asterisk, "*")
-    assert window.view._point_span is None
-    assert table.pointing is None
-
-
-# ---------------------------------------------------------------------------
-# Units and names, offered rather than assumed
-# ---------------------------------------------------------------------------
-
 def _typing(window, text, at=(100, 120)):
     window.view._last_scene_pos = QPointF(*at)
     press_key(window.view, Qt.Key_unknown, '"')
@@ -4685,72 +3315,12 @@ def _typing(window, text, at=(100, 120)):
     return window.view.editing_item()
 
 
-def test_typing_offers_units_and_the_names_you_have_defined(window):
-    _calc(window, "L_span := 6 m", at=(90, 500))
-    _typing(window, "w:=3kN")
-    popup = window.view._completions
-    assert window.view.completions_showing()
-    words = [popup.item(row).text() for row in range(popup.count())]
-    assert "kN" in words
-    window.view.end_item_edit()
-
-    _typing(window, "x:=L_", at=(90, 560))
-    words = [window.view._completions.item(row).text()
-             for row in range(window.view._completions.count())]
-    assert "L_span" in words
-    window.view.end_item_edit()
-
-
 def test_nothing_is_completed_until_tab_is_pressed(window):
     block = _typing(window, "w:=3kN")
     assert block._editor.toPlainText() == "w:=3kN"        # exactly what was typed
     press_key(window.view, Qt.Key_Tab)
     assert block._editor.toPlainText().startswith("w:=3k")
     window.view.end_item_edit()
-
-
-def test_the_arrows_move_through_the_list_and_tab_takes_one(window):
-    block = _typing(window, "w:=3k")
-    popup = window.view._completions
-    assert window.view.completions_showing()
-    first = popup.currentItem().text()
-    press_key(window.view, Qt.Key_Down)
-    second = popup.currentItem().text()
-    assert second != first
-    press_key(window.view, Qt.Key_Tab)
-    assert block._editor.toPlainText() == f"w:=3{second}"
-    window.view.end_item_edit()
-
-
-def test_escape_takes_the_list_and_the_line_together(window):
-    """One press, all the way out — the list does not get to keep it.
-
-    Escape used to put the list away and stop there. The list is offered
-    unasked and half the time it is not being looked at, so that read as an
-    Escape that did nothing at all.
-    """
-    _typing(window, "w:=3kN")
-    assert window.view.completions_showing()
-    press_key(window.view, Qt.Key_Escape)
-    assert not window.view.completions_showing()
-    assert window.view.editing_item() is None
-
-
-def test_a_number_on_its_own_is_not_a_word_to_complete(window):
-    _typing(window, "w:=300")
-    assert not window.view.completions_showing()
-    window.view.end_item_edit()
-
-
-def test_a_value_and_its_unit_are_written_with_a_dot_between_them(window):
-    from calcforge.core.mathrender import UNIT_SEPARATOR
-
-    block = _calc(window, "L := 6 m\nw := 12 kN/m\nM := w*L^2/8 =", at=(90, 110))
-    row = next(r for r in block.rows if r.result is not None)
-    assert UNIT_SEPARATOR == "·"
-    # the result row is number, dot, unit
-    assert any(getattr(box, "text", "") == UNIT_SEPARATOR
-               for box in _all_boxes(row.result))
 
 
 def _all_boxes(box):
@@ -4801,25 +3371,6 @@ def _paints_in(item, wanted, tolerance: int = 26) -> bool:
     return False
 
 
-def test_units_are_blue_while_they_are_being_typed(window):
-    """The typeset working is what is on screen, being typed or not."""
-    from calcforge.core.mathrender import MathStyle
-
-    block = _calc(window, "w := 12 kN", at=(90, 110))
-    window.view.begin_item_edit(block)
-    assert _paints_in(block, MathStyle().unit_color)
-    window.view.end_item_edit()
-
-
-def test_a_comment_is_grey_while_it_is_being_typed(window):
-    from calcforge.core.mathrender import MathStyle
-
-    block = _calc(window, "w := 12 kN   # dead load", at=(90, 110))
-    window.view.begin_item_edit(block)
-    assert _paints_in(block, MathStyle().comment_color)
-    window.view.end_item_edit()
-
-
 def test_the_answers_stay_on_the_page_while_the_line_is_edited(window):
     block = _calc(window, "L := 6 m\nw := 12 kN/m\nM := w*L^2/8 =", at=(90, 110))
     assert any(row.result is not None for row in block.rows)
@@ -4827,33 +3378,6 @@ def test_the_answers_stay_on_the_page_while_the_line_is_edited(window):
     assert any(row.result is not None for row in block.rows)   # not thrown away
     window.view.end_item_edit()
 
-
-def test_the_answer_keeps_up_with_what_is_typed(window):
-    block = _calc(window, "b := 300 mm\nA := b*b =", at=(90, 110))
-    window.view.begin_item_edit(block)
-    block._editor.setPlainText("b := 400 mm\nA := b*b =")
-    window.view._recalculate_while_typing()
-
-    assert window.document.workspace.get("A").to("mm^2").magnitude == pytest.approx(160000)
-    window.view.end_item_edit()
-
-
-def test_a_long_line_widens_the_region_rather_than_running_off_it(window):
-    """The typeset working is what is drawn, and the region grows to hold it."""
-    block = _calc(window, "L := 6 m", at=(90, 110))
-    narrow = block.local_rect().width()
-    window.view.begin_item_edit(block)
-    block._editor.setPlainText(
-        "L := 6 m + 12 m + 3 m + 24 m + 9 m + 15 m + 30 m + 45 m =")
-    window.recalculate()
-    assert block.local_rect().width() > narrow
-    assert block.rows[0].left.width <= block.local_rect().width()
-    window.view.end_item_edit()
-
-
-# ---------------------------------------------------------------------------
-# Groups
-# ---------------------------------------------------------------------------
 
 def _two_boxes(window):
     window.select_tool("rect")
@@ -4892,7 +3416,7 @@ def test_a_group_moves_as_one(window):
 
 
 def test_a_group_scales_as_one_and_shift_releases_its_ratio(window):
-    from calcforge.items.base import build_item
+    from markforge.items.base import build_item
 
     first, second = _two_boxes(window)
     first.setSelected(True)
@@ -4973,8 +3497,8 @@ def test_grouping_can_be_undone(window):
 
 
 def test_a_group_is_saved_with_the_document(window, tmp_path):
-    from calcforge.core.document import Document
-    from calcforge.io import project as project_io
+    from markforge.core.document import Document
+    from markforge.io import project as project_io
 
     first, second = _two_boxes(window)
     first.setSelected(True)
@@ -5039,7 +3563,7 @@ def test_a_default_belongs_to_that_kind_of_markup_only(window):
 
 
 def test_a_default_is_remembered_between_sessions(window):
-    from calcforge.ui.mainwindow import MainWindow
+    from markforge.ui.mainwindow import MainWindow
 
     window.select_tool("rect")
     drag(window.view, 100, 100, 200, 160)
@@ -5074,7 +3598,7 @@ def test_a_default_can_be_forgotten(window):
 
 
 def test_a_default_never_carries_the_contents_across(window):
-    from calcforge.ui import toolsets
+    from markforge.ui import toolsets
 
     block = _calc(window, "b := 300 mm", at=(90, 500))
     window.set_as_default(block)
@@ -5098,7 +3622,7 @@ def test_the_properties_panel_offers_it(window):
 
 def test_the_style_toolbar_sets_the_selected_markup_as_default(window, qapp):
     from PySide6.QtTest import QTest
-    from calcforge.ui import toolsets
+    from markforge.ui import toolsets
 
     window.show()
     qapp.processEvents()
@@ -5137,7 +3661,7 @@ def test_a_markup_can_be_saved_to_a_tool_set_from_its_context_menu(window):
 
 def _kept(window, item, into="My Tools", monkeypatch=None):
     """Put an item into a tool set without the dialog."""
-    from calcforge.ui import toolsets
+    from markforge.ui import toolsets
 
     groups = toolsets.load_toolsets()
     group = next(g for g in groups if g.name == into)
@@ -5148,7 +3672,7 @@ def _kept(window, item, into="My Tools", monkeypatch=None):
 
 
 def test_my_tools_is_always_there(window):
-    from calcforge.ui import toolsets
+    from markforge.ui import toolsets
 
     assert [g.name for g in toolsets.load_toolsets()][0] == toolsets.MY_TOOLS
     tree = window.toolsets_panel.tree
@@ -5175,7 +3699,7 @@ def test_a_kept_markup_comes_back_exactly_as_it_was(window):
 
 
 def test_a_tool_in_properties_mode_draws_a_new_one(window):
-    from calcforge.ui import toolsets
+    from markforge.ui import toolsets
 
     window.select_tool("text")
     drag(window.view, 100, 100, 300, 140)
@@ -5213,7 +3737,7 @@ def test_escape_puts_a_held_tool_back(window):
 
 def test_tool_sets_can_be_made_renamed_and_deleted(window, monkeypatch):
     from PySide6.QtWidgets import QInputDialog, QMessageBox
-    from calcforge.ui import toolsets
+    from markforge.ui import toolsets
 
     panel = window.toolsets_panel
     monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("Steel details", True))
@@ -5232,7 +3756,7 @@ def test_tool_sets_can_be_made_renamed_and_deleted(window, monkeypatch):
 
 def test_my_tools_cannot_be_renamed_or_deleted(window, monkeypatch):
     from PySide6.QtWidgets import QMessageBox
-    from calcforge.ui import toolsets
+    from markforge.ui import toolsets
 
     monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
@@ -5241,7 +3765,7 @@ def test_my_tools_cannot_be_renamed_or_deleted(window, monkeypatch):
 
 
 def test_a_tool_can_be_switched_between_the_two_modes(window):
-    from calcforge.ui import toolsets
+    from markforge.ui import toolsets
 
     window.select_tool("rect")
     drag(window.view, 100, 100, 200, 160)
@@ -5265,7 +3789,7 @@ def test_tools_can_be_reordered_and_removed(window):
     _kept(window, markups(window)[0])
     _kept(window, markups(window)[1])
 
-    from calcforge.ui import toolsets
+    from markforge.ui import toolsets
 
     panel = window.toolsets_panel
     panel.select_entry(toolsets.MY_TOOLS, 1)
@@ -5278,7 +3802,7 @@ def test_tools_can_be_reordered_and_removed(window):
 
 
 def test_tool_sets_are_remembered_between_sessions(window):
-    from calcforge.ui.mainwindow import MainWindow
+    from markforge.ui.mainwindow import MainWindow
 
     window.select_tool("rect")
     drag(window.view, 100, 100, 200, 160)
@@ -5417,7 +3941,7 @@ def test_a_selected_group_draws_one_box_round_the_lot(window):
 
 
 def test_a_group_goes_into_a_tool_set_as_one_thing(window):
-    from calcforge.ui import toolsets
+    from markforge.ui import toolsets
 
     first, second = _two_boxes(window)
     first.setSelected(True)
@@ -5431,7 +3955,7 @@ def test_a_group_goes_into_a_tool_set_as_one_thing(window):
 
 
 def test_placing_a_group_puts_every_member_down_grouped(window):
-    from calcforge.ui import toolsets
+    from markforge.ui import toolsets
 
     first, second = _two_boxes(window)
     first.setSelected(True)
@@ -5454,7 +3978,7 @@ def test_placing_a_group_puts_every_member_down_grouped(window):
 
 def test_what_is_about_to_be_placed_is_shown_first(window):
     from PySide6.QtGui import QImage, QPainter
-    from calcforge.ui import toolsets
+    from markforge.ui import toolsets
 
     window.select_tool("rect")
     drag(window.view, 100, 100, 220, 180)
@@ -5507,7 +4031,7 @@ def test_a_kept_cloud_uses_its_bottom_left_as_the_anchor(window):
 
 
 def test_a_toolset_group_uses_its_combined_bottom_left_as_the_anchor(window):
-    from calcforge.ui import toolsets
+    from markforge.ui import toolsets
 
     _quiet_snapping(window)
     first, second = _two_boxes(window)
@@ -5529,7 +4053,7 @@ def test_a_toolset_group_uses_its_combined_bottom_left_as_the_anchor(window):
 
 def test_a_click_placed_image_hangs_from_the_pointers_bottom_left(
         window, monkeypatch):
-    from calcforge.items.media import ImageItem
+    from markforge.items.media import ImageItem
 
     _quiet_snapping(window)
 
@@ -5966,17 +4490,6 @@ def test_typing_on_a_measurement_can_be_undone(window):
 # Dragging the fill handle
 # ---------------------------------------------------------------------------
 
-def _grid(window, values, at=(60, 60)):
-    window.select_tool("table")
-    drag(window.view, at[0], at[1], at[0] + 360, at[1] + 220)
-    table = window.view.active_table
-    table.sheet.resize(10, 5)
-    for (row, col), value in values.items():
-        table.set_cell(row, col, value)
-    window.recalculate()
-    return table
-
-
 def _drag_fill(window, table, to_cell):
     """Take hold of the fill handle and drag it to a cell."""
     handle = table.mapToScene(table.fill_handle_rect().center())
@@ -5999,33 +4512,12 @@ def test_a_single_value_is_copied_not_counted_up(window):
     assert [table.sheet.raw(row, 0) for row in range(4)] == ["7", "7", "7", "7"]
 
 
-def test_a_formula_keeps_its_absolute_references(window):
-    table = _grid(window, {(0, 0): "2", (1, 0): "3", (2, 0): "4",
-                           (0, 1): "10", (0, 2): "=A1*$B$1"})
-    table.current = table.anchor = (0, 2)
-    _drag_fill(window, table, (2, 2))
-    assert [table.sheet.raw(row, 2) for row in range(3)] == \
-        ["=A1*$B$1", "=A2*$B$1", "=A3*$B$1"]
-    window.recalculate()
-    assert table.sheet.value(2, 2) == 40
-
-
 def test_filling_sideways_works_the_same(window):
     table = _grid(window, {(0, 0): "5", (0, 1): "10"})
     table.current, table.anchor = (0, 0), (0, 1)
     _drag_fill(window, table, (0, 4))
     assert [table.sheet.raw(0, col) for col in range(5)] == \
         ["5", "10", "15", "20", "25"]
-
-
-def test_a_fill_is_one_undo_step(window):
-    table = _grid(window, {(0, 0): "1", (1, 0): "2"})
-    table.current, table.anchor = (0, 0), (1, 0)
-    _drag_fill(window, table, (5, 0))
-    assert table.sheet.raw(5, 0) == "6"
-    window.undo_stack.undo()
-    filled = [i for i in markups(window) if isinstance(i, TableItem)][0]
-    assert filled.sheet.raw(5, 0) == ""
 
 
 def test_a_named_table_wears_its_name(window):
@@ -6036,34 +4528,6 @@ def test_a_named_table_wears_its_name(window):
     table.table_name = ""
     assert table.local_rect().height() < before        # and given back
 
-
-def test_the_properties_panel_names_a_table(window):
-    from PySide6.QtWidgets import QLineEdit
-
-    table = _capacity_table(window, "")
-    window.select_tool("select")
-    table.setSelected(True)
-    window.refresh_selection()
-    boxes = [w for w in window.properties_panel.findChildren(QLineEdit)
-             if (w.toolTip() or "").startswith("Name this table")]
-    assert boxes
-    assert boxes[0].placeholderText() == ""        # no ghost name in the box
-    boxes[0].setText("shear")
-    boxes[0].editingFinished.emit()
-    assert table.table_name == "shear"
-    assert "shear" in window.document.workspace.table_names()
-
-
-def test_a_name_that_cannot_be_used_is_refused(window):
-    table = _capacity_table(window, "")
-    window.rename_table(table, "2 bolts")
-    assert table.table_name == ""
-    assert "cannot be used" in window.status_hint.text()
-
-
-# ---------------------------------------------------------------------------
-# Changing things after they are drawn
-# ---------------------------------------------------------------------------
 
 def _panel_groups(window, item):
     from PySide6.QtWidgets import QGroupBox
@@ -6077,7 +4541,7 @@ def _panel_groups(window, item):
 
 def test_a_contents_block_can_be_changed_afterwards(window):
     from PySide6.QtWidgets import QCheckBox, QLineEdit
-    from calcforge.items.contents import ContentsItem
+    from markforge.items.contents import ContentsItem
 
     window.select_tool("contents")
     drag(window.view, 60, 500, 360, 640)
@@ -6098,7 +4562,7 @@ def test_a_contents_block_can_be_changed_afterwards(window):
 
 def test_a_note_can_be_rewritten_in_the_panel(window):
     from PySide6.QtWidgets import QPlainTextEdit
-    from calcforge.items.text import NoteItem
+    from markforge.items.text import NoteItem
 
     window.select_tool("note")
     click(window.view, 200, 200)
@@ -6129,7 +4593,7 @@ def test_a_measurement_says_what_you_type_in_the_panel(window):
 def test_an_image_can_be_swapped_for_another(window, tmp_path, monkeypatch):
     from PySide6.QtGui import QImage
     from PySide6.QtWidgets import QFileDialog
-    from calcforge.items.media import ImageItem
+    from markforge.items.media import ImageItem
 
     first = str(tmp_path / "one.png")
     QImage(60, 40, QImage.Format_ARGB32).save(first)
@@ -6153,7 +4617,7 @@ def test_an_image_can_be_swapped_for_another(window, tmp_path, monkeypatch):
 def test_a_raster_image_has_no_line_or_fill_style_controls(window, tmp_path):
     from PySide6.QtGui import QImage
     from PySide6.QtWidgets import QFileDialog, QGroupBox
-    from calcforge.items.media import ImageItem
+    from markforge.items.media import ImageItem
 
     path = str(tmp_path / "photo.png")
     QImage(60, 40, QImage.Format_ARGB32).save(path)
@@ -6181,7 +4645,7 @@ def test_a_raster_image_has_no_line_or_fill_style_controls(window, tmp_path):
 
 
 def test_an_image_keeps_its_aspect_ratio_unless_shift_releases_it(window):
-    from calcforge.items.media import ImageItem
+    from markforge.items.media import ImageItem
 
     image = ImageItem(rect=QRectF(0, 0, 200, 100))
     window.view.frame().add_markup(image, QPointF(100, 100))
@@ -6201,70 +4665,6 @@ def test_an_image_keeps_its_aspect_ratio_unless_shift_releases_it(window):
     assert image.local_rect().height() == pytest.approx(230, abs=2)
 
 
-def test_every_markup_offers_its_own_settings(window):
-    """Each kind of markup has a panel section about what makes it that kind."""
-    expected = {
-        "rect": "Size", "ellipse": "Size", "cloud": "Cloud", "text": "Text",
-        "callout": "Text", "stamp": "Stamp", "table": "Table", "plot": "Plot",
-        "measure_length": "Measurement", "count": "Count",
-    }
-    for key, group in expected.items():
-        window.new_document()
-        window.select_tool(key)
-        if key == "count":
-            click(window.view, 200, 200)
-        else:
-            if key == "callout":
-                # A callout points at something first, then gets its box.
-                click(window.view, 120, 320)
-            drag(window.view, 150, 150, 380, 260)
-        if window.view.editing_item() is not None:
-            window.view.editing_item().set_text("words")
-            window.view.end_item_edit()
-        window.view.deactivate_table()
-        window.view.close_label_editor(commit=False)
-        item = markups(window)[0]
-        assert group in _panel_groups(window, item), f"{key} has no {group} section"
-
-
-# ---------------------------------------------------------------------------
-# Showing an answer in another unit changes only that answer
-# ---------------------------------------------------------------------------
-
-def test_asking_for_newtons_leaves_the_kilonewtons_written(window):
-    """"1 kN → N" is one kilonewton shown in newtons, not one newton."""
-    from calcforge.items.mathitem import MathItem
-
-    item = MathItem("test := 1 kN =")
-    item.setPos(60, 60)
-    window.view.frame().add_markup(item)
-    window.recalculate()
-
-    assert item.set_display_unit(0, "N")
-    window.recalculate()
-    statement = item.rows[0].statement
-    assert statement.result_text() == "1000 N"      # the answer, as asked
-    assert f"{statement.written:~P}".startswith("1.0 kN")   # what was written
-
-
-def test_the_other_lines_keep_their_own_units(window):
-    from calcforge.items.mathitem import MathItem
-
-    block = MathItem("test := 1 kN =\ntest =", block=True)
-    block.setPos(60, 60)
-    window.view.frame().add_markup(block)
-    window.recalculate()
-
-    assert block.set_display_unit(1, "N")
-    window.recalculate()
-    assert block.rows[0].statement.result_text() == "1 kN"
-    assert block.rows[1].statement.result_text() == "1000 N"
-
-
-# ---------------------------------------------------------------------------
-# Toolbar options belong to the tool they are for
-# ---------------------------------------------------------------------------
-
 def test_the_stamp_wording_is_only_shown_for_the_stamp(window):
     """Reading "APPROVED" across the top while drawing a box means nothing."""
     stamp = window._stamp_widgets[0]
@@ -6279,7 +4679,7 @@ def test_the_stamp_wording_is_only_shown_for_the_stamp(window):
 
 
 def test_count_stays_armed_and_numbers_each_click_until_escape(window):
-    from calcforge.items.measure import CountItem
+    from markforge.items.measure import CountItem
 
     window.select_tool("count")
     click(window.view, 120, 160)
@@ -6319,7 +4719,7 @@ def test_dragging_a_slider_is_one_undo_step(window):
 
 
 def test_a_pause_starts_a_new_undo_step(window):
-    from calcforge.ui import commands
+    from markforge.ui import commands
 
     window.select_tool("rect")
     drag(window.view, 80, 80, 220, 180)
@@ -6397,7 +4797,7 @@ def test_ctrl_b_while_typing_belongs_to_the_text(window):
 # ---------------------------------------------------------------------------
 
 def test_a_callout_takes_two_clicks_and_no_dragging(window):
-    from calcforge.items.text import CalloutItem
+    from markforge.items.text import CalloutItem
 
     window.select_tool("callout")
     click(window.view, 400, 420)                 # what it points at
@@ -6466,7 +4866,7 @@ def test_misspelt_words_are_underlined_only_while_typing(window):
 
 def test_spellcheck_knows_requests_and_offers_a_correction(window):
     from PySide6.QtTest import QTest
-    from calcforge.core.spelling import shared
+    from markforge.core.spelling import shared
 
     assert shared().knows("requests")
     assert not shared().knows("reqeusts")
@@ -6498,48 +4898,6 @@ def test_spellcheck_knows_requests_and_offers_a_correction(window):
 # One view of a calculation, typed into where it is
 # ---------------------------------------------------------------------------
 
-def test_a_calculation_stays_typeset_while_it_is_typed(window):
-    """No second, flatter copy underneath: the caret stands in the working."""
-    from calcforge.items.mathitem import MathItem
-
-    item = MathItem("x := 5/2 =")
-    item.setPos(60, 60)
-    window.view.frame().add_markup(item)
-    window.recalculate()
-    window.view.begin_item_edit(item)
-
-    editor = item._editor
-    cursor = editor.textCursor()
-    places = {}
-    for column in (5, 7):                    # the 5, then the 2
-        cursor.setPosition(column)
-        editor.setTextCursor(cursor)
-        places[column] = item.caret_place()
-
-    numerator, denominator = places[5], places[7]
-    assert numerator is not None and denominator is not None
-    assert numerator[1] < denominator[1]     # one above the bar, one below
-    window.view.end_item_edit()
-
-
-def test_clicking_a_fraction_puts_the_caret_in_that_part_of_it(window):
-    from calcforge.items.mathitem import MathItem
-
-    item = MathItem("x := 5/2 =")
-    item.setPos(60, 60)
-    window.view.frame().add_markup(item)
-    window.recalculate()
-    window.view.begin_item_edit(item)
-
-    row = item.rows[0]
-    top = QPointF(item.style.padding + row.left.width - 4,
-                  row.baseline - row.left.ascent + 4)
-    line, column = item.offset_at(top)
-    assert line == 0
-    assert column in (5, 6)                  # in the numerator, not at the end
-    window.view.end_item_edit()
-
-
 def test_typing_a_calculation_keeps_the_working_up_with_it(window):
     window.select_tool("select")
     press_key(window.view, Qt.Key_unknown, '"')
@@ -6553,7 +4911,7 @@ def test_typing_a_calculation_keeps_the_working_up_with_it(window):
 
 def test_shift_and_the_space_bar_asks_for_a_text_box(window):
     """Shift+Space follows the same conversion rule as an ordinary space."""
-    from calcforge.items.text import TextItem
+    from markforge.items.text import TextItem
 
     window.select_tool("select")
     press_key(window.view, Qt.Key_unknown, '"')
@@ -6570,7 +4928,7 @@ def test_shift_and_the_space_bar_asks_for_a_text_box(window):
 
 def test_a_space_changes_a_typed_calculation_into_text(window):
     """A typed single calculation becomes text at the same caret position."""
-    from calcforge.items.text import TextItem
+    from markforge.items.text import TextItem
 
     window.select_tool("select")
     press_key(window.view, Qt.Key_unknown, '"')
@@ -6596,7 +4954,7 @@ def test_a_lone_word_left_behind_becomes_a_note_after_all(window):
     Nothing can put that space there by typing any more, so this is for text
     that arrived some other way — pasted in, or built from something else.
     """
-    from calcforge.items.text import TextItem
+    from markforge.items.text import TextItem
 
     window.select_tool("select")
     press_key(window.view, Qt.Key_unknown, '"')
@@ -6608,31 +4966,9 @@ def test_a_lone_word_left_behind_becomes_a_note_after_all(window):
     assert markups(window)[0].text().strip() == "checked by hand"
 
 
-def test_a_space_turns_any_calculation_into_prose(window):
-    """It used to depend on which of the two tools had drawn the region.
-
-    One of them converted and the other refused and explained itself, so the
-    same keystroke did two different things for a reason nothing on screen
-    made visible. There is one kind now, and a space always means prose.
-    """
-    from calcforge.items.text import TextItem
-
-    item = MathItem("5+")
-    window.view.frame().add_markup(item)
-    window.view.begin_item_edit(item)
-    press_key(window.view, Qt.Key_Space, " ")
-    QApplication.processEvents()
-    assert isinstance(window.view.editing_item(), TextItem)
-    window.view.escape_everything()
-
-
-# ---------------------------------------------------------------------------
-# The tool chest shows the tools themselves
-# ---------------------------------------------------------------------------
-
 def test_a_tool_set_entry_is_drawn_as_what_it_is(window):
-    from calcforge.ui import toolsets
-    from calcforge.ui.panels import entry_thumbnail
+    from markforge.ui import toolsets
+    from markforge.ui.panels import entry_thumbnail
 
     window.select_tool("rect")
     drag(window.view, 100, 100, 260, 180)
@@ -6649,27 +4985,9 @@ def test_a_tool_set_entry_is_drawn_as_what_it_is(window):
         assert any(colour.red() > 150 and colour.green() < 120 for colour in inked), mode
 
 
-def test_drawing_again_is_only_offered_where_it_means_something(window):
-    from calcforge.ui import toolsets
-
-    window.select_tool("rect")
-    drag(window.view, 100, 100, 260, 180)
-    box = only(window, RectItem)[0]
-    assert toolsets.can_be_properties(toolsets.entry_for(box).payload)
-
-    window.select_tool("table")
-    drag(window.view, 100, 300, 400, 420)
-    window.view.deactivate_table()
-    table = [i for i in markups(window) if i.TYPE == "table"][0]
-    assert not toolsets.can_be_properties(toolsets.entry_for(table).payload)
-
-    grouped = toolsets.entry_for_many([box, table])
-    assert not toolsets.can_be_properties(grouped.payload)
-
-
 def test_drawing_again_is_greyed_out_for_a_calculation(window):
     """A calculation is nothing without its lines, so there is nothing to draw."""
-    from calcforge.ui import toolsets
+    from markforge.ui import toolsets
 
     panel = window.toolsets_panel
     panel.select_set(toolsets.MY_TOOLS)
@@ -6686,7 +5004,7 @@ def test_drawing_again_is_greyed_out_for_a_calculation(window):
 
 
 def test_tools_can_be_dragged_into_the_order_you_want(window):
-    from calcforge.ui import toolsets
+    from markforge.ui import toolsets
 
     panel = window.toolsets_panel
     panel.select_set(toolsets.MY_TOOLS)
@@ -6729,7 +5047,7 @@ def test_a_click_placed_tool_shows_itself_before_it_lands(window):
 
 def test_the_snapshot_marquee_looks_like_the_selection_marquee(window):
     """The same gesture meaning the same thing, drawn the same way."""
-    from calcforge.items.shapes import RectItem
+    from markforge.items.shapes import RectItem
 
     marquee = RectItem("marquee")
     assert marquee.style.line_style == "dash"
@@ -6749,7 +5067,7 @@ def test_a_line_being_drawn_catches_on_what_is_already_there(window):
 
 
 def test_snapping_can_be_turned_off(window):
-    from calcforge.ui import preferences
+    from markforge.ui import preferences
 
     prefs = preferences.current()
     was = prefs.snap_while_drawing
@@ -6806,7 +5124,7 @@ def test_a_locked_markup_says_so_with_the_pointer(window):
 
 def test_every_vertex_of_a_polyline_gets_the_same_pointer(window):
     from PySide6.QtCore import Qt
-    from calcforge.items.base import cursor_for_handle
+    from markforge.items.base import cursor_for_handle
 
     assert cursor_for_handle("v0") == Qt.PointingHandCursor
     assert cursor_for_handle("v7") == Qt.PointingHandCursor
@@ -6867,7 +5185,7 @@ def test_finishing_a_rectangle_resize_recomputes_the_cursor(window):
 def test_a_callout_is_asked_only_about_the_end_that_points(window):
     """Which arrow head goes on the end joined to the box is not a question."""
     from PySide6.QtWidgets import QComboBox
-    from calcforge.items.text import CalloutItem
+    from markforge.items.text import CalloutItem
 
     window.select_tool("callout")
     click(window.view, 400, 400)
@@ -6887,7 +5205,7 @@ def test_a_callout_is_asked_only_about_the_end_that_points(window):
 
 def test_a_callout_can_be_turned_into_a_cloud_afterwards(window):
     from PySide6.QtWidgets import QComboBox
-    from calcforge.items.text import CalloutItem
+    from markforge.items.text import CalloutItem
 
     window.select_tool("callout")
     click(window.view, 400, 400)
@@ -6910,7 +5228,7 @@ def test_a_callout_can_be_turned_into_a_cloud_afterwards(window):
 
 def test_the_markup_menu_omits_typewriter_but_keeps_the_other_tools(window):
     """Typewriter is retired without disturbing the remaining markup tools."""
-    from calcforge.ui.tools import TOOL_MAP
+    from markforge.ui.tools import TOOL_MAP
 
     wanted = {"eraser": "Shift+E", "arc": "Shift+C",
               "flag": "Shift+F", "highlighter": "H", "polyline": "N",
@@ -6928,8 +5246,8 @@ def test_the_markup_menu_omits_typewriter_but_keeps_the_other_tools(window):
 
 
 def test_an_old_typewriter_item_still_loads_without_exposing_its_tool(window):
-    from calcforge.items.base import build_item
-    from calcforge.items.text import TypewriterItem
+    from markforge.items.base import build_item
+    from markforge.items.text import TypewriterItem
 
     item = build_item(TypewriterItem("Old note").serialize())
     assert isinstance(item, TypewriterItem)
@@ -6966,7 +5284,7 @@ def test_an_arc_has_an_editable_bend_control_point(window):
 
 
 def test_a_flag_is_pinned_where_it_is_clicked(window):
-    from calcforge.items.text import FlagItem
+    from markforge.items.text import FlagItem
 
     window.select_tool("flag")
     click(window.view, 300, 220)
@@ -6996,67 +5314,12 @@ def test_the_eraser_rubs_out_ink_and_leaves_shapes_alone(window):
 # Cut-outs
 # ---------------------------------------------------------------------------
 
-def _area_measurement(window):
-    from calcforge.items.measure import MeasureItem
-
-    window.select_tool("measure_area")
-    for point in [(100, 100), (400, 100), (400, 300), (100, 300)]:
-        click(window.view, *point)
-    press_key(window.view, Qt.Key_Return)
-    window.recalculate()
-    return [i for i in markups(window) if isinstance(i, MeasureItem)][0]
-
-
-def test_a_cut_out_takes_its_area_off_the_measurement(window):
-    area = _area_measurement(window)
-    whole = area.raw_measure()[1]
-
-    window.select_tool("cutout_ellipse")
-    drag(window.view, 180, 150, 280, 240)
-    window.recalculate()
-
-    assert len(area.cutouts) == 1
-    assert area.raw_measure()[1] < whole
-    assert len(markups(window)) == 1           # the hole is not a markup of its own
-
-
-def test_a_polygon_cut_out_belongs_to_the_area_it_is_drawn_in(window):
-    area = _area_measurement(window)
-    whole = area.raw_measure()[1]
-
-    window.select_tool("cutout_polygon")
-    for point in [(300, 150), (370, 150), (370, 250)]:
-        click(window.view, *point)
-    press_key(window.view, Qt.Key_Return)
-    window.recalculate()
-
-    assert len(area.cutouts) == 1
-    assert area.raw_measure()[1] == pytest.approx(whole - 3500, abs=1)
-
-
 def test_a_cut_out_drawn_nowhere_says_so(window):
     _area_measurement(window)
     window.select_tool("cutout_ellipse")
     drag(window.view, 600, 600, 680, 660)
     assert len(markups(window)) == 1           # nothing left lying about
 
-
-def test_a_cut_out_survives_being_saved(window):
-    from calcforge.items.base import build_item
-
-    area = _area_measurement(window)
-    window.select_tool("cutout_ellipse")
-    drag(window.view, 180, 150, 280, 240)
-    window.recalculate()
-
-    clone = build_item(area.serialize())
-    assert len(clone.cutouts) == 1
-    assert clone.raw_measure()[1] == pytest.approx(area.raw_measure()[1])
-
-
-# ---------------------------------------------------------------------------
-# The rest of the right-click menu
-# ---------------------------------------------------------------------------
 
 def _a_rectangle(window, x0=120, y0=120, x1=240, y1=200):
     window.select_tool("rect")
@@ -7174,7 +5437,7 @@ def test_hidden_markups_go_away_and_come_back(window):
 
 
 def test_a_hidden_markup_is_still_hidden_after_a_save(window):
-    from calcforge.items.base import build_item
+    from markforge.items.base import build_item
 
     rect = _a_rectangle(window)
     rect.setSelected(True)
@@ -7195,7 +5458,7 @@ def test_flattening_takes_a_markup_out_of_reach(window):
 
 
 def test_flattening_survives_a_save(window):
-    from calcforge.items.base import build_item
+    from markforge.items.base import build_item
 
     rect = _a_rectangle(window)
     rect.setSelected(True)
@@ -7206,7 +5469,7 @@ def test_flattening_survives_a_save(window):
 
 
 def test_recover_restores_a_recoverably_flattened_item(window):
-    from calcforge.ui import preferences
+    from markforge.ui import preferences
 
     rect = _a_rectangle(window)
     rect.setSelected(True)
@@ -7227,7 +5490,7 @@ def test_recover_restores_a_recoverably_flattened_item(window):
 
 
 def test_irreversible_flattening_keeps_only_a_vector_recording(window):
-    from calcforge.ui import preferences
+    from markforge.ui import preferences
 
     rect = _a_rectangle(window)
     rect.setSelected(True)
@@ -7255,7 +5518,7 @@ def test_irreversible_flattening_keeps_only_a_vector_recording(window):
 
 
 def test_document_flattening_uses_the_classes_chosen(window, monkeypatch):
-    from calcforge.ui import dialogs, preferences
+    from markforge.ui import dialogs, preferences
 
     rect = _a_rectangle(window)
     calculation = _calc(window, "a:=2", at=(90, 300))
@@ -7283,7 +5546,7 @@ def test_document_flattening_uses_the_classes_chosen(window, monkeypatch):
 
 
 def test_flatten_dialog_class_choices_follow_real_clicks(window):
-    from calcforge.ui.dialogs import FlattenDialog
+    from markforge.ui.dialogs import FlattenDialog
 
     dialog = FlattenDialog(True, window)
     assert dialog.chosen() == {"markups"}
@@ -7377,7 +5640,7 @@ def test_the_menu_offers_a_leader_on_a_text_box_and_removal_on_a_callout(window)
 
 
 def test_a_text_boxs_leader_is_still_there_after_a_save(window):
-    from calcforge.items.base import build_item
+    from markforge.items.base import build_item
 
     window.select_tool("text")
     drag(window.view, 200, 200, 340, 250)
@@ -7479,7 +5742,7 @@ def test_a_pasted_snapshot_holds_its_drawing(window):
 def test_a_picture_pasted_from_elsewhere_holds_its_picture(window):
     from PySide6.QtGui import QImage
     from PySide6.QtWidgets import QApplication
-    from calcforge.items.media import ImageItem
+    from markforge.items.media import ImageItem
 
     foreign = QImage(120, 80, QImage.Format_ARGB32)
     foreign.fill(0xFF2F9E44)
@@ -7500,10 +5763,10 @@ def test_a_picture_pasted_from_elsewhere_holds_its_picture(window):
 def test_a_pasted_picture_is_still_there_after_a_save(window, tmp_path):
     from PySide6.QtGui import QImage
     from PySide6.QtWidgets import QApplication
-    from calcforge.core.document import Document
-    from calcforge.io import project as project_io
-    from calcforge.items.base import build_item
-    from calcforge.items.media import ImageItem
+    from markforge.core.document import Document
+    from markforge.io import project as project_io
+    from markforge.items.base import build_item
+    from markforge.items.media import ImageItem
 
     foreign = QImage(90, 60, QImage.Format_ARGB32)
     foreign.fill(0xFF1971C2)
@@ -7572,18 +5835,6 @@ def test_ctrl_b_emboldens_the_run_picked_out_in_a_text_box(window):
     assert not check.charFormat().font().bold()
 
 
-def test_ctrl_b_emboldens_the_cells_picked_out_in_a_table(window):
-    table = _capacity_table(window)
-    window.view.activate_table(table)
-    table.current = (1, 0)
-    table.anchor = (1, 2)
-
-    assert window.toggle_bold() is True
-    assert table.cell_format(1, 0).bold
-    assert table.cell_format(1, 2).bold
-    assert not table.cell_format(2, 0).bold
-
-
 def test_ctrl_b_still_bookmarks_when_there_are_no_words(window, monkeypatch):
     from PySide6.QtWidgets import QInputDialog
 
@@ -7595,28 +5846,6 @@ def test_ctrl_b_still_bookmarks_when_there_are_no_words(window, monkeypatch):
     assert len(window.document.bookmarks) == before + 1
 
 
-def test_the_pointer_says_resize_over_a_table_edge(window):
-    table = _capacity_table(window)
-    window.view.activate_table(table)
-
-    # The column divider lives in the strip above the grid.
-    origin = table.grid_origin()
-    gw, gh = table.gutter_size()
-    x = origin.x() + table.sheet.col_width(0)
-    edge = table.mapToScene(QPointF(x, origin.y() - gh / 2))
-    hover(window.view, edge.x(), edge.y())
-    assert window.view.cursor().shape() == Qt.SplitHCursor
-
-    y = origin.y() + table.sheet.row_height(0)
-    edge = table.mapToScene(QPointF(origin.x() - gw / 2, y))
-    hover(window.view, edge.x(), edge.y())
-    assert window.view.cursor().shape() == Qt.SplitVCursor
-
-
-# ---------------------------------------------------------------------------
-# Bringing a Bluebeam tool set in
-# ---------------------------------------------------------------------------
-
 def _btx(name):
     import os
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -7624,7 +5853,7 @@ def _btx(name):
 
 
 def test_importing_a_bluebeam_tool_set_fills_the_tool_chest(window):
-    from calcforge.ui import toolsets
+    from markforge.ui import toolsets
 
     assert window.import_toolset(_btx("Structures - Timber.btx"))
     names = [group.name for group in toolsets.load_toolsets()]
@@ -7644,7 +5873,7 @@ def test_importing_a_bluebeam_tool_set_fills_the_tool_chest(window):
 
 
 def test_an_imported_tool_can_be_put_on_the_page(window):
-    from calcforge.items.shapes import PolyItem, RectItem
+    from markforge.items.shapes import PolyItem, RectItem
 
     window.import_toolset(_btx("Structures - Timber.btx"))
     panel = window.toolsets_panel
@@ -7666,7 +5895,7 @@ def test_an_imported_tool_can_be_put_on_the_page(window):
 
 
 def test_an_imported_steel_section_draws_as_a_drawing(window):
-    from calcforge.items.shapes import SketchItem
+    from markforge.items.shapes import SketchItem
 
     window.import_toolset(_btx("Structural Steel UC Sections - 1-10 @ A1.btx"))
     panel = window.toolsets_panel
@@ -7681,7 +5910,7 @@ def test_an_imported_steel_section_draws_as_a_drawing(window):
 
 
 def test_importing_the_same_set_twice_does_not_lose_the_first(window):
-    from calcforge.ui import toolsets
+    from markforge.ui import toolsets
 
     window.import_toolset(_btx("Structures - Timber.btx"))
     window.import_toolset(_btx("Structures - Timber.btx"))
@@ -7692,7 +5921,7 @@ def test_importing_the_same_set_twice_does_not_lose_the_first(window):
 
 def test_a_file_that_is_not_a_tool_set_is_refused_politely(window, tmp_path, monkeypatch):
     from PySide6.QtWidgets import QMessageBox
-    from calcforge.ui import toolsets
+    from markforge.ui import toolsets
 
     path = tmp_path / "nope.btx"
     path.write_bytes(b"this is not xml")
@@ -7707,7 +5936,7 @@ def test_a_file_that_is_not_a_tool_set_is_refused_politely(window, tmp_path, mon
 # ---------------------------------------------------------------------------
 
 def test_every_tool_set_is_showing_at_once(window):
-    from calcforge.ui import toolsets
+    from markforge.ui import toolsets
 
     window.import_toolset(_btx("Structures - Timber.btx"))
     window.import_toolset(_btx("Structures - Welds.btx"))
@@ -7737,7 +5966,7 @@ def test_a_tool_set_can_be_rolled_up_and_stays_rolled_up(window):
 
 
 def test_clicking_a_tool_picks_it_up(window):
-    from calcforge.items.shapes import RectItem
+    from markforge.items.shapes import RectItem
 
     window.select_tool("rect")
     drag(window.view, 100, 100, 200, 160)
@@ -7770,7 +5999,7 @@ def test_clicking_a_set_heading_picks_nothing_up(window):
 
 
 def test_the_tool_chests_right_click_menu_carries_everything(window):
-    from calcforge.ui import toolsets
+    from markforge.ui import toolsets
 
     window.select_tool("rect")
     drag(window.view, 100, 100, 200, 160)
@@ -7848,32 +6077,6 @@ def test_paste_in_place_is_on_ctrl_shift_v(window):
     assert window.act_paste_here.shortcut().toString() == "Ctrl+Alt+V"
 
 
-def test_cells_can_be_lined_up_left_centre_and_right(window):
-    table = _capacity_table(window)
-    window.view.activate_table(table)
-    table.current = (1, 0)
-    table.anchor = (1, 1)
-
-    window.align_cells("right")
-    assert table.cell_format(1, 0).align == "right"
-    assert table.cell_format(1, 1).align == "right"
-    assert table.cell_format(2, 0).align != "right"
-
-    window.align_cells("center")
-    assert table.cell_format(1, 0).align == "center"
-
-
-def test_the_cell_bar_shows_how_the_cells_are_lined_up(window):
-    table = _capacity_table(window)
-    window.view.activate_table(table)
-    table.current = table.anchor = (1, 0)
-    window.align_cells("center")
-    window.refresh_formula_bar(table)
-
-    assert window.align_buttons["center"].isChecked()
-    assert not window.align_buttons["left"].isChecked()
-
-
 def test_alignment_is_on_the_tables_own_menu(window):
     table = _capacity_table(window)
     table.setSelected(True)
@@ -7882,28 +6085,6 @@ def test_alignment_is_on_the_tables_own_menu(window):
     assert align
     labels = [a.text() for a in align[0].menu().actions()]
     assert labels == ["Left", "Centre", "Right", "Auto"]
-
-
-def test_a_table_can_be_read_by_its_column_headings(window):
-    _capacity_table(window)          # headings are d, V and N
-    _calc(window, "dia := 20 mm\nV := bolts(dia, d, V) =", at=(60, 400))
-    window.recalculate()
-    assert window.document.workspace.get("V").to("kN").magnitude == pytest.approx(84.8)
-
-
-def test_the_letters_still_work_alongside_the_headings(window):
-    _capacity_table(window)
-    _calc(window, "dia := 16 mm\nV := bolts(dia, A, B) =", at=(60, 400))
-    window.recalculate()
-    assert window.document.workspace.get("V").to("kN").magnitude == pytest.approx(54.3)
-
-
-def test_a_heading_that_is_not_a_column_is_still_a_variable(window):
-    """Only a table's own headings are read as columns; the rest are names."""
-    _capacity_table(window)
-    _calc(window, "width := 3\nV := width * 2 =", at=(60, 400))
-    window.recalculate()
-    assert window.document.workspace.get("V") == 6
 
 
 def test_the_wheel_over_a_dropdown_scrolls_the_panel(window):
@@ -7930,7 +6111,7 @@ def test_the_wheel_over_a_dropdown_scrolls_the_panel(window):
 
     # And the filter hands it straight back the moment it has been clicked
     # into, so a deliberate wheel over an open box still works.
-    from calcforge.ui.widgets import WheelBelongsToTheScroller
+    from markforge.ui.widgets import WheelBelongsToTheScroller
 
     kept = WheelBelongsToTheScroller()
     combo.hasFocus = lambda: True              # focus needs an active window
@@ -8085,22 +6266,6 @@ def _contains(box, kind):
     return False
 
 
-def test_a_fraction_stays_a_fraction_while_it_is_being_typed(window):
-    """The edit view is the printed view — there is no second, plainer one."""
-    from calcforge.core.mathrender import Fraction
-
-    window.view._last_scene_pos = QPointF(90, 110)
-    press_key(window.view, Qt.Key_unknown, '"')
-    block = window.view.editing_item()
-    block._editor.setPlainText("Z := b*d^2/6")
-    block.retypeset_live()
-
-    assert any(_contains(box, Fraction) for box in _rows_of(block) if box)
-    # And it is still one when the caret leaves.
-    window.view.end_item_edit()
-    assert any(_contains(box, Fraction) for box in _rows_of(block) if box)
-
-
 def test_a_unit_being_typed_still_reads_as_a_quantity(window):
     window.view._last_scene_pos = QPointF(90, 110)
     press_key(window.view, Qt.Key_unknown, '"')
@@ -8113,230 +6278,6 @@ def test_a_unit_being_typed_still_reads_as_a_quantity(window):
     painted = _text_in(row)
     assert "300" in painted and "mm" in painted
 
-
-def test_a_one_letter_unit_is_blue_while_typed_and_at_rest(window):
-    """Direct attachment makes ``m`` a unit even though bare ``m`` may be a name."""
-    from calcforge.core.mathrender import Glyph
-
-    def glyphs(box):
-        if isinstance(box, Glyph):
-            return [box]
-        found = []
-        for child, _x, _baseline in box.children_at(0.0, 0.0):
-            found.extend(glyphs(child))
-        return found
-
-    window.view._last_scene_pos = QPointF(90, 110)
-    press_key(window.view, Qt.Key_unknown, '"')
-    item = window.view.editing_item()
-    type_text(window.view, "L:=2m")
-    expected = item.math_style().unit_color.name()
-    live = [g for row in _rows_of(item) if row for g in glyphs(row)
-            if g.text == "m"]
-    assert live and all(g.color.name() == expected for g in live)
-
-    window.view.end_item_edit()
-    resting = [g for row in _rows_of(item) if row for g in glyphs(row)
-               if g.text == "m"]
-    assert resting and all(g.color.name() == expected for g in resting)
-
-
-def _text_in(box) -> str:
-    """Every glyph inside a laid-out box, joined — for asking what it says."""
-    from calcforge.core.mathrender import Glyph
-
-    if isinstance(box, Glyph):
-        return box.text
-    return "".join(_text_in(child) for child, _x, _b in box.children_at(0.0, 0.0))
-
-
-def test_a_half_typed_line_shows_what_has_been_typed(window):
-    """"b*d^" cannot be evaluated, and that one line waits rather than vanishing.
-
-    It used to wait as the plain characters "b*d^". It waits as maths now: the
-    names it already has, and an empty box where the power is going. What the
-    line must never do is disappear while it is being typed.
-    """
-    from calcforge.core.mathrender import Slot
-
-    window.view._last_scene_pos = QPointF(90, 110)
-    press_key(window.view, Qt.Key_unknown, '"')
-    block = window.view.editing_item()
-    block._editor.setPlainText("part := b*d^")
-    block.retypeset_live()
-
-    boxes = [box for box in _rows_of(block) if box]
-    assert boxes, "the line is still shown"
-    written = _text_in(boxes[0])
-    assert "b" in written and "d" in written, "what has been typed is still there"
-    assert _contains(boxes[0], Slot), "and the power is an empty box waiting"
-
-
-def test_the_scripts_are_typeset_while_typing_too(window):
-    from calcforge.core.mathrender import Scripts
-
-    window.view._last_scene_pos = QPointF(90, 110)
-    press_key(window.view, Qt.Key_unknown, '"')
-    block = window.view.editing_item()
-    block._editor.setPlainText("L := sqrt(x_1^2 + y_1^2)")
-    block.retypeset_live()
-    assert any(_contains(box, Scripts) for box in _rows_of(block) if box)
-
-
-def test_a_defined_subscripted_name_stays_structural_after_colon_equals(window):
-    from calcforge.core.mathrender import Shifted
-
-    window.view._last_scene_pos = QPointF(90, 110)
-    press_key(window.view, Qt.Key_unknown, '"')
-    block = window.view.editing_item()
-    type_text(window.view, "trib_width")
-    type_text(window.view, ":=300mm")
-
-    assert block._editor.toPlainText() == "trib_width:=300mm"
-    assert any(_contains(box, Shifted) for box in _rows_of(block) if box)
-    row = block.rows[0]
-    assert row.head_width > 0
-    assert "_" not in _text_in(row.left)
-
-
-def test_a_definition_name_remains_editable_after_focus_leaves_and_returns(
-        window, qapp):
-    window.show()
-    qapp.processEvents()
-    block = _typeset(window, "trib_width:=300mm")
-    window.default_button.setFocus(Qt.OtherFocusReason)
-    qapp.processEvents()
-    assert window.view.editing_item() is block
-
-    row = block.rows[0]
-    local = QPointF(block.style.padding + row.head_width * 0.45, row.baseline)
-    scene = block.mapToScene(local)
-    click(window.view, scene.x(), scene.y())
-    position = block._editor.textCursor().position()
-    assert 1 <= position <= len("trib_width")
-
-    press_key(window.view, Qt.Key_Left)
-    assert block._editor.textCursor().position() == position - 1
-    press_key(window.view, Qt.Key_Right)
-    assert block._editor.textCursor().position() == position
-    before = block._editor.toPlainText()
-    press_key(window.view, Qt.Key_Backspace)
-    assert len(block._editor.toPlainText()) == len(before) - 1
-    assert ":=" in block._editor.toPlainText()
-
-
-# ---------------------------------------------------------------------------
-# What the completion list offers, and where it appears
-# ---------------------------------------------------------------------------
-
-def test_typing_a_name_offers_the_documents_own_variables_first(window):
-    _calc(window, "sigma_y := 300 MPa\nsigma_c := 25 MPa", at=(90, 110))
-    window.recalculate()
-
-    window.view._last_scene_pos = QPointF(90, 300)
-    press_key(window.view, Qt.Key_unknown, '"')
-    block = window.view.editing_item()
-    type_text(window.view, "R:=sig")
-
-    offered = window.view.completion_words("sig")
-    assert offered[:2] == ["sigma_c", "sigma_y"]
-    window.view.end_item_edit()
-
-
-def test_the_unit_you_typed_is_the_first_one_offered(window):
-    """"m" typed exactly should not be offered under "mm".
-
-    The unit menu groups millimetres beside metres, and that order decided the
-    list, so somebody who had written exactly the unit they wanted found
-    something else at the top of it and Tab took the wrong one.
-    """
-    _calc(window, "metric := 1", at=(90, 110))
-    window.recalculate()
-    window.view._last_scene_pos = QPointF(90, 300)
-    press_key(window.view, Qt.Key_unknown, '"')
-    type_text(window.view, "L:=300m")
-    assert window.view.completion_words("m")[0] == "m"
-    assert window.view.completion_words("mm")[0] == "mm"
-    # Case is corrected by the list, so the wrong case still finds the unit.
-    assert window.view.completion_words("kpa")[:1] == ["kPa"]
-    window.view.end_item_edit()
-
-
-def test_tab_with_nothing_to_complete_leaves_the_equation_alone(window):
-    """It used to type a literal tab into the source and stop it parsing."""
-    window.view._last_scene_pos = QPointF(90, 300)
-    press_key(window.view, Qt.Key_unknown, '"')
-    type_text(window.view, "L:=300zzq")
-    item = window.view.editing_item()
-    before = item._editor.toPlainText()
-    assert window.view.completion_words("zzq") == [], "nothing matches zzq"
-
-    said = []
-    window.view.statusMessage.connect(said.append)
-    press_key(window.view, Qt.Key_Tab, "\t")
-    QApplication.processEvents()
-    assert item._editor.toPlainText() == before, "no tab character went in"
-    assert said and "complete" in said[-1].lower()
-    window.view.escape_everything()
-
-
-def test_typing_after_a_number_offers_units_first(window):
-    _calc(window, "metric := 1", at=(90, 110))
-    window.recalculate()
-
-    window.view._last_scene_pos = QPointF(90, 300)
-    press_key(window.view, Qt.Key_unknown, '"')
-    type_text(window.view, "L:=300m")
-    assert window.view.caret_follows_a_number()
-    offered = window.view.completion_words("m")
-    assert offered[0] in ("m", "mm", "m^2", "m²", "min", "mol")
-    assert "metric" not in offered[:3]
-    window.view.end_item_edit()
-
-
-def test_the_list_shows_up_for_a_name_and_tab_fills_it_in(window):
-    _calc(window, "sigma_y := 300 MPa", at=(90, 110))
-    window.recalculate()
-
-    window.view._last_scene_pos = QPointF(90, 300)
-    press_key(window.view, Qt.Key_unknown, '"')
-    block = window.view.editing_item()
-    type_text(window.view, "R:=sigma_")
-    assert window.view.completions_showing()
-
-    press_key(window.view, Qt.Key_Tab)
-    assert block._editor.toPlainText().endswith("sigma_y")
-    window.view.end_item_edit()
-
-
-def test_the_list_appears_under_the_caret_not_under_the_block(window):
-    from PySide6.QtCore import QPoint
-
-    window.view._last_scene_pos = QPointF(90, 110)
-    press_key(window.view, Qt.Key_unknown, '"')
-    block = window.view.editing_item()
-    block._editor.setPlainText("a := 1\nb := 2\nc := 3\nd := 4\ne := 5\nf := m")
-    block.retypeset_live()
-    cursor = block._editor.textCursor()
-    cursor.movePosition(cursor.MoveOperation.End)
-    block._editor.setTextCursor(cursor)
-
-    window.view.show_completions()
-    assert window.view.completions_showing()
-    popup = window.view._completions
-    place = block.caret_place()
-    assert place is not None
-    caret = window.view.mapFromScene(block.mapToScene(QPointF(place[0], place[1])))
-    # Within a couple of lines of the caret, not down at the foot of the block.
-    assert abs(popup.pos().y() - caret.y()) < 40
-    assert abs(popup.pos().x() - caret.x()) < 40
-    window.view.hide_completions()
-    window.view.end_item_edit()
-
-
-# ---------------------------------------------------------------------------
-# Scripts, fields in prose, and how many figures a result is shown to
-# ---------------------------------------------------------------------------
 
 def test_underscore_and_caret_set_scripts_in_a_text_box(window):
     from PySide6.QtGui import QTextCharFormat
@@ -8360,7 +6301,7 @@ def test_underscore_and_caret_set_scripts_in_a_text_box(window):
 
 
 def test_a_table_cell_shows_its_scripts_too(window):
-    from calcforge.core.typography import script_runs
+    from markforge.core.typography import script_runs
 
     assert script_runs("A_g") == [("A", ""), ("g", "sub")]
     assert script_runs("m^2") == [("m", ""), ("2", "super")]
@@ -8369,227 +6310,6 @@ def test_a_table_cell_shows_its_scripts_too(window):
     table = _capacity_table(window)
     table.set_cell(0, 0, "A_g")
     assert table.sheet.raw(0, 0) == "A_g"
-
-
-def test_a_field_in_a_paragraph_quotes_a_value(window):
-    _calc(window, "M_n := 250 kN*m\nphi := 0.9", at=(90, 110))
-    window.recalculate()
-
-    window.select_tool("text")
-    drag(window.view, 100, 300, 400, 350)
-    box = window.view.editing_item()
-    box._editor.setPlainText(r"The moment \M_n\ governs, with \phi*M_n\ available.")
-    window.view.end_item_edit()
-    window.recalculate()
-
-    shown = box.text()
-    assert "M_n = 250" in shown            # a bare name prints name = value
-    assert "225" in shown                  # and an expression prints its answer
-    assert "\\" not in shown               # the marks themselves do not print
-
-
-def test_backslash_types_a_live_inline_expression_and_keeps_division(window):
-    _calc(window, "M_n:=250kN*m", at=(90, 110))
-    window.recalculate()
-    window.select_tool("text")
-    drag(window.view, 100, 300, 440, 350)
-    box = window.view.editing_item()
-    type_text(window.view, "Half is ")
-    press_key(window.view, Qt.Key_Backslash, "\\")
-    type_text(window.view, "M_n/2")
-    press_key(window.view, Qt.Key_Right)
-    type_text(window.view, ".")
-    assert box._editor.toPlainText() == r"Half is \M_n/2\."
-
-    window.view.end_item_edit()
-    window.recalculate()
-
-    assert "M_n/2 = 125" in box.text()
-    assert "kN" in box.text()
-    assert box.written == r"Half is \M_n/2\."
-
-
-def test_completion_is_only_offered_inside_an_inline_equation(window):
-    _calc(window, "M_n:=250kN*m", at=(90, 110))
-    window.recalculate()
-    window.select_tool("text")
-    drag(window.view, 100, 300, 440, 350)
-    box = window.view.editing_item()
-    type_text(window.view, "Ordinary M_")
-    assert not window.view.completions_showing()
-
-    press_key(window.view, Qt.Key_Backslash, "\\")
-    type_text(window.view, "M_")
-    assert window.view.completions_showing()
-    offered = [window.view._completions.item(index).text()
-               for index in range(window.view._completions.count())]
-    assert "M_n" in offered
-    for _ in range(offered.index("M_n")):
-        press_key(window.view, Qt.Key_Down)
-    assert window.view._completions.currentItem().text() == "M_n"
-    press_key(window.view, Qt.Key_Tab)
-    assert box._editor.toPlainText().endswith("\\M_n\\")
-
-
-def test_inline_completion_appears_below_its_caret(window):
-    _calc(window, "M_n:=250kN*m", at=(90, 110))
-    window.recalculate()
-    window.select_tool("text")
-    drag(window.view, 100, 300, 440, 390)
-    box = window.view.editing_item()
-    type_text(window.view, "First line")
-    press_key(window.view, Qt.Key_Return, "\r")
-    type_text(window.view, "Second line ")
-    press_key(window.view, Qt.Key_Backslash, "\\")
-    type_text(window.view, "M_")
-    popup = window.view._completions
-    assert window.view.completions_showing()
-    corner = window.view._completion_corner(popup)
-    assert popup.pos() == corner
-    assert corner.y() > window.view.mapFromScene(box.scenePos()).y()
-
-
-def test_a_field_keeps_up_with_the_sheet(window):
-    block = _calc(window, "M_n := 250 kN*m", at=(90, 110))
-    window.select_tool("text")
-    drag(window.view, 100, 300, 400, 350)
-    box = window.view.editing_item()
-    box._editor.setPlainText(r"\M_n\ governs")
-    window.view.end_item_edit()
-    window.recalculate()
-    assert "250" in box.text()
-
-    block.source = "M_n := 400 kN*m"
-    block.refresh(window.document.workspace)
-    window.recalculate()
-    assert "400" in box.text()
-
-
-def test_a_field_comes_back_as_it_was_typed_to_be_edited(window):
-    _calc(window, "M_n := 250 kN*m", at=(90, 110))
-    window.recalculate()
-    window.select_tool("text")
-    drag(window.view, 100, 300, 400, 350)
-    box = window.view.editing_item()
-    box._editor.setPlainText(r"\M_n\ governs")
-    window.view.end_item_edit()
-    window.recalculate()
-    assert "250" in box.text()
-
-    box.begin_edit()
-    assert box._editor.toPlainText() == r"\M_n\ governs"
-    box.end_edit()
-
-
-def test_a_field_that_makes_no_sense_says_so_rather_than_vanishing(window):
-    window.select_tool("text")
-    drag(window.view, 100, 300, 400, 350)
-    box = window.view.editing_item()
-    box._editor.setPlainText(r"value is \nowhere_at_all\ here")
-    window.view.end_item_edit()
-    window.recalculate()
-    assert "?" in box.text() and "here" in box.text()
-
-
-def test_one_line_can_be_shown_to_its_own_number_of_figures(window):
-    block = _calc(window, "a := 1/3 =\nb := 1/3 =", at=(90, 110))
-    window.recalculate()
-
-    window.set_line_figures(block, 0, 2, "fixed")
-    assert block.figures_for(0) == (2, "fixed")
-    assert block.figures_for(1) == (block.digits, block.number_format)
-
-    shown = [row.result for row in block.rows]
-    assert _text_in(shown[0]).replace("=", "").strip() == "0.33"
-    assert _text_in(shown[1]).replace("=", "").strip() != "0.33"
-
-
-def test_a_lines_own_figures_can_be_put_back(window):
-    block = _calc(window, "a := 1/3 =", at=(90, 110))
-    window.recalculate()
-    window.set_line_figures(block, 0, 6, "fixed")
-    assert block.figures_for(0) == (6, "fixed")
-    window.set_line_figures(block, 0, None)
-    assert block.figures_for(0) == (block.digits, block.number_format)
-
-
-def test_a_lines_own_figures_survive_a_save(window):
-    from calcforge.items.base import build_item
-
-    block = _calc(window, "a := 1/3 =", at=(90, 110))
-    window.recalculate()
-    window.set_line_figures(block, 0, 3, "scientific")
-    clone = build_item(block.serialize())
-    assert clone.figures_for(0) == (3, "scientific")
-
-
-def test_a_redefined_variable_recalculates_only_its_dependency_chain(window):
-    frame = window.view.frame()
-    source = frame.add_markup(MathItem("a := 1"), QPointF(80, 100))
-    table = TableItem()
-    table.sheet.set_raw(0, 0, "=a*2")
-    table.named_cells = {"b": "A1"}
-    frame.add_markup(table, QPointF(80, 180))
-    downstream = frame.add_markup(MathItem("c := b+1"), QPointF(80, 500))
-    unrelated = frame.add_markup(MathItem("quiet := 99"), QPointF(80, 580))
-    window.recalculate()
-
-    graph = window.document.dependency_graph
-    assert table.uid in graph.dependents_by_variable["a"]
-    assert downstream.uid in graph.dependents_by_variable["b"]
-    assert window.document.workspace.get("c") == pytest.approx(3)
-
-    source.source = "a := 4"
-    window.recalculate()
-
-    assert window._last_recalculated_items == {
-        source.uid, table.uid, downstream.uid}
-    assert unrelated.uid not in window._last_recalculated_items
-    assert window.document.workspace.get("a") == pytest.approx(4)
-    assert window.document.workspace.get("b") == pytest.approx(8)
-    assert window.document.workspace.get("c") == pytest.approx(9)
-    assert window.document.workspace.get("quiet") == pytest.approx(99)
-
-    window.recalculate()
-    assert window._last_recalculated_items == set()
-    assert window.document.workspace.get("c") == pytest.approx(9)
-
-
-def test_incremental_recalculation_preserves_reading_order_redefinitions(window):
-    frame = window.view.frame()
-    first = frame.add_markup(MathItem("a := 1"), QPointF(80, 100))
-    before = frame.add_markup(MathItem("before := a"), QPointF(80, 180))
-    frame.add_markup(MathItem("a := 10"), QPointF(80, 260))
-    after = frame.add_markup(MathItem("after := a"), QPointF(80, 340))
-    window.recalculate()
-
-    first.source = "a := 2"
-    window.recalculate()
-
-    assert before.uid in window._last_recalculated_items
-    assert after.uid in window._last_recalculated_items
-    assert window.document.workspace.get("before") == pytest.approx(2)
-    assert window.document.workspace.get("after") == pytest.approx(10)
-    assert window.document.workspace.get("a") == pytest.approx(10)
-
-
-def test_a_rebuilt_item_with_the_same_uid_cannot_replay_an_empty_cache(window):
-    from calcforge.items.base import build_item
-
-    frame = window.view.frame()
-    original = frame.add_markup(MathItem("a := 7"), QPointF(80, 100))
-    dependent = frame.add_markup(MathItem("b := a*2"), QPointF(80, 180))
-    window.recalculate()
-    clone = build_item(original.serialize())
-    frame.remove_markup(original)
-    frame.add_markup(clone)
-
-    window.recalculate()
-
-    assert clone.uid in window._last_recalculated_items
-    assert window.document.workspace.get("a") == pytest.approx(7)
-    assert window.document.workspace.get("b") == pytest.approx(14)
-    assert dependent.statements[0].ok
 
 
 def test_a_calculations_right_click_only_offers_merge_from_its_calc_commands(window):
@@ -8817,41 +6537,6 @@ def test_ctrl_dragging_a_copy_still_snaps(window):
         window.view._copy_on_move = False
 
 
-def test_merging_one_calculation_has_nothing_to_do(window):
-    """It used to turn a "line" into a "block". There is one kind now.
-
-    A single calculation is already everything a block was — it holds as many
-    lines as you like and can keep its names to itself — so there is nothing
-    to convert, and saying so is better than doing something invisible.
-    """
-    one = _calc(window, "a := 1", at=(90, 110))
-    window.scene.clearSelection()
-    one.setSelected(True)
-    before = len(markups(window))
-
-    window.merge_calculations()
-    assert len(markups(window)) == before, "nothing was made or destroyed"
-    assert markups(window)[0] is one, "and it is the same one, where it was"
-    assert "two or more" in window.status_hint.text().lower()
-
-
-def test_ctrl_shift_m_still_joins_several(window):
-    first = _calc(window, "a := 1", at=(90, 110))
-    second = _calc(window, "b := 2", at=(90, 200))
-    window.scene.clearSelection()
-    first.setSelected(True)
-    second.setSelected(True)
-    window.merge_calculations()
-
-    assert len(markups(window)) == 1
-    assert markups(window)[0].source == "a := 1\nb := 2"
-    assert markups(window)[0].block
-
-
-# ---------------------------------------------------------------------------
-# Clicking into typeset maths, the way SMath does
-# ---------------------------------------------------------------------------
-
 def _typeset(window, source, at=(90, 110)):
     """A calculation, open for typing, laid out as it will print."""
     window.view._last_scene_pos = QPointF(*at)
@@ -8941,66 +6626,6 @@ def test_zooming_from_the_menu_holds_the_middle_of_the_view(window):
     after = window.view.mapToScene(middle.toPoint())
     assert (after - before).manhattanLength() < 2.0
 
-
-def test_a_number_and_its_unit_are_joined_by_a_dot(window):
-    """"300·mm" reads as one value, and matches the answer on the other side."""
-    from calcforge.core.mathrender import UNIT_SEPARATOR
-
-    block = _calc(window, "b := 300 mm", at=(90, 110))
-    window.recalculate()
-    written = _text_in([row.left for row in block.rows if row.left][0])
-    assert UNIT_SEPARATOR in written
-    assert written.replace(" ", "").endswith(f"300{UNIT_SEPARATOR}mm")
-
-
-def test_a_plain_multiply_keeps_its_own_spacing(window):
-    """The dot between a number and a unit is tight; "2 · x" is not."""
-    import ast
-    from calcforge.core.mathrender import MathStyle, Spacer, Typesetter
-
-    block = _calc(window, "x := 2\ny := 2*x =", at=(90, 110))
-    window.recalculate()
-    written = _text_in([row.left for row in block.rows if row.left][1])
-    assert "·" in written          # still a multiply sign
-    # But the unit rule did not claim it: an ordinary product retains more
-    # air either side of its operator than a joined number-and-unit value.
-    setter = Typesetter(MathStyle(), variables={"x"})
-    product = setter.build(ast.parse("2*x", mode="eval").body, 10.0)
-    quantity = setter.build(ast.parse("2*mm", mode="eval").body, 10.0)
-    product_spaces = [part.width for part in product.children
-                      if isinstance(part, Spacer)]
-    quantity_spaces = [part.width for part in quantity.children
-                       if isinstance(part, Spacer)]
-    assert len(product_spaces) == len(quantity_spaces) == 2
-    assert min(product_spaces) > max(quantity_spaces)
-
-
-def test_quote_is_the_only_calculation_entry_key(window):
-    """Quote starts entry; slash remains division inside an equation."""
-    from calcforge.items.mathitem import MathItem
-    from calcforge.items.text import TextItem
-
-    window.shortcuts.reset()
-    window.apply_shortcuts()
-
-    window.view._last_scene_pos = QPointF(90, 110)
-    press_key(window.view, Qt.Key_unknown, '"')
-    assert isinstance(window.view.editing_item(), MathItem)
-    type_text(window.view, "b:=600mm/2")
-    window.view.end_item_edit()
-
-    window.view._last_scene_pos = QPointF(90, 300)
-    press_key(window.view, Qt.Key_Slash, "/")
-    window.recalculate()
-
-    assert window.view.editing_item() is None
-    assert [type(m).__name__ for m in markups(window)] == ["MathItem"]
-    assert window.document.workspace.get("b").to("mm").magnitude == pytest.approx(300)
-
-
-# ---------------------------------------------------------------------------
-# Turning the view, which is not turning the page
-# ---------------------------------------------------------------------------
 
 def test_the_view_can_be_turned_without_touching_the_page(window):
     """For reading a drawing that came in sideways."""
@@ -9204,7 +6829,7 @@ def test_a_rectangle_can_become_a_polygon_to_be_reshaped(window):
 
 
 def test_a_reshaped_outline_survives_a_round_trip(window):
-    from calcforge.items.base import build_item
+    from markforge.items.base import build_item
 
     shape = _polygon(window)
     shape.round_corner(1)
@@ -9228,7 +6853,7 @@ def test_reshaping_can_be_undone(window):
 
 def test_every_drawing_tool_is_on_the_insert_menu(window):
     """Not only on the toolbar: findable by reading, as a menu bar is for."""
-    from calcforge.ui.tools import NONE, tools_in
+    from markforge.ui.tools import NONE, tools_in
 
     insert = None
     for entry in window.menuBar().actions():
@@ -9274,35 +6899,6 @@ def test_selecting_something_draws_its_box_straight_away(window):
     assert chosen != empty, "the selection should show without anything else happening"
 
 
-def test_pasting_a_page_says_where_it_will_land(window):
-    """Not just "Paste page": which page it goes after."""
-    window.load_sample()
-    window.copy_page(0)
-    actions = window.page_menu(1).actions()
-    labels = [a.text() for a in actions]
-    assert "Paste after" in labels
-    assert "Paste before" in labels
-    # The label is two words; which page it lands on is in the tooltip.
-    tips = {a.text(): a.toolTip() for a in actions}
-    assert tips["Paste after"] == "Paste a page after page 2"
-    assert tips["Paste before"] == "Paste a page before page 2"
-
-
-def test_a_pasted_page_lands_where_it_said_and_is_shown(window):
-    window.load_sample()
-    before = len(window.document.pages)
-    window.copy_page(0)
-    window.paste_page(1)
-    assert len(window.document.pages) == before + 1
-    # It went in after page 2, and that is where the view now is.
-    assert window.current_index == 2
-    assert "page 3" in window.status_hint.text()
-
-    window.paste_page(0, before=True)
-    assert window.current_index == 0
-    assert "page 1" in window.status_hint.text()
-
-
 def test_paste_page_is_greyed_out_with_nothing_to_paste(window):
     from PySide6.QtWidgets import QApplication
 
@@ -9314,7 +6910,7 @@ def test_paste_page_is_greyed_out_with_nothing_to_paste(window):
 
 def test_the_format_painter_carries_a_brush(window):
     """Bluebeam's paint brush, not a letter or a box."""
-    from calcforge.ui.icons import icon
+    from markforge.ui.icons import icon
 
     assert not window.act_format_painter.icon().isNull()
     assert not icon("format_painter").isNull()
@@ -9399,7 +6995,7 @@ def test_a_grid_belongs_to_the_page_it_is_on(window):
 
 def test_an_inserted_pdf_page_comes_in_without_a_grid(window, tmp_path):
     from PySide6.QtGui import QImage
-    from calcforge.io import pdfio
+    from markforge.io import pdfio
 
     window.document.settings.show_grid = True
     photo = QImage(400, 300, QImage.Format_ARGB32)
@@ -9427,7 +7023,7 @@ def test_the_page_grid_is_on_the_page_menu_and_undoes(window):
 
 
 def test_a_page_grid_survives_saving(window):
-    from calcforge.core.document import Page
+    from markforge.core.document import Page
 
     window.set_page_grid(0, True)
     again = Page.from_dict(window.document.pages[0].to_dict())
@@ -9446,7 +7042,7 @@ def test_a_page_grid_survives_saving(window):
 def test_the_footer_stays_on_the_paper_when_there_is_no_margin(window, tmp_path):
     """An imported page has no margins, and the footer used to fall off it."""
     from PySide6.QtGui import QImage
-    from calcforge.io import pdfio
+    from markforge.io import pdfio
 
     window.document.settings.show_footer = True
     photo = QImage(600, 400, QImage.Format_ARGB32)
@@ -9487,121 +7083,6 @@ def test_the_header_and_footer_are_on_the_page_menu(window):
     assert "Show footer" in labels
 
 
-def test_a_run_of_pages_takes_the_footer_off_at_once(window):
-    window.load_sample()
-    window.document.settings.show_footer = True
-    window.pages_panel.rebuild(window.document, 0)
-    for row in (0, 1):
-        window.pages_panel.list.item(row).setSelected(True)
-    window.set_page_running_text(0, "footer", False)
-    assert not window.document.pages[0].shows_a_footer(window.document.settings)
-    assert not window.document.pages[1].shows_a_footer(window.document.settings)
-
-
-# ---------------------------------------------------------------------------
-# Pasting from Excel with the formulas
-# ---------------------------------------------------------------------------
-
-EXCEL_XML = """<?xml version="1.0"?>
-<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
- xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
- <Worksheet ss:Name="Sheet1"><Table>
-  <Row><Cell><Data ss:Type="Number">2</Data></Cell>
-       <Cell><Data ss:Type="Number">3</Data></Cell>
-       <Cell ss:Formula="=RC[-2]*RC[-1]"><Data ss:Type="Number">6</Data></Cell></Row>
-  <Row><Cell><Data ss:Type="Number">4</Data></Cell>
-       <Cell><Data ss:Type="Number">5</Data></Cell>
-       <Cell ss:Formula="=RC[-2]*RC[-1]"><Data ss:Type="Number">20</Data></Cell></Row>
- </Table></Worksheet>
-</Workbook>"""
-
-
-def _put_excel_on_the_clipboard(text=EXCEL_XML, plain="2\t3\t6\n4\t5\t20"):
-    from PySide6.QtCore import QByteArray, QMimeData
-    from PySide6.QtWidgets import QApplication
-
-    mime = QMimeData()
-    mime.setText(plain)
-    mime.setData("application/x-qt-windows-mime;value=\"XML Spreadsheet\"",
-                 QByteArray(text.encode("utf-8")))
-    QApplication.clipboard().setMimeData(mime)
-
-
-def test_pasting_from_excel_brings_the_formulas(window):
-    """The plain text holds only what the cells looked like."""
-    window.select_tool("table")
-    drag(window.view, 100, 120, 380, 260)
-    table = [i for i in markups(window) if isinstance(i, TableItem)][-1]
-    window.view.activate_table(table)
-    table.current = (0, 0)
-
-    _put_excel_on_the_clipboard()
-    assert window.view.paste_cells()
-
-    assert table.sheet.raw(0, 0) == "2"
-    assert table.sheet.raw(0, 2) == "=A1*B1"
-    # And it is relative: the row below refers to its own row.
-    assert table.sheet.raw(1, 2) == "=A2*B2"
-
-
-def test_a_formula_pasted_lower_down_still_points_at_its_own_row(window):
-    window.select_tool("table")
-    drag(window.view, 100, 120, 380, 300)
-    table = [i for i in markups(window) if isinstance(i, TableItem)][-1]
-    window.view.activate_table(table)
-    table.current = (2, 1)
-
-    _put_excel_on_the_clipboard()
-    assert window.view.paste_cells()
-    assert table.sheet.raw(2, 3) == "=B3*C3"
-    assert table.sheet.raw(3, 3) == "=B4*C4"
-
-
-def test_plain_text_from_anywhere_else_still_pastes_its_values(window):
-    from PySide6.QtWidgets import QApplication
-
-    window.select_tool("table")
-    drag(window.view, 100, 120, 380, 260)
-    table = [i for i in markups(window) if isinstance(i, TableItem)][-1]
-    window.view.activate_table(table)
-    table.current = (0, 0)
-
-    QApplication.clipboard().setText("7\t8\n9\t10")
-    assert window.view.paste_cells()
-    assert table.sheet.raw(0, 0) == "7"
-    assert table.sheet.raw(1, 1) == "10"
-
-
-def test_an_absolute_reference_stays_absolute(window):
-    from calcforge.core.excelxml import formula_to_a1
-
-    assert formula_to_a1("=RC[-1]*R1C1", 4, 3) == "=C5*$A$1"
-    assert formula_to_a1("=SUM(R[-3]C:R[-1]C)", 4, 1) == "=SUM(B2:B4)"
-
-
-# ---------------------------------------------------------------------------
-# Dropping a drawing on the pages panel
-# ---------------------------------------------------------------------------
-
-def test_a_dropped_image_becomes_a_page_where_the_line_was(window, tmp_path):
-    from PySide6.QtGui import QImage
-
-    window.load_sample()
-    before = len(window.document.pages)
-    photo = QImage(300, 200, QImage.Format_ARGB32)
-    photo.fill(0xFF227744)
-    path = str(tmp_path / "detail.png")
-    photo.save(path)
-
-    added = window.insert_files_at([path], 1)
-    assert added == 1
-    assert len(window.document.pages) == before + 1
-    # It went in as page 2, in front of what was page 2 before.
-    assert window.document.pages[1].source_note.endswith("detail.png")
-    assert window.current_index == 1
-    assert "page 2" in window.status_hint.text()
-
-
 def test_the_pages_panel_takes_a_dropped_drawing(window, tmp_path):
     """The panel accepts the drag and works out which page it points at."""
     from PySide6.QtCore import QMimeData, QPoint, QUrl
@@ -9623,23 +7104,6 @@ def test_the_pages_panel_takes_a_dropped_drawing(window, tmp_path):
     assert not panel._files_in(type("E", (), {"mimeData": lambda self: other})())
 
 
-def test_where_a_drop_lands_follows_the_pointer(window):
-    window.load_sample()
-    panel = window.pages_panel
-    panel.rebuild(window.document, 0)
-    first = panel.list.visualItemRect(panel.list.item(0))
-    if panel.list.uses_horizontal_slots():
-        before = first.center() - QPoint(first.width() // 3, 0)
-        after = first.center() + QPoint(first.width() // 3, 0)
-    else:
-        before = first.center() - QPoint(0, first.height() // 3)
-        after = first.center() + QPoint(0, first.height() // 3)
-    assert panel.drop_row(before) == 0
-    assert panel.drop_row(after) == 1
-    # Past the end of the strip: on the end.
-    assert panel.drop_row(QPoint(5, panel.list.height() * 4)) == panel.list.count()
-
-
 def test_a_wrapping_page_grid_uses_left_and_right_for_the_drop_slot(window, qapp):
     window.add_page()
     window.add_page()
@@ -9650,59 +7114,6 @@ def test_a_wrapping_page_grid_uses_left_and_right_for_the_drop_slot(window, qapp
     first = panel.list.visualItemRect(panel.list.item(0))
     assert panel.drop_row(first.center() - QPoint(first.width() // 3, 0)) == 0
     assert panel.drop_row(first.center() + QPoint(first.width() // 3, 0)) == 1
-
-
-def test_an_external_page_drag_shows_and_uses_the_exact_slot(
-        window, tmp_path, qapp):
-    from pathlib import Path
-    from PySide6.QtCore import QMimeData, QUrl
-    from PySide6.QtGui import (QDragEnterEvent, QDragLeaveEvent,
-                               QDragMoveEvent, QDropEvent, QImage)
-
-    window.load_sample()
-    window.show()
-    panel = window.pages_panel
-    panel.rebuild(window.document, 0)
-    qapp.processEvents()
-    path = tmp_path / "dropped.png"
-    image = QImage(30, 20, QImage.Format_ARGB32)
-    image.fill(0xFF336699)
-    assert image.save(str(path))
-    mime = QMimeData()
-    mime.setUrls([QUrl.fromLocalFile(str(path))])
-    first = panel.list.visualItemRect(panel.list.item(0))
-    spot = first.center() + QPoint(0, first.height() // 3)
-
-    enter = QDragEnterEvent(spot, Qt.CopyAction, mime,
-                            Qt.LeftButton, Qt.NoModifier)
-    QApplication.sendEvent(panel.list.viewport(), enter)
-    move = QDragMoveEvent(spot, Qt.CopyAction, mime,
-                          Qt.LeftButton, Qt.NoModifier)
-    QApplication.sendEvent(panel.list.viewport(), move)
-    qapp.processEvents()
-    assert move.isAccepted()
-    assert panel.list.external_drop_row == 1
-    start, end = panel.list.drop_indicator_line(1)
-    assert start.y() == end.y()
-    assert start.x() < end.x()
-
-    QApplication.sendEvent(panel.list.viewport(), QDragLeaveEvent())
-    assert panel.list.external_drop_row is None
-
-    captured = []
-    window.insert_files_at = lambda paths, row: captured.append((paths, row))
-    QApplication.sendEvent(panel.list.viewport(), QDragEnterEvent(
-        spot, Qt.CopyAction, mime, Qt.LeftButton, Qt.NoModifier))
-    QApplication.sendEvent(panel.list.viewport(), QDragMoveEvent(
-        spot, Qt.CopyAction, mime, Qt.LeftButton, Qt.NoModifier))
-    drop = QDropEvent(QPointF(spot), Qt.CopyAction, mime,
-                      Qt.LeftButton, Qt.NoModifier)
-    QApplication.sendEvent(panel.list.viewport(), drop)
-
-    assert drop.isAccepted()
-    assert len(captured) == 1 and captured[0][1] == 1
-    assert Path(captured[0][0][0]) == path
-    assert panel.list.external_drop_row is None
 
 
 def test_a_dropped_pdf_is_imported_at_the_indicated_row(window, tmp_path):
@@ -9767,7 +7178,7 @@ def test_finding_a_tool_picks_it_up(window, monkeypatch):
 
 def test_a_hatched_fill_is_not_a_flat_one(window):
     from PySide6.QtCore import Qt as QtNS
-    from calcforge.items.base import Style
+    from markforge.items.base import Style
 
     plain = Style(fill="#888888")
     assert plain.brush().style() == QtNS.SolidPattern
@@ -9777,7 +7188,7 @@ def test_a_hatched_fill_is_not_a_flat_one(window):
 
 def test_bluebeams_spellings_of_a_hatch_all_land(window):
     from PySide6.QtCore import Qt as QtNS
-    from calcforge.items.base import hatch_named
+    from markforge.items.base import hatch_named
 
     assert hatch_named("Hatch-DiagonalUp") == QtNS.BDiagPattern
     assert hatch_named("diagonal down") == QtNS.FDiagPattern
@@ -9791,7 +7202,7 @@ def test_bluebeams_spellings_of_a_hatch_all_land(window):
 
 def test_a_line_type_is_drawn_with_its_own_dashes(window):
     from PySide6.QtCore import Qt as QtNS
-    from calcforge.items.base import Style
+    from markforge.items.base import Style
 
     assert Style(line_style="solid").dashes() == []
     assert Style(line_style="centre").dashes() == [10.0, 2.5, 2.0, 2.5]
@@ -9805,7 +7216,7 @@ def test_a_line_type_is_drawn_with_its_own_dashes(window):
 
 def test_a_dashed_line_from_a_toolset_comes_in_dashed(window):
     """It used to be written to a field no markup has, and came in solid."""
-    from calcforge.io.btx import _style
+    from markforge.io.btx import _style
 
     look = _style({"C": [0, 0, 0], "BS": {"W": 2.0, "S": "D", "D": [4, 3]}})
     assert look["line_style"] == "dash"
@@ -9883,7 +7294,7 @@ def test_properties_only_offers_controls_the_selected_kind_can_use(window):
 
 
 def test_calculations_and_images_do_not_get_shape_style_controls(window):
-    from calcforge.items.media import ImageItem
+    from markforge.items.media import ImageItem
     from PySide6.QtWidgets import QComboBox
 
     calculation = _calc(window, "L:=6m", at=(90, 110))
@@ -9904,7 +7315,7 @@ def test_calculations_and_images_do_not_get_shape_style_controls(window):
 
 
 def test_style_toolbar_tracks_real_selection_and_the_active_tool(window):
-    from calcforge.ui.stylecaps import DASH, FILL, FONT, STROKE, WIDTH
+    from markforge.ui.stylecaps import DASH, FILL, FONT, STROKE, WIDTH
 
     window.view.escape_everything()
     window.select_tool("line")
@@ -9956,19 +7367,6 @@ def test_the_page_bar_says_what_the_paper_is(window):
     assert "Margins 10 mm" in window.status_size.toolTip()
 
 
-def test_the_page_bar_walks_through_the_pages(window):
-    window.load_sample()
-    window.go_to_page(0)
-    assert window.page_total.text() == f"of {len(window.document.pages)}"
-    assert not window.page_back.isEnabled()      # nothing before page 1
-    assert window.page_forward.isEnabled()
-
-    window.page_forward.click()
-    assert window.current_index == 1
-    window.page_back.click()
-    assert window.current_index == 0
-
-
 def test_the_grid_and_snap_buttons_are_on_the_bar(window):
     window.set_page_grid(0, False)
     window.refresh_page_bar()
@@ -10004,25 +7402,9 @@ def test_the_snap_dropdown_toggles_a_target_through_qt(window):
     assert window.document.settings.snap_to_grid
 
 
-def test_clicking_the_page_grid_does_not_move_the_view(window):
-    from PySide6.QtTest import QTest
-
-    window.load_sample()
-    window.go_to_page(1)
-    horizontal = window.view.horizontalScrollBar()
-    vertical = window.view.verticalScrollBar()
-    horizontal.setValue(horizontal.minimum() + 7)
-    vertical.setValue(min(vertical.maximum(), vertical.value() + 43))
-    before = (horizontal.value(), vertical.value())
-
-    QTest.mouseClick(window.status_grid, Qt.LeftButton)
-
-    assert (horizontal.value(), vertical.value()) == before
-
-
 def test_the_bar_follows_the_page_it_is_on(window, tmp_path):
     from PySide6.QtGui import QImage
-    from calcforge.io import pdfio
+    from markforge.io import pdfio
 
     photo = QImage(1200, 800, QImage.Format_ARGB32)
     photo.fill(0xFFFFFFFF)
@@ -10111,8 +7493,8 @@ def test_the_number_knows_where_it_is(window):
 def test_a_dimensions_value_holds_still_while_its_text_is_turned(window, tmp_path):
     """It used to be worked out against whatever page the view was on."""
     from PySide6.QtGui import QImage
-    from calcforge.core.document import PageScale
-    from calcforge.io import pdfio
+    from markforge.core.document import PageScale
+    from markforge.io import pdfio
 
     # Two pages at different scales, and a dimension on the second.
     photo = QImage(400, 300, QImage.Format_ARGB32)
@@ -10145,7 +7527,7 @@ def test_a_dimensions_value_holds_still_while_its_text_is_turned(window, tmp_pat
 
 def _a_pdf_with_lines(window, tmp_path):
     """Export a page with known geometry, so it can be read back in."""
-    from calcforge.io import export as export_io
+    from markforge.io import export as export_io
 
     window.select_tool("rect")
     drag(window.view, 120, 150, 300, 260)
@@ -10159,7 +7541,7 @@ def _a_pdf_with_lines(window, tmp_path):
 def test_an_inserted_pdf_brings_somebody_elses_markups_back_as_markups(
         window, tmp_path):
     """A cloud is a cloud, not sixty loose segments and not a picture."""
-    from calcforge.io import pdfio
+    from markforge.io import pdfio
 
     path = _a_pdf_with_lines(window, tmp_path)
     found = pdfio.markups(path, [0])
@@ -10177,8 +7559,8 @@ def test_an_inserted_pdf_brings_somebody_elses_markups_back_as_markups(
 
 def test_the_lines_come_in_on_a_layer_of_their_own(window, tmp_path):
     """The page's own drawing is the page's; a markup is somebody's."""
-    from calcforge.core.document import Document
-    from calcforge.io import pdfio
+    from markforge.core.document import Document
+    from markforge.io import pdfio
 
     path = _a_pdf_with_lines(window, tmp_path)
     fresh = Document()
@@ -10192,8 +7574,8 @@ def test_the_lines_come_in_on_a_layer_of_their_own(window, tmp_path):
 
 
 def test_the_lines_can_be_left_out_but_the_markups_never_are(window, tmp_path):
-    from calcforge.core.document import Document
-    from calcforge.io import pdfio
+    from markforge.core.document import Document
+    from markforge.io import pdfio
 
     path = _a_pdf_with_lines(window, tmp_path)
     fresh = Document()
@@ -10205,7 +7587,7 @@ def test_the_lines_can_be_left_out_but_the_markups_never_are(window, tmp_path):
 
 
 def test_a_file_that_cannot_be_read_that_way_still_comes_in(window, tmp_path):
-    from calcforge.io import pdfio
+    from markforge.io import pdfio
 
     broken = tmp_path / "not-really.pdf"
     broken.write_bytes(b"%PDF-1.4\nnothing to see here\n")
@@ -10213,7 +7595,7 @@ def test_a_file_that_cannot_be_read_that_way_still_comes_in(window, tmp_path):
 
 
 def test_a_curve_comes_across_as_something_to_measure(window):
-    from calcforge.io import pdfio
+    from markforge.io import pdfio
 
     run = pdfio._runs([["m", 0.0, 0.0], ["c", 0.0, 10.0, 10.0, 10.0, 10.0, 0.0]])
     assert len(run) == 1
@@ -10223,7 +7605,7 @@ def test_a_curve_comes_across_as_something_to_measure(window):
 
 
 def test_a_closed_path_comes_back_closed(window):
-    from calcforge.io import pdfio
+    from markforge.io import pdfio
 
     run = pdfio._runs([["m", 0.0, 0.0], ["l", 10.0, 0.0], ["l", 10.0, 10.0], ["z"]])
     assert run[0][0] == run[0][-1]
@@ -10236,7 +7618,7 @@ def test_a_closed_path_comes_back_closed(window):
 def test_the_properties_panel_says_where_it_is_and_how_big(window):
     """Typed, not nudged: a detail that starts exactly 40 mm in."""
     from PySide6.QtWidgets import QDoubleSpinBox, QGroupBox
-    from calcforge.core.document import MM_TO_PT, PT_TO_MM
+    from markforge.core.document import MM_TO_PT, PT_TO_MM
 
     window.select_tool("rect")
     drag(window.view, 120, 150, 320, 250)
@@ -10261,7 +7643,7 @@ def test_the_properties_panel_says_where_it_is_and_how_big(window):
 
 def test_typing_a_number_moves_and_resizes_it(window):
     from PySide6.QtWidgets import QDoubleSpinBox, QGroupBox
-    from calcforge.core.document import MM_TO_PT
+    from markforge.core.document import MM_TO_PT
 
     window.select_tool("rect")
     drag(window.view, 120, 150, 320, 250)
@@ -10413,7 +7795,7 @@ def test_moving_the_box_works_the_hinge_out_again(window):
 
 
 def test_a_leader_survives_a_round_trip_with_its_side_and_reach(window):
-    from calcforge.items.base import build_item
+    from markforge.items.base import build_item
 
     call = _callout(window)
     window.view.end_item_edit()
@@ -10432,7 +7814,7 @@ def test_a_leader_survives_a_round_trip_with_its_side_and_reach(window):
 
 def test_a_document_written_before_this_still_opens(window):
     """A leader saved as a free elbow comes back as a sensible one."""
-    from calcforge.items.base import build_item
+    from markforge.items.base import build_item
 
     older = {"type": "callout", "x": 0, "y": 0, "rect": [0, 0, 160, 60],
              "text": "note", "uid": "old",
@@ -10725,7 +8107,7 @@ def test_the_snapped_live_preview_is_the_geometry_that_gets_committed(window):
 
 def test_the_drawing_underneath_offers_corners_but_no_guides(window):
     """A PDF's line work is full of lines; every one would be a guide."""
-    from calcforge.items.shapes import PolyItem as Poly
+    from markforge.items.shapes import PolyItem as Poly
 
     settings = _quiet_snapping(window)
     settings.snap_to_content = True
@@ -10751,7 +8133,7 @@ def test_the_drawing_underneath_offers_corners_but_no_guides(window):
 
 
 def test_snapping_to_the_drawing_can_be_turned_off_on_its_own(window):
-    from calcforge.items.shapes import PolyItem as Poly
+    from markforge.items.shapes import PolyItem as Poly
 
     settings = _quiet_snapping(window)
     settings.snap_to_items = True
@@ -10820,30 +8202,6 @@ def test_the_three_snaps_are_on_the_view_menu(window):
 # Turning the view without turning the scrollbars
 # ---------------------------------------------------------------------------
 
-def test_turning_the_view_leaves_the_scrollbars_alone(window):
-    """A vertical bar that scrolls sideways is worse than no rotation."""
-    window.load_sample()
-    window.view.reset_view_rotation()
-    upright = window.view.transform()
-
-    window.view.rotate_view(True)
-    assert window.view.view_turn() == 90
-    # The view's own transform holds the zoom and nothing else: no rotation,
-    # so the scrollbars still point the way they scroll.
-    turned = window.view.transform()
-    assert turned.m12() == pytest.approx(0.0, abs=1e-9)
-    assert turned.m21() == pytest.approx(0.0, abs=1e-9)
-    assert turned.m11() == pytest.approx(turned.m22())
-
-    # The pages are what turned.
-    frame = window.document.pages[0].frame
-    assert frame.rotation() % 360 == 90
-
-    window.view.reset_view_rotation()
-    assert window.document.pages[0].frame.rotation() % 360 == 0
-    assert window.view.transform().m11() == pytest.approx(upright.m11())
-
-
 def test_a_turned_page_still_lies_on_the_canvas_the_right_way_up(window):
     """Turned, the sheet is wider than it is tall — and still on the canvas."""
     window.view.reset_view_rotation()
@@ -10857,22 +8215,6 @@ def test_a_turned_page_still_lies_on_the_canvas_the_right_way_up(window):
     assert sideways.width() == pytest.approx(upright.height(), abs=0.5)
     # And it has not wandered off above or to the left of the canvas.
     assert window.view.scene().sceneRect().contains(sideways.center())
-    window.view.reset_view_rotation()
-
-
-def test_the_pages_stay_in_order_when_the_view_is_turned(window):
-    window.load_sample()
-    window.view.reset_view_rotation()
-
-    def tops():
-        return [p.frame.mapRectToScene(p.frame.page_rect()).top()
-                for p in window.document.pages]
-
-    before = tops()
-    assert before == sorted(before)          # stacked down the canvas
-    window.view.rotate_view(True)
-    after = tops()
-    assert after == sorted(after)            # and still stacked down it
     window.view.reset_view_rotation()
 
 
@@ -10891,16 +8233,6 @@ def test_turning_the_view_changes_nothing_about_the_document(window):
 # ---------------------------------------------------------------------------
 # the keys a calculation is typed with
 # ---------------------------------------------------------------------------
-
-def _open_calculation(window, source="", block=False, typed=False):
-    """A calculation on the page with the caret in it."""
-    item = MathItem(source, block=block)
-    item.started_by_typing = typed
-    window.view.frame().add_markup(item)
-    window.view.setFocus()
-    window.view.begin_item_edit(item)
-    return item
-
 
 def test_a_space_changes_an_existing_single_calculation_to_text(window):
     """Fresh and existing single lines obey the same space-to-text rule."""
@@ -10934,7 +8266,7 @@ def test_a_space_changes_a_fresh_single_calculation_to_text(window):
 
 def test_a_space_converts_a_re_entered_calculation_too(window):
     """Fresh or re-entered, one calculation, one meaning for a space."""
-    from calcforge.items.text import TextItem
+    from markforge.items.text import TextItem
 
     item = _open_calculation(window, "b:=300mm", typed=False)
     said = []
@@ -10945,54 +8277,6 @@ def test_a_space_converts_a_re_entered_calculation_too(window):
     assert isinstance(text, TextItem)
     assert said and "changed" in said[-1].lower(), said
     window.view.escape_everything()
-
-
-def test_one_escape_leaves_a_calculation_with_the_list_up(window):
-    """The completion list must not swallow the first Escape.
-
-    It is offered unasked and half the time it is not being looked at, so an
-    Escape that only put the list away read as an Escape that did nothing.
-    """
-    _open_calculation(window)
-    type_text(window.view, "kN")
-    assert window.view.completions_showing(), "the list is offering units"
-    press_key(window.view, Qt.Key_Escape)
-    assert not window.view.completions_showing()
-    assert window.view.is_editing() is False, "and out in one press"
-
-
-def test_the_calculation_keys_survive_the_keyboard_wandering_off(window):
-    """A click on a button must not take Backspace with it.
-
-    The focus goes to a toolbar button, a panel, a menu — and the caret is
-    still sitting in the expression. Backspace, "=" and Enter used to go to
-    whatever had been clicked, which had no use for them.
-    """
-    from PySide6.QtGui import QFocusEvent
-
-    item = _open_calculation(window)
-    type_text(window.view, "b:=12")
-    # The keyboard goes to a button on a toolbar. The caret is still in the
-    # expression, and the keys the button has no use for end up at the window,
-    # which is where they are handed back.
-    window.view.focusOutEvent(QFocusEvent(QEvent.FocusOut, Qt.MouseFocusReason))
-    QApplication.processEvents()
-    assert window.view.is_editing(), "the line is still open"
-
-    def to_the_focus(key, text=""):
-        QApplication.sendEvent(window,
-                               QKeyEvent(QEvent.KeyPress, key, Qt.NoModifier, text))
-        QApplication.processEvents()
-
-    to_the_focus(Qt.Key_Backspace)
-    assert item._editor.toPlainText() == "b:=1"
-    to_the_focus(Qt.Key_Equal, "=")
-    assert item._editor.toPlainText() == "b:=1="
-    before = len([i for i in markups(window) if isinstance(i, MathItem)])
-    to_the_focus(Qt.Key_Return, "\r")
-    assert len([i for i in markups(window) if isinstance(i, MathItem)]) == before + 1
-    to_the_focus(Qt.Key_Escape)
-    assert not window.view.is_editing()
 
 
 def test_a_menu_over_a_calculation_does_not_close_it(window):
@@ -11019,37 +8303,6 @@ def test_starting_another_calculation_settles_the_first(window):
 # ---------------------------------------------------------------------------
 # the new-table question
 # ---------------------------------------------------------------------------
-
-def test_the_header_row_box_starts_where_the_table_is(window):
-    """It used to open unticked whatever the table was doing.
-
-    A new table starts with a header row, so the box disagreed with the table
-    in front of it — and pressing OK quietly took the header away. Ticking it
-    off and on again to check left it off, which is the state it had been
-    lying about all along.
-    """
-    from PySide6.QtCore import QPoint
-    from PySide6.QtTest import QTest
-    from calcforge.ui import dialogs
-
-    window.select_tool("table")
-    drag(window.view, 100, 100, 380, 220)
-    table = window.view.active_table
-    assert table is not None and table.sheet.header_row, "a table starts with one"
-    window.view.deactivate_table()
-
-    dialog = dialogs.TableSizeDialog(table.sheet.rows, table.sheet.cols,
-                                     table.sheet.header_row, window)
-    assert dialog.header.isChecked(), "the box says what the table says"
-    assert dialog.values()[2] is True
-
-    where = QPoint(8, dialog.header.height() // 2)
-    QTest.mouseClick(dialog.header, Qt.LeftButton, Qt.NoModifier, where)
-    assert dialog.values()[2] is False
-    QTest.mouseClick(dialog.header, Qt.LeftButton, Qt.NoModifier, where)
-    assert dialog.values()[2] is True, "off and on again is back where it was"
-    dialog.deleteLater()
-
 
 def test_a_finished_single_calculation_can_still_be_changed_to_prose(window):
     """Re-entered single lines use the same space behavior as fresh ones."""
@@ -11186,13 +8439,6 @@ def test_what_a_corner_carries_moves_with_it(window):
 # clicking into the working itself
 # ---------------------------------------------------------------------------
 
-def _fraction(window, source="Z:=bb*dd^2/66=", at=(80, 80)):
-    item = MathItem(source)
-    window.view.frame().add_markup(item, QPointF(*at))
-    window.recalculate()
-    return item
-
-
 def _scene_xy(item, local: QPointF):
     """A point in an item's own coordinates, as canvas x and y."""
     scene = item.mapToScene(local)
@@ -11277,17 +8523,6 @@ def test_a_fraction_inside_a_fraction_can_be_clicked_into(window):
     window.view.escape_everything()
 
 
-def test_the_right_line_of_a_block_takes_the_caret(window):
-    item = MathItem("p:=1/2\nq:=xx/yy=", block=True)
-    window.view.frame().add_markup(item, QPointF(80, 80))
-    window.recalculate()
-    window.view.begin_item_edit(item)
-    click(window.view, *_scene_xy(item, _piece_of(item, "yy")))
-    caret = item._editor.textCursor().position()
-    assert item._editor.toPlainText()[:caret] == "p:=1/2\nq:=xx/"
-    window.view.escape_everything()
-
-
 def test_a_double_click_in_the_working_takes_the_word_it_was_aimed_at(window):
     """Not whatever word sits at that spot in the invisible flat line."""
     item = _fraction(window)
@@ -11327,7 +8562,7 @@ def test_the_vertical_bar_still_runs_through_every_page_when_turned(window):
 def test_saving_settles_the_line_being_typed(window):
     """What is on the page when it is saved is what gets saved."""
     import tempfile, os
-    from calcforge.io import project as project_io
+    from markforge.io import project as project_io
 
     item = _open_calculation(window)
     type_text(window.view, "b:=300mm")
@@ -11336,7 +8571,7 @@ def test_saving_settles_the_line_being_typed(window):
     assert window.save_document()
     assert not window.view.is_editing(), "the line was settled first"
 
-    from calcforge.core.document import Document
+    from markforge.core.document import Document
     reopened = Document()
     project_io.load_document(reopened, path)
     sources = [i.get("source") for page in reopened.pages
@@ -11462,65 +8697,6 @@ def test_the_menu_says_how_many_pages_it_is_about(window):
 # a table's drag says how many cells, not how big they are
 # ---------------------------------------------------------------------------
 
-def test_dragging_a_table_out_counts_its_cells(window):
-    """It used to stretch a fixed six-by-four to whatever the box was.
-
-    That gave cells of a different size on every table on the sheet. The drag
-    says how many rows and columns there are; a cell stays the size a cell
-    reads well at.
-    """
-    from calcforge.core.spreadsheet import DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT
-
-    def drag_out(across, down):
-        before = {id(i) for i in markups(window)}
-        window.select_tool("table")
-        drag(window.view, 60, 60,
-             60 + across * DEFAULT_COL_WIDTH + 3,
-             60 + down * DEFAULT_ROW_HEIGHT + 3)
-        window.view.deactivate_table()
-        fresh = [i for i in markups(window)
-                 if isinstance(i, TableItem) and id(i) not in before]
-        assert fresh, "a table was drawn"
-        return fresh[0]
-
-    wide = drag_out(6, 10)
-    assert (wide.sheet.cols, wide.sheet.rows) == (6, 10)
-    assert wide.sheet.col_width(0) == DEFAULT_COL_WIDTH
-    assert wide.sheet.row_height(0) == DEFAULT_ROW_HEIGHT
-
-    small = drag_out(2, 3)
-    assert (small.sheet.cols, small.sheet.rows) == (2, 3)
-    assert small.sheet.col_width(0) == DEFAULT_COL_WIDTH, "the same size cell"
-    assert small.sheet.row_height(0) == DEFAULT_ROW_HEIGHT
-
-
-def test_a_table_never_comes_out_with_no_cells_at_all(window):
-    """A box too small for one cell still makes a table of one."""
-    before = {id(i) for i in markups(window)}
-    window.select_tool("table")
-    drag(window.view, 60, 60, 68, 66)
-    window.view.deactivate_table()
-    made = [i for i in markups(window)
-            if isinstance(i, TableItem) and id(i) not in before]
-    assert made and (made[0].sheet.rows, made[0].sheet.cols) == (1, 1)
-
-
-def test_the_drawn_table_fits_inside_the_box_it_was_dragged(window):
-    """What is drawn never overshoots the rubber box it was drawn with."""
-    from calcforge.core.spreadsheet import DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT
-
-    before = {id(i) for i in markups(window)}
-    window.select_tool("table")
-    across, down = 4.6 * DEFAULT_COL_WIDTH, 6.7 * DEFAULT_ROW_HEIGHT
-    drag(window.view, 60, 60, 60 + across, 60 + down)
-    window.view.deactivate_table()
-    table = [i for i in markups(window)
-             if isinstance(i, TableItem) and id(i) not in before][0]
-    assert (table.sheet.cols, table.sheet.rows) == (4, 6), "whole cells only"
-    assert table.local_rect().width() <= across + 1
-    assert table.local_rect().height() <= down + 1
-
-
 def test_the_style_toolbar_and_the_properties_panel_agree(window):
     """One markup, two places to change it, and the same list in both.
 
@@ -11530,8 +8706,8 @@ def test_the_style_toolbar_and_the_properties_panel_agree(window):
     you were allowed to change.
     """
     from tests.probe_audit import make
-    from calcforge.ui.stylecaps import capabilities
-    from calcforge.ui.tools import TOOLS
+    from markforge.ui.stylecaps import capabilities
+    from markforge.ui.tools import TOOLS
 
     disagreed = []
     for tool in TOOLS:

@@ -236,7 +236,7 @@ def _names(value) -> set[str]:
 
 def save_panel_state(docks: list[PanelDock]) -> None:
     """Remember which panels are pinned and which are rolled up."""
-    settings = QSettings("CalcForge", "CalcForge")
+    settings = QSettings("MarkForge", "MarkForge")
     settings.setValue(PINNED_KEY,
                       [dock.objectName() for dock in docks if dock.pinned])
     settings.setValue(COLLAPSED_KEY,
@@ -244,7 +244,7 @@ def save_panel_state(docks: list[PanelDock]) -> None:
 
 
 def load_panel_state(docks: list[PanelDock]) -> None:
-    settings = QSettings("CalcForge", "CalcForge")
+    settings = QSettings("MarkForge", "MarkForge")
     pinned = _names(settings.value(PINNED_KEY, []))
     collapsed = _names(settings.value(COLLAPSED_KEY, []))
     for dock in docks:

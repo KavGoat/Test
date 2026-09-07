@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Launch CalcForge."""
+"""Launch MarkForge."""
 import sys
 
-from calcforge.app import main
+from markforge.app import main
 
 if __name__ == "__main__":
     sys.exit(main())

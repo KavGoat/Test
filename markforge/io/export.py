@@ -140,7 +140,7 @@ def _paint_pdf(document: Document, path: str, pages: list, resolution: int,
     writer = QPdfWriter(path)
     writer.setResolution(resolution)
     writer.setTitle(document.title)
-    writer.setCreator("CalcForge")
+    writer.setCreator("MarkForge")
     paint_pages(writer, document, pages, resolution, pdf_overlay_pages=overlays,
                 without_markups=without_markups)
 
@@ -171,7 +171,7 @@ def _merge_preserved_pdf_pages(document: Document, path: str, pages: list,
         source.scale_to(float(page.width_pt), float(page.height_pt))
         source.merge_page(overlay_page, over=True)
         output.add_page(source)
-    output.add_metadata({"/Title": document.title or "", "/Creator": "CalcForge"})
+    output.add_metadata({"/Title": document.title or "", "/Creator": "MarkForge"})
     temporary = path + ".vector.tmp"
     try:
         with open(temporary, "wb") as handle:

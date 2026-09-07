@@ -58,7 +58,7 @@ _current: Preferences | None = None
 
 
 def _settings() -> QSettings:
-    return QSettings("CalcForge", "CalcForge")
+    return QSettings("MarkForge", "MarkForge")
 
 
 def _as_bool(value, fallback: bool) -> bool:

@@ -1,4 +1,4 @@
-"""Read a Bluebeam tool set — a ``.btx`` file — into CalcForge tools.
+"""Read a Bluebeam tool set — a ``.btx`` file — into MarkForge tools.
 
 An engineer's tool chest is years of work. Section shapes, weld symbols,
 review stamps, hatched concrete: nobody rebuilds that by hand, so a tool set
@@ -14,14 +14,14 @@ annotation points at ``BBObjPtr_SOMETHING``, and the drawing lives in a
 ``Resources`` block further down the file, as a PDF form XObject with a
 FlateDecoded content stream.
 
-**What comes out.** Ordinary CalcForge markups. A ``Square`` is a rectangle,
+**What comes out.** Ordinary MarkForge markups. A ``Square`` is a rectangle,
 a ``Polygon`` a polygon, a ``FreeText`` a text box or a call-out, an ``Ink`` a
 pen stroke. A stamp's drawing is read out of its content stream and becomes a
-:class:`~calcforge.items.shapes.SketchItem`, so a steel section arrives as the
+:class:`~markforge.items.shapes.SketchItem`, so a steel section arrives as the
 drawing it is and can still be scaled, coloured and printed as vectors.
 
 Nothing here needs a PDF library: what is being read is a handful of loose
-objects, and :mod:`calcforge.io.pdfobj` reads those.
+objects, and :mod:`markforge.io.pdfobj` reads those.
 """
 from __future__ import annotations
 
@@ -247,7 +247,7 @@ def _html_text(annotation: dict) -> str:
 # ---------------------------------------------------------------------------
 
 def markup_from(annotation: dict, resources: dict, name: str = "") -> Optional[dict]:
-    """One PDF annotation as a CalcForge markup payload, or None if unknown."""
+    """One PDF annotation as a MarkForge markup payload, or None if unknown."""
     subtype = str(annotation.get("Subtype", ""))
     x, y, width, height = _rect(annotation.get("Rect", []))
     style = _style(annotation)
