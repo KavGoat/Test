@@ -104,6 +104,21 @@ class _SizeEdit(QLineEdit):
         self.selectAll()
 
 
+_CLOUD_CURSOR = None
+
+
+def cloud_cursor() -> QCursor:
+    """A pointer carrying a small revision cloud, drawn once and kept."""
+    global _CLOUD_CURSOR
+    if _CLOUD_CURSOR is None:
+        from . import icons
+
+        pixmap = icons.cursor_pixmap("cloud", 24)
+        # Hot spot at the middle, because the cloud is drawn around the point.
+        _CLOUD_CURSOR = QCursor(pixmap, 12, 12)
+    return _CLOUD_CURSOR
+
+
 def typing_somewhere_else() -> bool:
     """True when the keyboard belongs to a box somebody is typing into.
 
@@ -404,7 +419,10 @@ class PageView(QGraphicsView):
         self._pending_cloud_leader = item
         self._mode = "idle"
         self._marquee = []
-        self.setCursor(Qt.CrossCursor)
+        # A plain crosshair says "put a point somewhere", which is not what is
+        # being asked for: what comes next is a cloud drawn round a region, so
+        # the pointer carries a cloud for as long as that is what a drag does.
+        self.setCursor(cloud_cursor())
         self.statusMessage.emit(
             "Drag around the area for the cloud leader · Esc to cancel")
         self.viewport().update()

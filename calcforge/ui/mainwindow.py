@@ -387,12 +387,21 @@ class MainWindow(QMainWindow):
         # Undo and redo come from the stack itself rather than from _act, so
         # they are entered in the shortcut list by hand — every key the
         # application answers to belongs there.
-        self.act_undo = self.undo_stack.createUndoAction(self, "Undo")
+        # Not the stack's own action: while something is being typed into, the
+        # first thing Ctrl+Z should take back is the typing. Undoing straight
+        # to the document stack threw away the whole edit in one go, so text
+        # deleted with Backspace could not be got back at all — the only step
+        # on the stack was the state before the line was opened.
+        self.act_undo = QAction("Undo", self)
+        self.act_undo.triggered.connect(self.undo_something)
+        self.undo_stack.canUndoChanged.connect(self._refresh_undo_actions)
         self.act_undo.setShortcut(QKeySequence(self.shortcuts.register(
             "command.undo", "Undo", "Ctrl+Z", "Edit")))
         self.give_icon(self.act_undo, "undo")
         self.action_ids["undo"] = "command.undo"
-        self.act_redo = self.undo_stack.createRedoAction(self, "Redo")
+        self.act_redo = QAction("Redo", self)
+        self.act_redo.triggered.connect(self.redo_something)
+        self.undo_stack.canRedoChanged.connect(self._refresh_undo_actions)
         self.act_redo.setShortcut(QKeySequence(self.shortcuts.register(
             "command.redo", "Redo", "Ctrl+Shift+Z", "Edit")))
         self.give_icon(self.act_redo, "redo")
@@ -2543,7 +2552,11 @@ class MainWindow(QMainWindow):
             tool = self.view.current_tool()
             active = tool.factory() if tool.factory is not None \
                 and tool.key not in ("snapshot", "calibrate") else None
-            supported = capabilities(active) if active is not None else set()
+            # Nothing is selected, so these controls set what the next markup
+            # of this kind starts as, which is a different question from what
+            # can be changed about one that already exists.
+            supported = capabilities(active, for_default=True) \
+                if active is not None else set()
         for field, actions in self._style_widgets.items():
             for action in actions:
                 action.setVisible(field in supported)
@@ -2559,6 +2572,41 @@ class MainWindow(QMainWindow):
             control.blockSignals(True)
             getattr(control, method)(value)
             control.blockSignals(False)
+
+    # -- undo --------------------------------------------------------------
+    def _open_editor_document(self):
+        """The text document being typed into, if anything is being typed into."""
+        item = self.view.editing_item()
+        editor = getattr(item, "_editor", None) if item is not None else None
+        return editor.document() if editor is not None else None
+
+    def undo_something(self) -> None:
+        """Take back the typing first, then the document change under it."""
+        document = self._open_editor_document()
+        if document is not None and document.isUndoAvailable():
+            document.undo()
+            self.recalculate()
+        elif self.undo_stack.canUndo():
+            self.undo_stack.undo()
+        self._refresh_undo_actions()
+
+    def redo_something(self) -> None:
+        document = self._open_editor_document()
+        if document is not None and document.isRedoAvailable():
+            document.redo()
+            self.recalculate()
+        elif self.undo_stack.canRedo():
+            self.undo_stack.redo()
+        self._refresh_undo_actions()
+
+    def _refresh_undo_actions(self, *_args) -> None:
+        document = self._open_editor_document()
+        self.act_undo.setEnabled(
+            bool(self.undo_stack.canUndo()
+                 or (document is not None and document.isUndoAvailable())))
+        self.act_redo.setEnabled(
+            bool(self.undo_stack.canRedo()
+                 or (document is not None and document.isRedoAvailable())))
 
     def _selected_calculations(self) -> list:
         return [item for item in self.selected_items() if isinstance(item, MathItem)]

@@ -2,7 +2,7 @@
 
 Audited: 2026-09-06 against `claude/engineering-calc-markup-app-2twiqs`.
 
-Every open line in `docs/tasklist.md` was gone through one at a time. The 148
+Every open line in `docs/tasklist.md` was gone through one at a time. The 153
 below are the ones the current source implements and something actually
 exercises — an event-driven test that drives the real Qt queue, or a check
 against the running application. Each carries the evidence it rests on.
@@ -201,6 +201,9 @@ behaviour it extends.
 
 - **(new)** Add Bluebeam-style photo/image colour operations: recolour an image to a selected colour, convert it to black-and-white, and make a selected source colour transparent. These are image-content operations, distinct from a markup's stroke/fill styling.
   - **Evidence:** Recolour, Black and white and make-a-colour-transparent are all offered (ui/dialogs.py:552 and io/recolour.py, which documents all three operations).
+
+- **(new, amended)** Pasted or placed images and snapshots must not acquire a red outline. The image tool's own default stroke must be settable and must default to none, and a snapshot's default stroke must be none; in both cases the visible frame must match the persisted or default style rather than a hard-coded red. A snapshot's stroke colour and width must then be settable by the user and honoured when set, and the style toolbar and the Properties panel must agree with each other on image and snapshot border state.
+  - **Evidence:** Fixed, and it settles task 157 with it. A snapshot is drawn linework rather than a photo, so it now carries STROKE and WIDTH capability: its outline still defaults to none (items/snapshot.py:38) and a set one is honoured (snapshot.py:91), and both the style toolbar and the Properties panel read the same stylecaps.capabilities, so they cannot disagree. A photo keeps no per-item border — a stroke colour on a raster image has nowhere to go — but capabilities now answers a second question, for_default, so with the Image tool active and nothing selected the toolbar offers Line and Width to set what a placed image starts with. Evidence: test_a_snapshot_has_a_border_that_starts_at_none_and_can_be_set, test_a_photos_own_border_is_not_offered_but_its_default_is, and the existing test_a_raster_image_has_no_line_or_fill_style_controls still passes.
 
 ## 11. Snapping, grid, alignment
 
@@ -461,6 +464,9 @@ behaviour it extends.
 - Fix modifier-drag behavior: Ctrl+drag duplicates; adding Shift before or after movement constrains the duplicate to 0/45/90 degrees; Shift-first then Ctrl switches from snap-constrained movement to duplication without leaving snapping in an inconsistent state.
   - **Evidence:** Modifier-drag is order-independent. Evidence: test_shift_first_then_ctrl_duplicates_and_keeps_the_move_constrained, test_ctrl_taken_hold_of_mid_move_switches_to_a_snapped_copy.
 
+- **(amended)** Recompute each callout leader hinge completely when its arrow tip, text box or cloud moves. Do not retain a prior manually adjusted hinge length after any of those changes. In a multi-leader callout each leader's hinge is computed independently: moving the cloud or the text box must not force every leader to share a single hinge length.
+  - **Evidence:** Verified rather than changed: the hinges were already worked out per leader, and there is now a test that says so. Three leaders pointing three ways end on three different sides after the box moves, each from its own tip, and the hand-placed one gives up its manual side and stand-off as the base task requires. Evidence: test_several_leaders_each_work_their_own_hinge_out, alongside test_moving_the_arrow_head_works_the_hinge_out_again and test_moving_the_box_works_the_hinge_out_again. One thing left deliberately: the Properties hinge slider reads leader[0] and writes every leader, which is one control acting on all of them by design — worth saying, because that is the one place a single hinge length is still shared.
+
 - Remove holes/gaps where overlapping highlighter strokes should form one continuous highlighted region.
   - **Evidence:** Overlapping highlighter strokes form one even band. Evidence: test_a_highlighter_stroke_is_one_even_band, test_the_highlight_goes_over_whatever_is_under_it.
 
@@ -508,6 +514,15 @@ behaviour it extends.
 
 - **(new)** "No scale" must be a different state from a true 1:1. The app currently treats 1:1 as the unset/default scale, so a page cannot actually be calibrated to a genuine 1:1 — a scale-dependent markup drawn afterwards still misbehaves. An explicit 1:1 calibration must be stored as a real, deliberate scale, distinct from "uncalibrated".
   - **Evidence:** Fixed. PageScale now carries its own `calibrated` flag instead of inferring it from the label (core/document.py), so a page deliberately set to 1:1 is a scaled page and one nobody touched is not. from_ratio and from_calibration set it; to_dict/from_dict persist it, and a document saved before the flag existed still reads its label the old way. Evidence: test_a_page_set_to_a_real_one_to_one_is_not_an_unscaled_page drives the real measure tool and checks the status hint, the save round trip, and both legacy-document cases; test_a_page_starts_without_a_scale_and_can_be_given_one still passes. Full suite 1255 passed, 0 failed.
+
+- **(new)** A snapshot offers no colour-change control at all. Either add the option wherever it is meaningful for a snapshot, or deliberately exclude snapshots from stroke-colour controls — and if excluded, make that exclusion consistent between the style toolbar and the Properties panel rather than present in one and absent in the other.
+  - **Evidence:** Decided and implemented rather than excluded: a snapshot now offers stroke colour and width in both the style toolbar and Properties, through the same capability set, so there is nowhere for the two to disagree. See the entry above for the evidence.
+
+- **(new)** Undo must cover equation state transitions. Undo reverts a space-triggered equation-to-text conversion back to the live equation, and restores text removed by Backspace, down to an empty entry.
+  - **Evidence:** Fixed. Ctrl+Z now takes back the typing before the document change under it: while a line is open, undo goes to that editor's own document and only falls through to the document stack when there is nothing left to take back. Backspaced text comes back and a second undo returns to an empty entry, which is what the task asks for; the space-triggered conversion still undoes to the live equation. Evidence: test_undo_takes_back_the_typing_before_the_line_itself, test_undo_puts_a_converted_calculation_back_as_a_calculation.
+
+- **(new)** Cloud-leader placement feedback: when a cloud leader is being added, no provisional straight leader is drawn before the cloud itself is drawn, and the cursor changes to a cloud-drawing cursor for the duration of the placement.
+  - **Evidence:** Fixed. The pointer carries a drawn revision cloud for the whole of a cloud-leader placement instead of a stock crosshair (icons.cursor_pixmap feeds view.cloud_cursor, set in begin_cloud_leader), and it is put down again on Escape. Nothing provisional is drawn before the cloud: _draw_cloud_leader_preview returns until a region is actually being dragged. Evidence: test_placing_a_cloud_leader_shows_a_cloud_on_the_pointer.
 
 - **(new)** Display formatting never alters stored values. Significant-figure and decimal-place settings affect only the rendered final answer — never the stored value, and never the typed equation text.
   - **Evidence:** Formatting is a render-time property of the item, not of the value: MathItem holds digits and number_format (items/mathitem.py:180-181) and applies them per line at layout through figures_for (mathitem.py:399); the workspace keeps the quantity. Evidence: test_one_line_can_be_shown_to_its_own_number_of_figures, test_a_lines_own_figures_can_be_put_back, test_a_lines_own_figures_survive_a_save.

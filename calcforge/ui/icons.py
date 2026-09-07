@@ -568,6 +568,19 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
         _glyph(painter, name[:2].upper(), INK, 8)
 
 
+def cursor_pixmap(name: str, size: int = 24) -> QPixmap:
+    """The same drawing an icon uses, as a pixmap for a cursor."""
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    painter.scale(size / 24.0, size / 24.0)
+    painter.setBrush(Qt.NoBrush)
+    _draw(name, painter)
+    painter.end()
+    return pixmap
+
+
 @lru_cache(maxsize=256)
 def icon(name: str, size: int = 24) -> QIcon:
     """Return a cached icon; drawn once per name and size."""

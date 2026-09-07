@@ -302,6 +302,117 @@ def test_escape_puts_the_count_tool_down_at_once(window):
     assert [m.index for m in placed] == [1, 2], "what was placed stays placed"
 
 
+def test_undo_takes_back_the_typing_before_the_line_itself(window):
+    """Backspace used to be unrecoverable inside an open calculation.
+
+    The whole edit was one step on the document stack, so the first Ctrl+Z
+    threw away the lot and landed on the state before the line was opened —
+    the deleted text was not anywhere to come back from.
+    """
+    window.view._last_scene_pos = QPointF(90, 300)
+    press_key(window.view, Qt.Key_unknown, '"')
+    type_text(window.view, "b:=300mm")
+    item = window.view.editing_item()
+    assert item._editor.toPlainText() == "b:=300mm"
+
+    for _ in range(8):
+        press_key(window.view, Qt.Key_Backspace)
+    QApplication.processEvents()
+    assert item._editor.toPlainText() == ""
+
+    window.undo_something()
+    QApplication.processEvents()
+    assert item._editor.toPlainText() == "b:=300mm", "the deleted text comes back"
+    window.undo_something()
+    QApplication.processEvents()
+    assert item._editor.toPlainText() == "", "and back down to an empty entry"
+    window.view.escape_everything()
+
+
+def test_undo_puts_a_converted_calculation_back_as_a_calculation(window):
+    """A space turns the line into prose; undo turns it back into a line."""
+    from calcforge.items.mathitem import MathItem
+    from calcforge.items.text import TextItem
+
+    window.view._last_scene_pos = QPointF(90, 300)
+    press_key(window.view, Qt.Key_unknown, '"')
+    type_text(window.view, "check")
+    press_key(window.view, Qt.Key_Space, " ")
+    QApplication.processEvents()
+    assert isinstance(window.view.editing_item(), TextItem)
+
+    window.view.escape_everything()
+    window.undo_something()
+    QApplication.processEvents()
+    live = [i for i in markups(window) if isinstance(i, (MathItem, TextItem))]
+    assert [type(i).__name__ for i in live] == ["MathItem"], \
+        "the live equation is back"
+
+
+def test_placing_a_cloud_leader_shows_a_cloud_on_the_pointer(window):
+    """A crosshair says "put a point somewhere"; a cloud is drawn round one.
+
+    And nothing provisional is drawn before the cloud itself: the preview only
+    appears once a region is being dragged out.
+    """
+    from calcforge.items.text import CalloutItem
+
+    window.select_tool("callout")
+    click(window.view, 200, 200)
+    click(window.view, 330, 260)
+    callout = [i for i in markups(window) if isinstance(i, CalloutItem)][-1]
+    window.view.escape_everything()
+
+    before = window.view.cursor().shape()
+    window.view.begin_cloud_leader(callout)
+    QApplication.processEvents()
+    assert window.view._pending_cloud_leader is callout
+    assert window.view.cursor().shape() == Qt.BitmapCursor, \
+        "a drawn cloud rides the pointer, not a stock crosshair"
+    assert window.view.cursor().shape() != before
+    assert window.view._marquee == [], "and nothing provisional is drawn yet"
+
+    press_key(window.view, Qt.Key_Escape)
+    QApplication.processEvents()
+    assert window.view._pending_cloud_leader is None
+    assert window.view.cursor().shape() != Qt.BitmapCursor, "the cloud is put down again"
+
+
+def test_a_snapshot_has_a_border_that_starts_at_none_and_can_be_set(window):
+    """It had no colour control anywhere, and a red frame it could not lose."""
+    from calcforge.items.snapshot import SnapshotItem
+    from calcforge.ui.stylecaps import STROKE, WIDTH, capabilities
+
+    shot = SnapshotItem()
+    assert shot.style.stroke == "" and shot.style.width == 0.0, \
+        "a snapshot starts with no outline at all"
+    assert {STROKE, WIDTH} <= capabilities(shot), \
+        "and both surfaces are told it has one to set"
+
+    shot.style.stroke = "#c92a2a"
+    shot.style.width = 1.5
+    assert shot.style.stroke and shot.style.width > 0, "a set outline is kept"
+
+
+def test_a_photos_own_border_is_not_offered_but_its_default_is(window):
+    """Two different questions about the same control.
+
+    A stroke colour on a raster photo has nowhere to go, so a selected image
+    does not offer one. What frame a placed image starts with is a real
+    setting, though, and with no way to reach it the only frame available was
+    whatever the code happened to begin with.
+    """
+    from calcforge.items.media import ImageItem
+    from calcforge.ui.stylecaps import OPACITY, STROKE, WIDTH, capabilities
+
+    photo = ImageItem()
+    assert capabilities(photo) == {OPACITY}, "nothing to change on the photo"
+    assert {STROKE, WIDTH} <= capabilities(photo, for_default=True), \
+        "but the default frame is settable"
+    assert photo.style.stroke == "" or photo.style.width == 0.0, \
+        "and it starts with no frame"
+
+
 def test_the_style_toolbar_offers_the_figures_an_answer_is_shown_to(window):
     """The two ways of styling a selection have to offer the same things.
 
@@ -9628,6 +9739,37 @@ def test_moving_the_arrow_head_works_the_hinge_out_again(window):
     assert leader.side == "", "the hand-picked side should have been given up"
     assert leader.reach == pytest.approx(call.ELBOW_REACH)
     assert call.side_of(leader) == "right"
+
+
+def test_several_leaders_each_work_their_own_hinge_out(window):
+    """One hinge for the lot is what a call-out must not have.
+
+    Each leader points somewhere different, so each works out its own side
+    from its own target when the box or the cloud moves — none of them is
+    handed whatever the first one happens to be doing.
+    """
+    call = _callout(window)
+    window.view.end_item_edit()
+    window.select_tool("select")
+    box = call.local_rect().normalized()
+
+    call.tip = QPointF(box.left() - 150, box.center().y())
+    call.add_leader(QPointF(box.right() + 150, box.center().y()))
+    call.add_leader(QPointF(box.center().x(), box.bottom() + 150))
+    assert len(call.leaders) == 3
+
+    # Hand-place the first one's hinge somewhere it would not go by itself.
+    call.set_elbow_of(call.leaders[0], QPointF(box.center().x(), box.top() - 45))
+    assert call.leaders[0].side == "top"
+    assert call.leaders[0].reach > call.ELBOW_REACH
+
+    call.leader_moved()
+
+    assert call.leaders[0].side == "", "the hand-picked side is given up"
+    assert all(leader.reach == pytest.approx(call.ELBOW_REACH)
+               for leader in call.leaders), "and the stand-off goes back to normal"
+    sides = [call.side_of(leader) for leader in call.leaders]
+    assert len(set(sides)) == 3, f"each leaves by its own side, got {sides}"
 
 
 def test_moving_the_box_works_the_hinge_out_again(window):

@@ -21,10 +21,22 @@ FILL_OPACITY = "fill_opacity"
 FONT = "font"
 
 
-def capabilities(item) -> set[str]:
-    """Return only controls whose values the item visibly uses."""
-    if isinstance(item, (ImageItem, SnapshotItem)):
-        return {OPACITY}
+def capabilities(item, for_default: bool = False) -> set[str]:
+    """Return only controls whose values the item visibly uses.
+
+    ``for_default`` asks the other question: not "what can be changed about
+    this markup" but "what can be set as the default for making one". They
+    differ for a photo. Its own border means nothing — a stroke colour on a
+    raster image has nowhere to go — but the frame a placed image is given is
+    a real setting, and with no way to reach it the only frame available was
+    whatever the code happened to start with.
+    """
+    if isinstance(item, SnapshotItem):
+        # A snapshot is drawn linework, not a photo: it has an outline, that
+        # outline defaults to none, and it is the user's to set.
+        return {OPACITY, STROKE, WIDTH}
+    if isinstance(item, ImageItem):
+        return {OPACITY, STROKE, WIDTH} if for_default else {OPACITY}
     if isinstance(item, MathItem):
         return {FONT}
     if isinstance(item, TableItem):

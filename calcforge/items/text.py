@@ -744,6 +744,11 @@ class _TextBase(MarkupItem):
         that old geometry too. Moved somewhere else, both choices are given
         up: the leader leaves by whichever side now faces its target and uses
         the normal stand-off again.
+
+        Each leader on its own, though. A call-out can carry several, each
+        pointing somewhere different, and every one of them works out its own
+        side from its own target — none of them is handed whatever the first
+        one happens to be doing.
         """
         for leader in self.leaders:
             leader.side = ""
