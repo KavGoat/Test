@@ -2937,7 +2937,11 @@ def test_a_snapshot_takes_the_drawing_underneath_with_it(window, tmp_path, monke
     painter.drawPicture(0, 0, recorded)
     painter.end()
     assert replay.pixelColor(55, 35).alpha() > 0       # imported vector linework
-    assert replay.pixelColor(10, 10).alpha() == 0      # no blue page background
+    # And the sheet it was drawn on. A snapshot takes what is under the
+    # marquee — which, on a page that came in from a PDF, is mostly the
+    # drawing itself and not a markup at all.
+    assert replay.pixelColor(10, 10).alpha() > 0
+    assert replay.pixelColor(10, 10).name() == "#3366aa"
 
     window.paste_items()
     pasted = [i for i in markups(window) if isinstance(i, SnapshotItem)]
@@ -7236,6 +7240,69 @@ def _a_pdf_with_lines(window, tmp_path):
     return path
 
 
+def test_opening_a_pdf_shows_the_pdf_and_makes_nothing(window, tmp_path):
+    """The complaint this answers: an opened PDF must look like the PDF.
+
+    It used to arrive as a picture of the page with MarkForge's own drawing
+    of everything on it laid over the top — every line and every markup
+    twice, the copy a little out of place and a little the wrong shape. So
+    what opened was never quite the file, and a drawing set took a quarter of
+    a minute and fifty megabytes to get there.
+    """
+    from markforge.core.document import Document
+    from markforge.io import pdfio
+
+    path = _a_pdf_with_lines(window, tmp_path)
+    fresh = Document()
+    pages = pdfio.import_pages(fresh, path, [0], at=0)
+    page = pages[0]
+    assert page._pending_items == [], "nothing is made out of the page"
+    assert page.background_key is None, "and no picture of it is kept"
+    assert page.pdf_key, "the page is drawn from the file itself"
+    assert page.pdf_annotations, "with everything that is marked on it"
+    # The only thing stored is the source file, once, however many pages
+    # came out of it.
+    assert list(fresh.assets) == [page.pdf_key]
+
+
+def test_a_pdf_page_still_draws_when_no_picture_of_it_was_kept(window, tmp_path):
+    """No stored sheet, so the first paint has to come from the file."""
+    from markforge.io import pdfio
+
+    path = _a_pdf_with_lines(window, tmp_path)
+    window.open_path(path)
+    window.rebuild_scenes()
+    QApplication.processEvents()
+    frame = window.document.pages[0].frame
+    assert frame is not None
+    assert window.document.pages[0].background_key is None
+    drawn = frame.render_image(dpi=72.0)
+    assert not drawn.isNull()
+    # Anything that is not paper. Counting dark pixels would miss the case
+    # entirely: what is on this page is thin red line work, which is bright.
+    ink = sum(1 for y in range(0, drawn.height(), 3)
+              for x in range(0, drawn.width(), 3)
+              if drawn.pixelColor(x, y).name() != "#ffffff")
+    assert ink > 40, "the page came out blank"
+
+
+def test_the_markups_on_a_page_can_be_asked_for_when_they_are_wanted(
+        window, tmp_path):
+    """Reading is the default; replying is a thing you ask for."""
+    path = _a_pdf_with_lines(window, tmp_path)
+    window.open_path(path)
+    window.rebuild_scenes()
+    page = window.document.pages[0]
+    assert not page.frame.markups()
+
+    made = window.make_markups_editable(0)
+    assert made > 0
+    assert len(page.frame.markups()) == made
+    # And now that they are ours, the page must stop drawing them itself, or
+    # each one would be on the page twice.
+    assert page.pdf_annotations is False
+
+
 def test_an_inserted_pdf_brings_somebody_elses_markups_back_as_markups(
         window, tmp_path):
     """A cloud is a cloud, not sixty loose segments and not a picture."""
@@ -7262,25 +7329,29 @@ def test_the_lines_come_in_knowing_they_are_the_pages_own(window, tmp_path):
 
     path = _a_pdf_with_lines(window, tmp_path)
     fresh = Document()
-    pages = pdfio.import_pages(fresh, path, [0], vectors=True, at=1)
+    pages = pdfio.import_pages(fresh, path, [0], vectors=True,
+                               annotations=True, at=1)
     told = {bool(item.get("from_drawing")) for item in pages[0]._pending_items}
     assert True in told, "the page's own line work"
     assert False in told, "and the markups that were made on it"
-    # And the picture is still there underneath, so the words still show.
-    assert pages[0].background_key
+    # Both were read out of the page, so the page must not draw them a second
+    # time underneath what was read out of it.
+    assert pages[0].pdf_annotations is False
+    assert pages[0].pdf_key, "and the sheet itself is still drawn from the file"
 
 
-def test_the_lines_can_be_left_out_but_the_markups_never_are(window, tmp_path):
+def test_the_lines_can_be_left_out_and_the_markups_read(window, tmp_path):
     from markforge.core.document import Document
     from markforge.io import pdfio
 
     path = _a_pdf_with_lines(window, tmp_path)
     fresh = Document()
-    pages = pdfio.import_pages(fresh, path, [0], vectors=False, at=1)
+    pages = pdfio.import_pages(fresh, path, [0], vectors=False,
+                               annotations=True, at=1)
     told = {bool(item.get("from_drawing")) for item in pages[0]._pending_items}
     assert told == {False}, \
-        "the page's own line work was not asked for; the markups always are"
-    assert pages[0].background_key
+        "the page's own line work was not asked for, only its markups"
+    assert pages[0].pdf_key
 
 
 def test_a_file_that_cannot_be_read_that_way_still_comes_in(window, tmp_path):

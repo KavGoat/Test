@@ -254,13 +254,10 @@ class PdfImportDialog(QDialog):
         self.fit.addItem("Fit to this document's page size", pdfio.FIT_CURRENT)
         form.addRow("Page size", self.fit)
 
-        # Neither a resolution nor a "bring the lines across as well" is asked
-        # about any more. There was never a right answer to either: everything
-        # in the file comes across as the file has it — the line work as real
-        # geometry, so measurements snap to the ends of lines, and the rest as
-        # a picture behind it, made as good as the sheet allows. The only
-        # question left is one about this document, which is what size of page
-        # the imported ones should be.
+        # No resolution is asked about, because there is none to choose: an
+        # inserted page is drawn from the file at whatever size it is being
+        # looked at. The only question left is one about this document, which
+        # is what size of page the imported ones should be.
         layout.addLayout(form)
 
         self.info = QLabel("")
@@ -325,7 +322,11 @@ class PdfImportDialog(QDialog):
 
     def selection(self) -> tuple[str, list[int], str, float, bool]:
         indices = pdfio.parse_page_range(self.pages.text(), self._count)
-        return (self.path, indices, self.fit.currentData(), pdfio.BEST_DPI, True)
+        # The last of these says whether to make markups out of the page's own
+        # line work. It is off: a page comes in as the page, and turning a
+        # drawing into thousands of editable lines is a thing to ask for, not
+        # a thing to have happen.
+        return (self.path, indices, self.fit.currentData(), pdfio.BEST_DPI, False)
 
 
 class TableSizeDialog(QDialog):

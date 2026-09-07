@@ -1298,10 +1298,13 @@ class MainWindow(QMainWindow):
         if count < 1:
             raise OSError("The PDF contains no pages")
         pdfio.import_pages(document, path, list(range(count)), pdfio.FIT_ORIGINAL,
-                           pdfio.BEST_DPI, at=0, vectors=True)
-        # Opening a PDF is opening a document, not converting one. Save writes
-        # this file back — the source page comes through untouched and the
-        # markups go on top of it, the way Bluebeam saves a marked-up drawing.
+                           pdfio.BEST_DPI, at=0)
+        # Opening a PDF is opening a document, not converting one. The page is
+        # the PDF's own page, drawn by the PDF renderer; nothing on it is
+        # turned into a markup of ours, so what is on screen is what any
+        # reader shows and it opens as fast as one. Save writes this file back
+        # — the source page comes through untouched and the markups go on top
+        # of it, the way Bluebeam saves a marked-up drawing.
         document.path = path
         document.modified = True
         self.document = document
@@ -1895,7 +1898,7 @@ class MainWindow(QMainWindow):
         # comes across, at the best the sheet allows.
         path, indices, fit = chosen[:3]
         dpi = chosen[3] if len(chosen) > 3 else pdfio.BEST_DPI
-        vectors = bool(chosen[4]) if len(chosen) > 4 else True
+        vectors = bool(chosen[4]) if len(chosen) > 4 else False
         if not path or not indices:
             QMessageBox.information(self, "Insert PDF", "No pages were selected.")
             return
@@ -2030,12 +2033,14 @@ class MainWindow(QMainWindow):
         self.view.fit_page()
 
     def _rotate_background(self, page, clockwise: bool) -> str:
-        """A quarter-turned copy of the page's background sheet, if it has one."""
-        data = self.document.asset(page.background_key)
-        if not data:
-            return ""
-        image = QImage()
-        if not image.loadFromData(data) or image.isNull():
+        """A quarter-turned copy of the page's sheet, if it has one.
+
+        A page opened from a PDF keeps no picture of itself, so one is
+        rendered here — turning it is what makes the turn permanent, and from
+        that point the page is a raster rather than the source file.
+        """
+        image = pdfio.page_raster(self.document, page)
+        if image is None or image.isNull():
             return ""
         transform = QTransform().rotate(90 if clockwise else -90)
         turned = image.transformed(transform, Qt.SmoothTransformation)
@@ -2249,7 +2254,16 @@ class MainWindow(QMainWindow):
                                                self.calibrate_dialog()))
         recolour = menu.addAction("Change colours…",
                                   lambda: self.recolour_page(index))
-        recolour.setEnabled(bool(self.document.pages[index].background_key))
+        page = self.document.pages[index]
+        recolour.setEnabled(bool(page.background_key or page.pdf_key))
+        editable = menu.addAction("Make this page's markups editable",
+                                  lambda: self.make_markups_editable(index))
+        editable.setToolTip(
+            "Read the clouds, call-outs and dimensions already on this page "
+            "out of the PDF\nand turn them into markups you can move and "
+            "change. What is read out is\nMarkForge's drawing of them, so it "
+            "will not match the file exactly.")
+        editable.setEnabled(bool(page.pdf_key) and page.pdf_annotations)
         delete = menu.addAction("Delete pages" if several else "Delete page",
                                 lambda: self.delete_page(index))
         delete.setToolTip(f"Delete {these}")
@@ -2990,12 +3004,9 @@ class MainWindow(QMainWindow):
         return True
 
     def _crop_background(self, page, region: QRectF):
-        """The part of the page's background sheet inside the region."""
-        data = self.document.asset(page.background_key)
-        if not data:
-            return None
-        image = QImage()
-        if not image.loadFromData(data) or image.isNull():
+        """The part of the page's sheet inside the region."""
+        image = pdfio.page_raster(self.document, page)
+        if image is None or image.isNull():
             return None
         across = image.width() / max(page.width_pt, 1.0)
         down = image.height() / max(page.height_pt, 1.0)
@@ -3011,6 +3022,62 @@ class MainWindow(QMainWindow):
             return None
         raw = bytes(buffer.data())
         return self.document.add_asset(raw, "png"), raw
+
+    def make_markups_editable(self, index: Optional[int] = None) -> int:
+        """Read the page's own annotations out of the PDF as markups.
+
+        Opening a drawing shows the drawing: the clouds and call-outs
+        somebody else made are drawn by the PDF renderer, exactly as any
+        reader draws them. That is right for reading and wrong for replying,
+        so this is where the two part company. What comes out is MarkForge's
+        rendering of each annotation, which is close but not the file — so the
+        page stops drawing them itself, or every one would be on the page
+        twice. Says how many were read.
+        """
+        which = self.page_index(index)
+        page = self.document.pages[which]
+        if not page.pdf_key or not page.pdf_annotations:
+            return 0
+        source = self.document.asset(page.pdf_key)
+        if not source or page.pdf_page_index is None:
+            return 0
+        import tempfile
+        from ..io import pdfio
+
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as handle:
+            handle.write(source)
+            scratch = handle.name
+        try:
+            found = pdfio.markups(scratch, [int(page.pdf_page_index)])
+        finally:
+            try:
+                os.unlink(scratch)
+            except OSError:
+                pass
+        payloads = found.get(int(page.pdf_page_index)) or []
+        if not payloads:
+            QMessageBox.information(
+                self, "Make markups editable",
+                "There are no markups on this page to read out — what is on "
+                "it is part of the sheet itself.")
+            return 0
+        scaled = payloads
+
+        def mutate():
+            page.pdf_annotations = False
+            frame = page.frame
+            if frame is not None:
+                frame.forget_sharp_background()
+                frame._background = None
+                for payload in scaled:
+                    item = build_item(dict(payload))
+                    if item is not None:
+                        frame.add_markup(item)
+                frame.update()
+        self._structural_change(f"Make {len(scaled)} markup(s) editable", mutate)
+        self.status_hint.setText(
+            f"{len(scaled)} markup(s) on this page can now be changed")
+        return len(scaled)
 
     def recolour_page(self, index: Optional[int] = None) -> None:
         """Change the colours of the sheet a page came in on."""
@@ -3109,11 +3176,8 @@ class MainWindow(QMainWindow):
         return image
 
     def _background_image(self, page):
-        image = QImage()
-        data = self.document.asset(page.background_key)
-        if not data or not image.loadFromData(data) or image.isNull():
-            return None
-        return image
+        image = pdfio.page_raster(self.document, page)
+        return None if image is None or image.isNull() else image
 
     def _ask_recolour(self, image, line_work=None) -> Optional[str]:
         """Run the dialog and store the result; the new asset key, or None.
@@ -4873,11 +4937,8 @@ class MainWindow(QMainWindow):
         from PySide6.QtCore import QBuffer, QByteArray, QIODevice
         from PySide6.QtGui import QImage, QPainter as _Painter
 
-        data = self.document.asset(page.background_key)
-        if not data:
-            return
-        image = QImage()
-        if not image.loadFromData(QByteArray(data)):
+        image = pdfio.page_raster(self.document, page)
+        if image is None or image.isNull():
             return
         scale_x = image.width() / max(page.width_pt, 1.0)
         scale_y = image.height() / max(page.height_pt, 1.0)

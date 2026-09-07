@@ -227,7 +227,8 @@ class PageFrame(QGraphicsObject):
         region, want = _region_to_draw(wanted, self.page_rect(), want,
                                        pdfio.MOST_LIVE_PIXELS)
         drawn = pdfio.LIVE.draw_region(page.pdf_key, data, int(page.pdf_page_index),
-                                       self.page_rect(), region, want)
+                                       self.page_rect(), region, want,
+                                       getattr(page, "pdf_annotations", True))
         if drawn is None:
             # Nothing readable in the file: keep what is on screen, and stop
             # asking, so a broken source is not re-read on every repaint.
@@ -619,14 +620,66 @@ class PageFrame(QGraphicsObject):
                 if item.isVisible()
                 and (not isinstance(item, _TextBase) or item.isSelected())]
 
-    def render_items_picture(self, items, region: QRectF) -> QPicture:
-        """Record exactly *items* in page coordinates inside *region*."""
+    def sheet_region(self, region: QRectF, scale: float = 4.0):
+        """The sheet itself under *region*, as pixels, or None if there is none.
+
+        A page that came in from a PDF is not made of markups — it is the
+        PDF's own page, drawn from the file. So anything that wants a copy of
+        what is on the page, rather than a copy of what has been added to it,
+        has to ask the file. A snapshot of a detail is the obvious one: what
+        is under the marquee is mostly the drawing.
+        """
+        page = self.page
+        box = QRectF(region).normalized().intersected(self.page_rect())
+        if box.isEmpty():
+            return None
+        if page.pdf_key is not None and page.pdf_page_index is not None:
+            data = self.document.asset(page.pdf_key)
+            if data:
+                from ..io import pdfio
+
+                room = pdfio.MOST_LIVE_PIXELS
+                want = float(scale)
+                while want > 0.5 and box.width() * want * box.height() * want > room:
+                    want /= 2.0
+                drawn = pdfio.LIVE.draw_region(
+                    page.pdf_key, data, int(page.pdf_page_index),
+                    self.page_rect(), box, want,
+                    getattr(page, "pdf_annotations", True))
+                if drawn is not None and not drawn.isNull():
+                    return box, drawn
+        if self._background is None and page.background_key:
+            self.load_background()
+        if self._background is not None and not self._background.isNull():
+            whole = self.page_rect()
+            across = self._background.width() / max(whole.width(), 1.0)
+            down = self._background.height() / max(whole.height(), 1.0)
+            piece = self._background.copy(
+                int(box.left() * across), int(box.top() * down),
+                max(int(box.width() * across), 1), max(int(box.height() * down), 1))
+            if not piece.isNull():
+                return box, piece.toImage()
+        return None
+
+    def render_items_picture(self, items, region: QRectF,
+                             sheet: bool = True) -> QPicture:
+        """Record *items* in page coordinates inside *region*, over the sheet."""
         box = QRectF(region).normalized()
         picture = QPicture()
-        if box.width() <= 0 or box.height() <= 0 or not items:
+        if box.width() <= 0 or box.height() <= 0:
+            return picture
+        under = self.sheet_region(box) if sheet else None
+        if not items and under is None:
             return picture
         painter = QPainter()
         painter.begin(picture)
+        if under is not None:
+            where, image = under
+            painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+            painter.drawImage(
+                QRectF(where.left() - box.left(), where.top() - box.top(),
+                       where.width(), where.height()),
+                image, QRectF(image.rect()))
         self.paint_items(painter, items, box)
         painter.end()
         return picture

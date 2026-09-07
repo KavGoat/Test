@@ -215,6 +215,12 @@ class Page:
         # vector/text page instead of flattening the source drawing to pixels.
         self.pdf_key: Optional[str] = None
         self.pdf_page_index: Optional[int] = None
+        # Whether the source page's own annotations are drawn with it. They
+        # are, normally — that is what makes an opened drawing look like the
+        # drawing. It goes false only when they have been read out into
+        # markups of ours, because then drawing them from the file as well
+        # would put every cloud and every call-out on the page twice.
+        self.pdf_annotations: bool = True
         self.background_opacity: float = 1.0
         self.source_note: str = ""                  # e.g. "drawing.pdf page 3"
         # Whether this page carries a grid. A page written on wants one; a
@@ -270,6 +276,7 @@ class Page:
             "background_key": self.background_key,
             "pdf_key": self.pdf_key,
             "pdf_page_index": self.pdf_page_index,
+            "pdf_annotations": self.pdf_annotations,
             "background_opacity": self.background_opacity,
             "source_note": self.source_note,
             "grid": self.grid,
@@ -288,6 +295,7 @@ class Page:
         page.pdf_key = data.get("pdf_key")
         source_index = data.get("pdf_page_index")
         page.pdf_page_index = None if source_index is None else int(source_index)
+        page.pdf_annotations = bool(data.get("pdf_annotations", True))
         page.background_opacity = float(data.get("background_opacity", 1.0))
         page.source_note = data.get("source_note", "")
         for which in ("grid", "header", "footer"):

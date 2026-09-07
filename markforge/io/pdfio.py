@@ -36,16 +36,22 @@ FIT_A4 = "a4"                   # scale into A4
 FIT_CURRENT = "current"         # scale into the document's current page size
 
 
-def _how_to_render() -> QPdfDocumentRenderOptions:
-    """How an imported page is drawn: everything that is on it.
+def _how_to_render(annotations: bool = True) -> QPdfDocumentRenderOptions:
+    """How a page is drawn. Everything on it, unless told otherwise.
 
     A marked-up drawing keeps its clouds, dimensions and call-outs as
     annotations rather than in the page, and Qt leaves those out unless it is
-    asked for them. Without this an imported PDF comes in with every markup
+    asked for them. Without this an opened PDF shows with every markup
     somebody else made missing from it.
+
+    The exception is a page whose annotations have been read out into markups
+    of our own. Drawing them from the file as well would put each one on the
+    page twice — once correctly and once as our copy of it, a little out of
+    place and a little the wrong shape, which is worse than either alone.
     """
     options = QPdfDocumentRenderOptions()
-    options.setRenderFlags(QPdfDocumentRenderOptions.RenderFlag.Annotations)
+    if annotations:
+        options.setRenderFlags(QPdfDocumentRenderOptions.RenderFlag.Annotations)
     return options
 
 
@@ -146,7 +152,7 @@ class LivePages:
         return document
 
     def draw(self, key: str, data: bytes, index: int,
-             width: int, height: int) -> Optional[QImage]:
+             width: int, height: int, annotations: bool = True) -> Optional[QImage]:
         """One page at an exact pixel size, or nothing if it cannot be had."""
         document = self.document_for(key, data)
         if document is None or not 0 <= index < document.pageCount():
@@ -157,11 +163,12 @@ class LivePages:
             shrink = (MOST_LIVE_PIXELS / (width * height)) ** 0.5
             width = max(int(width * shrink), 1)
             height = max(int(height * shrink), 1)
-        image = document.render(index, QSize(width, height), _how_to_render())
+        image = document.render(index, QSize(width, height),
+                                _how_to_render(annotations))
         return None if image.isNull() else image
 
     def draw_region(self, key: str, data: bytes, index: int, whole,
-                    region, scale: float):
+                    region, scale: float, annotations: bool = True):
         """Part of a page, drawn at *scale* pixels to the point.
 
         The whole page is scaled up and then only the piece asked for is
@@ -181,7 +188,7 @@ class LivePages:
                       max(int(round(region.height() * scale)), 1))
         if piece.width() * piece.height() > MOST_LIVE_PIXELS:
             return None
-        options = _how_to_render()
+        options = _how_to_render(annotations)
         options.setScaledSize(QSize(across, down))
         options.setScaledClipRect(piece)
         image = document.render(index, QSize(piece.width(), piece.height()), options)
@@ -195,6 +202,64 @@ class LivePages:
 
 
 LIVE = LivePages()
+
+
+# ---------------------------------------------------------------------------
+# a page as a picture, when something really needs one
+# ---------------------------------------------------------------------------
+
+def page_raster(document, page, dpi: float = BEST_DPI) -> Optional[QImage]:
+    """A picture of *page*, however it has to be got.
+
+    Opening a PDF stores no picture of anything — the page is drawn from the
+    file. But rotating, recolouring, cropping and redacting all work on a
+    raster and always did, so this is where they get one: the stored sheet if
+    the page has one, and otherwise a fresh render straight from the source.
+    """
+    data = document.asset(page.background_key) if page.background_key else None
+    if data:
+        image = QImage()
+        if image.loadFromData(data) and not image.isNull():
+            return image
+    if page.pdf_key is None or page.pdf_page_index is None:
+        return None
+    source = document.asset(page.pdf_key)
+    if not source:
+        return None
+    scale = max(dpi, 24.0) / 72.0
+    across = max(page.width_pt, 1.0) * scale
+    down = max(page.height_pt, 1.0) * scale
+    if across * down > MAX_PIXELS:
+        shrink = (MAX_PIXELS / (across * down)) ** 0.5
+        across, down = across * shrink, down * shrink
+    return LIVE.draw(page.pdf_key, source, int(page.pdf_page_index),
+                     int(round(across)), int(round(down)),
+                     getattr(page, "pdf_annotations", True))
+
+
+def store_raster(document, image: Optional[QImage]) -> str:
+    """Keep *image* in the document as a PNG asset. The key, or empty."""
+    if image is None or image.isNull():
+        return ""
+    buffer = QBuffer()
+    buffer.open(QIODevice.WriteOnly)
+    if not image.save(buffer, "PNG") or buffer.data().isEmpty():
+        return ""
+    return document.add_asset(bytes(buffer.data()), "png")
+
+
+def ensure_background(document, page, dpi: float = BEST_DPI) -> str:
+    """Give *page* a stored sheet of its own, rendering one if it has none.
+
+    For the operations that destroy what the page came from — a redaction, a
+    recolour — where the point is that the source must stop being consulted.
+    """
+    if page.background_key and document.asset(page.background_key):
+        return page.background_key
+    key = store_raster(document, page_raster(document, page, dpi))
+    if key:
+        page.background_key = key
+    return key
 
 
 def setup_for(info: PdfPageInfo, fit: str, template: Optional[PageSetup]) -> PageSetup:
@@ -382,12 +447,29 @@ def _bezier(a, b, c, d, t: float) -> list:
 
 def import_pages(document, path: str, indices: list[int], fit: str = FIT_ORIGINAL,
                  dpi: float = 150.0, at: Optional[int] = None,
-                 vectors: bool = False) -> list[Page]:
+                 vectors: bool = False, annotations: bool = False) -> list[Page]:
     """Load the chosen PDF pages into *document* as new pages.
 
-    With *vectors*, the PDF's own line work comes across as well: real
-    geometry of its own, sitting exactly over the picture, so a
+    **What arrives is the PDF.** Every page is drawn from the file itself, by
+    the same renderer a PDF reader uses, at whatever size it is being looked
+    at — so an opened drawing is the drawing, pixel for pixel, and stays that
+    way at any zoom. Nothing is converted into anything on the way in, and
+    nothing is stored: no picture of the page, and no markups of our own
+    standing in for what is already on it.
+
+    That is not what this used to do, and the difference is the whole
+    complaint. Every page used to be rendered to a PNG up front and every
+    annotation and every line on the sheet turned into an editable markup, so
+    a twelve-page A1 set took fifteen seconds, held fifty megabytes, and
+    arrived as seventy-two thousand objects drawn over the top of a correct
+    picture of the same drawing — near enough to be maddening, and never
+    right. The optional imports below are what is left of it:
+
+    *vectors* brings the page's own line work in as real geometry, so a
     measurement can snap to the end of a beam rather than to a guess.
+    *annotations* turns markups already on the page into editable ones.
+    Both make objects, both take time, and neither is what opening a file
+    should do — so both are off unless something asks.
     """
     source = PdfSource(path)
     with open(path, "rb") as handle:
@@ -395,12 +477,11 @@ def import_pages(document, path: str, indices: list[int], fit: str = FIT_ORIGINA
     template = document.pages[at - 1].setup if at else (
         document.pages[-1].setup if document.pages else None)
     drawn = line_work(path, indices) if vectors else {}
-    marked = markups(path, indices)
+    marked = markups(path, indices) if annotations else {}
     created: list[Page] = []
     try:
         for offset, index in enumerate(indices):
-            data, info = source.render_png(index, dpi)
-            key = document.add_asset(data, "png")
+            info = source.page_info(index)
             page = Page(setup_for(info, fit, template))
             if index in drawn:
                 # The page's own line work, over the picture of it. The page
@@ -413,9 +494,9 @@ def import_pages(document, path: str, indices: list[int], fit: str = FIT_ORIGINA
                 across = info.width_pt or 1.0
                 page._pending_items = list(page._pending_items) + _scaled_markups(
                     marked[index], page.setup.width_pt / across)
-            page.background_key = key
             page.pdf_key = pdf_key
             page.pdf_page_index = index
+            page.pdf_annotations = index not in marked
             page.source_note = f"{os.path.basename(path)} page {index + 1}"
             # A drawing has its own lines. A grid ruled over the top of it
             # only gets in the way, so a page that came in from a PDF starts

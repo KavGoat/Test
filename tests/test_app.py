@@ -927,11 +927,13 @@ def test_an_inserted_pdf_page_carries_the_drawing(window, tmp_path, monkeypatch)
 
     assert len(window.document.pages) == 2
     page = window.document.pages[1]
-    assert page.background_key
-    assert window.document.asset(page.background_key)
+    # No picture of the page is stored: the page is drawn from the PDF itself,
+    # which is what makes it identical to the file and instant to open.
+    assert page.background_key is None
     assert page.pdf_key
     assert window.document.asset(page.pdf_key).startswith(b"%PDF")
     assert page.pdf_page_index == 0
+    assert page.pdf_annotations, "and it draws what is already marked on it"
     assert _ink(page.frame.render_image(dpi=48.0)) > 100     # not a blank sheet
 
 
@@ -946,8 +948,8 @@ def test_pdf_review_snapshot_survives_edit_save_reopen_and_export(
     path = _drawing_pdf(str(tmp_path / "review.pdf"))
     _open_pdf(window, monkeypatch, path)
     frame = window.document.pages[0].frame
-    drawing = [item for item in frame.markups() if item.from_drawing]
-    assert drawing, "the imported PDF fixture supplied no vector drawing"
+    assert not frame.markups(), \
+        "opening a PDF makes nothing; the page is the PDF's own page"
 
     QApplication.sendEvent(
         window.view, QKeyEvent(QEvent.KeyPress, Qt.Key_G, Qt.NoModifier, "g"))
@@ -994,7 +996,7 @@ def test_an_inserted_pdf_page_survives_saving_and_reopening(window, tmp_path, mo
     reopened = Document()
     project_io.load_document(reopened, saved)
     page = reopened.pages[1]
-    assert page.background_key and reopened.asset(page.background_key)
+    assert page.background_key is None
     assert page.pdf_key and reopened.asset(page.pdf_key).startswith(b"%PDF")
     assert page.pdf_page_index == 0
 
@@ -1122,11 +1124,12 @@ def test_the_import_dialog_does_not_ask_for_a_resolution(window):
     dialog = dialogs.PdfImportDialog(window)
     try:
         assert not hasattr(dialog, "dpi"), "nobody is asked for a dpi"
-        assert not hasattr(dialog, "vectors"), "the line work always comes"
+        assert not hasattr(dialog, "vectors")
         labels = [label.text() for label in dialog.findChildren(QLabel)]
         assert not any("Render at" in text for text in labels)
         _path, _pages, _fit, dpi, vectors = dialog.selection()
         assert dpi == pdfio.BEST_DPI
-        assert vectors is True
+        assert vectors is False, \
+            "a page comes in as the page, not as thousands of editable lines"
     finally:
         dialog.deleteLater()

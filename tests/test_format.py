@@ -374,6 +374,10 @@ def test_a_marked_up_drawing_opens_as_markups_that_can_be_worked_with(
 
     window.open_path(theirs)
     window.rebuild_scenes()
+    # Opening shows the drawing as the file has it. Replying to it is a
+    # separate act, and this is it.
+    assert not window.document.pages[0].frame.markups()
+    window.make_markups_editable(0)
     came_in = [item for item in window.document.pages[0].frame.markups()
                if not item.from_drawing]
     kinds = [(type(item).__name__, getattr(item, "kind", "")) for item in came_in]
@@ -543,6 +547,7 @@ def test_every_markup_comes_back_as_what_it_went_out_as(window, tmp_path):
 
     window.open_path(path)
     window.rebuild_scenes()
+    window.make_markups_editable(0)
     came_back = [item for item in window.document.pages[0].frame.markups()
                  if not item.from_drawing]
     kinds = [(type(item).__name__, getattr(item, "kind", ""))
