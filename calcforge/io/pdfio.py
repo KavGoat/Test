@@ -17,12 +17,19 @@ from ..core.document import PT_TO_MM, LANDSCAPE, PORTRAIT, Page, PageSetup
 MAX_PIXELS = 48_000_000
 
 # What an imported page is rendered at, with nobody asked. There is no
-# resolution to choose: everything the file holds comes across as the file has
-# it — the line work as real geometry, the rest as a picture behind it — and
-# the picture is made as good as the sheet allows. 600 dpi is more than an A4
-# needs; a big drawing sheet is scaled down from it by the pixel cap above,
-# which is the only limit that actually matters.
-BEST_DPI = 600.0
+# resolution to choose, and there is no longer a resolution to get wrong: the
+# page is drawn from the PDF itself at whatever size it is being looked at, so
+# what is stored here is only the first thing shown, before the first proper
+# draw. Making that a 600 dpi picture of every page is what made opening a
+# drawing set take a minute and hold a gigabyte; it is a page-sized thumbnail
+# now, and the sharpness comes from the file.
+BEST_DPI = 110.0
+
+# Never hand the live renderer more than this many pixels for one page. A
+# page filling a large screen at twice the device ratio is about eight
+# megapixels; past that the sharpness is beyond anything a screen can show and
+# the wait is not.
+MOST_LIVE_PIXELS = 16_000_000
 
 FIT_ORIGINAL = "original"       # page takes the PDF page's own size
 FIT_A4 = "a4"                   # scale into A4
@@ -103,6 +110,93 @@ class PdfSource:
         self.doc.close()
 
 
+class LivePages:
+    """The source PDFs a document has pages from, kept open to draw from.
+
+    A page imported from a PDF is not a picture of a drawing, it is the
+    drawing, and the file is still there. So it is drawn from the file at the
+    size it is being looked at — which is what makes it sharp at any zoom
+    instead of a photograph that goes soft as soon as it is enlarged.
+    """
+
+    def __init__(self):
+        self._open: dict[str, QPdfDocument] = {}
+
+    def document_for(self, key: str, data: bytes) -> Optional[QPdfDocument]:
+        if not key or not data:
+            return None
+        found = self._open.get(key)
+        if found is not None:
+            return found
+        from PySide6.QtCore import QBuffer, QByteArray
+
+        holder = QBuffer()
+        holder.setData(QByteArray(data))
+        holder.open(QIODevice.ReadOnly)
+        document = QPdfDocument()
+        # Loading from a device hands nothing back — the error return belongs
+        # to the overload that takes a file name — so what says it worked is
+        # whether there are any pages in it.
+        document.load(holder)
+        if document.pageCount() < 1:
+            return None
+        # The buffer has to outlive the document that reads from it.
+        document._calcforge_buffer = holder
+        self._open[key] = document
+        return document
+
+    def draw(self, key: str, data: bytes, index: int,
+             width: int, height: int) -> Optional[QImage]:
+        """One page at an exact pixel size, or nothing if it cannot be had."""
+        document = self.document_for(key, data)
+        if document is None or not 0 <= index < document.pageCount():
+            return None
+        width = max(int(width), 1)
+        height = max(int(height), 1)
+        if width * height > MOST_LIVE_PIXELS:
+            shrink = (MOST_LIVE_PIXELS / (width * height)) ** 0.5
+            width = max(int(width * shrink), 1)
+            height = max(int(height * shrink), 1)
+        image = document.render(index, QSize(width, height), _how_to_render())
+        return None if image.isNull() else image
+
+    def draw_region(self, key: str, data: bytes, index: int, whole,
+                    region, scale: float):
+        """Part of a page, drawn at *scale* pixels to the point.
+
+        The whole page is scaled up and then only the piece asked for is
+        drawn, which is how a reader shows a drawing sharply without ever
+        making a picture of the entire sheet at that size.
+        """
+        from PySide6.QtCore import QRect
+
+        document = self.document_for(key, data)
+        if document is None or not 0 <= index < document.pageCount():
+            return None
+        across = max(int(round(whole.width() * scale)), 1)
+        down = max(int(round(whole.height() * scale)), 1)
+        piece = QRect(max(int(region.left() * scale), 0),
+                      max(int(region.top() * scale), 0),
+                      max(int(round(region.width() * scale)), 1),
+                      max(int(round(region.height() * scale)), 1))
+        if piece.width() * piece.height() > MOST_LIVE_PIXELS:
+            return None
+        options = _how_to_render()
+        options.setScaledSize(QSize(across, down))
+        options.setScaledClipRect(piece)
+        image = document.render(index, QSize(piece.width(), piece.height()), options)
+        return None if image.isNull() else image
+
+    def forget(self, key: str = "") -> None:
+        if key:
+            self._open.pop(key, None)
+        else:
+            self._open.clear()
+
+
+LIVE = LivePages()
+
+
 def setup_for(info: PdfPageInfo, fit: str, template: Optional[PageSetup]) -> PageSetup:
     """Choose the page geometry for an imported PDF page."""
     if fit == FIT_ORIGINAL:
@@ -152,6 +246,56 @@ def line_work(path: str, indices: list[int]) -> dict[int, list[dict]]:
         if strokes:
             found[index] = strokes[:MOST_STROKES]
     return found
+
+
+def markups(path: str, indices: list[int]) -> dict[int, list[dict]]:
+    """Each page's annotations, as the markups they are.
+
+    Somebody else's clouds, dimensions and comments come in as markups that can
+    be clicked on, moved, replied to and listed — not as a picture of their
+    redlines and not as the thousands of loose segments a cloud is drawn with.
+    """
+    from . import pdfmarkups, pdfvector
+
+    try:
+        source = pdfvector.PdfFile.open(path)
+        pages = source.pages()
+    except Exception:                                  # noqa: BLE001
+        return {}
+    found: dict[int, list[dict]] = {}
+    for index in indices:
+        if not 0 <= index < len(pages):
+            continue
+        try:
+            flip = pdfvector.flip_of_page(source, pages[index])
+            made = pdfmarkups.markups_of_page(source, pages[index], flip)
+        except Exception:                              # noqa: BLE001
+            continue
+        if made:
+            found[index] = made
+    return found
+
+
+def _scaled_markups(payloads: list[dict], scale: float) -> list[dict]:
+    """The same markups on differently sized paper."""
+    if scale == 1.0:
+        return payloads
+    moved = []
+    for payload in payloads:
+        entry = dict(payload)
+        for key in ("x", "y"):
+            if key in entry:
+                entry[key] = entry[key] * scale
+        if "rect" in entry:
+            entry["rect"] = [value * scale for value in entry["rect"]]
+        if "points" in entry:
+            entry["points"] = [[x * scale, y * scale] for x, y in entry["points"]]
+        style = dict(entry.get("style") or {})
+        if "width" in style:
+            style["width"] = max(style["width"] * scale, 0.1)
+        entry["style"] = style
+        moved.append(entry)
+    return moved
 
 
 def _items_from(strokes: list[dict], scale: float = 1.0) -> list[dict]:
@@ -240,6 +384,7 @@ def import_pages(document, path: str, indices: list[int], fit: str = FIT_ORIGINA
     template = document.pages[at - 1].setup if at else (
         document.pages[-1].setup if document.pages else None)
     drawn = line_work(path, indices) if vectors else {}
+    marked = markups(path, indices)
     created: list[Page] = []
     try:
         for offset, index in enumerate(indices):
@@ -259,6 +404,10 @@ def import_pages(document, path: str, indices: list[int], fit: str = FIT_ORIGINA
                 across = info.width_pt or 1.0
                 page._pending_items = _items_from(
                     drawn[index], page.setup.width_pt / across)
+            if index in marked:
+                across = info.width_pt or 1.0
+                page._pending_items = list(page._pending_items) + _scaled_markups(
+                    marked[index], page.setup.width_pt / across)
             page.background_key = key
             page.pdf_key = pdf_key
             page.pdf_page_index = index

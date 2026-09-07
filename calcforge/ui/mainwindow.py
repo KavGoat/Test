@@ -2788,17 +2788,21 @@ class MainWindow(QMainWindow):
             return
         items = self.selected_items()
         active = items[0] if items else None
+        self._style_own_look = False
         if items:
             supported = common_capabilities(items)
         else:
-            tool = self.view.current_tool()
-            active = tool.factory() if tool.factory is not None \
-                and tool.key not in ("snapshot", "calibrate") else None
+            active = self._style_default_item()
             # Nothing is selected, so these controls set what the next markup
             # of this kind starts as, which is a different question from what
             # can be changed about one that already exists.
             supported = capabilities(active, for_default=True) \
                 if active is not None else set()
+            if isinstance(active, (ImageItem, SnapshotItem)):
+                # These two are not drawn with the toolbar's pen, so what the
+                # controls show and change is the look remembered for them.
+                self._style_own_look = True
+                toolsets.apply_default(active)
         for field, actions in self._style_widgets.items():
             for action in actions:
                 action.setVisible(field in supported)
@@ -2917,48 +2921,80 @@ class MainWindow(QMainWindow):
         self.view.sticky_tool = on
 
     def _style_stroke(self, colour: str) -> None:
-        self.default_style.stroke = colour
-        self._push_style(lambda style: setattr(style, "stroke", colour),
-                         "Line colour",
-                         predicate=lambda item: STROKE in capabilities(item))
+        self._style_change(STROKE, lambda style: setattr(style, "stroke", colour),
+                           "Line colour")
 
     def _style_fill(self, colour: str) -> None:
-        self.default_style.fill = colour
-        self._push_style(lambda style: setattr(style, "fill", colour), "Fill colour",
-                         predicate=lambda item: FILL in capabilities(item))
+        self._style_change(FILL, lambda style: setattr(style, "fill", colour),
+                           "Fill colour")
 
     def _style_width(self, value: float) -> None:
-        self.default_style.width = value
-        self._push_style(lambda style: setattr(style, "width", value), "Line width",
-                         predicate=lambda item: WIDTH in capabilities(item))
+        self._style_change(WIDTH, lambda style: setattr(style, "width", value),
+                           "Line width")
 
     def _style_dash(self, value: str) -> None:
-        self.default_style.line_style = value
-        self._push_style(lambda style: setattr(style, "line_style", value), "Line style",
-                         predicate=lambda item: DASH in capabilities(item))
+        self._style_change(DASH, lambda style: setattr(style, "line_style", value),
+                           "Line style")
 
     def _style_font(self, value: float) -> None:
-        self.default_style.font_size = value
-        self._push_style(lambda style: setattr(style, "font_size", value), "Font size",
-                         predicate=lambda item: FONT in capabilities(item))
+        self._style_change(FONT, lambda style: setattr(style, "font_size", value),
+                           "Font size")
 
     def _style_hatch(self, value: str) -> None:
-        self.default_style.hatch = value or ""
-        self._push_style(lambda style: setattr(style, "hatch", value or ""), "Hatch",
-                         predicate=lambda item: HATCH in capabilities(item))
+        self._style_change(HATCH, lambda style: setattr(style, "hatch", value or ""),
+                           "Hatch")
 
     def _style_opacity(self, percent: int) -> None:
         value = max(percent, 1) / 100.0
-        self.default_style.opacity = value
-        self._push_style(lambda style: setattr(style, "opacity", value), "Opacity",
-                         predicate=lambda item: OPACITY in capabilities(item))
+        self._style_change(OPACITY, lambda style: setattr(style, "opacity", value),
+                           "Opacity")
 
     def _style_fill_opacity(self, percent: int) -> None:
         value = percent / 100.0
-        self.default_style.fill_opacity = value
-        self._push_style(lambda style: setattr(style, "fill_opacity", value),
-                         "Fill opacity",
-                         predicate=lambda item: FILL_OPACITY in capabilities(item))
+        self._style_change(FILL_OPACITY,
+                           lambda style: setattr(style, "fill_opacity", value),
+                           "Fill opacity")
+
+    def _style_change(self, field: str, mutate, description: str) -> None:
+        """One toolbar control moved: change the selection, or the default.
+
+        Most markups are drawn with the toolbar's own settings, so with nothing
+        selected the toolbar is those settings. A photo and a snapshot are not:
+        neither is drawn with a pen, and the frame each is given is remembered
+        for that kind of markup on its own. With one of those tools in hand the
+        toolbar edits that remembered look instead, which is what makes a line
+        type settable for them at all.
+        """
+        if self._remember_style_default(mutate):
+            return
+        mutate(self.default_style)
+        self._push_style(mutate, description,
+                         predicate=lambda item: field in capabilities(item))
+
+    def _remember_style_default(self, mutate) -> bool:
+        """Change the stored look of the tool in hand. True if that is what this is."""
+        if self.selected_items() or not getattr(self, "_style_own_look", False):
+            return False
+        item = self._style_default_item()
+        if item is None:
+            return False
+        toolsets.apply_default(item)
+        mutate(item.style)
+        toolsets.remember_default(item)
+        return True
+
+    def _style_default_item(self):
+        """A markup of the kind the tool in hand makes, for setting its look.
+
+        The snapshot tool's factory makes the marquee that is dragged out, not
+        the snapshot that comes back, so it is asked for by name.
+        """
+        tool = self.view.current_tool()
+        if tool.key == "snapshot":
+            return SnapshotItem()
+        if tool.key == "calibrate" or tool.factory is None:
+            return None
+        return tool.factory()
 
     def _push_style(self, mutate, description: str, predicate=None) -> None:
         items = self.selected_items()
@@ -3008,7 +3044,13 @@ class MainWindow(QMainWindow):
 
     def _apply_toolbar_style(self, item: MarkupItem) -> None:
         style = self.default_style
-        if isinstance(item, (NoteItem, ImageItem, StampItem, TableItem, FlagItem)):
+        if isinstance(item, (NoteItem, ImageItem, StampItem, TableItem, FlagItem,
+                             SnapshotItem)):
+            # None of these is drawn with the pen the toolbar holds. A photo
+            # and a snapshot each remember a look of their own, which is
+            # applied straight after this; giving them the pen as well is how
+            # a pasted image used to arrive wearing whatever colour the last
+            # rectangle was drawn in.
             return
         if isinstance(item, TypewriterItem):
             # Words with no box round them is the whole of what a typewriter
@@ -3261,15 +3303,26 @@ class MainWindow(QMainWindow):
             self.status_hint.setText("Snapshot: drag a region to copy")
             return
 
-        picture = frame.render_picture(region)
+        taken = frame.picture_items(region)
+        picture = frame.render_items_picture(taken, region)
         if picture.isNull():
             self.status_hint.setText("Nothing in that region to copy")
             return
         data = bytes(picture.data())
         key = self.document.put_asset(f"snapshot-{os.urandom(6).hex()}.qpic", data)
+        # What it was taken of travels with it. A recording can be replayed and
+        # nothing else, so without this a snapshot could never be asked to
+        # change colour — which is the one thing a redline snapshot is for.
+        kept = []
+        for item in taken:
+            recorded = item.serialize()
+            recorded["x"] = recorded.get("x", 0.0) - region.left()
+            recorded["y"] = recorded.get("y", 0.0) - region.top()
+            kept.append(recorded)
         payload = [{"type": "snapshot", "asset": key, "x": 0.0, "y": 0.0,
                     "rect": [0, 0, region.width(), region.height()],
                     "source_rect": [0, 0, region.width(), region.height()],
+                    "source_items": kept,
                     "source_page": self.document.pages.index(frame.page) + 1
                     if frame.page in self.document.pages else 0,
                     "keep_aspect": True, "uid": os.urandom(8).hex()}]
@@ -3384,6 +3437,9 @@ class MainWindow(QMainWindow):
 
     def recolour_item(self, item) -> None:
         """Change the colours of a picture on the page — a snapshot, say."""
+        if isinstance(item, SnapshotItem):
+            self.recolour_snapshot(item)
+            return
         image = QImage()
         data = self.document.asset(getattr(item, "asset_key", ""))
         if not data or not image.loadFromData(data) or image.isNull():
@@ -3401,6 +3457,50 @@ class MainWindow(QMainWindow):
         item.load_from_document(self.document)
         self.view.commit_snapshot("Change colours")
         self.refresh_selection()
+
+    def recolour_snapshot(self, item) -> None:
+        """Change a snapshot's colours, in the drawing rather than in a picture.
+
+        A snapshot is a recording, and a recording cannot be asked what colour
+        anything in it is. What it was taken of is kept beside it, so the
+        colour change is made there and the recording is made again — which is
+        why it stays sharp at any size afterwards, exactly as it was.
+        """
+        source = item.source_markups()
+        if not source:
+            QMessageBox.information(
+                self, "Change colours",
+                "This snapshot was taken before CalcForge kept what a snapshot "
+                "was made of, so there is nothing left in it to recolour. Take "
+                "it again and the colours will be yours to change.")
+            return
+        dialog = dialogs.RecolourDialog(self._snapshot_preview(item), self)
+        if dialog.exec() != dialogs.QDialog.Accepted:
+            return
+        if not dialog.apply_to_lines(source):
+            self.status_hint.setText("Nothing in that snapshot used that colour")
+            return
+        self.view.begin_snapshot(self.view.involved_frames(item))
+        picture = item.redraw_from(source)
+        self.document.put_asset(item.asset_key, bytes(picture.data()))
+        self.view.commit_snapshot("Change colours")
+        item.update()
+        self.refresh_selection()
+
+    def _snapshot_preview(self, item) -> QImage:
+        """A picture of a snapshot, for the dialog to read its colours off."""
+        taken = item.natural_size()
+        width = max(int(taken.width()), 1)
+        height = max(int(taken.height()), 1)
+        image = QImage(width, height, QImage.Format_ARGB32)
+        image.fill(0xFFFFFFFF)
+        picture = item.picture()
+        if picture is not None and not picture.isNull():
+            painter = QPainter(image)
+            painter.setRenderHint(QPainter.Antialiasing, True)
+            painter.drawPicture(0, 0, picture)
+            painter.end()
+        return image
 
     def _background_image(self, page):
         image = QImage()
@@ -5506,7 +5606,7 @@ class MainWindow(QMainWindow):
             if isinstance(item, MathItem):
                 if len([i for i in self.selected_items() if isinstance(i, MathItem)]) > 1:
                     menu.addAction(self.act_merge_lines)
-            if isinstance(item, ImageItem):
+            if isinstance(item, (ImageItem, SnapshotItem)):
                 menu.addAction("Change colours…", lambda: self.recolour_item(item))
             if isinstance(item, PlotItem):
                 menu.addAction("Edit plot…", lambda: self.edit_plot(item))

@@ -364,3 +364,61 @@ def test_a_dimensions_value_carries_a_control_dot(qapp):
 
     area = MeasureItem(AREA, [QPointF(0, 0), QPointF(100, 0), QPointF(100, 80)])
     assert area.control_dots() == set(), "an area has no dimension line to adjust"
+
+
+def test_a_snapshots_colours_can_be_changed(window):
+    """A recording cannot be asked anything, so it keeps what it was made of."""
+    from PySide6.QtCore import QPointF, QRectF
+    from PySide6.QtGui import QColor
+
+    from calcforge.io import recolour
+    from calcforge.items.shapes import PolyItem
+    from calcforge.items.snapshot import SnapshotItem
+
+    frame = window.document.pages[0].frame
+    for index, colour in enumerate(("#000000", "#0a0a0a", "#c92a2a")):
+        line = PolyItem("polyline", [QPointF(0, 0), QPointF(80, 0)])
+        line.style.stroke = colour
+        line.style.width = 2.0
+        frame.add_markup(line, QPointF(100, 120 + index * 20))
+    window.take_snapshot(frame, QRectF(90, 100, 200, 100))
+    window.paste_items()
+    snapshot = [i for i in frame.markups() if isinstance(i, SnapshotItem)][0]
+
+    source = snapshot.source_markups()
+    assert [item.style.stroke for item in source] \
+        == ["#000000", "#0a0a0a", "#c92a2a"]
+    assert recolour.swap_line_colour(source, QColor("#000000"),
+                                     QColor("#1971c2"), 40) == 2
+    picture = snapshot.redraw_from(source)
+    assert not picture.isNull(), "still a recording, so still sharp at any size"
+    assert [payload["style"]["stroke"] for payload in snapshot.source_items] \
+        == ["#1971c2", "#1971c2", "#c92a2a"]
+
+
+def test_a_snapshot_and_a_photo_have_a_line_type_of_their_own(window):
+    """Neither is drawn with the toolbar's pen, so each remembers its own."""
+    from calcforge.ui import toolsets
+    from calcforge.items.media import ImageItem
+    from calcforge.items.snapshot import SnapshotItem
+
+    for key, kind in (("snapshot", SnapshotItem), ("image", ImageItem)):
+        window.select_tool(key)
+        window.refresh_selection()
+        shown = {field for field, actions in window._style_widgets.items()
+                 if any(action.isVisible() for action in actions)}
+        assert "dash" in shown, f"{key} should offer a line type"
+        assert "stroke" in shown and "width" in shown
+
+    window.select_tool("snapshot")
+    window.refresh_selection()
+    window._style_stroke("#c92a2a")
+    window._style_width(2.5)
+    window._style_dash("dash")
+    made = SnapshotItem()
+    toolsets.apply_default(made)
+    assert made.style.stroke == "#c92a2a"
+    assert made.style.width == 2.5
+    assert made.style.line_style == "dash"
+    assert window.default_style.line_style == "solid", \
+        "and the pen every other markup is drawn with is left alone"

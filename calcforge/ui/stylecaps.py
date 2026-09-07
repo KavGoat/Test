@@ -33,10 +33,13 @@ def capabilities(item, for_default: bool = False) -> set[str]:
     """
     if isinstance(item, SnapshotItem):
         # A snapshot is drawn linework, not a photo: it has an outline, that
-        # outline defaults to none, and it is the user's to set.
-        return {OPACITY, STROKE, WIDTH}
+        # outline defaults to none, and it is the user's to set — its colour,
+        # its weight and what kind of line it is.
+        return {OPACITY, STROKE, WIDTH, DASH}
     if isinstance(item, ImageItem):
-        return {OPACITY, STROKE, WIDTH} if for_default else {OPACITY}
+        # A photo's own border means nothing, but the frame a placed one is
+        # given is a real setting, and a frame has a line type like any other.
+        return {OPACITY, STROKE, WIDTH, DASH} if for_default else {OPACITY}
     if isinstance(item, MathItem):
         return {FONT}
     if isinstance(item, TableItem):

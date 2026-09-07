@@ -13,6 +13,7 @@ to sit on the canvas today.
 """
 from __future__ import annotations
 
+import math
 from typing import Optional
 
 from PySide6.QtCore import QByteArray, QPointF, QRectF, Qt, Signal
@@ -89,6 +90,56 @@ GRID_PEN = QColor(180, 195, 210, 110)
 GRID_PEN_MAJOR = QColor(150, 170, 195, 150)
 
 
+def _painted_scale(painter) -> float:
+    """Pixels per point, the way this painter is set up to draw."""
+    shape = painter.transform()
+    across = math.hypot(shape.m11(), shape.m12())
+    down = math.hypot(shape.m21(), shape.m22())
+    return max(across, down, 0.01)
+
+
+def _exposed_part(option, whole: QRectF) -> QRectF:
+    """The part of the page this repaint is actually for."""
+    exposed = getattr(option, "exposedRect", None)
+    if exposed is None:
+        return QRectF(whole)
+    box = QRectF(exposed)
+    return QRectF(whole) if box.isEmpty() else box
+
+
+def _region_to_draw(wanted: QRectF, whole: QRectF, scale: float,
+                    most_pixels: int) -> tuple[QRectF, float]:
+    """A little more than is being looked at, held under what can be drawn.
+
+    A margin round the exposed part means a small scroll does not start another
+    draw. If the margin will not fit in the pixels available it goes first, and
+    only then does the sharpness give way — losing the margin costs a redraw,
+    losing the sharpness is the thing this is all for.
+    """
+    for margin in (0.35, 0.1, 0.0):
+        region = wanted.adjusted(-wanted.width() * margin, -wanted.height() * margin,
+                                 wanted.width() * margin, wanted.height() * margin)
+        region = region.intersected(whole)
+        if region.width() * scale * region.height() * scale <= most_pixels:
+            return region, scale
+    region = QRectF(wanted).intersected(whole)
+    pixels = max(region.width() * scale * region.height() * scale, 1.0)
+    return region, scale * (most_pixels / pixels) ** 0.5
+
+
+def _sharpness_step(scale: float) -> float:
+    """The resolution to ask for, in steps rather than continuously.
+
+    Re-drawing the page on every notch of the wheel would be all wait and no
+    picture, so the size asked for doubles rather than creeping: a zoom is one
+    re-draw, not fifty.
+    """
+    step = 0.5
+    while step < scale and step < 32.0:
+        step *= 2.0
+    return step
+
+
 class PageFrame(QGraphicsObject):
     """One page of the document, and everything drawn on it."""
 
@@ -100,6 +151,14 @@ class PageFrame(QGraphicsObject):
         self.document = document
         self.workspace = document.workspace
         self._background: Optional[QPixmap] = None
+        # The part of the page drawn from the source PDF at the size it is
+        # being looked at, and where it belongs. A page imported from a PDF
+        # shows its stored thumbnail the instant it opens and then this over
+        # the top of it, so what is on screen is as sharp as the file is
+        # rather than as sharp as one guess about resolution made once.
+        self._sharp: Optional[QPixmap] = None
+        self._sharp_region = QRectF()
+        self._sharp_scale = 0.0
         self._logo: Optional[QPixmap] = None
         self._logo_key = ""
         self.print_mode = False
@@ -133,6 +192,59 @@ class PageFrame(QGraphicsObject):
         pixmap.loadFromData(QByteArray(data))
         self._background = pixmap if not pixmap.isNull() else None
 
+    def forget_sharp_background(self) -> None:
+        self._sharp = None
+        self._sharp_region = QRectF()
+        self._sharp_scale = 0.0
+
+    def sharpen_background(self, looking_at: QRectF, scale: float) -> None:
+        """Draw the part being looked at from the PDF, at the size it is shown.
+
+        A page that came in from a PDF is stored with a small picture of
+        itself, enough to show something the moment it is opened. Everything
+        after that comes from the file: the piece on screen is drawn again at
+        the size the screen is actually showing it, so zooming in gets sharper
+        the way the drawing is sharper, instead of enlarging a photograph of it
+        until it goes soft.
+
+        Only the piece on screen, because a whole A0 sheet at reading zoom is
+        more pixels than can be held, and only when the zoom has changed enough
+        or the view has moved off what was drawn — otherwise this would run on
+        every repaint and nothing else would ever get done.
+        """
+        page = self.page
+        if page.pdf_key is None or page.pdf_page_index is None:
+            return
+        want = _sharpness_step(scale)
+        wanted = QRectF(looking_at).intersected(self.page_rect())
+        if wanted.isEmpty():
+            return
+        if want <= self._sharp_scale and self._sharp_region.contains(wanted):
+            return
+        from ..io import pdfio
+
+        data = self.document.asset(page.pdf_key)
+        if not data:
+            return
+        region, want = _region_to_draw(wanted, self.page_rect(), want,
+                                       pdfio.MOST_LIVE_PIXELS)
+        drawn = pdfio.LIVE.draw_region(page.pdf_key, data, int(page.pdf_page_index),
+                                       self.page_rect(), region, want)
+        if drawn is None:
+            # Nothing readable in the file: keep what is on screen, and stop
+            # asking, so a broken source is not re-read on every repaint.
+            self._sharp_scale = want
+            self._sharp_region = self.page_rect()
+            return
+        pixmap = QPixmap.fromImage(drawn)
+        if pixmap.isNull():
+            self._sharp_scale = want
+            self._sharp_region = self.page_rect()
+            return
+        self._sharp = pixmap
+        self._sharp_region = region
+        self._sharp_scale = want
+
     def paint(self, painter: QPainter, option, widget=None) -> None:
         rect = self.page_rect()
         if not self.print_mode:
@@ -141,11 +253,18 @@ class PageFrame(QGraphicsObject):
             painter.fillRect(rect, PAPER)
             if self._background is None and self.page.background_key:
                 self.load_background()
-            if self._background is not None:
+            self.sharpen_background(_exposed_part(option, rect),
+                                    _painted_scale(painter))
+            if self._background is not None or self._sharp is not None:
                 painter.save()
                 painter.setOpacity(self.page.background_opacity)
                 painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
-                painter.drawPixmap(rect, self._background, QRectF(self._background.rect()))
+                if self._background is not None:
+                    painter.drawPixmap(rect, self._background,
+                                       QRectF(self._background.rect()))
+                if self._sharp is not None:
+                    painter.drawPixmap(self._sharp_region, self._sharp,
+                                       QRectF(self._sharp.rect()))
                 painter.restore()
         if not self.print_mode:
             self._paint_grid(painter, rect)
@@ -503,16 +622,25 @@ class PageFrame(QGraphicsObject):
         corner is the origin and its size is the size of the snapshot.
         """
         box = QRectF(region).normalized()
+        return self.render_items_picture(self.picture_items(box), box)
+
+    def picture_items(self, region: QRectF) -> list:
+        """Which markups a snapshot of *region* takes with it.
+
+        Kept separate from the recording because a snapshot keeps them as well
+        as the recording: a list of drawing commands can be replayed but not
+        asked anything, so changing a snapshot's colours later means having
+        what it was taken of.
+        """
         from ..items.mathitem import MathItem
         from ..items.tableitem import TableItem
         from ..items.text import _TextBase
 
         selective = (MathItem, TableItem, _TextBase)
-        items = [item for item in self.markups()
-                 if item.isVisible()
-                 and self.document.layer(item.layer).visible
-                 and (not isinstance(item, selective) or item.isSelected())]
-        return self.render_items_picture(items, box)
+        return [item for item in self.markups()
+                if item.isVisible()
+                and self.document.layer(item.layer).visible
+                and (not isinstance(item, selective) or item.isSelected())]
 
     def render_items_picture(self, items, region: QRectF) -> QPicture:
         """Record exactly *items* in page coordinates inside *region*."""

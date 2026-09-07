@@ -246,23 +246,32 @@ class PdfFile:
         return numbers
 
 
-def strokes_of_page(source: PdfFile, page: dict) -> list[dict]:
+def flip_of_page(source: PdfFile, page: dict) -> tuple:
+    """PDF space to page space: origin at the corner, and the right way up."""
+    left, bottom, right, top = source.box_of(page)
+    height = abs(top - bottom)
+    return (1.0, 0.0, 0.0, -1.0, -min(left, right), height + min(bottom, top))
+
+
+def strokes_of_page(source: PdfFile, page: dict,
+                    with_annotations: bool = False) -> list[dict]:
     """The line work on one page, in page coordinates with y down.
 
     PDF measures from the bottom-left corner upwards; a page here measures
     from the top-left downwards, so the whole thing is flipped once here
     rather than everywhere it is used.
+
+    The page's own drawing only, unless asked otherwise. What is in the
+    annotations is somebody's markup, and it comes across as markup rather
+    than as line work — a cloud read as sixty loose segments is not a cloud.
     """
     from .btx import read_content
 
-    box = source.box_of(page)
-    left, bottom, right, top = box
-    height = abs(top - bottom)
-    # Move the origin to the box's corner, then flip.
-    flip = (1.0, 0.0, 0.0, -1.0, -min(left, right), height + min(bottom, top))
+    flip = flip_of_page(source, page)
     body = source.content_of(page)
     found = read_content(body, matrix=flip) if body else []
-    found.extend(strokes_of_annotations(source, page, flip))
+    if with_annotations:
+        found.extend(strokes_of_annotations(source, page, flip))
     return found
 
 
@@ -273,6 +282,25 @@ def _compose(first: tuple, second: tuple) -> tuple:
     return (a1 * a2 + b1 * c2, a1 * b2 + b1 * d2,
             c1 * a2 + d1 * c2, c1 * b2 + d1 * d2,
             e1 * a2 + f1 * c2 + e2, e1 * b2 + f1 * d2 + f2)
+
+
+def strokes_of_annotation(source: PdfFile, annotation: dict, flip: tuple) -> list[dict]:
+    """What one annotation draws, where it draws it."""
+    from .btx import read_content
+
+    form = _appearance_of(source, annotation)
+    if form is None:
+        return []
+    body = inflate(form.get("__stream__", b""), form)
+    if not body:
+        return []
+    placed = _appearance_matrix(source, annotation, form)
+    if placed is None:
+        return []
+    try:
+        return read_content(body, matrix=_compose(placed, flip))
+    except Exception:                                  # noqa: BLE001
+        return []
 
 
 def strokes_of_annotations(source: PdfFile, page: dict, flip: tuple) -> list[dict]:

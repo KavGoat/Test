@@ -204,8 +204,11 @@ def test_what_is_drawn_on_the_page_is_in_the_saved_pdf(window, tmp_path):
     project_io.save_document(window.document, after)
 
     def ink(path: str) -> int:
-        page = _readable_pdf(path).render(0, QSize(595, 842),
-                                          QPdfDocumentRenderOptions())
+        # As a reader draws it: the markups are annotations, and a reader
+        # draws those, so the flag is what "what somebody sees" means here.
+        options = QPdfDocumentRenderOptions()
+        options.setRenderFlags(QPdfDocumentRenderOptions.RenderFlag.Annotations)
+        page = _readable_pdf(path).render(0, QSize(595, 842), options)
         return sum(1 for y in range(page.height()) for x in range(page.width())
                    if page.pixelColor(x, y).lightness() < 220)
 
@@ -237,7 +240,11 @@ def test_a_drawing_opened_for_review_can_be_calculated_on(window, tmp_path):
 
 
 def test_an_imported_pdf_brings_in_the_markups_somebody_else_made(window, tmp_path):
-    """A marked-up drawing keeps its markups in annotations; bring them in."""
+    """A marked-up drawing keeps its markups in annotations; bring them in.
+
+    As markups — one thing to click on, in its own colour — and in the picture
+    of the page as well, so nothing that was drawn on it goes missing.
+    """
     from PySide6.QtCore import QRectF
     from calcforge.io import export as export_io, pdfio
     from calcforge.items.shapes import RectItem
@@ -248,12 +255,11 @@ def test_an_imported_pdf_brings_in_the_markups_somebody_else_made(window, tmp_pa
     marked = str(tmp_path / "marked.pdf")
     export_io.export_pdf(window.document, marked)
 
-    # The line work: the rectangle comes back where it was drawn.
-    found = pdfio.line_work(marked, [0])
-    corners = [(round(item["x"]), round(item["y"]))
-               for item in pdfio._items_from(found[0])]
-    assert (120, 150) in corners, \
-        "an annotation's own drawing is line work like any other"
+    # The rectangle comes back as a rectangle, where it was drawn, and not
+    # as a picture of one or as the segments its outline is made of.
+    found = pdfio.markups(marked, [0])
+    assert [(item["type"], item.get("kind"), round(item["x"]), round(item["y"]))
+            for item in found[0]] == [("rect", "rect", 120, 150)]
 
     # And the picture of the page shows it too.
     source = pdfio.PdfSource(marked)
@@ -268,3 +274,103 @@ def test_an_imported_pdf_brings_in_the_markups_somebody_else_made(window, tmp_pa
                 for x in range(0, picture.width(), 2)
                 if picture.pixelColor(x, y).lightness() < 200)
     assert inked > 50, "the markups should be in the picture of the page too"
+
+
+def test_saving_leaves_the_markups_movable_in_another_editor(window, tmp_path):
+    """Saved, not exported: the same file, and the same live markups."""
+    from PySide6.QtCore import QRectF
+    from calcforge.items.shapes import RectItem
+
+    drawn = RectItem()
+    drawn.set_local_rect(QRectF(0, 0, 180, 110))
+    window.document.pages[0].frame.add_markup(drawn, QPointF(120, 150))
+    path = str(tmp_path / "saved.pdf")
+    project_io.save_document(window.document, path)
+
+    from pypdf import PdfReader
+    reader = PdfReader(path)
+    marks = reader.pages[0].get("/Annots")
+    marks = [entry.get_object() for entry in marks.get_object()] if marks else []
+    assert [str(mark["/Subtype"]) for mark in marks] == ["/Square"], \
+        "a saved markup should still be a markup wherever the file is opened"
+    assert "/AP" in marks[0]
+    assert project_io.carries_a_document(path), \
+        "and the calculation layer is still in there"
+
+
+def test_a_marked_up_drawing_opens_as_markups_that_can_be_worked_with(
+        window, tmp_path):
+    """What somebody else drew is theirs to click on, not a picture of it."""
+    from PySide6.QtCore import QRectF
+    from calcforge.items.shapes import PolyItem, RectItem
+    from calcforge.io import export as export_io
+
+    frame = window.document.pages[0].frame
+    box = RectItem()
+    box.set_local_rect(QRectF(0, 0, 180, 110))
+    box.style.stroke = "#2f9e44"
+    box.author = "R. Kavanagh"
+    box.comment = "Check this splice"
+    frame.add_markup(box, QPointF(120, 150))
+    oval = RectItem("ellipse")
+    oval.set_local_rect(QRectF(0, 0, 90, 70))
+    frame.add_markup(oval, QPointF(340, 150))
+    run = PolyItem("polyline", [QPointF(0, 0), QPointF(60, 40), QPointF(120, 0)])
+    frame.add_markup(run, QPointF(120, 400))
+    cloud = RectItem("cloud")
+    cloud.set_local_rect(QRectF(0, 0, 150, 90))
+    frame.add_markup(cloud, QPointF(300, 400))
+
+    theirs = str(tmp_path / "reviewed.pdf")
+    export_io.export_pdf(window.document, theirs)
+
+    window.open_path(theirs)
+    window.rebuild_scenes()
+    came_in = [item for item in window.document.pages[0].frame.markups()
+               if item.layer == "Markups"]
+    kinds = [(type(item).__name__, getattr(item, "kind", "")) for item in came_in]
+    assert ("RectItem", "rect") in kinds
+    assert ("RectItem", "ellipse") in kinds
+    assert ("PolyItem", "polyline") in kinds
+    # A cloud has no annotation of its own in a PDF, so it travels as a stamp —
+    # and comes back as one drawing to pick up, not as the segments of one.
+    assert ("SketchItem", "") in kinds
+
+    theirs_rect = next(i for i in came_in if getattr(i, "kind", "") == "rect")
+    assert theirs_rect.pos().x() == pytest.approx(120, abs=1)
+    assert theirs_rect.pos().y() == pytest.approx(150, abs=1)
+    assert theirs_rect.style.stroke == "#2f9e44"
+    assert theirs_rect.author == "R. Kavanagh"
+    assert theirs_rect.comment == "Check this splice"
+    assert not theirs_rect.locked, "their markup is there to be worked with"
+
+
+def test_a_page_from_a_pdf_gets_sharper_as_it_is_zoomed_into(window, tmp_path):
+    """Drawn from the file at the size it is shown, not enlarged from a picture."""
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QImage, QPainter
+    from PySide6.QtWidgets import QStyleOptionGraphicsItem
+    from calcforge.io import export as export_io
+
+    source = str(tmp_path / "drawing.pdf")
+    export_io.export_pdf(window.document, source)
+    window.open_path(source)
+    window.rebuild_scenes()
+    frame = window.document.pages[0].frame
+
+    def look_at(zoom: float, region: QRectF) -> float:
+        canvas = QImage(300, 300, QImage.Format_ARGB32)
+        canvas.fill(0)
+        painter = QPainter(canvas)
+        painter.scale(zoom, zoom)
+        option = QStyleOptionGraphicsItem()
+        option.exposedRect = region
+        frame.paint(painter, option)
+        painter.end()
+        drawn = frame._sharp
+        return drawn.width() / max(frame._sharp_region.width(), 1) if drawn else 0.0
+
+    assert look_at(1.0, QRectF(0, 0, 595, 842)) == pytest.approx(1.0, abs=0.01)
+    assert look_at(4.0, QRectF(100, 100, 150, 200)) == pytest.approx(4.0, abs=0.01)
+    assert look_at(16.0, QRectF(120, 120, 40, 50)) == pytest.approx(16.0, abs=0.01), \
+        "zoomed right in, the picture is drawn at the zoom, not blown up"

@@ -10156,46 +10156,49 @@ def _a_pdf_with_lines(window, tmp_path):
     return path
 
 
-def test_an_inserted_pdf_brings_its_own_lines(window, tmp_path):
-    """Not just a picture: geometry that can be snapped to and measured."""
+def test_an_inserted_pdf_brings_somebody_elses_markups_back_as_markups(
+        window, tmp_path):
+    """A cloud is a cloud, not sixty loose segments and not a picture."""
     from calcforge.io import pdfio
 
     path = _a_pdf_with_lines(window, tmp_path)
-    strokes = pdfio.line_work(path, [0])
-    assert strokes, "the PDF's line work should be readable"
+    found = pdfio.markups(path, [0])
+    assert found, "the PDF's annotations should be readable"
 
-    items = pdfio._items_from(strokes[0])
-    assert items
-    # Each shape comes back where it was drawn — the rectangle and the line
-    # both, which is also what says each markup was drawn to its own size and
-    # not to the one before it.
-    corners = [(round(i["x"]), round(i["y"])) for i in items]
-    assert (120, 150) in corners
-    assert (120, 320) in corners
+    # Each comes back where it was drawn, as the kind of markup it is.
+    placed = {(item["type"], item.get("kind"),
+               round(item["x"]), round(item["y"])) for item in found[0]}
+    assert ("rect", "rect", 120, 150) in placed
+    assert ("poly", "polyline", 120, 320) in placed
+    assert all(item["layer"] == "Markups" for item in found[0])
 
 
 def test_the_lines_come_in_on_a_layer_of_their_own(window, tmp_path):
+    """The page's own drawing is the page's; a markup is somebody's."""
     from calcforge.core.document import Document
     from calcforge.io import pdfio
 
     path = _a_pdf_with_lines(window, tmp_path)
     fresh = Document()
     pages = pdfio.import_pages(fresh, path, [0], vectors=True, at=1)
-    assert pages[0]._pending_items
-    assert all(item["layer"] == "Drawing" for item in pages[0]._pending_items)
+    layers = {item["layer"] for item in pages[0]._pending_items}
+    assert "Drawing" in layers, "the page's own line work"
+    assert "Markups" in layers, "and the markups that were made on it"
     assert "Drawing" in fresh.layer_names()
     # And the picture is still there underneath, so the words still show.
     assert pages[0].background_key
 
 
-def test_the_lines_can_be_left_out(window, tmp_path):
+def test_the_lines_can_be_left_out_but_the_markups_never_are(window, tmp_path):
     from calcforge.core.document import Document
     from calcforge.io import pdfio
 
     path = _a_pdf_with_lines(window, tmp_path)
     fresh = Document()
     pages = pdfio.import_pages(fresh, path, [0], vectors=False, at=1)
-    assert not pages[0]._pending_items
+    layers = {item["layer"] for item in pages[0]._pending_items}
+    assert layers == {"Markups"}, \
+        "the page's own line work was not asked for; the markups always are"
     assert pages[0].background_key
 
 

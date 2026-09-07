@@ -105,13 +105,21 @@ def write(document, path: str, appearance: bool = True) -> None:
     for page in document.pages:
         output.add_page(_page_body(document, page, keep_alive))
     if appearance:
-        _draw_the_markups_onto(output, document)
+        _draw_the_sheets_onto(output, document)
     output.add_attachment(LAYER_ENTRY, layer_bytes(document))
     output.add_metadata({"/Title": document.title or "", "/Creator": "CalcForge"})
     temporary = path + ".tmp"
     with open(temporary, "wb") as handle:
         output.write(handle)
     os.replace(temporary, path)
+    if appearance:
+        # The markups go in as real annotations, not as ink on the page. A
+        # saved document is a PDF that anybody can open, and a markup that
+        # cannot be picked up in the editor it is opened in is a picture of a
+        # markup. The layer is still what CalcForge reads back.
+        from . import annotate
+
+        annotate.add_markups(path, document, _drawn_pages(document))
 
 
 def _page_body(document, page, keep_alive: list):
@@ -159,13 +167,15 @@ def _drawn_pages(document) -> list:
     return [page for page in document.pages if page.frame is not None]
 
 
-def _draw_the_markups_onto(output, document) -> None:
-    """Paint what CalcForge knows onto the pages, for every other PDF reader.
+def _draw_the_sheets_onto(output, document) -> None:
+    """Paint the sheet itself onto the pages — everything but the markups.
 
-    The layer is what CalcForge reads back, so this is purely so the file looks
-    right somewhere else. It needs a scene to draw from; a document that has
-    not been opened in a window has none, and then the file is still a correct
-    PDF of the pages themselves.
+    The paper, the grid, the running header and footer, the page's own line
+    work and anything flattened into it. The markups are not painted: they go
+    in afterwards as annotations, so they can still be moved wherever the file
+    is opened. This needs a scene to draw from; a document that has not been
+    opened in a window has none, and then the file is still a correct PDF of
+    the pages themselves.
     """
     drawn = _drawn_pages(document)
     if not drawn:
@@ -196,7 +206,7 @@ def _draw_the_markups_onto(output, document) -> None:
 
 
 def _rendered_overlay(document, drawn: list) -> Optional[str]:
-    """Everything CalcForge draws, on transparent pages, in a scratch file."""
+    """The sheet itself, without its markups, on pages in a scratch file."""
     import tempfile
 
     from PySide6.QtGui import QPdfWriter
@@ -213,7 +223,8 @@ def _rendered_overlay(document, drawn: list) -> Optional[str]:
     writer.setResolution(APPEARANCE_DPI)
     writer.setCreator("CalcForge")
     export.paint_pages(writer, document, drawn, APPEARANCE_DPI,
-                       pdf_overlay_pages=over_the_source)
+                       pdf_overlay_pages=over_the_source,
+                       without_markups=True)
     del writer
     if os.path.getsize(overlay_path) < 1:
         os.remove(overlay_path)
