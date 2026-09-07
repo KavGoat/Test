@@ -119,6 +119,24 @@ def cloud_cursor() -> QCursor:
     return _CLOUD_CURSOR
 
 
+def _already_bracketed(text: str) -> bool:
+    """Whether the whole of *text* is inside one pair of brackets.
+
+    "(a+b)" is; "(a)+(b)" is not, even though it starts and ends with one.
+    """
+    if not text.startswith("(") or not text.endswith(")"):
+        return False
+    depth = 0
+    for index, character in enumerate(text):
+        if character == "(":
+            depth += 1
+        elif character == ")":
+            depth -= 1
+            if depth == 0 and index < len(text) - 1:
+                return False
+    return depth == 0
+
+
 def typing_somewhere_else() -> bool:
     """True when the keyboard belongs to a box somebody is typing into.
 
@@ -3396,6 +3414,45 @@ class PageView(QGraphicsView):
             return
         popup.setCurrentRow((popup.currentRow() + step) % popup.count())
 
+    def wrap_the_selection(self, typed: str) -> bool:
+        """A bracket or a slash typed over a selected expression works on it.
+
+        Selecting part of an equation and typing "(" used to replace it with a
+        bracket, which is what a plain text box does and is never what was
+        meant: the whole point of picking an expression out is to do something
+        to it. An opening bracket now wraps what is selected, and a slash
+        makes it the numerator of a fraction with the caret waiting in the
+        denominator.
+
+        Anything with an operator in it is bracketed on the way into a
+        numerator, because "a+b" over "c" is not "a" plus "b/c".
+        """
+        if typed not in ("(", "/"):
+            return False
+        item = self._editing_item
+        if not isinstance(item, MathItem):
+            return False
+        editor = getattr(item, "_editor", None)
+        if editor is None:
+            return False
+        cursor = editor.textCursor()
+        chosen = cursor.selectedText().replace("\u2029", "\n")
+        if not chosen.strip():
+            return False
+        if typed == "(":
+            replacement, caret_back = f"({chosen})", 1
+        else:
+            inner = chosen.strip()
+            atom = re.fullmatch(r"[A-Za-z_]\w*|\d+(?:\.\d+)?", inner)
+            numerator = inner if atom or _already_bracketed(inner) else f"({inner})"
+            replacement, caret_back = f"{numerator}/", 0
+        cursor.insertText(replacement)
+        if caret_back:
+            cursor.setPosition(cursor.position() - caret_back)
+        editor.setTextCursor(cursor)
+        self.hide_completions()
+        return True
+
     def accept_completion(self) -> bool:
         """Put the highlighted word in, in place of what was being typed."""
         popup = self._completions
@@ -4700,6 +4757,10 @@ class PageView(QGraphicsView):
                 return
             if self._cell_editor is not None and key in (Qt.Key_Tab, Qt.Key_Backtab):
                 self.close_cell_editor(move=(0, -1 if key == Qt.Key_Backtab else 1))
+                event.accept()
+                return
+            if (self._cell_editor is None
+                    and self.wrap_the_selection(event.text())):
                 event.accept()
                 return
             super().keyPressEvent(event)

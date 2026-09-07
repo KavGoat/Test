@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 import numpy as np
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen
 
 from . import greek as _greek
@@ -163,6 +163,38 @@ class Glyph(Box):
         painter.setFont(self.font)
         painter.setPen(QPen(self.color))
         painter.drawText(QPointF(x, baseline), self.text)
+
+
+SLOT_NAME = "_cf_slot_"          # a hole in an expression being typed
+
+
+class Slot(Box):
+    """An empty input box, the way SMath draws a slot waiting to be filled.
+
+    A half-written expression is still an expression. "5/" is five over
+    something not yet decided, and drawing it as the plain characters "5/"
+    throws away the one thing the layout was telling you — that a denominator
+    is what comes next.
+    """
+
+    def __init__(self, size: float, color: QColor):
+        self.size = size
+        self.color = color
+        self.width = size * 0.62
+        self.ascent = size * 0.66
+        self.descent = size * 0.12
+
+    def draw(self, painter: QPainter, x: float, baseline: float) -> None:
+        painter.save()
+        pen = QPen(self.color)
+        pen.setWidthF(max(self.size * 0.055, 0.6))
+        pen.setStyle(Qt.DashLine)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRect(QRectF(x + self.size * 0.06, baseline - self.ascent,
+                                self.width - self.size * 0.12,
+                                self.ascent + self.descent))
+        painter.restore()
 
 
 class Spacer(Box):
@@ -589,6 +621,8 @@ class Typesetter:
         return self.build(node.body, size)
 
     def _build_Name(self, node: ast.Name, size: float) -> Box:
+        if node.id == SLOT_NAME:
+            return Slot(size, self.style.comment_color)
         if node.id in GREEK and "_" not in node.id:
             return self.text(GREEK[node.id], size, italic=False)
         if self.is_unit(node.id):

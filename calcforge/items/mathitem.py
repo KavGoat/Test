@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (QGraphicsItem, QGraphicsTextItem, QStyle,
                                QStyleOptionGraphicsItem)
 
 from ..core import engine
-from ..core.mathrender import (Box, MathStyle, Row, Spacer, Typesetter,
+from ..core.mathrender import (SLOT_NAME, Box, MathStyle, Row, Spacer, Typesetter,
                                caret_in, offset_in)
 from .base import MarkupItem, Style, register_item
 
@@ -153,6 +153,33 @@ def _parse_for_layout(statement) -> None:
     except Exception:                     # noqa: BLE001 — any half-typed line
         return
     statement.tree = tree
+
+
+def _with_slots(expression: str):
+    """Parse *expression* with its missing operands filled in, or None.
+
+    Only the trailing kind of hole is repaired — the one a line has while it
+    is still being typed. A genuinely malformed expression stays an error.
+    """
+    # "^" is a power here, as it is everywhere else the engine reads a line;
+    # left alone it parses as a bitwise operator and "2^" sets as an operator
+    # with a hole beside it rather than a base waiting for its exponent.
+    text = expression.strip().replace("^", "**")
+    if not text:
+        return None
+    for attempt in (text, f"{text}{SLOT_NAME}", f"{text} {SLOT_NAME}"):
+        try:
+            return ast.parse(attempt, mode="eval")
+        except SyntaxError:
+            continue
+    # An operator with nothing before it, such as a line beginning "/2": the
+    # slot goes in front instead.
+    for attempt in (f"{SLOT_NAME}{text}", f"{SLOT_NAME}{text}{SLOT_NAME}"):
+        try:
+            return ast.parse(attempt, mode="eval")
+        except SyntaxError:
+            continue
+    return None
 
 
 @register_item
@@ -433,6 +460,18 @@ class MathItem(MarkupItem):
     def _expression_box(self, statement, setter: Typesetter, size: float) -> Optional[Box]:
         if statement.tree is None:
             if statement.expression:
+                # A half-written expression is still an expression. Dropping to
+                # plain characters the moment it stopped parsing threw away the
+                # only thing the layout was saying — that "5/" is five over
+                # something, and that a^ is waiting for a power. Fill the holes
+                # with slots and set it properly; only give up if even that
+                # will not parse.
+                patched = _with_slots(statement.expression)
+                if patched is not None:
+                    try:
+                        return setter.build(patched.body, size)
+                    except Exception:
+                        pass
                 return setter.text(statement.expression, size)
             return None
         written = statement.written

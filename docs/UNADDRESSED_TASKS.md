@@ -2,7 +2,7 @@
 
 Audited: 2026-09-06 against `claude/engineering-calc-markup-app-2twiqs`.
 
-The 5 entries below are what the audit could not show working. Each says
+The 4 entries below are what the audit could not show working. Each says
 what is missing or blocking it. Several are tasks whose base behaviour is
 finished and whose recent amendment is not; those name the part that is done so
 the remaining work is clear.
@@ -19,9 +19,6 @@ This is not the user-owned completion record. It changes no checkbox in
 
 - **(new)** Use the locally supplied `SMath Studio/` installation, especially its desktop UI, examples and snippets, as the behavior reference when resolving equation-editor interactions. Reproduce its navigation and structured-expression behavior by observing the application; do not copy proprietary implementation code.
   - **Missing:** Standing reference instruction, not a code change: the SMath Studio/ installation is in the repo but no audit of its behaviour has been recorded. Stays a requirement per HANDOVER rule 5.
-
-- **(new, extended)** Make equation editing structural rather than flat-text-like: arrow keys and pointer placement navigate the visible expression tree; selecting an expression and typing an opening bracket wraps the entire selected expression; selecting an expression and typing `/` turns that selection into the numerator of a fraction/division structure. Preserve the selected expression and its formatting when applying either transformation. The structure must also survive a syntax error: a calculation that does not parse keeps its structured typeset layout instead of collapsing back to inline text, operator precedence (BEDMAS) stays visible, `5/` renders as 5 over an empty denominator placeholder, and incomplete value, unit and power slots render as small SMath-style outline input boxes.
-  - **Missing:** Not implemented, verified in the running app. With '1+2' selected in 'a:=1+2', typing '(' replaces the selection instead of wrapping it — the text becomes 'a:=('; typing '/' likewise gives 'a:=/' rather than making the selection a numerator. No expression-tree/wrap code exists. The extended error-tolerant-rendering clause is also unimplemented.
 
 ## 27. Reliability / process
 

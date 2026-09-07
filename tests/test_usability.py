@@ -302,6 +302,100 @@ def test_escape_puts_the_count_tool_down_at_once(window):
     assert [m.index for m in placed] == [1, 2], "what was placed stays placed"
 
 
+def _box_kinds(box, out=None):
+    out = [] if out is None else out
+    out.append(type(box).__name__)
+    for child, _x, _baseline in box.children_at(0, 0):
+        _box_kinds(child, out)
+    return out
+
+
+def test_a_bracket_typed_over_a_selection_wraps_it(window):
+    """It used to replace it, which is what a plain text box does.
+
+    The whole point of picking an expression out is to do something to it.
+    """
+    from PySide6.QtGui import QTextCursor
+
+    window.view._last_scene_pos = QPointF(90, 300)
+    press_key(window.view, Qt.Key_unknown, '"')
+    type_text(window.view, "a:=1+2")
+    editor = window.view.editing_item()._editor
+    cursor = editor.textCursor()
+    cursor.setPosition(3)
+    cursor.setPosition(6, QTextCursor.KeepAnchor)
+    editor.setTextCursor(cursor)
+
+    press_key(window.view, Qt.Key_unknown, "(")
+    QApplication.processEvents()
+    assert editor.toPlainText() == "a:=(1+2)"
+    window.view.escape_everything()
+
+
+def test_a_slash_typed_over_a_selection_makes_it_a_numerator(window):
+    """And brackets it on the way, because a+b over c is not a plus b/c."""
+    from PySide6.QtGui import QTextCursor
+
+    for source, start, end, expected in (
+            ("a:=1+2", 3, 6, "a:=(1+2)/"),      # an operator inside: bracketed
+            ("a:=x", 3, 4, "a:=x/"),            # a bare name: left alone
+            ("a:=(1+2)", 3, 8, "a:=(1+2)/")):   # already bracketed: not twice
+        window.view._last_scene_pos = QPointF(90, 300)
+        press_key(window.view, Qt.Key_unknown, '"')
+        type_text(window.view, source)
+        editor = window.view.editing_item()._editor
+        cursor = editor.textCursor()
+        cursor.setPosition(start)
+        cursor.setPosition(end, QTextCursor.KeepAnchor)
+        editor.setTextCursor(cursor)
+
+        press_key(window.view, Qt.Key_unknown, "/")
+        QApplication.processEvents()
+        assert editor.toPlainText() == expected, source
+        window.view.escape_everything()
+        QApplication.processEvents()
+
+
+def test_a_half_written_calculation_keeps_its_shape(window):
+    """"5/" is five over something, and it should look like it.
+
+    Dropping to plain characters the moment a line stopped parsing threw away
+    the one thing the layout was still saying.
+    """
+    from calcforge.core.mathrender import Fraction, Slot
+
+    for source, wanted in (("a:=5/", ("Fraction", "Slot")),
+                           ("a:=2^", ("Shifted", "Slot")),
+                           ("a:=3*", ("Slot",))):
+        window.view._last_scene_pos = QPointF(90, 300)
+        press_key(window.view, Qt.Key_unknown, '"')
+        type_text(window.view, source)
+        item = window.view.editing_item()
+        item.relayout()
+        QApplication.processEvents()
+        kinds = []
+        for row in item.rows:
+            if row.left is not None:
+                kinds += _box_kinds(row.left)
+        for name in wanted:
+            assert name in kinds, f"{source}: expected a {name}, got {kinds}"
+        window.view.escape_everything()
+        QApplication.processEvents()
+
+    # A line that parses is unaffected: no slots appear in a finished one.
+    window.view._last_scene_pos = QPointF(90, 300)
+    press_key(window.view, Qt.Key_unknown, '"')
+    type_text(window.view, "a:=1+2/3")
+    item = window.view.editing_item()
+    item.relayout()
+    kinds = []
+    for row in item.rows:
+        if row.left is not None:
+            kinds += _box_kinds(row.left)
+    assert "Fraction" in kinds and "Slot" not in kinds
+    window.view.escape_everything()
+
+
 def test_one_idea_has_one_name_in_the_properties_panel(window):
     """A table said "Digits", a calculation said "Significant digits".
 
@@ -7613,14 +7707,25 @@ def _text_in(box) -> str:
 
 
 def test_a_half_typed_line_shows_what_has_been_typed(window):
-    """"b*d^" cannot be laid out, and that one line waits rather than vanishing."""
+    """"b*d^" cannot be evaluated, and that one line waits rather than vanishing.
+
+    It used to wait as the plain characters "b*d^". It waits as maths now: the
+    names it already has, and an empty box where the power is going. What the
+    line must never do is disappear while it is being typed.
+    """
+    from calcforge.core.mathrender import Slot
+
     window.view._last_scene_pos = QPointF(90, 110)
     press_key(window.view, Qt.Key_unknown, '"')
     block = window.view.editing_item()
     block._editor.setPlainText("part := b*d^")
     block.retypeset_live()
 
-    assert "b*d^" in _text_in([box for box in _rows_of(block) if box][0])
+    boxes = [box for box in _rows_of(block) if box]
+    assert boxes, "the line is still shown"
+    written = _text_in(boxes[0])
+    assert "b" in written and "d" in written, "what has been typed is still there"
+    assert _contains(boxes[0], Slot), "and the power is an empty box waiting"
 
 
 def test_the_scripts_are_typeset_while_typing_too(window):

@@ -2,7 +2,7 @@
 
 Audited: 2026-09-06 against `claude/engineering-calc-markup-app-2twiqs`.
 
-Every open line in `docs/tasklist.md` was gone through one at a time. The 156
+Every open line in `docs/tasklist.md` was gone through one at a time. The 157
 below are the ones the current source implements and something actually
 exercises — an event-driven test that drives the real Qt queue, or a check
 against the running application. Each carries the evidence it rests on.
@@ -80,6 +80,9 @@ behaviour it extends.
 
 - **(reported again)** Equation editing must retain its caret and allow Left/Right arrow navigation after focus leaves the equation and returns. Clicking out after defining a variable with `:` and returning must still allow the user to place the caret and delete or amend the variable name on the left of the definition; no expression region may become uneditable.
   - **Evidence:** The definition name stays editable, with caret placement and Left/Right, after focus leaves and returns. Evidence: test_a_definition_name_remains_editable_after_focus_leaves_and_returns, test_the_calculation_keys_survive_the_keyboard_wandering_off.
+
+- **(new, extended)** Make equation editing structural rather than flat-text-like: arrow keys and pointer placement navigate the visible expression tree; selecting an expression and typing an opening bracket wraps the entire selected expression; selecting an expression and typing `/` turns that selection into the numerator of a fraction/division structure. Preserve the selected expression and its formatting when applying either transformation. The structure must also survive a syntax error: a calculation that does not parse keeps its structured typeset layout instead of collapsing back to inline text, operator precedence (BEDMAS) stays visible, `5/` renders as 5 over an empty denominator placeholder, and incomplete value, unit and power slots render as small SMath-style outline input boxes.
+  - **Evidence:** All three clauses done. Typing '(' over a selected expression wraps it instead of replacing it, and typing '/' makes it the numerator with the caret waiting in the denominator — bracketed on the way in when it contains an operator, because a+b over c is not a plus b/c, and not bracketed twice when it already is. A line that does not parse now keeps its structure rather than collapsing to plain characters: a tolerant parse fills the trailing hole with a slot, so '5/' sets as a fraction with an empty denominator, '2^' as a base with an empty box on its shoulder, and '3*' as a product with a slot; a genuinely malformed line, such as one with an unbalanced bracket, still shows as an error. Arrow and pointer navigation of the tree was already there. Evidence: test_a_bracket_typed_over_a_selection_wraps_it, test_a_slash_typed_over_a_selection_makes_it_a_numerator, test_a_half_written_calculation_keeps_its_shape, and test_a_half_typed_line_shows_what_has_been_typed rewritten to the amended rule; the existing clicking-into-a-fraction and scripts tests still pass.
 
 ## 6. Spreadsheet (Excel-like) behavior
 
