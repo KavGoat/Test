@@ -1411,7 +1411,7 @@ class PreferencesDialog(QDialog):
         self.recover_flattened = QCheckBox("Recoverable flattening")
         self.recover_flattened.setChecked(prefs.recover_flattened)
         self.recover_flattened.setToolTip(
-            "Keep the original item data in a .cfx file so Markup > Recover can restore it.\n"
+            "Keep the original item data in the file so Markup > Recover can restore it.\n"
             "Turn this off only when deliberately producing an irreversible file.")
         form.addRow("", self.recover_flattened)
         layout.addWidget(canvas)

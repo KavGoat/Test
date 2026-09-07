@@ -302,7 +302,7 @@ class MarkupItem(QGraphicsObject):
         # longer a markup that can be picked out or edited.
         self.hidden = False
         self.flattened = False
-        # Recoverable flattening keeps this complete source item in the .cfx
+        # Recoverable flattening keeps this complete source item in the
         # file. Irreversible flattening replaces source items with one visual
         # recording whose flag is False, so Recover never promises data that
         # was deliberately discarded.

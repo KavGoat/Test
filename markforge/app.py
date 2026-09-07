@@ -59,7 +59,7 @@ def main(argv: list[str] | None = None) -> int:
     window.offer_recovery()
 
     for argument in argv[1:]:
-        if argument.lower().endswith((".cfx", ".pdf")) and os.path.exists(argument):
+        if argument.lower().endswith(".pdf") and os.path.exists(argument):
             try:
                 window.open_path(argument)
                 window.current_index = 0

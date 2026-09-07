@@ -1,10 +1,9 @@
 """What a saved document is.
 
-This is a PDF editor that can also do calculations, so a saved document is a
-PDF: it opens in any reader, an imported drawing keeps the source PDF's own
-page rather than a picture of it, and the calculations ride along inside the
-file as a layer. ``.cfx`` and ``.pdf`` name the same kind of file — which one
-a document is called depends on whether there are calculations in it.
+A PDF, and nothing else. It opens in any reader; an imported drawing keeps the
+source PDF's own page rather than a picture of it; every markup goes in as a
+real annotation; and what a PDF cannot hold about a markup rides along inside
+the same file as an embedded record.
 """
 import os
 
@@ -24,7 +23,7 @@ def _readable_pdf(path: str) -> QPdfDocument:
 
 
 def test_a_saved_document_is_a_pdf_any_reader_can_open(window, tmp_path):
-    path = str(tmp_path / "sheet.cfx")
+    path = str(tmp_path / "sheet.pdf")
     project_io.save_document(window.document, path)
 
     with open(path, "rb") as handle:
@@ -32,46 +31,29 @@ def test_a_saved_document_is_a_pdf_any_reader_can_open(window, tmp_path):
     assert _readable_pdf(path).pageCount() == len(window.document.pages)
 
 
-def test_a_document_with_no_calculations_is_named_a_pdf(window, tmp_path):
-    """Nothing calculated in it, so it is a PDF and is called one."""
-    assert not pdfbase.has_calculations(window.document)
-    project_io.save_document(window.document, str(tmp_path / "markup"))
-    assert window.document.path.endswith(".pdf")
 
 
-def test_putting_a_calculation_in_it_makes_it_a_cfx(window, tmp_path):
-    _a_calculation_on(window)
-    assert pdfbase.has_calculations(window.document)
-    project_io.save_document(window.document, str(tmp_path / "beam"))
-    assert window.document.path.endswith(".cfx")
 
 
-def test_a_cfx_is_that_same_pdf_with_the_calculations_added(window, tmp_path):
-    """Renaming a .cfx to .pdf loses nothing: it was a PDF all along."""
-    _a_calculation_on(window)
-    path = str(tmp_path / "beam.cfx")
-    project_io.save_document(window.document, path)
-
-    renamed = str(tmp_path / "beam.pdf")
-    os.rename(path, renamed)
-    assert _readable_pdf(renamed).pageCount() == len(window.document.pages)
 
 
 def test_a_saved_document_comes_back_exactly(window, tmp_path):
     from markforge.items.shapes import RectItem
 
+    from markforge.items.text import NoteItem
+
     window.document.title = "Portal frame"
     frame = window.document.pages[0].frame
     frame.add_markup(RectItem(), QPointF(40, 40))
-    _a_calculation_on(window)
-    path = str(tmp_path / "frame.cfx")
+    frame.add_markup(NoteItem("check this"), QPointF(200, 40))
+    path = str(tmp_path / "frame.pdf")
     project_io.save_document(window.document, path)
 
     reopened = Document()
     project_io.load_document(reopened, path)
     assert reopened.title == "Portal frame"
     assert sorted(item["type"] for item in reopened.pages[0]._pending_items) \
-        == ["math", "rect"]
+        == ["note", "rect"]
 
 
 def test_an_imported_page_keeps_the_source_pdfs_own_page(window, tmp_path):
@@ -84,7 +66,7 @@ def test_an_imported_page_keeps_the_source_pdfs_own_page(window, tmp_path):
     document.pages = []
     pdfio.import_pages(document, source, [0], pdfio.FIT_ORIGINAL, 96.0, at=0)
 
-    saved = str(tmp_path / "marked_up.cfx")
+    saved = str(tmp_path / "marked_up.pdf")
     project_io.save_document(document, saved)
 
     from pypdf import PdfReader
@@ -111,7 +93,7 @@ def test_documents_written_before_the_format_was_a_pdf_still_open(tmp_path):
     import json
     import zipfile
 
-    path = str(tmp_path / "old.cfx")
+    path = str(tmp_path / "old.pdf")
     old = Document()
     old.title = "Written last year"
     with zipfile.ZipFile(path, "w") as archive:
@@ -168,16 +150,6 @@ def test_opening_a_pdf_is_opening_a_document_not_converting_one(window, tmp_path
     assert "GRID LINE" in PdfReader(source).pages[0].extract_text()
 
 
-def test_a_calculation_moves_the_save_beside_the_pdf_as_a_cfx(window, tmp_path):
-    source = str(tmp_path / "drawing.pdf")
-    _a_pdf_with_line_work(source)
-    window.open_path(source)
-    window.rebuild_scenes()
-    _a_calculation_on(window)
-
-    assert window.save_document()
-    assert window.document.path == str(tmp_path / "drawing.cfx")
-    assert os.path.exists(source), "the drawing itself should be left alone"
 
 
 def test_what_is_drawn_on_the_page_is_in_the_saved_pdf(window, tmp_path):

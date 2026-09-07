@@ -2315,7 +2315,7 @@ def test_a_table_name_is_kept_when_the_document_is_saved(window, tmp_path):
     from markforge.io import project as project_io
 
     _capacity_table(window, "shear")
-    path = str(tmp_path / "job.cfx")
+    path = str(tmp_path / "job.pdf")
     project_io.save_document(window.document, path)
 
     reopened = Document()
@@ -3504,7 +3504,7 @@ def test_a_group_is_saved_with_the_document(window, tmp_path):
     first.setSelected(True)
     second.setSelected(True)
     window.group_selection()
-    path = str(tmp_path / "job.cfx")
+    path = str(tmp_path / "job.pdf")
     project_io.save_document(window.document, path)
 
     reopened = Document()
@@ -5775,7 +5775,7 @@ def test_a_pasted_picture_is_still_there_after_a_save(window, tmp_path):
     hover(window.view, 120, 520)
     window.paste_items()
 
-    path = str(tmp_path / "picture.cfx")
+    path = str(tmp_path / "picture.pdf")
     project_io.save_document(window.document, path)
     reopened = Document()
     project_io.load_document(reopened, path)
@@ -8566,7 +8566,7 @@ def test_saving_settles_the_line_being_typed(window):
 
     item = _open_calculation(window)
     type_text(window.view, "b:=300mm")
-    path = os.path.join(tempfile.mkdtemp(), "sheet.cfx")
+    path = os.path.join(tempfile.mkdtemp(), "sheet.pdf")
     window.document.path = path
     assert window.save_document()
     assert not window.view.is_editing(), "the line was settled first"

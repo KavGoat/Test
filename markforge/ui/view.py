@@ -2901,6 +2901,33 @@ class PageView(QGraphicsView):
 
 
 
+    def place_caret(self, item, scene_pos: QPointF) -> None:
+        """Put the caret where the words were clicked.
+
+        Qt's own layout knows which character is under a point, and for a text
+        box that is the right answer — it is a real document laid out where it
+        is shown. Handing the click to the editor and hoping is not: the editor
+        sits at the item's origin, so a click measured against the page lands
+        somewhere else entirely.
+        """
+        editor = getattr(item, "_editor", None)
+        if editor is None:
+            return
+        from PySide6.QtGui import QTextCursor
+
+        local = editor.mapFromScene(scene_pos)
+        document = editor.document()
+        layout = document.documentLayout() if document is not None else None
+        if layout is None:
+            return
+        at = layout.hitTest(local, Qt.FuzzyHit)
+        if at < 0:
+            return
+        cursor = editor.textCursor()
+        cursor.setPosition(at)
+        editor.setTextCursor(cursor)
+        item.update()
+
     def end_item_edit(self) -> None:
         item = getattr(self, "_editing_item", None)
         if item is None:

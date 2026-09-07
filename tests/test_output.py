@@ -296,7 +296,7 @@ def test_the_logo_and_its_place_are_saved_with_the_document(window, tmp_path):
     settings.logo_key = _logo(window.document)
     settings.logo_slot = "footer_center"
     settings.logo_height_mm = 12.5
-    path = str(tmp_path / "logo.cfx")
+    path = str(tmp_path / "logo.pdf")
     project_io.save_document(window.document, path)
 
     reopened = Document()

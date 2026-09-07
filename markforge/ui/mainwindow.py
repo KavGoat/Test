@@ -1283,7 +1283,6 @@ class MainWindow(QMainWindow):
         # Opening a PDF is opening a document, not converting one. Save writes
         # this file back — the source page comes through untouched and the
         # markups go on top of it, the way Bluebeam saves a marked-up drawing.
-        # Put a calculation on it and the save becomes a .cfx beside it.
         document.path = path
         document.modified = True
         self.document = document
@@ -1397,7 +1396,7 @@ class MainWindow(QMainWindow):
     def autosave_path(self) -> str:
         if self.document.path:
             return self.document.path + ".autosave"
-        return os.path.join(self.recovery_dir(), "untitled.cfx.autosave")
+        return os.path.join(self.recovery_dir(), "untitled.pdf.autosave")
 
     @staticmethod
     def recovery_dir() -> str:
@@ -1424,7 +1423,7 @@ class MainWindow(QMainWindow):
 
     def clear_autosave(self) -> None:
         for path in {self.autosave_path(),
-                     os.path.join(self.recovery_dir(), "untitled.cfx.autosave")}:
+                     os.path.join(self.recovery_dir(), "untitled.pdf.autosave")}:
             try:
                 if os.path.exists(path):
                     os.remove(path)
@@ -1433,7 +1432,7 @@ class MainWindow(QMainWindow):
 
     def offer_recovery(self) -> bool:
         """On start-up, offer to reopen whatever a previous session left behind."""
-        path = os.path.join(self.recovery_dir(), "untitled.cfx.autosave")
+        path = os.path.join(self.recovery_dir(), "untitled.pdf.autosave")
         if not os.path.exists(path):
             return False
         answer = QMessageBox.question(
@@ -4552,7 +4551,6 @@ class MainWindow(QMainWindow):
             if hasattr(bar, "refresh_icons"):
                 bar.refresh_icons()
         self.markups_panel.rebuild(self.document)
-        self.problems_panel.rebuild(getattr(self.problems_panel, "_problems", []))
 
     def toggle_theme(self, dark: bool) -> None:
         from ..app import apply_theme
@@ -4790,7 +4788,7 @@ class MainWindow(QMainWindow):
             menu.addAction(self.act_paste_here)
             menu.addSeparator()
             insert = menu.addMenu("Insert here")
-            for key in ("math", "table", "plot", "text", "callout", "stamp", "image"):
+            for key in ("text", "callout", "note", "stamp", "image"):
                 tool = TOOL_MAP[key]
                 insert.addAction(icon(tool.icon), tool.label,
                                  lambda _c=False, k=key, p=scene_pos: self._insert_at(k, p))

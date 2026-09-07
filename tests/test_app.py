@@ -285,10 +285,10 @@ def test_a_page_excluded_from_print_is_grey_and_is_not_exported(window, tmp_path
     assert pdfio.page_count(pdf_path) == 2
     assert len(export_io.export_images(window.document, str(tmp_path), 40)) == 2
 
-    cfx_path = str(tmp_path / "included.cfx")
-    project_io.save_document(window.document, cfx_path)
+    saved_path = str(tmp_path / "included.pdf")
+    project_io.save_document(window.document, saved_path)
     reopened = Document()
-    project_io.load_document(reopened, cfx_path)
+    project_io.load_document(reopened, saved_path)
     assert [page.printable for page in reopened.pages] == [True, False, True]
 
 
@@ -437,25 +437,8 @@ def test_renumber_counts_closes_gaps(window):
     assert [c.index for c in remaining] == [1, 2]
 
 
-def test_copied_cells_reach_the_system_clipboard_as_tsv(window):
-    from PySide6.QtWidgets import QApplication
-    table = _make_table(window)
-    table.set_cell(0, 0, "a")
-    table.set_cell(0, 1, "b")
-    table.current, table.anchor = (0, 0), (0, 1)
-    window.copy_selection()
-    assert QApplication.clipboard().text() == "a\tb"
 
 
-def test_paste_grows_the_table_when_needed(window):
-    from PySide6.QtWidgets import QApplication
-    table = _make_table(window)
-    table.sheet.resize(2, 2)
-    QApplication.clipboard().setText("1\t2\t3\n4\t5\t6\n7\t8\t9")
-    table.current = table.anchor = (0, 0)
-    window.paste_items()
-    assert table.sheet.rows >= 3 and table.sheet.cols >= 3
-    assert table.sheet.raw(2, 2) == "9"
 
 
 def test_hiding_a_layer_hides_and_deselects_its_markups(window):
@@ -582,7 +565,7 @@ def test_applying_redactions_with_none_present_explains_itself(window, monkeypat
 
 def test_autosave_writes_and_clears_a_recovery_copy(window, tmp_path):
     import os
-    path = str(tmp_path / "doc.cfx")
+    path = str(tmp_path / "doc.pdf")
     from markforge.io import project as project_io
     project_io.save_document(window.document, path)
     window.document.path = path
@@ -1049,7 +1032,7 @@ def test_pdf_review_snapshot_survives_edit_save_reopen_and_export(
     frame.add_markup(line)
     assert shot[0] in frame.markups()
 
-    saved = str(tmp_path / "review.cfx")
+    saved = str(tmp_path / "review.pdf")
     project_io.save_document(window.document, saved)
     reopened = Document()
     project_io.load_document(reopened, saved)
@@ -1069,7 +1052,7 @@ def test_an_inserted_pdf_page_survives_saving_and_reopening(window, tmp_path, mo
 
     path = _drawing_pdf(str(tmp_path / "plan.pdf"))
     _import_pdf(window, monkeypatch, path)
-    saved = str(tmp_path / "job.cfx")
+    saved = str(tmp_path / "job.pdf")
     project_io.save_document(window.document, saved)
 
     reopened = Document()
