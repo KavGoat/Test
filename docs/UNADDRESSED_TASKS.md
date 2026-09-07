@@ -1,38 +1,51 @@
-# CalcForge tasks still requiring work
+# MarkForge tasks still requiring work
 
-Audited: 2026-09-06 against `claude/engineering-calc-markup-app-2twiqs`.
+Audited: 2026-09-07 against `claude/markforge-python`.
 
-The 7 entries below are what the audit could not show working. Each says
-what is missing or blocking it. Several are tasks whose base behaviour is
-finished and whose recent amendment is not; those name the part that is done so
-the remaining work is clear.
+The entries below are what the audit could not show working. Each says what is
+missing or blocking it. Several are tasks whose base behaviour is finished and
+whose recent amendment is not; those name the part that is done so the
+remaining work is clear.
 
 This is not the user-owned completion record. It changes no checkbox in
 `docs/tasklist.md` and no status in `docs/tasklist.xlsx`.
 
-## 1. Core concept
+## 1. What the app is
 
-- **(new)** Support multiple open documents at once: PDF review documents and `.cfx` CalcForge documents appear in separate tabs, can be viewed side-by-side in a split view, and can be moved into independent application windows. Each document keeps its own pages, state and active tool without leaking into another tab/window.
-  - **Missing:** Two of the three parts done; split view is not. DONE — tabs: each open document has a tab with its own document, canvas, undo history, page and tool, and one view is handed a different canvas on a switch, so nothing is re-wired and nothing of one document reaches into another. The bar hides itself when only one document is open. File > New tab, Ctrl+T. DONE — independent windows: File > New window, Ctrl+Shift+N, each with its own document, view and undo stack; a window built this way is kept alive rather than collected as the call returns, and every tab's undo stack is released when the window closes so none of them calls back into a window that has gone. NOT DONE — side-by-side split view: that needs a second live PageView in the same window, which the shared-view design deliberately avoids, so it is a separate piece of work rather than a bolt-on. Also not done: PDF review documents opening into a tab of their own, which follows the split-view question. Evidence: test_two_documents_open_in_tabs_without_reaching_into_each_other, test_a_second_window_keeps_its_own_document.
+- **(amended)** Support multiple open documents at once: each appears in its own tab, can be viewed side-by-side in a split view, and can be moved into an independent application window.
+  - **Missing:** Two of the three parts done; split view is not. DONE — tabs: each open document has a tab with its own document, canvas, undo history, page and tool, and one view is handed a different canvas on a switch, so nothing is re-wired and nothing of one document reaches into another. The bar hides itself when only one document is open. File ▸ New tab, Ctrl+T. DONE — independent windows: File ▸ New window, Ctrl+Shift+N, each with its own document, view and undo stack. NOT DONE — side-by-side split view: that needs a second live PageView in the same window, which the shared-view design deliberately avoids, so it is a separate piece of work rather than a bolt-on. Evidence: `test_two_documents_open_in_tabs_without_reaching_into_each_other`, `test_a_second_window_keeps_its_own_document`.
+
+## 15. Panels & layout
+
+- **(new)** Only one panel should be open at a time in each side location, Bluebeam-style.
+  - **Missing:** Not started. Panels dock, pin, float and are remembered, but nothing enforces one-at-a-time per side.
 
 ## 27. Reliability / process
 
-- Never let hitting the token/usage limit silently end the session's work — pause, and resume automatically once the limit resets, without needing a fresh prompt from you (130, 138) — **not something this end can promise.** A session that runs out of context is summarised and continued, and that is automatic; a session that runs out of *usage* stops until the limit resets and needs a prompt to pick up again. What is under control here is that nothing is left half-finished and unrecorded: work is committed and pushed as it is done, and this list says what is built and what is not, so whatever picks the work up next — a fresh session, or this one after a reset — starts from the list rather than from memory
-  - **Missing:** Platform limitation, restated accurately rather than closed. Nothing in this environment resumes a session when a usage limit lifts, and no code in this repository can change that. What does exist is a scheduled wake-up (send_later), which brings a session back at a chosen time but does not detect the limit — arranging to come back, not carrying on. docs/HANDOVER.md now says this, and says that the register and branch should always be left in a state somebody else can pick up from. Stays a requirement per HANDOVER rule 5.
+- Never let hitting the token/usage limit silently end the session's work — pause, and resume automatically once the limit resets, without needing a fresh prompt.
+  - **Missing:** Platform limitation, restated accurately rather than closed. Nothing in this environment resumes a session when a usage limit lifts, and no code in this repository can change that. What does exist is a scheduled wake-up (`send_later`), which brings a session back at a chosen time but does not detect the limit — arranging to come back, not carrying on. `docs/HANDOVER.md` says this, and says the register and branch should always be left in a state somebody else can pick up from. Stays a requirement per HANDOVER rule 6.
 
-- **(new)** Validate interactive changes through the real CalcForge UI, not only unit-level code inspection. Agents must drive the canvas with pointer moves, clicks, drags, keyboard arrows and configured shortcuts, including Escape/cancel paths, and look for stuck tools, lost focus, incorrect cursor states, blocked input, broken selections and other interaction regressions. Keep repeatable Qt event-driven tests for each defect found.
-  - **Missing:** Ongoing acceptance requirement, and it should stay open: it governs how every future interactive change is validated, so there is no state in which it is finished. It was held to throughout this session — the size entry, the count marker, the completion list, the wheel, the cloud cursor, undo, tabs and a second window were each driven through the real Qt event queue or the running application, and three of the fixes were only found that way. Leaving it open is the point of it.
+- **(new, amended)** Validate interactive changes through the real MarkForge UI, not only unit-level code inspection.
+  - **Missing:** Ongoing acceptance requirement, and it should stay open: it governs how every future interactive change is validated, so there is no state in which it is finished. Leaving it open is the point of it.
 
 ## 29. New requests awaiting review
 
-- **(amended, reported again)** After the first click of a rectangle or ellipse, show the numeric size entry as a small tooltip anchored near the bottom-right corner of the in-progress shape, tracking that corner as the drag proceeds. **Still wrong on the current build (photo)**: the entry is drawn rotated a quarter turn so its labels read bottom-to-top, and it sits well away from the shape rather than beside the corner being dragged. It must be upright whatever the view is doing, and beside the corner. It live-updates width and height (or diameter) throughout the drag and accepts typed values at any point before the second click commits. Typed values update the preview at page scale; the second click places the markup and dismisses the entry.
-  - **Missing:** Better, but the reported rotation could not be reproduced. The entry is now screen-aligned — ItemIgnoresTransformations and rotation pinned to zero — so it stays upright and the same size at any zoom and at every reading turn, which makes the photographed state impossible from here on; and it anchors to the shape's corner that is bottom-right ON SCREEN rather than the one the item calls bottom-right, which was genuinely wrong on a turned page. What I could not reproduce is a rotated panel on an untuned view, so I cannot say the exact cause in the photo is gone. Worth a re-check against this build. Evidence: test_the_size_entry_stays_upright_whichever_way_the_page_is_turned.
+- **(amended, reported again)** After the first click of a rectangle or ellipse, show the numeric size entry as a small tooltip anchored near the bottom-right corner of the in-progress shape.
+  - **Missing:** Better, but the reported rotation could not be reproduced. The entry is screen-aligned — `ItemIgnoresTransformations` and rotation pinned to zero — so it stays upright and the same size at any zoom and at every reading turn, and it anchors to the shape's corner that is bottom-right ON SCREEN rather than the one the item calls bottom-right, which was genuinely wrong on a turned page. What could not be reproduced is a rotated panel on an unturned view. Worth a re-check against this build. Evidence: `test_the_size_entry_stays_upright_whichever_way_the_page_is_turned`.
 
-- **(amended)** Add recoverable document flattening: choose which content classes to flatten (markups, calculations, tables and other supported items), retain recovery data by default, support individual-item flattening, and offer a Preferences setting to disable recoverability when deliberately producing an irreversible file. Flattening must behave the way it does on a Bluebeam PDF: flattened content becomes part of the page, so it is no longer selectable and no longer intercepts a click meant for something in front of or behind it. The flatten tool must not sit under a crosshair cursor — it is not a drawing tool — and while it is active it must still be possible to pick out the things it is about to act on.
-  - **Missing:** Half done. Flattened content is now part of the page as far as the pointer is concerned: it no longer answers markup_at, takes no mouse buttons and no hover, so a click reaches whatever is in front of or behind it, and recovery gives all of that back. Evidence: test_flattened_markup_lets_the_pointer_through_to_what_is_behind. NOT done: the crosshair cursor the report mentions. There is no flatten tool in the tool table — flattening is a menu action — so nothing here sets a crosshair for it, and I could not reproduce one; it may be a drawing tool left active from before. Needs the reporter to say what was selected when they saw it.
+- **(amended)** Add recoverable document flattening, with the class chooser, recovery data and the Preferences switch.
+  - **Missing:** Half done. Flattened content is part of the page as far as the pointer is concerned: it no longer answers `markup_at`, takes no mouse buttons and no hover, so a click reaches whatever is in front of or behind it, and recovery gives all of that back. Evidence: `test_flattened_markup_lets_the_pointer_through_to_what_is_behind`. NOT done: the crosshair cursor the report mentions. There is no flatten tool in the tool table — flattening is a menu action — so nothing here sets a crosshair for it. Needs the reporter to say what was selected when they saw it. The class chooser now offers Markups, Text and Measurements, the classes that exist since the strip-down.
 
-- **(new)** Walk the whole application as somebody meeting it for the first time and write down what is wrong with it: anything whose label does not say what it does, any button whose effect is a surprise, any gesture that is not what the rest of the drawing world does, and anything plainly missing. Then fix what that walk finds, as its own list of tasks rather than one vague entry.
-  - **Missing:** Not started. A first-run walk of the whole application has not been done, and what it finds is meant to become its own list of tasks rather than staying one entry.
+- **(new)** Walk the whole application as somebody meeting it for the first time and write down what is wrong with it.
+  - **Missing:** Not started. A first-run walk of the whole application has not been done, and what it finds is meant to become its own list of tasks rather than staying one entry. It is more worth doing now than it was: three features have been removed since the walk was asked for, and a removal leaves loose ends a walk is exactly the way to find.
 
-- **(new)** Recolour a snapshot the way a page and an image can be recoloured. A snapshot is stored as a drawing recording rather than as its source line work, so there is nothing in it to change the colour of one line at a time; giving it the same swap, colourise and transparency the rest have means keeping what it was taken from, not repainting a picture of it.
-  - **Missing:** Logged rather than half-built. A snapshot is stored as a QPicture — a recording of drawing commands — not as the line work it was taken from, and a command stream cannot be replayed through a colour substitution. Giving a snapshot the same swap, colourise and transparency means keeping its source items alongside the recording so the picture can be rebuilt recoloured; repainting a raster of it would throw away the vectors, which is the whole point of a snapshot.
+- **(new)** Recolour a snapshot the way a page and an image can be recoloured.
+  - **Missing:** Logged rather than half-built. A snapshot is stored as a `QPicture` — a recording of drawing commands — not as the line work it was taken from, and a command stream cannot be replayed through a colour substitution. Giving a snapshot the same swap, colourise and transparency means keeping its source items alongside the recording so the picture can be rebuilt recoloured; repainting a raster of it would throw away the vectors, which is the whole point of a snapshot.
+
+## Left behind by the removals
+
+Found by this audit rather than reported.
+
+- `docs/COMPLETED_TASKS.md` is a dated evidence record from the calculation era. Its entries are true of the build they were written against and false of this one. It is kept as history; it should not be read as a description of the app.
+- `docs/backlog.md` still refers to "the layer switches" as a comparison for the page bar, in a task that is otherwise live.
+- `markforge/ui/icons.py` still draws `panel_variables`, `panel_functions`, `panel_problems` and `variables`. Nothing asks for them.
