@@ -186,12 +186,10 @@ def export_pdf(document: Document, path: str, pages: Optional[list] = None,
                resolution: int = 300, live_markups: bool = True) -> None:
     """Write the document out as a PDF.
 
-    With *live_markups*, the sheet is written without its markups and each one
+    With *live_markups*, the page is written without its markups and each one
     goes into the file as a real PDF annotation instead, so that opening the
     export in Bluebeam gives back markups that can be picked up and moved
-    rather than a picture of them. Calculations cannot travel as calculations —
-    a PDF has no notion of a variable — so each goes out as an ordinary movable
-    markup showing the value it held when the export was made.
+    rather than a picture of them.
     """
     from . import annotate
 

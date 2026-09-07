@@ -1,8 +1,7 @@
 """The canvas: one scene holding every page of the document.
 
-A calculation sheet is read the way a PDF is read — scrolled through, not
-turned page by page — so all the pages live in one scene, stacked down the
-canvas with a gap between them. Each page is a :class:`PageFrame`: it draws
+A drawing set is read scrolled through, not turned page by page, so all the
+pages live in one scene, stacked down the canvas with a gap between them. Each page is a :class:`PageFrame`: it draws
 its own paper, edge, shadow, imported background, grid, margins and running
 text, and owns its markups as child items.
 
@@ -606,10 +605,10 @@ class PageFrame(QGraphicsObject):
         """Snapshot drawing in *region*, recorded as vectors where possible.
 
         The paper/background is deliberately absent. Imported PDF linework and
-        ordinary markups are copied, while calculation, table and text content
-        is included only when that item was explicitly selected before taking
-        the snapshot. This keeps a drawing-detail snapshot from silently
-        taking unrelated worksheet content with it.
+        ordinary markups are copied, while typed content is included only when
+        that item was explicitly selected before taking the snapshot. This
+        keeps a drawing-detail snapshot from silently carrying somebody's notes
+        across with it.
 
         The recording is in the region's own coordinates, so its top-left
         corner is the origin and its size is the size of the snapshot.
@@ -717,13 +716,13 @@ class DocumentScene(QGraphicsScene):
         self.print_mode = False
         self._pages_rect = QRectF()
         self._desk_margin = QPointF(PAGE_GAP, PAGE_GAP)
-        # Markups are dragged, resized and re-laid-out constantly, and a
-        # calculation changes shape every time a character is typed into it.
-        # Qt's spatial index assumes the opposite, and any bounding rectangle
-        # that changes without it being told leaves it dereferencing stale
-        # geometry — a crash, not a glitch.  A calculation sheet holds hundreds
-        # of items, not hundreds of thousands, so a linear scan is cheaper than
-        # the index would have been anyway.
+        # Markups are dragged, resized and re-laid-out constantly, and a text
+        # markup changes shape every time a character is typed into it. Qt's
+        # spatial index assumes the opposite, and any bounding rectangle that
+        # changes without it being told leaves it dereferencing stale geometry
+        # — a crash, not a glitch. A marked-up drawing holds hundreds of items,
+        # not hundreds of thousands, so a linear scan is cheaper than the index
+        # would have been anyway.
         self.setItemIndexMethod(QGraphicsScene.NoIndex)
         self.set_canvas_colour(CANVAS[LIGHT])
         self.selectionChanged.connect(self.selectionInfoChanged.emit)

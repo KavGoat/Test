@@ -29,9 +29,6 @@ class Preferences:
     wheel: str = WHEEL_ZOOM
     """Whether a notch of the wheel zooms (as Bluebeam does) or scrolls."""
 
-    self_contained_blocks: bool = False
-    """Whether a new block hides its names from the rest of the page."""
-
     check_spelling: bool = True
     """Whether words typed on the page are checked against the dictionary."""
 
@@ -45,7 +42,7 @@ class Preferences:
     """Whether a text box grows to fit what is typed into it."""
 
     insertion_point: bool = False
-    """Whether an empty-canvas click leaves a calculation insertion point."""
+    """Whether an empty-canvas click leaves an insertion point to type at."""
 
     recover_flattened: bool = True
     """Keep source item data when content is flattened into the page."""

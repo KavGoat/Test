@@ -11,6 +11,28 @@ from markforge.items.shapes import PolyItem, RectItem
 from markforge.items.text import CalloutItem, NoteItem, StampItem, TextItem
 
 
+def make_all(qapp):
+    """One of every markup, for the questions asked of all of them at once."""
+    return [
+        RectItem("rect", QRectF(0, 0, 100, 50)),
+        RectItem("ellipse", QRectF(0, 0, 80, 40)),
+        RectItem("cloud", QRectF(0, 0, 120, 60)),
+        PolyItem("line", [QPointF(0, 0), QPointF(50, 20)]),
+        PolyItem("arrow", [QPointF(0, 0), QPointF(60, 0)]),
+        PolyItem("polygon", [QPointF(0, 0), QPointF(40, 0), QPointF(20, 30)]),
+        PolyItem("ink", [QPointF(0, 0), QPointF(5, 6), QPointF(9, 2)]),
+        TextItem("hello"),
+        CalloutItem("note"),
+        NoteItem("a comment"),
+        StampItem("APPROVED"),
+        ImageItem(),
+        MeasureItem("length", [QPointF(0, 0), QPointF(100, 0)]),
+        MeasureItem("area", [QPointF(0, 0), QPointF(100, 0), QPointF(100, 50)]),
+        MeasureItem("dimension", [QPointF(0, 0), QPointF(160, 0)]),
+        CountItem("Doors", 2, "star"),
+    ]
+
+
 def test_every_item_type_is_registered(qapp):
     for item in make_all(qapp):
         assert item.TYPE in ITEM_REGISTRY

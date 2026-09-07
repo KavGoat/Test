@@ -8,9 +8,7 @@ markups panel, exactly as it is here.
 
 So the page is painted without them and each markup is written as a real PDF
 annotation instead, carrying its own appearance so that it looks the same
-wherever it is opened. The one thing that cannot travel is the calculating:
-a PDF has no idea what a variable is, so a calculation goes out as an ordinary
-movable markup showing the value it held at the moment of export.
+wherever it is opened.
 """
 from __future__ import annotations
 

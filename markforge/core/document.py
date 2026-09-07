@@ -44,9 +44,9 @@ class PageSetup:
     height_mm: float = 297.0
     orientation: str = PORTRAIT
     # Even margins, so the printable area sits in the middle of the sheet.
-    # Ten millimetres is the narrowest most printers will hold, and a
-    # calculation sheet wants the paper it is paying for: wider than this and
-    # the page reads as a frame with a little writing in it.
+    # Ten millimetres is the narrowest most printers will hold, and a drawing
+    # wants the paper it is printed on: wider than this and the page reads as
+    # a frame with a little drawing in it.
     margin_left: float = 10.0
     margin_top: float = 10.0
     margin_right: float = 10.0
@@ -311,8 +311,6 @@ class Page:
 class DocumentSettings:
     """Document-wide preferences."""
 
-    precision: int = 4
-    number_format: str = "auto"
     show_grid: bool = False
     snap_to_grid: bool = False
     # Pick up the corners, centres and ends of what is already drawn.
@@ -328,8 +326,6 @@ class DocumentSettings:
     snap_to_alignment: bool = True
     grid_mm: float = 5.0
     show_margins: bool = True
-    math_font: str = "Cambria Math"
-    math_size: float = 10.0
     header_left: str = ""
     header_center: str = ""
     header_right: str = ""
@@ -367,7 +363,10 @@ class Document:
         self.project = ""
         self.settings = DocumentSettings()
         self.pages: list[Page] = [Page()]
-        self.layers: list[Layer] = [Layer("Markups"), Layer("Calculations")]
+        # Two layers to begin with: what is drawn here, and what came in on
+        # the page. The second is where an imported PDF's own line work goes,
+        # so it can be hidden without hiding the markups over it.
+        self.layers: list[Layer] = [Layer("Markups"), Layer("Drawing")]
         self.bookmarks: list[Bookmark] = []
         self.assets: dict[str, bytes] = {}
         self.path: Optional[str] = None

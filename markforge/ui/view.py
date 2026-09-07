@@ -34,6 +34,10 @@ from .tools import (ANCHOR, CLICK, CLOUD, CLOUDY, DRAG, ERASE, FREE, NONE, POLY,
                     SNAPSHOT,
                     TOOL_MAP, Tool)
 
+# How far the insertion point steps down the page for one press of an arrow:
+# a line of ordinary text, which is what it is placing.
+LINE_STEP = 6.0
+
 MIN_ZOOM = 0.08
 MAX_ZOOM = 16.0
 CLICK_SLOP = 3.0
@@ -356,10 +360,9 @@ class PageView(QGraphicsView):
     def commit_snapshot(self, text: str, coalesce: bool = False) -> None:
         """Record an edit for undo, and leave the document consistent.
 
-        Reading order decides what resolves, so *moving* a calculation changes
-        the answers just as much as retyping it does. Recalculating here means
-        every committed gesture leaves the page showing the truth, rather than
-        each gesture having to remember to ask for it.
+        Every committed gesture leaves the page consistent — the takeoff list
+        added up again, the panels showing what is actually selected — rather
+        than each gesture having to remember to ask for it.
         """
         if not self._snapshot:
             return
@@ -1970,8 +1973,8 @@ class PageView(QGraphicsView):
         if self._mode == "rubber":
             if self._is_a_click(scene_pos):
                 # A click on bare paper only clears the selection, which the
-                # press already did, unless the optional calculation insertion
-                # point is enabled. Dragging still draws a marquee.
+                # press already did, unless the optional insertion point is
+                # enabled. Dragging still draws a marquee.
                 if preferences.current().insertion_point:
                     frame = self.frame_at(scene_pos)
                     if frame is not None:
@@ -2868,7 +2871,6 @@ class PageView(QGraphicsView):
                 or self._label_editor is not None)
 
 
-
     def begin_item_edit(self, item) -> None:
         if self._mode == "lasso":
             self.cancel_marquee()
@@ -2885,20 +2887,6 @@ class PageView(QGraphicsView):
         item.setSelected(True)
         item.begin_edit()
         self._editing_item = item
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
     def place_caret(self, item, scene_pos: QPointF) -> None:
@@ -2976,8 +2964,6 @@ class PageView(QGraphicsView):
             cursor.removeSelectedText()
             editor.setTextCursor(cursor)
         return True
-
-
 
 
     def group_of(self, item) -> list:
@@ -3093,28 +3079,25 @@ class PageView(QGraphicsView):
                 return item
         return None
 
-    # ------------------------------------------------------------------
-    # spreadsheet interaction
-    # ------------------------------------------------------------------
+    def insert_symbol(self, text: str) -> bool:
+        """Type a symbol into whatever is being written; False if nothing is.
 
-
-
-    POINTABLE = "=+-*/^(,:<>&%"
-
-
-
-    def stop_pointing(self) -> None:
-        """The reference is finished; the arrows go back to moving the caret."""
-        self._point_span = None
-        self._pointing = None
-
-
-
-
-
-
-
-
+        A symbol that opens a bracket — the root sign — brings its closing
+        bracket with it and leaves the caret between the two, because ``√(``
+        on its own is half of something.
+        """
+        closing = ")" if text.endswith("(") else ""
+        item = self._editing_item
+        editor = getattr(item, "_editor", None) if item is not None else None
+        if editor is None:
+            return False
+        cursor = editor.textCursor()
+        cursor.insertText(text + closing)
+        if closing:
+            cursor.movePosition(QTextCursor.Left, QTextCursor.MoveAnchor,
+                                len(closing))
+        editor.setTextCursor(cursor)
+        return True
 
     def busy_typing(self) -> bool:
         """True while words are being typed into something on the page.
@@ -3547,7 +3530,7 @@ class PageView(QGraphicsView):
         painter.restore()
 
     def _draw_insertion_point(self, painter: QPainter, point: QPointF) -> None:
-        """Draw the optional remembered home for the next calculation.
+        """Draw the optional remembered home for the next thing typed.
 
         A small crosshair, and nothing more. It marks a spot on a drawing that
         already has plenty on it, so it has to be findable without being one
@@ -3692,6 +3675,11 @@ class PageView(QGraphicsView):
                 self.escape_everything()
                 event.accept()
                 return
+            # And everything else is a letter of what is being written. It
+            # goes down to the scene, which hands it to the caret; nothing
+            # below here may look at it, because a markup being typed into
+            # owns every key that is not Escape.
+            super().keyPressEvent(event)
             return
 
         if key == Qt.Key_Space and not event.isAutoRepeat():
@@ -3734,13 +3722,13 @@ class PageView(QGraphicsView):
                                                             self.typing_frame())):
                 event.accept()
                 return
-            # And nothing else. A letter on bare paper used to open a
-            # calculation and put the letter in it, which meant every letter
-            # was spoken for: a tool key that had not been bound yet, or a
+            # And nothing else. A letter on bare paper used to open a text
+            # markup and put the letter in it, which meant every letter was
+            # spoken for: a tool key that had not been bound yet, or a
             # keystroke meant for something that had just lost the focus,
-            # started a calculation instead of doing nothing. Writing begins
+            # started writing instead of doing nothing. Writing begins
             # deliberately with '"', which is on the shortcut list where it
-            # can be changed. Slash remains division inside an equation.
+            # can be changed.
             if event.text() and event.text().isprintable():
                 event.accept()
                 return
@@ -3925,10 +3913,6 @@ class PageView(QGraphicsView):
             self.selectionChanged.emit()
         menu = self.window.build_context_menu(item, scene_pos)
         menu.exec(event.globalPos())
-
-
-
-
 
 
 def _far_enough(a: QPointF, b: QPointF) -> bool:

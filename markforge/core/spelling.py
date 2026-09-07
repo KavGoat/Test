@@ -1,7 +1,7 @@
 """Spelling, checked against New Zealand English.
 
-A calculation sheet is read by people who did not write it, and a misspelling
-in a note is the kind of thing nobody notices until it is printed and bound.
+A marked-up drawing is read by people who did not write on it, and a
+misspelling in a note is the kind of thing nobody notices until it is issued.
 So words typed into a text box, a callout or a note are checked, and the ones
 the dictionary does not know are underlined — quietly, the way every other
 editor does it, with no dialog and nothing to dismiss.

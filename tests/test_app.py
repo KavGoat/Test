@@ -491,8 +491,8 @@ def test_layers_panel_moves_the_selection(window):
     window.select_tool("select")
     item = markups(window)[0]
     item.setSelected(True)
-    window.move_selection_to_layer("Calculations")
-    assert item.layer == "Calculations"
+    window.move_selection_to_layer("Drawing")
+    assert item.layer == "Drawing"
     assert window.layers_panel.table.rowCount() == len(window.document.layers)
 
 
@@ -1158,14 +1158,12 @@ def test_preferences_survive_being_saved_and_read_back(qapp, tmp_path, monkeypat
 
     monkeypatch.setattr(QSettings, "setValue", QSettings.setValue)
     prefs = preferences.Preferences(wheel=preferences.WHEEL_SCROLL,
-                                    self_contained_blocks=True,
                                     check_spelling=False,
                                     recover_flattened=False)
     preferences.save(prefs)
     try:
         read = preferences.load()
         assert read.wheel == preferences.WHEEL_SCROLL
-        assert read.self_contained_blocks is True
         assert read.check_spelling is False
         assert read.recover_flattened is False
     finally:

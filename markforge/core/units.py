@@ -1,9 +1,9 @@
 """Unit registry and quantity formatting for MarkForge.
 
-Everything numeric that flows through the calculation engine is either a plain
-``float``/``int``, a numpy array, or a :class:`pint.Quantity`.  This module owns
-the single shared registry so that quantities created in a math region are
-compatible with quantities created in a spreadsheet cell.
+A measurement, a page scale and a rectangle's size are all lengths and areas
+with units on them, and they have to be comparable: a scale set in 1:100 and a
+line measured in metres meet in the same registry. This module owns the single
+shared one, and the formatting that puts a number on a drawing.
 """
 from __future__ import annotations
 

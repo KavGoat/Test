@@ -34,7 +34,7 @@ page you cannot lay out.
 
 ### 2. It moves the way documents move
 
-A calculation sheet is *read*, not operated. So:
+A drawing set is *read*, not operated. So:
 
 - The wheel scrolls. Shift and the wheel scroll sideways. Ctrl and the wheel
   zoom at the pointer, where the pointer is.
@@ -84,8 +84,8 @@ you want, and the manager refuses to save a key that would mean two things.
 Typing on the page does nothing unless the key is bound — which is what allows
 a bare keystroke to mean "start writing here" rather than being a hazard.
 
-**A tool key is a letter when you are writing.** While a calculation, a text
-box or a table cell has the cursor in it, no tool binding fires: `M` types an
+**A tool key is a letter when you are writing.** While a text box, a note or a
+callout has the cursor in it, no tool binding fires: `M` types an
 m, and so does `Alt+M`. Document commands — save, print, zoom — stay live,
 because they do in every other application. Getting this wrong is not a small
 annoyance; it is a tool changing under somebody mid-sentence.

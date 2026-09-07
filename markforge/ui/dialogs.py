@@ -641,7 +641,7 @@ def _colour_chip(colour: QColor):
 
 
 class DocumentPropertiesDialog(QDialog):
-    """Title block information, running headers and calculation defaults."""
+    """Title block information, running headers and markup defaults."""
 
     def __init__(self, document, parent=None):
         super().__init__(parent)
@@ -732,25 +732,12 @@ class DocumentPropertiesDialog(QDialog):
         self._show_logo_name()
         tabs.addTab(running, "Header && footer")
 
-        calc = QWidget()
-        calc_form = QFormLayout(calc)
-        self.precision = QSpinBox()
-        self.precision.setRange(1, 12)
-        self.precision.setValue(settings.precision)
-        calc_form.addRow("Default significant digits", self.precision)
-        self.number_format = QComboBox()
-        self.number_format.addItems(["auto", "fixed", "scientific", "engineering"])
-        self.number_format.setCurrentText(settings.number_format)
-        calc_form.addRow("Default number format", self.number_format)
-        self.math_size = QDoubleSpinBox()
-        self.math_size.setRange(4, 40)
-        self.math_size.setValue(settings.math_size)
-        self.math_size.setSuffix(" pt")
-        calc_form.addRow("Calculation text size", self.math_size)
+        markup = QWidget()
+        markup_form = QFormLayout(markup)
         self.default_author = QLineEdit(settings.default_author)
         self.default_author.setPlaceholderText("Stamped on new markups")
-        calc_form.addRow("Markup author", self.default_author)
-        tabs.addTab(calc, "Calculations")
+        markup_form.addRow("Author", self.default_author)
+        tabs.addTab(markup, "Markups")
 
         grid = QWidget()
         grid_form = QFormLayout(grid)
@@ -817,9 +804,6 @@ class DocumentPropertiesDialog(QDialog):
             field.text() for field in self.header_fields)
         settings.footer_left, settings.footer_center, settings.footer_right = (
             field.text() for field in self.footer_fields)
-        settings.precision = self.precision.value()
-        settings.number_format = self.number_format.currentText()
-        settings.math_size = self.math_size.value()
         settings.default_author = self.default_author.text()
         settings.show_grid = self.show_grid.isChecked()
         settings.snap_to_grid = self.snap.isChecked()
@@ -833,63 +817,6 @@ class DocumentPropertiesDialog(QDialog):
         settings.logo_slot = self.logo_slot.currentData()
         settings.logo_height_mm = self.logo_height.value()
         document.modified = True
-
-
-class NamedCellsDialog(QDialog):
-    """Give cells or ranges a variable name so calculations can use them."""
-
-    def __init__(self, table, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Named cells")
-        self.table_item = table
-        self.resize(420, 320)
-        layout = QVBoxLayout(self)
-        note = QLabel("Name a cell or range here and every calculation in the document "
-                      "can use that name — for example <b>W_total</b> = <b>E7</b>.")
-        note.setWordWrap(True)
-        layout.addWidget(note)
-
-        self.grid = QTableWidget(0, 2)
-        self.grid.setHorizontalHeaderLabels(["Variable name", "Cell or range"])
-        self.grid.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.grid.verticalHeader().setVisible(False)
-        layout.addWidget(self.grid, 1)
-        for name, ref in table.named_cells.items():
-            self._add_row(name, ref)
-        self._add_row("", table.current_ref())
-
-        buttons = QHBoxLayout()
-        add = QPushButton("Add row")
-        add.clicked.connect(lambda: self._add_row("", ""))
-        remove = QPushButton("Remove row")
-        remove.clicked.connect(self._remove_row)
-        buttons.addWidget(add)
-        buttons.addWidget(remove)
-        buttons.addStretch(1)
-        layout.addLayout(buttons)
-        layout.addWidget(_buttons(self))
-
-    def _add_row(self, name: str, ref: str) -> None:
-        row = self.grid.rowCount()
-        self.grid.insertRow(row)
-        self.grid.setItem(row, 0, QTableWidgetItem(name))
-        self.grid.setItem(row, 1, QTableWidgetItem(ref))
-
-    def _remove_row(self) -> None:
-        row = self.grid.currentRow()
-        if row >= 0:
-            self.grid.removeRow(row)
-
-    def result_names(self) -> dict[str, str]:
-        names: dict[str, str] = {}
-        for row in range(self.grid.rowCount()):
-            name_cell = self.grid.item(row, 0)
-            ref_cell = self.grid.item(row, 1)
-            name = name_cell.text().strip() if name_cell else ""
-            ref = ref_cell.text().strip().upper() if ref_cell else ""
-            if name and ref and name.isidentifier():
-                names[name] = ref
-        return names
 
 
 class CountSubjectDialog(QDialog):
@@ -1055,8 +982,8 @@ class ShortcutManagerDialog(QDialog):
             "straight onto the page; anything with Ctrl or Alt works from the menus too. "
             "Backspace clears one, Escape puts it back.<br>"
             "Tool keys are deliberately silent while you are typing into a "
-            "calculation, a text box or a table. Maths symbols are the other way "
-            "round: they type themselves in wherever the cursor is.")
+            "markup. Symbols are the other way round: they type themselves in "
+            "wherever the cursor is.")
         note.setWordWrap(True)
         layout.addWidget(note)
 
@@ -1208,12 +1135,11 @@ class AboutDialog(QDialog):
         title.setFont(font)
         layout.addWidget(title)
         body = QLabel(
-            "Engineering calculations, drawing markup and spreadsheets in one "
-            "page-by-page document.\n\n"
-            "• Unit-aware maths with named variables and functions\n"
+            "A PDF markup editor for drawings, page by page.\n\n"
             "• A full markup tool set with scaled measurement and takeoff\n"
-            "• Spreadsheets that read the same variables as your calculations\n"
-            "• Import PDF pages, print or export to PDF — A4 by default")
+            "• Bluebeam tool sets import, and markups export as real PDF "
+            "annotations other editors can move\n"
+            "• Open a PDF, mark it up, save it back as a PDF")
         body.setWordWrap(True)
         layout.addWidget(body)
         box = QDialogButtonBox(QDialogButtonBox.Close)
@@ -1232,9 +1158,8 @@ class _GesturesSheet(QWidget):
 
     ROWS = [
         ("Typing on the page", ""),
-        ("\"", "Start a text region where the cursor is"),
-        ("/", "Start a calculation where the cursor is"),
-        ("|", "Start a table here"),
+        ("\"", "Start a text markup where the cursor is"),
+        ("|", "Start a note here"),
         ("@", "Start a callout here"),
         ("any other key", "Nothing, unless it is bound on the Shortcuts tab"),
         ("Canvas", ""),
@@ -1243,18 +1168,12 @@ class _GesturesSheet(QWidget):
         ("Shift + drag", "Hold a line to 0°, 45° or 90°; square off a box"),
         ("Drag right / left", "Select what is wholly inside · what it crosses"),
         ("Click, click…", "Lasso a shape to select inside · Enter to close"),
-        ("Double-click", "Edit text, calculation or table · add a vertex to a polyline"),
+        ("Double-click", "Edit the words · add a vertex to a polyline"),
         ("Delete", "Delete the selection"),
         ("1 … 9", "Pick up that tool from My Tools"),
         ("Ctrl+G / Ctrl+Shift+G", "Group · ungroup the selection"),
         ("Arrow keys", "Nudge the selection"),
-        ("Enter", "In a one-line calculation: open the next line below"),
-        ("Shift+Enter", "In a calculation: keep typing on a new line of the same region"),
-        ("Spreadsheet", ""),
-        ("Enter / F2", "Edit the current cell"),
-        ("Tab / arrows", "Move between cells"),
-        ("Ctrl+D / Ctrl+R", "Fill down / fill right"),
-        ("Esc", "Leave the spreadsheet"),
+        ("Esc", "Put the tool down and leave what is being typed"),
     ]
 
     def __init__(self, parent=None):
@@ -1346,8 +1265,8 @@ class FlattenDialog(QDialog):
     """Choose the document content classes to make part of the page."""
 
     CLASSES = (("markups", "Markups"),
-               ("calculations", "Calculations"),
-               ("tables", "Tables"))
+               ("text", "Text"),
+               ("measurements", "Measurements"))
 
     def __init__(self, recoverable: bool, parent=None):
         super().__init__(parent)
@@ -1406,7 +1325,7 @@ class PreferencesDialog(QDialog):
         self.insertion = QCheckBox("Insertion point")
         self.insertion.setChecked(prefs.insertion_point)
         self.insertion.setToolTip(
-            "Click empty paper to place a calculation caret; Up and Down move it")
+            "Click empty paper to leave a caret there; the arrow keys move it")
         form.addRow("", self.insertion)
         self.recover_flattened = QCheckBox("Recoverable flattening")
         self.recover_flattened.setChecked(prefs.recover_flattened)
@@ -1418,12 +1337,6 @@ class PreferencesDialog(QDialog):
 
         writing = QGroupBox("Writing")
         form = QFormLayout(writing)
-        self.blocks = QCheckBox("A new block keeps its names to itself")
-        self.blocks.setChecked(prefs.self_contained_blocks)
-        self.blocks.setToolTip("Off: a block defines names for the whole document, "
-                               "as a calculation sheet reads.\n"
-                               "On: its names stay inside it.")
-        form.addRow("", self.blocks)
         self.autosize = QCheckBox("A text box grows to fit what is typed")
         self.autosize.setChecked(prefs.autosize_text)
         form.addRow("", self.autosize)
@@ -1446,7 +1359,6 @@ class PreferencesDialog(QDialog):
 
         return prefs_module.Preferences(
             wheel=self.wheel.currentData(),
-            self_contained_blocks=self.blocks.isChecked(),
             check_spelling=self.spelling.isChecked(),
             dictionary=self.dictionary.currentData(),
             snap_while_drawing=self.snapping.isChecked(),

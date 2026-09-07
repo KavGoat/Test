@@ -153,12 +153,6 @@ class MainWindow(QMainWindow):
         self._clipboard: list[dict] = []
         # The look the format painter is holding, if it is picked up.
         self._held_style: dict | None = None
-        self._suspend_recalc = False
-        self._dependency_graph: DependencyGraph | None = None
-        self._dependency_signatures: dict[str, str] = {}
-        # The independent check is not cheap, so it runs once the document has
-        # been left alone for a moment rather than on every keystroke.
-        self._verification = None
         self.scene = None
         # Each entry is one open document with its own canvas, undo history
         # and page. Empty until a second document is opened, because one
@@ -880,6 +874,7 @@ class MainWindow(QMainWindow):
         markup_menu.addAction(self.act_flatten_document)
         markup_menu.addAction(self.act_recover_flattened)
         markup_menu.addSeparator()
+        markup_menu.addAction(self.act_renumber_counts)
         markup_menu.addAction(self.act_forget_defaults)
         markup_menu.addSeparator()
         markup_menu.addAction(self.act_apply_redactions)
@@ -1287,8 +1282,6 @@ class MainWindow(QMainWindow):
         document.modified = True
         self.document = document
 
-
-
     def save_document(self) -> bool:
         # A line still being typed is part of the document being saved, so it
         # is settled first — its answers worked out, its region kept or turned
@@ -1343,13 +1336,13 @@ class MainWindow(QMainWindow):
             self.view.escape_everything()
             event.accept()
             return
-        # And the same for the rest of a calculation's keys. A click on a
-        # toolbar button or a panel takes the keyboard with it while the caret
-        # is still in the expression, and from there Backspace, "=" and Enter
-        # went to a button that has no use for them: keys that had apparently
-        # stopped working. A key nothing else wanted goes back to the
-        # calculation — unless somebody is typing in a field, whose Backspace
-        # is its own.
+        # And the same for the rest of the keys belonging to what is being
+        # written. A click on a toolbar button or a panel takes the keyboard
+        # with it while the caret is still in the words, and from there
+        # Backspace and Enter went to a button that has no use for them: keys
+        # that had apparently stopped working. A key nothing else wanted goes
+        # back to the markup — unless somebody is typing in a field, whose
+        # Backspace is its own.
         if self.view.is_editing() and not typing_somewhere_else():
             self.view.setFocus(Qt.OtherFocusReason)
             self.view.keyPressEvent(event)
@@ -1358,12 +1351,12 @@ class MainWindow(QMainWindow):
         super().keyPressEvent(event)
 
     def closeEvent(self, event) -> None:
-        # Nothing is settled here on purpose. Finishing an open line runs a
-        # whole recalculation, which touches the panels — and the arrangement
-        # written a few lines further down would then be the arrangement that
-        # recalculation left, not the one that was on screen. There is nothing
-        # to lose by leaving it: a line's text is kept level with the typing
-        # as it goes, so what is in the document is what was typed either way.
+        # Nothing is settled here on purpose. Finishing an open markup touches
+        # the panels, and the arrangement written a few lines further down
+        # would then be the arrangement that left behind, not the one that was
+        # on screen. There is nothing to lose by leaving it: a markup's text is
+        # kept level with the typing as it goes, so what is in the document is
+        # what was typed either way.
         if not self.confirm_discard():
             event.ignore()
             return
@@ -2327,10 +2320,9 @@ class MainWindow(QMainWindow):
     def apply_scale_change(self) -> None:
         """Everything that has to catch up when a page's scale changes.
 
-        Through a full recalculation, never by refreshing one page's items on
-        their own: evaluating a page against a workspace that already holds
-        this pass's definitions turns every definition on it into a check, and
-        "q = 5 kPa" quietly starts reading "true".
+        Every measurement on the page is a number read off the scale, so they
+        all have to be told; so does the takeoff list, which is those numbers
+        added up.
         """
         self.refresh_scale_label()
         # Measurements and rectangle sizes are in the takeoff list too, so it
@@ -2427,11 +2419,11 @@ class MainWindow(QMainWindow):
             action.setShortcut(QKeySequence(self.shortcuts.sequence(action_id)))
 
     def insert_symbol(self, text: str) -> None:
-        """Put a maths symbol in at the cursor, wherever the cursor is."""
+        """Put a symbol in at the cursor, wherever the cursor is."""
         if self.view.insert_symbol(text):
             return
         self.status_hint.setText(
-            f"{text} has nowhere to go — open a calculation, a text box or a cell first")
+            f"{text} has nowhere to go — start typing a markup first")
 
     def run_typed_binding(self, text: str, modifiers, position: QPointF) -> bool:
         """Act on a bare keystroke over the canvas; False if nothing is bound."""
@@ -2439,7 +2431,6 @@ class MainWindow(QMainWindow):
         if binding is None:
             return False
         if binding.kind == INSERT:
-            # The maths key opens one that could still turn into words.
             self._insert_at(binding.payload, position)
             return True
         if binding.kind == TOOL:
@@ -2484,12 +2475,6 @@ class MainWindow(QMainWindow):
         self.status_hint.setText(f"Renumbered {total} count marker(s)")
 
     def select_tool(self, key: str) -> None:
-        if (self.document.mode == "pdf"
-                and key in {"math", "table", "plot"}):
-            self.view.set_tool("select")
-            self.status_hint.setText(
-                "Calculation tools are unavailable in PDF review mode")
-            key = "select"
         self.view.set_tool(key)
         action = self.tool_actions.get(key)
         if action is not None and not action.isChecked():
@@ -2589,20 +2574,6 @@ class MainWindow(QMainWindow):
         self.act_redo.setEnabled(
             bool(self.undo_stack.canRedo()
                  or (document is not None and document.isRedoAvailable())))
-
-
-
-
-    def _toolbar_number_format_changed(self, mode: str) -> None:
-        maths = self._selected_calculations()
-        if not maths:
-            return
-        self.view.begin_snapshot(self.view.all_frames())
-        for item in maths:
-            item.number_format = mode
-            item.relayout()
-        self.view.commit_snapshot("Number format")
-
 
     def toggle_sticky(self, on: bool) -> None:
         self.view.sticky_tool = on
@@ -2801,10 +2772,6 @@ class MainWindow(QMainWindow):
         if not item.set_real_size(width, height, page):
             self.status_hint.setText("Could not read those dimensions — "
                                      "try something like “3 m”.")
-
-
-
-
 
     def edit_measure_text(self, item) -> None:
         """Type on a measurement, where the words are going to appear."""
@@ -3485,22 +3452,6 @@ class MainWindow(QMainWindow):
         self.view.commit_snapshot("Paste")
         self.refresh_selection()
 
-    @staticmethod
-    def _looks_like_a_header(grid: list[list[str]]) -> bool:
-        """A row of labels sitting over columns that are mostly numbers."""
-        if len(grid) < 2:
-            return False
-        from ..core.spreadsheet import parse_literal
-        first = [c for c in grid[0] if c.strip()]
-        if not first or any(isinstance(parse_literal(c), (int, float)) for c in first):
-            return False
-        below = [c for line in grid[1:] for c in line if c.strip()]
-        if not below:
-            return False
-        numeric = sum(1 for c in below if not isinstance(parse_literal(c), str))
-        return numeric >= len(below) / 2
-
-
     def duplicate_selection(self) -> None:
         items = self.selected_items()
         if not items:
@@ -3725,13 +3676,6 @@ class MainWindow(QMainWindow):
             item.set_local_rect(QRectF(0, 0, rect.width(), max(rect.width() * ratio, 10)))
         return True
 
-
-
-
-
-
-
-
     def declared_names(self) -> set[str]:
         """Every name the document assigns, gathered before anything evaluates."""
         names: set[str] = set()
@@ -3743,9 +3687,6 @@ class MainWindow(QMainWindow):
                 if callable(collect):
                     names |= collect()
         return names
-
-
-
 
     def find_a_tool(self) -> None:
         """Type what you want to do; it says which tool does it.
@@ -3978,6 +3919,24 @@ class MainWindow(QMainWindow):
             return
         self._flatten_items(items, recoverable)
 
+
+    @staticmethod
+    def _flatten_class(item) -> str:
+        """Which of the flatten dialog's classes *item* belongs to.
+
+        Three, because they are flattened for different reasons. Words are
+        flattened so nobody can retype them; a measurement is flattened so the
+        number cannot drift off the scale it was taken at; everything else is
+        flattened to make it part of the drawing.
+        """
+        from ..items.measure import CountItem, MeasureItem
+        from ..items.text import _TextBase, FlagItem, NoteItem, StampItem
+
+        if isinstance(item, (_TextBase, NoteItem, StampItem, FlagItem)):
+            return "text"
+        if isinstance(item, (MeasureItem, CountItem)):
+            return "measurements"
+        return "markups"
 
     def flatten_document(self) -> None:
         """Choose content classes and flatten matching items on every page."""
@@ -4309,15 +4268,6 @@ class MainWindow(QMainWindow):
             self.view.commit_snapshot("Bold")
             return True
 
-        if item is None and table is not None and not table.locked:
-            cells = table.selected_cells()
-            self.view.begin_snapshot(self.view.involved_frames(table))
-            wanted = not all(table.cell_format(r, c).bold for r, c in cells)
-            table.apply_format(cells, bold=wanted)
-            table.touch()
-            self.view.commit_snapshot("Bold")
-            return True
-
         if not hasattr(item, "style") or item.locked:
             return False
         self.view.begin_snapshot(self.view.involved_frames(item))
@@ -4375,8 +4325,7 @@ class MainWindow(QMainWindow):
         text_items = [entry for entry in selected if isinstance(entry, _TextBase)]
         if not text_items:
             return False
-        acting = text_items
-        self.view.begin_snapshot(self.view.involved_frames(*acting))
+        self.view.begin_snapshot(self.view.involved_frames(*text_items))
         for entry in text_items:
             if alignment:
                 entry.style.align = alignment
@@ -4384,14 +4333,6 @@ class MainWindow(QMainWindow):
                 entry.style.font_size = max(
                     3.0, min(entry.style.font_size + font_delta, 96.0))
             entry.apply_style()
-            entry.touch()
-        for entry in math_items:
-            lines = range(max(len(entry.source.split("\n")), 1))
-            for line in lines:
-                if alignment:
-                    entry.set_line_alignment(line, alignment)
-                if font_delta:
-                    entry.change_line_font_size(line, font_delta)
             entry.touch()
         self.view.commit_snapshot("Format text")
         self.status_hint.setText("Text formatted")
@@ -4416,25 +4357,6 @@ class MainWindow(QMainWindow):
         self.status_hint.setText(
             "Drag out where the contents should go — it lists the bookmarks, "
             "and each line goes to its page")
-
-    # ==================================================================
-    # formula bar
-    # ==================================================================
-
-
-    @staticmethod
-    def _line_under(item, scene_pos) -> int:
-        """Which line of a calculation the pointer is over."""
-        try:
-            line, _column = item.offset_at(item.mapFromScene(scene_pos))
-        except Exception:                  # noqa: BLE001 — an empty region
-            return 0
-        return max(int(line), 0)
-
-
-
-
-
 
     def export_pdf(self) -> None:
         suggested = os.path.splitext(self.document.path or self.document.title or "document")[0]
@@ -4797,9 +4719,6 @@ class MainWindow(QMainWindow):
             menu.addAction(self.act_scale)
             menu.addAction(self.act_select_all)
         return menu
-
-
-
 
     def _insert_at(self, key: str, scene_point: QPointF) -> None:
         """Put a new markup on the page under *scene_point*."""

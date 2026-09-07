@@ -1,85 +1,105 @@
-# What matters to an engineer, and what this app is for
+# What matters when a drawing is marked up, and what this app is for
 
 This is the brief the app is built and tested against. It exists so that
 "is it finished?" has an answer that is not a matter of opinion.
 
 ## What the app is for
 
-An engineer designing a building produces a **calculation sheet**: a document
-that another engineer — a checker, an approver, a building control officer, or
-the same engineer in ten years when something cracks — has to be able to read,
-follow, and disagree with. It is a legal record as much as a working tool.
+An engineer checking a drawing produces a **marked-up set**: the consultant's
+drawing with somebody's clouds, dimensions, take-off and comments on it, issued
+back so that the person who drew it can act on it. It is a record of what was
+asked for and when, as much as a working tool. It goes to people who are not
+using this program.
 
-CalcForge is that document. Calculations, the drawings they refer to, and the
-tables they read from all live on the same page, and the page prints exactly as
-it appears.
+MarkForge is that document, and the document is a PDF. The drawing that came
+in, the markups put on it, and the measurements taken off it are one file that
+anybody can open.
 
 ## What has to be true
 
 In rough order of how badly it hurts when it is not.
 
-### 1. The numbers are right
+### 1. The file that comes out opens everywhere, and is still the file that went in
 
-Nothing else matters if this is not true. A wrong number that *looks* right is
-the worst possible failure of a tool like this, because it is the one nobody
-catches. So:
+Nothing else matters if this is not true. A markup nobody else can read is a
+markup that was not made. So:
 
-- Arithmetic is arithmetic. No silent rearrangement, no lost precision.
-- **A quantity is one value.** `6 m / 200 mm` is thirty. It is not
-  `(6 m / 200) mm`. Getting this wrong is how a tool produces a number that is
-  wrong by a factor of a thousand and still looks plausible.
-- Every result is reproducible: the same sheet gives the same answer today and
-  next year, on any machine.
+- **A saved file is a PDF**, not a container with a PDF inside it. Acrobat,
+  Bluebeam, a browser and a phone all open it.
+- **The source page is preserved byte for byte.** Saving appends; it never
+  re-encodes, re-compresses or re-renders what came in. A signature still
+  verifies, an embedded font stays embedded, and a drawing office's export is
+  handed back exactly as it was received.
+- **Every markup is a real annotation** with its own appearance stream — a
+  cloud is a cloudy-bordered square, a callout is a free text with a callout
+  line, a dimension is a measured line — so the next person can select it,
+  move it and reply to it in their own software.
+- Nothing MarkForge knows about a markup is lost on a round trip through
+  MarkForge, and nothing another editor understands is lost on a round trip
+  through it.
 
-### 2. The units are tracked, and mismatches are refused
+### 2. The measurements are right
 
-Unit errors are the classic way a structure gets designed wrong. So:
+A take-off that is wrong by a factor is worse than no take-off, because it
+looks like work that has been done.
 
-- Adding a force to a length is an **error**, never a number.
-- Converting to the wrong dimension is an **error**, never a number.
+- A page's scale is the page's own. An imported 1:50 detail and a 1:200 layout
+  in one document each measure against their own scale, never the document's.
+- Setting a scale, or calibrating one against something of known length, never
+  changes what was measured before it — it changes what the number reads as.
+- Adding an area to a length is an error, never a number.
 - Choosing a unit to display in never changes the value underneath.
-- Mixing metric and imperial in one sheet is fine, and gives the same answer as
-  either alone.
-- A name the engineer chose is theirs. `sigma` is a stress, not the
-  Stefan-Boltzmann constant, whatever the unit registry thinks.
+- A cut-out comes off the area it is drawn inside, and the takeoff total says
+  so.
 
-### 3. It is auditable
+### 3. Somebody else's drawing opens quickly, correctly and sharply
 
-A checker has to be able to follow it without the author standing over them.
+The drawings are large, and they arrive from everywhere.
 
-- Every line shows its expression *and* its result, laid out as it would be
-  written by hand.
-- Every variable can be traced to where it was defined — including a value
-  published from a spreadsheet cell, which says which cell.
-- Nothing is hidden. There are no invisible defaults doing work off-screen.
-- What is on the screen is what prints.
+- A page is drawn from its own line work, not from a picture of it, so it is
+  sharp at any zoom rather than magnified.
+- Somebody else's markups come in as markups — a Bluebeam cloud opens as a
+  cloud that can be selected, recoloured and moved, not as part of the page.
+- A drawing opens in a moment, not in a minute. Opening a file is not a
+  conversion.
+- A file with a damaged cross-reference table is read anyway, by looking for
+  the objects, rather than refused.
 
-### 4. It prints properly
+### 4. It is auditable
 
-A calculation that cannot be issued is not finished. A4 by default, page by
-page, at the right size, with the numbers legible.
+The person receiving the markups has to be able to act on them without the
+author standing over them.
+
+- Every markup carries its author, its date, its subject and its comment.
+- The markups list is the take-off: every annotation in the document, its page,
+  its measured value, filterable and exportable to CSV.
+- Measurements and counts sharing a subject are totalled, and the total is the
+  sum of what is actually on the pages.
+- What is on the screen is what prints, and what prints is what was saved.
 
 ### 5. It says when it is unsure
 
-The tool must be loud about what it cannot confirm: undefined names, unit
-mismatches, values that were used before they were defined, circular
-references. Silence has to mean "checked", not "not looked at".
+The tool must be loud about what it cannot confirm: a measurement on a page
+with no scale, a redaction that only partly covers something, a flatten that
+cannot be undone. Silence has to mean "checked", not "not looked at".
 
-### 6. It fits how engineers actually work
+### 6. It fits how the work is actually done
 
-- Loads come out of a spreadsheet; that spreadsheet has to come along.
-- Drawings get marked up, measured and taken off, at a page scale.
-- Assumptions get written on the page next to the number they justify.
+- The tools an office already has are Bluebeam tool sets. They import.
+- The same twenty markups get drawn a hundred times, so defaults, tool sets and
+  the number keys matter more than any single feature.
+- Drawings get turned, recoloured and reissued, and the markups go with them.
 - Somebody else opens the file and has to make sense of it.
 
 ## What this does not claim
 
-No test suite proves software correct, and no tool removes the engineer's
-responsibility for the design. What the suites in `tests/` do is make specific,
-checkable promises: that the worked examples in `test_validation.py` come out at
-their published values, that the properties in `test_units_property.py` hold
-across every unit family and across randomised inputs, and that what leaves the
-printer in `test_output.py` is what was on the page.
+No test suite proves software correct, and no tool removes the reviewer's
+responsibility for the review. What the suites in `tests/` do is make specific,
+checkable promises: that `test_format.py` opens what was saved and finds an
+ordinary PDF with the source page untouched, that `test_pdf_engine.py` reads
+real files from other people's software rather than files of its own making,
+that `test_btx.py` reads the actual `.btx` tool sets in `btx/`, and that
+`test_output.py` measures what leaves the printer.
 
-**Check the printed sheet before you issue it.** That is true of every
-calculation tool ever written, and it is true of this one.
+**Check the marked-up set before you issue it.** That is true of every review
+tool ever written, and it is true of this one.

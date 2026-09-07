@@ -1,20 +1,24 @@
-# CalcForge
+# MarkForge
 
-A desktop engineering workbench for Windows, macOS and Linux. One document holds
-your **calculations**, your **drawing markup** and your **spreadsheets** — laid out
-page by page like a PDF, A4 by default, and printable exactly as you see it.
+A PDF markup editor for drawing review, on Windows, macOS and Linux. Open a
+drawing, mark it up, save it back — as a PDF that anybody can open, with every
+markup a real PDF annotation the next person can pick up and move.
 
-It is the three tools an engineer normally juggles, in one place:
+It is Bluebeam's job, done in the open:
 
-| You would normally use… | CalcForge gives you |
+| You would normally use… | MarkForge gives you |
 |---|---|
-| SMath Studio / Mathcad | Unit-aware, typeset calculations with named variables and functions |
-| Bluebeam Revu | The full markup tool set, scaled measurement, takeoff and PDF page import |
-| Excel | Spreadsheets that read the very same variables your calculations define |
+| Bluebeam Revu | The full markup tool set, scaled measurement, takeoff, layers, tool sets |
+| A PDF reader | Pages read as one scroll, at any zoom, sharp because they are re-rendered rather than magnified |
+| Anything that has to open it afterwards | An ordinary PDF — the drawing untouched, the markups standard annotations |
 
-Everything shares one workspace: a variable defined in a calculation can be used in a
-cell, and a cell can be published back as a variable. Change one number, press **F9**,
-and the whole document — text, tables and measurements — updates.
+There is no proprietary file format. **The document is a PDF.** Saving writes
+an incremental update: the page that came in is preserved byte for byte, and
+the markups are appended as annotations. A signed drawing still verifies, and
+what MarkForge knows about a markup that PDF has no word for rides along inside
+the same file as an embedded record — so a round trip through MarkForge loses
+nothing, and a round trip through anything else loses only what that program
+never understood.
 
 ---
 
@@ -24,212 +28,85 @@ and the whole document — text, tables and measurements — updates.
 git clone <this repository>
 cd <this repository>
 python -m pip install -r requirements.txt
-python main.py
+python main.py                    # or: python main.py drawing.pdf
 ```
 
 Python 3.10 or newer. Everything else comes from `requirements.txt`
-(PySide6, Pint, NumPy, SymPy) — no system libraries beyond a normal desktop.
+(PySide6, Pint, pypdf) — no system libraries beyond a normal desktop.
 
 Install it as a command instead, if you prefer:
 
 ```bash
 python -m pip install .
-calcforge                 # or: calcforge my-calculation.cfx
+markforge                         # or: markforge drawing.pdf
 ```
-
-Start with **Help ▸ Load the worked example** (or `python main.py --sample`) for a
-three-page steel-beam, load take-down and pad-footing calculation to poke at.
 
 On a headless machine (CI, a container) run with `QT_QPA_PLATFORM=offscreen`.
 
 ---
 
-## Calculations
-
-Type `/` anywhere on the page — or pick the **Calculation** tool from the toolbar — and write
-ordinary engineering maths. It is typeset as you would write it by hand — real
-fractions, radicals, subscripts and superscripts — with the result immediately
-after it. Each line is its own region, so you can drag any of them where you want.
-Press **Enter** to open the next line below, **Shift+Enter** to keep several lines
-in one region.
-
-**Double-click** any region, cell or line to edit it. While you are editing, the
-keyboard and the pointer belong to the text: arrows move the caret, dragging
-selects, `Ctrl+C`/`V` work on the text, and clicking outside finishes the edit.
-
-```
-# Simply supported beam
-L := 7.2 m
-w_dead := 8.5 kN/m
-w_live := 6.0 kN/m
-w := 1.2*w_dead + 1.5*w_live =    # ULS combination
-
-M_max := w*L^2/8 -> kN*m =
-Z_x := 896 cm^3
-sigma_b := M_max/Z_x -> MPa =
-f_y := 355 MPa
-sigma_b <= f_y =                  # capacity check
-```
-
-A line ends with `=` when you want to see its answer, the way SMath asks for
-one. Every other line is still worked out — the names it defines are there for
-the lines below — but it prints as you wrote it, with nothing after it. Type the
-`=` when the number matters and leave it off when it does not, and a page of
-working stays a page of working rather than a wall of numbers.
-
-### How to write it
-
-| You type | What happens |
-|---|---|
-| `b = 300 mm` | Defines `b` the first time that name appears… |
-| `b = 400 mm` | …and *checks* it afterwards, reading `false`, so nothing is silently overwritten. |
-| `b := 400 mm` or `b : 400 mm` | Always defines, even over a name that already exists. |
-| `b*d^2/6` | Implicit multiplication and `^` powers; shown as a real fraction. |
-| `5 kN`, `24 kN/m^3` | A number and a unit — no `*` needed; printed as `5·kN`, the way SMath separates the two. |
-| Tab | Offers the units and the names you have defined; the arrows move through them and Tab takes one. Nothing is completed for you. |
-| `M_max` | `_` makes a subscript; `sigma`, `delta`, `gamma`… become Greek letters. |
-| `expr -> MPa` | Show this result in a particular unit. |
-| `M := w*L^2/8 =` | The trailing `=` prints the answer; without it the line is worked out quietly. |
-| `f(x) := w*x*(L-x)/2` | Defines a function; call it with `f(2 m)`. |
-| `V := bolts(d, A, B)` | Looks `d` up in column A of the table named `bolts` and gives back column B, interpolating between the rows either side. Name a table from its right-click menu. |
-| `sigma <= f_y` | A check — the result reads `true` or `false`. |
-| `# note` | A comment, at the start of a line or after an expression. |
-
-Results come out in the unit you would have written yourself. `w·L²/8` reads
-**124.4 kN·m**, a bearing pressure reads **149.8 kPa**, a deflection **7.26 mm** —
-lengths swap from mm to m past a metre, forces from N to kN past a kilonewton.
-A value you typed out in full keeps the unit you chose (`896 cm³` stays cm³), and
-imperial input is never quietly turned into SI. An angle that fell out of `atan`
-reads in degrees; one you wrote in radians stays in radians.
-
-Units that cancel collapse to a plain number: `6 m / 200 mm` is **30**, and a
-utilisation ratio built from `kN·m/(mm³·MPa)` is **0.1018**.
-
-Units are enforced, not decorative: `1 m + 1 kg` is refused with
-*"Units do not match: cannot combine meter with kilogram"*, and every result carries
-the unit it earned. SI, imperial and the usual structural units (`kN`, `MPa`, `kip`,
-`ksi`, `psf`, `pcf`, `klf`…) are all built in.
-
-### A line, or a block
-
-There are two calculation tools, and which one you draw decides how it behaves.
-
-A **calculation line** is one line. It defines for the whole document, which is how
-a calculation sheet reads: something worked out at the top is available further
-down. Enter opens the next line below it, so a sheet is typed straight through.
-
-A **calculation block** holds as many lines as you like and keeps its own working
-inside it — a dozen intermediate values in one check cannot collide with the rest
-of the document. Enter simply makes another line. A block can still read anything
-defined **above** it, so it is the natural place for a side calculation that
-consumes a couple of document-wide inputs. It is marked with a rule down its left
-edge, and its values are listed in the Variables panel as local to it.
-
-Either can be turned into the other from its right-click menu; merging lines gives
-a block, splitting a block gives lines.
-
-### Order is position
-
-The whole document evaluates in one pass, top-left to bottom-right, exactly as
-SMath does. A value has to be defined above — or to the left of — whatever uses
-it, so dragging a line somewhere else really does change what resolves. When
-something stops resolving the **Problems** panel says so, with the page, the line
-or cell, and what went wrong: an undefined name, a unit mismatch, a bad formula.
-The status bar carries the count.
-
-**Split into separate lines** and **Merge into one block** (under *Calculate*)
-convert between one region per line and a single block.
-
-### Checking every number
-
-*Calculate ▸ Check every number* (`F10`) re-derives the whole document from its
-source text in a workspace of its own and compares every answer with what is on
-the page. It shares nothing with the live calculation, so a stale value, a cached
-result or a definition that has quietly gone missing shows up as a disagreement
-rather than as a number nobody questions. It also reports a name defined twice, a
-name that spells out a unit, a result that cannot be shown in its own target unit,
-and a magnitude far outside anything a building is made of.
-
-It runs by itself a moment after you stop typing, so a sheet is never left
-unchecked without you being told. What it finds appears in the **Problems** panel
-alongside anything that failed to evaluate.
-
-### What is available
-
-Arithmetic, `sqrt`, `root`, `exp`, `ln`, `log`; trigonometry that accepts degrees or
-radians; `sum`, `mean`, `median`, `stdev`, `max`, `min`; `if`, `and`, `or`, `not`;
-matrices (`matrix`, `det`, `inv`, `lsolve`, `norm`, `el`); `interp` and `lookup` for
-design tables; numerical `diff`, `integral`, `root_of`, `maximise`, `minimise`; unit
-helpers `to`, `mag`, `unit_of`; and a SymPy bridge (`sym`, `symsolve`, `symdiff`,
-`symint`, `simplify`, `factor`) when you want the algebra rather than the number.
-The **Functions** panel lists them all with one-line help — double-click to insert.
-
-The **Variables** panel shows every value the document has defined, what it evaluated
-to, and which block it came from.
-
----
-
-## Plots
-
-Draw a plot with the **Plot** tool (`G`) and give it a curve per line — a function
-you defined (`M`), or any expression in the plot variable. The range can be
-written in units (`0 m` to `L`), the axes label themselves from the units that
-come back, and a curve whose units do not match the y axis says so rather than
-being silently dropped.
-
 ## Markup
 
-The complete annotation set, with a properties panel for colour, fill, thickness,
-dash pattern, opacity, arrowheads, font, layer, author and comment:
+The complete annotation set, with a properties panel for colour, fill,
+thickness, dash pattern, hatch, opacity, arrowheads, font, layer, author and
+comment:
 
-- **Draw** — pen, highlighter, line, arrow, polyline, rectangle, ellipse, polygon,
-  revision cloud (box or free-form), area highlight, redaction
-- **Annotate** — text box, callout with a draggable leader, sticky note, status stamps
-  (*APPROVED*, *FOR CONSTRUCTION*, *AS BUILT*…), images
+- **Draw** — pen, highlighter, eraser, line, arrow, arc, polyline, rectangle,
+  ellipse, polygon, revision cloud (box or free-form), area highlight, redaction
+- **Annotate** — text box, callout with a draggable leader, cloud callout,
+  sticky note, flag, status stamps (*APPROVED*, *FOR CONSTRUCTION*,
+  *AS BUILT*…), images, a printed contents block
 - **Measure** — length, polyline length, area, perimeter, volume, angle, radius,
-  diameter, and a count tool with numbered markers
+  diameter, dimension, and a count tool with numbered markers
 
-Every tool draws either way: press and drag, or click for the first point and again
-for the second, with the drawing following the pointer in between. Polylines and
-polygons take a click per vertex and finish on a double-click.
+Every tool draws either way: press and drag, or click for the first point and
+again for the second, with the drawing following the pointer in between.
+Polylines and polygons take a click per vertex and finish on a double-click.
 
-Selected markups get eight resize handles and a rotation handle; polylines, polygons
-and callout leaders get one handle per vertex — the leader's are orange diamonds,
-because they move the arrow rather than the box — and a double-click inserts another.
-Shift holds a line to 0°, 45° or 90° and squares off a box; Ctrl-dragging leaves a
-copy behind, and Ctrl taken hold of mid-drag lets go of the snapping while it is
-held. Arrow keys nudge, and everything is undoable.
+Selected markups get eight resize handles and a rotation handle; polylines,
+polygons and callout leaders get one handle per vertex — the leader's are
+orange diamonds, because they move the arrow rather than the box — and a
+double-click inserts another. Shift holds a line to 0°, 45° or 90° and squares
+off a box; Ctrl-dragging leaves a copy behind, and Ctrl taken hold of mid-drag
+lets go of the snapping while it is held. Arrow keys nudge, and everything is
+undoable.
 
-**Snapping** picks up the grid and what is already drawn — corners, centres and edge
-midpoints of anything boxed, and every vertex of anything drawn as a line — and marks
-what it has caught with a small orange square. `View ▸ Snap to what is drawn`.
+**Snapping** picks up the grid and what is already drawn — corners, centres and
+edge midpoints of anything boxed, and every vertex of anything drawn as a line
+— and marks what it has caught with a small orange square. Snapping to the
+imported drawing's own line work is a separate switch from snapping to the
+markups over it, because they want different things: a corner of a beam is
+worth catching exactly, and the alignment guides that help when laying markups
+out only get in the way over a drawing that is already full of lines.
+`View ▸ Snap`.
 
 **Group** several markups with `Ctrl+G` and they select, move and copy as one
 thing; `Ctrl+Shift+G` takes them apart. A group is a shared name rather than a
 container, so the markups stay where they are on the page and grouping is one
 undo step.
 
-**Snapshot** (`G`) drags a region and copies everything in it. What comes back is not
-a picture: the markups, calculations and tables in it are copied as themselves, so
-pasting puts real items down that stay sharp at any zoom and can still be edited.
+**Snapshot** (`G`) drags a region and copies everything in it. What comes back
+is not a picture: the line work in it is copied as line work, so pasting puts
+something down that stays sharp at any zoom.
 
-The **Markups** panel is a live list of every annotation in the document — page, type,
-subject, measured value, author, date and comment — filterable, and exportable to CSV
-as a takeoff. Measurements and counts sharing a subject are totalled at the bottom.
+The **Markups** panel is a live list of every annotation in the document —
+page, type, subject, measured value, author, date and comment — filterable, and
+exportable to CSV as a takeoff. Measurements and counts sharing a subject are
+totalled at the bottom.
 
 ### Defaults and tool sets
 
 Change a markup's properties and press **Set as default** in the properties
-panel: every rectangle after that is drawn the way you set that one up. Defaults
-are per kind — a rectangle and an ellipse keep their own — and are remembered
-between sessions. *Markup ▸ Forget markup defaults* puts them all back.
+panel: every rectangle after that is drawn the way you set that one up.
+Defaults are per kind — a rectangle and an ellipse keep their own — and are
+remembered between sessions. *Markup ▸ Forget markup defaults* puts them all
+back.
 
-The **Tool sets** panel is a tool chest. Keep anything in it — a markup, a
-calculation, a whole table — in as many named sets as you like, and use each
-entry two ways:
+The **Tool sets** panel is a tool chest. Keep anything in it, in as many named
+sets as you like, and use each entry two ways:
 
 - **as a copy**, which puts back exactly what was added, contents and all: a
-  text box comes back with its words in it, a calculation with its lines;
+  text box comes back with its words in it;
 - **as properties**, which makes it a tool — draw a new one where and how big
   you like, wearing the stored colours, thickness and font.
 
@@ -238,131 +115,83 @@ the number keys: press `3` on the page and you are holding the third one.
 Sets are remembered between documents, because they belong to you rather than
 to the job.
 
+**Bluebeam tool sets import.** *File ▸ Import tools…* reads a `.btx` file —
+the real thing, not an export of one: each tool's `Raw` field is a
+zlib-compressed, hex-encoded PDF annotation dictionary, and it is parsed as
+one. The sets in `btx/` are what the reader is tested against, so the tools an
+office already has come across with their colours, weights, line types, hatches
+and stamps intact.
+
 ### Scale and measurement
 
-A scale is **optional**. A page starts without one, and everything still works —
-measurements simply read paper distances, and the first one you draw says so.
+A scale is **optional**. A page starts without one, and everything still works
+— measurements simply read paper distances, and the first one you draw says so.
 
-Give a page a scale whenever you want real dimensions: click the scale button in the
-status bar or right-click the page in the pages panel, then either pick a standard
-ratio or press **Calibrate** — click each end of something you know the length of and
-type that length. Scale is per page, so an imported 1:50 detail and a 1:200 layout
-can live in the same document, and each page carries its scale beside its number in
-the pages panel.
+Give a page a scale whenever you want real dimensions: click the scale button
+in the status bar or right-click the page in the pages panel, then either pick
+a standard ratio or press **Calibrate** — click each end of something you know
+the length of and type that length. Scale is per page, so an imported 1:50
+detail and a 1:200 layout can live in the same document, and each page carries
+its scale beside its number in the pages panel.
 
-Only the three tools that measure something obey the scale:
+Only the tools that measure something obey the scale:
 
 | Tool | Key | Reads |
 |---|---|---|
 | Length | `M` | The true distance between the two ends |
+| Polylength | `Shift+Alt+Q` | The true length of a run of segments |
 | Area | `Shift+Alt+A` | The true area of the polygon you click out |
+| Perimeter | `Shift+Alt+P` | The true distance round it |
+| Volume | `Shift+Alt+V` | An area against a depth you give it |
+| Angle | `Shift+Alt+G` | The angle between two legs |
+| Radius · diameter | `Shift+Alt+D` | The true size of a circle |
 | Rectangle | `R` | Its true width × height — and it will take an exact size |
 
-**A rectangle and an ellipse both know how big they are** — real dimensions on a
-scaled page, paper millimetres without one. The size is in the properties panel, where
-it can also be set exactly, and in the Value column of the markups list for a takeoff.
-It is not written across the drawing unless you ask for it: a page of shapes each
-carrying their dimensions is unreadable. Draw one on a scaled page and it offers an
-exact size, so you can type `3 m` × `1.5 m` and have it set out precisely.
+An area measurement takes **cut-outs**: draw a polygon or an ellipse inside one
+and its area comes off the total, which is how an opening is taken out of a
+wall.
 
-Everything else — polygon, pen, cloud, arrow, text — is a drawing, not a measurement,
-and is never scaled.
+**A rectangle and an ellipse both know how big they are** — real dimensions on
+a scaled page, paper millimetres without one. The size is in the properties
+panel, where it can also be set exactly, and in the Value column of the markups
+list for a takeoff. It is not written across the drawing unless you ask for it:
+a page of shapes each carrying their dimensions is unreadable.
 
-The **Dimension** tool (`Alt+M`) is the exception that measures but lets you overrule
-the number: it asks for the text to display, so a run of studs can read `3600 c/c`
-while the takeoff total still uses what was actually measured.
+Everything else — polygon, pen, cloud, arrow, text — is a drawing, not a
+measurement, and is never scaled.
+
+The **Dimension** tool (`Alt+M`) is the exception that measures but lets you
+overrule the number: it asks for the text to display, so a run of studs can
+read `3600 c/c` while the takeoff total still uses what was actually measured.
 
 ### Moving and duplicating by an exact offset
 
-`Ctrl+Shift+D` (also on the right-click menu) moves or copies whatever is selected by a
-distance you type, any number of times — "across 3 m, 4 times" lays out a row of
-footings. On a scaled page the offset is a real distance (`3 m`); without a scale it is
-a paper one (`25 mm`).
-
-### PDF pages
-
-**File ▸ Insert PDF pages** brings drawings in as page backgrounds — all pages or a
-range like `1-3,7`, at the resolution you pick, keeping each page's own size or
-fitting to A4, with a preview of what is coming in. Mark them up, measure them, and
-calculate against them. A photo goes in the same way through **Insert image as a
-page**.
-
-Right-clicking a page in the pages panel does everything else to it: insert a blank
-page, PDF pages or an image either side, duplicate, move, turn it a quarter turn
-either way — taking the drawing and the markups with it — put it on a different sheet
-of paper, set its scale, or change its colours. **Change colours** pushes everything
-dark enough to be a line onto one colour, which is what turns a black drawing grey so
-red markups can be read on top of it, or swaps one colour for another.
+`Ctrl+Shift+D` (also on the right-click menu) moves or copies whatever is
+selected by a distance you type, any number of times — "across 3 m, 4 times"
+lays out a row of footings. On a scaled page the offset is a real distance
+(`3 m`); without a scale it is a paper one (`25 mm`).
 
 ---
 
-## Tables
+## Pages
 
-Draw a table with the **Table** tool (`B`) — it asks how many rows and columns it
-holds. It behaves like a spreadsheet: click a cell and type, `Tab` and the arrow keys
-navigate, `Ctrl+D` / `Ctrl+R` fill down and right (with relative and `$absolute$`
-references translated properly), and the formula bar shows the raw entry and the
-evaluated result. After `=`, and after every operator, bracket and comma in a formula,
-the arrows and the pointer choose the cell to refer to and put its reference in.
+**File ▸ Open** takes a PDF and that PDF *is* the document. Its pages come in
+at their own size, as their own line work rather than a picture of it, so they
+stay sharp however far you zoom in — the page is re-rendered at the zoom you
+are actually looking at, not magnified. Somebody else's markups come in as
+markups: a Bluebeam cloud opens as a cloud you can select, recolour and move.
 
-```
-A            B          C             D
-Item         Thickness  Density       Load
-Slab         150 mm     24 kN/m^3     =B2*C2
-Screed       60 mm      22 kN/m^3     =B3*C3
-Total                                 =SUM(D2:D4)
-```
+**File ▸ Insert PDF pages** brings more in beside them — all pages or a range
+like `1-3,7`, keeping each page's own size or fitting to A4, with a preview of
+what is coming. A photo goes in the same way through **Insert image as a page**.
 
-- Cells accept numbers, text, booleans **and quantities** — `150 mm` is a length, not
-  a string, so `=B2*C2` comes out as a pressure.
-- Drag the fill handle at the corner of the selection to fill across or down:
-  a run of numbers carries on (1, 2 becomes 3, 4, 5), a single value is copied,
-  and formulas have their relative references shifted while `$absolute$` ones
-  stay put — the same as Excel.
-- Copy, cut and paste ranges with `Ctrl+C` / `Ctrl+X` / `Ctrl+V`. Relative references
-  follow the paste, absolute ones do not, and the clipboard is tab-separated so it
-  round-trips with Excel.
-- Excel-style functions: `SUM`, `AVERAGE`, `COUNT`, `COUNTA`, `IF`, `IFERROR`,
-  `AND`, `OR`, `MIN`, `MAX`, `ROUND`, `SUMIF`, `COUNTIF`, `SUMPRODUCT`, `VLOOKUP`,
-  `INDEX`, `MATCH`, `CONCAT`, `TEXT`… case-insensitive, with `=` for equality,
-  `<>` for not-equal and `&` for joining text. `IF` and `IFERROR` are lazy, so
-  `=IF(B2=0,0,A2/B2)` is safe.
-- **Any variable from a calculation works in a formula** — `=D2*gamma_c` just works.
-- **Name a table** — from its right-click menu or the properties panel — and a
-  calculation can look values up in it: `V := bolts(d, A, B)` finds `d` in column A
-  and gives back column B, units and all, interpolating between the rows either side
-  when it has to. A named table wears its name in its top corner, so what a sheet is
-  called is visible on the sheet.
-- Give a column a display unit and every value in it is converted for display.
-
-### Getting a sheet out of Excel
-
-Copy cells in Excel and paste them straight onto the page: they arrive as a table
-sized to what you copied, with a header row picked up from words sitting over
-numbers. Quantities stay quantities (`150 mm` is a length), Excel's quoting is
-honoured so a cell holding a line break survives, and a thousands-separated number
-like `1,234.5` stays a number instead of becoming text. Pasting into a table that
-is already open drops the cells in at the cursor instead.
-
-### Publishing a cell as a variable
-
-Click a cell and type a name into the **name box** in the formula bar — the box
-between the cell reference and `ƒx`. From then on every calculation in the document
-can use that name, and the cell is **tagged with it on the sheet** and marked with a
-folded corner, so a table never hides what it defines. The Variables panel says
-which cell each published value came from (`Table · B2`). Clear the box to stop
-publishing it.
-
-Names are checked the same way everywhere, so a cell cannot be called after a unit,
-a built-in function or a reserved word. *Publish columns as variables* does the same
-thing for whole columns, using the header as the name.
-
-Recalculation is dependency-ordered with circular-reference detection, and runs in two
-passes so a block can reference something defined further down the document.
-
----
-
-## The document
+Right-clicking a page in the pages panel does everything else to it: insert a
+blank page, PDF pages or an image either side, duplicate, move, turn it a
+quarter turn either way — taking the drawing and the markups with it — put it
+on a different sheet of paper, set its scale, or change its colours.
+**Change colours** pushes everything dark enough to be a line onto one colour,
+which is what turns a black drawing grey so red markups can be read on top of
+it, or swaps one colour for another.
 
 - **One continuous canvas.** Every page is stacked down it with a gap of desk
   between them, and you scroll through the whole document the way you would
@@ -373,77 +202,99 @@ passes so a block can reference something defined further down the document.
   one; the view is never moved under you to tidy up.
 - Drawing lands on the page under the pointer, and a markup dragged onto the
   next page belongs to that page afterwards — undo covers both.
-- Pages are real pages: **A4 portrait by default**, plus A0–A5, Letter, Legal,
-  Tabloid, ANSI and ARCH sizes, portrait or landscape, with adjustable margins —
-  per page or applied to all.
+- New pages are real pages: **A4 portrait by default**, plus A0–A5, Letter,
+  Legal, Tabloid, ANSI and ARCH sizes, portrait or landscape, with adjustable
+  margins — per page or applied to all.
 - Thumbnail panel for adding, duplicating, deleting and reordering pages.
 - Optional grid with snapping, margin guides, and header/footer templates with
   fields: `{title} {project} {author} {page} {pages} {date} {time} {file}`.
-- **Print** and **print preview** through the normal system dialog, **Export to PDF**
-  (vector, any page size), export pages as images, and export the markups list or the
-  variable list to CSV.
-- **Layers** with per-layer show, lock and print — hidden layers cannot be clicked,
-  locked ones cannot be moved, non-printing ones stay out of the output.
-- **Redaction that redacts**: draw the boxes, then *Markup ▸ Apply redactions* to
-  overwrite the page pixels underneath and delete the markups they cover. It says
-  plainly that this cannot be undone, and that partly-overlapping markups are left
-  for you to check.
+- **Layers** with per-layer show, lock and print. An imported PDF's own line
+  work goes on a **Drawing** layer of its own, so it can be dimmed or hidden
+  without touching the markups over it.
+- **Redaction that redacts**: draw the boxes, then *Markup ▸ Apply redactions*
+  to overwrite the page underneath and delete the markups they cover. It says
+  plainly that this cannot be undone, and that partly-overlapping markups are
+  left for you to check.
+- **Bookmarks** (`Ctrl+B`) name places in the document. The bookmarks panel
+  jumps to them, a **contents block** prints the same list on the page with
+  page numbers and leader dots, and each line of it is a link. Both reach the
+  saved PDF: the bookmarks become its outline and every contents line becomes a
+  working link.
 - **A light and a dark theme** (View ▸ Dark). The chrome, the icons and every
-  panel follow it; the page itself stays paper-white in both, and the words on
-  it keep their own colour — the sheet is the sheet, whatever the frame does.
+  panel follow it; the page itself stays paper-white in both, and what is drawn
+  on it keeps its own colour — the sheet is the sheet, whatever the frame does.
 - **The window is yours.** Every panel has a pin, a float button and a close
-  button in its title bar: pin one and it stays put however clumsy the next
-  drag is. Toolbars dock on any edge and can be locked, and
+  button in its title bar. Toolbars dock on any edge and can be locked, and
   *View ▸ Toolbars ▸ Choose tools* picks which markup tools appear on them —
   anything taken off is still on its menu and still on its key. Where
-  everything sits, what is pinned, what is hidden and the window's own size
-  come back next time; *Reset the layout* puts the original arrangement back.
-- **Bookmarks** (`Ctrl+B`) name places in the document. The bookmarks panel jumps to
-  them, a **contents block** prints the same list on the page with page numbers and
-  leader dots, and each line of it is a link. Both reach the exported PDF: the
-  bookmarks become the PDF's own outline and every contents line becomes a working
-  link.
-- Autosave every two minutes beside the document, offered back on the next start.
-- Save to `.cfx` — a zip holding the document as JSON plus its images and imported
-  PDF pages, so a file is self-contained and diff-friendly.
+  everything sits comes back next time; *Reset the layout* puts the original
+  arrangement back.
+- **Print** and **print preview** through the normal system dialog, export
+  pages as images, and export the markups list to CSV.
+- Autosave every two minutes beside the document, offered back on the next
+  start.
+
+---
+
+## What a saved file is
+
+A PDF. Not a PDF-shaped container, and not a PDF with a copy of the drawing
+inside it — the file you opened, plus an appended update.
+
+- **The source page is untouched.** Its bytes are the same bytes. Nothing is
+  re-encoded, re-compressed or re-rendered, so a signature still verifies, an
+  embedded font stays embedded and a CAD export keeps whatever it was doing.
+- **Every markup is a real annotation.** A cloud is a `/Square` or `/Polygon`
+  with a `/BE` cloudy border; a callout is a `/FreeText` with a `/CL` callout
+  line and the right `/IT` intent; a measurement is a `/Line`, `/Polygon` or
+  `/PolyLine` carrying a `/Measure` dictionary and the leader lines and endings
+  it was drawn with. Open the file in Bluebeam, Acrobat or a browser and the
+  markups are markups: selectable, movable, editable.
+- **Each carries its own appearance stream**, so it looks the same wherever it
+  is opened, including in readers that would not otherwise know how to draw it.
+- **What PDF has no word for is not thrown away.** A markup's tool-set origin,
+  its cut-outs, its group, the page's scale: these ride along as an embedded
+  record in the same file, so MarkForge reads back exactly what it wrote while
+  everything else reads back a perfectly ordinary annotation.
 
 ---
 
 ## Keyboard
 
-Typing straight onto the page does **nothing unless the key is bound** — which is
-what lets a bare keystroke mean "start writing here":
+Typing straight onto the page does **nothing unless the key is bound** — which
+is what lets a bare keystroke mean "start writing here":
 
 | Key | Starts |
 |---|---|
-| `"` | A text region where the cursor is |
-| `/` | A calculation |
-| `\|` | A table |
+| `"` | A text markup where the cursor is |
+| `\|` | A note |
 | `@` | A callout |
 
-Everything is editable under **Help ▸ Keyboard shortcuts…** (`Ctrl+K`): click a shortcut and
-**press the keys you want**. A single character is stored as that character;
-anything with Ctrl or Alt is stored as a key sequence and works from the menus
-too. Backspace clears one, Escape puts it back, and a key bound to two things
-outlines both rows in red and will not save until you resolve it.
+Everything is editable under **Help ▸ Keyboard shortcuts…** (`F1`): click a
+shortcut and **press the keys you want**. A single character is stored as that
+character; anything with Ctrl or Alt is stored as a key sequence and works from
+the menus too. Backspace clears one, Escape puts it back, and a key bound to
+two things outlines both rows in red and will not save until you resolve it.
 
 **Tool keys are silent while you are typing.** `M` in the middle of a sentence
 is a letter, and so is `Alt+M` — they only pick a tool when nothing is being
-edited. Save, print and zoom stay live throughout, as they do everywhere else.
+written. Save, print and zoom stay live throughout, as they do everywhere else.
 
 | Key | Action |
 |---|---|
 | `Esc` | Back to Select · finish or cancel what you are doing |
-| `L` `A` | Line · arrow |
+| `L` `A` `Shift+C` | Line · arrow · arc |
 | `R` `E` `C` | Rectangle · ellipse · revision cloud |
-| `P` `Alt+P` `K` | Polygon · pen · highlighter |
-| `T` `Q` `Shift+Q` `N` `S` | Text box · callout · cloud callout · note · stamp |
+| `P` `Alt+P` `H` `Shift+E` | Polygon · pen · highlighter · eraser |
+| `N` | Polyline |
+| `T` `Q` `Shift+Q` `S` `Shift+F` | Text box · callout · cloud callout · stamp · flag |
 | `J` | Highlight — dragged over anything, it darkens rather than covers |
-| `B` `Shift+G` | Table · plot |
 | `G` | Snapshot — copy a region and paste it back as itself |
 | `M` `Shift+Alt+A` | Measure length · measure area |
 | `Alt+M` | Dimension — asks for the text to show |
-| `H`, `Space`+drag, middle-drag | Pan |
+| `Shift+Alt+Q` `Shift+Alt+P` `Shift+Alt+V` | Polylength · perimeter · volume |
+| `Shift+Alt+G` `Shift+Alt+D` `Shift+Alt+C` | Angle · diameter · count |
+| `Space`+drag, middle-drag | Pan |
 | Wheel · `Shift`+wheel | Scroll · scroll sideways |
 | `PgUp` / `PgDn` | A screenful · `Ctrl`+them for a whole page |
 | `Ctrl+Home` / `Ctrl+End` | The start and the end of the document |
@@ -453,55 +304,57 @@ edited. Save, print and zoom stay live throughout, as they do everywhere else.
 | Drag right / left | Select what is wholly inside · what the marquee crosses |
 | Click, click… | Lasso a shape and select what is inside it · `Enter` closes it |
 | `Ctrl`+drag | Leave a copy behind · `Ctrl` mid-drag lets go of the snapping |
-| Double-click | Edit text, calculation or table · add a polyline vertex |
-| `Enter` | In a one-line calculation: open the next line below |
-| `Shift+Enter` | Keep typing on a new line of the same region |
-| `F9` | Recalculate everything |
-| `F10` | Check every number — re-derive the document and compare |
+| Double-click | Edit the words · add a polyline vertex |
 | `Ctrl+Shift+D` | Move or duplicate the selection by an exact offset |
 | `Ctrl+Shift+V` | Carry what was copied on the pointer and click to drop it |
 | `Ctrl+B` | Bookmark this place |
 | `Ctrl+G` / `Ctrl+Shift+G` | Group · ungroup the selection |
 | `1` … `9` | Pick up that tool from **My Tools** |
-| `Tab` | Take the offered unit or name · in a table, the next cell |
-| `Ctrl+Alt+8` `Ctrl+Alt+R` … | Maths symbols — the full list under Insert ▸ Maths symbol |
+| `Ctrl+Alt+8` `Ctrl+Alt+R` … | Symbols — the full list under Insert ▸ Symbol |
 | `Ctrl+Z` / `Ctrl+Y` | Undo · redo |
-| In a table | `Enter`/`F2` edit · `Tab`/arrows move · `Ctrl+D`/`Ctrl+R` fill |
 
-Everything is on one window: **Help ▸ Keyboard shortcuts…** (`F1` or `Ctrl+K`), with
-the mouse and canvas gestures on its second tab.
+The mouse and canvas gestures are on the second tab of the same window.
 
 ---
 
 ## Layout of the code
 
 ```
-calcforge/
-  core/        units, evaluation engine, function library, 2D maths typesetting,
-               spreadsheet engine, document and page model, problem collection
-  items/       everything that can sit on a page: shapes, text, stamps, images,
-               measurements, calculations, tables, plots
-  ui/          the scene and canvas, tools, key bindings, dock panels, dialogs,
-               main window
-  io/          project files, PDF import, printing and export
-  sample.py    the worked example
-tests/         168 tests: engine, spreadsheet, items and end-to-end GUI
+markforge/
+  pdf/         the PDF engine: objects, lexer, filters, storage, reader,
+               writer with incremental update, annotation model
+  core/        document and page model, units and formatting, typography,
+               spelling
+  items/       everything that can sit on a page: shapes, text, stamps,
+               images, snapshots, measurements, counts
+  ui/          the scene and canvas, tools, key bindings, dock panels,
+               dialogs, main window
+  io/          opening and saving PDFs, annotation writing, Bluebeam tool
+               sets, vector import, links, recolouring, export
+btx/           the real Bluebeam tool sets the importer is tested against
+tests/         the suite: the engine, the items, the window, and real use
 ```
 
-Two pieces are worth knowing about if you go digging:
+Three pieces are worth knowing about if you go digging:
 
-**`core/mathrender.py`** lays maths out as a tree of boxes — fractions, radicals,
-scripts, scaled brackets, matrices — and paints them with `QPainter`. That is what
-makes a calculation look handwritten rather than like source code.
+**`pdf/`** is a PDF reader and writer written from the specification rather
+than wrapped round somebody else's. It reads classic cross-reference tables and
+cross-reference streams, object streams, Flate/LZW/ASCIIHex/ASCII85/RunLength
+with PNG and TIFF predictors, and it will recover a file whose cross-reference
+table is wrong by scanning for the objects. It writes incrementally: the
+original bytes, then only what changed. That is what makes "save" a promise
+rather than a re-export.
 
-**`core/typography.py`** sizes every page font in pixels rather than points. Page
-coordinates are PostScript points, so a font sized in points would come out four
-times too large on a 300 dpi printer; pixel sizing pins text to scene units and lets
-the painter's transform scale it like any other geometry.
+**`io/annotate.py`** is the other half of that promise: the mapping from a
+markup on the canvas to the annotation dictionary that means the same thing —
+`/BE` for a cloud, `/CL` and `/IT` for a callout, `/Measure` with its `/LL`,
+`/LLE`, `/Cap` and line endings for a dimension — each with an appearance
+stream drawn from the item itself.
 
-**`core/units.py`** holds the ladders that decide a result reads best in kN rather
-than 780 000 N, and the rules that keep an angle, an imperial input or a value you
-typed out in full exactly as it was written.
+**`core/typography.py`** sizes every page font in pixels rather than points.
+Page coordinates are PostScript points, so a font sized in points would come
+out four times too large on a 300 dpi printer; pixel sizing pins text to scene
+units and lets the painter's transform scale it like any other geometry.
 
 ### Tests
 
@@ -509,37 +362,24 @@ typed out in full exactly as it was written.
 python -m pytest
 ```
 
-Runs headless (the suite forces `QT_QPA_PLATFORM=offscreen`) and drives the real
-window: every drawing tool, selection, resize, undo, table editing, recalculation
-order, save/reload, and PDF export.
+Runs headless (the suite forces `QT_QPA_PLATFORM=offscreen`) and drives the
+real window: every drawing tool, selection, resize, undo, save and reload, and
+the PDF that comes out at the end.
 
 | File | What it promises |
 |---|---|
-| `test_engine.py` | Parsing, units, `=` / `:=`, functions, matrices, symbolics |
-| `test_spreadsheet.py` | Cells, formulas, ranges, dependency order, clipboard |
-| `test_items.py` | Serialisation, geometry, layout of every markup type |
+| `test_pdf_engine.py` | The PDF engine, against real files: syntax, filters, damaged cross-references, incremental update, annotations |
+| `test_format.py` | What a saved document is — a PDF, the source page untouched, markups as annotations |
+| `test_btx.py` | Bluebeam tool sets, read from the real `.btx` files in `btx/` |
+| `test_items.py` | Serialisation, geometry and layout of every markup type |
 | `test_app.py` | The window: tools, panels, undo, files, printing |
+| `test_canvas.py` | One continuous scroll through every page |
+| `test_layout.py` | Panels and toolbars: pinning, hiding, moving, remembering |
 | `test_usability.py` | Real pointer and keyboard sequences through the viewport |
-| `test_validation.py` | Worked examples against published answers |
-| `test_units_property.py` | What must hold for every value, plus randomised runs |
-| `test_verify.py` | The independent check, mostly by breaking things on purpose |
+| `test_walkthrough.py` | A whole review, start to finish, the way somebody would do it |
 | `test_output.py` | Exported PDFs, read back and measured |
 
-Beyond the suite there is a fuzzer:
-
-```bash
-python tools/session_fuzz.py 42 400        # seed, rounds
-```
-
-It drives the real window at random — tools, drags, double-clicks, typing,
-undo, page changes, pasting, rescaling — then asks the verifier whether the
-document still re-derives, and finally whether it still prints. Fifty sessions
-of four hundred gestures each currently run clean. Earlier ones did not: they
-found a crash while rendering a page thumbnail, a page insertion that emptied
-the document, a move that did not recalculate, and a reading order that was not
-a total order.
-
-`docs/what-matters.md` is the brief all of this is written against — what an
-engineer needs from a calculation sheet, and what this tool does not claim.
+`docs/what-matters.md` is the brief all of this is written against — what
+somebody reviewing a drawing needs, and what this tool does not claim.
 `docs/interface.md` is the same for the interface: who is at the keyboard, and
 why the chrome looks the way it does.

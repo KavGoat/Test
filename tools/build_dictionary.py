@@ -1,4 +1,4 @@
-"""Turn hunspell dictionaries into the word list CalcForge ships.
+"""Turn hunspell dictionaries into the word list MarkForge ships.
 
 Hunspell keeps a stem and a set of flags, and works the endings out at look-up
 time. Carrying a hunspell engine around just to spell-check a text box is more
@@ -12,7 +12,7 @@ plus the words in ``extra_words.txt``.
 
 Run it as::
 
-    python tools/build_dictionary.py path/to/dictpack calcforge/data/en_nz.txt.gz
+    python tools/build_dictionary.py path/to/dictpack markforge/data/en_nz.txt.gz
 
 It is a build tool, not part of the application: the application only ever
 reads the list it produces.

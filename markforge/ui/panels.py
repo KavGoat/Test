@@ -1040,8 +1040,8 @@ def _fill_example(item) -> None:
 def _icon_for_type(type_name: str) -> str:
     """The tool icon that goes with a serialised markup's type."""
     return {"rect": "rect", "poly": "line", "text": "text", "callout": "callout",
-            "note": "note", "stamp": "stamp", "image": "image", "math": "math",
-            "table": "table", "plot": "plot", "measure": "measure_length",
+            "note": "note", "stamp": "stamp", "image": "image",
+            "measure": "measure_length",
             "count": "count", "contents": "page"}.get(type_name, "select")
 
 

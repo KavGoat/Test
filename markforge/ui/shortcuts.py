@@ -1,8 +1,9 @@
 """User-editable keyboard bindings.
 
 Some bindings do more than pick a tool. On an empty canvas a bare keypress does
-nothing unless it is bound. Typing ``"`` opens a calculation entry; a space
-converts that single line to prose, while slash remains division in equations.
+nothing unless it is bound: typing ``"`` starts a text markup where the pointer
+is, ``|`` a note and ``@`` a callout, so that writing on the page never needs a
+trip to the toolbar.
 """
 from __future__ import annotations
 
@@ -40,11 +41,10 @@ def _tool_bindings() -> list[Binding]:
     return bindings
 
 
-# Maths symbols, for typing into a calculation, a text box or a cell. The
-# engine reads the operators among them — × really multiplies, √ really takes a
-# root, ² really squares — and Δ and Σ are ordinary letters as far as a variable
-# name is concerned. They are here so the ones somebody uses every day can go on
-# a key they can reach without hunting through a character map.
+# Symbols, for typing into a text markup, a note or a callout. A markup on a
+# structural drawing is full of them — ⌀20 bars, a 45° splay, φMn — and they are
+# here so the ones somebody writes every day are on a key they can reach without
+# hunting through a character map.
 SYMBOLS: list[tuple[str, str, str, str]] = [
     # action name,      symbol, label,               default keys
     ("multiply",        "×",    "Multiply ×",        "Ctrl+Alt+8"),
@@ -84,22 +84,16 @@ def _symbol_bindings() -> list[Binding]:
             for name, symbol, label, keys in SYMBOLS]
 
 
-# The canvas typing mode comes first because it is reached without choosing a
-# tool. One explicit trigger avoids consuming ordinary typing and operators.
+# Typing on bare paper comes first because it is reached without choosing a
+# tool. One explicit trigger avoids consuming ordinary typing.
 DEFAULT_BINDINGS: list[Binding] = [
-    Binding("insert.text", "Calculation entry", '"', INSERT, "Typing", "math"),
-    Binding("insert.table", "Start table", "|", INSERT, "Typing", "table"),
+    Binding("insert.text", "Start text", '"', INSERT, "Typing", "text"),
+    Binding("insert.note", "Start note", "|", INSERT, "Typing", "note"),
     Binding("insert.callout", "Start callout", "@", INSERT, "Typing", "callout"),
 ] + _tool_bindings() + [
     Binding("command.fit_page", "Fit page", "Ctrl+0", COMMAND, "View", "fit_page"),
     Binding("command.fit_width", "Fit width", "Ctrl+1", COMMAND, "View", "fit_width"),
-    Binding("command.split_lines", "Split", "Ctrl+Shift+L",
-            COMMAND, "Document", "split_calculation"),
-    Binding("command.merge_lines", "Merge", "Ctrl+Shift+M",
-            COMMAND, "Document", "merge_calculations"),
-    Binding("command.problems", "Show problems", "Ctrl+Shift+P", COMMAND, "Document",
-            "show_problems"),
-    Binding("command.renumber_counts", "Renumber counts", "", COMMAND, "Document",
+    Binding("command.renumber_counts", "Renumber counts", "", COMMAND, "Markup",
             "renumber_counts"),
 ] + _symbol_bindings()
 

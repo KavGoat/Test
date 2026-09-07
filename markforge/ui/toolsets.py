@@ -140,9 +140,9 @@ class ToolEntry:
         return str(self.payload.get("type", ""))
 
 
-# Only a single markup can be kept "as properties": a calculation, a table, a
-# graph or an image has nothing worth drawing again without its contents, and
-# a group is several things at once.
+# Only a single markup can be kept "as properties": an image or a snapshot has
+# nothing worth drawing again without its contents, and a group is several
+# things at once.
 PROPERTIES_TYPES = {"rect", "poly", "text", "callout", "note", "stamp",
                     "measure", "count"}
 

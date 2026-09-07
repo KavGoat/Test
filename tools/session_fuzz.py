@@ -3,18 +3,17 @@
     python tools/session_fuzz.py [seed] [rounds] [trace]
 
 Picks tools, drags, clicks, double-clicks, types, deletes, undoes, changes
-pages, pastes, rescales and prints — hundreds of times — then asks the verifier
-whether the document still re-derives, and finally whether it still prints. It
-reports anything that raised and any answer the page can no longer justify.
+pages, pastes, rescales and prints — hundreds of times — checking as it goes
+that the document still saves and reopens as the same document, and finally
+that it still prints. It reports anything that raised.
 
 Everything modal is stubbed first: a randomised run must never sit waiting for
 somebody to click OK. Runs are seeded, so a failure can be reproduced exactly,
 and `trace` prints the gesture before and after each round so a crash can be
 pinned to the one that caused it.
 
-This found the crash while rendering a page thumbnail, the page insertion that
-emptied the document, the move that did not recalculate, and the reading order
-that was not a total order. It scrolls and zooms as well as drawing, because on
+This found the crash while rendering a page thumbnail and the page insertion
+that emptied the document. It scrolls and zooms as well as drawing, because on
 a canvas holding every page those are the gestures most likely to leave a
 gesture aimed at the wrong page.
 """
@@ -262,9 +261,22 @@ def do_scale():
     win.apply_scale_change()
 
 
-@guard("recalc")
-def do_recalc():
-    win.recalculate()
+@guard("save")
+def do_save():
+    """Write the document out and read it back: it must be the same document."""
+    import tempfile
+
+    from markforge.core.document import Document
+    from markforge.io import project as project_io
+
+    view.end_item_edit()
+    path = os.path.join(tempfile.gettempdir(), f"session_fuzz_save_{SEED}.pdf")
+    project_io.save_document(win.document, path)
+    reopened = Document()
+    project_io.load_document(reopened, path)
+    if len(reopened.pages) != len(win.document.pages):
+        FAILURES.append(("save", f"{len(win.document.pages)} pages out, "
+                                 f"{len(reopened.pages)} back"))
 
 
 @guard("toolset")
@@ -323,7 +335,7 @@ def do_group():
 ACTIONS = ([do_drag] * 12 + [do_click] * 4 + [do_double_click] * 4 +
            [do_right_click] * 2 + [do_key] * 4 + [do_typed] * 8 +
            [do_write] * 8 + [do_tool] * 8 + [do_undo] * 2 + [do_page] * 1 +
-           [do_clipboard] * 2 + [do_scale] * 2 + [do_recalc] * 2 +
+           [do_clipboard] * 2 + [do_scale] * 2 + [do_save] * 2 +
            [do_navigate] * 6 + [do_chrome] * 4 + [do_shortcuts] * 2 +
            [do_toolset] * 4 + [do_group] * 3)
 
@@ -332,8 +344,8 @@ for round_number in range(ROUNDS):
     action = rng.choice(ACTIONS)
     if TRACE:
         print(f"{round_number:4} {action.__name__} tool={view.current_tool().key} "
-              f"page={win.current_index} editing={view.editing_item() is not None} "
-              f"table={view.active_table is not None}")
+              f"page={win.current_index} "
+              f"editing={view.editing_item() is not None}")
     action()
     if TRACE:
         print(f"     ...done {action.__name__}")
@@ -341,25 +353,13 @@ for round_number in range(ROUNDS):
         app.processEvents()
     if round_number % 100 == 99:
         try:
-            view.end_item_edit()
-            view.deactivate_table()
-            result = win.verify_document(quiet=True)
-            kinds = {}
-            for problem in result.problems:
-                kinds[problem.kind] = kinds.get(problem.kind, 0) + 1
-            bad = [p for p in result.problems if p.kind == "disagreement"]
-            if bad:
-                detail = "\n".join(
-                    f"  {p.item_name} {p.where}: {p.source!r} -> {p.message}"
-                    for p in bad)
-                FAILURES.append(("verify", f"round {round_number}:\n{detail}"))
+            do_save()
         except Exception:
-            FAILURES.append(("verify", traceback.format_exc()))
+            FAILURES.append(("save", traceback.format_exc()))
 
 # and finally: does it still print?
 try:
     view.end_item_edit()
-    view.deactivate_table()
     import tempfile
 
     from markforge.io import export as export_io

@@ -52,34 +52,18 @@ class _InlineEditor(QGraphicsTextItem):
     # writing moves on, so does the level.
     ENDS_A_RUN = set(" \t,;:()[]{}+-*/=<>")
 
-    def inside_field(self) -> bool:
-        """Whether the caret is between a pair of inline-equation marks."""
-        cursor = self.textCursor()
-        before = self.toPlainText()[:cursor.position()]
-        return before.count("\\") % 2 == 1
-
     def keyPressEvent(self, event) -> None:
         """``_`` drops what follows; ``^`` lifts it — as they do in maths.
 
         Writing "150x50 SG8 at 400 c/c" needs no help, but "A_g", "m^2" and
-        "f'_c" are on every page of a calculation, and reaching for a menu to
+        "f'_c" are written on drawings every day, and reaching for a menu to
         set one character is not writing. So the two characters an engineer
         already types for it do it: what follows a ``_`` is set as a
         subscript and what follows a ``^`` as a superscript, until a space or
         an operator says the word has finished.
         """
         text = event.text()
-        if text == "\\" and not (event.modifiers() & Qt.ControlModifier):
-            # A field: what goes between the two marks is worked out from the
-            # document and printed in its place. The caret lands between them,
-            # so what follows is typed straight into the field.
-            cursor = self.textCursor()
-            cursor.insertText("\\\\")
-            cursor.movePosition(QTextCursor.Left)
-            self.setTextCursor(cursor)
-            event.accept()
-            return
-        if (text in ("_", "^") and not self.inside_field()
+        if (text in ("_", "^")
                 and not (event.modifiers() & Qt.ControlModifier)):
             self.set_script("sub" if text == "_" else "super")
             event.accept()
