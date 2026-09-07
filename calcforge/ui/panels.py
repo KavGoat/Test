@@ -1787,7 +1787,7 @@ class PropertiesPanel(QScrollArea):
                     lambda value: self._slide(
                         lambda i: setattr(i, "elbow_reach", value),
                         "Leader stand-off"))
-                form.addRow("Hinge stands off", stand_off)
+                form.addRow("Hinge", stand_off)
                 count = QLabel(f"{len(first.leaders)}"
                                + (" arrow" if len(first.leaders) == 1
                                   else " arrows"))
@@ -1915,7 +1915,8 @@ class PropertiesPanel(QScrollArea):
         digits.valueChanged.connect(
             lambda value: self._slide(lambda i: (setattr(i, "digits", value), i.relayout()),
                                       "Precision"))
-        form.addRow("Significant digits", digits)
+        digits.setToolTip("How many figures the answers on this calculation are shown to")
+        form.addRow("Figures", digits)
 
         number_format = QComboBox()
         number_format.addItems(["auto", "fixed", "scientific", "engineering"])
@@ -1979,7 +1980,8 @@ class PropertiesPanel(QScrollArea):
         digits.setValue(item.sheet.digits)
         digits.valueChanged.connect(
             lambda value: self._slide(lambda i: setattr(i.sheet, "digits", value), "Precision"))
-        form.addRow("Digits", digits)
+        digits.setToolTip("How many figures the numbers in this table are shown to")
+        form.addRow("Figures", digits)
 
         for label, attribute in (("Header row", "header_row"), ("Banded rows", "banded"),
                                  ("Grid lines", "grid_lines")):

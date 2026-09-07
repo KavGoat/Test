@@ -2,7 +2,7 @@
 
 Audited: 2026-09-06 against `claude/engineering-calc-markup-app-2twiqs`.
 
-Every open line in `docs/tasklist.md` was gone through one at a time. The 153
+Every open line in `docs/tasklist.md` was gone through one at a time. The 156
 below are the ones the current source implements and something actually
 exercises — an event-driven test that drives the real Qt queue, or a check
 against the running application. Each carries the evidence it rests on.
@@ -402,6 +402,9 @@ behaviour it extends.
 
 ## 28. Miscellaneous fixes reported (screenshots referenced)
 
+- **(found here, not reported by you)** Two layout tests — `test_everything_that_can_be_arranged_comes_back` and `test_a_rolled_up_panel_comes_back_rolled_up` — fail intermittently, but only in a **full** suite run. Both pass on their own, and both pass when every file that runs before them is run with them, so nothing earlier is leaving a mess behind: it is a race that shows up only when the machine is busy. Both save an arrangement and then build a second window to check it came back, so the suspect is a 1.5-second layout-save timer on a window still alive, firing between the save and the second window reading it. Worth chasing rather than re-running until it passes — the same race could lose a real arrangement on a slow machine
+  - **Evidence:** Fixed at the cause. Stopping the timer on a direct save was not enough: arranging anything afterwards arms it again, and by the time it fires another window may have written or restored a newer arrangement, which this window's older state then lands on. Each save now stamps the settings and a delayed save checks the stamp before writing, so a pending one that has been overtaken stands down. Evidence: test_a_stale_delayed_save_does_not_land_on_a_newer_arrangement forces exactly that sequence by hand — arrange, save, arrange again, build a second window that saves, then fire the first window's delayed save — and checks the newer arrangement survives. The two tests HANDOVER names pass alongside it.
+
 - General inconsistent/odd spacing in rendered equations, per screenshot (97)
   - **Evidence:** Equation spacing is normalised: compact result gutter, tight number-unit product, ordinary operator spacing kept, powers on the visible shoulder, subscript and power sharing one column. Evidence: test_a_plain_multiply_keeps_its_own_spacing, test_a_subscript_and_a_power_share_one_column, test_a_number_and_its_unit_are_joined_by_a_dot, test_equals_can_be_typed_deleted_and_retyped_without_a_result_gap.
 
@@ -416,6 +419,9 @@ behaviour it extends.
 
 - There's an unidentified "blue tool" in the UI that does nothing and can't even be selected/clicked — find and remove it (63)
   - **Evidence:** No dead tool remains: the table holds 41 tools and every one has a factory except the eraser, which rubs out rather than creating. Evidence: test_every_markup_tool_is_reachable_from_the_toolbar, test_every_tool_and_application_action_is_reachable_from_the_menu_bar.
+
+- Audit every Properties-panel option for redundancy or unclear labeling — e.g. what does "multiply highlighter" in the callout properties actually do? Several options may not be needed at all (61)
+  - **Evidence:** Audited every Properties row and acted on what it found. One idea had three names: the Style toolbar said Figures, a calculation said Significant digits, a table said Digits. All three say Figures now, with what they do in the tooltip. 'Hinge stands off' was a four-word label carrying a sentence its tooltip already explained, so it is 'Hinge'. The reported example, a 'multiply highlighter' option, is not a Properties control at all — blend is set by the highlighter itself and is exposed nowhere, so there is nothing there to be confused by. Evidence: test_one_idea_has_one_name_in_the_properties_panel, which also holds every remaining row label to two words or fewer, so the next long one fails rather than accumulating.
 
 - Highlighter tool leaves odd gaps/holes depending on the stroke path used to draw it (58, 59)
   - **Evidence:** A highlighter stroke is one even band with no holes where it overlaps itself. Evidence: test_a_highlighter_stroke_is_one_even_band, test_the_highlight_goes_over_whatever_is_under_it.
@@ -514,6 +520,9 @@ behaviour it extends.
 
 - **(new)** "No scale" must be a different state from a true 1:1. The app currently treats 1:1 as the unset/default scale, so a page cannot actually be calibrated to a genuine 1:1 — a scale-dependent markup drawn afterwards still misbehaves. An explicit 1:1 calibration must be stored as a real, deliberate scale, distinct from "uncalibrated".
   - **Evidence:** Fixed. PageScale now carries its own `calibrated` flag instead of inferring it from the label (core/document.py), so a page deliberately set to 1:1 is a scaled page and one nobody touched is not. from_ratio and from_calibration set it; to_dict/from_dict persist it, and a document saved before the flag existed still reads its label the old way. Evidence: test_a_page_set_to_a_real_one_to_one_is_not_an_unscaled_page drives the real measure tool and checks the status hint, the save round trip, and both legacy-document cases; test_a_page_starts_without_a_scale_and_can_be_given_one still passes. Full suite 1255 passed, 0 failed.
+
+- **(new)** Count tool defects: the marker number is visually cut off; Escape must cancel the entire count session immediately rather than lagging behind the keypress; and the ghost `1` marker left behind after cancellation must disappear on its own, without needing a further click.
+  - **Evidence:** One of three fixed, two not reproducible on this build and now covered by tests so a regression would show. FIXED — the clipped number: CountItem sizes the number's box from its font (index_rect) and owns that space in boundingRect, whole at 7, 9, 11, 14 and 18pt and up to three digits (test_a_count_marker_shows_its_whole_number_at_any_size). NOT REPRODUCED — Escape puts the count tool down on the press with no lag and no draft left behind, and no ghost 1 marker appears or lingers on either the hover-then-Escape or place-then-Escape path (test_escape_puts_the_count_tool_down_at_once). Both read as reports against an older build; worth a check against this one.
 
 - **(new)** A snapshot offers no colour-change control at all. Either add the option wherever it is meaningful for a snapshot, or deliberately exclude snapshots from stroke-colour controls — and if excluded, make that exclusion consistent between the style toolbar and the Properties panel rather than present in one and absent in the other.
   - **Evidence:** Decided and implemented rather than excluded: a snapshot now offers stroke colour and width in both the style toolbar and Properties, through the same capability set, so there is nowhere for the two to disagree. See the entry above for the evidence.

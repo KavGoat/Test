@@ -352,6 +352,47 @@ def test_a_direct_layout_save_consumes_the_pending_timer(window):
     assert not window._layout_timer.isActive()
 
 
+def test_a_stale_delayed_save_does_not_land_on_a_newer_arrangement(window, qapp):
+    """The race the two arrangement tests kept losing, made to happen on purpose.
+
+    A window writes the arrangement out shortly after it changes. Stopping
+    that timer on a direct save was not enough: any arranging afterwards
+    starts it again, and if it fires once a second window has restored a newer
+    arrangement, the older window's state lands on top of it. Here the timer
+    is fired by hand at exactly that moment.
+    """
+    from calcforge.ui.mainwindow import MainWindow
+
+    window.addDockWidget(Qt.TopDockWidgetArea, panels(window)["dock_problems"])
+    window.save_layout()
+    # Arranging after the save arms the delayed one again.
+    window.addDockWidget(Qt.BottomDockWidgetArea, panels(window)["dock_problems"])
+    window.note_layout_change()
+    assert window._layout_timer.isActive()
+
+    second = MainWindow()
+    second.confirm_discard = lambda: True
+    try:
+        second.addDockWidget(Qt.LeftDockWidgetArea, panels(second)["dock_problems"])
+        second.save_layout()
+        newer = second._layout_stamp
+        assert newer > window._layout_stamp, "the second window wrote last"
+
+        # Now let the first window's delayed save fire, late.
+        window._save_layout_unless_overtaken()
+        from PySide6.QtCore import QSettings
+        from calcforge.ui.mainwindow import APP_NAME, ORGANISATION
+
+        settings = QSettings(ORGANISATION, APP_NAME)
+        assert int(settings.value("window/stamp", 0)) == newer, \
+            "the stale save stood down instead of overwriting"
+    finally:
+        second.close()
+        second.setParent(None)
+        second.deleteLater()
+        qapp.processEvents()
+
+
 def test_everything_that_can_be_arranged_comes_back(window, qapp):
     """One restart, and the whole arrangement is as it was left."""
     from calcforge.theme import DARK

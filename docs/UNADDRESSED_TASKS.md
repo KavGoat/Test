@@ -2,7 +2,7 @@
 
 Audited: 2026-09-06 against `claude/engineering-calc-markup-app-2twiqs`.
 
-The 8 entries below are what the audit could not show working. Each says
+The 5 entries below are what the audit could not show working. Each says
 what is missing or blocking it. Several are tasks whose base behaviour is
 finished and whose recent amendment is not; those name the part that is done so
 the remaining work is clear.
@@ -30,16 +30,3 @@ This is not the user-owned completion record. It changes no checkbox in
 
 - **(new)** Validate interactive changes through the real CalcForge UI, not only unit-level code inspection. Agents must drive the canvas with pointer moves, clicks, drags, keyboard arrows and configured shortcuts, including Escape/cancel paths, and look for stuck tools, lost focus, incorrect cursor states, blocked input, broken selections and other interaction regressions. Keep repeatable Qt event-driven tests for each defect found.
   - **Missing:** Ongoing acceptance requirement rather than a finished feature: it governs how every future interactive change is validated, so it never closes.
-
-## 28. Miscellaneous fixes reported (screenshots referenced)
-
-- **(found here, not reported by you)** Two layout tests — `test_everything_that_can_be_arranged_comes_back` and `test_a_rolled_up_panel_comes_back_rolled_up` — fail intermittently, but only in a **full** suite run. Both pass on their own, and both pass when every file that runs before them is run with them, so nothing earlier is leaving a mess behind: it is a race that shows up only when the machine is busy. Both save an arrangement and then build a second window to check it came back, so the suspect is a 1.5-second layout-save timer on a window still alive, firing between the save and the second window reading it. Worth chasing rather than re-running until it passes — the same race could lose a real arrangement on a slow machine
-  - **Missing:** The race is still structurally present: mainwindow.py:218-220 still runs a 1500 ms _layout_timer, and both tests still save an arrangement and immediately build a second window. They passed in all three full runs this session, which is not proof the race is gone — HANDOVER §3 says as much. Logged, not fixed.
-
-- Audit every Properties-panel option for redundancy or unclear labeling — e.g. what does "multiply highlighter" in the callout properties actually do? Several options may not be needed at all (61)
-  - **Missing:** No record of the audit having been carried out. The specific example does do something — blend 'multiply' is the highlighter's composition mode (items/base.py:133 and 496) — but nothing shows every Properties option was reviewed for redundancy or unclear labelling.
-
-## 29. New requests awaiting review
-
-- **(new)** Count tool defects: the marker number is visually cut off; Escape must cancel the entire count session immediately rather than lagging behind the keypress; and the ghost `1` marker left behind after cancellation must disappear on its own, without needing a further click.
-  - **Missing:** One of the three fixed; two could not be reproduced on this build. FIXED — the clipped number: CountItem now sizes the number's box from the font (index_rect) instead of a box fixed at 16x10 points, and owns that space in boundingRect, so the number is whole at 7, 9, 11, 14 and 18pt and up to three digits. Evidence: test_a_count_marker_shows_its_whole_number_at_any_size. NOT REPRODUCED — Escape already puts the count tool down on the press, with no lag and no draft left behind, and no ghost 1 marker appears on either the hover-then-Escape or place-then-Escape path; test_escape_puts_the_count_tool_down_at_once covers it. Those two reports look to have been made against an older build. Leaving the task open until the user confirms against this one.

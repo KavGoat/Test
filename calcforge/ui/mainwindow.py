@@ -218,7 +218,7 @@ class MainWindow(QMainWindow):
         self._layout_timer = QTimer(self)
         self._layout_timer.setSingleShot(True)
         self._layout_timer.setInterval(1500)
-        self._layout_timer.timeout.connect(self.save_layout)
+        self._layout_timer.timeout.connect(self._save_layout_unless_overtaken)
         for dock in self.panels:
             dock.dockLocationChanged.connect(lambda *_: self.note_layout_change())
             dock.topLevelChanged.connect(lambda *_: self.note_layout_change())
@@ -1608,6 +1608,25 @@ class MainWindow(QMainWindow):
         if timer is not None:
             timer.start()
 
+    def _save_layout_unless_overtaken(self) -> None:
+        """The delayed save, dropped if somebody else has written since.
+
+        Stopping the timer on a direct save was not enough on its own: any
+        arranging done afterwards starts it again, and by the time it fires
+        another window may have saved or restored a newer arrangement. This
+        window's older state would then land on top of it. Each save stamps
+        the settings, so a pending one can tell it has been overtaken and stay
+        out of the way.
+        """
+        settings = QSettings(ORGANISATION, APP_NAME)
+        try:
+            stored = int(settings.value("window/stamp", 0))
+        except (TypeError, ValueError):
+            stored = 0
+        if stored > getattr(self, "_layout_stamp", 0):
+            return
+        self.save_layout()
+
     def save_layout(self) -> None:
         # A direct save consumes any delayed save already waiting. Otherwise
         # that stale timer can fire after a second window has restored a newer
@@ -1616,6 +1635,12 @@ class MainWindow(QMainWindow):
         if timer is not None:
             timer.stop()
         settings = QSettings(ORGANISATION, APP_NAME)
+        try:
+            stamp = int(settings.value("window/stamp", 0)) + 1
+        except (TypeError, ValueError):
+            stamp = 1
+        settings.setValue("window/stamp", stamp)
+        self._layout_stamp = stamp
         settings.setValue("window/geometry", self.saveGeometry())
         settings.setValue("window/maximised", self.isMaximized())
         settings.setValue("window/state", self.saveState())
@@ -1629,6 +1654,12 @@ class MainWindow(QMainWindow):
 
     def restore_layout(self) -> None:
         settings = QSettings(ORGANISATION, APP_NAME)
+        # What this window has caught up with. A delayed save from a window
+        # still holding an older arrangement checks this before writing.
+        try:
+            self._layout_stamp = int(settings.value("window/stamp", 0))
+        except (TypeError, ValueError):
+            self._layout_stamp = 0
         geometry = settings.value("window/geometry")
         state = settings.value("window/state")
         if geometry is not None:

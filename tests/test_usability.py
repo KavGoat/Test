@@ -302,6 +302,26 @@ def test_escape_puts_the_count_tool_down_at_once(window):
     assert [m.index for m in placed] == [1, 2], "what was placed stays placed"
 
 
+def test_one_idea_has_one_name_in_the_properties_panel(window):
+    """A table said "Digits", a calculation said "Significant digits".
+
+    The same thing under two names is the sort of thing the Properties audit
+    was asked to find: a reader has to work out whether they mean each other.
+    Both say "Figures" now, with what they do in the tooltip, matching the
+    Style toolbar.
+    """
+    import re
+
+    source = open("calcforge/ui/panels.py", encoding="utf-8").read()
+    labels = re.findall(r'form\.addRow\("([^"]+)"', source)
+    assert "Significant digits" not in labels and "Digits" not in labels
+    assert labels.count("Figures") == 2, "the calculation and the table both"
+
+    # And every remaining label is short, as the task list asks for.
+    too_long = [label for label in labels if len(label.split()) > 2]
+    assert not too_long, f"labels of more than two words: {too_long}"
+
+
 def test_undo_takes_back_the_typing_before_the_line_itself(window):
     """Backspace used to be unrecoverable inside an open calculation.
 
@@ -342,6 +362,11 @@ def test_undo_puts_a_converted_calculation_back_as_a_calculation(window):
     assert isinstance(window.view.editing_item(), TextItem)
 
     window.view.escape_everything()
+    QApplication.processEvents()
+    # Undo goes to the open editor first, so the line has to be closed before
+    # this is a question about the document at all.
+    assert window.view.editing_item() is None
+
     window.undo_something()
     QApplication.processEvents()
     live = [i for i in markups(window) if isinstance(i, (MathItem, TextItem))]
