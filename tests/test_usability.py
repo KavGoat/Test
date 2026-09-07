@@ -8782,11 +8782,12 @@ def test_a_size_typed_in_a_unit_nobody_knows_is_refused_not_raised(window):
 
 
 def test_ctrl_b_i_and_u_format_the_words_being_typed(window):
-    """No command fires, and the words are still formatted.
+    """The words picked out under the caret, and only those.
 
-    Both halves matter. The editor has no handling of its own for these three
-    — checked, and it has not — so suppressing the shortcut without taking the
-    key would leave Ctrl+B doing nothing at all inside a text markup.
+    No command fires either. Both halves matter: the editor has no handling of
+    its own for these three — checked, and it has not — so suppressing the
+    shortcut without taking the key would leave Ctrl+B doing nothing at all
+    inside a text markup.
     """
     from PySide6.QtGui import QTextCursor
 
@@ -8829,3 +8830,53 @@ def test_a_key_bound_over_ctrl_b_still_does_not_fire_while_typing(window):
         window.view.escape_everything()
         window.shortcuts.reset("command.fit_page")
         window.apply_shortcuts()
+
+
+def test_ctrl_b_i_and_u_take_the_whole_box_when_nothing_is_picked_out(window):
+    """Typing with no run selected: the markup itself, not one word of it.
+
+    The three keys mean the same thing at both scales — the selected text, or
+    the text box the caret is in when none is selected.
+    """
+    from PySide6.QtGui import QTextCursor
+
+    item = _open_words(window, "600 dia pile")
+    cursor = item._editor.textCursor()
+    cursor.clearSelection()
+    item._editor.setTextCursor(cursor)
+    assert not (item.style.bold or item.style.italic or item.style.underline)
+
+    for key in (Qt.Key_B, Qt.Key_I, Qt.Key_U):
+        press_key(window.view, key, "", Qt.ControlModifier)
+    QApplication.processEvents()
+
+    assert item.style.bold and item.style.italic and item.style.underline
+    face = item._editor.font()
+    assert face.bold() and face.italic() and face.underline(), \
+        "and the words on the page show it while they are still being typed"
+    assert window.view.is_editing(), "without ending the edit"
+    window.view.escape_everything()
+
+
+def test_ctrl_b_i_and_u_take_a_text_box_picked_out_on_the_page(window, qapp):
+    """Not typing, just selected: the same three keys do the same three things."""
+    from PySide6.QtTest import QTest
+
+    box = _words(window, "300 kerb", at=(90, 110))
+    window.select_tool("select")
+    window.view.scene().clearSelection()
+    box.setSelected(True)
+    window.refresh_selection()
+    assert not window.view.is_editing()
+    _show_for_shortcut(window, qapp)
+
+    for key in (Qt.Key_B, Qt.Key_I, Qt.Key_U):
+        QTest.keyClick(window.view, key, Qt.ControlModifier)
+    qapp.processEvents()
+    assert box.style.bold and box.style.italic and box.style.underline
+
+    for key in (Qt.Key_B, Qt.Key_I, Qt.Key_U):
+        QTest.keyClick(window.view, key, Qt.ControlModifier)
+    qapp.processEvents()
+    assert not (box.style.bold or box.style.italic or box.style.underline), \
+        "and pressing them again puts it back"
