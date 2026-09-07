@@ -3305,19 +3305,63 @@ def test_a_named_table_shows_up_as_something_the_document_knows(window):
 
 
 # ---------------------------------------------------------------------------
-# A calculation line and a calculation block are different things
+# A calculation is one thing, not two
 # ---------------------------------------------------------------------------
 
-def test_the_two_calculation_tools_are_offered_separately(window):
-    from calcforge.ui.tools import TOOL_MAP
-    assert TOOL_MAP["math"].label == "Calculation line"
-    assert TOOL_MAP["mathblock"].label == "Calculation block"
-    assert "math" in window.tool_actions and "mathblock" in window.tool_actions
+def test_prose_keeps_the_same_rhythm_as_the_working_beside_it(window):
+    """A note beside a column of working refers to it line by line.
+
+    The two used to drift: at ten point the working is pitched 15.6 apart and
+    prose 14.0, so ten lines down a reference points at the wrong row. Both
+    ask the same function for the number now.
+    """
+    from calcforge.core.engine import Workspace
+    from calcforge.items.mathitem import MathItem, calculation_line_pitch
+    from calcforge.items.text import TextItem
+
+    for size in (8.0, 10.0, 12.0):
+        calc = MathItem("a := 1\nb := 2\nc := 3")
+        calc.local_scope = True
+        calc.style.font_size = size
+        calc.refresh(Workspace())
+        calc.relayout()
+        working = [b.top - a.top for a, b in zip(calc.rows, calc.rows[1:])]
+
+        note = TextItem("")
+        note.style.font_size = size
+        note.doc.setPlainText("a is one\nb is two\nc is three")
+        note.apply_style()
+        layout = note.doc.documentLayout()
+        tops, block = [], note.doc.begin()
+        while block.isValid():
+            tops.append(layout.blockBoundingRect(block).top())
+            block = block.next()
+        prose = [b - a for a, b in zip(tops, tops[1:])]
+
+        assert working and prose
+        assert working[0] == pytest.approx(prose[0], abs=0.01), size
+        assert prose[0] == pytest.approx(calculation_line_pitch(size), abs=0.01)
+
+
+def test_there_is_one_calculation_tool(window):
+    """A "line" and a "block" were the same thing drawn by different tools.
+
+    They differed on what Enter did and whether names escaped, and both of
+    those are settings on the region rather than a choice made before it is
+    drawn — so choosing between them up front was a decision nobody had the
+    information to make yet.
+    """
+    from calcforge.ui.tools import TOOL_MAP, TOOLS
+
+    assert TOOL_MAP["math"].label == "Calculation"
+    assert "mathblock" not in TOOL_MAP, "the second one is gone"
+    assert "math" in window.tool_actions and "mathblock" not in window.tool_actions
+    assert len([t for t in TOOLS if t.key.startswith("math")]) == 1
 
 
 def test_a_block_keeps_its_working_to_itself(window):
     """A block shares its names unless it is told to keep them."""
-    window.select_tool("mathblock")
+    window.select_tool("math")
     drag(window.view, 80, 80, 400, 200)
     block = window.view.editing_item()
     assert block.block and not block.local_scope
@@ -3333,34 +3377,40 @@ def test_a_line_defines_for_the_whole_document(window):
     window.select_tool("math")
     drag(window.view, 80, 300, 400, 330)
     line = window.view.editing_item()
-    assert not line.block and not line.local_scope
+    assert not line.local_scope, "a calculation shares its names until told not to"
     line._editor.setPlainText("t := 5 mm")
     window.view.end_item_edit()
     window.recalculate()
     assert window.document.workspace.get("t").to("mm").magnitude == pytest.approx(5)
 
 
-def test_a_line_does_not_expose_block_only_scope_controls(window):
+def test_self_contained_is_offered_on_any_calculation(window):
+    """It used to be a block-only control, because a "line" could not have it.
+
+    With one kind of calculation left, whether a region keeps its names to
+    itself is a property of that region, and every one of them can be asked.
+    """
     from PySide6.QtWidgets import QCheckBox
 
     window.select_tool("math")
     drag(window.view, 80, 300, 400, 330)
-    line = window.view.editing_item()
+    calc = window.view.editing_item()
     window.view.end_item_edit()
-    line.setSelected(True)
-    window.properties_panel.show_items([line])
+    calc.setSelected(True)
+    window.properties_panel.show_items([calc])
 
     labels = [box.text() for box in
               window.properties_panel.findChildren(QCheckBox)]
-    assert "Self-contained" not in labels
+    assert "Self-contained" in labels
 
 
-def test_the_style_toolbar_scope_control_only_edits_a_block(window, qapp):
+def test_the_style_toolbar_scope_control_edits_any_calculation(window, qapp):
+    """The control used to appear only for one of the two kinds."""
     from PySide6.QtTest import QTest
 
     window.show()
     qapp.processEvents()
-    block = _open_calculation(window, "inside := 5", block=True)
+    block = _open_calculation(window, "inside := 5")
     window.view.end_item_edit()
     window.select_tool("select")
     block.setSelected(True)
@@ -3371,12 +3421,16 @@ def test_the_style_toolbar_scope_control_only_edits_a_block(window, qapp):
     QTest.mouseClick(window.scope_button, Qt.LeftButton)
 
     assert block.local_scope
-    line = MathItem("outside := 6", block=False)
-    window.view.frame().add_markup(line, QPointF(80, 400))
+    # A second calculation is the same kind of thing, so it is offered too —
+    # and its own answer is its own, not the first one's.
+    other = MathItem("outside := 6")
+    window.view.frame().add_markup(other, QPointF(80, 400))
     window.view.scene().clearSelection()
-    line.setSelected(True)
+    other.setSelected(True)
     window.refresh_selection()
-    assert not window._scope_widget.isVisible()
+    assert window._scope_widget.isVisible()
+    assert not window.scope_button.isChecked()
+    assert not other.local_scope
 
 
 def test_the_style_toolbar_can_set_the_default_for_new_blocks(window, qapp):
@@ -3391,7 +3445,7 @@ def test_the_style_toolbar_can_set_the_default_for_new_blocks(window, qapp):
         window.show()
         qapp.processEvents()
         window.view.scene().clearSelection()
-        window.select_tool("mathblock")
+        window.select_tool("math")
         assert window._scope_widget.isVisible()
         assert not window.scope_button.isChecked()
 
@@ -3404,16 +3458,22 @@ def test_the_style_toolbar_can_set_the_default_for_new_blocks(window, qapp):
         preferences.apply(prefs)
 
 
-def test_enter_in_a_block_makes_another_line_not_another_region(window):
-    window.select_tool("mathblock")
+def test_shift_enter_makes_another_line_in_the_same_calculation(window):
+    """Which region a line lands in is a keystroke, not a kind of thing.
+
+    It used to be decided before anything was typed, by which of two tools had
+    been picked up. Enter goes on down the sheet; Shift+Enter keeps the next
+    line in the region already being written.
+    """
+    window.select_tool("math")
     drag(window.view, 80, 80, 400, 200)
-    block = window.view.editing_item()
+    calc = window.view.editing_item()
     type_text(window.view, "a:=1")
-    press_key(window.view, Qt.Key_Return)
+    press_key(window.view, Qt.Key_Return, "\r", Qt.ShiftModifier)
     type_text(window.view, "b:=2")
-    assert window.view.editing_item() is block
+    assert window.view.editing_item() is calc, "still the same region"
     window.view.end_item_edit()
-    assert len([l for l in block.source.split("\n") if l.strip()]) == 2
+    assert len([l for l in calc.source.split("\n") if l.strip()]) == 2
     assert len([i for i in markups(window) if isinstance(i, MathItem)]) == 1
 
 
@@ -3458,26 +3518,37 @@ def test_merging_lines_makes_a_block(window):
     assert len(merged) == 1 and merged[0].block
 
 
-def test_splitting_a_block_gives_lines(window):
-    window.select_tool("mathblock")
+def test_splitting_a_calculation_gives_one_region_per_line(window):
+    """Splitting still splits; the pieces are calculations like any other."""
+    window.select_tool("math")
     drag(window.view, 80, 80, 400, 200)
-    block = window.view.editing_item()
-    block._editor.setPlainText("a := 1\nb := 2")
+    calc = window.view.editing_item()
+    calc._editor.setPlainText("a := 1\nb := 2")
     window.view.end_item_edit()
-    block.setSelected(True)
+    calc.setSelected(True)
     window.split_calculation()
     pieces = [i for i in markups(window) if isinstance(i, MathItem)]
     assert len(pieces) == 2
-    assert not any(piece.block for piece in pieces)
+    assert all(piece.source.strip() for piece in pieces)
+    assert {piece.source.strip() for piece in pieces} == {"a := 1", "b := 2"}
 
 
-def test_an_older_document_keeps_the_behaviour_it_was_written_with(window):
+def test_an_older_document_loads_as_one_kind_of_calculation(window):
+    """Documents written before the merge recorded which kind a region was.
+
+    That value is read and dropped rather than bringing the distinction back
+    in through the file: everything opens as the one kind there is now.
+    """
     from calcforge.items.base import build_item
 
-    item = build_item({"type": "math", "source": "a := 1\nb := 2", "x": 0, "y": 0})
-    assert item.block                       # several lines: it was a block
-    single = build_item({"type": "math", "source": "a := 1", "x": 0, "y": 0})
-    assert not single.block
+    several = build_item({"type": "math", "source": "a := 1\nb := 2",
+                          "x": 0, "y": 0, "block": True})
+    single = build_item({"type": "math", "source": "a := 1",
+                         "x": 0, "y": 0, "block": False})
+    for item in (several, single):
+        assert item.wants_next_region, "Enter opens the next calculation below"
+    assert several.source == "a := 1\nb := 2", "and the working is untouched"
+    assert single.source == "a := 1"
 
 
 def test_resizing_a_callout_leaves_the_arrow_where_it_points(window):
@@ -6352,15 +6423,21 @@ def test_a_lone_word_left_behind_becomes_a_note_after_all(window):
     assert markups(window)[0].text().strip() == "checked by hand"
 
 
-def test_there_is_no_such_thing_as_a_space_in_a_calculation_block(window):
-    """Blocks remain calculations and refuse spaces."""
-    item = MathItem("5+", block=True)
+def test_a_space_turns_any_calculation_into_prose(window):
+    """It used to depend on which of the two tools had drawn the region.
+
+    One of them converted and the other refused and explained itself, so the
+    same keystroke did two different things for a reason nothing on screen
+    made visible. There is one kind now, and a space always means prose.
+    """
+    from calcforge.items.text import TextItem
+
+    item = MathItem("5+")
     window.view.frame().add_markup(item)
     window.view.begin_item_edit(item)
     press_key(window.view, Qt.Key_Space, " ")
     QApplication.processEvents()
-    assert window.view.editing_item() is item
-    assert item._editor.toPlainText() == "5+"
+    assert isinstance(window.view.editing_item(), TextItem)
     window.view.escape_everything()
 
 
@@ -8555,17 +8632,22 @@ def test_ctrl_dragging_a_copy_still_snaps(window):
         window.view._copy_on_move = False
 
 
-def test_ctrl_shift_m_makes_a_block_of_one_calculation(window):
-    block = _calc(window, "a := 1", at=(90, 110))
-    assert not block.block
+def test_merging_one_calculation_has_nothing_to_do(window):
+    """It used to turn a "line" into a "block". There is one kind now.
+
+    A single calculation is already everything a block was — it holds as many
+    lines as you like and can keep its names to itself — so there is nothing
+    to convert, and saying so is better than doing something invisible.
+    """
+    one = _calc(window, "a := 1", at=(90, 110))
     window.scene.clearSelection()
-    block.setSelected(True)
+    one.setSelected(True)
     before = len(markups(window))
 
     window.merge_calculations()
-    assert block.block
-    assert len(markups(window)) == before      # made a block, did not copy it
-    assert markups(window)[0] is block         # the same one, where it was
+    assert len(markups(window)) == before, "nothing was made or destroyed"
+    assert markups(window)[0] is one, "and it is the same one, where it was"
+    assert "two or more" in window.status_hint.text().lower()
 
 
 def test_ctrl_shift_m_still_joins_several(window):
@@ -10622,16 +10704,18 @@ def test_a_space_changes_a_fresh_single_calculation_to_text(window):
     window.view.escape_everything()
 
 
-def test_a_space_is_refused_in_a_calculation_block(window):
-    """Blocks are always calculations, so spaces never land in them."""
-    item = _open_calculation(window, "b:=300mm", block=True, typed=False)
+def test_a_space_converts_a_re_entered_calculation_too(window):
+    """Fresh or re-entered, one calculation, one meaning for a space."""
+    from calcforge.items.text import TextItem
+
+    item = _open_calculation(window, "b:=300mm", typed=False)
     said = []
     window.view.statusMessage.connect(said.append)
     press_key(window.view, Qt.Key_Space, " ")
     QApplication.processEvents()
-    assert window.view.editing_item() is item
-    assert item._editor.toPlainText() == "b:=300mm"
-    assert said and "blocks" in said[-1].lower()
+    text = window.view.editing_item()
+    assert isinstance(text, TextItem)
+    assert said and "changed" in said[-1].lower(), said
     window.view.escape_everything()
 
 

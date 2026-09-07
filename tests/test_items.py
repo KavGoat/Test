@@ -148,13 +148,22 @@ def test_a_block_can_be_made_self_contained(qapp):
     assert block.local_values["M"].value.to("kN*m").magnitude == pytest.approx(54)
 
 
-def test_block_scope_survives_a_round_trip(qapp):
-    item = MathItem("a = 1 m\nb = 2 m", block=True)
+def test_keeping_a_calculations_names_to_itself_survives_a_round_trip(qapp):
+    """Scope is the region's own answer, saved and read back.
+
+    It used to be tied to a region being a "block" — one of two kinds chosen
+    by which tool drew it. There is one kind now, so any calculation can be
+    asked to keep its working in, and the answer travels with the file.
+    """
+    item = MathItem("a = 1 m\nb = 2 m")
     item.local_scope = True
     clone = build_item(item.serialize())
-    assert clone.local_scope is True and clone.block is True
-    line = build_item(MathItem("a = 1 m").serialize())
-    assert line.local_scope is False and line.block is False
+    assert clone.local_scope is True
+    assert clone.scoped is True, "so its names stay inside it"
+
+    shared = build_item(MathItem("a = 1 m").serialize())
+    assert shared.local_scope is False
+    assert shared.scoped is False, "and this one's do not"
 
 
 def test_math_item_marks_unit_literals(qapp):

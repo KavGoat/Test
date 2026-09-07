@@ -1425,7 +1425,7 @@ class MainWindow(QMainWindow):
     def apply_document_mode(self) -> None:
         """Expose worksheet UI or the focused PDF-review subset."""
         pdf_mode = self.document.mode == "pdf"
-        calculation_tools = {"math", "mathblock", "table", "plot"}
+        calculation_tools = {"math", "table", "plot"}
         for key in calculation_tools:
             action = self.tool_actions.get(key)
             if action is not None:
@@ -2668,7 +2668,7 @@ class MainWindow(QMainWindow):
 
     def select_tool(self, key: str) -> None:
         if (self.document.mode == "pdf"
-                and key in {"math", "mathblock", "table", "plot"}):
+                and key in {"math", "table", "plot"}):
             self.view.set_tool("select")
             self.status_hint.setText(
                 "Calculation tools are unavailable in PDF review mode")
@@ -2706,8 +2706,8 @@ class MainWindow(QMainWindow):
 
         items = self.selected_items()
         block = items[0] if len(items) == 1 and isinstance(items[0], MathItem) \
-            and items[0].block else None
-        for_default = not items and self.view.tool_key == "mathblock"
+            else None
+        for_default = not items and self.view.tool_key == "math"
         self._scope_widget.setVisible(block is not None or for_default)
         self.scope_button.blockSignals(True)
         self.scope_button.setChecked(
@@ -2827,10 +2827,10 @@ class MainWindow(QMainWindow):
 
     def _toolbar_scope_toggled(self, on: bool) -> None:
         items = self.selected_items()
-        if len(items) == 1 and isinstance(items[0], MathItem) and items[0].block:
+        if len(items) == 1 and isinstance(items[0], MathItem):
             self.set_block_scope(on)
             return
-        if not items and self.view.tool_key == "mathblock":
+        if not items and self.view.tool_key == "math":
             from . import preferences
 
             prefs = preferences.current()
@@ -4145,36 +4145,22 @@ class MainWindow(QMainWindow):
         """Make one block of what is selected.
 
         Two or more calculations are joined into one region, in reading order.
-        One on its own becomes a block where it stands — a block is what holds
-        several lines and makes Enter open the next one inside it — without
-        being moved, copied or rebuilt, which is what "make a block of this"
-        should mean and did not.
+        It used to have a second job: turning one calculation into a "block",
+        back when those were a different kind of thing. There is one kind now,
+        so a single calculation is already everything a block was and there is
+        nothing to convert — merging is joining several into one.
         """
         from ..ui.scene import reading_order
         blocks = [i for i in self.selected_items() if isinstance(i, MathItem)]
-        if not blocks:
-            self.status_hint.setText("Select a calculation to make a block of.")
-            return
-        if len(blocks) == 1:
-            one = blocks[0]
-            if one.block:
-                self.status_hint.setText("That is already a block")
-                return
-            self.view.begin_snapshot(self.view.involved_frames(one))
-            one.block = True
-            one.touch()
-            one.update()
-            self.view.commit_snapshot("Make a block")
-            self.refresh_selection()
+        if len(blocks) < 2:
             self.status_hint.setText(
-                "Now a block — Enter opens the next line inside it")
+                "Select two or more calculations to merge into one.")
             return
         blocks = reading_order(blocks)
         first = blocks[0]
         # Several lines in one region is a block, so Enter inside it makes
         # another line rather than another region.
-        merged = MathItem("\n".join(block.source.rstrip() for block in blocks),
-                          block=True)
+        merged = MathItem("\n".join(block.source.rstrip() for block in blocks))
         merged.style = first.style.copy()
         merged.digits = first.digits
         merged.number_format = first.number_format

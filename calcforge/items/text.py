@@ -444,6 +444,7 @@ class _TextBase(MarkupItem):
         option.setAlignment(self.style.alignment() & Qt.AlignHorizontal_Mask)
         option.setWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
         self.doc.setDefaultTextOption(option)
+        self._match_the_calculation_rhythm()
         self.doc.setTextWidth(max(self.text_rect().width(), 8.0))
         if self._editor is not None:
             self._editor.setDefaultTextColor(self.style.text_qcolor())
@@ -451,6 +452,26 @@ class _TextBase(MarkupItem):
         if self.auto_size:
             self._fit_height()
         self.update()
+
+    def _match_the_calculation_rhythm(self) -> None:
+        """Set the lines on the same pitch as a calculation's rows.
+
+        A note beside a column of working refers to it line by line, and the
+        two used to drift: at ten point the working is pitched 15.6 apart and
+        prose 14.0, so ten lines down a reference points at the wrong row.
+        Both ask the same function for the number now.
+        """
+        from PySide6.QtGui import QTextBlockFormat, QTextCursor
+        from .mathitem import calculation_line_pitch
+
+        pitch = calculation_line_pitch(self.style.font_size)
+        shape = QTextBlockFormat()
+        shape.setLineHeight(pitch, QTextBlockFormat.FixedHeight.value)
+        cursor = QTextCursor(self.doc)
+        cursor.select(QTextCursor.Document)
+        blocked = self.doc.blockSignals(True)
+        cursor.mergeBlockFormat(shape)
+        self.doc.blockSignals(blocked)
 
     def text_rect(self) -> QRectF:
         pad = self.style.padding

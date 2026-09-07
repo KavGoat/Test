@@ -2,7 +2,7 @@
 
 Audited: 2026-09-06 against `claude/engineering-calc-markup-app-2twiqs`.
 
-The 11 entries below are what the audit could not show working. Each says
+The 9 entries below are what the audit could not show working. Each says
 what is missing or blocking it. Several are tasks whose base behaviour is
 finished and whose recent amendment is not; those name the part that is done so
 the remaining work is clear.
@@ -41,12 +41,6 @@ This is not the user-owned completion record. It changes no checkbox in
 
 - **(new, restated)** Export to PDF must produce a PDF whose markups are still markups. Opened in Bluebeam, every annotation is selectable and movable exactly as it is here; the calculation layer is the one thing that does not travel, so each calculation exports as an ordinary movable markup showing the value it held at the moment of export. This follows from the format task above and replaces any export that flattens markups into artwork.
   - **Missing:** Not started, and follows the format task. Markups stay real markups in the exported PDF; the calculation layer is the one thing that does not travel, so each calculation exports as an ordinary movable markup showing the value it held at export time.
-
-- **(new)** Remove the distinction between a calculation line and a calculation block — they are one thing now. Every calculation is a region that may hold one line or several, and no command, menu entry, property or panel may offer "line" and "block" as different kinds. Typing `"` and then a space makes a text line, which is the same region holding prose.
-  - **Missing:** Not started. Lines and blocks are still separate throughout — MathItem.block, the Self-contained toggle, Ctrl+Shift+M merge, and the separate section 3 of this register all treat them as two kinds. They are one thing now, and a quote followed by a space makes a text line.
-
-- **(new)** Text set on several lines must lay out on the same rhythm as a calculation region holding several lines. A text box beside a calculation block, referring to its lines, should line up with them: the same line height and spacing, ignoring rows a tall fraction or a large script genuinely has to make room for.
-  - **Missing:** Not started. Nothing lines a text box up with the rows of a calculation region beside it; the two lay out on unrelated rhythms.
 
 - **(new)** Walk the whole application as somebody meeting it for the first time and write down what is wrong with it: anything whose label does not say what it does, any button whose effect is a surprise, any gesture that is not what the rest of the drawing world does, and anything plainly missing. Then fix what that walk finds, as its own list of tasks rather than one vague entry.
   - **Missing:** Not started. A first-run walk of the whole application has not been done, and what it finds is meant to become its own list of tasks rather than staying one entry.

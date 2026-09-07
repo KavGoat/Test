@@ -21,6 +21,23 @@ DEFAULT_SOURCE = ""
 
 # Vertical step used when Enter opens the next calculation line below this one.
 LINE_STEP = 6.0
+DEFAULT_LINE_GAP = 4.0
+
+
+def calculation_line_pitch(font_size: float, line_gap: float = DEFAULT_LINE_GAP) -> float:
+    """How far apart the rows of a plain calculation sit, in points.
+
+    Prose set beside a column of working has to keep the same rhythm as the
+    working, or the two drift apart a line at a time: at ten point a
+    calculation row is pitched 15.6 apart and a text line 14.0, so ten lines
+    down they are out by the height of a line. One number, asked for in the
+    same way by both, is what keeps a reference lined up with what it refers
+    to. Rows that genuinely need more room — a tall fraction, a big script —
+    still take it; this is the plain case.
+    """
+    setter = Typesetter(MathStyle(size=font_size))
+    plain = setter.text("0", font_size)
+    return plain.ascent + plain.descent + line_gap
 
 
 class _MathEditor(QGraphicsTextItem):
@@ -53,12 +70,12 @@ class _MathEditor(QGraphicsTextItem):
 
     def keyPressEvent(self, event) -> None:
         if event.text() == " ":
-            if not self.owner.block:
-                self.owner.wantsWords.emit()
-            else:
-                self.owner.saySomething.emit(
-                    "Calculation blocks do not use spaces — attach units "
-                    "directly, as in 5kN")
+            # A space always means "this is prose". There used to be two kinds
+            # of calculation and only one of them would convert; the other
+            # refused the space and explained itself, which meant the same
+            # keystroke did two different things depending on which tool had
+            # drawn the region. There is one kind now, and it converts.
+            self.owner.wantsWords.emit()
             event.accept()
             return
         if event.key() in (Qt.Key_Return, Qt.Key_Enter):
@@ -197,11 +214,14 @@ class MathItem(MarkupItem):
     def __init__(self, source: str = DEFAULT_SOURCE, block: bool = False):
         super().__init__()
         self.source = source
-        # Two kinds of calculation, chosen by which tool drew it. A line is one
-        # line that defines for the whole document; a block holds as many lines
-        # as you like and keeps its working to itself. Which it is decides what
-        # Enter does while typing, and whether its names escape.
-        self.block = bool(block)
+        # There used to be two kinds of calculation, chosen by which tool drew
+        # it: a "line" that held one line and let its names out, and a "block"
+        # that held several and kept them in. They are one thing now — a
+        # region that may hold one line or many — so Enter always opens
+        # another line inside it and any region can be asked to keep its
+        # working to itself. The attribute survives only so that documents
+        # written before the merge still load; nothing branches on it.
+        self.block = True
         self.statements: list[engine.Statement] = []
         self.rows: list[_MathRow] = []
         self.digits = 4
@@ -330,16 +350,20 @@ class MathItem(MarkupItem):
     @property
     def scoped(self) -> bool:
         """True when this region's definitions stay inside it."""
-        return self.local_scope and self.block
+        return self.local_scope
 
     @property
     def wants_next_region(self) -> bool:
-        """Enter opens the next line below, rather than growing this one.
+        """Enter opens the next calculation below; Shift+Enter grows this one.
 
-        True for a calculation line, which is one line by definition. In a
-        block Enter does what Enter does in any text box: a new line.
+        This used to be the whole difference between the two kinds of
+        calculation, decided before a word was typed by which tool was picked
+        up. It is a keystroke instead, which is what the manual has said all
+        along: Enter for the next line down the sheet, Shift+Enter to keep
+        several lines in one region. Nobody has to know which kind of thing
+        they drew, because there is only one.
         """
-        return not self.block
+        return True
 
     def refresh(self, workspace=None, page=None) -> None:
         if workspace is None:
@@ -1006,7 +1030,11 @@ class MathItem(MarkupItem):
         self.show_definition_results = bool(data.get("show_definition_results", True))
         self.show_comments = bool(data.get("show_comments", True))
         # Before there were two kinds, a region with several lines was a block.
-        self.block = bool(data.get("block", not self.single_line))
+        # Older documents recorded which of the two kinds a region was. There
+        # is one kind now, so the stored value is read and discarded rather
+        # than bringing the distinction back in through the file.
+        data.get("block")
+        self.block = True
         self.local_scope = bool(data.get("local_scope", False))
         self.auto_width = bool(data.get("auto_width", True))
         self.align_results = bool(data.get("align_results", False))

@@ -1429,7 +1429,7 @@ def test_a_block_defines_for_the_document_unless_told_otherwise(window):
 def test_the_properties_panel_toggles_a_blocks_scope(window):
     from PySide6.QtWidgets import QCheckBox
 
-    window.select_tool("mathblock")
+    window.select_tool("math")
     drag(window.view, 80, 100, 300, 180)
     block = editing_item(window)
     block._editor.setPlainText("x = 2 m\ny = x*3")
@@ -1456,7 +1456,7 @@ def test_a_block_keeps_its_values_to_itself(window):
     editing_item(window)._editor.setPlainText("q_floor = 5 kPa")
     window.view.end_item_edit()
 
-    window.select_tool("mathblock")
+    window.select_tool("math")
     drag(window.view, 80, 200, 300, 300)
     block = editing_item(window)
     block._editor.setPlainText("b_trib = 3 m\nw = q_floor*b_trib\nR = w*6 m/2")
@@ -1477,7 +1477,7 @@ def test_a_block_can_read_globals_defined_above_it(window):
     editing_item(window)._editor.setPlainText("L = 6 m")
     window.view.end_item_edit()
 
-    window.select_tool("mathblock")
+    window.select_tool("math")
     drag(window.view, 80, 200, 300, 280)
     block = editing_item(window)
     block._editor.setPlainText("w = 12 kN/m\nM = w*L^2/8")
@@ -1490,7 +1490,7 @@ def test_a_block_can_read_globals_defined_above_it(window):
 
 
 def test_a_later_line_cannot_see_inside_a_block(window):
-    window.select_tool("mathblock")
+    window.select_tool("math")
     drag(window.view, 80, 100, 300, 180)
     first = editing_item(window)
     first._editor.setPlainText("a = 2 m\nb = 3 m")
@@ -1519,7 +1519,7 @@ def test_a_single_line_region_always_defines_globally(window):
 
 
 def test_a_block_can_be_opened_up_to_the_document(window):
-    window.select_tool("mathblock")
+    window.select_tool("math")
     drag(window.view, 80, 100, 300, 180)
     block = editing_item(window)
     block._editor.setPlainText("x = 2 m\ny = x*3")
@@ -1533,7 +1533,7 @@ def test_a_block_can_be_opened_up_to_the_document(window):
 
 
 def test_block_locals_are_listed_for_reference(window):
-    window.select_tool("mathblock")
+    window.select_tool("math")
     drag(window.view, 80, 100, 300, 180)
     block = editing_item(window)
     block._editor.setPlainText("x = 2 m\ny = x*3")

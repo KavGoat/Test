@@ -2,7 +2,7 @@
 
 Audited: 2026-09-06 against `claude/engineering-calc-markup-app-2twiqs`.
 
-Every open line in `docs/tasklist.md` was gone through one at a time. The 155
+Every open line in `docs/tasklist.md` was gone through one at a time. The 157
 below are the ones the current source implements and something actually
 exercises — an event-driven test that drives the real Qt queue, or a check
 against the running application. Each carries the evidence it rests on.
@@ -532,3 +532,9 @@ behaviour it extends.
 
 - **(new)** Display formatting never alters stored values. Significant-figure and decimal-place settings affect only the rendered final answer — never the stored value, and never the typed equation text.
   - **Evidence:** Formatting is a render-time property of the item, not of the value: MathItem holds digits and number_format (items/mathitem.py:180-181) and applies them per line at layout through figures_for (mathitem.py:399); the workspace keeps the quantity. Evidence: test_one_line_can_be_shown_to_its_own_number_of_figures, test_a_lines_own_figures_can_be_put_back, test_a_lines_own_figures_survive_a_save.
+
+- **(new)** Remove the distinction between a calculation line and a calculation block — they are one thing now. Every calculation is a region that may hold one line or several, and no command, menu entry, property or panel may offer "line" and "block" as different kinds. Typing `"` and then a space makes a text line, which is the same region holding prose.
+  - **Evidence:** Done. There is one calculation tool, one kind of region, and the two things that used to differ are settings on the region instead of a choice made before it is drawn. A space always converts to prose — it used to convert in one kind and be refused with an explanation in the other, so the same keystroke did two things for a reason nothing on screen showed. Self-contained is offered on any calculation. Enter opens the next calculation below and Shift+Enter keeps the next line in this one, which is what the manual has said all along and preserves both old behaviours as a keystroke rather than a kind. Merge only merges now; with one selection there is nothing to convert and it says so. Documents written before the merge read their stored kind and drop it. Evidence: test_there_is_one_calculation_tool, test_a_space_turns_any_calculation_into_prose, test_a_space_converts_a_re_entered_calculation_too, test_self_contained_is_offered_on_any_calculation, test_the_style_toolbar_scope_control_edits_any_calculation, test_shift_enter_makes_another_line_in_the_same_calculation, test_merging_one_calculation_has_nothing_to_do, test_splitting_a_calculation_gives_one_region_per_line, test_an_older_document_loads_as_one_kind_of_calculation, test_keeping_a_calculations_names_to_itself_survives_a_round_trip.
+
+- **(new)** Text set on several lines must lay out on the same rhythm as a calculation region holding several lines. A text box beside a calculation block, referring to its lines, should line up with them: the same line height and spacing, ignoring rows a tall fraction or a large script genuinely has to make room for.
+  - **Evidence:** Done. Both now ask calculation_line_pitch for the number: a plain calculation row and a line of prose are pitched identically at 8, 10 and 12 point — 13.30, 15.62 and 17.95 — where before they were 15.62 against 14.0 at ten point, so ten lines down a reference pointed at the wrong row. Rows that genuinely need more room, a tall fraction or a big script, still take it. Evidence: test_prose_keeps_the_same_rhythm_as_the_working_beside_it.
