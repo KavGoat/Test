@@ -5,7 +5,6 @@ import uuid
 from dataclasses import asdict, dataclass
 from typing import Any, Optional
 
-from .engine import Workspace
 from .units import Q_, format_quantity, parse_unit
 
 MM_TO_PT = 72.0 / 25.4
@@ -356,7 +355,7 @@ class DocumentSettings:
 
 
 class Document:
-    """A CalcForge project: pages, assets, settings and the shared workspace."""
+    """A document: its pages, its assets and its settings."""
 
     VERSION = 1
 
@@ -371,7 +370,6 @@ class Document:
         self.layers: list[Layer] = [Layer("Markups"), Layer("Calculations")]
         self.bookmarks: list[Bookmark] = []
         self.assets: dict[str, bytes] = {}
-        self.workspace = Workspace()
         self.path: Optional[str] = None
         self.modified = False
 

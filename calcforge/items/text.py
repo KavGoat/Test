@@ -361,59 +361,12 @@ class _TextBase(MarkupItem):
         # with one. As many as the note needs: one comment about three bolts
         # wants three arrows, not three copies of the comment.
         self.leaders: list[_Leader] = []
-        # What was typed, fields and all. The document holds what is *shown*,
-        # which is the same thing once the fields have been worked out.
+        # What was typed. Kept beside the document it is shown in because a
+        # good deal of the editing machinery reads it, and the two are the
+        # same thing.
         self.written = text
         self.digits = 4
         self.doc.contentsChanged.connect(self._on_contents_changed)
-
-    # -- fields ------------------------------------------------------------
-    #
-    # A paragraph on a calculation sheet nearly always wants to quote a number
-    # that is worked out somewhere else: "the design moment of \\M_n\\ governs".
-    # Typing the number in by hand means it is wrong the moment anything above
-    # it changes. A field between two backslashes is worked out from the
-    # document every time the sheet is recalculated, so it cannot go stale.
-    #
-    # A field holding a bare name that the document defines prints as
-    # "name = value unit", because that is how it would be written by hand.
-    # Anything else keeps the expression and prints its answer beside it.
-    FIELD = re.compile(r"\\([^\\\n]+)\\")
-
-    def has_fields(self) -> bool:
-        return bool(self.FIELD.search(self.written))
-
-    def resolve_fields(self, workspace) -> str:
-        """*written* with every field replaced by what it comes to."""
-        from ..core import engine
-        from ..core.units import format_quantity
-
-        def answer(match) -> str:
-            source = match.group(1).strip()
-            if not source:
-                return match.group(0)
-            try:
-                if workspace is not None and workspace.has(source):
-                    value = workspace.get(source)
-                    shown = _as_text(value, self.digits)
-                    return f"{source} = {shown}"
-                if workspace is None:
-                    return match.group(0)
-                value = workspace.evaluate(source)
-            except Exception:                # noqa: BLE001 — any bad field
-                return f"[{source}?]"
-            return f"{source} = {_as_text(value, self.digits)}"
-
-        return self.FIELD.sub(answer, self.written)
-
-    def refresh(self, workspace=None, page=None) -> None:
-        """Work every field out again, so the prose keeps up with the sheet."""
-        if self._editing or not self.has_fields():
-            return
-        shown = self.resolve_fields(workspace)
-        if shown != self.doc.toPlainText():
-            self.doc.setPlainText(shown)
-            self.apply_style()
 
     # -- content -----------------------------------------------------------
     def text(self) -> str:
@@ -444,7 +397,6 @@ class _TextBase(MarkupItem):
         option.setAlignment(self.style.alignment() & Qt.AlignHorizontal_Mask)
         option.setWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
         self.doc.setDefaultTextOption(option)
-        self._match_the_calculation_rhythm()
         self.doc.setTextWidth(max(self.text_rect().width(), 8.0))
         if self._editor is not None:
             self._editor.setDefaultTextColor(self.style.text_qcolor())
@@ -452,26 +404,6 @@ class _TextBase(MarkupItem):
         if self.auto_size:
             self._fit_height()
         self.update()
-
-    def _match_the_calculation_rhythm(self) -> None:
-        """Set the lines on the same pitch as a calculation's rows.
-
-        A note beside a column of working refers to it line by line, and the
-        two used to drift: at ten point the working is pitched 15.6 apart and
-        prose 14.0, so ten lines down a reference points at the wrong row.
-        Both ask the same function for the number now.
-        """
-        from PySide6.QtGui import QTextBlockFormat, QTextCursor
-        from .mathitem import calculation_line_pitch
-
-        pitch = calculation_line_pitch(self.style.font_size)
-        shape = QTextBlockFormat()
-        shape.setLineHeight(pitch, QTextBlockFormat.FixedHeight.value)
-        cursor = QTextCursor(self.doc)
-        cursor.select(QTextCursor.Document)
-        blocked = self.doc.blockSignals(True)
-        cursor.mergeBlockFormat(shape)
-        self.doc.blockSignals(blocked)
 
     def text_rect(self) -> QRectF:
         pad = self.style.padding
@@ -996,10 +928,6 @@ class _TextBase(MarkupItem):
             return
         if not self._editing:
             self._upright_for_edit()
-        # The fields come back as they were typed, so they can be edited
-        # rather than having their answers typed over.
-        if self.has_fields() and self.doc.toPlainText() != self.written:
-            self.doc.setPlainText(self.written)
         self.check_spelling(True)
         if self._editor is None:
             self._editor = _InlineEditor(self)

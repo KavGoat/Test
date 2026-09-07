@@ -1,16 +1,15 @@
-"""What a saved document actually is: a PDF, with the calculation layer in it.
+"""What a saved document actually is: a PDF.
 
-This is a PDF editor that can also do calculations, and the file format follows
-from that. Every document saved by CalcForge is a real PDF — it opens in
-Bluebeam, in a browser, in anything — and the parts a PDF has no way to hold,
-the calculations and everything else CalcForge knows about a markup, ride
-along inside it as an embedded file.
+There is one format and it is PDF. Every document saved here is a real PDF —
+it opens in Bluebeam, in Acrobat, in a browser, in anything — and every markup
+in it is a real PDF annotation, so it can be picked up and moved wherever it is
+opened rather than being ink somebody else is stuck with.
 
-So there is only one file. A drawing set that has been marked up and never
-calculated on is a PDF and is named one. Put a calculation on it and the same
-bytes are named ``.cfx``: the calculation layer is an addition to the PDF, not
-a replacement for it, and renaming a ``.cfx`` to ``.pdf`` loses nothing but the
-calculations' ability to be edited again.
+A PDF annotation cannot hold quite everything: the layer a markup is on, the
+hatch behind it, what it was measured against. Those ride along inside the same
+file as an embedded record, so opening the file here again gives back exactly
+what was saved, and opening it anywhere else gives back a perfectly ordinary
+marked-up PDF. There is no second format and no other extension.
 """
 from __future__ import annotations
 
@@ -20,16 +19,13 @@ import os
 import zipfile
 from typing import Optional
 
-# The embedded file the calculation layer travels in. A PDF reader that knows
-# nothing about CalcForge shows it as an attachment and is otherwise unbothered.
-LAYER_ENTRY = "calcforge.cfx"
+# The embedded file the markup record travels in. A PDF reader that knows
+# nothing about this application shows it as an attachment and is otherwise
+# unbothered by it.
+LAYER_ENTRY = "markups.json.zip"
 
 DOCUMENT_ENTRY = "document.json"
 ASSET_PREFIX = "assets/"
-
-# Item types that are calculations rather than markups. What decides whether a
-# document is a PDF or a PDF with a calculation layer.
-CALCULATION_TYPES = {"math", "table", "plot"}
 
 # What the markup appearance is drawn at when it has to be rasterised. The
 # imported page's own content is carried through as itself and never resampled;
@@ -37,19 +33,9 @@ CALCULATION_TYPES = {"math", "table", "plot"}
 APPEARANCE_DPI = 200
 
 
-# -- what is in the document ----------------------------------------------
-def has_calculations(document) -> bool:
-    """Whether this document is a PDF with a calculation layer, or just a PDF."""
-    for page in document.pages:
-        for item in page.to_dict().get("items", []):
-            if item.get("type") in CALCULATION_TYPES:
-                return True
-    return False
-
-
-# -- the layer -------------------------------------------------------------
+# -- the record ------------------------------------------------------------
 def layer_bytes(document) -> bytes:
-    """The calculation layer: the document's own record, and its assets."""
+    """The markup record: the document's own account of itself, and its assets."""
     payload = json.dumps(document.to_dict(), indent=1, ensure_ascii=False)
     holder = io.BytesIO()
     with zipfile.ZipFile(holder, "w", zipfile.ZIP_DEFLATED) as archive:
@@ -78,7 +64,7 @@ def is_pdf(path: str) -> bool:
 
 
 def layer_in(path: str) -> Optional[bytes]:
-    """The calculation layer inside the PDF at *path*, if it carries one."""
+    """The markup record inside the PDF at *path*, if it carries one."""
     if not is_pdf(path):
         return None
     from pypdf import PdfReader
@@ -97,7 +83,7 @@ def layer_in(path: str) -> Optional[bytes]:
 
 # -- writing ---------------------------------------------------------------
 def write(document, path: str, appearance: bool = True) -> None:
-    """Write *document* to *path* as a PDF carrying its calculation layer."""
+    """Write *document* to *path* as a PDF carrying its markup record."""
     from pypdf import PdfWriter
 
     output = PdfWriter()
@@ -116,7 +102,7 @@ def write(document, path: str, appearance: bool = True) -> None:
         # The markups go in as real annotations, not as ink on the page. A
         # saved document is a PDF that anybody can open, and a markup that
         # cannot be picked up in the editor it is opened in is a picture of a
-        # markup. The layer is still what CalcForge reads back.
+        # markup. The record is still what this application reads back.
         from . import annotate
 
         annotate.add_markups(path, document, _drawn_pages(document))
@@ -234,7 +220,7 @@ def _rendered_overlay(document, drawn: list) -> Optional[str]:
 
 # -- reading ---------------------------------------------------------------
 def read(document, path: str) -> bool:
-    """Load *path* into *document*. True when it carried a calculation layer."""
+    """Load *path* into *document*. True when it carried a markup record."""
     found = layer_in(path)
     if found is None:
         return False

@@ -18,19 +18,15 @@ from PySide6.QtWidgets import (QApplication, QCompleter, QGraphicsProxyWidget,
                                QWidget)
 
 from ..core.document import MM_TO_PT
-from ..core.spreadsheet import make_ref, parse_clipboard_grid
 from ..core.units import parse_unit
 from ..items.base import (HANDLE_CURSORS, HANDLE_SIZE, MarkupItem, build_item,
                           cloud_path, cursor_for_handle)
 from ..items.contents import ContentsItem
-from ..items.mathitem import LINE_STEP, MathItem
 from .scene import DocumentScene, PageFrame, detach
 from ..items.measure import (AREA, CALIBRATE, DIMENSION, VOLUME, CountItem,
                              MeasureItem)
 from ..items.media import ImageItem
-from ..items.plotitem import PlotItem
 from ..items.shapes import PolyItem, RectItem
-from ..items.tableitem import TableItem
 from ..items.text import CalloutItem, NoteItem, StampItem, TextItem, _TextBase
 from . import preferences
 from .commands import PageEditCommand
@@ -167,7 +163,6 @@ class PageView(QGraphicsView):
     zoomChanged = Signal(float)
     selectionChanged = Signal()
     itemActivated = Signal(object)
-    cellChanged = Signal(object)
     documentEdited = Signal()
     pageChanged = Signal(int)
 
@@ -211,21 +206,7 @@ class PageView(QGraphicsView):
         self._zoom = 1.0
         self.scroll_mode = "continuous"
 
-        self.active_table: Optional[TableItem] = None
-        self._cell_editor: Optional[QLineEdit] = None
-        self._cell_proxy: Optional[QGraphicsProxyWidget] = None
-        self._editing_cell: Optional[tuple[int, int]] = None
-        self._unit_editor: Optional[QLineEdit] = None
-        self._unit_proxy: Optional[QGraphicsProxyWidget] = None
-        self._unit_target: tuple = (None, -1)
-        # While a formula is being typed: the cell being pointed at, and where
-        # its reference sits in the text so the next arrow key can replace it.
-        self._pointing: Optional[tuple[int, int]] = None
-        self._point_span: Optional[tuple[int, int]] = None
-        self._completions = None
-        self._completing = False
         self._live_timer = None
-        self._fill_origin: Optional[tuple[int, int]] = None
         self._draw_origin: Optional[QPointF] = None
         # Ctrl held when a drag starts leaves the originals where they were.
         self._copy_on_move = False
@@ -328,10 +309,6 @@ class PageView(QGraphicsView):
 
     def after_undo(self) -> None:
         self.close_label_editor(commit=False)
-        self.close_unit_editor(commit=False)
-        self.close_cell_editor(commit=False)
-        self.active_table = None
-        self.window.recalculate()
         self.documentEdited.emit()
         self.selectionChanged.emit()
 
@@ -366,8 +343,6 @@ class PageView(QGraphicsView):
 
         remember(self.frame())
         remember(getattr(self._editing_item, "parentItem", lambda: None)())
-        if self.active_table is not None:
-            remember(self.active_table.parentItem())
         for item in scene.selectedItems():
             remember(item.parentItem())
         for item in items:
@@ -420,15 +395,11 @@ class PageView(QGraphicsView):
             self.cancel_marquee()
         if self._draft is not None:
             self.cancel_draft()
-        self.close_unit_editor()
-        self.close_cell_editor()
         self.tool_key = key if key in TOOL_MAP else "select"
         self._preview_key = None            # the preview belongs to the old tool
         tool = self.current_tool()
         self.setCursor(self._cursor_for_tool(tool))
         self.statusMessage.emit(tool.hint or tool.label)
-        if key != "select":
-            self.deactivate_table()
 
     def begin_cloud_leader(self, item) -> None:
         """Arm a drag that chooses the region for a new cloud leader."""
@@ -1089,15 +1060,6 @@ class PageView(QGraphicsView):
             event.accept()
             return
 
-        # A click away from the little unit box finishes it, the way clicking
-        # off any other in-place editor does.
-        if self._unit_editor is not None and event.button() == Qt.LeftButton:
-            proxy = self._unit_proxy
-            if proxy is not None and proxy.sceneBoundingRect().contains(scene_pos):
-                super().mousePressEvent(event)
-                return
-            self.close_unit_editor(commit=True)
-
         # While a region is being edited the pointer belongs to its text: a
         # click inside places the caret, a drag selects, a click outside
         # finishes the edit. Its own handles are the exception — a callout's
@@ -1109,16 +1071,6 @@ class PageView(QGraphicsView):
                        if self.editable(item) else None)
             rect = self.editing_rect()
             if grabbed is None and rect is not None and rect.contains(scene_pos):
-                if isinstance(item, MathItem):
-                    # A calculation is typeset, and the editor holding its
-                    # characters is invisible and laid out as one flat line.
-                    # Letting Qt place the caret from the click puts it in the
-                    # wrong place every time — near the start, wherever in the
-                    # fraction the pointer actually was. The box tree knows
-                    # which characters it drew where, so it does the mapping.
-                    self.place_caret(item, scene_pos)
-                    event.accept()
-                    return
                 super().mousePressEvent(event)
                 return
             self.end_item_edit()
@@ -1200,52 +1152,7 @@ class PageView(QGraphicsView):
                 detach(item)
 
     def _press_select(self, event: QMouseEvent, scene_pos: QPointF) -> None:
-        # 1. an active spreadsheet takes clicks inside its own frame
-        if self.active_table is not None:
-            local = self.active_table.mapFromScene(scene_pos)
-            if self.active_table.fill_handle_rect().contains(local):
-                self.close_cell_editor()
-                self._mode = "table_fill"
-                # The whole selected block is what is dragged from, as in
-                # Excel: two numbers carry a series on, one is copied.
-                self._fill_origin = self.active_table.selection()
-                self.begin_snapshot()
-                event.accept()
-                return
-            border = self.active_table.border_at(local)
-            if border is not None:
-                self._mode = "table_resize"
-                self._handle_key = f"{border[0]}:{border[1]}"
-                self.begin_snapshot()
-                event.accept()
-                return
-            gutter = self.active_table.gutter_at(local)
-            if gutter is not None:
-                self._select_table_band(gutter)
-                event.accept()
-                return
-            cell = self.active_table.cell_at(local)
-            if cell is not None and self._cell_editor is not None \
-                    and self.pointing_allowed():
-                # Clicking another cell while writing a formula refers to it
-                # instead of abandoning what is being typed.
-                self.point_at(*cell)
-                self._mode = "idle"
-                event.accept()
-                return
-            if cell is not None:
-                self.close_cell_editor()
-                table = self.active_table
-                table.current = cell
-                if not (event.modifiers() & Qt.ShiftModifier):
-                    table.anchor = cell
-                table.update()
-                self._mode = "table_select"
-                self.cellChanged.emit(table)
-                event.accept()
-                return
-
-        # 2. a selected group owns one outer resize box. Check it before the
+        # 1. a selected group owns one outer resize box. Check it before the
         # modifier-specific reshape paths so Shift can release its ratio.
         grouped = self._selected_group()
         if grouped is not None:
@@ -1399,17 +1306,6 @@ class PageView(QGraphicsView):
             item.setPos(frame.mapFromScene(position))
             item.refresh(self.document().workspace, frame.page)
 
-    def _select_table_band(self, gutter: tuple[str, int]) -> None:
-        table = self.active_table
-        kind, index = gutter
-        if kind == "col":
-            table.current = (0, index)
-            table.anchor = (table.sheet.rows - 1, index)
-        else:
-            table.current = (index, 0)
-            table.anchor = (index, table.sheet.cols - 1)
-        table.update()
-        self.cellChanged.emit(table)
 
     def _add_poly_point(self, event: QMouseEvent, point: QPointF, tool: Tool) -> None:
         """Another corner on the shape being clicked out."""
@@ -1561,13 +1457,6 @@ class PageView(QGraphicsView):
             return
 
         if self._editing_item is not None and self._mode == "idle":
-            if isinstance(self._editing_item, MathItem) \
-                    and event.buttons() & Qt.LeftButton:
-                # Dragging across typeset maths selects from where the press
-                # landed to where the pointer is, both mapped through the box
-                # tree rather than through the hidden flat editor.
-                self.drag_select(self._editing_item, event)
-                return
             super().mouseMoveEvent(event)       # dragging selects text
             return
 
@@ -1645,36 +1534,6 @@ class PageView(QGraphicsView):
             event.accept()
             return
 
-        if self._mode == "table_resize" and self.active_table is not None:
-            kind, index = self._handle_key.split(":")
-            index = int(index)
-            table = self.active_table
-            local = table.mapFromScene(scene_pos)
-            table.prepareGeometryChange()
-            if kind == "col":
-                table.sheet.col_widths[index] = max(local.x() - table.column_x(index), 14.0)
-            else:
-                table.sheet.row_heights[index] = max(local.y() - table.row_y(index), 10.0)
-            table.update()
-            event.accept()
-            return
-
-        if self._mode == "table_select" and self.active_table is not None:
-            cell = self.active_table.cell_at(self.active_table.mapFromScene(scene_pos))
-            if cell is not None and cell != self.active_table.anchor:
-                self.active_table.anchor = cell
-                self.active_table.update()
-                self.cellChanged.emit(self.active_table)
-            event.accept()
-            return
-
-        if self._mode == "table_fill" and self.active_table is not None:
-            cell = self.active_table.cell_at(self.active_table.mapFromScene(scene_pos))
-            if cell is not None:
-                self.active_table.anchor = cell
-                self.active_table.update()
-            event.accept()
-            return
 
         if self._mode == "cloud_leader" and self._marquee:
             self._marquee[-1] = self.snap_scene(scene_pos)
@@ -1731,16 +1590,8 @@ class PageView(QGraphicsView):
         if getattr(self, "_editing_item", None) is not None:
             self.end_item_edit()
             undone.append("the words being typed")
-        if self._unit_editor is not None:
-            self.close_unit_editor(commit=False)
         if self._label_editor is not None:
             self.close_label_editor(commit=False)
-        if self._cell_editor is not None:
-            self.close_cell_editor(commit=False)
-            undone.append("the cell")
-        if self.active_table is not None:
-            self.deactivate_table()
-            undone.append("the table")
         if self.scene() is not None and self.scene().selectedItems():
             self.scene().clearSelection()
             undone.append("the selection")
@@ -1857,11 +1708,7 @@ class PageView(QGraphicsView):
             top_left = parent.mapFromScene(rect.topLeft()) if parent is not None \
                 else rect.topLeft()
             draft.setPos(top_left)
-            if isinstance(draft, TableItem):
-                # A table's drag counts cells rather than stretching them.
-                draft.fit_to_a_drag(rect.width(), rect.height())
-            else:
-                draft.set_local_rect(QRectF(0, 0, rect.width(), rect.height()))
+            draft.set_local_rect(QRectF(0, 0, rect.width(), rect.height()))
         if isinstance(draft, MeasureItem):
             draft.refresh(page=self.page())
         self.follow_size_editor()
@@ -2075,19 +1922,6 @@ class PageView(QGraphicsView):
         # a border is measured from, and they appear only then — turning them
         # on for a table that is merely picked out would shift the table by
         # the width of a gutter under the pointer that had just selected it.
-        # A resize cursor over an edge that cannot be dragged would be a
-        # promise the table does not keep, so it is offered where the drag is.
-        tables = [self.active_table] if self.active_table is not None else []
-        for table in tables:
-            local = table.mapFromScene(scene_pos)
-            border = table.border_at(local)
-            if border is not None:
-                self.setCursor(Qt.SplitHCursor if border[0] == "col"
-                               else Qt.SplitVCursor)
-                return
-            if table is self.active_table and table.fill_handle_rect().contains(local):
-                self.setCursor(Qt.CrossCursor)
-                return
         item = self.markup_at(scene_pos)
         if item is None:
             self.setCursor(Qt.ArrowCursor)
@@ -2121,12 +1955,6 @@ class PageView(QGraphicsView):
             return
 
         if self._editing_item is not None and self._mode == "idle":
-            if isinstance(self._editing_item, MathItem):
-                # The press already put the caret where the typeset maths was
-                # clicked. Handing the release to Qt's own editor would let it
-                # place the caret again from its flat layout and undo that.
-                event.accept()
-                return
             super().mouseReleaseEvent(event)
             return
 
@@ -2223,12 +2051,6 @@ class PageView(QGraphicsView):
             event.accept()
             return
 
-        if self._mode == "table_fill":
-            self._mode = "idle"
-            self._apply_fill()
-            event.accept()
-            return
-
         if self._mode == "draw_drag" and self.current_tool().mode in (CLOUDY, CLOUD) \
                 and self._is_a_click(scene_pos) and isinstance(self._draft, RectItem):
             # Clicked, not dragged: this cloud is being drawn corner by corner.
@@ -2286,59 +2108,22 @@ class PageView(QGraphicsView):
             self.select_in_marquee()
             event.accept()
             return
-        # Already editing this region: let the editor select a word.
+        # Already editing this text: let the editor select a word.
         rect = self.editing_rect()
         if rect is not None and rect.contains(scene_pos):
-            item = self._editing_item
-            if isinstance(item, MathItem):
-                # Except in a calculation, where the editor holding the
-                # characters is invisible and laid out as one flat line —
-                # Qt's own word-picking would look up the word at whatever
-                # place in that line the pointer happens to sit over, which
-                # is not the word that was double-clicked. The box tree says
-                # which character was, and the word around it is the word.
-                self.place_caret(item, scene_pos)
-                editor = getattr(item, "_editor", None)
-                if editor is not None:
-                    cursor = editor.textCursor()
-                    cursor.select(QTextCursor.WordUnderCursor)
-                    editor.setTextCursor(cursor)
-                    item.update()
-                event.accept()
-                return
             super().mouseDoubleClickEvent(event)
             return
         item = self.markup_at(scene_pos)
         if item is None:
             super().mouseDoubleClickEvent(event)
             return
-        if isinstance(item, TableItem):
-            self.activate_table(item)
-            cell = item.cell_at(item.mapFromScene(scene_pos))
-            if cell is not None:
-                item.current = item.anchor = cell
-                self.open_cell_editor()
-            event.accept()
-            return
-        if isinstance(item, MathItem) and not item.locked:
-            # Double-clicking the answer changes the unit it is shown in, the
-            # way SMath has a unit slot beside every result. Anywhere else on
-            # the line edits the line.
-            row = item.result_at(item.mapFromScene(scene_pos))
-            if row >= 0 and self.open_unit_editor(item, row):
-                event.accept()
-                return
         if isinstance(item, ContentsItem):
             row = item.row_at(item.mapFromScene(scene_pos))
             if row is not None:
                 self.window.go_to_bookmark(*row)
                 event.accept()
                 return
-        if isinstance(item, PlotItem) and not item.locked:
-            self.window.edit_plot(item)
-            event.accept()
-            return
-        if isinstance(item, (MathItem, _TextBase)) and not item.locked:
+        if isinstance(item, _TextBase) and not item.locked:
             self.begin_item_edit(item)
             self.place_caret(item, scene_pos)
             event.accept()
@@ -2660,9 +2445,6 @@ class PageView(QGraphicsView):
                 width, _height = self._default_size(draft)
                 draft.points[-1] = QPointF(width, 0)
             draft.prepareGeometryChange()
-        elif isinstance(draft, MathItem):
-            # A calculation sizes itself around what is typed into it.
-            pass
         else:
             rect = draft.local_rect()
             if tiny or rect.width() < 6 or rect.height() < 6:
@@ -2736,10 +2518,6 @@ class PageView(QGraphicsView):
         note_scale = False
         if isinstance(draft, RectItem) and draft.kind in SIZED_SHAPES:
             self.window.prompt_rectangle_size(draft)
-        elif isinstance(draft, TableItem):
-            self.window.prompt_table_size(draft)
-        elif isinstance(draft, PlotItem):
-            self.window.edit_plot(draft, fresh=True)
         elif isinstance(draft, MeasureItem):
             if draft.kind != DIMENSION:
                 note_scale = True
@@ -2748,10 +2526,8 @@ class PageView(QGraphicsView):
         if isinstance(draft, MeasureItem) and draft.kind == DIMENSION \
                 and self.window.interactive_prompts:
             self.open_label_editor(draft)
-        elif isinstance(draft, (MathItem, TextItem, CalloutItem)):
+        elif isinstance(draft, (TextItem, CalloutItem)):
             self.begin_item_edit(draft)
-        elif isinstance(draft, TableItem):
-            self.activate_table(draft)
         self.finish_tool()
         # Last word, so returning to the select tool does not wipe the notice.
         if note_scale:
@@ -2759,12 +2535,6 @@ class PageView(QGraphicsView):
 
     @staticmethod
     def _default_size(item: MarkupItem) -> tuple[float, float]:
-        if isinstance(item, PlotItem):
-            return 300.0, 200.0
-        if isinstance(item, TableItem):
-            return item.sheet.total_width(), item.sheet.total_height()
-        if isinstance(item, MathItem):
-            return 300.0, 90.0
         if isinstance(item, StampItem):
             return 190.0, 58.0
         if isinstance(item, (TextItem, CalloutItem)):
@@ -3099,65 +2869,10 @@ class PageView(QGraphicsView):
         keyboard is writing, and a tool key would be a letter of somebody's
         sentence rather than a request to change tool.
         """
-        return (self._editing_item is not None or self._cell_editor is not None
-                or self._unit_editor is not None or self._label_editor is not None
-                or self.active_table is not None)
+        return (self._editing_item is not None
+                or self._label_editor is not None)
 
-    def drag_select(self, item, event) -> None:
-        """Extend the selection to the pointer, in typeset coordinates."""
-        editor = getattr(item, "_editor", None)
-        if editor is None:
-            return
-        scene_pos = self.mapToScene(event.position().toPoint())
-        line, column = item.offset_at(item.mapFromScene(scene_pos))
-        if line < 0:
-            return
-        block = editor.document().findBlockByNumber(line)
-        if not block.isValid():
-            return
-        cursor = editor.textCursor()
-        cursor.setPosition(block.position()
-                           + min(max(column, 0), block.length() - 1),
-                           QTextCursor.KeepAnchor)
-        editor.setTextCursor(cursor)
-        item.update()
-        event.accept()
 
-    @staticmethod
-    def place_caret(item, scene_pos: QPointF) -> None:
-        """Put the caret where the pointer is, rather than at the start.
-
-        A calculation is typeset while it is being written, so a click on the
-        numerator of a fraction has to be turned back into a place in the
-        source. The box tree knows which characters it was built from, which is
-        what makes that possible — and what makes clicking into a calculation
-        feel like clicking into anything else.
-        """
-        editor = getattr(item, "_editor", None)
-        if editor is None:
-            return
-        if isinstance(item, MathItem):
-            line, column = item.offset_at(item.mapFromScene(scene_pos))
-            if line < 0:
-                return
-            cursor = editor.textCursor()
-            block = editor.document().findBlockByNumber(line)
-            if not block.isValid():
-                return
-            cursor.setPosition(block.position()
-                               + min(max(column, 0), block.length() - 1))
-            editor.setTextCursor(cursor)
-            item.update()
-            return
-        try:
-            local = editor.mapFromScene(scene_pos)
-            position = editor.document().documentLayout().hitTest(local, Qt.FuzzyHit)
-        except Exception:
-            return
-        if position >= 0:
-            cursor = editor.textCursor()
-            cursor.setPosition(position)
-            editor.setTextCursor(cursor)
 
     def begin_item_edit(self, item) -> None:
         if self._mode == "lasso":
@@ -3167,419 +2882,44 @@ class PageView(QGraphicsView):
             # first left the first one's editor on the page, still showing a
             # caret, with nothing able to close it.
             self.end_item_edit()
-        # The region may be on a page other than the one on screen — somebody
-        # can scroll while a calculation is open — so its own page is what has
-        # to be recorded, not whichever the chrome calls current.
+        # The text may be on a page other than the one on screen — somebody
+        # can scroll while a note is open — so its own page is what has to be
+        # recorded, not whichever the chrome calls current.
         self.begin_snapshot(self.involved_frames(item))
         self.scene().clearSelection()
         item.setSelected(True)
-        if isinstance(item, MathItem) and not getattr(item, "_enter_wired", False):
-            item.enterPressed.connect(self._open_next_line)
-            item.wantsWords.connect(lambda i=item: self.turn_into_words(i))
-            item.saySomething.connect(self.statusMessage)
-            item._enter_wired = True
         item.begin_edit()
         self._editing_item = item
-        self._last_recalculated = getattr(item, "source", "")
-        if isinstance(item, MathItem) and not getattr(item, "_live_wired", False):
-            # Wired once per region: a QTextDocument outlives one edit, and
-            # asking Qt to disconnect something it never held prints a warning.
-            editor = getattr(item, "_editor", None)
-            if editor is not None:
-                editor.document().contentsChanged.connect(self._note_live_edit)
-                item._live_wired = True
 
-    def turn_into_words(self, item) -> None:
-        """Swap a half-typed calculation for a text box holding the same words.
 
-        Nothing is lost and nothing has to be retyped: what was in the region
-        goes into the text box, the caret carries on at the end of it, and the
-        space that caused all this is added where it was typed.
-        """
-        if item.scene() is None:
-            return
-        words = item.source
-        editor = getattr(item, "_editor", None)
-        cursor = editor.textCursor() if editor is not None else None
-        start = cursor.selectionStart() if cursor is not None else len(words)
-        end = cursor.selectionEnd() if cursor is not None else start
-        words = words[:start] + " " + words[end:]
-        caret = start + 1
-        frame = item.parentItem()
-        position = item.pos()
-        style = item.style
-        # It is becoming words now, so it is no longer a line that *might*:
-        # without this, closing the edit below would ask the same question
-        # again and answer it a second time.
-        item.started_by_typing = False
-        self.end_item_edit()
-        self.begin_snapshot(self.involved_frames(item))
-        detach(item)
-        box = TextItem(words)
-        box.style = style
-        box.set_local_rect(QRectF(0, 0, max(item.local_rect().width(), 140.0),
-                                  max(item.local_rect().height(), 22.0)))
-        frame.add_markup(box, position)
-        self.scene().clearSelection()
-        box.setSelected(True)
-        self.commit_snapshot("Write text")
-        self.selectionChanged.emit()
-        self.begin_item_edit(box)
-        text_cursor = box._editor.textCursor()
-        text_cursor.setPosition(caret)
-        box._editor.setTextCursor(text_cursor)
-        self.statusMessage.emit("Space changed this calculation line to text")
 
-    def _note_live_edit(self) -> None:
-        """Work the line out again shortly, so its answer keeps up with it."""
-        if self._live_timer is None:
-            self._live_timer = QTimer(self)
-            self._live_timer.setSingleShot(True)
-            self._live_timer.setInterval(500)
-            self._live_timer.timeout.connect(self._recalculate_while_typing)
-        self._live_timer.start()
 
-    def _recalculate_while_typing(self) -> None:
-        """Update the answers beside what is being typed.
 
-        Through a whole-document pass, never by evaluating this region on its
-        own: a region evaluated against a workspace that already holds this
-        pass's definitions turns its own definitions into checks.
-        """
-        item = self._editing_item
-        editor = getattr(item, "_editor", None) if item is not None else None
-        if not isinstance(item, MathItem) or editor is None:
-            return
-        text = editor.toPlainText()
-        # The region keeps its own source level with the typing so the working
-        # stays typeset, so that is no longer a test of whether anything has
-        # changed since the last pass. What was last worked out is.
-        if text == self._last_recalculated:
-            return
-        item.source = text
-        self._last_recalculated = text
-        self.window.recalculate()
 
-    # -- completing a name or a unit ---------------------------------------
-    #
-    # Typing into a calculation offers what could come next: the units, and
-    # every name this document has defined. Nothing is chosen for you —
-    # Tab takes what is highlighted, the arrows move the highlight, Escape
-    # puts the list away — because a unit that arrives by itself is a unit
-    # nobody asked for.
-    def completion_word(self) -> tuple[str, int]:
-        """The word being typed at the caret, and where it starts."""
-        item = self._editing_item
-        editor = getattr(item, "_editor", None) if item is not None else None
-        if editor is None:
-            return "", 0
-        cursor = editor.textCursor()
-        text = editor.toPlainText()
-        at = cursor.position()
-        start = at
-        while start > 0 and (text[start - 1].isalnum() or text[start - 1] in "_"):
-            start -= 1
-        word = text[start:at]
-        if word and word[0].isdigit():
-            # A unit written straight after its number — 300MPa, which is the
-            # only way it can be written now that a calculation takes no
-            # spaces. The number is not a name and offers nothing; the letters
-            # after it are the unit being typed.
-            letters = 0
-            while letters < len(word) and (word[letters].isdigit()
-                                           or word[letters] == "."):
-                letters += 1
-            if letters >= len(word):
-                return "", at        # all number, nothing to complete
-            return word[letters:], start + letters
-        return word, start
 
-    def completion_allowed(self) -> bool:
-        """Names and units are offered only in equation-bearing editors."""
-        item = self._editing_item
-        if isinstance(item, MathItem):
-            return True
-        editor = getattr(item, "_editor", None) if item is not None else None
-        inside = getattr(editor, "inside_field", None)
-        return bool(callable(inside) and inside())
 
-    def completion_words(self, prefix: str, units_first: Optional[bool] = None) -> list[str]:
-        """What could follow *prefix*: the document's own names, and units.
 
-        Which comes first depends on where the caret is. Straight after a
-        number — ``300 M`` — a unit is what is being typed, and the units go
-        first. Anywhere else it is a name: the variables, functions and tables
-        this document defines go first, because they are the ones being
-        reached for and there are a hundred units to wade past otherwise.
-        """
-        from ..core.units import UNIT_MENU
 
-        workspace = self.document().workspace
-        names = sorted(set(workspace.variables) | set(workspace.functions)
-                       | set(workspace.table_names()))
-        units: list[str] = []
-        for group in UNIT_MENU.values():
-            units += [unit for unit in group if unit not in units]
-        if units_first is None:
-            units_first = self.caret_follows_a_number()
-        first, second = (units, names) if units_first else (names, units)
-        wanted = [word for word in first if word.startswith(prefix)]
-        wanted += [word for word in second if word.startswith(prefix)
-                   and word not in wanted]
-        if not wanted:                      # nothing exact: try ignoring case
-            lowered = prefix.lower()
-            wanted = [word for word in first + second
-                      if word.lower().startswith(lowered) and word not in wanted]
-        # What was actually typed goes to the top. The lists are in their own
-        # sensible order — the unit menu groups millimetres beside metres —
-        # and that order put "mm" above "m" for somebody who had typed exactly
-        # "m", so the first thing offered was not the thing they had written.
-        for candidate in (prefix, prefix.lower()):
-            for position, word in enumerate(wanted):
-                if word == candidate or word.lower() == candidate:
-                    if position:
-                        wanted.insert(0, wanted.pop(position))
-                    return wanted[:40]
-        return wanted[:40]
 
-    def caret_follows_a_number(self) -> bool:
-        """Whether what is being typed sits where a unit sits: after a number."""
-        item = self._editing_item
-        editor = getattr(item, "_editor", None) if item is not None else None
-        if editor is None:
-            return False
-        text = editor.toPlainText()
-        _word, start = self.completion_word()
-        index = start - 1
-        while index >= 0 and text[index] == " ":
-            index -= 1
-        return index >= 0 and (text[index].isdigit() or text[index] == ".")
 
-    def show_completions(self) -> None:
-        """Offer what could follow what is being typed, if anything could."""
-        if not self.completion_allowed():
-            self.hide_completions()
-            return
-        word, _start = self.completion_word()
-        if len(word) < 1:
-            self.hide_completions()
-            return
-        words = self.completion_words(word)
-        if not words or words == [word]:
-            self.hide_completions()
-            return
-        popup = self._completer_popup()
-        popup.clear()
-        popup.addItems(words)
-        popup.setCurrentRow(0)
-        popup.resize(200, min(len(words), 8) * 18 + 6)
-        popup.move(self._completion_corner(popup))
-        popup.show()
-        popup.raise_()
-        self._completing = True
 
-    def _completion_corner(self, popup) -> QPoint:
-        """Just under the caret, and inside the window.
 
-        The list used to hang off the bottom-left of the whole editor, which
-        for a block of eight lines is nowhere near the word being typed.
-        """
-        item = self._editing_item
-        anchor = None
-        place = item.caret_place() if hasattr(item, "caret_place") else None
-        if place is not None:
-            x, baseline, _ascent, descent = place
-            anchor = item.mapToScene(QPointF(x, baseline + descent + 2))
-        if anchor is None:
-            editor = getattr(item, "_editor", None)
-            if editor is None:
-                return QPoint(0, 0)
-            cursor = editor.textCursor()
-            block = cursor.block()
-            layout = block.layout()
-            line = layout.lineForTextPosition(
-                max(cursor.position() - block.position(), 0)) if layout else None
-            if line is not None and line.isValid():
-                margin = editor.document().documentMargin()
-                position = max(cursor.position() - block.position(), 0)
-                # QTextLine.cursorToX() currently crashes in PySide 6 on
-                # Windows for a QGraphicsTextItem-backed document. Measure
-                # the visible part of this line instead.
-                prefix = block.text()[line.textStart():position]
-                advance = QFontMetricsF(cursor.charFormat().font()).horizontalAdvance(prefix)
-                local = QPointF(
-                    margin + layout.position().x() + line.x() + advance,
-                    margin + layout.position().y() + line.y() + line.height())
-                anchor = editor.mapToScene(local)
-            else:
-                anchor = editor.mapToScene(editor.boundingRect().bottomLeft())
-        corner = self.mapFromScene(anchor) + QPoint(0, 2)
-        # Kept on screen: a list that runs off the bottom edge offers nothing.
-        room = self.viewport().rect()
-        corner.setX(max(0, min(corner.x(), room.width() - popup.width())))
-        if corner.y() + popup.height() > room.height():
-            corner.setY(max(0, corner.y() - popup.height() - 18))
-        return corner
 
-    def _completer_popup(self):
-        if self._completions is None:
-            from PySide6.QtWidgets import QListWidget
-            popup = QListWidget(self.viewport())
-            popup.setObjectName("completionList")
-            popup.setFocusPolicy(Qt.NoFocus)
-            popup.setUniformItemSizes(True)
-            popup.itemClicked.connect(lambda _entry: self.accept_completion())
-            self._completions = popup
-        return self._completions
-
-    def completions_showing(self) -> bool:
-        """Whether the list is up.
-
-        Kept as a flag of its own rather than asking the widget: a child of a
-        window that has not been shown is never "visible" as far as Qt is
-        concerned, and whether the list is offering anything is not the same
-        question as whether pixels are on a screen.
-        """
-        return self._completing and self._completions is not None
-
-    def hide_completions(self) -> None:
-        self._completing = False
-        self._live_timer = None
-        if self._completions is not None:
-            self._completions.hide()
-
-    def move_completion(self, step: int) -> None:
-        popup = self._completions
-        if not self.completions_showing() or not popup.count():
-            return
-        popup.setCurrentRow((popup.currentRow() + step) % popup.count())
-
-    def wrap_the_selection(self, typed: str) -> bool:
-        """A bracket or a slash typed over a selected expression works on it.
-
-        Selecting part of an equation and typing "(" used to replace it with a
-        bracket, which is what a plain text box does and is never what was
-        meant: the whole point of picking an expression out is to do something
-        to it. An opening bracket now wraps what is selected, and a slash
-        makes it the numerator of a fraction with the caret waiting in the
-        denominator.
-
-        Anything with an operator in it is bracketed on the way into a
-        numerator, because "a+b" over "c" is not "a" plus "b/c".
-        """
-        if typed not in ("(", "/"):
-            return False
-        item = self._editing_item
-        if not isinstance(item, MathItem):
-            return False
-        editor = getattr(item, "_editor", None)
-        if editor is None:
-            return False
-        cursor = editor.textCursor()
-        chosen = cursor.selectedText().replace("\u2029", "\n")
-        if not chosen.strip():
-            return False
-        if typed == "(":
-            replacement, caret_back = f"({chosen})", 1
-        else:
-            inner = chosen.strip()
-            atom = re.fullmatch(r"[A-Za-z_]\w*|\d+(?:\.\d+)?", inner)
-            numerator = inner if atom or _already_bracketed(inner) else f"({inner})"
-            replacement, caret_back = f"{numerator}/", 0
-        cursor.insertText(replacement)
-        if caret_back:
-            cursor.setPosition(cursor.position() - caret_back)
-        editor.setTextCursor(cursor)
-        self.hide_completions()
-        return True
-
-    def accept_completion(self) -> bool:
-        """Put the highlighted word in, in place of what was being typed."""
-        popup = self._completions
-        if not self.completions_showing() or popup.currentItem() is None:
-            return False
-        chosen = popup.currentItem().text()
-        word, start = self.completion_word()
-        item = self._editing_item
-        editor = getattr(item, "_editor", None) if item is not None else None
-        if editor is None:
-            return False
-        cursor = editor.textCursor()
-        cursor.setPosition(start)
-        cursor.setPosition(start + len(word), QTextCursor.KeepAnchor)
-        cursor.insertText(chosen)
-        editor.setTextCursor(cursor)
-        self.hide_completions()
-        self.statusMessage.emit(f"{chosen} — Tab accepted it")
-        return True
-
-    def _open_next_line(self) -> None:
-        """Enter in a one-line calculation opens the next one just below it."""
-        item = self._editing_item
-        if not isinstance(item, MathItem):
-            return
-        origin = QPointF(item.pos())
-        # Commit first: the region only knows how tall it is once what was typed
-        # into it has been laid out, and a tall fraction needs more room below.
-        self.end_item_edit()
-        height = item.local_rect().height() if item.scene() is not None else 0.0
-        below = origin + QPointF(0, max(height, self.style_line_height(item)) + LINE_STEP)
-        self.begin_snapshot(self.involved_frames(item))
-        following = MathItem("")
-        following.style = item.style.copy()
-        following.digits = item.digits
-        following.number_format = item.number_format
-        following.show_definition_results = item.show_definition_results
-        following.show_comments = item.show_comments
-        following.author = item.author
-        following.layer = item.layer
-        frame = item.parentItem() or self.frame()
-        frame.add_markup(following, self.snap(below))
-        self.scene().clearSelection()
-        following.setSelected(True)
-        self.commit_snapshot("Add calculation")
-        self.begin_item_edit(following)
 
     def end_item_edit(self) -> None:
-        self.hide_completions()
-        if self._live_timer is not None:
-            self._live_timer.stop()
         item = getattr(self, "_editing_item", None)
         if item is None:
             return
         self._editing_item = None
-        if isinstance(item, MathItem):
-            # Last chance for a line that turned out to be a sentence. While it
-            # was being typed one word and a space could still have been a
-            # variable waiting for its ":=", so it was left alone; now that the
-            # caret has gone it plainly was not.
-            if item.looks_like_words() or item.reads_as_a_sentence():
-                item.end_edit()
-                self.turn_into_words(item)
-                self.commit_snapshot("Write a note")
-                self.documentEdited.emit()
-                return
-            item.end_edit()
-            # It was a calculation when the caret left, so it is one now.
-            # Opening it again is editing an existing equation, which is its
-            # own state: a space there is refused, not taken as proof that the
-            # line was a sentence all along. Only a line still being entered
-            # for the first time can turn into words.
-            item.started_by_typing = False
-            self.window.recalculate()
-        else:
-            item.end_edit()
-        # A region left completely empty is an invisible click target; drop it.
+        item.end_edit()
+        # A text box left completely empty is an invisible click target; drop it.
         if self._is_empty(item):
             detach(item)
-            self.window.recalculate()
         self.commit_snapshot("Edit text")
         self.documentEdited.emit()
 
     @staticmethod
     def _is_empty(item) -> bool:
-        if isinstance(item, MathItem):
-            return not item.source.strip()
         if isinstance(item, CalloutItem):
             # A callout points at something, so it says something even before
             # a word is typed in it. Dropping it the moment the pointer left
@@ -3615,116 +2955,8 @@ class PageView(QGraphicsView):
             editor.setTextCursor(cursor)
         return True
 
-    def insert_symbol(self, text: str) -> bool:
-        """Type a maths symbol into whatever is being edited; False if nothing is.
 
-        A symbol that opens a bracket — the root sign — brings its closing
-        bracket with it and leaves the caret between the two, because
-        ``√(`` on its own is a syntax error waiting to happen.
-        """
-        closing = ")" if text.endswith("(") else ""
-        item = self._editing_item
-        editor = getattr(item, "_editor", None) if item is not None else None
-        if editor is not None:
-            cursor = editor.textCursor()
-            cursor.insertText(text + closing)
-            if closing:
-                cursor.movePosition(QTextCursor.Left, QTextCursor.MoveAnchor,
-                                    len(closing))
-            editor.setTextCursor(cursor)
-            return True
-        if self._cell_editor is not None:
-            self._cell_editor.insert(text + closing)
-            if closing:
-                self._cell_editor.setCursorPosition(
-                    self._cell_editor.cursorPosition() - len(closing))
-            return True
-        return False
 
-    # ------------------------------------------------------------------
-    # the unit a result is shown in
-    # ------------------------------------------------------------------
-    def open_unit_editor(self, item: MathItem, index: int) -> bool:
-        """Type the unit a printed result should be shown in, SMath-style.
-
-        The box opens over the answer itself, offering the units it could be
-        converted to and the names already defined, so the unit can be picked
-        with the arrow keys rather than remembered.
-        """
-        if item.locked or not (0 <= index < len(item.rows)):
-            return False
-        self.close_unit_editor(commit=False)
-        rect = item.result_rect(index)
-        if rect.isEmpty():
-            return False
-        editor = QLineEdit()
-        editor.setText(item.display_unit_of(index))
-        font = item.style.font()
-        editor.setCompleter(self._unit_completer(editor))
-        proxy = self.scene().addWidget(editor)
-        editor.setStyleSheet(
-            "QLineEdit { border: 2px solid #1971c2; background: #ffffff; "
-            f"color: #1246a0; padding: 0 2px; font-size: "
-            f"{max(item.style.font_size, 6.0):g}px; }}")
-        editor.setFont(font)
-        proxy.setZValue(10_000)
-        proxy.setPos(item.mapToScene(rect.topLeft()))
-        editor.setFixedSize(int(max(rect.width() + 24, 80)), int(max(rect.height(), 16)))
-        editor.selectAll()
-        editor.setFocus(Qt.OtherFocusReason)
-        editor.returnPressed.connect(lambda: self.close_unit_editor(commit=True))
-        self._unit_editor = editor
-        self._unit_proxy = proxy
-        self._unit_target = (item, index)
-        self.statusMessage.emit(
-            "Type the unit to show this result in — Enter to accept, "
-            "Esc to leave it alone, empty to let it choose")
-        return True
-
-    def _unit_completer(self, parent) -> QCompleter:
-        """Units to convert to, and the names this document already knows."""
-        from ..core.units import UNIT_MENU
-
-        words: list[str] = []
-        for group in UNIT_MENU.values():
-            words += [unit for unit in group if unit not in words]
-        workspace = self.window.document.workspace
-        words += sorted(set(workspace.variables) | set(workspace.functions))
-        completer = QCompleter(words, parent)
-        completer.setCaseSensitivity(Qt.CaseSensitive)
-        completer.setCompletionMode(QCompleter.PopupCompletion)
-        completer.setFilterMode(Qt.MatchStartsWith)
-        return completer
-
-    def close_unit_editor(self, commit: bool = True) -> None:
-        if self._unit_editor is None:
-            return
-        text = self._unit_editor.text().strip()
-        item, index = self._unit_target
-        proxy = self._unit_proxy
-        self._unit_editor = None
-        self._unit_proxy = None
-        self._unit_target = (None, -1)
-        if proxy is not None:
-            widget = proxy.widget()
-            if widget is not None:
-                widget.clearFocus()
-            proxy.clearFocus()
-            if proxy.scene() is not None:
-                proxy.scene().removeItem(proxy)
-            proxy.deleteLater()
-        if not commit or item is None:
-            return
-        if text and not _is_a_unit(text):
-            self.statusMessage.emit(f"“{text}” is not a unit I know")
-            return
-        self.begin_snapshot(self.involved_frames(item))
-        if item.set_display_unit(index, text):
-            self.window.recalculate()
-            self.commit_snapshot("Change result unit")
-            self.statusMessage.emit(f"Result shown in {text}" if text
-                                    else "Result shown in the unit it reads best in")
-        self.setFocus(Qt.OtherFocusReason)
 
     def group_of(self, item) -> list:
         """Everything grouped with *item* — itself alone when it is not grouped.
@@ -3842,331 +3074,26 @@ class PageView(QGraphicsView):
     # ------------------------------------------------------------------
     # spreadsheet interaction
     # ------------------------------------------------------------------
-    def activate_table(self, table: TableItem) -> None:
-        if self.active_table is table:
-            return
-        self.deactivate_table()
-        self.active_table = table
-        table.set_chrome(True)
-        self.scene().clearSelection()
-        table.setSelected(True)
-        self.cellChanged.emit(table)
-        self.statusMessage.emit(
-            "Spreadsheet: type to edit · Enter/Tab to move · Ctrl+D fills down · Esc to leave")
 
-    def deactivate_table(self) -> None:
-        self.close_cell_editor()
-        if self.active_table is not None:
-            self.active_table.set_chrome(False)
-            self.active_table = None
-            self.cellChanged.emit(None)
 
-    def open_cell_editor(self, initial: Optional[str] = None) -> None:
-        table = self.active_table
-        if table is None or table.locked:
-            return
-        self.close_cell_editor()
-        row, col = table.current
-        self.begin_snapshot()
-        editor = QLineEdit()
-        editor.setText(initial if initial is not None else table.sheet.raw(row, col))
-        # The editor sits on the paper, so it takes the paper's colours rather
-        # than the interface's: black on white whatever theme the window is in.
-        # Left to the palette, dark mode would put white text on white paper.
-        editor.setStyleSheet(
-            "QLineEdit { border: 2px solid #1971c2; background: #ffffff; "
-            "color: #111318; selection-background-color: #a5d8ff; "
-            "selection-color: #111318; padding: 0 2px; }")
-        # And it lines up the way the cell does — a number stays on the right
-        # while it is being typed, rather than jumping across on Enter.
-        editor.setAlignment(table.editor_alignment(row, col, editor.text()))
-        font = table.style.font()
-        cell_size = table.cell_format(row, col).font_size
-        font.setPointSizeF(max(cell_size if cell_size is not None
-                               else table.style.font_size, 6.0))
-        editor.setFont(font)
-        proxy = self.scene().addWidget(editor)
-        proxy.setZValue(10_000)
-        rect = table.cell_rect(row, col)
-        proxy.setGeometry(QRectF(table.mapToScene(rect.topLeft()),
-                                 rect.size().expandedTo(rect.size())))
-        proxy.setPos(table.mapToScene(rect.topLeft()))
-        editor.setFixedSize(int(max(rect.width(), 60)), int(max(rect.height(), 16)))
-        editor.selectAll() if initial is None else editor.setCursorPosition(len(editor.text()))
-        editor.setFocus(Qt.OtherFocusReason)
-        editor.returnPressed.connect(lambda: self.close_cell_editor(move=(1, 0)))
-        editor.textEdited.connect(self._typed_in_cell)
-        self._cell_editor = editor
-        self._cell_proxy = proxy
-        self._editing_cell = (row, col)
-        self.stop_pointing()
 
-    def _typed_in_cell(self, _text: str) -> None:
-        """Anything typed by hand ends the reference the arrows were building."""
-        if self._point_span is not None:
-            self.stop_pointing()
-
-    # -- pointing at cells while writing a formula -------------------------
-    #
-    # After "=" — and after every operator, bracket and comma in the formula —
-    # a reference can go next. While that is true the arrow keys and the
-    # pointer stop moving the cursor and start choosing the cell to refer to,
-    # which is how a formula gets written in every spreadsheet.
     POINTABLE = "=+-*/^(,:<>&%"
 
-    def pointing_allowed(self) -> bool:
-        """True when what is being typed is a formula waiting for a reference."""
-        editor = self._cell_editor
-        if editor is None:
-            return False
-        text = editor.text()
-        if not text.startswith("="):
-            return False
-        if self._point_span is not None:
-            return True
-        before = text[:editor.cursorPosition()].rstrip()
-        return bool(before) and before[-1] in self.POINTABLE
 
-    def point_at(self, row: int, col: int) -> None:
-        """Put a reference to that cell into the formula being typed."""
-        editor = self._cell_editor
-        table = self.active_table
-        if editor is None or table is None:
-            return
-        row = max(0, min(row, table.sheet.rows - 1))
-        col = max(0, min(col, table.sheet.cols - 1))
-        reference = make_ref(row, col)
-        text = editor.text()
-        start = end = editor.cursorPosition()
-        if self._point_span is not None:
-            first, last = self._point_span
-            # Only replace what is still the reference this put there; if the
-            # text has moved on underneath, the new one is inserted instead.
-            if 0 <= first <= last <= len(text) and _looks_like_a_ref(text[first:last]):
-                start, end = first, last
-        editor.setText(text[:start] + reference + text[end:])
-        editor.setCursorPosition(start + len(reference))
-        self._point_span = (start, start + len(reference))
-        self._pointing = (row, col)
-        table.pointing = (row, col)
-        table.update()
 
     def stop_pointing(self) -> None:
         """The reference is finished; the arrows go back to moving the caret."""
         self._point_span = None
         self._pointing = None
-        if self.active_table is not None:
-            self.active_table.pointing = None
-            self.active_table.update()
 
-    def close_cell_editor(self, commit: bool = True,
-                          move: Optional[tuple[int, int]] = None) -> None:
-        if self._cell_editor is None:
-            return
-        text = self._cell_editor.text()
-        self.stop_pointing()
-        cell = self._editing_cell
-        proxy = self._cell_proxy
-        self._cell_editor = None
-        self._cell_proxy = None
-        self._editing_cell = None
-        if proxy is not None:
-            # Focus must leave the proxy before it is removed, otherwise Qt
-            # spins trying to hand focus on to a widget that is going away.
-            widget = proxy.widget()
-            if widget is not None:
-                widget.clearFocus()
-            proxy.clearFocus()
-            if proxy.scene() is not None:
-                proxy.scene().removeItem(proxy)
-            proxy.deleteLater()
-        if commit and cell is not None and self.active_table is not None:
-            table = self.active_table
-            if table.sheet.raw(*cell) != text:
-                table.set_cell(cell[0], cell[1], text)
-                self.window.recalculate()
-                self.commit_snapshot("Edit cell")
-            if move:
-                table.move_current(*move)
-                self.cellChanged.emit(table)
-        self.setFocus(Qt.OtherFocusReason)
 
-    def _apply_fill(self) -> None:
-        table = self.active_table
-        if table is None or self._fill_origin is None:
-            return
-        source = self._fill_origin
-        self._fill_origin = None
-        target = table.selection()
-        if target == source:
-            return
-        filled = table.sheet.fill_series(source, target)
-        if filled:
-            self.window.recalculate()
-            self.commit_snapshot("Fill")
-            self.cellChanged.emit(table)
-            self.statusMessage.emit(f"Filled {filled} cell(s)")
 
-    # -- cell clipboard ----------------------------------------------------
-    def copy_cells(self) -> bool:
-        """Copy the selected cells as TSV, plus a full-fidelity private copy."""
-        table = self.active_table
-        if table is None:
-            return False
-        r0, c0, r1, c1 = table.selection()
-        mime = QMimeData()
-        mime.setText(table.sheet.region_text(r0, c0, r1, c1, raw=True))
-        mime.setData(CELLS_MIME, json.dumps(
-            table.sheet.region_payload(r0, c0, r1, c1)).encode("utf-8"))
-        QApplication.clipboard().setMimeData(mime)
-        count = (r1 - r0 + 1) * (c1 - c0 + 1)
-        self.statusMessage.emit(f"Copied {count} cell(s)")
-        return True
 
-    def cut_cells(self) -> bool:
-        table = self.active_table
-        if table is None or not self.copy_cells():
-            return False
-        self.begin_snapshot()
-        for row, col in table.selected_cells():
-            table.sheet.set_raw(row, col, "")
-        self.window.recalculate()
-        self.commit_snapshot("Cut cells")
-        return True
 
-    def clipboard_cell_size(self) -> tuple[int, int]:
-        """How many rows and columns are on the clipboard, spreadsheet-wise."""
-        mime = QApplication.clipboard().mimeData()
-        rows: list = []
-        if mime.hasFormat(CELLS_MIME):
-            try:
-                rows = json.loads(
-                    bytes(mime.data(CELLS_MIME)).decode("utf-8")).get("rows", [])
-            except ValueError:
-                rows = []
-        if not rows:
-            rows = parse_clipboard_grid(mime.text())
-        return len(rows), max((len(line) for line in rows), default=0)
 
-    def clipboard_is_a_block(self) -> bool:
-        """True when the clipboard holds more than the one cell."""
-        height, width = self.clipboard_cell_size()
-        return height > 1 or width > 1
 
-    def paste_cells(self) -> bool:
-        """Paste into the active table, from CalcForge or from a spreadsheet."""
-        table = self.active_table
-        if table is None or table.locked:
-            return False
-        # A block of cells is a block wherever the reader happens to be: if a
-        # cell is open for editing it is abandoned, not filled with the lot.
-        if self._cell_editor is not None:
-            if not self.clipboard_is_a_block():
-                return False
-            self.close_cell_editor(commit=False)
-        mime = QApplication.clipboard().mimeData()
-        row, col = table.current
-        self.begin_snapshot()
-        if mime.hasFormat(CELLS_MIME):
-            try:
-                payload = json.loads(bytes(mime.data(CELLS_MIME)).decode("utf-8"))
-            except ValueError:
-                payload = None
-            if payload:
-                height = len(payload.get("rows", []))
-                width = max((len(line) for line in payload.get("rows", [])), default=0)
-                table.sheet.grow_to_fit(row, col, height, width)
-                table.sheet.paste_payload(payload, row, col)
-                self._finish_paste(table, row, col, height, width)
-                return True
-        grid = self._excel_formulas(mime, row, col)
-        if grid is not None:
-            # Excel's own flavour, which carries the formulas. The plain text
-            # beside it holds only what the cells looked like, so pasting a
-            # column of subtotals used to bring numbers where it should have
-            # brought the sums.
-            height = len(grid)
-            width = max((len(line) for line in grid), default=0)
-            table.sheet.grow_to_fit(row, col, height, width)
-            for down, line in enumerate(grid):
-                for across, value in enumerate(line):
-                    if row + down < table.sheet.rows and col + across < table.sheet.cols:
-                        table.sheet.set_raw(row + down, col + across, value)
-            self._finish_paste(table, row, col, height, width)
-            return True
-        text = mime.text()
-        if not text:
-            return False
-        lines = text.replace("\r\n", "\n").split("\n")
-        table.sheet.grow_to_fit(row, col, len(lines),
-                                max((len(l.split("\t")) for l in lines), default=1))
-        height, width = table.sheet.paste_text(text, row, col)
-        self._finish_paste(table, row, col, height, width)
-        return True
 
-    @staticmethod
-    def _excel_formulas(mime, row: int, col: int):
-        """The clipboard read as Excel's XML, if it put any there.
 
-        Nothing when it did not — copying out of a text editor, or out of a
-        spreadsheet that only offers plain text — and the paste falls back to
-        the values, which is all there is to have.
-        """
-        from ..core import excelxml
-
-        for flavour in mime.formats():
-            if "XML Spreadsheet" not in flavour and "spreadsheet" not in flavour.lower():
-                continue
-            try:
-                text = bytes(mime.data(flavour)).decode("utf-8", "replace")
-            except (TypeError, ValueError):
-                continue
-            text = text.split("\x00", 1)[0]
-            if not excelxml.looks_like_excel_xml(text):
-                continue
-            grid = excelxml.parse(text, row, col)
-            if grid:
-                return grid
-        return None
-
-    def _finish_paste(self, table, row: int, col: int, height: int, width: int) -> None:
-        table.anchor = (min(row + max(height, 1) - 1, table.sheet.rows - 1),
-                        min(col + max(width, 1) - 1, table.sheet.cols - 1))
-        table.prepareGeometryChange()
-        self.window.recalculate()
-        self.commit_snapshot("Paste cells")
-        self.cellChanged.emit(table)
-        self.statusMessage.emit(f"Pasted {height}×{width} cell(s)")
-
-    def fill_down(self) -> None:
-        table = self.active_table
-        if table is None:
-            return
-        r0, c0, r1, c1 = table.selection()
-        if r1 <= r0:
-            return
-        self.begin_snapshot()
-        for col in range(c0, c1 + 1):
-            table.sheet.fill((r0, col), [(row, col) for row in range(r0 + 1, r1 + 1)])
-        self.window.recalculate()
-        self.commit_snapshot("Fill down")
-
-    def fill_right(self) -> None:
-        table = self.active_table
-        if table is None:
-            return
-        r0, c0, r1, c1 = table.selection()
-        if c1 <= c0:
-            return
-        self.begin_snapshot()
-        for row in range(r0, r1 + 1):
-            table.sheet.fill((row, c0), [(row, col) for col in range(c0 + 1, c1 + 1)])
-        self.window.recalculate()
-        self.commit_snapshot("Fill right")
-
-    # ------------------------------------------------------------------
-    # keyboard
-    # ------------------------------------------------------------------
     def busy_typing(self) -> bool:
         """True while words are being typed into something on the page.
 
@@ -4174,8 +3101,7 @@ class PageView(QGraphicsView):
         sentence is being written: Ctrl+B belongs to the text under the caret,
         not to the bookmarks.
         """
-        return (self._editing_item is not None or self.active_table is not None
-                or self._cell_editor is not None or self._unit_editor is not None
+        return (self._editing_item is not None
                 or getattr(self, "_label_editor", None) is not None)
 
     def idle_on_canvas(self) -> bool:
@@ -4187,8 +3113,7 @@ class PageView(QGraphicsView):
         """
         quiet = self._mode == "idle" or (self._mode == "lasso"
                                          and len(self._marquee) <= 2)
-        return (self._editing_item is None and self.active_table is None
-                and self._cell_editor is None and quiet
+        return (self._editing_item is None and quiet
                 and self.tool_key in ("select", "pan"))
 
     def pointer_scene_pos(self) -> QPointF:
@@ -4648,13 +3573,12 @@ class PageView(QGraphicsView):
         out: all of them need a key press to finish or to cancel, and all of
         them are stranded if the keyboard is somewhere else.
 
-        An open calculation counts too. A click on a toolbar button or a panel
-        takes the keyboard with it, and the caret is still sitting in the
-        expression — so Backspace, Escape, "=" and Enter all went to whatever
-        was clicked and looked like keys that had simply stopped working.
+        Words being typed count too. A click on a toolbar button or a panel
+        takes the keyboard with it while the caret is still in the text — so
+        Backspace, Escape and Enter all went to whatever was clicked and
+        looked like keys that had simply stopped working.
         """
         return (self._editing_item is not None
-                or self._cell_editor is not None
                 or self._pending_anchor is not None
                 or self._pending_cloud is not None
                 or self._pending_cloud_leader is not None
@@ -4686,7 +3610,7 @@ class PageView(QGraphicsView):
         """
         if event.type() == QEvent.KeyPress and event.key() in (Qt.Key_Tab,
                                                                Qt.Key_Backtab):
-            if self._editing_item is not None or self._cell_editor is not None:
+            if self._editing_item is not None:
                 event.accept()
                 self.keyPressEvent(event)
                 if event.isAccepted():
@@ -4726,17 +3650,8 @@ class PageView(QGraphicsView):
             # What the pointer would do has just changed under it.
             self._update_hover_cursor(self._last_scene_pos)
 
-        # While a region or a cell is being edited every key belongs to it —
-        # arrows move the caret, not the markup — apart from Escape, which
-        # finishes the edit.
-        if self._unit_editor is not None:
-            if key == Qt.Key_Escape:
-                self.close_unit_editor(commit=False)
-                event.accept()
-                return
-            super().keyPressEvent(event)
-            return
-
+        # While words are being typed every key belongs to them — arrows move
+        # the caret, not the markup — apart from Escape, which finishes it.
         if self._label_editor is not None:
             if key == Qt.Key_Escape:
                 self.close_label_editor(commit=False)
@@ -4745,39 +3660,7 @@ class PageView(QGraphicsView):
             super().keyPressEvent(event)
             return
 
-        if self._editing_item is not None and self._cell_editor is None:
-            # The completion list takes the keys that drive it, and nothing
-            # else: everything it does not use goes on to the text.
-            if self.completions_showing():
-                # Escape is deliberately not in this list. It used to put the
-                # list away and stop there, which meant the first Escape out of
-                # a calculation did nothing anybody could see — the list is
-                # small, it is offered unasked, and half the time it is not
-                # even being looked at. Escape means the same thing everywhere:
-                # out, in one press, list and all.
-                if key in (Qt.Key_Tab, Qt.Key_Backtab):
-                    if self.accept_completion():
-                        event.accept()
-                        return
-                if key in (Qt.Key_Down, Qt.Key_Up):
-                    self.move_completion(1 if key == Qt.Key_Down else -1)
-                    event.accept()
-                    return
-            elif key in (Qt.Key_Tab, Qt.Key_Backtab):
-                # Tab with nothing offered asks for the list.
-                self.show_completions()
-                if self.completions_showing() and self.accept_completion():
-                    event.accept()
-                    return
-                # Nothing matched. Tab still does not belong in an equation:
-                # letting it through typed a literal tab character into the
-                # source, so "300zzq" became "300zzq\t" and the line stopped
-                # parsing for a reason nothing on screen explained.
-                event.accept()
-                self.statusMessage.emit("Nothing to complete")
-                return
-
-        if self._editing_item is not None or self._cell_editor is not None:
+        if self._editing_item is not None:
             self.give_the_keys_back_to_the_caret()
             if key == Qt.Key_Escape:
                 # All the way back, not just out of the words: this branch
@@ -4787,61 +3670,6 @@ class PageView(QGraphicsView):
                 self.escape_everything()
                 event.accept()
                 return
-            # Pasting a block of cells into an open cell would put the whole
-            # sheet into that one box. It goes across the cells instead; a
-            # single cell still pastes into the text being typed.
-            if (self._cell_editor is not None and key == Qt.Key_V
-                    and modifiers & Qt.ControlModifier
-                    and self.clipboard_is_a_block()):
-                self.paste_cells()
-                event.accept()
-                return
-            # An arrow key in the middle of a formula chooses the cell to refer
-            # to rather than moving the caret, the way it does in Excel.
-            arrows = {Qt.Key_Left: (0, -1), Qt.Key_Right: (0, 1),
-                      Qt.Key_Up: (-1, 0), Qt.Key_Down: (1, 0)}
-            if (self._cell_editor is not None and key in arrows
-                    and not (modifiers & Qt.ControlModifier)
-                    and self.pointing_allowed()):
-                start = self._pointing or self._editing_cell or (0, 0)
-                step = arrows[key]
-                self.point_at(start[0] + step[0], start[1] + step[1])
-                event.accept()
-                return
-            # Typing a value and pressing an arrow puts it in and moves on,
-            # which is how a column of numbers gets entered in Excel.
-            if (self._cell_editor is not None and key in (Qt.Key_Up, Qt.Key_Down)
-                    and not (modifiers & Qt.ControlModifier)):
-                self.close_cell_editor(move=(-1 if key == Qt.Key_Up else 1, 0))
-                event.accept()
-                return
-            if self._cell_editor is not None and key in (Qt.Key_Tab, Qt.Key_Backtab):
-                self.close_cell_editor(move=(0, -1 if key == Qt.Key_Backtab else 1))
-                event.accept()
-                return
-            if (self._cell_editor is None
-                    and self.wrap_the_selection(event.text())):
-                event.accept()
-                return
-            super().keyPressEvent(event)
-            if self._editing_item is not None and self._cell_editor is None:
-                if event.text() == "(":
-                    editor = getattr(self._editing_item, "_editor", None)
-                    text = editor.toPlainText() if editor is not None else ""
-                    at = editor.textCursor().position() - 1 if editor is not None else 0
-                    match = re.search(r"[A-Za-z_]\w*$", text[:max(at, 0)])
-                    if match:
-                        from ..core.functions import FUNCTIONS, function_help
-                        name = match.group(0)
-                        if name in FUNCTIONS:
-                            self.statusMessage.emit(function_help(name))
-                if ((event.text().isalnum() or event.text() == "_")
-                        and self.completion_allowed()):
-                    self.show_completions()
-                elif key in (Qt.Key_Backspace, Qt.Key_Delete):
-                    self.show_completions()
-                else:
-                    self.hide_completions()
             return
 
         if key == Qt.Key_Space and not event.isAutoRepeat():
@@ -4854,10 +3682,6 @@ class PageView(QGraphicsView):
             self.escape_everything()
             event.accept()
             return
-
-        if self.active_table is not None and self._cell_editor is None:
-            if self._table_key(event):
-                return
 
         if key in (Qt.Key_Return, Qt.Key_Enter) and self._mode == "draw_poly":
             self.finish_poly()
@@ -4875,7 +3699,7 @@ class PageView(QGraphicsView):
             return
 
         # A bare keystroke on the canvas only does something if it is bound:
-        # '"' starts a calculation-or-text entry; tool keys pick their tool.
+        # '"' starts typing a text box; tool keys pick their tool.
         if self.idle_on_canvas():
             # The number keys reach for My Tools, before anything else is
             # asked about the keystroke: 1 to 9 are the first nine things in it.
@@ -5029,60 +3853,6 @@ class PageView(QGraphicsView):
         frame = self.frame()
         return frame.page.height_pt * self._zoom if frame is not None else 0.0
 
-    def _table_key(self, event: QKeyEvent) -> bool:
-        table = self.active_table
-        key = event.key()
-        modifiers = event.modifiers()
-        extend = bool(modifiers & Qt.ShiftModifier)
-        moves = {Qt.Key_Left: (0, -1), Qt.Key_Right: (0, 1), Qt.Key_Up: (-1, 0),
-                 Qt.Key_Down: (1, 0)}
-        if key in moves:
-            table.move_current(*moves[key], extend=extend)
-            self.cellChanged.emit(table)
-            event.accept()
-            return True
-        if key == Qt.Key_Tab:
-            table.move_current(0, 1)
-            self.cellChanged.emit(table)
-            event.accept()
-            return True
-        if key == Qt.Key_Backtab:
-            table.move_current(0, -1)
-            self.cellChanged.emit(table)
-            event.accept()
-            return True
-        if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_F2):
-            self.open_cell_editor()
-            event.accept()
-            return True
-        if key in (Qt.Key_Delete, Qt.Key_Backspace):
-            self.begin_snapshot()
-            for row, col in table.selected_cells():
-                table.sheet.set_raw(row, col, "")
-            self.window.recalculate()
-            self.commit_snapshot("Clear cells")
-            event.accept()
-            return True
-        if key == Qt.Key_D and modifiers & Qt.ControlModifier:
-            self.fill_down()
-            event.accept()
-            return True
-        if key == Qt.Key_R and modifiers & Qt.ControlModifier:
-            self.fill_right()
-            event.accept()
-            return True
-        if key == Qt.Key_Home:
-            table.current = table.anchor = (0, 0)
-            table.update()
-            self.cellChanged.emit(table)
-            event.accept()
-            return True
-        text = event.text()
-        if text and text.isprintable() and not (modifiers & Qt.ControlModifier):
-            self.open_cell_editor(initial=text)
-            event.accept()
-            return True
-        return False
 
     def keyReleaseEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key_Control:
@@ -5135,17 +3905,8 @@ class PageView(QGraphicsView):
         menu.exec(event.globalPos())
 
 
-def _looks_like_a_ref(text: str) -> bool:
-    """A1, or BC24 — what point_at writes into a formula."""
-    return bool(re.fullmatch(r"[A-Z]{1,3}\d{1,5}", text))
 
 
-def _is_a_unit(text: str) -> bool:
-    """True when pint can make sense of what was typed."""
-    try:
-        return parse_unit(text) is not None
-    except Exception:                        # noqa: BLE001 - anything pint throws
-        return False
 
 
 def _far_enough(a: QPointF, b: QPointF) -> bool:

@@ -149,7 +149,6 @@ class PageFrame(QGraphicsObject):
         super().__init__()
         self.page = page
         self.document = document
-        self.workspace = document.workspace
         self._background: Optional[QPixmap] = None
         # The part of the page drawn from the source PDF at the size it is
         # being looked at, and where it belongs. A page imported from a PDF
@@ -483,7 +482,7 @@ class PageFrame(QGraphicsObject):
         if hasattr(item, "load_from_document"):
             item.load_from_document(self.document)
         item.setParentItem(self)
-        item.refresh(self.workspace, self.page)
+        item.refresh(page=self.page)
         self.itemsChanged.emit()
         return item
 
@@ -515,15 +514,9 @@ class PageFrame(QGraphicsObject):
         self.itemsChanged.emit()
 
     def refresh_items(self) -> None:
-        """Re-evaluate this page's items against the shared workspace.
-
-        Only ever safe as part of a whole-document pass. On its own it
-        evaluates this page against a workspace that already holds the
-        definitions from the last pass, which turns every definition on the
-        page into a check — the window recalculates instead.
-        """
+        """Work out again what every markup on this page reads."""
         for item in self.ordered_markups():
-            item.refresh(self.workspace, self.page)
+            item.refresh(page=self.page)
 
     def apply_layers(self) -> None:
         """Hide and lock items according to the layer they sit on."""
@@ -720,7 +713,6 @@ class DocumentScene(QGraphicsScene):
     def __init__(self, document: Document):
         super().__init__()
         self.document = document
-        self.workspace = document.workspace
         # How far the pages are turned for reading, in degrees. A way of
         # looking at the document; nothing about the document itself.
         self.reading_turn = 0

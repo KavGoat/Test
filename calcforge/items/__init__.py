@@ -8,13 +8,10 @@ the kind of bug that only shows up in the one place nobody looked.
 """
 from . import base           # noqa: F401  the registry itself
 from . import contents       # noqa: F401
-from . import mathitem       # noqa: F401
 from . import measure        # noqa: F401
 from . import media          # noqa: F401
-from . import plotitem       # noqa: F401
 from . import shapes         # noqa: F401
 from . import snapshot       # noqa: F401
-from . import tableitem      # noqa: F401
 from . import text           # noqa: F401
 
 from .base import MarkupItem, Style, build_item   # noqa: F401

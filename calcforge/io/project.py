@@ -1,9 +1,8 @@
 """Opening and saving documents.
 
-A saved document is a PDF (see :mod:`calcforge.io.pdfbase`). ``.cfx`` names one
-that carries calculations; ``.pdf`` names one that does not. Both are the same
-kind of file, and documents written before that was true — a zip of JSON and
-assets — still open.
+A saved document is a PDF (see :mod:`calcforge.io.pdfbase`) — there is one
+format and that is it. Documents written before that was true, when this
+application kept a zip of JSON and assets of its own, still open.
 """
 from __future__ import annotations
 
@@ -15,42 +14,16 @@ from . import pdfbase
 
 DOCUMENT_ENTRY = pdfbase.DOCUMENT_ENTRY
 ASSET_PREFIX = pdfbase.ASSET_PREFIX
-EXTENSION = ".cfx"
-PLAIN_EXTENSION = ".pdf"
-FILTER = ("Documents (*.cfx *.pdf);;Documents with calculations (*.cfx);;"
-          "PDF documents (*.pdf);;All files (*)")
-
-
-def intended_extension(document) -> str:
-    """``.cfx`` once there is a calculation in it, ``.pdf`` while there is not."""
-    return EXTENSION if pdfbase.has_calculations(document) else PLAIN_EXTENSION
-
-
-def named_for_what_it_holds(document, path: str) -> str:
-    """*path* with the extension the document has earned.
-
-    A document with no calculations keeps whatever it is called — renaming
-    somebody's ``.cfx`` because they deleted the last calculation out of it
-    would be a surprise nobody asked for. A document that has gained one is
-    written as ``.cfx``, because there is now a layer in it that only ``.cfx``
-    promises is there.
-    """
-    stem, suffix = os.path.splitext(path)
-    known = suffix.lower() in (EXTENSION, PLAIN_EXTENSION)
-    wanted = intended_extension(document)
-    if not known:
-        return path + wanted
-    if wanted == EXTENSION and suffix.lower() != EXTENSION:
-        return stem + EXTENSION
-    return path
+EXTENSION = ".pdf"
+FILTER = "PDF documents (*.pdf);;All files (*)"
 
 
 def suggested_name(document) -> str:
-    """What Save-as should offer: the document's name, named for what it holds."""
+    """What Save-as should offer."""
     stem = document.title or "document"
     if document.path:
         stem = os.path.splitext(document.path)[0]
-    return stem + intended_extension(document)
+    return stem + EXTENSION
 
 
 def assets_in_use(document) -> set[str]:
@@ -77,17 +50,12 @@ def save_document(document, path: str, enforce_extension: bool = True,
                   appearance: bool = True) -> None:
     """Write *document* to *path* atomically, as a PDF.
 
-    The name follows what is in the document: a marked-up drawing set is a PDF
-    and keeps that name, and the moment there is a calculation in it the same
-    file is written as ``.cfx`` instead. Nothing about the bytes changes — the
-    name is only saying whether there is a calculation layer to come back to.
-
-    Recovery copies are written beside the document as ``….cfx.autosave``, so
+    Recovery copies are written beside the document as ``….pdf.autosave``, so
     they pass *enforce_extension* False to keep the name they were given, and
-    *appearance* False because nothing but CalcForge ever reads them.
+    *appearance* False because nothing but this application ever reads them.
     """
-    if enforce_extension:
-        path = named_for_what_it_holds(document, path)
+    if enforce_extension and not path.lower().endswith(EXTENSION):
+        path += EXTENSION
     document.prune_assets(assets_in_use(document))
     pdfbase.write(document, path, appearance=appearance)
     document.path = path
@@ -99,7 +67,7 @@ def load_document(document, path: str) -> None:
     if pdfbase.read(document, path):
         return
     if pdfbase.is_pdf(path):
-        raise OSError("That PDF holds no CalcForge document — open it instead")
+        raise OSError("That PDF was not written here — open it instead")
     _load_the_old_zip(document, path)
     document.path = path
     document.modified = False

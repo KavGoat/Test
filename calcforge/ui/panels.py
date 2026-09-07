@@ -1,4 +1,4 @@
-"""Dock panels: pages, markups list, variables, functions and properties."""
+"""Dock panels: pages, the markups list, layers, bookmarks and properties."""
 from __future__ import annotations
 
 import csv
@@ -20,12 +20,9 @@ from ..core.units import format_quantity
 from ..items.base import (ARROW_HEADS, DASH_ARRAYS, HATCH_PATTERNS,
                           LINE_STYLES, MarkupItem)
 from ..items.contents import ContentsItem
-from ..items.mathitem import MathItem
 from ..items.media import ImageItem
-from ..items.plotitem import PlotItem, Series
 from ..items.measure import CountItem, MeasureItem
 from ..items.shapes import PolyItem, RectItem
-from ..items.tableitem import TableItem
 from ..items.text import STAMP_PRESETS, CalloutItem, NoteItem, StampItem, TextItem
 from .icons import icon
 from .stylecaps import (DASH, FILL, FILL_OPACITY, HATCH, OPACITY, STROKE,
@@ -473,25 +470,7 @@ class MarkupsPanel(QWidget):
         QMessageBox.information(self, "Export markups", f"Saved {path}")
 
 
-def _set_series(item: PlotItem, text: str) -> None:
-    """Rebuild a plot's curves from one line of text per curve."""
-    series: list[Series] = []
-    for line in text.split("\n"):
-        line = line.strip()
-        if not line:
-            continue
-        expression, _, label = line.partition("|")
-        series.append(Series(expression.strip(), label.strip()))
-    item.series = series or [Series()]
-
-
 def _icon_for(item) -> str:
-    if isinstance(item, MathItem):
-        return "math"
-    if isinstance(item, TableItem):
-        return "table"
-    if isinstance(item, PlotItem):
-        return "plot"
     if isinstance(item, MeasureItem):
         return "measure_length"
     if isinstance(item, CountItem):
@@ -520,132 +499,6 @@ def _icon_for(item) -> str:
 def _is_cell_ref(text: str) -> bool:
     """A1, D2, or a range like A1:B4 — what a table records as an origin."""
     return bool(re.fullmatch(r"[A-Z]{1,3}\d{1,5}(:[A-Z]{1,3}\d{1,5})?|column [A-Z]{1,3}", text))
-
-
-class VariablesPanel(QWidget):
-    """Live view of every variable and function the document has defined."""
-
-    insertRequested = Signal(str)
-
-    def __init__(self, window):
-        super().__init__()
-        self.window = window
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(4)
-        self.filter = QLineEdit()
-        self.filter.setPlaceholderText("Filter variables…")
-        self.filter.setClearButtonEnabled(True)
-        self.filter.textChanged.connect(lambda _: self.rebuild(self.window.document.workspace))
-        layout.addWidget(self.filter)
-
-        self.table = QTableWidget(0, 3)
-        self.table.setHorizontalHeaderLabels(["Name", "Value", "Defined in"])
-        self.table.verticalHeader().setVisible(False)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setAlternatingRowColors(True)
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.Interactive)
-        header.setSectionResizeMode(1, QHeaderView.Stretch)
-        header.setSectionResizeMode(2, QHeaderView.Interactive)
-        self.table.setColumnWidth(0, 84)
-        self.table.setColumnWidth(2, 92)
-        self.table.setWordWrap(False)
-        self.table.itemDoubleClicked.connect(
-            lambda cell: self.insertRequested.emit(self.table.item(cell.row(), 0).text()))
-        layout.addWidget(self.table, 1)
-
-    def _block_locals(self) -> list[tuple[str, str, str]]:
-        """Values that live inside a self-contained block, shown for reference."""
-        rows: list[tuple[str, str, str]] = []
-        document = getattr(self.window, "document", None)
-        if document is None:
-            return rows
-        for page in document.pages:
-            if page.frame is None:
-                continue
-            for item in page.frame.ordered_markups():
-                locals_map = getattr(item, "local_values", None)
-                if not locals_map:
-                    continue
-                for name, info in sorted(locals_map.items(), key=lambda kv: kv[1].order):
-                    rows.append((name, format_quantity(info.value, 6),
-                                 f"{item.display_name()} · local"))
-        return rows
-
-    def rebuild(self, workspace) -> None:
-        needle = self.filter.text().strip().lower()
-        entries = []
-        for name, info in sorted(workspace.variables.items(), key=lambda kv: kv[1].order):
-            # A table cell says which cell it came from, so a published value
-            # can be traced back to the square it lives in.
-            where = info.source
-            if info.expression and _is_cell_ref(info.expression):
-                where = f"{where} · {info.expression}" if where else info.expression
-            entries.append((name, format_quantity(info.value, 6), where))
-        for name, function in sorted(workspace.functions.items()):
-            entries.append((function.signature(), function.source, ""))
-        for name, value, source in self._block_locals():
-            entries.append((name, value, source))
-        entries = [row for row in entries
-                   if not needle or any(needle in str(cell).lower() for cell in row)]
-        self.table.setRowCount(len(entries))
-        mono = QFont("Cascadia Mono")
-        mono.setFamilies(["Cascadia Mono", "Consolas", "DejaVu Sans Mono", "monospace"])
-        for row, (name, value, source) in enumerate(entries):
-            name_cell = QTableWidgetItem(name)
-            name_cell.setFont(mono)
-            self.table.setItem(row, 0, name_cell)
-            self.table.setItem(row, 1, QTableWidgetItem(value))
-            self.table.setItem(row, 2, QTableWidgetItem(source))
-
-
-class FunctionsPanel(QWidget):
-    """Searchable reference of the built-in function library."""
-
-    insertRequested = Signal(str)
-
-    def __init__(self):
-        super().__init__()
-        from ..core.functions import FUNCTIONS, function_help
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(4)
-        self.filter = QLineEdit()
-        self.filter.setPlaceholderText("Search functions…")
-        self.filter.setClearButtonEnabled(True)
-        layout.addWidget(self.filter)
-        self.list = QListWidget()
-        self.list.setAlternatingRowColors(True)
-        layout.addWidget(self.list, 1)
-        self.help = QLabel("Double-click a function to insert it.")
-        self.help.setWordWrap(True)
-        self.help.setStyleSheet("color:#4a5261; padding:3px;")
-        layout.addWidget(self.help)
-
-        self._entries = []
-        for name in sorted(FUNCTIONS):
-            self._entries.append((name, function_help(name)))
-        self.filter.textChanged.connect(self._rebuild)
-        self.list.currentRowChanged.connect(self._show_help)
-        self.list.itemDoubleClicked.connect(
-            lambda entry: self.insertRequested.emit(entry.text().split("(")[0] + "("))
-        self._rebuild("")
-
-    def _rebuild(self, needle: str) -> None:
-        needle = needle.strip().lower()
-        self.list.clear()
-        self._visible = [(name, help_text) for name, help_text in self._entries
-                         if not needle or needle in name.lower() or needle in help_text.lower()]
-        for name, help_text in self._visible:
-            entry = QListWidgetItem(name)
-            entry.setToolTip(help_text)
-            self.list.addItem(entry)
-
-    def _show_help(self, row: int) -> None:
-        if 0 <= row < len(self._visible):
-            self.help.setText(self._visible[row][1])
 
 
 # ---------------------------------------------------------------------------
@@ -1333,76 +1186,6 @@ class LayersPanel(QWidget):
 # Problems
 # ---------------------------------------------------------------------------
 
-class ProblemsPanel(QWidget):
-    """Everything in the document that did not evaluate, and where it lives."""
-
-    problemActivated = Signal(int, str)
-
-    COLUMNS = ["Page", "Kind", "Where", "Message", "Source"]
-
-    def __init__(self, window):
-        super().__init__()
-        self.window = window
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(4)
-
-        top = QHBoxLayout()
-        self.filter = QLineEdit()
-        self.filter.setPlaceholderText("Filter problems…")
-        self.filter.setClearButtonEnabled(True)
-        self.filter.textChanged.connect(lambda _: self.rebuild(self._problems))
-        top.addWidget(self.filter, 1)
-        self.summary = QLabel("")
-        self.summary.setStyleSheet("color:#a33; font-weight:600;")
-        top.addWidget(self.summary)
-        layout.addLayout(top)
-
-        self.table = QTableWidget(0, len(self.COLUMNS))
-        self.table.setHorizontalHeaderLabels(self.COLUMNS)
-        self.table.verticalHeader().setVisible(False)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setAlternatingRowColors(True)
-        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
-        self.table.itemDoubleClicked.connect(self._activate)
-        layout.addWidget(self.table, 1)
-
-        self.empty = QLabel("No problems — everything evaluated.")
-        self.empty.setStyleSheet("color:#3a7a4a; padding:4px;")
-        layout.addWidget(self.empty)
-        self._problems: list = []
-
-    def rebuild(self, problems: list) -> None:
-        from ..core.problems import summarise
-
-        self._problems = list(problems)
-        needle = self.filter.text().strip().lower()
-        rows = [p for p in self._problems
-                if not needle or needle in p.message.lower()
-                or needle in p.source.lower() or needle in p.label.lower()]
-        self.table.setRowCount(len(rows))
-        for index, problem in enumerate(rows):
-            cells = [str(problem.page + 1), problem.label, problem.where,
-                     problem.message, problem.source]
-            for column, text in enumerate(cells):
-                entry = QTableWidgetItem(text)
-                entry.setData(Qt.UserRole, (problem.page, problem.item_uid))
-                if column == 1:
-                    entry.setForeground(QColor("#b3261e"))
-                self.table.setItem(index, column, entry)
-        for column in (0, 1, 2):
-            self.table.resizeColumnToContents(column)
-        self.summary.setText(summarise(self._problems))
-        self.empty.setVisible(not self._problems)
-        self.table.setVisible(bool(self._problems))
-
-    def _activate(self, cell: QTableWidgetItem) -> None:
-        data = cell.data(Qt.UserRole)
-        if data:
-            self.problemActivated.emit(data[0], data[1])
-
-
 # ---------------------------------------------------------------------------
 # Properties
 # ---------------------------------------------------------------------------
@@ -1464,19 +1247,13 @@ class PropertiesPanel(QScrollArea):
         appearance = common_capabilities(self._items)
         if appearance - {"font"}:
             self._add_appearance(first, appearance)
-        if all(getattr(i, "HAS_TEXT", False) or isinstance(i, (StampItem, TableItem))
+        if all(getattr(i, "HAS_TEXT", False) or isinstance(i, StampItem)
                for i in self._items):
             self._add_text(first)
         if all(isinstance(i, (PolyItem, MeasureItem, CalloutItem)) for i in self._items):
             self._add_arrows(first)
         if len(self._items) == 1:
-            if isinstance(first, MathItem):
-                self._add_math(first)
-            elif isinstance(first, TableItem):
-                self._add_table(first)
-            elif isinstance(first, PlotItem):
-                self._add_plot(first)
-            elif isinstance(first, MeasureItem):
+            if isinstance(first, MeasureItem):
                 self._add_measure(first)
             elif isinstance(first, CountItem):
                 self._add_count(first)
@@ -1907,168 +1684,8 @@ class PropertiesPanel(QScrollArea):
             lambda value: self._slide(lambda i: setattr(i, "cloud_radius", value), "Cloud size"))
         form.addRow("Arc size", radius)
 
-    def _add_math(self, item: MathItem) -> None:
-        form = self._group("Calculation")
-        digits = QSpinBox()
-        digits.setRange(1, 12)
-        digits.setValue(item.digits)
-        digits.valueChanged.connect(
-            lambda value: self._slide(lambda i: (setattr(i, "digits", value), i.relayout()),
-                                      "Precision"))
-        digits.setToolTip("How many figures the answers on this calculation are shown to")
-        form.addRow("Figures", digits)
 
-        number_format = QComboBox()
-        number_format.addItems(["auto", "fixed", "scientific", "engineering"])
-        number_format.setCurrentText(item.number_format)
-        number_format.currentTextChanged.connect(
-            lambda value: self._apply(lambda i: (setattr(i, "number_format", value), i.relayout()),
-                                      "Number format"))
-        form.addRow("Number format", number_format)
 
-        for label, attribute in (("Show every line's result", "show_definition_results"),
-                                 ("Align results in a column", "align_results"),
-                                 ("Show comments", "show_comments")):
-            box = QCheckBox(label)
-            box.setChecked(getattr(item, attribute))
-            box.toggled.connect(
-                lambda on, a=attribute: self._apply(
-                    lambda i: (setattr(i, a, on), i.relayout()), "Calculation layout"))
-            form.addRow("", box)
-
-        if item.block:
-            scope = QCheckBox("Self-contained")
-            scope.setChecked(item.local_scope)
-            scope.setToolTip(
-                "Off by default. Keep this block's working names local while "
-                "still allowing it to read document values defined above.")
-            scope.toggled.connect(
-                lambda on: self._apply(
-                    lambda i: setattr(i, "local_scope", on), "Block scope"))
-            form.addRow("", scope)
-
-        edit = QPushButton("Edit")
-        edit.setToolTip("Edit this calculation")
-        edit.clicked.connect(lambda: self.window.view.begin_item_edit(item))
-        form.addRow("", edit)
-
-    def _add_table(self, item: TableItem) -> None:
-        form = self._group("Table")
-        title = QLineEdit(item.title)
-        title.textEdited.connect(
-            lambda value: self._apply(lambda i: setattr(i, "title", value), "Table title"))
-        form.addRow("Title", title)
-
-        rows = QSpinBox()
-        rows.setRange(1, 2000)
-        rows.setValue(item.sheet.rows)
-        rows.valueChanged.connect(
-            lambda value: self._slide(
-                lambda i: i.sheet.resize(value, i.sheet.cols), "Table size"))
-        form.addRow("Rows", rows)
-
-        cols = QSpinBox()
-        cols.setRange(1, 200)
-        cols.setValue(item.sheet.cols)
-        cols.valueChanged.connect(
-            lambda value: self._slide(
-                lambda i: i.sheet.resize(i.sheet.rows, value), "Table size"))
-        form.addRow("Columns", cols)
-
-        digits = QSpinBox()
-        digits.setRange(1, 12)
-        digits.setValue(item.sheet.digits)
-        digits.valueChanged.connect(
-            lambda value: self._slide(lambda i: setattr(i.sheet, "digits", value), "Precision"))
-        digits.setToolTip("How many figures the numbers in this table are shown to")
-        form.addRow("Figures", digits)
-
-        for label, attribute in (("Header row", "header_row"), ("Banded rows", "banded"),
-                                 ("Grid lines", "grid_lines")):
-            box = QCheckBox(label)
-            box.setChecked(getattr(item.sheet, attribute))
-            box.toggled.connect(
-                lambda on, a=attribute: self._apply(
-                    lambda i: setattr(i.sheet, a, on), "Table style"))
-            form.addRow("", box)
-
-        publish = QCheckBox("Publish columns as variables")
-        publish.setToolTip("Each column header becomes a variable holding that column's values")
-        publish.setChecked(item.publish_headers)
-        publish.toggled.connect(
-            lambda on: self._apply(lambda i: setattr(i, "publish_headers", on), "Publish columns"))
-        form.addRow("", publish)
-
-        name = QLineEdit(item.table_name)
-        # No ghost name in the box: an empty field says "unnamed", and a
-        # greyed-out "bolts" reads as a name this table already has.
-        name.setToolTip("Name this table and a calculation can read it:\n"
-                        "    V := bolts(d, A, B)\n"
-                        "which finds d in column A and gives back column B")
-        name.editingFinished.connect(
-            lambda: self.window.rename_table(item, name.text()))
-        form.addRow("Table name", name)
-
-        names = QPushButton("Named cells…")
-        names.clicked.connect(lambda: self.window.edit_named_cells(item))
-        form.addRow("", names)
-
-    def _add_plot(self, item: PlotItem) -> None:
-        form = self._group("Plot")
-        curves = QPlainTextEdit("\n".join(
-            (s.expression if not s.label else f"{s.expression} | {s.label}")
-            for s in item.series))
-        curves.setFixedHeight(64)
-        curves.setToolTip("One curve per line: an expression or a defined function,\n"
-                          "optionally followed by  |  and a legend label")
-        curves.textChanged.connect(
-            lambda: self._apply(lambda i: _set_series(i, curves.toPlainText()), "Plot curves"))
-        form.addRow("Curves", curves)
-
-        variable = QLineEdit(item.variable)
-        variable.textEdited.connect(
-            lambda text: self._apply(lambda i: setattr(i, "variable", text.strip() or "x"),
-                                     "Plot variable"))
-        form.addRow("Variable", variable)
-
-        for label, attribute, placeholder in (("From", "x_from", "0 m"),
-                                              ("To", "x_to", "L")):
-            edit = QLineEdit(getattr(item, attribute))
-            edit.setPlaceholderText(placeholder)
-            edit.textEdited.connect(
-                lambda text, a=attribute: self._apply(lambda i: setattr(i, a, text),
-                                                      "Plot range"))
-            form.addRow(label, edit)
-
-        samples = QSpinBox()
-        samples.setRange(2, 2000)
-        samples.setValue(item.samples)
-        samples.valueChanged.connect(
-            lambda value: self._slide(lambda i: setattr(i, "samples", value), "Plot samples"))
-        form.addRow("Points", samples)
-
-        for label, attribute in (("Title", "title"), ("X label", "x_label"),
-                                 ("Y label", "y_label")):
-            edit = QLineEdit(getattr(item, attribute))
-            edit.textEdited.connect(
-                lambda text, a=attribute: self._apply(lambda i: setattr(i, a, text),
-                                                      "Plot labels"))
-            form.addRow(label, edit)
-
-        for label, attribute in (("X unit", "x_unit"), ("Y unit", "y_unit")):
-            combo = UnitCombo(getattr(item, attribute))
-            combo.currentTextChanged.connect(
-                lambda text, a=attribute: self._apply(lambda i: setattr(i, a, text.strip()),
-                                                      "Plot units"))
-            form.addRow(label, combo)
-
-        for label, attribute in (("Grid", "show_grid"), ("Legend", "show_legend"),
-                                 ("Markers", "show_markers")):
-            box = QCheckBox(label)
-            box.setChecked(getattr(item, attribute))
-            box.toggled.connect(
-                lambda on, a=attribute: self._apply(lambda i: setattr(i, a, on), "Plot style"))
-            form.addRow("", box)
 
     def _add_measure(self, item: MeasureItem) -> None:
         form = self._group("Measurement")

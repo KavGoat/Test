@@ -7,12 +7,9 @@ from typing import Callable, Optional
 
 from ..items import measure as measure_module
 from ..items.contents import ContentsItem
-from ..items.mathitem import MathItem
 from ..items.measure import CountItem, MeasureItem
 from ..items.media import ImageItem
 from ..items.shapes import PolyItem, RectItem
-from ..items.plotitem import PlotItem
-from ..items.tableitem import TableItem
 from ..items.text import CalloutItem, FlagItem, NoteItem, StampItem, TextItem
 
 # How a tool gathers its geometry from the mouse.
@@ -118,19 +115,7 @@ TOOLS: list[Tool] = [
     Tool("image", "Image", "image", DRAG, "Annotate", "",
          "Place an image from disk", factory=lambda: ImageItem()),
 
-    # One calculation tool. There used to be a "line" and a "block", which
-    # were the same thing with different answers to what Enter does and
-    # whether names escaped; both of those are settings on the region now, not
-    # a choice made before it is drawn.
-    Tool("math", "Calculation", "math", DRAG, "Calculate", "",
-         "Unit-aware maths — as many lines as you like, and Enter opens "
-         "another one inside it",
-         factory=lambda: MathItem()),
-    Tool("table", "Table", "table", DRAG, "Calculate", "B",
-         "Spreadsheet that can use your variables", factory=lambda: TableItem()),
-    Tool("plot", "Plot", "plot", DRAG, "Calculate", "Shift+G",
-         "Plot a function or expression against a range", factory=lambda: PlotItem()),
-    Tool("contents", "Contents", "contents", DRAG, "Calculate", "",
+    Tool("contents", "Contents", "contents", DRAG, "Annotate", "",
          "A table of contents built from the document's bookmarks — click a "
          "line to go there", factory=lambda: ContentsItem()),
 
@@ -175,7 +160,7 @@ TOOLS: list[Tool] = [
 
 TOOL_MAP = {tool.key: tool for tool in TOOLS}
 
-CATEGORIES = ["Navigate", "Draw", "Annotate", "Calculate", "Measure"]
+CATEGORIES = ["Navigate", "Draw", "Annotate", "Measure"]
 
 
 def tools_in(category: str) -> list[Tool]:

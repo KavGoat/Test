@@ -2,13 +2,10 @@
 from __future__ import annotations
 
 from ..items.contents import ContentsItem
-from ..items.mathitem import MathItem
 from ..items.measure import MeasureItem
 from ..items.media import ImageItem
-from ..items.plotitem import PlotItem
 from ..items.shapes import PolyItem, RectItem
 from ..items.snapshot import SnapshotItem
-from ..items.tableitem import TableItem
 from ..items.text import _TextBase
 
 STROKE = "stroke"
@@ -40,12 +37,6 @@ def capabilities(item, for_default: bool = False) -> set[str]:
         # A photo's own border means nothing, but the frame a placed one is
         # given is a real setting, and a frame has a line type like any other.
         return {OPACITY, STROKE, WIDTH, DASH} if for_default else {OPACITY}
-    if isinstance(item, MathItem):
-        return {FONT}
-    if isinstance(item, TableItem):
-        return {FILL, STROKE, WIDTH, FONT}
-    if isinstance(item, PlotItem):
-        return {STROKE, WIDTH, FONT, OPACITY}
     if isinstance(item, ContentsItem):
         return {STROKE, FILL, WIDTH, FONT, OPACITY, FILL_OPACITY}
     if isinstance(item, _TextBase):

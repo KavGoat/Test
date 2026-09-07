@@ -297,16 +297,3 @@ def export_markups_csv(document: Document, path: str) -> int:
         writer.writerows(rows)
     return len(rows)
 
-
-def export_variables_csv(document: Document, path: str) -> int:
-    from ..core.units import format_quantity
-
-    workspace = document.workspace
-    rows = []
-    for name, info in sorted(workspace.variables.items(), key=lambda kv: kv[1].order):
-        rows.append([name, format_quantity(info.value, 8), info.expression, info.source])
-    with open(path, "w", newline="", encoding="utf-8") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(["Name", "Value", "Expression", "Defined in"])
-        writer.writerows(rows)
-    return len(rows)
