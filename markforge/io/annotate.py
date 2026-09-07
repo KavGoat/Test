@@ -455,7 +455,12 @@ def _measure_dictionary(annotation, item) -> None:
 
     scale = getattr(item, "page_scale", None)
     scale = scale() if callable(scale) else None
-    if scale is None or not getattr(scale, "is_calibrated", False):
+    if scale is None:
+        return
+    calibrated = getattr(scale, "is_calibrated", False)
+    if callable(calibrated):
+        calibrated = calibrated()
+    if not calibrated:
         return
     try:
         unit = str(scale.display_unit)

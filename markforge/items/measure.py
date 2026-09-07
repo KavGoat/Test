@@ -385,8 +385,18 @@ class MeasureItem(MarkupItem):
 
     # -- measurement -------------------------------------------------------
     def page_scale(self):
-        scene = self.scene()
-        page = getattr(scene, "page", None) if scene is not None else None
+        """What the page this is drawn on is a drawing of.
+
+        The page belongs to the frame this markup sits on, not to the scene:
+        one canvas holds every page of the document, so asking the scene got a
+        default scale back every time and a measurement written out with it
+        said 1:1 whatever the drawing was actually at.
+        """
+        frame = self.parentItem()
+        page = getattr(frame, "page", None) if frame is not None else None
+        if page is None:
+            scene = self.scene()
+            page = getattr(scene, "page", None) if scene is not None else None
         if page is not None:
             return page.scale
         from ..core.document import PageScale
