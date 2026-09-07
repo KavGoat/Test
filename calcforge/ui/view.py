@@ -2927,6 +2927,15 @@ class PageView(QGraphicsView):
         layout.addWidget(height)
         proxy = self.scene().addWidget(panel)
         proxy.setZValue(20_000)
+        # A tooltip belongs to the screen, not to the paper. Ignoring the view
+        # transform keeps it upright and the same size whatever the zoom is
+        # and whichever way the page has been turned for reading — a size
+        # entry lying on its side with its labels reading bottom-to-top is not
+        # something anybody can use.
+        from PySide6.QtWidgets import QGraphicsItem
+
+        proxy.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
+        proxy.setRotation(0.0)
         width.textEdited.connect(self.update_typed_size)
         height.textEdited.connect(self.update_typed_size)
         width.escapePressed.connect(self.escape_everything)
@@ -2955,8 +2964,25 @@ class PageView(QGraphicsView):
         proxy = self._size_proxy
         if proxy is None or not isinstance(draft, RectItem):
             return
-        corner = draft.mapToScene(draft.local_rect().normalized().bottomRight())
-        proxy.setPos(corner + QPointF(10, 10))
+        proxy.setPos(self._drag_corner(draft) + QPointF(10, 10))
+
+    def _drag_corner(self, draft) -> QPointF:
+        """The shape's corner that is bottom-right *on screen*, in scene points.
+
+        Not the one the item calls bottom-right: with the page turned for
+        reading, that corner is somewhere else entirely, and the entry ends up
+        beside a corner the pointer is nowhere near.
+        """
+        rect = draft.local_rect().normalized()
+        corners = [rect.topLeft(), rect.topRight(), rect.bottomRight(), rect.bottomLeft()]
+        best, furthest = None, None
+        for corner in corners:
+            scene_point = draft.mapToScene(corner)
+            on_screen = self.mapFromScene(scene_point)
+            reach = on_screen.x() + on_screen.y()
+            if furthest is None or reach > furthest:
+                best, furthest = scene_point, reach
+        return best if best is not None else draft.mapToScene(rect.bottomRight())
 
     def follow_size_editor(self) -> None:
         """Ride the corner, and say how big the shape is while it is dragged.
@@ -3775,6 +3801,13 @@ class PageView(QGraphicsView):
         for item in self.scene().items(scene_pos):
             if isinstance(item, MarkupItem):
                 if item.layer and not self.window.layer_visible(item.layer):
+                    continue
+                if item.flattened:
+                    # Flattened is part of the page, the way it is on a
+                    # Bluebeam PDF. It was already unselectable, but it went on
+                    # answering the question "what is under the pointer", so it
+                    # stood in front of whatever was actually being reached
+                    # for and nothing behind it could be picked up.
                     continue
                 return item
         return None
@@ -4840,13 +4873,19 @@ class PageView(QGraphicsView):
                 return
 
         if key in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down):
-            if (key in (Qt.Key_Up, Qt.Key_Down)
-                    and preferences.current().insertion_point
+            if (preferences.current().insertion_point
                     and self._insertion_point is not None
                     and not self.scene().selectedItems()):
+                # All four arrows move it. Left and Right used to fall through
+                # to the nudge-or-scroll path and do nothing at all, so the
+                # insertion point could be moved down a page but never along
+                # a line, which is half a caret.
                 step = 1.0 if modifiers & Qt.ShiftModifier else LINE_STEP
-                direction = -1.0 if key == Qt.Key_Up else 1.0
-                self._insertion_point += QPointF(0, direction * step)
+                across = 1.0 if modifiers & Qt.ShiftModifier else 0.25 * MM_TO_PT * 4
+                move = {Qt.Key_Up: QPointF(0, -step), Qt.Key_Down: QPointF(0, step),
+                        Qt.Key_Left: QPointF(-across, 0),
+                        Qt.Key_Right: QPointF(across, 0)}[key]
+                self._insertion_point += move
                 self.follow_off_screen(QRectF(self._insertion_point, self._insertion_point)
                                        .adjusted(-12, -12, 12, 12))
                 self.viewport().update()

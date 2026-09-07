@@ -121,4 +121,14 @@ class SnapshotItem(MarkupItem):
         self.source_page = int(data.get("source_page", 0) or 0)
         taken = data.get("source_rect")
         self.source_rect = QRectF(*taken) if taken else QRectF(self._rect)
+        # A snapshot payload carries no markup style — it is a recording, not
+        # something drawn with a pen. Generic deserialisation used to replace
+        # the borderless default with the red line every drawn markup starts
+        # with, which is where the outline nobody asked for came from and why
+        # changing the default never removed it: the default was right, and it
+        # was being thrown away on the way back in. Same fault as the one
+        # pasted images had, and the same fix.
+        snapshot_default = self.style
         self.load_base(data)
+        if "style" not in data:
+            self.style = snapshot_default

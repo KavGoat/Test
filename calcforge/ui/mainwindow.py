@@ -4521,6 +4521,12 @@ class MainWindow(QMainWindow):
                 item.set_locked(True)
                 item.setFlag(QGraphicsItem.ItemIsSelectable, False)
                 item.setSelected(False)
+                # Part of the page means the pointer goes through it, not just
+                # that it cannot be picked up: it must not take a click meant
+                # for something in front of or behind it, and it must not
+                # light up under the pointer either.
+                item.setAcceptedMouseButtons(Qt.NoButton)
+                item.setAcceptHoverEvents(False)
         else:
             by_frame = {}
             for item in items:
@@ -4571,6 +4577,11 @@ class MainWindow(QMainWindow):
             item.set_locked(item.locked_before_flatten)
             item.setFlag(QGraphicsItem.ItemIsSelectable,
                          self.document.layer(item.layer).visible)
+            # Give the pointer back what flattening took away, or a recovered
+            # markup is visible, listed and selectable in the panel and still
+            # cannot be touched on the page.
+            item.setAcceptedMouseButtons(Qt.AllButtons)
+            item.setAcceptHoverEvents(True)
         self.view.commit_snapshot("Recover flattening")
         self.status_hint.setText(f"Recovered {len(items)} item(s)")
         self.refresh_lists()

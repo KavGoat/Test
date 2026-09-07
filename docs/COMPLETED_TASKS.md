@@ -2,7 +2,7 @@
 
 Audited: 2026-09-06 against `claude/engineering-calc-markup-app-2twiqs`.
 
-Every open line in `docs/tasklist.md` was gone through one at a time. The 153
+Every open line in `docs/tasklist.md` was gone through one at a time. The 155
 below are the ones the current source implements and something actually
 exercises — an event-driven test that drives the real Qt queue, or a check
 against the running application. Each carries the evidence it rests on.
@@ -115,6 +115,9 @@ behaviour it extends.
 - **(new)** Selecting as it stands — click, and click-drag for a rectangular marquee, with no key held — is right and stays as it is. What Shift adds: **Shift and click point after point draws a polygon to select inside**, closed by clicking the first point again or by Enter
   - **Evidence:** Plain click and rectangular marquee unchanged; Shift clicks out a selection polygon, closed by returning to the first point or Enter, and Escape abandons it. Evidence: test_shift_clicking_out_a_lasso_selects_what_is_inside_it, test_a_lasso_takes_only_what_is_wholly_inside, test_escape_abandons_a_half_drawn_lasso.
 
+- **(supersedes prior removal, amended)** Provide an optional canvas insertion point for calculation placement. When enabled, clicking empty canvas sets the insertion point and **all four** arrow keys move it — Left and Right along the line as well as Up and Down between lines, which currently do nothing; new calculation lines use that point. The insertion point renders as a tiny crosshair, not a large marker. The setting must be independently toggleable so ordinary selection/marquee behavior remains available when it is off. Left, Right, Up and Down must never scroll the page view or change pages during ordinary navigation; the single exception is that the view may auto-scroll when the insertion point, or an item being moved with the arrows, is about to leave the visible area.
+  - **Evidence:** Left and Right move the insertion point now, alongside Up and Down; they used to fall through to the nudge-or-scroll path and do nothing, so it could be moved down a page but never along a line. Shift still gives the fine step. Evidence: test_every_arrow_moves_the_insertion_point, plus the existing insertion-point and no-scroll tests.
+
 - Escape must always fully clear selection and exit whatever edit/tool sub-state you're in, in one press, regardless of how deep the current mode is nested (81, 92)
   - **Evidence:** escape_everything (view.py:1634) unwinds held tool, pending call-out anchor, insertion point, pending cloud and cloud leader, marquee, editors and selection in one press and reports what it put down. Exercised from 41 places in tests/test_usability.py.
 
@@ -201,6 +204,9 @@ behaviour it extends.
 
 - **(new)** Add Bluebeam-style photo/image colour operations: recolour an image to a selected colour, convert it to black-and-white, and make a selected source colour transparent. These are image-content operations, distinct from a markup's stroke/fill styling.
   - **Evidence:** Recolour, Black and white and make-a-colour-transparent are all offered (ui/dialogs.py:552 and io/recolour.py, which documents all three operations).
+
+- **(new, amended)** Pasted or placed images and snapshots must not acquire a red outline. The image tool's own default stroke must be settable and must default to none, and a snapshot's default stroke must be none; in both cases the visible frame must match the persisted or default style rather than a hard-coded red. A snapshot's stroke colour and width must then be settable by the user and honoured when set, and the style toolbar and the Properties panel must agree with each other on image and snapshot border state. **Reported again**: a snapshot still draws an outline on the current build. Whatever is drawing it is not the style the task describes, so find that path rather than changing the default again.
+  - **Evidence:** Fixed, and the earlier attempts had been aiming at the wrong thing. The default and the paint path were both already right; a snapshot payload carries no markup style, so generic deserialisation was replacing the borderless default with the red line every drawn markup starts with — the same fault pasted images had, and the same fix. A stroke deliberately set still survives the round trip. Evidence: test_a_snapshot_is_borderless_when_it_comes_back.
 
 ## 11. Snapping, grid, alignment
 

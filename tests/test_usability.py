@@ -310,6 +310,118 @@ def _box_kinds(box, out=None):
     return out
 
 
+def test_a_snapshot_is_borderless_when_it_comes_back(window):
+    """The outline nobody asked for, and why changing the default never moved it.
+
+    A snapshot payload carries no markup style, so generic deserialisation put
+    the red line every drawn markup starts with onto it. The default was right
+    all along and was being thrown away on the way back in.
+    """
+    from calcforge.items.base import build_item
+    from calcforge.items.snapshot import SnapshotItem
+
+    payload = {"type": "snapshot", "asset": "k", "x": 0.0, "y": 0.0,
+               "rect": [0, 0, 120, 80], "source_rect": [0, 0, 120, 80],
+               "source_page": 1, "keep_aspect": True, "uid": "ab"}
+    item = build_item(dict(payload))
+    assert isinstance(item, SnapshotItem)
+    assert item.style.stroke == "" and item.style.width == 0.0
+    assert not (item.style.stroke and item.style.width > 0), "so nothing is drawn"
+
+    # A stroke that was deliberately set still survives the trip.
+    kept = SnapshotItem()
+    kept.style.stroke, kept.style.width = "#1971c2", 1.5
+    back = build_item(dict(kept.serialize(), type="snapshot"))
+    assert back.style.stroke == "#1971c2" and back.style.width == 1.5
+
+
+def test_the_size_entry_stays_upright_whichever_way_the_page_is_turned(window):
+    """It was photographed lying on its side, labels reading bottom-to-top.
+
+    A tooltip belongs to the screen, not to the paper.
+    """
+    from PySide6.QtWidgets import QGraphicsItem
+    from calcforge.core.document import PageScale
+
+    window.current_page().scale = PageScale.from_ratio(50)
+    for turn in (0, 90, 180, 270):
+        window.view.scene().set_reading_turn(turn)
+        QApplication.processEvents()
+        window.select_tool("rect")
+        click(window.view, 200, 200)
+        hover(window.view, 340, 320)
+        proxy = window.view._size_proxy
+        assert proxy is not None, turn
+        assert proxy.rotation() == 0.0, turn
+        assert proxy.flags() & QGraphicsItem.ItemIgnoresTransformations, turn
+        window.view.escape_everything()
+        QApplication.processEvents()
+    window.view.scene().set_reading_turn(0)
+
+
+def test_every_arrow_moves_the_insertion_point(window):
+    """Left and Right used to do nothing, which is half a caret."""
+    from calcforge.ui import preferences
+
+    prefs = preferences.current()
+    was = prefs.insertion_point
+    try:
+        prefs.insertion_point = True
+        preferences.apply(prefs)
+        window.select_tool("select")
+        click(window.view, 260, 340)
+        assert window.view._insertion_point is not None
+
+        moves = {}
+        for key in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down):
+            before = QPointF(window.view._insertion_point)
+            press_key(window.view, key)
+            after = window.view._insertion_point
+            moves[key] = (after.x() - before.x(), after.y() - before.y())
+
+        assert moves[Qt.Key_Left][0] < 0 and moves[Qt.Key_Left][1] == 0
+        assert moves[Qt.Key_Right][0] > 0 and moves[Qt.Key_Right][1] == 0
+        assert moves[Qt.Key_Up][1] < 0 and moves[Qt.Key_Up][0] == 0
+        assert moves[Qt.Key_Down][1] > 0 and moves[Qt.Key_Down][0] == 0
+    finally:
+        prefs.insertion_point = was
+        preferences.apply(prefs)
+
+
+def test_flattened_markup_lets_the_pointer_through_to_what_is_behind(window):
+    """Part of the page means the pointer goes through it.
+
+    It was already unselectable, but it went on answering "what is under the
+    pointer", so it stood in front of whatever was being reached for.
+    """
+    from calcforge.items.shapes import RectItem
+
+    window.select_tool("rect")
+    drag(window.view, 120, 120, 320, 260)          # behind
+    window.select_tool("rect")
+    drag(window.view, 160, 150, 280, 230)          # in front, overlapping
+    boxes = [i for i in markups(window) if isinstance(i, RectItem)]
+    front, back = boxes[-1], boxes[0]
+    window.select_tool("select")
+    assert window.view.markup_at(QPointF(220, 190)) is front
+
+    window.view.scene().clearSelection()
+    front.setSelected(True)
+    window.flatten_selection()
+    QApplication.processEvents()
+    assert front.flattened
+    assert window.view.markup_at(QPointF(220, 190)) is back, \
+        "the one behind can be reached now"
+    assert not front.acceptedMouseButtons(), "and the flattened one takes no clicks"
+
+    window.view.scene().clearSelection()
+    window.recover_flattened()
+    QApplication.processEvents()
+    assert not front.flattened
+    assert front.acceptedMouseButtons(), "recovery gives the pointer back"
+    assert window.view.markup_at(QPointF(220, 190)) is front
+
+
 def test_two_documents_open_in_tabs_without_reaching_into_each_other(window):
     """One document per tab, one canvas each, nothing shared but the window."""
     # isVisible() is false for anything inside a window that has not been
