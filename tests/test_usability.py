@@ -310,6 +310,76 @@ def _box_kinds(box, out=None):
     return out
 
 
+def test_two_documents_open_in_tabs_without_reaching_into_each_other(window):
+    """One document per tab, one canvas each, nothing shared but the window."""
+    # isVisible() is false for anything inside a window that has not been
+    # shown, so it would pass here whatever the bar was doing. isHidden() is
+    # the question actually being asked: was it deliberately put away.
+    assert window.document_tabs.isHidden(), "one document needs no tab bar"
+
+    first = window.document
+    window.add_page()
+    window.select_tool("rect")
+    assert len(first.pages) == 2
+
+    window.open_in_new_tab()
+    QApplication.processEvents()
+    assert window.document_tabs.count() == 2
+    assert not window.document_tabs.isHidden(), "a second document brings the bar"
+    assert window.document is not first, "the new tab has a document of its own"
+    assert len(window.document.pages) == 1, "and pages of its own"
+    assert window.undo_stack is not None
+    second = window.document
+    window.select_tool("ellipse")
+
+    window.document_tabs.setCurrentIndex(0)
+    QApplication.processEvents()
+    assert window.document is first
+    assert len(window.document.pages) == 2, "the first document is as it was left"
+    assert window.view.tool_key == "rect", "including the tool in hand"
+    assert window.view.scene().document is first, "and its own canvas"
+
+    window.document_tabs.setCurrentIndex(1)
+    QApplication.processEvents()
+    assert window.document is second
+    assert len(window.document.pages) == 1
+    assert window.view.tool_key == "ellipse"
+
+    window.close_document_tab(1)
+    QApplication.processEvents()
+    assert window.document_tabs.count() == 1
+    assert window.document is first
+    assert window.document_tabs.isHidden(), "back to one, back to no bar"
+
+
+def test_a_second_window_keeps_its_own_document(window):
+    """The other half of the same idea: a window with a document of its own."""
+    from calcforge.ui.mainwindow import MainWindow
+
+    second = window.open_new_window()
+    second.confirm_discard = lambda: True
+    second.interactive_prompts = False
+    try:
+        assert isinstance(second, MainWindow) and second is not window
+        assert second.document is not window.document
+        assert second.view is not window.view
+        assert second.undo_stack is not window.undo_stack
+
+        window.select_tool("rect")
+        second.select_tool("ellipse")
+        assert window.view.tool_key == "rect", "the tools do not leak"
+        assert second.view.tool_key == "ellipse"
+
+        window.add_page()
+        assert len(window.document.pages) == 2
+        assert len(second.document.pages) == 1, "nor do the pages"
+    finally:
+        second.close()
+        second.setParent(None)
+        second.deleteLater()
+        QApplication.processEvents()
+
+
 def test_a_bracket_typed_over_a_selection_wraps_it(window):
     """It used to replace it, which is what a plain text box does.
 

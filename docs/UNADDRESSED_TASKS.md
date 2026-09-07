@@ -13,7 +13,7 @@ This is not the user-owned completion record. It changes no checkbox in
 ## 1. Core concept
 
 - **(new)** Support multiple open documents at once: PDF review documents and `.cfx` CalcForge documents appear in separate tabs, can be viewed side-by-side in a split view, and can be moved into independent application windows. Each document keeps its own pages, state and active tool without leaking into another tab/window.
-  - **Missing:** Not started: the app builds one MainWindow (calcforge/app.py:57) and has no document tabs, split view or second-window path.
+  - **Missing:** Two of the three parts done; split view is not. DONE — tabs: each open document has a tab with its own document, canvas, undo history, page and tool, and one view is handed a different canvas on a switch, so nothing is re-wired and nothing of one document reaches into another. The bar hides itself when only one document is open. File > New tab, Ctrl+T. DONE — independent windows: File > New window, Ctrl+Shift+N, each with its own document, view and undo stack; a window built this way is kept alive rather than collected as the call returns, and every tab's undo stack is released when the window closes so none of them calls back into a window that has gone. NOT DONE — side-by-side split view: that needs a second live PageView in the same window, which the shared-view design deliberately avoids, so it is a separate piece of work rather than a bolt-on. Also not done: PDF review documents opening into a tab of their own, which follows the split-view question. Evidence: test_two_documents_open_in_tabs_without_reaching_into_each_other, test_a_second_window_keeps_its_own_document.
 
 ## 4. Equation editor
 

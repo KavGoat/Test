@@ -13,7 +13,7 @@ from PySide6.QtGui import (QAction, QActionGroup, QColor, QCursor, QFont, QImage
                            QKeySequence, QPainter, QTextBlockFormat,
                            QTextCharFormat, QTextCursor, QTransform, QUndoStack)
 from PySide6.QtPrintSupport import QPrintDialog, QPrintPreviewDialog, QPrinter
-from PySide6.QtWidgets import (QApplication, QComboBox, QDockWidget, QDoubleSpinBox,
+from PySide6.QtWidgets import (QTabBar, QApplication, QComboBox, QDockWidget, QDoubleSpinBox,
                                QFileDialog, QGraphicsItem, QHBoxLayout,
                                QInputDialog, QLabel, QLineEdit, QMainWindow,
                                QMenu, QMessageBox, QSpinBox, QStatusBar,
@@ -175,6 +175,10 @@ class MainWindow(QMainWindow):
         # been left alone for a moment rather than on every keystroke.
         self._verification = None
         self.scene = None
+        # Each entry is one open document with its own canvas, undo history
+        # and page. Empty until a second document is opened, because one
+        # document needs no tab bar.
+        self._open_documents: list[dict] = []
         self.toolbars: list = []
         self.visible_tools = None       # None means every tool
         self._default_state = None
@@ -297,6 +301,21 @@ class MainWindow(QMainWindow):
         self.formula_bar.setVisible(False)
         layout.addWidget(self.formula_bar)
 
+        # One document per tab, one view for all of them. Each tab keeps its
+        # own document, canvas, undo history and page, and switching hands the
+        # view a different canvas — so nothing has to be re-wired, and nothing
+        # of one document can reach into another.
+        self.document_tabs = QTabBar()
+        self.document_tabs.setDocumentMode(True)
+        self.document_tabs.setExpanding(False)
+        self.document_tabs.setTabsClosable(True)
+        self.document_tabs.setMovable(True)
+        self.document_tabs.setDrawBase(False)
+        self.document_tabs.setVisible(False)          # one document: no bar
+        self.document_tabs.currentChanged.connect(self.switch_to_document)
+        self.document_tabs.tabCloseRequested.connect(self.close_document_tab)
+        layout.addWidget(self.document_tabs)
+
         layout.addWidget(self.view, 1)
         self.setCentralWidget(central)
 
@@ -364,6 +383,10 @@ class MainWindow(QMainWindow):
 
     def _build_actions(self) -> None:
         self._act("new", "New", lambda: self.new_document(), "Ctrl+N", "new")
+        self._act("new_tab", "New tab", lambda: self.open_in_new_tab(), "Ctrl+T",
+                  tip="Open another document beside this one, in its own tab")
+        self._act("new_window", "New window", self.open_new_window, "Ctrl+Shift+N",
+                  tip="Open a second window with a document of its own")
         self._act("open", "Open…", self.open_document, "Ctrl+O", "open")
         self._act("save", "Save", self.save_document, "Ctrl+S", "save")
         self._act("save_as", "Save as…", self.save_document_as, "Ctrl+Shift+S")
@@ -892,7 +915,8 @@ class MainWindow(QMainWindow):
         bar = self.menuBar()
 
         file_menu = bar.addMenu("&File")
-        for action in (self.act_new, self.act_open, None, self.act_save, self.act_save_as,
+        for action in (self.act_new, self.act_new_tab, self.act_new_window, self.act_open,
+                       None, self.act_save, self.act_save_as,
                        None, self.act_insert_pdf, self.act_insert_image_page,
                        self.act_import_toolset,
                        None, self.act_export_pdf,
@@ -1192,6 +1216,120 @@ class MainWindow(QMainWindow):
     # ==================================================================
     # document lifecycle
     # ==================================================================
+    # Every window built this way is kept here. A QMainWindow with nothing
+    # referring to it is collected the moment the call that made it returns,
+    # and the window vanishes as it is being looked at.
+    _windows: list = []
+
+    # -- one document per tab ----------------------------------------------
+    def _current_document_state(self, tool: Optional[str] = None) -> dict:
+        # The tool belongs to the document being worked on, not to the window:
+        # coming back to a drawing should find the pen still in hand. It has
+        # to be read before the switch puts the tool down, so it is passed in.
+        return {"document": self.document, "scene": self.scene,
+                "undo_stack": self.undo_stack, "index": self.current_index,
+                "tool": tool or self.view.tool_key}
+
+    def _adopt_document_state(self, state: dict) -> None:
+        self.document = state["document"]
+        self.scene = state["scene"]
+        self.undo_stack = state["undo_stack"]
+        self.current_index = state["index"]
+        if self.scene is not None:
+            self.view.setScene(self.scene)
+        self.rebuild_scenes()
+        self.apply_document_mode()
+        self.select_tool(state.get("tool") or "select")
+        self.refresh_lists()
+        self.update_title()
+        self._refresh_undo_actions()
+
+    def _tab_title(self, document) -> str:
+        return os.path.basename(document.path) if document.path else "Untitled"
+
+    def open_in_new_tab(self, document=None) -> int:
+        """Put another document beside this one, with a tab of its own."""
+        held = self.view.tool_key
+        self.view.escape_everything()
+        if not self._open_documents:
+            self._open_documents.append(self._current_document_state(held))
+            self.document_tabs.blockSignals(True)
+            self.document_tabs.addTab(self._tab_title(self.document))
+            self.document_tabs.blockSignals(False)
+        else:
+            self._open_documents[self.document_tabs.currentIndex()] = \
+                self._current_document_state(held)
+        stack = QUndoStack(self)
+        stack.cleanChanged.connect(lambda _clean: self.update_title())
+        fresh = {"document": document if document is not None else Document(),
+                 "scene": None, "undo_stack": stack, "index": 0,
+                 "tool": "select"}
+        self._open_documents.append(fresh)
+        self.document_tabs.blockSignals(True)
+        where = self.document_tabs.addTab(self._tab_title(fresh["document"]))
+        self.document_tabs.setCurrentIndex(where)
+        self.document_tabs.blockSignals(False)
+        self.document_tabs.setVisible(self.document_tabs.count() > 1)
+        self._adopt_document_state(fresh)
+        return where
+
+    def switch_to_document(self, index: int) -> None:
+        """Show the document on that tab, putting this one aside as it is."""
+        if not (0 <= index < len(self._open_documents)):
+            return
+        held = self.view.tool_key
+        self.view.escape_everything()
+        for position, state in enumerate(self._open_documents):
+            if state["document"] is self.document:
+                self._open_documents[position] = self._current_document_state(held)
+                break
+        self._adopt_document_state(self._open_documents[index])
+
+    def close_document_tab(self, index: int) -> None:
+        """Close one document. The last one standing keeps the window."""
+        if not (0 <= index < len(self._open_documents)):
+            return
+        if len(self._open_documents) == 1:
+            self.new_document()
+            return
+        going = self._open_documents.pop(index)
+        self.document_tabs.blockSignals(True)
+        self.document_tabs.removeTab(index)
+        self.document_tabs.blockSignals(False)
+        self.document_tabs.setVisible(self.document_tabs.count() > 1)
+        if going["document"] is self.document:
+            self._adopt_document_state(
+                self._open_documents[min(index, len(self._open_documents) - 1)])
+
+    def refresh_document_tabs(self) -> None:
+        """Tab names follow the documents they stand for."""
+        for position, state in enumerate(self._open_documents):
+            if position < self.document_tabs.count():
+                self.document_tabs.setTabText(position,
+                                              self._tab_title(state["document"]))
+
+    def open_new_window(self) -> "MainWindow":
+        """A second window, with a document, pages and tool of its own.
+
+        Nothing is shared but the application: the two windows do not reach
+        into each other's document, and the arrangement each of them saves is
+        stamped so a late write from one cannot land on the other's.
+        """
+        window = type(self)()
+        MainWindow._windows.append(window)
+        window.destroyed.connect(
+            lambda *_: MainWindow._windows.remove(window)
+            if window in MainWindow._windows else None)
+        # Offset from this one, so the new window is not exactly on top of the
+        # old one and apparently missing.
+        here = self.geometry()
+        window.setGeometry(here.adjusted(36, 36, 36, 36))
+        window.show()
+        window.raise_()
+        window.activateWindow()
+        self.status_hint.setText("Opened a second window")
+        return window
+
     def new_document(self, confirm: bool = True) -> None:
         if confirm and not self.confirm_discard():
             return
@@ -1412,10 +1550,16 @@ class MainWindow(QMainWindow):
             timer.stop()
         self._autosave.stop()
         self.clear_autosave()
-        try:
-            self.undo_stack.cleanChanged.disconnect()
-        except (RuntimeError, TypeError):
-            pass
+        # Every open document has an undo stack of its own, and all of them
+        # report a clean change back to this window. Leaving the ones behind
+        # other tabs connected means they call a window that has gone.
+        stacks = [self.undo_stack] + [state["undo_stack"]
+                                      for state in self._open_documents]
+        for stack in stacks:
+            try:
+                stack.cleanChanged.disconnect()
+            except (RuntimeError, TypeError):
+                pass
         event.accept()
 
     # ==================================================================
