@@ -2,7 +2,7 @@
 
 Audited: 2026-09-06 against `claude/engineering-calc-markup-app-2twiqs`.
 
-The 16 entries below are what the audit could not show working. Each says
+The 13 entries below are what the audit could not show working. Each says
 what is missing or blocking it. Several are tasks whose base behaviour is
 finished and whose recent amendment is not; those name the part that is done so
 the remaining work is clear.
@@ -28,16 +28,6 @@ This is not the user-owned completion record. It changes no checkbox in
 - **(new, amended)** Pasted or placed images and snapshots must not acquire a red outline. The image tool's own default stroke must be settable and must default to none, and a snapshot's default stroke must be none; in both cases the visible frame must match the persisted or default style rather than a hard-coded red. A snapshot's stroke colour and width must then be settable by the user and honoured when set, and the style toolbar and the Properties panel must agree with each other on image and snapshot border state.
   - **Missing:** Half done. A snapshot's default really is no stroke (items/snapshot.py:38, Style(stroke='', width=0.0)) and a set stroke is honoured (snapshot.py:91); a pasted image keeps its borderless default rather than picking up the drawn-markup red (items/media.py:84-91). Still missing: the image tool has no settable default stroke of its own anywhere in the code, and nothing verifies that the style toolbar and the Properties panel agree on image and snapshot border state.
 
-## 15. Panels & layout
-
-- **(expanded)** Make the style toolbar and Properties panel selection-aware. Show only controls compatible with the selected markup type and hide or disable every irrelevant control: rectangles/ellipses expose shape geometry, stroke, fill and hatch but no text controls; lines, arrows, polylines and measurements expose their relevant stroke/endpoint controls but no hatch; text and callouts expose text formatting and only their applicable fill/stroke/leader controls; photos, snapshots and groups expose only their supported image/group operations. Surface important type-specific controls there too, including **Self-contained** for calculation blocks and table-specific editing controls for tables. Apply the same filtering when no item is selected, using the active tool's capabilities instead. A selected equation or calculation exposes decimal-places, significant-figures and scientific-notation controls in both the style toolbar and the Properties panel, not only through the right-click menu; markups expose their full colour, hatch and line controls; text exposes text controls; and callouts expose both.
-  - **Missing:** Base filtering is done and tested (test_a_raster_image_has_no_line_or_fill_style_controls, test_drawing_again_is_greyed_out_for_a_calculation, the Self-contained panel tests). The amended clause is half done: the Properties panel does expose Significant digits and a Number format combo of auto/fixed/scientific/engineering for a calculation (ui/panels.py:1910-1926), but the Style toolbar carries only Line, Fill, Width, Dash, Text, Set default, Self-contained and Stamp (mainwindow.py:628-690) — no result-formatting control at all.
-
-## 21. Measuring tools
-
-- **(new)** Make polygon and ellipse cut-outs discoverable in the measurement workflow. A cut-out is a hole owned by an existing area/volume measurement, not a standalone markup: the UI must clearly indicate that it is drawn inside that measurement, finished with Enter, and subtracts from its reported area. Polygon and ellipse cut-outs apply to any closed shape — polygons, area measurements, rectangles, circles and ellipses — not only to polygonal areas.
-  - **Missing:** Base behaviour is done and tested (test_a_cut_out_takes_its_area_off_the_measurement, test_a_polygon_cut_out_belongs_to_the_area_it_is_drawn_in). The amended any-closed-shape clause is not: area_under (view.py:2810-2824) accepts only a MeasureItem whose kind is AREA or VOLUME, so a rectangle, polygon or ellipse cannot host a cut-out. Also note unreachable code at view.py:2825-2826, after that function's return None.
-
 ## 27. Reliability / process
 
 - Never let hitting the token/usage limit silently end the session's work — pause, and resume automatically once the limit resets, without needing a fresh prompt from you (130, 138) — **not something this end can promise.** A session that runs out of context is summarised and continued, and that is automatic; a session that runs out of *usage* stops until the limit resets and needs a prompt to pick up again. What is under control here is that nothing is left half-finished and unrecorded: work is committed and pushed as it is done, and this list says what is built and what is not, so whatever picks the work up next — a fresh session, or this one after a reset — starts from the list rather than from memory
@@ -55,9 +45,6 @@ This is not the user-owned completion record. It changes no checkbox in
   - **Missing:** No record of the audit having been carried out. The specific example does do something — blend 'multiply' is the highlighter's composition mode (items/base.py:133 and 496) — but nothing shows every Properties option was reviewed for redundancy or unclear labelling.
 
 ## 29. New requests awaiting review
-
-- **(amended)** After the first click of a rectangle or ellipse, show the numeric size entry as a small tooltip anchored near the bottom-right corner of the in-progress shape, tracking that corner as the drag proceeds. It live-updates width and height (or diameter) throughout the drag and accepts typed values at any point before the second click commits. Typed values update the preview at page scale; the second click places the markup and dismisses the entry.
-  - **Missing:** The base size entry exists and is tested (test_a_rectangle_reports_its_real_size_and_accepts_an_exact_one, test_an_ellipse_can_be_set_out_to_an_exact_size), but the amendment is not implemented. open_size_editor (view.py:2840-2878) anchors the panel once at draft.mapToScene(0,0)+(8,8) — the shape's TOP-LEFT — and never moves it again, so it does not track the bottom-right corner as the drag proceeds. The two fields are placeholders only: nothing writes the live width and height into them while dragging.
 
 - **(amended)** Recompute each callout leader hinge completely when its arrow tip, text box or cloud moves. Do not retain a prior manually adjusted hinge length after any of those changes. In a multi-leader callout each leader's hinge is computed independently: moving the cloud or the text box must not force every leader to share a single hinge length.
   - **Missing:** The recompute-on-move behaviour is there and tested (the hinge tests), but the amended per-leader clause is unverified: no test covers a multi-leader call-out keeping independent hinge lengths when the cloud or the box moves.

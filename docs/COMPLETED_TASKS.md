@@ -2,7 +2,7 @@
 
 Audited: 2026-09-06 against `claude/engineering-calc-markup-app-2twiqs`.
 
-Every open line in `docs/tasklist.md` was gone through one at a time. The 145
+Every open line in `docs/tasklist.md` was gone through one at a time. The 148
 below are the ones the current source implements and something actually
 exercises — an event-driven test that drives the real Qt queue, or a check
 against the running application. Each carries the evidence it rests on.
@@ -260,6 +260,9 @@ behaviour it extends.
 - The Properties panel should be resizable down to zero width (effectively hidden) and dragged back open again later (23)
   - **Evidence:** Dock contents and the dock itself are setMinimumSize(0, 0) (ui/docks.py:154-156), so the panel closes to zero width and drags back open.
 
+- **(expanded)** Make the style toolbar and Properties panel selection-aware. Show only controls compatible with the selected markup type and hide or disable every irrelevant control: rectangles/ellipses expose shape geometry, stroke, fill and hatch but no text controls; lines, arrows, polylines and measurements expose their relevant stroke/endpoint controls but no hatch; text and callouts expose text formatting and only their applicable fill/stroke/leader controls; photos, snapshots and groups expose only their supported image/group operations. Surface important type-specific controls there too, including **Self-contained** for calculation blocks and table-specific editing controls for tables. Apply the same filtering when no item is selected, using the active tool's capabilities instead. A selected equation or calculation exposes decimal-places, significant-figures and scientific-notation controls in both the style toolbar and the Properties panel, not only through the right-click menu; markups expose their full colour, hatch and line controls; text exposes text controls; and callouts expose both.
+  - **Evidence:** Amended clause now done. The Style toolbar carries a Figures spinner and a number-format combo (auto, fixed, scientific, engineering) for a selected calculation, matching what Properties and the right-click menu already offered, and they hide again for anything with no answer to show. The base selection-aware filtering was already in place. Evidence: test_the_style_toolbar_offers_the_figures_an_answer_is_shown_to, plus test_a_raster_image_has_no_line_or_fill_style_controls and test_drawing_again_is_greyed_out_for_a_calculation.
+
 - **(new)** Line-style and hatch selectors in Properties must show a compact visual preview of the actual pattern, weight and colour alongside each option. Users should be able to identify a dashed/dotted line or hatch pattern without relying on a text-only name.
   - **Evidence:** Line-style and hatch choices carry real pattern previews. Evidence: test_line_and_hatch_choices_have_real_pattern_previews.
 
@@ -323,6 +326,9 @@ behaviour it extends.
 
 - **(new)** Count is a continuous placement tool: after Count is selected, every click must place the next marker for the active count subject, numbered `1`, `2`, `3`, and so on. It must remain armed until Escape, selection of another tool, or an explicit cancellation; users must not have to reselect Count after each marker.
   - **Evidence:** Count stays armed and numbers each marker in turn, and renumbering closes gaps. Evidence: test_count_tool_places_numbered_markers, test_renumber_counts_closes_gaps. NOTE: the three newly reported count defects are a separate §29 entry.
+
+- **(new)** Make polygon and ellipse cut-outs discoverable in the measurement workflow. A cut-out is a hole owned by an existing area/volume measurement, not a standalone markup: the UI must clearly indicate that it is drawn inside that measurement, finished with Enter, and subtracts from its reported area. Polygon and ellipse cut-outs apply to any closed shape — polygons, area measurements, rectangles, circles and ellipses — not only to polygonal areas.
+  - **Evidence:** Fixed. Cutouts moved from MeasureItem onto MarkupItem, so any closed shape owns holes: a rectangle, a rounded rectangle, an ellipse, a cloud and a closed polygon each answer with their own outline_ring, and area_under now offers the topmost closed shape under the point rather than only an AREA or VOLUME measurement. A hole is subtracted from the fill so it is a real hole rather than a dashed outline on solid colour, and it is saved and read back with the shape. An open polyline encloses nothing and is never offered. Evidence: test_a_cut_out_belongs_to_any_closed_shape, test_an_open_polyline_is_not_offered_as_somewhere_to_put_a_hole, plus the existing test_a_cut_out_takes_its_area_off_the_measurement and test_a_polygon_cut_out_belongs_to_the_area_it_is_drawn_in. The unreachable code after area_under's return is gone.
 
 ## 22. Bookmarks & table of contents
 
@@ -436,6 +442,9 @@ behaviour it extends.
 
 - New pages start uncalibrated. The first scale-dependent rectangle, ellipse or measurement prompts for page scale instead of assuming a scale.
   - **Evidence:** note_missing_scale (mainwindow.py:2811) says once that the page has no scale and points at the status-bar control, and the draw path calls it for a scale-dependent item (view.py:2825). NOTE: it keys off PageScale.is_calibrated, which task 155 shows is wrong for a genuine 1:1.
+
+- **(amended)** After the first click of a rectangle or ellipse, show the numeric size entry as a small tooltip anchored near the bottom-right corner of the in-progress shape, tracking that corner as the drag proceeds. It live-updates width and height (or diameter) throughout the drag and accepts typed values at any point before the second click commits. Typed values update the preview at page scale; the second click places the markup and dismisses the entry.
+  - **Evidence:** Fixed. The size entry rides the shape's bottom-right corner — the one under the pointer — instead of being pinned once to its top-left, and it reports width and height at page scale as the drag proceeds instead of showing two empty boxes. It stops reporting the moment a size is typed, never overwrites a box being typed into, and says nothing at all before the shape has been dragged out, because a number already in the box is one the next keystroke would land on the end of; a box also selects its contents when focused so typing replaces rather than appends. Evidence: test_the_size_entry_rides_the_corner_and_says_the_size, plus the existing test_click_click_rectangle_has_live_scaled_size_entry and test_one_ellipse_diameter_makes_a_circle_and_escape_cancels, which caught the first version of this appending to a pre-filled value.
 
 - A cloud callout's cloud and text box must be independently movable. Moving the box moves only the box; moving the cloud moves only the cloud; the leader geometry updates without moving the whole callout.
   - **Evidence:** The cloud and the call-out box move independently. Evidence: test_a_cloud_and_its_callout_box_move_independently.

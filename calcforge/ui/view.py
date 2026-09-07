@@ -96,6 +96,13 @@ class _SizeEdit(QLineEdit):
             return
         super().keyPressEvent(event)
 
+    def focusInEvent(self, event) -> None:
+        # The box shows the size the shape is at, so the first thing typed
+        # into it means "make it this instead" — not "add these digits to the
+        # end of what it already says".
+        super().focusInEvent(event)
+        self.selectAll()
+
 
 def typing_somewhere_else() -> bool:
     """True when the keyboard belongs to a box somebody is typing into.
@@ -1807,6 +1814,7 @@ class PageView(QGraphicsView):
                 draft.set_local_rect(QRectF(0, 0, rect.width(), rect.height()))
         if isinstance(draft, MeasureItem):
             draft.refresh(page=self.page())
+        self.follow_size_editor()
         draft.update()
 
     def _leave_copies_behind(self) -> None:
@@ -2797,7 +2805,10 @@ class PageView(QGraphicsView):
         target.setSelected(True)
         self.commit_snapshot(f"Add {tool.label.lower()}")
         self.selectionChanged.emit()
-        self.statusMessage.emit(f"Taken out: {target.value_text}")
+        # A measurement says what is left; a plain shape has no total to say.
+        left = getattr(target, "value_text", "") or getattr(target, "size_text", "")
+        self.statusMessage.emit(f"Taken out: {left}" if left
+                                else f"Taken out of the {target.NAME.lower()}")
         self.finish_tool()
         return True
 
@@ -2821,22 +2832,25 @@ class PageView(QGraphicsView):
         return [rect.topLeft(), rect.topRight(), rect.bottomRight(), rect.bottomLeft()]
 
     def area_under(self, scene_pos: QPointF, ignore=None):
-        """The area measurement that point falls inside, if any."""
+        """The closed shape that point falls inside, if any.
+
+        A hole used to belong only to an area or volume measurement, so
+        cutting one out of a rectangle, a circle or a plain polygon was not
+        possible even though all of them enclose something and all of them are
+        drawn round things that have holes in. Every closed shape answers with
+        its own ring now, and the topmost one under the point owns the hole.
+        """
         frame = self.frame_at(scene_pos) or self.frame()
         if frame is None:
             return None
         for item in reversed(frame.ordered_markups()):
-            if item is ignore or not isinstance(item, MeasureItem):
+            if item is ignore or not self.editable(item):
                 continue
-            if item.kind not in (AREA, VOLUME) or not self.editable(item):
-                continue
-            ring = QPolygonF(item.points)
+            ring = QPolygonF(item.outline_ring())
             if ring.size() >= 3 and ring.containsPoint(item.mapFromScene(scene_pos),
                                                        Qt.OddEvenFill):
                 return item
         return None
-        if isinstance(draft, MeasureItem) and draft.kind != DIMENSION:
-            self.window.note_missing_scale()
 
     def forget_snapshot(self) -> None:
         """Drop the undo snapshot taken for a gesture that changes nothing."""
@@ -2877,8 +2891,6 @@ class PageView(QGraphicsView):
         layout.addWidget(height)
         proxy = self.scene().addWidget(panel)
         proxy.setZValue(20_000)
-        at = draft.mapToScene(QPointF(0, 0)) + QPointF(8, 8)
-        proxy.setPos(at)
         width.textEdited.connect(self.update_typed_size)
         height.textEdited.connect(self.update_typed_size)
         width.escapePressed.connect(self.escape_everything)
@@ -2888,9 +2900,53 @@ class PageView(QGraphicsView):
         self._size_width = width
         self._size_height = height
         self._typed_size = False
+        # Positioned but not filled in: a first click has no size to report,
+        # and a number sitting in the box is one the next thing typed would
+        # land on the end of.
+        self.place_size_editor()
         width.setFocus(Qt.OtherFocusReason)
         self.statusMessage.emit(
             "Type the size, then click to place · Esc to cancel")
+
+    def place_size_editor(self) -> None:
+        """Put the size entry beside the corner being dragged.
+
+        It used to be pinned once to the shape's top-left and left there, so
+        it did not move as the shape grew. It rides the bottom-right corner
+        now — the corner under the pointer.
+        """
+        draft = self._draft
+        proxy = self._size_proxy
+        if proxy is None or not isinstance(draft, RectItem):
+            return
+        corner = draft.mapToScene(draft.local_rect().normalized().bottomRight())
+        proxy.setPos(corner + QPointF(10, 10))
+
+    def follow_size_editor(self) -> None:
+        """Ride the corner, and say how big the shape is while it is dragged.
+
+        The boxes were empty from the first click to the last, so the only way
+        to learn a size was to type one. They now report the size as it
+        changes — but only while the pointer is driving the shape, and never
+        into a box being typed into, because a number already sitting there is
+        one the next keystroke would land on the end of.
+        """
+        self.place_size_editor()
+        draft = self._draft
+        if self._typed_size or not isinstance(draft, RectItem):
+            return
+        page = self.page()
+        if page is None or not page.scale.is_calibrated():
+            return
+        draft.refresh(page=page)
+        digits = max(page.scale.precision, 0)
+        for box, value in ((self._size_width, draft.width_value),
+                           (self._size_height, draft.height_value)):
+            if box is None or value is None or box.hasFocus():
+                continue
+            was = box.blockSignals(True)
+            box.setText(f"{float(value.magnitude):.{digits}f}")
+            box.blockSignals(was)
 
     @staticmethod
     def _size_with_default_unit(text: str, unit: str) -> str:

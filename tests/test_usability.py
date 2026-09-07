@@ -302,6 +302,145 @@ def test_escape_puts_the_count_tool_down_at_once(window):
     assert [m.index for m in placed] == [1, 2], "what was placed stays placed"
 
 
+def test_the_style_toolbar_offers_the_figures_an_answer_is_shown_to(window):
+    """The two ways of styling a selection have to offer the same things.
+
+    Figures, decimal places and scientific notation were on the right-click
+    menu and in Properties, but not on the toolbar — and how many figures a
+    number is quoted to is exactly the sort of thing changed while looking at
+    the number.
+    """
+    from calcforge.items.mathitem import MathItem
+    from calcforge.items.shapes import RectItem
+
+    line = _calc(window, "b := 300 mm", at=(90, 110))
+    window.recalculate()
+    window.view.scene().clearSelection()
+    line.setSelected(True)
+    window.view.selectionChanged.emit()
+    QApplication.processEvents()
+    assert all(a.isVisible() for a in window._figures_widgets), \
+        "a selected calculation shows them"
+    assert window.figures_spin.value() == line.digits
+    assert window.number_format_combo.currentText() == line.number_format
+
+    window.figures_spin.setValue(3)
+    QApplication.processEvents()
+    assert line.digits == 3, "and the toolbar changes the calculation"
+    window.number_format_combo.setCurrentText("scientific")
+    QApplication.processEvents()
+    assert line.number_format == "scientific"
+
+    # A rectangle has no answer to show, so they go away again.
+    window.select_tool("rect")
+    drag(window.view, 300, 400, 420, 480)
+    window.select_tool("select")
+    box = [i for i in markups(window) if isinstance(i, RectItem)][-1]
+    window.view.scene().clearSelection()
+    box.setSelected(True)
+    window.view.selectionChanged.emit()
+    QApplication.processEvents()
+    assert not any(a.isVisible() for a in window._figures_widgets)
+    assert isinstance(line, MathItem)
+
+
+def test_a_cut_out_belongs_to_any_closed_shape(window):
+    """A hole used to be something only an area measurement could have.
+
+    A rectangle, a circle and a plain polygon all enclose something and all
+    get drawn round things with holes in them, so all of them take one now,
+    and it is saved with the shape it came out of.
+    """
+    from calcforge.core.document import PageScale
+    from calcforge.items.shapes import PolyItem, RectItem
+
+    window.current_page().scale = PageScale.from_ratio(50)
+    for tool, expected_ring in (("rect", 4), ("ellipse", 48)):
+        window.select_tool(tool)
+        drag(window.view, 120, 120, 420, 340)
+        host = [i for i in markups(window) if isinstance(i, RectItem)][-1]
+        host.style.fill = "#cccccc"
+        assert len(host.outline_ring()) == expected_ring
+
+        window.select_tool("cutout_ellipse")
+        drag(window.view, 200, 180, 300, 260)
+        assert len(host.cutouts) == 1, f"{tool} takes a hole"
+        assert len(host.serialize().get("cutouts", [])) == 1, "and keeps it"
+
+        fresh = RectItem()
+        fresh.deserialize(host.serialize())
+        assert len(fresh.cutouts) == 1, "and reads it back"
+
+    window.select_tool("polygon")
+    for x, y in ((520, 120), (760, 120), (760, 340), (520, 340)):
+        click(window.view, x, y)
+    press_key(window.view, Qt.Key_Return)
+    QApplication.processEvents()
+    poly = [i for i in markups(window) if isinstance(i, PolyItem) and i.closed][-1]
+    assert len(poly.outline_ring()) >= 3
+
+    window.select_tool("cutout_ellipse")
+    drag(window.view, 600, 180, 700, 260)
+    assert len(poly.cutouts) == 1, "a closed polygon takes one too"
+
+
+def test_an_open_polyline_is_not_offered_as_somewhere_to_put_a_hole(window):
+    """A shape that encloses nothing cannot own a hole."""
+    from calcforge.items.shapes import PolyItem
+
+    window.select_tool("polyline")
+    for x, y in ((120, 500), (300, 500), (300, 600)):
+        click(window.view, x, y)
+    press_key(window.view, Qt.Key_Return)
+    QApplication.processEvents()
+    line = [i for i in markups(window) if isinstance(i, PolyItem)][-1]
+    assert not line.closed
+    assert line.outline_ring() == []
+    assert window.view.area_under(QPointF(250, 540)) is not line
+
+
+def test_the_size_entry_rides_the_corner_and_says_the_size(window):
+    """It used to be pinned to the top-left with two empty boxes.
+
+    So it neither followed the shape as it grew nor said how big the shape
+    currently was: the only way to learn a size was to type one.
+    """
+    from calcforge.core.document import PageScale
+    from calcforge.items.shapes import RectItem
+
+    window.current_page().scale = PageScale.from_ratio(50)
+    window.select_tool("rect")
+    click(window.view, 100, 100)            # first click, not a drag
+    assert window.view._size_editor is not None, "the entry opens on the first click"
+
+    seen = []
+    for x, y in ((200, 180), (300, 260), (420, 340)):
+        hover(window.view, x, y)
+        draft = window.view._draft
+        corner = draft.mapToScene(draft.local_rect().bottomRight())
+        panel = window.view._size_proxy.pos()
+        assert panel.x() > corner.x() and panel.y() > corner.y(), \
+            "the entry sits off the corner being dragged"
+        assert panel.x() - corner.x() < 40 and panel.y() - corner.y() < 40, \
+            "and stays beside it rather than being left behind"
+        seen.append((window.view._size_width.text(), window.view._size_height.text()))
+
+    assert all(w and h for w, h in seen), "it says the size the whole way"
+    assert seen[0] != seen[1] != seen[2], "and the size changes as the shape does"
+    assert float(seen[2][0]) > float(seen[0][0])
+
+    # Once a size is typed, what was typed is what stands.
+    window.view._size_width.setText("2.5")
+    window.view._size_width.textEdited.emit("2.5")
+    window.view._size_height.setText("1.5")
+    window.view._size_height.textEdited.emit("1.5")
+    assert window.view._typed_size
+    hover(window.view, 500, 460)
+    assert window.view._size_width.text() == "2.5", "the drag does not overwrite it"
+    assert window.view._size_height.text() == "1.5"
+    window.view.escape_everything()
+
+
 def test_a_column_edge_says_it_can_be_dragged(window):
     """The cursor over a column or row border is the resize cursor.
 

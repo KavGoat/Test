@@ -657,6 +657,25 @@ class MainWindow(QMainWindow):
         self.font_spin.setSuffix(" pt")
         self.font_spin.valueChanged.connect(self._style_font)
         self._style_widgets[FONT].append(style_bar.addWidget(self.font_spin))
+        # How a calculation's answer reads. It was on the right-click menu and
+        # in Properties only, so the two ways of styling a selected thing did
+        # not offer the same things — and the figures a number is quoted to is
+        # exactly the sort of thing changed while looking at the number.
+        self.figures_label = QLabel(" Figures ")
+        self.figures_spin = QSpinBox()
+        self.figures_spin.setRange(1, 12)
+        self.figures_spin.setToolTip(
+            "How many figures the answers on this calculation are shown to")
+        self.figures_spin.valueChanged.connect(self._toolbar_figures_changed)
+        self.number_format_combo = QComboBox()
+        self.number_format_combo.addItems(["auto", "fixed", "scientific", "engineering"])
+        self.number_format_combo.setToolTip(
+            "Significant figures, decimal places, scientific or engineering")
+        self.number_format_combo.currentTextChanged.connect(
+            self._toolbar_number_format_changed)
+        self._figures_widgets = [style_bar.addWidget(self.figures_label),
+                                 style_bar.addWidget(self.figures_spin),
+                                 style_bar.addWidget(self.number_format_combo)]
         style_bar.addSeparator()
         self.default_button = QToolButton()
         self.default_button.setText("Set default")
@@ -2528,6 +2547,7 @@ class MainWindow(QMainWindow):
         for field, actions in self._style_widgets.items():
             for action in actions:
                 action.setVisible(field in supported)
+        self._refresh_figures_controls()
         if active is None:
             return
         controls = ((self.stroke_button, active.style.stroke, "set_color"),
@@ -2539,6 +2559,48 @@ class MainWindow(QMainWindow):
             control.blockSignals(True)
             getattr(control, method)(value)
             control.blockSignals(False)
+
+    def _selected_calculations(self) -> list:
+        return [item for item in self.selected_items() if isinstance(item, MathItem)]
+
+    def _refresh_figures_controls(self) -> None:
+        """The result-format controls belong to a selected calculation."""
+        if not hasattr(self, "figures_spin"):
+            return
+        maths = self._selected_calculations()
+        for action in self._figures_widgets:
+            action.setVisible(bool(maths))
+        if not maths:
+            return
+        first = maths[0]
+        for control, value, method in (
+                (self.figures_spin, first.digits, "setValue"),
+                (self.number_format_combo, first.number_format, "setCurrentText")):
+            control.blockSignals(True)
+            getattr(control, method)(value)
+            control.blockSignals(False)
+
+    def _toolbar_figures_changed(self, value: int) -> None:
+        maths = self._selected_calculations()
+        if not maths:
+            return
+        self.view.begin_snapshot(self.view.all_frames())
+        for item in maths:
+            item.digits = int(value)
+            item.relayout()
+        self.view.commit_snapshot("Precision")
+        self.recalculate()
+
+    def _toolbar_number_format_changed(self, mode: str) -> None:
+        maths = self._selected_calculations()
+        if not maths:
+            return
+        self.view.begin_snapshot(self.view.all_frames())
+        for item in maths:
+            item.number_format = mode
+            item.relayout()
+        self.view.commit_snapshot("Number format")
+        self.recalculate()
 
     def _toolbar_scope_toggled(self, on: bool) -> None:
         items = self.selected_items()

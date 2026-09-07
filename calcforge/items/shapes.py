@@ -234,6 +234,19 @@ class RectItem(MarkupItem):
         pen = self.style.pen() if self.style.stroke else QPen(Qt.NoPen)
         painter.setPen(pen)
         painter.setBrush(self.style.brush())
+        if self.cutouts and self.style.fill and self.kind in ("rect", "ellipse"):
+            # A hole in a filled shape has to be a hole in the fill, or the
+            # only sign of it is the dashed outline sitting on solid colour.
+            solid = QPainterPath()
+            if self.kind == "ellipse":
+                solid.addEllipse(rect)
+            elif self.style.corner_radius > 0:
+                solid.addRoundedRect(rect, self.style.corner_radius,
+                                     self.style.corner_radius)
+            else:
+                solid.addRect(rect)
+            painter.fillPath(solid.subtracted(self.holes_path()), self.style.brush())
+            painter.setBrush(Qt.NoBrush)
         if self.kind == "ellipse":
             painter.drawEllipse(rect)
         elif self.kind == "cloud":
@@ -250,8 +263,25 @@ class RectItem(MarkupItem):
             painter.drawRoundedRect(rect, self.style.corner_radius, self.style.corner_radius)
         else:
             painter.drawRect(rect)
+        self.paint_cutouts(painter)
         if self.show_size and self.size_text:
             self._paint_size(painter, rect)
+
+    def outline_ring(self) -> list:
+        """A rectangle, a rounded rectangle and an ellipse all enclose something."""
+        rect = self._rect.normalized()
+        if rect.width() <= 0 or rect.height() <= 0:
+            return []
+        if self.kind == "ellipse":
+            steps = 48
+            centre, rx, ry = rect.center(), rect.width() / 2, rect.height() / 2
+            return [QPointF(centre.x() + math.cos(2 * math.pi * i / steps) * rx,
+                            centre.y() + math.sin(2 * math.pi * i / steps) * ry)
+                    for i in range(steps)]
+        if self.kind in ("rect", "cloud"):
+            return [rect.topLeft(), rect.topRight(),
+                    rect.bottomRight(), rect.bottomLeft()]
+        return []
 
     def _paint_size(self, painter: QPainter, rect: QRectF) -> None:
         """Write the size under the rectangle, the way a dimension is written.
@@ -280,6 +310,8 @@ class RectItem(MarkupItem):
                                                  self._rect.width(), self._rect.height()],
                      "cloud_radius": self.cloud_radius,
                      "show_size": self.show_size})
+        if self.cutouts:
+            data["cutouts"] = self.cutouts_as_data()
         return data
 
     def deserialize(self, data: dict) -> None:
@@ -288,6 +320,7 @@ class RectItem(MarkupItem):
         self._rect = QRectF(*values)
         self.cloud_radius = float(data.get("cloud_radius", 9.0))
         self.show_size = bool(data.get("show_size", False))
+        self.cutouts_from_data(data)
         self.load_base(data)
 
 
@@ -757,6 +790,8 @@ class PolyItem(MarkupItem):
         if self.closed and self.style.fill:
             filled = QPainterPath(path)
             filled.closeSubpath()
+            if self.cutouts:
+                filled = filled.subtracted(self.holes_path())
             painter.fillPath(filled, self.style.brush())
         if self.kind == "highlighter":
             # A highlighter lays down one flat band of ink. Stroking the path
@@ -773,7 +808,12 @@ class PolyItem(MarkupItem):
         painter.setPen(self.style.pen())
         painter.setBrush(Qt.NoBrush)
         painter.drawPath(path)
+        self.paint_cutouts(painter)
         self._paint_arrows(painter)
+
+    def outline_ring(self) -> list:
+        """A closed polygon encloses something; an open polyline does not."""
+        return list(self.points) if self.closed and len(self.points) >= 3 else []
 
     def highlight_colour(self) -> QColor:
         colour = QColor(self.style.stroke or "#ffd43b")
@@ -854,6 +894,8 @@ class PolyItem(MarkupItem):
                               for k, v in self.curved.items()}
         if self.broken:
             data["broken"] = sorted(self.broken)
+        if self.cutouts:
+            data["cutouts"] = self.cutouts_as_data()
         return data
 
     def deserialize(self, data: dict) -> None:
@@ -866,6 +908,7 @@ class PolyItem(MarkupItem):
         self.curved = {int(k): (float(v[0]), float(v[1]))
                        for k, v in (data.get("curved") or {}).items()}
         self.broken = {int(k): True for k in (data.get("broken") or [])}
+        self.cutouts_from_data(data)
         self.load_base(data)
 
 

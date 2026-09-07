@@ -310,6 +310,13 @@ class MarkupItem(QGraphicsObject):
         self.locked_before_flatten = False
         # Markups sharing a group id are selected, moved and copied together.
         self.group = ""
+        # Holes taken out of this shape, each a ring of local points. A hole
+        # belongs to the shape it came out of rather than being a markup of
+        # its own, so moving the shape takes its holes with it. Any closed
+        # shape can own them — a slab with two lift shafts in it is the same
+        # idea whether it was drawn as an area measurement, a polygon or a
+        # rectangle.
+        self.cutouts: list[list[QPointF]] = []
         self._handles_visible = True
         self.setFlags(QGraphicsItem.ItemIsSelectable | QGraphicsItem.ItemIsMovable |
                       QGraphicsItem.ItemSendsGeometryChanges)
@@ -508,6 +515,47 @@ class MarkupItem(QGraphicsObject):
         return
 
     # -- serialisation -----------------------------------------------------
+    # -- holes -------------------------------------------------------------
+    def outline_ring(self) -> list:
+        """This shape as a closed ring of local points, or empty if it is not.
+
+        What a hole can be put inside. A shape that does not enclose anything
+        returns nothing and is never offered as somewhere to put one.
+        """
+        return []
+
+    def holes_path(self) -> QPainterPath:
+        """Every hole as one path, for subtracting from a fill."""
+        path = QPainterPath()
+        for hole in self.cutouts:
+            if len(hole) >= 3:
+                path.addPolygon(QPolygonF(hole))
+                path.closeSubpath()
+        return path
+
+    def paint_cutouts(self, painter: QPainter) -> None:
+        """The holes, outlined so it is obvious what has been taken out."""
+        if not self.cutouts:
+            return
+        pen = QPen(QColor(self.style.stroke or "#1971c2"))
+        pen.setWidthF(max(self.style.width, 0.6))
+        pen.setStyle(Qt.DashLine)
+        painter.save()
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        for hole in self.cutouts:
+            if len(hole) >= 3:
+                painter.drawPolygon(QPolygonF(hole))
+        painter.restore()
+
+    def cutouts_as_data(self) -> list:
+        return [[[round(p.x(), 3), round(p.y(), 3)] for p in hole]
+                for hole in self.cutouts]
+
+    def cutouts_from_data(self, data: dict) -> None:
+        self.cutouts = [[QPointF(x, y) for x, y in hole]
+                        for hole in data.get("cutouts", [])]
+
     def base_dict(self) -> dict:
         return {
             "type": self.TYPE,
