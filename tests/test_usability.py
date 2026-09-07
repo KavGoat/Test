@@ -302,6 +302,39 @@ def test_escape_puts_the_count_tool_down_at_once(window):
     assert [m.index for m in placed] == [1, 2], "what was placed stays placed"
 
 
+def test_a_column_edge_says_it_can_be_dragged(window):
+    """The cursor over a column or row border is the resize cursor.
+
+    It is offered where the drag is: the borders are measured from the A/B/C
+    and 1/2/3 gutters, and those appear when the table is open for typing
+    into. Showing a resize cursor on a table that is only picked out would
+    promise a drag that would not happen.
+    """
+    from calcforge.items.tableitem import TableItem
+
+    window.select_tool("table")
+    drag(window.view, 100, 100, 400, 240)
+    table = [i for i in markups(window) if isinstance(i, TableItem)][0]
+    assert window.view.active_table is table and table.show_chrome
+
+    gutter_w, gutter_h = table.gutter_size()
+    origin = table.grid_origin()
+    edge = QPointF(origin.x() + table.sheet.col_width(0), origin.y() - gutter_h / 2)
+    assert table.border_at(edge) == ("col", 0)
+    where = table.mapToScene(edge)          # the helpers take scene points
+    hover(window.view, where.x() + 3, where.y())
+    hover(window.view, where.x(), where.y())
+    assert window.view.cursor().shape() == Qt.SplitHCursor
+
+    down = QPointF(origin.x() - gutter_w / 2, origin.y() + table.sheet.row_height(0))
+    assert table.border_at(down) == ("row", 0)
+    where = table.mapToScene(down)
+    hover(window.view, where.x(), where.y() + 3)
+    hover(window.view, where.x(), where.y())
+    assert window.view.cursor().shape() == Qt.SplitVCursor
+    window.view.deactivate_table()
+
+
 def test_arrow_tool_places_an_arrow_and_hides_handles_until_selected(window):
     from PySide6.QtGui import QImage, QPainter
 

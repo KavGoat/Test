@@ -2,7 +2,7 @@
 
 Audited: 2026-09-06 against `claude/engineering-calc-markup-app-2twiqs`.
 
-The 19 entries below are what the audit could not show working. Each says
+The 17 entries below are what the audit could not show working. Each says
 what is missing or blocking it. Several are tasks whose base behaviour is
 finished and whose recent amendment is not; those name the part that is done so
 the remaining work is clear.
@@ -22,11 +22,6 @@ This is not the user-owned completion record. It changes no checkbox in
 
 - **(new, extended)** Make equation editing structural rather than flat-text-like: arrow keys and pointer placement navigate the visible expression tree; selecting an expression and typing an opening bracket wraps the entire selected expression; selecting an expression and typing `/` turns that selection into the numerator of a fraction/division structure. Preserve the selected expression and its formatting when applying either transformation. The structure must also survive a syntax error: a calculation that does not parse keeps its structured typeset layout instead of collapsing back to inline text, operator precedence (BEDMAS) stays visible, `5/` renders as 5 over an empty denominator placeholder, and incomplete value, unit and power slots render as small SMath-style outline input boxes.
   - **Missing:** Not implemented, verified in the running app. With '1+2' selected in 'a:=1+2', typing '(' replaces the selection instead of wrapping it — the text becomes 'a:=('; typing '/' likewise gives 'a:=/' rather than making the selection a numerator. No expression-tree/wrap code exists. The extended error-tolerant-rendering clause is also unimplemented.
-
-## 6. Spreadsheet (Excel-like) behavior
-
-- Cursor icon should change to a resize cursor when hovering a column/row border — currently doesn't, making it hard to tell it's draggable (108)
-  - **Missing:** Not implemented: neither calcforge/items/tableitem.py nor the view sets any cursor over a column or row border — tableitem.py contains no setCursor call at all. The SizeHor/SizeVerCursor in items/base.py belong to markup resize handles, not table borders.
 
 ## 10. Snapshot tool
 
@@ -63,9 +58,6 @@ This is not the user-owned completion record. It changes no checkbox in
 
 - Audit every Properties-panel option for redundancy or unclear labeling — e.g. what does "multiply highlighter" in the callout properties actually do? Several options may not be needed at all (61)
   - **Missing:** No record of the audit having been carried out. The specific example does do something — blend 'multiply' is the highlighter's composition mode (items/base.py:133 and 496) — but nothing shows every Properties option was reviewed for redundancy or unclear labelling.
-
-- Table column/row resize doesn't show a resize cursor (108, duplicate of §6 item)
-  - **Missing:** Duplicate of the §6 entry and open for the same reason: no cursor is set over a table column or row border anywhere; calcforge/items/tableitem.py contains no setCursor call.
 
 ## 29. New requests awaiting review
 

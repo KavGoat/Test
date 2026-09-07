@@ -2002,11 +2002,14 @@ class PageView(QGraphicsView):
                 if key:
                     self.setCursor(cursor_for_handle(key))
                     return
-        # A table's column and row edges, whether it is open for typing into
-        # or just picked out on the page.
+        # A table's column and row edges, which are grabbable only while it is
+        # open for typing into. The gutters carrying A/B/C and 1/2/3 are what
+        # a border is measured from, and they appear only then — turning them
+        # on for a table that is merely picked out would shift the table by
+        # the width of a gutter under the pointer that had just selected it.
+        # A resize cursor over an edge that cannot be dragged would be a
+        # promise the table does not keep, so it is offered where the drag is.
         tables = [self.active_table] if self.active_table is not None else []
-        tables += [item for item in self.scene().selectedItems()
-                   if isinstance(item, TableItem) and item not in tables]
         for table in tables:
             local = table.mapFromScene(scene_pos)
             border = table.border_at(local)

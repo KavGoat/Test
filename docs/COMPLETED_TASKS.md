@@ -2,7 +2,7 @@
 
 Audited: 2026-09-06 against `claude/engineering-calc-markup-app-2twiqs`.
 
-Every open line in `docs/tasklist.md` was gone through one at a time. The 142
+Every open line in `docs/tasklist.md` was gone through one at a time. The 144
 below are the ones the current source implements and something actually
 exercises — an event-driven test that drives the real Qt queue, or a check
 against the running application. Each carries the evidence it rests on.
@@ -85,6 +85,9 @@ behaviour it extends.
 
 - Pasting cells copied from Excel should create a real table object here, and should carry over relative formulas where translation is possible (fall back to values only where it isn't) (12, 23, 109)
   - **Evidence:** Pasting Excel cells builds a real table and carries relative formulas across, falling back to values where it cannot translate. Evidence: test_pasting_excel_cells_onto_the_page_makes_a_table, test_pasting_from_excel_brings_the_formulas, test_formulas_pasted_as_text_stay_formulas, test_excel_quoting_survives_the_trip.
+
+- Cursor icon should change to a resize cursor when hovering a column/row border — currently doesn't, making it hard to tell it's draggable (108)
+  - **Evidence:** Behaviour is there and now covered; my first verdict was wrong because I grepped only items/tableitem.py, and the cursor is set in ui/view.py. Hovering a column or row border of a table that is open for typing gives Qt.SplitHCursor / Qt.SplitVCursor. It is offered exactly where the drag is possible: border_at measures from the A/B/C and 1/2/3 gutters, which exist only while the table is active. The view also listed merely-selected tables as candidates, but that branch could never fire — show_chrome is false then, so border_at returns None immediately — and set_chrome shifts the table by a gutter, so turning chrome on at selection would move the table under the pointer that just selected it. The dead branch is removed and the comment says why. Evidence: test_a_column_edge_says_it_can_be_dragged, driving real hover events.
 
 - Fix visual overlap between adjacent table cells so content doesn't run into the next cell (11)
   - **Evidence:** Cell content is clipped inside its own cell rather than running into the next. Evidence: test_table_text_is_clipped_inside_its_own_cell.
@@ -404,6 +407,9 @@ behaviour it extends.
 
 - Highlighter tool leaves odd gaps/holes depending on the stroke path used to draw it (58, 59)
   - **Evidence:** A highlighter stroke is one even band with no holes where it overlaps itself. Evidence: test_a_highlighter_stroke_is_one_even_band, test_the_highlight_goes_over_whatever_is_under_it.
+
+- Table column/row resize doesn't show a resize cursor (108, duplicate of §6 item)
+  - **Evidence:** Behaviour is there and now covered; my first verdict was wrong because I grepped only items/tableitem.py, and the cursor is set in ui/view.py. Hovering a column or row border of a table that is open for typing gives Qt.SplitHCursor / Qt.SplitVCursor. It is offered exactly where the drag is possible: border_at measures from the A/B/C and 1/2/3 gutters, which exist only while the table is active. The view also listed merely-selected tables as candidates, but that branch could never fire — show_chrome is false then, so border_at returns None immediately — and set_chrome shifts the table by a gutter, so turning chrome on at selection would move the table under the pointer that just selected it. The dead branch is removed and the comment says why. Evidence: test_a_column_edge_says_it_can_be_dragged, driving real hover events. Same entry as the §6 one.
 
 - An object can get stuck showing a "move" cursor even when nothing is selected, and Escape doesn't clear it (110)
   - **Evidence:** The cursor is recomputed when a gesture finishes and Escape restores it. Evidence: test_finishing_a_rectangle_resize_recomputes_the_cursor, test_escape_cancels_a_group_resize_and_restores_the_cursor.
