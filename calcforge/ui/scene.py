@@ -433,8 +433,16 @@ class PageFrame(QGraphicsObject):
 
     # -- rendering ---------------------------------------------------------
     def render_page(self, painter: QPainter, target: QRectF, for_print: bool = True,
-                    pdf_overlay: bool = False) -> None:
-        """Draw the whole page into *target*, hiding editing chrome."""
+                    pdf_overlay: bool = False, without_markups: bool = False) -> None:
+        """Draw the whole page into *target*, hiding editing chrome.
+
+        With *without_markups*, only the page itself is drawn — the paper, the
+        imported background, the grid, the running header and footer, and
+        anything that has been flattened into the sheet, which is part of it
+        now. That is what an export wants when the markups that are still
+        markups are going into the file as real annotations instead of being
+        painted into it.
+        """
         scene = self.scene()
         if scene is None:
             return
@@ -456,9 +464,10 @@ class PageFrame(QGraphicsObject):
                     item.set_chrome(False)
                 item._handles_visible = False
             hidden = [item for item in self.markups()
-                      if for_print and (not item.printable
-                                        or not self.layer_prints(item)
-                                        or (pdf_overlay and item.layer == "Drawing"))]
+                      if (without_markups and not item.flattened)
+                      or (for_print and (not item.printable
+                                         or not self.layer_prints(item)
+                                         or (pdf_overlay and item.layer == "Drawing")))]
             for item in hidden:
                 item.setVisible(False)
             source = self.mapRectToScene(self.page_rect())

@@ -87,8 +87,9 @@ calcforge/
     tools.py         the tool table: key, label, icon, shortcut, factory
     shortcuts.py     DEFAULT_BINDINGS and the shortcut manager
     theme.py (calcforge/theme.py) light and dark stylesheets
-  io/          project (.cfx), pdfio, pdfvector, btx (Bluebeam tool sets),
-               export
+  io/          pdfbase (what a saved document is), project (open and save),
+               annotate (markups as real PDF annotations), pdfio, pdfvector,
+               pdflinks, btx (Bluebeam tool sets), export
 tests/         pytest; see §3
 tools/         session_fuzz.py — a long randomised session against the app
 docs/          this file, tasklist.md, interface.md, backlog.md,
@@ -111,8 +112,26 @@ docs/          this file, tasklist.md, interface.md, backlog.md,
 - **Undo is a snapshot stack.** `view.begin_snapshot(frames)` … change …
   `view.commit_snapshot("Label")`. One gesture is one step.
 - **Settings** are `QSettings("CalcForge", "CalcForge")`. The suite sandboxes
-  them; do not call `sync()` to "fix" ordering — that broke the layout tests
-  once already.
+  them by pointing `XDG_CONFIG_HOME` and its neighbours at a temporary folder,
+  at the top of `tests/conftest.py` and not in a fixture, because Qt works out
+  those locations once and keeps the answer. Do not call `sync()` to "fix"
+  ordering — that broke the layout tests once already.
+- **A saved document is a PDF.** Not a format of its own that can produce one:
+  `io/pdfbase.py` writes the pages as PDF pages — an imported page keeps the
+  source PDF's own page, with its real line information — and puts everything
+  a PDF cannot hold (the calculations, and what CalcForge knows about each
+  markup) inside the file as an embedded attachment. `.cfx` names one with
+  calculations in it and `.pdf` one without; the bytes are the same kind of
+  file either way, so renaming a `.cfx` to `.pdf` loses nothing but the
+  calculations' ability to be edited again. What decides how a file opens is
+  what it holds, never what it is called: `project.carries_a_document(path)`.
+- **An exported markup is a real annotation.** `io/annotate.py` writes each one
+  into the PDF with its own appearance, and the sheet is painted without it, so
+  it can be picked up and moved in Bluebeam. Anything flattened is the page now
+  and stays painted in. A calculation cannot travel as a calculation, so it
+  exports as an ordinary movable markup showing the value it held at export —
+  which is why the print tests read markup text out of the appearance streams
+  (`Printed.text()` in `tests/test_output.py`) rather than from the page.
 
 ---
 

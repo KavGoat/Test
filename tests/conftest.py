@@ -1,9 +1,22 @@
 import gc
 import os
 import sys
+import tempfile
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Where the settings, the recovery folder and every other remembered thing go.
+# This has to be done before Qt is asked for any of them, and before anything
+# creates a QSettings, which is why it is here and not in a fixture: Qt works
+# out those locations once and keeps the answer. Without it the suite reads and
+# writes the real ones, so a test that saves an arrangement leaves it behind
+# for the next run — and for whoever is using the application on this machine.
+_SANDBOX = tempfile.mkdtemp(prefix="calcforge-tests-")
+for _variable in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME",
+                  "XDG_STATE_HOME"):
+    os.environ[_variable] = os.path.join(_SANDBOX, _variable.lower())
+    os.makedirs(os.environ[_variable], exist_ok=True)
 
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
@@ -19,10 +32,14 @@ def settings_sandbox(tmp_path_factory):
     """
     from PySide6.QtCore import QSettings
 
-    folder = str(tmp_path_factory.mktemp("settings"))
+    folder = os.environ["XDG_CONFIG_HOME"]
     QSettings.setDefaultFormat(QSettings.IniFormat)
     QSettings.setPath(QSettings.IniFormat, QSettings.UserScope, folder)
     QSettings.setPath(QSettings.IniFormat, QSettings.SystemScope, folder)
+    written = QSettings("CalcForge", "CalcForge").fileName()
+    assert written.startswith(_SANDBOX), (
+        f"the suite is writing its settings to {written}, which is somebody's "
+        "real ones")
     yield folder
 
 

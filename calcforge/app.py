@@ -59,12 +59,12 @@ def main(argv: list[str] | None = None) -> int:
     window.offer_recovery()
 
     for argument in argv[1:]:
-        if argument.lower().endswith(".cfx") and os.path.exists(argument):
-            from .io import project as project_io
+        if argument.lower().endswith((".cfx", ".pdf")) and os.path.exists(argument):
             try:
-                project_io.load_document(window.document, argument)
+                window.open_path(argument)
                 window.current_index = 0
                 window.rebuild_scenes()
+                window.apply_document_mode()
                 window.view.fit_page()
                 window.update_title()
             except Exception as exc:  # noqa: BLE001

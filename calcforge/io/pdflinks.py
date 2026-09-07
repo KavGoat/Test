@@ -118,6 +118,28 @@ class _Pdf:
         match = re.search(rb"/Annots\s+(\d+)\s+0\s+R", self.body(number))
         return int(match.group(1)) if match else None
 
+    def annots_array(self, number: int) -> Optional[tuple[int, int]]:
+        """Where a page keeps its annotations written out in the page itself.
+
+        A page whose markups went out as annotations has them listed in the
+        page dictionary rather than in an array object of its own, and the
+        links have to join that list. Two ``/Annots`` keys on one page is not
+        a page any reader will read.
+        """
+        body = self.body(number)
+        match = re.search(rb"/Annots\s*\[", body)
+        if not match:
+            return None
+        depth = 0
+        for index in range(match.end() - 1, len(body)):
+            if body[index:index + 1] == b"[":
+                depth += 1
+            elif body[index:index + 1] == b"]":
+                depth -= 1
+                if depth == 0:
+                    return match.end(), index
+        return None
+
 
 def add_outline_and_links(path: str, outline: list, links: list) -> bool:
     """Append an outline and link annotations to the PDF at *path*.
@@ -171,11 +193,17 @@ def add_outline_and_links(path: str, outline: list, links: list) -> bool:
             existing = pdf.body(array).strip()
             inner = existing[1:-1] if existing.startswith(b"[") else b""
             new[array] = b"[ " + inner.strip() + b" " + references + b" ]"
-        else:
-            body = pdf.body(page_number).strip()
-            if not body.endswith(b">>"):
-                continue
-            new[page_number] = (body[:-2] + b"\n/Annots [ " + references + b" ]\n>>")
+            continue
+        written_out = pdf.annots_array(page_number)
+        body = pdf.body(page_number)
+        if written_out is not None:
+            first, last = written_out
+            new[page_number] = (body[:last] + b" " + references + body[last:])
+            continue
+        body = body.strip()
+        if not body.endswith(b">>"):
+            continue
+        new[page_number] = (body[:-2] + b"\n/Annots [ " + references + b" ]\n>>")
 
     # -- the outline -------------------------------------------------------
     if outline:

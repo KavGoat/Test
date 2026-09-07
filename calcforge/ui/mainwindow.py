@@ -390,6 +390,10 @@ class MainWindow(QMainWindow):
         self._act("open", "Open…", self.open_document, "Ctrl+O", "open")
         self._act("save", "Save", self.save_document, "Ctrl+S", "save")
         self._act("save_as", "Save as…", self.save_document_as, "Ctrl+Shift+S")
+        self._act("add_calculations", "Add calculations", self.start_calculating,
+                  tip="Turn on the calculation tools for this document. It "
+                      "stays the same PDF; saving it now writes a .cfx, which "
+                      "is that PDF with the calculations kept alongside it")
         self._act("insert_pdf", "Insert PDF…", lambda: self.insert_pdf(),
                   "Ctrl+I", "pdf")
         self._act("import_toolset", "Import tools…",
@@ -917,6 +921,7 @@ class MainWindow(QMainWindow):
         file_menu = bar.addMenu("&File")
         for action in (self.act_new, self.act_new_tab, self.act_new_window, self.act_open,
                        None, self.act_save, self.act_save_as,
+                       self.act_add_calculations,
                        None, self.act_insert_pdf, self.act_insert_image_page,
                        self.act_import_toolset,
                        None, self.act_export_pdf,
@@ -1402,8 +1407,13 @@ class MainWindow(QMainWindow):
         self.update_title()
 
     def open_path(self, path: str) -> None:
-        """Load a CalcForge project, or open a PDF as a review document."""
-        if not path.lower().endswith(".pdf"):
+        """Open a document, or bring in a PDF that is not one yet.
+
+        A saved document is itself a PDF, so what decides between the two is
+        what the file holds and not what it is called: a PDF carrying a
+        CalcForge layer is a document and opens as one, whatever its name.
+        """
+        if project_io.carries_a_document(path):
             project_io.load_document(self.document, path)
             return
         document = Document()
@@ -1416,11 +1426,29 @@ class MainWindow(QMainWindow):
             raise OSError("The PDF contains no pages")
         pdfio.import_pages(document, path, list(range(count)), pdfio.FIT_ORIGINAL,
                            pdfio.BEST_DPI, at=0, vectors=True)
-        # A PDF is a source document, never the Save target. Save creates a
-        # .cfx review file and preserves this mode and the original PDF assets.
-        document.path = None
+        # Opening a PDF is opening a document, not converting one. Save writes
+        # this file back — the source page comes through untouched and the
+        # markups go on top of it, the way Bluebeam saves a marked-up drawing.
+        # Put a calculation on it and the save becomes a .cfx beside it.
+        document.path = path
         document.modified = True
         self.document = document
+
+    def start_calculating(self) -> None:
+        """Let a document opened for review be calculated on.
+
+        Reviewing a drawing hides the calculation tools, which is right until
+        the moment a number is wanted on it. Nothing about the document
+        changes here except what is offered: the PDF is the same PDF, and the
+        next save writes it as a ``.cfx`` because there is now a layer to keep.
+        """
+        if self.document.mode != "pdf":
+            return
+        self.document.mode = "worksheet"
+        self.document.modified = True
+        self.apply_document_mode()
+        self.status_hint.setText(
+            "Calculations are on for this document — it saves as .cfx now")
 
     def apply_document_mode(self) -> None:
         """Expose worksheet UI or the focused PDF-review subset."""
@@ -1437,6 +1465,11 @@ class MainWindow(QMainWindow):
                        self.act_export_vars):
             action.setVisible(not pdf_mode)
             action.setEnabled(not pdf_mode)
+        # Offered only while it would do something: this is a PDF editor that
+        # can calculate, so a drawing opened for review is one command away
+        # from being calculated on.
+        self.act_add_calculations.setVisible(pdf_mode)
+        self.act_add_calculations.setEnabled(pdf_mode)
         self.calculate_menu.menuAction().setVisible(not pdf_mode)
         self.symbol_menu.menuAction().setVisible(not pdf_mode)
         self.formula_bar.setVisible(False)
@@ -1479,7 +1512,7 @@ class MainWindow(QMainWindow):
         return True
 
     def save_document_as(self) -> bool:
-        suggested = self.document.path or f"{self.document.title or 'calculation'}.cfx"
+        suggested = project_io.suggested_name(self.document)
         path, _ = QFileDialog.getSaveFileName(self, "Save document as", suggested,
                                               project_io.FILTER)
         if not path:
@@ -1585,7 +1618,8 @@ class MainWindow(QMainWindow):
         path = self.autosave_path()
         try:
             saved_path = self.document.path
-            project_io.save_document(self.document, path, enforce_extension=False)
+            project_io.save_document(self.document, path, enforce_extension=False,
+                                     appearance=False)
             self.document.path = saved_path     # an autosave is not a save-as
             self.document.modified = True
             return path

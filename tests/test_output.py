@@ -32,8 +32,51 @@ class Printed:
         return size.width(), size.height()
 
     def text(self) -> str:
-        return "\n".join(self.document.getAllText(i).text()
-                          for i in range(self.pages))
+        """Every word a reader shows, wherever the file happens to keep it.
+
+        An exported markup is a real annotation with its own appearance, so
+        what it says is not in the page's own content stream. Qt's reader only
+        gives back the page, so the annotations are read as well and added to
+        it: between them they are what somebody opening the file actually sees.
+        """
+        return "\n".join([self.document.getAllText(i).text()
+                           for i in range(self.pages)] + self.markup_text())
+
+    def markup_text(self) -> list[str]:
+        """What each markup on each page says, out of its appearance."""
+        from pypdf import PdfReader
+        from pypdf._page import PageObject
+        from pypdf.generic import NameObject
+
+        said = []
+        reader = PdfReader(self.path, strict=False)
+        for page in reader.pages:
+            for annotation in self.annotations(page):
+                look = annotation.get("/AP")
+                if not look or "/N" not in look:
+                    continue
+                form = look["/N"]
+                form = form.get_object() if hasattr(form, "get_object") else form
+                reading = PageObject.create_blank_page(pdf=reader, width=1, height=1)
+                reading[NameObject("/Contents")] = form
+                if "/Resources" in form:
+                    reading[NameObject("/Resources")] = form["/Resources"]
+                said.append(reading.extract_text())
+        return said
+
+    @staticmethod
+    def annotations(page) -> list:
+        found = page.get("/Annots")
+        if found is None:
+            return []
+        return [entry.get_object() for entry in found.get_object()]
+
+    def markups(self, index: int = 0) -> list:
+        """The annotations on one page — what a reader lets somebody move."""
+        from pypdf import PdfReader
+
+        reader = PdfReader(self.path, strict=False)
+        return self.annotations(reader.pages[index])
 
 
 def _pdf(document, tmp_path, name="out.pdf") -> Printed:
@@ -424,3 +467,110 @@ def test_exporting_a_range_does_not_leave_links_dangling(window, tmp_path):
     export_io.export_pdf(window.document, path, pages=window.document.pages[:1])
     assert _outline_titles(path) == ["Beam design"]
     assert Printed(path).pages == 1
+
+
+# ---------------------------------------------------------------------------
+# An export whose markups are still markups
+# ---------------------------------------------------------------------------
+
+def test_every_markup_goes_out_as_a_markup(window, tmp_path):
+    """Opened elsewhere, each one is still an annotation to pick up and move."""
+    window.select_tool("rect")
+    _drag(window, 100, 100, 260, 200)
+    window.select_tool("ellipse")
+    _drag(window, 300, 100, 420, 200)
+    window.select_tool("polyline")
+    _drag(window, 100, 300, 300, 380)
+
+    printed = _pdf(window.document, tmp_path, "live.pdf")
+    kinds = [str(mark["/Subtype"]) for mark in printed.markups()]
+    assert sorted(kinds) == ["/Circle", "/PolyLine", "/Square"]
+    for mark in printed.markups():
+        assert "/AP" in mark, "a markup with no appearance would show as nothing"
+        assert "/Rect" in mark
+
+
+def test_an_exported_markup_is_not_also_painted_into_the_sheet(window, tmp_path):
+    """Painted as well as placed, it would leave a ghost the moment it moved."""
+    window.select_tool("rect")
+    _drag(window, 100, 100, 260, 200)
+    box = window.document.pages[0].frame.ordered_markups()[0]
+    box.style.stroke = "#2f9e44"
+
+    from PySide6.QtCore import QSize
+    from PySide6.QtPdf import QPdfDocumentRenderOptions
+
+    printed = _pdf(window.document, tmp_path, "ghost.pdf")
+
+    def greens(with_markups: bool) -> int:
+        options = QPdfDocumentRenderOptions()
+        if with_markups:
+            options.setRenderFlags(QPdfDocumentRenderOptions.RenderFlag.Annotations)
+        image = printed.document.render(0, QSize(595, 842), options)
+        return sum(1 for y in range(image.height()) for x in range(image.width())
+                   if image.pixelColor(x, y).green() > 110
+                   and image.pixelColor(x, y).red() < 120
+                   and image.pixelColor(x, y).alpha() > 0)
+
+    assert greens(True) > 100, "the rectangle should be there as an annotation"
+    # A handful of stray pixels come off the antialiased page furniture, so
+    # what is being asked is whether the rectangle is in the sheet, and a
+    # rectangle is hundreds of pixels of green.
+    assert greens(False) < greens(True) / 10, \
+        "and not painted into the page as well"
+
+
+def test_a_calculation_goes_out_frozen_at_the_value_it_had(window, tmp_path):
+    """A PDF has no variables, so the number is the one it held on export."""
+    window.select_tool("math")
+    _drag(window, 80, 120, 380, 200)
+    block = window.view.editing_item()
+    block._editor.setPlainText("L = 6 m\nM = L*3 =")
+    window.view.end_item_edit()
+    window.recalculate()
+
+    printed = _pdf(window.document, tmp_path, "frozen.pdf")
+    assert "18" in printed.text()
+    assert [str(mark["/Subtype"]) for mark in printed.markups()] == ["/Stamp"], \
+        "a calculation exports as an ordinary movable markup"
+
+
+def test_an_exported_markup_carries_who_made_it_and_what_it_says(window, tmp_path):
+    window.select_tool("rect")
+    _drag(window, 100, 100, 260, 200)
+    box = window.document.pages[0].frame.ordered_markups()[0]
+    box.author = "R. Kavanagh"
+    box.comment = "Check this splice"
+    box.subject = "Query"
+
+    mark = _pdf(window.document, tmp_path, "said.pdf").markups()[0]
+    assert str(mark["/T"]) == "R. Kavanagh"
+    assert str(mark["/Contents"]) == "Check this splice"
+    assert str(mark["/Subj"]) == "Query"
+
+
+def test_bookmarks_still_work_when_the_markups_are_live(window, tmp_path):
+    """The links go in after the annotations and must not displace them."""
+    window.document.add_bookmark("Beam design", 0, 40.0)
+    window.select_tool("rect")
+    _drag(window, 100, 100, 260, 200)
+
+    path = str(tmp_path / "both.pdf")
+    export_io.export_pdf(window.document, path)
+    assert _outline_titles(path) == ["Beam design"]
+    assert len(Printed(path).markups()) == 1
+
+
+def test_flattened_content_stays_part_of_the_sheet(window, tmp_path):
+    """Flattening is the decision that it is the page now, so it is painted in."""
+    window.select_tool("rect")
+    _drag(window, 100, 100, 260, 200)
+    window.select_tool("ellipse")
+    _drag(window, 300, 100, 420, 200)
+    box, oval = window.document.pages[0].frame.ordered_markups()
+    window._flatten_items([box], recoverable=True)
+
+    printed = _pdf(window.document, tmp_path, "flat.pdf")
+    kinds = [str(mark["/Subtype"]) for mark in printed.markups()]
+    assert kinds == ["/Circle"], \
+        "only the ellipse is still a markup; the rectangle is the page now"

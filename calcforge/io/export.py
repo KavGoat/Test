@@ -31,7 +31,8 @@ def _apply_layout(device, page) -> None:
 
 def paint_pages(device, document: Document, pages: Iterable, resolution: float,
                 per_page_layout: bool = True,
-                pdf_overlay_pages: Optional[set[str]] = None) -> None:
+                pdf_overlay_pages: Optional[set[str]] = None,
+                without_markups: bool = False) -> None:
     """Render *pages* onto a paged paint device.
 
     ``QPdfWriter`` accepts a new page size for every page, so an export can mix
@@ -62,7 +63,8 @@ def paint_pages(device, document: Document, pages: Iterable, resolution: float,
             page.frame.render_page(
                 painter, _target_rect(painter, page, resolution, per_page_layout),
                 for_print=True,
-                pdf_overlay=bool(pdf_overlay_pages and page.uid in pdf_overlay_pages))
+                pdf_overlay=bool(pdf_overlay_pages and page.uid in pdf_overlay_pages),
+                without_markups=without_markups)
     finally:
         if started:
             painter.end()
@@ -133,12 +135,14 @@ def _preserved_pdf_pages(document: Document, pages: list) -> set[str]:
 
 
 def _paint_pdf(document: Document, path: str, pages: list, resolution: int,
-               overlays: Optional[set[str]] = None) -> None:
+               overlays: Optional[set[str]] = None,
+               without_markups: bool = False) -> None:
     writer = QPdfWriter(path)
     writer.setResolution(resolution)
     writer.setTitle(document.title)
     writer.setCreator("CalcForge")
-    paint_pages(writer, document, pages, resolution, pdf_overlay_pages=overlays)
+    paint_pages(writer, document, pages, resolution, pdf_overlay_pages=overlays,
+                without_markups=without_markups)
 
 
 def _merge_preserved_pdf_pages(document: Document, path: str, pages: list,
@@ -179,7 +183,18 @@ def _merge_preserved_pdf_pages(document: Document, path: str, pages: list,
 
 
 def export_pdf(document: Document, path: str, pages: Optional[list] = None,
-               resolution: int = 300) -> None:
+               resolution: int = 300, live_markups: bool = True) -> None:
+    """Write the document out as a PDF.
+
+    With *live_markups*, the sheet is written without its markups and each one
+    goes into the file as a real PDF annotation instead, so that opening the
+    export in Bluebeam gives back markups that can be picked up and moved
+    rather than a picture of them. Calculations cannot travel as calculations —
+    a PDF has no notion of a variable — so each goes out as an ordinary movable
+    markup showing the value it held when the export was made.
+    """
+    from . import annotate
+
     printed = [page for page in (pages if pages is not None else document.pages)
                if page.printable]
     if not printed:
@@ -187,22 +202,44 @@ def export_pdf(document: Document, path: str, pages: Optional[list] = None,
     preserved = _preserved_pdf_pages(document, printed)
     if preserved:
         try:
-            _paint_pdf(document, path, printed, resolution, preserved)
+            _paint_pdf(document, path, printed, resolution, preserved,
+                       without_markups=live_markups)
             _merge_preserved_pdf_pages(document, path, printed, preserved)
         except Exception:                              # noqa: BLE001
             # A malformed/encrypted source still exports honestly from the
             # screen raster rather than leaving a missing or corrupt page.
-            _paint_pdf(document, path, printed, resolution)
+            _paint_pdf(document, path, printed, resolution,
+                       without_markups=live_markups)
     else:
-        _paint_pdf(document, path, printed, resolution)
+        _paint_pdf(document, path, printed, resolution,
+                   without_markups=live_markups)
+    drawn = [page for page in printed if page.frame is not None]
+    if live_markups and not annotate.add_markups(path, document, drawn):
+        # Nothing could be written as an annotation — an appearance that would
+        # not draw, a file pypdf will not reopen. The markups are not left out
+        # of the export over it: the sheet is painted again with them on it.
+        _paint_the_markups_after_all(document, path, printed, resolution, preserved)
     # Qt has no way to write an outline or a link, so both are appended to the
     # finished file. A failure there costs the bookmarks, never the document.
     from . import pdflinks
-    outline, links = outline_and_links(document, [p for p in printed if p.frame is not None])
+    outline, links = outline_and_links(document, drawn)
     try:
         pdflinks.add_outline_and_links(path, outline, links)
     except Exception:                              # noqa: BLE001
         pass
+
+
+def _paint_the_markups_after_all(document: Document, path: str, printed: list,
+                                 resolution: int, preserved: set[str]) -> None:
+    """The old way out: everything painted into the sheet."""
+    if preserved:
+        try:
+            _paint_pdf(document, path, printed, resolution, preserved)
+            _merge_preserved_pdf_pages(document, path, printed, preserved)
+            return
+        except Exception:                              # noqa: BLE001
+            pass
+    _paint_pdf(document, path, printed, resolution)
 
 
 def pages_for_printer(document: Document, printer: QPrinter) -> list:

@@ -2,7 +2,7 @@
 
 Audited: 2026-09-06 against `claude/engineering-calc-markup-app-2twiqs`.
 
-The 10 entries below are what the audit could not show working. Each says
+The 8 entries below are what the audit could not show working. Each says
 what is missing or blocking it. Several are tasks whose base behaviour is
 finished and whose recent amendment is not; those name the part that is done so
 the remaining work is clear.
@@ -35,12 +35,6 @@ This is not the user-owned completion record. It changes no checkbox in
 
 - **(amended)** Add recoverable document flattening: choose which content classes to flatten (markups, calculations, tables and other supported items), retain recovery data by default, support individual-item flattening, and offer a Preferences setting to disable recoverability when deliberately producing an irreversible file. Flattening must behave the way it does on a Bluebeam PDF: flattened content becomes part of the page, so it is no longer selectable and no longer intercepts a click meant for something in front of or behind it. The flatten tool must not sit under a crosshair cursor — it is not a drawing tool — and while it is active it must still be possible to pick out the things it is about to act on.
   - **Missing:** Half done. Flattened content is now part of the page as far as the pointer is concerned: it no longer answers markup_at, takes no mouse buttons and no hover, so a click reaches whatever is in front of or behind it, and recovery gives all of that back. Evidence: test_flattened_markup_lets_the_pointer_through_to_what_is_behind. NOT done: the crosshair cursor the report mentions. There is no flatten tool in the tool table — flattening is a menu action — so nothing here sets a crosshair for it, and I could not reproduce one; it may be a drawing tool left active from before. Needs the reporter to say what was selected when they saw it.
-
-- **(new, restated)** This is a PDF editor that can also do calculations, and the format follows from that. A document is a PDF: every page carries real PDF line information, opening a PDF is just opening a document, inserting one is not a conversion, and a document with no calculations in it is a PDF and saves as one. Add calculations and it saves as `.cfx`, which is that same PDF with a calculation layer on top of it — the calculations are an added layer, never a replacement for the PDF underneath and never something that turns the file into a format of its own.
-  - **Missing:** Not started, and restated after I had the framing backwards. This is a PDF editor that also does calculations, not a calculation app that imports PDF: a document is a PDF, one with no calculations in it saves as a PDF, and adding calculations saves it as .cfx — the same PDF with a calculation layer on top. The calculations are an added layer, never a replacement for the PDF underneath.
-
-- **(new, restated)** Export to PDF must produce a PDF whose markups are still markups. Opened in Bluebeam, every annotation is selectable and movable exactly as it is here; the calculation layer is the one thing that does not travel, so each calculation exports as an ordinary movable markup showing the value it held at the moment of export. This follows from the format task above and replaces any export that flattens markups into artwork.
-  - **Missing:** Not started, and follows the format task. Markups stay real markups in the exported PDF; the calculation layer is the one thing that does not travel, so each calculation exports as an ordinary movable markup showing the value it held at export time.
 
 - **(new)** Walk the whole application as somebody meeting it for the first time and write down what is wrong with it: anything whose label does not say what it does, any button whose effect is a surprise, any gesture that is not what the rest of the drawing world does, and anything plainly missing. Then fix what that walk finds, as its own list of tasks rather than one vague entry.
   - **Missing:** Not started. A first-run walk of the whole application has not been done, and what it finds is meant to become its own list of tasks rather than staying one entry.
