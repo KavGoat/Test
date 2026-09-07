@@ -42,6 +42,16 @@ _EXTRA_DEFINITIONS = [
     "kN = 1000 * newton",
     "MN = 1e6 * newton",
     "kNm = kilonewton * meter",
+    # Found by reading SMath's own unit catalogue (SMath Studio/entries/
+    # Units.xml) against this registry: fourteen of its units were not
+    # understood here, and these are the ones an engineer actually reaches
+    # for. The rest were a joke unit, a chemistry one, and casing the
+    # completion list already corrects.
+    "ksf = kip / foot ** 2",
+    "tonf = 2000 * force_pound = ton_force",
+    "lbm = pound",
+    "rev = 2 * pi * radian = revolution",
+    "rph = revolution / hour",
 ]
 
 for _definition in _EXTRA_DEFINITIONS:

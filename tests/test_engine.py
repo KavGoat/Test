@@ -466,3 +466,25 @@ def test_a_named_unit_on_its_own_still_reads_as_one():
     block.local_scope = False
     block.refresh(workspace)
     assert workspace.get("F").to("kN").magnitude == pytest.approx(5)
+
+
+def test_the_engineering_units_read_from_smaths_catalogue_are_defined():
+    """Five units SMath knew and this did not, found by comparing the two.
+
+    docs/smath-reference.md records the comparison. They are here because an
+    engineer reaches for them; the rest of the gap was a joke unit, chemistry
+    and binary prefixes, and every name added is a name that can no longer be
+    used as a variable.
+    """
+    from calcforge.core.units import Q_, ureg
+
+    for name in ("ksf", "tonf", "lbm", "rev", "rph"):
+        assert ureg.Unit(name) is not None, name
+
+    # And they mean what they should.
+    assert Q_(1, "tonf").to("force_pound").magnitude == pytest.approx(2000)
+    assert Q_(1, "ksf").to("psf").magnitude == pytest.approx(1000)
+    assert Q_(1, "lbm").to("kg").magnitude == pytest.approx(0.45359237)
+    import math
+
+    assert Q_(1, "rev").to("radian").magnitude == pytest.approx(2 * math.pi)

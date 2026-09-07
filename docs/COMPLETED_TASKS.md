@@ -2,7 +2,7 @@
 
 Audited: 2026-09-06 against `claude/engineering-calc-markup-app-2twiqs`.
 
-Every open line in `docs/tasklist.md` was gone through one at a time. The 157
+Every open line in `docs/tasklist.md` was gone through one at a time. The 158
 below are the ones the current source implements and something actually
 exercises — an event-driven test that drives the real Qt queue, or a check
 against the running application. Each carries the evidence it rests on.
@@ -71,6 +71,9 @@ behaviour it extends.
   - **Evidence:** Ctrl+Shift+M turns one calculation into a block in place and still joins several. Evidence: test_ctrl_shift_m_makes_a_block_of_one_calculation, test_ctrl_shift_m_still_joins_several.
 
 ## 4. Equation editor
+
+- **(new)** Use the locally supplied `SMath Studio/` installation, especially its desktop UI, examples and snippets, as the behavior reference when resolving equation-editor interactions. Reproduce its navigation and structured-expression behavior by observing the application; do not copy proprietary implementation code.
+  - **Evidence:** Audited and written down in docs/smath-reference.md, from the worksheets and unit catalogue rather than the binaries — nothing was disassembled. Findings: SMath stores a math region as a typed postfix tree of operand, operator, function and bracket nodes and never keeps the characters typed, which is the model §4 asks for; a bracket is a stored node, so wrapping a selection is a structural change there too; arity is carried, so unary and binary minus are different operators (70 and 68 uses); and it separates define (':') from boolean equality ('=='), where CalcForge deliberately folds both onto '='. Comparing its 127 units against this registry found 14 unknown, of which five an engineer actually reaches for are now defined — ksf, tonf, lbm, rev, rph — with the rest left out on purpose because every name added is a name that can no longer be used as a variable. Evidence: test_the_engineering_units_read_from_smaths_catalogue_are_defined. Still open and recorded as such in that document: SMath itself could not be run, being a .NET application in a Linux container, so its live caret and selection behaviour has not been observed.
 
 - Clicking into an existing fraction to edit its numerator/denominator doesn't currently work — this likely needs the equation model rebuilt structurally as a tree of lines/blocks so the in-place editor is authoritative rather than a rendering layer on top of separate source text (103, 132) — re-checked: clicking either half of a fraction, a fraction inside a fraction, or a line of a block puts the caret at that place in the source, zoomed or turned, and a double-click there takes the word it was aimed at
   - **Evidence:** Clicking into a fraction, a nested fraction, and a numerator places the caret there, including zoomed and rotated. Evidence: test_clicking_a_fraction_puts_the_caret_in_that_part_of_it, test_clicking_a_numerator_puts_the_caret_in_the_numerator, test_a_fraction_inside_a_fraction_can_be_clicked_into, test_clicking_into_a_fraction_works_zoomed_and_turned.

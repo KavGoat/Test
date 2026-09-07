@@ -200,6 +200,18 @@ record. `docs/tasklist.md` is the record.
 5. Preserve existing user changes, keep commits scoped, and report the exact
   validation performed along with any remaining limitation.
 
+### If the session is going to end
+
+The container is ephemeral and a usage limit ends a turn without warning, so
+the rule is that unpushed work is lost work — commit and push each finished
+piece rather than batching. Nothing in the environment resumes a session
+automatically when a limit lifts. What is available is a scheduled wake-up
+(`send_later` on the claude-code-remote server), which can bring a session
+back at a chosen time; it does not detect the limit, so it is a way of
+arranging to come back rather than a way of not stopping. Leave the register
+and the branch in a state somebody else could pick up from, because they may
+have to.
+
 ### Commits
 
 - Commit and push **continuously** — every completed piece of work, not at
