@@ -332,9 +332,9 @@ def test_a_marked_up_drawing_opens_as_markups_that_can_be_worked_with(
     assert ("RectItem", "rect") in kinds
     assert ("RectItem", "ellipse") in kinds
     assert ("PolyItem", "polyline") in kinds
-    # A cloud has no annotation of its own in a PDF, so it travels as a stamp —
-    # and comes back as one drawing to pick up, not as the segments of one.
-    assert ("SketchItem", "") in kinds
+    # A cloud is a square with a cloudy border, which the PDF has a way of
+    # saying — so it comes back a cloud rather than a drawing of one.
+    assert ("RectItem", "cloud") in kinds
 
     theirs_rect = next(i for i in came_in if getattr(i, "kind", "") == "rect")
     assert theirs_rect.pos().x() == pytest.approx(120, abs=1)
@@ -374,3 +374,153 @@ def test_a_page_from_a_pdf_gets_sharper_as_it_is_zoomed_into(window, tmp_path):
     assert look_at(4.0, QRectF(100, 100, 150, 200)) == pytest.approx(4.0, abs=0.01)
     assert look_at(16.0, QRectF(120, 120, 40, 50)) == pytest.approx(16.0, abs=0.01), \
         "zoomed right in, the picture is drawn at the zoom, not blown up"
+
+
+# ---------------------------------------------------------------------------
+# Markups written as what they are, not as a picture of what they are
+# ---------------------------------------------------------------------------
+
+def _marked_up_page(window):
+    """One of each markup a PDF has a real annotation for."""
+    from PySide6.QtCore import QRectF
+    from calcforge.core.document import PageScale
+    from calcforge.items.measure import AREA, DIMENSION, MeasureItem
+    from calcforge.items.shapes import PolyItem, RectItem
+    from calcforge.items.text import CalloutItem, TypewriterItem
+
+    page = window.document.pages[0]
+    page.scale = PageScale.from_ratio(100)
+    frame = page.frame
+    boxed = RectItem("cloud")
+    boxed.set_local_rect(QRectF(0, 0, 150, 90))
+    frame.add_markup(boxed, QPointF(60, 60))
+    frame.add_markup(PolyItem("cloud", [QPointF(0, 0), QPointF(100, 0),
+                                        QPointF(100, 70)]), QPointF(250, 60))
+    frame.add_markup(PolyItem("arrow", [QPointF(0, 0), QPointF(120, 60)]),
+                     QPointF(60, 200))
+    frame.add_markup(CalloutItem("see detail"), QPointF(250, 220))
+    frame.add_markup(TypewriterItem("typed"), QPointF(60, 320))
+    dimension = MeasureItem(DIMENSION, [QPointF(0, 0), QPointF(200, 0)])
+    frame.add_markup(dimension, QPointF(60, 420))
+    dimension.witness_reach = -30.0
+    dimension.refresh(page=page)
+    area = MeasureItem(AREA, [QPointF(0, 0), QPointF(120, 0), QPointF(120, 90)])
+    frame.add_markup(area, QPointF(320, 420))
+    area.refresh(page=page)
+
+
+def _annotations(path: str) -> list:
+    from pypdf import PdfReader
+
+    found = PdfReader(path).pages[0].get("/Annots")
+    return [entry.get_object() for entry in found.get_object()] if found else []
+
+
+def test_a_cloud_goes_out_as_a_cloud_not_a_drawing_of_one(window, tmp_path):
+    """A PDF says a cloud with a border effect; it does not draw one."""
+    from calcforge.io import export as export_io
+
+    _marked_up_page(window)
+    path = str(tmp_path / "clouds.pdf")
+    export_io.export_pdf(window.document, path)
+
+    cloudy = [mark for mark in _annotations(path)
+              if "/BE" in mark and str(mark["/BE"].get("/S")) == "/C"]
+    assert len(cloudy) == 2, "the boxed cloud and the polygon cloud"
+    assert {str(mark["/Subtype"]) for mark in cloudy} == {"/Square", "/Polygon"}
+    assert float(cloudy[0]["/BE"]["/I"]) > 0, "and it says how pronounced it is"
+
+
+def test_a_call_out_goes_out_with_its_leader(window, tmp_path):
+    """Free text with a callout line — the three-point form, knee and all."""
+    from calcforge.io import export as export_io
+
+    _marked_up_page(window)
+    path = str(tmp_path / "callout.pdf")
+    export_io.export_pdf(window.document, path)
+
+    callouts = [mark for mark in _annotations(path)
+                if str(mark.get("/IT", "")) == "/FreeTextCallout"]
+    assert len(callouts) == 1
+    assert len(callouts[0]["/CL"]) == 6, "start, knee and end"
+    typed = [mark for mark in _annotations(path)
+             if str(mark.get("/IT", "")) == "/FreeTextTypeWriter"]
+    assert len(typed) == 1, "and a typewriter says it is one"
+
+
+def test_a_dimension_goes_out_as_a_dimension(window, tmp_path):
+    """Every part of it already had a name in the specification."""
+    from calcforge.io import export as export_io
+
+    _marked_up_page(window)
+    path = str(tmp_path / "dimension.pdf")
+    export_io.export_pdf(window.document, path)
+
+    dimensions = [mark for mark in _annotations(path)
+                  if str(mark.get("/IT", "")) == "/LineDimension"]
+    assert len(dimensions) == 1
+    mark = dimensions[0]
+    assert str(mark["/Subtype"]) == "/Line"
+    assert float(mark["/LL"]) == pytest.approx(30, abs=0.5), "the witness reach"
+    assert float(mark["/LLE"]) > 0, "how far past the line they run"
+    assert float(mark["/LLO"]) > 0, "and how far clear of the point they start"
+    assert bool(mark["/Cap"]) and str(mark["/CP"]) == "/Inline", \
+        "the value is written along the line"
+    assert "/Measure" in mark, "and the scale travels with it"
+
+
+def test_a_take_off_carries_the_scale_it_was_measured_against(window, tmp_path):
+    """Otherwise the number means nothing in anybody else's reader."""
+    from calcforge.io import export as export_io
+
+    _marked_up_page(window)
+    path = str(tmp_path / "area.pdf")
+    export_io.export_pdf(window.document, path)
+
+    areas = [mark for mark in _annotations(path)
+             if str(mark.get("/IT", "")) == "/PolygonDimension"]
+    assert len(areas) == 1
+    measure = areas[0]["/Measure"]
+    assert str(measure["/Subtype"]) == "/RL"
+    assert str(measure["/R"]), "the scale, written the way it is written on a drawing"
+
+
+def test_every_markup_comes_back_as_what_it_went_out_as(window, tmp_path):
+    """The round trip: out as a real annotation, in as the same markup."""
+    from calcforge.io import export as export_io
+
+    _marked_up_page(window)
+    path = str(tmp_path / "round.pdf")
+    export_io.export_pdf(window.document, path)
+
+    window.open_path(path)
+    window.rebuild_scenes()
+    came_back = [item for item in window.document.pages[0].frame.markups()
+                 if item.layer == "Markups"]
+    kinds = [(type(item).__name__, getattr(item, "kind", ""))
+             for item in came_back]
+    assert ("RectItem", "cloud") in kinds, "a cloud is still a cloud"
+    assert ("PolyItem", "cloud") in kinds
+    assert ("CalloutItem", "") in kinds
+    assert ("TypewriterItem", "") in kinds
+    assert ("MeasureItem", "dimension") in kinds
+    assert ("MeasureItem", "area") in kinds
+
+    dimension = next(i for i in came_back if getattr(i, "kind", "") == "dimension")
+    assert dimension.witness_reach == pytest.approx(-30, abs=0.5), \
+        "its witness lines come back where they were"
+    callout = next(i for i in came_back if type(i).__name__ == "CalloutItem")
+    assert callout.leaders, "and the call-out still points at something"
+
+
+def test_an_arrow_keeps_its_head(window, tmp_path):
+    from calcforge.io import export as export_io
+
+    _marked_up_page(window)
+    path = str(tmp_path / "arrow.pdf")
+    export_io.export_pdf(window.document, path)
+
+    lines = [mark for mark in _annotations(path)
+             if str(mark["/Subtype"]) == "/Line" and "/IT" not in mark]
+    assert lines and "/LE" in lines[0]
+    assert str(lines[0]["/LE"][1]) == "/ClosedArrow"

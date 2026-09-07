@@ -56,15 +56,25 @@ def _one(source, annotation: dict, kind: str, flip: tuple, scale: float,
     style = _style(source, annotation, colour, scale)
     common = _common(source, annotation)
 
+    intent = str(source.resolve(annotation.get("IT")) or "")
     if kind in ("Square", "Circle"):
         inside = _inset(source, annotation, box, scale)
-        return [_shape("rect", "ellipse" if kind == "Circle" else "rect",
-                       inside, style, common)]
+        shape = "ellipse" if kind == "Circle" else "rect"
+        if _is_cloudy(source, annotation):
+            shape = "cloud"
+        return [_shape("rect", shape, inside, style, common)]
+    if kind == "FreeText":
+        return [_free_text(source, annotation, box, style, common, flip,
+                           scale, intent)]
     if kind == "Line":
         ends = _numbers(source, annotation.get("L"))
         if len(ends) >= 4:
             points = [_at(flip, ends[0], ends[1], scale),
                       _at(flip, ends[2], ends[3], scale)]
+            _line_endings(source, annotation, style)
+            if intent == "LineDimension":
+                return [_dimension(source, annotation, points, style, common,
+                                   scale)]
             style.setdefault("arrow_end", "arrow")
             return [_line("line", points, style, common)]
     if kind in ("PolyLine", "Polygon"):
@@ -72,6 +82,11 @@ def _one(source, annotation: dict, kind: str, flip: tuple, scale: float,
         points = [_at(flip, corners[i], corners[i + 1], scale)
                   for i in range(0, len(corners) - 1, 2)]
         if len(points) >= 2:
+            _line_endings(source, annotation, style)
+            if _is_cloudy(source, annotation) or intent == "PolygonCloud":
+                return [_line("cloud", points, style, common)]
+            if intent in ("PolygonDimension", "PolyLineDimension"):
+                return [_take_off(points, style, common, intent)]
             return [_line("polyline" if kind == "PolyLine" else "polygon",
                           points, style, common)]
     if kind == "Ink":
@@ -202,6 +217,94 @@ def _text(kind: str, box: list, style: dict, common: dict) -> dict:
     payload = _payload(kind, style, common)
     payload.update({"x": box[0], "y": box[1], "rect": [0, 0, box[2], box[3]],
                     "text": common.get("comment", "")})
+    return payload
+
+
+def _is_cloudy(source, annotation: dict) -> bool:
+    """A cloudy border effect: what a PDF calls a revision cloud."""
+    effect = source.resolve(annotation.get("BE"))
+    return isinstance(effect, dict) and str(effect.get("S") or "") == "C"
+
+
+# The PDF's ten line endings, and the arrow head each is drawn with here.
+INCOMING_ENDINGS = {
+    "None": "none", "ClosedArrow": "arrow", "OpenArrow": "open",
+    "Circle": "dot", "Square": "square", "Diamond": "diamond",
+    "Slash": "slash", "Butt": "none", "RClosedArrow": "arrow",
+    "ROpenArrow": "open",
+}
+
+
+def _line_endings(source, annotation: dict, style: dict) -> None:
+    """What was drawn on each end of the line it came from."""
+    endings = source.resolve(annotation.get("LE"))
+    if isinstance(endings, str):
+        endings = [endings]
+    if not isinstance(endings, (list, tuple)) or not endings:
+        return
+    names = [str(source.resolve(entry) or "") for entry in endings]
+    if names:
+        style["arrow_start"] = INCOMING_ENDINGS.get(names[0], "none")
+    if len(names) > 1:
+        style["arrow_end"] = INCOMING_ENDINGS.get(names[1], "none")
+
+
+def _dimension(source, annotation: dict, points: list, style: dict,
+               common: dict, scale: float) -> dict:
+    """A line annotation that says it is a dimension comes back as one.
+
+    Its leader length is the reach the dimension line stands off what it
+    measures, and its caption offset is where the value was dragged to. Both
+    had a name in the specification long before this application had one.
+    """
+    payload = _payload("measure", style, common)
+    left = min(point[0] for point in points)
+    top = min(point[1] for point in points)
+    reach = source.resolve(annotation.get("LL"))
+    offset = _numbers(source, annotation.get("CO"))
+    payload.update({
+        "kind": "dimension",
+        "x": left, "y": top,
+        "points": [[x - left, y - top] for x, y in points],
+        "witness_reach": -float(reach) * scale
+        if isinstance(reach, (int, float)) else 0.0,
+        "custom_label": common.get("comment", ""),
+    })
+    if len(offset) >= 2:
+        payload["label_offset"] = [offset[0] * scale, -offset[1] * scale]
+    return payload
+
+
+def _take_off(points: list, style: dict, common: dict, intent: str) -> dict:
+    """A polygon or polyline that says it is a measurement."""
+    payload = _payload("measure", style, common)
+    left = min(point[0] for point in points)
+    top = min(point[1] for point in points)
+    payload.update({
+        "kind": "area" if intent == "PolygonDimension" else "polylength",
+        "x": left, "y": top,
+        "points": [[x - left, y - top] for x, y in points],
+    })
+    return payload
+
+
+def _free_text(source, annotation: dict, box: list, style: dict, common: dict,
+               flip: tuple, scale: float, intent: str) -> dict:
+    """Words on the page — plain, typed straight on, or on a call-out."""
+    corners = _numbers(source, annotation.get("CL"))
+    leader = [_at(flip, corners[i], corners[i + 1], scale)
+              for i in range(0, len(corners) - 1, 2)]
+    kind = "text"
+    if intent == "FreeTextTypeWriter":
+        kind = "typewriter"
+    elif intent == "FreeTextCallout" or len(leader) >= 2:
+        kind = "callout"
+    payload = _text(kind, box, style, common)
+    if kind == "callout" and leader:
+        # The leader's own end is where it points; the rest is worked out from
+        # the box, the way every call-out here works out its hinge.
+        tip = leader[0]
+        payload["leaders"] = [{"tip": [tip[0] - box[0], tip[1] - box[1]]}]
     return payload
 
 
