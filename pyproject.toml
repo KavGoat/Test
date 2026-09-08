@@ -18,12 +18,15 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=7.4"]
+# PDF4Py, the PDF page and markup editor in pdf4py/, needs one library more.
+pdf4py = ["pymupdf>=1.24"]
 
 [project.gui-scripts]
 calcforge = "calcforge.app:main"
+pdf4py = "pdf4py.app:main"
 
 [tool.setuptools.packages.find]
-include = ["calcforge*"]
+include = ["calcforge*", "pdf4py*"]
 
 [tool.setuptools.package-data]
 calcforge = ["py.typed"]

@@ -304,3 +304,20 @@ python -m pytest
 Runs headless (the suite forces `QT_QPA_PLATFORM=offscreen`) and drives the real
 window: every drawing tool, selection, resize, undo, table editing, recalculation
 order, save/reload, and PDF export.
+
+---
+
+## Also in this repository: PDF4Py
+
+`pdf4py/` is a separate, much smaller desktop app — a PDF page and markup editor
+inspired by [PDF4QT](https://github.com/JakubMelka/PDF4QT). It opens a PDF, adds
+and deletes pages, moves the markups the PDF already has, and draws rectangles.
+That is all it does.
+
+```bash
+python -m pip install -r pdf4py/requirements.txt
+python -m pdf4py document.pdf
+```
+
+It shares nothing with CalcForge but the repository: see
+[`pdf4py/README.md`](pdf4py/README.md).
