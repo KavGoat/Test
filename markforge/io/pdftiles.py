@@ -36,6 +36,11 @@ reader worth using:
 Printing and exporting do not come through here. They want the whole page at
 one resolution, right now, and they are allowed to wait — that is
 :func:`markforge.io.pdfio.LivePages.draw_region`.
+
+The renderer is MuPDF, through :mod:`markforge.pdf.engine`. A MuPDF document
+belongs to the thread that opened it, so the worker below opens its own from
+the same bytes rather than sharing the one the window draws with — which is
+the same arrangement the Qt renderer needed, for the same reason.
 """
 from __future__ import annotations
 
@@ -45,10 +50,12 @@ from typing import Optional
 import atexit
 import queue
 
-from PySide6.QtCore import (QBuffer, QByteArray, QCoreApplication, QIODevice,
-                            QObject, QRect, QRectF, QSize, Qt, QThread, Signal)
+from PySide6.QtCore import (QCoreApplication, QObject, QRectF, Qt, QThread,
+                            Signal)
 from PySide6.QtGui import QImage, QPixmap
-from PySide6.QtPdf import QPdfDocument, QPdfDocumentRenderOptions
+
+from ..pdf import engine
+from ..pdf.engine import PdfError
 
 #: How big a tile is, in screen pixels. Big enough that a screenful is a
 #: handful of them rather than hundreds; small enough that one is quick.
@@ -111,13 +118,6 @@ class SheetKey:
     annotations: bool
 
 
-def _options(annotations: bool) -> QPdfDocumentRenderOptions:
-    options = QPdfDocumentRenderOptions()
-    if annotations:
-        options.setRenderFlags(QPdfDocumentRenderOptions.RenderFlag.Annotations)
-    return options
-
-
 class _Worker(QThread):
     """Renders on its own thread, taking work off a queue.
 
@@ -126,7 +126,7 @@ class _Worker(QThread):
     there is nothing here that needs it. What crosses back is a signal, which
     Qt delivers on the window's thread by itself.
 
-    The thread keeps its own QPdfDocument for each source, because a document
+    The thread keeps its own MuPDF document for each source, because a document
     belongs to the thread that opened it.
     """
 
@@ -136,7 +136,7 @@ class _Worker(QThread):
     def __init__(self) -> None:
         super().__init__()
         self._work: "queue.Queue" = queue.Queue()
-        self._open: dict[str, QPdfDocument] = {}
+        self._open: dict[str, object] = {}
         self._stopping = False
 
     def submit(self, key, data: bytes, width: float, height: float) -> None:
@@ -156,7 +156,7 @@ class _Worker(QThread):
                 break
             key, data, width, height = job
             if key == "forget":
-                self._open.pop(data, None)
+                engine.close(self._open.pop(data, None))
                 continue
             try:
                 if isinstance(key, SheetKey):
@@ -169,58 +169,64 @@ class _Worker(QThread):
                 signal = (self.sheetDone if isinstance(key, SheetKey)
                           else self.tileDone)
                 signal.emit(key, QImage())
+        for document in self._open.values():
+            engine.close(document)
         self._open.clear()
 
-    def _document(self, source: str, data: bytes) -> Optional[QPdfDocument]:
+    def _document(self, source: str, data: bytes):
         found = self._open.get(source)
         if found is not None:
             return found
-        holder = QBuffer()
-        holder.setData(QByteArray(data))
-        holder.open(QIODevice.ReadOnly)
-        document = QPdfDocument()
-        document.load(holder)
-        if document.pageCount() < 1:
+        try:
+            document = engine.open_bytes(data)
+        except PdfError:
             return None
-        # The buffer has to outlive the document reading from it.
-        document._markforge_buffer = holder
+        if document.page_count < 1:
+            engine.close(document)
+            return None
         self._open[source] = document
         return document
 
     def _tile(self, key: "TileKey", data: bytes,
               page_width: float, page_height: float) -> None:
+        from .pdfio import to_image
+
         document = self._document(key.source, data)
-        if document is None or not 0 <= key.index < document.pageCount():
+        if document is None or not 0 <= key.index < document.page_count:
             self.tileDone.emit(key, QImage())
             return
-        across = max(int(round(page_width * key.scale)), 1)
-        down = max(int(round(page_height * key.scale)), 1)
-        # The last tile in a row or column is the part of one that fits.
-        left, top = key.col * TILE, key.row * TILE
-        width = max(min(TILE, across - left), 0)
-        height = max(min(TILE, down - top), 0)
-        if width <= 0 or height <= 0:
+        # Where this tile is on the page, in points. The last tile in a row or
+        # column is the part of one that fits, and asking for more than the
+        # page has would stretch its edge across the difference.
+        size = TILE / key.scale
+        left, top = key.col * size, key.row * size
+        right = min(left + size, page_width)
+        bottom = min(top + size, page_height)
+        if right - left <= 0 or bottom - top <= 0:
             self.tileDone.emit(key, QImage())
             return
-        options = _options(key.annotations)
-        options.setScaledSize(QSize(across, down))
-        options.setScaledClipRect(QRect(left, top, width, height))
-        image = document.render(key.index, QSize(width, height), options)
-        self.tileDone.emit(key, image)
+        raster = engine.render_region(document, key.index,
+                                      (left, top, right, bottom), key.scale,
+                                      key.annotations)
+        image = to_image(raster)
+        self.tileDone.emit(key, image if image is not None else QImage())
 
     def _sheet(self, key: "SheetKey", data: bytes,
                page_width: float, page_height: float) -> None:
+        from .pdfio import to_image
+
         document = self._document(key.source, data)
-        if document is None or not 0 <= key.index < document.pageCount():
+        if document is None or not 0 <= key.index < document.page_count:
             self.sheetDone.emit(key, QImage())
             return
         longest = max(page_width, page_height, 1.0)
         shrink = min(THUMBNAIL_EDGE / longest, 4.0)
-        across = max(int(page_width * shrink), 1)
-        down = max(int(page_height * shrink), 1)
-        image = document.render(key.index, QSize(across, down),
-                                _options(key.annotations))
-        self.sheetDone.emit(key, image)
+        raster = engine.render_page(document, key.index,
+                                    max(int(page_width * shrink), 1),
+                                    max(int(page_height * shrink), 1),
+                                    key.annotations)
+        image = to_image(raster)
+        self.sheetDone.emit(key, image if image is not None else QImage())
 
 
 class TileCache(QObject):

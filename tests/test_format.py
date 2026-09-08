@@ -324,6 +324,97 @@ def test_an_imported_pdf_brings_in_the_markups_somebody_else_made(window, tmp_pa
     assert inked > 50, "the markups should be in the picture of the page too"
 
 
+def _a_turned_pdf(path: str, rotation: int = 90) -> None:
+    """A portrait sheet that says it is turned, with a line near one corner.
+
+    Which is an ordinary thing for a drawing to be: a plan sheet laid out
+    portrait and rotated for viewing is what half a CAD package's PDF export
+    produces.
+    """
+    import pymupdf
+
+    document = pymupdf.open()
+    page = document.new_page(width=400, height=800)
+    shape = page.new_shape()
+    shape.draw_line(pymupdf.Point(20, 20), pymupdf.Point(120, 70))
+    shape.finish(color=(0, 0, 0), width=2)
+    shape.commit()
+    page.set_rotation(rotation)
+    document.save(path)
+    document.close()
+
+
+def test_a_turned_page_comes_in_as_the_sheet_it_is_drawn_as(window, tmp_path,
+                                                            monkeypatch):
+    """A page that says it is turned measures, and reads, the way it looks.
+
+    A drawing rotated for viewing is a landscape sheet. Measuring it by the
+    box the file stores makes it portrait, and then everything read off it —
+    the line work, somebody's markups — lands a quarter turn away from where
+    it is drawn.
+    """
+    from markforge.io import pdfio
+
+    source = str(tmp_path / "turned.pdf")
+    _a_turned_pdf(source, 90)
+
+    assert pdfio.page_count(source) == 1
+    reader = pdfio.PdfSource(source)
+    try:
+        info = reader.page_info(0)
+    finally:
+        reader.close()
+    assert (round(info.width_pt), round(info.height_pt)) == (800, 400), \
+        "a turned page is the landscape sheet it is drawn as"
+
+    pdfio.import_pages(window.document, source, [0], pdfio.FIT_ORIGINAL,
+                       vectors=True)
+    page = window.document.pages[-1]
+    assert (round(page.width_pt), round(page.height_pt)) == (800, 400)
+
+    lines = [item for item in page._pending_items if item.get("from_drawing")]
+    assert lines, "the sheet's own line work should have come across"
+    for item in lines:
+        for x, y in item["points"]:
+            assert -1 <= item["x"] + x <= page.width_pt + 1
+            assert -1 <= item["y"] + y <= page.height_pt + 1
+
+
+def test_a_markup_on_a_turned_page_is_saved_where_it_was_put(window, tmp_path):
+    """Written into the file, read back out, and still in the same place.
+
+    The one that matters. A markup lives in display points; a PDF annotation
+    lives in the file's own space, measured up from the bottom-left of the
+    *unrotated* sheet. On a turned page those differ by more than a flip, and
+    a save that only flips puts the markup on the wrong edge of the paper.
+    """
+    from PySide6.QtCore import QRectF
+    from markforge.io import pdfio
+    from markforge.items.shapes import RectItem
+
+    source = str(tmp_path / "turned.pdf")
+    _a_turned_pdf(source, 90)
+    window.open_path(source)
+    window.rebuild_scenes()
+
+    page = window.document.pages[0]
+    assert (round(page.width_pt), round(page.height_pt)) == (800, 400)
+    drawn = RectItem()
+    drawn.set_local_rect(QRectF(0, 0, 160, 100))
+    page.frame.add_markup(drawn, QPointF(200, 120))
+
+    saved = str(tmp_path / "marked.pdf")
+    project_io.save_document(window.document, saved)
+
+    found = pdfio.markups(saved, [0])[0]
+    boxes = [item for item in found if item["type"] == "rect"]
+    assert len(boxes) == 1
+    # Back within a point of where it was put, which it is only if the page's
+    # own rotation was applied on the way out and taken off on the way in.
+    assert abs(boxes[0]["x"] - 200) < 2, boxes[0]["x"]
+    assert abs(boxes[0]["y"] - 120) < 2, boxes[0]["y"]
+
+
 def test_saving_leaves_the_markups_movable_in_another_editor(window, tmp_path):
     """Saved, not exported: the same file, and the same live markups."""
     from PySide6.QtCore import QRectF

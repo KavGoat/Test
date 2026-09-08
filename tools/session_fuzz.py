@@ -365,11 +365,13 @@ try:
     from markforge.io import export as export_io
     path = os.path.join(tempfile.gettempdir(), f"session_fuzz_{SEED}.pdf")
     export_io.export_pdf(win.document, path)
-    from PySide6.QtPdf import QPdfDocument
-    doc = QPdfDocument()
-    assert doc.load(path) == QPdfDocument.Error.None_
-    assert doc.pageCount() == len(win.document.pages), (
-        doc.pageCount(), len(win.document.pages))
+    from markforge.pdf import engine
+    doc = engine.open_path(path)
+    try:
+        assert doc.page_count == len(win.document.pages), (
+            doc.page_count, len(win.document.pages))
+    finally:
+        engine.close(doc)
 except Exception:
     FAILURES.append(("print", traceback.format_exc()))
 

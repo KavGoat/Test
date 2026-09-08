@@ -311,43 +311,30 @@ def test_the_logo_and_its_place_are_saved_with_the_document(window, tmp_path):
 # ---------------------------------------------------------------------------
 
 def _outline_titles(path: str) -> list[str]:
-    """The bookmark names in a PDF, read straight out of the file.
+    """The bookmark names in a PDF, as a reader would see them.
 
-    Walks each string to its own closing bracket, honouring the backslash
-    escapes, rather than trusting a regex not to run past the end of one.
+    Read through the outline itself rather than by hunting the bytes for one
+    particular spelling of ``/Title``: how a writer spaces and encodes a string
+    is its own business, and a test that depends on it is testing the writer
+    rather than the bookmark.
     """
-    data = open(path, "rb").read()
-    titles = []
-    at = 0
-    while True:
-        at = data.find(b"/Title (", at)
-        if at < 0:
-            break
-        start = at + len(b"/Title (")
-        index = start
-        body = bytearray()
-        while index < len(data):
-            byte = data[index]
-            if byte == 0x5C:                      # backslash: take the next byte
-                body.append(data[index + 1])
-                index += 2
-                continue
-            if byte == 0x29:                      # )
-                break
-            body.append(byte)
-            index += 1
-        at = index + 1
-        if not data[at:at + 40].lstrip().startswith(b"/Parent"):
-            continue                              # the file's own title, not ours
-        raw = bytes(body)
-        titles.append(raw[2:].decode("utf-16-be") if raw.startswith(b"\xfe\xff")
-                      else raw.decode("latin-1"))
-    return titles
+    import pymupdf
+
+    document = pymupdf.open(path)
+    try:
+        return [title for _level, title, _page in document.get_toc(simple=True)]
+    finally:
+        document.close()
 
 
 def _link_count(path: str) -> int:
-    import re
-    return len(re.findall(rb"/Subtype\s*/Link", open(path, "rb").read()))
+    import pymupdf
+
+    document = pymupdf.open(path)
+    try:
+        return sum(len(page.get_links()) for page in document)
+    finally:
+        document.close()
 
 
 def test_a_document_without_bookmarks_is_unchanged(window, tmp_path):

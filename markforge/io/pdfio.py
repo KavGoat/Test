@@ -1,28 +1,40 @@
-"""Importing PDF pages as page backgrounds, using Qt's own PDF module."""
+"""Importing PDF pages as page backgrounds, and drawing them with MuPDF.
+
+The renderer is :mod:`markforge.pdf.engine`, which is MuPDF. What this module
+adds is the Qt end of it — turning a rendered :class:`~markforge.pdf.engine.Raster`
+into a ``QImage`` — and the business of bringing PDF pages into a document as
+pages of its own.
+
+Coordinates here are display points: the page as it is drawn, with its own
+``/Rotate`` applied. A page that says it is turned ninety degrees measures as
+the landscape sheet it is, and a markup put at the top-left corner of what is
+on screen is at the top-left corner of the page. Getting that wrong is how an
+imported drawing comes in sideways, or comes in the right way up with every
+markup on it ninety degrees out.
+"""
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
 from typing import Optional
 
-from PySide6.QtCore import QBuffer, QIODevice, QSize
+from PySide6.QtCore import QBuffer, QIODevice
 from PySide6.QtGui import QImage
-from PySide6.QtPdf import QPdfDocument, QPdfDocumentRenderOptions
 
 from ..core.document import PT_TO_MM, LANDSCAPE, PORTRAIT, Page, PageSetup
+from ..pdf import engine
+from ..pdf.engine import PdfError
 
-# An A0 sheet at 300 dpi is 140 megapixels; Qt will not allocate it, and even
-# when it does the PNG encoder can fail. 48 megapixels is A0 at about 100 dpi
-# and A4 at 600, which is more than enough to read a drawing.
+# An A0 sheet at 300 dpi is 140 megapixels, which is more than can usefully be
+# allocated and far more than can be looked at. 48 megapixels is A0 at about
+# 100 dpi and A4 at 600, which is more than enough to read a drawing.
 MAX_PIXELS = 48_000_000
 
 # What an imported page is rendered at, with nobody asked. There is no
 # resolution to choose, and there is no longer a resolution to get wrong: the
 # page is drawn from the PDF itself at whatever size it is being looked at, so
 # what is stored here is only the first thing shown, before the first proper
-# draw. Making that a 600 dpi picture of every page is what made opening a
-# drawing set take a minute and hold a gigabyte; it is a page-sized thumbnail
-# now, and the sharpness comes from the file.
+# draw.
 BEST_DPI = 110.0
 
 # Never hand the live renderer more than this many pixels for one page. A
@@ -36,23 +48,19 @@ FIT_A4 = "a4"                   # scale into A4
 FIT_CURRENT = "current"         # scale into the document's current page size
 
 
-def _how_to_render(annotations: bool = True) -> QPdfDocumentRenderOptions:
-    """How a page is drawn. Everything on it, unless told otherwise.
+def to_image(raster: Optional[engine.Raster]) -> Optional[QImage]:
+    """A rendered raster as a QImage that owns its own bytes.
 
-    A marked-up drawing keeps its clouds, dimensions and call-outs as
-    annotations rather than in the page, and Qt leaves those out unless it is
-    asked for them. Without this an opened PDF shows with every markup
-    somebody else made missing from it.
-
-    The exception is a page whose annotations have been read out into markups
-    of our own. Drawing them from the file as well would put each one on the
-    page twice — once correctly and once as our copy of it, a little out of
-    place and a little the wrong shape, which is worse than either alone.
+    A QImage built over a buffer does not copy it, and the buffer here is a
+    Python ``bytes`` that goes out of scope as soon as this returns — so the
+    copy is not optional, it is the difference between a picture and a crash.
     """
-    options = QPdfDocumentRenderOptions()
-    if annotations:
-        options.setRenderFlags(QPdfDocumentRenderOptions.RenderFlag.Annotations)
-    return options
+    if raster is None or raster.is_empty:
+        return None
+    shape = (QImage.Format_RGBA8888 if raster.alpha else QImage.Format_RGB888)
+    image = QImage(raster.samples, raster.width, raster.height,
+                   raster.stride, shape)
+    return None if image.isNull() else image.copy()
 
 
 @dataclass
@@ -67,18 +75,36 @@ class PdfSource:
 
     def __init__(self, path: str):
         self.path = path
-        self.doc = QPdfDocument()
-        status = self.doc.load(path)
-        if status != QPdfDocument.Error.None_:
-            raise OSError(f"Could not open {path}: {status.name}")
+        try:
+            self.doc = engine.open_path(path)
+        except PdfError as exc:
+            raise OSError(str(exc)) from exc
+        if self.doc.page_count < 1:
+            engine.close(self.doc)
+            raise OSError(f"{path} has no pages.")
+        # MuPDF repairs what it can rather than refusing, which is what makes a
+        # damaged drawing openable at all. Whether it had to is worth knowing:
+        # a repaired file has no original bytes left to add to, so saving it
+        # has to write the whole file again rather than append to it.
+        self.repaired = bool(getattr(self.doc, "is_repaired", False))
+        self.warnings = engine.drain_messages()
 
     @property
     def page_count(self) -> int:
-        return self.doc.pageCount()
+        return self.doc.page_count
 
     def page_info(self, index: int) -> PdfPageInfo:
-        size = self.doc.pagePointSize(index)
-        return PdfPageInfo(index, size.width(), size.height())
+        width, height = engine.page_size(self.doc, index)
+        return PdfPageInfo(index, width, height)
+
+    def render(self, index: int, dpi: float = 150.0) -> Optional[QImage]:
+        """One page as a picture, at *dpi* or the most that will fit."""
+        info = self.page_info(index)
+        scale = self._scale_for(info, dpi)
+        return to_image(engine.render_page(
+            self.doc, index,
+            max(int(round(info.width_pt * scale)), 1),
+            max(int(round(info.height_pt * scale)), 1)))
 
     def render_png(self, index: int, dpi: float = 150.0) -> tuple[bytes, PdfPageInfo]:
         """Render one page to PNG bytes, at *dpi* or the most that will fit.
@@ -90,11 +116,8 @@ class PdfSource:
         still fails is raised rather than swallowed.
         """
         info = self.page_info(index)
-        scale = self._scale_for(info, dpi)
-        width = max(int(round(info.width_pt * scale)), 1)
-        height = max(int(round(info.height_pt * scale)), 1)
-        image = self.doc.render(index, QSize(width, height), _how_to_render())
-        if image.isNull():
+        image = self.render(index, dpi)
+        if image is None:
             raise OSError(f"Could not render page {index + 1} of this PDF")
         buffer = QBuffer()
         buffer.open(QIODevice.WriteOnly)
@@ -105,7 +128,7 @@ class PdfSource:
 
     @staticmethod
     def _scale_for(info: PdfPageInfo, dpi: float) -> float:
-        """Points-to-pixels, held under a size Qt can actually allocate."""
+        """Points-to-pixels, held under a size that can actually be allocated."""
         scale = max(dpi, 24.0) / 72.0
         pixels = (info.width_pt * scale) * (info.height_pt * scale)
         if pixels > MAX_PIXELS:
@@ -113,7 +136,7 @@ class PdfSource:
         return max(scale, 24.0 / 72.0)
 
     def close(self) -> None:
-        self.doc.close()
+        engine.close(self.doc)
 
 
 class LivePages:
@@ -123,31 +146,30 @@ class LivePages:
     drawing, and the file is still there. So it is drawn from the file at the
     size it is being looked at — which is what makes it sharp at any zoom
     instead of a photograph that goes soft as soon as it is enlarged.
+
+    A MuPDF document belongs to the thread that opened it, and this one is
+    opened on the window's thread. Tiles are drawn elsewhere and keep their own
+    (see :mod:`markforge.io.pdftiles`); what is left here is the whole-page and
+    whole-region work that printing and exporting want, which is allowed to
+    wait.
     """
 
     def __init__(self):
-        self._open: dict[str, QPdfDocument] = {}
+        self._open: dict[str, object] = {}
 
-    def document_for(self, key: str, data: bytes) -> Optional[QPdfDocument]:
+    def document_for(self, key: str, data: bytes):
         if not key or not data:
             return None
         found = self._open.get(key)
         if found is not None:
             return found
-        from PySide6.QtCore import QBuffer, QByteArray
-
-        holder = QBuffer()
-        holder.setData(QByteArray(data))
-        holder.open(QIODevice.ReadOnly)
-        document = QPdfDocument()
-        # Loading from a device hands nothing back — the error return belongs
-        # to the overload that takes a file name — so what says it worked is
-        # whether there are any pages in it.
-        document.load(holder)
-        if document.pageCount() < 1:
+        try:
+            document = engine.open_bytes(data)
+        except PdfError:
             return None
-        # The buffer has to outlive the document that reads from it.
-        document._markforge_buffer = holder
+        if document.page_count < 1:
+            engine.close(document)
+            return None
         self._open[key] = document
         return document
 
@@ -155,7 +177,7 @@ class LivePages:
              width: int, height: int, annotations: bool = True) -> Optional[QImage]:
         """One page at an exact pixel size, or nothing if it cannot be had."""
         document = self.document_for(key, data)
-        if document is None or not 0 <= index < document.pageCount():
+        if document is None or not 0 <= index < document.page_count:
             return None
         width = max(int(width), 1)
         height = max(int(height), 1)
@@ -163,42 +185,36 @@ class LivePages:
             shrink = (MOST_LIVE_PIXELS / (width * height)) ** 0.5
             width = max(int(width * shrink), 1)
             height = max(int(height * shrink), 1)
-        image = document.render(index, QSize(width, height),
-                                _how_to_render(annotations))
-        return None if image.isNull() else image
+        return to_image(engine.render_page(document, index, width, height,
+                                           annotations))
 
     def draw_region(self, key: str, data: bytes, index: int, whole,
                     region, scale: float, annotations: bool = True):
         """Part of a page, drawn at *scale* pixels to the point.
 
-        The whole page is scaled up and then only the piece asked for is
-        drawn, which is how a reader shows a drawing sharply without ever
-        making a picture of the entire sheet at that size.
+        *whole* and *region* are QRectF in display points. MuPDF clips before
+        it rasterises, so the cost is the piece asked for and not the sheet it
+        came off.
         """
-        from PySide6.QtCore import QRect
-
         document = self.document_for(key, data)
-        if document is None or not 0 <= index < document.pageCount():
+        if document is None or not 0 <= index < document.page_count:
             return None
-        across = max(int(round(whole.width() * scale)), 1)
-        down = max(int(round(whole.height() * scale)), 1)
-        piece = QRect(max(int(region.left() * scale), 0),
-                      max(int(region.top() * scale), 0),
-                      max(int(round(region.width() * scale)), 1),
-                      max(int(round(region.height() * scale)), 1))
-        if piece.width() * piece.height() > MOST_LIVE_PIXELS:
+        across = max(int(round(region.width() * scale)), 1)
+        down = max(int(round(region.height() * scale)), 1)
+        if across * down > MOST_LIVE_PIXELS:
             return None
-        options = _how_to_render(annotations)
-        options.setScaledSize(QSize(across, down))
-        options.setScaledClipRect(piece)
-        image = document.render(index, QSize(piece.width(), piece.height()), options)
-        return None if image.isNull() else image
+        return to_image(engine.render_region(
+            document, index,
+            (region.left(), region.top(), region.right(), region.bottom()),
+            scale, annotations))
 
     def forget(self, key: str = "") -> None:
         if key:
-            self._open.pop(key, None)
-        else:
-            self._open.clear()
+            engine.close(self._open.pop(key, None))
+            return
+        for document in self._open.values():
+            engine.close(document)
+        self._open.clear()
 
 
 LIVE = LivePages()
@@ -289,27 +305,28 @@ MOST_STROKES = 6000
 def line_work(path: str, indices: list[int]) -> dict[int, list[dict]]:
     """The vector line work of each page, ready to become markups.
 
-    Nothing when the file cannot be read that way — an encrypted PDF, or one
-    compressed with a filter this reader does not do. The pages still come in
-    as pictures; they simply do not gain geometry to snap to.
+    Nothing when the file cannot be read that way. The pages still come in and
+    still draw; they simply do not gain geometry to snap to.
     """
     from . import pdfvector
 
     try:
         source = pdfvector.PdfFile.open(path)
-        pages = source.pages()
     except Exception:                                  # noqa: BLE001
         return {}
     found: dict[int, list[dict]] = {}
-    for index in indices:
-        if not 0 <= index < len(pages):
-            continue
-        try:
-            strokes = pdfvector.strokes_of_page(source, pages[index])
-        except Exception:                              # noqa: BLE001
-            continue
-        if strokes:
-            found[index] = strokes[:MOST_STROKES]
+    try:
+        for index in indices:
+            if not 0 <= index < source.page_count:
+                continue
+            try:
+                strokes = pdfvector.strokes_of_page(source, index)
+            except Exception:                          # noqa: BLE001
+                continue
+            if strokes:
+                found[index] = strokes[:MOST_STROKES]
+    finally:
+        source.close()
     return found
 
 
@@ -324,20 +341,21 @@ def markups(path: str, indices: list[int]) -> dict[int, list[dict]]:
 
     try:
         source = pdfvector.PdfFile.open(path)
-        pages = source.pages()
     except Exception:                                  # noqa: BLE001
         return {}
     found: dict[int, list[dict]] = {}
-    for index in indices:
-        if not 0 <= index < len(pages):
-            continue
-        try:
-            flip = pdfvector.flip_of_page(source, pages[index])
-            made = pdfmarkups.markups_of_page(source, pages[index], flip)
-        except Exception:                              # noqa: BLE001
-            continue
-        if made:
-            found[index] = made
+    try:
+        for index in indices:
+            if not 0 <= index < source.page_count:
+                continue
+            try:
+                made = pdfmarkups.markups_of_page(source, index)
+            except Exception:                          # noqa: BLE001
+                continue
+            if made:
+                found[index] = made
+    finally:
+        source.close()
     return found
 
 
@@ -451,25 +469,17 @@ def import_pages(document, path: str, indices: list[int], fit: str = FIT_ORIGINA
     """Load the chosen PDF pages into *document* as new pages.
 
     **What arrives is the PDF.** Every page is drawn from the file itself, by
-    the same renderer a PDF reader uses, at whatever size it is being looked
-    at — so an opened drawing is the drawing, pixel for pixel, and stays that
-    way at any zoom. Nothing is converted into anything on the way in, and
-    nothing is stored: no picture of the page, and no markups of our own
-    standing in for what is already on it.
+    MuPDF, at whatever size it is being looked at — so an opened drawing is the
+    drawing, pixel for pixel, and stays that way at any zoom. Nothing is
+    converted into anything on the way in, and nothing is stored: no picture of
+    the page, and no markups of our own standing in for what is already on it.
 
-    That is not what this used to do, and the difference is the whole
-    complaint. Every page used to be rendered to a PNG up front and every
-    annotation and every line on the sheet turned into an editable markup, so
-    a twelve-page A1 set took fifteen seconds, held fifty megabytes, and
-    arrived as seventy-two thousand objects drawn over the top of a correct
-    picture of the same drawing — near enough to be maddening, and never
-    right. The optional imports below are what is left of it:
+    The optional imports make objects, both take time, and neither is what
+    opening a file should do — so both are off unless something asks:
 
     *vectors* brings the page's own line work in as real geometry, so a
     measurement can snap to the end of a beam rather than to a guess.
     *annotations* turns markups already on the page into editable ones.
-    Both make objects, both take time, and neither is what opening a file
-    should do — so both are off unless something asks.
     """
     source = PdfSource(path)
     with open(path, "rb") as handle:
@@ -519,12 +529,8 @@ def render_preview(path: str, index: int, box: int = 560):
     """A page rendered small, for showing what an import will bring in."""
     source = PdfSource(path)
     try:
-        info = source.page_info(index)
-        longest = max(info.width_pt, info.height_pt, 1.0)
-        return source.doc.render(index, QSize(
-            max(int(info.width_pt / longest * box), 1),
-            max(int(info.height_pt / longest * box), 1)),
-            _how_to_render())
+        image = to_image(engine.render_thumbnail(source.doc, index, box))
+        return image if image is not None else QImage()
     finally:
         source.close()
 

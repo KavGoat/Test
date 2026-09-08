@@ -1,278 +1,271 @@
 """Reading a PDF's own line work, rather than a photograph of it.
 
 A drawing that comes in as a picture is a drawing you cannot snap to, cannot
-measure honestly and cannot zoom into. The lines are in the file — PDF draws
-them with the same operators a Bluebeam stamp uses — so they can be read out
-and put on the page as real geometry.
+measure honestly and cannot zoom into. The lines are in the file, so they can
+be read out and put on the page as real geometry.
 
-What is read here is the file's structure: its objects, its page tree and the
-content stream of each page. Turning that stream into strokes is already done,
-by :func:`markforge.io.btx.read_content`.
+MuPDF is what reads them. It runs the page the way a renderer does — every
+content stream, every form XObject the page draws, the graphics state stack,
+the clipping, the transformations — and hands back the paths that came out of
+it with the colour and width each was actually stroked at. That is the whole
+point of doing it this way rather than interpreting the content stream here: a
+drawing is not a flat list of ``m``/``l``/``c`` operators, it is those
+operators run through nested transformations, and a reader that skips the
+running gets the lines in the wrong places.
 
-Text is not read. Letters in a PDF are drawn from an embedded font, and
-rendering those properly is a typesetting job of its own; the raster page is
-kept underneath so the words still show, and the line work sits exactly over
-it. That is the honest split, and it is the part an engineer needs to be able
-to point at.
+Coordinates come back in **display points** — origin at the top-left corner, y
+down, and the page's own ``/Rotate`` applied — which is what the rest of
+MarkForge means by a page coordinate. A page that says it is turned ninety
+degrees has its line work turned with it, rather than arriving in the shape the
+file happens to store it in.
+
+Text is not read. Letters are drawn from an embedded font, and turning those
+into geometry is a typesetting job of its own; the page itself is drawn
+underneath so the words still show, and the line work sits exactly over it.
 """
 from __future__ import annotations
 
-import re
-import zlib
-from typing import Optional
+from typing import Any, Optional
 
-from .pdfobj import Name, Ref, parse
+import pymupdf
 
-# "12 0 obj" — every object in the file, wherever the cross-reference table
-# says they are. Scanning for them directly reads a damaged file too, and
-# saves implementing both the old table and the newer stream that replaced it.
-_OBJECT = re.compile(rb"(\d+)\s+(\d+)\s+obj\b")
+from ..pdf import engine
+from ..pdf.engine import PdfError
+from ..pdf.objects import Ref
 
-
-def inflate(data: bytes, entry: dict) -> bytes:
-    """A stream's bytes, with the filters this reader knows about undone."""
-    filters = entry.get("Filter")
-    if isinstance(filters, (Name, str)):
-        filters = [filters]
-    for name in filters or []:
-        if str(name) in ("FlateDecode", "Fl"):
-            try:
-                data = zlib.decompress(data)
-            except zlib.error:
-                try:
-                    data = zlib.decompressobj().decompress(data)
-                except zlib.error:
-                    return b""
-        else:
-            return b""             # a filter this reader does not do
-    predictor = (entry.get("DecodeParms") or {})
-    if isinstance(predictor, list):
-        predictor = predictor[0] if predictor else {}
-    if isinstance(predictor, dict) and int(predictor.get("Predictor", 1) or 1) >= 10:
-        data = _unpredict(data, predictor)
-    return data
-
-
-def _unpredict(data: bytes, parms: dict) -> bytes:
-    """Undo a PNG predictor, which is how a cross-reference stream is packed."""
-    columns = int(parms.get("Columns", 1) or 1)
-    colours = int(parms.get("Colors", 1) or 1)
-    bits = int(parms.get("BitsPerComponent", 8) or 8)
-    step = max(colours * bits // 8, 1)
-    row_length = columns * colours * bits // 8
-    out = bytearray()
-    previous = bytearray(row_length)
-    at = 0
-    while at + 1 + row_length <= len(data):
-        tag = data[at]
-        row = bytearray(data[at + 1:at + 1 + row_length])
-        at += 1 + row_length
-        for index in range(row_length):
-            left = row[index - step] if index >= step else 0
-            up = previous[index]
-            upper_left = previous[index - step] if index >= step else 0
-            if tag == 1:
-                row[index] = (row[index] + left) & 0xFF
-            elif tag == 2:
-                row[index] = (row[index] + up) & 0xFF
-            elif tag == 3:
-                row[index] = (row[index] + (left + up) // 2) & 0xFF
-            elif tag == 4:
-                estimate = left + up - upper_left
-                a, b, c = (abs(estimate - left), abs(estimate - up),
-                           abs(estimate - upper_left))
-                row[index] = (row[index] + (left if a <= b and a <= c
-                                            else up if b <= c else upper_left)) & 0xFF
-        out += row
-        previous = row
-    return bytes(out)
+#: Paths with more points than this are a hatch, a shading or a scanned trace
+#: rather than something anybody wants to snap to.
+MOST_POINTS_IN_A_PATH = 4000
 
 
 class PdfFile:
-    """Every object in a PDF, and the pages made out of them."""
+    """One PDF, open for its geometry and its annotations.
 
-    def __init__(self, data: bytes):
-        self.data = data
-        self.objects: dict[int, object] = {}
-        self.streams: dict[int, bytes] = {}
-        self._read_objects()
-        self._read_object_streams()
+    A thin thing over a MuPDF document. It exists so the readers above it can
+    ask for a page's line work, an annotation's dictionary or an appearance's
+    strokes without any of them holding a MuPDF handle or knowing which matrix
+    turns what into what.
+    """
+
+    def __init__(self, document: "pymupdf.Document", data: bytes = b""):
+        self.doc = document
+        self._data = data
+        self._bare: "Optional[pymupdf.Document]" = None
+        self._stripped: set[int] = set()
 
     @classmethod
     def open(cls, path: str) -> "PdfFile":
         with open(path, "rb") as handle:
-            return cls(handle.read())
+            data = handle.read()
+        return cls(engine.open_bytes(data), data)
 
-    # -- the objects -------------------------------------------------------
-    def _read_objects(self) -> None:
-        for match in _OBJECT.finditer(self.data):
-            number = int(match.group(1))
-            body, _end = self._object_at(match.end())
-            if body is None:
-                continue
-            self.objects[number] = body
+    @classmethod
+    def from_bytes(cls, data: bytes) -> "PdfFile":
+        return cls(engine.open_bytes(data), data)
 
-    def _object_at(self, start: int):
-        """One object's value, and its stream if it has one."""
-        try:
-            value, at = parse(self.data, start, references=True)
-        except Exception:                                  # noqa: BLE001
-            return None, start
-        tail = self.data[at:at + 20]
-        if b"stream" in tail and isinstance(value, dict):
-            begin = self.data.index(b"stream", at) + len(b"stream")
-            if self.data[begin:begin + 2] == b"\r\n":
-                begin += 2
-            elif self.data[begin:begin + 1] in (b"\n", b"\r"):
-                begin += 1
-            length = self.resolve_later(value.get("Length"))
-            if isinstance(length, (int, float)) and length > 0:
-                raw = self.data[begin:begin + int(length)]
-            else:
-                end = self.data.find(b"endstream", begin)
-                raw = self.data[begin:end if end > 0 else begin]
-            value["__stream__"] = raw
-        return value, at
+    @property
+    def page_count(self) -> int:
+        return self.doc.page_count
 
-    def _read_object_streams(self) -> None:
-        """Objects packed inside another object, as a modern PDF stores them."""
-        for entry in list(self.objects.values()):
-            if not isinstance(entry, dict) or str(entry.get("Type")) != "ObjStm":
-                continue
-            body = inflate(entry.get("__stream__", b""), entry)
-            if not body:
-                continue
-            count = int(entry.get("N", 0) or 0)
-            first = int(entry.get("First", 0) or 0)
-            heading = body[:first].split()
-            for index in range(count):
-                try:
-                    number = int(heading[index * 2])
-                    offset = int(heading[index * 2 + 1])
-                except (IndexError, ValueError):
-                    break
-                try:
-                    value, _at = parse(body, first + offset, references=True)
-                except Exception:                          # noqa: BLE001
-                    continue
-                self.objects.setdefault(number, value)
+    def page(self, index: int) -> "pymupdf.Page":
+        return self.doc[index]
 
-    def resolve(self, value):
-        """Follow an indirect reference, however many deep."""
+    def page_size(self, index: int) -> tuple[float, float]:
+        return engine.page_size(self.doc, index)
+
+    def bare_page(self, index: int) -> "Optional[pymupdf.Page]":
+        """The page with nobody's markups on it, for reading its own lines.
+
+        MuPDF runs a page the way a renderer does, and a renderer draws the
+        annotations too — so asking a marked-up drawing for its geometry hands
+        back somebody's clouds along with the building. They are markups and
+        they come across as markups; here they are in the way.
+
+        So the line work is read off a second copy of the file with the
+        annotations taken off the page. A copy, rather than the document in
+        hand, because that one is still being asked for those same annotations.
+        """
+        if self._bare is None:
+            if not self._data:
+                return None
+            try:
+                self._bare = engine.open_bytes(self._data)
+            except PdfError:
+                return None
+        if not 0 <= index < self._bare.page_count:
+            return None
+        page = self._bare[index]
+        if index not in self._stripped:
+            try:
+                for annot in list(page.annots()):
+                    page.delete_annot(annot)
+            except Exception:                          # noqa: BLE001
+                engine.drain_messages()
+            self._stripped.add(index)
+        return page
+
+    def close(self) -> None:
+        engine.close(self.doc)
+        engine.close(self._bare)
+        self.doc = None
+        self._bare = None
+
+    def __enter__(self) -> "PdfFile":
+        return self
+
+    def __exit__(self, *_unused) -> None:
+        self.close()
+
+    # -- objects -----------------------------------------------------------
+    def resolve(self, value: Any) -> Any:
+        """Follow an indirect reference, however many deep.
+
+        The readers above work in the plain dictionaries a PDF is written in,
+        where a value may be the thing or a reference to it. One place follows
+        those, so nothing else has to remember to.
+        """
         seen = 0
         while isinstance(value, Ref):
-            value = self.objects.get(value.number)
+            value = engine.object_at(self.doc, value.number)
             seen += 1
-            if seen > 32:
+            if seen > 32:                              # a file pointing at itself
                 return None
         return value
 
-    def resolve_later(self, value):
-        """A length that is itself an object, read straight out of the file.
+    def object_at(self, number: int) -> Any:
+        return engine.object_at(self.doc, number)
 
-        The objects are not all read yet while the streams are being cut out
-        of the file, so this looks the one number up on its own.
+    def annotations_of(self, index: int) -> list[dict]:
+        """Every annotation on a page, as the dictionary the file holds.
+
+        In the page's own order, which is the order they are drawn in, so a
+        markup that was on top comes back on top.
         """
-        if not isinstance(value, Ref):
-            return value
-        found = re.search(rb"(?<![0-9])" + str(value.number).encode()
-                          + rb"\s+\d+\s+obj\s*(\d+)", self.data)
-        return int(found.group(1)) if found else None
-
-    # -- the pages ---------------------------------------------------------
-    def pages(self) -> list[dict]:
-        """Every page, in the order they are read, with what they inherit."""
         found: list[dict] = []
-        root = None
-        for entry in self.objects.values():
-            if isinstance(entry, dict) and str(entry.get("Type")) == "Pages" \
-                    and "Parent" not in entry:
-                root = entry
-                break
-        if root is not None:
-            self._walk(root, {}, found, set())
-        if not found:
-            # No usable tree: take the page objects as they come, which is
-            # what a file with a damaged catalogue leaves.
-            for number, entry in sorted(self.objects.items()):
-                if isinstance(entry, dict) and str(entry.get("Type")) == "Page":
-                    found.append(self._inherited(entry, {}))
+        for number in engine.annotation_xrefs(self.doc, index):
+            holder = engine.object_at(self.doc, number)
+            if isinstance(holder, dict):
+                holder = dict(holder)
+                holder["__xref__"] = number
+                found.append(holder)
         return found
 
-    _INHERITS = ("Resources", "MediaBox", "CropBox", "Rotate")
 
-    def _inherited(self, page: dict, handed_down: dict) -> dict:
-        merged = dict(page)
-        for key in self._INHERITS:
-            if key not in merged and key in handed_down:
-                merged[key] = handed_down[key]
-        return merged
+# ---------------------------------------------------------------------------
+# line work
+# ---------------------------------------------------------------------------
 
-    def _walk(self, node: dict, handed_down: dict, found: list, seen: set) -> None:
-        marker = id(node)
-        if marker in seen:
-            return
-        seen.add(marker)
-        passed = dict(handed_down)
-        for key in self._INHERITS:
-            if key in node:
-                passed[key] = node[key]
-        for child in self.resolve(node.get("Kids")) or []:
-            entry = self.resolve(child)
-            if not isinstance(entry, dict):
-                continue
-            if str(entry.get("Type")) == "Pages":
-                self._walk(entry, passed, found, seen)
-            else:
-                found.append(self._inherited(entry, passed))
+def strokes_of_page(source: PdfFile, index: int) -> list[dict]:
+    """The line work on one page, in display points.
 
-    def content_of(self, page: dict) -> bytes:
-        """One page's whole content stream, decompressed and joined."""
-        contents = self.resolve(page.get("Contents"))
-        parts = contents if isinstance(contents, list) else [page.get("Contents")]
-        body = b""
-        for part in parts:
-            entry = self.resolve(part)
-            if isinstance(entry, dict):
-                body += inflate(entry.get("__stream__", b""), entry) + b"\n"
-        return body
-
-    def box_of(self, page: dict) -> list:
-        """The page's size in points, as [left, bottom, right, top]."""
-        box = self.resolve(page.get("CropBox")) or self.resolve(page.get("MediaBox"))
-        numbers = [float(self.resolve(v) or 0) for v in box] if box else []
-        if len(numbers) != 4:
-            return [0.0, 0.0, 595.28, 841.89]              # A4, for want of better
-        return numbers
+    The page's own drawing only. What is in the annotations is somebody's
+    markup, and it comes across as markup rather than as line work — a cloud
+    read as sixty loose segments is not a cloud.
+    """
+    page = source.bare_page(index)
+    if page is None:
+        return []
+    try:
+        drawings = page.get_drawings()
+        rotation = page.rotation_matrix
+    except Exception:                                  # noqa: BLE001
+        engine.drain_messages()
+        return []
+    return _strokes_from(drawings, rotation)
 
 
-def flip_of_page(source: PdfFile, page: dict) -> tuple:
-    """PDF space to page space: origin at the corner, and the right way up."""
-    left, bottom, right, top = source.box_of(page)
-    height = abs(top - bottom)
-    return (1.0, 0.0, 0.0, -1.0, -min(left, right), height + min(bottom, top))
+def strokes_of_annotation(source: PdfFile, annotation: dict) -> list[dict]:
+    """What one annotation draws, where it draws it.
 
+    For the annotations a PDF has no proper shape for — somebody's stamp, a
+    tool from a set nobody else has — where the appearance *is* the markup.
 
-def strokes_of_page(source: PdfFile, page: dict,
-                    with_annotations: bool = False) -> list[dict]:
-    """The line work on one page, in page coordinates with y down.
-
-    PDF measures from the bottom-left corner upwards; a page here measures
-    from the top-left downwards, so the whole thing is flipped once here
-    rather than everywhere it is used.
-
-    The page's own drawing only, unless asked otherwise. What is in the
-    annotations is somebody's markup, and it comes across as markup rather
-    than as line work — a cloud read as sixty loose segments is not a cloud.
+    An appearance is a form XObject: a content stream and a box, drawn at
+    whatever the annotation's rectangle maps that box onto. MuPDF gets the
+    stream out of the file — filters, object streams, encryption and all —
+    and :func:`markforge.io.btx.read_content` reads the handful of path
+    operators in it, which is the same reader a Bluebeam stamp goes through.
     """
     from .btx import read_content
 
-    flip = flip_of_page(source, page)
-    body = source.content_of(page)
-    found = read_content(body, matrix=flip) if body else []
-    if with_annotations:
-        found.extend(strokes_of_annotations(source, page, flip))
-    return found
+    form = _appearance_of(source, annotation)
+    if form is None:
+        return []
+    body = engine.stream_of(source.doc, form["__xref__"])
+    if not body:
+        return []
+    placed = _appearance_matrix(source, annotation, form)
+    if placed is None:
+        return []
+    index = _page_index_of(source, annotation)
+    if index is None:
+        return []
+    try:
+        page = source.page(index)
+        flip = _compose(placed, _flip_of(page))
+        return read_content(body, matrix=flip)
+    except Exception:                                  # noqa: BLE001
+        engine.drain_messages()
+        return []
+
+
+def _flip_of(page: "pymupdf.Page") -> tuple:
+    """The file's own space to display points, as a plain PDF matrix.
+
+    The same transform :func:`markforge.pdf.engine.to_display` gives, in the
+    six numbers the content reader takes rather than as a MuPDF matrix.
+    """
+    matrix = engine.to_display(page)
+    return (matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f)
+
+
+def _page_index_of(source: PdfFile, annotation: dict) -> Optional[int]:
+    """Which page an annotation is on, by the ``/P`` it carries or by looking."""
+    parent = annotation.get("P")
+    if isinstance(parent, Ref):
+        for index in range(source.page_count):
+            try:
+                if source.doc.page_xref(index) == parent.number:
+                    return index
+            except Exception:                          # noqa: BLE001
+                break
+    number = annotation.get("__xref__")
+    for index in range(source.page_count):
+        if number in engine.annotation_xrefs(source.doc, index):
+            return index
+    return None
+
+
+def _appearance_of(source: PdfFile, annotation: dict) -> Optional[dict]:
+    """An annotation's normal appearance, whichever state it is kept under."""
+    look = source.resolve(annotation.get("AP"))
+    if not isinstance(look, dict):
+        return None
+    found = _stream_dictionary(source, look.get("N"))
+    if found is not None:
+        return found
+    # A form for each state — a tick box, say. The first is as good a guess
+    # as any, and better than reading nothing.
+    states = source.resolve(look.get("N"))
+    if not isinstance(states, dict):
+        return None
+    for value in states.values():
+        found = _stream_dictionary(source, value)
+        if found is not None:
+            return found
+    return None
+
+
+def _stream_dictionary(source: PdfFile, value) -> Optional[dict]:
+    """A referenced object that really is a stream, with its number kept."""
+    if not isinstance(value, Ref):
+        return None
+    holder = source.object_at(value.number)
+    if not isinstance(holder, dict) or "Length" not in holder:
+        return None
+    holder = dict(holder)
+    holder["__xref__"] = value.number
+    return holder
 
 
 def _compose(first: tuple, second: tuple) -> tuple:
@@ -284,79 +277,8 @@ def _compose(first: tuple, second: tuple) -> tuple:
             e1 * a2 + f1 * c2 + e2, e1 * b2 + f1 * d2 + f2)
 
 
-def strokes_of_annotation(source: PdfFile, annotation: dict, flip: tuple) -> list[dict]:
-    """What one annotation draws, where it draws it."""
-    from .btx import read_content
-
-    form = _appearance_of(source, annotation)
-    if form is None:
-        return []
-    body = inflate(form.get("__stream__", b""), form)
-    if not body:
-        return []
-    placed = _appearance_matrix(source, annotation, form)
-    if placed is None:
-        return []
-    try:
-        return read_content(body, matrix=_compose(placed, flip))
-    except Exception:                                  # noqa: BLE001
-        return []
-
-
-def strokes_of_annotations(source: PdfFile, page: dict, flip: tuple) -> list[dict]:
-    """The line work inside a page's annotations.
-
-    A PDF that has been marked up keeps its clouds, dimensions and call-outs
-    as annotations rather than in the page itself, so a page read for its
-    geometry alone would come back nearly empty. What each annotation draws is
-    in its appearance, which is a drawing like any other: it is read the same
-    way and put where the annotation sits on the page.
-    """
-    from .btx import read_content
-
-    found: list[dict] = []
-    for entry in source.resolve(page.get("Annots")) or []:
-        annotation = source.resolve(entry)
-        if not isinstance(annotation, dict):
-            continue
-        if str(annotation.get("Subtype")) in ("Link", "Popup"):
-            continue
-        form = _appearance_of(source, annotation)
-        if form is None:
-            continue
-        body = inflate(form.get("__stream__", b""), form)
-        if not body:
-            continue
-        placed = _appearance_matrix(source, annotation, form)
-        if placed is None:
-            continue
-        try:
-            found.extend(read_content(body, matrix=_compose(placed, flip)))
-        except Exception:                                  # noqa: BLE001
-            continue
-    return found
-
-
-def _appearance_of(source: PdfFile, annotation: dict):
-    """An annotation's normal appearance, whichever state it is kept under."""
-    look = source.resolve(annotation.get("AP"))
-    if not isinstance(look, dict):
-        return None
-    normal = source.resolve(look.get("N"))
-    if not isinstance(normal, dict):
-        return None
-    if "__stream__" in normal:
-        return normal
-    # A form for each state — a tick box, say. The first is as good a guess
-    # as any, and better than reading nothing.
-    for value in normal.values():
-        candidate = source.resolve(value)
-        if isinstance(candidate, dict) and "__stream__" in candidate:
-            return candidate
-    return None
-
-
-def _appearance_matrix(source: PdfFile, annotation: dict, form: dict):
+def _appearance_matrix(source: PdfFile, annotation: dict,
+                       form: dict) -> Optional[tuple]:
     """Where the appearance lands: its own box, fitted into the annotation's.
 
     That is what a PDF reader does with an appearance — transform it by its
@@ -364,18 +286,15 @@ def _appearance_matrix(source: PdfFile, annotation: dict, form: dict):
     occupies — and it is why a markup drawn at its own origin ends up in the
     right place on the page.
     """
-    rect = [float(source.resolve(v) or 0) for v in
-            (source.resolve(annotation.get("Rect")) or [])]
+    rect = _numbers(source, annotation.get("Rect"))
     if len(rect) != 4:
         return None
     left, bottom = min(rect[0], rect[2]), min(rect[1], rect[3])
     across, up = abs(rect[2] - rect[0]), abs(rect[3] - rect[1])
-    box = [float(source.resolve(v) or 0) for v in
-           (source.resolve(form.get("BBox")) or [])]
+    box = _numbers(source, form.get("BBox"))
     if len(box) != 4:
         return (1.0, 0.0, 0.0, 1.0, left, bottom)
-    matrix = [float(source.resolve(v) or 0) for v in
-              (source.resolve(form.get("Matrix")) or [])]
+    matrix = _numbers(source, form.get("Matrix"))
     own = tuple(matrix) if len(matrix) == 6 else (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
     corners = _transformed_box(box, own)
     wide = max(corners[2] - corners[0], 1e-9)
@@ -398,10 +317,112 @@ def _transformed_box(box: list, matrix: tuple) -> tuple:
     return min(xs), min(ys), max(xs), max(ys)
 
 
+def _numbers(source: PdfFile, value: Any) -> list[float]:
+    values = source.resolve(value)
+    if not isinstance(values, (list, tuple)):
+        return []
+    out = []
+    for item in values:
+        found = source.resolve(item)
+        if isinstance(found, (int, float)) and not isinstance(found, bool):
+            out.append(float(found))
+    return out
+
+
+def _strokes_from(drawings: list, rotation: "pymupdf.Matrix") -> list[dict]:
+    """MuPDF's paths as MarkForge's strokes, turned into display points.
+
+    MuPDF gives a path already run and already the right way up, but not
+    rotated: a page that says it is turned still hands its geometry back in the
+    shape the file stores it in. The rotation is applied here, once, so
+    everything downstream is in the coordinates that are actually on screen.
+    """
+    strokes: list[dict] = []
+    for entry in drawings:
+        path = _path_of(entry, rotation)
+        if not path:
+            continue
+        stroke = _colour_of(entry.get("color"))
+        fill = _colour_of(entry.get("fill"))
+        if entry.get("type") == "f" and not stroke:
+            # A filled shape with no outline: its own edge is what is visible,
+            # so that is what the geometry should follow.
+            stroke = fill
+        strokes.append({
+            "path": path,
+            "stroke": stroke or "#3d4350",
+            "fill": fill if entry.get("type") in ("f", "fs") else "",
+            "width": max(float(entry.get("width") or 0.0) or 0.6, 0.1),
+        })
+    return strokes
+
+
+def _path_of(entry: dict, rotation: "pymupdf.Matrix") -> list:
+    """One MuPDF path as the ``m``/``l``/``c``/``z`` steps everything reads."""
+    path: list = []
+    points = 0
+    for item in entry.get("items") or []:
+        kind = item[0]
+        if kind == "l":
+            path.append(["m", *_at(item[1], rotation)])
+            path.append(["l", *_at(item[2], rotation)])
+            points += 2
+        elif kind == "c":
+            path.append(["m", *_at(item[1], rotation)])
+            path.append(["c", *_at(item[2], rotation), *_at(item[3], rotation),
+                         *_at(item[4], rotation)])
+            points += 4
+        elif kind == "re":
+            box = pymupdf.Rect(item[1]).normalize()
+            corners = [(box.x0, box.y0), (box.x1, box.y0),
+                       (box.x1, box.y1), (box.x0, box.y1)]
+            placed = [_at(pymupdf.Point(*corner), rotation) for corner in corners]
+            path.append(["m", *placed[0]])
+            path.extend(["l", *corner] for corner in placed[1:])
+            path.append(["z"])
+            points += 5
+        elif kind == "qu":
+            quad = item[1]
+            placed = [_at(point, rotation) for point in
+                      (quad.ul, quad.ur, quad.lr, quad.ll)]
+            path.append(["m", *placed[0]])
+            path.extend(["l", *corner] for corner in placed[1:])
+            path.append(["z"])
+            points += 5
+        if points > MOST_POINTS_IN_A_PATH:
+            break
+    if path and entry.get("closePath"):
+        path.append(["z"])
+    return path
+
+
+def _at(point, rotation: "pymupdf.Matrix") -> tuple[float, float]:
+    placed = pymupdf.Point(point) * rotation
+    return float(placed.x), float(placed.y)
+
+
+def _colour_of(value) -> str:
+    """A MuPDF colour as ``#rrggbb``, or empty when there is none."""
+    if not value:
+        return ""
+    try:
+        parts = [max(0.0, min(1.0, float(component))) for component in value]
+    except (TypeError, ValueError):
+        return ""
+    if len(parts) == 1:
+        parts = parts * 3
+    elif len(parts) == 4:
+        cyan, magenta, yellow, black = parts
+        parts = [(1.0 - cyan) * (1.0 - black), (1.0 - magenta) * (1.0 - black),
+                 (1.0 - yellow) * (1.0 - black)]
+    if len(parts) != 3:
+        return ""
+    return "#%02x%02x%02x" % tuple(int(round(part * 255)) for part in parts)
+
+
 def read(path: str, indices: Optional[list[int]] = None) -> list[list[dict]]:
     """The line work of each page asked for, in order."""
-    source = PdfFile.open(path)
-    pages = source.pages()
-    wanted = range(len(pages)) if indices is None else indices
-    return [strokes_of_page(source, pages[index])
-            for index in wanted if 0 <= index < len(pages)]
+    with PdfFile.open(path) as source:
+        wanted = range(source.page_count) if indices is None else indices
+        return [strokes_of_page(source, index) for index in wanted
+                if 0 <= index < source.page_count]

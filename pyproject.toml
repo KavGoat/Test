@@ -12,11 +12,13 @@ license = { text = "MIT" }
 dependencies = [
     "PySide6>=6.6",
     "pint>=0.23",
-    "pypdf>=6.14,<7",
+    "pymupdf>=1.24",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.4"]
+# pypdf is here to check what MarkForge writes with a reader that is
+# not the one that wrote it. Nothing in the application uses it.
+dev = ["pytest>=7.4", "pypdf>=6.14,<7"]
 
 [project.gui-scripts]
 markforge = "markforge.app:main"

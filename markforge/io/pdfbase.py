@@ -19,6 +19,9 @@ import os
 import zipfile
 from typing import Optional
 
+from ..pdf import engine
+from ..pdf.engine import PdfError
+
 # The embedded file the markup record travels in. A PDF reader that knows
 # nothing about this application shows it as an attachment and is otherwise
 # unbothered by it.
@@ -56,29 +59,26 @@ def read_record(data: bytes) -> tuple[dict, dict[str, bytes]]:
 
 
 def is_pdf(path: str) -> bool:
-    try:
-        with open(path, "rb") as handle:
-            return handle.read(5).startswith(b"%PDF")
-    except OSError:
-        return False
+    return engine.is_pdf(path)
 
 
 def record_in(path: str) -> Optional[bytes]:
-    """The markup record inside the PDF at *path*, if it carries one."""
+    """The markup record inside the PDF at *path*, if it carries one.
+
+    An incrementally updated PDF can carry the same attachment more than once,
+    the later one overriding the earlier. MuPDF reads the file's current name
+    tree, so what comes back is the one a reader would see — the current one.
+    """
     if not is_pdf(path):
         return None
-    from pypdf import PdfReader
-
     try:
-        reader = PdfReader(path, strict=False)
-        found = reader.attachments.get(RECORD_ENTRY)
-    except Exception:                                  # noqa: BLE001
+        document = engine.open_path(path)
+    except PdfError:
         return None
-    if not found:
-        return None
-    # pypdf hands back every embedded file of that name; the last one written
-    # is the current one, which is what an incrementally updated PDF means.
-    return bytes(found[-1])
+    try:
+        return engine.embedded(document, RECORD_ENTRY)
+    finally:
+        engine.close(document)
 
 
 # -- writing ---------------------------------------------------------------
@@ -108,20 +108,24 @@ def write(document, path: str, appearance: bool = True) -> None:
 
 def _assemble(document, path: str, appearance: bool = True) -> None:
     """Build the file page by page, from whatever each page came from."""
-    from pypdf import PdfWriter
+    import pymupdf
 
-    output = PdfWriter()
-    keep_alive: list = []                 # source readers, until the write
-    for page in document.pages:
-        output.add_page(_page_body(document, page, keep_alive))
-    if appearance:
-        _draw_the_sheets_onto(output, document)
-    output.add_attachment(RECORD_ENTRY, record_bytes(document))
-    output.add_metadata({"/Title": document.title or "", "/Creator": "MarkForge"})
-    temporary = path + ".tmp"
-    with open(temporary, "wb") as handle:
-        output.write(handle)
-    os.replace(temporary, path)
+    output = pymupdf.open()
+    sources: dict[str, object] = {}       # the PDFs pages are coming from
+    try:
+        for page in document.pages:
+            _add_page_body(output, document, page, sources)
+        if appearance:
+            _draw_the_sheets_onto(output, document)
+        engine.embed(output, RECORD_ENTRY, record_bytes(document))
+        output.set_metadata({"title": document.title or "",
+                             "creator": "MarkForge",
+                             "producer": "MarkForge"})
+        engine.save_as(output, path)
+    finally:
+        for source in sources.values():
+            engine.close(source)
+        engine.close(output)
     if appearance:
         # The markups go in as real annotations, not as ink on the page. A
         # saved document is a PDF that anybody can open, and a markup that
@@ -132,44 +136,59 @@ def _assemble(document, path: str, appearance: bool = True) -> None:
         annotate.add_markups(path, document, _drawn_pages(document))
 
 
-def _page_body(document, page, keep_alive: list):
+def _add_page_body(output, document, page, sources: dict) -> None:
     """One page of the file: the PDF it came from, or paper of the right size.
 
     A page imported from a PDF keeps that PDF's own page — its real line
     information, its text, its everything — rather than a picture of it. That
     is what makes an imported drawing still a drawing after a round trip.
+
+    Where the page is still the size it came in at, the source page is brought
+    across whole: the same objects, its own annotations, its links. Where it
+    has been fitted onto other paper it is placed onto a sheet of the new size
+    instead, which scales the drawing but cannot scale annotations with it —
+    those are already markups here, and go back on as markups.
     """
-    from pypdf import PdfWriter
-
-    source = _source_page(document, page, keep_alive)
-    if source is not None:
-        return source
-    blank = PdfWriter()
-    return blank.add_blank_page(float(page.width_pt), float(page.height_pt))
-
-
-def _source_page(document, page, keep_alive: list):
-    from pypdf import PdfReader
-
-    data = document.asset(page.pdf_key) if page.pdf_key else None
-    if not data or page.pdf_page_index is None:
-        return None
+    width, height = float(page.width_pt), float(page.height_pt)
+    source = _source_for(document, page, sources)
+    index = int(page.pdf_page_index) if page.pdf_page_index is not None else -1
+    if source is None or not 0 <= index < source.page_count:
+        output.new_page(-1, width=width, height=height)
+        return
+    across, down = engine.page_size(source, index)
+    wanted = output.page_count + 1
     try:
-        reader = PdfReader(io.BytesIO(data), strict=False)
-        keep_alive.append(reader)
-        index = int(page.pdf_page_index)
-        if not 0 <= index < len(reader.pages):
-            return None
-        source = reader.pages[index]
-        if source.rotation:
-            source.transfer_rotation_to_content()
-        source.scale_to(float(page.width_pt), float(page.height_pt))
-        return source
+        if abs(across - width) < 1.0 and abs(down - height) < 1.0:
+            output.insert_pdf(source, from_page=index, to_page=index,
+                              annots=True)
+            return
+        sheet = output.new_page(-1, width=width, height=height)
+        sheet.show_pdf_page(sheet.rect, source, index)
     except Exception:                                  # noqa: BLE001
         # A source that cannot be read is not worth losing the save over: the
         # page still comes out, the record still holds everything, and the
         # markups are still drawn onto it below.
+        engine.drain_messages()
+        if output.page_count < wanted:
+            output.new_page(-1, width=width, height=height)
+
+
+def _source_for(document, page, sources: dict):
+    """The PDF a page came from, opened once and kept for the whole write."""
+    key = page.pdf_key
+    if not key or page.pdf_page_index is None:
         return None
+    if key in sources:
+        return sources[key]
+    data = document.asset(key)
+    if not data:
+        return None
+    try:
+        source = engine.open_bytes(data)
+    except PdfError:
+        return None
+    sources[key] = source
+    return source
 
 
 def _drawn_pages(document) -> list:
@@ -191,26 +210,27 @@ def _draw_the_sheets_onto(output, document) -> None:
     if not drawn:
         return
     overlay_path = None
+    overlay = None
     try:
         overlay_path = _rendered_overlay(document, drawn)
         if overlay_path is None:
             return
-        from pypdf import PdfReader
-
-        with open(overlay_path, "rb") as handle:
-            overlay = PdfReader(io.BytesIO(handle.read()), strict=False)
-        if len(overlay.pages) != len(drawn):
+        overlay = engine.open_path(overlay_path)
+        if overlay.page_count != len(drawn):
             return
         where = {id(page): index for index, page in enumerate(document.pages)}
-        for page, marks in zip(drawn, overlay.pages):
+        for offset, page in enumerate(drawn):
             index = where.get(id(page))
-            if index is None:
+            if index is None or not 0 <= index < output.page_count:
                 continue
-            output.pages[index].merge_page(marks, over=True)
+            sheet = output[index]
+            sheet.show_pdf_page(sheet.rect, overlay, offset, overlay=True)
     except Exception:                                  # noqa: BLE001
         # Never lose a save over its appearance elsewhere.
+        engine.drain_messages()
         return
     finally:
+        engine.close(overlay)
         if overlay_path and os.path.exists(overlay_path):
             os.remove(overlay_path)
 

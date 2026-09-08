@@ -1,24 +1,22 @@
 """Bookmarks and links for a finished PDF.
 
 Qt writes the pages but has no way to say "this is the outline" or "this
-rectangle is a link", so the two are added afterwards as a PDF incremental
-update: the original bytes are left exactly as they were and the new objects,
-a new cross-reference section and a new trailer are appended to the end. Every
-reader understands that; it is how a PDF is annotated without rewriting it.
+rectangle is a link", so both are added afterwards. MuPDF has a proper name
+for each — an outline is a table of contents, a link is a destination on a
+page — and writes them itself, so what is left here is only the translation
+from what an export knows to what MuPDF is asked for.
 
-Only what Qt actually produces has to be understood here — a PDF 1.4 file with
-plain uncompressed objects and a classic cross-reference table — so this is a
-small, deliberate reader rather than a general one. Anything it does not
-recognise is left alone: the document still opens, without an outline.
+A failure costs the bookmarks, never the document: the file is written again
+only if everything went in, and the caller carries on either way.
 """
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
-from typing import Optional
 
-_OBJECT = re.compile(rb"(?:^|[\s>])(\d+)\s+0\s+obj\b")
-_STARTXREF = re.compile(rb"startxref\s+(\d+)\s*%%EOF\s*$", re.S)
+import pymupdf
+
+from ..pdf import engine
+from ..pdf.engine import PdfError
 
 
 @dataclass
@@ -51,205 +49,97 @@ class Link:
     where: Destination
 
 
-def _escape(text: str) -> bytes:
-    """A PDF text string, in UTF-16 so anything can be written in it."""
-    body = text.encode("utf-16-be")
-    out = bytearray(b"\xfe\xff")
-    for byte in body:
-        if byte in (0x28, 0x29, 0x5C):        # ( ) \
-            out += b"\\"
-        out.append(byte)
-    return b"(" + bytes(out) + b")"
-
-
-class _Pdf:
-    """Just enough of a PDF to find its pages and add to it."""
-
-    def __init__(self, data: bytes):
-        self.data = data
-        self.objects: dict[int, tuple[int, bytes]] = {}
-        for match in _OBJECT.finditer(data):
-            number = int(match.group(1))
-            start = match.end()
-            end = data.find(b"endobj", start)
-            if end < 0:
-                continue
-            self.objects[number] = (match.start(1), data[start:end])
-
-    def body(self, number: int) -> bytes:
-        return self.objects.get(number, (0, b""))[1]
-
-    def trailer(self) -> bytes:
-        index = self.data.rfind(b"trailer")
-        return self.data[index:] if index >= 0 else b""
-
-    def startxref(self) -> Optional[int]:
-        match = _STARTXREF.search(self.data)
-        return int(match.group(1)) if match else None
-
-    def size(self) -> int:
-        match = re.search(rb"/Size\s+(\d+)", self.trailer())
-        return int(match.group(1)) if match else max(self.objects, default=0) + 1
-
-    def root(self) -> Optional[int]:
-        match = re.search(rb"/Root\s+(\d+)\s+0\s+R", self.trailer())
-        return int(match.group(1)) if match else None
-
-    def page_numbers(self) -> list[int]:
-        """The page objects, in the order the document puts them in."""
-        root = self.root()
-        if root is None:
-            return []
-        pages = re.search(rb"/Pages\s+(\d+)\s+0\s+R", self.body(root))
-        if not pages:
-            return []
-        kids = re.search(rb"/Kids\s*\[(.*?)\]", self.body(int(pages.group(1))), re.S)
-        if not kids:
-            return []
-        return [int(number) for number in re.findall(rb"(\d+)\s+0\s+R", kids.group(1))]
-
-    def page_height(self, number: int) -> float:
-        box = re.search(rb"/MediaBox\s*\[\s*([\d.\-]+)\s+([\d.\-]+)\s+"
-                        rb"([\d.\-]+)\s+([\d.\-]+)", self.body(number))
-        return float(box.group(4)) - float(box.group(2)) if box else 842.0
-
-    def annots_object(self, number: int) -> Optional[int]:
-        """The array object a page keeps its annotations in, if it has one."""
-        match = re.search(rb"/Annots\s+(\d+)\s+0\s+R", self.body(number))
-        return int(match.group(1)) if match else None
-
-    def annots_array(self, number: int) -> Optional[tuple[int, int]]:
-        """Where a page keeps its annotations written out in the page itself.
-
-        A page whose markups went out as annotations has them listed in the
-        page dictionary rather than in an array object of its own, and the
-        links have to join that list. Two ``/Annots`` keys on one page is not
-        a page any reader will read.
-        """
-        body = self.body(number)
-        match = re.search(rb"/Annots\s*\[", body)
-        if not match:
-            return None
-        depth = 0
-        for index in range(match.end() - 1, len(body)):
-            if body[index:index + 1] == b"[":
-                depth += 1
-            elif body[index:index + 1] == b"]":
-                depth -= 1
-                if depth == 0:
-                    return match.end(), index
-        return None
-
-
 def add_outline_and_links(path: str, outline: list, links: list) -> bool:
-    """Append an outline and link annotations to the PDF at *path*.
+    """Put the bookmarks and the links into the PDF at *path*.
 
-    Returns False, having changed nothing, when the file is not the shape this
-    understands — a document without bookmarks is better than a broken one.
+    True when anything was written. The file is only rewritten if there was
+    something to write, so an export with neither is left exactly as it was.
     """
     if not outline and not links:
         return False
-    with open(path, "rb") as handle:
-        data = handle.read()
-    pdf = _Pdf(data)
-    pages = pdf.page_numbers()
-    root = pdf.root()
-    start = pdf.startxref()
-    if not pages or root is None or start is None:
+    try:
+        document = engine.open_path(path)
+    except PdfError:
         return False
-
-    next_number = max(pdf.size(), max(pdf.objects, default=0) + 1)
-    new: dict[int, bytes] = {}          # object number -> body
-
-    def claim() -> int:
-        nonlocal next_number
-        next_number += 1
-        return next_number - 1
-
-    def destination(where) -> bytes:
-        index = max(0, min(where.page, len(pages) - 1))
-        page_number = pages[index]
-        top = pdf.page_height(page_number) - max(where.y, 0.0)
-        return b"[ %d 0 R /XYZ null %.2f null ]" % (page_number, top)
-
-    # -- the links, page by page -------------------------------------------
-    per_page: dict[int, list[int]] = {}
-    for link in links:
-        if not (0 <= link.page < len(pages)):
-            continue
-        number = claim()
-        left, bottom, right, top = link.rect
-        new[number] = (b"<<\n/Type /Annot\n/Subtype /Link\n"
-                       b"/Rect [ %.2f %.2f %.2f %.2f ]\n"
-                       b"/Border [ 0 0 0 ]\n/F 4\n/Dest %s\n>>"
-                       % (left, bottom, right, top, destination(link.where)))
-        per_page.setdefault(link.page, []).append(number)
-
-    for index, numbers in per_page.items():
-        page_number = pages[index]
-        array = pdf.annots_object(page_number)
-        references = b" ".join(b"%d 0 R" % number for number in numbers)
-        if array is not None:
-            existing = pdf.body(array).strip()
-            inner = existing[1:-1] if existing.startswith(b"[") else b""
-            new[array] = b"[ " + inner.strip() + b" " + references + b" ]"
-            continue
-        written_out = pdf.annots_array(page_number)
-        body = pdf.body(page_number)
-        if written_out is not None:
-            first, last = written_out
-            new[page_number] = (body[:last] + b" " + references + body[last:])
-            continue
-        body = body.strip()
-        if not body.endswith(b">>"):
-            continue
-        new[page_number] = (body[:-2] + b"\n/Annots [ " + references + b" ]\n>>")
-
-    # -- the outline -------------------------------------------------------
-    if outline:
-        outlines_number = claim()
-        numbers = [claim() for _ in outline]
-        # A flat tree, indented by level: readers show the indentation and
-        # nothing depends on the nesting being real.
-        for position, (entry, number) in enumerate(zip(outline, numbers)):
-            parts = [b"<<", b"/Title " + _escape(entry.title),
-                     b"/Parent %d 0 R" % outlines_number,
-                     b"/Dest " + destination(entry.where)]
-            if position:
-                parts.append(b"/Prev %d 0 R" % numbers[position - 1])
-            if position + 1 < len(numbers):
-                parts.append(b"/Next %d 0 R" % numbers[position + 1])
-            parts.append(b">>")
-            new[number] = b"\n".join(parts)
-        new[outlines_number] = (b"<<\n/Type /Outlines\n/First %d 0 R\n"
-                                b"/Last %d 0 R\n/Count %d\n>>"
-                                % (numbers[0], numbers[-1], len(numbers)))
-        catalog = pdf.body(root).strip()
-        if catalog.endswith(b">>"):
-            new[root] = (catalog[:-2] + b"\n/Outlines %d 0 R\n/PageMode /UseOutlines\n>>"
-                         % outlines_number)
-
-    if not new:
+    try:
+        wrote = _set_outline(document, outline)
+        wrote = _add_links(document, links) or wrote
+        if not wrote:
+            return False
+        engine.save_as(document, path)
+    except Exception:                                  # noqa: BLE001
+        engine.drain_messages()
         return False
-
-    # -- append it ---------------------------------------------------------
-    out = bytearray(data)
-    if not out.endswith(b"\n"):
-        out += b"\n"
-    offsets: dict[int, int] = {}
-    for number in sorted(new):
-        offsets[number] = len(out)
-        out += b"%d 0 obj\n" % number + new[number] + b"\nendobj\n"
-
-    xref_at = len(out)
-    out += b"xref\n"
-    for number in sorted(offsets):                # one section per object,
-        out += b"%d 1\n" % number                 # since they are not contiguous
-        out += b"%010d 00000 n \n" % offsets[number]
-    out += (b"trailer\n<<\n/Size %d\n/Root %d 0 R\n/Prev %d\n>>\n"
-            b"startxref\n%d\n%%%%EOF\n"
-            % (next_number, root, start, xref_at))
-
-    with open(path, "wb") as handle:
-        handle.write(bytes(out))
+    finally:
+        engine.close(document)
     return True
+
+
+def _set_outline(document, outline: list) -> bool:
+    """The bookmark tree, as MuPDF's table of contents.
+
+    A table of contents is a list of levels, and MuPDF insists a level only
+    ever steps down by one — a heading three under a heading one is a file it
+    refuses rather than repairs — so the levels are pulled back into line on
+    the way in. The one that was written too deep still lands under the right
+    parent; it simply stops claiming a generation that is not there.
+    """
+    if not outline:
+        return False
+    table = []
+    previous = 0
+    for entry in outline:
+        page = max(0, min(int(entry.where.page), document.page_count - 1))
+        level = max(1, min(int(entry.level) + 1, previous + 1))
+        table.append([level, str(entry.title or ""), page + 1,
+                      {"kind": pymupdf.LINK_GOTO,
+                       "to": _landing(document, page, entry.where.y)}])
+        previous = level
+    try:
+        document.set_toc(table)
+    except Exception:                                  # noqa: BLE001
+        engine.drain_messages()
+        return False
+    return True
+
+
+def _add_links(document, links: list) -> bool:
+    """Each clickable rectangle, on the page it is on.
+
+    The rectangle arrives measured up from the bottom of the page, which is
+    how a PDF says it and how the export works it out. MuPDF places a link in
+    display points, so it is turned over here.
+    """
+    written = False
+    for link in links:
+        if not 0 <= link.page < document.page_count:
+            continue
+        try:
+            page = document[link.page]
+            height = page.rect.height
+            left, bottom, right, top = link.rect
+            box = pymupdf.Rect(left, height - top, right, height - bottom)
+            page.insert_link({
+                "kind": pymupdf.LINK_GOTO,
+                "from": box.normalize(),
+                "page": max(0, min(int(link.where.page),
+                                   document.page_count - 1)),
+                "to": _landing(document, link.where.page, link.where.y),
+            })
+            written = True
+        except Exception:                              # noqa: BLE001
+            engine.drain_messages()
+            continue
+    return written
+
+
+def _landing(document, page: int, y: float) -> "pymupdf.Point":
+    """Where a destination lands, in the space a PDF destination is written in.
+
+    Everything on the drawing side measures down from the top of the page; a
+    ``/XYZ`` destination measures up from the bottom. The one place that gets
+    turned over is here.
+    """
+    index = max(0, min(int(page), document.page_count - 1))
+    height = engine.page_size(document, index)[1]
+    return pymupdf.Point(0.0, height - max(float(y), 0.0))

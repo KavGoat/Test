@@ -23,44 +23,15 @@ DELIMITERS = b"()<>[]{}/%"
 NUMBER = re.compile(rb"[+-]?(?:\d+\.?\d*|\.\d+)")
 
 
-class Ref:
-    """An indirect reference: "12 0 R", one object pointing at another.
-
-    An annotation dictionary rarely uses them, so the reader that was written
-    for tool sets read the two numbers and the R as three separate tokens and
-    nothing minded. Reading a whole PDF does mind: the page's contents, its
-    resources and even the length of its own stream are all written this way.
-    """
-
-    __slots__ = ("number", "generation")
-
-    def __init__(self, number: int, generation: int = 0):
-        self.number = int(number)
-        self.generation = int(generation)
-
-    def __repr__(self) -> str:
-        return f"{self.number} {self.generation} R"
-
-    def __eq__(self, other) -> bool:
-        return (isinstance(other, Ref) and other.number == self.number
-                and other.generation == self.generation)
-
-    def __hash__(self) -> int:
-        return hash((self.number, self.generation))
-
+# A reference and a name are the same things here as everywhere else in
+# MarkForge, and deliberately the *same classes*: what this parser reads is
+# handed straight to readers that check what they were given, and two Name
+# types that are not each other is how a dictionary full of correct values
+# reads as a dictionary full of nothing.
+from ..pdf.objects import Name, Ref                    # noqa: E402
 
 # "12 0 R", when what follows a pair of integers is the letter R.
 REFERENCE = re.compile(rb"(\d+)\s+(\d+)\s+R(?![A-Za-z0-9])")
-
-
-class Name(str):
-    """A PDF name, ``/Square``. A string that remembers it was a name.
-
-    It matters when a value can be either: ``/S/S`` is the name "S", while
-    ``(S)`` would be the text "S", and a border style of one is not the other.
-    """
-
-    __slots__ = ()
 
 
 def _skip(data: bytes, i: int) -> int:

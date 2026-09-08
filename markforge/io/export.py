@@ -147,39 +147,62 @@ def _paint_pdf(document: Document, path: str, pages: list, resolution: int,
 
 def _merge_preserved_pdf_pages(document: Document, path: str, pages: list,
                                preserved: set[str]) -> None:
-    """Replace overlay pages with their original PDF page plus that overlay."""
-    from pypdf import PdfReader, PdfWriter
+    """Replace overlay pages with their original PDF page plus that overlay.
+
+    A page that came in from a PDF and has not been altered goes out as that
+    PDF's own page — its real line work, its text, its everything — with what
+    was painted here laid over the top. A page that is not preserved goes out
+    as what was painted, which is all there is of it.
+    """
+    import pymupdf
+
+    from ..pdf import engine
 
     rendered_pages = [page for page in pages if page.frame is not None]
-    overlay = PdfReader(path)
-    if len(overlay.pages) != len(rendered_pages):
-        raise OSError("The PDF overlay page count did not match the document")
-    output = PdfWriter()
-    readers = []                 # keep source streams alive until writer.write
-    for page, overlay_page in zip(rendered_pages, overlay.pages):
-        if page.uid not in preserved:
-            output.add_page(overlay_page)
-            continue
-        reader = PdfReader(io.BytesIO(document.asset(page.pdf_key)), strict=False)
-        readers.append(reader)
-        index = int(page.pdf_page_index)
-        if not 0 <= index < len(reader.pages):
-            raise OSError("An imported PDF page no longer exists in its source")
-        source = reader.pages[index]
-        if source.rotation:
-            source.transfer_rotation_to_content()
-        source.scale_to(float(page.width_pt), float(page.height_pt))
-        source.merge_page(overlay_page, over=True)
-        output.add_page(source)
-    output.add_metadata({"/Title": document.title or "", "/Creator": "MarkForge"})
-    temporary = path + ".vector.tmp"
+    overlay = engine.open_path(path)
+    output = pymupdf.open()
+    sources: dict[str, object] = {}
     try:
-        with open(temporary, "wb") as handle:
-            output.write(handle)
-        os.replace(temporary, path)
+        if overlay.page_count != len(rendered_pages):
+            raise OSError("The PDF overlay page count did not match the document")
+        for offset, page in enumerate(rendered_pages):
+            width, height = float(page.width_pt), float(page.height_pt)
+            sheet = output.new_page(-1, width=width, height=height)
+            if page.uid in preserved:
+                source = _opened(document, page, sources)
+                index = int(page.pdf_page_index)
+                if source is None or not 0 <= index < source.page_count:
+                    raise OSError("An imported PDF page no longer exists "
+                                  "in its source")
+                sheet.show_pdf_page(sheet.rect, source, index)
+            sheet.show_pdf_page(sheet.rect, overlay, offset, overlay=True)
+        output.set_metadata({"title": document.title or "",
+                             "creator": "MarkForge", "producer": "MarkForge"})
+        engine.save_as(output, path)
     finally:
-        if os.path.exists(temporary):
-            os.remove(temporary)
+        for source in sources.values():
+            engine.close(source)
+        engine.close(overlay)
+        engine.close(output)
+
+
+def _opened(document: Document, page, sources: dict):
+    """The PDF a page came from, opened once for the whole export."""
+    from ..pdf import engine
+
+    key = page.pdf_key
+    if not key:
+        return None
+    if key in sources:
+        return sources[key]
+    data = document.asset(key)
+    if not data:
+        return None
+    try:
+        sources[key] = engine.open_bytes(data)
+    except engine.PdfError:
+        return None
+    return sources[key]
 
 
 def export_pdf(document: Document, path: str, pages: Optional[list] = None,
@@ -214,8 +237,9 @@ def export_pdf(document: Document, path: str, pages: Optional[list] = None,
     drawn = [page for page in printed if page.frame is not None]
     if live_markups and not annotate.add_markups(path, document, drawn):
         # Nothing could be written as an annotation — an appearance that would
-        # not draw, a file pypdf will not reopen. The markups are not left out
-        # of the export over it: the sheet is painted again with them on it.
+        # not draw, or a file that could not be reopened. The markups are not
+        # left out of the export over it: the sheet is painted again with
+        # them on it.
         _paint_the_markups_after_all(document, path, printed, resolution, preserved)
     # Qt has no way to write an outline or a link, so both are appended to the
     # finished file. A failure there costs the bookmarks, never the document.

@@ -1011,9 +1011,10 @@ def test_an_inserted_pdf_page_prints(window, tmp_path, monkeypatch):
 
     source = pdfio.PdfSource(out)
     try:
-        image = source.doc.render(1, source.doc.pagePointSize(1).toSize())
+        image = source.render(1, dpi=72.0)
     finally:
         source.close()
+    assert image is not None
     assert _ink(image) > 100
 
 

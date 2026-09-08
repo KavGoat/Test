@@ -10,35 +10,41 @@ wrote it and whatever they said.
 What a PDF has no annotation for, or what this does not recognise, still comes
 across as one markup rather than as debris: its appearance is a drawing, and a
 drawing is what a sketch markup holds.
+
+Everything an annotation says about where it is — its rectangle, a line's two
+ends, a polygon's corners, a call-out's leader — is written in the file's own
+space, measured up from the bottom-left corner of the unrotated page. Every one
+of them is put through the same transform on the way in, so a markup read off a
+page that says it is turned ninety degrees lands where it is actually drawn.
 """
 from __future__ import annotations
 
 import os
+import pymupdf
+
+from ..pdf import engine
 
 # Annotations that are not somebody's markup and should not become one.
-NOT_MARKUP = {"Link", "Popup", "Widget", "FileAttachment", "Movie", "Screen",
-              "PrinterMark", "TrapNet", "Watermark", "3D", "Projection"}
+NOT_MARKUP = set(engine.NOT_MARKUP)
 
 # How many annotations are worth bringing across from one page. A page with
 # more than this on it is not a marked-up drawing, it is a data dump.
 MOST_MARKUPS = 3000
 
 
-def markups_of_page(source, page: dict, flip: tuple,
-                    scale: float = 1.0) -> list[dict]:
-    """Every annotation on one page, as markup payloads in page coordinates."""
+def markups_of_page(source, index: int, scale: float = 1.0) -> list[dict]:
+    """Every annotation on one page, as markup payloads in display points."""
     from .btx import colour
 
+    page = source.page(index)
+    place = engine.to_display(page)
     found: list[dict] = []
-    for entry in source.resolve(page.get("Annots")) or []:
-        annotation = source.resolve(entry)
-        if not isinstance(annotation, dict):
-            continue
-        kind = str(annotation.get("Subtype") or "")
+    for annotation in source.annotations_of(index):
+        kind = str(source.resolve(annotation.get("Subtype")) or "")
         if kind in NOT_MARKUP:
             continue
         try:
-            made = _one(source, annotation, kind, flip, scale, colour)
+            made = _one(source, annotation, kind, place, scale, colour)
         except Exception:                              # noqa: BLE001
             made = None
         if made:
@@ -48,10 +54,10 @@ def markups_of_page(source, page: dict, flip: tuple,
     return found
 
 
-def _one(source, annotation: dict, kind: str, flip: tuple, scale: float,
+def _one(source, annotation: dict, kind: str, place, scale: float,
          colour) -> list[dict]:
     """One annotation, as the markup it is."""
-    box = _box(source, annotation, flip, scale)
+    box = _box(source, annotation, place, scale)
     style = _style(source, annotation, colour, scale)
     common = _common(source, annotation)
 
@@ -63,13 +69,13 @@ def _one(source, annotation: dict, kind: str, flip: tuple, scale: float,
             shape = "cloud"
         return [_shape("rect", shape, inside, style, common)]
     if kind == "FreeText":
-        return [_free_text(source, annotation, box, style, common, flip,
+        return [_free_text(source, annotation, box, style, common, place,
                            scale, intent)]
     if kind == "Line":
         ends = _numbers(source, annotation.get("L"))
         if len(ends) >= 4:
-            points = [_at(flip, ends[0], ends[1], scale),
-                      _at(flip, ends[2], ends[3], scale)]
+            points = [_at(place, ends[0], ends[1], scale),
+                      _at(place, ends[2], ends[3], scale)]
             _line_endings(source, annotation, style)
             if intent == "LineDimension":
                 return [_dimension(source, annotation, points, style, common,
@@ -81,7 +87,7 @@ def _one(source, annotation: dict, kind: str, flip: tuple, scale: float,
             return [_line("line", points, style, common)]
     if kind in ("PolyLine", "Polygon"):
         corners = _numbers(source, annotation.get("Vertices"))
-        points = [_at(flip, corners[i], corners[i + 1], scale)
+        points = [_at(place, corners[i], corners[i + 1], scale)
                   for i in range(0, len(corners) - 1, 2)]
         if len(points) >= 2:
             _line_endings(source, annotation, style)
@@ -92,28 +98,26 @@ def _one(source, annotation: dict, kind: str, flip: tuple, scale: float,
             return [_line("polyline" if kind == "PolyLine" else "polygon",
                           points, style, common)]
     if kind == "Ink":
-        return _ink(source, annotation, flip, scale, style, common)
+        return _ink(source, annotation, place, scale, style, common)
     if kind in ("Highlight", "StrikeOut", "Underline", "Squiggly"):
         style = dict(style)
         style["fill"] = style.get("stroke") or "#ffe066"
         style["stroke"] = ""
         style["fill_opacity"] = 0.5
         return [_shape("rect", "highlight", box, style, common)]
-    if kind == "FreeText":
-        return [_text("text", box, style, common)]
     if kind == "Text":
         return [_text("note", box, style, common)]
-    drawn = _appearance(source, annotation, flip, scale)
+    drawn = _appearance(source, annotation, scale)
     if drawn:
         return drawn
     return []
 
 
 # -- the pieces ------------------------------------------------------------
-def _at(flip: tuple, x, y, scale: float) -> list[float]:
-    a, b, c, d, e, f = flip
-    x, y = float(x), float(y)
-    return [(a * x + c * y + e) * scale, (b * x + d * y + f) * scale]
+def _at(place, x, y, scale: float) -> list[float]:
+    """One point of the file's own space, as a display point."""
+    point = pymupdf.Point(float(x), float(y)) * place
+    return [point.x * scale, point.y * scale]
 
 
 def _numbers(source, value) -> list[float]:
@@ -123,18 +127,18 @@ def _numbers(source, value) -> list[float]:
     out = []
     for item in values:
         found = source.resolve(item)
-        if isinstance(found, (int, float)):
+        if isinstance(found, (int, float)) and not isinstance(found, bool):
             out.append(float(found))
     return out
 
 
-def _box(source, annotation: dict, flip: tuple, scale: float) -> list[float]:
-    """The annotation's rectangle, in page coordinates: [x, y, w, h]."""
+def _box(source, annotation: dict, place, scale: float) -> list[float]:
+    """The annotation's rectangle, in display points: [x, y, w, h]."""
     rect = _numbers(source, annotation.get("Rect"))
     if len(rect) != 4:
         return [0.0, 0.0, 1.0, 1.0]
-    one = _at(flip, rect[0], rect[1], scale)
-    two = _at(flip, rect[2], rect[3], scale)
+    one = _at(place, rect[0], rect[1], scale)
+    two = _at(place, rect[2], rect[3], scale)
     left, right = min(one[0], two[0]), max(one[0], two[0])
     top, bottom = min(one[1], two[1]), max(one[1], two[1])
     return [left, top, max(right - left, 0.5), max(bottom - top, 0.5)]
@@ -241,7 +245,8 @@ def _text(kind: str, box: list, style: dict, common: dict) -> dict:
 def _is_cloudy(source, annotation: dict) -> bool:
     """A cloudy border effect: what a PDF calls a revision cloud."""
     effect = source.resolve(annotation.get("BE"))
-    return isinstance(effect, dict) and str(effect.get("S") or "") == "C"
+    return isinstance(effect, dict) and \
+        str(source.resolve(effect.get("S")) or "") == "C"
 
 
 # The PDF's ten line endings, and the arrow head each is drawn with here.
@@ -307,10 +312,10 @@ def _take_off(points: list, style: dict, common: dict, intent: str) -> dict:
 
 
 def _free_text(source, annotation: dict, box: list, style: dict, common: dict,
-               flip: tuple, scale: float, intent: str) -> dict:
+               place, scale: float, intent: str) -> dict:
     """Words on the page — plain, typed straight on, or on a call-out."""
     corners = _numbers(source, annotation.get("CL"))
-    leader = [_at(flip, corners[i], corners[i + 1], scale)
+    leader = [_at(place, corners[i], corners[i + 1], scale)
               for i in range(0, len(corners) - 1, 2)]
     kind = "text"
     if intent == "FreeTextTypeWriter":
@@ -326,7 +331,7 @@ def _free_text(source, annotation: dict, box: list, style: dict, common: dict,
     return payload
 
 
-def _ink(source, annotation: dict, flip: tuple, scale: float,
+def _ink(source, annotation: dict, place, scale: float,
          style: dict, common: dict) -> list[dict]:
     lists = source.resolve(annotation.get("InkList"))
     if not isinstance(lists, (list, tuple)):
@@ -334,18 +339,18 @@ def _ink(source, annotation: dict, flip: tuple, scale: float,
     made = []
     for run in lists:
         numbers = _numbers(source, run)
-        points = [_at(flip, numbers[i], numbers[i + 1], scale)
+        points = [_at(place, numbers[i], numbers[i + 1], scale)
                   for i in range(0, len(numbers) - 1, 2)]
         if len(points) >= 2:
             made.append(_line("ink", points, dict(style), dict(common)))
     return made
 
 
-def _appearance(source, annotation: dict, flip: tuple, scale: float) -> list[dict]:
+def _appearance(source, annotation: dict, scale: float) -> list[dict]:
     """Whatever it draws, as one drawing that can be picked up and moved."""
     from . import pdfvector
 
-    strokes = pdfvector.strokes_of_annotation(source, annotation, flip)
+    strokes = pdfvector.strokes_of_annotation(source, annotation)
     if not strokes:
         return []
     if scale != 1.0:

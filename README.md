@@ -36,7 +36,7 @@ python main.py                    # or: python main.py drawing.pdf
 ```
 
 Python 3.10 or newer. Everything else comes from `requirements.txt`
-(PySide6, Pint, pypdf) — no system libraries beyond a normal desktop.
+(PySide6, Pint, PyMuPDF) — no system libraries beyond a normal desktop.
 
 Install it as a command instead, if you prefer:
 
@@ -341,8 +341,8 @@ The mouse and canvas gestures are on the second tab of the same window.
 
 ```
 markforge/
-  pdf/         the PDF engine: objects, lexer, filters, storage, reader,
-               writer with incremental update, annotation model
+  pdf/         the PDF layer: what a PDF is made of, and MuPDF — opening,
+               drawing, reading objects, writing annotations, saving
   core/        document and page model, units and formatting, typography,
                spelling
   items/       everything that can sit on a page: shapes, text, stamps,
@@ -358,15 +358,36 @@ tests/         the suite: the engine, the items, the window, and real use
 
 Three pieces are worth knowing about if you go digging:
 
-**`pdf/`** is a PDF reader and writer written from the specification rather
-than wrapped round somebody else's. It reads classic cross-reference tables and
-cross-reference streams, object streams, Flate/LZW/ASCIIHex/ASCII85/RunLength
-with PNG and TIFF predictors, and it will recover a file whose cross-reference
-table is wrong by scanning for the objects. It writes incrementally: the
-original bytes, then only what changed. `io/pdfsave.py` is what uses it to
-save — it decides whether this document is an addition to one file, and when
-it is, appends the annotations, the pages that now point at them and the
-record. That is what makes "save" a promise rather than a re-export.
+**`pdf/`** is where every PDF file operation happens, and it is MuPDF.
+`pdf/engine.py` opens files, measures and draws pages, reads their objects and
+their line work, writes annotations, attachments, bookmarks and links, and
+saves — either whole or as an incremental update that leaves every original
+byte where it was. Nothing in it imports Qt, which is the same split PDF4QT
+keeps between its rendering library and its applications: above that line a
+page is a rectangle of points with markups on it, below it a page is objects
+and streams. `pdf/objects.py` is the small part that is MarkForge's own — the
+vocabulary a markup's annotation is described in, so that description is
+written once and does not belong to whichever library writes it out.
+
+MarkForge used to carry its own reader and writer — a lexer, the stream
+filters, a cross-reference reader that could fall back to scanning. It was
+correct on the files it had been shown and it was never going to be correct on
+the ones it had not: a drawing set is full of files written by CAD packages
+that treat the specification as a suggestion. MuPDF has had thirty years of
+those fixes, and getting them for free is worth more than owning the code.
+
+`io/pdfsave.py` is what saving goes through. It decides whether this document
+is an addition to one file, and when it is, appends the annotations, the pages
+that now point at them and the record — leaving the drawing that came in byte
+for byte as its author wrote it, so a signature over it still verifies. That is
+what makes "save" a promise rather than a re-export.
+
+**Coordinates.** Everything above `pdf/` works in *display points*: points with
+the page's own `/Rotate` already applied, origin top-left, y down — the page as
+it is drawn. A PDF annotation is written in the file's own space, measured up
+from the bottom-left of the *unrotated* sheet. On a page that is not turned
+those differ by a flip; on one that is, by a rotation as well. `engine.to_pdf`
+and `engine.to_display` are the only two places that conversion happens.
 
 **`io/annotate.py`** is the other half of that promise: the mapping from a
 markup on the canvas to the annotation dictionary that means the same thing —
@@ -391,7 +412,7 @@ the PDF that comes out at the end.
 
 | File | What it promises |
 |---|---|
-| `test_pdf_engine.py` | The PDF engine, against real files: syntax, filters, damaged cross-references, incremental update, annotations |
+| `test_pdf_engine.py` | The PDF layer: opening, page geometry under rotation, drawing, object round trips, incremental update, attachments, line work |
 | `test_format.py` | What a saved document is — a PDF, the source page untouched, markups as annotations |
 | `test_btx.py` | Bluebeam tool sets, read from the real `.btx` files in `btx/` |
 | `test_items.py` | Serialisation, geometry and layout of every markup type |

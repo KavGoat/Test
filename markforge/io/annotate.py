@@ -16,17 +16,17 @@ import os
 import tempfile
 from typing import Optional
 
-from ..pdf.objects import Name
+from ..pdf import engine
+from ..pdf.objects import Name, Ref
 
 # What each kind of markup becomes. A shape that a PDF has a real annotation
 # for gets that one, so a reader can edit it natively; everything else goes as
 # a stamp, which every reader can select, move and delete.
 #
 # Everything here is built as the plain dictionaries and names of
-# :mod:`markforge.pdf`, not as any library's object types. That is what lets
-# the same annotation be appended to a file MarkForge is updating in place and
-# handed to pypdf when a document is being assembled from several sources —
-# one description of what a markup is, written once.
+# :mod:`markforge.pdf.objects`, and :func:`markforge.pdf.engine.serialize`
+# writes them. One description of what a markup is, written once, whether the
+# file is being added to in place or assembled from several sources.
 STAMP = "Stamp"
 
 # The appearance is drawn at this resolution and scaled back to points, which
@@ -190,13 +190,8 @@ class Appearances:
         self.path = None
 
 
-def add_markups(path: str, document, printed: list) -> int:
-    """Write every markup on *printed* into the PDF at *path* as an annotation.
-
-    Returns how many were written. The file is left exactly as it was if
-    anything goes wrong, because an export that lost its markups would be
-    worse than one whose markups are not yet live.
-    """
+def markups_to_place(document, printed: list) -> Appearances:
+    """Every markup that should go out as an annotation, ready to be drawn."""
     appearances = Appearances()
     for index, page in enumerate(printed):
         frame = page.frame
@@ -211,127 +206,161 @@ def add_markups(path: str, document, printed: list) -> int:
             if rect.width() <= 0 or rect.height() <= 0:
                 continue
             appearances.add(index, item, rect)
+    return appearances
+
+
+def add_markups(path: str, document, printed: list) -> int:
+    """Write every markup on *printed* into the PDF at *path* as an annotation.
+
+    Returns how many were written. The file is left exactly as it was if
+    anything goes wrong, because an export that lost its markups would be
+    worse than one whose markups are not yet live.
+    """
+    appearances = markups_to_place(document, printed)
     if not appearances.entries:
         return 0
     try:
-        drawn = appearances.draw()
-        if drawn is None:
+        if appearances.draw() is None:
             return 0
-        return _write_them(path, printed, appearances)
+        return _write_them(path, appearances)
     except Exception:                                  # noqa: BLE001
         return 0
     finally:
         appearances.discard()
 
 
-def _write_them(path: str, printed: list, appearances: Appearances) -> int:
-    from pypdf import PdfReader, PdfWriter
+def _write_them(path: str, appearances: Appearances) -> int:
+    """Put the drawn appearances into the file at *path* as annotations."""
+    target = scratch = None
+    try:
+        target = engine.open_path(path)
+        scratch = engine.open_path(appearances.path)
+        if scratch.page_count != len(appearances.entries):
+            return 0
+        written = place_markups(target, scratch, appearances,
+                                keep_existing=True)
+        if not written:
+            return 0
+        engine.save_as(target, path)
+        return written
+    finally:
+        engine.close(scratch)
+        engine.close(target)
 
-    source = PdfReader(appearances.path, strict=False)
-    if len(source.pages) != len(appearances.entries):
-        return 0
-    writer = PdfWriter(clone_from=path)
-    if len(writer.pages) < len(printed):
-        return 0
-    written = 0
-    for (index, item, rect), drawn in zip(appearances.entries, source.pages):
-        form = _form_of(drawn, rect)
+
+def place_markups(target, scratch, appearances: Appearances,
+                  keep_existing: bool = False) -> int:
+    """Put each drawn markup into *target* as an annotation with an appearance.
+
+    *scratch* holds one page per markup — what Qt painted. Each becomes a form
+    XObject in *target*, and each annotation points at its own.
+
+    With *keep_existing* the page's annotations are added to, which is what an
+    export wants: the page was painted without its markups and carries only
+    its own links. Without it they are replaced, which is what saving over a
+    drawing wants: what came in on the file was read as markups when it was
+    opened, and those markups are what is being written back, so appending
+    would leave every cloud in the document twice. Either way the file's own
+    furniture — its links and its form fields — stays.
+    """
+    placed: dict[int, list[int]] = {}
+    for order, (index, item, rect) in enumerate(appearances.entries):
+        if not 0 <= index < target.page_count:
+            continue
+        form = engine.form_from_page(target, scratch, order,
+                                     rect.width(), rect.height())
         if form is None:
             continue
-        reference = writer._add_object(form.clone(writer))
-        height = float(printed[index].height_pt)
-        annotation = annotation_for(item, rect, height)
-        holder = as_pypdf(annotation)
-        _put_the_appearance_on(holder, reference)
-        writer.add_annotation(index, holder)
-        written += 1
-    if not written:
-        return 0
-    temporary = path + ".markups.tmp"
-    try:
-        with open(temporary, "wb") as handle:
-            writer.write(handle)
-        os.replace(temporary, path)
-    finally:
-        if os.path.exists(temporary):
-            os.remove(temporary)
+        place = Placement.of_page(target[index])
+        annotation = annotation_for(item, rect, place, Ref(form))
+        placed.setdefault(index, []).append(
+            engine.add_object(target, annotation))
+
+    written = 0
+    for index in range(target.page_count):
+        theirs = placed.get(index, [])
+        already = engine.annotation_xrefs(target, index)
+        kept = already if keep_existing else furniture(target, index)
+        if kept + theirs == already:
+            continue                       # the page already says exactly this
+        engine.set_page_annotations(target, index, kept + theirs)
+        written += len(theirs)
     return written
 
 
-def as_pypdf(value):
-    """One of this module's values, as the object type pypdf writes.
+def furniture(target, index: int) -> list[int]:
+    """A page's own links and form fields — everything that is not markup."""
+    from ..pdf.engine import NOT_MARKUP
 
-    The description of a markup is written once, in the PDF's own vocabulary.
-    This is the translation for the path that hands it to pypdf; the path that
-    appends it to a file MarkForge is updating writes it as it stands.
+    kept = []
+    for number in engine.annotation_xrefs(target, index):
+        holder = engine.object_at(target, number)
+        if isinstance(holder, dict) and \
+                str(holder.get("Subtype") or "") in NOT_MARKUP:
+            kept.append(number)
+    return kept
+
+
+class Placement:
+    """Where a markup's coordinates land in the file's own space.
+
+    A markup is positioned in display points — down the page from its top-left
+    corner, the way it is drawn. A PDF annotation is positioned in the file's
+    own space, up the page from the bottom-left corner of the *unrotated*
+    sheet. On a page that is not turned those differ by a flip, which is what
+    this used to do everywhere and what everything still falls back to. On a
+    page that says it is turned ninety degrees they differ by a rotation as
+    well, and a markup written with only the flip lands on the wrong edge of
+    the paper — which is precisely the sort of thing that only shows up on
+    somebody else's drawing.
     """
-    from pypdf.generic import (ArrayObject, BooleanObject, DictionaryObject,
-                               FloatObject, NameObject, NumberObject,
-                               TextStringObject)
 
-    if isinstance(value, Name):
-        return NameObject("/" + str(value))
-    if isinstance(value, bool):
-        return BooleanObject(value)
-    if isinstance(value, int):
-        return NumberObject(value)
-    if isinstance(value, float):
-        return FloatObject(value)
-    if isinstance(value, str):
-        return TextStringObject(value)
-    if isinstance(value, (list, tuple)):
-        return ArrayObject([as_pypdf(item) for item in value])
-    if isinstance(value, dict):
-        holder = DictionaryObject()
-        for key, item in value.items():
-            holder[NameObject("/" + str(key))] = as_pypdf(item)
-        return holder
-    return value
+    def __init__(self, matrix=None, page_height: float = 0.0):
+        self._matrix = matrix
+        self._height = float(page_height)
 
+    @classmethod
+    def upright(cls, page_height: float) -> "Placement":
+        """A page with no rotation of its own: the flip, and nothing else."""
+        return cls(None, page_height)
 
-def _put_the_appearance_on(holder, reference) -> None:
-    """Point a pypdf annotation at the form it shows itself with."""
-    from pypdf.generic import DictionaryObject, NameObject
+    @classmethod
+    def of_page(cls, page) -> "Placement":
+        """The real transform for a MuPDF page, rotation and all."""
+        try:
+            return cls(engine.to_pdf(page), float(page.rect.height))
+        except Exception:                              # noqa: BLE001
+            return cls(None, 0.0)
 
-    look = DictionaryObject()
-    look[NameObject("/N")] = reference
-    holder[NameObject("/AP")] = look
+    def point(self, x: float, y: float) -> tuple[float, float]:
+        if self._matrix is None:
+            return float(x), self._height - float(y)
+        return engine.pdf_point_with(self._matrix, x, y)
+
+    def rect(self, rect) -> list[float]:
+        """A QRectF in display points, as the annotation's own /Rect."""
+        one = self.point(rect.left(), rect.top())
+        two = self.point(rect.right(), rect.bottom())
+        return [min(one[0], two[0]), min(one[1], two[1]),
+                max(one[0], two[0]), max(one[1], two[1])]
 
 
-def _form_of(drawn, rect):
-    """One drawn markup, as the form a PDF annotation shows itself with."""
-    from pypdf.generic import (ArrayObject, DecodedStreamObject, FloatObject,
-                               NameObject, NumberObject)
-
-    contents = drawn.get_contents()
-    if contents is None:
-        return None
-    form = DecodedStreamObject()
-    form.set_data(contents.get_data())
-    form[NameObject("/Type")] = NameObject("/XObject")
-    form[NameObject("/Subtype")] = NameObject("/Form")
-    form[NameObject("/FormType")] = NumberObject(1)
-    form[NameObject("/BBox")] = ArrayObject([
-        FloatObject(0), FloatObject(0),
-        FloatObject(rect.width()), FloatObject(rect.height())])
-    if "/Resources" in drawn:
-        form[NameObject("/Resources")] = drawn["/Resources"]
-    return form
-
-
-def annotation_for(item, rect, page_height: float, appearance=None) -> dict:
+def annotation_for(item, rect, place, appearance=None) -> dict:
     """The annotation dictionary for one markup.
 
-    A plain dictionary of :mod:`markforge.pdf` values. *appearance* is whatever
-    stands for the form the annotation shows itself with — a reference in a
-    file being updated, a cloned object in one being assembled — and may be
-    left out while the appearance is still being drawn.
+    A plain dictionary of :mod:`markforge.pdf.objects` values. *place* says how
+    display points become the file's own coordinates. *appearance* is the form
+    the annotation shows itself with, and may be left out while the appearance
+    is still being drawn.
     """
+    if not isinstance(place, Placement):
+        # A page height, which is what this took before there were pages that
+        # could be turned. Still the right answer for a page that is not.
+        place = Placement.upright(float(place))
     annotation: dict = {
         "Type": Name("Annot"),
         "Subtype": Name(subtype_for(item)),
-        "Rect": [rect.left(), page_height - rect.bottom(),
-                 rect.right(), page_height - rect.top()],
+        "Rect": place.rect(rect),
         "F": 4,                                         # printed, not hidden
         "NM": item.uid,
     }
@@ -354,13 +383,13 @@ def annotation_for(item, rect, page_height: float, appearance=None) -> dict:
     width = float(getattr(item.style, "width", 0.0) or 0.0)
     if width > 0:
         annotation["BS"] = {"W": width}
-    _add_the_geometry(annotation, item, rect, page_height)
+    _add_the_geometry(annotation, item, rect, place)
     if appearance is not None:
         annotation["AP"] = {"N": appearance}
     return annotation
 
 
-def _add_the_geometry(annotation, item, rect, page_height: float) -> None:
+def _add_the_geometry(annotation, item, rect, place: "Placement") -> None:
     """Say what the markup is, not only where its box is.
 
     An annotation's rectangle has to hold everything it draws, arrow heads and
@@ -389,9 +418,9 @@ def _add_the_geometry(annotation, item, rect, page_height: float) -> None:
             _cloudy(annotation, item)
         return
     if subtype == "FreeText":
-        _free_text(annotation, item, rect, page_height)
+        _free_text(annotation, item, rect, place)
         return
-    points = _points_on_the_page(item, page_height)
+    points = _points_on_the_page(item, place)
     if not points:
         return
     if subtype == "Line":
@@ -399,7 +428,7 @@ def _add_the_geometry(annotation, item, rect, page_height: float) -> None:
                            points[-1][0], points[-1][1]]
         _line_endings(annotation, item)
         if item.TYPE == "measure":
-            _dimension(annotation, item, page_height)
+            _dimension(annotation, item)
         return
     if subtype in ("Polygon", "PolyLine"):
         annotation["Vertices"] = [value for point in points for value in point]
@@ -435,7 +464,7 @@ def _line_endings(annotation, item) -> None:
     annotation["LE"] = [Name(start), Name(end)]
 
 
-def _dimension(annotation, item, page_height: float) -> None:
+def _dimension(annotation, item) -> None:
     """A dimension, said the way a PDF says one.
 
     Every part of it already had a name in the specification. The witness lines
@@ -518,7 +547,7 @@ def _measure_dictionary(annotation, item) -> None:
     }
 
 
-def _free_text(annotation, item, rect, page_height: float) -> None:
+def _free_text(annotation, item, rect, place: "Placement") -> None:
     """Words on the page, and the leader that points at what they are about."""
     if item.TYPE == "typewriter":
         annotation["IT"] = Name("FreeTextTypeWriter")
@@ -535,7 +564,7 @@ def _free_text(annotation, item, rect, page_height: float) -> None:
     if numbers is not None:
         annotation["DA"] = (f"{numbers[0]} {numbers[1]} {numbers[2]} rg "
                             f"/Helv {float(item.style.font_size)} Tf")
-    leader = _callout_line(item, page_height)
+    leader = _callout_line(item, place)
     if leader:
         annotation["IT"] = Name("FreeTextCallout")
         annotation["CL"] = [value for point in leader for value in point]
@@ -567,7 +596,7 @@ def _justification(item) -> int:
     return 0
 
 
-def _callout_line(item, page_height: float) -> list:
+def _callout_line(item, place: "Placement") -> list:
     """A call-out's leader: where it points, its knee, and where the words are.
 
     Three points when the leader has a hinge, which is what a call-out's leader
@@ -584,10 +613,10 @@ def _callout_line(item, page_height: float) -> list:
                   item.mapToParent(item.side_point_of(leader))]
     except Exception:                                  # noqa: BLE001
         return []
-    return [(point.x(), page_height - point.y()) for point in points]
+    return [place.point(point.x(), point.y()) for point in points]
 
 
-def _points_on_the_page(item, page_height: float) -> list:
+def _points_on_the_page(item, place: "Placement") -> list:
     """A line's corners where the PDF keeps them: up from the bottom."""
     corners = getattr(item, "points", None)
     if not corners:
@@ -595,7 +624,7 @@ def _points_on_the_page(item, page_height: float) -> list:
     placed = []
     for corner in corners:
         on_page = item.mapToParent(corner)
-        placed.append((on_page.x(), page_height - on_page.y()))
+        placed.append(place.point(on_page.x(), on_page.y()))
     return placed
 
 
