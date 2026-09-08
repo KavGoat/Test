@@ -216,13 +216,6 @@ def pdf_point_with(matrix: "pymupdf.Matrix", x: float,
     return float(point.x), float(point.y)
 
 
-def pdf_rect(page: "pymupdf.Page",
-             rect: tuple[float, float, float, float]) -> tuple[float, ...]:
-    """A rectangle in display points, as the file's own /Rect."""
-    box = (pymupdf.Rect(*rect).normalize() * to_pdf(page)).normalize()
-    return float(box.x0), float(box.y0), float(box.x1), float(box.y1)
-
-
 # ---------------------------------------------------------------------------
 # drawing pages
 # ---------------------------------------------------------------------------

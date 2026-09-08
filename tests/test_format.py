@@ -344,6 +344,35 @@ def _a_turned_pdf(path: str, rotation: int = 90) -> None:
     document.close()
 
 
+def test_a_damaged_drawing_opens_and_says_that_it_was_repaired(window, tmp_path):
+    """A drawing set is full of files that are not quite right.
+
+    They have to open — a damaged drawing that opens is worth more than a
+    correct refusal — and it is still worth saying so once, because saving a
+    repaired file writes it whole rather than adding to the bytes that came in.
+    """
+    from markforge.io import pdfio
+
+    broken = str(tmp_path / "broken.pdf")
+    with open(broken, "wb") as handle:
+        handle.write(
+            b"%PDF-1.4\n"
+            b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
+            b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"
+            b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] >>\n"
+            b"endobj\n"
+            b"startxref\n999999\n%%EOF\n")       # an offset that goes nowhere
+
+    window.open_path(broken)
+    assert len(window.document.pages) == 1, "it opens"
+    assert "repaired" in window.status_hint.text(), "and it says so"
+
+    sound = str(tmp_path / "sound.pdf")
+    _a_pdf_with_line_work(sound)
+    assert pdfio.trouble_with(sound) == "", \
+        "a file that is not damaged has nothing to report"
+
+
 def test_a_turned_page_comes_in_as_the_sheet_it_is_drawn_as(window, tmp_path,
                                                             monkeypatch):
     """A page that says it is turned measures, and reads, the way it looks.

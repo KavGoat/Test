@@ -543,6 +543,30 @@ def page_count(path: str) -> int:
         source.close()
 
 
+def trouble_with(path: str) -> str:
+    """What opening this PDF turned up, in a sentence, or nothing.
+
+    A drawing set is full of files that are not quite right — a cross-reference
+    table that points at the wrong offsets, a page tree that loops, a stream
+    whose length is a lie. MuPDF repairs them and opens them, which is what
+    makes the drawing readable at all, and it is still worth saying so once:
+    a repaired file has no original bytes left to append to, so saving it
+    writes the whole file again rather than adding to it.
+    """
+    try:
+        source = PdfSource(path)
+    except OSError:
+        return ""
+    try:
+        if not source.repaired:
+            return ""
+        return (f"{os.path.basename(path)} had to be repaired to be read. "
+                "It opens, but saving will rewrite the whole file rather "
+                "than adding to it.")
+    finally:
+        source.close()
+
+
 def parse_page_range(text: str, maximum: int) -> list[int]:
     """Turn ``1-3,7`` into zero-based page indices."""
     text = (text or "").strip()

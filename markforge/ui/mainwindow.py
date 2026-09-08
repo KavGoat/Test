@@ -1308,6 +1308,12 @@ class MainWindow(QMainWindow):
         document.path = path
         document.modified = True
         self.document = document
+        # A file that had to be repaired to be read still opens, and is still
+        # worth a word: what comes out of a save is a whole new file rather
+        # than the original with the markups added to it.
+        note = pdfio.trouble_with(path)
+        if note:
+            self.status_hint.setText(note)
 
     def save_document(self) -> bool:
         # A line still being typed is part of the document being saved, so it
