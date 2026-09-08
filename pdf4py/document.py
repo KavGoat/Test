@@ -10,9 +10,12 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Iterator, Optional
+from typing import Callable, Iterator, Optional
 
 import pymupdf
+
+from . import geometry
+from .history import History, Step
 
 # MuPDF writes its own diagnostics straight to stderr. A file with a damaged
 # xref produces thousands of "cannot find object in xref" lines, which floods
@@ -46,6 +49,9 @@ A4_POINTS = (595.0, 842.0)
 
 # A markup smaller than this is a mis-drag, not a resize.
 MIN_MARKUP_SIZE = 3.0
+
+# Room left round a callout's leader line inside the annotation's rectangle.
+CALLOUT_PADDING = 2.0
 
 # The colour new rectangles are drawn in — the usual markup red.
 RECTANGLE_COLOUR = (0.85, 0.16, 0.16)
@@ -108,8 +114,8 @@ class DocumentError(RuntimeError):
 class PdfDocument:
     """A PDF opened for editing.
 
-    The file is read into memory and the file handle closed, so the document can
-    always be saved back over the file it came from.
+    Opened from its file rather than into memory, so a save can append the
+    change instead of rewriting the whole document.
     """
 
     def __init__(self) -> None:
@@ -118,6 +124,7 @@ class PdfDocument:
         self.modified = False
         self.repaired = False
         self.warnings = ""
+        self.history = History()
 
     # ------------------------------------------------------------------ state
 
@@ -161,6 +168,7 @@ class PdfDocument:
         self._doc = doc
         self.path = path
         self.modified = False
+        self.history.clear()
         self.warnings = _drain_messages()
         self.repaired = bool(getattr(doc, "is_repaired", False))
 
@@ -225,6 +233,7 @@ class PdfDocument:
         self._doc = pymupdf.open(target)
         self.repaired = False
         self.modified = False
+        self.history.clear()        # the xrefs those steps name are gone
         return True
 
     @staticmethod
@@ -241,6 +250,7 @@ class PdfDocument:
         self.modified = False
         self.repaired = False
         self.warnings = ""
+        self.history.clear()
 
     # --------------------------------------------------------------- rendering
 
@@ -383,35 +393,34 @@ class PdfDocument:
         """Tie markups together so they move as one. The first one leads."""
         if len(xrefs) < 2:
             return False
-        # Anything already grouped joins under this group's leader instead of
-        # keeping a leader that is about to become a member itself.
         leader, *rest = xrefs
-        try:
+
+        def change() -> bool:
+            # Anything already grouped joins under this group's leader instead
+            # of keeping one that is about to become a member itself.
             self._doc.xref_set_key(leader, "IRT", "null")
             self._doc.xref_set_key(leader, "RT", "null")
             for xref in rest:
                 self._doc.xref_set_key(xref, "IRT", "%d 0 R" % leader)
                 self._doc.xref_set_key(xref, "RT", "/Group")
-        except Exception:  # noqa: BLE001
-            _drain_messages()
-            return False
-        self.modified = True
-        return True
+            return True
+
+        return self._edit(f"Group {len(xrefs)} markups", xrefs, change)
 
     def ungroup(self, index: int, xref: int) -> int:
         """Break the group this markup is in. Returns how many were freed."""
         members = self.group_members(index, xref)
         if len(members) < 2:
             return 0
-        try:
+
+        def change() -> bool:
             for member in members:
                 self._doc.xref_set_key(member, "IRT", "null")
                 self._doc.xref_set_key(member, "RT", "null")
-        except Exception:  # noqa: BLE001
-            _drain_messages()
-            return 0
-        self.modified = True
-        return len(members)
+            return True
+
+        return len(members) if self._edit(f"Ungroup {len(members)} markups",
+                                          members, change) else 0
 
     # ---------------------------------------------------------------- callouts
 
@@ -435,26 +444,82 @@ class PdfDocument:
 
     def set_callout(self, index: int, xref: int,
                     points: list[tuple[float, float]]) -> bool:
-        """Reshape a callout's leader line, given its points in display points."""
+        """Reshape a callout's leader line, given its points in display points.
+
+        The rectangle has to hold the leader as well as the words, and the
+        ``/RD`` insets say where the words sit inside it. Move the leader
+        without moving that pair together and the text box collapses — which
+        is a callout that has disappeared.
+        """
         if len(points) not in (2, 3):
             return False
         try:
             page = self._doc[index]  # the page must outlive the annotation
-            annot = self._find(page, xref)
-            if annot is None:
+            if self._find(page, xref) is None:
                 return False
             to_pdf = self._to_pdf(page)
-            moved = [pymupdf.Point(x, y) * to_pdf for x, y in points]
-            self._doc.xref_set_key(xref, "CL", "[%s]" % " ".join(
-                "%g %g" % (point.x, point.y) for point in moved))
-            # The rectangle has to hold the line as well as the words, and
-            # update() redraws the leader from the numbers just written.
-            annot.update()
+            leader = [pymupdf.Point(x, y) * to_pdf for x, y in points]
+            inner = self._text_box_of(xref)
+            if inner is None:
+                return False
         except Exception:  # noqa: BLE001
             _drain_messages()
             return False
-        self.modified = True
-        return True
+
+        def change() -> bool:
+            box = pymupdf.Rect(inner)
+            for point in leader:
+                box |= pymupdf.Rect(point.x, point.y, point.x, point.y)
+            box = pymupdf.Rect(box.x0 - CALLOUT_PADDING, box.y0 - CALLOUT_PADDING,
+                               box.x1 + CALLOUT_PADDING, box.y1 + CALLOUT_PADDING)
+            self._doc.xref_set_key(xref, "CL", "[%s]" % " ".join(
+                "%g %g" % (point.x, point.y) for point in leader))
+            self._set_callout_box(xref, box, inner)
+            if not self._regenerate(index, xref):
+                return False
+            # Redrawing settles the rectangle on what it actually needs, which
+            # leaves the insets describing the old one — and an inset measured
+            # from the wrong rectangle is a text box that has slid, or closed
+            # up altogether. Say where the words go once more, against the
+            # rectangle that is now there.
+            settled = geometry.rect_of(self._doc, xref)
+            if settled is not None and not self._same_box(settled, box):
+                self._set_callout_box(xref, settled, inner)
+                return self._regenerate(index, xref)
+            return True
+
+        return self._edit("Reshape callout", [xref], change)
+
+    def _set_callout_box(self, xref: int, box: "pymupdf.Rect",
+                         inner: "pymupdf.Rect") -> None:
+        """Set the rectangle and the insets that put the words inside it.
+
+        ``/RD`` is measured inwards from ``/Rect``: left, top, right, bottom.
+        """
+        self._doc.xref_set_key(xref, "Rect", "[%g %g %g %g]" % tuple(box))
+        self._doc.xref_set_key(xref, "RD", "[%g %g %g %g]" % (
+            max(inner.x0 - box.x0, 0.0), max(box.y1 - inner.y1, 0.0),
+            max(box.x1 - inner.x1, 0.0), max(inner.y0 - box.y0, 0.0)))
+
+    @staticmethod
+    def _same_box(one: "pymupdf.Rect", other: "pymupdf.Rect") -> bool:
+        return all(abs(a - b) < 0.05 for a, b in zip(tuple(one), tuple(other)))
+
+    def _text_box_of(self, xref: int) -> Optional["pymupdf.Rect"]:
+        """Where a free text's words sit: its ``/Rect`` less its ``/RD``."""
+        box = geometry.rect_of(self._doc, xref)
+        if box is None:
+            return None
+        try:
+            kind, raw = self._doc.xref_get_key(xref, "RD")
+            if kind != "array":
+                return box
+            left, top, right, bottom = (float(v) for v in raw.strip("[]").split())
+        except Exception:  # noqa: BLE001
+            return box
+        inner = pymupdf.Rect(box.x0 + left, box.y0 + bottom,
+                             box.x1 - right, box.y1 - top)
+        return inner if inner.width > 1 and inner.height > 1 else box
 
     # -------------------------------------------------------------------- text
 
@@ -465,17 +530,56 @@ class PdfDocument:
             annot = self._find(page, xref)
             if annot is None or annot.type[0] not in TEXT_SUBTYPES:
                 return False
-            info = annot.info
-            info["content"] = text
-            annot.set_info(info)
-            annot.update()
         except Exception:  # noqa: BLE001
             _drain_messages()
             return False
-        self.modified = True
-        return True
 
-    # ------------------------------------------------------------------ resize
+        def change() -> bool:
+            here = self._doc[index]
+            one = self._find(here, xref)
+            if one is None:
+                return False
+            info = one.info
+            info["content"] = text
+            one.set_info(info)
+            return self._regenerate(index, xref)
+
+        return self._edit("Edit text", [xref], change)
+
+    # ------------------------------------------------------------ moving pieces
+
+    def move_markup(self, index: int, xref: int, dx: float, dy: float) -> bool:
+        """Shift a markup by ``dx``/``dy`` display points."""
+        return self.move_markups(index, {xref: (dx, dy)})
+
+    def move_markups(self, index: int, shifts: dict[int, tuple[float, float]]) -> bool:
+        """Move markups, all of it — geometry as well as the box round it.
+
+        Moving only the ``/Rect`` moves what this program draws, because it
+        paints the appearance stream, and moves nothing at all in Bluebeam,
+        which redraws a cloud from its ``/Vertices``.
+        """
+        if not shifts:
+            return False
+        try:
+            page = self._doc[index]  # the page must outlive the annotations
+            to_pdf = self._to_pdf(page)
+        except Exception:  # noqa: BLE001
+            _drain_messages()
+            return False
+
+        def change() -> bool:
+            done = False
+            for xref, (dx, dy) in shifts.items():
+                # A direction, not a position: only the linear part applies.
+                pdf_dx = dx * to_pdf.a + dy * to_pdf.c
+                pdf_dy = dx * to_pdf.b + dy * to_pdf.d
+                done |= geometry.transform(self._doc, xref,
+                                           geometry.move_matrix(pdf_dx, pdf_dy))
+            return done
+
+        label = "Move markup" if len(shifts) == 1 else f"Move {len(shifts)} markups"
+        return self._edit(label, list(shifts), change)
 
     def resize_markup(self, index: int, xref: int,
                       rect: tuple[float, float, float, float]) -> bool:
@@ -488,76 +592,72 @@ class PdfDocument:
             target = pymupdf.Rect(*rect).normalize() * page.derotation_matrix
             if target.width < MIN_MARKUP_SIZE or target.height < MIN_MARKUP_SIZE:
                 return False
-            annot.set_rect(target)
-            # set_rect pads the rectangle by the border width, so ask again for
-            # the difference it introduced rather than letting it accumulate.
-            drift = annot.rect - target
-            if max(abs(value) for value in drift) > 0.01:
-                annot.set_rect(target - drift)
-        except Exception:  # noqa: BLE001 - a markup that will not be resized
+            old = geometry.rect_of(self._doc, xref)
+            if old is None or not old.width or not old.height:
+                return False
+            new = pymupdf.Rect(*(target * page.transformation_matrix)).normalize()
+            matrix = geometry.resize_matrix(old, new)
+        except Exception:  # noqa: BLE001
             _drain_messages()
             return False
-        self.modified = True
-        return True
 
-    # ------------------------------------------------------- coordinate frames
-
-    @staticmethod
-    def _to_pdf(page: "pymupdf.Page") -> "pymupdf.Matrix":
-        """Display points -> PDF user space."""
-        return page.derotation_matrix * page.transformation_matrix
-
-    @staticmethod
-    def _to_display(page: "pymupdf.Page") -> "pymupdf.Matrix":
-        """PDF user space -> display points."""
-        return ~pymupdf.Matrix(page.transformation_matrix) * page.rotation_matrix
-
-    def move_markup(self, index: int, xref: int, dx: float, dy: float) -> bool:
-        """Shift an existing annotation by ``dx``/``dy`` display points.
-
-        The annotation's ``/Rect`` is rewritten directly rather than through
-        ``Annot.set_rect``, which re-applies the border padding on every call and
-        so would creep the markup a point further with each drag.
-        """
-        try:
-            page = self._doc[index]  # the page must outlive the annotation
-            if self._find(page, xref) is None:
+        def change() -> bool:
+            if not geometry.transform(self._doc, xref, matrix):
                 return False
-            kind, raw = self._doc.xref_get_key(xref, "Rect")
-            if kind != "array":
-                return False
-            x0, y0, x1, y1 = (float(value) for value in raw.strip("[]").split())
-            # Display points -> unrotated page points -> PDF user space. Only
-            # the linear part applies: this is a direction, not a position.
-            matrix = page.derotation_matrix * page.transformation_matrix
-            pdf_dx = dx * matrix.a + dy * matrix.c
-            pdf_dy = dx * matrix.b + dy * matrix.d
-            self._doc.xref_set_key(xref, "Rect", "[%g %g %g %g]" % (
-                x0 + pdf_dx, y0 + pdf_dy, x1 + pdf_dx, y1 + pdf_dy))
-        except Exception:  # noqa: BLE001 - an annotation that will not move
-            _drain_messages()
-            return False
-        # Dropping the page reference is what makes the edit visible: the next
-        # ``doc[index]`` then re-reads the page and picks up the new rectangle.
-        del page
-        self.modified = True
-        return True
+            # Redrawn from the geometry rather than stretched from the old
+            # picture, which is what other editors do too: a cloud resized by
+            # stretching its appearance comes out with oval bumps.
+            return self._regenerate(index, xref)
+
+        return self._edit("Resize markup", [xref], change)
 
     def add_rectangle(self, index: int, rect: tuple[float, float, float, float]) -> int:
         """Add a rectangle annotation, given its corners in display points."""
-        try:
+        def draw() -> int:
             page = self._doc[index]
             box = pymupdf.Rect(*rect).normalize() * page.derotation_matrix
             annot = page.add_rect_annot(box)
             annot.set_colors(stroke=RECTANGLE_COLOUR)
             annot.set_border(width=RECTANGLE_WIDTH)
             annot.update()
-            xref = annot.xref
+            return annot.xref
+
+        try:
+            xref = draw()
         except Exception as exc:  # noqa: BLE001
             _drain_messages()
             raise DocumentError(f"Could not add the rectangle: {exc}") from exc
-        self.modified = True
+        self._record_addition("Draw rectangle", index, xref, draw)
         return xref
+
+    def delete_markups(self, index: int, xrefs: list[int]) -> int:
+        """Remove markups from the page."""
+        if not xrefs:
+            return 0
+        # Undo puts the whole page back rather than trying to rebuild an
+        # annotation dictionary by hand: a markup is its keys, its appearance
+        # stream and whatever else its author put on it, and the page is the
+        # one thing that certainly holds all of it.
+        before = self._stash_page(index)
+        if before is None or not self._remove_annots(index, xrefs):
+            return 0
+        after = self._stash_page(index)
+        if after is None:
+            return 0
+
+        # Swapping whole pages both ways, because restoring one gives every
+        # markup on it a new xref and there would be nothing left for a redo
+        # to name.
+        def undo() -> None:
+            self._restore_page(index, before)
+
+        def redo() -> None:
+            self._restore_page(index, after)
+
+        self.history.record(Step("Delete markup" if len(xrefs) == 1
+                                 else f"Delete {len(xrefs)} markups", undo, redo))
+        self.modified = True
+        return len(xrefs)
 
     # ------------------------------------------------------------------- pages
 
@@ -575,15 +675,182 @@ class PdfDocument:
             raise DocumentError(f"Could not insert a page: {exc}") from exc
         self.modified = True
 
+        def undo() -> None:
+            self._doc.delete_page(index)
+
+        def redo() -> None:
+            self._doc.new_page(pno=index, width=width, height=height)
+
+        self.history.record(Step("Insert page", undo, redo))
+
     def delete_page(self, index: int) -> None:
         if self._doc.page_count <= 1:
             raise DocumentError("A PDF must keep at least one page.")
+        # The page is set aside in a document of its own so undo can put back
+        # what was on it, markups and all, rather than a blank sheet.
+        kept = pymupdf.open()
         try:
+            kept.insert_pdf(self._doc, from_page=index, to_page=index, annots=True)
             self._doc.delete_page(index)
         except Exception as exc:  # noqa: BLE001
             _drain_messages()
             raise DocumentError(f"Could not delete the page: {exc}") from exc
         self.modified = True
+
+        def undo() -> None:
+            self._doc.insert_pdf(kept, start_at=index, annots=True)
+
+        def redo() -> None:
+            self._doc.delete_page(index)
+
+        self.history.record(Step("Delete page", undo, redo))
+
+    # ------------------------------------------------------------ undo and redo
+
+    @property
+    def can_undo(self) -> bool:
+        return self.history.can_undo
+
+    @property
+    def can_redo(self) -> bool:
+        return self.history.can_redo
+
+    def undo(self) -> Optional[str]:
+        label = self.history.undo()
+        if label is not None:
+            self.modified = True
+        return label
+
+    def redo(self) -> Optional[str]:
+        label = self.history.redo()
+        if label is not None:
+            self.modified = True
+        return label
+
+    # ---------------------------------------------------------------- internals
+
+    def _edit(self, label: str, xrefs: list[int],
+              change: "Callable[[], bool]") -> bool:
+        """Run an edit, remembering enough of the markups to take it back."""
+        before = {xref: geometry.snapshot(self._doc, xref) for xref in xrefs}
+        try:
+            done = change()
+        except Exception:  # noqa: BLE001
+            _drain_messages()
+            done = False
+        if not done:
+            for xref, kept in before.items():
+                geometry.restore(self._doc, xref, kept)
+            return False
+        after = {xref: geometry.snapshot(self._doc, xref) for xref in xrefs}
+
+        def undo() -> None:
+            for xref, kept in before.items():
+                geometry.restore(self._doc, xref, kept)
+
+        def redo() -> None:
+            for xref, kept in after.items():
+                geometry.restore(self._doc, xref, kept)
+
+        self.history.record(Step(label, undo, redo))
+        self.modified = True
+        return True
+
+    def _record_addition(self, label: str, index: int, xref: int,
+                         draw: "Callable[[], int]") -> None:
+        """Remember a markup that was just drawn.
+
+        Redo draws it again rather than resurrecting the old object, so what
+        comes back is a markup this program made from scratch — and the xref it
+        gets is the one undo will take away next time.
+        """
+        made = {"xref": xref}
+        self.modified = True
+
+        def undo() -> None:
+            self._remove_annots(index, [made["xref"]])
+
+        def redo() -> None:
+            try:
+                made["xref"] = draw()
+            except Exception:  # noqa: BLE001
+                _drain_messages()
+
+        self.history.record(Step(label, undo, redo))
+
+    def _stash_page(self, index: int) -> "Optional[pymupdf.Document]":
+        """A copy of one page, held aside so undo can put it back."""
+        try:
+            kept = pymupdf.open()
+            kept.insert_pdf(self._doc, from_page=index, to_page=index, annots=True)
+            return kept
+        except Exception:  # noqa: BLE001
+            _drain_messages()
+            return None
+
+    def _restore_page(self, index: int, kept: "pymupdf.Document") -> None:
+        # Put the copy in first: a PDF cannot be left with no pages at all.
+        try:
+            self._doc.insert_pdf(kept, start_at=index, annots=True)
+            self._doc.delete_page(index + 1)
+        except Exception:  # noqa: BLE001
+            _drain_messages()
+
+    def _remove_annots(self, index: int, xrefs: list[int]) -> bool:
+        try:
+            page = self._doc[index]
+            wanted = set(xrefs)
+            for annot in list(self._annots(page)):
+                if annot.xref in wanted:
+                    page.delete_annot(annot)
+            return True
+        except Exception:  # noqa: BLE001
+            _drain_messages()
+            return False
+
+    def _regenerate(self, index: int, xref: int) -> bool:
+        """Redraw a markup from its own numbers, and refuse to lose it.
+
+        MuPDF builds a fresh appearance stream from the annotation's geometry.
+        For a markup another program drew that replaces its artwork with
+        MuPDF's, which is the price of editing it — but if what comes back is
+        blank, the markup has effectively been deleted, and the edit is not
+        worth having.
+        """
+        try:
+            page = self._doc[index]  # the page must outlive the annotation
+            annot = self._find(page, xref)
+            if annot is None:
+                return False
+            annot.update()
+            return self._draws_something(annot)
+        except Exception:  # noqa: BLE001
+            _drain_messages()
+            return False
+
+    @staticmethod
+    def _draws_something(annot: "pymupdf.Annot") -> bool:
+        try:
+            pixmap = annot.get_pixmap(alpha=True)
+        except Exception:  # noqa: BLE001
+            _drain_messages()
+            return False
+        if not pixmap.width or not pixmap.height:
+            return False
+        samples, channels = pixmap.samples, pixmap.n
+        return any(samples[i] for i in range(channels - 1, len(samples), channels))
+
+    # ------------------------------------------------------- coordinate frames
+
+    @staticmethod
+    def _to_pdf(page: "pymupdf.Page") -> "pymupdf.Matrix":
+        """Display points -> PDF user space."""
+        return page.derotation_matrix * page.transformation_matrix
+
+    @staticmethod
+    def _to_display(page: "pymupdf.Page") -> "pymupdf.Matrix":
+        """PDF user space -> display points."""
+        return ~pymupdf.Matrix(page.transformation_matrix) * page.rotation_matrix
 
     # ------------------------------------------------------------------ helpers
 

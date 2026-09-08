@@ -248,6 +248,164 @@ def test_moving_a_markup_that_is_gone(document):
     assert not document.move_markup(0, 9999, 5.0, 5.0)
 
 
+# ------------------------------------------------- the numbers in the file
+
+
+def build_shapes(path) -> str:
+    """One of every markup whose shape lives somewhere other than its /Rect."""
+    doc = pymupdf.open()
+    doc.new_page(width=600, height=800)
+    doc.save(str(path))
+    doc.close()
+    doc = pymupdf.open(str(path))
+    page = doc[0]
+    cloud = page.add_polygon_annot([(100, 100), (260, 100), (260, 200), (100, 200)])
+    cloud.set_border(width=2)
+    cloud.update()
+    doc.xref_set_key(cloud.xref, "BE", "<</S/C/I 2>>")     # a revision cloud
+    page.add_line_annot((100, 300), (300, 380)).update()
+    page.add_ink_annot([[(100, 450), (150, 470), (200, 440)]]).update()
+    page.add_highlight_annot(pymupdf.Rect(100, 550, 400, 570)).update()
+    doc.save(str(path), incremental=True, encryption=pymupdf.PDF_ENCRYPT_KEEP)
+    doc.close()
+    return str(path)
+
+
+def geometry_of(path) -> dict:
+    """What each markup would be redrawn from, straight out of the file."""
+    doc = pymupdf.open(str(path))
+    found = {}
+    for annot in doc[0].annots():
+        for key in ("Rect", "Vertices", "L", "InkList", "QuadPoints", "CL"):
+            kind, raw = doc.xref_get_key(annot.xref, key)
+            if kind == "array":
+                found[(annot.type[1], key)] = [
+                    float(v) for v in raw.replace("[", " ").replace("]", " ").split()]
+    doc.close()
+    return found
+
+
+@pytest.mark.parametrize("kind,key", [("Polygon", "Vertices"), ("Line", "L"),
+                                      ("Ink", "InkList"), ("Highlight", "QuadPoints")])
+def test_moving_a_markup_moves_what_it_is_drawn_from(tmp_path, kind, key):
+    """A markup is its geometry, not the box round it.
+
+    Move only the /Rect and this program follows, because it paints the
+    appearance stream — and Bluebeam puts the cloud straight back where it was,
+    because it redraws it from the vertices.
+    """
+    path = build_shapes(tmp_path / "shapes.pdf")
+    before = geometry_of(path)
+    document = PdfDocument()
+    document.open(path)
+    for markup in document.markups(0):
+        document.move_markup(0, markup.xref, 50.0, 30.0)
+    document.save()
+    document.close()
+    after = geometry_of(path)
+
+    # Display down is PDF up, so +30 on the screen is -30 in the file.
+    for index, value in enumerate(before[(kind, key)]):
+        assert after[(kind, key)][index] == pytest.approx(
+            value + (50.0 if index % 2 == 0 else -30.0), abs=0.01)
+    assert after[(kind, "Rect")] != before[(kind, "Rect")]
+
+
+def test_a_cloud_keeps_its_cloudy_border_when_moved(tmp_path):
+    path = build_shapes(tmp_path / "cloud.pdf")
+    document = PdfDocument()
+    document.open(path)
+    cloud = next(m for m in document.markups(0) if m.subtype == "Polygon")
+    document.move_markup(0, cloud.xref, 20.0, 20.0)
+    document.save()
+    document.close()
+    doc = pymupdf.open(str(path))
+    assert doc.xref_get_key(next(doc[0].annots()).xref, "BE")[1] == "<</S/C/I 2>>"
+    doc.close()
+
+
+# ------------------------------------------------------------ undo and redo
+
+
+def test_undo_and_redo_a_move(rich):
+    square = of_kind(rich, "Square")[0]
+    rich.move_markup(0, square.xref, 30.0, -20.0)
+    moved = of_kind(rich, "Square")[0].rect
+    assert rich.can_undo and not rich.can_redo
+    assert rich.undo() == "Move markup"
+    assert of_kind(rich, "Square")[0].rect == square.rect
+    assert rich.can_redo
+    assert rich.redo() == "Move markup"
+    assert of_kind(rich, "Square")[0].rect == moved
+
+
+def test_undo_restores_the_geometry_not_just_the_rectangle(tmp_path):
+    path = build_shapes(tmp_path / "shapes.pdf")
+    before = geometry_of(path)
+    document = PdfDocument()
+    document.open(path)
+    cloud = next(m for m in document.markups(0) if m.subtype == "Polygon")
+    document.move_markup(0, cloud.xref, 40.0, 40.0)
+    document.undo()
+    document.save()
+    document.close()
+    assert geometry_of(path)[("Polygon", "Vertices")] == pytest.approx(
+        before[("Polygon", "Vertices")])
+
+
+def test_undo_and_redo_a_drawn_rectangle(document):
+    before = len(document.markups(0))
+    document.add_rectangle(0, (10, 10, 60, 60))
+    assert len(document.markups(0)) == before + 1
+    assert document.undo() == "Draw rectangle"
+    assert len(document.markups(0)) == before
+    assert document.redo() == "Draw rectangle"
+    assert len(document.markups(0)) == before + 1
+
+
+def test_undo_and_redo_a_deleted_markup(document):
+    before = len(document.markups(0))
+    xref = document.markups(0)[0].xref
+    assert document.delete_markups(0, [xref]) == 1
+    assert len(document.markups(0)) == before - 1
+    for expected in (before, before - 1, before, before - 1):
+        (document.undo if expected == before else document.redo)()
+        assert len(document.markups(0)) == expected
+
+
+def test_undo_a_deleted_page_brings_its_markups_back(document):
+    document.delete_page(0)
+    assert document.page_count == 1
+    assert document.markups(0) == []          # page 2 was the blank one
+    assert document.undo() == "Delete page"
+    assert document.page_count == 2
+    assert len(document.markups(0)) == 2      # the square and the note are back
+
+
+def test_undo_and_redo_an_inserted_page(document):
+    document.insert_page(1)
+    assert document.page_count == 3
+    document.undo()
+    assert document.page_count == 2
+    document.redo()
+    assert document.page_count == 3
+
+
+def test_undo_runs_out(document):
+    assert not document.can_undo
+    assert document.undo() is None
+    assert document.redo() is None
+
+
+def test_a_new_edit_forgets_what_was_undone(document):
+    square = document.markups(0)[0]
+    document.move_markup(0, square.xref, 10.0, 10.0)
+    document.undo()
+    assert document.can_redo
+    document.move_markup(0, square.xref, 5.0, 5.0)
+    assert not document.can_redo
+
+
 # --------------------------------------------------------- editing a markup
 
 
@@ -266,6 +424,58 @@ def test_a_callout_reports_its_leader_line(rich):
     assert len(callout) == 3
     assert callout[0] == (60.0, 120.0)      # PDF y-up 480 on a 600pt page
     assert callout[1] == (120.0, 80.0)
+
+
+def build_callout(path) -> str:
+    """A callout shaped the way a markup program writes one: the rectangle
+    holds the leader as well as the words, and /RD says where inside it the
+    words sit."""
+    doc = pymupdf.open()
+    doc.new_page(width=600, height=800)
+    doc.save(str(path))
+    doc.close()
+    doc = pymupdf.open(str(path))
+    annot = doc[0].add_freetext_annot(pymupdf.Rect(360, 300, 560, 370),
+                                      "Corbel discounted", fontsize=10, border_width=1)
+    doc.xref_set_key(annot.xref, "IT", "/FreeTextCallout")
+    doc.xref_set_key(annot.xref, "CL", "[150 620 250 560 360 470]")
+    doc.xref_set_key(annot.xref, "Rect", "[145 425 565 625]")
+    doc.xref_set_key(annot.xref, "RD", "[215 0 5 55]")
+    doc.save(str(path), incremental=True, encryption=pymupdf.PDF_ENCRYPT_KEEP)
+    doc.close()
+    return str(path)
+
+
+def test_a_callout_survives_having_its_hinge_moved(tmp_path):
+    """The bug this guards: the rectangle has to hold the leader, and /RD says
+    where the words sit inside it. Move one without the other and the text box
+    closes up — a callout that has disappeared."""
+    document = PdfDocument()
+    document.open(build_callout(tmp_path / "callout.pdf"))
+    callout = document.markups(0)[0]
+    assert document.render_markup(0, callout.xref, 1.0) is not None
+
+    inner = tuple(document._text_box_of(callout.xref))
+    for _ in range(4):
+        current = document.markups(0)[0]
+        tip, hinge, tail = current.callout
+        assert document.set_callout(0, current.xref,
+                                    [tip, (hinge[0] + 25, hinge[1] + 15), tail])
+        after = document.markups(0)[0]
+        assert document.render_markup(0, after.xref, 1.0) is not None
+        assert after.text == "Corbel discounted"
+
+    # The words settle once and then stay put: no creep down the page.
+    settled = tuple(document._text_box_of(document.markups(0)[0].xref))
+    assert settled[0] == pytest.approx(inner[0], abs=0.01)
+    assert settled[2] == pytest.approx(inner[2], abs=0.01)
+    for _ in range(3):
+        current = document.markups(0)[0]
+        tip, hinge, tail = current.callout
+        document.set_callout(0, current.xref, [tip, (hinge[0] + 10, hinge[1]), tail])
+    assert tuple(document._text_box_of(document.markups(0)[0].xref)) == \
+        pytest.approx(settled, abs=0.01)
+    document.close()
 
 
 def test_reshaping_a_callout_moves_only_the_point_that_was_dragged(rich):
@@ -614,8 +824,10 @@ def test_dragging_a_handle_resizes_the_markup(rich_editor):
     before = markup_of(rich_editor, square)
     drag_handle(rich_editor, "se", QPointF(before.x1 + 60, before.y1 + 40))
     after = markup_of(rich_editor, square)
-    assert (after.x0, after.y0) == (before.x0, before.y0)     # the far corner stays
-    assert (after.x1, after.y1) == (before.x1 + 60, before.y1 + 40)
+    # Resizing redraws the markup from its geometry, so the rectangle MuPDF
+    # writes back carries its border padding rather than the exact drag.
+    assert (after.x0, after.y0) == pytest.approx((before.x0, before.y0), abs=0.01)
+    assert (after.x1, after.y1) == pytest.approx((before.x1 + 60, before.y1 + 40), abs=0.01)
     assert rich_editor.document.modified
 
 

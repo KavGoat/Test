@@ -97,6 +97,21 @@ class MainWindow(QMainWindow):
         self.select_action.setChecked(True)
         bar.addSeparator()
 
+        edit_menu = self.menuBar().addMenu("&Edit")
+        self.undo_action = self._action("&Undo", None, QKeySequence.Undo,
+                                        self.undo, "Take back the last change")
+        self.redo_action = self._action("&Redo", None, QKeySequence.Redo,
+                                        self.redo, "Do it again")
+        self.delete_action_markup = self._action("&Delete Markup", None, "Delete",
+                                                 self.delete_markups,
+                                                 "Remove the selected markups")
+        for action in (self.undo_action, self.redo_action):
+            edit_menu.addAction(action)
+            bar.addAction(action)
+        edit_menu.addSeparator()
+        edit_menu.addAction(self.delete_action_markup)
+        bar.addSeparator()
+
         markup_menu = self.menuBar().addMenu("&Markup")
         self.text_action = self._action("Edit &Text…", None, "F2", self.edit_text,
                                         "Rewrite what this markup says")
@@ -265,7 +280,44 @@ class MainWindow(QMainWindow):
             "Drag a markup to move it, or its handles to resize or reshape it."
             if mode == SELECT else "Drag on the page to draw a rectangle.", 4000)
 
+    # ------------------------------------------------------------ undo, redo
+
+    def undo(self) -> None:
+        self._step_back(self.document.undo(), "Nothing left to undo.")
+
+    def redo(self) -> None:
+        self._step_back(self.document.redo(), "Nothing to redo.")
+
+    def _step_back(self, label: Optional[str], nothing: str) -> None:
+        if label is None:
+            self.statusBar().showMessage(nothing, 3000)
+            return
+        # A page may have come back, or gone, so the strip is rebuilt with it.
+        current = min(self.view.index, max(self.document.page_count - 1, 0))
+        if self.pages.count() != self.document.page_count:
+            self.pages.reload(current)
+        else:
+            self.pages.refresh_thumbnail(current)
+        self.show_page(current)
+        self.update_title()
+        self.update_enabled()
+        self.statusBar().showMessage(f"{label} — undone." if label else "", 4000)
+
     # ---------------------------------------------------------------- markups
+
+    def delete_markups(self) -> None:
+        chosen = [item.xref for item in self.view.selected_items()]
+        if not chosen:
+            self.statusBar().showMessage("Select a markup to delete.", 4000)
+            return
+        removed = self.document.delete_markups(self.view.index, chosen)
+        if not removed:
+            self.statusBar().showMessage("Those markups cannot be deleted.", 4000)
+            return
+        self.view.refresh()
+        self.on_edited()
+        self.statusBar().showMessage(
+            f"Deleted {removed} markup{'s' if removed > 1 else ''}.", 4000)
 
     def edit_text(self, xref: int = 0) -> None:
         """Rewrite a text box or a sticky note."""
@@ -336,6 +388,13 @@ class MainWindow(QMainWindow):
         self.text_action.setEnabled(len(chosen) == 1 and chosen[0].markup.editable_text)
         self.group_action.setEnabled(len(chosen) > 1)
         self.ungroup_action.setEnabled(any(item.markup.leader for item in chosen))
+        self.delete_action_markup.setEnabled(bool(chosen))
+        self.undo_action.setEnabled(self.document.can_undo)
+        self.redo_action.setEnabled(self.document.can_redo)
+        self.undo_action.setText(f"&Undo {self.document.history.undo_label}".rstrip()
+                                 if self.document.can_undo else "&Undo")
+        self.redo_action.setText(f"&Redo {self.document.history.redo_label}".rstrip()
+                                 if self.document.can_redo else "&Redo")
 
     def confirm_discard(self) -> bool:
         if not self.document.modified:

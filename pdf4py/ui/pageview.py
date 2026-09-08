@@ -415,18 +415,19 @@ class PageView(QGraphicsView):
                  if item.pos() != item.home]
         if not moved:
             return
-        done = 0
-        for item, shift in moved:
-            if self.document.move_markup(self.index, item.xref,
-                                         shift.x() / self.zoom, shift.y() / self.zoom):
-                item.home = QPointF(item.pos())
-                done += 1
-            else:
+        # One step, so undo takes a whole group back rather than one markup of
+        # it at a time.
+        shifts = {item.xref: (shift.x() / self.zoom, shift.y() / self.zoom)
+                  for item, shift in moved}
+        if not self.document.move_markups(self.index, shifts):
+            for item, _ in moved:
                 item.setPos(item.home)
-        if not done:
             self.message.emit("This markup cannot be moved.")
             return
-        self.message.emit(f"Moved {done} markup{'s' if done > 1 else ''}.")
+        for item, _ in moved:
+            item.home = QPointF(item.pos())
+        count = len(moved)
+        self.message.emit(f"Moved {count} markup{'s' if count > 1 else ''}.")
         self._place_handles(self.selected_items())
         self.edited.emit()
 
