@@ -75,8 +75,12 @@ pdf4py/
 and its applications: it owns the PDF and hands the interface finished images,
 and the interface hands back geometry. Three details are worth knowing:
 
-**The file is read into memory** and the handle closed, so a document can always
-be saved back over the file it was opened from.
+**Saving appends.** Saving back over the file it came from writes only the
+change, so it takes no measurable time whatever the document's size. A full
+rewrite happens only under Save As, or when the file was damaged enough that
+MuPDF had to repair it — and even then without recompressing every stream in
+the document, which on a ten megabyte drawing set costs seventeen seconds for a
+change that took a moment to make.
 
 **Pages are rendered without their annotations**, and every markup is then
 rendered on its own and placed over the page as a separate item. That is what
@@ -91,6 +95,41 @@ and would walk the markup a point further with every drag.
 
 ---
 
+## Large documents
+
+A two hundred page drawing set is the case the app is built for, and three
+things had to be true for it to work:
+
+**Thumbnails are drawn lazily.** A sheet of a drawing set can cost a second to
+render, so drawing all two hundred up front would leave the window dead for
+minutes. Every page starts as a blank sheet of the right shape, and the ones
+actually on screen fill in a few hundredths of a second at a time. Adding or
+deleting a page changes that one row rather than rebuilding the strip.
+
+**The markup overlay is built in one walk of the page.** Asking for each
+markup by name re-walks the annotation list every time, which is quadratic: a
+sheet carrying six hundred markups took four seconds to open, and now takes a
+sixth of a second.
+
+**MuPDF's diagnostics are captured, not printed.** A damaged file makes it
+write a `cannot find object in xref` line for every object it cannot find —
+thousands of them, straight to the console, slow enough on Windows to be felt.
+They are collected instead, and the status bar says the one thing you can act
+on: the file is damaged, it was repaired to open it, and Save As will write a
+clean copy. Nothing MuPDF refuses to draw can take the window down with it —
+a page that will not render shows as a blank sheet and the rest still works.
+
+Measured on a 200-page, 10 MB A1 drawing set:
+
+| | before | after |
+|---|---|---|
+| Open | 2.3 s | 0.3 s |
+| Insert or delete a page | 1.8 s | ~0.01 s |
+| Show a page carrying 600 markups | 4.0 s | 0.17 s |
+| Save | 17.4 s | ~0.00 s |
+
+---
+
 ## Tests
 
 ```bash
@@ -99,6 +138,7 @@ python -m pytest
 
 Runs headless (the suite forces `QT_QPA_PLATFORM=offscreen`). It covers the
 document model — exact, drift-free moves, rotated pages, page insertion and
-deletion, the save round trip — and drives the real window with synthetic mouse
-events: the rectangle tool, dragging a markup, clamping at the page edge, and
-the page strip staying in step with the canvas.
+deletion, the save round trip, a deliberately damaged file opening quietly and
+saving sound — and drives the real window with synthetic mouse events: the
+rectangle tool, dragging a markup, clamping at the page edge, the page strip
+staying in step with the canvas and not drawing pages nobody is looking at.

@@ -1,6 +1,8 @@
 """Tests for the PDF4Py page and markup editor."""
 from __future__ import annotations
 
+import pathlib
+
 import pytest
 
 pymupdf = pytest.importorskip("pymupdf")
@@ -75,6 +77,64 @@ def test_saving_over_the_file_it_came_from(document, sample):
     assert len(reopened.markups(0)) == 3
 
 
+def damage(path) -> str:
+    """Break the xref so MuPDF has to repair the file to open it."""
+    data = bytearray(pathlib.Path(path).read_bytes())
+    marker = data.rfind(b"startxref")
+    end = data.find(b"\n", marker + 10)
+    data[marker + 10:end] = b"999999999"
+    pathlib.Path(path).write_bytes(bytes(data))
+    return str(path)
+
+
+def test_a_damaged_file_opens_repaired_and_quietly(sample, capfd):
+    document = PdfDocument()
+    document.open(damage(sample))
+    out, err = capfd.readouterr()
+    assert document.page_count == 2
+    assert document.repaired
+    assert "repair" in document.warnings
+    # MuPDF's own complaints must not reach the console: a file missing a few
+    # thousand objects prints a line for every one of them.
+    assert err == "" and out == ""
+    document.close()
+
+
+def test_saving_appends_rather_than_rewriting(document, sample):
+    before = pathlib.Path(sample).read_bytes()
+    document.add_rectangle(0, (10, 10, 60, 60))
+    assert document.save() is False        # no reload: the xrefs still stand
+    after = pathlib.Path(sample).read_bytes()
+    # An appended save leaves the original bytes untouched and adds to the end,
+    # which is what makes saving a large document instant.
+    assert after.startswith(before) and len(after) > len(before)
+
+
+def test_a_repaired_file_is_rewritten_when_saved(sample, tmp_path):
+    document = PdfDocument()
+    document.open(damage(sample))
+    document.add_rectangle(0, (10, 10, 60, 60))
+    document.insert_page(1)
+    assert document.save() is True         # a repaired file cannot be appended to
+    document.close()
+
+    reopened = PdfDocument()
+    reopened.open(sample)
+    assert reopened.page_count == 3
+    assert not reopened.repaired           # the saved copy is sound
+    assert len(reopened.markups(0)) == 3
+    reopened.close()
+    assert list(tmp_path.glob("*.pdf4py-part")) == []
+
+
+def test_save_as_leaves_the_original_alone(document, sample, tmp_path):
+    before = pathlib.Path(sample).read_bytes()
+    document.add_rectangle(0, (10, 10, 60, 60))
+    assert document.save(str(tmp_path / "copy.pdf")) is False
+    assert pathlib.Path(sample).read_bytes() == before
+    assert document.path == str(tmp_path / "copy.pdf")
+
+
 # --------------------------------------------------------------------- markups
 
 
@@ -101,6 +161,29 @@ def test_the_page_is_rendered_without_its_markups(document):
     blue = [page.samples[int(y) * stride + x * channels + 2]
             for y in range(int(square.y0), int(square.y1))]
     assert max(blue) == min(blue)
+
+
+def test_the_overlay_is_built_in_one_walk_of_the_page(document):
+    """Rendering markups one xref at a time re-walks the list for each and is
+    quadratic; on a marked-up drawing sheet that is seconds per page."""
+    drawn = document.markups_with_rasters(0, 1.0)
+    assert [markup for markup, _ in drawn] == document.markups(0)
+    assert all(raster is not None for _, raster in drawn)
+
+    document._find = lambda *args: pytest.fail("the page was walked per markup")
+    assert len(document.markups_with_rasters(0, 1.0)) == 2
+
+
+def test_a_page_that_will_not_render_does_not_take_the_app_down(document, monkeypatch):
+    import pymupdf
+
+    def refuse(*args, **kwargs):
+        raise RuntimeError("damaged page")
+
+    monkeypatch.setattr(pymupdf.Page, "get_pixmap", refuse)
+    assert document.render_page(0, 1.0) is None
+    assert document.render_thumbnail(0) is None
+    assert document.page_count == 2          # the document is still usable
 
 
 def test_moving_a_markup_is_exact_and_does_not_creep(document):
@@ -217,6 +300,40 @@ def drag(view, start: QPointF, end: QPointF) -> None:
     view.mousePressEvent(event(QEvent.MouseButtonPress, start, Qt.LeftButton, Qt.LeftButton))
     view.mouseMoveEvent(event(QEvent.MouseMove, end, Qt.NoButton, Qt.LeftButton))
     view.mouseReleaseEvent(event(QEvent.MouseButtonRelease, end, Qt.LeftButton, Qt.NoButton))
+
+
+def test_the_strip_does_not_draw_every_page_up_front(qapp, tmp_path):
+    """A two hundred page drawing set costs a second a sheet to draw, so the
+    strip must fill in as you scroll rather than block the window."""
+    from pdf4py.ui.mainwindow import MainWindow
+
+    many = pymupdf.open()
+    for _ in range(60):
+        many.new_page(width=595, height=842)
+    path = tmp_path / "many-pages.pdf"
+    many.save(str(path))
+    many.close()
+
+    window = MainWindow()
+    window.confirm_discard = lambda: True
+    assert window.load(str(path))
+    assert window.pages.count() == 60
+    assert len(window.pages._drawn) == 0      # nothing drawn until it is on screen
+    window.document.close()
+    window.close()
+    window.deleteLater()
+
+
+def test_page_changes_only_touch_the_row_that_changed(editor):
+    editor.pages._drawn = {0, 1}
+    editor.insert_page()
+    assert editor.pages.count() == 3
+    assert [editor.pages.item(row).text() for row in range(3)] == ["1", "2", "3"]
+    assert editor.pages._drawn == {0, 2}      # the old page 2 kept its thumbnail
+    editor.pages.setCurrentRow(1)
+    editor.delete_page()
+    assert [editor.pages.item(row).text() for row in range(2)] == ["1", "2"]
+    assert editor.pages._drawn == {0, 1}
 
 
 def test_the_window_shows_the_document(editor):

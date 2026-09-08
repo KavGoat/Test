@@ -9,11 +9,11 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QPainter, QPen
+from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (QGraphicsItem, QGraphicsPixmapItem, QGraphicsRectItem,
                                QGraphicsScene, QGraphicsView)
 
-from ..document import Markup, PdfDocument
+from ..document import DocumentError, Markup, PdfDocument
 from .images import to_pixmap
 
 SELECT = "select"
@@ -127,7 +127,12 @@ class PageView(QGraphicsView):
             return
         self.index = min(max(index, 0), self.document.page_count - 1)
 
-        page = to_pixmap(self.document.render_page(self.index, self.zoom))
+        raster = self.document.render_page(self.index, self.zoom)
+        if raster is None:
+            page = self._unreadable_page()
+            self.message.emit(f"Page {self.index + 1} could not be drawn.")
+        else:
+            page = to_pixmap(raster)
         self._page_item = scene.addPixmap(page)
         self._page_item.setZValue(0)
         bounds = QRectF(0, 0, page.width(), page.height())
@@ -135,16 +140,27 @@ class PageView(QGraphicsView):
         frame.setZValue(1)
         scene.setSceneRect(bounds.adjusted(-PAPER_MARGIN, -PAPER_MARGIN,
                                            PAPER_MARGIN, PAPER_MARGIN))
+        if raster is None:
+            return
 
-        for markup in self.document.markups(self.index):
-            raster = self.document.render_markup(self.index, markup.xref, self.zoom)
-            if raster is None:
+        movable = self.mode == SELECT
+        # One walk of the page draws every markup: asking for them one at a
+        # time re-walks the annotation list for each and turns quadratic.
+        for markup, drawn in self.document.markups_with_rasters(self.index, self.zoom):
+            if drawn is None:
                 continue
-            item = MarkupItem(self, markup, to_pixmap(raster),
-                              QPointF(raster.x, raster.y), bounds)
-            item.setFlag(QGraphicsItem.ItemIsMovable, self.mode == SELECT)
-            item.setFlag(QGraphicsItem.ItemIsSelectable, self.mode == SELECT)
+            item = MarkupItem(self, markup, to_pixmap(drawn),
+                              QPointF(drawn.x, drawn.y), bounds)
+            item.setFlag(QGraphicsItem.ItemIsMovable, movable)
+            item.setFlag(QGraphicsItem.ItemIsSelectable, movable)
             scene.addItem(item)
+
+    def _unreadable_page(self) -> QPixmap:
+        """A page that will not render still needs to take up its own space."""
+        width, height = self.document.page_size(self.index)
+        pixmap = QPixmap(max(int(width * self.zoom), 1), max(int(height * self.zoom), 1))
+        pixmap.fill(QColor("#e8e2e2"))
+        return pixmap
 
     def refresh(self) -> None:
         self.show_page(self.index)
@@ -152,7 +168,10 @@ class PageView(QGraphicsView):
     # ------------------------------------------------------------------- zoom
 
     def set_zoom(self, zoom: float) -> None:
-        self.zoom = min(max(zoom, MIN_ZOOM), MAX_ZOOM)
+        zoom = min(max(zoom, MIN_ZOOM), MAX_ZOOM)
+        if abs(zoom - self.zoom) < 1e-6:
+            return                      # no redraw for a zoom that did not move
+        self.zoom = zoom
         self.refresh()
 
     def zoom_in(self) -> None:
@@ -161,14 +180,28 @@ class PageView(QGraphicsView):
     def zoom_out(self) -> None:
         self.set_zoom(self.zoom / ZOOM_STEP)
 
-    def fit_page(self) -> None:
+    def zoom_to_fit(self, index: Optional[int] = None) -> float:
+        """The zoom at which a page fits the viewport."""
         if self.document.is_empty:
-            return
-        width, height = self.document.page_size(self.index)
+            return self.zoom
+        width, height = self.document.page_size(self.index if index is None else index)
         available = self.viewport().size()
         margin = 2 * PAPER_MARGIN + 4
-        self.set_zoom(min((available.width() - margin) / max(width, 1.0),
-                          (available.height() - margin) / max(height, 1.0)))
+        return min((available.width() - margin) / max(width, 1.0),
+                   (available.height() - margin) / max(height, 1.0))
+
+    def fit_page(self) -> None:
+        self.set_zoom(self.zoom_to_fit())
+
+    def show_fitted(self, index: int) -> None:
+        """Show a page at the zoom that fits it, drawing it only once.
+
+        Setting the zoom and then showing the page would render it twice, which
+        on a large drawing sheet is a second of the user's time for nothing.
+        """
+        self.index = index
+        self.zoom = min(max(self.zoom_to_fit(index), MIN_ZOOM), MAX_ZOOM)
+        self.show_page(index)
 
     # ------------------------------------------------------------------ tools
 
@@ -222,8 +255,12 @@ class PageView(QGraphicsView):
             points = QRectF(box.x() / self.zoom, box.y() / self.zoom,
                             box.width() / self.zoom, box.height() / self.zoom)
             if points.width() >= MIN_RECTANGLE_POINTS and points.height() >= MIN_RECTANGLE_POINTS:
-                self.document.add_rectangle(self.index, (points.left(), points.top(),
-                                                         points.right(), points.bottom()))
+                try:
+                    self.document.add_rectangle(self.index, (points.left(), points.top(),
+                                                             points.right(), points.bottom()))
+                except DocumentError as exc:
+                    self.message.emit(str(exc))
+                    return
                 self.refresh()
                 self.message.emit("Rectangle added.")
                 self.edited.emit()

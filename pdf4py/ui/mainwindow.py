@@ -5,9 +5,9 @@ import os
 from typing import Optional
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QActionGroup, QKeySequence
-from PySide6.QtWidgets import (QDockWidget, QFileDialog, QMainWindow, QMessageBox,
-                               QWidget)
+from PySide6.QtGui import QAction, QActionGroup, QGuiApplication, QKeySequence
+from PySide6.QtWidgets import (QApplication, QDockWidget, QFileDialog, QMainWindow,
+                               QMessageBox, QWidget)
 
 from ..document import DocumentError, PdfDocument
 from . import icons
@@ -129,28 +129,53 @@ class MainWindow(QMainWindow):
             self.load(path)
 
     def load(self, path: str) -> bool:
+        self.statusBar().showMessage(f"Opening {os.path.basename(path)}…")
+        QGuiApplication.setOverrideCursor(Qt.WaitCursor)
+        QApplication.processEvents()
         try:
             self.document.open(path)
         except DocumentError as exc:
+            QGuiApplication.restoreOverrideCursor()
+            self.statusBar().clearMessage()
             QMessageBox.warning(self, APP_NAME, str(exc))
             return False
+        finally:
+            if QGuiApplication.overrideCursor() is not None:
+                QGuiApplication.restoreOverrideCursor()
         self.pages.reload(0)
-        self.show_page(0)
-        self.view.fit_page()
+        # Fits and draws in one pass: a big sheet is not rendered twice.
+        self.view.show_fitted(0)
+        self.update_enabled()
         self.update_title()
         self.update_enabled()
-        self.statusBar().showMessage(
-            f"{os.path.basename(path)} — {self.document.page_count} page(s).", 5000)
+        self.statusBar().showMessage(self._opened_message(path), 8000)
         return True
+
+    def _opened_message(self, path: str) -> str:
+        name = os.path.basename(path)
+        pages = self.document.page_count
+        if self.document.repaired:
+            # MuPDF's own complaints are kept off the console; this is the one
+            # thing the user can act on — the file itself is damaged.
+            return (f"{name} — {pages} page(s). The file's structure is damaged; "
+                    "it was repaired to open it. Save As writes a clean copy.")
+        return f"{name} — {pages} page(s)."
 
     def save(self) -> bool:
         if self.document.path is None:
             return self.save_as()
+        self.statusBar().showMessage("Saving…")
+        QGuiApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            self.document.save()
+            reloaded = self.document.save()
         except DocumentError as exc:
             QMessageBox.warning(self, APP_NAME, str(exc))
             return False
+        finally:
+            QGuiApplication.restoreOverrideCursor()
+        if reloaded:
+            # A rewritten file has new xrefs, so what is on screen is stale.
+            self.view.refresh()
         self.update_title()
         self.statusBar().showMessage(f"Saved {os.path.basename(self.document.path)}.", 4000)
         return True
@@ -164,11 +189,15 @@ class MainWindow(QMainWindow):
             return False
         if not path.lower().endswith(".pdf"):
             path += ".pdf"
+        self.statusBar().showMessage("Saving…")
+        QGuiApplication.setOverrideCursor(Qt.WaitCursor)
         try:
             self.document.save(path)
         except DocumentError as exc:
             QMessageBox.warning(self, APP_NAME, str(exc))
             return False
+        finally:
+            QGuiApplication.restoreOverrideCursor()
         self.update_title()
         self.statusBar().showMessage(f"Saved {os.path.basename(path)}.", 4000)
         return True
@@ -187,8 +216,13 @@ class MainWindow(QMainWindow):
         if self.document.is_empty:
             return
         index = self.view.index + 1
-        self.document.insert_page(index)
-        self.pages.reload(index)
+        try:
+            self.document.insert_page(index)
+        except DocumentError as exc:
+            QMessageBox.warning(self, APP_NAME, str(exc))
+            return
+        self.pages.insert_row(index)
+        self.pages.setCurrentRow(index)
         self.show_page(index)
         self.on_edited(refresh_thumbnail=False)
         self.statusBar().showMessage(f"Inserted a blank page at {index + 1}.", 4000)
@@ -202,8 +236,10 @@ class MainWindow(QMainWindow):
         except DocumentError as exc:
             QMessageBox.information(self, APP_NAME, str(exc))
             return
-        self.pages.reload(min(index, self.document.page_count - 1))
-        self.show_page(min(index, self.document.page_count - 1))
+        landing = min(index, self.document.page_count - 1)
+        self.pages.remove_row(index)
+        self.pages.setCurrentRow(landing)
+        self.show_page(landing)
         self.on_edited(refresh_thumbnail=False)
         self.statusBar().showMessage(f"Deleted page {index + 1}.", 4000)
 
