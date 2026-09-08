@@ -7286,6 +7286,37 @@ def test_a_pdf_page_still_draws_when_no_picture_of_it_was_kept(window, tmp_path)
     assert ink > 40, "the page came out blank"
 
 
+def test_a_markup_drawn_on_an_opened_pdf_can_be_picked_up_and_moved(
+        window, tmp_path):
+    """The page is the PDF's; what is drawn on it is still yours to move."""
+    path = _a_pdf_with_lines(window, tmp_path)
+    window.open_path(path)
+    window.rebuild_scenes()
+    QApplication.processEvents()
+
+    window.select_tool("rect")
+    drag(window.view, 150, 150, 320, 250)
+    frame = window.view.frame()
+    made = [item for item in frame.markups() if not item.from_drawing]
+    assert len(made) == 1, "the rectangle went on the page"
+    item = made[0]
+    was = QPointF(item.pos())
+
+    window.select_tool("select")
+    window.view.scene().clearSelection()
+    item.setSelected(True)
+    window.refresh_selection()
+    # drag() speaks scene coordinates, and a PDF page's frame does not sit at
+    # the scene origin, so the item's centre has to be mapped there first.
+    centre = item.mapToScene(item.local_rect().center())
+    drag(window.view, centre.x(), centre.y(), centre.x() + 90, centre.y() + 60)
+    QApplication.processEvents()
+
+    moved = item.pos() - was
+    assert moved.x() == pytest.approx(90, abs=2)
+    assert moved.y() == pytest.approx(60, abs=2)
+
+
 def test_the_markups_on_a_page_can_be_asked_for_when_they_are_wanted(
         window, tmp_path):
     """Reading is the default; replying is a thing you ask for."""

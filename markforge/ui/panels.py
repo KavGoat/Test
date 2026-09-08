@@ -132,6 +132,10 @@ class PagesPanel(QWidget):
     def __init__(self, window):
         super().__init__()
         self.window = window
+        # A page finished being drawn in the background: put it in its row.
+        from ..io import pdftiles
+
+        pdftiles.TILES.sheetReady.connect(self._page_was_drawn)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
@@ -342,7 +346,7 @@ class PagesPanel(QWidget):
             if scale:
                 parts.append(scale)
             caption = "   ".join(parts)
-            entry = QListWidgetItem(self._thumbnail(page), caption)
+            entry = QListWidgetItem(self._thumbnail(page, document), caption)
             entry.setTextAlignment(Qt.AlignHCenter)
             tip = page.label or page.source_note or f"Page {index + 1}"
             if not page.printable:
@@ -354,13 +358,51 @@ class PagesPanel(QWidget):
         self.list.setCurrentRow(current)
         self._suppress = False
 
+    def _page_was_drawn(self, key) -> None:
+        """Fill in the row whose page has just been drawn, and only that one."""
+        document = getattr(self.window, "document", None)
+        if document is None:
+            return
+        for index, page in enumerate(document.pages):
+            if page.pdf_key == key.source and page.pdf_page_index == key.index:
+                entry = self.list.item(index)
+                if entry is not None:
+                    entry.setIcon(self._thumbnail(page, document))
+
     def refresh_current(self, document, current: int) -> None:
         entry = self.list.item(current)
         if entry is not None and 0 <= current < len(document.pages):
-            entry.setIcon(self._thumbnail(document.pages[current]))
+            entry.setIcon(self._thumbnail(document.pages[current], document))
 
     @staticmethod
-    def _thumbnail(page) -> QIcon:
+    def _thumbnail(page, document=None) -> QIcon:
+        """A small picture of the page for the list.
+
+        A page that came in from a PDF is drawn once, small, in the background
+        for the canvas to have something to show while its tiles arrive — so
+        the list borrows that rather than rendering every page again. Opening
+        a drawing set used to spend half a second here doing exactly the work
+        that was already being done.
+        """
+        if document is not None and page.pdf_key and page.pdf_page_index is not None:
+            data = document.asset(page.pdf_key)
+            if data:
+                from ..io import pdftiles
+                from PySide6.QtCore import QRectF
+
+                whole = QRectF(0, 0, page.width_pt, page.height_pt)
+                sheet = pdftiles.TILES.sheet(
+                    page.pdf_key, data, int(page.pdf_page_index), whole,
+                    bool(getattr(page, "pdf_annotations", True)))
+                if sheet is not None and not sheet.isNull():
+                    return QIcon(sheet.scaled(
+                        160, 160, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                # Not drawn yet. A blank sheet of the right shape now, and the
+                # row is refreshed when the picture arrives.
+                tall = int(160 * page.height_pt / max(page.width_pt, 1.0))
+                waiting = QPixmap(160, max(tall, 1))
+                waiting.fill(Qt.white)
+                return QIcon(waiting)
         scene = page.frame
         if scene is None:
             pixmap = QPixmap(96, 128)

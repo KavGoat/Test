@@ -74,7 +74,10 @@ def _one(source, annotation: dict, kind: str, flip: tuple, scale: float,
             if intent == "LineDimension":
                 return [_dimension(source, annotation, points, style, common,
                                    scale)]
-            style.setdefault("arrow_end", "arrow")
+            # No head unless the annotation asked for one. Defaulting to an
+            # arrow put a head on every plain line on the sheet — section cut
+            # lines, legend rules, leader tails — none of which had one.
+            style.setdefault("arrow_end", "none")
             return [_line("line", points, style, common)]
     if kind in ("PolyLine", "Polygon"):
         corners = _numbers(source, annotation.get("Vertices"))
@@ -169,16 +172,32 @@ def _common(source, annotation: dict) -> dict:
     out: dict = {}
     for key, field in (("T", "author"), ("Contents", "comment"),
                        ("Subj", "subject")):
-        said = source.resolve(annotation.get(key))
-        if isinstance(said, bytes):
-            said = _readable(said)
-        if isinstance(said, str) and said.strip():
+        said = _readable(source.resolve(annotation.get(key)))
+        if said.strip():
             out[field] = said.strip()
     return out
 
 
-def _readable(raw: bytes) -> str:
-    """A PDF text string, which may be UTF-16 with a mark on the front."""
+def _readable(raw) -> str:
+    """A PDF text string as words.
+
+    PDF writes text either in its own single-byte encoding or in UTF-16 with a
+    byte-order mark on the front, and Bluebeam writes UTF-16. The catch is
+    that a reader may hand this back as a ``str`` it has already decoded one
+    byte at a time — so the mark arrives as the two characters ``þÿ`` and the
+    words come with a null between every letter. Left alone that is what puts
+    ``þÿN␀O␀T␀E␀S`` on the page where NOTES belongs, so a string that arrives
+    looking like that is put back to bytes and decoded properly.
+    """
+    if isinstance(raw, str):
+        if not raw.startswith(("\xfe\xff", "\xff\xfe")):
+            return raw
+        try:
+            raw = raw.encode("latin-1")
+        except UnicodeEncodeError:
+            return raw
+    if not isinstance(raw, bytes):
+        return ""
     if raw[:2] in (b"\xfe\xff", b"\xff\xfe"):
         try:
             return raw.decode("utf-16")

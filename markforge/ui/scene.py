@@ -15,7 +15,7 @@ from __future__ import annotations
 import math
 from typing import Optional
 
-from PySide6.QtCore import QByteArray, QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QByteArray, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (QBrush, QColor, QImage, QLinearGradient, QPainter,
                            QPen, QPicture, QPixmap)
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QGraphicsScene
@@ -166,6 +166,12 @@ class PageFrame(QGraphicsObject):
         # Behind every markup, and behind the desk's own shadow drawing.
         self.setZValue(-1000.0)
 
+    def shows(self, key) -> bool:
+        """Whether a tile or sheet that has just been drawn belongs here."""
+        page = self.page
+        return (page.pdf_key is not None and key.source == page.pdf_key
+                and key.index == page.pdf_page_index)
+
     # -- geometry ----------------------------------------------------------
     def page_rect(self) -> QRectF:
         return QRectF(0, 0, self.page.width_pt, self.page.height_pt)
@@ -195,54 +201,78 @@ class PageFrame(QGraphicsObject):
         self._sharp_region = QRectF()
         self._sharp_scale = 0.0
 
-    def sharpen_background(self, looking_at: QRectF, scale: float) -> None:
-        """Draw the part being looked at from the PDF, at the size it is shown.
+    def paint_the_pdf(self, painter: QPainter, looking_at: QRectF,
+                      scale: float) -> bool:
+        """Draw the source page under the markups. Says whether it drew.
 
-        A page that came in from a PDF is stored with a small picture of
-        itself, enough to show something the moment it is opened. Everything
-        after that comes from the file: the piece on screen is drawn again at
-        the size the screen is actually showing it, so zooming in gets sharper
-        the way the drawing is sharper, instead of enlarging a photograph of it
-        until it goes soft.
+        Nothing is rendered here. The tile cache is asked for the squares of
+        the page on screen at the zoom on screen; whatever is ready is drawn,
+        and whatever is not is asked for and will arrive in a moment, at which
+        point this part of the page is repainted. Under the tiles goes the
+        small picture of the whole page, so what shows before they arrive is
+        the page, soft, rather than a hole.
 
-        Only the piece on screen, because a whole A0 sheet at reading zoom is
-        more pixels than can be held, and only when the zoom has changed enough
-        or the view has moved off what was drawn — otherwise this would run on
-        every repaint and nothing else would ever get done.
+        Printing does not go through the tiles. It wants the whole page at
+        one resolution and is entitled to wait for it.
         """
         page = self.page
         if page.pdf_key is None or page.pdf_page_index is None:
-            return
-        want = _sharpness_step(scale)
-        wanted = QRectF(looking_at).intersected(self.page_rect())
-        if wanted.isEmpty():
-            return
-        if want <= self._sharp_scale and self._sharp_region.contains(wanted):
-            return
-        from ..io import pdfio
-
+            return False
         data = self.document.asset(page.pdf_key)
         if not data:
-            return
-        region, want = _region_to_draw(wanted, self.page_rect(), want,
-                                       pdfio.MOST_LIVE_PIXELS)
-        drawn = pdfio.LIVE.draw_region(page.pdf_key, data, int(page.pdf_page_index),
-                                       self.page_rect(), region, want,
-                                       getattr(page, "pdf_annotations", True))
-        if drawn is None:
-            # Nothing readable in the file: keep what is on screen, and stop
-            # asking, so a broken source is not re-read on every repaint.
-            self._sharp_scale = want
-            self._sharp_region = self.page_rect()
-            return
-        pixmap = QPixmap.fromImage(drawn)
-        if pixmap.isNull():
-            self._sharp_scale = want
-            self._sharp_region = self.page_rect()
-            return
-        self._sharp = pixmap
-        self._sharp_region = region
-        self._sharp_scale = want
+            return False
+        from ..io import pdfio, pdftiles
+
+        whole = self.page_rect()
+        index = int(page.pdf_page_index)
+        shown = bool(getattr(page, "pdf_annotations", True))
+        painter.save()
+        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        drew = False
+        if self.print_mode:
+            # One render, at the resolution being printed, synchronously.
+            step = max(min(scale, 8.0), 1.0)
+            region, step = _region_to_draw(
+                QRectF(looking_at).intersected(whole) or whole, whole, step,
+                pdfio.MOST_LIVE_PIXELS)
+            drawn = pdfio.LIVE.draw_region(page.pdf_key, data, index, whole,
+                                           region, step, shown)
+            if drawn is not None and not drawn.isNull():
+                painter.drawImage(region, drawn, QRectF(drawn.rect()))
+                drew = True
+            painter.restore()
+            return drew
+
+        shown_part = QRectF(looking_at).intersected(whole)
+        tiles: list = []
+        missing = True
+        if not shown_part.isEmpty():
+            # A margin, so a small scroll lands on tiles that are already here.
+            margin_x = shown_part.width() * 0.25
+            margin_y = shown_part.height() * 0.25
+            asked = shown_part.adjusted(-margin_x, -margin_y, margin_x, margin_y)
+            tiles, missing = pdftiles.TILES.tiles(
+                page.pdf_key, data, index, whole, scale, asked, shown)
+        if missing:
+            # Only while the tiles are still coming, and only the part of it
+            # that is on screen: stretching the whole small picture over a
+            # whole sheet on every repaint is the sort of thing that makes
+            # scrolling a drawing feel like wading.
+            sheet = pdftiles.TILES.sheet(page.pdf_key, data, index, whole, shown)
+            if sheet is not None:
+                part = shown_part if not shown_part.isEmpty() else whole
+                across = sheet.width() / max(whole.width(), 1.0)
+                down = sheet.height() / max(whole.height(), 1.0)
+                painter.drawPixmap(
+                    part, sheet,
+                    QRectF(part.left() * across, part.top() * down,
+                           part.width() * across, part.height() * down))
+                drew = True
+        for where, tile in tiles:
+            painter.drawPixmap(where, tile, QRectF(tile.rect()))
+            drew = True
+        painter.restore()
+        return drew
 
     def paint(self, painter: QPainter, option, widget=None) -> None:
         rect = self.page_rect()
@@ -252,19 +282,15 @@ class PageFrame(QGraphicsObject):
             painter.fillRect(rect, PAPER)
             if self._background is None and self.page.background_key:
                 self.load_background()
-            self.sharpen_background(_exposed_part(option, rect),
-                                    _painted_scale(painter))
-            if self._background is not None or self._sharp is not None:
-                painter.save()
-                painter.setOpacity(self.page.background_opacity)
-                painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
-                if self._background is not None:
-                    painter.drawPixmap(rect, self._background,
-                                       QRectF(self._background.rect()))
-                if self._sharp is not None:
-                    painter.drawPixmap(self._sharp_region, self._sharp,
-                                       QRectF(self._sharp.rect()))
-                painter.restore()
+            painter.save()
+            painter.setOpacity(self.page.background_opacity)
+            painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+            if self._background is not None:
+                painter.drawPixmap(rect, self._background,
+                                   QRectF(self._background.rect()))
+            self.paint_the_pdf(painter, _exposed_part(option, rect),
+                               _painted_scale(painter))
+            painter.restore()
         if not self.print_mode:
             self._paint_grid(painter, rect)
             self._paint_margins(painter)
@@ -767,6 +793,44 @@ class DocumentScene(QGraphicsScene):
         self.setItemIndexMethod(QGraphicsScene.NoIndex)
         self.set_canvas_colour(CANVAS[LIGHT])
         self.selectionChanged.connect(self.selectionInfoChanged.emit)
+        # A square of a page finished drawing in the background: repaint just
+        # where it belongs. The scene listens rather than each page, because a
+        # page frame is thrown away and rebuilt constantly and a signal still
+        # pointing at a deleted one is a crash rather than a glitch.
+        from ..io import pdftiles
+
+        pdftiles.TILES.tileReady.connect(self._part_of_a_page_arrived)
+        pdftiles.TILES.sheetReady.connect(self._a_page_arrived)
+        # Tiles come back in bursts — a screenful is dozens of them — and
+        # repainting once per tile is dozens of repaints of nearly the same
+        # thing. They are gathered up and drawn together on the next turn of
+        # the event loop instead.
+        self._arrived: list = []
+        self._settling = QTimer(self)
+        self._settling.setSingleShot(True)
+        self._settling.setInterval(0)
+        self._settling.timeout.connect(self._draw_what_arrived)
+
+    def _part_of_a_page_arrived(self, key) -> None:
+        self._arrived.append(key)
+        if not self._settling.isActive():
+            self._settling.start()
+
+    def _draw_what_arrived(self) -> None:
+        keys, self._arrived = self._arrived, []
+        for frame in self.frames:
+            box = QRectF()
+            for key in keys:
+                if frame.shows(key):
+                    box = box.united(key.page_rect()) if not box.isEmpty() \
+                        else key.page_rect()
+            if not box.isEmpty():
+                frame.update(box)
+
+    def _a_page_arrived(self, key) -> None:
+        for frame in self.frames:
+            if frame.shows(key):
+                frame.update()
 
     def set_canvas_colour(self, colour: str) -> None:
         self.setBackgroundBrush(QBrush(QColor(colour)))

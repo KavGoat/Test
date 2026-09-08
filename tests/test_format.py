@@ -410,22 +410,42 @@ def test_a_page_from_a_pdf_gets_sharper_as_it_is_zoomed_into(window, tmp_path):
     window.rebuild_scenes()
     frame = window.document.pages[0].frame
 
-    def look_at(zoom: float, region: QRectF) -> float:
-        canvas = QImage(300, 300, QImage.Format_ARGB32)
-        canvas.fill(0)
-        painter = QPainter(canvas)
-        painter.scale(zoom, zoom)
-        option = QStyleOptionGraphicsItem()
-        option.exposedRect = region
-        frame.paint(painter, option)
-        painter.end()
-        drawn = frame._sharp
-        return drawn.width() / max(frame._sharp_region.width(), 1) if drawn else 0.0
+    import time
+    from PySide6.QtWidgets import QApplication
+    from markforge.io import pdftiles
 
-    assert look_at(1.0, QRectF(0, 0, 595, 842)) == pytest.approx(1.0, abs=0.01)
-    assert look_at(4.0, QRectF(100, 100, 150, 200)) == pytest.approx(4.0, abs=0.01)
-    assert look_at(16.0, QRectF(120, 120, 40, 50)) == pytest.approx(16.0, abs=0.01), \
-        "zoomed right in, the picture is drawn at the zoom, not blown up"
+    def look_at(zoom: float, region: QRectF) -> float:
+        """Paint at *zoom*, wait for the squares, and say how fine they are."""
+        canvas = QImage(300, 300, QImage.Format_ARGB32)
+        for _ in range(60):
+            canvas.fill(0)
+            painter = QPainter(canvas)
+            painter.scale(zoom, zoom)
+            option = QStyleOptionGraphicsItem()
+            option.exposedRect = region
+            frame.paint(painter, option)
+            painter.end()
+            # Only the rung this zoom asks for: squares left over from the
+            # last, coarser look are still in the cache and would answer for
+            # a sharpness that is not what is being drawn now.
+            rung = pdftiles.zoom_step(zoom)
+            drawn = [key for key in pdftiles.TILES._tiles
+                     if frame.shows(key) and key.scale == rung
+                     and key.page_rect().intersects(region)
+                     and not pdftiles.TILES._tiles[key].isNull()]
+            if drawn:
+                return rung
+            deadline = time.perf_counter() + 0.05
+            while time.perf_counter() < deadline:
+                QApplication.processEvents()
+        return 0.0
+
+    # The ladder is in powers of two, so what comes back is the rung at or
+    # above the zoom — never less than the screen is showing.
+    assert look_at(1.0, QRectF(0, 0, 595, 842)) >= 1.0
+    assert look_at(4.0, QRectF(100, 100, 150, 200)) >= 4.0
+    assert look_at(16.0, QRectF(120, 120, 40, 50)) >= 16.0, \
+        "zoomed right in, the page is drawn at the zoom, not blown up"
 
 
 # ---------------------------------------------------------------------------
