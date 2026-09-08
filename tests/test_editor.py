@@ -894,14 +894,46 @@ def test_editing_text_follows_the_selection(rich_editor):
     assert not rich_editor.text_action.isEnabled()
 
 
-def test_double_clicking_a_text_box_asks_for_the_editor(rich_editor):
-    asked = []
-    rich_editor.view.text_edit_requested.connect(asked.append)
+def double_click(item) -> None:
+    from PySide6.QtWidgets import QGraphicsSceneMouseEvent
+    event = QGraphicsSceneMouseEvent(QEvent.GraphicsSceneMouseDoubleClick)
+    event.setButton(Qt.LeftButton)
+    item.mouseDoubleClickEvent(event)
+
+
+def test_double_clicking_a_text_box_opens_an_editor_on_the_page(rich_editor):
     callout = item_for(rich_editor, "FreeText")
-    callout.mouseDoubleClickEvent(
-        QMouseEvent(QEvent.MouseButtonDblClick, QPointF(1, 1), QPointF(1, 1),
-                    Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
-    assert asked == [callout.xref]
+    double_click(callout)
+    assert rich_editor.view.editing
+    editor = rich_editor.view._editor
+    # Over the markup, not in a dialog somewhere else.
+    assert editor.widget().toPlainText() == markup_of(rich_editor, callout).text
+    assert editor.geometry().intersects(callout.sceneBoundingRect())
+
+
+def test_the_editor_writes_the_text_back(rich_editor):
+    callout = item_for(rich_editor, "FreeText")
+    double_click(callout)
+    rich_editor.view._editor.widget().setPlainText("REVISED: see detail 4")
+    rich_editor.view._editor._commit()
+    assert not rich_editor.view.editing
+    assert markup_of(rich_editor, item_for(rich_editor, "FreeText")).text == \
+        "REVISED: see detail 4"
+
+
+def test_escape_leaves_the_text_alone(rich_editor):
+    callout = item_for(rich_editor, "FreeText")
+    before = markup_of(rich_editor, callout).text
+    double_click(callout)
+    rich_editor.view._editor.widget().setPlainText("thrown away")
+    rich_editor.view._editor._cancel()
+    assert not rich_editor.view.editing
+    assert markup_of(rich_editor, item_for(rich_editor, "FreeText")).text == before
+
+
+def test_a_rectangle_does_not_open_an_editor(rich_editor):
+    double_click(item_for(rich_editor, "Square"))
+    assert not rich_editor.view.editing
 
 
 def test_zoom_holds_the_point_under_the_cursor(rich_editor):
@@ -911,17 +943,35 @@ def test_zoom_holds_the_point_under_the_cursor(rich_editor):
     cursor = QPointF(view.viewport().width() * 0.7, view.viewport().height() * 0.3)
 
     def page_point():
+        """Where on the paper the pointer is, whichever zoom is drawn."""
         scene = view.mapToScene(cursor.toPoint())
-        return round(scene.x() / view.zoom, 1), round(scene.y() / view.zoom, 1)
+        return (round(scene.x() / view._drawn_zoom, 1),
+                round(scene.y() / view._drawn_zoom, 1))
 
     before = page_point()
-    view.zoom_by(1.25, cursor)
-    assert page_point() == pytest.approx(before, abs=0.5)
-    view.zoom_by(1.25, cursor)
-    assert page_point() == pytest.approx(before, abs=0.5)
-    view.zoom_by(1 / 1.25, cursor)
-    assert page_point() == pytest.approx(before, abs=0.5)
+    for step in (1.25, 1.25, 1 / 1.25):
+        view.zoom_by(step, cursor)
+        # Held while the scaled picture stands in for the page…
+        assert page_point() == pytest.approx(before, abs=0.5)
+        view._redraw_at_zoom()
+        # …and still held once it has been redrawn properly.
+        assert page_point() == pytest.approx(before, abs=0.5)
     assert view.zoom > 3.0
+
+
+def test_the_wheel_scales_first_and_redraws_after(rich_editor):
+    """Re-rendering a big sheet on every click of the wheel is a stutter, so
+    what is on screen is scaled at once and drawn properly when it stops."""
+    view = rich_editor.view
+    view.set_zoom(2.0)
+    assert view._drawn_zoom == 2.0
+    view.zoom_by(1.25, QPointF(100, 100))
+    assert view.zoom == pytest.approx(2.5)
+    assert view._drawn_zoom == 2.0                  # not redrawn yet
+    assert view.transform().m11() == pytest.approx(1.25)
+    view._redraw_at_zoom()
+    assert view._drawn_zoom == pytest.approx(2.5)   # redrawn at the new zoom
+    assert view.transform().m11() == pytest.approx(1.0)
 
 
 def test_edits_reach_the_saved_file(editor, tmp_path):

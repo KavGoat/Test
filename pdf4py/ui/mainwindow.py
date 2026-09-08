@@ -6,8 +6,8 @@ from typing import Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QActionGroup, QGuiApplication, QKeySequence
-from PySide6.QtWidgets import (QApplication, QDockWidget, QFileDialog, QInputDialog,
-                               QMainWindow, QMessageBox, QWidget)
+from PySide6.QtWidgets import (QApplication, QDockWidget, QFileDialog, QMainWindow,
+                               QMessageBox, QWidget)
 
 from ..document import DocumentError, PdfDocument
 from . import icons
@@ -39,7 +39,7 @@ class MainWindow(QMainWindow):
         self.pages.page_chosen.connect(self.show_page)
         self.view.edited.connect(self.on_edited)
         self.view.selection.connect(self.update_enabled)
-        self.view.text_edit_requested.connect(self.edit_text)
+        self.view.text_edit_requested.connect(self.view.edit_text)
         self.view.message.connect(lambda text: self.statusBar().showMessage(text, 4000))
         self.update_title()
         self.statusBar().showMessage("Open a PDF to start.")
@@ -319,25 +319,15 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             f"Deleted {removed} markup{'s' if removed > 1 else ''}.", 4000)
 
-    def edit_text(self, xref: int = 0) -> None:
-        """Rewrite a text box or a sticky note."""
+    def edit_text(self) -> None:
+        """Open the editor on the page, over the markup being edited."""
         chosen = self.view.selected_items()
-        item = next((one for one in chosen if one.xref == xref), None) \
-            if xref else (chosen[0] if len(chosen) == 1 else None)
+        item = chosen[0] if len(chosen) == 1 else None
         if item is None or not item.markup.editable_text:
             self.statusBar().showMessage(
                 "Select a text box or a note to edit its text.", 4000)
             return
-        text, agreed = QInputDialog.getMultiLineText(
-            self, f"Edit {item.subtype.lower()} text", "Text:", item.markup.text)
-        if not agreed or text == item.markup.text:
-            return
-        if self.view.document.set_text(self.view.index, item.xref, text):
-            self.view.refresh(item.xref)
-            self.on_edited()
-            self.statusBar().showMessage("Text updated.", 4000)
-        else:
-            self.statusBar().showMessage("This markup's text cannot be changed.", 4000)
+        self.view.edit_text(item.xref)
 
     def group_markups(self) -> None:
         xrefs = [item.xref for item in self.view.selected_items()]

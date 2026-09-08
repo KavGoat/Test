@@ -10,14 +10,16 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QPixmap, QPolygonF
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
+from PySide6.QtGui import (QBrush, QColor, QPainter, QPen, QPixmap, QPolygonF,
+                           QTransform)
 from PySide6.QtWidgets import (QGraphicsItem, QGraphicsPixmapItem, QGraphicsPathItem,
                                QGraphicsRectItem, QGraphicsScene, QGraphicsView)
 from PySide6.QtGui import QPainterPath
 
 from ..document import DocumentError, Markup, PdfDocument
 from .images import to_pixmap
+from .textedit import InlineText
 
 SELECT = "select"
 RECTANGLE = "rectangle"
@@ -25,6 +27,11 @@ RECTANGLE = "rectangle"
 MIN_ZOOM = 0.1
 MAX_ZOOM = 8.0
 ZOOM_STEP = 1.25
+
+# How long the scaled-up picture stands in for the page before it is redrawn
+# properly. Long enough that a roll of the wheel is one redraw rather than ten,
+# short enough that it is never a blurred page you are waiting on.
+SETTLE_MS = 120
 
 # A drag shorter than this is a mis-click, not a rectangle.
 MIN_RECTANGLE_POINTS = 3.0
@@ -38,6 +45,12 @@ CALLOUT_COLOUR = QColor("#e08000")
 BROKEN_PAGE_COLOUR = QColor("#e8e2e2")
 
 HANDLE_SIZE = 8.0
+
+# A markup smaller than this has no room for an editor inside it.
+MIN_EDITOR_SIZE = 40.0
+NOTE_EDITOR_WIDTH = 180.0
+NOTE_EDITOR_HEIGHT = 70.0
+EDITOR_POINT_SIZE = 10.0
 
 # The eight resize handles, as the corner of the rectangle each one drags.
 CORNERS = (("nw", 0.0, 0.0), ("n", 0.5, 0.0), ("ne", 1.0, 0.0),
@@ -123,7 +136,7 @@ class MarkupItem(QGraphicsPixmapItem):
 
     def mouseDoubleClickEvent(self, event):
         if self.markup.editable_text:
-            self._view.text_edit_requested.emit(self.xref)
+            self._view.edit_text(self.xref)
             event.accept()
             return
         super().mouseDoubleClickEvent(event)
@@ -182,6 +195,13 @@ class PageView(QGraphicsView):
         self._preview: Optional[QGraphicsItem] = None
         self._handles: list[HandleItem] = []
         self._groups: dict[int, list[int]] = {}
+        self._editor: Optional[InlineText] = None
+        self._drawn_zoom = 1.0
+        self._anchor: Optional[tuple[QPointF, QPointF]] = None
+        self._settle = QTimer(self)
+        self._settle.setSingleShot(True)
+        self._settle.setInterval(SETTLE_MS)
+        self._settle.timeout.connect(self._redraw_at_zoom)
         self._dragging: Optional[HandleItem] = None
         self._origin = QPointF()
         self._syncing = False
@@ -198,6 +218,7 @@ class PageView(QGraphicsView):
         """Rebuild the scene for ``index``, or empty it if there is no page."""
         scene = self.scene()
         self._clear_handles()
+        self._editor = None
         scene.clear()
         self._page_item = None
         self._draft = self._preview = None
@@ -206,6 +227,7 @@ class PageView(QGraphicsView):
             scene.setSceneRect(QRectF(0, 0, 1, 1))
             return
         self.index = min(max(index, 0), self.document.page_count - 1)
+        self._drawn_zoom = self.zoom
 
         raster = self.document.render_page(self.index, self.zoom)
         if raster is None:
@@ -288,6 +310,8 @@ class PageView(QGraphicsView):
         if abs(zoom - self.zoom) < 1e-6:
             return                      # no redraw for a zoom that did not move
         self.zoom = zoom
+        self._settle.stop()
+        self.setTransform(QTransform())
         self.refresh(keep)
 
     def zoom_in(self) -> None:
@@ -299,20 +323,46 @@ class PageView(QGraphicsView):
     def zoom_by(self, factor: float, anchor) -> None:
         """Zoom about a point in the viewport, leaving what is under it still.
 
-        The scene is re-rendered rather than scaled, so the point has to be
-        followed through in page coordinates and the scrollbars moved to put it
-        back where it was.
+        Re-rendering a large sheet takes long enough that doing it on every
+        click of the wheel is a stutter, so the picture already on screen is
+        scaled at once — which is instant, and slightly soft — and the page is
+        redrawn properly once the wheel stops. The point under the pointer is
+        held throughout, across the scaling and across the redraw.
         """
         if self.document.is_empty:
             return
         anchor = QPointF(anchor)
-        before = self.mapToScene(anchor.toPoint())
-        page_point = QPointF(before.x() / self.zoom, before.y() / self.zoom)
+        page_point = self.mapToScene(anchor.toPoint()) / self._drawn_zoom
+        zoom = min(max(self.zoom * factor, MIN_ZOOM), MAX_ZOOM)
+        if abs(zoom - self.zoom) < 1e-6:
+            return
+        self.zoom = zoom
+        self._anchor = (page_point, anchor)
+        self._scale_preview()
+        self._settle.start()
+
+    def _scale_preview(self) -> None:
+        """Stand the page up at the new zoom by scaling what is already drawn."""
+        scale = self.zoom / self._drawn_zoom
+        self.setTransform(QTransform.fromScale(scale, scale))
+        self._hold_anchor()
+
+    def _redraw_at_zoom(self) -> None:
+        """Draw the page properly at the zoom the wheel left it on."""
         selected = self.selected_items()
-        self.set_zoom(self.zoom * factor,
-                      selected[0].xref if len(selected) == 1 else 0)
-        after = QPointF(page_point.x() * self.zoom, page_point.y() * self.zoom)
-        drift = self.mapFromScene(after) - anchor.toPoint()
+        self.setTransform(QTransform())
+        self.refresh(selected[0].xref if len(selected) == 1 else 0)
+        self._hold_anchor()
+        self._anchor = None
+
+    def _hold_anchor(self) -> None:
+        """Put the page point that was under the pointer back under it."""
+        if self._anchor is None:
+            return
+        page_point, viewport_point = self._anchor
+        target = QPointF(page_point.x() * self._drawn_zoom,
+                         page_point.y() * self._drawn_zoom)
+        drift = self.mapFromScene(target) - viewport_point.toPoint()
         self.horizontalScrollBar().setValue(
             self.horizontalScrollBar().value() + drift.x())
         self.verticalScrollBar().setValue(
@@ -408,6 +458,45 @@ class PageView(QGraphicsView):
         self._handles.append(handle)
 
     # ------------------------------------------------------------------ edits
+
+    def edit_text(self, xref: int) -> None:
+        """Open an editor on the page, over the markup, at the size it is."""
+        item = next((one for one in self.markup_items() if one.xref == xref), None)
+        if item is None or not item.markup.editable_text:
+            return
+        self.close_editor()
+        box = item.sceneBoundingRect()
+        if box.width() < MIN_EDITOR_SIZE or box.height() < MIN_EDITOR_SIZE:
+            # A sticky note is an icon barely bigger than the cursor, so its
+            # words get a box of their own beside it rather than inside it.
+            box = QRectF(box.left(), box.top(), NOTE_EDITOR_WIDTH * self.zoom,
+                         NOTE_EDITOR_HEIGHT * self.zoom)
+        self._editor = InlineText(item.markup.text, box, EDITOR_POINT_SIZE * self.zoom,
+                                  lambda text, x=xref: self._text_edited(x, text))
+        self.scene().addItem(self._editor)
+        self._editor.take_focus()
+
+    @property
+    def editing(self) -> bool:
+        return self._editor is not None
+
+    def close_editor(self) -> None:
+        if self._editor is not None:
+            editor, self._editor = self._editor, None
+            if editor.scene() is not None:
+                self.scene().removeItem(editor)
+
+    def _text_edited(self, xref: int, text: Optional[str]) -> None:
+        self.close_editor()
+        if text is None:
+            self.message.emit("Text left as it was.")
+            return
+        if self.document.set_text(self.index, xref, text):
+            self.refresh(xref)
+            self.message.emit("Text updated.")
+            self.edited.emit()
+        else:
+            self.message.emit("This markup's text cannot be changed.")
 
     def commit_moves(self) -> None:
         """Write every finished drag back into the document."""
