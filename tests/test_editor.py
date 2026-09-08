@@ -1364,11 +1364,11 @@ def test_autosave_lifecycle():
 
 
 def test_theme_toggle(editor):
-    assert not editor._dark_mode
-    editor.toggle_theme()
     assert editor._dark_mode
     editor.toggle_theme()
     assert not editor._dark_mode
+    editor.toggle_theme()
+    assert editor._dark_mode
 
 
 def test_forward_backward_one_actions(editor):

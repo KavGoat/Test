@@ -14,18 +14,22 @@ COLUMNS = ["Page", "Type", "Subject", "Author", "Text"]
 
 STYLE = """
 QTableWidget {
-    background: #fafafa;
-    gridline-color: #e0e0e0;
-    border: 1px solid #ddd;
-    border-radius: 3px;
-    font-size: 11px;
-}
-QTableWidget::item:selected { background: #dce9fb; color: #10233d; }
-QHeaderView::section {
-    background: #f2f3f5;
+    background: #1f2335;
+    gridline-color: #292e42;
     border: none;
-    border-bottom: 1px solid #ddd;
-    padding: 4px 6px;
+    font-size: 11px;
+    color: #c0caf5;
+    selection-background-color: #283457;
+    selection-color: #c0caf5;
+}
+QTableWidget::item:selected { background: #283457; color: #c0caf5; }
+QTableWidget::item:hover { background: #24283b; }
+QHeaderView::section {
+    background: #24283b;
+    color: #a9b1d6;
+    border: none;
+    border-bottom: 1px solid #292e42;
+    padding: 5px 8px;
     font-weight: 600;
     font-size: 11px;
 }
@@ -81,7 +85,7 @@ class MarkupListPanel(QWidget):
         self._count_label = QLineEdit("0 markups")
         self._count_label.setReadOnly(True)
         self._count_label.setFrame(False)
-        self._count_label.setStyleSheet("color: #666; font-size: 11px; background: transparent;")
+        self._count_label.setStyleSheet("color: #565f89; font-size: 11px; background: transparent;")
         layout.addWidget(self._count_label)
 
     def reload(self) -> None:

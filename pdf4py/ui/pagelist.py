@@ -25,15 +25,22 @@ BATCH_BUDGET_S = 0.05
 BATCH_PAUSE_MS = 10
 
 STYLE = """
-QListWidget { background: #f2f3f5; border: none; }
-QListWidget::item { border: 1px solid transparent; border-radius: 3px; padding: 3px; }
-QListWidget::item:selected { background: #dce9fb; border-color: #1a73e8; color: #10233d; }
-QListWidget::item:hover:!selected { background: #e6e8ec; }
+QListWidget {
+    background: #1a1b26; border: none; outline: none;
+    color: #565f89;
+}
+QListWidget::item {
+    border: 1px solid transparent; border-radius: 4px; padding: 3px;
+}
+QListWidget::item:selected {
+    background: #283457; border-color: #3d59a1; color: #c0caf5;
+}
+QListWidget::item:hover:!selected { background: #24283b; }
 """
 
-PAGE_EDGE = QColor("#9aa0a6")
-PLACEHOLDER_FILL = QColor("#ffffff")
-BROKEN_FILL = QColor("#e8e2e2")
+PAGE_EDGE = QColor("#414868")
+PLACEHOLDER_FILL = QColor("#c0caf5")
+BROKEN_FILL = QColor("#292e42")
 
 
 def framed(pixmap: QPixmap) -> QPixmap:

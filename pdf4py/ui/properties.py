@@ -16,7 +16,7 @@ def _colour_button(colour: QColor) -> QPushButton:
     btn = QPushButton()
     btn.setFixedSize(28, 22)
     btn.setStyleSheet(
-        f"background: {colour.name()}; border: 1px solid #888; border-radius: 3px;")
+        f"background: {colour.name()}; border: 1px solid #414868; border-radius: 4px;")
     return btn
 
 
@@ -50,7 +50,7 @@ class PropertyPanel(QWidget):
         layout.setContentsMargins(6, 6, 6, 6)
 
         self._info_label = QLabel("No markup selected")
-        self._info_label.setStyleSheet("color: #666; font-style: italic;")
+        self._info_label.setStyleSheet("color: #565f89; font-style: italic;")
         layout.addWidget(self._info_label)
 
         self._props_box = QGroupBox("Properties")
@@ -132,14 +132,14 @@ class PropertyPanel(QWidget):
 
             stroke_colour = _rgb_to_qcolor(markup.colour)
             self._stroke_btn.setStyleSheet(
-                f"background: {stroke_colour.name()}; border: 1px solid #888; "
-                f"border-radius: 3px;")
+                f"background: {stroke_colour.name()}; border: 1px solid #414868; "
+                f"border-radius: 4px;")
             self._stroke_label.setText(stroke_colour.name() if markup.colour else "none")
 
             fill_colour = _rgb_to_qcolor(markup.fill_colour)
             self._fill_btn.setStyleSheet(
-                f"background: {fill_colour.name() if markup.fill_colour else '#f0f0f0'}; "
-                f"border: 1px solid #888; border-radius: 3px;")
+                f"background: {fill_colour.name() if markup.fill_colour else '#24283b'}; "
+                f"border: 1px solid #414868; border-radius: 4px;")
             self._fill_label.setText(fill_colour.name() if markup.fill_colour else "none")
 
             self._width_spin.setValue(markup.border_width)

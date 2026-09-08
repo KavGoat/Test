@@ -28,29 +28,157 @@ PDF_FILTER = "PDF documents (*.pdf);;All files (*)"
 IMAGE_FILTER = "PNG images (*.png);;JPEG images (*.jpg *.jpeg);;All files (*)"
 CSV_FILTER = "CSV files (*.csv);;All files (*)"
 
-_DARK_STYLE = """
-    QMainWindow, QWidget { background: #2b2b2b; color: #ddd; }
-    QMenuBar { background: #333; color: #ddd; }
-    QMenuBar::item:selected { background: #555; }
-    QMenu { background: #333; color: #ddd; }
-    QMenu::item:selected { background: #555; }
-    QToolBar { background: #333; border: none; }
-    QDockWidget { color: #ddd; }
-    QDockWidget::title { background: #3a3a3a; }
-    QGroupBox { color: #ddd; }
-    QLabel { color: #ddd; }
+_MARKFORGE_STYLE = """
+    QMainWindow { background: #1a1b26; }
+    QWidget { background: #1a1b26; color: #c0caf5; }
+
+    QMenuBar {
+        background: #1f2335; color: #a9b1d6;
+        border-bottom: 1px solid #292e42;
+        padding: 2px 0;
+    }
+    QMenuBar::item { padding: 4px 10px; border-radius: 4px; }
+    QMenuBar::item:selected { background: #292e42; color: #c0caf5; }
+    QMenu {
+        background: #1f2335; color: #c0caf5;
+        border: 1px solid #292e42; border-radius: 6px;
+        padding: 4px 0;
+    }
+    QMenu::item { padding: 5px 24px 5px 12px; border-radius: 4px; margin: 1px 4px; }
+    QMenu::item:selected { background: #283457; }
+    QMenu::separator { height: 1px; background: #292e42; margin: 4px 8px; }
+
+    QToolBar {
+        background: #1f2335; border: none;
+        border-bottom: 1px solid #292e42;
+        spacing: 2px; padding: 3px 6px;
+    }
+    QToolBar::separator { width: 1px; background: #292e42; margin: 4px 4px; }
+    QToolButton {
+        background: transparent; color: #a9b1d6;
+        border: 1px solid transparent; border-radius: 6px;
+        padding: 4px; margin: 1px;
+    }
+    QToolButton:hover { background: #292e42; border-color: #292e42; }
+    QToolButton:checked { background: #283457; border-color: #3d59a1; }
+    QToolButton:pressed { background: #3d59a1; }
+
+    QDockWidget {
+        color: #a9b1d6;
+        titlebar-close-icon: none;
+        titlebar-normal-icon: none;
+    }
+    QDockWidget::title {
+        background: #1f2335; text-align: left;
+        padding: 6px 10px;
+        border-bottom: 1px solid #292e42;
+        font-weight: 600;
+    }
+
+    QGroupBox {
+        color: #a9b1d6; font-weight: 600;
+        border: 1px solid #292e42; border-radius: 6px;
+        margin-top: 8px; padding-top: 14px;
+    }
+    QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }
+
+    QLabel { color: #c0caf5; background: transparent; }
+
     QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QTextEdit {
-        background: #3a3a3a; color: #ddd; border: 1px solid #555; }
-    QSlider::groove:horizontal { background: #555; height: 4px; }
-    QSlider::handle:horizontal { background: #aaa; width: 12px; margin: -4px 0; }
-    QPushButton { background: #444; color: #ddd; border: 1px solid #666;
-                  padding: 3px 8px; border-radius: 3px; }
-    QPushButton:hover { background: #555; }
-    QCheckBox { color: #ddd; }
-    QListWidget { background: #333; color: #ddd; }
-    QHeaderView::section { background: #3a3a3a; color: #ddd; }
-    QStatusBar { background: #333; color: #ddd; }
-    QScrollBar { background: #333; }
+        background: #24283b; color: #c0caf5;
+        border: 1px solid #292e42; border-radius: 4px;
+        padding: 3px 6px; selection-background-color: #283457;
+    }
+    QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus, QTextEdit:focus {
+        border-color: #3d59a1;
+    }
+    QComboBox::drop-down {
+        border: none; width: 20px;
+    }
+    QComboBox QAbstractItemView {
+        background: #1f2335; color: #c0caf5;
+        border: 1px solid #292e42; selection-background-color: #283457;
+    }
+
+    QSlider::groove:horizontal {
+        background: #292e42; height: 4px; border-radius: 2px;
+    }
+    QSlider::handle:horizontal {
+        background: #7aa2f7; width: 14px; height: 14px;
+        margin: -5px 0; border-radius: 7px;
+    }
+    QSlider::handle:horizontal:hover { background: #89b4fa; }
+
+    QPushButton {
+        background: #24283b; color: #c0caf5;
+        border: 1px solid #292e42; padding: 4px 12px;
+        border-radius: 4px; font-weight: 500;
+    }
+    QPushButton:hover { background: #292e42; border-color: #3d59a1; }
+    QPushButton:pressed { background: #3d59a1; }
+
+    QCheckBox { color: #c0caf5; spacing: 6px; }
+    QCheckBox::indicator {
+        width: 16px; height: 16px; border-radius: 3px;
+        border: 1px solid #414868;
+    }
+    QCheckBox::indicator:checked {
+        background: #7aa2f7; border-color: #7aa2f7;
+    }
+    QCheckBox::indicator:unchecked { background: #24283b; }
+
+    QListWidget {
+        background: #1f2335; color: #c0caf5;
+        border: none; outline: none;
+    }
+    QListWidget::item:selected { background: #283457; }
+    QListWidget::item:hover:!selected { background: #292e42; }
+
+    QTableWidget {
+        background: #1f2335; color: #c0caf5;
+        gridline-color: #292e42; border: none;
+        selection-background-color: #283457;
+    }
+    QHeaderView::section {
+        background: #24283b; color: #a9b1d6;
+        border: none; border-bottom: 1px solid #292e42;
+        padding: 5px 8px; font-weight: 600;
+    }
+
+    QStatusBar {
+        background: #1f2335; color: #565f89;
+        border-top: 1px solid #292e42;
+    }
+    QStatusBar::item { border: none; }
+
+    QScrollBar:vertical {
+        background: #1a1b26; width: 10px; margin: 0; border: none;
+    }
+    QScrollBar::handle:vertical {
+        background: #292e42; min-height: 30px; border-radius: 5px;
+    }
+    QScrollBar::handle:vertical:hover { background: #414868; }
+    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+    QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
+
+    QScrollBar:horizontal {
+        background: #1a1b26; height: 10px; margin: 0; border: none;
+    }
+    QScrollBar::handle:horizontal {
+        background: #292e42; min-width: 30px; border-radius: 5px;
+    }
+    QScrollBar::handle:horizontal:hover { background: #414868; }
+    QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
+    QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: none; }
+
+    QSplitter::handle { background: #292e42; }
+    QTabBar::tab {
+        background: #1f2335; color: #565f89;
+        border: none; padding: 6px 14px;
+        border-bottom: 2px solid transparent;
+    }
+    QTabBar::tab:selected { color: #c0caf5; border-bottom-color: #7aa2f7; }
+    QTabBar::tab:hover:!selected { color: #a9b1d6; background: #24283b; }
 """
 
 
@@ -66,7 +194,8 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.view)
         self.setWindowIcon(icons.app_icon())
         self.resize(1280, 860)
-        self._dark_mode = False
+        self._dark_mode = True
+        self.setStyleSheet(_MARKFORGE_STYLE)
 
         self._autosave = Autosave(self._autosave_tick)
 
@@ -324,6 +453,7 @@ class MainWindow(QMainWindow):
         self.theme_action = self._action("&Dark Theme", icons.theme_icon(), None,
                                          self.toggle_theme, "Switch between light and dark")
         self.theme_action.setCheckable(True)
+        self.theme_action.setChecked(True)
         for action in (zoom_in, zoom_out, fit):
             view_menu.addAction(action)
             main_bar.addAction(action)
@@ -949,9 +1079,12 @@ class MainWindow(QMainWindow):
     def toggle_theme(self) -> None:
         self._dark_mode = not self._dark_mode
         if self._dark_mode:
-            self.setStyleSheet(_DARK_STYLE)
+            self.setStyleSheet(_MARKFORGE_STYLE)
+            from ..app import _dark_palette
+            QApplication.instance().setPalette(_dark_palette())
         else:
             self.setStyleSheet("")
+            QApplication.instance().setPalette(QApplication.style().standardPalette())
         self.theme_action.setChecked(self._dark_mode)
 
     # ------------------------------------------------------------------ state

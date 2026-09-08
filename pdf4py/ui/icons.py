@@ -4,13 +4,13 @@ from __future__ import annotations
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 
-INK = QColor("#2f3640")
-ACCENT = QColor("#d62828")
-BLUE = QColor("#1a73e8")
-GREEN = QColor("#1a8c3a")
-BROWN = QColor("#8b4513")
-PURPLE = QColor("#7a4fd6")
-ORANGE = QColor("#e08000")
+INK = QColor("#a9b1d6")
+ACCENT = QColor("#f7768e")
+BLUE = QColor("#7aa2f7")
+GREEN = QColor("#9ece6a")
+BROWN = QColor("#e0af68")
+PURPLE = QColor("#bb9af7")
+ORANGE = QColor("#ff9e64")
 
 
 def _canvas() -> tuple[QPixmap, QPainter]:
@@ -140,7 +140,7 @@ def ink_icon() -> QIcon:
 def highlight_icon() -> QIcon:
     pixmap, painter = _canvas()
     painter.setPen(Qt.NoPen)
-    painter.setBrush(QColor(255, 235, 59, 160))
+    painter.setBrush(QColor(255, 235, 59, 100))
     painter.drawRect(QRectF(4, 10, 24, 12))
     painter.setPen(QPen(INK, 1.2))
     painter.drawLine(QPointF(6, 16), QPointF(26, 16))
@@ -164,7 +164,7 @@ def text_icon() -> QIcon:
 def note_icon() -> QIcon:
     pixmap, painter = _canvas()
     painter.setPen(QPen(ORANGE, 2.0))
-    painter.setBrush(QColor(255, 240, 180))
+    painter.setBrush(QColor(255, 240, 180, 80))
     painter.drawRect(QRectF(6, 6, 20, 20))
     painter.setPen(QPen(INK, 1.2))
     painter.drawLine(QPointF(10, 13), QPointF(22, 13))
@@ -186,10 +186,10 @@ def rotate_icon() -> QIcon:
 
 def order_front_icon() -> QIcon:
     pixmap, painter = _canvas()
-    painter.setPen(QPen(QColor("#aaa"), 1.4))
+    painter.setPen(QPen(QColor("#565f89"), 1.4))
     painter.drawRect(QRectF(4, 4, 14, 14))
     painter.setPen(QPen(BLUE, 2.0))
-    painter.setBrush(QColor(220, 233, 251))
+    painter.setBrush(QColor(40, 52, 87, 160))
     painter.drawRect(QRectF(14, 14, 14, 14))
     painter.end()
     return QIcon(pixmap)
@@ -198,9 +198,9 @@ def order_front_icon() -> QIcon:
 def order_back_icon() -> QIcon:
     pixmap, painter = _canvas()
     painter.setPen(QPen(BLUE, 2.0))
-    painter.setBrush(QColor(220, 233, 251))
+    painter.setBrush(QColor(40, 52, 87, 160))
     painter.drawRect(QRectF(4, 4, 14, 14))
-    painter.setPen(QPen(QColor("#aaa"), 1.4))
+    painter.setPen(QPen(QColor("#565f89"), 1.4))
     painter.drawRect(QRectF(14, 14, 14, 14))
     painter.end()
     return QIcon(pixmap)
@@ -327,10 +327,10 @@ def app_icon() -> QIcon:
     pixmap.fill(Qt.transparent)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.Antialiasing)
-    painter.setBrush(QColor("#ffffff"))
-    painter.setPen(QPen(INK, 3.0))
-    painter.drawRect(QRectF(12, 6, 40, 52))
-    painter.setPen(QPen(ACCENT, 4.0))
+    painter.setBrush(QColor("#24283b"))
+    painter.setPen(QPen(QColor("#7aa2f7"), 3.0))
+    painter.drawRoundedRect(QRectF(12, 6, 40, 52), 4, 4)
+    painter.setPen(QPen(QColor("#f7768e"), 4.0))
     painter.drawRect(QRectF(21, 24, 22, 16))
     painter.end()
     return QIcon(pixmap)

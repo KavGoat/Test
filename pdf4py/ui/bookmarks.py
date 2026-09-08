@@ -11,10 +11,13 @@ from PySide6.QtWidgets import (QHBoxLayout, QInputDialog, QListWidget,
 from ..document import Bookmark, PdfDocument
 
 STYLE = """
-QListWidget { background: #fafafa; border: 1px solid #ddd; border-radius: 3px; }
-QListWidget::item { padding: 4px 8px; }
-QListWidget::item:selected { background: #dce9fb; color: #10233d; }
-QListWidget::item:hover:!selected { background: #eef1f5; }
+QListWidget {
+    background: #1f2335; border: none; border-radius: 4px;
+    color: #c0caf5; outline: none;
+}
+QListWidget::item { padding: 5px 10px; }
+QListWidget::item:selected { background: #283457; color: #c0caf5; }
+QListWidget::item:hover:!selected { background: #24283b; }
 """
 
 
