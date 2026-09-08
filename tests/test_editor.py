@@ -33,15 +33,6 @@ def build_pdf(path, rotation: int = 0) -> str:
     return str(path)
 
 
-@pytest.fixture(scope="session")
-def qapp():
-    """PDF4Py's own application, so this file stands on its own."""
-    from PySide6.QtWidgets import QApplication
-
-    from pdf4py.app import build_application
-    return QApplication.instance() or build_application([])
-
-
 @pytest.fixture
 def sample(tmp_path):
     return build_pdf(tmp_path / "sample.pdf")
@@ -203,16 +194,10 @@ def test_the_last_page_cannot_be_deleted(document):
 
 
 @pytest.fixture
-def editor(qapp, sample):
-    from pdf4py.ui.mainwindow import MainWindow
-    window = MainWindow()
-    window.resize(1100, 820)
-    assert window.load(sample)
-    window.view.set_zoom(1.0)      # 1:1 keeps scene points and PDF points equal
-    yield window
-    window.document.modified = False
-    window.close()
-    window.deleteLater()
+def editor(editor_window, sample):
+    assert editor_window.load(sample)
+    editor_window.view.set_zoom(1.0)   # 1:1 keeps scene points and PDF points equal
+    return editor_window
 
 
 def markup_items(window) -> list[MarkupItem]:

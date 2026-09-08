@@ -1,20 +1,16 @@
-# CalcForge
+# PDF4Py
 
-A desktop engineering workbench for Windows, macOS and Linux. One document holds
-your **calculations**, your **drawing markup** and your **spreadsheets** — laid out
-page by page like a PDF, A4 by default, and printable exactly as you see it.
+A small desktop PDF editor, inspired by
+[PDF4QT](https://github.com/JakubMelka/PDF4QT) — its viewer, its Page Master
+page-assembly tool and its annotation editing, reduced to the four things this
+app is for:
 
-It is the three tools an engineer normally juggles, in one place:
+- **Open a PDF**
+- **Add and delete pages**
+- **Move the markups a PDF already has** — drag any existing annotation
+- **Draw a rectangle**
 
-| You would normally use… | CalcForge gives you |
-|---|---|
-| SMath Studio / Mathcad | Unit-aware, typeset calculations with named variables and functions |
-| Bluebeam Revu | The full markup tool set, scaled measurement, takeoff and PDF page import |
-| Excel | Spreadsheets that read the very same variables your calculations define |
-
-Everything shares one workspace: a variable defined in a calculation can be used in a
-cell, and a cell can be published back as a variable. Change one number, press **F9**,
-and the whole document — text, tables and measurements — updates.
+Nothing else. There is no form filling, no signing, no text editing.
 
 ---
 
@@ -24,300 +20,85 @@ and the whole document — text, tables and measurements — updates.
 git clone <this repository>
 cd <this repository>
 python -m pip install -r requirements.txt
-python main.py
+python main.py                    # or: python main.py document.pdf
 ```
 
-Python 3.10 or newer. Everything else comes from `requirements.txt`
-(PySide6, Pint, NumPy, SymPy) — no system libraries beyond a normal desktop.
+Python 3.10 or newer, PySide6 for the interface and
+[PyMuPDF](https://pymupdf.readthedocs.io) for the PDF itself. Nothing else, and
+no system libraries beyond a normal desktop.
 
 Install it as a command instead, if you prefer:
 
 ```bash
 python -m pip install .
-calcforge                 # or: calcforge my-calculation.cfx
+pdf4py document.pdf               # or: python -m pdf4py
 ```
-
-Start with **Help ▸ Load the worked example** (or `python main.py --sample`) for a
-three-page steel-beam, load take-down and pad-footing calculation to poke at.
-
-On a headless machine (CI, a container) run with `QT_QPA_PLATFORM=offscreen`.
 
 ---
 
-## Calculations
+## Using it
 
-Type `\` anywhere on the page — or pick the **Calculation** tool (`M`) — and write
-ordinary engineering maths. It is typeset as you would write it by hand — real
-fractions, radicals, subscripts and superscripts — with the result immediately
-after it. Each line is its own region, so you can drag any of them where you want.
-Press **Enter** to open the next line below, **Shift+Enter** to keep several lines
-in one region.
-
-```
-# Simply supported beam
-L := 7.2 m
-w_dead := 8.5 kN/m
-w_live := 6.0 kN/m
-w := 1.2*w_dead + 1.5*w_live      # ULS combination
-
-M_max := w*L^2/8 -> kN*m
-Z_x := 896 cm^3
-sigma_b := M_max/Z_x -> MPa
-f_y := 355 MPa
-sigma_b <= f_y                    # capacity check
-```
-
-### How to write it
-
-| You type | What happens |
+| | |
 |---|---|
-| `b = 300 mm` | Defines `b` the first time that name appears… |
-| `b = 400 mm` | …and *checks* it afterwards, reading `false`, so nothing is silently overwritten. |
-| `b := 400 mm` or `b : 400 mm` | Always defines, even over a name that already exists. |
-| `b*d^2/6` | Implicit multiplication and `^` powers; shown as a real fraction. |
-| `5 kN`, `24 kN/m^3` | A number and a unit — no `*` needed. |
-| `M_max` | `_` makes a subscript; `sigma`, `delta`, `gamma`… become Greek letters. |
-| `expr -> MPa` | Show this result in a particular unit. |
-| `f(x) := w*x*(L-x)/2` | Defines a function; call it with `f(2 m)`. |
-| `sigma <= f_y` | A check — the result reads `true` or `false`. |
-| `# note` | A comment, at the start of a line or after an expression. |
+| **Open** | `Ctrl+O`, or pass a file on the command line |
+| **Save / Save As** | `Ctrl+S` / `Ctrl+Shift+S` |
+| **Move markups** (tool) | `V` — drag any existing annotation to a new place |
+| **Rectangle** (tool) | `R` — drag on the page to draw one |
+| **Insert blank page after** | `Ctrl+Shift+A` — matches the current page's size |
+| **Delete page** | `Ctrl+Shift+D` |
+| **Zoom** | `Ctrl++`, `Ctrl+-`, `Ctrl+0` to fit, or `Ctrl`+wheel |
 
-Results come out in the unit you would have written yourself. `w·L²/8` reads
-**124.4 kN·m**, a bearing pressure reads **149.8 kPa**, a deflection **7.26 mm** —
-lengths swap from mm to m past a metre, forces from N to kN past a kilonewton.
-A value you typed out in full keeps the unit you chose (`896 cm³` stays cm³), and
-imperial input is never quietly turned into SI. An angle that fell out of `atan`
-reads in degrees; one you wrote in radians stays in radians.
+The strip on the left is one thumbnail per page; click one to go to it. Markups
+outline as you pass over them, and a rectangle you draw is red, 1.5 pt.
 
-Units that cancel collapse to a plain number: `6 m / 200 mm` is **30**, and a
-utilisation ratio built from `kN·m/(mm³·MPa)` is **0.1018**.
-
-Units are enforced, not decorative: `1 m + 1 kg` is refused with
-*"Units do not match: cannot combine meter with kilogram"*, and every result carries
-the unit it earned. SI, imperial and the usual structural units (`kN`, `MPa`, `kip`,
-`ksi`, `psf`, `pcf`, `klf`…) are all built in.
-
-### Order is position
-
-The whole document evaluates in one pass, top-left to bottom-right, exactly as
-SMath does. A value has to be defined above — or to the left of — whatever uses
-it, so dragging a line somewhere else really does change what resolves. When
-something stops resolving the **Problems** panel says so, with the page, the line
-or cell, and what went wrong: an undefined name, a unit mismatch, a bad formula.
-The status bar carries the count.
-
-**Split into separate lines** and **Merge into one block** (under *Calculate*)
-convert between one region per line and a single block.
-
-### What is available
-
-Arithmetic, `sqrt`, `root`, `exp`, `ln`, `log`; trigonometry that accepts degrees or
-radians; `sum`, `mean`, `median`, `stdev`, `max`, `min`; `if`, `and`, `or`, `not`;
-matrices (`matrix`, `det`, `inv`, `lsolve`, `norm`, `el`); `interp` and `lookup` for
-design tables; numerical `diff`, `integral`, `root_of`, `maximise`, `minimise`; unit
-helpers `to`, `mag`, `unit_of`; and a SymPy bridge (`sym`, `symsolve`, `symdiff`,
-`symint`, `simplify`, `factor`) when you want the algebra rather than the number.
-The **Functions** panel lists them all with one-line help — double-click to insert.
-
-The **Variables** panel shows every value the document has defined, what it evaluated
-to, and which block it came from.
-
----
-
-## Plots
-
-Draw a plot with the **Plot** tool (`G`) and give it a curve per line — a function
-you defined (`M`), or any expression in the plot variable. The range can be
-written in units (`0 m` to `L`), the axes label themselves from the units that
-come back, and a curve whose units do not match the y axis says so rather than
-being silently dropped.
-
-## Markup
-
-The complete annotation set, with a properties panel for colour, fill, thickness,
-dash pattern, opacity, arrowheads, font, layer, author and comment:
-
-- **Draw** — pen, highlighter, line, arrow, polyline, rectangle, ellipse, polygon,
-  revision cloud (box or free-form), area highlight, redaction
-- **Annotate** — text box, callout with a draggable leader, sticky note, status stamps
-  (*APPROVED*, *FOR CONSTRUCTION*, *AS BUILT*…), images
-- **Measure** — length, polyline length, area, perimeter, volume, angle, radius,
-  diameter, and a count tool with numbered markers
-
-Selected markups get eight resize handles and a rotation handle; polylines, polygons
-and callout leaders get one handle per vertex, and a double-click inserts another.
-Shift constrains to 15° or to a square, arrow keys nudge, and everything is
-undoable.
-
-The **Markups** panel is a live list of every annotation in the document — page, type,
-subject, measured value, author, date and comment — filterable, and exportable to CSV
-as a takeoff. Measurements and counts sharing a subject are totalled at the bottom.
-
-### Scale and measurement
-
-Set the page scale from the status bar, or draw a known distance with the
-**Calibrate** tool and type what it represents ("5 m"). Every measurement on that page
-then reads true site dimensions in the units you choose, at the precision you choose.
-Scale is per page, so an imported 1:50 detail and a 1:200 layout can live in the same
-document.
-
-### PDF pages
-
-**File ▸ Insert PDF pages** brings drawings in as page backgrounds — all pages or a
-range like `1-3,7`, at the resolution you pick, keeping each page's own size or
-fitting to A4. Mark them up, measure them, and calculate against them.
-
----
-
-## Tables
-
-Draw a table with the **Table** tool (`B`). It behaves like a spreadsheet: click a
-cell and type, `Tab` and the arrow keys navigate, `Ctrl+D` / `Ctrl+R` fill down and
-right (with relative and `$absolute$` references translated properly), and the formula
-bar shows the raw entry and the evaluated result.
-
-```
-A            B          C             D
-Item         Thickness  Density       Load
-Slab         150 mm     24 kN/m^3     =B2*C2
-Screed       60 mm      22 kN/m^3     =B3*C3
-Total                                 =SUM(D2:D4)
-```
-
-- Cells accept numbers, text, booleans **and quantities** — `150 mm` is a length, not
-  a string, so `=B2*C2` comes out as a pressure.
-- Copy, cut and paste ranges with `Ctrl+C` / `Ctrl+X` / `Ctrl+V`. Relative references
-  follow the paste, absolute ones do not, and the clipboard is tab-separated so it
-  round-trips with Excel.
-- Excel-style functions: `SUM`, `AVERAGE`, `COUNT`, `COUNTA`, `IF`, `IFERROR`,
-  `AND`, `OR`, `MIN`, `MAX`, `ROUND`, `SUMIF`, `COUNTIF`, `SUMPRODUCT`, `VLOOKUP`,
-  `INDEX`, `MATCH`, `CONCAT`, `TEXT`… case-insensitive, with `=` for equality,
-  `<>` for not-equal and `&` for joining text. `IF` and `IFERROR` are lazy, so
-  `=IF(B2=0,0,A2/B2)` is safe.
-- **Any variable from a calculation works in a formula** — `=D2*gamma_c` just works.
-- Give a column a display unit and every value in it is converted for display.
-- Publish results back: name a cell (right-click ▸ **Named cells…**) or switch on
-  *Publish columns as variables*, and the rest of the document can use it.
-
-Recalculation is dependency-ordered with circular-reference detection, and runs in two
-passes so a block can reference something defined further down the document.
-
----
-
-## The document
-
-- Pages are real pages: **A4 portrait by default**, plus A0–A5, Letter, Legal,
-  Tabloid, ANSI and ARCH sizes, portrait or landscape, with adjustable margins —
-  per page or applied to all.
-- Thumbnail panel for adding, duplicating, deleting and reordering pages.
-- Optional grid with snapping, margin guides, and header/footer templates with
-  fields: `{title} {project} {author} {page} {pages} {date} {time} {file}`.
-- **Print** and **print preview** through the normal system dialog, **Export to PDF**
-  (vector, any page size), export pages as images, and export the markups list or the
-  variable list to CSV.
-- **Layers** with per-layer show, lock and print — hidden layers cannot be clicked,
-  locked ones cannot be moved, non-printing ones stay out of the output.
-- **Redaction that redacts**: draw the boxes, then *Markup ▸ Apply redactions* to
-  overwrite the page pixels underneath and delete the markups they cover. It says
-  plainly that this cannot be undone, and that partly-overlapping markups are left
-  for you to check.
-- A light and a dark theme; the page itself stays paper-white in both.
-- Autosave every two minutes beside the document, offered back on the next start.
-- Save to `.cfx` — a zip holding the document as JSON plus its images and imported
-  PDF pages, so a file is self-contained and diff-friendly.
-
----
-
-## Keyboard
-
-Typing straight onto the page does **nothing unless the key is bound** — which is
-what lets a bare keystroke mean "start writing here":
-
-| Key | Starts |
-|---|---|
-| `"` | A text region where the cursor is |
-| `\` | A calculation |
-| `\|` | A table |
-| `@` | A callout |
-
-Everything is editable under **Help ▸ Customise shortcuts**, which flags any key
-used twice and remembers your bindings between sessions.
-
-| Key | Action |
-|---|---|
-| `Esc` | Back to Select · finish or cancel what you are doing |
-| `P` `K` | Pen · highlighter |
-| `L` `A` | Line · arrow |
-| `R` `E` `C` | Rectangle · ellipse · revision cloud |
-| `T` `N` `S` | Text box · note · stamp |
-| `M` `B` `G` | Calculation · table · plot |
-| `H`, `Space`+drag | Pan |
-| `Ctrl`+wheel | Zoom · `Ctrl+0` fit page · `Ctrl+1` fit width |
-| `Shift`+drag | Constrain to 15° or square |
-| Double-click | Edit text, calculation or table · add a polyline vertex |
-| `Enter` | In a one-line calculation: open the next line below |
-| `Shift+Enter` | Keep typing on a new line of the same region |
-| `F9` | Recalculate everything |
-| `Ctrl+Z` / `Ctrl+Y` | Undo · redo |
-| In a table | `Enter`/`F2` edit · `Tab`/arrows move · `Ctrl+D`/`Ctrl+R` fill |
-
-Full list under **Help ▸ Keyboard shortcuts** (`F1`).
+The title bar carries a `*` while there are unsaved changes, and closing or
+opening another file asks before throwing them away.
 
 ---
 
 ## Layout of the code
 
 ```
-calcforge/
-  core/        units, evaluation engine, function library, 2D maths typesetting,
-               spreadsheet engine, document and page model, problem collection
-  items/       everything that can sit on a page: shapes, text, stamps, images,
-               measurements, calculations, tables, plots
-  ui/          the scene and canvas, tools, key bindings, dock panels, dialogs,
-               main window
-  io/          project files, PDF import, printing and export
-  sample.py    the worked example
-tests/         168 tests: engine, spreadsheet, items and end-to-end GUI
+main.py            launcher
+pdf4py/
+  app.py           the QApplication
+  document.py      the PDF and the four edits — no Qt anywhere in here
+  ui/
+    pageview.py    the canvas: the page, the markup items, the two tools
+    pagelist.py    the page thumbnails
+    mainwindow.py  menus, toolbar and the wiring between the two
+    icons.py       toolbar icons, painted rather than shipped as files
+    images.py      rasters from the document into Qt images
 ```
 
-Two pieces are worth knowing about if you go digging:
+`document.py` keeps the same split PDF4QT does between its rendering library
+and its applications: it owns the PDF and hands the interface finished images,
+and the interface hands back geometry. Three details are worth knowing:
 
-**`core/mathrender.py`** lays maths out as a tree of boxes — fractions, radicals,
-scripts, scaled brackets, matrices — and paints them with `QPainter`. That is what
-makes a calculation look handwritten rather than like source code.
+**The file is read into memory** and the handle closed, so a document can always
+be saved back over the file it was opened from.
 
-**`core/typography.py`** sizes every page font in pixels rather than points. Page
-coordinates are PostScript points, so a font sized in points would come out four
-times too large on a 300 dpi printer; pixel sizing pins text to scene units and lets
-the painter's transform scale it like any other geometry.
+**Pages are rendered without their annotations**, and every markup is then
+rendered on its own and placed over the page as a separate item. That is what
+makes a markup something you can pick up and drag rather than part of a picture.
+A drag is clamped to the page, so a markup cannot be lost off the edge.
 
-**`core/units.py`** holds the ladders that decide a result reads best in kN rather
-than 780 000 N, and the rules that keep an angle, an imperial input or a value you
-typed out in full exactly as it was written.
+**Coordinates are display points** everywhere outside `document.py`: PDF user
+space with the page's own `/Rotate` already applied, so a rotated page behaves
+like any other. A move is written straight into the annotation's `/Rect`,
+because PyMuPDF's `Annot.set_rect` re-applies the border padding on every call
+and would walk the markup a point further with every drag.
 
-### Tests
+---
+
+## Tests
 
 ```bash
 python -m pytest
 ```
 
-Runs headless (the suite forces `QT_QPA_PLATFORM=offscreen`) and drives the real
-window: every drawing tool, selection, resize, undo, table editing, recalculation
-order, save/reload, and PDF export.
-
----
-
-## Also in this repository: PDF4Py
-
-`pdf4py/` is a separate, much smaller desktop app — a PDF page and markup editor
-inspired by [PDF4QT](https://github.com/JakubMelka/PDF4QT). It opens a PDF, adds
-and deletes pages, moves the markups the PDF already has, and draws rectangles.
-That is all it does.
-
-```bash
-python -m pip install -r pdf4py/requirements.txt
-python -m pdf4py document.pdf
-```
-
-It shares nothing with CalcForge but the repository: see
-[`pdf4py/README.md`](pdf4py/README.md).
+Runs headless (the suite forces `QT_QPA_PLATFORM=offscreen`). It covers the
+document model — exact, drift-free moves, rotated pages, page insertion and
+deletion, the save round trip — and drives the real window with synthetic mouse
+events: the rectangle tool, dragging a markup, clamping at the page edge, and
+the page strip staying in step with the canvas.
