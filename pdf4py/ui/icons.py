@@ -6,6 +6,11 @@ from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 
 INK = QColor("#2f3640")
 ACCENT = QColor("#d62828")
+BLUE = QColor("#1a73e8")
+GREEN = QColor("#1a8c3a")
+BROWN = QColor("#8b4513")
+PURPLE = QColor("#7a4fd6")
+ORANGE = QColor("#e08000")
 
 
 def _canvas() -> tuple[QPixmap, QPainter]:
@@ -73,6 +78,130 @@ def rectangle_icon() -> QIcon:
     pixmap, painter = _canvas()
     painter.setPen(QPen(ACCENT, 2.4))
     painter.drawRect(QRectF(5, 8, 22, 16))
+    painter.end()
+    return QIcon(pixmap)
+
+
+def line_icon() -> QIcon:
+    pixmap, painter = _canvas()
+    painter.setPen(QPen(BLUE, 2.4, Qt.SolidLine, Qt.RoundCap))
+    painter.drawLine(QPointF(6, 26), QPointF(26, 6))
+    painter.end()
+    return QIcon(pixmap)
+
+
+def arrow_icon() -> QIcon:
+    pixmap, painter = _canvas()
+    painter.setPen(QPen(BLUE, 2.4, Qt.SolidLine, Qt.RoundCap))
+    painter.drawLine(QPointF(6, 26), QPointF(26, 6))
+    painter.drawLine(QPointF(26, 6), QPointF(19, 8))
+    painter.drawLine(QPointF(26, 6), QPointF(24, 13))
+    painter.end()
+    return QIcon(pixmap)
+
+
+def ellipse_icon() -> QIcon:
+    pixmap, painter = _canvas()
+    painter.setPen(QPen(GREEN, 2.4))
+    painter.drawEllipse(QRectF(4, 7, 24, 18))
+    painter.end()
+    return QIcon(pixmap)
+
+
+def polygon_icon() -> QIcon:
+    pixmap, painter = _canvas()
+    painter.setPen(QPen(BROWN, 2.4, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    painter.drawPolygon([QPointF(16, 4), QPointF(28, 14), QPointF(24, 28),
+                         QPointF(8, 28), QPointF(4, 14)])
+    painter.end()
+    return QIcon(pixmap)
+
+
+def cloud_icon() -> QIcon:
+    pixmap, painter = _canvas()
+    painter.setPen(QPen(ACCENT, 2.0))
+    painter.drawArc(QRectF(3, 10, 12, 14), 90 * 16, 180 * 16)
+    painter.drawArc(QRectF(9, 6, 14, 12), 30 * 16, 180 * 16)
+    painter.drawArc(QRectF(17, 10, 12, 14), -90 * 16, 180 * 16)
+    painter.drawArc(QRectF(8, 16, 16, 12), 210 * 16, 180 * 16)
+    painter.end()
+    return QIcon(pixmap)
+
+
+def ink_icon() -> QIcon:
+    pixmap, painter = _canvas()
+    painter.setPen(QPen(PURPLE, 2.4, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    painter.drawPolyline([QPointF(5, 24), QPointF(10, 12), QPointF(16, 20),
+                          QPointF(22, 8), QPointF(28, 16)])
+    painter.end()
+    return QIcon(pixmap)
+
+
+def highlight_icon() -> QIcon:
+    pixmap, painter = _canvas()
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(QColor(255, 235, 59, 160))
+    painter.drawRect(QRectF(4, 10, 24, 12))
+    painter.setPen(QPen(INK, 1.2))
+    painter.drawLine(QPointF(6, 16), QPointF(26, 16))
+    painter.end()
+    return QIcon(pixmap)
+
+
+def text_icon() -> QIcon:
+    pixmap, painter = _canvas()
+    painter.setPen(QPen(INK, 2.0))
+    painter.drawRect(QRectF(4, 6, 24, 20))
+    font = painter.font()
+    font.setPointSizeF(12)
+    font.setBold(True)
+    painter.setFont(font)
+    painter.drawText(QRectF(4, 6, 24, 20), Qt.AlignCenter, "T")
+    painter.end()
+    return QIcon(pixmap)
+
+
+def note_icon() -> QIcon:
+    pixmap, painter = _canvas()
+    painter.setPen(QPen(ORANGE, 2.0))
+    painter.setBrush(QColor(255, 240, 180))
+    painter.drawRect(QRectF(6, 6, 20, 20))
+    painter.setPen(QPen(INK, 1.2))
+    painter.drawLine(QPointF(10, 13), QPointF(22, 13))
+    painter.drawLine(QPointF(10, 17), QPointF(22, 17))
+    painter.drawLine(QPointF(10, 21), QPointF(18, 21))
+    painter.end()
+    return QIcon(pixmap)
+
+
+def rotate_icon() -> QIcon:
+    pixmap, painter = _canvas()
+    painter.setPen(QPen(INK, 2.0, Qt.SolidLine, Qt.RoundCap))
+    painter.drawArc(QRectF(6, 6, 20, 20), 45 * 16, 270 * 16)
+    painter.drawLine(QPointF(22, 5), QPointF(26, 9))
+    painter.drawLine(QPointF(22, 5), QPointF(18, 9))
+    painter.end()
+    return QIcon(pixmap)
+
+
+def order_front_icon() -> QIcon:
+    pixmap, painter = _canvas()
+    painter.setPen(QPen(QColor("#aaa"), 1.4))
+    painter.drawRect(QRectF(4, 4, 14, 14))
+    painter.setPen(QPen(BLUE, 2.0))
+    painter.setBrush(QColor(220, 233, 251))
+    painter.drawRect(QRectF(14, 14, 14, 14))
+    painter.end()
+    return QIcon(pixmap)
+
+
+def order_back_icon() -> QIcon:
+    pixmap, painter = _canvas()
+    painter.setPen(QPen(BLUE, 2.0))
+    painter.setBrush(QColor(220, 233, 251))
+    painter.drawRect(QRectF(4, 4, 14, 14))
+    painter.setPen(QPen(QColor("#aaa"), 1.4))
+    painter.drawRect(QRectF(14, 14, 14, 14))
     painter.end()
     return QIcon(pixmap)
 
