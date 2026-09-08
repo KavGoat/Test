@@ -7,10 +7,12 @@ app is for:
 
 - **Open a PDF**
 - **Add and delete pages**
-- **Move the markups a PDF already has** — drag any existing annotation
+- **Edit the markups a PDF already has** — move them, resize them, bend a
+  callout's leader line, rewrite what a text box says, group them and ungroup
+  them again
 - **Draw a rectangle**
 
-Nothing else. There is no form filling, no signing, no text editing.
+Nothing else. There is no form filling, no signing, no page text editing.
 
 ---
 
@@ -42,14 +44,30 @@ pdf4py document.pdf               # or: python -m pdf4py
 |---|---|
 | **Open** | `Ctrl+O`, or pass a file on the command line |
 | **Save / Save As** | `Ctrl+S` / `Ctrl+Shift+S` |
-| **Move markups** (tool) | `V` — drag any existing annotation to a new place |
+| **Edit markups** (tool) | `V` — drag a markup to move it, its handles to resize or reshape it |
 | **Rectangle** (tool) | `R` — drag on the page to draw one |
+| **Edit text** | `F2`, or double-click a text box or a sticky note |
+| **Group / Ungroup** | `Ctrl+G` / `Ctrl+Shift+G` |
 | **Insert blank page after** | `Ctrl+Shift+A` — matches the current page's size |
 | **Delete page** | `Ctrl+Shift+D` |
-| **Zoom** | `Ctrl++`, `Ctrl+-`, `Ctrl+0` to fit, or `Ctrl`+wheel |
+| **Zoom** | `Ctrl`+wheel zooms on the pointer; `Ctrl++`, `Ctrl+-`, `Ctrl+0` to fit |
 
 The strip on the left is one thumbnail per page; click one to go to it. Markups
 outline as you pass over them, and a rectangle you draw is red, 1.5 pt.
+
+**Selecting.** Click a markup to select it; drag on empty paper to rubber-band
+several, or `Ctrl`-click to add one at a time. A selected markup grows eight
+blue handles for its size, and a callout grows an orange one at each bend of its
+leader line — drag the tip to move the arrow, the middle one to move the hinge.
+A sticky note has no handles: it is an icon, and stretching it would only
+stretch the icon.
+
+**Groups.** Select two or more markups and `Ctrl+G` ties them together; from
+then on clicking any one of them selects the whole group and dragging moves all
+of it, outlined in purple. Groups move but do not reshape — `Ctrl+Shift+G`
+breaks the group and the handles come back. This is PDF's own grouping
+(`/RT /Group` with `/IRT` naming the leader, PDF 32000 §12.5.6.2), so groups
+made here survive a save and are understood by other PDF software.
 
 The title bar carries a `*` while there are unsaved changes, and closing or
 opening another file asks before throwing them away.
@@ -91,7 +109,18 @@ A drag is clamped to the page, so a markup cannot be lost off the edge.
 space with the page's own `/Rotate` already applied, so a rotated page behaves
 like any other. A move is written straight into the annotation's `/Rect`,
 because PyMuPDF's `Annot.set_rect` re-applies the border padding on every call
-and would walk the markup a point further with every drag.
+and would walk the markup a point further with every drag. A resize does go
+through `set_rect` — it needs the appearance redrawn, not shifted — and then
+asks what it actually got and corrects the difference once, so dragging the same
+handle twenty times leaves the markup exactly where it was put.
+
+**The scene is 1:1 with the screen.** Zooming re-renders the page rather than
+scaling the view, which is what keeps text crisp and lets the edit handles stay
+the same size at every zoom. It also means `Ctrl`+wheel has to do its own work:
+the page point under the pointer is followed through the new zoom and the
+scrollbars moved to put it back under the pointer. When the whole page fits in
+the window there is nothing to scroll, so it stays centred, as every other PDF
+viewer does.
 
 ---
 
@@ -137,8 +166,10 @@ python -m pytest
 ```
 
 Runs headless (the suite forces `QT_QPA_PLATFORM=offscreen`). It covers the
-document model — exact, drift-free moves, rotated pages, page insertion and
-deletion, the save round trip, a deliberately damaged file opening quietly and
-saving sound — and drives the real window with synthetic mouse events: the
-rectangle tool, dragging a markup, clamping at the page edge, the page strip
-staying in step with the canvas and not drawing pages nobody is looking at.
+document model — exact, drift-free moves and resizes, rotated pages, callouts,
+text, grouping, page insertion and deletion, the save round trip, a deliberately
+damaged file opening quietly and saving sound — and drives the real window: the
+rectangle tool, dragging a markup, dragging a handle, bending a callout, moving
+a group as one, zoom holding the point under the pointer, clamping at the page
+edge, and the page strip staying in step without drawing pages nobody is looking
+at.

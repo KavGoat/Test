@@ -11,7 +11,7 @@ from PySide6.QtCore import QEvent, QPointF, Qt
 from PySide6.QtGui import QMouseEvent
 
 from pdf4py.document import DocumentError, PdfDocument
-from pdf4py.ui.pageview import RECTANGLE, SELECT, MarkupItem
+from pdf4py.ui.pageview import RECTANGLE, SELECT, HandleItem, MarkupItem
 
 SQUARE = (80.0, 200.0, 220.0, 280.0)
 
@@ -38,6 +38,42 @@ def build_pdf(path, rotation: int = 0) -> str:
 @pytest.fixture
 def sample(tmp_path):
     return build_pdf(tmp_path / "sample.pdf")
+
+
+def build_marked_up(path) -> str:
+    """A page with the markups that can be edited: a callout, two rectangles
+    that can be grouped, and a sticky note that resizes into nothing."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=400, height=600)
+    callout = page.add_freetext_annot(pymupdf.Rect(200, 100, 360, 160),
+                                      "Check this detail", fontsize=11, border_width=1)
+    doc.xref_set_key(callout.xref, "CL", "[60 480 120 520 200 500]")
+    doc.xref_set_key(callout.xref, "IT", "/FreeTextCallout")
+    for box in (pymupdf.Rect(50, 300, 150, 360), pymupdf.Rect(170, 300, 270, 360)):
+        square = page.add_rect_annot(box)
+        square.set_border(width=2)
+        square.update()
+    page.add_text_annot((300, 400), "a note")
+    doc.save(str(path))
+    doc.close()
+    return str(path)
+
+
+@pytest.fixture
+def marked_up(tmp_path):
+    return build_marked_up(tmp_path / "marked-up.pdf")
+
+
+@pytest.fixture
+def rich(marked_up):
+    doc = PdfDocument()
+    doc.open(marked_up)
+    yield doc
+    doc.close()
+
+
+def of_kind(document, subtype: str) -> list:
+    return [m for m in document.markups(0) if m.subtype == subtype]
 
 
 @pytest.fixture
@@ -212,6 +248,116 @@ def test_moving_a_markup_that_is_gone(document):
     assert not document.move_markup(0, 9999, 5.0, 5.0)
 
 
+# --------------------------------------------------------- editing a markup
+
+
+def test_a_markup_reports_what_can_be_done_to_it(rich):
+    kinds = {m.subtype: m for m in rich.markups(0)}
+    assert kinds["FreeText"].editable_text and kinds["FreeText"].resizable
+    assert kinds["FreeText"].text == "Check this detail"
+    assert kinds["Square"].resizable and not kinds["Square"].editable_text
+    # A sticky note is an icon: stretching it only stretches the icon.
+    assert not kinds["Text"].resizable and kinds["Text"].editable_text
+
+
+def test_a_callout_reports_its_leader_line(rich):
+    callout = of_kind(rich, "FreeText")[0].callout
+    # Three points in display coordinates: arrow tip, hinge, text box.
+    assert len(callout) == 3
+    assert callout[0] == (60.0, 120.0)      # PDF y-up 480 on a 600pt page
+    assert callout[1] == (120.0, 80.0)
+
+
+def test_reshaping_a_callout_moves_only_the_point_that_was_dragged(rich):
+    callout = of_kind(rich, "FreeText")[0]
+    tip, hinge, tail = callout.callout
+    moved = (hinge[0] + 30, hinge[1] + 45)
+    assert rich.set_callout(0, callout.xref, [tip, moved, tail])
+    assert of_kind(rich, "FreeText")[0].callout == (tip, moved, tail)
+    assert rich.modified
+
+
+def test_a_callout_needs_two_or_three_points(rich):
+    callout = of_kind(rich, "FreeText")[0]
+    assert not rich.set_callout(0, callout.xref, [(1.0, 2.0)])
+    assert not rich.set_callout(0, callout.xref, [(1.0, 2.0)] * 4)
+
+
+def test_rewriting_what_a_text_box_says(rich, tmp_path):
+    callout = of_kind(rich, "FreeText")[0]
+    assert rich.set_text(0, callout.xref, "REVISED: see detail 4")
+    assert of_kind(rich, "FreeText")[0].text == "REVISED: see detail 4"
+    target = tmp_path / "retitled.pdf"
+    rich.save(str(target))
+    reopened = PdfDocument()
+    reopened.open(str(target))
+    assert of_kind(reopened, "FreeText")[0].text == "REVISED: see detail 4"
+    reopened.close()
+
+
+def test_a_rectangle_cannot_have_its_text_rewritten(rich):
+    assert not rich.set_text(0, of_kind(rich, "Square")[0].xref, "nope")
+
+
+def test_resizing_is_exact_and_stays_exact(rich):
+    square = of_kind(rich, "Square")[0]
+    for _ in range(4):
+        # Repeated because set_rect pads by the border width, which would creep
+        # the markup a point larger on every drag if it were not compensated.
+        assert rich.resize_markup(0, square.xref, (60.0, 320.0, 260.0, 420.0))
+        assert of_kind(rich, "Square")[0].rect == (60.0, 320.0, 260.0, 420.0)
+
+
+def test_a_sticky_note_is_not_resized(rich):
+    note = of_kind(rich, "Text")[0]
+    assert not rich.resize_markup(0, note.xref, (10.0, 10.0, 200.0, 200.0))
+    assert of_kind(rich, "Text")[0].rect == note.rect
+
+
+def test_a_markup_cannot_be_resized_to_nothing(rich):
+    square = of_kind(rich, "Square")[0]
+    assert not rich.resize_markup(0, square.xref, (60.0, 320.0, 61.0, 321.0))
+
+
+# ----------------------------------------------------------------- grouping
+
+
+def test_grouping_makes_markups_move_together(rich):
+    first, second = (m.xref for m in of_kind(rich, "Square"))
+    assert rich.group(0, [first, second])
+    assert rich.group_members(0, second) == [first, second]
+    assert rich.group_members(0, first) == [first, second]
+    # The group hangs off its leader, which is how PDF says it should be done.
+    assert {m.xref: m.leader for m in of_kind(rich, "Square")} == {first: 0, second: first}
+
+
+def test_grouping_needs_more_than_one_markup(rich):
+    assert not rich.group(0, [of_kind(rich, "Square")[0].xref])
+
+
+def test_ungrouping_frees_every_member(rich):
+    xrefs = [m.xref for m in of_kind(rich, "Square")]
+    rich.group(0, xrefs)
+    assert rich.ungroup(0, xrefs[1]) == 2
+    assert all(m.leader == 0 for m in rich.markups(0))
+    assert rich.group_members(0, xrefs[0]) == [xrefs[0]]
+
+
+def test_ungrouping_something_that_is_not_grouped(rich):
+    assert rich.ungroup(0, of_kind(rich, "Square")[0].xref) == 0
+
+
+def test_a_group_survives_the_save(rich, tmp_path):
+    xrefs = [m.xref for m in of_kind(rich, "Square")]
+    rich.group(0, xrefs)
+    target = tmp_path / "grouped.pdf"
+    rich.save(str(target))
+    reopened = PdfDocument()
+    reopened.open(str(target))
+    assert len(reopened.group_members(0, of_kind(reopened, "Square")[1].xref)) == 2
+    reopened.close()
+
+
 # ------------------------------------------------------------------ rectangles
 
 
@@ -281,6 +427,37 @@ def editor(editor_window, sample):
     assert editor_window.load(sample)
     editor_window.view.set_zoom(1.0)   # 1:1 keeps scene points and PDF points equal
     return editor_window
+
+
+@pytest.fixture
+def rich_editor(editor_window, marked_up):
+    assert editor_window.load(marked_up)
+    editor_window.view.set_zoom(1.0)
+    return editor_window
+
+
+def select_only(window, item) -> None:
+    for other in window.view.markup_items():
+        other.setSelected(False)
+    item.setSelected(True)
+
+
+def markup_of(window, item):
+    """The document's record for the markup an item is showing."""
+    return next(m for m in window.document.markups(window.view.index)
+                if m.xref == item.xref)
+
+
+def handle(window, role: str) -> HandleItem:
+    return next(one for one in window.view._handles if one.role == role)
+
+
+def drag_handle(window, role: str, to: QPointF) -> None:
+    view = window.view
+    grip = handle(window, role)
+    view.begin_handle_drag(grip)
+    view.drag_handle(to)
+    view.finish_handle_drag(to)
 
 
 def markup_items(window) -> list[MarkupItem]:
@@ -379,7 +556,7 @@ def test_dragging_a_markup_moves_it_in_the_document(editor):
     item = item_for(editor, "Square")
     before = square_of(editor.document)
     item.setPos(item.pos() + QPointF(30, -25))
-    editor.view.commit_move(item, QPointF(30, -25))
+    editor.view.commit_moves()
     after = square_of(editor.document)
     assert (after.x0, after.y0) == (before.x0 + 30.0, before.y0 - 25.0)
     assert item.home == item.pos()      # the drag is now the item's resting place
@@ -412,6 +589,129 @@ def test_deleting_a_page_from_the_window(editor):
     assert editor.delete_action.isEnabled() is False
 
 
+# ------------------------------------------------------- editing on the page
+
+
+def test_a_selected_markup_grows_handles(rich_editor):
+    square = item_for(rich_editor, "Square")
+    select_only(rich_editor, square)
+    assert sorted(one.role for one in rich_editor.view._handles) == [
+        "e", "n", "ne", "nw", "s", "se", "sw", "w"]
+
+    select_only(rich_editor, item_for(rich_editor, "FreeText"))
+    roles = sorted(one.role for one in rich_editor.view._handles)
+    # A callout gets a grab point per bend of its leader line as well.
+    assert roles[:3] == ["callout0", "callout1", "callout2"]
+    assert len(roles) == 11
+
+    select_only(rich_editor, item_for(rich_editor, "Text"))
+    assert rich_editor.view._handles == []      # a sticky note has no size
+
+
+def test_dragging_a_handle_resizes_the_markup(rich_editor):
+    square = item_for(rich_editor, "Square")
+    select_only(rich_editor, square)
+    before = markup_of(rich_editor, square)
+    drag_handle(rich_editor, "se", QPointF(before.x1 + 60, before.y1 + 40))
+    after = markup_of(rich_editor, square)
+    assert (after.x0, after.y0) == (before.x0, before.y0)     # the far corner stays
+    assert (after.x1, after.y1) == (before.x1 + 60, before.y1 + 40)
+    assert rich_editor.document.modified
+
+
+def test_dragging_a_callout_hinge(rich_editor):
+    callout = item_for(rich_editor, "FreeText")
+    select_only(rich_editor, callout)
+    tip, hinge, tail = markup_of(rich_editor, callout).callout
+    drag_handle(rich_editor, "callout1", QPointF(hinge[0] + 30, hinge[1] + 45))
+    assert markup_of(rich_editor, callout).callout == (
+        tip, (hinge[0] + 30, hinge[1] + 45), tail)
+
+
+def test_a_group_is_selected_and_moved_as_one(rich_editor):
+    squares = [i for i in rich_editor.view.markup_items() if i.subtype == "Square"]
+    for item in squares:
+        item.setSelected(True)
+    rich_editor.group_markups()
+
+    squares = [i for i in rich_editor.view.markup_items() if i.subtype == "Square"]
+    for one in squares:
+        # Whichever member is clicked — the leader or a follower — takes the
+        # whole group with it, and a group is moved rather than reshaped.
+        select_only(rich_editor, one)
+        assert len(rich_editor.view.selected_items()) == 2
+        assert rich_editor.view._handles == []
+
+    before = {m.xref: (m.x0, m.y0) for m in of_kind(rich_editor.document, "Square")}
+    for item in rich_editor.view.selected_items():
+        item.setPos(item.pos() + QPointF(20, 15))
+    rich_editor.view.commit_moves()
+    after = {m.xref: (m.x0, m.y0) for m in of_kind(rich_editor.document, "Square")}
+    assert all(after[x] == (before[x][0] + 20, before[x][1] + 15) for x in before)
+
+
+def test_ungrouping_from_the_window_gives_the_handles_back(rich_editor):
+    squares = [i for i in rich_editor.view.markup_items() if i.subtype == "Square"]
+    for item in squares:
+        item.setSelected(True)
+    rich_editor.group_markups()
+    rich_editor.ungroup_markups()
+    square = [i for i in rich_editor.view.markup_items() if i.subtype == "Square"][0]
+    select_only(rich_editor, square)
+    assert len(rich_editor.view.selected_items()) == 1
+    assert len(rich_editor.view._handles) == 8
+
+
+def test_group_and_ungroup_follow_the_selection(rich_editor):
+    assert not rich_editor.group_action.isEnabled()
+    assert not rich_editor.ungroup_action.isEnabled()
+    squares = [i for i in rich_editor.view.markup_items() if i.subtype == "Square"]
+    for item in squares:
+        item.setSelected(True)
+    assert rich_editor.group_action.isEnabled()
+    rich_editor.group_markups()
+    select_only(rich_editor, [i for i in rich_editor.view.markup_items()
+                              if i.subtype == "Square"][0])
+    assert rich_editor.ungroup_action.isEnabled()
+
+
+def test_editing_text_follows_the_selection(rich_editor):
+    select_only(rich_editor, item_for(rich_editor, "FreeText"))
+    assert rich_editor.text_action.isEnabled()
+    select_only(rich_editor, item_for(rich_editor, "Square"))
+    assert not rich_editor.text_action.isEnabled()
+
+
+def test_double_clicking_a_text_box_asks_for_the_editor(rich_editor):
+    asked = []
+    rich_editor.view.text_edit_requested.connect(asked.append)
+    callout = item_for(rich_editor, "FreeText")
+    callout.mouseDoubleClickEvent(
+        QMouseEvent(QEvent.MouseButtonDblClick, QPointF(1, 1), QPointF(1, 1),
+                    Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
+    assert asked == [callout.xref]
+
+
+def test_zoom_holds_the_point_under_the_cursor(rich_editor):
+    view = rich_editor.view
+    view.set_zoom(3.0)                      # big enough that the page can scroll
+    assert view.verticalScrollBar().maximum() > 0
+    cursor = QPointF(view.viewport().width() * 0.7, view.viewport().height() * 0.3)
+
+    def page_point():
+        scene = view.mapToScene(cursor.toPoint())
+        return round(scene.x() / view.zoom, 1), round(scene.y() / view.zoom, 1)
+
+    before = page_point()
+    view.zoom_by(1.25, cursor)
+    assert page_point() == pytest.approx(before, abs=0.5)
+    view.zoom_by(1.25, cursor)
+    assert page_point() == pytest.approx(before, abs=0.5)
+    view.zoom_by(1 / 1.25, cursor)
+    assert page_point() == pytest.approx(before, abs=0.5)
+    assert view.zoom > 3.0
+
+
 def test_edits_reach_the_saved_file(editor, tmp_path):
     editor.set_mode(RECTANGLE)
     drag(editor.view, QPointF(100, 400), QPointF(240, 460))
@@ -419,7 +719,7 @@ def test_edits_reach_the_saved_file(editor, tmp_path):
     editor.show_page(0)
     item = item_for(editor, "Text")
     item.setPos(item.pos() + QPointF(10, 10))
-    editor.view.commit_move(item, QPointF(10, 10))
+    editor.view.commit_moves()
 
     target = tmp_path / "edited.pdf"
     editor.document.save(str(target))

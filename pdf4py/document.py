@@ -33,7 +33,19 @@ def _drain_messages() -> str:
 # annotation, and links are navigation rather than markup.
 HIDDEN_SUBTYPES = frozenset({pymupdf.PDF_ANNOT_POPUP, pymupdf.PDF_ANNOT_LINK})
 
+# Markups drawn at a fixed size — a sticky note is an icon, not a box, and
+# stretching it only stretches the icon.
+FIXED_SIZE_SUBTYPES = frozenset({pymupdf.PDF_ANNOT_TEXT,
+                                 pymupdf.PDF_ANNOT_FILE_ATTACHMENT,
+                                 pymupdf.PDF_ANNOT_SOUND})
+
+# Markups that carry text of their own, which the user can rewrite.
+TEXT_SUBTYPES = frozenset({pymupdf.PDF_ANNOT_FREE_TEXT, pymupdf.PDF_ANNOT_TEXT})
+
 A4_POINTS = (595.0, 842.0)
+
+# A markup smaller than this is a mis-drag, not a resize.
+MIN_MARKUP_SIZE = 3.0
 
 # The colour new rectangles are drawn in — the usual markup red.
 RECTANGLE_COLOUR = (0.85, 0.16, 0.16)
@@ -50,6 +62,14 @@ class Markup:
     y0: float
     x1: float
     y1: float
+    #: The xref every markup in this group hangs off, or 0 when ungrouped.
+    leader: int = 0
+    #: A callout's leader line: two or three points, the arrow tip first.
+    callout: tuple[tuple[float, float], ...] = ()
+    #: The markup's own words, for the kinds that carry any.
+    text: str = ""
+    resizable: bool = True
+    editable_text: bool = False
 
     @property
     def width(self) -> float:
@@ -58,6 +78,10 @@ class Markup:
     @property
     def height(self) -> float:
         return self.y1 - self.y0
+
+    @property
+    def rect(self) -> tuple[float, float, float, float]:
+        return self.x0, self.y0, self.x1, self.y1
 
 
 @dataclass(frozen=True)
@@ -277,10 +301,8 @@ class PdfDocument:
             try:
                 if annot.type[0] in HIDDEN_SUBTYPES:
                     continue
-                rect = annot.rect * rotation
-                markup = Markup(annot.xref, annot.type[1],
-                                rect.x0, rect.y0, rect.x1, rect.y1)
-                drawn.append((markup, self._raster_for(annot, zoom)))
+                drawn.append((self._describe(page, annot, rotation),
+                              self._raster_for(annot, zoom)))
             except Exception:  # noqa: BLE001 - one bad annotation, not the page
                 _drain_messages()
         return drawn
@@ -312,12 +334,183 @@ class PdfDocument:
             try:
                 if annot.type[0] in HIDDEN_SUBTYPES:
                     continue
-                rect = annot.rect * rotation
-                found.append(Markup(annot.xref, annot.type[1],
-                                    rect.x0, rect.y0, rect.x1, rect.y1))
+                found.append(self._describe(page, annot, rotation))
             except Exception:  # noqa: BLE001 - one bad annotation, not the page
                 _drain_messages()
         return found
+
+    def _describe(self, page: "pymupdf.Page", annot: "pymupdf.Annot",
+                  rotation: "pymupdf.Matrix") -> Markup:
+        kind = annot.type[0]
+        rect = annot.rect * rotation
+        return Markup(annot.xref, annot.type[1],
+                      rect.x0, rect.y0, rect.x1, rect.y1,
+                      leader=self._leader_of(annot.xref),
+                      callout=self._callout_of(page, annot.xref),
+                      text=annot.info.get("content", "") if kind in TEXT_SUBTYPES else "",
+                      resizable=kind not in FIXED_SIZE_SUBTYPES,
+                      editable_text=kind in TEXT_SUBTYPES)
+
+    # ------------------------------------------------------------------ groups
+
+    def _leader_of(self, xref: int) -> int:
+        """The markup this one is grouped onto, or 0.
+
+        PDF 32000 §12.5.6.2: an annotation with ``/RT /Group`` is grouped with
+        the annotation its ``/IRT`` names, and that one leads the group. A plain
+        ``/IRT`` without ``/RT /Group`` is a reply, not a group.
+        """
+        try:
+            kind, reply_type = self._doc.xref_get_key(xref, "RT")
+            if kind != "name" or reply_type.lstrip("/") != "Group":
+                return 0
+            kind, parent = self._doc.xref_get_key(xref, "IRT")
+            if kind != "xref":
+                return 0
+            return int(parent.split()[0])
+        except Exception:  # noqa: BLE001
+            _drain_messages()
+            return 0
+
+    def group_members(self, index: int, xref: int) -> list[int]:
+        """Every markup that moves when this one does, itself included."""
+        leader = self._leader_of(xref) or xref
+        members = [markup.xref for markup in self.markups(index)
+                   if markup.xref == leader or markup.leader == leader]
+        return members if len(members) > 1 else [xref]
+
+    def group(self, index: int, xrefs: list[int]) -> bool:
+        """Tie markups together so they move as one. The first one leads."""
+        if len(xrefs) < 2:
+            return False
+        # Anything already grouped joins under this group's leader instead of
+        # keeping a leader that is about to become a member itself.
+        leader, *rest = xrefs
+        try:
+            self._doc.xref_set_key(leader, "IRT", "null")
+            self._doc.xref_set_key(leader, "RT", "null")
+            for xref in rest:
+                self._doc.xref_set_key(xref, "IRT", "%d 0 R" % leader)
+                self._doc.xref_set_key(xref, "RT", "/Group")
+        except Exception:  # noqa: BLE001
+            _drain_messages()
+            return False
+        self.modified = True
+        return True
+
+    def ungroup(self, index: int, xref: int) -> int:
+        """Break the group this markup is in. Returns how many were freed."""
+        members = self.group_members(index, xref)
+        if len(members) < 2:
+            return 0
+        try:
+            for member in members:
+                self._doc.xref_set_key(member, "IRT", "null")
+                self._doc.xref_set_key(member, "RT", "null")
+        except Exception:  # noqa: BLE001
+            _drain_messages()
+            return 0
+        self.modified = True
+        return len(members)
+
+    # ---------------------------------------------------------------- callouts
+
+    def _callout_of(self, page: "pymupdf.Page", xref: int
+                    ) -> tuple[tuple[float, float], ...]:
+        """A callout's leader line in display points, arrow tip first."""
+        try:
+            kind, raw = self._doc.xref_get_key(xref, "CL")
+            if kind != "array":
+                return ()
+            numbers = [float(value) for value in raw.strip("[]").split()]
+        except Exception:  # noqa: BLE001
+            _drain_messages()
+            return ()
+        if len(numbers) not in (4, 6):
+            return ()
+        to_display = self._to_display(page)
+        return tuple((point.x, point.y) for point in
+                     (pymupdf.Point(numbers[i], numbers[i + 1]) * to_display
+                      for i in range(0, len(numbers), 2)))
+
+    def set_callout(self, index: int, xref: int,
+                    points: list[tuple[float, float]]) -> bool:
+        """Reshape a callout's leader line, given its points in display points."""
+        if len(points) not in (2, 3):
+            return False
+        try:
+            page = self._doc[index]  # the page must outlive the annotation
+            annot = self._find(page, xref)
+            if annot is None:
+                return False
+            to_pdf = self._to_pdf(page)
+            moved = [pymupdf.Point(x, y) * to_pdf for x, y in points]
+            self._doc.xref_set_key(xref, "CL", "[%s]" % " ".join(
+                "%g %g" % (point.x, point.y) for point in moved))
+            # The rectangle has to hold the line as well as the words, and
+            # update() redraws the leader from the numbers just written.
+            annot.update()
+        except Exception:  # noqa: BLE001
+            _drain_messages()
+            return False
+        self.modified = True
+        return True
+
+    # -------------------------------------------------------------------- text
+
+    def set_text(self, index: int, xref: int, text: str) -> bool:
+        """Rewrite what a text box or a sticky note says."""
+        try:
+            page = self._doc[index]  # the page must outlive the annotation
+            annot = self._find(page, xref)
+            if annot is None or annot.type[0] not in TEXT_SUBTYPES:
+                return False
+            info = annot.info
+            info["content"] = text
+            annot.set_info(info)
+            annot.update()
+        except Exception:  # noqa: BLE001
+            _drain_messages()
+            return False
+        self.modified = True
+        return True
+
+    # ------------------------------------------------------------------ resize
+
+    def resize_markup(self, index: int, xref: int,
+                      rect: tuple[float, float, float, float]) -> bool:
+        """Give a markup a new rectangle, in display points."""
+        try:
+            page = self._doc[index]  # the page must outlive the annotation
+            annot = self._find(page, xref)
+            if annot is None or annot.type[0] in FIXED_SIZE_SUBTYPES:
+                return False
+            target = pymupdf.Rect(*rect).normalize() * page.derotation_matrix
+            if target.width < MIN_MARKUP_SIZE or target.height < MIN_MARKUP_SIZE:
+                return False
+            annot.set_rect(target)
+            # set_rect pads the rectangle by the border width, so ask again for
+            # the difference it introduced rather than letting it accumulate.
+            drift = annot.rect - target
+            if max(abs(value) for value in drift) > 0.01:
+                annot.set_rect(target - drift)
+        except Exception:  # noqa: BLE001 - a markup that will not be resized
+            _drain_messages()
+            return False
+        self.modified = True
+        return True
+
+    # ------------------------------------------------------- coordinate frames
+
+    @staticmethod
+    def _to_pdf(page: "pymupdf.Page") -> "pymupdf.Matrix":
+        """Display points -> PDF user space."""
+        return page.derotation_matrix * page.transformation_matrix
+
+    @staticmethod
+    def _to_display(page: "pymupdf.Page") -> "pymupdf.Matrix":
+        """PDF user space -> display points."""
+        return ~pymupdf.Matrix(page.transformation_matrix) * page.rotation_matrix
 
     def move_markup(self, index: int, xref: int, dx: float, dy: float) -> bool:
         """Shift an existing annotation by ``dx``/``dy`` display points.

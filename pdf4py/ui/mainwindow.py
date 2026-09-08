@@ -6,8 +6,8 @@ from typing import Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QActionGroup, QGuiApplication, QKeySequence
-from PySide6.QtWidgets import (QApplication, QDockWidget, QFileDialog, QMainWindow,
-                               QMessageBox, QWidget)
+from PySide6.QtWidgets import (QApplication, QDockWidget, QFileDialog, QInputDialog,
+                               QMainWindow, QMessageBox, QWidget)
 
 from ..document import DocumentError, PdfDocument
 from . import icons
@@ -38,6 +38,8 @@ class MainWindow(QMainWindow):
         self._build_actions()
         self.pages.page_chosen.connect(self.show_page)
         self.view.edited.connect(self.on_edited)
+        self.view.selection.connect(self.update_enabled)
+        self.view.text_edit_requested.connect(self.edit_text)
         self.view.message.connect(lambda text: self.statusBar().showMessage(text, 4000))
         self.update_title()
         self.statusBar().showMessage("Open a PDF to start.")
@@ -86,14 +88,25 @@ class MainWindow(QMainWindow):
         self.rectangle_action = self._action("&Rectangle", icons.rectangle_icon(), "R",
                                              lambda: self.set_mode(RECTANGLE),
                                              "Drag on the page to draw a rectangle")
-        group = QActionGroup(self)
+        tools = QActionGroup(self)
         for action in (self.select_action, self.rectangle_action):
             action.setCheckable(True)
-            group.addAction(action)
+            tools.addAction(action)
             tool_menu.addAction(action)
             bar.addAction(action)
         self.select_action.setChecked(True)
         bar.addSeparator()
+
+        markup_menu = self.menuBar().addMenu("&Markup")
+        self.text_action = self._action("Edit &Text…", None, "F2", self.edit_text,
+                                        "Rewrite what this markup says")
+        self.group_action = self._action("&Group", None, "Ctrl+G", self.group_markups,
+                                         "Make the selected markups move as one")
+        self.ungroup_action = self._action("&Ungroup", None, "Ctrl+Shift+G",
+                                           self.ungroup_markups,
+                                           "Let these markups move on their own again")
+        for action in (self.text_action, self.group_action, self.ungroup_action):
+            markup_menu.addAction(action)
 
         zoom_in = self._action("Zoom &In", icons.zoom_icon(True), QKeySequence.ZoomIn,
                                self.view.zoom_in, "Zoom in")
@@ -249,8 +262,56 @@ class MainWindow(QMainWindow):
         self.view.set_mode(mode)
         (self.select_action if mode == SELECT else self.rectangle_action).setChecked(True)
         self.statusBar().showMessage(
-            "Drag a markup to move it." if mode == SELECT
-            else "Drag on the page to draw a rectangle.", 4000)
+            "Drag a markup to move it, or its handles to resize or reshape it."
+            if mode == SELECT else "Drag on the page to draw a rectangle.", 4000)
+
+    # ---------------------------------------------------------------- markups
+
+    def edit_text(self, xref: int = 0) -> None:
+        """Rewrite a text box or a sticky note."""
+        chosen = self.view.selected_items()
+        item = next((one for one in chosen if one.xref == xref), None) \
+            if xref else (chosen[0] if len(chosen) == 1 else None)
+        if item is None or not item.markup.editable_text:
+            self.statusBar().showMessage(
+                "Select a text box or a note to edit its text.", 4000)
+            return
+        text, agreed = QInputDialog.getMultiLineText(
+            self, f"Edit {item.subtype.lower()} text", "Text:", item.markup.text)
+        if not agreed or text == item.markup.text:
+            return
+        if self.view.document.set_text(self.view.index, item.xref, text):
+            self.view.refresh(item.xref)
+            self.on_edited()
+            self.statusBar().showMessage("Text updated.", 4000)
+        else:
+            self.statusBar().showMessage("This markup's text cannot be changed.", 4000)
+
+    def group_markups(self) -> None:
+        xrefs = [item.xref for item in self.view.selected_items()]
+        if len(xrefs) < 2:
+            self.statusBar().showMessage(
+                "Select two or more markups to group them.", 4000)
+            return
+        if not self.document.group(self.view.index, xrefs):
+            self.statusBar().showMessage("These markups cannot be grouped.", 4000)
+            return
+        self.view.refresh(xrefs[0])
+        self.on_edited()
+        self.statusBar().showMessage(f"Grouped {len(xrefs)} markups.", 4000)
+
+    def ungroup_markups(self) -> None:
+        chosen = self.view.selected_items()
+        if not chosen:
+            self.statusBar().showMessage("Select a grouped markup first.", 4000)
+            return
+        freed = self.document.ungroup(self.view.index, chosen[0].xref)
+        if not freed:
+            self.statusBar().showMessage("That markup is not in a group.", 4000)
+            return
+        self.view.refresh(chosen[0].xref)
+        self.on_edited()
+        self.statusBar().showMessage(f"Ungrouped {freed} markups.", 4000)
 
     # ------------------------------------------------------------------ state
 
@@ -271,6 +332,10 @@ class MainWindow(QMainWindow):
                        self.select_action, self.rectangle_action):
             action.setEnabled(has_pages)
         self.delete_action.setEnabled(self.document.page_count > 1)
+        chosen = self.view.selected_items() if has_pages else []
+        self.text_action.setEnabled(len(chosen) == 1 and chosen[0].markup.editable_text)
+        self.group_action.setEnabled(len(chosen) > 1)
+        self.ungroup_action.setEnabled(any(item.markup.leader for item in chosen))
 
     def confirm_discard(self) -> bool:
         if not self.document.modified:
