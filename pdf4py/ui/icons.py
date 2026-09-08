@@ -227,6 +227,101 @@ def fit_icon() -> QIcon:
     return QIcon(pixmap)
 
 
+def polyline_icon() -> QIcon:
+    pixmap, painter = _canvas()
+    painter.setPen(QPen(BLUE, 2.4, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    painter.drawPolyline([QPointF(5, 26), QPointF(12, 8), QPointF(20, 22), QPointF(27, 6)])
+    painter.end()
+    return QIcon(pixmap)
+
+
+def stamp_icon() -> QIcon:
+    pixmap, painter = _canvas()
+    painter.setPen(QPen(ACCENT, 2.0))
+    painter.drawRect(QRectF(4, 8, 24, 14))
+    font = painter.font()
+    font.setPointSizeF(7)
+    font.setBold(True)
+    painter.setFont(font)
+    painter.drawText(QRectF(4, 8, 24, 14), Qt.AlignCenter, "OK")
+    painter.end()
+    return QIcon(pixmap)
+
+
+def eraser_icon() -> QIcon:
+    pixmap, painter = _canvas()
+    painter.setPen(QPen(INK, 2.0, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    painter.drawPolygon([QPointF(8, 24), QPointF(4, 18), QPointF(20, 6),
+                         QPointF(28, 6), QPointF(28, 12), QPointF(12, 24)])
+    painter.drawLine(QPointF(14, 16), QPointF(22, 10))
+    painter.end()
+    return QIcon(pixmap)
+
+
+def measure_icon() -> QIcon:
+    pixmap, painter = _canvas()
+    painter.setPen(QPen(GREEN, 2.4, Qt.SolidLine, Qt.RoundCap))
+    painter.drawLine(QPointF(4, 24), QPointF(28, 8))
+    painter.drawLine(QPointF(4, 20), QPointF(4, 28))
+    painter.drawLine(QPointF(28, 4), QPointF(28, 12))
+    painter.end()
+    return QIcon(pixmap)
+
+
+def lasso_icon() -> QIcon:
+    pixmap, painter = _canvas()
+    painter.setPen(QPen(INK, 2.0, Qt.DashLine, Qt.RoundCap, Qt.RoundJoin))
+    painter.drawEllipse(QRectF(4, 6, 24, 16))
+    painter.setPen(QPen(INK, 2.0, Qt.SolidLine, Qt.RoundCap))
+    painter.drawLine(QPointF(20, 20), QPointF(16, 28))
+    painter.end()
+    return QIcon(pixmap)
+
+
+def redaction_icon() -> QIcon:
+    pixmap, painter = _canvas()
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(QColor(0, 0, 0))
+    painter.drawRect(QRectF(4, 10, 24, 12))
+    painter.end()
+    return QIcon(pixmap)
+
+
+def print_icon() -> QIcon:
+    pixmap, painter = _canvas()
+    painter.setPen(QPen(INK, 2.0))
+    painter.drawRect(QRectF(3, 12, 26, 12))
+    painter.drawRect(QRectF(8, 4, 16, 10))
+    painter.drawRect(QRectF(8, 20, 16, 8))
+    painter.end()
+    return QIcon(pixmap)
+
+
+def duplicate_icon() -> QIcon:
+    pixmap, painter = _canvas()
+    painter.setPen(QPen(INK, 1.8))
+    painter.drawRect(QRectF(4, 8, 16, 20))
+    painter.setPen(QPen(BLUE, 1.8))
+    painter.drawRect(QRectF(12, 4, 16, 20))
+    painter.end()
+    return QIcon(pixmap)
+
+
+def theme_icon() -> QIcon:
+    pixmap, painter = _canvas()
+    painter.setPen(QPen(INK, 2.0))
+    painter.drawEllipse(QRectF(6, 6, 20, 20))
+    painter.setBrush(INK)
+    from PySide6.QtGui import QPainterPath
+    path = QPainterPath()
+    path.moveTo(16, 6)
+    path.arcTo(QRectF(6, 6, 20, 20), 90, -180)
+    path.closeSubpath()
+    painter.drawPath(path)
+    painter.end()
+    return QIcon(pixmap)
+
+
 def app_icon() -> QIcon:
     pixmap = QPixmap(64, 64)
     pixmap.fill(Qt.transparent)

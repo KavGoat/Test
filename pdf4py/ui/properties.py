@@ -5,7 +5,7 @@ from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import (QColorDialog, QDoubleSpinBox, QFormLayout,
+from PySide6.QtWidgets import (QCheckBox, QColorDialog, QDoubleSpinBox, QFormLayout,
                                QGroupBox, QHBoxLayout, QLabel, QPushButton,
                                QSlider, QVBoxLayout, QWidget)
 
@@ -38,6 +38,8 @@ class PropertyPanel(QWidget):
     fill_changed = Signal(tuple)
     border_width_changed = Signal(float)
     opacity_changed = Signal(float)
+    hidden_changed = Signal(bool)
+    locked_changed = Signal(bool)
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -96,6 +98,17 @@ class PropertyPanel(QWidget):
         opacity_row.addWidget(self._opacity_label)
         form.addRow("Opacity:", opacity_row)
 
+        # Hidden / Locked
+        flags_row = QHBoxLayout()
+        self._hidden_cb = QCheckBox("Hidden")
+        self._hidden_cb.stateChanged.connect(self._on_hidden)
+        self._locked_cb = QCheckBox("Locked")
+        self._locked_cb.stateChanged.connect(self._on_locked)
+        flags_row.addWidget(self._hidden_cb)
+        flags_row.addWidget(self._locked_cb)
+        flags_row.addStretch()
+        form.addRow("Flags:", flags_row)
+
         # Info
         self._type_label = QLabel("")
         form.addRow("Type:", self._type_label)
@@ -132,6 +145,8 @@ class PropertyPanel(QWidget):
             self._width_spin.setValue(markup.border_width)
             self._opacity_slider.setValue(int(markup.opacity * 100))
             self._opacity_label.setText(f"{int(markup.opacity * 100)}%")
+            self._hidden_cb.setChecked(markup.hidden)
+            self._locked_cb.setChecked(markup.locked)
             self._type_label.setText(markup.subtype)
             self._author_label.setText(markup.author or "—")
         finally:
@@ -161,3 +176,11 @@ class PropertyPanel(QWidget):
         self._opacity_label.setText(f"{value}%")
         if not self._updating:
             self.opacity_changed.emit(value / 100.0)
+
+    def _on_hidden(self, state: int) -> None:
+        if not self._updating:
+            self.hidden_changed.emit(state == Qt.Checked.value)
+
+    def _on_locked(self, state: int) -> None:
+        if not self._updating:
+            self.locked_changed.emit(state == Qt.Checked.value)

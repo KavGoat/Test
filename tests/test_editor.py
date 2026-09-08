@@ -1,6 +1,7 @@
 """Tests for the PDF4Py page and markup editor."""
 from __future__ import annotations
 
+import os
 import pathlib
 
 import pytest
@@ -1177,3 +1178,231 @@ def test_page_at_point(editor):
         assert editor.view.page_at_point(center0) == 0
         center1 = editor.view._page_rects[1].center()
         assert editor.view.page_at_point(center1) == 1
+
+
+# --------------------------------------------------------------- new annotation types (v2)
+
+
+def test_add_polyline(document):
+    xref = document.add_polyline(0, [(50, 50), (100, 80), (150, 60), (200, 90)])
+    added = next(m for m in document.markups(0) if m.xref == xref)
+    assert added.subtype == "PolyLine"
+    assert document.modified
+
+
+def test_add_stamp(document):
+    xref = document.add_stamp(0, (50, 50, 200, 100), stamp_id=0)
+    added = next(m for m in document.markups(0) if m.xref == xref)
+    assert added.subtype == "Stamp"
+    assert document.modified
+
+
+def test_add_redaction(document):
+    xref = document.add_redaction(0, (50, 50, 200, 100))
+    added = next(m for m in document.markups(0) if m.xref == xref)
+    assert added.subtype == "Redact"
+    assert document.modified
+
+
+# --------------------------------------------------------------- hide/lock markups
+
+
+def test_hide_and_unhide_markup(document):
+    square = square_of(document)
+    assert not square.hidden
+    assert document.set_markup_hidden(0, square.xref, True)
+    after = square_of(document)
+    assert after.hidden
+    assert document.set_markup_hidden(0, after.xref, False)
+    assert not square_of(document).hidden
+
+
+def test_lock_and_unlock_markup(document):
+    square = square_of(document)
+    assert not square.locked
+    assert document.set_markup_locked(0, square.xref, True)
+    after = square_of(document)
+    assert after.locked
+    assert document.set_markup_locked(0, after.xref, False)
+    assert not square_of(document).locked
+
+
+# --------------------------------------------------------------- one-step ordering
+
+
+def test_forward_one_and_backward_one(document):
+    first = document.markups(0)[0].xref
+    second = document.markups(0)[1].xref
+    assert document.forward_one(0, first)
+    assert document.markups(0)[-1].xref == first
+    assert document.backward_one(0, first)
+    assert document.markups(0)[0].xref == first
+
+
+# --------------------------------------------------------------- duplicate markup
+
+
+def test_duplicate_markup(document):
+    square = square_of(document)
+    before = len(document.markups(0))
+    xref = document.duplicate_markup(0, square.xref)
+    assert xref is not None
+    assert len(document.markups(0)) == before + 1
+    dup = next(m for m in document.markups(0) if m.xref == xref)
+    assert dup.subtype == square.subtype
+
+
+# --------------------------------------------------------------- export csv
+
+
+def test_export_csv(document, tmp_path):
+    path = str(tmp_path / "markups.csv")
+    document.export_markups_csv(path)
+    import csv
+    with open(path) as f:
+        rows = list(csv.reader(f))
+    assert len(rows) >= 2
+    assert rows[0][0].lower() == "page"
+
+
+# --------------------------------------------------------------- export page image
+
+
+def test_export_page_image(document, tmp_path):
+    path = str(tmp_path / "page.png")
+    document.export_page_image(0, path, dpi=72)
+    assert os.path.isfile(path)
+    assert os.path.getsize(path) > 100
+
+
+# --------------------------------------------------------------- duplicate page
+
+
+def test_duplicate_page(document):
+    markups_before = len(document.markups(0))
+    document.duplicate_page(0)
+    assert document.page_count == 3
+    assert len(document.markups(1)) >= 0
+
+
+# --------------------------------------------------------------- insert sized page
+
+
+def test_insert_page_sized(document):
+    document.insert_page_sized(1, 612.0, 792.0)
+    assert document.page_count == 3
+    w, h = document.page_size(1)
+    assert abs(w - 612.0) < 1.0
+    assert abs(h - 792.0) < 1.0
+
+
+# --------------------------------------------------------------- insert pdf pages
+
+
+def test_insert_pdf_pages(document, tmp_path):
+    source = tmp_path / "source.pdf"
+    doc = pymupdf.open()
+    doc.new_page(width=300, height=400)
+    doc.new_page(width=300, height=400)
+    doc.save(str(source))
+    doc.close()
+    document.insert_pdf_pages(str(source), 0, 1, 1)
+    assert document.page_count == 4
+
+
+# --------------------------------------------------------------- snap engine
+
+
+def test_snap_engine():
+    from pdf4py.snap import SnapEngine
+    engine = SnapEngine()
+    engine.grid_enabled = True
+    engine.grid_size = 10.0
+    result = engine.snap(11.0, 21.0)
+    assert result.x == 10.0
+    assert result.y == 20.0
+    assert result.snapped_x
+    assert result.snapped_y
+
+
+# --------------------------------------------------------------- measure
+
+
+def test_measure_length():
+    from pdf4py.measure import length
+    assert length((0, 0), (3, 4)) == pytest.approx(5.0)
+
+
+def test_measure_polygon_area():
+    from pdf4py.measure import polygon_area
+    area = polygon_area([(0, 0), (10, 0), (10, 10), (0, 10)])
+    assert area == pytest.approx(100.0)
+
+
+def test_measure_angle():
+    from pdf4py.measure import angle_between
+    angle = angle_between((10, 0), (0, 0), (0, 10))
+    assert angle == pytest.approx(90.0, abs=0.1)
+
+
+# --------------------------------------------------------------- autosave
+
+
+def test_autosave_lifecycle():
+    from pdf4py.autosave import Autosave
+    calls = []
+    saver = Autosave(lambda: calls.append(1))
+    assert not saver.enabled
+    saver.set_enabled(True)
+    assert saver.enabled
+    saver.set_has_path(True)
+    saver.set_enabled(False)
+    saver.stop()
+
+
+# --------------------------------------------------------------- mainwindow new features
+
+
+def test_theme_toggle(editor):
+    assert not editor._dark_mode
+    editor.toggle_theme()
+    assert editor._dark_mode
+    editor.toggle_theme()
+    assert not editor._dark_mode
+
+
+def test_forward_backward_one_actions(editor):
+    editor.set_mode(SELECT)
+    item = item_for(editor, "Square")
+    select_only(editor, item)
+    editor.forward_one()
+    editor.backward_one()
+
+
+def test_hide_lock_toggle(editor):
+    editor.set_mode(SELECT)
+    item = item_for(editor, "Square")
+    select_only(editor, item)
+    editor.toggle_hide_markup()
+    editor.toggle_hide_markup()
+    editor.toggle_lock_markup()
+    editor.toggle_lock_markup()
+
+
+def test_new_tool_modes_exist(editor):
+    from pdf4py.ui.pageview import (POLYLINE, STAMP, ERASER, REDACTION,
+                                     MEASURE_LENGTH, MEASURE_AREA,
+                                     MEASURE_ANGLE, LASSO)
+    for mode in (POLYLINE, STAMP, ERASER, REDACTION, MEASURE_LENGTH,
+                 MEASURE_AREA, MEASURE_ANGLE, LASSO):
+        editor.set_mode(mode)
+    editor.set_mode(SELECT)
+
+
+def test_property_panel_hidden_locked_checkboxes(rich_editor):
+    square = item_for(rich_editor, "Square")
+    select_only(rich_editor, square)
+    assert hasattr(rich_editor.properties, '_hidden_cb')
+    assert hasattr(rich_editor.properties, '_locked_cb')
+    assert not rich_editor.properties._hidden_cb.isChecked()
+    assert not rich_editor.properties._locked_cb.isChecked()

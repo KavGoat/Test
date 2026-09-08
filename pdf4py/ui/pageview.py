@@ -11,13 +11,15 @@ import math
 from typing import Optional
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import (QBrush, QColor, QPainter, QPen, QPixmap, QPolygonF,
-                           QTransform)
+from PySide6.QtGui import (QBrush, QColor, QGuiApplication, QPainter, QPen,
+                           QPixmap, QPolygonF, QTransform)
 from PySide6.QtWidgets import (QGraphicsItem, QGraphicsPixmapItem, QGraphicsPathItem,
                                QGraphicsRectItem, QGraphicsScene, QGraphicsView)
 from PySide6.QtGui import QPainterPath
 
-from ..document import DocumentError, Markup, PdfDocument
+from ..document import DocumentError, Markup, PdfDocument, STAMP_NAMES
+from ..snap import SnapEngine
+from ..measure import MeasureEngine, length as measure_length, polygon_area, angle_between
 from .images import to_pixmap
 from .textedit import InlineText
 
@@ -33,12 +35,24 @@ INK = "ink"
 HIGHLIGHT = "highlight"
 TEXT = "text"
 NOTE = "note"
+POLYLINE = "polyline"
+STAMP = "stamp"
+ERASER = "eraser"
+REDACTION = "redaction"
+MEASURE_LENGTH = "measure_length"
+MEASURE_AREA = "measure_area"
+MEASURE_ANGLE = "measure_angle"
+LASSO = "lasso"
 
 ALL_MODES = (SELECT, RECTANGLE, LINE, ARROW, ELLIPSE, POLYGON, CLOUD,
-             INK, HIGHLIGHT, TEXT, NOTE)
+             INK, HIGHLIGHT, TEXT, NOTE, POLYLINE, STAMP, ERASER, REDACTION,
+             MEASURE_LENGTH, MEASURE_AREA, MEASURE_ANGLE, LASSO)
 
-# Two-point tools: press-drag-release
-TWO_POINT_MODES = {RECTANGLE, LINE, ARROW, ELLIPSE, CLOUD, HIGHLIGHT, TEXT}
+TWO_POINT_MODES = {RECTANGLE, LINE, ARROW, ELLIPSE, CLOUD, HIGHLIGHT, TEXT,
+                   STAMP, REDACTION, MEASURE_LENGTH}
+
+NUDGE_STEP = 1.0
+NUDGE_BIG = 10.0
 
 MIN_ZOOM = 0.1
 MAX_ZOOM = 8.0
@@ -56,6 +70,8 @@ GROUP_COLOUR = QColor("#7a4fd6")
 DRAFT_COLOUR = QColor("#d62828")
 CALLOUT_COLOUR = QColor("#e08000")
 BROKEN_PAGE_COLOUR = QColor("#e8e2e2")
+SNAP_COLOUR = QColor("#e08000")
+MEASURE_COLOUR = QColor("#1a8c3a")
 
 HANDLE_SIZE = 8.0
 
@@ -213,12 +229,21 @@ class PageView(QGraphicsView):
         self._origin = QPointF()
         self._origin_page = 0
         self._syncing = False
-        # For ink drawing
         self._ink_points: list[QPointF] = []
         self._ink_path_item: Optional[QGraphicsPathItem] = None
-        # For polygon drawing
         self._polygon_points: list[QPointF] = []
         self._polygon_preview: Optional[QGraphicsPathItem] = None
+        self._polyline_points: list[QPointF] = []
+        self._polyline_preview: Optional[QGraphicsPathItem] = None
+        self._measure_points: list[QPointF] = []
+        self._measure_preview: Optional[QGraphicsPathItem] = None
+        self._lasso_points: list[QPointF] = []
+        self._lasso_preview: Optional[QGraphicsPathItem] = None
+        self._clipboard: Optional[tuple[int, int]] = None  # (page_index, xref)
+        self._stamp_id: int = 0
+        self.snap = SnapEngine()
+        self.measure = MeasureEngine()
+        self._snap_indicators: list[QGraphicsItem] = []
         self.setScene(QGraphicsScene(self))
         self.setBackgroundBrush(QBrush(CANVAS_COLOUR))
         self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
@@ -247,6 +272,13 @@ class PageView(QGraphicsView):
         self._ink_path_item = None
         self._polygon_points = []
         self._polygon_preview = None
+        self._polyline_points = []
+        self._polyline_preview = None
+        self._measure_points = []
+        self._measure_preview = None
+        self._lasso_points = []
+        self._lasso_preview = None
+        self._clear_snap_indicators()
 
         if self.document.is_empty:
             self.index = 0
@@ -462,16 +494,19 @@ class PageView(QGraphicsView):
     def set_mode(self, mode: str) -> None:
         self._finish_polygon()
         self._finish_ink()
+        self._finish_polyline()
+        self._cancel_measure()
+        self._cancel_lasso()
         self.mode = mode
-        selectable = mode == SELECT
+        selectable = mode in (SELECT, ERASER, LASSO)
         for item in self.markup_items():
-            item.setFlag(QGraphicsItem.ItemIsMovable, selectable)
+            item.setFlag(QGraphicsItem.ItemIsMovable, mode == SELECT)
             item.setFlag(QGraphicsItem.ItemIsSelectable, selectable)
             if not selectable:
                 item.setSelected(False)
-        self.setDragMode(QGraphicsView.RubberBandDrag if selectable
+        self.setDragMode(QGraphicsView.RubberBandDrag if mode == SELECT
                          else QGraphicsView.NoDrag)
-        self.viewport().setCursor(Qt.ArrowCursor if selectable else Qt.CrossCursor)
+        self.viewport().setCursor(Qt.ArrowCursor if mode == SELECT else Qt.CrossCursor)
 
     # -------------------------------------------------------------- selection
 
@@ -682,7 +717,21 @@ class PageView(QGraphicsView):
             self.page_changed.emit(self.index)
 
     def mousePressEvent(self, event):
-        if event.button() != Qt.LeftButton or self.mode == SELECT:
+        if event.button() != Qt.LeftButton:
+            super().mousePressEvent(event)
+            return
+
+        if self.mode == SELECT:
+            if event.modifiers() & Qt.ControlModifier:
+                item = self._markup_at(event.position().toPoint())
+                if item is not None:
+                    new_xref = self.document.duplicate_markup(
+                        item.page_index, item.xref, 0, 0)
+                    if new_xref:
+                        self.refresh(new_xref)
+                        self.edited.emit()
+                        self.message.emit("Markup duplicated — drag to place.")
+                        return
             super().mousePressEvent(event)
             return
 
@@ -701,9 +750,24 @@ class PageView(QGraphicsView):
             self.edited.emit()
             return
 
+        if self.mode == ERASER:
+            item = self._markup_at(event.position().toPoint())
+            if item is not None:
+                removed = self.document.delete_markups(item.page_index, [item.xref])
+                if removed:
+                    self.refresh()
+                    self.edited.emit()
+                    self.message.emit("Markup erased.")
+            return
+
         if self.mode == INK:
             self._origin_page = page_idx
             self._ink_points = [scene_pos]
+            return
+
+        if self.mode == LASSO:
+            self._origin_page = page_idx
+            self._lasso_points = [scene_pos]
             return
 
         if self.mode == POLYGON:
@@ -713,12 +777,26 @@ class PageView(QGraphicsView):
             self._update_polygon_preview()
             return
 
+        if self.mode == POLYLINE:
+            if not self._polyline_points:
+                self._origin_page = page_idx
+            self._polyline_points.append(scene_pos)
+            self._update_polyline_preview()
+            return
+
+        if self.mode in (MEASURE_AREA, MEASURE_ANGLE):
+            if not self._measure_points:
+                self._origin_page = page_idx
+            self._measure_points.append(scene_pos)
+            self._update_measure_preview()
+            return
+
         if self.mode in TWO_POINT_MODES:
             self._origin = self._clamp(scene_pos)
             self._origin_page = page_idx
             pen = QPen(DRAFT_COLOUR, 1.0, Qt.DashLine)
             pen.setCosmetic(True)
-            if self.mode in (LINE, ARROW):
+            if self.mode in (LINE, ARROW, MEASURE_LENGTH):
                 path = QPainterPath()
                 path.moveTo(self._origin)
                 path.lineTo(self._origin)
@@ -730,7 +808,7 @@ class PageView(QGraphicsView):
             else:
                 self._draft = self.scene().addRect(
                     QRectF(self._origin, self._origin), pen)
-            if not isinstance(self._draft, QGraphicsRectItem) or self.mode in (LINE, ARROW, ELLIPSE):
+            if not isinstance(self._draft, QGraphicsRectItem) or self.mode in (LINE, ARROW, ELLIPSE, MEASURE_LENGTH):
                 self.scene().addItem(self._draft)
             self._draft.setZValue(20)
             return
@@ -739,44 +817,67 @@ class PageView(QGraphicsView):
 
     def mouseMoveEvent(self, event):
         scene_pos = self.mapToScene(event.position().toPoint())
+        shift = bool(event.modifiers() & Qt.ShiftModifier)
 
         if self._ink_points:
             self._ink_points.append(scene_pos)
             self._update_ink_preview()
             return
 
+        if self._lasso_points:
+            self._lasso_points.append(scene_pos)
+            self._update_lasso_preview()
+            return
+
         if self._draft is not None:
             corner = self._clamp(scene_pos)
-            if self.mode in (LINE, ARROW):
+            if shift:
+                corner = self._constrain(self._origin, corner)
+            if self.mode in (LINE, ARROW, MEASURE_LENGTH):
                 if self._draft.scene() is not None:
                     self.scene().removeItem(self._draft)
                 path = QPainterPath()
                 path.moveTo(self._origin)
                 path.lineTo(corner)
-                pen = QPen(DRAFT_COLOUR, 1.0, Qt.DashLine)
+                pen = QPen(MEASURE_COLOUR if self.mode == MEASURE_LENGTH
+                           else DRAFT_COLOUR, 1.0, Qt.DashLine)
                 pen.setCosmetic(True)
                 self._draft = QGraphicsPathItem(path)
                 self._draft.setPen(pen)
                 self._draft.setZValue(20)
                 self.scene().addItem(self._draft)
             elif self.mode == ELLIPSE and isinstance(self._draft, QGraphicsRectItem):
-                pass
+                rect = QRectF(self._origin, corner).normalized()
+                if shift:
+                    side = min(rect.width(), rect.height())
+                    rect.setWidth(side)
+                    rect.setHeight(side)
+                self._draft.setRect(rect)
             elif isinstance(self._draft, QGraphicsRectItem):
-                self._draft.setRect(QRectF(self._origin, corner).normalized())
+                rect = QRectF(self._origin, corner).normalized()
+                if shift and self.mode in (RECTANGLE, CLOUD, HIGHLIGHT, STAMP, REDACTION):
+                    side = min(rect.width(), rect.height())
+                    rect.setWidth(side)
+                    rect.setHeight(side)
+                self._draft.setRect(rect)
             return
 
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
-        # Ink: finish stroke
         if self._ink_points and event.button() == Qt.LeftButton:
             self._finish_ink()
             return
 
-        # Two-point tools
+        if self._lasso_points and event.button() == Qt.LeftButton:
+            self._finish_lasso()
+            return
+
         if self._draft is not None and event.button() == Qt.LeftButton:
             scene_pos = self.mapToScene(event.position().toPoint())
             corner = self._clamp(scene_pos)
+            if bool(event.modifiers() & Qt.ShiftModifier):
+                corner = self._constrain(self._origin, corner)
             if self._draft.scene() is not None:
                 self.scene().removeItem(self._draft)
             self._draft = None
@@ -838,6 +939,30 @@ class PageView(QGraphicsView):
                     else:
                         self.message.emit("Drag to place a text box.")
                         return
+                elif self.mode == STAMP:
+                    if abs(cx - ox) >= MIN_DRAW_POINTS and abs(cy - oy) >= MIN_DRAW_POINTS:
+                        self.document.add_stamp(page_idx, (ox, oy, cx, cy),
+                                                stamp_id=self._stamp_id)
+                        name = STAMP_NAMES[self._stamp_id] if self._stamp_id < len(STAMP_NAMES) else "Stamp"
+                        self.message.emit(f"{name} stamp added.")
+                    else:
+                        self.message.emit("Drag to place a stamp.")
+                        return
+                elif self.mode == REDACTION:
+                    if abs(cx - ox) >= MIN_DRAW_POINTS and abs(cy - oy) >= MIN_DRAW_POINTS:
+                        self.document.add_redaction(page_idx, (ox, oy, cx, cy))
+                        self.message.emit("Redaction area added.")
+                    else:
+                        self.message.emit("Drag to mark a redaction.")
+                        return
+                elif self.mode == MEASURE_LENGTH:
+                    dist = math.hypot(cx - ox, cy - oy)
+                    if dist >= MIN_DRAW_POINTS:
+                        label = self.measure.format_length(page_idx, dist)
+                        self.message.emit(f"Length: {label}")
+                    else:
+                        self.message.emit("Drag to measure.")
+                    return
             except DocumentError as exc:
                 self.message.emit(str(exc))
                 return
@@ -852,6 +977,15 @@ class PageView(QGraphicsView):
         if self.mode == POLYGON and self._polygon_points:
             self._finish_polygon()
             return
+        if self.mode == POLYLINE and self._polyline_points:
+            self._finish_polyline()
+            return
+        if self.mode == MEASURE_AREA and self._measure_points:
+            self._finish_measure_area()
+            return
+        if self.mode == MEASURE_ANGLE and len(self._measure_points) >= 3:
+            self._finish_measure_angle()
+            return
         super().mouseDoubleClickEvent(event)
 
     def wheelEvent(self, event):
@@ -863,9 +997,21 @@ class PageView(QGraphicsView):
         super().wheelEvent(event)
 
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key_Escape:
+        key = event.key()
+        mods = event.modifiers()
+
+        if key == Qt.Key_Escape:
             if self._polygon_points:
                 self._cancel_polygon()
+                return
+            if self._polyline_points:
+                self._cancel_polyline()
+                return
+            if self._measure_points:
+                self._cancel_measure()
+                return
+            if self._lasso_points:
+                self._cancel_lasso()
                 return
             if self._ink_points:
                 self._ink_points = []
@@ -873,6 +1019,51 @@ class PageView(QGraphicsView):
                     self.scene().removeItem(self._ink_path_item)
                 self._ink_path_item = None
                 return
+
+        if self.mode == SELECT and key in (Qt.Key_Up, Qt.Key_Down, Qt.Key_Left, Qt.Key_Right):
+            step = NUDGE_BIG if mods & Qt.ShiftModifier else NUDGE_STEP
+            dx = step if key == Qt.Key_Right else (-step if key == Qt.Key_Left else 0)
+            dy = step if key == Qt.Key_Down else (-step if key == Qt.Key_Up else 0)
+            chosen = self.selected_items()
+            if chosen:
+                by_page: dict[int, dict[int, tuple[float, float]]] = {}
+                for item in chosen:
+                    by_page.setdefault(item.page_index, {})[item.xref] = (dx, dy)
+                for page_idx, shifts in by_page.items():
+                    self.document.move_markups(page_idx, shifts)
+                self.refresh(chosen[0].xref if len(chosen) == 1 else 0)
+                self.edited.emit()
+                return
+
+        if mods & Qt.ControlModifier and key == Qt.Key_C:
+            chosen = self.selected_items()
+            if len(chosen) == 1:
+                self._clipboard = (chosen[0].page_index, chosen[0].xref)
+                self.message.emit("Markup copied.")
+            return
+
+        if mods & Qt.ControlModifier and key == Qt.Key_V:
+            if self._clipboard is not None:
+                src_page, src_xref = self._clipboard
+                target_page = self.index
+                new_xref = self.document.duplicate_markup(src_page, src_xref, 20, 20)
+                if new_xref:
+                    self.refresh(new_xref)
+                    self.edited.emit()
+                    self.message.emit("Markup pasted.")
+            return
+
+        if mods & Qt.ControlModifier and key == Qt.Key_D:
+            chosen = self.selected_items()
+            if len(chosen) == 1:
+                new_xref = self.document.duplicate_markup(
+                    chosen[0].page_index, chosen[0].xref, 20, 20)
+                if new_xref:
+                    self.refresh(new_xref)
+                    self.edited.emit()
+                    self.message.emit("Markup duplicated.")
+            return
+
         super().keyPressEvent(event)
 
     # ---------------------------------------------------------- ink helpers
@@ -959,3 +1150,168 @@ class PageView(QGraphicsView):
         scene_rect = self.scene().sceneRect()
         return QPointF(min(max(point.x(), scene_rect.left()), scene_rect.right()),
                        min(max(point.y(), scene_rect.top()), scene_rect.bottom()))
+
+    @staticmethod
+    def _constrain(origin: QPointF, target: QPointF) -> QPointF:
+        dx = target.x() - origin.x()
+        dy = target.y() - origin.y()
+        dist = math.hypot(dx, dy)
+        if dist < 1e-9:
+            return target
+        angle = math.atan2(dy, dx)
+        snap_angle = round(angle / (math.pi / 4)) * (math.pi / 4)
+        return QPointF(origin.x() + dist * math.cos(snap_angle),
+                       origin.y() + dist * math.sin(snap_angle))
+
+    def _markup_at(self, viewport_pos) -> Optional[MarkupItem]:
+        scene_pos = self.mapToScene(viewport_pos)
+        for item in self.scene().items(scene_pos):
+            if isinstance(item, MarkupItem):
+                return item
+        return None
+
+    def _clear_snap_indicators(self) -> None:
+        for ind in self._snap_indicators:
+            if ind.scene() is not None:
+                self.scene().removeItem(ind)
+        self._snap_indicators = []
+
+    # -------------------------------------------------------- polyline helpers
+
+    def _update_polyline_preview(self) -> None:
+        if self._polyline_preview and self._polyline_preview.scene():
+            self.scene().removeItem(self._polyline_preview)
+        if len(self._polyline_points) < 2:
+            return
+        path = QPainterPath()
+        path.moveTo(self._polyline_points[0])
+        for pt in self._polyline_points[1:]:
+            path.lineTo(pt)
+        pen = QPen(DRAFT_COLOUR, 1.0, Qt.DashLine)
+        pen.setCosmetic(True)
+        self._polyline_preview = QGraphicsPathItem(path)
+        self._polyline_preview.setPen(pen)
+        self._polyline_preview.setZValue(20)
+        self.scene().addItem(self._polyline_preview)
+
+    def _finish_polyline(self) -> None:
+        if self._polyline_preview and self._polyline_preview.scene():
+            self.scene().removeItem(self._polyline_preview)
+        self._polyline_preview = None
+        if len(self._polyline_points) < 2:
+            self._polyline_points = []
+            return
+        page_idx = self._origin_page
+        page_points = [self.scene_to_page(p, page_idx) for p in self._polyline_points]
+        self._polyline_points = []
+        try:
+            self.document.add_polyline(page_idx, page_points)
+            self.message.emit("Polyline added.")
+            self.refresh()
+            self.edited.emit()
+        except DocumentError as exc:
+            self.message.emit(str(exc))
+
+    def _cancel_polyline(self) -> None:
+        if self._polyline_preview and self._polyline_preview.scene():
+            self.scene().removeItem(self._polyline_preview)
+        self._polyline_preview = None
+        self._polyline_points = []
+        self.message.emit("Polyline cancelled.")
+
+    # ------------------------------------------------------- measure helpers
+
+    def _update_measure_preview(self) -> None:
+        if self._measure_preview and self._measure_preview.scene():
+            self.scene().removeItem(self._measure_preview)
+        if len(self._measure_points) < 2:
+            return
+        path = QPainterPath()
+        path.moveTo(self._measure_points[0])
+        for pt in self._measure_points[1:]:
+            path.lineTo(pt)
+        pen = QPen(MEASURE_COLOUR, 1.4, Qt.DashDotLine)
+        pen.setCosmetic(True)
+        self._measure_preview = QGraphicsPathItem(path)
+        self._measure_preview.setPen(pen)
+        self._measure_preview.setZValue(20)
+        self.scene().addItem(self._measure_preview)
+
+    def _finish_measure_area(self) -> None:
+        if self._measure_preview and self._measure_preview.scene():
+            self.scene().removeItem(self._measure_preview)
+        self._measure_preview = None
+        if len(self._measure_points) < 3:
+            self._measure_points = []
+            self.message.emit("Need at least 3 points to measure area.")
+            return
+        page_idx = self._origin_page
+        page_pts = [self.scene_to_page(p, page_idx) for p in self._measure_points]
+        self._measure_points = []
+        area = polygon_area(page_pts)
+        label = self.measure.format_area(page_idx, area)
+        self.message.emit(f"Area: {label}")
+
+    def _finish_measure_angle(self) -> None:
+        if self._measure_preview and self._measure_preview.scene():
+            self.scene().removeItem(self._measure_preview)
+        self._measure_preview = None
+        if len(self._measure_points) < 3:
+            self._measure_points = []
+            self.message.emit("Need 3 points to measure an angle.")
+            return
+        page_idx = self._origin_page
+        pts = [self.scene_to_page(p, page_idx) for p in self._measure_points[:3]]
+        self._measure_points = []
+        deg = angle_between(pts[0], pts[1], pts[2])
+        self.message.emit(f"Angle: {deg:.1f}°")
+
+    def _cancel_measure(self) -> None:
+        if self._measure_preview and self._measure_preview.scene():
+            self.scene().removeItem(self._measure_preview)
+        self._measure_preview = None
+        self._measure_points = []
+
+    # --------------------------------------------------------- lasso helpers
+
+    def _update_lasso_preview(self) -> None:
+        if self._lasso_preview and self._lasso_preview.scene():
+            self.scene().removeItem(self._lasso_preview)
+        if len(self._lasso_points) < 2:
+            return
+        path = QPainterPath()
+        path.moveTo(self._lasso_points[0])
+        for pt in self._lasso_points[1:]:
+            path.lineTo(pt)
+        pen = QPen(SELECTION_COLOUR, 1.0, Qt.DashLine)
+        pen.setCosmetic(True)
+        self._lasso_preview = QGraphicsPathItem(path)
+        self._lasso_preview.setPen(pen)
+        self._lasso_preview.setZValue(20)
+        self.scene().addItem(self._lasso_preview)
+
+    def _finish_lasso(self) -> None:
+        if self._lasso_preview and self._lasso_preview.scene():
+            self.scene().removeItem(self._lasso_preview)
+        self._lasso_preview = None
+        if len(self._lasso_points) < 3:
+            self._lasso_points = []
+            return
+        polygon = QPolygonF(self._lasso_points)
+        for item in self.markup_items():
+            center = item.sceneBoundingRect().center()
+            if polygon.containsPoint(center, Qt.OddEvenFill):
+                item.setSelected(True)
+        self._lasso_points = []
+        count = len(self.selected_items())
+        if count:
+            self.message.emit(f"Lasso selected {count} markup{'s' if count > 1 else ''}.")
+            self.selection.emit()
+        else:
+            self.message.emit("No markups inside the lasso.")
+
+    def _cancel_lasso(self) -> None:
+        if self._lasso_preview and self._lasso_preview.scene():
+            self.scene().removeItem(self._lasso_preview)
+        self._lasso_preview = None
+        self._lasso_points = []

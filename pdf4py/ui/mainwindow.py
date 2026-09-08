@@ -6,20 +6,52 @@ from typing import Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QActionGroup, QGuiApplication, QKeySequence
-from PySide6.QtWidgets import (QApplication, QDockWidget, QFileDialog, QMainWindow,
-                               QMessageBox, QWidget)
+from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QDialogButtonBox,
+                               QDockWidget, QFileDialog, QFormLayout, QInputDialog,
+                               QMainWindow, QMessageBox, QPushButton, QSpinBox,
+                               QWidget)
 
-from ..document import DocumentError, PdfDocument
+from ..autosave import Autosave
+from ..document import PAPER_SIZES, STAMP_NAMES, DocumentError, PdfDocument
 from . import icons
 from .bookmarks import BookmarkPanel
 from .markuplist import MarkupListPanel
 from .pagelist import PageList
-from .pageview import (ARROW, CLOUD, ELLIPSE, HIGHLIGHT, INK, LINE, NOTE,
-                       POLYGON, RECTANGLE, SELECT, TEXT, PageView)
+from .pageview import (ARROW, CLOUD, ELLIPSE, ERASER, HIGHLIGHT, INK, LASSO,
+                       LINE, MEASURE_ANGLE, MEASURE_AREA, MEASURE_LENGTH,
+                       NOTE, POLYGON, POLYLINE, RECTANGLE, REDACTION, SELECT,
+                       STAMP, TEXT, PageView)
 from .properties import PropertyPanel
 
 APP_NAME = "PDF4Py"
 PDF_FILTER = "PDF documents (*.pdf);;All files (*)"
+IMAGE_FILTER = "PNG images (*.png);;JPEG images (*.jpg *.jpeg);;All files (*)"
+CSV_FILTER = "CSV files (*.csv);;All files (*)"
+
+_DARK_STYLE = """
+    QMainWindow, QWidget { background: #2b2b2b; color: #ddd; }
+    QMenuBar { background: #333; color: #ddd; }
+    QMenuBar::item:selected { background: #555; }
+    QMenu { background: #333; color: #ddd; }
+    QMenu::item:selected { background: #555; }
+    QToolBar { background: #333; border: none; }
+    QDockWidget { color: #ddd; }
+    QDockWidget::title { background: #3a3a3a; }
+    QGroupBox { color: #ddd; }
+    QLabel { color: #ddd; }
+    QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QTextEdit {
+        background: #3a3a3a; color: #ddd; border: 1px solid #555; }
+    QSlider::groove:horizontal { background: #555; height: 4px; }
+    QSlider::handle:horizontal { background: #aaa; width: 12px; margin: -4px 0; }
+    QPushButton { background: #444; color: #ddd; border: 1px solid #666;
+                  padding: 3px 8px; border-radius: 3px; }
+    QPushButton:hover { background: #555; }
+    QCheckBox { color: #ddd; }
+    QListWidget { background: #333; color: #ddd; }
+    QHeaderView::section { background: #3a3a3a; color: #ddd; }
+    QStatusBar { background: #333; color: #ddd; }
+    QScrollBar { background: #333; }
+"""
 
 
 class MainWindow(QMainWindow):
@@ -34,6 +66,9 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.view)
         self.setWindowIcon(icons.app_icon())
         self.resize(1280, 860)
+        self._dark_mode = False
+
+        self._autosave = Autosave(self._autosave_tick)
 
         # Pages dock (left)
         pages_dock = QDockWidget("Pages", self)
@@ -72,7 +107,6 @@ class MainWindow(QMainWindow):
                                  | QDockWidget.DockWidgetClosable)
         self.addDockWidget(Qt.BottomDockWidgetArea, markups_dock)
 
-        # Keep track of dock widgets for View menu
         self._docks = {
             "Pages": pages_dock,
             "Properties": props_dock,
@@ -96,6 +130,8 @@ class MainWindow(QMainWindow):
         self.properties.fill_changed.connect(self._set_fill_colour)
         self.properties.border_width_changed.connect(self._set_border_width)
         self.properties.opacity_changed.connect(self._set_opacity)
+        self.properties.hidden_changed.connect(self._set_hidden)
+        self.properties.locked_changed.connect(self._set_locked)
 
         self.bookmarks.page_requested.connect(self.show_page)
         self.markup_list.markup_selected.connect(self._on_markup_list_select)
@@ -125,9 +161,29 @@ class MainWindow(QMainWindow):
                                         self.save, "Save the document")
         self.save_as_action = self._action("Save &As...", None, QKeySequence.SaveAs,
                                            self.save_as, "Save under a new name")
+        self.print_action = self._action("&Print...", icons.print_icon(), QKeySequence.Print,
+                                         self.print_document, "Print the document")
+        self.export_csv_action = self._action("Export Markups as &CSV...", None, None,
+                                              self.export_csv, "Export all markups to CSV")
+        self.export_image_action = self._action("Export Page as &Image...", None, None,
+                                                self.export_page_image,
+                                                "Export the current page as an image")
+        self.autosave_action = QAction("Auto&save", self)
+        self.autosave_action.setCheckable(True)
+        self.autosave_action.setStatusTip("Periodically save the document")
+        self.autosave_action.setToolTip("Periodically save the document")
+        self.autosave_action.toggled.connect(self._toggle_autosave)
+        self.addAction(self.autosave_action)
+
         quit_action = self._action("&Quit", None, QKeySequence.Quit, self.close, "Quit")
         for action in (self.open_action, self.save_action, self.save_as_action):
             file_menu.addAction(action)
+        file_menu.addSeparator()
+        file_menu.addAction(self.print_action)
+        file_menu.addAction(self.export_csv_action)
+        file_menu.addAction(self.export_image_action)
+        file_menu.addSeparator()
+        file_menu.addAction(self.autosave_action)
         file_menu.addSeparator()
         file_menu.addAction(quit_action)
         main_bar.addAction(self.open_action)
@@ -153,6 +209,15 @@ class MainWindow(QMainWindow):
         self.insert_action = self._action("Insert Blank Page &After", icons.add_page_icon(),
                                           "Ctrl+Shift+A", self.insert_page,
                                           "Insert a blank page after this one")
+        self.insert_sized_action = self._action("Insert &Sized Page...", None, None,
+                                                self.insert_sized_page,
+                                                "Insert a page with a chosen paper size")
+        self.insert_pdf_action = self._action("Insert Pages from P&DF...", None, None,
+                                              self.insert_pdf_pages,
+                                              "Insert pages from another PDF")
+        self.duplicate_page_action = self._action("D&uplicate Page", icons.duplicate_icon(),
+                                                  None, self.duplicate_page,
+                                                  "Duplicate the current page")
         self.delete_page_action = self._action("&Delete Page", icons.delete_page_icon(),
                                                "Ctrl+Shift+D", self.delete_page,
                                                "Delete the page shown")
@@ -162,8 +227,11 @@ class MainWindow(QMainWindow):
         self.rotate_ccw_action = self._action("Rotate C&ounter-clockwise", None,
                                               "Ctrl+Shift+L", self.rotate_page_ccw,
                                               "Rotate the page 90 degrees counter-clockwise")
-        for action in (self.insert_action, self.delete_page_action,
-                       self.rotate_cw_action, self.rotate_ccw_action):
+        for action in (self.insert_action, self.insert_sized_action, self.insert_pdf_action,
+                       self.duplicate_page_action):
+            page_menu.addAction(action)
+        page_menu.addSeparator()
+        for action in (self.delete_page_action, self.rotate_cw_action, self.rotate_ccw_action):
             page_menu.addAction(action)
         main_bar.addAction(self.insert_action)
         main_bar.addAction(self.delete_page_action)
@@ -178,13 +246,27 @@ class MainWindow(QMainWindow):
             ("&Line", icons.line_icon(), "L", LINE, "Draw a line"),
             ("&Arrow", icons.arrow_icon(), "A", ARROW, "Draw an arrow"),
             ("&Ellipse", icons.ellipse_icon(), "E", ELLIPSE, "Draw an ellipse"),
-            ("&Polygon", icons.polygon_icon(), "P", POLYGON,
+            ("Po&lygon", icons.polygon_icon(), "P", POLYGON,
              "Click points, double-click to finish"),
             ("&Cloud", icons.cloud_icon(), "C", CLOUD, "Draw a revision cloud"),
             ("&Ink / Pen", icons.ink_icon(), "I", INK, "Draw freehand"),
             ("&Highlight", icons.highlight_icon(), "H", HIGHLIGHT, "Highlight an area"),
             ("&Text Box", icons.text_icon(), "T", TEXT, "Place a text box"),
             ("&Note", icons.note_icon(), "N", NOTE, "Place a sticky note"),
+            ("Poly&line", icons.polyline_icon(), "Shift+L", POLYLINE,
+             "Click points, double-click to finish"),
+            ("Sta&mp", icons.stamp_icon(), "M", STAMP, "Drag to place a stamp"),
+            ("E&raser", icons.eraser_icon(), "X", ERASER, "Click a markup to delete it"),
+            ("Re&daction", icons.redaction_icon(), "D", REDACTION,
+             "Drag to mark an area for redaction"),
+            ("Measure &Length", icons.measure_icon(), None, MEASURE_LENGTH,
+             "Drag to measure a distance"),
+            ("Measure &Area", None, None, MEASURE_AREA,
+             "Click points, double-click to measure area"),
+            ("Measure An&gle", None, None, MEASURE_ANGLE,
+             "Click three points to measure an angle"),
+            ("&Lasso Select", icons.lasso_icon(), "Shift+V", LASSO,
+             "Draw a freehand selection area"),
         ]
 
         self._tool_actions: dict[str, QAction] = {}
@@ -212,10 +294,24 @@ class MainWindow(QMainWindow):
         self.back_action = self._action("Send to &Back", icons.order_back_icon(),
                                         "Ctrl+Shift+[", self.send_to_back,
                                         "Send markup to back")
+        self.forward_one_action = self._action("Move For&ward", None, "Ctrl+]",
+                                               self.forward_one,
+                                               "Move markup one step forward")
+        self.backward_one_action = self._action("Move Back&ward", None, "Ctrl+[",
+                                                self.backward_one,
+                                                "Move markup one step backward")
+        self.hide_action = self._action("&Hide Markup", None, None, self.toggle_hide_markup,
+                                        "Toggle markup visibility")
+        self.lock_action = self._action("&Lock Markup", None, None, self.toggle_lock_markup,
+                                        "Toggle markup lock")
         for action in (self.text_action, self.group_action, self.ungroup_action):
             markup_menu.addAction(action)
         markup_menu.addSeparator()
-        for action in (self.front_action, self.back_action):
+        for action in (self.front_action, self.back_action,
+                       self.forward_one_action, self.backward_one_action):
+            markup_menu.addAction(action)
+        markup_menu.addSeparator()
+        for action in (self.hide_action, self.lock_action):
             markup_menu.addAction(action)
 
         # View
@@ -225,10 +321,15 @@ class MainWindow(QMainWindow):
                                 self.view.zoom_out, "Zoom out")
         fit = self._action("&Fit Page", icons.fit_icon(), "Ctrl+0",
                            self.view.fit_page, "Fit the whole page")
+        self.theme_action = self._action("&Dark Theme", icons.theme_icon(), None,
+                                         self.toggle_theme, "Switch between light and dark")
+        self.theme_action.setCheckable(True)
         for action in (zoom_in, zoom_out, fit):
             view_menu.addAction(action)
             main_bar.addAction(action)
 
+        view_menu.addSeparator()
+        view_menu.addAction(self.theme_action)
         view_menu.addSeparator()
         panels_menu = view_menu.addMenu("&Panels")
         for name, dock in self._docks.items():
@@ -275,6 +376,7 @@ class MainWindow(QMainWindow):
         self.view.show_fitted(0)
         self.bookmarks.reload()
         self.markup_list.reload()
+        self._autosave.set_has_path(self.document.path is not None)
         self.update_enabled()
         self.update_title()
         self.statusBar().showMessage(self._opened_message(path), 8000)
@@ -302,6 +404,7 @@ class MainWindow(QMainWindow):
             QGuiApplication.restoreOverrideCursor()
         if reloaded:
             self.view.refresh()
+        self._autosave.set_has_path(True)
         self.update_title()
         self.statusBar().showMessage(f"Saved {os.path.basename(self.document.path)}.", 4000)
         return True
@@ -324,9 +427,83 @@ class MainWindow(QMainWindow):
             return False
         finally:
             QGuiApplication.restoreOverrideCursor()
+        self._autosave.set_has_path(True)
         self.update_title()
         self.statusBar().showMessage(f"Saved {os.path.basename(path)}.", 4000)
         return True
+
+    def print_document(self) -> None:
+        if self.document.is_empty:
+            return
+        try:
+            from PySide6.QtPrintSupport import QPrintDialog, QPrinter
+        except ImportError:
+            QMessageBox.information(self, APP_NAME, "Printing support is not available.")
+            return
+        printer = QPrinter(QPrinter.HighResolution)
+        dialog = QPrintDialog(printer, self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        from PySide6.QtGui import QImage, QPainter as QPrint
+        painter = QPrint()
+        painter.begin(printer)
+        page_rect = printer.pageRect(QPrinter.DevicePixel)
+        for i in range(self.document.page_count):
+            if i > 0:
+                printer.newPage()
+            img_data = self.document.render_page(i, dpi=300)
+            img = QImage(img_data["samples"], img_data["width"], img_data["height"],
+                         img_data["stride"], QImage.Format_RGB888)
+            scaled = img.scaled(int(page_rect.width()), int(page_rect.height()),
+                                Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            painter.drawImage(0, 0, scaled)
+        painter.end()
+        self.statusBar().showMessage("Printed.", 4000)
+
+    def export_csv(self) -> None:
+        if self.document.is_empty:
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Export Markups as CSV", "", CSV_FILTER)
+        if not path:
+            return
+        if not path.lower().endswith(".csv"):
+            path += ".csv"
+        try:
+            self.document.export_markups_csv(path)
+        except DocumentError as exc:
+            QMessageBox.warning(self, APP_NAME, str(exc))
+            return
+        self.statusBar().showMessage(f"Exported markups to {os.path.basename(path)}.", 4000)
+
+    def export_page_image(self) -> None:
+        if self.document.is_empty:
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Export Page as Image", "", IMAGE_FILTER)
+        if not path:
+            return
+        dpi, ok = QInputDialog.getInt(self, "Export DPI", "Resolution (DPI):", 150, 72, 600)
+        if not ok:
+            return
+        try:
+            self.document.export_page_image(self.view.index, path, dpi)
+        except DocumentError as exc:
+            QMessageBox.warning(self, APP_NAME, str(exc))
+            return
+        self.statusBar().showMessage(
+            f"Exported page {self.view.index + 1} to {os.path.basename(path)}.", 4000)
+
+    def _autosave_tick(self) -> None:
+        if self.document.path and self.document.modified:
+            try:
+                self.document.save()
+                self.update_title()
+            except DocumentError:
+                pass
+
+    def _toggle_autosave(self, on: bool) -> None:
+        self._autosave.set_enabled(on)
+        self.statusBar().showMessage(
+            "Autosave enabled." if on else "Autosave disabled.", 4000)
 
     # ------------------------------------------------------------------ pages
 
@@ -373,6 +550,106 @@ class MainWindow(QMainWindow):
         self.pages.setCurrentRow(index)
         self.on_edited(refresh_thumbnail=False)
         self.statusBar().showMessage(f"Inserted a blank page at {index + 1}.", 4000)
+
+    def insert_sized_page(self) -> None:
+        if self.document.is_empty:
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Insert Sized Page")
+        form = QFormLayout(dialog)
+        size_combo = QComboBox()
+        for name in PAPER_SIZES:
+            w, h = PAPER_SIZES[name]
+            size_combo.addItem(f"{name}  ({w} x {h} pt)", name)
+        form.addRow("Paper size:", size_combo)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        name = size_combo.currentData()
+        w, h = PAPER_SIZES[name]
+        index = self.view.index + 1
+        try:
+            self.document.insert_page_sized(index, float(w), float(h))
+        except DocumentError as exc:
+            QMessageBox.warning(self, APP_NAME, str(exc))
+            return
+        self.pages.insert_row(index)
+        self.view.refresh()
+        self.view._syncing = True
+        self.view.index = index
+        if self.view._page_rects:
+            self.view._scroll_to_page(index)
+        self.view._syncing = False
+        self.pages.setCurrentRow(index)
+        self.on_edited(refresh_thumbnail=False)
+        self.statusBar().showMessage(f"Inserted {name} page at {index + 1}.", 4000)
+
+    def insert_pdf_pages(self) -> None:
+        if self.document.is_empty:
+            return
+        path, _ = QFileDialog.getOpenFileName(self, "Insert Pages from PDF", "", PDF_FILTER)
+        if not path:
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Page Range")
+        form = QFormLayout(dialog)
+        from_spin = QSpinBox()
+        from_spin.setMinimum(1)
+        from_spin.setMaximum(9999)
+        from_spin.setValue(1)
+        form.addRow("From page:", from_spin)
+        to_spin = QSpinBox()
+        to_spin.setMinimum(1)
+        to_spin.setMaximum(9999)
+        to_spin.setValue(1)
+        form.addRow("To page:", to_spin)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        insert_at = self.view.index + 1
+        try:
+            self.document.insert_pdf_pages(path, from_spin.value() - 1,
+                                           to_spin.value() - 1, insert_at)
+        except DocumentError as exc:
+            QMessageBox.warning(self, APP_NAME, str(exc))
+            return
+        self.pages.reload(insert_at)
+        self.view.refresh()
+        self.view._syncing = True
+        self.view.index = insert_at
+        if self.view._page_rects:
+            self.view._scroll_to_page(insert_at)
+        self.view._syncing = False
+        self.on_edited(refresh_thumbnail=False)
+        self.statusBar().showMessage(
+            f"Inserted pages from {os.path.basename(path)}.", 4000)
+
+    def duplicate_page(self) -> None:
+        if self.document.is_empty:
+            return
+        index = self.view.index
+        try:
+            self.document.duplicate_page(index)
+        except DocumentError as exc:
+            QMessageBox.warning(self, APP_NAME, str(exc))
+            return
+        new_index = index + 1
+        self.pages.insert_row(new_index)
+        self.view.refresh()
+        self.view._syncing = True
+        self.view.index = new_index
+        if self.view._page_rects:
+            self.view._scroll_to_page(new_index)
+        self.view._syncing = False
+        self.pages.setCurrentRow(new_index)
+        self.on_edited(refresh_thumbnail=False)
+        self.statusBar().showMessage(f"Duplicated page {index + 1}.", 4000)
 
     def delete_page(self) -> None:
         if self.document.is_empty:
@@ -437,6 +714,14 @@ class MainWindow(QMainWindow):
             HIGHLIGHT: "Drag to highlight an area.",
             TEXT: "Drag to place a text box.",
             NOTE: "Click to place a sticky note.",
+            POLYLINE: "Click to add points. Double-click to finish the polyline.",
+            STAMP: "Drag to place a stamp annotation.",
+            ERASER: "Click on a markup to delete it.",
+            REDACTION: "Drag to mark an area for redaction.",
+            MEASURE_LENGTH: "Drag to measure a distance.",
+            MEASURE_AREA: "Click points, double-click to measure area.",
+            MEASURE_ANGLE: "Click three points to measure an angle.",
+            LASSO: "Draw around markups to select them.",
         }
         self.statusBar().showMessage(tips.get(mode, ""), 4000)
 
@@ -540,6 +825,54 @@ class MainWindow(QMainWindow):
             self.on_edited()
             self.statusBar().showMessage("Markup sent to back.", 4000)
 
+    def forward_one(self) -> None:
+        chosen = self.view.selected_items()
+        if len(chosen) != 1:
+            self.statusBar().showMessage("Select one markup to reorder.", 4000)
+            return
+        item = chosen[0]
+        if self.document.forward_one(item.page_index, item.xref):
+            self.view.refresh(item.xref)
+            self.on_edited()
+            self.statusBar().showMessage("Markup moved forward.", 4000)
+
+    def backward_one(self) -> None:
+        chosen = self.view.selected_items()
+        if len(chosen) != 1:
+            self.statusBar().showMessage("Select one markup to reorder.", 4000)
+            return
+        item = chosen[0]
+        if self.document.backward_one(item.page_index, item.xref):
+            self.view.refresh(item.xref)
+            self.on_edited()
+            self.statusBar().showMessage("Markup moved backward.", 4000)
+
+    def toggle_hide_markup(self) -> None:
+        chosen = self.view.selected_items()
+        if len(chosen) != 1:
+            self.statusBar().showMessage("Select one markup.", 4000)
+            return
+        item = chosen[0]
+        new_hidden = not item.markup.hidden
+        if self.document.set_markup_hidden(item.page_index, item.xref, new_hidden):
+            self.view.refresh(item.xref)
+            self.on_edited()
+            self.statusBar().showMessage(
+                "Markup hidden." if new_hidden else "Markup shown.", 4000)
+
+    def toggle_lock_markup(self) -> None:
+        chosen = self.view.selected_items()
+        if len(chosen) != 1:
+            self.statusBar().showMessage("Select one markup.", 4000)
+            return
+        item = chosen[0]
+        new_locked = not item.markup.locked
+        if self.document.set_markup_locked(item.page_index, item.xref, new_locked):
+            self.view.refresh(item.xref)
+            self.on_edited()
+            self.statusBar().showMessage(
+                "Markup locked." if new_locked else "Markup unlocked.", 4000)
+
     # --------------------------------------------------------- property edits
 
     def _set_stroke_colour(self, rgb: tuple) -> None:
@@ -578,6 +911,24 @@ class MainWindow(QMainWindow):
             self.view.refresh(item.xref)
             self.on_edited()
 
+    def _set_hidden(self, hidden: bool) -> None:
+        chosen = self.view.selected_items()
+        if len(chosen) != 1:
+            return
+        item = chosen[0]
+        if self.document.set_markup_hidden(item.page_index, item.xref, hidden):
+            self.view.refresh(item.xref)
+            self.on_edited()
+
+    def _set_locked(self, locked: bool) -> None:
+        chosen = self.view.selected_items()
+        if len(chosen) != 1:
+            return
+        item = chosen[0]
+        if self.document.set_markup_locked(item.page_index, item.xref, locked):
+            self.view.refresh(item.xref)
+            self.on_edited()
+
     # --------------------------------------------------------- selection sync
 
     def _on_selection_change(self) -> None:
@@ -592,6 +943,16 @@ class MainWindow(QMainWindow):
     def _on_markup_list_select(self, page_index: int, xref: int) -> None:
         self.show_page(page_index)
         self.view.refresh(xref)
+
+    # ----------------------------------------------------------------- theme
+
+    def toggle_theme(self) -> None:
+        self._dark_mode = not self._dark_mode
+        if self._dark_mode:
+            self.setStyleSheet(_DARK_STYLE)
+        else:
+            self.setStyleSheet("")
+        self.theme_action.setChecked(self._dark_mode)
 
     # ------------------------------------------------------------------ state
 
@@ -609,7 +970,10 @@ class MainWindow(QMainWindow):
 
     def update_enabled(self) -> None:
         has_pages = not self.document.is_empty
-        for action in (self.save_action, self.save_as_action, self.insert_action):
+        for action in (self.save_action, self.save_as_action, self.insert_action,
+                       self.insert_sized_action, self.insert_pdf_action,
+                       self.duplicate_page_action, self.print_action,
+                       self.export_csv_action, self.export_image_action):
             action.setEnabled(has_pages)
         for mode, action in self._tool_actions.items():
             action.setEnabled(has_pages)
@@ -624,6 +988,10 @@ class MainWindow(QMainWindow):
         self.delete_action_markup.setEnabled(bool(chosen))
         self.front_action.setEnabled(len(chosen) == 1)
         self.back_action.setEnabled(len(chosen) == 1)
+        self.forward_one_action.setEnabled(len(chosen) == 1)
+        self.backward_one_action.setEnabled(len(chosen) == 1)
+        self.hide_action.setEnabled(len(chosen) == 1)
+        self.lock_action.setEnabled(len(chosen) == 1)
 
         self.undo_action.setEnabled(self.document.can_undo)
         self.redo_action.setEnabled(self.document.can_redo)
@@ -646,6 +1014,7 @@ class MainWindow(QMainWindow):
         return True
 
     def closeEvent(self, event):
+        self._autosave.stop()
         if self.confirm_discard():
             event.accept()
         else:

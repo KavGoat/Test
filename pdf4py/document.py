@@ -8,6 +8,7 @@ coordinates the user sees on screen are the coordinates used throughout.
 """
 from __future__ import annotations
 
+import csv
 import math
 import os
 import re
@@ -52,9 +53,25 @@ CLOUD_COLOUR = (0.85, 0.16, 0.16)
 INK_COLOUR = (0.13, 0.13, 0.75)
 HIGHLIGHT_COLOUR = (1.0, 0.92, 0.23)
 FREETEXT_COLOUR = (0.0, 0.0, 0.0)
+POLYLINE_COLOUR = (0.13, 0.45, 0.85)
+STAMP_COLOUR = (0.85, 0.16, 0.16)
 
 DEFAULT_BORDER_WIDTH = 1.5
 DEFAULT_OPACITY = 1.0
+
+PAPER_SIZES = {
+    "A0": (2384, 3370), "A1": (1684, 2384), "A2": (1191, 1684),
+    "A3": (842, 1191), "A4": (595, 842), "A5": (420, 595),
+    "Letter": (612, 792), "Legal": (612, 1008), "Tabloid": (792, 1224),
+    "ARCH A": (648, 864), "ARCH B": (864, 1296), "ARCH C": (1296, 1728),
+    "ARCH D": (1728, 2592), "ARCH E": (2592, 3456),
+}
+
+STAMP_NAMES = [
+    "Approved", "Not Approved", "Draft", "Experimental", "Expired",
+    "Final", "For Comment", "For Public Release", "Confidential",
+    "Departmental", "Not For Public Release", "Top Secret",
+]
 
 
 @dataclass(frozen=True)
@@ -81,6 +98,8 @@ class Markup:
     created: str = ""
     subject: str = ""
     page_index: int = 0
+    hidden: bool = False
+    locked: bool = False
 
     @property
     def width(self) -> float:
@@ -344,6 +363,7 @@ class PdfDocument:
         info = annot.info
         border = annot.border
         border_width = border.get("width", 1.0) if border else 1.0
+        flags = annot.flags
         return Markup(
             xref=annot.xref,
             subtype=annot.type[1],
@@ -362,6 +382,8 @@ class PdfDocument:
             created=info.get("creationDate", ""),
             subject=info.get("subject", ""),
             page_index=page_index,
+            hidden=bool(flags & pymupdf.PDF_ANNOT_IS_HIDDEN),
+            locked=bool(flags & pymupdf.PDF_ANNOT_IS_LOCKED),
         )
 
     # ------------------------------------------------------------------ groups
@@ -895,6 +917,66 @@ class PdfDocument:
         self._record_addition("Add text", index, xref, draw)
         return xref
 
+    def add_polyline(self, index: int, points: list[tuple[float, float]],
+                     colour: tuple[float, ...] = POLYLINE_COLOUR,
+                     width: float = DEFAULT_BORDER_WIDTH) -> int:
+        if len(points) < 2:
+            raise DocumentError("A polyline needs at least two points.")
+
+        def draw() -> int:
+            page = self._doc[index]
+            pdf_points = [pymupdf.Point(*p) * page.derotation_matrix for p in points]
+            annot = page.add_polyline_annot(pdf_points)
+            annot.set_colors(stroke=colour)
+            annot.set_border(width=width)
+            annot.update()
+            return annot.xref
+
+        try:
+            xref = draw()
+        except Exception as exc:
+            _drain_messages()
+            raise DocumentError(f"Could not add the polyline: {exc}") from exc
+        self._record_addition("Draw polyline", index, xref, draw)
+        return xref
+
+    def add_stamp(self, index: int, rect: tuple[float, float, float, float],
+                  stamp_id: int = 0,
+                  colour: tuple[float, ...] = STAMP_COLOUR) -> int:
+        def draw() -> int:
+            page = self._doc[index]
+            box = pymupdf.Rect(*rect).normalize() * page.derotation_matrix
+            annot = page.add_stamp_annot(box, stamp=stamp_id)
+            annot.set_colors(stroke=colour)
+            annot.set_opacity(0.5)
+            annot.update()
+            return annot.xref
+
+        try:
+            xref = draw()
+        except Exception as exc:
+            _drain_messages()
+            raise DocumentError(f"Could not add the stamp: {exc}") from exc
+        self._record_addition("Add stamp", index, xref, draw)
+        return xref
+
+    def add_redaction(self, index: int, rect: tuple[float, float, float, float]
+                      ) -> int:
+        def draw() -> int:
+            page = self._doc[index]
+            box = pymupdf.Rect(*rect).normalize() * page.derotation_matrix
+            annot = page.add_redact_annot(box)
+            annot.update()
+            return annot.xref
+
+        try:
+            xref = draw()
+        except Exception as exc:
+            _drain_messages()
+            raise DocumentError(f"Could not add the redaction: {exc}") from exc
+        self._record_addition("Add redaction", index, xref, draw)
+        return xref
+
     def add_note(self, index: int, point: tuple[float, float],
                  text: str = "Note") -> int:
         def draw() -> int:
@@ -932,6 +1014,219 @@ class PdfDocument:
                                  else f"Delete {len(xrefs)} markups", undo, redo))
         self.modified = True
         return len(xrefs)
+
+    # ------------------------------------------------------------ hide / lock
+
+    def set_markup_hidden(self, index: int, xref: int, hidden: bool) -> bool:
+        try:
+            page = self._doc[index]
+            annot = self._find(page, xref)
+            if annot is None:
+                return False
+        except Exception:
+            _drain_messages()
+            return False
+
+        def change() -> bool:
+            here = self._doc[index]
+            one = self._find(here, xref)
+            if one is None:
+                return False
+            flags = one.flags
+            if hidden:
+                flags |= pymupdf.PDF_ANNOT_IS_HIDDEN
+            else:
+                flags &= ~pymupdf.PDF_ANNOT_IS_HIDDEN
+            one.set_flags(flags)
+            return True
+
+        return self._edit("Hide markup" if hidden else "Show markup", [xref], change)
+
+    def set_markup_locked(self, index: int, xref: int, locked: bool) -> bool:
+        try:
+            page = self._doc[index]
+            annot = self._find(page, xref)
+            if annot is None:
+                return False
+        except Exception:
+            _drain_messages()
+            return False
+
+        def change() -> bool:
+            here = self._doc[index]
+            one = self._find(here, xref)
+            if one is None:
+                return False
+            flags = one.flags
+            if locked:
+                flags |= pymupdf.PDF_ANNOT_IS_LOCKED
+            else:
+                flags &= ~pymupdf.PDF_ANNOT_IS_LOCKED
+            one.set_flags(flags)
+            return True
+
+        return self._edit("Lock markup" if locked else "Unlock markup", [xref], change)
+
+    # --------------------------------------------------- one-step ordering
+
+    def forward_one(self, index: int, xref: int) -> bool:
+        before = self._stash_page(index)
+        if before is None:
+            return False
+        try:
+            page = self._doc[index]
+            annot_xrefs = self._annot_xref_order(page)
+            if xref not in annot_xrefs:
+                return False
+            pos = annot_xrefs.index(xref)
+            if pos >= len(annot_xrefs) - 1:
+                return False
+            annot_xrefs[pos], annot_xrefs[pos + 1] = annot_xrefs[pos + 1], annot_xrefs[pos]
+            self._reorder_annots(page, annot_xrefs)
+        except Exception:
+            _drain_messages()
+            return False
+        after = self._stash_page(index)
+        if after is None:
+            return False
+        self._record_page_swap("Move forward", index, before, after)
+        return True
+
+    def backward_one(self, index: int, xref: int) -> bool:
+        before = self._stash_page(index)
+        if before is None:
+            return False
+        try:
+            page = self._doc[index]
+            annot_xrefs = self._annot_xref_order(page)
+            if xref not in annot_xrefs:
+                return False
+            pos = annot_xrefs.index(xref)
+            if pos <= 0:
+                return False
+            annot_xrefs[pos], annot_xrefs[pos - 1] = annot_xrefs[pos - 1], annot_xrefs[pos]
+            self._reorder_annots(page, annot_xrefs)
+        except Exception:
+            _drain_messages()
+            return False
+        after = self._stash_page(index)
+        if after is None:
+            return False
+        self._record_page_swap("Move backward", index, before, after)
+        return True
+
+    # -------------------------------------------------------- duplicate markup
+
+    def duplicate_markup(self, index: int, xref: int,
+                         dx: float = 20.0, dy: float = 20.0) -> int:
+        try:
+            page = self._doc[index]
+            annot = self._find(page, xref)
+            if annot is None:
+                return 0
+            kind = annot.type[0]
+            rect = annot.rect
+            colours = annot.colors
+            stroke = colours.get("stroke", ()) or ()
+            fill_c = colours.get("fill", ()) or ()
+            border = annot.border
+            bw = border.get("width", 1.0) if border else 1.0
+            opacity = annot.opacity if annot.opacity >= 0 else 1.0
+            info = annot.info
+            to_pdf = self._to_pdf(page)
+            pdf_dx = dx * to_pdf.a + dy * to_pdf.c
+            pdf_dy = dx * to_pdf.b + dy * to_pdf.d
+        except Exception:
+            _drain_messages()
+            return 0
+
+        def draw() -> int:
+            p = self._doc[index]
+            offset = pymupdf.Rect(rect.x0 + pdf_dx, rect.y0 + pdf_dy,
+                                  rect.x1 + pdf_dx, rect.y1 + pdf_dy)
+            new: Optional[pymupdf.Annot] = None
+            if kind == pymupdf.PDF_ANNOT_SQUARE:
+                new = p.add_rect_annot(offset)
+            elif kind == pymupdf.PDF_ANNOT_CIRCLE:
+                new = p.add_circle_annot(offset)
+            elif kind == pymupdf.PDF_ANNOT_LINE:
+                try:
+                    k, raw = self._doc.xref_get_key(xref, "L")
+                    if k == "array":
+                        nums = [float(v) for v in raw.strip("[]").split()]
+                        a = pymupdf.Point(nums[0] + pdf_dx, nums[1] + pdf_dy)
+                        b = pymupdf.Point(nums[2] + pdf_dx, nums[3] + pdf_dy)
+                        new = p.add_line_annot(a, b)
+                except Exception:
+                    new = p.add_rect_annot(offset)
+            elif kind == pymupdf.PDF_ANNOT_FREE_TEXT:
+                new = p.add_freetext_annot(offset, info.get("content", "Text"),
+                                           fontsize=12.0, text_color=stroke or (0, 0, 0))
+            elif kind == pymupdf.PDF_ANNOT_TEXT:
+                center = pymupdf.Point(offset.x0, offset.y0)
+                new = p.add_text_annot(center, info.get("content", "Note"))
+            elif kind == pymupdf.PDF_ANNOT_HIGHLIGHT:
+                new = p.add_highlight_annot(quads=[offset.quad])
+            elif kind in (pymupdf.PDF_ANNOT_POLYGON, pymupdf.PDF_ANNOT_POLYLINE):
+                try:
+                    k, raw = self._doc.xref_get_key(xref, "Vertices")
+                    if k == "array":
+                        nums = [float(v) for v in raw.strip("[]").split()]
+                        pts = [pymupdf.Point(nums[i] + pdf_dx, nums[i+1] + pdf_dy)
+                               for i in range(0, len(nums), 2)]
+                        if kind == pymupdf.PDF_ANNOT_POLYGON:
+                            new = p.add_polygon_annot(pts)
+                        else:
+                            new = p.add_polyline_annot(pts)
+                except Exception:
+                    new = p.add_rect_annot(offset)
+            else:
+                new = p.add_rect_annot(offset)
+
+            if new is None:
+                raise DocumentError("Could not duplicate the markup.")
+            if stroke:
+                new.set_colors(stroke=stroke)
+            if fill_c:
+                new.set_colors(fill=fill_c)
+            new.set_border(width=bw)
+            new.set_opacity(max(0.0, min(1.0, opacity)))
+            new.update()
+            return new.xref
+
+        try:
+            new_xref = draw()
+        except Exception as exc:
+            _drain_messages()
+            return 0
+        self._record_addition("Duplicate markup", index, new_xref, draw)
+        return new_xref
+
+    # --------------------------------------------------------------- export
+
+    def export_markups_csv(self, path: str) -> None:
+        rows = self.all_markups()
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["Page", "Type", "Subject", "Author", "Text",
+                             "X0", "Y0", "X1", "Y1", "Colour", "Opacity"])
+            for m in rows:
+                writer.writerow([
+                    m.page_index + 1, m.subtype, m.subject, m.author,
+                    m.text, f"{m.x0:.1f}", f"{m.y0:.1f}", f"{m.x1:.1f}", f"{m.y1:.1f}",
+                    ",".join(f"{c:.2f}" for c in m.colour) if m.colour else "",
+                    f"{m.opacity:.2f}",
+                ])
+
+    def export_page_image(self, index: int, path: str, dpi: int = 150) -> None:
+        zoom = dpi / 72.0
+        try:
+            page = self._doc[index]
+            pixmap = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), annots=True)
+            pixmap.save(path)
+        except Exception as exc:
+            _drain_messages()
+            raise DocumentError(f"Could not export page image: {exc}") from exc
 
     # ------------------------------------------------------------------- pages
 
@@ -997,6 +1292,71 @@ class PdfDocument:
             self._doc[index].set_rotation(new_rotation)
 
         self.history.record(Step(f"Rotate page {angle}°", undo, redo))
+
+    def duplicate_page(self, index: int) -> None:
+        try:
+            kept = pymupdf.open()
+            kept.insert_pdf(self._doc, from_page=index, to_page=index, annots=True)
+            self._doc.insert_pdf(kept, start_at=index + 1, annots=True)
+        except Exception as exc:
+            _drain_messages()
+            raise DocumentError(f"Could not duplicate the page: {exc}") from exc
+        self.modified = True
+
+        def undo() -> None:
+            self._doc.delete_page(index + 1)
+
+        def redo() -> None:
+            cp = pymupdf.open()
+            cp.insert_pdf(self._doc, from_page=index, to_page=index, annots=True)
+            self._doc.insert_pdf(cp, start_at=index + 1, annots=True)
+
+        self.history.record(Step("Duplicate page", undo, redo))
+
+    def insert_pdf_pages(self, source_path: str, from_page: int, to_page: int,
+                         insert_at: int) -> int:
+        try:
+            source = pymupdf.open(source_path, filetype="pdf")
+            count = source.page_count
+            from_page = max(0, min(from_page, count - 1))
+            to_page = max(from_page, min(to_page, count - 1))
+            self._doc.insert_pdf(source, from_page=from_page, to_page=to_page,
+                                 start_at=insert_at, annots=True)
+            inserted = to_page - from_page + 1
+            source.close()
+        except Exception as exc:
+            _drain_messages()
+            raise DocumentError(f"Could not insert pages: {exc}") from exc
+        self.modified = True
+
+        def undo() -> None:
+            for _ in range(inserted):
+                self._doc.delete_page(insert_at)
+
+        def redo() -> None:
+            src = pymupdf.open(source_path, filetype="pdf")
+            self._doc.insert_pdf(src, from_page=from_page, to_page=to_page,
+                                 start_at=insert_at, annots=True)
+            src.close()
+
+        self.history.record(Step(f"Insert {inserted} page(s)", undo, redo))
+        return inserted
+
+    def insert_page_sized(self, index: int, width: float, height: float) -> None:
+        try:
+            self._doc.new_page(pno=index, width=width, height=height)
+        except Exception as exc:
+            _drain_messages()
+            raise DocumentError(f"Could not insert a page: {exc}") from exc
+        self.modified = True
+
+        def undo() -> None:
+            self._doc.delete_page(index)
+
+        def redo() -> None:
+            self._doc.new_page(pno=index, width=width, height=height)
+
+        self.history.record(Step("Insert page", undo, redo))
 
     # ---------------------------------------------------------------- bookmarks
 
