@@ -314,6 +314,29 @@ def test_what_we_write_is_readable_by_another_library(tmp_path):
     assert str(mark["/BE"]["/S"]) == "/C"
 
 
+def test_saving_over_a_file_lets_go_of_it_first(tmp_path):
+    """Nothing may still hold a file when it is replaced.
+
+    Most of these saves are over the very file the document was read from — an
+    export having its markups added, an outline written onto a finished PDF.
+    Windows refuses to rename over a file anything still has open: the save
+    fails with a permission error and what is left beside the drawing is a
+    ``.markforge-part`` file nobody asked for. Unix allows it and hides the
+    whole thing, so the only way to keep it fixed is to check here.
+    """
+    path = str(tmp_path / "drawing.pdf")
+    open(path, "wb").write(a_drawing())
+
+    document = engine.open_path(path)
+    other = engine.open_path(path)
+    engine.save_as(document, path, also=(other,))
+    assert document.is_closed, "the document written must be let go of"
+    assert other.is_closed, "and so must anything else holding the file"
+    assert not os.path.exists(path + ".markforge-part"), \
+        "and nothing may be left lying beside it"
+    engine.close(engine.open_path(path))               # still a readable PDF
+
+
 def test_an_appearance_is_lifted_out_of_the_file_it_was_drawn_in(tmp_path):
     """A markup drawn on a scratch page becomes the form its annotation shows."""
     scratch = pymupdf.open()
@@ -517,6 +540,28 @@ def test_a_zoom_gives_up_on_the_zoom_before_it(tmp_path):
     assert not [key for key in cache._waiting
                 if getattr(key, "scale", 0) == 2.0], \
         "and the zoom after it should have given up on them"
+
+
+def test_a_page_is_drawn_at_every_zoom_including_right_out(tmp_path):
+    """Zoomed out is drawn, not left as a small picture stretched over a sheet.
+
+    The whole-page thumbnail is the gap filler while tiles come. Serving it as
+    the answer at low zoom leaves a drawing permanently soft — it only sharpens
+    when something makes it render, which is what zooming in does. A page has
+    to be drawn at the resolution it is being shown at, at any zoom.
+    """
+    from PySide6.QtCore import QRectF
+
+    from markforge.io import pdftiles
+
+    cache = pdftiles.TileCache()
+    asked: list = []
+    cache._ask = lambda key, data, page, sheet: asked.append(key)
+    page = QRectF(0, 0, 2384, 1684)                    # A1
+    # Fitted to a window: well under the thumbnail's own sharpness.
+    cache.tiles("a-drawing", b"%PDF-", 0, page, 0.25, page)
+    assert [key for key in asked if isinstance(key, pdftiles.TileKey)], \
+        "zoomed out still has to be drawn"
 
 
 def test_a_page_nobody_can_see_is_not_drawn():

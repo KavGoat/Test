@@ -188,9 +188,12 @@ lays out a row of footings. On a scaled page the offset is a real distance
 at their own size, as their own line work rather than a picture of it, so they
 stay sharp however far you zoom in — the page is re-rendered at the zoom you
 are actually looking at, not magnified. Somebody else's markups come in as
-markups: a Bluebeam cloud opens as a cloud you can select, recolour and move.
-Its bookmarks come in too, so the sheet index a drawing set was issued with is
-in the panel rather than only in the file.
+markups: a Bluebeam cloud opens as a cloud you can select, recolour and move,
+and so do their call-outs, text boxes, rectangles and dimensions — the point of
+opening somebody's marked-up sheet is to work on it. Its bookmarks come in too,
+so the sheet index a drawing set was issued with is in the panel rather than
+only in the file. The page's own line work stays part of the page: that is the
+drawing, not a markup, and there can be tens of thousands of it.
 
 **File ▸ Insert PDF pages** brings more in beside them — all pages or a range
 like `1-3,7`, keeping each page's own size or fitting to A4, with a preview of

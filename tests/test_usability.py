@@ -7294,15 +7294,25 @@ def test_a_markup_drawn_on_an_opened_pdf_can_be_picked_up_and_moved(
     window.rebuild_scenes()
     QApplication.processEvents()
 
+    frame = window.view.frame()
+    # The drawing arrives with its own markups on it, so what is new here is
+    # what was not there a moment ago.
+    before = {id(item) for item in frame.markups()}
     window.select_tool("rect")
     drag(window.view, 150, 150, 320, 250)
-    frame = window.view.frame()
-    made = [item for item in frame.markups() if not item.from_drawing]
+    made = [item for item in frame.markups()
+            if id(item) not in before and not item.from_drawing]
     assert len(made) == 1, "the rectangle went on the page"
     item = made[0]
     was = QPointF(item.pos())
 
     window.select_tool("select")
+    # This is about picking a markup up and putting it down, not about
+    # snapping. The drawing arrives with its own markups on it now, and one of
+    # them near the drop is enough to pull this a few points off.
+    for snap in (window.act_snap, window.act_snap_items,
+                 window.act_snap_content, window.act_snap_alignment):
+        snap.setChecked(False)
     window.view.scene().clearSelection()
     item.setSelected(True)
     window.refresh_selection()
@@ -7317,19 +7327,23 @@ def test_a_markup_drawn_on_an_opened_pdf_can_be_picked_up_and_moved(
     assert moved.y() == pytest.approx(60, abs=2)
 
 
-def test_the_markups_on_a_page_can_be_asked_for_when_they_are_wanted(
-        window, tmp_path):
-    """Reading is the default; replying is a thing you ask for."""
+def test_the_markups_on_a_page_are_there_to_be_worked_with(window, tmp_path):
+    """Somebody else's markups arrive as markups, not as a picture of them.
+
+    Opening a marked-up drawing is opening the markups: a call-out to move, a
+    text box to retype, a cloud to recolour. Drawn from the file they are a
+    picture of their redlines with nothing to take hold of.
+    """
     path = _a_pdf_with_lines(window, tmp_path)
     window.open_path(path)
     window.rebuild_scenes()
     page = window.document.pages[0]
-    assert not page.frame.markups()
 
-    made = window.make_markups_editable(0)
-    assert made > 0
-    assert len(page.frame.markups()) == made
-    # And now that they are ours, the page must stop drawing them itself, or
+    theirs = [item for item in page.frame.markups() if not item.from_drawing]
+    assert theirs, "their markups should have come in"
+    assert all(item.flags() & item.GraphicsItemFlag.ItemIsMovable
+               for item in theirs)
+    # And since they are ours now, the page must stop drawing them itself, or
     # each one would be on the page twice.
     assert page.pdf_annotations is False
 

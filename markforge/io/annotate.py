@@ -241,7 +241,9 @@ def _write_them(path: str, appearances: Appearances) -> int:
                                 keep_existing=True)
         if not written:
             return 0
+        # Closes the target: it is open on the very file being written.
         engine.save_as(target, path)
+        target = None
         return written
     finally:
         engine.close(scratch)

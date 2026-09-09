@@ -616,19 +616,38 @@ def save_incremental(document: "pymupdf.Document", path: str) -> bool:
 
 
 def save_as(document: "pymupdf.Document", path: str,
-            tidy: bool = True) -> None:
+            tidy: bool = True, also: "tuple" = ()) -> None:
     """Write the whole document out, atomically, through a temporary beside it.
 
     A save interrupted half way through must leave the drawing that was there,
     not half of a new one.
+
+    **Everything given here is closed before the file is put in place**, and
+    that is the point of *also* rather than an afterthought. Most of these
+    saves are over the very file the document was read from — an export having
+    its markups added, an outline written onto a finished PDF — and Windows
+    will not let a file be replaced while anything still has it open. It fails
+    with a permission error, the drawing is not saved, and what is left beside
+    it is a ``.markforge-part`` file nobody asked for. Unix allows the rename
+    and hides the whole thing, which is why it can sit there for a while.
+
+    So the documents are finished with here, in order, and the caller must not
+    use them again.
     """
     temporary = path + ".markforge-part"
     try:
         document.save(temporary, garbage=3 if tidy else 0,
                       deflate=True, clean=False)
-        os.replace(temporary, path)
     except Exception as exc:                           # noqa: BLE001
         drain_messages()
+        _discard(temporary)
+        raise PdfError(f"Could not write {path}: {exc}") from exc
+    close(document)
+    for held in also:
+        close(held)
+    try:
+        os.replace(temporary, path)
+    except OSError as exc:
         _discard(temporary)
         raise PdfError(f"Could not write {path}: {exc}") from exc
 

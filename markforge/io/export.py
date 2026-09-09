@@ -189,7 +189,10 @@ def _merge_preserved_pdf_pages(document: Document, path: str, pages: list,
             _carry_the_links(output[offset], source, index, key, landed)
         output.set_metadata({"title": document.title or "",
                              "creator": "MarkForge", "producer": "MarkForge"})
-        engine.save_as(output, path)
+        # Closes both: the overlay is open on the file being replaced, and
+        # Windows will not rename over a file anything still holds.
+        engine.save_as(output, path, also=(overlay,))
+        output = overlay = None
     finally:
         for source in sources.values():
             engine.close(source)

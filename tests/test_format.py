@@ -409,6 +409,95 @@ def test_only_the_sheets_that_came_in_keep_their_bookmarks(window, tmp_path):
     assert entries[0][1] == before, "hung off the page it actually came in on"
 
 
+def _a_drawing_marked_up_elsewhere(path: str) -> None:
+    """What a sheet looks like after somebody else has been through it."""
+    import pymupdf
+
+    document = pymupdf.open()
+    page = document.new_page(width=595, height=842)
+    cloud = page.add_rect_annot(pymupdf.Rect(80, 100, 280, 200))
+    cloud.set_colors(stroke=(1, 0, 0))
+    cloud.set_info(title="Sam", content="check this dim", subject="RFI 12")
+    cloud.update()
+    document.xref_set_key(cloud.xref, "BE", "<</S/C/I 2>>")
+    callout = page.add_freetext_annot(pymupdf.Rect(320, 120, 520, 180),
+                                      "SEE DETAIL 4", fontsize=11)
+    callout.update()
+    document.xref_set_key(callout.xref, "IT", "/FreeTextCallout")
+    document.xref_set_key(callout.xref, "CL", "[300 700 310 690 320 680]")
+    typed = page.add_freetext_annot(pymupdf.Rect(80, 300, 300, 340),
+                                    "typed note", fontsize=10)
+    typed.update()
+    document.save(path)
+    document.close()
+
+
+def test_somebody_else_s_markups_can_be_picked_up_and_changed(window, tmp_path):
+    """A drawing that has been through Bluebeam opens as its markups.
+
+    The point of opening somebody's marked-up sheet is to work on it — move a
+    call-out, retype a text box, recolour a cloud. Drawn from the file they are
+    a picture of their redlines and there is nothing to take hold of.
+    """
+    source = str(tmp_path / "marked.pdf")
+    _a_drawing_marked_up_elsewhere(source)
+    window.open_path(source)
+    window.rebuild_scenes()
+
+    page = window.document.pages[0]
+    marks = [item for item in page.frame.ordered_markups()
+             if not getattr(item, "from_drawing", False)]
+    assert len(marks) == 3
+
+    # Each is the thing it was, not a drawing of it.
+    kinds = {(item.TYPE, getattr(item, "kind", "")) for item in marks}
+    assert ("rect", "cloud") in kinds, kinds
+    assert ("callout", "") in kinds, kinds
+    assert ("text", "") in kinds, "a plain text box is a text box, not a callout"
+
+    cloud = next(item for item in marks if getattr(item, "kind", "") == "cloud")
+    assert cloud.author == "Sam"
+    assert cloud.comment == "check this dim"
+    assert cloud.subject == "RFI 12"
+
+    # And it can be taken hold of and moved.
+    assert cloud.flags() & cloud.GraphicsItemFlag.ItemIsSelectable
+    assert cloud.flags() & cloud.GraphicsItemFlag.ItemIsMovable
+    was = cloud.pos()
+    cloud.setPos(was + QPointF(40, 25))
+    assert cloud.pos() != was
+
+    # The page must not also draw them from the file, or every one shows twice.
+    assert page.pdf_annotations is False
+
+
+def test_a_markup_moved_on_somebody_else_s_drawing_saves_where_it_was_put(
+        window, tmp_path):
+    """Moved, saved, and still a real annotation in the file afterwards."""
+    import pymupdf
+
+    source = str(tmp_path / "marked.pdf")
+    _a_drawing_marked_up_elsewhere(source)
+    window.open_path(source)
+    window.rebuild_scenes()
+
+    marks = [item for item in window.document.pages[0].frame.ordered_markups()
+             if not getattr(item, "from_drawing", False)]
+    cloud = next(item for item in marks if getattr(item, "kind", "") == "cloud")
+    cloud.setPos(cloud.pos() + QPointF(60, 40))
+
+    assert window.save_document()
+    assert not os.path.exists(source + ".tmp"), "nothing left lying beside it"
+    assert not os.path.exists(source + ".markforge-part")
+
+    document = pymupdf.open(source)
+    try:
+        kinds = sorted(annot.type[1] for annot in document[0].annots())
+        assert kinds == ["FreeText", "FreeText", "Square"], kinds
+    finally:
+        document.close()
+
+
 def test_a_damaged_drawing_opens_and_says_that_it_was_repaired(window, tmp_path):
     """A drawing set is full of files that are not quite right.
 
@@ -657,10 +746,10 @@ def test_a_marked_up_drawing_opens_as_markups_that_can_be_worked_with(
 
     window.open_path(theirs)
     window.rebuild_scenes()
-    # Opening shows the drawing as the file has it. Replying to it is a
-    # separate act, and this is it.
-    assert not window.document.pages[0].frame.markups()
-    window.make_markups_editable(0)
+    # Opening somebody's marked-up drawing gives back their markups, ready to
+    # be worked with. The page's own line work is a different matter and stays
+    # in the page: that is the drawing, not a markup, and there can be tens of
+    # thousands of it.
     came_in = [item for item in window.document.pages[0].frame.markups()
                if not item.from_drawing]
     kinds = [(type(item).__name__, getattr(item, "kind", "")) for item in came_in]

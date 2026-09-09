@@ -313,14 +313,21 @@ def _take_off(points: list, style: dict, common: dict, intent: str) -> dict:
 
 def _free_text(source, annotation: dict, box: list, style: dict, common: dict,
                place, scale: float, intent: str) -> dict:
-    """Words on the page — plain, typed straight on, or on a call-out."""
+    """Words on the page — plain, typed straight on, or on a call-out.
+
+    What makes it a call-out is the annotation saying so. A leader line on its
+    own does not: ``/CL`` means nothing without ``/IT /FreeTextCallout`` to
+    give it meaning, and writers leave one behind on plain text boxes — which
+    is how every text box on a sheet arrives wearing a leader pointing at a
+    corner of the page.
+    """
     corners = _numbers(source, annotation.get("CL"))
     leader = [_at(place, corners[i], corners[i + 1], scale)
               for i in range(0, len(corners) - 1, 2)]
     kind = "text"
     if intent == "FreeTextTypeWriter":
         kind = "typewriter"
-    elif intent == "FreeTextCallout" or len(leader) >= 2:
+    elif intent == "FreeTextCallout":
         kind = "callout"
     payload = _text(kind, box, style, common)
     if kind == "callout" and leader:

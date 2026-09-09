@@ -66,7 +66,9 @@ def add_outline_and_links(path: str, outline: list, links: list) -> bool:
         wrote = _add_links(document, links) or wrote
         if not wrote:
             return False
+        # Closes the document: it is open on the file being replaced.
         engine.save_as(document, path)
+        document = None
     except Exception:                                  # noqa: BLE001
         engine.drain_messages()
         return False

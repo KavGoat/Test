@@ -26,7 +26,10 @@ reader worth using:
 * **A thumbnail underneath.** One small picture of each whole page, kept, and
   drawn stretched under the tiles. It is what fills the gap while tiles are
   still coming, so a page is never blank and never shows a hole — it starts
-  soft and sharpens, rather than starting empty.
+  soft and sharpens, rather than starting empty. It is only ever the gap
+  filler: tiles are rendered at every zoom, including zoomed right out, so
+  what settles is always drawn at the resolution the screen is showing and
+  never a small picture stretched over a big sheet.
 
 * **A cache with a ceiling.** Tiles are kept for as long as there is room and
   the least recently wanted are dropped first, so zooming back out and
@@ -405,21 +408,6 @@ class TileCache(QObject):
         wanted = QRectF(region).intersected(page)
         if wanted.isEmpty():
             return [], False
-        if scale <= _sheet_scale(page) * 1.05:
-            # The small picture of the whole page is already as sharp as the
-            # screen is showing, so tiles here would be the same pixels drawn
-            # again. That matters most on the view a drawing opens at: a dense
-            # A1 sheet fitted to the window was rendering the thumbnail and
-            # then the whole sheet again in tiles, which is where the second
-            # and a half before it appeared was going.
-            #
-            # Against the scale actually on screen rather than the rung of the
-            # ladder above it: a page fitted to a window lands a little under
-            # the thumbnail's own sharpness, and the rung above that is not
-            # what anybody is looking at.
-            self._stop_wanting(source, index, step)
-            self.sheet(source, data, index, page, annotations)
-            return [], True
         first_col = max(int(wanted.left() // size), 0)
         last_col = int((wanted.right() - 1e-6) // size)
         first_row = max(int(wanted.top() // size), 0)
@@ -521,8 +509,9 @@ class TileCache(QObject):
 def _sheet_scale(page: QRectF) -> float:
     """How sharp the small picture of a whole page is, in pixels to the point.
 
-    Below this a tile is the same pixels the thumbnail already holds, so there
-    is nothing to be gained by rendering one.
+    What the gap filler is worth while the tiles of a page are still coming.
+    Not a reason to skip those tiles: a page left showing this is a page that
+    stays soft until something else makes it redraw.
     """
     longest = max(page.width(), page.height(), 1.0)
     return min(THUMBNAIL_EDGE / longest, 4.0)
