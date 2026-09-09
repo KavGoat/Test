@@ -409,6 +409,61 @@ def test_a_turned_page_comes_in_as_the_sheet_it_is_drawn_as(window, tmp_path,
             assert -1 <= item["y"] + y <= page.height_pt + 1
 
 
+def test_a_turned_page_is_still_turned_after_it_is_saved(window, tmp_path):
+    """Saving a turned drawing adds to it; it does not straighten it out.
+
+    A page says it is turned with ``/Rotate``, and that is part of the file its
+    author wrote. Marking it up and saving must leave it saying so — appended
+    to, byte for byte, like any other drawing. Rewriting the page to bake the
+    rotation into its content puts the markups in the right place on screen and
+    still hands back a file that is not the one that came in: the original
+    bytes are gone, and with them the promise that a signature over them still
+    covers them.
+    """
+    import pymupdf
+    from PySide6.QtCore import QRectF
+    from markforge.items.shapes import RectItem
+
+    source = str(tmp_path / "turned.pdf")
+    _a_turned_pdf(source, 90)
+    with open(source, "rb") as handle:
+        original = handle.read()
+
+    window.open_path(source)
+    window.rebuild_scenes()
+    drawn = RectItem()
+    drawn.set_local_rect(QRectF(0, 0, 120, 80))
+    window.document.pages[0].frame.add_markup(drawn, QPointF(150, 100))
+
+    saved = str(tmp_path / "marked.pdf")
+    project_io.save_document(window.document, saved)
+
+    with open(saved, "rb") as handle:
+        written = handle.read()
+    assert written[:len(original)] == original, \
+        "a turned page is added to like any other, not written again"
+
+    document = pymupdf.open(saved)
+    try:
+        page = document[0]
+        assert page.rotation == 90, "and it still says it is turned"
+        assert (round(page.rect.width), round(page.rect.height)) == (800, 400)
+        marks = list(page.annots())
+        assert len(marks) == 1
+        # Where any other reader draws it. The annotation's box is a little
+        # bigger than the rectangle inside it — it has to hold the stroke and
+        # whatever the markup draws around itself — so what is checked is that
+        # it holds the rectangle and hugs it, rather than sitting a quarter
+        # turn away, which is what dropping the rotation would look like.
+        box = marks[0].rect * page.rotation_matrix
+        drawn_at = pymupdf.Rect(150, 100, 270, 180)
+        assert box.contains(drawn_at), f"{box} should hold {drawn_at}"
+        assert box.get_area() < drawn_at.get_area() * 3, \
+            f"{box} is far larger than the markup in it"
+    finally:
+        document.close()
+
+
 def test_a_markup_on_a_turned_page_is_saved_where_it_was_put(window, tmp_path):
     """Written into the file, read back out, and still in the same place.
 
