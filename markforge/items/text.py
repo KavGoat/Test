@@ -676,20 +676,13 @@ class _TextBase(MarkupItem):
     def leader_moved(self) -> None:
         """The arrow head or the box moved: work the hinges out again.
 
-        A hinge that was dragged to a particular side made sense against the
-        arrow head as it then was. Its manually adjusted stand-off belongs to
-        that old geometry too. Moved somewhere else, both choices are given
-        up: the leader leaves by whichever side now faces its target and uses
-        the normal stand-off again.
-
-        Each leader on its own, though. A call-out can carry several, each
-        pointing somewhere different, and every one of them works out its own
-        side from its own target — none of them is handed whatever the first
-        one happens to be doing.
+        The side is released so the leader leaves by whichever side now faces
+        its target. The reach (hinge stand-off) is *kept*: somebody who set a
+        longer or shorter hinge meant that length, and losing it every time
+        the box or arrow moves forces them to set it again on every drag.
         """
         for leader in self.leaders:
             leader.side = ""
-            leader.reach = self.ELBOW_REACH
 
     # -- the one-leader spellings, kept for everything that uses them ------
     def side(self) -> str:
@@ -1263,6 +1256,18 @@ class CalloutItem(_TextBase):
         from PySide6.QtGui import QPolygonF
 
         return QPolygonF(list(self.cloud_points))
+
+    def cloud_at(self, local_pos: QPointF) -> int:
+        """Index of the cloud leader whose region contains *local_pos*, or -1."""
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QPolygonF
+
+        for index, leader in enumerate(self.leaders):
+            if leader.clouds():
+                poly = QPolygonF(leader.cloud)
+                if poly.containsPoint(local_pos, Qt.WindingFill):
+                    return index
+        return -1
 
     def paint_content(self, painter: QPainter) -> None:
         painter.setRenderHint(QPainter.Antialiasing, True)

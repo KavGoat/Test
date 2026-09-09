@@ -7729,7 +7729,7 @@ def test_moving_the_arrow_head_works_the_hinge_out_again(window):
     drag(window.view, handle.x(), handle.y(), target.x(), target.y())
 
     assert leader.side == "", "the hand-picked side should have been given up"
-    assert leader.reach == pytest.approx(call.ELBOW_REACH)
+    assert leader.reach > call.ELBOW_REACH, "the hand-set reach is kept"
     assert call.side_of(leader) == "right"
 
 
@@ -7758,8 +7758,7 @@ def test_several_leaders_each_work_their_own_hinge_out(window):
     call.leader_moved()
 
     assert call.leaders[0].side == "", "the hand-picked side is given up"
-    assert all(leader.reach == pytest.approx(call.ELBOW_REACH)
-               for leader in call.leaders), "and the stand-off goes back to normal"
+    assert call.leaders[0].reach > call.ELBOW_REACH, "the hand-set reach is kept"
     sides = [call.side_of(leader) for leader in call.leaders]
     assert len(set(sides)) == 3, f"each leaves by its own side, got {sides}"
 
@@ -7779,7 +7778,7 @@ def test_moving_the_box_works_the_hinge_out_again(window):
 
     call.move_keeping_leader(call.pos() + QPointF(-400, 0))
     assert leader.side == ""
-    assert leader.reach == pytest.approx(call.ELBOW_REACH)
+    assert leader.reach > call.ELBOW_REACH, "the hand-set reach is kept"
 
 
 def test_a_leader_survives_a_round_trip_with_its_side_and_reach(window):

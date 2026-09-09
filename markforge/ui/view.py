@@ -19,8 +19,9 @@ from PySide6.QtWidgets import (QApplication, QCompleter, QGraphicsProxyWidget,
 
 from ..core.document import MM_TO_PT
 from ..core.units import parse_unit
-from ..items.base import (HANDLE_CURSORS, HANDLE_SIZE, MarkupItem, build_item,
-                          cloud_path, cursor_for_handle, rename_groups)
+from ..items.base import (HANDLE_CURSORS, HANDLE_SCREEN_PX, HANDLE_SIZE,
+                          MarkupItem, build_item, cloud_path,
+                          cursor_for_handle, rename_groups)
 from ..items.contents import ContentsItem
 from .scene import DocumentScene, PageFrame, detach
 from ..items.measure import (AREA, CALIBRATE, DIMENSION, VOLUME, CountItem,
@@ -1405,6 +1406,18 @@ class PageView(QGraphicsView):
             self._mode = "idle"
             event.accept()
             return
+
+        if isinstance(item, CalloutItem):
+            cloud_index = item.cloud_at(item.mapFromScene(scene_pos))
+            if cloud_index >= 0:
+                self._handle_item = item
+                self._handle_key = f"l{cloud_index}"
+                self._handle_shift = False
+                self._mode = "resize"
+                self.begin_snapshot()
+                event.accept()
+                return
+
         self._mode = "move"
         self._copy_on_move = control
         self._copied = False
@@ -2009,6 +2022,12 @@ class PageView(QGraphicsView):
                              event_modifiers=Qt.NoModifier) -> None:
         """Say what the pointer would do here, before it is pressed."""
         if self.tool_key != "select":
+            return
+        if self._pending_arrow_leader is not None:
+            self.setCursor(Qt.CrossCursor)
+            return
+        if self._pending_cloud_leader is not None:
+            self.setCursor(cloud_cursor())
             return
         grouped = self._selected_group()
         if grouped is not None:
@@ -3512,7 +3531,7 @@ class PageView(QGraphicsView):
         painter.setPen(pen)
         painter.setBrush(QColor(11, 107, 203, 12))
         margin = 5.0 / max(self._zoom, 0.05)
-        half = HANDLE_SIZE / max(self._zoom, 0.05) / 2
+        half = HANDLE_SCREEN_PX / max(self._zoom, 0.05) / 2
         for members in families.values():
             box = self.markup_box(members[0])
             for item in members[1:]:

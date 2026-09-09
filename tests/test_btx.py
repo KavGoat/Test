@@ -593,6 +593,28 @@ def test_a_section_marks_parts_are_assembled_not_scattered(qapp):
     assert reach < 30, f"the bar is {reach:.0f} points from any cut line"
 
 
+def test_a_stamp_with_nested_xobjects_renders_as_a_picture(qapp):
+    """The title block stamp has 36 nested XObjects via Do operators.
+
+    Before the picture path was added, the stamp was silently dropped because
+    read_content cannot follow Do invocations.  Now it comes through as a
+    rasterised picture that MuPDF renders from the assembled objects.
+    """
+    sketch = _sketch_tools()
+    stamp_tool = sketch.tools[14]
+    assert stamp_tool.name == "Titleblock"
+    payload = stamp_tool.payloads[0]
+    assert "stamp_picture" in payload, "stamp should carry a rasterised picture"
+    import base64
+    png = base64.b64decode(payload["stamp_picture"])
+    assert png[:8] == b"\x89PNG\r\n\x1a\n", "stamp_picture should be a PNG"
+    item = build_item(payload)
+    assert item._their_picture is not None
+    assert not item._their_picture.isNull()
+    assert item._their_picture.width() > 100
+    assert item.their_picture_box[2] > 500
+
+
 def test_every_tool_still_fits_in_a_sensible_box(qapp):
     """A part placed by the wrong rule shows up as a tool the size of a page."""
     for path in FILES:

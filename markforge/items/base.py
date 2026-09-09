@@ -160,8 +160,8 @@ class Style:
             pen.setCapStyle(Qt.FlatCap)
         else:
             pen.setStyle(LINE_STYLES.get(self.line_style, Qt.SolidLine))
-            pen.setCapStyle(Qt.RoundCap)
-        pen.setJoinStyle(Qt.RoundJoin)
+            pen.setCapStyle(Qt.FlatCap)
+        pen.setJoinStyle(Qt.MiterJoin)
         pen.setCosmetic(False)
         return pen
 
@@ -248,7 +248,8 @@ def build_item(data: dict):
 # Handles
 # ---------------------------------------------------------------------------
 
-HANDLE_SIZE = 7.0
+HANDLE_SIZE = 4.0
+HANDLE_SCREEN_PX = 4.0
 ROTATE_OFFSET = 22.0
 
 CORNER_HANDLES = ("nw", "n", "ne", "e", "se", "s", "sw", "w")
@@ -362,6 +363,7 @@ class MarkupItem(QGraphicsObject):
         self._their_picture = None
         self.their_picture_asset = ""
         self.their_picture_box: tuple = ()
+        self._stamp_picture_b64 = ""
         # True while the item is being built from a payload. Laying text out
         # and fitting a box are changes as far as touch() is concerned, and
         # they all happen during loading — so a markup would stop being its
@@ -521,14 +523,17 @@ class MarkupItem(QGraphicsObject):
         if not self.isSelected() or not self._handles_visible:
             return
         if self.group:
-            # A grouped markup is part of one thing, and the view draws one box
-            # round the lot; its own outline and handles would only be noise.
             return
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing, True)
+        import math
+        shape = painter.transform()
+        zoom = max(math.hypot(shape.m11(), shape.m12()), 0.01)
+        handle = HANDLE_SCREEN_PX / zoom
+        half = handle / 2
         rect = self.local_rect().normalized()
         outline = QPen(QColor(30, 110, 220, 200))
-        outline.setWidthF(0.8)
+        outline.setWidthF(0.6 / zoom)
         outline.setStyle(Qt.DashLine)
         painter.setPen(outline)
         painter.setBrush(Qt.NoBrush)
@@ -536,13 +541,9 @@ class MarkupItem(QGraphicsObject):
         if self.locked:
             painter.restore()
             return
-        painter.setPen(QPen(QColor(20, 90, 200), 0.9))
+        painter.setPen(QPen(QColor(20, 90, 200), 0.6 / zoom))
         painter.setBrush(QBrush(QColor(255, 255, 255)))
-        half = HANDLE_SIZE / 2
         points = self.handle_points()
-        # A markup can own handles that are not corners of its box — a
-        # callout's arrow, for one. They are drawn as orange diamonds so it is
-        # obvious which handle moves what.
         leader = self.leader_handles()
         dots = self.control_dots()
         for key, point in points.items():
@@ -556,18 +557,18 @@ class MarkupItem(QGraphicsObject):
                 painter.drawEllipse(point, half * 0.8, half * 0.8)
                 painter.setBrush(QBrush(QColor(255, 255, 255)))
             elif key in leader:
-                painter.setPen(QPen(QColor(200, 90, 20), 0.9))
+                painter.setPen(QPen(QColor(200, 90, 20), 0.6 / zoom))
                 painter.setBrush(QBrush(QColor(255, 170, 80)))
                 painter.drawPolygon(QPolygonF([
-                    QPointF(point.x(), point.y() - half - 1),
-                    QPointF(point.x() + half + 1, point.y()),
-                    QPointF(point.x(), point.y() + half + 1),
-                    QPointF(point.x() - half - 1, point.y())]))
-                painter.setPen(QPen(QColor(20, 90, 200), 0.9))
+                    QPointF(point.x(), point.y() - half - 1.0 / zoom),
+                    QPointF(point.x() + half + 1.0 / zoom, point.y()),
+                    QPointF(point.x(), point.y() + half + 1.0 / zoom),
+                    QPointF(point.x() - half - 1.0 / zoom, point.y())]))
+                painter.setPen(QPen(QColor(20, 90, 200), 0.6 / zoom))
                 painter.setBrush(QBrush(QColor(255, 255, 255)))
             else:
                 painter.drawRect(QRectF(point.x() - half, point.y() - half,
-                                        HANDLE_SIZE, HANDLE_SIZE))
+                                        handle, handle))
         painter.restore()
 
     # -- painting helpers --------------------------------------------------
@@ -773,6 +774,7 @@ class MarkupItem(QGraphicsObject):
             "still_theirs": self.still_theirs,
             "their_picture_asset": self.their_picture_asset,
             "their_picture_box": list(self.their_picture_box),
+            "stamp_picture": self._stamp_picture_b64,
             "flatten_recoverable": self.flatten_recoverable,
             "locked_before_flatten": self.locked_before_flatten,
             "group": self.group,
@@ -812,6 +814,19 @@ class MarkupItem(QGraphicsObject):
         found = data.get("their_picture_box") or ()
         self.their_picture_box = tuple(float(v) for v in found) \
             if len(found) == 4 else ()
+        b64 = data.get("stamp_picture", "")
+        if isinstance(b64, str) and b64:
+            self._stamp_picture_b64 = b64
+            try:
+                import base64
+                from PySide6.QtCore import QByteArray
+                from PySide6.QtGui import QPixmap
+                picture = QPixmap()
+                if picture.loadFromData(QByteArray(base64.b64decode(b64))) \
+                        and not picture.isNull():
+                    self._their_picture = picture
+            except Exception:
+                pass
         self.flattened = bool(data.get("flattened", False))
         self.flatten_recoverable = bool(data.get("flatten_recoverable", True))
         self.locked_before_flatten = bool(data.get("locked_before_flatten", False))

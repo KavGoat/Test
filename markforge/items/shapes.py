@@ -10,8 +10,8 @@ from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPolygon
 from PySide6.QtGui import QFontMetricsF
 
 from ..core.units import format_quantity, parse_unit
-from .base import (HANDLE_SIZE, MarkupItem, Style, arrow_path, cloud_path,
-                   register_item)
+from .base import (HANDLE_SCREEN_PX, HANDLE_SIZE, MarkupItem, Style,
+                   arrow_path, cloud_path, register_item)
 
 
 def _smooth_path(points: list[QPointF], tension: float = 0.42) -> QPainterPath:
@@ -874,9 +874,13 @@ class PolyItem(MarkupItem):
             return
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing, True)
-        painter.setPen(QPen(QColor(20, 90, 200), 0.9))
+        import math as _math
+        shape = painter.transform()
+        zoom = max(_math.hypot(shape.m11(), shape.m12()), 0.01)
+        handle = HANDLE_SCREEN_PX / zoom
+        half = handle / 2
+        painter.setPen(QPen(QColor(20, 90, 200), 0.6 / zoom))
         painter.setBrush(QBrush(QColor(255, 255, 255)))
-        half = HANDLE_SIZE / 2
         for key, point in self.handle_points().items():
             if key == "rot":
                 painter.setBrush(QBrush(QColor(120, 200, 120)))
@@ -884,7 +888,7 @@ class PolyItem(MarkupItem):
                 painter.setBrush(QBrush(QColor(255, 255, 255)))
             else:
                 painter.drawRect(QRectF(point.x() - half, point.y() - half,
-                                        HANDLE_SIZE, HANDLE_SIZE))
+                                        handle, handle))
         painter.restore()
 
     # -- serialisation -----------------------------------------------------
@@ -1096,8 +1100,8 @@ class SketchItem(MarkupItem):
                 pen = QPen(QColor(colour))
                 pen.setWidthF(max(float(stroke.get("width", 1.0)), 0.1) / thickness)
                 pen.setCosmetic(False)
-                pen.setJoinStyle(Qt.RoundJoin)
-                pen.setCapStyle(Qt.RoundCap)
+                pen.setJoinStyle(Qt.MiterJoin)
+                pen.setCapStyle(Qt.FlatCap)
                 painter.setPen(pen)
             else:
                 painter.setPen(Qt.NoPen)

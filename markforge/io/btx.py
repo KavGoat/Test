@@ -537,6 +537,13 @@ def markup_from(annotation: dict, resources: dict, name: str = "") -> Optional[d
             return dict(common, type="sketch", strokes=strokes,
                         rect=[0, 0, width, height],
                         source_box=[0, 0, width, height])
+        picture = _stamp_picture(annotation, resources)
+        if picture:
+            import base64
+            return dict(common, type="rect", kind="rect",
+                        rect=[0, 0, width, height],
+                        stamp_picture=base64.b64encode(picture).decode("ascii"),
+                        their_picture_box=[0, 0, width, height])
         words = _html_text(annotation)
         if words:
             return dict(common, type="text", text=words,
@@ -593,6 +600,87 @@ def _stamp_strokes(annotation: dict, resources: dict) -> list[dict]:
     # Turn the drawing over, as with every other markup, and put it in the
     # annotation's own box rather than wherever on the page it was drawn.
     return _flip_strokes(strokes, height)
+
+
+def _stamp_picture(annotation: dict, resources: dict) -> Optional[bytes]:
+    """A stamp whose drawing needs nested XObjects, rendered as PNG bytes.
+
+    A stamp like a title block calls other form XObjects through ``Do``
+    operators, and those call more, thirty-six deep on the WSP block. The
+    vector reader cannot follow them. Instead, all the objects the stamp
+    reaches are assembled into a real PDF and MuPDF renders the page.
+    """
+    appearance = annotation.get("AP")
+    pointer = appearance.get("N") if isinstance(appearance, dict) else None
+    match = POINTER.search(str(pointer or ""))
+    top_name = match.group(1) if match else None
+    blob = resources.get(top_name) if top_name else None
+    if not blob:
+        return None
+    stream = _stream_of(blob)
+    if not stream or b"Do" not in stream:
+        return None
+
+    wanted, seen = [top_name], set()
+    while wanted:
+        name = wanted.pop()
+        if name in seen or name not in resources:
+            continue
+        seen.add(name)
+        for found in POINTER.findall(resources[name].decode("latin-1", "replace")):
+            wanted.append(found)
+
+    numbers = {name: index + 1 for index, name in enumerate(sorted(seen))}
+    out = bytearray(b"%PDF-1.7\n")
+    offsets = {}
+    for name, number in numbers.items():
+        text = resources[name].decode("latin-1")
+        text = re.sub(r"/BBObjPtr_(\w+)",
+                      lambda m: f" {numbers.get(m.group(1), 0)} 0 R", text)
+        offsets[number] = len(out)
+        out += f"{number} 0 obj\n".encode("latin-1")
+        out += text.encode("latin-1")
+        out += b"\nendobj\n"
+
+    header = parse_dict(resources[top_name][:resources[top_name].find(b"stream")])
+    box = [float(v) for v in header.get("BBox", [0, 0, 400, 60])]
+    mtx = [float(v) for v in (header.get("Matrix") or [1, 0, 0, 1, 0, 0])]
+    wide = (box[2] - box[0]) * abs(mtx[0]) or 1.0
+    high = (box[3] - box[1]) * abs(mtx[3]) or 1.0
+
+    extra = len(numbers) + 1
+    top_num = numbers[top_name]
+    content = (f"q {mtx[0]} 0 0 {mtx[3]} 0 0 cm /XF Do Q").encode()
+    for number, body in (
+        (extra, b"<< /Type /Catalog /Pages %d 0 R >>" % (extra + 1)),
+        (extra + 1, b"<< /Type /Pages /Kids [%d 0 R] /Count 1 >>" % (extra + 2)),
+        (extra + 2, ("<< /Type /Page /Parent %d 0 R /MediaBox "
+                     "[0 0 %f %f] /Resources << /XObject << /XF "
+                     "%d 0 R >> >> /Contents %d 0 R >>"
+                     % (extra + 1, wide, high, top_num, extra + 3)).encode()),
+        (extra + 3, b"<< /Length %d >>\nstream\n" % len(content)
+                    + content + b"\nendstream"),
+    ):
+        offsets[number] = len(out)
+        out += f"{number} 0 obj\n".encode() + body + b"\nendobj\n"
+
+    start = len(out)
+    count = max(offsets) + 1
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % count
+    for number in range(1, count):
+        out += b"%010d 00000 n \n" % offsets.get(number, 0)
+    out += (b"trailer\n<< /Size %d /Root %d 0 R >>\nstartxref\n%d\n%%%%EOF\n"
+            % (count, extra, start))
+
+    try:
+        import pymupdf
+        doc = pymupdf.open(stream=bytes(out), filetype="pdf")
+        pixmap = doc[0].get_pixmap(matrix=pymupdf.Matrix(3, 3), alpha=True)
+        png = pixmap.tobytes("png")
+        doc.close()
+        return png
+    except Exception:
+        return None
 
 
 def _flip_strokes(strokes: list[dict], height: float) -> list[dict]:
