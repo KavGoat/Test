@@ -90,11 +90,22 @@ GRID_PEN_MAJOR = QColor(150, 170, 195, 150)
 
 
 def _painted_scale(painter) -> float:
-    """Pixels per point, the way this painter is set up to draw."""
+    """Pixels per point, the way this painter is set up to draw.
+
+    The device's pixel ratio is part of that and is *not* in the painter's
+    transform: on a screen at two hundred per cent, Qt hands an item a
+    painter scaled 1 and a paint device that is two real pixels to each one
+    the transform counts. Reading only the transform is how a sheet came to
+    be drawn at half the resolution it was being shown at, on every laptop
+    made in the last ten years — every tile stretched to twice its size, at
+    every zoom, which looks exactly like a page that never comes into focus.
+    """
     shape = painter.transform()
     across = math.hypot(shape.m11(), shape.m12())
     down = math.hypot(shape.m21(), shape.m22())
-    return max(across, down, 0.01)
+    device = painter.device()
+    real = device.devicePixelRatio() if device is not None else 1.0
+    return max(across, down, 0.01) * max(float(real or 1.0), 1.0)
 
 
 def _exposed_part(option, whole: QRectF, item=None) -> QRectF:

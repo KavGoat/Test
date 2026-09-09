@@ -564,6 +564,30 @@ def test_a_page_is_drawn_at_every_zoom_including_right_out(tmp_path):
         "zoomed out still has to be drawn"
 
 
+def test_a_page_is_drawn_at_the_real_pixels_of_the_screen_showing_it():
+    """A screen at two hundred per cent gets twice the resolution, not the same.
+
+    Qt keeps the device's pixel ratio on the paint device, not in the
+    painter's transform, so a page asked for at "one to one" on such a screen
+    is really being shown at two pixels to the point. Reading only the
+    transform had every tile rendered at half the resolution it was drawn at
+    and stretched to fit — a sheet that never came into focus at any zoom,
+    on every laptop made in the last ten years.
+    """
+    from PySide6.QtGui import QImage, QPainter
+
+    from markforge.ui.scene import _painted_scale
+
+    sharpness = {}
+    for ratio in (1.0, 2.0):
+        canvas = QImage(64, 64, QImage.Format_RGB32)
+        canvas.setDevicePixelRatio(ratio)
+        painter = QPainter(canvas)
+        sharpness[ratio] = _painted_scale(painter)
+        painter.end()
+    assert sharpness[2.0] == pytest.approx(sharpness[1.0] * 2.0), sharpness
+
+
 def test_a_page_nobody_can_see_is_not_drawn():
     """Opening a forty-sheet set draws the sheets being read, not all forty."""
     from PySide6.QtCore import QRectF

@@ -105,6 +105,37 @@ def _rect(values) -> tuple[float, float, float, float]:
     return (min(x0, x1), min(y0, y1), abs(x1 - x0) or 1.0, abs(y1 - y0) or 1.0)
 
 
+def _turn(annotation: dict, box: tuple):
+    """How far Bluebeam has turned this markup, as a function, or None.
+
+    A rotated markup keeps the points it was first drawn with and records the
+    turn in ``/Rotation`` — degrees *clockwise*, which is the way somebody
+    dragging a rotate handle counts them and the opposite way round from
+    every angle PDF itself uses. ``Rect`` is the box the turned shape fills,
+    so the turn happens about the middle of that box: put the points through
+    this and they land where the markup actually looks. Without it a section
+    mark's arrowhead sat beside its bubble instead of on top of it; with it
+    the wrong way round, the arrowhead pointed into the bubble.
+    """
+    try:
+        degrees = float(annotation.get("Rotation", 0) or 0) % 360.0
+    except (TypeError, ValueError):
+        return None
+    if not degrees:
+        return None
+    x, y, width, height = box
+    middle_x, middle_y = x + width / 2.0, y + height / 2.0
+    cosine = math.cos(math.radians(-degrees))
+    sine = math.sin(math.radians(-degrees))
+
+    def turned(point):
+        across = float(point[0]) - middle_x
+        up = float(point[1]) - middle_y
+        return [middle_x + across * cosine - up * sine,
+                middle_y + across * sine + up * cosine]
+    return turned
+
+
 ARROWS = {
     "OpenArrow": "arrow", "ClosedArrow": "arrow", "ROpenArrow": "arrow",
     "RClosedArrow": "arrow", "Diamond": "diamond", "RDiamond": "diamond",
@@ -178,6 +209,27 @@ def _text_look(annotation: dict) -> dict:
         colour_text = re.search(r"color\s*:\s*(#[0-9A-Fa-f]{6})", settings)
         if colour_text:
             look["text_color"] = colour_text.group(1).lower()
+        # The typeface, and how close to the edge of its box the words sit.
+        # Both are what decide whether a title fits on one line: set in the
+        # wrong face, at four points of padding instead of one, "DESCRIPTION
+        # OF DRAWING" broke in half across the middle of the sheet.
+        family = re.search(r"font(?:-family)?\s*:\s*(?:bold\s+|italic\s+)*"
+                           r"([A-Za-z][\w \-]*?)\s*(?:[\d.]+pt)?\s*(?:;|$)",
+                           settings)
+        if family and family.group(1).strip():
+            look["font_family"] = family.group(1).strip()
+        margin = re.search(r"(?<!-)margin\s*:\s*([\d.]+)pt", settings)
+        if margin:
+            try:
+                look["padding"] = float(margin.group(1))
+            except ValueError:
+                pass
+        if re.search(r"font\s*:\s*[^;]*\bbold\b", settings):
+            look["bold"] = True
+        if re.search(r"font\s*:\s*[^;]*\bitalic\b", settings):
+            look["italic"] = True
+        if re.search(r"text-decoration\s*:\s*underline", settings):
+            look["underline"] = True
     # /DA sets the colour the words are painted in: "1 0 0 rg" is red.
     appearance = annotation.get("DA")
     if isinstance(appearance, str) and "text_color" not in look:
@@ -226,20 +278,142 @@ def _html_text(annotation: dict) -> str:
     """What a text markup says: its rich text if it has any, else Contents."""
     rich = annotation.get("RC")
     if isinstance(rich, str) and rich.strip():
-        # The rich text is XHTML. The words are what matter; a text box here
-        # holds its own formatting, and carrying Bluebeam's markup across
-        # would only bring its <span style=…> with it.
+        # The rich text is XHTML. Only the words are wanted here — how they
+        # are set comes across separately, in _rich_text.
         text = re.sub(r"<br\s*/?>", "\n", rich)
+        text = re.sub(r"<p\b[^>]*/>", "\n", text)     # a blank line is a line
         text = re.sub(r"</p\s*>", "\n", text)
         text = re.sub(r"<[^>]+>", "", text)
         text = (text.replace("&lt;", "<").replace("&gt;", ">")
                     .replace("&amp;", "&").replace("&#39;", "'")
                     .replace("&quot;", '"').replace("&nbsp;", " "))
-        text = re.sub(r"\n{3,}", "\n\n", text).strip()
-        if text:
+        text = re.sub(r"\n{3,}", "\n\n", text).strip("\n")
+        if text.strip():
             return text
     contents = annotation.get("Contents")
     return contents if isinstance(contents, str) else ""
+
+
+# ---------------------------------------------------------------------------
+# how a text markup is set
+# ---------------------------------------------------------------------------
+
+# A legend's heading is underlined, a drawing title is bold and sixteen point
+# over a plain twelve, and the blank line between two legend entries is what
+# holds them apart. All of that is in the annotation's rich text, and dropping
+# it left the words in a heap in the corner of the box. These carry it across.
+_XHTML = "{http://www.w3.org/1999/xhtml}"
+
+# What a text box here can actually show. Anything else Bluebeam writes —
+# line-height, the several kinds of margin — is left behind rather than
+# passed on to be misread.
+_SHOWABLE = ("font-family", "font-size", "font-weight", "font-style",
+             "text-decoration", "color", "text-align")
+
+# "font: bold Helvetica 16pt", which is shorthand for three of the above.
+_SHORTHAND = re.compile(r"^\s*(?:(bold|normal)\s+)?(?:(italic|normal)\s+)?"
+                        r"(.*?)\s*([\d.]+)pt\s*$")
+
+
+def _showable(declarations: str) -> str:
+    """The parts of a style Qt's rich text understands, as a style string."""
+    parts = []
+    for piece in (declarations or "").split(";"):
+        name, colon, value = piece.partition(":")
+        name, value = name.strip().lower(), value.strip()
+        if not colon or not value:
+            continue
+        if name == "font-size":
+            parts.append(f"font-size:{_points(value)}")
+        elif name in _SHOWABLE:
+            parts.append(f"{name}:{value}")
+        elif name == "font":
+            parts.extend(_shorthand(value))
+    return ";".join(parts)
+
+
+def _points(size: str) -> str:
+    """A type size in the units the page is measured in.
+
+    A scene unit here *is* a PDF point, but Qt's rich text reads ``pt``
+    against the screen's resolution and makes it a third bigger again. Saying
+    ``px`` instead is what keeps sixteen point sixteen points — and what
+    keeps a drawing title on the one line it was set on.
+    """
+    match = re.match(r"^\s*([\d.]+)\s*(pt|px)?\s*$", size)
+    return f"{match.group(1)}px" if match else size
+
+
+def _shorthand(value: str) -> list[str]:
+    match = _SHORTHAND.match(value)
+    if not match:
+        return []
+    weight, slant, family, size = match.groups()
+    parts = [f"font-size:{size}px"]
+    if family:
+        parts.append(f"font-family:{family}")
+    if weight:
+        parts.append(f"font-weight:{weight}")
+    if slant:
+        parts.append(f"font-style:{slant}")
+    return parts
+
+
+def _plain_tag(tag) -> str:
+    return str(tag).replace(_XHTML, "").lower()
+
+
+def _escaped(text) -> str:
+    return (str(text or "").replace("&", "&amp;")
+            .replace("<", "&lt;").replace(">", "&gt;"))
+
+
+def _inline(node) -> str:
+    """One element's words, with the runs inside it kept as they are set."""
+    out = _escaped(node.text)
+    for child in node:
+        if _plain_tag(child.tag) == "br":
+            out += "<br/>"
+        else:
+            inside = _inline(child)
+            style = _showable(child.get("style", ""))
+            out += f'<span style="{style}">{inside}</span>' if style else inside
+        out += _escaped(child.tail)
+    return out
+
+
+def _rich_text(annotation: dict) -> str:
+    """A text markup's rich text as HTML, or "" when it has none worth having.
+
+    Bluebeam's paragraph margins are its own; they are dropped and replaced
+    with none, because a text box here holds the spacing itself and adding
+    both would open every line up twice over.
+    """
+    rich = annotation.get("RC")
+    if not isinstance(rich, str) or "<" not in rich:
+        return ""
+    try:
+        body = ET.fromstring(rich)
+    except ET.ParseError:
+        return ""
+    paragraphs = []
+    anything = False
+    for node in body.iter():
+        if _plain_tag(node.tag) != "p":
+            continue
+        words = _inline(node).strip()
+        anything = anything or bool(words)
+        style = _showable(node.get("style", ""))
+        style = f"{style};margin:0px" if style else "margin:0px"
+        # An empty paragraph is a blank line, and a blank line with nothing in
+        # it is no line at all: the space is what keeps two legend entries
+        # apart from each other.
+        paragraphs.append(f'<p style="{style}">{words or "&nbsp;"}</p>')
+    if not anything:
+        return ""
+    outer = _showable(body.get("style", ""))
+    return (f'<body style="{outer}">' if outer else "<body>") + \
+        "".join(paragraphs) + "</body>"
 
 
 # ---------------------------------------------------------------------------
@@ -255,10 +429,18 @@ def markup_from(annotation: dict, resources: dict, name: str = "") -> Optional[d
     common = {"x": 0.0, "y": 0.0, "style": style, "label": label,
               "subject": label}
 
+    # A markup that has been turned keeps the points it was drawn with and
+    # says so in /Rotation, so the turn has to be put back before anything
+    # else is read. Doing it here, inside flip, is what keeps every shape
+    # below reading as though it had been drawn the way it now looks.
+    turn = _turn(annotation, (x, y, width, height))
+
     # PDF measures up the page and this measures down it, so every y is
     # turned over inside the annotation's own box. Doing it here, once, is
     # what keeps every shape below reading as though it were drawn normally.
     def flip(point) -> list[float]:
+        if turn is not None:
+            point = turn(point)
         return [point[0] - x, (y + height) - point[1]]
 
     if subtype == "Square":
@@ -311,10 +493,13 @@ def markup_from(annotation: dict, resources: dict, name: str = "") -> Optional[d
                        max(height - top - bottom, 8.0)]
             except (TypeError, ValueError):
                 pass
+        set_out = _rich_text(annotation)
+        made = dict(common, text=words, rect=box)
+        if set_out:
+            made["html"] = set_out
         if leader:
-            return dict(common, type="callout", text=words, rect=box,
-                        leader=[flip(leader[0])])
-        return dict(common, type="text", text=words, rect=box)
+            return dict(made, type="callout", leader=[flip(leader[0])])
+        return dict(made, type="text")
     if subtype == "Stamp":
         strokes = _stamp_strokes(annotation, resources)
         if strokes:
@@ -596,15 +781,19 @@ def _tool_from(element, resources: dict) -> Optional[Tool]:
         payload = markup_from(annotation, resources)
         if payload is None:
             continue
-        # Where each part of a tool sits. X and Y are the annotation's
-        # *bottom-left* corner, which is where PDF puts the origin of a Rect —
-        # so the top edge, which is what a markup is positioned by here, is a
-        # height further up. Reading Y as the top instead scattered the parts
-        # of a section mark by their own heights: the two labels swapped
-        # halves of the bubble, the arrow slid off it, and the heavy bar at
-        # the end of the cut line ended up a hundred points away from the line.
+        # Where each part of a tool sits. X and Y say how far the tool's own
+        # anchor is *from* this annotation's bottom-left corner, so they go on
+        # the other way round: a part with X of -27 sits 27 points to the
+        # right, not to the left. Reading the sign the other way put a section
+        # mark's cut line ten points clear of the bubble it belongs to and
+        # threw the arrowhead off the far side altogether.
+        #
+        # Y needs no such turn: it is negated once for being an offset from
+        # the annotation, and again for PDF measuring up the page while this
+        # measures down it. What is left is the top edge, a height above the
+        # bottom-left corner PDF gave.
         _x, _y, _w, height = _rect(annotation.get("Rect", []))
-        payload["x"] = float(payload.get("x", 0.0)) + offset_x
+        payload["x"] = float(payload.get("x", 0.0)) - offset_x
         payload["y"] = float(payload.get("y", 0.0)) + offset_y - height
         if not label:
             label = payload.get("label", "")

@@ -135,6 +135,100 @@ def test_each_kind_of_bluebeam_markup_lands_on_the_right_one_here(qapp):
 
 
 # ---------------------------------------------------------------------------
+# a section mark, put together
+#
+# The one thing every one of these files is really for. A section mark is a
+# bubble with a cut line through it, an arrowhead on the bubble saying which
+# way the section looks, and two labels inside. Every part of it is a separate
+# annotation, so it only reads as a section mark if all of them land in the
+# right place relative to each other — which makes it the sharpest test there
+# is of how the parts of a tool are positioned. The numbers below are read off
+# ``btx/Document1.pdf``, a sheet with these same tools placed on it.
+# ---------------------------------------------------------------------------
+
+def _sketch_tools():
+    return btx.read(os.path.join(HERE, "btx", "Structures - Sketch Tools.btx"))
+
+
+def _part(tool, kind: str, which: int = 0) -> dict:
+    found = [p for p in tool.payloads
+             if p.get("kind") == kind or p.get("type") == kind]
+    return found[which]
+
+
+def _place(payload) -> QRectF:
+    """Where a payload sits on the page, as a box."""
+    item = build_item(payload)
+    return item.local_rect().translated(item.pos())
+
+
+def test_a_section_marks_cut_line_crosses_its_own_bubble(qapp):
+    """The line is a chord of the circle, not a tail hanging off one side.
+
+    X and Y on a tool's parts say how far the tool's anchor is *from* each
+    one, so they are applied the other way round. Read the sign the other way
+    and the cut line lands ten points clear of the bubble it belongs to.
+    """
+    tool = [t for t in _sketch_tools().tools if t.name == "Elevation"][1]
+    bubble = _place(_part(tool, "ellipse"))
+    line = _place(_part(tool, "line"))
+    assert bubble.left() < line.left() and line.right() < bubble.right(), \
+        f"the cut line {line} is not inside the bubble {bubble}"
+    # And through the middle of it, which is what divides the two labels.
+    assert abs(line.center().y() - bubble.center().y()) < 1.0
+
+
+def test_a_section_marks_arrowhead_points_away_from_its_bubble(qapp):
+    """Apex clear of the circle, base behind it — which way the section looks.
+
+    The arrowhead is drawn upright and turned with ``/Rotation``. Ignoring
+    that left it beside the bubble; turning it the wrong way round left it
+    pointing into the bubble instead of out of it.
+    """
+    tool = [t for t in _sketch_tools().tools if t.name == "Elevation"][1]
+    bubble = _place(_part(tool, "ellipse"))
+    head = build_item(_part(tool, "polygon"))
+    points = [p + head.pos() for p in head.points]
+    apex = min(points, key=lambda p: p.y())          # the one furthest up
+    assert apex.y() < bubble.top(), "the arrowhead does not clear the bubble"
+    assert abs(apex.x() - bubble.center().x()) < 1.0, "and it is off to one side"
+    base = [p for p in points if p is not apex]
+    assert all(bubble.contains(p) for p in base), \
+        "the wide end of the arrowhead should sit behind the bubble"
+
+
+def test_a_markup_bluebeam_turned_comes_back_turned(qapp):
+    """``/Rotation`` is degrees clockwise about the middle of the markup's box."""
+    upright = {"Subtype": "Polygon", "Rect": [0, 0, 40, 20],
+               "Vertices": [10, -10, 10, 30, 30, 10]}    # apex pointing right
+    straight = btx.markup_from(upright, {})
+    turned = btx.markup_from(dict(upright, Rotation=90), {})
+    # Upright: the apex is the point furthest to the right, halfway down.
+    assert straight["points"][2] == pytest.approx([30.0, 10.0])
+    # Turned a quarter turn clockwise: the apex is at the bottom, halfway
+    # across. Display measures down the page, so "the bottom" is the big y.
+    assert turned["points"][2] == pytest.approx([20.0, 20.0])
+
+
+def test_a_legend_keeps_its_heading_and_the_space_between_its_entries(qapp):
+    """Bold, underlined, and the blank lines that hold the entries apart.
+
+    Bluebeam sets a text markup in XHTML, and dropping it left three lines of
+    a legend in a heap in the top corner of a box built for five.
+    """
+    tool = next(t for t in _sketch_tools().tools if t.name == "Legend")
+    words = _part(tool, "text")
+    assert "LEGEND" in words["text"]
+    assert words["text"].count("\n") >= 4, "the blank lines have gone"
+    set_out = words["html"]
+    assert "underline" in set_out and "bold" in set_out
+    # Point sizes are the page's own units, not the screen's: saying "pt" here
+    # has Qt read them against the screen's resolution and set every line a
+    # third too big, which is what broke a drawing title across two lines.
+    assert "pt" not in set_out and "font-size:10.8654px" in set_out
+
+
+# ---------------------------------------------------------------------------
 # a stamp's drawing
 # ---------------------------------------------------------------------------
 
