@@ -269,6 +269,8 @@ class PageView(QGraphicsView):
         # An existing text box/callout waiting for the user to drag the region
         # of a new cloud leader. Nothing changes until that drag lands.
         self._pending_cloud_leader = None
+        # And the note waiting for a click to say where its new arrow points.
+        self._pending_arrow_leader = None
         # How far the page is turned on screen, in degrees. This is a way of
         # looking at the document, not a change to it: nothing is saved, and
         # what prints is unaffected.
@@ -407,6 +409,8 @@ class PageView(QGraphicsView):
     def set_tool(self, key: str) -> None:
         self.forget_snap()
         self.close_size_editor()
+        if self._pending_arrow_leader is not None:
+            self.cancel_arrow_leader()
         if self._pending_cloud_leader is not None:
             self.cancel_cloud_leader()
         if self._mode == "lasso":
@@ -418,6 +422,32 @@ class PageView(QGraphicsView):
         tool = self.current_tool()
         self.setCursor(self._cursor_for_tool(tool))
         self.statusMessage.emit(tool.hint or tool.label)
+
+    def begin_arrow_leader(self, item) -> None:
+        """Arm a click that says where a new arrow leader points.
+
+        A leader is about the thing it points at, so the first thing to say
+        about one is where that is. Putting it down at a guessed spot beside
+        the note and leaving it to be dragged there means every leader is two
+        gestures and the first one is wrong.
+        """
+        if item is None or item.scene() is None or not self.editable(item):
+            return
+        if self.tool_key != "select":
+            self.set_tool("select")
+            self.toolFinished.emit("select")
+        self._pending_arrow_leader = item
+        self._mode = "idle"
+        self.setCursor(Qt.CrossCursor)
+        self.statusMessage.emit(
+            "Click what the arrow should point at · Esc to cancel")
+        self.viewport().update()
+
+    def cancel_arrow_leader(self) -> None:
+        """Put down an unplaced arrow leader without changing the document."""
+        self._pending_arrow_leader = None
+        self.setCursor(self._cursor_for_tool(self.current_tool()))
+        self.viewport().update()
 
     def begin_cloud_leader(self, item) -> None:
         """Arm a drag that chooses the region for a new cloud leader."""
@@ -1115,6 +1145,17 @@ class PageView(QGraphicsView):
         self._press_scene = scene_pos
         self._press_view = event.position().toPoint()
 
+        if (self._pending_arrow_leader is not None
+                and event.button() == Qt.LeftButton):
+            item, self._pending_arrow_leader = self._pending_arrow_leader, None
+            self.setCursor(self._cursor_for_tool(self.current_tool()))
+            if item.scene() is not None:
+                self.begin_snapshot(self.involved_frames(item))
+                self.window.finish_arrow_leader(item, self.snap_scene(scene_pos))
+            self.viewport().update()
+            event.accept()
+            return
+
         if (self._pending_cloud_leader is not None
                 and event.button() == Qt.LeftButton):
             point = self.snap_scene(scene_pos)
@@ -1527,6 +1568,7 @@ class PageView(QGraphicsView):
         if event.buttons() == Qt.NoButton and self._mode in self.HELD_MODES:
             self._release_stale_mode()
         if (self._pending_anchor is not None or self._pending_stamp is not None
+                or self._pending_arrow_leader is not None
                 or self.current_tool().mode == CLICK):
             self.viewport().update()          # the leader, or the preview, follows
 
@@ -1665,6 +1707,9 @@ class PageView(QGraphicsView):
             self._insertion_point = None
             undone.append("the insertion point")
         self._pending_cloud = None
+        if self._pending_arrow_leader is not None:
+            self.cancel_arrow_leader()
+            undone.append("the arrow leader")
         if self._pending_cloud_leader is not None:
             self.cancel_cloud_leader()
             undone.append("the cloud leader")
@@ -3249,6 +3294,8 @@ class PageView(QGraphicsView):
             self._draw_snap_marker(painter, self._snap_marker)
         if self._pending_anchor is not None:
             self._draw_pending_leader(painter, self._pending_anchor)
+        if self._pending_arrow_leader is not None:
+            self._draw_arrow_leader_preview(painter)
 
     def _draw_pending_preview(self, painter: QPainter) -> None:
         """Show what is about to be put down, under the pointer.
@@ -3480,30 +3527,71 @@ class PageView(QGraphicsView):
         painter.restore()
 
     def _draw_cloud_leader_preview(self, painter: QPainter) -> None:
-        """Show the cloud region and its connection while it is dragged."""
+        """Show the cloud region and its connection while it is dragged.
+
+        Not a drawing of one: the real thing. A copy of the note is given the
+        cloud that the drag has reached and asked to paint its own leader, so
+        the cloud, the corner it joins at, the hinge and the side it leaves by
+        are the same code that lands. Drawing a straight line from the middle
+        of the note instead put a leader through the words and into the box —
+        which is not where one goes, and is not where the one that landed
+        went either, so it jumped the moment the drag ended.
+        """
         item = self._pending_cloud_leader
         if item is None or len(self._marquee) < 2:
             return
         rect = QRectF(self._marquee[0], self._marquee[-1]).normalized()
         if rect.width() < 1 or rect.height() < 1:
             return
-        ring = QPolygonF([rect.topLeft(), rect.topRight(),
-                          rect.bottomRight(), rect.bottomLeft()])
-        box = item.mapRectToScene(item.local_rect()).normalized()
-        cloud_edge = min(ring, key=lambda point:
-                         (point.x() - box.center().x()) ** 2
-                         + (point.y() - box.center().y()) ** 2)
+        preview = self._a_copy_leading_to(item, cloud=rect)
+        if preview is None:
+            return
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing, True)
-        pen = item.style.pen()
-        if not item.style.stroke or item.style.width <= 0:
-            pen = QPen(item.style.text_qcolor())
-            pen.setWidthF(1.0)
-        painter.setPen(pen)
-        painter.setBrush(Qt.NoBrush)
-        painter.drawPath(cloud_path(ring, getattr(item, "cloud_radius", 9.0)))
-        painter.drawLine(box.center(), cloud_edge)
+        painter.translate(item.mapToScene(QPointF(0, 0)))
+        preview.paint_leader(painter)
         painter.restore()
+
+    def _draw_arrow_leader_preview(self, painter: QPainter) -> None:
+        """Show where the new arrow would point, before the click lands."""
+        item = self._pending_arrow_leader
+        if item is None or item.scene() is None:
+            return
+        preview = self._a_copy_leading_to(
+            item, point=self.snap_scene(self._last_scene_pos))
+        if preview is None:
+            return
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.translate(item.mapToScene(QPointF(0, 0)))
+        preview.paint_leader(painter)
+        painter.restore()
+
+    def _a_copy_leading_to(self, item, point: Optional[QPointF] = None,
+                           cloud: Optional[QRectF] = None):
+        """A copy of *item* with one more leader on it, for drawing a preview.
+
+        A copy, so nothing is added to the document until the click lands, and
+        the item itself rather than a sketch of one, so what is shown is what
+        will be there. It is never put in a scene: it is only ever asked to
+        paint, in the item's own coordinates.
+        """
+        from ..items.text import CalloutItem
+
+        try:
+            data = item.serialize()
+            preview = CalloutItem()
+            preview.deserialize(data)
+            if cloud is not None:
+                box = QRectF(item.mapFromScene(cloud.topLeft()),
+                             item.mapFromScene(cloud.bottomRight())).normalized()
+                preview.add_cloud_leader([box.topLeft(), box.topRight(),
+                                          box.bottomRight(), box.bottomLeft()])
+            else:
+                preview.add_leader(item.mapFromScene(point))
+            return preview
+        except Exception:                              # noqa: BLE001
+            return None
 
     def _draw_pending_leader(self, painter: QPainter, anchor: QPointF) -> None:
         """The call-out as it will be, drawn while it is being placed.

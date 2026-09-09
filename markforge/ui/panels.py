@@ -70,15 +70,57 @@ class PageListWidget(QListWidget):
     CELL_WIDTH = 116
     CELL_HEIGHT = 174
 
+    #: How small and how large the pictures of the pages may be made.
+    SMALLEST = 0.5
+    LARGEST = 3.0
+
+    #: A wheel notch's worth of zoom.
+    STEP = 1.15
+
+    zoomed = Signal(float)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.external_drop_row: int | None = None
+        self.scale = 1.0
+
+    def cell_size(self) -> QSize:
+        return QSize(max(int(self.CELL_WIDTH * self.scale), 24),
+                     max(int(self.CELL_HEIGHT * self.scale), 32))
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        self.relayout()
+
+    def relayout(self) -> None:
+        cell = self.cell_size()
         width = max(self.viewport().width(), 1)
-        columns = max(width // self.CELL_WIDTH, 1)
-        self.setGridSize(QSize(max(width // columns, 1), self.CELL_HEIGHT))
+        columns = max(width // cell.width(), 1)
+        self.setGridSize(QSize(max(width // columns, 1), cell.height()))
+
+    def wheelEvent(self, event) -> None:
+        """Ctrl and the wheel makes the pages bigger and smaller.
+
+        A drawing set is read by its sheets, and at the size they come out of
+        the box a title block is a grey smudge. Plain scrolling is left alone:
+        the wheel over a list scrolls it, and taking that away to zoom instead
+        would be surprising in the one place the wheel already has a job.
+        """
+        if not (event.modifiers() & Qt.ControlModifier):
+            super().wheelEvent(event)
+            return
+        notches = event.angleDelta().y()
+        if not notches:
+            event.accept()
+            return
+        # By how far the wheel turned, not by whether it turned: a trackpad
+        # sends a stream of small amounts and a mouse sends whole notches, and
+        # one step for either makes the trackpad crawl and the mouse coarse.
+        step = self.STEP ** (notches / 120.0)
+        wanted = max(self.SMALLEST, min(self.scale * step, self.LARGEST))
+        if abs(wanted - self.scale) > 1e-6:
+            self.zoomed.emit(wanted)
+        event.accept()
 
     def set_external_drop_row(self, row: int | None) -> None:
         row = None if row is None else max(0, min(int(row), self.count()))
@@ -162,11 +204,13 @@ class PagesPanel(QWidget):
         layout.addLayout(buttons)
 
         self.list = PageListWidget()
+        self.list.scale = self._remembered_scale()
+        self.list.zoomed.connect(self.set_thumbnail_scale)
         # Sheets are drawn as they are scrolled to rather than all at once.
         self.list.verticalScrollBar().valueChanged.connect(
             lambda _value: self._draw_what_is_on_screen())
         self.list.setViewMode(QListWidget.IconMode)
-        self.list.setIconSize(QSize(96, 128))
+        self.list.setIconSize(self._icon_size())
         self.list.setFlow(QListView.LeftToRight)
         self.list.setWrapping(True)
         self.list.setResizeMode(QListWidget.Adjust)
@@ -194,6 +238,49 @@ class PagesPanel(QWidget):
         self.list.dropEvent = self._drop
         layout.addWidget(self.list, 1)
         self._suppress = False
+
+    # -- how big the pictures are ------------------------------------------
+    #: The icon inside a cell, before the cell's own padding.
+    ICON_WIDTH = 96
+    ICON_HEIGHT = 128
+
+    @staticmethod
+    def _remembered_scale() -> float:
+        from . import preferences
+
+        wanted = float(getattr(preferences.current(), "page_thumbnails", 1.0))
+        return max(PageListWidget.SMALLEST,
+                   min(wanted, PageListWidget.LARGEST))
+
+    def _icon_size(self) -> QSize:
+        scale = self.list.scale
+        return QSize(max(int(self.ICON_WIDTH * scale), 16),
+                     max(int(self.ICON_HEIGHT * scale), 20))
+
+    def set_thumbnail_scale(self, scale: float) -> None:
+        """Draw the pages this much bigger, and remember it.
+
+        The pictures themselves are redrawn rather than the old ones being
+        stretched: a thumbnail is made from the page's own small render, which
+        has resolution to spare, so making it bigger makes it sharper.
+        """
+        from . import preferences
+
+        scale = max(PageListWidget.SMALLEST,
+                    min(float(scale), PageListWidget.LARGEST))
+        if abs(scale - self.list.scale) < 1e-6:
+            return
+        self.list.scale = scale
+        self.list.setIconSize(self._icon_size())
+        self.list.relayout()
+        document = getattr(self.window, "document", None)
+        for row in range(self.list.count()):
+            if document is not None and row < len(document.pages):
+                self.list.item(row).setIcon(
+                    self._thumbnail(document.pages[row], document))
+        prefs = preferences.current()
+        prefs.page_thumbnails = scale
+        preferences.apply(prefs)
 
     # -- dropping a file on the strip --------------------------------------
     WELCOME = (".pdf", ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff")
@@ -405,8 +492,7 @@ class PagesPanel(QWidget):
         if entry is not None and 0 <= current < len(document.pages):
             entry.setIcon(self._thumbnail(document.pages[current], document))
 
-    @staticmethod
-    def _thumbnail(page, document=None, ask: bool = True) -> QIcon:
+    def _thumbnail(self, page, document=None, ask: bool = True) -> QIcon:
         """A small picture of the page for the list.
 
         A page that came in from a PDF is drawn once, small, in the background
@@ -414,7 +500,13 @@ class PagesPanel(QWidget):
         the list borrows that rather than rendering every page again. Opening
         a drawing set used to spend half a second here doing exactly the work
         that was already being done.
+
+        Made at whatever size the list is showing them at, not at one size and
+        stretched: the picture it is cut from has resolution to spare, so a
+        list zoomed in gets sharper pages rather than bigger blurry ones.
         """
+        scale = getattr(self.list, "scale", 1.0)
+        across = max(int(160 * scale), 24)
         if document is not None and page.pdf_key and page.pdf_page_index is not None:
             data = document.asset(page.pdf_key)
             if data:
@@ -427,19 +519,20 @@ class PagesPanel(QWidget):
                     bool(getattr(page, "pdf_annotations", True)), ask=ask)
                 if sheet is not None and not sheet.isNull():
                     return QIcon(sheet.scaled(
-                        160, 160, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                        across, across, Qt.KeepAspectRatio,
+                        Qt.SmoothTransformation))
                 # Not drawn yet. A blank sheet of the right shape now, and the
                 # row is refreshed when the picture arrives.
-                tall = int(160 * page.height_pt / max(page.width_pt, 1.0))
-                waiting = QPixmap(160, max(tall, 1))
+                tall = int(across * page.height_pt / max(page.width_pt, 1.0))
+                waiting = QPixmap(across, max(tall, 1))
                 waiting.fill(Qt.white)
                 return QIcon(waiting)
         scene = page.frame
         if scene is None:
-            pixmap = QPixmap(96, 128)
+            pixmap = QPixmap(max(int(96 * scale), 16), max(int(128 * scale), 20))
             pixmap.fill(Qt.white)
             return QIcon(pixmap)
-        image = scene.render_image(dpi=18.0, for_print=False)
+        image = scene.render_image(dpi=18.0 * scale, for_print=False)
         return QIcon(QPixmap.fromImage(image))
 
 

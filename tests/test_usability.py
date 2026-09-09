@@ -594,6 +594,113 @@ def test_undo_takes_back_the_typing_before_the_markup_itself(window):
     window.view.escape_everything()
 
 
+def _a_note_on_the_page(window):
+    """A plain text box with words in it, on the first page."""
+    from markforge.items.text import TextItem
+
+    note = TextItem("check this bolt", QRectF(0, 0, 140, 44))
+    window.document.pages[0].frame.add_markup(note, QPointF(200, 200))
+    QApplication.processEvents()
+    return note
+
+
+def _what_it_draws(item) -> QRectF:
+    """The box round everything an item's leaders draw, in its own space."""
+    from PySide6.QtGui import QPainter, QPicture
+
+    picture = QPicture()
+    painter = QPainter(picture)
+    item.paint_leader(painter)
+    painter.end()
+    return QRectF(picture.boundingRect())
+
+
+def test_a_new_arrow_leader_is_placed_where_it_is_pointed(window):
+    """Adding one asks where it points, instead of guessing and being wrong.
+
+    A leader is about the thing it points at. Putting it down at a spot beside
+    the note and leaving it to be dragged there makes every leader two
+    gestures, the first of them wrong.
+    """
+    from markforge.items.text import CalloutItem
+
+    note = _a_note_on_the_page(window)
+    window.add_leader_to(note, "arrow")
+    QApplication.processEvents()
+    assert window.view._pending_arrow_leader is note, "it waits to be told where"
+    assert not note.leaders, "and nothing is added until it is"
+
+    at = QPointF(420, 340)
+    click(window.view, at.x(), at.y())
+    QApplication.processEvents()
+
+    made = [i for i in markups(window) if isinstance(i, CalloutItem)]
+    assert len(made) == 1, "the text box became a call-out"
+    call = made[0]
+    assert len(call.leaders) == 1, \
+        f"one leader, not {len(call.leaders)} — a call-out makes itself one " \
+        f"to start with, and that one must not be kept as well"
+    points_at = call.mapToScene(call.tip_of(call.leaders[0]))
+    assert points_at.x() == pytest.approx(at.x(), abs=1.0)
+    assert points_at.y() == pytest.approx(at.y(), abs=1.0)
+
+
+def test_the_arrow_being_placed_is_drawn_where_it_will_land(window):
+    """What is shown before the click is what is there after it."""
+    note = _a_note_on_the_page(window)
+    window.add_leader_to(note, "arrow")
+    at = QPointF(420, 340)
+    window.view._last_scene_pos = at
+    preview = window.view._a_copy_leading_to(note, point=at)
+    assert preview is not None
+    shown = _what_it_draws(preview)
+
+    click(window.view, at.x(), at.y())
+    QApplication.processEvents()
+    call = [i for i in markups(window) if getattr(i, "leaders", None)][0]
+    landed = _what_it_draws(call)
+    # To within the pixel the click itself rounds to. What is being asked is
+    # whether the leader jumps — a different hinge, a different side, a line
+    # from somewhere else — not whether a click lands on the exact half-point
+    # the preview was drawn at.
+    for edge in ("left", "top", "right", "bottom"):
+        assert getattr(landed, edge)() == pytest.approx(
+            getattr(shown, edge)(), abs=1.5), \
+            f"the leader jumped between being shown and being placed: " \
+            f"{landed} against {shown}"
+
+
+def test_a_cloud_leader_being_placed_joins_the_box_where_it_will(window):
+    """Not a line into the middle of the words.
+
+    The preview used to draw straight from the middle of the note to the
+    cloud — through its own words and into the box, which is not where a
+    leader goes and not where the one that landed went either, so it jumped
+    the moment the drag ended.
+    """
+    note = _a_note_on_the_page(window)
+    window.add_leader_to(note, "cloud")
+    region = QRectF(430, 300, 130, 80)
+    window.view._marquee = [region.topLeft(), region.bottomRight()]
+    preview = window.view._a_copy_leading_to(note, cloud=region)
+    assert preview is not None
+    shown = _what_it_draws(preview)
+
+    leaves_at = preview.side_point_of(preview.leaders[-1])
+    box = preview.local_rect().normalized()
+    assert (abs(leaves_at.x() - box.center().x()) > 1
+            or abs(leaves_at.y() - box.center().y()) > 1), \
+        "the leader should leave the box by an edge, not from the middle of it"
+
+    window.view.begin_snapshot(window.view.involved_frames(note))
+    window.finish_cloud_leader(note, region)
+    QApplication.processEvents()
+    call = [i for i in markups(window) if getattr(i, "leaders", None)][0]
+    assert len(call.leaders) == 1
+    assert _what_it_draws(call) == shown, \
+        "the cloud leader jumped between being shown and being placed"
+
+
 def test_placing_a_cloud_leader_shows_a_cloud_on_the_pointer(window):
     """A crosshair says "put a point somewhere"; a cloud is drawn round one.
 
@@ -5211,6 +5318,7 @@ def test_format_painter_does_not_copy_callout_leaders(window):
     first = _callout(window)
     window.view.end_item_edit()
     window.add_leader_to(first)
+    click(window.view, 520, 420)
     second = _callout(window)
     window.view.end_item_edit()
     before = [(leader.kind, QPointF(leader.tip)) for leader in second.leaders]
@@ -6789,6 +6897,65 @@ def test_the_header_and_footer_are_on_the_page_menu(window):
     assert "Show footer" in labels
 
 
+def _wheel_over(widget, notches: int, modifiers=Qt.NoModifier):
+    from PySide6.QtGui import QWheelEvent
+
+    at = QPointF(30, 30)
+    event = QWheelEvent(at, widget.mapToGlobal(at.toPoint()).toPointF(),
+                        QPoint(0, 0), QPoint(0, 120 * notches),
+                        Qt.NoButton, modifiers, Qt.NoScrollPhase, False)
+    widget.wheelEvent(event)
+    QApplication.processEvents()
+
+
+def test_the_pages_in_the_panel_can_be_made_bigger(window):
+    """Ctrl and the wheel over the page list zooms it.
+
+    A drawing set is read by its sheets, and at the size they come out of the
+    box a title block is a grey smudge. Plain scrolling is left alone: the
+    wheel over a list scrolls it, and taking that away would be surprising in
+    the one place the wheel already has a job.
+    """
+    panel = window.pages_panel
+    listing = panel.list
+    was = listing.iconSize().width()
+    assert listing.scale == pytest.approx(1.0)
+
+    _wheel_over(listing, 3, Qt.ControlModifier)
+    assert listing.scale > 1.0
+    assert listing.iconSize().width() > was, "and the pictures got bigger"
+
+    _wheel_over(listing, -6, Qt.ControlModifier)
+    assert listing.scale < 1.0
+    assert listing.iconSize().width() < was
+
+    # It stops somewhere at each end rather than going to nothing or to a
+    # page a screenful across.
+    _wheel_over(listing, -40, Qt.ControlModifier)
+    assert listing.scale == pytest.approx(listing.SMALLEST)
+    _wheel_over(listing, 60, Qt.ControlModifier)
+    assert listing.scale == pytest.approx(listing.LARGEST)
+
+
+def test_a_plain_wheel_over_the_pages_still_scrolls_them(window):
+    panel = window.pages_panel
+    listing = panel.list
+    was = listing.scale
+    _wheel_over(listing, -3)
+    assert listing.scale == was, "the wheel on its own scrolls, it does not zoom"
+
+
+def test_the_size_of_the_pages_in_the_panel_is_remembered(window):
+    """It is a choice about reading, so it belongs to the person, not the file."""
+    from markforge.ui import preferences
+
+    window.pages_panel.set_thumbnail_scale(1.6)
+    assert preferences.current().page_thumbnails == pytest.approx(1.6)
+    assert preferences.load().page_thumbnails == pytest.approx(1.6), \
+        "and it is still there next time"
+    window.pages_panel.set_thumbnail_scale(1.0)
+
+
 def test_the_pages_panel_takes_a_dropped_drawing(window, tmp_path):
     """The panel accepts the drag and works out which page it points at."""
     from PySide6.QtCore import QMimeData, QPoint, QUrl
@@ -7661,8 +7828,11 @@ def test_the_menu_adds_and_removes_one_leader_at_a_time(window):
     assert "Add arrow leader" in labels
     assert "Add cloud leader" in labels
 
+    # Each one asks where it points before anything is added.
     window.add_leader_to(call)
+    click(window.view, 520, 400)
     window.add_leader_to(call)
+    click(window.view, 520, 120)
     assert len(call.leaders) == 3
 
     # Right-click on one of them, and that one can be taken away.
@@ -7693,6 +7863,7 @@ def test_a_cloud_callout_is_offered_more_leaders_of_either_kind(window):
     assert "Add cloud leader" in labels
 
     window.add_leader_to(call, "arrow")
+    click(window.view, 560, 460)
     assert [leader.kind for leader in call.leaders] == ["cloud", "arrow"]
     window.add_leader_to(call, "cloud")
     drag(window.view, 500, 330, 620, 400)

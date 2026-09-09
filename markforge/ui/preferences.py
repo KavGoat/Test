@@ -47,6 +47,10 @@ class Preferences:
     recover_flattened: bool = True
     """Keep source item data when content is flattened into the page."""
 
+    page_thumbnails: float = 1.0
+    """How big the pictures in the page list are, as a multiple of their
+    ordinary size. Ctrl and the wheel over the list changes it."""
+
     def wheel_zooms(self) -> bool:
         return self.wheel == WHEEL_ZOOM
 
@@ -82,6 +86,14 @@ def load() -> Preferences:
         default = getattr(prefs, field.name)
         if isinstance(default, bool):
             setattr(prefs, field.name, _as_bool(stored, default))
+        elif isinstance(default, float):
+            # QSettings hands back whatever it wrote, and on some platforms
+            # that is the string of it. A number that will not parse is a
+            # number to ignore, not a reason to lose the rest.
+            try:
+                setattr(prefs, field.name, float(stored))
+            except (TypeError, ValueError):
+                pass
         else:
             setattr(prefs, field.name, str(stored))
     return prefs

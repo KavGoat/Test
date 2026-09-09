@@ -1013,8 +1013,13 @@ class _TextBase(MarkupItem):
             "written": self.written,
             "digits": self.digits,
         })
-        if self.leaders:
-            data["leaders"] = [leader.to_dict() for leader in self.leaders]
+        # Always, even when there are none. A call-out makes itself one leader
+        # to start with, so a text box turned into a call-out — which is what
+        # giving one a leader does — would keep that made-up leader as well as
+        # the one being added, and arrive pointing at two things, one of them
+        # a spot below and to the left that nobody chose. Saying "none" is a
+        # different thing from not saying.
+        data["leaders"] = [leader.to_dict() for leader in self.leaders]
         return data
 
     def deserialize(self, data: dict) -> None:

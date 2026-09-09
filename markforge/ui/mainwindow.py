@@ -4231,23 +4231,33 @@ class MainWindow(QMainWindow):
                            lambda i=which: self.remove_leader_from(item, i))
 
     def add_leader_to(self, item, kind: str = "arrow") -> None:
-        """Another leader on this note, clear of the ones it already has.
+        """Another leader on this note — placed, not guessed at.
 
-        A text box given a leader is a call-out, so it becomes one — the three
-        are one object in different states, and this is the state changing.
+        Both kinds ask where before anything changes: an arrow wants the thing
+        it points at, a cloud wants the area it goes round. Putting an arrow
+        down beside the note and leaving it to be dragged made every leader
+        two gestures, the first of them wrong.
         """
         if kind == "cloud":
             self.view.begin_cloud_leader(item)
             return
-        self.view.begin_snapshot(self.view.involved_frames(item))
+        self.view.begin_arrow_leader(item)
+
+    def finish_arrow_leader(self, item, scene_point: QPointF) -> None:
+        """Put the new arrow leader at the place that was clicked.
+
+        A text box given a leader is a call-out, so it becomes one — the three
+        are one object in different states, and this is the state changing.
+        """
+        where = item.mapFromScene(scene_point)
         item = self.becomes_a_callout(item)
-        item.add_leader()
+        item.add_leader(where)
         item.touch()
         item.update()
         self.view.commit_snapshot("Add leader")
         self.refresh_selection()
         self.status_hint.setText(
-            f"{len(item.leaders)} leader(s) — drag it to what it points at")
+            f"{len(item.leaders)} leader(s) — drag the head to move it")
 
     def finish_cloud_leader(self, item, scene_rect: QRectF) -> None:
         """Attach a cloud leader around the region chosen on the canvas."""
