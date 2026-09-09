@@ -377,19 +377,53 @@ def test_an_exported_drawing_keeps_the_index_and_links_it_came_with(
     assert pdfio.page_count(path) == 3
 
 
-def test_the_document_s_own_index_wins_over_the_one_it_came_with(window, tmp_path):
-    """A contents block somebody built is the outline they meant to have."""
+def test_a_bookmark_added_to_a_drawing_set_joins_its_index(window, tmp_path):
+    """The index it came with is the document's index now, so this adds to it.
+
+    There is one list of bookmarks and everything reads from it — the panel,
+    a contents block, the exported outline — so a bookmark added to an opened
+    drawing set takes its place in that list rather than replacing it or
+    living somewhere parallel to it.
+    """
     source = str(tmp_path / "set.pdf")
     _a_pdf_with_an_index(source)
     window.open_path(source)
     window.rebuild_scenes()
-    window.document.add_bookmark("My own index", 0, 40.0)
+    window.document.add_bookmark("My own note", 0, 400.0)
 
     path = str(tmp_path / "exported.pdf")
     export_io.export_pdf(window.document, path, resolution=150)
 
-    assert _outline_titles(path) == ["My own index"]
+    # In page order, and down the page within a page: the added one sits after
+    # "Cover" because it points further down the same sheet.
+    assert _outline_titles(path) == ["Cover", "My own note", "Plan", "Details"]
     assert _link_count(path) == 1, "and the links it came with are still there"
+
+
+def test_a_bookmark_lands_where_on_the_page_it_points(window, tmp_path):
+    """Near the top of the sheet means near the top of the sheet.
+
+    A ``/XYZ`` destination is written measuring up from the bottom of the page
+    and everything here measures down from the top, so somewhere the two have
+    to be reconciled — and doing it twice is the same as not doing it at all,
+    except that it looks right until somebody clicks the bookmark and lands at
+    the wrong end of a title sheet.
+    """
+    import pymupdf
+
+    height = window.document.pages[0].height_pt
+    window.document.add_bookmark("Near the top", 0, 100.0)
+    path = str(tmp_path / "bookmarked.pdf")
+    export_io.export_pdf(window.document, path, resolution=150)
+
+    document = pymupdf.open(path)
+    try:
+        entry = document.get_toc(simple=False)[0]
+        landed = entry[3]["to"].y
+        assert abs(landed - 100.0) < 2, \
+            f"asked for 100pt down a {height:.0f}pt page, landed at {landed:.0f}"
+    finally:
+        document.close()
 
 
 def test_a_document_without_bookmarks_is_unchanged(window, tmp_path):

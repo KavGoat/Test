@@ -344,6 +344,71 @@ def _a_turned_pdf(path: str, rotation: int = 90) -> None:
     document.close()
 
 
+def _a_pdf_with_an_outline(path: str) -> None:
+    """Three sheets and an index over them, the way a drawing set arrives."""
+    import pymupdf
+
+    document = pymupdf.open()
+    for number in range(3):
+        page = document.new_page(width=595, height=842)
+        page.insert_text(pymupdf.Point(70, 120), f"SHEET {number + 1}", fontsize=14)
+    document.set_toc([
+        [1, "Cover", 1, {"kind": pymupdf.LINK_GOTO, "to": pymupdf.Point(0, 60)}],
+        [2, "Plan", 2],
+        [1, "Details", 3]])
+    document.save(path)
+    document.close()
+
+
+def test_opening_a_drawing_set_brings_its_index_with_it(window, tmp_path):
+    """A PDF's outline is its sheet index, and opening one should hand it over.
+
+    It was in the file all along — it survived a save and an export untouched —
+    but the panel beside it was empty, so there was no way to see or use it.
+    """
+    source = str(tmp_path / "set.pdf")
+    _a_pdf_with_an_outline(source)
+    window.open_path(source)
+    window.rebuild_scenes()
+
+    entries = window.document.contents_entries()
+    assert [(mark.title, index) for mark, index in entries] == [
+        ("Cover", 0), ("Plan", 1), ("Details", 2)]
+    assert [mark.level for mark, _index in entries] == [0, 1, 0], \
+        "and the tree it was written as is still a tree"
+    # Where on its sheet the first one points, not merely which sheet.
+    assert abs(entries[0][0].y - 60.0) < 2, entries[0][0].y
+
+    # Kept against the page rather than its number, so inserting does not send
+    # the index to the wrong sheets.
+    uids = {mark.page_uid for mark, _ in entries}
+    assert uids == {page.uid for page in window.document.pages}
+
+
+def test_an_index_can_be_left_behind_when_pages_are_brought_in(window, tmp_path):
+    from markforge.io import pdfio
+
+    source = str(tmp_path / "set.pdf")
+    _a_pdf_with_an_outline(source)
+    pdfio.import_pages(window.document, source, [0, 1], pdfio.FIT_ORIGINAL,
+                       bookmarks=False)
+    assert window.document.contents_entries() == []
+
+
+def test_only_the_sheets_that_came_in_keep_their_bookmarks(window, tmp_path):
+    """A bookmark to a sheet nobody imported would go to the wrong one."""
+    from markforge.io import pdfio
+
+    source = str(tmp_path / "set.pdf")
+    _a_pdf_with_an_outline(source)
+    before = len(window.document.pages)
+    pdfio.import_pages(window.document, source, [2], pdfio.FIT_ORIGINAL)
+
+    entries = window.document.contents_entries()
+    assert [mark.title for mark, _index in entries] == ["Details"]
+    assert entries[0][1] == before, "hung off the page it actually came in on"
+
+
 def test_a_damaged_drawing_opens_and_says_that_it_was_repaired(window, tmp_path):
     """A drawing set is full of files that are not quite right.
 
@@ -371,6 +436,49 @@ def test_a_damaged_drawing_opens_and_says_that_it_was_repaired(window, tmp_path)
     _a_pdf_with_line_work(sound)
     assert pdfio.trouble_with(sound) == "", \
         "a file that is not damaged has nothing to report"
+
+
+def test_saving_a_repaired_drawing_writes_a_file_that_is_sound(window, tmp_path):
+    """A file that had to be repaired is written whole, not added to.
+
+    Adding to a PDF means appending a cross-reference whose ``/Prev`` points
+    back at the one already in the file. When that one points nowhere — which
+    is what "had to be repaired" means — the chain does not resolve, and
+    everything appended to it is as unreachable as what was already there. The
+    bytes would be preserved into a file that still does not open.
+
+    So a repaired file is written out whole instead, which repairs it. That
+    costs the byte-for-byte promise, and the promise was worth nothing here:
+    there is no signature over a file whose cross-reference is wrong.
+    """
+    from pypdf import PdfReader
+    from PySide6.QtCore import QRectF
+    from markforge.items.shapes import RectItem
+
+    broken = str(tmp_path / "broken.pdf")
+    with open(broken, "wb") as handle:
+        handle.write(
+            b"%PDF-1.4\n"
+            b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
+            b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"
+            b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] >>\n"
+            b"endobj\n"
+            b"startxref\n999999\n%%EOF\n")
+
+    window.open_path(broken)
+    window.rebuild_scenes()
+    drawn = RectItem()
+    drawn.set_local_rect(QRectF(0, 0, 100, 60))
+    window.document.pages[0].frame.add_markup(drawn, QPointF(80, 80))
+
+    saved = str(tmp_path / "mended.pdf")
+    project_io.save_document(window.document, saved)
+
+    # Strict, and by a different library: the file that comes out is one a
+    # reader can follow without guessing.
+    reader = PdfReader(saved, strict=True)
+    assert len(reader.pages) == 1
+    assert project_io.carries_a_document(saved), "and it is still our document"
 
 
 def test_a_turned_page_comes_in_as_the_sheet_it_is_drawn_as(window, tmp_path,

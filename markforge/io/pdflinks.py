@@ -134,12 +134,22 @@ def _add_links(document, links: list) -> bool:
 
 
 def _landing(document, page: int, y: float) -> "pymupdf.Point":
-    """Where a destination lands, in the space a PDF destination is written in.
+    """Where a destination lands, in the space MuPDF is asked for it.
 
-    Everything on the drawing side measures down from the top of the page; a
-    ``/XYZ`` destination measures up from the bottom. The one place that gets
-    turned over is here.
+    A ``/XYZ`` destination is written in the file measuring up from the bottom
+    of the page, and everything on the drawing side measures down from the top
+    — but MuPDF does that turn itself, for both ``set_toc`` and
+    ``insert_link``. So the display point goes in as it stands. Turning it over
+    first put every bookmark and every link the same distance from the wrong
+    end of the sheet, which on a title page is the difference between the top
+    of the drawing and the bottom of it.
+
+    Worth knowing that MuPDF is not consistent about this: a destination read
+    back out of an outline is in display points, and one read back out of a
+    *link* is in the file's own space. Reading is
+    :func:`markforge.io.pdfio.outline` and :func:`_add_links` respectively; this
+    is only about writing, where both take display points.
     """
     index = max(0, min(int(page), document.page_count - 1))
     height = engine.page_size(document, index)[1]
-    return pymupdf.Point(0.0, height - max(float(y), 0.0))
+    return pymupdf.Point(0.0, max(min(float(y), height), 0.0))

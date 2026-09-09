@@ -189,6 +189,8 @@ at their own size, as their own line work rather than a picture of it, so they
 stay sharp however far you zoom in — the page is re-rendered at the zoom you
 are actually looking at, not magnified. Somebody else's markups come in as
 markups: a Bluebeam cloud opens as a cloud you can select, recolour and move.
+Its bookmarks come in too, so the sheet index a drawing set was issued with is
+in the panel rather than only in the file.
 
 **File ▸ Insert PDF pages** brings more in beside them — all pages or a range
 like `1-3,7`, keeping each page's own size or fitting to A4, with a preview of
@@ -229,11 +231,13 @@ it, or swaps one colour for another.
   to overwrite the page underneath and delete the markups they cover. It says
   plainly that this cannot be undone, and that partly-overlapping markups are
   left for you to check.
-- **Bookmarks** (`Ctrl+B`) name places in the document. The bookmarks panel
-  jumps to them, a **contents block** prints the same list on the page with
-  page numbers and leader dots, and each line of it is a link. Both reach the
-  saved PDF: the bookmarks become its outline and every contents line becomes a
-  working link.
+- **Bookmarks** (`Ctrl+B`) name places in the document. An opened PDF's own
+  outline arrives as bookmarks, and anything you add joins the same list. The
+  bookmarks panel jumps to them, a **contents block** prints the same list on
+  the page with page numbers and leader dots, and each line of it is a link.
+  Both reach the saved PDF: the bookmarks become its outline and every contents
+  line becomes a working link. A drawing set exported from here keeps the links
+  it came in with as well.
 - **A light and a dark theme** (View ▸ Dark). The chrome, the icons and every
   panel follow it; the page itself stays paper-white in both, and what is drawn
   on it keeps its own colour — the sheet is the sheet, whatever the frame does.

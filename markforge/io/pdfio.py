@@ -330,6 +330,68 @@ def line_work(path: str, indices: list[int]) -> dict[int, list[dict]]:
     return found
 
 
+def outline(path: str, indices: list[int]) -> list[tuple[int, str, float, int]]:
+    """The PDF's own bookmarks, for the pages being brought in.
+
+    A drawing set's outline is its sheet index — the only practical way round a
+    two-hundred-page file — and it is written in the PDF, so opening one should
+    hand it over rather than leaving the panel empty beside a document that
+    plainly has one.
+
+    Each entry comes back as ``(page index, title, y, level)``, with *y* in
+    display points down the page, so it can be hung off whichever page the
+    import made. Entries pointing at pages that were not brought in are left
+    out: a bookmark that goes to the wrong sheet is worse than one that is
+    missing.
+    """
+    wanted = {index: order for order, index in enumerate(indices)}
+    if not wanted:
+        return []
+    try:
+        source = engine.open_path(path)
+    except PdfError:
+        return []
+    found: list[tuple[int, str, float, int]] = []
+    try:
+        try:
+            table = source.get_toc(simple=False)
+        except Exception:                              # noqa: BLE001
+            engine.drain_messages()
+            return []
+        for entry in table:
+            level, title, page = entry[0], entry[1], entry[2]
+            index = int(page) - 1
+            if index not in wanted:
+                continue
+            found.append((index, str(title),
+                          _down_the_page(source, index, entry),
+                          max(int(level) - 1, 0)))
+    finally:
+        engine.close(source)
+    return found
+
+
+def _down_the_page(source, index: int, entry) -> float:
+    """How far down the page a bookmark points, in display points.
+
+    A PDF destination is written measuring up from the bottom of the sheet,
+    but MuPDF has already turned an outline entry's the right way round by the
+    time it hands it over — unlike a link's, which comes back as the file
+    wrote it. So this takes it as it is; converting again would put every
+    bookmark the same distance from the wrong end of the page.
+    """
+    where = entry[3] if len(entry) > 3 else None
+    point = where.get("to") if isinstance(where, dict) else None
+    if point is None:
+        return 0.0
+    try:
+        height = engine.page_size(source, index)[1]
+        return max(min(float(point.y), height), 0.0)
+    except Exception:                                  # noqa: BLE001
+        engine.drain_messages()
+        return 0.0
+
+
 def markups(path: str, indices: list[int]) -> dict[int, list[dict]]:
     """Each page's annotations, as the markups they are.
 
@@ -465,7 +527,8 @@ def _bezier(a, b, c, d, t: float) -> list:
 
 def import_pages(document, path: str, indices: list[int], fit: str = FIT_ORIGINAL,
                  dpi: float = 150.0, at: Optional[int] = None,
-                 vectors: bool = False, annotations: bool = False) -> list[Page]:
+                 vectors: bool = False, annotations: bool = False,
+                 bookmarks: bool = True) -> list[Page]:
     """Load the chosen PDF pages into *document* as new pages.
 
     **What arrives is the PDF.** Every page is drawn from the file itself, by
@@ -489,9 +552,11 @@ def import_pages(document, path: str, indices: list[int], fit: str = FIT_ORIGINA
     drawn = line_work(path, indices) if vectors else {}
     marked = markups(path, indices) if annotations else {}
     created: list[Page] = []
+    source_heights: dict[int, float] = {}
     try:
         for offset, index in enumerate(indices):
             info = source.page_info(index)
+            source_heights[index] = info.height_pt
             page = Page(setup_for(info, fit, template))
             if index in drawn:
                 # The page's own line work, over the picture of it. The page
@@ -521,8 +586,32 @@ def import_pages(document, path: str, indices: list[int], fit: str = FIT_ORIGINA
             created.append(page)
     finally:
         source.close()
+    if bookmarks:
+        _bring_the_outline(document, path, indices, created, source_heights)
     document.modified = True
     return created
+
+
+def _bring_the_outline(document, path: str, indices: list[int],
+                       created: list[Page], heights: dict[int, float]) -> None:
+    """Hang the source PDF's bookmarks off the pages that were made from it.
+
+    Against each page's own id rather than its number, the way every other
+    bookmark here is kept, so inserting pages later does not send the sheet
+    index to the wrong sheets. Where the page was fitted onto other paper, how
+    far down it a bookmark points is scaled the same way the page was.
+    """
+    from ..core.document import Bookmark
+
+    made = {index: page for index, page in zip(indices, created)}
+    for index, title, y, level in outline(path, indices):
+        page = made.get(index)
+        if page is None:
+            continue
+        was = heights.get(index) or 0.0
+        scale = (page.height_pt / was) if was > 0 else 1.0
+        document.bookmarks.append(
+            Bookmark(title.strip() or page.label, page.uid, y * scale, level))
 
 
 def render_preview(path: str, index: int, box: int = 560):

@@ -187,7 +187,6 @@ def _merge_preserved_pdf_pages(document: Document, path: str, pages: list,
         # page cannot be written while that page is still to be made.
         for offset, source, index, key in carry_over:
             _carry_the_links(output[offset], source, index, key, landed)
-        _carry_the_outline(output, sources, landed)
         output.set_metadata({"title": document.title or "",
                              "creator": "MarkForge", "producer": "MarkForge"})
         engine.save_as(output, path)
@@ -233,46 +232,6 @@ def _carry_the_links(sheet, source, index: int, key: str, landed: dict) -> None:
             sheet.insert_link(entry)
         except Exception:                              # noqa: BLE001
             engine.drain_messages()
-
-
-def _carry_the_outline(output, sources: dict, landed: dict) -> None:
-    """Bring the source PDF's bookmarks onto the export, where they still point.
-
-    A drawing set's outline is its sheet index, and losing it on export loses
-    the only way of getting round a two-hundred-page file. Entries whose sheet
-    was not exported are dropped rather than pointed somewhere arbitrary, and
-    the levels are pulled back into line afterwards so the tree is still a tree.
-
-    Only when the document has no outline of its own. If it does — a contents
-    block that somebody built — that one is written afterwards and wins, which
-    is right: it is the one they made.
-    """
-    from ..pdf import engine
-
-    entries: list = []
-    for key, source in sources.items():
-        try:
-            table = source.get_toc(simple=True)
-        except Exception:                              # noqa: BLE001
-            engine.drain_messages()
-            continue
-        for level, title, page in table:
-            target = landed.get((key, page - 1))
-            if target is not None:
-                entries.append([int(level), str(title), target + 1])
-    if not entries:
-        return
-    entries.sort(key=lambda row: row[2])
-    tidied: list = []
-    previous = 0
-    for level, title, page in entries:
-        level = max(1, min(level, previous + 1))
-        tidied.append([level, title, page])
-        previous = level
-    try:
-        output.set_toc(tidied)
-    except Exception:                                  # noqa: BLE001
-        engine.drain_messages()
 
 
 def _opened(document: Document, page, sources: dict):
