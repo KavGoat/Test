@@ -1155,7 +1155,7 @@ def entry_thumbnail(entry, width: int = 48, height: int = 34) -> QPixmap:
         painter.save()
         painter.translate(item.pos())
         try:
-            item.paint_content(painter)
+            item.paint_visible(painter)
         except Exception:
             pass
         painter.restore()

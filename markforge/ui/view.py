@@ -3266,7 +3266,7 @@ class PageView(QGraphicsView):
                                                    float(data.get("y", 0.0))))
             painter.save()
             painter.translate(at)
-            item.paint_content(painter)
+            item.paint_visible(painter)
             painter.restore()
         # No box round it. The drawing under the pointer says where it will
         # land and how big it is; a dashed rectangle on top of that says
@@ -3299,7 +3299,7 @@ class PageView(QGraphicsView):
         painter.setOpacity(0.5)
         painter.translate(point)
         try:
-            item.paint_content(painter)
+            item.paint_visible(painter)
         except Exception:
             pass
         painter.restore()

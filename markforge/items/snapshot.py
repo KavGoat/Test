@@ -30,7 +30,7 @@ def picture_of(items, box: QRectF) -> QPicture:
         painter.save()
         painter.translate(item.pos())
         painter.setTransform(item.transform(), True)
-        item.paint_content(painter)
+        item.paint_visible(painter)
         painter.restore()
     painter.end()
     return picture

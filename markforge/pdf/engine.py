@@ -306,6 +306,32 @@ def raster_from(drawing, region: tuple[float, float, float, float],
     return _raster_of(pixmap)
 
 
+def annotation_raster(document: "pymupdf.Document", index: int, xref: int,
+                      scale: float = 3.0) -> Optional[Raster]:
+    """One annotation drawn the way its own file draws it.
+
+    Its appearance stream, rasterised — which is what every reader in the
+    world shows for it, and the only way to be sure a markup read out of
+    somebody's drawing looks like the markup they made. A stamp is a logo and
+    a ruled table; a section mark is filled to a shape nothing here describes.
+    Redrawn from their dictionaries they come out close, and close is worse
+    than useless on a drawing being checked against the original.
+    """
+    try:
+        page = document[index]
+        for annot in page.annots():
+            if annot.xref != xref:
+                continue
+            pixmap = annot.get_pixmap(matrix=pymupdf.Matrix(scale, scale),
+                                      alpha=True)
+            if not pixmap.width or not pixmap.height:
+                return None
+            return _raster_of(pixmap)
+    except Exception:                                  # noqa: BLE001
+        drain_messages()
+    return None
+
+
 def render_thumbnail(document: "pymupdf.Document", index: int,
                      longest_edge: int = 140,
                      annotations: bool = True) -> Optional[Raster]:

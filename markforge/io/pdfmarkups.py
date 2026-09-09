@@ -20,6 +20,8 @@ page that says it is turned ninety degrees lands where it is actually drawn.
 from __future__ import annotations
 
 import os
+import re
+
 import pymupdf
 
 from ..pdf import engine
@@ -32,8 +34,22 @@ NOT_MARKUP = set(engine.NOT_MARKUP)
 MOST_MARKUPS = 3000
 
 
-def markups_of_page(source, index: int, scale: float = 1.0) -> list[dict]:
-    """Every annotation on one page, as markup payloads in display points."""
+#: How finely an annotation's own appearance is kept. Three times life size
+#: stays crisp at the zoom somebody reads a detail at, and a markup is a small
+#: part of a sheet, so the pictures are small.
+LOOK_SCALE = 3.0
+
+
+def markups_of_page(source, index: int, scale: float = 1.0,
+                    keep_the_look=None) -> list[dict]:
+    """Every annotation on one page, as markup payloads in display points.
+
+    With *keep_the_look* — anything that takes PNG bytes and gives back
+    somewhere to find them again — each markup also carries a picture of how
+    the file it came from drew it. That is what it shows until it is edited,
+    and it is the difference between somebody's drawing looking like their
+    drawing and looking like this application's best guess at it.
+    """
     from .btx import colour
 
     page = source.page(index)
@@ -48,10 +64,62 @@ def markups_of_page(source, index: int, scale: float = 1.0) -> list[dict]:
         except Exception:                              # noqa: BLE001
             made = None
         if made:
+            if keep_the_look is not None:
+                _keep_the_look(source, index, annotation, made,
+                               keep_the_look, place, scale)
             found.extend(made)
         if len(found) >= MOST_MARKUPS:
             break
     return found
+
+
+def _keep_the_look(source, index: int, annotation: dict, made: list,
+                   keep_the_look, place, scale: float) -> None:
+    """Hang a picture of the annotation's own appearance on what it became.
+
+    With the rectangle it belongs in, which is the annotation's own and not
+    the markup's. A text box sizes itself to whatever it is holding; the
+    picture has to go where the file put it, or it is stretched to fit a box
+    the file never had and comes out big and soft.
+
+    Only where one markup came of one annotation. An ink annotation is several
+    strokes and there is no honest way to cut its picture between them, so
+    those draw themselves.
+    """
+    number = annotation.get("__xref__")
+    if len(made) != 1 or not isinstance(number, int):
+        return
+    raster = engine.annotation_raster(source.doc, index, number, LOOK_SCALE)
+    if raster is None or raster.is_empty:
+        return
+    kept = keep_the_look(_as_png(raster))
+    if not kept:
+        return
+    payload = made[0]
+    box = _box(source, annotation, place, scale)
+    payload["as_it_came_asset"] = kept
+    # Where the picture goes, relative to the markup's own origin.
+    payload["as_it_came_rect"] = [box[0] - float(payload.get("x", 0.0)),
+                                  box[1] - float(payload.get("y", 0.0)),
+                                  box[2], box[3]]
+
+
+def _as_png(raster) -> bytes:
+    """A rendered appearance as PNG bytes."""
+    from PySide6.QtCore import QBuffer, QIODevice
+    from PySide6.QtGui import QImage
+
+    # Premultiplied: that is how MuPDF hands back a pixmap with alpha, and
+    # reading it as straight alpha puts a grey wash over the whole picture.
+    shape = (QImage.Format_RGBA8888_Premultiplied if raster.alpha
+             else QImage.Format_RGB888)
+    image = QImage(raster.samples, raster.width, raster.height,
+                   raster.stride, shape).copy()
+    holder = QBuffer()
+    holder.open(QIODevice.WriteOnly)
+    if not image.save(holder, "PNG"):
+        return b""
+    return bytes(holder.data())
 
 
 def _one(source, annotation: dict, kind: str, place, scale: float,
@@ -110,7 +178,14 @@ def _one(source, annotation: dict, kind: str, place, scale: float,
     drawn = _appearance(source, annotation, scale)
     if drawn:
         return drawn
-    return []
+    # A stamp, or anything else this does not have a shape for. It still has
+    # an appearance — that is what the file draws for it, and for a title block
+    # or a company stamp it is the whole of the markup — so it comes across as
+    # a plain box carrying that picture, which can be picked up and moved like
+    # anything else. Leaving it out because there is no shape to give it is how
+    # a title block goes missing from a drawing.
+    return [_shape("rect", "rect", box,
+                   dict(style, stroke="", fill="", width=0.0), common)]
 
 
 # -- the pieces ------------------------------------------------------------
@@ -169,6 +244,55 @@ def _style(source, annotation: dict, colour, scale: float) -> dict:
     if isinstance(opacity, (int, float)) and 0 < float(opacity) < 1:
         style["opacity"] = float(opacity)
     return style
+
+
+#: ``/DA`` is a scrap of a content stream: the colour to set and the font to
+#: pick, in the operators a page would use. Two of them matter here — the size
+#: the words are set at, and what colour they are set in — and without them
+#: every text box on a sheet comes back at whatever size this application
+#: happens to default to, which on a title block is the difference between a
+#: label and a word running off the end of its box.
+_FONT = re.compile(r"/([^\s/]+)\s+([0-9.]+)\s+Tf")
+_GREY = re.compile(r"([0-9.]+)\s+g(?![A-Za-z])")
+_RGB = re.compile(r"([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)\s+rg(?![A-Za-z])")
+_CMYK = re.compile(r"([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)\s+k(?![A-Za-z])")
+
+
+def _how_the_words_are_set(source, annotation: dict, scale: float) -> dict:
+    """The size and colour a free text annotation sets its words in."""
+    said = source.resolve(annotation.get("DA"))
+    out: dict = {}
+    if not isinstance(said, str) or not said:
+        return out
+    found = _FONT.search(said)
+    if found:
+        try:
+            size = float(found.group(2))
+        except ValueError:
+            size = 0.0
+        # A size of zero means "fit the box", which a PDF reader works out for
+        # itself. Nothing here can, so it keeps its own default rather than
+        # setting the words at nothing.
+        if size > 0:
+            out["font_size"] = max(size * scale, 1.0)
+    found = _RGB.search(said)
+    if found:
+        out["text_color"] = _hex(*(float(v) for v in found.groups()))
+    elif _CMYK.search(said):
+        cyan, magenta, yellow, black = (float(v) for v in
+                                        _CMYK.search(said).groups())
+        out["text_color"] = _hex((1 - cyan) * (1 - black),
+                                 (1 - magenta) * (1 - black),
+                                 (1 - yellow) * (1 - black))
+    elif _GREY.search(said):
+        grey = float(_GREY.search(said).group(1))
+        out["text_color"] = _hex(grey, grey, grey)
+    return out
+
+
+def _hex(red: float, green: float, blue: float) -> str:
+    return "#%02x%02x%02x" % tuple(
+        int(round(max(0.0, min(1.0, part)) * 255)) for part in (red, green, blue))
 
 
 def _common(source, annotation: dict) -> dict:
@@ -330,6 +454,10 @@ def _free_text(source, annotation: dict, box: list, style: dict, common: dict,
     elif intent == "FreeTextCallout":
         kind = "callout"
     payload = _text(kind, box, style, common)
+    # Set the way the annotation says to set it, not the way this application
+    # would have set it.
+    payload["style"] = dict(payload.get("style") or {},
+                            **_how_the_words_are_set(source, annotation, scale))
     if kind == "callout" and leader:
         # The leader's own end is where it points; the rest is worked out from
         # the box, the way every call-out here works out its hinge.

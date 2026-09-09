@@ -35,6 +35,7 @@ class ImageItem(MarkupItem):
         return self._pixmap
 
     def load_from_document(self, document) -> None:
+        super().load_from_document(document)
         data = document.asset(self.asset_key)
         if data:
             pixmap = QPixmap()

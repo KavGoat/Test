@@ -426,6 +426,15 @@ class TileCache(QObject):
                     continue
                 missing = True
                 wanting.append(key)
+        if missing:
+            # Something better than the small picture of the whole page while
+            # the squares for this zoom are still coming: whatever is already
+            # drawn of this page at another zoom. Zooming in on a sheet that
+            # was sharp should not go soft on the way — the rung below is half
+            # the resolution, not a thumbnail of the entire drawing — and
+            # these are drawn under the tiles that are ready, coarsest first.
+            ready = self._standing_in(source, index, step, wanted,
+                                      annotations) + ready
         # Nearest the middle of what is being looked at first, and never more
         # than a few screenfuls at once. A repaint that asks for a thousand
         # tiles is a repaint whose answers arrive minutes later, by which time
@@ -438,6 +447,28 @@ class TileCache(QObject):
         for key in wanting:
             self._ask(key, data, page, sheet=False)
         return ready, missing
+
+    def _standing_in(self, source: str, index: int, step: float,
+                     region: QRectF, annotations: bool
+                     ) -> list[tuple[QRectF, QPixmap]]:
+        """What is already drawn of this page at other zooms, coarsest first.
+
+        A page that was sharp a moment ago has squares of itself in the cache,
+        and half the resolution wanted is far better than a picture of the
+        whole sheet stretched over it. Drawn coarsest first so anything finer
+        lands on top, and the tiles for the zoom actually wanted go on last.
+        """
+        found: list[tuple[float, QRectF, QPixmap]] = []
+        for key, pixmap in self._tiles.items():
+            if (key.source != source or key.index != index
+                    or key.scale == step or key.annotations != annotations
+                    or pixmap is None or pixmap.isNull()):
+                continue
+            where = key.page_rect(pixmap)
+            if where.intersects(region):
+                found.append((key.scale, where, pixmap))
+        found.sort(key=lambda entry: entry[0])
+        return [(where, pixmap) for _scale, where, pixmap in found]
 
     def _stop_wanting(self, source: str, index: int, step: float) -> None:
         """Give up on tiles of this page at a zoom nobody is looking at now.

@@ -432,6 +432,67 @@ def _a_drawing_marked_up_elsewhere(path: str) -> None:
     document.close()
 
 
+REFERENCE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                         "btx", "Document1.pdf")
+
+
+@pytest.mark.skipif(not os.path.exists(REFERENCE),
+                    reason="the reference drawing is not here")
+def test_a_real_marked_up_drawing_opens_looking_like_itself(window, tmp_path):
+    """The test that matters: it has to look like the PDF.
+
+    A real sheet out of Bluebeam — a company stamp, a title block, section
+    marks, notes, a legend, two dozen text boxes. Opening it and redrawing
+    every markup from its own dictionary gets close and no closer: the stamp
+    is a logo and a ruled table, the section marks are filled to a shape
+    nothing here describes, and the text is set by an appearance stream rather
+    than by the font its ``/DA`` happens to name. Close is worse than useless
+    on a drawing somebody is checking against the original.
+
+    So this renders the page as any reader would and as MarkForge does, and
+    counts how much of it disagrees.
+    """
+    import pymupdf
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QImage, QPainter, QColor
+
+    dpi = 110.0 / 72.0
+    window.open_path(REFERENCE)
+    window.rebuild_scenes()
+
+    document = pymupdf.open(REFERENCE)
+    try:
+        for index in range(document.page_count):
+            pixmap = document[index].get_pixmap(
+                matrix=pymupdf.Matrix(dpi, dpi), annots=True)
+            theirs = QImage(pixmap.samples, pixmap.width, pixmap.height,
+                            pixmap.stride, QImage.Format_RGB888).copy()
+
+            ours = QImage(theirs.size(), QImage.Format_RGB888)
+            ours.fill(QColor("white"))
+            painter = QPainter(ours)
+            painter.setRenderHint(QPainter.Antialiasing, True)
+            window.document.pages[index].frame.render_page(
+                painter, QRectF(0, 0, theirs.width(), theirs.height()),
+                for_print=True)
+            painter.end()
+
+            off = total = 0
+            for y in range(0, theirs.height(), 3):
+                for x in range(0, theirs.width(), 3):
+                    total += 1
+                    a, b = theirs.pixelColor(x, y), ours.pixelColor(x, y)
+                    if (abs(a.red() - b.red()) + abs(a.green() - b.green())
+                            + abs(a.blue() - b.blue())) > 90:
+                        off += 1
+            differs = off / max(total, 1)
+            assert differs < 0.03, (
+                f"page {index + 1} of the reference drawing differs by "
+                f"{differs * 100:.1f}% — it should look like the PDF")
+    finally:
+        document.close()
+
+
 def test_somebody_else_s_markups_can_be_picked_up_and_changed(window, tmp_path):
     """A drawing that has been through Bluebeam opens as its markups.
 

@@ -57,7 +57,11 @@ def to_image(raster: Optional[engine.Raster]) -> Optional[QImage]:
     """
     if raster is None or raster.is_empty:
         return None
-    shape = (QImage.Format_RGBA8888 if raster.alpha else QImage.Format_RGB888)
+    # MuPDF's pixmaps with alpha are premultiplied, and read as though they
+    # were not every half-transparent pixel comes out too dark — which over a
+    # white page is a grey wash across the whole picture.
+    shape = (QImage.Format_RGBA8888_Premultiplied if raster.alpha
+             else QImage.Format_RGB888)
     image = QImage(raster.samples, raster.width, raster.height,
                    raster.stride, shape)
     return None if image.isNull() else image.copy()
@@ -392,12 +396,17 @@ def _down_the_page(source, index: int, entry) -> float:
         return 0.0
 
 
-def markups(path: str, indices: list[int]) -> dict[int, list[dict]]:
+def markups(path: str, indices: list[int], document=None
+            ) -> dict[int, list[dict]]:
     """Each page's annotations, as the markups they are.
 
     Somebody else's clouds, dimensions and comments come in as markups that can
     be clicked on, moved, replied to and listed — not as a picture of their
     redlines and not as the thousands of loose segments a cloud is drawn with.
+
+    Given a *document* to keep them in, each markup also brings the picture of
+    how its own file drew it, and shows that until it is edited. Without one
+    they are drawn from their own properties, which is close and not the same.
     """
     from . import pdfmarkups, pdfvector
 
@@ -405,13 +414,19 @@ def markups(path: str, indices: list[int]) -> dict[int, list[dict]]:
         source = pdfvector.PdfFile.open(path)
     except Exception:                                  # noqa: BLE001
         return {}
+
+    def keep_the_look(png: bytes) -> str:
+        return document.add_asset(png, "png") if png else ""
+
     found: dict[int, list[dict]] = {}
     try:
         for index in indices:
             if not 0 <= index < source.page_count:
                 continue
             try:
-                made = pdfmarkups.markups_of_page(source, index)
+                made = pdfmarkups.markups_of_page(
+                    source, index,
+                    keep_the_look=keep_the_look if document is not None else None)
             except Exception:                          # noqa: BLE001
                 continue
             if made:
@@ -550,7 +565,7 @@ def import_pages(document, path: str, indices: list[int], fit: str = FIT_ORIGINA
     template = document.pages[at - 1].setup if at else (
         document.pages[-1].setup if document.pages else None)
     drawn = line_work(path, indices) if vectors else {}
-    marked = markups(path, indices) if annotations else {}
+    marked = markups(path, indices, document) if annotations else {}
     created: list[Page] = []
     source_heights: dict[int, float] = {}
     try:

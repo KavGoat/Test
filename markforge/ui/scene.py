@@ -593,9 +593,17 @@ class PageFrame(QGraphicsObject):
         self.itemsChanged.emit()
 
     def refresh_items(self) -> None:
-        """Work out again what every markup on this page reads."""
+        """Work out again what every markup on this page reads.
+
+        Settling, not editing: a markup that came in with an appearance of its
+        own must still have it afterwards.
+        """
         for item in self.ordered_markups():
-            item.refresh(page=self.page)
+            item._still_arriving = True
+            try:
+                item.refresh(page=self.page)
+            finally:
+                item._still_arriving = False
 
     def assets_used(self) -> set[str]:
         used: set[str] = set()
@@ -780,7 +788,7 @@ class PageFrame(QGraphicsObject):
                 continue
             painter.save()
             painter.setWorldTransform(transform, True)
-            item.paint_content(painter)
+            item.paint_visible(painter)
             painter.restore()
 
     def render_image(self, dpi: float = 150.0, for_print: bool = True,
