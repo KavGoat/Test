@@ -337,6 +337,61 @@ def _link_count(path: str) -> int:
         document.close()
 
 
+def _a_pdf_with_an_index(path: str) -> None:
+    """Three sheets, an outline over them, and a link from one to another."""
+    import pymupdf
+
+    document = pymupdf.open()
+    for number in range(3):
+        page = document.new_page(width=595, height=842)
+        page.insert_text(pymupdf.Point(70, 120), f"SHEET {number + 1}", fontsize=14)
+    document.set_toc([[1, "Cover", 1], [2, "Plan", 2], [1, "Details", 3]])
+    document[0].insert_link({"kind": pymupdf.LINK_GOTO,
+                             "from": pymupdf.Rect(50, 50, 200, 80),
+                             "page": 2, "to": pymupdf.Point(0, 700)})
+    document.save(path)
+    document.close()
+
+
+def test_an_exported_drawing_keeps_the_index_and_links_it_came_with(
+        window, tmp_path):
+    """A drawing set's outline is its sheet index; its links are how you move.
+
+    Exporting places each source page onto the sheet it goes out as, and
+    placing a page draws it — it does not bring the outline that pointed at it
+    or the links that were on it. Both have to be carried over deliberately, or
+    a two-hundred-page set comes out of the export with no way round it.
+    """
+    from markforge.io import pdfio
+
+    source = str(tmp_path / "set.pdf")
+    _a_pdf_with_an_index(source)
+    window.open_path(source)
+    window.rebuild_scenes()
+
+    path = str(tmp_path / "exported.pdf")
+    export_io.export_pdf(window.document, path, resolution=150)
+
+    assert _outline_titles(path) == ["Cover", "Plan", "Details"]
+    assert _link_count(path) == 1
+    assert pdfio.page_count(path) == 3
+
+
+def test_the_document_s_own_index_wins_over_the_one_it_came_with(window, tmp_path):
+    """A contents block somebody built is the outline they meant to have."""
+    source = str(tmp_path / "set.pdf")
+    _a_pdf_with_an_index(source)
+    window.open_path(source)
+    window.rebuild_scenes()
+    window.document.add_bookmark("My own index", 0, 40.0)
+
+    path = str(tmp_path / "exported.pdf")
+    export_io.export_pdf(window.document, path, resolution=150)
+
+    assert _outline_titles(path) == ["My own index"]
+    assert _link_count(path) == 1, "and the links it came with are still there"
+
+
 def test_a_document_without_bookmarks_is_unchanged(window, tmp_path):
     path = str(tmp_path / "plain.pdf")
     export_io.export_pdf(window.document, path)
