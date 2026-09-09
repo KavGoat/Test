@@ -116,6 +116,9 @@ class TileKey:
     col: int
     row: int
     annotations: bool
+    #: The page's own annotations to leave out, because this application has
+    #: taken them over and is drawing them itself.
+    without: tuple = ()
 
     def page_rect(self, pixels=None) -> QRectF:
         """Where this tile belongs on the page, in points.
@@ -140,6 +143,8 @@ class SheetKey:
     source: str
     index: int
     annotations: bool
+    #: The page's own annotations to leave out — see :class:`TileKey`.
+    without: tuple = ()
 
 
 class _Worker(QThread):
@@ -214,7 +219,8 @@ class _Worker(QThread):
                 break
             key, data, width, height = job
             if key == "forget":
-                engine.close(self._open.pop(data, None))
+                for held in [k for k in self._open if k[0] == data]:
+                    engine.close(self._open.pop(held, None))
                 for held in [k for k in self._lists if k[0] == data]:
                     self._lists.pop(held, None)
                 continue
@@ -234,7 +240,7 @@ class _Worker(QThread):
             engine.close(document)
         self._open.clear()
 
-    def _document(self, source: str, data: bytes):
+    def _document(self, source, data: bytes):
         found = self._open.get(source)
         if found is not None:
             return found
@@ -245,11 +251,13 @@ class _Worker(QThread):
         if document.page_count < 1:
             engine.close(document)
             return None
+        if len(self._open) >= MOST_HELD_PAGES:
+            engine.close(self._open.pop(next(iter(self._open))))
         self._open[source] = document
         return document
 
     def _display_list(self, source: str, data: bytes, index: int,
-                      annotations: bool):
+                      annotations: bool, without: tuple = ()):
         """The page, parsed once, ready to be rasterised any number of times.
 
         A dense drawing sheet is tens of thousands of path operations, and
@@ -257,17 +265,19 @@ class _Worker(QThread):
         a display list they are run once and every tile after that is only
         rasterising.
         """
-        key = (source, index, annotations)
+        key = (source, index, annotations, without)
         found = self._lists.get(key)
         if found is not None:
             return found
-        document = self._document(source, data)
+        # A document of its own for each set of left-out annotations. Leaving
+        # one out is done by setting its hidden flag, and a flag put back
+        # again does not always give back what was there before — so the
+        # answer is never to put one back: each set gets a clean copy.
+        document = self._document((source, without), data)
         if document is None or not 0 <= index < document.page_count:
             return None
-        try:
-            made = document[index].get_displaylist(annots=annotations)
-        except Exception:                                  # noqa: BLE001
-            engine.drain_messages()
+        made = engine.display_list(document, index, annotations, without)
+        if made is None:
             return None
         if len(self._lists) >= MOST_HELD_PAGES:
             self._lists.pop(next(iter(self._lists)), None)
@@ -279,7 +289,7 @@ class _Worker(QThread):
         from .pdfio import to_image
 
         drawing = self._display_list(key.source, data, key.index,
-                                     key.annotations)
+                                     key.annotations, key.without)
         if drawing is None:
             self.tileDone.emit(key, QImage())
             return
@@ -302,7 +312,7 @@ class _Worker(QThread):
         from .pdfio import to_image
 
         drawing = self._display_list(key.source, data, key.index,
-                                     key.annotations)
+                                     key.annotations, key.without)
         if drawing is None:
             self.sheetDone.emit(key, QImage())
             return
@@ -366,7 +376,7 @@ class TileCache(QObject):
     # -- what is ready -----------------------------------------------------
     def sheet(self, source: str, data: bytes, index: int,
               page: QRectF, annotations: bool = True,
-              ask: bool = True) -> Optional[QPixmap]:
+              ask: bool = True, without: tuple = ()) -> Optional[QPixmap]:
         """The small picture of the whole page, asking for it if need be.
 
         Without *ask*, only what is already drawn: for a caller that would
@@ -374,7 +384,7 @@ class TileCache(QObject):
         should draw the sheets somebody is looking at, not every sheet in the
         file before the window will move.
         """
-        key = SheetKey(source, index, annotations)
+        key = SheetKey(source, index, annotations, tuple(without))
         found = self._sheets.get(key)
         if found is not None:
             return found if not found.isNull() else None
@@ -392,7 +402,8 @@ class TileCache(QObject):
         return sum(1 for key in self._waiting if isinstance(key, SheetKey))
 
     def tiles(self, source: str, data: bytes, index: int, page: QRectF,
-              scale: float, region: QRectF, annotations: bool = True
+              scale: float, region: QRectF, annotations: bool = True,
+              without: tuple = ()
               ) -> tuple[list[tuple[QRectF, QPixmap]], bool]:
         """Every tile of *region* that is ready, and whether any is missing.
 
@@ -402,6 +413,7 @@ class TileCache(QObject):
         skipping it saves a full-page scaled blit on every repaint.
         """
         step = zoom_step(scale)
+        without = tuple(without)
         size = TILE / step
         if size <= 0:
             return [], True
@@ -412,13 +424,14 @@ class TileCache(QObject):
         last_col = int((wanted.right() - 1e-6) // size)
         first_row = max(int(wanted.top() // size), 0)
         last_row = int((wanted.bottom() - 1e-6) // size)
-        self._stop_wanting(source, index, step)
+        self._stop_wanting(source, index, step, without)
         ready: list[tuple[QRectF, QPixmap]] = []
         wanting: list = []
         missing = False
         for row in range(first_row, last_row + 1):
             for col in range(first_col, last_col + 1):
-                key = TileKey(source, index, step, col, row, annotations)
+                key = TileKey(source, index, step, col, row, annotations,
+                              without)
                 found = self._tiles.get(key)
                 if found is not None:
                     if not found.isNull():
@@ -434,7 +447,7 @@ class TileCache(QObject):
             # the resolution, not a thumbnail of the entire drawing — and
             # these are drawn under the tiles that are ready, coarsest first.
             ready = self._standing_in(source, index, step, wanted,
-                                      annotations) + ready
+                                      annotations, without) + ready
         # Nearest the middle of what is being looked at first, and never more
         # than a few screenfuls at once. A repaint that asks for a thousand
         # tiles is a repaint whose answers arrive minutes later, by which time
@@ -449,7 +462,7 @@ class TileCache(QObject):
         return ready, missing
 
     def _standing_in(self, source: str, index: int, step: float,
-                     region: QRectF, annotations: bool
+                     region: QRectF, annotations: bool, without: tuple = ()
                      ) -> list[tuple[QRectF, QPixmap]]:
         """What is already drawn of this page at other zooms, coarsest first.
 
@@ -462,6 +475,7 @@ class TileCache(QObject):
         for key, pixmap in self._tiles.items():
             if (key.source != source or key.index != index
                     or key.scale == step or key.annotations != annotations
+                    or key.without != without
                     or pixmap is None or pixmap.isNull()):
                 continue
             where = key.page_rect(pixmap)
@@ -470,7 +484,8 @@ class TileCache(QObject):
         found.sort(key=lambda entry: entry[0])
         return [(where, pixmap) for _scale, where, pixmap in found]
 
-    def _stop_wanting(self, source: str, index: int, step: float) -> None:
+    def _stop_wanting(self, source: str, index: int, step: float,
+                      without: tuple = ()) -> None:
         """Give up on tiles of this page at a zoom nobody is looking at now.
 
         A zoom asks for a fresh rung of the ladder, and everything still
@@ -485,7 +500,8 @@ class TileCache(QObject):
         """
         stale = [key for key in self._waiting
                  if isinstance(key, TileKey) and key.source == source
-                 and key.index == index and key.scale != step]
+                 and key.index == index
+                 and (key.scale != step or key.without != without)]
         self._waiting.difference_update(stale)
 
     def _ask(self, key, data: bytes, page: QRectF, sheet: bool) -> None:

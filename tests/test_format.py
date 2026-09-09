@@ -438,6 +438,37 @@ REFERENCE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file_
 
 @pytest.mark.skipif(not os.path.exists(REFERENCE),
                     reason="the reference drawing is not here")
+def _ink_with_nothing_like_it(one, other, slack: int = 2) -> float:
+    """What fraction of *one*'s ink has nothing like it near it in *other*.
+
+    With a couple of pixels of slack, because the two pictures are laid out by
+    different code and land a fraction of a pixel apart — on a sheet that is
+    nearly all hairlines and eight-point text, that alone reads as though
+    everything differed. What is being asked is whether anything is *missing*.
+    """
+    import numpy as np
+    from PySide6.QtGui import QImage
+
+    def grey(image: QImage):
+        # The copy is not optional: convertToFormat hands back a temporary,
+        # and an array over its buffer is reading freed memory once it goes.
+        shade = image.convertToFormat(QImage.Format_Grayscale8)
+        raw = np.frombuffer(bytes(shade.constBits()), np.uint8)
+        return raw.reshape(shade.height(),
+                           shade.bytesPerLine())[:, :shade.width()].copy()
+
+    here, there = grey(one), grey(other)
+    ink = here < 200
+    if not ink.any():
+        return 0.0
+    nearest = np.full(here.shape, 255, np.uint8)
+    for down in range(-slack, slack + 1):
+        for across in range(-slack, slack + 1):
+            nearest = np.minimum(nearest, np.roll(np.roll(there, down, 0),
+                                                  across, 1))
+    return (ink & (nearest >= 200)).sum() / ink.sum()
+
+
 def test_a_real_marked_up_drawing_opens_looking_like_itself(window, tmp_path):
     """The test that matters: it has to look like the PDF.
 
@@ -449,8 +480,10 @@ def test_a_real_marked_up_drawing_opens_looking_like_itself(window, tmp_path):
     than by the font its ``/DA`` happens to name. Close is worse than useless
     on a drawing somebody is checking against the original.
 
-    So this renders the page as any reader would and as MarkForge does, and
-    counts how much of it disagrees.
+    So none of them is redrawn. A markup read out of somebody's file is left
+    to that file to draw for as long as nobody has changed it, and this is
+    what checks it: the page rendered as any reader would render it, and the
+    page rendered by MarkForge, laid over each other.
     """
     import pymupdf
     from PySide6.QtCore import QRectF
@@ -472,8 +505,12 @@ def test_a_real_marked_up_drawing_opens_looking_like_itself(window, tmp_path):
             ours.fill(QColor("white"))
             painter = QPainter(ours)
             painter.setRenderHint(QPainter.Antialiasing, True)
+            # The same scale MuPDF used, not the rounded pixel size: half a
+            # pixel of drift across a sheet of hairlines is enough to make two
+            # identical renders look as though they disagree everywhere.
+            box = document[index].rect
             window.document.pages[index].frame.render_page(
-                painter, QRectF(0, 0, theirs.width(), theirs.height()),
+                painter, QRectF(0, 0, box.width * dpi, box.height * dpi),
                 for_print=True)
             painter.end()
 
@@ -486,11 +523,167 @@ def test_a_real_marked_up_drawing_opens_looking_like_itself(window, tmp_path):
                             + abs(a.blue() - b.blue())) > 90:
                         off += 1
             differs = off / max(total, 1)
-            assert differs < 0.03, (
+            # Nothing here has been touched, so nothing here is MarkForge's
+            # drawing of somebody else's markup: both pictures are the file's
+            # own content through the same rasteriser. What is left at this
+            # size is resampling — the page is drawn at a rung of the zoom
+            # ladder and scaled to the sheet, and a hairline lands across a
+            # pixel boundary differently in each. See below for the same
+            # comparison at a size where there is no resampling at all.
+            assert differs < 0.025, (
                 f"page {index + 1} of the reference drawing differs by "
                 f"{differs * 100:.1f}% — it should look like the PDF")
+            # And nothing may be missing, wherever it is. A markup left out
+            # is a markup the drawing no longer has — which is a different
+            # thing from a hairline being a shade lighter, and the reason for
+            # the slack.
+            lost = _ink_with_nothing_like_it(theirs, ours)
+            gained = _ink_with_nothing_like_it(ours, theirs)
+            assert lost < 0.01, (
+                f"page {index + 1} is missing {lost * 100:.1f}% of what the "
+                f"file draws")
+            assert gained < 0.01, (
+                f"page {index + 1} draws {gained * 100:.1f}% that the file "
+                f"does not")
     finally:
         document.close()
+
+
+def test_a_real_marked_up_drawing_is_drawn_by_its_own_file(window):
+    """Not a resemblance to the PDF — the PDF.
+
+    Every markup on this sheet is still its own file's, so nothing on the
+    sheet is MarkForge's drawing of somebody else's markup: the page is
+    rendered with its annotations still on it and each markup over one draws
+    nothing at all. That is why it looks right, and it is worth stating as
+    what it is rather than only as a pixel count.
+    """
+    from PySide6.QtGui import QPicture, QPainter
+
+    window.open_path(REFERENCE)
+    window.rebuild_scenes()
+    for index, page in enumerate(window.document.pages):
+        theirs = [item for item in page.frame.markups()
+                  if getattr(item, "from_annotation", 0)]
+        assert len(theirs) > 20, f"page {index + 1} should be full of markups"
+        assert all(item.still_theirs for item in theirs)
+        assert page.pdf_annotations, "the file draws them"
+        assert page.frame.left_to_us(for_print=True) == (), \
+            "and none of them is left out of what it draws"
+        # Nothing at all is drawn here for them, so there is nothing to be a
+        # near-miss: what shows is the file's own drawing and only that.
+        for item in theirs:
+            picture = QPicture()
+            painter = QPainter(picture)
+            item.paint_visible(painter)
+            painter.end()
+            assert picture.boundingRect().isEmpty(), \
+                f"{item.display_name()} is being drawn over its own file's"
+
+
+def _annotations_of(path: str) -> list:
+    """Each page's annotations as (kind, where, what it says)."""
+    import pymupdf
+
+    document = pymupdf.open(path)
+    try:
+        return [[(a.type[1], tuple(round(v, 2) for v in a.rect),
+                  (a.info.get("content") or "")[:20])
+                 for a in page.annots()] for page in document]
+    finally:
+        document.close()
+
+
+def test_saving_a_drawing_nobody_has_changed_changes_none_of_its_markups(
+        window, tmp_path):
+    """Open somebody's marked-up sheet, save it, and it is still their sheet.
+
+    Every annotation comes out as the object that went in — the same author,
+    the same date, the same replies, the same appearance. Not a redrawing of
+    it that is nearly right.
+    """
+    import shutil
+
+    path = str(tmp_path / "theirs.pdf")
+    shutil.copy(REFERENCE, path)
+    was = _annotations_of(path)
+    window.open_path(path)
+    window.rebuild_scenes()
+    assert window.save_document()
+
+    now = _annotations_of(path)
+    for index, (before, after) in enumerate(zip(was, now)):
+        assert before, f"page {index + 1} of the reference should have markups"
+        assert after == before, (
+            f"page {index + 1} came back with different markups")
+
+
+def test_changing_one_markup_leaves_every_other_one_alone(window, tmp_path):
+    """One taken over, the rest untouched — in the file as well as on screen."""
+    import shutil
+
+    path = str(tmp_path / "theirs.pdf")
+    shutil.copy(REFERENCE, path)
+    was = _annotations_of(path)
+    window.open_path(path)
+    window.rebuild_scenes()
+
+    frame = window.document.pages[0].frame
+    one = next(item for item in frame.markups()
+               if getattr(item, "still_theirs", False))
+    one.setPos(one.pos() + QPointF(30, 20))
+    assert window.save_document()
+
+    now = _annotations_of(path)
+    assert len(now[0]) == len(was[0]), "the moved markup is still one markup"
+    kept = sum(1 for row in now[0] if row in was[0])
+    assert kept == len(was[0]) - 1, (
+        f"{len(was[0]) - kept} markups changed; only the one that was moved "
+        f"should have")
+    assert now[1] == was[1], "and the page nobody touched is untouched"
+
+
+def test_exporting_a_drawing_nobody_has_changed_gives_back_the_drawing(
+        window, tmp_path):
+    """The exported sheet is the sheet — every annotation, every pixel.
+
+    An export used to take the page apart and rebuild it, which drops most of
+    what MuPDF is asked to graft: two thirds of the markups on this sheet went
+    missing, and what was left sat on the grey of the canvas. Where every page
+    is a kept page of one PDF, that PDF is what is written, with what was
+    drawn here laid over it.
+    """
+    import numpy as np
+    import pymupdf
+    from markforge.io import export as export_io
+
+    path = str(tmp_path / "exported.pdf")
+    window.open_path(REFERENCE)
+    window.rebuild_scenes()
+    export_io.export_pdf(window.document, path)
+
+    assert _annotations_of(path) == _annotations_of(REFERENCE), \
+        "every markup should have come across as the annotation it is"
+
+    theirs = pymupdf.open(REFERENCE)
+    ours = pymupdf.open(path)
+    try:
+        assert ours.page_count == theirs.page_count
+        for index in range(theirs.page_count):
+            was = theirs[index].get_pixmap(matrix=pymupdf.Matrix(2, 2),
+                                           annots=True)
+            now = ours[index].get_pixmap(matrix=pymupdf.Matrix(2, 2),
+                                         annots=True)
+            before = np.frombuffer(was.samples, np.uint8).astype(int)
+            after = np.frombuffer(now.samples, np.uint8).astype(int)
+            assert before.shape == after.shape
+            apart = np.abs(before - after)
+            assert apart.max() == 0, (
+                f"page {index + 1} of the export is not the drawing that went "
+                f"in ({int((apart > 60).sum())} pixels differ)")
+    finally:
+        theirs.close()
+        ours.close()
 
 
 def test_somebody_else_s_markups_can_be_picked_up_and_changed(window, tmp_path):
@@ -521,15 +714,28 @@ def test_somebody_else_s_markups_can_be_picked_up_and_changed(window, tmp_path):
     assert cloud.comment == "check this dim"
     assert cloud.subject == "RFI 12"
 
-    # And it can be taken hold of and moved.
+    # Every one is drawn exactly once. Until somebody touches it, that is the
+    # file's own drawing of it — which is what makes somebody else's markup
+    # look exactly as it does in their reader rather than nearly. The markup
+    # sitting over it draws nothing, so nothing shows twice.
+    assert page.pdf_annotations, "the file goes on drawing what it drew"
+    assert all(item.still_theirs for item in marks), \
+        "nothing has been touched, so nothing has changed hands"
+    assert page.frame.left_to_us() == (), \
+        "and so the page leaves none of them out"
+
+    # And it can be taken hold of and moved — which hands it over: from here
+    # this application draws it, and the page leaves that annotation out, or
+    # the markup would stay behind at the place the file has it.
     assert cloud.flags() & cloud.GraphicsItemFlag.ItemIsSelectable
     assert cloud.flags() & cloud.GraphicsItemFlag.ItemIsMovable
     was = cloud.pos()
     cloud.setPos(was + QPointF(40, 25))
     assert cloud.pos() != was
-
-    # The page must not also draw them from the file, or every one shows twice.
-    assert page.pdf_annotations is False
+    assert not cloud.still_theirs
+    assert page.frame.left_to_us() == (cloud.from_annotation,)
+    assert all(item.still_theirs for item in marks if item is not cloud), \
+        "and only that one"
 
 
 def test_a_markup_moved_on_somebody_else_s_drawing_saves_where_it_was_put(

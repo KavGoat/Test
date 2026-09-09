@@ -221,6 +221,12 @@ class Page:
         # markups of ours, because then drawing them from the file as well
         # would put every cloud and every call-out on the page twice.
         self.pdf_annotations: bool = True
+        # Which of the source page's annotations were read out as markups.
+        # The page still draws them — that is what makes somebody else's
+        # drawing look exactly like theirs — so this is the list it works out
+        # what to leave out of: an annotation whose markup has been taken over
+        # or deleted has to stop being drawn from the file.
+        self.markup_annotations: list[int] = []
         self.background_opacity: float = 1.0
         self.source_note: str = ""                  # e.g. "drawing.pdf page 3"
         # Whether this page carries a grid. A page written on wants one; a
@@ -277,6 +283,7 @@ class Page:
             "pdf_key": self.pdf_key,
             "pdf_page_index": self.pdf_page_index,
             "pdf_annotations": self.pdf_annotations,
+            "markup_annotations": list(self.markup_annotations),
             "background_opacity": self.background_opacity,
             "source_note": self.source_note,
             "grid": self.grid,
@@ -296,6 +303,8 @@ class Page:
         source_index = data.get("pdf_page_index")
         page.pdf_page_index = None if source_index is None else int(source_index)
         page.pdf_annotations = bool(data.get("pdf_annotations", True))
+        page.markup_annotations = [int(v) for v in
+                                   (data.get("markup_annotations") or [])]
         page.background_opacity = float(data.get("background_opacity", 1.0))
         page.source_note = data.get("source_note", "")
         for which in ("grid", "header", "footer"):

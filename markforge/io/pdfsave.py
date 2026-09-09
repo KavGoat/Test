@@ -113,21 +113,33 @@ def save(document, path: str, original: bytes, appearance: bool = True) -> int:
 
     temporary = path + ".tmp"
     written = 0
+    # The scratch file the markups were drawn into. It cannot be deleted while
+    # the document it was grafted into is open — MuPDF holds it, and Windows
+    # will not delete a file anything holds — so it is kept until everything
+    # is shut, which is after the file has been put in place. Deleting it too
+    # early is what made every save fail on Windows with a message naming a
+    # file in the temp folder.
+    leftovers: list = []
     try:
         with open(temporary, "wb") as handle:
             handle.write(original)
         target = engine.open_path(temporary)
         try:
             if appearance:
-                written = _add_the_markups(target, document)
+                written = _add_the_markups(target, document, leftovers)
             engine.embed(target, pdfbase.RECORD_ENTRY,
                          pdfbase.record_bytes(document))
             if not engine.save_incremental(target, temporary):
                 # A repaired file has no original bytes worth keeping — there
                 # is nothing to append to that a reader would follow — so it
-                # is written out whole instead. Still the same document.
-                target.save(temporary + ".whole")
-                os.replace(temporary + ".whole", temporary)
+                # is written out whole instead. Still the same document. It
+                # goes beside the file rather than over it: the document still
+                # has that one open, and a file that is open is a file that
+                # cannot be replaced.
+                whole = temporary + ".whole"
+                target.save(whole)
+                engine.close(target)
+                os.replace(whole, temporary)
         finally:
             engine.close(target)
         os.replace(temporary, path)
@@ -136,6 +148,9 @@ def save(document, path: str, original: bytes, appearance: bool = True) -> int:
         _discard(temporary)
         _discard(temporary + ".whole")
         raise PdfError(f"Could not save {path}: {exc}") from exc
+    finally:
+        for scratch in leftovers:
+            _discard(scratch)
     return written
 
 
@@ -146,7 +161,7 @@ def _discard(path: str) -> None:
         pass
 
 
-def _add_the_markups(target, document) -> int:
+def _add_the_markups(target, document, leftovers: list) -> int:
     """Put every markup on the file's pages, as annotations.
 
     The page's annotation list is replaced rather than added to. What came in
@@ -154,18 +169,28 @@ def _add_the_markups(target, document) -> int:
     what is being written back; appending them to the originals would leave
     every cloud in the document twice. The file's own furniture — its links
     and its form fields — is not markup and stays.
+
+    The scratch file the markups were drawn into is handed to *leftovers*
+    rather than deleted: *target* has been grafted from it and still holds it
+    open, and it is the caller who knows when *target* is shut.
     """
     from . import annotate
 
-    appearances = annotate.markups_to_place(document, document.pages)
+    # The file being written is the file the markups came off, so every page
+    # already carries its own annotations and the ones nobody has changed
+    # stay exactly as they are.
+    appearances = annotate.markups_to_place(
+        document, document.pages, {page.uid for page in document.pages})
     if not appearances.entries:
         # Still worth saying so on the pages: a document whose last markup was
-        # deleted has to lose it from the file too.
-        return _clear_the_markups(target, document)
+        # deleted has to lose it from the file too — and one where nothing has
+        # been changed has to keep every annotation it came in with.
+        return _clear_the_markups(target, document, appearances)
     scratch = None
     try:
         if appearances.draw() is None:
             return 0
+        leftovers.append(appearances.path)
         scratch = engine.open_path(appearances.path)
         if scratch.page_count != len(appearances.entries):
             return 0
@@ -174,15 +199,23 @@ def _add_the_markups(target, document) -> int:
         return 0
     finally:
         engine.close(scratch)
-        appearances.discard()
+        appearances.path = None
 
 
-def _clear_the_markups(target, document) -> int:
-    """Leave each page with its own furniture and nothing else."""
+def _clear_the_markups(target, document, appearances) -> int:
+    """Leave each page its own furniture, and the markups nobody has changed.
+
+    Everything else goes: a markup deleted here has to be gone from the file
+    too, and a markup taken over is about to be written back as one of ours.
+    """
     from . import annotate
 
     for index in range(min(target.page_count, len(document.pages))):
+        already = engine.annotation_xrefs(target, index)
+        untouched = set(appearances.theirs.get(index, ()))
         kept = annotate.furniture(target, index)
-        if kept != engine.annotation_xrefs(target, index):
+        kept = kept + [number for number in already
+                       if number in untouched and number not in kept]
+        if kept != already:
             engine.set_page_annotations(target, index, kept)
     return 0

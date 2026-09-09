@@ -159,12 +159,19 @@ class LivePages:
     """
 
     def __init__(self):
-        self._open: dict[str, object] = {}
+        self._open: dict = {}
 
-    def document_for(self, key: str, data: bytes):
+    def document_for(self, key: str, data: bytes, without: tuple = ()):
+        """The document, ready to draw a page that leaves *without* out.
+
+        A document of its own for each set of left-out annotations: leaving
+        one out is done by marking it hidden, and there is no reliable way
+        back, so a copy that has hidden some is never asked for a page that
+        wants them.
+        """
         if not key or not data:
             return None
-        found = self._open.get(key)
+        found = self._open.get((key, tuple(without)))
         if found is not None:
             return found
         try:
@@ -174,15 +181,18 @@ class LivePages:
         if document.page_count < 1:
             engine.close(document)
             return None
-        self._open[key] = document
+        self._open[(key, tuple(without))] = document
         return document
 
     def draw(self, key: str, data: bytes, index: int,
-             width: int, height: int, annotations: bool = True) -> Optional[QImage]:
+             width: int, height: int, annotations: bool = True,
+             without: tuple = ()) -> Optional[QImage]:
         """One page at an exact pixel size, or nothing if it cannot be had."""
-        document = self.document_for(key, data)
+        document = self.document_for(key, data, without)
         if document is None or not 0 <= index < document.page_count:
             return None
+        if without:
+            engine.leave_out(document[index], without)
         width = max(int(width), 1)
         height = max(int(height), 1)
         if width * height > MOST_LIVE_PIXELS:
@@ -193,16 +203,19 @@ class LivePages:
                                            annotations))
 
     def draw_region(self, key: str, data: bytes, index: int, whole,
-                    region, scale: float, annotations: bool = True):
+                    region, scale: float, annotations: bool = True,
+                    without: tuple = ()):
         """Part of a page, drawn at *scale* pixels to the point.
 
         *whole* and *region* are QRectF in display points. MuPDF clips before
         it rasterises, so the cost is the piece asked for and not the sheet it
         came off.
         """
-        document = self.document_for(key, data)
+        document = self.document_for(key, data, without)
         if document is None or not 0 <= index < document.page_count:
             return None
+        if without:
+            engine.leave_out(document[index], without)
         across = max(int(round(region.width() * scale)), 1)
         down = max(int(round(region.height() * scale)), 1)
         if across * down > MOST_LIVE_PIXELS:
@@ -214,7 +227,8 @@ class LivePages:
 
     def forget(self, key: str = "") -> None:
         if key:
-            engine.close(self._open.pop(key, None))
+            for held in [k for k in self._open if k[0] == key]:
+                engine.close(self._open.pop(held, None))
             return
         for document in self._open.values():
             engine.close(document)
@@ -396,17 +410,19 @@ def _down_the_page(source, index: int, entry) -> float:
         return 0.0
 
 
-def markups(path: str, indices: list[int], document=None
-            ) -> dict[int, list[dict]]:
+def markups(path: str, indices: list[int], keep_the_look: bool = True,
+            document=None) -> dict[int, list[dict]]:
     """Each page's annotations, as the markups they are.
 
     Somebody else's clouds, dimensions and comments come in as markups that can
     be clicked on, moved, replied to and listed — not as a picture of their
     redlines and not as the thousands of loose segments a cloud is drawn with.
 
-    Given a *document* to keep them in, each markup also brings the picture of
-    how its own file drew it, and shows that until it is edited. Without one
-    they are drawn from their own properties, which is close and not the same.
+    Each markup remembers which annotation it was read out of and stays that
+    annotation's until somebody changes it: the page goes on drawing it, so it
+    looks exactly the way its own file draws it, at every zoom and for
+    nothing. Editing one takes it over — the page leaves that annotation out
+    and this application draws the markup instead.
     """
     from . import pdfmarkups, pdfvector
 
@@ -415,7 +431,7 @@ def markups(path: str, indices: list[int], document=None
     except Exception:                                  # noqa: BLE001
         return {}
 
-    def keep_the_look(png: bytes) -> str:
+    def picture_of(png: bytes) -> str:
         return document.add_asset(png, "png") if png else ""
 
     found: dict[int, list[dict]] = {}
@@ -425,8 +441,8 @@ def markups(path: str, indices: list[int], document=None
                 continue
             try:
                 made = pdfmarkups.markups_of_page(
-                    source, index,
-                    keep_the_look=keep_the_look if document is not None else None)
+                    source, index, keep_the_look=keep_the_look,
+                    picture_of=picture_of if document is not None else None)
             except Exception:                          # noqa: BLE001
                 continue
             if made:
@@ -437,12 +453,20 @@ def markups(path: str, indices: list[int], document=None
 
 
 def _scaled_markups(payloads: list[dict], scale: float) -> list[dict]:
-    """The same markups on differently sized paper."""
+    """The same markups on differently sized paper.
+
+    A markup that has been resized is no longer where its own annotation is:
+    the page would draw the annotation at the size the file has it, over a
+    markup at the size the page is now. So a fitted page's markups are ours
+    from the start and this application draws them.
+    """
     if scale == 1.0:
         return payloads
     moved = []
     for payload in payloads:
         entry = dict(payload)
+        entry.pop("still_theirs", None)
+        entry.pop("from_annotation", None)
         for key in ("x", "y"):
             if key in entry:
                 entry[key] = entry[key] * scale
@@ -565,7 +589,7 @@ def import_pages(document, path: str, indices: list[int], fit: str = FIT_ORIGINA
     template = document.pages[at - 1].setup if at else (
         document.pages[-1].setup if document.pages else None)
     drawn = line_work(path, indices) if vectors else {}
-    marked = markups(path, indices, document) if annotations else {}
+    marked = markups(path, indices, document=document) if annotations else {}
     created: list[Page] = []
     source_heights: dict[int, float] = {}
     try:
@@ -582,11 +606,18 @@ def import_pages(document, path: str, indices: list[int], fit: str = FIT_ORIGINA
                     drawn[index], page.setup.width_pt / across)
             if index in marked:
                 across = info.width_pt or 1.0
+                onto = page.setup.width_pt / across
                 page._pending_items = list(page._pending_items) + _scaled_markups(
-                    marked[index], page.setup.width_pt / across)
+                    marked[index], onto)
+                # Which of the page's annotations became markups. The page
+                # goes on drawing them — that is what makes somebody else's
+                # drawing look like theirs — and leaves out the ones that have
+                # since been taken over or deleted.
+                page.markup_annotations = [
+                    int(payload["from_annotation"]) for payload in marked[index]
+                    if payload.get("from_annotation")]
             page.pdf_key = pdf_key
             page.pdf_page_index = index
-            page.pdf_annotations = index not in marked
             page.source_note = f"{os.path.basename(path)} page {index + 1}"
             # A drawing has its own lines. A grid ruled over the top of it
             # only gets in the way, so a page that came in from a PDF starts

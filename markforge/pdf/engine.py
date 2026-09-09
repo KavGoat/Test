@@ -276,19 +276,66 @@ def render_region(document: "pymupdf.Document", index: int,
 
 
 def display_list(document: "pymupdf.Document", index: int,
-                 annotations: bool = True):
+                 annotations: bool = True, without: "tuple" = ()):
     """A page parsed once, ready to be rasterised any number of times.
 
     Asking a page for a square of itself runs its whole content stream again,
     and a drawing sheet is tens of thousands of path operations — so a page cut
     into forty tiles is parsed forty times. Held as a display list it is parsed
     once and each tile after that is only rasterising.
+
+    *without* names annotations by xref that this page must not draw, because
+    something else is drawing them — a markup somebody has taken over, and one
+    the file drew as well would show twice. **This changes the document**: the
+    annotations are marked hidden, and the caller must not go on to use it for
+    a page that wants them back. Give each set of left-out annotations its own
+    copy of the document.
     """
     try:
-        return document[index].get_displaylist(annots=annotations)
+        page = document[index]
+        if without:
+            leave_out(page, without)
+        return page.get_displaylist(annots=annotations)
     except Exception:                                  # noqa: BLE001
         drain_messages()
         return None
+
+
+def annotation_raster(document: "pymupdf.Document", index: int, xref: int,
+                      scale: float = 3.0) -> Optional[Raster]:
+    """One annotation drawn the way its own file draws it.
+
+    For the few markups there is nothing else to draw: a stamp is a picture
+    and a logo and a ruled table, described nowhere but in its own appearance
+    stream, and there is no dictionary to rebuild it from.
+    """
+    try:
+        for annotation in document[index].annots():
+            if annotation.xref != xref:
+                continue
+            pixmap = annotation.get_pixmap(matrix=pymupdf.Matrix(scale, scale),
+                                           alpha=True)
+            if not pixmap.width or not pixmap.height:
+                return None
+            return Raster(pixmap.samples, pixmap.width, pixmap.height,
+                          pixmap.stride, bool(pixmap.alpha))
+    except Exception:                                  # noqa: BLE001
+        drain_messages()
+    return None
+
+
+def leave_out(page, without: "tuple") -> None:
+    """Mark the named annotations hidden, so nothing draws them."""
+    wanted = set(without)
+    if not wanted:
+        return
+    try:
+        for annotation in page.annots():
+            if annotation.xref in wanted:
+                annotation.set_flags(annotation.flags
+                                     | pymupdf.PDF_ANNOT_IS_HIDDEN)
+    except Exception:                                  # noqa: BLE001
+        drain_messages()
 
 
 def raster_from(drawing, region: tuple[float, float, float, float],
@@ -304,32 +351,6 @@ def raster_from(drawing, region: tuple[float, float, float, float],
         drain_messages()
         return None
     return _raster_of(pixmap)
-
-
-def annotation_raster(document: "pymupdf.Document", index: int, xref: int,
-                      scale: float = 3.0) -> Optional[Raster]:
-    """One annotation drawn the way its own file draws it.
-
-    Its appearance stream, rasterised — which is what every reader in the
-    world shows for it, and the only way to be sure a markup read out of
-    somebody's drawing looks like the markup they made. A stamp is a logo and
-    a ruled table; a section mark is filled to a shape nothing here describes.
-    Redrawn from their dictionaries they come out close, and close is worse
-    than useless on a drawing being checked against the original.
-    """
-    try:
-        page = document[index]
-        for annot in page.annots():
-            if annot.xref != xref:
-                continue
-            pixmap = annot.get_pixmap(matrix=pymupdf.Matrix(scale, scale),
-                                      alpha=True)
-            if not pixmap.width or not pixmap.height:
-                return None
-            return _raster_of(pixmap)
-    except Exception:                                  # noqa: BLE001
-        drain_messages()
-    return None
 
 
 def render_thumbnail(document: "pymupdf.Document", index: int,

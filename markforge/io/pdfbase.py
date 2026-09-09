@@ -112,11 +112,17 @@ def _assemble(document, path: str, appearance: bool = True) -> None:
 
     output = pymupdf.open()
     sources: dict[str, object] = {}       # the PDFs pages are coming from
+    # Scratch files the pages were drawn into. They are kept until the file
+    # they were grafted into is shut, because until then it holds them open —
+    # and a file anything holds open is a file Windows will not delete.
+    leftovers: list = []
+    carried: set = set()                  # pages that kept their annotations
     try:
         for page in document.pages:
-            _add_page_body(output, document, page, sources)
+            if _add_page_body(output, document, page, sources):
+                carried.add(page.uid)
         if appearance:
-            _draw_the_sheets_onto(output, document)
+            _draw_the_sheets_onto(output, document, leftovers)
         engine.embed(output, RECORD_ENTRY, record_bytes(document))
         output.set_metadata({"title": document.title or "",
                              "creator": "MarkForge",
@@ -126,6 +132,8 @@ def _assemble(document, path: str, appearance: bool = True) -> None:
         for source in sources.values():
             engine.close(source)
         engine.close(output)
+        for scratch in leftovers:
+            _throw_away(scratch)
     if appearance:
         # The markups go in as real annotations, not as ink on the page. A
         # saved document is a PDF that anybody can open, and a markup that
@@ -133,10 +141,10 @@ def _assemble(document, path: str, appearance: bool = True) -> None:
         # markup. The record is still what this application reads back.
         from . import annotate
 
-        annotate.add_markups(path, document, _drawn_pages(document))
+        annotate.add_markups(path, document, _drawn_pages(document), carried)
 
 
-def _add_page_body(output, document, page, sources: dict) -> None:
+def _add_page_body(output, document, page, sources: dict) -> bool:
     """One page of the file: the PDF it came from, or paper of the right size.
 
     A page imported from a PDF keeps that PDF's own page — its real line
@@ -148,20 +156,25 @@ def _add_page_body(output, document, page, sources: dict) -> None:
     has been fitted onto other paper it is placed onto a sheet of the new size
     instead, which scales the drawing but cannot scale annotations with it —
     those are already markups here, and go back on as markups.
+
+    Says whether the page kept its own annotations, because the markups
+    nobody has changed *are* those annotations and must not be drawn again on
+    top of them.
     """
     width, height = float(page.width_pt), float(page.height_pt)
     source = _source_for(document, page, sources)
     index = int(page.pdf_page_index) if page.pdf_page_index is not None else -1
     if source is None or not 0 <= index < source.page_count:
         output.new_page(-1, width=width, height=height)
-        return
+        return False
     across, down = engine.page_size(source, index)
     wanted = output.page_count + 1
     try:
         if abs(across - width) < 1.0 and abs(down - height) < 1.0:
             output.insert_pdf(source, from_page=index, to_page=index,
                               annots=True)
-            return
+            _drop_the_ones_taken_over(output[-1], page)
+            return True
         sheet = output.new_page(-1, width=width, height=height)
         sheet.show_pdf_page(sheet.rect, source, index)
     except Exception:                                  # noqa: BLE001
@@ -171,6 +184,28 @@ def _add_page_body(output, document, page, sources: dict) -> None:
         engine.drain_messages()
         if output.page_count < wanted:
             output.new_page(-1, width=width, height=height)
+    return False
+
+
+def _drop_the_ones_taken_over(sheet, page) -> None:
+    """Take off the page's own drawing of every markup somebody has changed.
+
+    The rest stay exactly as their author wrote them. The changed ones go back
+    on afterwards as this application's own annotations, and leaving both
+    would show each of them twice.
+    """
+    frame = getattr(page, "frame", None)
+    if frame is None:
+        return
+    ours = set(frame.left_to_us(for_print=True))
+    if not ours:
+        return
+    try:
+        for annotation in list(sheet.annots()):
+            if annotation.xref in ours:
+                sheet.delete_annot(annotation)
+    except Exception:                                  # noqa: BLE001
+        engine.drain_messages()
 
 
 def _source_for(document, page, sources: dict):
@@ -196,7 +231,7 @@ def _drawn_pages(document) -> list:
     return [page for page in document.pages if page.frame is not None]
 
 
-def _draw_the_sheets_onto(output, document) -> None:
+def _draw_the_sheets_onto(output, document, leftovers: list) -> None:
     """Paint the sheet itself onto the pages — everything but the markups.
 
     The paper, the grid, the running header and footer, the page's own line
@@ -215,6 +250,7 @@ def _draw_the_sheets_onto(output, document) -> None:
         overlay_path = _rendered_overlay(document, drawn)
         if overlay_path is None:
             return
+        leftovers.append(overlay_path)
         overlay = engine.open_path(overlay_path)
         if overlay.page_count != len(drawn):
             return
@@ -231,8 +267,6 @@ def _draw_the_sheets_onto(output, document) -> None:
         return
     finally:
         engine.close(overlay)
-        if overlay_path and os.path.exists(overlay_path):
-            os.remove(overlay_path)
 
 
 def _rendered_overlay(document, drawn: list) -> Optional[str]:
@@ -257,9 +291,23 @@ def _rendered_overlay(document, drawn: list) -> Optional[str]:
                        without_markups=True)
     del writer
     if os.path.getsize(overlay_path) < 1:
-        os.remove(overlay_path)
+        _throw_away(overlay_path)
         return None
     return overlay_path
+
+
+def _throw_away(path: str) -> None:
+    """Get rid of a scratch file, and never mind if it will not go.
+
+    A file left in the temp folder is a nuisance; a save that fails because of
+    one is a lost drawing.
+    """
+    from .annotate import _sweep_up_later
+
+    try:
+        os.remove(path)
+    except OSError:
+        _sweep_up_later(path)
 
 
 # -- reading ---------------------------------------------------------------

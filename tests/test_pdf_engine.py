@@ -337,6 +337,35 @@ def test_saving_over_a_file_lets_go_of_it_first(tmp_path):
     engine.close(engine.open_path(path))               # still a readable PDF
 
 
+def test_a_save_survives_a_scratch_file_that_will_not_delete(tmp_path,
+                                                             monkeypatch):
+    """A file that cannot be removed must never cost a drawing.
+
+    The markups are drawn into a scratch file and the saved document is
+    grafted from it — which means the scratch file is still open, and Windows
+    will not delete a file anything has open. Deleting it anyway, and letting
+    that failure out, is what made every save on Windows fail with "could not
+    save" and a message naming a file in the temp folder.
+    """
+    import os as real_os
+
+    from markforge.io import annotate
+
+    appearances = annotate.Appearances()
+    path = str(tmp_path / "held.pdf")
+    open(path, "wb").write(b"scratch")
+    appearances.path = path
+
+    def refuse(target):
+        raise PermissionError(32, "in use by another process")
+
+    monkeypatch.setattr(real_os, "remove", refuse)
+    appearances.discard()                              # must not raise
+    assert appearances.path is None
+    assert path in annotate._LEFTOVERS, "and it is swept up on the way out"
+    annotate._LEFTOVERS.remove(path)
+
+
 def test_an_appearance_is_lifted_out_of_the_file_it_was_drawn_in(tmp_path):
     """A markup drawn on a scratch page becomes the form its annotation shows."""
     scratch = pymupdf.open()

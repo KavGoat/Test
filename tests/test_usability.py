@@ -7343,9 +7343,16 @@ def test_the_markups_on_a_page_are_there_to_be_worked_with(window, tmp_path):
     assert theirs, "their markups should have come in"
     assert all(item.flags() & item.GraphicsItemFlag.ItemIsMovable
                for item in theirs)
-    # And since they are ours now, the page must stop drawing them itself, or
-    # each one would be on the page twice.
-    assert page.pdf_annotations is False
+    # Each is drawn exactly once, and until somebody touches it that is the
+    # file's own drawing of it, so it looks exactly as it does in the reader
+    # it was made in. The markup over it draws nothing.
+    assert page.pdf_annotations, "the file goes on drawing what it drew"
+    assert all(item.still_theirs for item in theirs)
+    assert page.frame.left_to_us() == ()
+    # Taking hold of one hands it over, and only that one.
+    theirs[0].setSelected(True)
+    assert not theirs[0].still_theirs
+    assert page.frame.left_to_us() == (theirs[0].from_annotation,)
 
 
 def test_an_inserted_pdf_brings_somebody_elses_markups_back_as_markups(
@@ -7379,9 +7386,10 @@ def test_the_lines_come_in_knowing_they_are_the_pages_own(window, tmp_path):
     told = {bool(item.get("from_drawing")) for item in pages[0]._pending_items}
     assert True in told, "the page's own line work"
     assert False in told, "and the markups that were made on it"
-    # Both were read out of the page, so the page must not draw them a second
-    # time underneath what was read out of it.
-    assert pages[0].pdf_annotations is False
+    # The markups go on being drawn by the file until somebody touches one,
+    # so the page knows which of its annotations they were read out of.
+    assert pages[0].pdf_annotations, "the file goes on drawing what it drew"
+    assert pages[0].markup_annotations, "and knows which ones became markups"
     assert pages[0].pdf_key, "and the sheet itself is still drawn from the file"
 
 

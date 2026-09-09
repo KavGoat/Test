@@ -3040,13 +3040,13 @@ class MainWindow(QMainWindow):
     def make_markups_editable(self, index: Optional[int] = None) -> int:
         """Read the page's own annotations out of the PDF as markups.
 
-        Opening a drawing shows the drawing: the clouds and call-outs
-        somebody else made are drawn by the PDF renderer, exactly as any
-        reader draws them. That is right for reading and wrong for replying,
-        so this is where the two part company. What comes out is MarkForge's
-        rendering of each annotation, which is close but not the file — so the
-        page stops drawing them itself, or every one would be on the page
-        twice. Says how many were read.
+        Opening a drawing already reads them out, and leaves each one to the
+        file to draw so it looks exactly as its author drew it. This is for a
+        page where that did not happen — one whose annotations were not
+        imported — and it takes the lot over at once: what comes out is
+        MarkForge's own rendering of each, so the page stops drawing them
+        itself, or every one would be on the page twice. Says how many were
+        read.
         """
         which = self.page_index(index)
         page = self.document.pages[which]
@@ -3062,7 +3062,9 @@ class MainWindow(QMainWindow):
             handle.write(source)
             scratch = handle.name
         try:
-            found = pdfio.markups(scratch, [int(page.pdf_page_index)])
+            # Ours from the start: the page is about to stop drawing them.
+            found = pdfio.markups(scratch, [int(page.pdf_page_index)],
+                                  keep_the_look=False, document=self.document)
         finally:
             try:
                 os.unlink(scratch)

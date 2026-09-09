@@ -326,18 +326,22 @@ class MarkupItem(QGraphicsObject):
         # idea whether it was drawn as an area measurement, a polygon or a
         # rectangle.
         self.cutouts: list[list[QPointF]] = []
-        # How the file this markup came from drew it, if it came from one.
-        # See show_as_it_came() below.
-        self._as_it_came = None
-        self._as_it_came_rect = QRectF()
+        # Which annotation of the file this markup was read out of, if it was
+        # read out of one, and whether it is still exactly as it arrived.
+        # See "somebody else's markup" below.
+        self.from_annotation = 0
+        self.still_theirs = False
+        # For the few markups there is nothing to draw from — a stamp is a
+        # picture and a company logo, described nowhere but in its own
+        # appearance — the file's drawing of it, kept.
+        self._their_picture = None
+        self.their_picture_asset = ""
+        self.their_picture_box: tuple = ()
         # True while the item is being built from a payload. Laying text out
         # and fitting a box are changes as far as touch() is concerned, and
-        # they all happen during loading — so the appearance a markup arrived
-        # with would be thrown away before it had ever been drawn.
+        # they all happen during loading — so a markup would stop being its
+        # own file's before it had ever been drawn.
         self._still_arriving = False
-        # Where that picture is kept in the document, so it survives a save.
-        self.as_it_came_asset = ""
-        self.as_it_came_box: tuple = ()
         self._handles_visible = True
         self.setFlags(QGraphicsItem.ItemIsSelectable | QGraphicsItem.ItemIsMovable |
                       QGraphicsItem.ItemSendsGeometryChanges)
@@ -348,14 +352,14 @@ class MarkupItem(QGraphicsObject):
     def touch(self) -> None:
         """Say this markup has been changed.
 
-        Which is also the moment an imported markup stops being able to show
-        the appearance it arrived with: that picture is what it used to look
-        like. Moving one does not come through here, so a markup dragged
-        across the page keeps looking exactly as its own file drew it.
+        Which is also the moment somebody else's markup becomes one of ours:
+        up to here the file it came from was drawing it, and from here this
+        application draws it. Moving one does not come through here, so a
+        markup dragged across the page is still drawn by its own file.
         """
         self.modified = datetime.now().isoformat(timespec="seconds")
         if not self._still_arriving:
-            self.draw_itself_from_now_on()
+            self.make_it_ours()
 
     def display_name(self) -> str:
         return self.label or self.NAME
@@ -560,74 +564,93 @@ class MarkupItem(QGraphicsObject):
     def paint_visible(self, painter: QPainter) -> None:
         """Draw what this markup actually looks like.
 
-        Which is the appearance it arrived with, where it has one, and what it
-        draws of itself otherwise. Everything that puts a markup anywhere — the
-        canvas, a print, an export, a snapshot, the markups list — goes through
-        here, so a markup read out of somebody's drawing looks the same in all
-        of them.
+        Nothing, while it is still somebody else's and their own file is
+        drawing it. Everything that puts a markup anywhere — the canvas, a
+        print, an export, a snapshot, the markups list — goes through here, so
+        a markup read out of somebody's drawing looks the same in all of them.
         """
-        if self._as_it_came is not None:
-            self.paint_as_it_came(painter)
+        if self.still_theirs:
+            return
+        if self._their_picture is not None:
+            self.paint_their_picture(painter)
         else:
             self.paint_content(painter)
 
-    def load_from_document(self, document) -> None:
-        """Pick up the appearance this markup arrived with, if it has one."""
-        if not self.as_it_came_asset:
+    def paint_their_picture(self, painter: QPainter) -> None:
+        picture = self._their_picture
+        box = (QRectF(*self.their_picture_box) if self.their_picture_box
+               else self.local_rect())
+        if picture is None or picture.isNull() or box.isEmpty():
             return
-        data = document.asset(self.as_it_came_asset)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        painter.drawPixmap(box, picture, QRectF(picture.rect()))
+
+    def load_from_document(self, document) -> None:
+        """Anything this markup needs out of the document it belongs to."""
+        if not self.their_picture_asset:
+            return
+        data = document.asset(self.their_picture_asset)
         if not data:
             return
         from PySide6.QtCore import QByteArray
         from PySide6.QtGui import QPixmap
 
         picture = QPixmap()
-        if not picture.loadFromData(QByteArray(data)) or picture.isNull():
-            return
-        box = (QRectF(*self.as_it_came_box) if self.as_it_came_box
-               else self.local_rect())
-        self.show_as_it_came(picture, box)
+        if picture.loadFromData(QByteArray(data)) and not picture.isNull():
+            self._their_picture = picture
 
-    # -- how it looked where it came from ----------------------------------
+    # -- somebody else's markup --------------------------------------------
     #
-    # A markup read out of somebody else's PDF carries its own appearance —
-    # the picture the file says it looks like — and that is what every reader
-    # in the world shows for it. Redrawing it from its dictionary instead gets
-    # close and no closer: a Bluebeam stamp is a logo and a ruled table, its
-    # section marks are filled to a shape nothing here describes, and its text
-    # is set by an appearance stream rather than by the font its ``/DA``
-    # happens to name. Close is worse than useless on a drawing somebody is
-    # checking against the original.
+    # A markup read out of somebody else's PDF is drawn by that PDF, not by
+    # this application, for exactly as long as nobody has changed it.
     #
-    # So an imported markup shows the appearance it arrived with, and keeps
-    # showing it while it is only being moved about. The moment it is really
-    # edited — retyped, recoloured, reshaped — the appearance is what it used
-    # to look like rather than what it looks like, and it is dropped in favour
-    # of drawing the markup as it now is.
+    # Redrawing it here instead gets close and no closer. A Bluebeam stamp is
+    # a logo and a ruled table; its section marks are filled to a shape
+    # nothing here describes; its text is set by an appearance stream rather
+    # than by the font its ``/DA`` happens to name. Close is worse than
+    # useless on a drawing somebody is checking against the original — and
+    # every version of "close" that has been tried, a redraw from the
+    # dictionary and then a picture of the annotation, was soft, or wrong, or
+    # both. The file's own drawing of it is neither: it is the same drawing
+    # every other reader in the world shows, at every zoom, for nothing.
+    #
+    # So the page is rendered with those annotations still on it, and the
+    # markup sitting over one draws nothing at all. It is still a markup — it
+    # can be picked, moved, listed, measured, deleted — and it still goes back
+    # into the file as the very annotation it came from, byte for byte.
+    #
+    # The moment it is really changed, that stops: the annotation is left out
+    # of the page's render, this draws the markup itself, and it is written
+    # back as one of ours. That is the one conversion, and it happens once.
 
-    def show_as_it_came(self, picture, rect: QRectF) -> None:
-        """Draw this markup as the file it came from drew it."""
-        self._as_it_came = picture
-        self._as_it_came_rect = QRectF(rect)
-        self.update()
-
-    def draw_itself_from_now_on(self) -> None:
-        """Stop using the appearance it arrived with: it has been changed."""
-        if self._as_it_came is not None:
-            self._as_it_came = None
-            self._as_it_came_rect = QRectF()
+    def make_it_ours(self) -> None:
+        """Take this markup over: from here it is drawn and saved as ours."""
+        if self.still_theirs:
+            self.still_theirs = False
+            if self.scene() is not None:
+                self.scene().update()
             self.update()
+
+    def itemChange(self, change, value):
+        """Anything at all done to this markup takes it over.
+
+        Moving especially. While it is still theirs it is their file drawing
+        it, at the place their file has it — so a markup dragged across the
+        sheet without changing hands would not appear to move at all. Being
+        picked up counts too: somebody who has taken hold of a markup has
+        started working on it, and it should behave like one of ours from
+        that moment rather than at some later one they cannot predict.
+        """
+        if change in (QGraphicsItem.ItemPositionHasChanged,
+                      QGraphicsItem.ItemSelectedHasChanged,
+                      QGraphicsItem.ItemTransformHasChanged) \
+                and self.still_theirs and not self._still_arriving:
+            self.make_it_ours()
+        return super().itemChange(change, value)
 
     @property
     def came_with_its_own_look(self) -> bool:
-        return self._as_it_came is not None
-
-    def paint_as_it_came(self, painter: QPainter) -> None:
-        picture, box = self._as_it_came, self._as_it_came_rect
-        if picture is None or box.isEmpty() or picture.isNull():
-            return
-        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
-        painter.drawPixmap(box, picture, QRectF(picture.rect()))
+        return self.still_theirs
 
     # -- serialisation -----------------------------------------------------
     # -- holes -------------------------------------------------------------
@@ -694,8 +717,10 @@ class MarkupItem(QGraphicsObject):
             "printable": self.printable,
             "hidden": self.hidden,
             "flattened": self.flattened,
-            "as_it_came_asset": self.as_it_came_asset,
-            "as_it_came_rect": list(self.as_it_came_box),
+            "from_annotation": self.from_annotation,
+            "still_theirs": self.still_theirs,
+            "their_picture_asset": self.their_picture_asset,
+            "their_picture_box": list(self.their_picture_box),
             "flatten_recoverable": self.flatten_recoverable,
             "locked_before_flatten": self.locked_before_flatten,
             "group": self.group,
@@ -727,9 +752,11 @@ class MarkupItem(QGraphicsObject):
         self.modified = data.get("modified", self.modified)
         self.printable = bool(data.get("printable", True))
         self.hidden = bool(data.get("hidden", False))
-        self.as_it_came_asset = str(data.get("as_it_came_asset", ""))
-        found = data.get("as_it_came_rect") or ()
-        self.as_it_came_box = tuple(float(v) for v in found) \
+        self.from_annotation = int(data.get("from_annotation", 0) or 0)
+        self.still_theirs = bool(data.get("still_theirs", False))
+        self.their_picture_asset = str(data.get("their_picture_asset", ""))
+        found = data.get("their_picture_box") or ()
+        self.their_picture_box = tuple(float(v) for v in found) \
             if len(found) == 4 else ()
         self.flattened = bool(data.get("flattened", False))
         self.flatten_recoverable = bool(data.get("flatten_recoverable", True))

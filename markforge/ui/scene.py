@@ -119,6 +119,12 @@ def _exposed_part(option, whole: QRectF, item=None) -> QRectF:
 
     So what the window can actually see is the bound, and the exposed rect
     narrows it. Nothing off screen is ever worth a tile.
+
+    Nothing off screen — while the drawing is *for* the screen. A print, an
+    export or a thumbnail is drawn from the same paint method with no window
+    involved, and there the bound is the whole page: clipping that to
+    whatever the reader happened to be looking at is how a printed sheet
+    comes out with everything outside the window missing.
     """
     box = QRectF(whole)
     exposed = getattr(option, "exposedRect", None)
@@ -129,8 +135,12 @@ def _exposed_part(option, whole: QRectF, item=None) -> QRectF:
 
 
 def _visible_part(item) -> Optional[QRectF]:
-    """What the window is showing, in the item's own coordinates."""
-    if item is None:
+    """What the window is showing, in the item's own coordinates.
+
+    Nothing, when the drawing is not for a window: a page being printed or
+    exported is drawn whole, however little of it is on screen.
+    """
+    if item is None or getattr(item, "print_mode", False):
         return None
     try:
         scene = item.scene()
@@ -220,7 +230,32 @@ class PageFrame(QGraphicsObject):
 
         return pdftiles.TILES.sheet(
             page.pdf_key, b"", int(page.pdf_page_index), self.page_rect(),
-            bool(getattr(page, "pdf_annotations", True)), ask=False) is None
+            bool(getattr(page, "pdf_annotations", True)),
+            without=self.left_to_us(), ask=False) is None
+
+    def left_to_us(self, for_print: bool = False) -> tuple:
+        """The page's own annotations this application is now drawing itself.
+
+        A markup read out of the file is drawn *by* the file for as long as
+        nobody has changed it, which is what makes somebody else's drawing
+        look exactly like theirs. The moment one is taken over — edited,
+        hidden or deleted — the page has to stop drawing it, or it would show
+        twice: once as the file has it and once as it now is.
+        """
+        page = self.page
+        left_out = set(getattr(page, "markup_annotations", ()) or ())
+        if not left_out:
+            return ()
+        for item in self.markups():
+            number = getattr(item, "from_annotation", 0)
+            if not number or number not in left_out:
+                continue
+            if not getattr(item, "still_theirs", False):
+                continue
+            if not item.isVisible() or (for_print and not item.printable):
+                continue
+            left_out.discard(number)
+        return tuple(sorted(left_out))
 
     # -- geometry ----------------------------------------------------------
     def page_rect(self) -> QRectF:
@@ -276,6 +311,9 @@ class PageFrame(QGraphicsObject):
         whole = self.page_rect()
         index = int(page.pdf_page_index)
         shown = bool(getattr(page, "pdf_annotations", True))
+        # The ones this application has taken over, which the page must now
+        # leave to it rather than drawing them itself.
+        without = self.left_to_us(for_print=self.print_mode)
         painter.save()
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
         drew = False
@@ -286,7 +324,7 @@ class PageFrame(QGraphicsObject):
                 QRectF(looking_at).intersected(whole) or whole, whole, step,
                 pdfio.MOST_LIVE_PIXELS)
             drawn = pdfio.LIVE.draw_region(page.pdf_key, data, index, whole,
-                                           region, step, shown)
+                                           region, step, shown, without)
             if drawn is not None and not drawn.isNull():
                 painter.drawImage(region, drawn, QRectF(drawn.rect()))
                 drew = True
@@ -310,13 +348,14 @@ class PageFrame(QGraphicsObject):
             margin_y = shown_part.height() * 0.25
             asked = shown_part.adjusted(-margin_x, -margin_y, margin_x, margin_y)
             tiles, missing = pdftiles.TILES.tiles(
-                page.pdf_key, data, index, whole, scale, asked, shown)
+                page.pdf_key, data, index, whole, scale, asked, shown, without)
         if missing:
             # Only while the tiles are still coming, and only the part of it
             # that is on screen: stretching the whole small picture over a
             # whole sheet on every repaint is the sort of thing that makes
             # scrolling a drawing feel like wading.
-            sheet = pdftiles.TILES.sheet(page.pdf_key, data, index, whole, shown)
+            sheet = pdftiles.TILES.sheet(page.pdf_key, data, index, whole,
+                                         shown, without=without)
             if sheet is not None:
                 part = shown_part if not shown_part.isEmpty() else whole
                 across = sheet.width() / max(whole.width(), 1.0)
@@ -1026,4 +1065,12 @@ class DocumentScene(QGraphicsScene):
     def drawBackground(self, painter: QPainter, rect: QRectF) -> None:
         # Qt's own drawBackground would paint the brush; this one replaces it,
         # so the desk the sheets lie on has to be painted here.
+        #
+        # The desk is furniture, not the document. A page rendered for a print
+        # or an export comes through here too, and painting it there put the
+        # grey of the canvas across the whole sheet — which, on an exported
+        # drawing whose page is laid in underneath the render, hid the drawing
+        # completely and left the markups floating on grey.
+        if any(frame.print_mode for frame in self.frames):
+            return
         painter.fillRect(rect, self.backgroundBrush())

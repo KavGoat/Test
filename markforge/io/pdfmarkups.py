@@ -34,21 +34,15 @@ NOT_MARKUP = set(engine.NOT_MARKUP)
 MOST_MARKUPS = 3000
 
 
-#: How finely an annotation's own appearance is kept. Three times life size
-#: stays crisp at the zoom somebody reads a detail at, and a markup is a small
-#: part of a sheet, so the pictures are small.
-LOOK_SCALE = 3.0
-
-
 def markups_of_page(source, index: int, scale: float = 1.0,
-                    keep_the_look=None) -> list[dict]:
+                    keep_the_look=None, picture_of=None) -> list[dict]:
     """Every annotation on one page, as markup payloads in display points.
 
-    With *keep_the_look* — anything that takes PNG bytes and gives back
-    somewhere to find them again — each markup also carries a picture of how
-    the file it came from drew it. That is what it shows until it is edited,
-    and it is the difference between somebody's drawing looking like their
-    drawing and looking like this application's best guess at it.
+    With *keep_the_look* true, each markup remembers which annotation it was
+    read out of and says it is still that annotation's — which is what has the
+    page go on drawing it, exactly as its own file draws it, until somebody
+    changes it. Without it the markups are ordinary ones from the moment they
+    arrive, which is what an import that is not keeping the source page wants.
     """
     from .btx import colour
 
@@ -64,44 +58,48 @@ def markups_of_page(source, index: int, scale: float = 1.0,
         except Exception:                              # noqa: BLE001
             made = None
         if made:
-            if keep_the_look is not None:
-                _keep_the_look(source, index, annotation, made,
-                               keep_the_look, place, scale)
+            if keep_the_look:
+                _leave_it_to_the_file(annotation, made)
+            if picture_of is not None:
+                _the_file_draws_it(source, index, annotation, made, picture_of)
+            for payload in made:
+                payload.pop(NOTHING_TO_DRAW, None)
             found.extend(made)
         if len(found) >= MOST_MARKUPS:
             break
     return found
 
 
-def _keep_the_look(source, index: int, annotation: dict, made: list,
-                   keep_the_look, place, scale: float) -> None:
-    """Hang a picture of the annotation's own appearance on what it became.
+#: How finely the file's own picture of a markup is kept, for the few that
+#: need one. Three times life size stays crisp at the zoom somebody reads a
+#: detail at, and it is only ever a handful of small markups on a sheet.
+PICTURE_SCALE = 3.0
 
-    With the rectangle it belongs in, which is the annotation's own and not
-    the markup's. A text box sizes itself to whatever it is holding; the
-    picture has to go where the file put it, or it is stretched to fit a box
-    the file never had and comes out big and soft.
 
-    Only where one markup came of one annotation. An ink annotation is several
-    strokes and there is no honest way to cut its picture between them, so
-    those draw themselves.
+def _the_file_draws_it(source, index: int, annotation: dict, made: list,
+                       picture_of) -> None:
+    """Give a markup with nothing to draw the picture its own file draws.
+
+    Only those: everything else is rebuilt from what the annotation says, and
+    a picture would only be softer than the drawing it stands for. *picture_of*
+    takes PNG bytes and gives back somewhere to find them again.
     """
-    number = annotation.get("__xref__")
-    if len(made) != 1 or not isinstance(number, int):
+    payload = made[0] if len(made) == 1 else None
+    if payload is None or not payload.get(NOTHING_TO_DRAW):
         return
-    raster = engine.annotation_raster(source.doc, index, number, LOOK_SCALE)
+    number = annotation.get("__xref__")
+    if not isinstance(number, int) or number <= 0:
+        return
+    raster = engine.annotation_raster(source.doc, index, number, PICTURE_SCALE)
     if raster is None or raster.is_empty:
         return
-    kept = keep_the_look(_as_png(raster))
+    kept = picture_of(_as_png(raster))
     if not kept:
         return
-    payload = made[0]
-    box = _box(source, annotation, place, scale)
-    payload["as_it_came_asset"] = kept
-    # Where the picture goes, relative to the markup's own origin.
-    payload["as_it_came_rect"] = [box[0] - float(payload.get("x", 0.0)),
-                                  box[1] - float(payload.get("y", 0.0)),
-                                  box[2], box[3]]
+    payload["their_picture_asset"] = kept
+    payload["their_picture_box"] = [0.0, 0.0,
+                                    float(payload["rect"][2]),
+                                    float(payload["rect"][3])]
 
 
 def _as_png(raster) -> bytes:
@@ -120,6 +118,24 @@ def _as_png(raster) -> bytes:
     if not image.save(holder, "PNG"):
         return b""
     return bytes(holder.data())
+
+
+def _leave_it_to_the_file(annotation: dict, made: list) -> None:
+    """Say each of these is still the annotation it was read out of.
+
+    Which annotation, so the page can leave it out of its own render the
+    moment somebody takes the markup over — and so a save can put the very
+    object back, rather than this application's redrawing of it.
+
+    An annotation that came apart into several markups (an ink markup is one
+    per stroke) cannot be handed back to any one of them, so those are ours
+    from the start and are drawn here.
+    """
+    number = annotation.get("__xref__")
+    if len(made) != 1 or not isinstance(number, int) or number <= 0:
+        return
+    made[0]["from_annotation"] = number
+    made[0]["still_theirs"] = True
 
 
 def _one(source, annotation: dict, kind: str, place, scale: float,
@@ -178,14 +194,21 @@ def _one(source, annotation: dict, kind: str, place, scale: float,
     drawn = _appearance(source, annotation, scale)
     if drawn:
         return drawn
-    # A stamp, or anything else this does not have a shape for. It still has
-    # an appearance — that is what the file draws for it, and for a title block
-    # or a company stamp it is the whole of the markup — so it comes across as
-    # a plain box carrying that picture, which can be picked up and moved like
-    # anything else. Leaving it out because there is no shape to give it is how
-    # a title block goes missing from a drawing.
-    return [_shape("rect", "rect", box,
-                   dict(style, stroke="", fill="", width=0.0), common)]
+    # A stamp, or anything else this does not have a shape for. There is
+    # nothing to rebuild it from — a company stamp is a logo and a ruled table
+    # and is described nowhere but in its own appearance — so it comes across
+    # as a plain box that will be given the file's own picture of itself, and
+    # can be picked up and moved like anything else. Leaving it out because
+    # there is no shape to give it is how a title block goes missing.
+    made = _shape("rect", "rect", box,
+                  dict(style, stroke="", fill="", width=0.0), common)
+    made[NOTHING_TO_DRAW] = True
+    return [made]
+
+
+#: On a payload: this markup has no drawing of its own, and needs the picture
+#: its file draws for it. Not stored — it is acted on and taken off again.
+NOTHING_TO_DRAW = "__nothing_to_draw__"
 
 
 # -- the pieces ------------------------------------------------------------
@@ -239,10 +262,23 @@ def _style(source, annotation: dict, colour, scale: float) -> dict:
         if isinstance(found, (int, float)):
             width = float(found)
     opacity = source.resolve(annotation.get("CA"))
-    style = {"stroke": line or "#e03131", "fill": fill,
-             "width": max(width * scale, 0.1)}
+    # An annotation that names no colour is not drawn in this application's
+    # default red — it is not outlined at all. A text box with /C [] is a
+    # title with no box round it, and giving it one puts a red rectangle
+    # round every label on a title block the moment somebody edits one.
+    kind = str(source.resolve(annotation.get("Subtype")) or "")
+    if kind == "FreeText" and not line:
+        style = {"stroke": "", "fill": fill, "width": 0.0}
+    else:
+        style = {"stroke": line or "#e03131", "fill": fill,
+                 "width": max(width * scale, 0.1)}
     if isinstance(opacity, (int, float)) and 0 < float(opacity) < 1:
         style["opacity"] = float(opacity)
+    # A PDF fill is opaque unless the annotation says otherwise. This
+    # application's own default is a translucent wash, which is right for a
+    # highlight drawn here and wrong for everything read out of a file: it
+    # turned every solid black section arrowhead on a sheet into a grey one.
+    style["fill_opacity"] = style.get("opacity", 1.0) if fill else 1.0
     return style
 
 
@@ -455,15 +491,48 @@ def _free_text(source, annotation: dict, box: list, style: dict, common: dict,
         kind = "callout"
     payload = _text(kind, box, style, common)
     # Set the way the annotation says to set it, not the way this application
-    # would have set it.
-    payload["style"] = dict(payload.get("style") or {},
-                            **_how_the_words_are_set(source, annotation, scale))
+    # would have set it. /DA gives the size and the colour; /DS gives the
+    # typeface, the alignment and the padding; /RC gives the runs — which
+    # word is bold, which line is underlined, where the blank lines are.
+    # Getting these across is what makes a markup somebody takes over still
+    # look like the one their file drew, rather than like a plain paragraph
+    # in this application's own face.
+    from .btx import _rich_text, _text_look
+
+    said = _bluebeamish(source, annotation)
+    setting = dict(payload.get("style") or {})
+    setting.update(_text_look(said))
+    # /DA last: it is the one PDF itself defines, so where the two disagree
+    # about a colour or a size it is the one every reader goes by.
+    setting.update(_how_the_words_are_set(source, annotation, scale))
+    payload["style"] = setting
+    runs = _rich_text(said)
+    if runs:
+        payload["html"] = runs
     if kind == "callout" and leader:
         # The leader's own end is where it points; the rest is worked out from
         # the box, the way every call-out here works out its hinge.
         tip = leader[0]
         payload["leaders"] = [{"tip": [tip[0] - box[0], tip[1] - box[1]]}]
     return payload
+
+
+def _bluebeamish(source, annotation: dict) -> dict:
+    """The annotation's text keys, resolved and decoded, as a plain dict.
+
+    :mod:`markforge.io.btx` reads exactly these keys off exactly these
+    annotations — a tool set is annotation dictionaries and nothing else — so
+    the reading of them lives there and is used from here rather than written
+    twice and drifting apart.
+    """
+    out = {"Subtype": "FreeText"}
+    for key in ("DA", "DS", "RC", "Contents", "Q"):
+        found = source.resolve(annotation.get(key))
+        if isinstance(found, (str, bytes)):
+            found = _readable(found)
+        if found not in (None, ""):
+            out[key] = found
+    return out
 
 
 def _ink(source, annotation: dict, place, scale: float,

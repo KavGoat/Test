@@ -12,6 +12,7 @@ wherever it is opened.
 """
 from __future__ import annotations
 
+import atexit
 import os
 import tempfile
 from typing import Optional
@@ -128,6 +129,9 @@ class Appearances:
     def __init__(self):
         self.path: Optional[str] = None
         self.entries: list = []            # (page index, item, rect on the page)
+        # Per page, the annotations of the file being written that a markup is
+        # still exactly — the ones to leave where they are rather than redraw.
+        self.theirs: dict = {}
 
     def add(self, page_index: int, item, rect) -> None:
         self.entries.append((page_index, item, rect))
@@ -185,14 +189,58 @@ class Appearances:
         return path
 
     def discard(self) -> None:
-        if self.path and os.path.exists(self.path):
-            os.remove(self.path)
-        self.path = None
+        """Get rid of the scratch file — and never mind if it will not go.
+
+        Windows will not delete a file anything still has open, and MuPDF
+        holds a document open for as long as whatever it was grafted into is
+        open. So the scratch file can outlive the moment somebody wants rid of
+        it, and it must not be allowed to cost a save: a leftover file in the
+        temp folder is a nuisance, a drawing that would not save is a day's
+        work. Nothing here raises. What could not go now is tried again on the
+        way out of the program.
+        """
+        path, self.path = self.path, None
+        if not path:
+            return
+        try:
+            os.remove(path)
+        except OSError:
+            _sweep_up_later(path)
 
 
-def markups_to_place(document, printed: list) -> Appearances:
-    """Every markup that should go out as an annotation, ready to be drawn."""
+_LEFTOVERS: list = []
+
+
+def _sweep_up_later(path: str) -> None:
+    """A scratch file that would not delete now, to try again on the way out."""
+    if path in _LEFTOVERS:
+        return
+    if not _LEFTOVERS:
+        atexit.register(_sweep_up)
+    _LEFTOVERS.append(path)
+
+
+def _sweep_up() -> None:
+    while _LEFTOVERS:
+        try:
+            os.remove(_LEFTOVERS.pop())
+        except OSError:
+            pass
+
+
+def markups_to_place(document, printed: list, carried=None) -> Appearances:
+    """Every markup that should go out as an annotation, ready to be drawn.
+
+    *carried* names the pages — by uid — whose own annotations are already in
+    the file being written, because the page was kept rather than redrawn. On
+    those, the markups nobody has changed are left out: the annotation that a
+    markup still *is* is already there, exactly as its author wrote it, and
+    putting a redrawing of it over the top is how a drawing that went round a
+    loop stopped looking like itself. Which ones those are is in
+    :attr:`Appearances.theirs`.
+    """
     appearances = Appearances()
+    kept = set() if carried is None else set(carried)
     for index, page in enumerate(printed):
         frame = page.frame
         if frame is None:
@@ -201,6 +249,11 @@ def markups_to_place(document, printed: list) -> Appearances:
                          and page.background_opacity == 1.0
                          and document.asset(page.pdf_key))
         for item in exportable(frame, page, preserved):
+            if page.uid in kept and getattr(item, "still_theirs", False) \
+                    and getattr(item, "from_annotation", 0):
+                appearances.theirs.setdefault(index, []).append(
+                    int(item.from_annotation))
+                continue
             rect = item.mapRectToParent(item.boundingRect()).normalized()
             rect = rect.adjusted(-MARGIN, -MARGIN, MARGIN, MARGIN)
             if rect.width() <= 0 or rect.height() <= 0:
@@ -209,28 +262,44 @@ def markups_to_place(document, printed: list) -> Appearances:
     return appearances
 
 
-def add_markups(path: str, document, printed: list) -> int:
+def add_markups(path: str, document, printed: list, carried=None) -> bool:
     """Write every markup on *printed* into the PDF at *path* as an annotation.
 
-    Returns how many were written. The file is left exactly as it was if
-    anything goes wrong, because an export that lost its markups would be
-    worse than one whose markups are not yet live.
+    Says whether the file now holds what it should. The file is left exactly
+    as it was if anything goes wrong, because an export that lost its markups
+    would be worse than one whose markups are not yet live — and the caller
+    falls back to painting them on. *carried* is as in
+    :func:`markups_to_place`: the pages already carrying their own
+    annotations, whose unchanged markups are already there and are not
+    written again.
+
+    Nothing to write is success, not failure. On a drawing opened and exported
+    without a single markup being touched there is nothing to write — every
+    one of them is still its own file's annotation and came across with the
+    page — and reading that as a failure is what had the whole export painted
+    again from the screen, losing those annotations altogether.
     """
-    appearances = markups_to_place(document, printed)
+    appearances = markups_to_place(document, printed, carried)
     if not appearances.entries:
-        return 0
+        return True
     try:
         if appearances.draw() is None:
-            return 0
-        return _write_them(path, appearances)
+            return False
+        return bool(_write_them(path, appearances))
     except Exception:                                  # noqa: BLE001
-        return 0
+        return False
     finally:
         appearances.discard()
 
 
 def _write_them(path: str, appearances: Appearances) -> int:
-    """Put the drawn appearances into the file at *path* as annotations."""
+    """Put the drawn appearances into the file at *path* as annotations.
+
+    The target is closed before the scratch file, and both before the caller
+    gets rid of it: the target has been grafted from the scratch and holds it
+    open until it is shut itself, and a file anything holds open is a file
+    Windows will not delete.
+    """
     target = scratch = None
     try:
         target = engine.open_path(path)
@@ -241,13 +310,14 @@ def _write_them(path: str, appearances: Appearances) -> int:
                                 keep_existing=True)
         if not written:
             return 0
-        # Closes the target: it is open on the very file being written.
-        engine.save_as(target, path)
-        target = None
+        # Closes the target and the scratch: the target is open on the very
+        # file being written, and the scratch is what it was grafted from.
+        engine.save_as(target, path, also=(scratch,))
+        target = scratch = None
         return written
     finally:
-        engine.close(scratch)
         engine.close(target)
+        engine.close(scratch)
 
 
 def place_markups(target, scratch, appearances: Appearances,
@@ -280,13 +350,21 @@ def place_markups(target, scratch, appearances: Appearances,
 
     written = 0
     for index in range(target.page_count):
-        theirs = placed.get(index, [])
+        ours = placed.get(index, [])
         already = engine.annotation_xrefs(target, index)
         kept = already if keep_existing else furniture(target, index)
-        if kept + theirs == already:
+        if not keep_existing:
+            # The annotations a markup still *is*, kept exactly as their own
+            # author wrote them, in the order the file had them. This is what
+            # makes a drawing that has been opened and saved here identical to
+            # the one that came in, wherever it is opened afterwards.
+            untouched = set(appearances.theirs.get(index, ()))
+            kept = kept + [number for number in already
+                           if number in untouched and number not in kept]
+        if kept + ours == already:
             continue                       # the page already says exactly this
-        engine.set_page_annotations(target, index, kept + theirs)
-        written += len(theirs)
+        engine.set_page_annotations(target, index, kept + ours)
+        written += len(ours)
     return written
 
 
