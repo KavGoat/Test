@@ -490,10 +490,17 @@ def _add_the_geometry(annotation, item, rect, place: "Placement") -> None:
             shape = item.mapRectToParent(item.local_rect()).normalized()
         except Exception:                              # noqa: BLE001
             return
-        annotation["RD"] = [max(shape.left() - rect.left(), 0.0),
-                            max(shape.top() - rect.top(), 0.0),
-                            max(rect.right() - shape.right(), 0.0),
-                            max(rect.bottom() - shape.bottom(), 0.0)]
+        # /RD is the gap between Rect and the *ink*, and the shape's own path
+        # is inside that by half its border — a border is drawn on the line,
+        # not beside it. Writing the gap to the path instead puts the shape
+        # half a border width in wherever it is opened, and reads back that
+        # much smaller here. See markforge.io.btx.drawn_box, which is the
+        # same rule from the other side.
+        border = max(float(getattr(item.style, "width", 0.0) or 0.0), 0.0) / 2.0
+        annotation["RD"] = [max(shape.left() - rect.left() - border, 0.0),
+                            max(shape.top() - rect.top() - border, 0.0),
+                            max(rect.right() - shape.right() - border, 0.0),
+                            max(rect.bottom() - shape.bottom() - border, 0.0)]
         if kind == "cloud":
             _cloudy(annotation, item)
         return

@@ -581,6 +581,41 @@ def test_a_real_marked_up_drawing_is_drawn_by_its_own_file(window):
                 f"{item.display_name()} is being drawn over its own file's"
 
 
+def test_a_shape_is_written_where_every_reader_will_draw_it(window, tmp_path):
+    """Out as an annotation and back again, the same size and the same place.
+
+    A shape annotation says where its ink is with ``/RD``, and the path it is
+    stroked along is inside that by half its border. Writing the gap to the
+    path instead of to the ink puts the shape half a border width in wherever
+    it is opened — and out by a whole one where the file being read set both,
+    which is what had a section mark's arrowhead sitting inside its bubble
+    instead of touching it.
+    """
+    from PySide6.QtCore import QRectF
+    from markforge.io import export as export_io, pdfio
+    from markforge.items.shapes import RectItem
+
+    for width in (0.5, 1.0, 4.0):
+        drawn = RectItem()
+        drawn.style.width = width
+        drawn.set_local_rect(QRectF(0, 0, 180, 110))
+        page = window.document.pages[0]
+        for item in list(page.frame.markups()):
+            page.frame.remove_markup(item)
+        page.frame.add_markup(drawn, QPointF(120, 150))
+        marked = str(tmp_path / f"marked_{width}.pdf")
+        export_io.export_pdf(window.document, marked)
+
+        found = pdfio.markups(marked, [0])[0]
+        assert len(found) == 1, f"one markup at {width}pt, not {len(found)}"
+        came = found[0]
+        assert (came["x"], came["y"]) == pytest.approx((120.0, 150.0), abs=0.05), \
+            f"a {width}pt border moved the shape on the way through"
+        assert (came["rect"][2], came["rect"][3]) == \
+            pytest.approx((180.0, 110.0), abs=0.05), \
+            f"a {width}pt border resized the shape on the way through"
+
+
 def _annotations_of(path: str) -> list:
     """Each page's annotations as (kind, where, what it says)."""
     import pymupdf

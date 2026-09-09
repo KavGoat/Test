@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (QApplication, QCompleter, QGraphicsProxyWidget,
 from ..core.document import MM_TO_PT
 from ..core.units import parse_unit
 from ..items.base import (HANDLE_CURSORS, HANDLE_SIZE, MarkupItem, build_item,
-                          cloud_path, cursor_for_handle)
+                          cloud_path, cursor_for_handle, rename_groups)
 from ..items.contents import ContentsItem
 from .scene import DocumentScene, PageFrame, detach
 from ..items.measure import (AREA, CALIBRATE, DIMENSION, VOLUME, CountItem,
@@ -1818,9 +1818,7 @@ class PageView(QGraphicsView):
             data = deepcopy(self._move_original_data.get(item.uid,
                                                          item.serialize()))
             data["uid"] = os.urandom(8).hex()
-            if data.get("group"):
-                data["group"] = self._copied_groups.setdefault(
-                    data["group"], os.urandom(6).hex())
+            rename_groups(data, self._copied_groups)
             copy = build_item(data)
             if copy is None:
                 continue
@@ -2367,14 +2365,27 @@ class PageView(QGraphicsView):
             self._pending_stamp = None
             return False
         origin = self._pending_origin(frame, scene_pos)
+        # Fresh names for every group in the tool, keeping the arrangement it
+        # was kept in: a tool made of a group inside a group comes down as
+        # one, and putting the same tool down twice gives two of them rather
+        # than one group of ten markups.
+        renamed: dict = {}
+        for data in payloads:
+            for step in (data.get("group_path") or []):
+                renamed.setdefault(str(step), os.urandom(6).hex())
         group_name = os.urandom(6).hex() if len(payloads) > 1 else ""
         self.begin_snapshot([frame])
         self.scene().clearSelection()
         placed = []
         for data in payloads:
             data["uid"] = os.urandom(8).hex()
-            if group_name:
-                data["group"] = group_name
+            path = [renamed[str(step)] for step in (data.get("group_path") or [])]
+            if not path and group_name:
+                path = [group_name]
+            elif group_name and path:
+                path = [path[0]] + path[1:]
+            data["group_path"] = path
+            data["group"] = path[0] if path else ""
             item = build_item(data)
             if item is None:
                 continue

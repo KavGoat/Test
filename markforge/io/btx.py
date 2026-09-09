@@ -136,6 +136,37 @@ def _turn(annotation: dict, box: tuple):
     return turned
 
 
+def drawn_box(box, inset, width: float) -> list[float]:
+    """The rectangle a square or circle is actually drawn in.
+
+    Not ``Rect``. A shape annotation sits inside ``Rect`` less its ``/RD``,
+    and the border is then kept inside *that* rather than straddling it — so
+    the path itself is in by another half a border width, and the outside of
+    the ink lands exactly on ``Rect`` less ``/RD``.
+
+    That last half-width is the whole of this. A section mark's arrowhead is
+    built so that the two corners of its base sit exactly on its bubble;
+    drawing the bubble in the whole of ``Rect`` makes it a border width wider
+    than its own file draws it, and the arrowhead ends up a point inside the
+    circle it is supposed to touch. On a forty-point bubble that is plain to
+    see, and it is wrong on every square and every circle on the sheet.
+    """
+    try:
+        x, y, wide, high = (float(v) for v in box[:4])
+    except (TypeError, ValueError):
+        return list(box)
+    edges = [0.0, 0.0, 0.0, 0.0]
+    if isinstance(inset, (list, tuple)) and len(inset) >= 4:
+        try:
+            edges = [float(v) for v in inset[:4]]
+        except (TypeError, ValueError):
+            edges = [0.0, 0.0, 0.0, 0.0]
+    half = max(float(width or 0.0), 0.0) / 2.0
+    left, top, right, bottom = (edge + half for edge in edges)
+    return [x + left, y + top,
+            max(wide - left - right, 0.5), max(high - top - bottom, 0.5)]
+
+
 ARROWS = {
     "OpenArrow": "arrow", "ClosedArrow": "arrow", "ROpenArrow": "arrow",
     "RClosedArrow": "arrow", "Diamond": "diamond", "RDiamond": "diamond",
@@ -443,12 +474,12 @@ def markup_from(annotation: dict, resources: dict, name: str = "") -> Optional[d
             point = turn(point)
         return [point[0] - x, (y + height) - point[1]]
 
-    if subtype == "Square":
-        return dict(common, type="rect", kind="rect",
-                    rect=[0, 0, width, height])
-    if subtype == "Circle":
-        return dict(common, type="rect", kind="ellipse",
-                    rect=[0, 0, width, height])
+    if subtype in ("Square", "Circle"):
+        inside = drawn_box([0.0, 0.0, width, height], annotation.get("RD"),
+                           style.get("width", 0.0))
+        return dict(common, type="rect",
+                    kind="ellipse" if subtype == "Circle" else "rect",
+                    rect=inside)
     if subtype == "Line":
         points = _pairs(annotation.get("L"))
         if len(points) < 2:
@@ -777,10 +808,15 @@ def _tool_from(element, resources: dict) -> Optional[Tool]:
     payloads: list[dict] = []
     label = ""
     group_name = ""
-    for offset_x, offset_y, annotation in _parts(element):
+    parts = list(_parts(element))
+    nesting = group_paths([annotation for _x, _y, annotation in parts])
+    for offset_x, offset_y, annotation in parts:
         payload = markup_from(annotation, resources)
         if payload is None:
             continue
+        path = nesting.get(_own_name(annotation), ())
+        if path:
+            payload["group_path"] = list(path)
         # Where each part of a tool sits. X and Y say how far the tool's own
         # anchor is *from* this annotation's bottom-left corner, so they go on
         # the other way round: a part with X of -27 sits 27 points to the
@@ -806,10 +842,85 @@ def _tool_from(element, resources: dict) -> Optional[Tool]:
     if not payloads:
         return None
     if len(payloads) > 1:
-        # Members of one tool travel together, the way a grouped markup does.
+        # Members of one tool travel together, the way a grouped markup does —
+        # and in the arrangement of groups Bluebeam had them in, where it said
+        # so. A part the file grouped with nothing still belongs to the tool,
+        # so it goes in the tool's own outermost group with the rest.
+        outermost = next((p["group_path"][0] for p in payloads
+                          if p.get("group_path")), "btx")
         for payload in payloads:
-            payload["group"] = "btx"
+            path = list(payload.get("group_path") or [])
+            if not path or path[0] != outermost:
+                path = [outermost] + [step for step in path if step != outermost]
+            payload["group_path"] = path
+            payload["group"] = path[0]
     return Tool(name=label or "Tool", payloads=payloads)
+
+
+# ---------------------------------------------------------------------------
+# groups, and groups inside groups
+# ---------------------------------------------------------------------------
+#
+# Bluebeam keeps a group as one *leader* annotation carrying the names of its
+# members, with every member pointing back at the leader through ``/IRT``. A
+# group inside a group is the inner leader pointing at the outer one, so the
+# whole tree is in those pointers — and a section mark whose bubble and label
+# are a group of their own, inside the group that adds the cut line, only
+# comes back as the one thing it is if the pointers are followed all the way
+# up. Flattening them loses which parts belong together, so taking the mark
+# apart takes the whole thing apart instead of the piece somebody meant.
+
+def _own_name(annotation: dict) -> str:
+    """What this annotation calls itself, if it says."""
+    for key in ("NM", "TempNameID", "TempGroupNestingName"):
+        found = annotation.get(key)
+        if isinstance(found, str) and found.strip():
+            return str(found)
+    return ""
+
+
+def _leads_a_group(annotation: dict) -> bool:
+    for key in ("GroupNesting", "TempGroupNesting"):
+        if isinstance(annotation.get(key), list):
+            return True
+    return False
+
+
+def _its_leader(annotation: dict) -> str:
+    """The group this annotation is in, by the name of the one that leads it."""
+    for key in ("IRT", "TempIRT"):
+        found = annotation.get(key)
+        if isinstance(found, str) and found.strip():
+            return str(found)
+    return ""
+
+
+def group_paths(annotations: list) -> dict[str, tuple]:
+    """For each annotation, the groups it is inside — outermost first.
+
+    Keyed by what each annotation calls itself. A leader is in its own group
+    as well as leading it, so its path ends with its own name, which is what
+    puts it in the same group as the members it leads.
+    """
+    leader_of = {}
+    for annotation in annotations:
+        name = _own_name(annotation)
+        if name:
+            leader_of[name] = _its_leader(annotation)
+    paths: dict[str, tuple] = {}
+    for annotation in annotations:
+        name = _own_name(annotation)
+        if not name:
+            continue
+        at = name if _leads_a_group(annotation) else _its_leader(annotation)
+        chain: list[str] = []
+        seen = set()
+        while at and at not in seen:
+            seen.add(at)
+            chain.append(at)
+            at = leader_of.get(at, "")
+        paths[name] = tuple(reversed(chain))
+    return paths
 
 
 def _group_name(annotation: dict) -> str:

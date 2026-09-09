@@ -4,6 +4,7 @@ Every test here runs against the real ``.btx`` files in ``btx/`` — the ones
 they were brought across for. A synthetic file would prove the parser reads
 what the parser writes; these prove it reads what Bluebeam writes.
 """
+import math
 import glob
 import os
 import zlib
@@ -172,8 +173,12 @@ def test_a_section_marks_cut_line_crosses_its_own_bubble(qapp):
     tool = [t for t in _sketch_tools().tools if t.name == "Elevation"][1]
     bubble = _place(_part(tool, "ellipse"))
     line = _place(_part(tool, "line"))
-    assert bubble.left() < line.left() and line.right() < bubble.right(), \
-        f"the cut line {line} is not inside the bubble {bubble}"
+    # Flush with it: the chord is drawn right across the bubble, its ends
+    # landing on the circle within a fraction of a point either side.
+    assert abs(line.left() - bubble.left()) < 0.2, \
+        f"the cut line {line} does not start at the bubble {bubble}"
+    assert abs(line.right() - bubble.right()) < 0.2, \
+        f"the cut line {line} does not finish at the bubble {bubble}"
     # And through the middle of it, which is what divides the two labels.
     assert abs(line.center().y() - bubble.center().y()) < 1.0
 
@@ -195,6 +200,143 @@ def test_a_section_marks_arrowhead_points_away_from_its_bubble(qapp):
     base = [p for p in points if p is not apex]
     assert all(bubble.contains(p) for p in base), \
         "the wide end of the arrowhead should sit behind the bubble"
+
+
+def test_a_section_marks_arrowhead_touches_its_bubble(qapp):
+    """The two corners of the base sit exactly on the circle, not inside it.
+
+    A shape annotation is drawn inside its ``Rect`` less its ``/RD``, and the
+    border is kept inside *that* rather than straddling it — so the path is in
+    by another half a border width. Drawing the bubble in the whole of
+    ``Rect`` makes it a border width wider than its own file draws it, and an
+    arrowhead built to meet the bubble ends up a point inside it. On a
+    forty-point bubble that is plain to see.
+    """
+    tool = [t for t in _sketch_tools().tools if t.name == "Elevation"][1]
+    bubble = _place(_part(tool, "ellipse"))
+    head = build_item(_part(tool, "polygon"))
+    points = [p + head.pos() for p in head.points]
+    middle = bubble.center()
+    radius = bubble.width() / 2.0
+    def how_far(point):
+        return math.hypot(point.x() - middle.x(), point.y() - middle.y())
+
+    base = sorted(points, key=how_far)[:2]
+    for corner in base:
+        gap = math.hypot(corner.x() - middle.x(), corner.y() - middle.y())
+        assert abs(gap - radius) < 0.01, (
+            f"the arrowhead's base is {gap - radius:+.3f}pt off the bubble; "
+            f"it should touch it")
+
+
+def test_a_shape_is_drawn_the_size_its_own_file_draws_it(qapp):
+    """Rect less /RD less half the border — measured off the reference sheet.
+
+    ``btx/Document1.pdf`` has these very tools placed on it, and the circle's
+    own appearance stream draws a path 37.803 across inside a 39.803 Rect
+    whose /RD is 0.5 and whose border is 1.
+    """
+    tool = [t for t in _sketch_tools().tools if t.name == "Elevation"][1]
+    bubble = _part(tool, "ellipse")
+    assert bubble["rect"][2] == pytest.approx(37.803, abs=0.01)
+    assert bubble["rect"][3] == pytest.approx(37.803, abs=0.01)
+    # And it is still in the middle of where Rect put it.
+    assert bubble["rect"][0] == pytest.approx(1.0, abs=0.01)
+    assert bubble["rect"][1] == pytest.approx(1.0, abs=0.01)
+
+
+# ---------------------------------------------------------------------------
+# groups, and groups inside groups
+# ---------------------------------------------------------------------------
+
+def _a_tool_set_with_a_group_inside_a_group(path) -> str:
+    """A tool set written the way Bluebeam writes a nested group.
+
+    None of the sample files has one — every group in them is a single flat
+    group — so the shape of a nested one is written out here: a leader
+    annotation naming its members, each member pointing back at it through
+    ``/IRT``, and an inner leader that is itself a member of the outer group.
+    """
+    import binascii
+    import zlib
+
+    def packed(text: str) -> str:
+        return binascii.hexlify(zlib.compress(text.encode("utf-8"))).decode()
+
+    parts = [
+        ("<< /Subtype /Line /Rect [0 0 60 11] /L [5.5 5.5 54.5 5.5] "
+         "/C [0 0 0] /NM (OUTER) /GroupNesting "
+         "[(Section mark) (OUTER) (INNER) (CUTLINE)] >>"),
+        ("<< /Subtype /Circle /Rect [0 0 40 40] /RD [.5 .5 .5 .5] /C [0 0 0] "
+         "/NM (INNER) /IRT (OUTER) /RT /Group /GroupNesting "
+         "[(Bubble) (INNER) (LABEL)] >>"),
+        ("<< /Subtype /FreeText /Rect [0 0 30 14] /Contents (S1) "
+         "/DA (0 0 0 rg /Helv 8 Tf) /NM (LABEL) /IRT (INNER) /RT /Group >>"),
+        ("<< /Subtype /Line /Rect [0 0 50 11] /L [5.5 5.5 44.5 5.5] "
+         "/C [0 0 0] /NM (CUTLINE) /IRT (OUTER) /RT /Group >>"),
+    ]
+    rows = []
+    for order, raw in enumerate(parts):
+        tag = "ToolChestItem" if order == 0 else "Child"
+        body = (f"<Name>N{order}</Name><Type>Bluebeam.PDF.Annotations."
+                f"Annotation</Type><Raw>{packed(raw)}</Raw>"
+                f"<X>0</X><Y>0</Y><Index>{order}</Index>")
+        rows.append(f"<{tag}>{body}" + ("" if order == 0 else f"</{tag}>"))
+    xml = ("<?xml version='1.0'?><BluebeamRevuToolSet>"
+           f"<Title>{packed('Nested')}</Title>" + rows[0] + "".join(rows[1:])
+           + "</ToolChestItem></BluebeamRevuToolSet>")
+    path.write_text(xml, encoding="utf-8")
+    return str(path)
+
+
+def test_a_group_inside_a_group_comes_across_as_one(qapp, tmp_path):
+    """Every part in the outer group, and the inner ones in theirs as well."""
+    made = btx.read(_a_tool_set_with_a_group_inside_a_group(
+        tmp_path / "nested.btx"))
+    assert len(made.tools) == 1
+    tool = made.tools[0]
+    assert tool.name == "Section mark", "the outermost group names the tool"
+    assert len(tool.payloads) == 4
+
+    outer = {tuple(p["group_path"])[0] for p in tool.payloads}
+    assert len(outer) == 1, "every part is in the one outer group"
+    inside = [p for p in tool.payloads if len(p["group_path"]) > 1]
+    assert len(inside) == 2, "the bubble and its label are a group of their own"
+    assert len({tuple(p["group_path"]) for p in inside}) == 1
+
+
+def test_ungrouping_takes_off_one_layer_at_a_time(qapp, tmp_path):
+    """The bubble and its label stay together when the mark is taken apart."""
+    made = btx.read(_a_tool_set_with_a_group_inside_a_group(
+        tmp_path / "nested.btx"))
+    items = [build_item(dict(p)) for p in made.tools[0].payloads]
+    assert len({item.group for item in items}) == 1, "one thing to click on"
+
+    for item in items:
+        item.out_of_its_outer_group()
+    left = {item.group for item in items if item.group}
+    assert len(left) == 1, "what was inside is still one group"
+    assert sum(1 for item in items if item.group) == 2
+    assert sum(1 for item in items if not item.group) == 2
+
+
+def test_two_of_the_same_tool_are_two_things_and_not_one(qapp, tmp_path):
+    """Putting a tool down twice gives two groups, not one group of eight."""
+    from markforge.items.base import rename_groups
+
+    made = btx.read(_a_tool_set_with_a_group_inside_a_group(
+        tmp_path / "nested.btx"))
+    placed = []
+    for _ in range(2):
+        renamed: dict = {}
+        for payload in made.tools[0].payloads:
+            copy = dict(payload)
+            rename_groups(copy, renamed)
+            placed.append(copy)
+    outer = {p["group"] for p in placed}
+    assert len(outer) == 2, "each one is its own group"
+    paths = {tuple(p["group_path"]) for p in placed}
+    assert len(paths) == 4, "and each keeps its own inner group"
 
 
 def test_a_markup_bluebeam_turned_comes_back_turned(qapp):

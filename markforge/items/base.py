@@ -212,6 +212,24 @@ def register_item(cls):
     return cls
 
 
+def rename_groups(data: dict, renamed: dict) -> None:
+    """Give a copied markup fresh group names, keeping its arrangement.
+
+    A duplicate that kept the names would join the very group it was copied
+    from and move about with it. Every group it is inside gets a new name, and
+    the same new name each time that group is met again, so a group inside a
+    group is still inside it afterwards.
+    """
+    path = [str(step) for step in (data.get("group_path") or []) if str(step)]
+    if not path and data.get("group"):
+        path = [str(data["group"])]
+    if not path:
+        return
+    path = [renamed.setdefault(step, uuid.uuid4().hex[:12]) for step in path]
+    data["group_path"] = path
+    data["group"] = path[0]
+
+
 def build_item(data: dict):
     """Recreate an item from its serialised form."""
     cls = ITEM_REGISTRY.get(data.get("type"))
@@ -319,6 +337,13 @@ class MarkupItem(QGraphicsObject):
         self.locked_before_flatten = False
         # Markups sharing a group id are selected, moved and copied together.
         self.group = ""
+        # And the groups that one is inside, outermost first, when it is
+        # inside more than one. A tool set brings these across: a section mark
+        # is a bubble and its label grouped together, inside the group that
+        # adds the cut line. Clicking takes hold of the outermost — group is
+        # always the first step of this — and ungrouping peels one off, so
+        # what is inside stays together.
+        self.group_path: tuple = ()
         # Holes taken out of this shape, each a ring of local points. A hole
         # belongs to the shape it came out of rather than being a markup of
         # its own, so moving the shape takes its holes with it. Any closed
@@ -623,6 +648,33 @@ class MarkupItem(QGraphicsObject):
     # of the page's render, this draws the markup itself, and it is written
     # back as one of ours. That is the one conversion, and it happens once.
 
+    # -- groups ------------------------------------------------------------
+    def set_group_path(self, path, outermost: str = "") -> None:
+        """Say which groups this markup is inside, outermost first.
+
+        *outermost* is what a document written before groups could nest says
+        instead, and is used when there is no path.
+        """
+        steps = [str(step) for step in (path or ()) if str(step)]
+        if not steps and outermost:
+            steps = [outermost]
+        self.group_path = tuple(steps)
+        self.group = steps[0] if steps else ""
+
+    def put_in_a_group(self, name: str) -> None:
+        """Put this markup inside a new group, outside any it is already in."""
+        self.set_group_path((name,) + tuple(
+            step for step in self.group_path if step != name))
+
+    def out_of_its_outer_group(self) -> None:
+        """Take this markup out of the outermost group it is in.
+
+        One layer at a time. A section mark is a bubble and its label inside
+        the group that adds the cut line: ungrouping it should give back the
+        cut line and the bubble-with-its-label, not five loose markups.
+        """
+        self.set_group_path(self.group_path[1:])
+
     def make_it_ours(self) -> None:
         """Take this markup over: from here it is drawn and saved as ours."""
         if self.still_theirs:
@@ -724,6 +776,7 @@ class MarkupItem(QGraphicsObject):
             "flatten_recoverable": self.flatten_recoverable,
             "locked_before_flatten": self.locked_before_flatten,
             "group": self.group,
+            "group_path": list(self.group_path),
         }
 
     def serialize(self) -> dict:
@@ -739,7 +792,8 @@ class MarkupItem(QGraphicsObject):
                                          float(matrix[2]), float(matrix[3]),
                                          float(matrix[4]), float(matrix[5])))
         self.style = Style.from_dict(data.get("style", {}))
-        self.group = str(data.get("group", ""))
+        self.set_group_path(data.get("group_path") or (),
+                            str(data.get("group", "")))
         self.author = data.get("author", "")
         self.subject = data.get("subject", "")
         self.comment = data.get("comment", "")

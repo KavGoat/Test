@@ -27,7 +27,8 @@ from ..core.units import format_quantity, parse_unit
 from ..io import export as export_io
 from ..io import pdfio
 from ..io import project as project_io
-from ..items.base import HATCH_PATTERNS, MarkupItem, Style, build_item
+from ..items.base import (HATCH_PATTERNS, MarkupItem, Style, build_item,
+                          rename_groups)
 from ..items.contents import ContentsItem
 from ..items.measure import MeasureItem
 from ..items.media import ImageItem
@@ -3335,8 +3336,7 @@ class MainWindow(QMainWindow):
         for entry in payload:
             copy = dict(entry)
             copy["uid"] = os.urandom(8).hex()
-            if copy.get("group"):
-                copy["group"] = renamed.setdefault(copy["group"], os.urandom(6).hex())
+            rename_groups(copy, renamed)
             item = build_item(copy)
             if item is None:
                 continue
@@ -3441,7 +3441,9 @@ class MainWindow(QMainWindow):
         name = os.urandom(6).hex()
         self.view.begin_snapshot(self.view.all_frames())
         for item in items:
-            item.group = name
+            # Outside whatever they are already in, so grouping two section
+            # marks keeps each one a section mark.
+            item.put_in_a_group(name)
             item.touch()
         self.view.commit_snapshot("Group markups")
         self.refresh_selection()
@@ -3449,7 +3451,14 @@ class MainWindow(QMainWindow):
                                  "takes them apart again")
 
     def ungroup_selection(self) -> None:
-        """Take the selected groups apart."""
+        """Take the selected groups apart, one layer at a time.
+
+        A tool set brings groups across as the arrangement of groups they were
+        made in — a section mark is a bubble and its label inside the group
+        that adds the cut line. Taking the whole lot apart at once would give
+        back a heap of loose markups; taking off the outer layer gives back
+        the pieces somebody put together.
+        """
         items = [i for i in self.selected_items()
                  if isinstance(i, MarkupItem) and i.group]
         if not items:
@@ -3457,11 +3466,14 @@ class MainWindow(QMainWindow):
             return
         self.view.begin_snapshot(self.view.all_frames())
         for item in items:
-            item.group = ""
+            item.out_of_its_outer_group()
             item.touch()
         self.view.commit_snapshot("Ungroup markups")
         self.refresh_selection()
-        self.status_hint.setText(f"Ungrouped {len(items)} markups")
+        inside = sum(1 for item in items if item.group)
+        self.status_hint.setText(
+            f"Ungrouped {len(items)} markups"
+            + (f" — {inside} of them are still grouped inside" if inside else ""))
 
     def copy_selection(self) -> None:
         if self.view.text_clipboard("copy"):
@@ -3552,8 +3564,7 @@ class MainWindow(QMainWindow):
         for entry in payload:
             copy = dict(entry)
             copy["uid"] = os.urandom(8).hex()
-            if copy.get("group"):
-                copy["group"] = renamed.setdefault(copy["group"], os.urandom(6).hex())
+            rename_groups(copy, renamed)
             if offset is not None:
                 copy["x"] = copy.get("x", 0) + offset.x()
                 copy["y"] = copy.get("y", 0) + offset.y()

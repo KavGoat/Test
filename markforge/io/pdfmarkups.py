@@ -147,7 +147,8 @@ def _one(source, annotation: dict, kind: str, place, scale: float,
 
     intent = str(source.resolve(annotation.get("IT")) or "")
     if kind in ("Square", "Circle"):
-        inside = _inset(source, annotation, box, scale)
+        inside = _inset(source, annotation, box, scale,
+                        float(style.get("width", 0.0)) / max(scale, 1e-6))
         shape = "ellipse" if kind == "Circle" else "rect"
         if _is_cloudy(source, annotation):
             shape = "cloud"
@@ -242,14 +243,20 @@ def _box(source, annotation: dict, place, scale: float) -> list[float]:
     return [left, top, max(right - left, 0.5), max(bottom - top, 0.5)]
 
 
-def _inset(source, annotation: dict, box: list, scale: float) -> list[float]:
-    """A square or circle sits inside its rectangle by its own difference."""
+def _inset(source, annotation: dict, box: list, scale: float,
+           width: float = 0.0) -> list[float]:
+    """A square or circle sits inside its rectangle by its own difference.
+
+    And by half its border, which is drawn inside that rather than straddling
+    it — see :func:`markforge.io.btx.drawn_box`, which is the same rule and
+    the reason a section mark's arrowhead touches its bubble instead of
+    sitting a point inside it.
+    """
+    from .btx import drawn_box
+
     inset = _numbers(source, annotation.get("RD"))
-    if len(inset) != 4:
-        return box
-    left, top, right, bottom = (value * scale for value in inset)
-    return [box[0] + left, box[1] + top,
-            max(box[2] - left - right, 0.5), max(box[3] - top - bottom, 0.5)]
+    inset = [value * scale for value in inset] if len(inset) == 4 else None
+    return drawn_box(box, inset, width * scale)
 
 
 def _style(source, annotation: dict, colour, scale: float) -> dict:
