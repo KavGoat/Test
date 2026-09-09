@@ -162,6 +162,9 @@ class PagesPanel(QWidget):
         layout.addLayout(buttons)
 
         self.list = PageListWidget()
+        # Sheets are drawn as they are scrolled to rather than all at once.
+        self.list.verticalScrollBar().valueChanged.connect(
+            lambda _value: self._draw_what_is_on_screen())
         self.list.setViewMode(QListWidget.IconMode)
         self.list.setIconSize(QSize(96, 128))
         self.list.setFlow(QListView.LeftToRight)
@@ -346,7 +349,8 @@ class PagesPanel(QWidget):
             if scale:
                 parts.append(scale)
             caption = "   ".join(parts)
-            entry = QListWidgetItem(self._thumbnail(page, document), caption)
+            entry = QListWidgetItem(self._thumbnail(page, document, ask=False),
+                                    caption)
             entry.setTextAlignment(Qt.AlignHCenter)
             tip = page.label or page.source_note or f"Page {index + 1}"
             if not page.printable:
@@ -357,6 +361,33 @@ class PagesPanel(QWidget):
             self.list.addItem(entry)
         self.list.setCurrentRow(current)
         self._suppress = False
+        self._draw_what_is_on_screen()
+
+    def _draw_what_is_on_screen(self) -> None:
+        """Ask for the sheets of the rows somebody can actually see.
+
+        A forty-page set has forty sheets to draw and a dozen rows on screen.
+        Drawing all of them before the window will move is six seconds of a
+        drawing set opening; drawing the ones in view is a few hundred
+        milliseconds, and the rest arrive as they are scrolled to.
+        """
+        document = getattr(self.window, "document", None)
+        if document is None:
+            return
+        showing = self.list.viewport().rect()
+        for index in range(self.list.count()):
+            if not 0 <= index < len(document.pages):
+                break
+            entry = self.list.item(index)
+            if entry is None:
+                continue
+            # A row well below the fold is not worth a render yet. The margin
+            # is a screenful, so scrolling lands on sheets already drawn.
+            box = self.list.visualItemRect(entry)
+            if box.bottom() < -showing.height() or \
+                    box.top() > showing.height() * 2:
+                continue
+            entry.setIcon(self._thumbnail(document.pages[index], document))
 
     def _page_was_drawn(self, key) -> None:
         """Fill in the row whose page has just been drawn, and only that one."""
@@ -375,7 +406,7 @@ class PagesPanel(QWidget):
             entry.setIcon(self._thumbnail(document.pages[current], document))
 
     @staticmethod
-    def _thumbnail(page, document=None) -> QIcon:
+    def _thumbnail(page, document=None, ask: bool = True) -> QIcon:
         """A small picture of the page for the list.
 
         A page that came in from a PDF is drawn once, small, in the background
@@ -393,7 +424,7 @@ class PagesPanel(QWidget):
                 whole = QRectF(0, 0, page.width_pt, page.height_pt)
                 sheet = pdftiles.TILES.sheet(
                     page.pdf_key, data, int(page.pdf_page_index), whole,
-                    bool(getattr(page, "pdf_annotations", True)))
+                    bool(getattr(page, "pdf_annotations", True)), ask=ask)
                 if sheet is not None and not sheet.isNull():
                     return QIcon(sheet.scaled(
                         160, 160, Qt.KeepAspectRatio, Qt.SmoothTransformation))

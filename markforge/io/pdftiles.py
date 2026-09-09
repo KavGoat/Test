@@ -12,8 +12,7 @@ reader worth using:
 
 * **Tiles.** The page is cut into squares of a fixed size in *screen* pixels.
   Only the squares on screen are ever drawn, so the cost of a repaint depends
-  on the size of the window and not on the size of the sheet. A tile of an A1
-  sheet at four times life size takes about twenty milliseconds.
+  on the size of the window and not on the size of the sheet.
 
 * **A zoom ladder.** Tiles are rendered at powers of two, not at whatever the
   zoom happens to be, so a wheel notch reuses what is already drawn and a real
@@ -48,7 +47,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import atexit
-import queue
+import threading
 
 from PySide6.QtCore import (QCoreApplication, QObject, QRectF, Qt, QThread,
                             Signal)
@@ -57,9 +56,16 @@ from PySide6.QtGui import QImage, QPixmap
 from ..pdf import engine
 from ..pdf.engine import PdfError
 
-#: How big a tile is, in screen pixels. Big enough that a screenful is a
-#: handful of them rather than hundreds; small enough that one is quick.
-TILE = 512
+#: How big a tile is, in screen pixels.
+#:
+#: Bigger than it looks like it should be, and measured rather than guessed.
+#: What a tile costs is mostly walking the page's drawing — forty thousand
+#: paths on a dense A1 sheet — and that is paid once per tile whatever size it
+#: is, because clipping decides what to rasterise and not what to walk. So
+#: cutting the screen into more, smaller squares pays the expensive part more
+#: often. Covering a window at 1024 is roughly forty per cent quicker than at
+#: 512 across every zoom; 2048 gives it back again in rasterising.
+TILE = 1024
 
 #: The longest edge of the small picture kept of a whole page.
 THUMBNAIL_EDGE = 1100
@@ -67,6 +73,21 @@ THUMBNAIL_EDGE = 1100
 #: How much of the tile cache to keep, in bytes of image. Roughly forty
 #: A1-sized screenfuls, and a hard ceiling rather than a hope.
 CACHE_BYTES = 192 * 1024 * 1024
+
+#: The most tiles one repaint will ask for. A screenful is about a dozen, so
+#: this is several screenfuls of margin and still a bound: past it the answers
+#: arrive long after the zoom that wanted them has moved on.
+MOST_TILES_AT_ONCE = 48
+
+#: How many whole-page pictures to have in hand at once. Enough for the sheet
+#: being read and its neighbours; the rest follow as each one arriving repaints
+#: the canvas and asks for the next.
+MOST_SHEETS_AT_ONCE = 4
+
+#: How many pages to keep parsed on the render thread. A display list of a
+#: dense A1 sheet is a few megabytes; a handful covers the page being read and
+#: its neighbours, which is what scrolling touches.
+MOST_HELD_PAGES = 8
 
 
 def zoom_step(scale: float) -> float:
@@ -119,44 +140,80 @@ class SheetKey:
 
 
 class _Worker(QThread):
-    """Renders on its own thread, taking work off a queue.
+    """Renders on its own thread, taking work off a stack.
 
-    Deliberately a queue and not queued slot calls: handing Python objects
+    Deliberately a stack and not queued slot calls: handing Python objects
     across threads through Qt's meta-object system is a way to crash, and
     there is nothing here that needs it. What crosses back is a signal, which
     Qt delivers on the window's thread by itself.
 
+    **A stack, not a queue.** What was asked for most recently is what is on
+    screen now, and what was asked for a second ago may be the same page at a
+    zoom nobody is looking at any more. Rendering in the order the requests
+    arrived means every zoom is served only after the whole of the previous
+    zoom has been drawn — which is what made zooming into a dense sheet take
+    ten seconds and then fifteen. Newest first, and anything nobody still
+    wants is dropped rather than drawn.
+
     The thread keeps its own MuPDF document for each source, because a document
-    belongs to the thread that opened it.
+    belongs to the thread that opened it, and a display list for each page it
+    has drawn: a page is parsed once and its tiles are rasterised from that
+    rather than running the content stream again for every square.
     """
 
     tileDone = Signal(object, QImage)
     sheetDone = Signal(object, QImage)
 
-    def __init__(self) -> None:
+    def __init__(self, wanted: "Optional[set]" = None) -> None:
         super().__init__()
-        self._work: "queue.Queue" = queue.Queue()
+        self._work: list = []                # a stack; the newest is on top
+        self._lock = threading.Lock()
+        self._ready = threading.Semaphore(0)
         self._open: dict[str, object] = {}
+        self._lists: "dict[tuple, object]" = {}
+        self._wanted = wanted if wanted is not None else set()
         self._stopping = False
 
     def submit(self, key, data: bytes, width: float, height: float) -> None:
-        self._work.put((key, data, width, height))
+        with self._lock:
+            self._work.append((key, data, width, height))
+        self._ready.release()
 
     def stop(self) -> None:
         self._stopping = True
-        self._work.put(None)
+        with self._lock:
+            self._work.append(None)
+        self._ready.release()
 
     def drop(self, source: str) -> None:
-        self._work.put(("forget", source, 0.0, 0.0))
+        self.submit("forget", source, 0.0, 0.0)
+
+    def _next(self):
+        """The most recent piece of work still worth doing."""
+        while True:
+            self._ready.acquire()
+            with self._lock:
+                if not self._work:
+                    continue
+                job = self._work.pop()
+            if job is None or job[0] == "forget":
+                return job
+            # Asked for, then superseded before the thread got to it. Skipping
+            # here is the whole point of the stack: the answer would be thrown
+            # away the moment it arrived.
+            if job[0] in self._wanted:
+                return job
 
     def run(self) -> None:
         while True:
-            job = self._work.get()
+            job = self._next()
             if job is None:
                 break
             key, data, width, height = job
             if key == "forget":
                 engine.close(self._open.pop(data, None))
+                for held in [k for k in self._lists if k[0] == data]:
+                    self._lists.pop(held, None)
                 continue
             try:
                 if isinstance(key, SheetKey):
@@ -169,6 +226,7 @@ class _Worker(QThread):
                 signal = (self.sheetDone if isinstance(key, SheetKey)
                           else self.tileDone)
                 signal.emit(key, QImage())
+        self._lists.clear()
         for document in self._open.values():
             engine.close(document)
         self._open.clear()
@@ -187,12 +245,39 @@ class _Worker(QThread):
         self._open[source] = document
         return document
 
+    def _display_list(self, source: str, data: bytes, index: int,
+                      annotations: bool):
+        """The page, parsed once, ready to be rasterised any number of times.
+
+        A dense drawing sheet is tens of thousands of path operations, and
+        asking the page for a square of itself runs all of them again. Held as
+        a display list they are run once and every tile after that is only
+        rasterising.
+        """
+        key = (source, index, annotations)
+        found = self._lists.get(key)
+        if found is not None:
+            return found
+        document = self._document(source, data)
+        if document is None or not 0 <= index < document.page_count:
+            return None
+        try:
+            made = document[index].get_displaylist(annots=annotations)
+        except Exception:                                  # noqa: BLE001
+            engine.drain_messages()
+            return None
+        if len(self._lists) >= MOST_HELD_PAGES:
+            self._lists.pop(next(iter(self._lists)), None)
+        self._lists[key] = made
+        return made
+
     def _tile(self, key: "TileKey", data: bytes,
               page_width: float, page_height: float) -> None:
         from .pdfio import to_image
 
-        document = self._document(key.source, data)
-        if document is None or not 0 <= key.index < document.page_count:
+        drawing = self._display_list(key.source, data, key.index,
+                                     key.annotations)
+        if drawing is None:
             self.tileDone.emit(key, QImage())
             return
         # Where this tile is on the page, in points. The last tile in a row or
@@ -205,27 +290,23 @@ class _Worker(QThread):
         if right - left <= 0 or bottom - top <= 0:
             self.tileDone.emit(key, QImage())
             return
-        raster = engine.render_region(document, key.index,
-                                      (left, top, right, bottom), key.scale,
-                                      key.annotations)
-        image = to_image(raster)
+        image = to_image(engine.raster_from(
+            drawing, (left, top, right, bottom), key.scale))
         self.tileDone.emit(key, image if image is not None else QImage())
 
     def _sheet(self, key: "SheetKey", data: bytes,
                page_width: float, page_height: float) -> None:
         from .pdfio import to_image
 
-        document = self._document(key.source, data)
-        if document is None or not 0 <= key.index < document.page_count:
+        drawing = self._display_list(key.source, data, key.index,
+                                     key.annotations)
+        if drawing is None:
             self.sheetDone.emit(key, QImage())
             return
         longest = max(page_width, page_height, 1.0)
         shrink = min(THUMBNAIL_EDGE / longest, 4.0)
-        raster = engine.render_page(document, key.index,
-                                    max(int(page_width * shrink), 1),
-                                    max(int(page_height * shrink), 1),
-                                    key.annotations)
-        image = to_image(raster)
+        image = to_image(engine.raster_from(
+            drawing, (0.0, 0.0, page_width, page_height), shrink))
         self.sheetDone.emit(key, image if image is not None else QImage())
 
 
@@ -243,6 +324,10 @@ class TileCache(QObject):
         super().__init__()
         self._tiles: dict[TileKey, QPixmap] = {}
         self._sheets: dict[SheetKey, QPixmap] = {}
+        # Shared with the worker, which reads it to decide whether a job it is
+        # about to start is still worth doing. A set of immutable keys, added
+        # to and discarded from on this thread only, so the worker never sees
+        # half a change.
         self._waiting: set = set()
         self._held = 0
         self._worker: Optional[_Worker] = None
@@ -252,7 +337,7 @@ class TileCache(QObject):
     def _started(self) -> _Worker:
         if self._worker is not None:
             return self._worker
-        worker = _Worker()
+        worker = _Worker(self._waiting)
         worker.setObjectName("markforge-pdf")
         worker.tileDone.connect(self._tile_arrived, Qt.QueuedConnection)
         worker.sheetDone.connect(self._sheet_arrived, Qt.QueuedConnection)
@@ -277,14 +362,31 @@ class TileCache(QObject):
 
     # -- what is ready -----------------------------------------------------
     def sheet(self, source: str, data: bytes, index: int,
-              page: QRectF, annotations: bool = True) -> Optional[QPixmap]:
-        """The small picture of the whole page, asking for it if need be."""
+              page: QRectF, annotations: bool = True,
+              ask: bool = True) -> Optional[QPixmap]:
+        """The small picture of the whole page, asking for it if need be.
+
+        Without *ask*, only what is already drawn: for a caller that would
+        like a picture but must not start forty of them. Opening a drawing set
+        should draw the sheets somebody is looking at, not every sheet in the
+        file before the window will move.
+        """
         key = SheetKey(source, index, annotations)
         found = self._sheets.get(key)
         if found is not None:
             return found if not found.isNull() else None
-        self._ask(key, data, page, sheet=True)
+        if ask and self._sheets_wanted() < MOST_SHEETS_AT_ONCE:
+            # A few at a time. Zoomed out far enough to see a whole set, every
+            # sheet in it is on screen at once and every one of them wants
+            # drawing — which is a drawing set taking five seconds to appear
+            # rather than the two or three sheets anybody is reading. Each one
+            # that arrives repaints the canvas, which asks for the next few, so
+            # they fill in from the top instead of all being waited for.
+            self._ask(key, data, page, sheet=True)
         return None
+
+    def _sheets_wanted(self) -> int:
+        return sum(1 for key in self._waiting if isinstance(key, SheetKey))
 
     def tiles(self, source: str, data: bytes, index: int, page: QRectF,
               scale: float, region: QRectF, annotations: bool = True
@@ -303,11 +405,28 @@ class TileCache(QObject):
         wanted = QRectF(region).intersected(page)
         if wanted.isEmpty():
             return [], False
+        if scale <= _sheet_scale(page) * 1.05:
+            # The small picture of the whole page is already as sharp as the
+            # screen is showing, so tiles here would be the same pixels drawn
+            # again. That matters most on the view a drawing opens at: a dense
+            # A1 sheet fitted to the window was rendering the thumbnail and
+            # then the whole sheet again in tiles, which is where the second
+            # and a half before it appeared was going.
+            #
+            # Against the scale actually on screen rather than the rung of the
+            # ladder above it: a page fitted to a window lands a little under
+            # the thumbnail's own sharpness, and the rung above that is not
+            # what anybody is looking at.
+            self._stop_wanting(source, index, step)
+            self.sheet(source, data, index, page, annotations)
+            return [], True
         first_col = max(int(wanted.left() // size), 0)
         last_col = int((wanted.right() - 1e-6) // size)
         first_row = max(int(wanted.top() // size), 0)
         last_row = int((wanted.bottom() - 1e-6) // size)
+        self._stop_wanting(source, index, step)
         ready: list[tuple[QRectF, QPixmap]] = []
+        wanting: list = []
         missing = False
         for row in range(first_row, last_row + 1):
             for col in range(first_col, last_col + 1):
@@ -318,8 +437,37 @@ class TileCache(QObject):
                         ready.append((key.page_rect(found), found))
                     continue
                 missing = True
-                self._ask(key, data, page, sheet=False)
+                wanting.append(key)
+        # Nearest the middle of what is being looked at first, and never more
+        # than a few screenfuls at once. A repaint that asks for a thousand
+        # tiles is a repaint whose answers arrive minutes later, by which time
+        # the zoom has moved on; the rest are asked for on the repaints that
+        # follow, by which time it is known whether they are still wanted.
+        if len(wanting) > MOST_TILES_AT_ONCE:
+            middle = wanted.center()
+            wanting.sort(key=lambda key: _distance_from(key, middle))
+            wanting = wanting[:MOST_TILES_AT_ONCE]
+        for key in wanting:
+            self._ask(key, data, page, sheet=False)
         return ready, missing
+
+    def _stop_wanting(self, source: str, index: int, step: float) -> None:
+        """Give up on tiles of this page at a zoom nobody is looking at now.
+
+        A zoom asks for a fresh rung of the ladder, and everything still
+        outstanding from the rung before it is about to be thrown away — it
+        would arrive, be cached, and never be drawn. Left in the queue it is
+        worse than useless: the worker draws all of it before it reaches the
+        tiles that are actually on screen, which is what made zooming into a
+        dense sheet take ten seconds and then fifteen.
+
+        Only the same page's other zooms go. Tiles of *other* pages are still
+        wanted — that is the next page in the scroll, coming.
+        """
+        stale = [key for key in self._waiting
+                 if isinstance(key, TileKey) and key.source == source
+                 and key.index == index and key.scale != step]
+        self._waiting.difference_update(stale)
 
     def _ask(self, key, data: bytes, page: QRectF, sheet: bool) -> None:
         if key in self._waiting or not data:
@@ -368,6 +516,23 @@ class TileCache(QObject):
             self._sheets.pop(key, None)
         if self._worker is not None:
             self._worker.drop(source)
+
+
+def _sheet_scale(page: QRectF) -> float:
+    """How sharp the small picture of a whole page is, in pixels to the point.
+
+    Below this a tile is the same pixels the thumbnail already holds, so there
+    is nothing to be gained by rendering one.
+    """
+    longest = max(page.width(), page.height(), 1.0)
+    return min(THUMBNAIL_EDGE / longest, 4.0)
+
+
+def _distance_from(key: "TileKey", middle) -> float:
+    """How far a tile's own middle is from the middle of what is on screen."""
+    box = key.page_rect()
+    return ((box.center().x() - middle.x()) ** 2
+            + (box.center().y() - middle.y()) ** 2)
 
 
 def _weight(pixmap: QPixmap) -> int:

@@ -475,6 +475,67 @@ def test_a_colour_reads_the_same_whichever_space_it_was_written_in():
 
 
 # ---------------------------------------------------------------------------
+# What a repaint is allowed to cost
+# ---------------------------------------------------------------------------
+
+def test_one_repaint_never_asks_for_the_whole_sheet(tmp_path):
+    """A repaint asks for what is on screen, not for the page it is part of.
+
+    An A1 sheet at eight times life size is a thousand tiles. Asked for all at
+    once they arrive long after the zoom that wanted them has moved on, and the
+    render thread grinds through every one of them first — which is what made
+    zooming into a dense drawing take ten seconds and then fifteen.
+    """
+    from PySide6.QtCore import QRectF
+
+    from markforge.io import pdftiles
+
+    cache = pdftiles.TileCache()
+    asked: list = []
+    cache._ask = lambda key, data, page, sheet: asked.append(key)
+    page = QRectF(0, 0, 2384, 1684)                    # A1
+    # The whole sheet, at a zoom where it is a thousand squares.
+    cache.tiles("a-drawing", b"%PDF-", 0, page, 8.0, page)
+    assert asked, "it should ask for something"
+    assert len(asked) <= pdftiles.MOST_TILES_AT_ONCE, len(asked)
+
+
+def test_a_zoom_gives_up_on_the_zoom_before_it(tmp_path):
+    """Squares of a page at a zoom nobody is looking at are not worth drawing."""
+    from PySide6.QtCore import QRectF
+
+    from markforge.io import pdftiles
+
+    cache = pdftiles.TileCache()
+    cache._ask = lambda key, data, page, sheet: cache._waiting.add(key)
+    page = QRectF(0, 0, 2384, 1684)
+    cache.tiles("a-drawing", b"%PDF-", 0, page, 2.0, page)
+    coarse = {key for key in cache._waiting if getattr(key, "scale", 0) == 2.0}
+    assert coarse, "the first zoom should have asked for squares"
+
+    cache.tiles("a-drawing", b"%PDF-", 0, page, 8.0, page)
+    assert not [key for key in cache._waiting
+                if getattr(key, "scale", 0) == 2.0], \
+        "and the zoom after it should have given up on them"
+
+
+def test_a_page_nobody_can_see_is_not_drawn():
+    """Opening a forty-sheet set draws the sheets being read, not all forty."""
+    from PySide6.QtCore import QRectF
+
+    from markforge.io import pdftiles
+
+    cache = pdftiles.TileCache()
+    asked: list = []
+    cache._ask = lambda key, data, page, sheet: (
+        asked.append(key), cache._waiting.add(key))
+    page = QRectF(0, 0, 595, 842)
+    for index in range(40):
+        cache.sheet("a-set", b"%PDF-", index, page)
+    assert len(asked) <= pdftiles.MOST_SHEETS_AT_ONCE, len(asked)
+
+
+# ---------------------------------------------------------------------------
 # Real files
 # ---------------------------------------------------------------------------
 

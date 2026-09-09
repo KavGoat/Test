@@ -275,6 +275,37 @@ def render_region(document: "pymupdf.Document", index: int,
     return _raster_of(pixmap)
 
 
+def display_list(document: "pymupdf.Document", index: int,
+                 annotations: bool = True):
+    """A page parsed once, ready to be rasterised any number of times.
+
+    Asking a page for a square of itself runs its whole content stream again,
+    and a drawing sheet is tens of thousands of path operations — so a page cut
+    into forty tiles is parsed forty times. Held as a display list it is parsed
+    once and each tile after that is only rasterising.
+    """
+    try:
+        return document[index].get_displaylist(annots=annotations)
+    except Exception:                                  # noqa: BLE001
+        drain_messages()
+        return None
+
+
+def raster_from(drawing, region: tuple[float, float, float, float],
+                scale: float) -> Optional[Raster]:
+    """Part of an already-parsed page, at *scale* pixels to the display point."""
+    try:
+        clip = pymupdf.Rect(*region).normalize()
+        if clip.is_empty:
+            return None
+        pixmap = drawing.get_pixmap(matrix=pymupdf.Matrix(scale, scale),
+                                    clip=clip, alpha=False)
+    except Exception:                                  # noqa: BLE001
+        drain_messages()
+        return None
+    return _raster_of(pixmap)
+
+
 def render_thumbnail(document: "pymupdf.Document", index: int,
                      longest_edge: int = 140,
                      annotations: bool = True) -> Optional[Raster]:

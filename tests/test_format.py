@@ -697,8 +697,17 @@ def test_a_page_from_a_pdf_gets_sharper_as_it_is_zoomed_into(window, tmp_path):
     from PySide6.QtWidgets import QApplication
     from markforge.io import pdftiles
 
+    whole = frame.page_rect()
+
     def look_at(zoom: float, region: QRectF) -> float:
-        """Paint at *zoom*, wait for the squares, and say how fine they are."""
+        """Paint at *zoom*, wait, and say how sharp what is on screen is.
+
+        In pixels to the point, counting whichever of the two is answering:
+        the squares rendered at this zoom, or the small picture of the whole
+        page where that is already finer than the screen — which on a page
+        this size it is, up to about one to one. Either way what matters is
+        the number, not which of them produced it.
+        """
         canvas = QImage(300, 300, QImage.Format_ARGB32)
         for _ in range(60):
             canvas.fill(0)
@@ -708,9 +717,6 @@ def test_a_page_from_a_pdf_gets_sharper_as_it_is_zoomed_into(window, tmp_path):
             option.exposedRect = region
             frame.paint(painter, option)
             painter.end()
-            # Only the rung this zoom asks for: squares left over from the
-            # last, coarser look are still in the cache and would answer for
-            # a sharpness that is not what is being drawn now.
             rung = pdftiles.zoom_step(zoom)
             drawn = [key for key in pdftiles.TILES._tiles
                      if frame.shows(key) and key.scale == rung
@@ -718,13 +724,17 @@ def test_a_page_from_a_pdf_gets_sharper_as_it_is_zoomed_into(window, tmp_path):
                      and not pdftiles.TILES._tiles[key].isNull()]
             if drawn:
                 return rung
+            sheet = [key for key in pdftiles.TILES._sheets
+                     if frame.shows(key)
+                     and not pdftiles.TILES._sheets[key].isNull()]
+            if sheet and pdftiles._sheet_scale(whole) >= zoom:
+                return pdftiles._sheet_scale(whole)
             deadline = time.perf_counter() + 0.05
             while time.perf_counter() < deadline:
                 QApplication.processEvents()
         return 0.0
 
-    # The ladder is in powers of two, so what comes back is the rung at or
-    # above the zoom — never less than the screen is showing.
+    # Never less sharp than the screen is showing, at any zoom.
     assert look_at(1.0, QRectF(0, 0, 595, 842)) >= 1.0
     assert look_at(4.0, QRectF(100, 100, 150, 200)) >= 4.0
     assert look_at(16.0, QRectF(120, 120, 40, 50)) >= 16.0, \

@@ -97,13 +97,41 @@ def _painted_scale(painter) -> float:
     return max(across, down, 0.01)
 
 
-def _exposed_part(option, whole: QRectF) -> QRectF:
-    """The part of the page this repaint is actually for."""
+def _exposed_part(option, whole: QRectF, item=None) -> QRectF:
+    """The part of the page this repaint is actually for.
+
+    Qt says what it has exposed, and mostly that is the strip being scrolled
+    onto. Sometimes it says nothing useful — a full-viewport update, an item
+    repainted wholesale, a render driven from code rather than from a window —
+    and taking that to mean the whole sheet is how one repaint of an A1
+    drawing at eight times life size comes to ask for a thousand tiles.
+
+    So what the window can actually see is the bound, and the exposed rect
+    narrows it. Nothing off screen is ever worth a tile.
+    """
+    box = QRectF(whole)
     exposed = getattr(option, "exposedRect", None)
-    if exposed is None:
-        return QRectF(whole)
-    box = QRectF(exposed)
-    return QRectF(whole) if box.isEmpty() else box
+    if exposed is not None and not QRectF(exposed).isEmpty():
+        box = QRectF(exposed)
+    seen = _visible_part(item)
+    return box if seen is None else box.intersected(seen)
+
+
+def _visible_part(item) -> Optional[QRectF]:
+    """What the window is showing, in the item's own coordinates."""
+    if item is None:
+        return None
+    try:
+        scene = item.scene()
+        views = scene.views() if scene is not None else []
+        if not views:
+            return None
+        view = views[0]
+        on_screen = view.mapToScene(
+            view.viewport().rect()).boundingRect()
+        return item.mapRectFromScene(on_screen)
+    except Exception:                                  # noqa: BLE001
+        return None
 
 
 def _region_to_draw(wanted: QRectF, whole: QRectF, scale: float,
@@ -171,6 +199,17 @@ class PageFrame(QGraphicsObject):
         page = self.page
         return (page.pdf_key is not None and key.source == page.pdf_key
                 and key.index == page.pdf_page_index)
+
+    def wants_its_page_drawn(self) -> bool:
+        """Whether this page came from a PDF and has no picture of itself yet."""
+        page = self.page
+        if page.pdf_key is None or page.pdf_page_index is None:
+            return False
+        from ..io import pdftiles
+
+        return pdftiles.TILES.sheet(
+            page.pdf_key, b"", int(page.pdf_page_index), self.page_rect(),
+            bool(getattr(page, "pdf_annotations", True)), ask=False) is None
 
     # -- geometry ----------------------------------------------------------
     def page_rect(self) -> QRectF:
@@ -244,6 +283,14 @@ class PageFrame(QGraphicsObject):
             return drew
 
         shown_part = QRectF(looking_at).intersected(whole)
+        if shown_part.isEmpty():
+            # None of this page is on screen. Qt still comes through here for
+            # pages either side of the one being read, and asking for their
+            # pictures is how opening a forty-sheet set came to draw all forty
+            # before the window would move. They are drawn when they are
+            # scrolled to.
+            painter.restore()
+            return False
         tiles: list = []
         missing = True
         if not shown_part.isEmpty():
@@ -288,7 +335,7 @@ class PageFrame(QGraphicsObject):
             if self._background is not None:
                 painter.drawPixmap(rect, self._background,
                                    QRectF(self._background.rect()))
-            self.paint_the_pdf(painter, _exposed_part(option, rect),
+            self.paint_the_pdf(painter, _exposed_part(option, rect, self),
                                _painted_scale(painter))
             painter.restore()
         if not self.print_mode:
@@ -828,8 +875,18 @@ class DocumentScene(QGraphicsScene):
                 frame.update(box)
 
     def _a_page_arrived(self, key) -> None:
+        """One page has been drawn: show it, and let the next ones be asked for.
+
+        Only a few whole-page pictures are in hand at a time, so the ones still
+        waiting need a repaint to ask again — without it a set stops after the
+        first few and the rest stay blank until something else happens to
+        repaint them.
+        """
         for frame in self.frames:
             if frame.shows(key):
+                frame.update()
+        for frame in self.frames:
+            if frame.wants_its_page_drawn():
                 frame.update()
 
     def set_canvas_colour(self, colour: str) -> None:
