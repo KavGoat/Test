@@ -460,6 +460,15 @@ This is implementation and validation evidence only. The completion cells in
 - **No phantom toolbar menu rows:** both panel rails now have real Qt object
   titles, so the toolbar visibility menu contains named entries rather than
   blank checked slots. Evidence: `test_toolbar_popup_has_no_blank_phantom_entries`.
+- **Drawing and leader cursors:** active line, rectangle, ellipse and other
+  drawing gestures now carry the selected tool beside a precise crosshair;
+  arrow- and cloud-leader placement have their own drawn affordances and both
+  return to the ordinary cursor on Escape. The existing `_TextBase` context
+  path makes both leader kinds available consistently to every text markup
+  capable of carrying a leader. Evidence:
+  `test_active_drawing_gestures_carry_their_tool_on_the_cursor`,
+  `test_placing_a_cloud_leader_shows_a_cloud_on_the_pointer`, and the leader
+  context-menu tests in `tests/test_usability.py`.
 - **Finer canvas scrolling:** wheel scrolling uses smaller 30-pixel steps while
   native pixel/trackpad deltas remain continuous. Evidence:
   `test_wheel_scrolls_the_canvas_in_small_steps` and the canvas wheel tests.
@@ -489,3 +498,5 @@ This is implementation and validation evidence only. The completion cells in
   run cannot read or overwrite the user's real preferences. The NZ spelling
   dictionary is also preferred before a generic system dictionary, retaining
   `colour` while covering ordinary words such as `requests`.
+- **Session fuzz validation:** `python3 tools/session_fuzz.py 41 300` completed
+  300 randomised UI rounds across two pages and 20 markups with zero failures.

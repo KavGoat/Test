@@ -71,6 +71,7 @@ SIZED_SHAPES = ("rect", "ellipse")
 CELLS_MIME = "application/x-markforge-cells"
 FREE_MIN_STEP = 1.2
 _RESHAPE_CURSORS: dict[str, QCursor] = {}
+_DRAWING_CURSORS: dict[str, QCursor] = {}
 
 
 def _reshape_cursor(operation: str) -> QCursor:
@@ -103,6 +104,29 @@ def _reshape_cursor(operation: str) -> QCursor:
     painter.end()
     cursor = QCursor(pixmap, 9, 9)
     _RESHAPE_CURSORS[kind] = cursor
+    return cursor
+
+
+def drawing_cursor(icon_name: str) -> QCursor:
+    """A precise crosshair carrying the icon of the active drawing gesture."""
+    if icon_name in _DRAWING_CURSORS:
+        return _DRAWING_CURSORS[icon_name]
+    from . import icons
+
+    pixmap = QPixmap(34, 34)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    painter.drawPixmap(10, 0, icons.cursor_pixmap(icon_name, 22))
+    for pen in (QPen(QColor("#ffffff"), 3.5),
+                QPen(QColor("#1971c2"), 1.4)):
+        pen.setCapStyle(Qt.RoundCap)
+        painter.setPen(pen)
+        painter.drawLine(QPointF(1, 27), QPointF(11, 27))
+        painter.drawLine(QPointF(6, 22), QPointF(6, 32))
+    painter.end()
+    cursor = QCursor(pixmap, 6, 27)
+    _DRAWING_CURSORS[icon_name] = cursor
     return cursor
 
 
@@ -443,7 +467,7 @@ class PageView(QGraphicsView):
             self.toolFinished.emit("select")
         self._pending_arrow_leader = item
         self._mode = "idle"
-        self.setCursor(Qt.CrossCursor)
+        self.setCursor(drawing_cursor("arrow"))
         self.statusMessage.emit(
             "Click what the arrow should point at · Esc to cancel")
         self.viewport().update()
@@ -488,7 +512,7 @@ class PageView(QGraphicsView):
         if tool.key == "pan":
             return QCursor(Qt.OpenHandCursor)
         if tool.mode in (DRAG, POLY, FREE):
-            return QCursor(Qt.CrossCursor)
+            return drawing_cursor(tool.icon)
         return QCursor(Qt.PointingHandCursor)
 
     def finish_tool(self) -> None:
@@ -2032,7 +2056,7 @@ class PageView(QGraphicsView):
         if self.tool_key != "select":
             return
         if self._pending_arrow_leader is not None:
-            self.setCursor(Qt.CrossCursor)
+            self.setCursor(drawing_cursor("arrow"))
             return
         if self._pending_cloud_leader is not None:
             self.setCursor(cloud_cursor())

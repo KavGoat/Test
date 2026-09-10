@@ -1006,6 +1006,32 @@ def test_the_modifier_tools_are_reachable_from_their_actions(window):
     assert window.view.tool_key == "measure_dimension"
 
 
+def test_active_drawing_gestures_carry_their_tool_on_the_cursor(window):
+    """A line, shape and added leader should not all look like one crosshair."""
+    from markforge.items.text import CalloutItem
+
+    cursors = []
+    for key in ("line", "rect", "ellipse"):
+        window.tool_actions[key].trigger()
+        QApplication.processEvents()
+        cursor = window.view.cursor()
+        assert cursor.shape() == Qt.BitmapCursor
+        cursors.append(cursor.pixmap().cacheKey())
+    assert len(set(cursors)) == 3
+
+    window.select_tool("callout")
+    click(window.view, 200, 200)
+    click(window.view, 330, 260)
+    callout = [item for item in markups(window)
+               if isinstance(item, CalloutItem)][-1]
+    window.view.escape_everything()
+    window.view.begin_arrow_leader(callout)
+    QApplication.processEvents()
+    assert window.view.cursor().shape() == Qt.BitmapCursor
+    press_key(window.view, Qt.Key_Escape)
+    assert window.view.cursor().shape() == Qt.ArrowCursor
+
+
 def test_q_draws_a_callout_pointing_at_what_was_clicked_first(window):
     """Bluebeam's order: click what it points at, then drag out the box."""
     window.select_tool("select")

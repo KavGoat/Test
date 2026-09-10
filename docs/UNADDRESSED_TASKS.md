@@ -222,14 +222,8 @@ All four found by this audit were cleared in the same commit:
 ---
 
 ## 30. New rows still requiring work after the 2026-09-10 pass
-
-- **Active drawing cursors and generalised leader creation.** Editing cursors
-  and callout/cloud leader gestures have coverage, but the newly requested
-  affordance across every active drawing sub-state and every leader-capable
-  markup has not yet had a complete interaction walk. It remains open rather
-  than being inferred from the existing cursor tests.
 - **Snapshot broken-state sequence.** Existing snapshot creation, cancellation,
   repeat use, vector capture and Escape paths pass, but the newly reported
   reproducible corrupting sequence is not described in the task row and was
-  not reproduced in this pass. It needs either the exact gesture sequence or a
-  longer targeted UI fuzz walk; no speculative change was made.
+  not reproduced in this pass or in the 300-round seed-41 UI fuzz run. It needs
+  the exact gesture sequence; no speculative change was made.
