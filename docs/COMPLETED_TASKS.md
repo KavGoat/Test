@@ -500,3 +500,32 @@ This is implementation and validation evidence only. The completion cells in
   `colour` while covering ordinary words such as `requests`.
 - **Session fuzz validation:** `python3 tools/session_fuzz.py 41 300` completed
   300 randomised UI rounds across two pages and 20 markups with zero failures.
+
+- **Cloud drawing and callout completion:** one Cloud tool supports both the
+  dragged rectangular form and the point-by-point Cloud+ form. Enter and
+  right-click both close a point-by-point cloud; for a cloud callout either
+  gesture proceeds to placement of its text box. Evidence:
+  `test_cloud_tool_supports_dragged_and_point_by_point_clouds`,
+  `test_a_cloud_callout_can_be_drawn_corner_by_corner`, and
+  `test_a_right_click_finishes_the_cloud_before_placing_its_callout`.
+- **Format Painter roller:** the persistent Format Painter now uses an
+  independently drawn paint-roller icon rather than the earlier brush drawing,
+  without copying another application's artwork. Evidence:
+  `test_the_format_painter_carries_a_paint_roller`.
+- **Previously stale unaddressed entries:** Insert PDF retains the source PDF
+  and vector linework; Escape restores the ordinary cursor even with no
+  selection; every visible tool entry is backed by a selectable tool; the
+  rectangle/ellipse size editor is screen-aligned; and flattening is a menu
+  command rather than a cursor tool. The removed fading markup label is absent.
+  Evidence: `test_an_imported_page_keeps_the_source_pdfs_own_page`,
+  `test_escape_cancels_a_group_resize_and_restores_the_cursor`,
+  `test_every_markup_tool_is_reachable_from_the_toolbar`,
+  `test_the_size_entry_stays_upright_whichever_way_the_page_is_turned`, and the
+  flattening tests in `tests/test_usability.py`.
+- **Snapshot recolouring:** snapshots retain serialised source linework beside
+  their `QPicture`, recolour that source, and rebuild a vector recording rather
+  than rasterising it. Evidence: `test_a_snapshots_colours_can_be_changed`.
+- **Even crossing highlights:** highlighter bands use an opaque marker colour
+  in Darken composition, retaining darker drawing content while preventing a
+  separately drawn crossing from darkening the first stroke again. Evidence:
+  `test_crossing_highlighters_are_one_even_wash`.

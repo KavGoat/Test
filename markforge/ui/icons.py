@@ -390,22 +390,20 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
             painter.drawLine(QPointF(x, 16), QPointF(x, 11))
         _glyph(painter, "?", WARM, 9, True, QRectF(6, 2, 12, 10))
     elif name == "format_painter":
-        # Bluebeam's paint brush: a handle, a ferrule and bristles, held at an
-        # angle. The one icon everybody recognises for "take that look and put
-        # it on this".
+        # A paint roller is the drawing-world convention for copying a look.
+        # This is our own small line drawing rather than copied application
+        # artwork: roller at the top, bent shank, and a grip below.
         _pen(painter, INK, 1.4)
+        painter.setBrush(QBrush(QColor(MARKER)))
+        painter.drawRoundedRect(QRectF(3.0, 3.0, 14.5, 6.0), 1.5, 1.5)
         painter.setBrush(Qt.NoBrush)
-        painter.drawPolygon(QPolygonF([QPointF(14.2, 2.6), QPointF(19.4, 7.8),
-                                       QPointF(11.6, 15.6), QPointF(6.4, 10.4)]))
-        painter.setBrush(QBrush(QColor(INK)))
-        painter.drawPolygon(QPolygonF([QPointF(6.4, 10.4), QPointF(11.6, 15.6),
-                                       QPointF(9.2, 18.0), QPointF(4.0, 12.8)]))
-        # the bristles, spreading out below the ferrule
+        painter.drawLine(QPointF(17.5, 6.0), QPointF(20.0, 6.0))
+        painter.drawLine(QPointF(20.0, 6.0), QPointF(20.0, 12.0))
+        painter.drawLine(QPointF(20.0, 12.0), QPointF(13.0, 12.0))
+        painter.drawLine(QPointF(13.0, 12.0), QPointF(13.0, 15.0))
         _pen(painter, INK, 1.3)
-        painter.setBrush(Qt.NoBrush)
-        painter.drawPolyline(QPolygonF([QPointF(4.0, 12.8), QPointF(2.4, 17.4),
-                                        QPointF(4.6, 20.6), QPointF(9.2, 18.0)]))
-        painter.drawLine(QPointF(4.4, 15.4), QPointF(6.6, 17.6))
+        painter.setBrush(QBrush(QColor(INK)))
+        painter.drawRoundedRect(QRectF(10.5, 14.0, 5.0, 8.0), 1.2, 1.2)
     # -- the panel rail: one icon per panel, none of them a tool's ---------
     elif name == "panel_pages":
         _pen(painter, INK, 1.3)

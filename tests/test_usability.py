@@ -6839,16 +6839,46 @@ def test_paste_page_is_greyed_out_with_nothing_to_paste(window):
     assert paste and not any(a.isEnabled() for a in paste)
 
 
-def test_the_format_painter_carries_a_brush(window):
-    """Bluebeam's paint brush, not a letter or a box."""
+def test_the_format_painter_carries_a_paint_roller(window):
+    """The requested roller is a distinct drawn icon, not a letter or box."""
     from markforge.ui.icons import icon
 
     assert not window.act_format_painter.icon().isNull()
     assert not icon("format_painter").isNull()
     # And it is its own drawing, not the same one another button uses.
-    brush = icon("format_painter").pixmap(24, 24).toImage()
+    roller = icon("format_painter").pixmap(24, 24).toImage()
     other = icon("select").pixmap(24, 24).toImage()
-    assert brush != other
+    assert roller != other
+
+
+def test_a_right_click_finishes_the_cloud_before_placing_its_callout(window):
+    """Cloud+ accepts its promised second closing gesture as well as Enter."""
+    from PySide6.QtGui import QContextMenuEvent
+
+    window.select_tool("cloud_callout")
+    for x, y in ((120, 120), (260, 120), (260, 240)):
+        click(window.view, x, y)
+        hover(window.view, x, y)
+    assert window.view._mode == "draw_poly"
+
+    where = window.view.mapFromScene(QPointF(260, 240))
+    window.view.contextMenuEvent(
+        QContextMenuEvent(QContextMenuEvent.Mouse, where,
+                          window.view.mapToGlobal(where)))
+    QApplication.processEvents()
+
+    assert window.view._mode != "draw_poly"
+    assert window.view._pending_anchor is not None, \
+        "closing the cloud proceeds to placement of the callout box"
+
+
+def test_cloud_and_cloud_plus_are_named_where_the_drawing_choice_is_explained():
+    from markforge.ui.tools import TOOL_MAP
+
+    for key in ("cloud", "cloud_callout"):
+        hint = TOOL_MAP[key].hint
+        assert "Cloud" in hint
+        assert "Cloud+" in hint
 
 
 # ---------------------------------------------------------------------------
