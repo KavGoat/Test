@@ -88,8 +88,8 @@ TOOLS: list[Tool] = [
          "Click each vertex, double-click to close — not scaled",
          factory=_poly("polygon")),
     Tool("cloud", "Cloud", "cloud", CLOUDY, "Draw", "C",
-         "Drag a cloud round an area, or click each corner for whatever shape "
-         "the revision actually is — Enter or a right-click closes it",
+         "Drag a rectangular Cloud round an area, or click each corner for a "
+         "custom Cloud+ — Enter or a right-click closes it",
          factory=_rect("cloud")),
     Tool("highlight", "Highlight area", "highlight", DRAG, "Draw", "J",
          "Drag over anything to highlight it — it darkens what is underneath "
@@ -103,8 +103,8 @@ TOOLS: list[Tool] = [
          "Click what it points at, then click where the words go",
          factory=lambda: CalloutItem("")),
     Tool("cloud_callout", "Cloud call-out", "cloud_callout", CLOUD, "Annotate", "Shift+Q",
-         "Cloud what the comment is about, then click where the words go — "
-         "the cloud and the note come out as one thing",
+         "Drag a rectangular Cloud or click the corners of a custom Cloud+, "
+         "then click where the words go — the cloud and note are one thing",
          factory=lambda: CalloutItem("")),
     Tool("note", "Note", "note", CLICK, "Annotate", "",
          "Sticky note with a comment", factory=lambda: NoteItem("")),

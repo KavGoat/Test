@@ -815,16 +815,16 @@ class PolyItem(MarkupItem):
             # Merging the whole stroke into a single outline and filling that
             # once gives one even band, whichever way it was drawn.
             #
-            # That holds within one stroke. Two separate strokes crossing each
-            # other still double up, because each is its own markup composited
-            # over what is already on the page: measured, one band is #ffe99d
-            # and the crossing is #ffde6c. Making them read as one wash needs
-            # every highlighter on the page painted into one layer and that
-            # layer composited once, which is a change to how the page is
-            # painted rather than to how a stroke is. Recorded in
-            # docs/UNADDRESSED_TASKS.md rather than half-done here.
             painter.setPen(Qt.NoPen)
-            painter.setBrush(QBrush(self.highlight_colour()))
+            colour = self.highlight_colour()
+            # Darken with an opaque marker colour has the two properties a
+            # highlighter needs: darker drawing lines remain visible, while a
+            # second marker stroke cannot darken the first one again. The old
+            # half-transparent Multiply pass composited every markup
+            # separately, making crossings visibly darker.
+            colour.setAlpha(255)
+            painter.setCompositionMode(QPainter.CompositionMode_Darken)
+            painter.setBrush(QBrush(colour))
             painter.drawPath(self.band_path(path))
             self._paint_arrows(painter)
             return

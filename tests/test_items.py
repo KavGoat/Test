@@ -176,6 +176,21 @@ def test_cutouts_are_reclipped_when_the_host_is_resized(qapp):
     assert ellipse.clipped_holes_path().boundingRect().right() <= 40.0
 
 
+def test_crossing_highlighters_are_one_even_wash(qapp):
+    """Separate strokes do not make a darker patch where they cross."""
+    image = QImage(180, 180, QImage.Format_ARGB32)
+    image.fill(Qt.white)
+    painter = QPainter(image)
+    for points in ((QPointF(20, 90), QPointF(160, 90)),
+                   (QPointF(90, 20), QPointF(90, 160))):
+        stroke = PolyItem("highlighter", list(points))
+        stroke.paint_content(painter)
+    painter.end()
+
+    assert image.pixelColor(45, 90) == image.pixelColor(90, 90)
+    assert image.pixelColor(90, 45) == image.pixelColor(90, 90)
+
+
 def test_a_snapshots_colours_can_be_changed(window):
     """A recording cannot be asked anything, so it keeps what it was made of."""
     from PySide6.QtCore import QPointF, QRectF
