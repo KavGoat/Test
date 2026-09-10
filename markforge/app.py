@@ -7,12 +7,8 @@ import sys
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication
 
-from PySide6.QtCore import QSettings
-
 from .theme import DARK, LIGHT, stylesheet
-
-APP_NAME = "MarkForge"
-ORGANISATION = "MarkForge"
+from .settings import APP_NAME, ORGANISATION, app_settings
 
 
 def build_application(argv: list[str]) -> QApplication:
@@ -33,7 +29,7 @@ def build_application(argv: list[str]) -> QApplication:
 
 def current_theme() -> str:
     """The theme the user last chose."""
-    value = QSettings(ORGANISATION, APP_NAME).value("theme", LIGHT)
+    value = app_settings().value("theme", LIGHT)
     return DARK if str(value) == DARK else LIGHT
 
 
@@ -46,7 +42,7 @@ def apply_theme(application: QApplication, theme: str) -> None:
     set_icon_theme(theme)
     application.setPalette(palette(theme))
     application.setStyleSheet(stylesheet(theme))
-    QSettings(ORGANISATION, APP_NAME).setValue("theme", theme)
+    app_settings().setValue("theme", theme)
 
 
 def main(argv: list[str] | None = None) -> int:

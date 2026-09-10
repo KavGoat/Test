@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any, Optional
 
 from .units import Q_, format_quantity, parse_unit
@@ -259,14 +259,16 @@ class Page:
             return bool(settings.show_grid)
         return self.grid
 
-    def shows_a_header(self, settings) -> bool:
+    def shows_a_header(self, settings, index: Optional[int] = None) -> bool:
         if self.header is None:
-            return bool(settings.show_header)
+            return bool(settings.running_text(index).get("show_header",
+                                                         settings.show_header))
         return self.header
 
-    def shows_a_footer(self, settings) -> bool:
+    def shows_a_footer(self, settings, index: Optional[int] = None) -> bool:
         if self.footer is None:
-            return bool(settings.show_footer)
+            return bool(settings.running_text(index).get("show_footer",
+                                                         settings.show_footer))
         return self.footer
 
     # -- serialisation -----------------------------------------------------
@@ -353,6 +355,31 @@ class DocumentSettings:
     logo_slot: str = "header_left"
     logo_height_mm: float = 10.0
     default_author: str = ""
+    # Optional page-range overrides.  Ranges are one-based and inclusive so
+    # their saved form says the same thing as the manager: pages 1–5.
+    header_footer_sections: list[dict] = field(default_factory=list)
+
+    def running_text(self, page_index: Optional[int]) -> dict:
+        """Effective running-text settings for a zero-based page index."""
+        values = {
+            "show_header": self.show_header, "show_footer": self.show_footer,
+            "header_left": self.header_left, "header_center": self.header_center,
+            "header_right": self.header_right, "footer_left": self.footer_left,
+            "footer_center": self.footer_center, "footer_right": self.footer_right,
+        }
+        if page_index is None:
+            return values
+        page_number = page_index + 1
+        for section in self.header_footer_sections:
+            try:
+                start = int(section.get("start", 1))
+                end = int(section.get("end", start))
+            except (TypeError, ValueError):
+                continue
+            if start <= page_number <= end:
+                values.update({key: section[key] for key in values if key in section})
+                break
+        return values
 
     def to_dict(self) -> dict:
         return asdict(self)

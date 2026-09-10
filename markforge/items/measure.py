@@ -57,6 +57,11 @@ def _polygon_area(points: list[QPointF]) -> float:
     return abs(total) / 2.0
 
 
+def _path_area(path: QPainterPath) -> float:
+    """Area covered by a painter path, including clipped polygon fragments."""
+    return sum(_polygon_area(list(polygon)) for polygon in path.toFillPolygons())
+
+
 def _centroid(points: list[QPointF]) -> QPointF:
     if not points:
         return QPointF(0, 0)
@@ -418,9 +423,7 @@ class MeasureItem(MarkupItem):
             # the slab less the shafts, which is the number the concrete is
             # ordered against.
             covered = _polygon_area(points)
-            for hole in self.cutouts:
-                if len(hole) >= 3:
-                    covered -= _polygon_area(hole)
+            covered -= _path_area(self.clipped_holes_path())
             return "area", max(covered, 0.0)
         if self.kind == ANGLE and len(points) >= 3:
             a, b, c = points[0], points[1], points[2]
@@ -469,6 +472,8 @@ class MeasureItem(MarkupItem):
             filled = QPainterPath()
             filled.addPolygon(QPolygonF(self.points))
             filled.closeSubpath()
+            if self.cutouts:
+                filled = filled.subtracted(self.clipped_holes_path())
             painter.fillPath(filled, self.style.brush())
         if self.is_dimensioned():
             self._paint_dimension_line(painter)
@@ -535,7 +540,7 @@ class MeasureItem(MarkupItem):
     def _paint_arrows(self, painter: QPainter) -> None:
         if len(self.points) < 2 or self.closed:
             return
-        size = max(self.style.width * 4.5, 7.0)
+        size = max(self.style.width * 4.5, 7.0) * max(self.style.arrow_size, 0.1)
         colour = QColor(self.style.stroke)
         colour.setAlphaF(self.style.opacity)
         painter.setBrush(QBrush(colour))

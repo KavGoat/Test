@@ -5,10 +5,11 @@ panel they pinned should stay where they put it however clumsy the next drag
 is.
 """
 import pytest
-from PySide6.QtCore import QSettings, Qt
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDockWidget, QToolBar
 
 from markforge.ui.docks import PanelDock
+from markforge.settings import app_settings
 
 
 def panels(window):
@@ -154,7 +155,7 @@ def test_resetting_the_layout_puts_everything_back(window):
     assert visible == {"dock_pages", "dock_properties"}
     assert all(bar.isMovable() for bar in window.toolbars)
     assert window.tool_actions["ellipse"].isVisible()
-    assert QSettings("MarkForge", "MarkForge").value("window/state") is None
+    assert app_settings().value("window/state") is None
 
 
 # ---------------------------------------------------------------------------
@@ -263,14 +264,12 @@ def test_the_theme_is_remembered(window):
 
 def test_moving_a_panel_writes_the_layout_out_by_itself(window):
     """Not only on a clean quit: a crash should not cost the arrangement."""
-    from PySide6.QtCore import QSettings
-
-    QSettings("MarkForge", "MarkForge").remove("window/state")
+    app_settings().remove("window/state")
     window.addDockWidget(Qt.RightDockWidgetArea, panels(window)["dock_pages"])
     assert window._layout_timer.isActive(), "nothing scheduled a save"
     window._layout_timer.stop()
     window.save_layout()
-    assert QSettings("MarkForge", "MarkForge").value("window/state") is not None
+    assert app_settings().value("window/state") is not None
 
 
 def test_hiding_a_panel_schedules_a_save(window):
@@ -461,4 +460,3 @@ def test_preferences_and_shortcuts_live_under_settings(window):
     help_labels = [action.text() for action in menus["Help"].actions()]
     assert "Preferences…" not in edit
     assert "Shortcuts…" not in help_labels
-

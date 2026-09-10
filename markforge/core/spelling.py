@@ -62,17 +62,19 @@ class SpellChecker:
         return self._words
 
     def _load(self) -> set[str]:
-        for candidate in ([self._path] if self._path else []) + list(SYSTEM_LISTS):
+        # The bundled list is deliberately New Zealand English. A generic
+        # system dictionary (notably macOS's /usr/share/dict/words) may be US
+        # English and must not override spellings such as "colour". An
+        # explicitly supplied list still takes precedence for callers that
+        # intentionally choose one.
+        candidates = ([Path(self._path)] if self._path else []) + [BUNDLED]
+        candidates += [Path(path) for path in SYSTEM_LISTS]
+        for candidate in candidates:
             if candidate and os.path.exists(candidate):
                 try:
-                    return {word.lower() for word in _read(Path(candidate))}
+                    return {word.lower() for word in _read(candidate)}
                 except OSError:
                     continue
-        if BUNDLED.exists():
-            try:
-                return {word.lower() for word in _read(BUNDLED)}
-            except OSError:
-                pass
         return set()                      # no dictionary: nothing is misspelt
 
     def ready(self) -> bool:

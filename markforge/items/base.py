@@ -130,6 +130,7 @@ class Style:
     valign: str = "top"
     arrow_start: str = "none"
     arrow_end: str = "none"
+    arrow_size: float = 1.0
     blend: str = "normal"              # 'multiply' for highlighter
     corner_radius: float = 0.0
     padding: float = 4.0
@@ -724,6 +725,28 @@ class MarkupItem(QGraphicsObject):
                 path.closeSubpath()
         return path
 
+    def outline_path(self) -> QPainterPath:
+        """The current closed host outline used to clip its cut-outs.
+
+        Cut-outs keep the geometry that was drawn, but only their overlap with
+        the host is effective.  Rebuilding this path on every paint/measure is
+        what makes a hole follow a later resize instead of hanging outside it.
+        """
+        path = QPainterPath()
+        ring = self.outline_ring()
+        if len(ring) >= 3:
+            path.addPolygon(QPolygonF(ring))
+            path.closeSubpath()
+        return path
+
+    def clipped_holes_path(self) -> QPainterPath:
+        """The portion of all saved cut-outs that is still inside the host."""
+        holes = self.holes_path()
+        outline = self.outline_path()
+        if holes.isEmpty() or outline.isEmpty():
+            return QPainterPath()
+        return holes.intersected(outline)
+
     def paint_cutouts(self, painter: QPainter) -> None:
         """The holes, outlined so it is obvious what has been taken out."""
         if not self.cutouts:
@@ -734,9 +757,7 @@ class MarkupItem(QGraphicsObject):
         painter.save()
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
-        for hole in self.cutouts:
-            if len(hole) >= 3:
-                painter.drawPolygon(QPolygonF(hole))
+        painter.drawPath(self.clipped_holes_path())
         painter.restore()
 
     def cutouts_as_data(self) -> list:

@@ -23,6 +23,8 @@ from typing import Any, Optional
 
 from PySide6.QtCore import QSettings
 
+from ..settings import app_settings
+
 DEFAULTS_KEY = "markups/defaults"
 TOOLSETS_KEY = "toolsets/sets"
 MY_TOOLS = "My Tools"
@@ -42,7 +44,7 @@ CONTENT_KEYS = frozenset({
 
 
 def _settings() -> QSettings:
-    return QSettings("MarkForge", "MarkForge")
+    return app_settings()
 
 
 def default_key(item) -> str:

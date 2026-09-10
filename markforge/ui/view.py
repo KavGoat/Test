@@ -42,6 +42,10 @@ LINE_STEP = 6.0
 MIN_ZOOM = 0.08
 MAX_ZOOM = 16.0
 CLICK_SLOP = 3.0
+# Qt's default wheel step is deliberately coarse for list widgets. On a
+# drawing canvas that jumps past the detail somebody is trying to inspect, so
+# angle-based mouse wheels use a quarter pixel per angle unit (30 px/notch).
+WHEEL_SCROLL_FACTOR = 0.25
 # How near the pointer has to be, in view pixels, to catch a drawn point.
 #: What Ctrl+B, Ctrl+I and Ctrl+U do to the words being typed.
 _FORMATTING_KEYS = {
@@ -690,7 +694,8 @@ class PageView(QGraphicsView):
         pixels = event.pixelDelta()
         notches = event.angleDelta().y()
         if event.modifiers() & Qt.ShiftModifier:
-            step = pixels.y() or pixels.x() or notches
+            raw = pixels.y() or pixels.x()
+            step = raw if raw else round(notches * WHEEL_SCROLL_FACTOR)
             bar = self.horizontalScrollBar()
             bar.setValue(bar.value() - step)
             event.accept()
@@ -726,7 +731,10 @@ class PageView(QGraphicsView):
                 self.verticalScrollBar().value() - pixels.y())
             event.accept()
             return
-        super().wheelEvent(event)
+        if notches:
+            bar = self.verticalScrollBar()
+            bar.setValue(bar.value() - round(notches * WHEEL_SCROLL_FACTOR))
+        event.accept()
 
     # ------------------------------------------------------------------
     # snapping

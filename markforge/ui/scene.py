@@ -497,20 +497,21 @@ class PageFrame(QGraphicsObject):
     def _paint_running_text(self, painter: QPainter) -> None:
         settings = self.document.settings
         index = self.document.index_of(self.page)
+        running = settings.running_text(index)
         left, top, width, height = self.page.setup.content_rect_pt
         from ..core.typography import page_font
         painter.save()
         painter.setFont(page_font("", 8.0))
         painter.setPen(QPen(QColor(90, 96, 106)))
-        if self.page.shows_a_header(settings):
+        if self.page.shows_a_header(settings, index):
             # The same the other way up: a header written above the top of
             # the paper is a header nobody reads.
             # The band is as deep as it has to be for the logo, but never
             # deeper than the margin it lives in.
             band = self._band(QRectF(left, max(top - 18, 3), width, 14),
                               "header", top)
-            self._paint_three(painter, band, settings.header_left,
-                              settings.header_center, settings.header_right,
+            self._paint_three(painter, band, running["header_left"],
+                              running["header_center"], running["header_right"],
                               index, "header")
             pen = QPen(QColor(190, 196, 206))
             pen.setWidthF(0.5)
@@ -518,7 +519,7 @@ class PageFrame(QGraphicsObject):
             rule = band.bottom() + 4
             painter.drawLine(QPointF(left, rule), QPointF(left + width, rule))
             painter.setPen(QPen(QColor(90, 96, 106)))
-        if self.page.shows_a_footer(settings):
+        if self.page.shows_a_footer(settings, index):
             # A page that came in from a PDF has no margins to speak of, so
             # the footer used to be written five points below the bottom of
             # the paper, where nothing can see it. Wherever the margin puts
@@ -527,8 +528,8 @@ class PageFrame(QGraphicsObject):
             baseline = min(top + height + 5,
                            self.page.height_pt - FOOTER_DEPTH - 3)
             band = self._band(QRectF(left, baseline, width, 14), "footer", room)
-            self._paint_three(painter, band, settings.footer_left,
-                              settings.footer_center, settings.footer_right,
+            self._paint_three(painter, band, running["footer_left"],
+                              running["footer_center"], running["footer_right"],
                               index, "footer")
             pen = QPen(QColor(190, 196, 206))
             pen.setWidthF(0.5)

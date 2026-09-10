@@ -760,7 +760,8 @@ class _TextBase(MarkupItem):
                 colour.setAlphaF(self.style.opacity)
                 painter.setBrush(QBrush(colour))
                 painter.drawPath(arrow_path(tip, angle,
-                                            max(self.style.width * 4.5, 8.0),
+                                            max(self.style.width * 4.5, 8.0)
+                                            * max(self.style.arrow_size, 0.1),
                                             self.style.arrow_end))
 
     def cloud_radius_of(self, _leader) -> float:

@@ -150,7 +150,7 @@ def test_right_click_offers_a_menu_for_the_item_under_it(window):
     menu = window.build_context_menu(markups(window)[0], QPointF(160, 150))
     labels = [a.text() for a in menu.actions() if a.text()]
     assert "Cut" in labels and "Duplicate" in labels
-    assert any("offset" in label.lower() for label in labels)
+    assert "Multiple…" in labels
 
 
 def test_right_click_on_empty_paper_offers_insertions(window):
@@ -460,6 +460,84 @@ def test_a_second_window_keeps_its_own_document(window):
         QApplication.processEvents()
 
 
+def test_a_tab_can_open_a_second_view_of_the_same_document(window):
+    from PySide6.QtWidgets import QMenu
+
+    window.add_page()
+    original = window.document
+    window.open_in_new_tab()
+    menu = QMenu()
+    point = window.document_tabs.tabRect(0).center()
+    window._tab_context_menu(point, menu)
+    labels = [action.text() for action in menu.actions()]
+    assert labels == ["Open tab", "Open window"]
+
+    menu.actions()[0].trigger()
+    QApplication.processEvents()
+    assert window.document_tabs.count() == 3
+    assert window.document is original
+    assert window.scene is window._open_documents[0]["scene"]
+    assert window.undo_stack is window._open_documents[0]["undo_stack"]
+
+
+def test_a_document_tab_can_be_torn_into_a_window(window):
+    from markforge.ui.mainwindow import MainWindow
+    from PySide6.QtTest import QTest
+
+    first = window.document
+    window.open_in_new_tab()
+    second = window.document
+    before = set(MainWindow._windows)
+    bar = window.document_tabs
+    start = bar.tabRect(1).center()
+    outside = QPoint(bar.width() + 80, bar.height() + 80)
+    QTest.mousePress(bar, Qt.LeftButton, Qt.NoModifier, start)
+    QTest.mouseMove(bar, outside)
+    QTest.mouseRelease(bar, Qt.LeftButton, Qt.NoModifier, outside)
+    QApplication.processEvents()
+    made = [candidate for candidate in MainWindow._windows if candidate not in before]
+    assert len(made) == 1
+    torn = made[0]
+    torn.confirm_discard = lambda: True
+    try:
+        assert torn.document is second
+        assert window.document is first
+        assert window.document_tabs.count() == 1
+    finally:
+        torn.close()
+        torn.deleteLater()
+        QApplication.processEvents()
+
+
+def test_same_document_windows_can_sync_by_page_or_document(window):
+    window.add_page()
+    second = window.open_same_document_window()
+    second.confirm_discard = lambda: True
+    second.interactive_prompts = False
+    try:
+        QApplication.processEvents()
+        window.go_to_page(0)
+        second.go_to_page(0)
+        window.window_sync.setCurrentText("Page sync")
+        second.window_sync.setCurrentText("Page sync")
+        window.view.set_zoom(1.75)
+        QApplication.processEvents()
+        assert second.view.zoom() == pytest.approx(1.75)
+        window.go_to_page(1)
+        assert second.current_index == 0, "page sync leaves the pages independent"
+
+        window.window_sync.setCurrentText("Document sync")
+        second.window_sync.setCurrentText("Document sync")
+        window.go_to_page(0)
+        window.go_to_page(1)
+        QApplication.processEvents()
+        assert second.current_index == 1, "document sync follows the page as well"
+    finally:
+        second.close()
+        second.deleteLater()
+        QApplication.processEvents()
+
+
 def test_the_style_toolbar_goes_when_it_has_nothing_to_offer(window, qapp):
     """An empty band with one stranded button is not a toolbar.
 
@@ -534,6 +612,19 @@ def test_every_label_the_user_reads_is_one_or_two_words(window, qapp):
     # "Paste in place" is what Bluebeam calls it, so it stays as it is.
     long = [entry for entry in long if "Paste in place" not in entry]
     assert not long, "labels of more than two words:\n" + "\n".join(sorted(set(long)))
+
+
+def test_toolbar_popup_has_no_blank_phantom_entries(window):
+    menu = window.createPopupMenu()
+    try:
+        labels = [action.text().strip() for action in menu.actions()
+                  if not action.isSeparator()]
+        assert labels
+        assert all(labels)
+        assert "Left panels" in labels
+        assert "Right panels" in labels
+    finally:
+        menu.deleteLater()
 
 
 def test_one_idea_has_one_name_in_the_properties_panel(window):
@@ -7158,12 +7249,53 @@ def test_properties_only_offers_controls_the_selected_kind_can_use(window):
 
     window.select_tool("line")
     drag(window.view, 320, 120, 460, 220)
-    line = markups(window)[-1]
     window.select_tool("select")
     click(window.view, 390, 170)
     assert "Text" not in _property_groups(window)
     assert window.properties_panel.findChild(QComboBox, "lineStyle") is not None
     assert window.properties_panel.findChild(QComboBox, "hatchPattern") is None
+
+
+def test_arrowhead_size_is_independent_in_properties_and_toolbar(window):
+    from PySide6.QtWidgets import QDoubleSpinBox
+
+    window.select_tool("arrow")
+    drag(window.view, 120, 160, 300, 160)
+    arrow = markups(window)[-1]
+    window.select_tool("select")
+    arrow.setSelected(True)
+    window.refresh_selection()
+
+    properties = window.properties_panel.findChild(QDoubleSpinBox, "arrowSize")
+    assert properties is not None
+    line_width = arrow.style.width
+    properties.setValue(2.0)
+    assert arrow.style.arrow_size == pytest.approx(2.0)
+    assert arrow.style.width == pytest.approx(line_width)
+
+    assert window.arrow_size_spin.isVisibleTo(window)
+    window.arrow_size_spin.setValue(1.5)
+    assert arrow.style.arrow_size == pytest.approx(1.5)
+    assert arrow.style.width == pytest.approx(line_width)
+
+
+def test_dimension_text_size_is_editable_in_properties(window):
+    from PySide6.QtWidgets import QDoubleSpinBox
+
+    window.select_tool("measure_dimension")
+    drag(window.view, 120, 160, 300, 160)
+    dimension = markups(window)[-1]
+    window.select_tool("select")
+    dimension.setSelected(True)
+    window.refresh_selection()
+
+    control = window.properties_panel.findChild(
+        QDoubleSpinBox, "measurementTextSize")
+    assert control is not None
+    line_width = dimension.style.width
+    control.setValue(15.0)
+    assert dimension.style.font_size == pytest.approx(15.0)
+    assert dimension.style.width == pytest.approx(line_width)
 
 
 def test_an_image_does_not_get_shape_style_controls(window):
@@ -7945,9 +8077,9 @@ def test_the_hinge_stand_off_can_be_typed(window):
     groups = {g.title(): g for g in
               window.properties_panel.findChildren(QGroupBox)}
     assert "Leader" in groups
-    spins = groups["Leader"].findChildren(QDoubleSpinBox)
-    assert spins, "the stand-off should be in the panel"
-    spins[0].setValue(70)
+    stand_off = groups["Leader"].findChild(QDoubleSpinBox, "leaderStandOff")
+    assert stand_off is not None, "the stand-off should be in the panel"
+    stand_off.setValue(70)
     assert call.leaders[0].reach == pytest.approx(70, abs=0.5)
     # And the hinge is still square out of its side.
     start = call.side_point()

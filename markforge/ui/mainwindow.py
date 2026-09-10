@@ -6,9 +6,9 @@ import json
 import os
 from typing import Optional
 
-from PySide6.QtCore import (QBuffer, QEvent, QIODevice, QMimeData, QPointF,
+from PySide6.QtCore import (QBuffer, QEvent, QIODevice, QMimeData, QPoint, QPointF,
                             QRect, QRectF,
-                            QSettings, QSize, Qt, QTimer)
+                            QSize, Qt, QTimer, Signal)
 from PySide6.QtGui import (QAction, QActionGroup, QColor, QCursor, QFont, QImage,
                            QKeySequence, QPainter, QTextBlockFormat,
                            QTextCharFormat, QTextCursor, QTransform, QUndoStack)
@@ -36,6 +36,7 @@ from ..items.shapes import PolyItem, RectItem
 from ..items.snapshot import SnapshotItem
 from ..items.text import (CalloutItem, FlagItem, NoteItem, StampItem,
                           TextItem, TypewriterItem, _TextBase)
+from ..settings import app_settings
 from . import dialogs
 from .commands import DocumentStructureCommand
 from .icons import icon
@@ -46,8 +47,9 @@ from .rail import (AREAS, LEFT, RIGHT, PanelRail, RailBar, load_sides,
                    save_sides)
 from .scene import DocumentScene, detach
 from .shortcuts import COMMAND, INSERT, SYMBOL, TOOL, ShortcutManager
-from .stylecaps import (DASH, FILL, FILL_OPACITY, FONT, HATCH, OPACITY, STROKE,
-                        WIDTH, capabilities, common_capabilities)
+from .stylecaps import (ARROW_SIZE, DASH, FILL, FILL_OPACITY, FONT, HATCH,
+                        OPACITY, STROKE, WIDTH, capabilities,
+                        common_capabilities)
 from . import toolsets
 from .tools import CATEGORIES, NONE, TOOL_MAP, TOOLS, tools_in
 from .view import SIZED_SHAPES
@@ -86,6 +88,24 @@ class CenteredStatusBar(QStatusBar):
         self.addWidget(_stretch(self), 1)
         self.addWidget(widget)
         self.addWidget(_stretch(self), 1)
+
+
+class DetachableTabBar(QTabBar):
+    """A document tab bar that reports a drag released outside itself."""
+
+    detachRequested = Signal(int, QPoint)
+
+    def mousePressEvent(self, event) -> None:
+        self._dragged_tab = self.tabAt(event.position().toPoint())
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        index = getattr(self, "_dragged_tab", -1)
+        outside = index >= 0 and not self.rect().contains(event.position().toPoint())
+        self._dragged_tab = -1
+        super().mouseReleaseEvent(event)
+        if outside:
+            self.detachRequested.emit(index, event.globalPosition().toPoint())
 
 
 def _stretch(parent) -> QWidget:
@@ -144,6 +164,13 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
+        type(self)._windows.append(self)
+        self.destroyed.connect(
+            lambda *_: type(self)._windows.remove(self)
+            if self in type(self)._windows else None)
+        self._syncing_view = False
+        self._undo_clean_slot = lambda _clean: self.update_title()
+        self._connected_undo_stacks = []
         keep_the_wheel_with_the_scroller(QApplication.instance())
         self.document = Document()
         self.undo_stack = QUndoStack(self)
@@ -218,7 +245,10 @@ class MainWindow(QMainWindow):
             toolbar.visibilityChanged.connect(lambda *_: self.note_layout_change())
             toolbar.movableChanged.connect(lambda *_: self.note_layout_change())
         self._enforce_panel_limit()
-        QTimer.singleShot(0, self.view.fit_page)
+        self._initial_fit = QTimer(self)
+        self._initial_fit.setSingleShot(True)
+        self._initial_fit.timeout.connect(self.view.fit_page)
+        self._initial_fit.start(0)
 
     # ==================================================================
     # construction
@@ -234,7 +264,7 @@ class MainWindow(QMainWindow):
         # own document, canvas, undo history and page, and switching hands the
         # view a different canvas — so nothing has to be re-wired, and nothing
         # of one document can reach into another.
-        self.document_tabs = QTabBar()
+        self.document_tabs = DetachableTabBar()
         self.document_tabs.setDocumentMode(True)
         self.document_tabs.setExpanding(False)
         self.document_tabs.setTabsClosable(True)
@@ -243,6 +273,9 @@ class MainWindow(QMainWindow):
         self.document_tabs.setVisible(False)          # one document: no bar
         self.document_tabs.currentChanged.connect(self.switch_to_document)
         self.document_tabs.tabCloseRequested.connect(self.close_document_tab)
+        self.document_tabs.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.document_tabs.customContextMenuRequested.connect(self._tab_context_menu)
+        self.document_tabs.detachRequested.connect(self.tear_off_document)
         layout.addWidget(self.document_tabs)
 
         layout.addWidget(self.view, 1)
@@ -380,7 +413,7 @@ class MainWindow(QMainWindow):
         self._act("select_all", "Select all", self.select_all, "Ctrl+A")
         self._act("lock", "Lock", self.toggle_lock, "Ctrl+L",
                   tip="Lock the selection so it cannot be moved, or let it go")
-        self._act("array", "Offset copies…", self.array_selection,
+        self._act("array", "Multiple…", self.array_selection,
                   "Ctrl+Shift+D",
                   tip="Repeat the selection at a fixed spacing, any number of times")
         self._act("front", "Bring front", lambda: self.reorder("front"), "Ctrl+Shift+]",
@@ -585,7 +618,7 @@ class MainWindow(QMainWindow):
         style_bar.setObjectName("toolbar_style")
         self._style_widgets: dict[str, list] = {
             STROKE: [], FILL: [], WIDTH: [], DASH: [], FONT: [],
-            HATCH: [], OPACITY: [], FILL_OPACITY: []}
+            HATCH: [], OPACITY: [], FILL_OPACITY: [], ARROW_SIZE: []}
         self._style_widgets[STROKE].append(style_bar.addWidget(QLabel(" Line ")))
         self.stroke_button = ColorButton(self.default_style.stroke, True, "Line colour")
         self.stroke_button.colorChanged.connect(self._style_stroke)
@@ -602,6 +635,17 @@ class MainWindow(QMainWindow):
         self.width_spin.setSuffix(" pt")
         self.width_spin.valueChanged.connect(self._style_width)
         self._style_widgets[WIDTH].append(style_bar.addWidget(self.width_spin))
+        self._style_widgets[ARROW_SIZE].append(style_bar.addWidget(QLabel(" Head ")))
+        self.arrow_size_spin = QDoubleSpinBox()
+        self.arrow_size_spin.setObjectName("arrowSize")
+        self.arrow_size_spin.setRange(0.25, 4.0)
+        self.arrow_size_spin.setSingleStep(0.25)
+        self.arrow_size_spin.setValue(self.default_style.arrow_size)
+        self.arrow_size_spin.setSuffix(" ×")
+        self.arrow_size_spin.setToolTip("Arrowhead size, independent of line thickness")
+        self.arrow_size_spin.valueChanged.connect(self._style_arrow_size)
+        self._style_widgets[ARROW_SIZE].append(
+            style_bar.addWidget(self.arrow_size_spin))
         self._style_widgets[DASH].append(style_bar.addWidget(QLabel(" Dash ")))
         self.dash_combo = QComboBox()
         self.dash_combo.addItems(["solid", "dash", "dot", "dashdot", "dashdotdot"])
@@ -1064,6 +1108,13 @@ class MainWindow(QMainWindow):
         self.status_snap.setPopupMode(QToolButton.InstantPopup)
         status.addPermanentWidget(self.status_snap)
 
+        self.window_sync = QComboBox()
+        self.window_sync.setObjectName("windowSync")
+        self.window_sync.addItems(["Sync off", "Page sync", "Document sync"])
+        self.window_sync.setToolTip(
+            "Link this view with other windows showing the same document")
+        status.addPermanentWidget(self.window_sync)
+
         self.status_size = QToolButton()
         self.status_size.setAutoRaise(True)
         self.status_size.setToolTip("The paper and its margins — click to change them")
@@ -1082,10 +1133,15 @@ class MainWindow(QMainWindow):
         self.view.statusMessage.connect(self.status_hint.setText)
         self.view.cursorMoved.connect(self._show_position)
         self.view.zoomChanged.connect(self._show_zoom)
+        self.view.zoomChanged.connect(lambda _zoom: self._sync_other_windows(False))
         self.view.selectionChanged.connect(self.refresh_selection)
         self.view.toolFinished.connect(self.select_tool)
         self.view.documentEdited.connect(self.mark_modified)
         self.view.pageChanged.connect(self.follow_scrolled_page)
+        self.view.horizontalScrollBar().valueChanged.connect(
+            lambda _value: self._sync_other_windows(False))
+        self.view.verticalScrollBar().valueChanged.connect(
+            lambda _value: self._sync_other_windows(False))
         # Tool keys have to fall silent while somebody is typing, and a
         # shortcut fires before the key ever reaches the editor — so they are
         # headed off at the one point that sees every keystroke.
@@ -1096,7 +1152,14 @@ class MainWindow(QMainWindow):
         self.pages_panel.pagesReordered.connect(self.move_page)
         self.markups_panel.markupActivated.connect(self.reveal_markup)
         self.markups_panel.markupPicked.connect(self.pick_markup)
-        self.undo_stack.cleanChanged.connect(lambda _clean: self.update_title())
+        self._connect_undo_stack(self.undo_stack)
+
+    def _connect_undo_stack(self, stack) -> None:
+        """Connect this window once, without disturbing another shared view."""
+        if any(stack is seen for seen in self._connected_undo_stacks):
+            return
+        stack.cleanChanged.connect(self._undo_clean_slot)
+        self._connected_undo_stacks.append(stack)
 
     # ==================================================================
     # document lifecycle
@@ -1113,16 +1176,26 @@ class MainWindow(QMainWindow):
         # to be read before the switch puts the tool down, so it is passed in.
         return {"document": self.document, "scene": self.scene,
                 "undo_stack": self.undo_stack, "index": self.current_index,
-                "tool": tool or self.view.tool_key}
+                "tool": tool or self.view.tool_key,
+                "zoom": self.view.zoom(),
+                "hscroll": self.view.horizontalScrollBar().value(),
+                "vscroll": self.view.verticalScrollBar().value()}
 
     def _adopt_document_state(self, state: dict) -> None:
+        initial_fit = getattr(self, "_initial_fit", None)
+        if initial_fit is not None:
+            initial_fit.stop()
         self.document = state["document"]
         self.scene = state["scene"]
         self.undo_stack = state["undo_stack"]
+        self._connect_undo_stack(self.undo_stack)
         self.current_index = state["index"]
         if self.scene is not None:
             self.view.setScene(self.scene)
         self.rebuild_scenes()
+        self.view.set_zoom(float(state.get("zoom", self.view.zoom())))
+        self.view.horizontalScrollBar().setValue(int(state.get("hscroll", 0)))
+        self.view.verticalScrollBar().setValue(int(state.get("vscroll", 0)))
         self.select_tool(state.get("tool") or "select")
         self.refresh_lists()
         self.update_title()
@@ -1143,11 +1216,18 @@ class MainWindow(QMainWindow):
         else:
             self._open_documents[self.document_tabs.currentIndex()] = \
                 self._current_document_state(held)
-        stack = QUndoStack(self)
-        stack.cleanChanged.connect(lambda _clean: self.update_title())
+        same_document = document is self.document
+        stack = self.undo_stack if same_document else QUndoStack(self)
+        if not same_document:
+            self._connect_undo_stack(stack)
         fresh = {"document": document if document is not None else Document(),
-                 "scene": None, "undo_stack": stack, "index": 0,
-                 "tool": "select"}
+                 "scene": self.scene if same_document else None,
+                 "undo_stack": stack,
+                 "index": self.current_index if same_document else 0,
+                 "tool": self.view.tool_key if same_document else "select",
+                 "zoom": self.view.zoom(),
+                 "hscroll": self.view.horizontalScrollBar().value(),
+                 "vscroll": self.view.verticalScrollBar().value()}
         self._open_documents.append(fresh)
         self.document_tabs.blockSignals(True)
         where = self.document_tabs.addTab(self._tab_title(fresh["document"]))
@@ -1156,6 +1236,48 @@ class MainWindow(QMainWindow):
         self.document_tabs.setVisible(self.document_tabs.count() > 1)
         self._adopt_document_state(fresh)
         return where
+
+    def open_same_document_tab(self, index: Optional[int] = None) -> int:
+        """Open another independently positioned view of a document."""
+        if index is not None and 0 <= index < len(self._open_documents):
+            self.switch_to_document(index)
+        return self.open_in_new_tab(self.document)
+
+    def _tab_context_menu(self, point: QPoint, menu=None):
+        """Commands belonging to the document under the pointer."""
+        index = self.document_tabs.tabAt(point)
+        if index < 0:
+            return None
+        supplied = menu is not None
+        menu = menu or QMenu(self.document_tabs)
+        menu.addAction("Open tab", lambda: self.open_same_document_tab(index))
+        menu.addAction("Open window", lambda: self.open_same_document_window(index))
+        if not supplied:
+            menu.exec(self.document_tabs.mapToGlobal(point))
+        return menu
+
+    def open_same_document_window(self, index: Optional[int] = None) -> "MainWindow":
+        """Show this document in another window without copying its contents."""
+        state = (self._open_documents[index]
+                 if index is not None and 0 <= index < len(self._open_documents)
+                 else self._current_document_state())
+        window = self.open_new_window()
+        window._adopt_document_state(dict(state))
+        return window
+
+    def tear_off_document(self, index: int, global_point: QPoint = QPoint()) -> None:
+        """Move a tab into a new independent application window."""
+        if not (0 <= index < len(self._open_documents)):
+            return
+        state = self._open_documents[index]
+        window = self.open_new_window()
+        window._adopt_document_state(dict(state))
+        if not global_point.isNull():
+            window.move(global_point)
+        self.close_document_tab(index)
+        if all(state["undo_stack"] is not held["undo_stack"]
+               for held in self._open_documents):
+            state["undo_stack"].setParent(window)
 
     def switch_to_document(self, index: int) -> None:
         """Show the document on that tab, putting this one aside as it is."""
@@ -1200,10 +1322,6 @@ class MainWindow(QMainWindow):
         stamped so a late write from one cannot land on the other's.
         """
         window = type(self)()
-        MainWindow._windows.append(window)
-        window.destroyed.connect(
-            lambda *_: MainWindow._windows.remove(window)
-            if window in MainWindow._windows else None)
         # Offset from this one, so the new window is not exactly on top of the
         # old one and apparently missing.
         here = self.geometry()
@@ -1415,11 +1533,9 @@ class MainWindow(QMainWindow):
         # Every open document has an undo stack of its own, and all of them
         # report a clean change back to this window. Leaving the ones behind
         # other tabs connected means they call a window that has gone.
-        stacks = [self.undo_stack] + [state["undo_stack"]
-                                      for state in self._open_documents]
-        for stack in stacks:
+        for stack in self._connected_undo_stacks:
             try:
-                stack.cleanChanged.disconnect()
+                stack.cleanChanged.disconnect(self._undo_clean_slot)
             except (RuntimeError, TypeError):
                 pass
         event.accept()
@@ -1527,6 +1643,39 @@ class MainWindow(QMainWindow):
         self.pages_panel.list.blockSignals(False)
         self.refresh_scale_label()
         self.refresh_selection()
+        self._sync_other_windows(True)
+
+    def _sync_other_windows(self, document_change: bool) -> None:
+        """Copy this viewport to opted-in windows showing the same document."""
+        if self._syncing_view or not hasattr(self, "window_sync"):
+            return
+        mode = self.window_sync.currentIndex()
+        if mode == 0:
+            return
+        source_top = self.view._page_top_value(self.current_index)
+        page_offset = self.view.verticalScrollBar().value() - source_top
+        for other in list(type(self)._windows):
+            if other is self:
+                continue
+            try:
+                if other.document is not self.document or other.window_sync.currentIndex() == 0:
+                    continue
+                other._syncing_view = True
+                if document_change and mode == 2 and other.current_index != self.current_index:
+                    other.go_to_page(self.current_index)
+                other.view.set_zoom(self.view.zoom())
+                other.view.horizontalScrollBar().setValue(
+                    self.view.horizontalScrollBar().value())
+                other.view.verticalScrollBar().setValue(
+                    round(other.view._page_top_value(other.current_index)
+                          + page_offset))
+            except RuntimeError:
+                continue
+            finally:
+                try:
+                    other._syncing_view = False
+                except RuntimeError:
+                    pass
 
     def eventFilter(self, watched, event) -> bool:
         """Let the editor keep keys that would otherwise run global commands.
@@ -1569,7 +1718,7 @@ class MainWindow(QMainWindow):
 
     def reset_layout(self) -> None:
         """Put every panel and toolbar back where it started."""
-        settings = QSettings(ORGANISATION, APP_NAME)
+        settings = app_settings()
         for key in ("window/geometry", "window/state", "panels/pinned",
                     "panels/collapsed", "toolbars/locked", "toolbars/tools"):
             settings.remove(key)
@@ -1626,7 +1775,7 @@ class MainWindow(QMainWindow):
         the settings, so a pending one can tell it has been overtaken and stay
         out of the way.
         """
-        settings = QSettings(ORGANISATION, APP_NAME)
+        settings = app_settings()
         try:
             stored = int(settings.value("window/stamp", 0))
         except (TypeError, ValueError):
@@ -1642,7 +1791,7 @@ class MainWindow(QMainWindow):
         timer = getattr(self, "_layout_timer", None)
         if timer is not None:
             timer.stop()
-        settings = QSettings(ORGANISATION, APP_NAME)
+        settings = app_settings()
         try:
             stamp = int(settings.value("window/stamp", 0)) + 1
         except (TypeError, ValueError):
@@ -1661,7 +1810,7 @@ class MainWindow(QMainWindow):
         settings.sync()
 
     def restore_layout(self) -> None:
-        settings = QSettings(ORGANISATION, APP_NAME)
+        settings = app_settings()
         # What this window has caught up with. A delayed save from a window
         # still holding an older arrangement checks this before writing.
         try:
@@ -1704,6 +1853,7 @@ class MainWindow(QMainWindow):
         self.pages_panel.list.setCurrentRow(index)
         self.pages_panel.list.blockSignals(False)
         self.refresh_scale_label()
+        self._sync_other_windows(True)
 
     def _structure_snapshot(self) -> dict:
         return {"pages": [page.to_dict() for page in self.document.pages],
@@ -2592,6 +2742,7 @@ class MainWindow(QMainWindow):
         controls = ((self.stroke_button, active.style.stroke, "set_color"),
                     (self.fill_button, active.style.fill, "set_color"),
                     (self.width_spin, active.style.width, "setValue"),
+                    (self.arrow_size_spin, active.style.arrow_size, "setValue"),
                     (self.dash_combo, active.style.line_style, "setCurrentText"),
                     (self.font_spin, active.style.font_size, "setValue"),
                     (self.hatch_combo, active.style.hatch or "plain",
@@ -2652,6 +2803,11 @@ class MainWindow(QMainWindow):
     def _style_width(self, value: float) -> None:
         self._style_change(WIDTH, lambda style: setattr(style, "width", value),
                            "Line width")
+
+    def _style_arrow_size(self, value: float) -> None:
+        self._style_change(
+            ARROW_SIZE, lambda style: setattr(style, "arrow_size", value),
+            "Arrowhead size")
 
     def _style_dash(self, value: str) -> None:
         self._style_change(DASH, lambda style: setattr(style, "line_style", value),
@@ -2789,6 +2945,7 @@ class MainWindow(QMainWindow):
         if isinstance(item, MeasureItem):
             item.style.width = style.width
             item.style.line_style = style.line_style
+            item.style.arrow_size = style.arrow_size
             return
         if style.stroke:
             item.style.stroke = style.stroke
@@ -3685,7 +3842,7 @@ class MainWindow(QMainWindow):
         self.view.commit_snapshot("Align markups")
 
     def array_selection(self) -> None:
-        """Move or copy the selection by an exact offset, any number of times."""
+        """Move or copy the selection at exact spacing, any number of times."""
         items = [i for i in self.selected_items() if self.view.editable(i)]
         if not items:
             self.status_hint.setText("Select something to move or duplicate first.")
@@ -3962,7 +4119,8 @@ class MainWindow(QMainWindow):
             self._held_style["callout"] = {
                 key: getattr(style, key) for key in
                 ("arrow_start", "arrow_end", "font_family", "font_size",
-                 "bold", "italic", "underline", "text_color", "align", "valign")
+                 "arrow_size", "bold", "italic", "underline", "text_color",
+                 "align", "valign")
             }
         brush = icon("format_painter").pixmap(24, 24)
         self.view.setCursor(QCursor(brush, 2, 22))
@@ -5050,4 +5208,3 @@ class MainWindow(QMainWindow):
 
     def show_about(self) -> None:
         dialogs.AboutDialog(self).exec()
-

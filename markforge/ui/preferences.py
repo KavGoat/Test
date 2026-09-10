@@ -15,6 +15,8 @@ from dataclasses import dataclass, fields
 
 from PySide6.QtCore import QSettings
 
+from ..settings import app_settings
+
 PREFIX = "preferences/"
 
 # What the wheel does with no modifier held.
@@ -59,7 +61,7 @@ _current: Preferences | None = None
 
 
 def _settings() -> QSettings:
-    return QSettings("MarkForge", "MarkForge")
+    return app_settings()
 
 
 def _as_bool(value, fallback: bool) -> bool:

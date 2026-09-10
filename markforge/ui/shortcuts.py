@@ -13,6 +13,7 @@ from typing import Optional
 from PySide6.QtCore import QObject, QSettings, Qt, Signal
 from PySide6.QtGui import QKeySequence
 
+from ..settings import app_settings
 from .tools import TOOLS
 
 TOOL = "tool"
@@ -231,7 +232,7 @@ class ShortcutManager(QObject):
 
     # -- persistence -------------------------------------------------------
     def _settings(self) -> QSettings:
-        return QSettings("MarkForge", "MarkForge")
+        return app_settings()
 
     def load(self) -> None:
         settings = self._settings()

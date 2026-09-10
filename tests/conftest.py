@@ -18,6 +18,9 @@ for _variable in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME",
     os.environ[_variable] = os.path.join(_SANDBOX, _variable.lower())
     os.makedirs(os.environ[_variable], exist_ok=True)
 
+os.environ["MARKFORGE_SETTINGS_FILE"] = os.path.join(_SANDBOX,
+                                                     "markforge-tests.ini")
+
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
 
@@ -30,13 +33,10 @@ def settings_sandbox(tmp_path_factory):
     sessions. Without this, a test that rebinds a key would change what every
     later test — and the developer's own copy of the app — starts with.
     """
-    from PySide6.QtCore import QSettings
-
     folder = os.environ["XDG_CONFIG_HOME"]
-    QSettings.setDefaultFormat(QSettings.IniFormat)
-    QSettings.setPath(QSettings.IniFormat, QSettings.UserScope, folder)
-    QSettings.setPath(QSettings.IniFormat, QSettings.SystemScope, folder)
-    written = QSettings("MarkForge", "MarkForge").fileName()
+    from markforge.settings import app_settings
+
+    written = app_settings().fileName()
     assert written.startswith(_SANDBOX), (
         f"the suite is writing its settings to {written}, which is somebody's "
         "real ones")
@@ -81,9 +81,9 @@ def fresh_settings(settings_sandbox):
     A test that rebinds a key or moves a panel saves it, and the next window
     would open with that arrangement. Each test gets a clean slate instead.
     """
-    from PySide6.QtCore import QSettings
+    from markforge.settings import app_settings
 
-    settings = QSettings("MarkForge", "MarkForge")
+    settings = app_settings()
     settings.clear()
     settings.sync()
     yield

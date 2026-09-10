@@ -1638,6 +1638,7 @@ class PropertiesPanel(QScrollArea):
                 lambda value: self._apply(
                     lambda i: setattr(i.style, "arrow_end", value), "Arrow head"))
             form.addRow("Arrow head", head)
+            self._add_arrow_size(form, first)
             shape = QComboBox()
             shape.addItems(["Box", "Cloud"])
             shape.setCurrentIndex(1 if first.shape_kind == "cloud" else 0)
@@ -1648,6 +1649,7 @@ class PropertiesPanel(QScrollArea):
             form.addRow("Drawn as", shape)
             if first.leaders and not first.clouds_a_region():
                 stand_off = QDoubleSpinBox()
+                stand_off.setObjectName("leaderStandOff")
                 stand_off.setRange(first.LEAST_REACH, 400.0)
                 stand_off.setDecimals(0)
                 stand_off.setSuffix(" pt")
@@ -1681,6 +1683,21 @@ class PropertiesPanel(QScrollArea):
         end.currentTextChanged.connect(
             lambda value: self._apply(lambda i: setattr(i.style, "arrow_end", value), "Arrow"))
         form.addRow("End", end)
+        self._add_arrow_size(form, first)
+
+    def _add_arrow_size(self, form, first: MarkupItem) -> None:
+        size = QDoubleSpinBox()
+        size.setObjectName("arrowSize")
+        size.setRange(0.25, 4.0)
+        size.setSingleStep(0.25)
+        size.setValue(first.style.arrow_size)
+        size.setSuffix(" ×")
+        size.setToolTip("Arrowhead size, independent of line thickness")
+        size.valueChanged.connect(
+            lambda value: self._slide(
+                lambda item: setattr(item.style, "arrow_size", value),
+                "Arrowhead size"))
+        form.addRow("Head size", size)
 
     def _add_size(self, item) -> None:
         """What a rectangle or an ellipse measures, and whether it says so.
@@ -1791,6 +1808,18 @@ class PropertiesPanel(QScrollArea):
         font.setBold(True)
         value.setFont(font)
         form.addRow("Value", value)
+
+        text_size = QDoubleSpinBox()
+        text_size.setObjectName("measurementTextSize")
+        text_size.setRange(3.0, 96.0)
+        text_size.setSingleStep(0.5)
+        text_size.setValue(item.style.font_size)
+        text_size.setSuffix(" pt")
+        text_size.valueChanged.connect(
+            lambda size: self._slide(
+                lambda selected: setattr(selected.style, "font_size", size),
+                "Measurement text size"))
+        form.addRow("Text size", text_size)
 
         subject = QLineEdit(item.subject)
         subject.setToolTip("Measurements sharing a subject are totalled in the markups list")

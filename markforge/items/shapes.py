@@ -245,7 +245,8 @@ class RectItem(MarkupItem):
                                      self.style.corner_radius)
             else:
                 solid.addRect(rect)
-            painter.fillPath(solid.subtracted(self.holes_path()), self.style.brush())
+            painter.fillPath(solid.subtracted(self.clipped_holes_path()),
+                             self.style.brush())
             painter.setBrush(Qt.NoBrush)
         if self.kind == "ellipse":
             painter.drawEllipse(rect)
@@ -282,6 +283,19 @@ class RectItem(MarkupItem):
             return [rect.topLeft(), rect.topRight(),
                     rect.bottomRight(), rect.bottomLeft()]
         return []
+
+    def outline_path(self) -> QPainterPath:
+        """Use the exact visible outline when clipping holes."""
+        path = QPainterPath()
+        rect = self._rect.normalized()
+        if self.kind == "ellipse":
+            path.addEllipse(rect)
+        elif self.kind == "rect" and self.style.corner_radius > 0:
+            path.addRoundedRect(rect, self.style.corner_radius,
+                                self.style.corner_radius)
+        elif self.kind in ("rect", "cloud"):
+            path.addRect(rect)
+        return path
 
     def _paint_size(self, painter: QPainter, rect: QRectF) -> None:
         """Write the size under the rectangle, the way a dimension is written.
@@ -791,7 +805,7 @@ class PolyItem(MarkupItem):
             filled = QPainterPath(path)
             filled.closeSubpath()
             if self.cutouts:
-                filled = filled.subtracted(self.holes_path())
+                filled = filled.subtracted(self.clipped_holes_path())
             painter.fillPath(filled, self.style.brush())
         if self.kind == "highlighter":
             # A highlighter lays down one flat band of ink. Stroking the path
@@ -824,6 +838,14 @@ class PolyItem(MarkupItem):
         """A closed polygon encloses something; an open polyline does not."""
         return list(self.points) if self.closed and len(self.points) >= 3 else []
 
+    def outline_path(self) -> QPainterPath:
+        """The built polygon, including its edited curved sides."""
+        if not self.closed or len(self.points) < 3:
+            return QPainterPath()
+        path = self.build_path()
+        path.closeSubpath()
+        return path
+
     def highlight_colour(self) -> QColor:
         colour = QColor(self.style.stroke or "#ffd43b")
         colour.setAlphaF(max(0.0, min(1.0, self.style.opacity)))
@@ -842,7 +864,7 @@ class PolyItem(MarkupItem):
     def _paint_arrows(self, painter: QPainter) -> None:
         if len(self.points) < 2:
             return
-        size = max(self.style.width * 4.0, 7.0)
+        size = max(self.style.width * 4.0, 7.0) * max(self.style.arrow_size, 0.1)
         colour = QColor(self.style.stroke or "#000000")
         colour.setAlphaF(self.style.opacity)
         painter.setBrush(QBrush(colour))

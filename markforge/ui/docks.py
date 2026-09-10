@@ -7,11 +7,13 @@ along with a layout that is remembered between sessions.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QSettings, QSize, Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QIcon, QPainter, QPen, QPixmap, QColor, QPolygonF
 from PySide6.QtCore import QPointF, QRectF
 from PySide6.QtWidgets import (QDockWidget, QHBoxLayout, QLabel, QSizePolicy,
                                QToolButton, QWidget)
+
+from ..settings import app_settings
 
 PINNED_KEY = "panels/pinned"
 COLLAPSED_KEY = "panels/collapsed"
@@ -236,7 +238,7 @@ def _names(value) -> set[str]:
 
 def save_panel_state(docks: list[PanelDock]) -> None:
     """Remember which panels are pinned and which are rolled up."""
-    settings = QSettings("MarkForge", "MarkForge")
+    settings = app_settings()
     settings.setValue(PINNED_KEY,
                       [dock.objectName() for dock in docks if dock.pinned])
     settings.setValue(COLLAPSED_KEY,
@@ -244,7 +246,7 @@ def save_panel_state(docks: list[PanelDock]) -> None:
 
 
 def load_panel_state(docks: list[PanelDock]) -> None:
-    settings = QSettings("MarkForge", "MarkForge")
+    settings = app_settings()
     pinned = _names(settings.value(PINNED_KEY, []))
     collapsed = _names(settings.value(COLLAPSED_KEY, []))
     for dock in docks:

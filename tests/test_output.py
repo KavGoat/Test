@@ -207,6 +207,33 @@ def test_the_page_number_and_date_reach_the_paper(window, tmp_path):
     assert datetime.now().strftime("%Y-%m-%d") in text
 
 
+def test_header_and_footer_wording_can_vary_by_page_section(window, tmp_path):
+    settings = window.document.settings
+    settings.show_header = True
+    settings.header_left = "General"
+    settings.header_footer_sections = [
+        {"start": 1, "end": 1, "show_header": True,
+         "show_footer": False, "header_left": "Cover"},
+        {"start": 2, "end": 3, "show_header": True,
+         "show_footer": True, "header_left": "Drawings",
+         "footer_right": "Sheet {page}"},
+    ]
+    window.add_page()
+    window.add_page()
+
+    pdf = _pdf(window.document, tmp_path)
+    first = pdf.document.getAllText(0).text()
+    second = pdf.document.getAllText(1).text()
+    assert "Cover" in first
+    assert "Drawings" not in first
+    assert "Drawings" in second
+    assert "Sheet 2" in second
+
+    reopened = type(window.document)()
+    reopened.load_dict(window.document.to_dict())
+    assert reopened.settings.header_footer_sections == settings.header_footer_sections
+
+
 def test_a_logo_is_printed_in_the_slot_it_was_put_in(window):
     settings = window.document.settings
     settings.logo_key = _logo(window.document)

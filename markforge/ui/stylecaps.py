@@ -6,7 +6,7 @@ from ..items.measure import MeasureItem
 from ..items.media import ImageItem
 from ..items.shapes import PolyItem, RectItem
 from ..items.snapshot import SnapshotItem
-from ..items.text import _TextBase
+from ..items.text import CalloutItem, _TextBase
 
 STROKE = "stroke"
 FILL = "fill"
@@ -16,6 +16,7 @@ HATCH = "hatch"
 OPACITY = "opacity"
 FILL_OPACITY = "fill_opacity"
 FONT = "font"
+ARROW_SIZE = "arrow_size"
 
 
 def capabilities(item, for_default: bool = False) -> set[str]:
@@ -40,14 +41,17 @@ def capabilities(item, for_default: bool = False) -> set[str]:
     if isinstance(item, ContentsItem):
         return {STROKE, FILL, WIDTH, FONT, OPACITY, FILL_OPACITY}
     if isinstance(item, _TextBase):
-        return {STROKE, FILL, WIDTH, DASH, FONT, OPACITY, FILL_OPACITY}
+        result = {STROKE, FILL, WIDTH, DASH, FONT, OPACITY, FILL_OPACITY}
+        if isinstance(item, CalloutItem):
+            result.add(ARROW_SIZE)
+        return result
     if isinstance(item, MeasureItem):
-        result = {STROKE, WIDTH, DASH, FONT, OPACITY}
+        result = {STROKE, WIDTH, DASH, FONT, OPACITY, ARROW_SIZE}
         if getattr(item, "closed", False):
             result |= {FILL, FILL_OPACITY}
         return result
     if isinstance(item, PolyItem):
-        result = {STROKE, WIDTH, DASH, OPACITY}
+        result = {STROKE, WIDTH, DASH, OPACITY, ARROW_SIZE}
         if getattr(item, "closed", False) or item.kind in ("polygon", "cloud"):
             result |= {FILL, HATCH, FILL_OPACITY}
         return result
@@ -65,4 +69,3 @@ def common_capabilities(items) -> set[str]:
     for item in items[1:]:
         common &= capabilities(item)
     return common
-

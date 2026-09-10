@@ -5,7 +5,7 @@ the product context, code map, validation approach and task-tracking rules
 needed to work safely without re-reading earlier chat.
 
 - Repository: `KavGoat/Test`
-- Branch: **`claude/markforge-python`** — all work goes here. Never push to
+- Branch: **`claude/markforge-mupdf-pdf-handling-vpyj1t`** — all work goes here. Never push to
   another branch without being asked.
 - The living task list: **`docs/tasklist.md`** — read it, work from it, keep it
   updated. `docs/tasklist.xlsx` is the user's companion status sheet: column A
@@ -271,7 +271,7 @@ in a state somebody else could pick up from, because they may have to.
 
 - Commit and push **continuously** — every completed piece of work, not at the
   end. The container is ephemeral; unpushed work is lost work.
-- `git push -u origin claude/markforge-python`
+- `git push -u origin claude/markforge-mupdf-pdf-handling-vpyj1t`
 - Commit messages: a short title, then prose explaining **what was wrong and
   why the new behaviour is right**. The user reads them. Look at the recent log
   for the register.

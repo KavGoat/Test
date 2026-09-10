@@ -58,8 +58,8 @@ def source_bytes(document) -> Optional[bytes]:
         # somebody flattened into the page — has to be painted, and painting
         # means writing the page again. Then this is not an update to a file;
         # it is a new file, and pdfbase assembles it.
-        if page.shows_a_grid(settings) or page.shows_a_header(settings) \
-                or page.shows_a_footer(settings):
+        if page.shows_a_grid(settings) or page.shows_a_header(settings, index) \
+                or page.shows_a_footer(settings, index):
             return None
         if page.frame is not None and any(item.flattened
                                           for item in page.frame.markups()):

@@ -300,7 +300,8 @@ def test_the_wheel_can_be_set_to_scroll_instead(window):
         bar = window.view.verticalScrollBar()
         before = bar.value()
         wheel(window.view, -240)
-        assert bar.value() > before
+        travelled = bar.value() - before
+        assert 0 < travelled <= 60
         assert window.view.zoom() == 1.0
     finally:
         prefs.wheel = was

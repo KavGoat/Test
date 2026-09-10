@@ -157,6 +157,25 @@ def test_a_dimensions_value_carries_a_control_dot(qapp):
     assert area.control_dots() == set(), "an area has no dimension line to adjust"
 
 
+def test_cutouts_are_reclipped_when_the_host_is_resized(qapp):
+    """Only the part still inside a resized area is painted and deducted."""
+    area = MeasureItem("area", [QPointF(0, 0), QPointF(100, 0),
+                                QPointF(100, 100), QPointF(0, 100)])
+    area.cutouts = [[QPointF(50, 25), QPointF(150, 25),
+                     QPointF(150, 75), QPointF(50, 75)]]
+    assert area.raw_measure() == ("area", 7500.0)
+
+    area.set_local_rect(QRectF(0, 0, 75, 100))
+    clipped = area.clipped_holes_path().boundingRect()
+    assert clipped.right() <= 75.0
+    assert area.raw_measure() == ("area", 6250.0)
+
+    ellipse = RectItem("ellipse", QRectF(0, 0, 100, 100))
+    ellipse.cutouts = area.cutouts
+    ellipse.set_local_rect(QRectF(0, 0, 40, 100))
+    assert ellipse.clipped_holes_path().boundingRect().right() <= 40.0
+
+
 def test_a_snapshots_colours_can_be_changed(window):
     """A recording cannot be asked anything, so it keeps what it was made of."""
     from PySide6.QtCore import QPointF, QRectF

@@ -12,10 +12,12 @@ is decided here.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QMimeData, QPoint, QSettings, Qt, Signal
+from PySide6.QtCore import QMimeData, QPoint, Qt, Signal
 from PySide6.QtGui import QDrag, QPainter, QPen, QColor
 from PySide6.QtWidgets import (QSizePolicy, QToolBar, QToolButton, QVBoxLayout,
                                QWidget)
+
+from ..settings import app_settings
 
 SIDES_KEY = "panels/sides"
 MIME = "application/x-markforge-panel"
@@ -149,7 +151,7 @@ class RailBar(QToolBar):
     """
 
     def __init__(self, rail: PanelRail, parent=None):
-        super().__init__(parent)
+        super().__init__(f"{rail.side.title()} panels", parent)
         self.setObjectName(f"rail_{rail.side}")
         self.setMovable(False)
         self.setFloatable(False)
@@ -160,7 +162,7 @@ class RailBar(QToolBar):
 
 def load_sides(default: dict[str, str]) -> dict[str, str]:
     """Which side each panel was last on."""
-    settings = QSettings("MarkForge", "MarkForge")
+    settings = app_settings()
     stored = settings.value(SIDES_KEY, None)
     sides = dict(default)
     if isinstance(stored, dict):
@@ -171,4 +173,4 @@ def load_sides(default: dict[str, str]) -> dict[str, str]:
 
 
 def save_sides(sides: dict[str, str]) -> None:
-    QSettings("MarkForge", "MarkForge").setValue(SIDES_KEY, dict(sides))
+    app_settings().setValue(SIDES_KEY, dict(sides))

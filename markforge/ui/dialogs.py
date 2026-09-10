@@ -695,6 +695,35 @@ class DocumentPropertiesDialog(QDialog):
         hint.setStyleSheet("color:#5a6270;")
         running_form.addRow(hint)
 
+        sections = QGroupBox("Sections")
+        sections_layout = QVBoxLayout(sections)
+        self.sections = QTableWidget(0, 9)
+        self.sections.setObjectName("headerFooterSections")
+        self.sections.setHorizontalHeaderLabels([
+            "Pages", "Header", "Left", "Centre", "Right",
+            "Footer", "Left", "Centre", "Right",
+        ])
+        self.sections.setToolTip(
+            "The first matching page range overrides the all-page wording")
+        self.sections.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.sections.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.sections.horizontalHeader().setSectionResizeMode(6, QHeaderView.Stretch)
+        for section in settings.header_footer_sections:
+            self._add_running_section(section)
+        section_buttons = QHBoxLayout()
+        add_section = QPushButton("Add")
+        add_section.setToolTip("Add a page range with its own header and footer")
+        add_section.clicked.connect(self._add_running_section)
+        remove_section = QPushButton("Remove")
+        remove_section.setToolTip("Remove the selected section")
+        remove_section.clicked.connect(self._remove_running_section)
+        section_buttons.addWidget(add_section)
+        section_buttons.addWidget(remove_section)
+        section_buttons.addStretch(1)
+        sections_layout.addWidget(self.sections)
+        sections_layout.addLayout(section_buttons)
+        running_form.addRow(sections)
+
         logo_box = QGroupBox("Logo")
         logo_form = QFormLayout(logo_box)
         self.logo_key = settings.logo_key
@@ -771,6 +800,54 @@ class DocumentPropertiesDialog(QDialog):
         self.logo_name.setText(os.path.basename(getattr(self, "_logo_path", ""))
                                or ("in the document" if self.logo_key else "none"))
 
+    def _add_running_section(self, section=None) -> None:
+        """Add an editable page-range override to the manager."""
+        if isinstance(section, bool):  # clicked(bool)
+            section = None
+        section = section or {}
+        row = self.sections.rowCount()
+        self.sections.insertRow(row)
+        start = int(section.get("start", 1))
+        end = int(section.get("end", min(len(self.document.pages), start)))
+        self.sections.setItem(row, 0, QTableWidgetItem(
+            str(start) if start == end else f"{start}-{end}"))
+        keys = ("show_header", "header_left", "header_center", "header_right",
+                "show_footer", "footer_left", "footer_center", "footer_right")
+        defaults = self.document.settings.running_text(None)
+        for column, key in enumerate(keys, 1):
+            if key.startswith("show_"):
+                item = QTableWidgetItem()
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                item.setCheckState(Qt.Checked if section.get(key, defaults[key])
+                                   else Qt.Unchecked)
+            else:
+                item = QTableWidgetItem(str(section.get(key, defaults[key])))
+            self.sections.setItem(row, column, item)
+
+    def _remove_running_section(self) -> None:
+        row = self.sections.currentRow()
+        if row >= 0:
+            self.sections.removeRow(row)
+
+    def _running_sections(self) -> list[dict]:
+        """Read and validate the section rows as one-based inclusive ranges."""
+        result = []
+        maximum = max(len(self.document.pages), 1)
+        keys = ("show_header", "header_left", "header_center", "header_right",
+                "show_footer", "footer_left", "footer_center", "footer_right")
+        for row in range(self.sections.rowCount()):
+            text = (self.sections.item(row, 0).text() or "").strip()
+            indices = pdfio.parse_page_range(text, maximum)
+            if not indices:
+                continue
+            section = {"start": min(indices) + 1, "end": max(indices) + 1}
+            for column, key in enumerate(keys, 1):
+                item = self.sections.item(row, column)
+                section[key] = (item.checkState() == Qt.Checked if key.startswith("show_")
+                                else item.text())
+            result.append(section)
+        return result
+
     def _choose_logo(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self, "Choose a logo", "",
@@ -805,6 +882,7 @@ class DocumentPropertiesDialog(QDialog):
             field.text() for field in self.header_fields)
         settings.footer_left, settings.footer_center, settings.footer_right = (
             field.text() for field in self.footer_fields)
+        settings.header_footer_sections = self._running_sections()
         settings.default_author = self.default_author.text()
         settings.show_grid = self.show_grid.isChecked()
         settings.snap_to_grid = self.snap.isChecked()
@@ -872,11 +950,11 @@ class RectangleSizeDialog(QDialog):
 
 
 class ArrayDialog(QDialog):
-    """Move or copy the selection by an exact offset, any number of times."""
+    """Move or copy the selection at exact spacing, any number of times."""
 
     def __init__(self, unit: str, scaled: bool, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Move or duplicate by an offset")
+        self.setWindowTitle("Multiple")
         layout = QVBoxLayout(self)
         if scaled:
             message = ("This page has a scale, so distances are real distances. "
@@ -899,8 +977,10 @@ class ArrayDialog(QDialog):
         form.addRow("Times", self.count)
         layout.addLayout(form)
 
-        self.duplicate = QRadioButton("Duplicate — leave the original in place")
-        self.move = QRadioButton("Move — no copies")
+        self.duplicate = QRadioButton("Duplicate")
+        self.duplicate.setToolTip("Leave the original in place and make copies")
+        self.move = QRadioButton("Move")
+        self.move.setToolTip("Move the original without making copies")
         self.duplicate.setChecked(True)
         layout.addWidget(self.duplicate)
         layout.addWidget(self.move)

@@ -3,7 +3,7 @@ import os
 
 import pytest
 from PySide6.QtCore import QEvent, QPointF, Qt
-from PySide6.QtGui import QKeyEvent, QMouseEvent
+from PySide6.QtGui import QFontMetricsF, QKeyEvent, QMouseEvent
 from PySide6.QtWidgets import QApplication
 
 from markforge.items.measure import CountItem, MeasureItem
@@ -558,7 +558,9 @@ def test_editing_a_text_box_puts_the_caret_near_the_click(window):
     window.select_tool("select")
 
     rect = box.local_rect()
-    point = box.mapToScene(QPointF(rect.left() + rect.width() * 0.45, rect.top() + 8))
+    text_width = QFontMetricsF(box.style.font()).horizontalAdvance(box.text())
+    point = box.mapToScene(QPointF(rect.left() + box.style.padding + text_width * 0.45,
+                                   rect.top() + 8))
     real_double_click(window.view, point.x(), point.y())
     assert editing_item(window) is box
     assert 0 < box._editor.textCursor().position() < len("the quick brown fox")
@@ -843,6 +845,24 @@ def test_the_header_and_footer_have_a_menu_entry_of_their_own(window):
     dialog.show_tab("header")
     assert "Header" in dialog.tabs.tabText(dialog.tabs.currentIndex())
     dialog.deleteLater()
+
+
+def test_the_header_footer_manager_accepts_page_sections(window):
+    from markforge.ui import dialogs
+
+    window.add_page()
+    dialog = dialogs.DocumentPropertiesDialog(window.document)
+    dialog._add_running_section()
+    dialog.sections.item(0, 0).setText("1-2")
+    dialog.sections.item(0, 2).setText("Project cover")
+    dialog.sections.item(0, 5).setCheckState(Qt.Unchecked)
+    dialog.apply()
+    dialog.deleteLater()
+
+    section = window.document.settings.header_footer_sections[0]
+    assert (section["start"], section["end"]) == (1, 2)
+    assert section["header_left"] == "Project cover"
+    assert section["show_footer"] is False
 
 
 def test_a_logo_that_cannot_be_read_leaves_the_page_alone(window):
