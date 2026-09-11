@@ -979,7 +979,7 @@ class PageView(QGraphicsView):
                 (rect.topLeft(), rect.topRight(),
                  rect.bottomLeft(), rect.bottomRight())]
 
-    def named_snap_targets(self, frame, ignore=()) -> list:
+    def named_snap_targets(self, frame, ignore=(), near=None, reach=0.0) -> list:
         """Every point worth catching hold of, and what each of them is.
 
         Two sources, each with its own switch: the markups drawn here, and
@@ -991,6 +991,9 @@ class PageView(QGraphicsView):
         skip = set(ignore)
         for item in frame.markups():
             if item in skip or not item.isVisible():
+                continue
+            if near is not None and not item.sceneBoundingRect().adjusted(
+                    -reach, -reach, reach, reach).contains(near):
                 continue
             if self.is_drawing(item):
                 if settings.snap_to_content:
@@ -1129,9 +1132,33 @@ class PageView(QGraphicsView):
         reach = SNAP_REACH / max(self._zoom, 0.05)
         best = None
         best_distance = reach
-        candidates = self.named_snap_targets(frame, ignore)
+        candidates = self.named_snap_targets(frame, ignore, scene_pos, reach)
         candidates += self.crossings_near(frame, scene_pos, reach, ignore)
+        # The body of an edge is a target too, not just its corners and middle.
+        # Project onto the segment in scene coordinates so rotated callouts
+        # behave the same way as upright ones.
+        settings = self.document().settings
+        skip = set(ignore)
+        for item in frame.markups():
+            if item in skip or not item.isVisible():
+                continue
+            if self.is_drawing(item) or not settings.snap_to_items:
+                continue
+            if not item.sceneBoundingRect().adjusted(-reach, -reach, reach, reach).contains(scene_pos):
+                continue
+            for start, end in self.sides_of(item):
+                delta = end - start
+                length2 = delta.x() ** 2 + delta.y() ** 2
+                if length2 <= 1e-12:
+                    continue
+                offset = scene_pos - start
+                t = max(0.0, min(1.0, (offset.x() * delta.x() + offset.y() * delta.y()) / length2))
+                point = start + delta * t
+                if _within(point, scene_pos, reach):
+                    candidates.append((point, "edge", item))
         for point, what, item in candidates:
+            if what == "edge" and best is not None and best[1] != "edge":
+                continue
             distance = math.hypot(point.x() - scene_pos.x(),
                                   point.y() - scene_pos.y())
             if distance < best_distance:
@@ -2690,7 +2717,10 @@ class PageView(QGraphicsView):
             # into the status bar, which would wipe out what the snapshot has
             # to say about what it took.
             self.finish_tool()
-            self.window.take_snapshot(frame, region)
+            if tool.key == "whiteout":
+                self.window.whiteout_region(frame, region)
+            else:
+                self.window.take_snapshot(frame, region)
             return
 
         draft.refresh(page=self.page())

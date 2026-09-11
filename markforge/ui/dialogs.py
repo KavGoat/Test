@@ -7,7 +7,7 @@ from typing import Optional
 from PySide6.QtCore import QKeyCombination, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QKeySequence, QPixmap
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox,
-                               QCompleter, QDialog,
+                               QDialog,
                                QDialogButtonBox, QDoubleSpinBox, QFileDialog,
                                QFormLayout, QGroupBox, QHBoxLayout, QHeaderView,
                                QLabel, QLineEdit, QMessageBox, QPushButton,
@@ -80,7 +80,8 @@ class PageSetupDialog(QDialog):
             self.margins[key] = spin
         layout.addWidget(margins)
 
-        self.apply_all = QCheckBox("Apply to every page")
+        self.apply_all = QCheckBox("All pages")
+        self.apply_all.setToolTip("Apply to every page")
         self.apply_all.setEnabled(multiple_pages)
         layout.addWidget(self.apply_all)
         layout.addWidget(_buttons(self))
@@ -143,8 +144,7 @@ class ScaleDialog(QDialog):
             pick.clicked.connect(lambda: self.done(self.PICK))
             layout.addWidget(pick)
 
-        ratio_box = QGroupBox("…or from a standard ratio" if measured_pt
-                              else "From a standard ratio")
+        ratio_box = QGroupBox("Standard ratio")
         ratio_form = QFormLayout(ratio_box)
         self.ratio = QComboBox()
         self.ratio.setEditable(True)
@@ -155,9 +155,11 @@ class ScaleDialog(QDialog):
 
         units = QFormLayout()
         self.length_unit = UnitCombo(scale.display_unit)
-        units.addRow("Show lengths in", self.length_unit)
+        self.length_unit.setToolTip("Units used to display lengths")
+        units.addRow("Length unit", self.length_unit)
         self.area_unit = UnitCombo(scale.area_unit)
-        units.addRow("Show areas in", self.area_unit)
+        self.area_unit.setToolTip("Units used to display areas")
+        units.addRow("Area unit", self.area_unit)
         self.precision = QSpinBox()
         self.precision.setRange(0, 6)
         self.precision.setValue(scale.precision)
@@ -268,6 +270,7 @@ class PdfImportDialog(QDialog):
         # obvious here rather than after it has been inserted.
         self.preview = QLabel("Choose a PDF to see the first page it will bring in")
         self.preview.setAlignment(Qt.AlignCenter)
+        self.preview.setWordWrap(True)
         self.preview.setMinimumHeight(200)
         self.preview.setStyleSheet(
             "QLabel { border:1px solid palette(mid); background: palette(base); "
@@ -329,168 +332,6 @@ class PdfImportDialog(QDialog):
         return (self.path, indices, self.fit.currentData(), pdfio.BEST_DPI, False)
 
 
-class TableSizeDialog(QDialog):
-    """How many rows and columns a new table starts with."""
-
-    def __init__(self, rows: int, cols: int, header: bool = True, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("New table")
-        layout = QVBoxLayout(self)
-        note = QLabel("How big is this table? Rows and columns can be added "
-                      "or taken away later from its right-click menu.")
-        note.setWordWrap(True)
-        layout.addWidget(note)
-        form = QFormLayout()
-        self.rows = QSpinBox()
-        self.rows.setRange(1, 500)
-        self.rows.setValue(rows)
-        form.addRow("Rows", self.rows)
-        self.cols = QSpinBox()
-        self.cols.setRange(1, 100)
-        self.cols.setValue(cols)
-        form.addRow("Columns", self.cols)
-        self.header = QCheckBox("First row is a header")
-        # Ticked or not according to the table itself. It used to open
-        # unticked whatever the table was doing, and a new table starts with a
-        # header — so the box disagreed with the table in front of it, and
-        # pressing OK quietly took the header away.
-        self.header.setChecked(bool(header))
-        form.addRow(self.header)
-        layout.addLayout(form)
-        layout.addWidget(_buttons(self))
-        self.rows.setFocus()
-
-    def values(self) -> tuple[int, int, bool]:
-        return self.rows.value(), self.cols.value(), self.header.isChecked()
-
-
-class PlotDialog(QDialog):
-    """What a graph plots: its curves, the variable and the range.
-
-    A plot with nothing in it is a blank box, and the way to fill it in used
-    to be a text field in a panel that had to be found first. This asks
-    outright, and offers the names the document already defines.
-    """
-
-    def __init__(self, item, names=(), parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Plot")
-        self.item = item
-        self.names = sorted(names)
-        self.resize(520, 520)
-        layout = QVBoxLayout(self)
-
-        note = QLabel("One curve per row. Write an expression in the variable "
-                      "below — <b>w*x*(L-x)/2</b> — or the name of a function "
-                      "you have defined.")
-        note.setWordWrap(True)
-        layout.addWidget(note)
-
-        self.curves = QTableWidget(0, 2)
-        self.curves.setHorizontalHeaderLabels(["Expression", "Legend label"])
-        self.curves.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        self.curves.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.curves.verticalHeader().setVisible(False)
-        layout.addWidget(self.curves, 1)
-        for series in item.series:
-            self._add_row(series.expression, series.label)
-        if not item.series:
-            self._add_row("", "")
-
-        buttons = QHBoxLayout()
-        add = QPushButton("Add curve")
-        add.clicked.connect(lambda: self._add_row("", ""))
-        remove = QPushButton("Remove curve")
-        remove.clicked.connect(self._remove_row)
-        buttons.addWidget(add)
-        buttons.addWidget(remove)
-        buttons.addStretch(1)
-        layout.addLayout(buttons)
-
-        form = QFormLayout()
-        self.variable = QLineEdit(item.variable)
-        self.variable.setPlaceholderText("x")
-        form.addRow("Plot against", self.variable)
-        self.x_from = QLineEdit(item.x_from)
-        self.x_from.setPlaceholderText("0 m")
-        form.addRow("From", self.x_from)
-        self.x_to = QLineEdit(item.x_to)
-        self.x_to.setPlaceholderText("L")
-        form.addRow("To", self.x_to)
-        for edit in (self.x_from, self.x_to):
-            edit.setCompleter(self._completer(edit))
-        self.title = QLineEdit(item.title)
-        form.addRow("Title", self.title)
-        self.x_label = QLineEdit(item.x_label)
-        form.addRow("X label", self.x_label)
-        self.y_label = QLineEdit(item.y_label)
-        form.addRow("Y label", self.y_label)
-        self.x_unit = UnitCombo(item.x_unit)
-        form.addRow("X unit", self.x_unit)
-        self.y_unit = UnitCombo(item.y_unit)
-        form.addRow("Y unit", self.y_unit)
-        layout.addLayout(form)
-
-        toggles = QHBoxLayout()
-        self.grid = QCheckBox("Grid")
-        self.grid.setChecked(item.show_grid)
-        self.legend = QCheckBox("Legend")
-        self.legend.setChecked(item.show_legend)
-        self.markers = QCheckBox("Markers")
-        self.markers.setChecked(item.show_markers)
-        for box in (self.grid, self.legend, self.markers):
-            toggles.addWidget(box)
-        toggles.addStretch(1)
-        layout.addLayout(toggles)
-        layout.addWidget(_buttons(self))
-
-    def _completer(self, parent):
-        completer = QCompleter(self.names, parent)
-        completer.setCaseSensitivity(Qt.CaseSensitive)
-        completer.setFilterMode(Qt.MatchContains)
-        return completer
-
-    def _add_row(self, expression: str, label: str) -> None:
-        row = self.curves.rowCount()
-        self.curves.insertRow(row)
-        edit = QLineEdit(expression)
-        edit.setPlaceholderText("w*x*(L-x)/2")
-        edit.setCompleter(self._completer(edit))
-        self.curves.setCellWidget(row, 0, edit)
-        self.curves.setCellWidget(row, 1, QLineEdit(label))
-        self.curves.setCurrentCell(row, 0)
-        edit.setFocus()
-
-    def _remove_row(self) -> None:
-        row = self.curves.currentRow()
-        if row >= 0 and self.curves.rowCount() > 1:
-            self.curves.removeRow(row)
-
-    def apply(self) -> None:
-        from ..items.plotitem import Series
-
-        series = []
-        for row in range(self.curves.rowCount()):
-            expression = self.curves.cellWidget(row, 0).text().strip()
-            if not expression:
-                continue
-            series.append(Series(expression,
-                                 self.curves.cellWidget(row, 1).text().strip()))
-        item = self.item
-        item.series = series or [Series()]
-        item.variable = self.variable.text().strip() or "x"
-        item.x_from = self.x_from.text().strip() or "0"
-        item.x_to = self.x_to.text().strip() or "10"
-        item.title = self.title.text()
-        item.x_label = self.x_label.text()
-        item.y_label = self.y_label.text()
-        item.x_unit = self.x_unit.currentText().strip()
-        item.y_unit = self.y_unit.currentText().strip()
-        item.show_grid = self.grid.isChecked()
-        item.show_legend = self.legend.isChecked()
-        item.show_markers = self.markers.isChecked()
-
-
 class RecolourDialog(QDialog):
     """Change the colours of a drawing that came in as a picture.
 
@@ -509,7 +350,8 @@ class RecolourDialog(QDialog):
         self.resize(520, 520)
         layout = QVBoxLayout(self)
 
-        self.lines_mode = QRadioButton("Recolour the lines")
+        self.lines_mode = QRadioButton("Line colour")
+        self.lines_mode.setToolTip("Recolour the lines")
         self.lines_mode.setChecked(True)
         self.lines_mode.setToolTip(
             "Everything darker than the threshold takes the new colour, keeping "
@@ -530,7 +372,8 @@ class RecolourDialog(QDialog):
         lines.addRow("Counts as a line below", self.threshold)
         layout.addLayout(lines)
 
-        self.swap_mode = QRadioButton("Swap one colour for another")
+        self.swap_mode = QRadioButton("Swap colour")
+        self.swap_mode.setToolTip("Swap one colour for another")
         layout.addWidget(self.swap_mode)
         swap = QFormLayout()
         self.from_colour = QComboBox()
@@ -555,7 +398,8 @@ class RecolourDialog(QDialog):
             "Put the whole drawing onto the “To” colour, keeping its light "
             "and shade — Bluebeam's Colorize")
         layout.addWidget(self.colourise_mode)
-        self.grey_mode = QRadioButton("Black and white")
+        self.grey_mode = QRadioButton("Greyscale")
+        self.grey_mode.setToolTip("Black and white")
         self.grey_mode.setToolTip("Convert the image to greyscale")
         layout.addWidget(self.grey_mode)
         self.transparent_mode = QRadioButton("Make transparent")
@@ -648,7 +492,7 @@ class DocumentPropertiesDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Document properties")
         self.document = document
-        self.resize(520, 460)
+        self.resize(900, 660)
         layout = QVBoxLayout(self)
         tabs = QTabWidget()
         layout.addWidget(tabs, 1)
@@ -669,9 +513,11 @@ class DocumentPropertiesDialog(QDialog):
         running = QWidget()
         running_form = QFormLayout(running)
         settings = document.settings
-        self.show_header = QCheckBox("Show a header on every page")
+        self.show_header = QCheckBox("Show header")
+        self.show_header.setToolTip("Show a header on every page")
         self.show_header.setChecked(settings.show_header)
-        self.show_footer = QCheckBox("Show a footer on every page")
+        self.show_footer = QCheckBox("Show footer")
+        self.show_footer.setToolTip("Show a footer on every page")
         self.show_footer.setChecked(settings.show_footer)
         running_form.addRow(self.show_header)
         self.header_fields = []
@@ -705,9 +551,10 @@ class DocumentPropertiesDialog(QDialog):
         ])
         self.sections.setToolTip(
             "The first matching page range overrides the all-page wording")
-        self.sections.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-        self.sections.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-        self.sections.horizontalHeader().setSectionResizeMode(6, QHeaderView.Stretch)
+        self.sections.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        self.sections.horizontalHeader().setMinimumSectionSize(65)
+        for column in range(9):
+            self.sections.setColumnWidth(column, 80 if column in (0, 1, 5) else 120)
         for section in settings.header_footer_sections:
             self._add_running_section(section)
         section_buttons = QHBoxLayout()
@@ -773,13 +620,15 @@ class DocumentPropertiesDialog(QDialog):
         grid_form = QFormLayout(grid)
         self.show_grid = QCheckBox("Show grid")
         self.show_grid.setChecked(settings.show_grid)
-        self.snap = QCheckBox("Snap to grid")
+        self.snap = QCheckBox("Grid snap")
+        self.snap.setToolTip("Snap to grid")
         self.snap.setChecked(settings.snap_to_grid)
         self.grid_mm = QDoubleSpinBox()
         self.grid_mm.setRange(0.5, 100)
         self.grid_mm.setValue(settings.grid_mm)
         self.grid_mm.setSuffix(" mm")
-        self.show_margins = QCheckBox("Show margin guides")
+        self.show_margins = QCheckBox("Margin guides")
+        self.show_margins.setToolTip("Show margin guides")
         self.show_margins.setChecked(settings.show_margins)
         grid_form.addRow(self.show_grid)
         grid_form.addRow(self.snap)
@@ -1398,7 +1247,8 @@ class PreferencesDialog(QDialog):
         self.wheel.setToolTip("Ctrl and the wheel always zoom, whichever this is;\n"
                               "a trackpad always scrolls")
         form.addRow("Mouse wheel", self.wheel)
-        self.snapping = QCheckBox("Catch on what is already drawn")
+        self.snapping = QCheckBox("Drawing snap")
+        self.snapping.setToolTip("Catch on what is already drawn")
         self.snapping.setChecked(prefs.snap_while_drawing)
         self.snapping.setToolTip("Corners, midpoints and line ends pull the "
                                  "pointer to them while you draw")
@@ -1418,10 +1268,12 @@ class PreferencesDialog(QDialog):
 
         writing = QGroupBox("Writing")
         form = QFormLayout(writing)
-        self.autosize = QCheckBox("A text box grows to fit what is typed")
+        self.autosize = QCheckBox("Autosize text")
+        self.autosize.setToolTip("A text box grows to fit what is typed")
         self.autosize.setChecked(prefs.autosize_text)
         form.addRow("", self.autosize)
-        self.spelling = QCheckBox("Check spelling as I type")
+        self.spelling = QCheckBox("Check spelling")
+        self.spelling.setToolTip("Check spelling as I type")
         self.spelling.setChecked(prefs.check_spelling)
         form.addRow("", self.spelling)
         self.dictionary = QComboBox()

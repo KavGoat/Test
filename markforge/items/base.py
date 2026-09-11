@@ -136,6 +136,7 @@ class Style:
     padding: float = 4.0
     # A hatch pattern over the fill, by name — "" is a plain fill.
     hatch: str = ""
+    hatch_scale: float = 1.0
     # A dash pattern of this line's own, in multiples of its width. Empty
     # means the named line style decides, which is the usual case; a line
     # read out of a Bluebeam file brings its own.
@@ -171,7 +172,10 @@ class Style:
             return QBrush(Qt.NoBrush)
         colour = QColor(self.fill)
         colour.setAlphaF(max(0.0, min(1.0, self.fill_opacity * self.opacity)))
-        return QBrush(colour, hatch_named(self.hatch))
+        brush = QBrush(colour, hatch_named(self.hatch))
+        scale = max(0.1, min(float(self.hatch_scale), 100.0))
+        brush.setTransform(QTransform.fromScale(scale, scale))
+        return brush
 
     def font(self) -> QFont:
         return page_font(self.font_family, self.font_size, self.bold, self.italic,

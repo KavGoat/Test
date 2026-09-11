@@ -395,7 +395,7 @@ def test_two_documents_open_in_tabs_without_reaching_into_each_other(window):
     # isVisible() is false for anything inside a window that has not been
     # shown, so it would pass here whatever the bar was doing. isHidden() is
     # the question actually being asked: was it deliberately put away.
-    assert window.document_tabs.isHidden(), "one document needs no tab bar"
+    assert not window.document_tabs.isHidden(), "one document still needs a drop target"
 
     first = window.document
     window.add_page()
@@ -429,7 +429,7 @@ def test_two_documents_open_in_tabs_without_reaching_into_each_other(window):
     QApplication.processEvents()
     assert window.document_tabs.count() == 1
     assert window.document is first
-    assert window.document_tabs.isHidden(), "back to one, back to no bar"
+    assert not window.document_tabs.isHidden(), "keep the single-tab drop target"
 
 
 def test_a_second_window_keeps_its_own_document(window):
@@ -470,7 +470,7 @@ def test_a_tab_can_open_a_second_view_of_the_same_document(window):
     point = window.document_tabs.tabRect(0).center()
     window._tab_context_menu(point, menu)
     labels = [action.text() for action in menu.actions()]
-    assert labels == ["Open tab", "Open window"]
+    assert labels == ["Open tab", "Open window", "Split view"]
 
     menu.actions()[0].trigger()
     QApplication.processEvents()
@@ -3161,11 +3161,8 @@ def test_a_snapshot_takes_the_drawing_underneath_with_it(window, tmp_path, monke
     painter.drawPicture(0, 0, recorded)
     painter.end()
     assert replay.pixelColor(55, 35).alpha() > 0       # imported vector linework
-    # And the sheet it was drawn on. A snapshot takes what is under the
-    # marquee — which, on a page that came in from a PDF, is mostly the
-    # drawing itself and not a markup at all.
-    assert replay.pixelColor(10, 10).alpha() > 0
-    assert replay.pixelColor(10, 10).name() == "#3366aa"
+    # Paper and page backgrounds are deliberately excluded from snapshots.
+    assert replay.pixelColor(10, 10).alpha() == 0
 
     window.paste_items()
     pasted = [i for i in markups(window) if isinstance(i, SnapshotItem)]
@@ -9362,3 +9359,122 @@ def test_ctrl_b_i_and_u_take_a_text_box_picked_out_on_the_page(window, qapp):
     qapp.processEvents()
     assert not (box.style.bold or box.style.italic or box.style.underline), \
         "and pressing them again puts it back"
+
+
+def test_reordered_document_tabs_keep_their_documents(window):
+    from PySide6.QtTest import QTest
+    first = window.document
+    window.open_in_new_tab()
+    second = window.document
+    window.open_in_new_tab()
+    third = window.document
+    window.document_tabs.moveTab(0, 2)
+    for index, expected in enumerate((second, third, first)):
+        QTest.mouseClick(window.document_tabs, Qt.LeftButton, Qt.NoModifier,
+                         window.document_tabs.tabRect(index).center())
+        QApplication.processEvents()
+        assert window.document is expected
+
+
+def test_duplicate_tabs_keep_independent_view_state(window):
+    window.show()
+    window.view.set_zoom(1.25)
+    window.select_tool("line")
+    window.open_same_document_tab()
+    window.view.set_zoom(2.0)
+    window.select_tool("ellipse")
+    window.document_tabs.setCurrentIndex(0)
+    assert window.view.zoom() == pytest.approx(1.25)
+    assert window.view.tool_key == "line"
+    window.document_tabs.setCurrentIndex(1)
+    assert window.view.zoom() == pytest.approx(2.0)
+    assert window.view.tool_key == "ellipse"
+
+
+def test_closing_an_inactive_tab_can_be_cancelled(window, monkeypatch):
+    first = window.document
+    window.open_in_new_tab()
+    second = window.document
+    asked = []
+    def cancel():
+        asked.append(window.document)
+        return False
+    monkeypatch.setattr(window, "confirm_discard", cancel)
+    window.close_document_tab(0)
+    assert asked == [first]
+    assert window.document_tabs.count() == 2
+    assert window.document is second
+
+
+def test_window_close_checks_inactive_documents(window, monkeypatch):
+    first = window.document
+    window.open_in_new_tab()
+    second = window.document
+    asked = []
+    def confirm():
+        asked.append(window.document)
+        return window.document is not first
+    monkeypatch.setattr(window, "confirm_discard", confirm)
+    assert not window.close()
+    assert asked == [first]
+    assert window.document is second
+
+
+def test_split_panes_edit_independently_and_route_shortcuts(window):
+    from PySide6.QtTest import QTest
+    first = window.document
+    window.open_in_new_tab()
+    second_document = window.document
+    host = window.split_document(0)
+    other = host.panes[1]
+    other.confirm_discard = lambda: True
+    try:
+        QApplication.processEvents()
+        assert other.document is first
+        assert window.document is second_document
+        assert window.view.isVisible() and other.view.isVisible()
+        assert window.window() is other.window()
+        other.view.setFocus()
+        QTest.keyClick(other.view.viewport(), Qt.Key_L)
+        assert other.view.tool_key == "line"
+        assert window.view.tool_key == "select"
+        drag(other.view, 100, 100, 200, 200)
+        assert other.view.frame().markups()
+        assert not window.view.frame().markups()
+        QTest.keyClick(other.view.viewport(), Qt.Key_Escape)
+        assert other.view.tool_key == "select"
+        before = other.view.zoom()
+        QTest.keyClick(other.view.viewport(), Qt.Key_Plus, Qt.ControlModifier)
+        QApplication.processEvents()
+        assert other.view.zoom() > before
+        window.view.setFocus()
+        QTest.keyClick(window.view.viewport(), Qt.Key_L)
+        assert window.view.tool_key == "line"
+        assert other.view.tool_key == "select"
+    finally:
+        host.separate()
+        other.close()
+        other.deleteLater()
+        QApplication.processEvents()
+
+
+def test_split_views_share_edits_but_new_document_keeps_other_undo(window):
+    host = window.split_document()
+    other = host.panes[1]
+    other.confirm_discard = lambda: True
+    try:
+        QApplication.processEvents()
+        _a_rectangle(window)
+        assert other.scene is window.scene
+        assert other.undo_stack is window.undo_stack
+        count = other.undo_stack.count()
+        window.new_document(confirm=False)
+        assert other.document is not window.document
+        assert other.undo_stack.count() == count
+        assert other.view.frame().markups()
+        assert not window.view.frame().markups()
+    finally:
+        host.separate()
+        other.close()
+        other.deleteLater()
+        QApplication.processEvents()

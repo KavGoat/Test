@@ -1,8 +1,7 @@
-"""Using the app: a whole calculation sheet, and the awkward moments.
+"""Using the PDF editor, including interrupted gestures and focus changes.
 
 The rest of the suite tests one thing at a time. This drives the application
-the way somebody sitting at it would — a heading, some inputs, a result, a
-change of mind, a drawing, a table — because a hundred parts that each work
+the way somebody sitting at it would — a heading, a drawing, a change of mind, and a saved PDF — because a hundred parts that each work
 alone can still add up to something nobody would want to use.
 """
 import os
@@ -35,11 +34,11 @@ def test_tool_letters_fall_silent_while_words_are_being_typed(window):
     window.view.end_item_edit()
 
 
-def test_tool_letters_fall_silent_inside_a_calculation(window):
+def test_tool_letters_fall_silent_inside_explicit_text_entry(window):
     window.view._last_scene_pos = QPointF(100, 250)
     press_key(window.view, Qt.Key_unknown, '"')
-    type_text(window.view, "cap:=5kN")
-    assert window.view.editing_item()._editor.toPlainText() == "cap:=5kN"
+    type_text(window.view, "Beam capacity 5 kN")
+    assert window.view.editing_item()._editor.toPlainText() == "Beam capacity 5 kN"
     window.view.end_item_edit()
 
 

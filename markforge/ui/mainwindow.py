@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (QTabBar, QApplication, QComboBox, QDockWidget, QD
                                QFileDialog, QGraphicsItem, QHBoxLayout,
                                QInputDialog, QLabel, QLineEdit, QMainWindow,
                                QMenu, QMessageBox, QSizePolicy, QSpinBox,
-                               QStatusBar, QToolBar, QToolButton, QVBoxLayout,
+                               QStatusBar, QToolBar, QToolButton, QVBoxLayout, QSplitter,
                                QWidget)
 
 from ..core.document import (LANDSCAPE, MM_TO_PT, PAGE_SIZES, PORTRAIT,
@@ -95,17 +95,131 @@ class DetachableTabBar(QTabBar):
 
     detachRequested = Signal(int, QPoint)
 
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._preview = None
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.tabMoved.connect(self._track_dragged_tab)
+
+    def _track_dragged_tab(self, before, after):
+        if getattr(self, "_dragged_tab", -1) == before:
+            self._dragged_tab = after
+
     def mousePressEvent(self, event) -> None:
-        self._dragged_tab = self.tabAt(event.position().toPoint())
+        self._press_position = event.position().toPoint()
+        self._dragged_tab = (self.tabAt(event.position().toPoint())
+                             if event.button() == Qt.LeftButton else -1)
         super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        index = getattr(self, "_dragged_tab", -1)
+        outside = not self.rect().adjusted(-8, -8, 8, 8).contains(event.position().toPoint())
+        if index >= 0 and event.buttons() & Qt.LeftButton and outside:
+            if self._preview is None:
+                self.setFocus(Qt.MouseFocusReason)
+                self._preview = QLabel(None, Qt.ToolTip | Qt.FramelessWindowHint)
+                self._preview.setAttribute(Qt.WA_TransparentForMouseEvents)
+                self._preview.setAttribute(Qt.WA_ShowWithoutActivating)
+                self._preview.setPixmap(self.grab(self.tabRect(index)))
+                self._preview.setWindowOpacity(0.88)
+            self._preview.move(event.globalPosition().toPoint() + QPoint(12, 12))
+            self._preview.show()
+            return
+        self._clear_preview()
+        super().mouseMoveEvent(event)
+
+    def _clear_preview(self):
+        if self._preview is not None:
+            self._preview.close()
+            self._preview.deleteLater()
+            self._preview = None
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Escape:
+            self._dragged_tab = -1
+            self._clear_preview()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def event(self, event):
+        if (event.type() == QEvent.ShortcutOverride and self._preview is not None
+                and event.key() == Qt.Key_Escape):
+            event.accept()
+            return True
+        return super().event(event)
 
     def mouseReleaseEvent(self, event) -> None:
         index = getattr(self, "_dragged_tab", -1)
-        outside = index >= 0 and not self.rect().contains(event.position().toPoint())
+        outside = (index >= 0
+                   and (event.position().toPoint() - self._press_position).manhattanLength()
+                       >= QApplication.startDragDistance()
+                   and not self.rect().contains(event.position().toPoint()))
         self._dragged_tab = -1
+        self._clear_preview()
         super().mouseReleaseEvent(event)
         if outside:
             self.detachRequested.emit(index, event.globalPosition().toPoint())
+
+
+class SplitDocumentWindow(QSplitter):
+    """Two complete editing panes, with independent controls and keyboard focus."""
+
+    def __init__(self, first, second):
+        super().__init__(Qt.Horizontal)
+        self.setWindowTitle(APP_NAME)
+        self.setChildrenCollapsible(False)
+        self.setAttribute(Qt.WA_DeleteOnClose)
+        self.panes = [first, second]
+        self.setGeometry(first.geometry())
+        self.resize(max(first.width(), 1500), first.height())
+        for pane in self.panes:
+            pane._split_host = self
+            pane._before_split = (pane.saveState(), pane.statusBar().isVisible())
+            # Start with room for the drawings. Panels remain available on
+            # each pane's rails, and the complete layout returns on separation.
+            for dock in pane.panels:
+                dock.hide()
+            pane.statusBar().hide()
+            pane.menuBar().setNativeMenuBar(False)
+            pane.setParent(self, Qt.Widget)
+            self.addWidget(pane)
+            # Window shortcuts would be ambiguous between the two editors.
+            # Each pane owns its actions, so focus chooses which one answers.
+            for action in pane.findChildren(QAction):
+                pane.addAction(action)
+                action.setShortcutContext(Qt.WidgetWithChildrenShortcut)
+            pane.show()
+        self.setSizes([self.width() // 2, self.width() // 2])
+
+    def separate(self):
+        """Return both editors to windows without closing any document."""
+        for offset, pane in enumerate(self.panes):
+            pane._split_host = None
+            pane.setParent(None, Qt.Window)
+            state, status_visible = pane._before_split
+            pane.restoreState(state)
+            pane.statusBar().setVisible(status_visible)
+            pane.menuBar().setNativeMenuBar(True)
+            for action in pane.findChildren(QAction):
+                action.setShortcutContext(Qt.WindowShortcut)
+            pane.setGeometry(self.geometry().adjusted(36 * offset, 36 * offset,
+                                                       36 * offset, 36 * offset))
+            pane.show()
+        self.panes = []
+        self.close()
+
+    def closeEvent(self, event):
+        # Ask before closing either pane, so Cancel leaves both available.
+        for pane in self.panes:
+            if not pane.confirm_all_documents():
+                event.ignore()
+                return
+        for pane in self.panes:
+            pane._closing_confirmed = True
+            pane.close()
+            pane._closing_confirmed = False
+        event.accept()
 
 
 def _stretch(parent) -> QWidget:
@@ -191,6 +305,8 @@ class MainWindow(QMainWindow):
         # and page. Empty until a second document is opened, because one
         # document needs no tab bar.
         self._open_documents: list[dict] = []
+        self._active_tab = -1
+        self._split_host = None
         self.toolbars: list = []
         self.visible_tools = None       # None means every tool
         self._default_state = None
@@ -218,6 +334,11 @@ class MainWindow(QMainWindow):
         self._autosave.start()
 
         self.new_document(confirm=False)
+        self._open_documents = [self._current_document_state()]
+        self._active_tab = 0
+        self.document_tabs.blockSignals(True)
+        self.document_tabs.addTab(self._tab_title(self.document))
+        self.document_tabs.blockSignals(False)
         from ..app import current_theme
         from ..theme import DARK
         self.act_dark.setChecked(current_theme() == DARK)
@@ -270,9 +391,10 @@ class MainWindow(QMainWindow):
         self.document_tabs.setTabsClosable(True)
         self.document_tabs.setMovable(True)
         self.document_tabs.setDrawBase(False)
-        self.document_tabs.setVisible(False)          # one document: no bar
+        self.document_tabs.setVisible(True)
         self.document_tabs.currentChanged.connect(self.switch_to_document)
         self.document_tabs.tabCloseRequested.connect(self.close_document_tab)
+        self.document_tabs.tabMoved.connect(self._tab_moved)
         self.document_tabs.setContextMenuPolicy(Qt.CustomContextMenu)
         self.document_tabs.customContextMenuRequested.connect(self._tab_context_menu)
         self.document_tabs.detachRequested.connect(self.tear_off_document)
@@ -352,6 +474,10 @@ class MainWindow(QMainWindow):
                   tip="Open another document beside this one, in its own tab")
         self._act("new_window", "New window", self.open_new_window, "Ctrl+Shift+N",
                   tip="Open a second window with a document of its own")
+        self._act("split_view", "Split view", self.split_document,
+                  tip="View this document beside another editable pane")
+        self._act("separate_views", "Separate views", self.separate_views,
+                  tip="Return split panes to independent windows")
         self._act("open", "Open…", self.open_document, "Ctrl+O", "open")
         self._act("save", "Save", self.save_document, "Ctrl+S", "save")
         self._act("save_as", "Save as…", self.save_document_as, "Ctrl+Shift+S")
@@ -671,6 +797,15 @@ class MainWindow(QMainWindow):
         self.hatch_combo.currentIndexChanged.connect(
             lambda _index: self._style_hatch(self.hatch_combo.currentData()))
         self._style_widgets[HATCH].append(style_bar.addWidget(self.hatch_combo))
+        self.hatch_scale_spin = QDoubleSpinBox()
+        self.hatch_scale_spin.setObjectName("hatchScale")
+        self.hatch_scale_spin.setRange(0.1, 100.0)
+        self.hatch_scale_spin.setSingleStep(0.1)
+        self.hatch_scale_spin.setSuffix(" ×")
+        self.hatch_scale_spin.setToolTip("Hatch scale")
+        self.hatch_scale_spin.valueChanged.connect(lambda value: self._style_change(
+            HATCH, lambda style: setattr(style, "hatch_scale", value), "Hatch scale"))
+        self._style_widgets[HATCH].append(style_bar.addWidget(self.hatch_scale_spin))
         self._style_widgets[OPACITY].append(style_bar.addWidget(QLabel(" Opacity ")))
         self.opacity_spin = QSpinBox()
         self.opacity_spin.setRange(5, 100)
@@ -907,6 +1042,9 @@ class MainWindow(QMainWindow):
                        self.act_prev_page,
                        self.act_next_page):
             view_menu.addSeparator() if action is None else view_menu.addAction(action)
+        view_menu.addSeparator()
+        view_menu.addAction(self.act_split_view)
+        view_menu.addAction(self.act_separate_views)
         panels_menu = view_menu.addMenu("Panels")
         for dock in self.panels:
             panels_menu.addAction(dock.toggleViewAction())
@@ -1188,6 +1326,8 @@ class MainWindow(QMainWindow):
         self.document = state["document"]
         self.scene = state["scene"]
         self.undo_stack = state["undo_stack"]
+        # Shared views may outlive the window that first created this stack.
+        self.undo_stack.setParent(None)
         self._connect_undo_stack(self.undo_stack)
         self.current_index = state["index"]
         if self.scene is not None:
@@ -1224,7 +1364,7 @@ class MainWindow(QMainWindow):
                  "scene": self.scene if same_document else None,
                  "undo_stack": stack,
                  "index": self.current_index if same_document else 0,
-                 "tool": self.view.tool_key if same_document else "select",
+                 "tool": held if same_document else "select",
                  "zoom": self.view.zoom(),
                  "hscroll": self.view.horizontalScrollBar().value(),
                  "vscroll": self.view.verticalScrollBar().value()}
@@ -1233,7 +1373,8 @@ class MainWindow(QMainWindow):
         where = self.document_tabs.addTab(self._tab_title(fresh["document"]))
         self.document_tabs.setCurrentIndex(where)
         self.document_tabs.blockSignals(False)
-        self.document_tabs.setVisible(self.document_tabs.count() > 1)
+        self.document_tabs.setVisible(True)
+        self._active_tab = where
         self._adopt_document_state(fresh)
         return where
 
@@ -1252,15 +1393,14 @@ class MainWindow(QMainWindow):
         menu = menu or QMenu(self.document_tabs)
         menu.addAction("Open tab", lambda: self.open_same_document_tab(index))
         menu.addAction("Open window", lambda: self.open_same_document_window(index))
+        menu.addAction("Split view", lambda: self.split_document(index))
         if not supplied:
             menu.exec(self.document_tabs.mapToGlobal(point))
         return menu
 
     def open_same_document_window(self, index: Optional[int] = None) -> "MainWindow":
         """Show this document in another window without copying its contents."""
-        state = (self._open_documents[index]
-                 if index is not None and 0 <= index < len(self._open_documents)
-                 else self._current_document_state())
+        state = self._state_for_tab(index)
         window = self.open_new_window()
         window._adopt_document_state(dict(state))
         return window
@@ -1269,43 +1409,136 @@ class MainWindow(QMainWindow):
         """Move a tab into a new independent application window."""
         if not (0 <= index < len(self._open_documents)):
             return
-        state = self._open_documents[index]
+        for other in type(self)._windows:
+            if other is self or not other.isVisible():
+                continue
+            bar = other.document_tabs
+            if bar.isVisible() and bar.rect().contains(bar.mapFromGlobal(global_point)):
+                self.move_document_to(index, other, bar.tabAt(bar.mapFromGlobal(global_point)))
+                return
+        state = self._state_for_tab(index)
         window = self.open_new_window()
         window._adopt_document_state(dict(state))
         if not global_point.isNull():
             window.move(global_point)
-        self.close_document_tab(index)
+        self.close_document_tab(index, moving=True)
         if all(state["undo_stack"] is not held["undo_stack"]
                for held in self._open_documents):
             state["undo_stack"].setParent(window)
 
+    def move_document_to(self, index, target, before=-1):
+        """Move the live document, viewport and undo history between windows."""
+        if target is self or not 0 <= index < len(self._open_documents):
+            return
+        state = dict(self._state_for_tab(index))
+        destination = target.open_in_new_tab()
+        target._open_documents[destination] = state
+        target._adopt_document_state(state)
+        target.document_tabs.setTabText(destination, target._tab_title(state["document"]))
+        if before >= 0:
+            target.document_tabs.moveTab(destination, before)
+        self.close_document_tab(index, moving=True)
+        if all(held["undo_stack"] is not state["undo_stack"] for held in self._open_documents):
+            state["undo_stack"].setParent(target)
+
+    def _state_for_tab(self, index=None):
+        if index is None or index == self._active_tab:
+            return self._current_document_state()
+        return self._open_documents[index]
+
+    def _tab_moved(self, before: int, after: int) -> None:
+        if 0 <= before < len(self._open_documents):
+            self._open_documents.insert(after, self._open_documents.pop(before))
+            if self._active_tab == before:
+                self._active_tab = after
+            elif before < self._active_tab <= after:
+                self._active_tab -= 1
+            elif after <= self._active_tab < before:
+                self._active_tab += 1
+
+    def split_document(self, index=None):
+        if self._split_host is not None:
+            return self._split_host
+        # Splitting an inactive tab puts that document beside the current one.
+        # Splitting the current document opens another view of the same pages.
+        state = dict(self._state_for_tab(index))
+        second = type(self)()
+        second.interactive_prompts = self.interactive_prompts
+        second._adopt_document_state(state)
+        host = SplitDocumentWindow(self, second)
+        host.show()
+        second.view.setFocus(Qt.OtherFocusReason)
+        return host
+
+    def separate_views(self):
+        if self._split_host is not None:
+            self._split_host.separate()
+
     def switch_to_document(self, index: int) -> None:
-        """Show the document on that tab, putting this one aside as it is."""
-        if not (0 <= index < len(self._open_documents)):
+        """Store the view by tab identity, even when two tabs share a PDF."""
+        if not (0 <= index < len(self._open_documents)) or index == self._active_tab:
             return
         held = self.view.tool_key
         self.view.escape_everything()
-        for position, state in enumerate(self._open_documents):
-            if state["document"] is self.document:
-                self._open_documents[position] = self._current_document_state(held)
-                break
+        if 0 <= self._active_tab < len(self._open_documents):
+            self._open_documents[self._active_tab] = self._current_document_state(held)
+        self._active_tab = index
+        self.document_tabs.blockSignals(True)
+        self.document_tabs.setCurrentIndex(index)
+        self.document_tabs.blockSignals(False)
         self._adopt_document_state(self._open_documents[index])
 
-    def close_document_tab(self, index: int) -> None:
-        """Close one document. The last one standing keeps the window."""
+    def close_document_tab(self, index: int, moving: bool = False) -> None:
+        """Closing a view must not silently discard its document's edits."""
         if not (0 <= index < len(self._open_documents)):
             return
+        target = self._state_for_tab(index)
+        shared = any(state["document"] is target["document"]
+                     for i, state in enumerate(self._open_documents) if i != index)
+        if not moving and not shared:
+            previous = self._active_tab
+            self.switch_to_document(index)
+            if not self.confirm_discard():
+                self.switch_to_document(previous)
+                return
+            self.switch_to_document(previous)
         if len(self._open_documents) == 1:
-            self.new_document()
+            self.new_document(confirm=False)
+            self._open_documents[0] = self._current_document_state()
             return
-        going = self._open_documents.pop(index)
+        if 0 <= self._active_tab < len(self._open_documents):
+            self._open_documents[self._active_tab] = self._current_document_state()
+        was_active = index == self._active_tab
+        self._open_documents.pop(index)
         self.document_tabs.blockSignals(True)
         self.document_tabs.removeTab(index)
+        if was_active:
+            self._active_tab = min(index, len(self._open_documents) - 1)
+        elif index < self._active_tab:
+            self._active_tab -= 1
+        self.document_tabs.setCurrentIndex(self._active_tab)
         self.document_tabs.blockSignals(False)
-        self.document_tabs.setVisible(self.document_tabs.count() > 1)
-        if going["document"] is self.document:
-            self._adopt_document_state(
-                self._open_documents[min(index, len(self._open_documents) - 1)])
+        self.document_tabs.setVisible(True)
+        if was_active:
+            self._adopt_document_state(self._open_documents[self._active_tab])
+
+    def confirm_all_documents(self) -> bool:
+        """Include inactive tabs in the close/save decision, once per PDF."""
+        if not self._open_documents:
+            return self.confirm_discard()
+        previous = self._active_tab
+        seen = set()
+        for index in range(len(self._open_documents)):
+            document = self._state_for_tab(index)["document"]
+            if id(document) in seen:
+                continue
+            seen.add(id(document))
+            self.switch_to_document(index)
+            if not self.confirm_discard():
+                self.switch_to_document(previous)
+                return False
+        self.switch_to_document(previous)
+        return True
 
     def refresh_document_tabs(self) -> None:
         """Tab names follow the documents they stand for."""
@@ -1332,11 +1565,17 @@ class MainWindow(QMainWindow):
         self.status_hint.setText("Opened a second window")
         return window
 
+    def _new_undo_stack(self):
+        # Replacing one view's document must not clear another view's history.
+        self.undo_stack = QUndoStack(self)
+        self.undo_stack.setUndoLimit(200)
+        self._connect_undo_stack(self.undo_stack)
+
     def new_document(self, confirm: bool = True) -> None:
         if confirm and not self.confirm_discard():
             return
         self.document = Document()
-        self.undo_stack.clear()
+        self._new_undo_stack()
         self.current_index = 0
         self.rebuild_scenes()
         self.select_tool("select")
@@ -1407,7 +1646,10 @@ class MainWindow(QMainWindow):
         MarkForge record is a document and opens as one, whatever its name.
         """
         if project_io.carries_a_document(path):
-            project_io.load_document(self.document, path)
+            document = Document()
+            project_io.load_document(document, path)
+            self.document = document
+            self._new_undo_stack()
             return
         document = Document()
         document.mode = "pdf"
@@ -1434,6 +1676,7 @@ class MainWindow(QMainWindow):
         document.path = path
         document.modified = True
         self.document = document
+        self._new_undo_stack()
         # A file that had to be repaired to be read still opens, and is still
         # worth a word: what comes out of a save is a whole new file rather
         # than the original with the markups added to it.
@@ -1516,7 +1759,7 @@ class MainWindow(QMainWindow):
         # on screen. There is nothing to lose by leaving it: a markup's text is
         # kept level with the typing as it goes, so what is in the document is
         # what was typed either way.
-        if not self.confirm_discard():
+        if not getattr(self, "_closing_confirmed", False) and not self.confirm_all_documents():
             event.ignore()
             return
         self.save_layout()
@@ -1613,6 +1856,8 @@ class MainWindow(QMainWindow):
         except RuntimeError:            # the window is being torn down
             return
         self.setWindowTitle(f"{name}{dirty} — {APP_NAME}")
+        if 0 <= self._active_tab < self.document_tabs.count():
+            self.document_tabs.setTabText(self._active_tab, name + dirty)
 
     def mark_modified(self) -> None:
         self.document.modified = True
@@ -1687,6 +1932,17 @@ class MainWindow(QMainWindow):
         command, and the handful of editor commands that are about the words
         themselves.
         """
+        owner = watched if isinstance(watched, QWidget) else None
+        while owner is not None and not isinstance(owner, MainWindow):
+            owner = owner.parentWidget()
+        if owner is not self:
+            return super().eventFilter(watched, event)
+        if (event.type() == QEvent.MouseButtonPress and self.holding_a_format()
+                and isinstance(watched, QWidget)
+                and watched is not self.view and not self.view.isAncestorOf(watched)
+                and not (isinstance(watched, QToolButton)
+                         and watched.defaultAction() is self.act_format_painter)):
+            self.put_the_format_painter_down()
         if event.type() == QEvent.ShortcutOverride and self.view.is_editing():
             sequence = QKeySequence(event.keyCombination())
             binding = self.shortcuts.binding_for(sequence)
@@ -1785,6 +2041,8 @@ class MainWindow(QMainWindow):
         self.save_layout()
 
     def save_layout(self) -> None:
+        if self._split_host is not None:
+            return
         # A direct save consumes any delayed save already waiting. Otherwise
         # that stale timer can fire after a second window has restored a newer
         # arrangement and overwrite it with this older window's state.
@@ -2682,6 +2940,7 @@ class MainWindow(QMainWindow):
         self.status_hint.setText(f"Renumbered {total} count marker(s)")
 
     def select_tool(self, key: str) -> None:
+        self.put_the_format_painter_down()
         self.view.set_tool(key)
         action = self.tool_actions.get(key)
         if action is not None and not action.isChecked():
@@ -2747,6 +3006,7 @@ class MainWindow(QMainWindow):
                     (self.font_spin, active.style.font_size, "setValue"),
                     (self.hatch_combo, active.style.hatch or "plain",
                      "setCurrentText"),
+                    (self.hatch_scale_spin, active.style.hatch_scale, "setValue"),
                     (self.opacity_spin, int(round(active.style.opacity * 100)),
                      "setValue"),
                     (self.fill_opacity_spin,
@@ -2957,6 +3217,9 @@ class MainWindow(QMainWindow):
         item.style.width = style.width
         item.style.line_style = style.line_style
         item.style.opacity = style.opacity
+        if HATCH in capabilities(item):
+            item.style.hatch = style.hatch
+            item.style.hatch_scale = style.hatch_scale
         item.style.font_size = style.font_size
         if hasattr(item, "apply_style"):
             item.apply_style()
@@ -3073,6 +3336,53 @@ class MainWindow(QMainWindow):
 
     SNAPSHOT_DPI = 300.0
 
+    def whiteout_region(self, frame, region):
+        """Cut a region out of source artwork without covering live markups."""
+        if frame is None or region.normalized().isEmpty():
+            return
+        page = frame.page
+        data = self.document.asset(page.pdf_key) if page.pdf_key else None
+        if not data or page.pdf_page_index is None:
+            self.status_hint.setText("Whiteout: this page has no source PDF artwork")
+            return
+        import pymupdf
+        region = region.normalized().intersected(frame.page_rect())
+        if region.isEmpty():
+            return
+        try:
+            with pymupdf.open(stream=data, filetype="pdf") as source:
+                pdf_page = source[int(page.pdf_page_index)]
+                sx, sy = pdf_page.rect.width / page.width_pt, pdf_page.rect.height / page.height_pt
+                box = pymupdf.Rect(region.left() * sx, region.top() * sy,
+                                   region.right() * sx, region.bottom() * sy)
+                transform = pdf_page.derotation_matrix * ~pdf_page.transformation_matrix
+                hole = box * transform
+                outer = pdf_page.rect * transform
+                def rectangle(rect):
+                    return f"{rect.x0:g} {rect.y0:g} {rect.width:g} {rect.height:g} re\n"
+                # The even-odd clip leaves a hole in the PDF itself. It keeps
+                # the surviving line segments vector-sharp, including paths
+                # that cross the region, and adds no white foreground markup.
+                contents = pdf_page.read_contents()
+                body = ("q\n" + rectangle(outer) + rectangle(hole) + "W* n\n").encode()
+                xref = source.get_new_xref()
+                source.update_object(xref, "<<>>")
+                source.update_stream(xref, body + contents + b"\nQ\n")
+                pdf_page.set_contents(xref)
+                changed = source.tobytes(garbage=4, deflate=True)
+        except Exception as error:
+            self.status_hint.setText(f"Whiteout failed: {error}")
+            return
+        def apply():
+            page.pdf_key = self.document.add_asset(changed, "pdf")
+            page.background_key = None
+            frame._background = None
+            for item in list(frame.markups()):
+                if item.from_drawing:
+                    frame.remove_markup(item)
+        self._structural_change("Whiteout", apply, preserve_view=True)
+        self.status_hint.setText("Cleared PDF artwork — Undo restores it")
+
     def take_snapshot(self, frame, region: QRectF) -> None:
         """Take a copy of *region* on *frame*.
 
@@ -3095,8 +3405,12 @@ class MainWindow(QMainWindow):
             self.status_hint.setText("Snapshot: drag a region to copy")
             return
 
-        taken = frame.picture_items(region)
-        picture = frame.render_items_picture(taken, region)
+        try:
+            taken = frame.picture_items(region)
+            picture = frame.render_items_picture(taken, region)
+        except Exception as error:
+            self.status_hint.setText(f"Snapshot failed: {error}")
+            return
         if picture.isNull():
             self.status_hint.setText("Nothing in that region to copy")
             return
@@ -3119,6 +3433,11 @@ class MainWindow(QMainWindow):
                     if frame.page in self.document.pages else 0,
                     "keep_aspect": True, "uid": os.urandom(8).hex()}]
         assets = {key: base64.b64encode(data).decode("ascii")}
+        for source_item in taken:
+            for asset in source_item.assets_used():
+                content = self.document.asset(asset)
+                if content:
+                    assets[asset] = base64.b64encode(content).decode("ascii")
 
         self._clipboard = payload
         mime = QMimeData()
@@ -3128,6 +3447,9 @@ class MainWindow(QMainWindow):
         # resolution. Rendering the page again here would put its background
         # and excluded worksheet items back into the system clipboard.
         scale = self.SNAPSHOT_DPI / 72.0
+        # The external clipboard is only a preview. Bound its allocation even
+        # for an A0 capture; the internal recording keeps full vector detail.
+        scale = min(scale, (16_000_000 / (region.width() * region.height())) ** 0.5)
         cut = QImage(max(round(region.width() * scale), 1),
                      max(round(region.height() * scale), 1),
                      QImage.Format_ARGB32)
@@ -3313,7 +3635,7 @@ class MainWindow(QMainWindow):
         colour change is made there and the recording is made again — which is
         why it stays sharp at any size afterwards, exactly as it was.
         """
-        source = item.source_markups()
+        source = item.source_markups(self.document)
         if not source:
             QMessageBox.information(
                 self, "Change colours",
@@ -3329,7 +3651,9 @@ class MainWindow(QMainWindow):
             return
         self.view.begin_snapshot(self.view.involved_frames(item))
         picture = item.redraw_from(source)
-        self.document.put_asset(item.asset_key, bytes(picture.data()))
+        # Keep the previous recording immutable: the undo snapshot still
+        # refers to it, and other copies may share that asset.
+        item.asset_key = self.document.add_asset(bytes(picture.data()), "qpic")
         self.view.commit_snapshot("Change colours")
         item.update()
         self.refresh_selection()

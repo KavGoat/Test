@@ -88,7 +88,7 @@ TOOLS: list[Tool] = [
          "Click each vertex, double-click to close — not scaled",
          factory=_poly("polygon")),
     Tool("cloud", "Cloud", "cloud", CLOUDY, "Draw", "C",
-         "Drag a rectangular Cloud round an area, or click each corner for a "
+         "Mark a revision: drag a rectangular Cloud, or click each corner for a "
          "custom Cloud+ — Enter or a right-click closes it",
          factory=_rect("cloud")),
     Tool("highlight", "Highlight area", "highlight", DRAG, "Draw", "J",
@@ -96,6 +96,9 @@ TOOLS: list[Tool] = [
          "rather than covering it", factory=_rect("highlight")),
     Tool("redact", "Redact", "redact", DRAG, "Draw", "",
          "Opaque black-out box", factory=_rect("redact")),
+    Tool("whiteout", "Whiteout", "eraser", SNAPSHOT, "Draw", "",
+         "Drag a region to clear flattened PDF artwork; Undo restores it",
+         factory=_rect("rect")),
 
     Tool("text", "Text box", "text", DRAG, "Annotate", "T", "Text box",
          factory=lambda: TextItem("")),

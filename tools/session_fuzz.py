@@ -17,10 +17,17 @@ that emptied the document. It scrolls and zooms as well as drawing, because on
 a canvas holding every page those are the gestures most likely to leave a
 gesture aimed at the wrong page.
 """
-import faulthandler, functools, os, random, sys, traceback
+import faulthandler, functools, os, random, sys, traceback, tempfile
 print = functools.partial(print, flush=True)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 faulthandler.enable()
+
+# A random editing session must never read or overwrite the user's preferences.
+_sandbox = tempfile.mkdtemp(prefix="markforge-fuzz-")
+os.environ["MARKFORGE_SETTINGS_FILE"] = os.path.join(_sandbox, "settings.ini")
+for _name in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME"):
+    os.environ[_name] = os.path.join(_sandbox, _name.lower())
+    os.makedirs(os.environ[_name], exist_ok=True)
 
 from PySide6.QtCore import QEvent, QPointF, Qt
 from PySide6.QtGui import QKeyEvent, QMouseEvent

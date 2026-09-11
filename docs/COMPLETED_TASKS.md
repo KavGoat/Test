@@ -1,5 +1,87 @@
 # MarkForge — evidence record
 
+## Current review — 2026-09-11–12
+
+This section supersedes stale statements in the historical review below.
+All completion cells in both task registers were blank at the start of this
+review. None has been marked complete. The audit checked the implementation,
+the cited test names and the current suite, rather than treating “Built” or
+“Fixed” in task wording as proof.
+
+Final validation: **888 passed, one skipped** in the full suite (133.91 seconds).
+The focused review suite contains 17 tests, including rotated PDF capture,
+failure recovery and snapshot recolour undo/copy independence.
+The workbook contains **115 tasks**, matching the Markdown register exactly
+after normalizing Markdown emphasis. Existing completion cells remain blank;
+the frozen header and AutoFilter were retained, with filtering extended to all
+116 rows including the header.
+
+- The initial suite passed **871 tests, with one skipped**. Nevertheless,
+  snapshot background exclusion and Format Painter cancellation were wrong.
+  One old snapshot test required an opaque background; it now requires
+  transparency. Several cited test names did not exist; the references below
+  have been corrected and focused coverage added for unsupported claims.
+- **PDF snapshots:** source paths are extracted independently of optional snap
+  geometry and recorded as vectors, preserving Bézier curves, clipping and
+  recolourable source data. Full-page fills and raster page backgrounds are
+  excluded. Repeat capture/paste, save/reopen, annotation output and recolour
+  are exercised in `tests/test_review_regressions.py`. This does not promise
+  reconstruction of scanned pixels, PDF text glyphs, shading or every blend
+  mode as vector linework. Background images placed as ordinary markups retain
+  their usual snapshot behaviour.
+  Recolouring now creates a fresh recording asset rather than overwriting the
+  recording referenced by Undo and other copies. Source image/snapshot assets
+  travel on the clipboard and load before a source recording is rebuilt.
+- **Whiteout:** a region cuts a hole in the source PDF artwork through vector
+  clipping, leaving live markups and surviving parts of crossing lines alone.
+  Undo/redo, saved output and subsequent snapshots are tested. It is visual
+  whiteout, not secure redaction: source content is clipped rather than purged.
+- **Hatch scale:** Properties and the style toolbar share the persisted
+  `Style.hatch_scale`; brush transforms apply the value during rendering and
+  appearance export. Control synchronization, serialization and undo are tested.
+- **Edges:** line drawing and control-point edits can snap anywhere along a
+  markup's straight edge, including a callout's left edge. Existing corners,
+  midpoints and crossings take priority. PDF snap geometry still offers its
+  original corners/endpoints without alignment guides.
+- **Tabs:** the bar is always present, a translucent floating preview follows
+  drag-out, and release over another tab bar transfers the document and undo
+  history. Release elsewhere creates a window. Round-trip transfer and preview
+  behaviour are tested, alongside the existing tab identity and split tests.
+- **Rendering and responsiveness:** views at different zooms no longer cancel
+  each other's tile requests; thumbnails have a 32 MiB ceiling; cache hits
+  refresh tile recency; low-zoom rendering avoids redundant thumbnail jobs;
+  external snapshot previews have a 16-million-pixel ceiling. Nearby snapping
+  avoids constructing point lists for remote markups. A five-run synthetic
+  benchmark with 1,500 paths / 150,000 vertices measured median candidate
+  generation of **229.08 ms before filtering and 31.15 ms after filtering**.
+  This is a component benchmark, not an overall application speed claim.
+- **Format Painter:** the newly added cancellation test reproduced a defect:
+  choosing another tool left the painter armed. Tool changes and clicks on
+  controls outside the canvas now put it down. Repeated application remains
+  armed until cancellation; real event tests cover these paths.
+- **Previously stale open entries:** split view is implemented and covered by
+  `test_split_panes_edit_independently_and_route_shortcuts` and
+  `test_split_views_share_edits_but_new_document_keeps_other_undo`.
+  BTX section/elevation fidelity is held against the included Bluebeam
+  reference geometry by `test_a_shape_is_drawn_the_size_its_own_file_draws_it`,
+  `test_a_section_marks_arrowhead_touches_its_bubble`,
+  `test_the_parts_of_a_section_mark_line_up_with_each_other` and
+  `test_a_section_marks_parts_are_assembled_not_scattered`.
+- **Walkthrough:** page setup, all document-property tabs, preferences, scale,
+  calibration, Insert PDF, shortcut tabs and print preview were opened through
+  Qt; tabs were clicked, screenshots reviewed and Escape/cancel exercised.
+  Scale-dialog labels were shortened and the document dialog widened so the
+  section columns can be read. Toolset operations, multi-window editing and
+  exported printing are covered by the existing interaction/output suites.
+  Physical printing and third-party editor interaction were not performed.
+- **Stress session:** the native Qt run `python3 tools/session_fuzz.py 41 300`
+  completed **300 rounds, 3 pages, 15 markups, zero failures**. The first launch
+  was blocked by macOS GUI services inside the sandbox; the authorized rerun
+  succeeded. The fuzzer now isolates settings instead of touching user preferences.
+
+See `UNADDRESSED_TASKS.md` for remaining acceptance limitations. Historical
+evidence follows for traceability; it is not a claim that every PDF is covered.
+
 Audited: 2026-09-07 against `claude/markforge-mupdf-pdf-handling-vpyj1t`, with the suite green
 and `tools/session_fuzz.py` clean over two hundred rounds. Re-checked the same
 day by driving the running application and looking at it, which is where the
@@ -39,7 +121,7 @@ is in the git log.
   endings. Evidence: `test_every_markup_goes_out_as_a_markup`,
   `test_an_exported_markup_is_not_also_painted_into_the_sheet`,
   `test_a_cloud_goes_out_as_a_cloud_not_a_drawing_of_one`,
-  `test_a_dimension_keeps_every_part_the_specification_names`,
+  `test_a_dimension_goes_out_as_a_dimension`,
   `test_a_call_out_goes_out_with_its_leader`.
 - **What a PDF cannot hold rides along** as an embedded record, and what
   decides how a file opens is what it holds rather than what it is called.
@@ -53,16 +135,12 @@ is in the git log.
 
 ## The PDF engine
 
-`markforge/pdf/` is a reader and writer written from the specification rather
-than wrapped round somebody else's. Evidence: `tests/test_pdf_engine.py`, 24
-tests, run against real files from other people's software rather than files of
-its own making.
+`markforge/pdf/engine.py` is the MuPDF-backed PDF engine. Earlier descriptions
+of a standalone parser are obsolete. Evidence: `tests/test_pdf_engine.py` and
+`tests/test_format.py`, including real external files and pypdf cross-reading.
 
-- Syntax, filters and predictors: Flate, LZW, ASCIIHex, ASCII85, RunLength,
-  PNG and TIFF.
-- Classic cross-reference tables, cross-reference streams and object streams.
-- Recovery by scanning when the cross-reference table is wrong; refusal of a
-  file that is not a PDF at all.
+- Parsing, rendering and damaged-file recovery are delegated to MuPDF;
+  non-PDF input is refused.
 - Incremental update, verified byte-for-byte and cross-read with pypdf.
 - The annotation model: border effects, callout lines, measure dictionaries,
   the ten line endings.
@@ -75,13 +153,13 @@ its own making.
 - **Their markups come in as markups.** Evidence:
   `test_an_imported_pdf_brings_in_the_markups_somebody_else_made`,
   `test_a_marked_up_drawing_opens_as_markups_that_can_be_worked_with`,
-  `test_a_cloud_is_a_border_effect_and_comes_back_as_one`,
-  `test_a_link_is_not_somebody_s_markup`.
+  `test_a_cloud_goes_out_as_a_cloud_not_a_drawing_of_one`,
+  `test_an_exported_drawing_keeps_the_index_and_links_it_came_with`.
 - **Opening a PDF is opening a document, not converting one**: Save writes it
   back. Evidence: `test_opening_a_pdf_is_opening_a_document_not_converting_one`.
 - **The page's own line work is the page**, not a markup on it: locked, below
-  everything drawn on it, written as part of the page, not copied by a
-  snapshot, caught hold of but never offered as an alignment guide. Evidence:
+  everything drawn on it, written as part of the page, captured directly from
+  the PDF by snapshots, caught hold of but never offered as an alignment guide. Evidence:
   `test_the_pages_own_line_work_is_not_dragged_about`,
   `test_sending_to_the_back_stays_in_front_of_the_drawing`,
   `test_snapshot_skips_unselected_typing`.
@@ -161,7 +239,7 @@ Evidence: `tests/test_btx.py`, 28 tests — `test_every_tool_set_reads_without_l
   `test_a_callout_can_have_as_many_leaders_as_you_like`,
   `test_a_cloud_callout_is_offered_more_leaders_of_either_kind`,
   `test_a_leader_survives_a_round_trip_with_its_side_and_reach`,
-  `test_a_call_out_keeps_its_knee`.
+  `test_a_call_out_goes_out_with_its_leader`.
 - **The hinge is computed, never stored**, so it stays perpendicular and
   automatic. Evidence: `test_the_leader_leaves_the_middle_of_a_side`,
   `test_resizing_a_callout_leaves_the_arrow_where_it_points`,
@@ -198,7 +276,7 @@ Evidence: `tests/test_btx.py`, 28 tests — `test_every_tool_set_reads_without_l
   `test_the_first_scaled_tool_click_prompts_before_drawing`,
   `test_cancelling_the_first_scale_prompt_does_not_create_a_markup`.
 - **A measurement carries the scale it was taken against**, into the file.
-  Evidence: `test_a_measurement_carries_the_scale_it_was_taken_against`,
+  Evidence: `test_a_take_off_carries_the_scale_it_was_measured_against`,
   `test_a_take_off_carries_the_scale_it_was_measured_against`,
   `test_a_measurement_prints_the_dimension_it_reads`.
 - **The dimension tool draws plainly, with its value on the line and a control
@@ -296,7 +374,7 @@ Evidence: `test_the_format_painter_carries_one_markups_look_to_another`,
 `test_clicking_with_the_format_painter_paints_that_markup`,
 `test_format_painter_never_copies_cloud_geometry`,
 `test_format_painter_does_not_copy_callout_leaders`,
-`test_the_format_painter_carries_a_brush`,
+`test_the_format_painter_carries_a_paint_roller`,
 `test_escape_puts_the_format_painter_down`.
 
 ## Properties and the style toolbar
@@ -436,9 +514,9 @@ Four things the first audit listed as real but untested. Each has a test now.
 
 ## Built, but nothing holds it
 
-- **The `.btx` sketch-tool fidelity repair.** The tool sets load and every tool
-  in them reads, but nothing compares an imported structural symbol against
-  what Bluebeam draws — see `docs/UNADDRESSED_TASKS.md`.
+- **Historical BTX coverage gap:** superseded by the current reference-geometry
+  evidence at the top of this file. Other imported symbols remain subject to
+  ordinary user acceptance; successful parsing alone is not fidelity evidence.
 
 ---
 

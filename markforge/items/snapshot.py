@@ -108,8 +108,9 @@ class SnapshotItem(MarkupItem):
             kept.append(payload)
         self.source_items = kept
 
-    def source_markups(self) -> list:
+    def source_markups(self, document=None) -> list:
         """The markups it was taken of, built back from what was kept."""
+        from ..io import pdfsnapshot  # register source paths when opening a saved snapshot
         made = []
         for payload in self.source_items:
             try:
@@ -117,6 +118,8 @@ class SnapshotItem(MarkupItem):
             except Exception:                          # noqa: BLE001
                 continue
             if item is not None:
+                if document is not None and hasattr(item, "load_from_document"):
+                    item.load_from_document(document)
                 made.append(item)
         return made
 

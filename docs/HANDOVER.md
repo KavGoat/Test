@@ -1,5 +1,31 @@
 # MarkForge — start here
 
+## Latest review: 2026-09-11–12
+
+Read the **Current review** sections of `COMPLETED_TASKS.md` and
+`UNADDRESSED_TASKS.md` before using the older architecture/status notes below.
+The PDF engine is now MuPDF-backed (`pdf/engine.py`); the old standalone parser
+map is historical. Split view and transferable document tabs are implemented.
+The bar stays visible with one tab.
+
+Snapshots use `io/pdfsnapshot.py` to extract exact source vector paths with
+clipping, then retain them in `SnapshotItem.source_items` beside the QPicture.
+Do not restore the raster page fallback: it carries the background through and
+breaks recolouring. Source PDF paths are separate from capped optional snapping
+geometry. Raster page backgrounds and full-page vector fills are excluded.
+Whiteout clips a region out of source artwork with undo; it is not secure redaction.
+`Style.hatch_scale` controls hatch spacing and is shared by both style surfaces.
+
+Current acceptance tests: `tests/test_review_regressions.py`. Rendering requests
+carry a viewport consumer so a detail view cannot cancel an overview's tiles.
+The fuzzer isolates application settings. On this macOS environment, pytest
+uses Qt's offscreen backend; a native fuzzer requires access to GUI services.
+No completion checkbox was changed in this review. New requests appear in
+both task registers; old completion evidence was checked and corrected.
+Final suite: 888 passed, one skipped. Native stress session: 300 rounds, zero failures.
+
+---
+
 **If you are an agent picking this project up, read this file first.** It gives
 the product context, code map, validation approach and task-tracking rules
 needed to work safely without re-reading earlier chat.

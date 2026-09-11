@@ -17,7 +17,7 @@ from typing import Optional
 
 from PySide6.QtCore import QByteArray, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (QBrush, QColor, QImage, QLinearGradient, QPainter,
-                           QPen, QPicture, QPixmap)
+                           QPen, QPicture, QPixmap, QTransform)
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QGraphicsScene
 
 from ..core.document import MM_TO_PT, Document, Page
@@ -147,9 +147,10 @@ def _visible_part(item) -> Optional[QRectF]:
         views = scene.views() if scene is not None else []
         if not views:
             return None
-        view = views[0]
-        on_screen = view.mapToScene(
-            view.viewport().rect()).boundingRect()
+        on_screen = QRectF()
+        for view in views:
+            on_screen = on_screen.united(view.mapToScene(
+                view.viewport().rect()).boundingRect())
         return item.mapRectFromScene(on_screen)
     except Exception:                                  # noqa: BLE001
         return None
@@ -287,7 +288,7 @@ class PageFrame(QGraphicsObject):
         self._sharp_scale = 0.0
 
     def paint_the_pdf(self, painter: QPainter, looking_at: QRectF,
-                      scale: float) -> bool:
+                      scale: float, consumer=None) -> bool:
         """Draw the source page under the markups. Says whether it drew.
 
         Nothing is rendered here. The tile cache is asked for the squares of
@@ -348,14 +349,16 @@ class PageFrame(QGraphicsObject):
             margin_y = shown_part.height() * 0.25
             asked = shown_part.adjusted(-margin_x, -margin_y, margin_x, margin_y)
             tiles, missing = pdftiles.TILES.tiles(
-                page.pdf_key, data, index, whole, scale, asked, shown, without)
+                page.pdf_key, data, index, whole, scale, asked, shown, without,
+                consumer=consumer)
         if missing:
             # Only while the tiles are still coming, and only the part of it
             # that is on screen: stretching the whole small picture over a
             # whole sheet on every repaint is the sort of thing that makes
             # scrolling a drawing feel like wading.
             sheet = pdftiles.TILES.sheet(page.pdf_key, data, index, whole,
-                                         shown, without=without)
+                                         shown, without=without,
+                                         ask=scale > pdftiles._sheet_scale(whole))
             if sheet is not None:
                 part = shown_part if not shown_part.isEmpty() else whole
                 across = sheet.width() / max(whole.width(), 1.0)
@@ -386,7 +389,7 @@ class PageFrame(QGraphicsObject):
                 painter.drawPixmap(rect, self._background,
                                    QRectF(self._background.rect()))
             self.paint_the_pdf(painter, _exposed_part(option, rect, self),
-                               _painted_scale(painter))
+                               _painted_scale(painter), consumer=widget)
             painter.restore()
         if not self.print_mode:
             self._paint_grid(painter, rect)
@@ -748,8 +751,12 @@ class PageFrame(QGraphicsObject):
         """
         from ..items.text import _TextBase
 
-        return [item for item in self.markups()
+        from ..io.pdfsnapshot import source_paths
+        source = source_paths(self.document, self.page, region)
+        return source + [item for item in self.markups()
                 if item.isVisible()
+                and not (self.page.pdf_key and item.from_drawing)
+                and item.mapRectToParent(item.boundingRect()).intersects(region)
                 and (not isinstance(item, _TextBase) or item.isSelected())]
 
     def sheet_region(self, region: QRectF, scale: float = 4.0):
@@ -794,7 +801,7 @@ class PageFrame(QGraphicsObject):
         return None
 
     def render_items_picture(self, items, region: QRectF,
-                             sheet: bool = True) -> QPicture:
+                             sheet: bool = False) -> QPicture:
         """Record *items* in page coordinates inside *region*, over the sheet."""
         box = QRectF(region).normalized()
         picture = QPicture()
@@ -835,6 +842,10 @@ class PageFrame(QGraphicsObject):
         painter.translate(-box.left(), -box.top())
         for item in sorted(items, key=lambda markup: markup.zValue()):
             transform, ok = item.itemTransform(self)
+            if item.parentItem() is None:
+                transform = QTransform.fromTranslate(item.pos().x(), item.pos().y())
+                transform *= item.transform()
+                ok = True
             if not ok:
                 continue
             painter.save()

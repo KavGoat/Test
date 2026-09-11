@@ -1552,6 +1552,15 @@ class PropertiesPanel(QScrollArea):
                     lambda i: setattr(i.style, "hatch", hatch.currentData()),
                                           "Hatch"))
             form.addRow("Hatch", hatch)
+            hatch_scale = QDoubleSpinBox()
+            hatch_scale.setObjectName("hatchScale")
+            hatch_scale.setRange(0.1, 100.0)
+            hatch_scale.setSingleStep(0.1)
+            hatch_scale.setSuffix(" ×")
+            hatch_scale.setValue(first.style.hatch_scale)
+            hatch_scale.valueChanged.connect(lambda value: self._apply(
+                lambda i: setattr(i.style, "hatch_scale", value), "Hatch scale"))
+            form.addRow("Hatch scale", hatch_scale)
 
         if OPACITY in controls:
             opacity = LabeledSlider(5, 100, int(first.style.opacity * 100))

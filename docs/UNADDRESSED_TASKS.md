@@ -1,5 +1,43 @@
 # MarkForge — tasks still requiring work
 
+## Current review — 2026-09-11–12
+
+This is the active remainder. The older audit below is retained as history,
+not as a second open-work list. Completion cells remain user-owned and blank.
+
+| Requirement | Current finding / next evidence needed |
+| --- | --- |
+| Intermittent tool lockup that survives Escape | Still not reproduced. The current native 300-round stress session had zero failures, and the event suite covers callout, leader, selection, resize, snapshot and painter cancellation. A concrete sequence reaching the reported lockup is still needed; passing unrelated tests does not close it. |
+| Automatically resume after a usage-limit reset | Platform limitation; this repository cannot control session limits or guarantee automatic restart. The handover and task records preserve the work for continuation. |
+| Continue validating interactive changes through actual Qt events | Ongoing requirement. Current coverage includes pointer gestures, keyboard cancellation, tab transfer, printing/export and a native stress session. It must be repeated for future changes, so it is not a one-time completion. |
+
+### Addressed in this review
+
+- PDF snapshot capture/paste, vector persistence/recolouring, and background
+  exclusion now have actual-PDF regressions. The previously contradictory
+  background test has been corrected. The old “needs a gesture sequence”
+  snapshot entry is superseded by this implementation evidence.
+- Hatch scale, Whiteout, arbitrary markup-edge snapping, persistent tab bars,
+  floating drag previews and moving tabs back into existing windows are
+  implemented and tested. Whiteout is vector clipping, not secure redaction.
+- Performance work fixes competing zoom requests, bounds preview memory and
+  reduces snap candidate generation. Measurements and their limits are in
+  `COMPLETED_TASKS.md`; responsiveness on the user's own dense PDFs still
+  requires acceptance, rather than a universal “fast” claim.
+- Split view and BTX section/elevation reference-geometry fixes were already
+  present. Their current tests replace the stale “not done” entries below.
+- The remaining dialog and print-preview walkthrough was performed. It found
+  long scale labels and a narrow section editor, now corrected. Existing
+  toolset/window/output tests cover the corresponding editing workflows.
+- Format Painter's claimed tool-change cancellation was false. A new event
+  test reproduced it; tool changes and outside controls now cancel the mode.
+
+For exact evidence see `COMPLETED_TASKS.md` and `tests/test_review_regressions.py`.
+
+---
+
+## Historical audit — superseded by the current review above
+
 Audited: 2026-09-07 against `claude/markforge-mupdf-pdf-handling-vpyj1t`. Re-audited the same day
 after a run-through of the running application, which corrected four entries
 below and found five bugs — those are in `docs/COMPLETED_TASKS.md` under

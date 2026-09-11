@@ -51,6 +51,7 @@ from typing import Optional
 
 import atexit
 import threading
+import weakref
 
 from PySide6.QtCore import (QCoreApplication, QObject, QRectF, Qt, QThread,
                             Signal)
@@ -76,6 +77,7 @@ THUMBNAIL_EDGE = 1100
 #: How much of the tile cache to keep, in bytes of image. Roughly forty
 #: A1-sized screenfuls, and a hard ceiling rather than a hope.
 CACHE_BYTES = 192 * 1024 * 1024
+SHEET_CACHE_BYTES = 32 * 1024 * 1024
 
 #: The most tiles one repaint will ask for. A screenful is about a dozen, so
 #: this is several screenfuls of margin and still a bound: past it the answers
@@ -343,6 +345,8 @@ class TileCache(QObject):
         # half a change.
         self._waiting: set = set()
         self._held = 0
+        self._sheet_bytes = 0
+        self._consumers = weakref.WeakKeyDictionary()
         self._worker: Optional[_Worker] = None
         self._farewell = False
 
@@ -387,6 +391,8 @@ class TileCache(QObject):
         key = SheetKey(source, index, annotations, tuple(without))
         found = self._sheets.get(key)
         if found is not None:
+            self._sheets.pop(key)
+            self._sheets[key] = found
             return found if not found.isNull() else None
         if ask and self._sheets_wanted() < MOST_SHEETS_AT_ONCE:
             # A few at a time. Zoomed out far enough to see a whole set, every
@@ -403,7 +409,7 @@ class TileCache(QObject):
 
     def tiles(self, source: str, data: bytes, index: int, page: QRectF,
               scale: float, region: QRectF, annotations: bool = True,
-              without: tuple = ()
+              without: tuple = (), consumer=None
               ) -> tuple[list[tuple[QRectF, QPixmap]], bool]:
         """Every tile of *region* that is ready, and whether any is missing.
 
@@ -424,7 +430,7 @@ class TileCache(QObject):
         last_col = int((wanted.right() - 1e-6) // size)
         first_row = max(int(wanted.top() // size), 0)
         last_row = int((wanted.bottom() - 1e-6) // size)
-        self._stop_wanting(source, index, step, without)
+        self._stop_wanting(source, index, step, without, consumer)
         ready: list[tuple[QRectF, QPixmap]] = []
         wanting: list = []
         missing = False
@@ -434,6 +440,8 @@ class TileCache(QObject):
                               without)
                 found = self._tiles.get(key)
                 if found is not None:
+                    self._tiles.pop(key)
+                    self._tiles[key] = found
                     if not found.isNull():
                         ready.append((key.page_rect(found), found))
                     continue
@@ -485,7 +493,7 @@ class TileCache(QObject):
         return [(where, pixmap) for _scale, where, pixmap in found]
 
     def _stop_wanting(self, source: str, index: int, step: float,
-                      without: tuple = ()) -> None:
+                      without: tuple = (), consumer=None) -> None:
         """Give up on tiles of this page at a zoom nobody is looking at now.
 
         A zoom asks for a fresh rung of the ladder, and everything still
@@ -498,10 +506,15 @@ class TileCache(QObject):
         Only the same page's other zooms go. Tiles of *other* pages are still
         wanted — that is the next page in the scroll, coming.
         """
+        retained = {(step, without)}
+        if consumer is not None:
+            self._consumers.setdefault(consumer, {})[(source, index)] = (step, without)
+            retained.update(requests[(source, index)] for requests in self._consumers.values()
+                            if (source, index) in requests)
         stale = [key for key in self._waiting
                  if isinstance(key, TileKey) and key.source == source
                  and key.index == index
-                 and (key.scale != step or key.without != without)]
+                 and (key.scale, key.without) not in retained]
         self._waiting.difference_update(stale)
 
     def _ask(self, key, data: bytes, page: QRectF, sheet: bool) -> None:
@@ -517,6 +530,7 @@ class TileCache(QObject):
     def _tile_arrived(self, key: TileKey, image: QImage) -> None:
         self._waiting.discard(key)
         pixmap = QPixmap.fromImage(image) if not image.isNull() else QPixmap()
+        self._held -= _weight(self._tiles.pop(key, None))
         self._tiles[key] = pixmap
         self._held += _weight(pixmap)
         self._make_room()
@@ -525,7 +539,11 @@ class TileCache(QObject):
     def _sheet_arrived(self, key: SheetKey, image: QImage) -> None:
         self._waiting.discard(key)
         pixmap = QPixmap.fromImage(image) if not image.isNull() else QPixmap()
+        self._sheet_bytes -= _weight(self._sheets.pop(key, None))
         self._sheets[key] = pixmap
+        self._sheet_bytes += _weight(pixmap)
+        while self._sheet_bytes > SHEET_CACHE_BYTES and self._sheets:
+            self._sheet_bytes -= _weight(self._sheets.pop(next(iter(self._sheets))))
         self.sheetReady.emit(key)
 
     def _make_room(self) -> None:
@@ -544,11 +562,14 @@ class TileCache(QObject):
             self._tiles.clear()
             self._sheets.clear()
             self._held = 0
+            self._sheet_bytes = 0
+            self._waiting.clear()
+            self._consumers.clear()
             return
         for key in [k for k in self._tiles if k.source == source]:
             self._held -= _weight(self._tiles.pop(key))
         for key in [k for k in self._sheets if k.source == source]:
-            self._sheets.pop(key, None)
+            self._sheet_bytes -= _weight(self._sheets.pop(key, None))
         if self._worker is not None:
             self._worker.drop(source)
 
