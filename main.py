@@ -2,7 +2,8 @@
 """Launch MarkForge."""
 import sys
 
-from markforge.app import main
-
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()
+    from markforge.app import main
     sys.exit(main())

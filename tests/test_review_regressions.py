@@ -200,7 +200,9 @@ def test_pdf_thumbnail_cache_has_a_memory_ceiling(qapp, monkeypatch):
     monkeypatch.setattr(pdftiles, "SHEET_CACHE_BYTES", 40000)
     image = QImage(100, 100, QImage.Format_ARGB32)
     for page in range(12):
-        cache._sheet_arrived(pdftiles.SheetKey("pdf", page, True), image)
+        key = pdftiles.SheetKey("pdf", page, True)
+        cache._waiting.add(key)
+        cache._sheet_arrived(key, image)
     assert cache._sheet_bytes <= 40000
     assert len(cache._sheets) == 1
 

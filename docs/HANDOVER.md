@@ -2,6 +2,13 @@
 
 ## Latest review: 2026-09-11–12
 
+PDF rendering now uses `io/pdfrender.py` worker processes coordinated by
+`io/pdftiles.py`. Do not move MuPDF rendering back into Python threads.
+Sources are shared through private files; pixels use fixed shared buffers.
+The default is up to four processes (override `MARKFORGE_PDF_WORKERS=1..8`).
+See `PDF_PERFORMANCE.md` for timings, cache bounds and reproducible benchmarks.
+Latest full suite: 911 passed, one skipped; native stress: 300 rounds, no failures.
+
 Read the **Current review** sections of `COMPLETED_TASKS.md` and
 `UNADDRESSED_TASKS.md` before using the older architecture/status notes below.
 The PDF engine is now MuPDF-backed (`pdf/engine.py`); the old standalone parser

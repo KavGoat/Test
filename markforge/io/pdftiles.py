@@ -1,48 +1,14 @@
-"""Drawing PDF pages the way a PDF reader does: in tiles, off the main thread.
+"""Viewport PDF tiles rendered by a bounded pool of independent processes.
 
-The problem this solves is the one every PDF viewer has. A drawing sheet is
-enormous — an A1 page at the zoom somebody actually reads a detail at is
-hundreds of megapixels — so the page cannot be rendered as one picture, and it
-certainly cannot be rendered while the window is trying to repaint. Do it that
-way and the sheet is either blurred, because the render had to be shrunk to
-something that would fit, or the window stops dead every time it scrolls.
+Only visible tiles and a small scroll margin are requested. A zoom ladder and
+LRU pixmap caches reuse finished work. Each render process keeps its own parsed
+pages; private source files and fixed shared pixel buffers avoid copying large
+PDFs and images through the job queue. The Qt coordinator only schedules work
+and transfers owned QImages back to the window.
 
-So, the same arrangement PDF4QT uses, and Chrome's viewer, and every other
-reader worth using:
-
-* **Tiles.** The page is cut into squares of a fixed size in *screen* pixels.
-  Only the squares on screen are ever drawn, so the cost of a repaint depends
-  on the size of the window and not on the size of the sheet.
-
-* **A zoom ladder.** Tiles are rendered at powers of two, not at whatever the
-  zoom happens to be, so a wheel notch reuses what is already drawn and a real
-  zoom change costs one round of rendering rather than fifty.
-
-* **A background thread.** Nothing is rendered on the thread that paints. A
-  repaint draws the tiles that are ready and asks for the ones that are not;
-  when one arrives it says so and that part of the page is repainted. The
-  window never waits.
-
-* **A thumbnail underneath.** One small picture of each whole page, kept, and
-  drawn stretched under the tiles. It is what fills the gap while tiles are
-  still coming, so a page is never blank and never shows a hole — it starts
-  soft and sharpens, rather than starting empty. It is only ever the gap
-  filler: tiles are rendered at every zoom, including zoomed right out, so
-  what settles is always drawn at the resolution the screen is showing and
-  never a small picture stretched over a big sheet.
-
-* **A cache with a ceiling.** Tiles are kept for as long as there is room and
-  the least recently wanted are dropped first, so zooming back out and
-  scrolling back up are instant, and the memory does not grow without end.
-
-Printing and exporting do not come through here. They want the whole page at
-one resolution, right now, and they are allowed to wait — that is
-:func:`markforge.io.pdfio.LivePages.draw_region`.
-
-The renderer is MuPDF, through :mod:`markforge.pdf.engine`. A MuPDF document
-belongs to the thread that opened it, so the worker below opens its own from
-the same bytes rather than sharing the one the window draws with — which is
-the same arrangement the Qt renderer needed, for the same reason.
+Separate processes matter: PyMuPDF does not support multithreaded use, and a
+native render in a Python thread can hold the interpreter lock and stall Qt.
+Printing/export retain the synchronous renderer in pdfio.LivePages.
 """
 from __future__ import annotations
 
@@ -50,25 +16,20 @@ from dataclasses import dataclass
 from typing import Optional
 
 import atexit
+import time
 import threading
 import weakref
 
 from PySide6.QtCore import (QCoreApplication, QObject, QRectF, Qt, QThread,
-                            Signal)
+                            Signal, QTimer)
 from PySide6.QtGui import QImage, QPixmap
 
-from ..pdf import engine
-from ..pdf.engine import PdfError
 
 #: How big a tile is, in screen pixels.
 #:
-#: Bigger than it looks like it should be, and measured rather than guessed.
-#: What a tile costs is mostly walking the page's drawing — forty thousand
-#: paths on a dense A1 sheet — and that is paid once per tile whatever size it
-#: is, because clipping decides what to rasterise and not what to walk. So
-#: cutting the screen into more, smaller squares pays the expensive part more
-#: often. Covering a window at 1024 is roughly forty per cent quicker than at
-#: 512 across every zoom; 2048 gives it back again in rasterising.
+#: The process-pool benchmark compares 512, 1024 and 2048 pixels over the
+#: same area. 1024 gives the best balance of complete-view latency, first-tile
+#: latency and shared-buffer memory. See docs/PDF_PERFORMANCE.md.
 TILE = 1024
 
 #: The longest edge of the small picture kept of a whole page.
@@ -89,10 +50,10 @@ MOST_TILES_AT_ONCE = 48
 #: the canvas and asks for the next.
 MOST_SHEETS_AT_ONCE = 4
 
-#: How many pages to keep parsed on the render thread. A display list of a
-#: dense A1 sheet is a few megabytes; a handful covers the page being read and
-#: its neighbours, which is what scrolling touches.
-MOST_HELD_PAGES = 8
+# Source files are private, shared by the renderers, and bounded separately
+# from the GUI pixmaps. A single PDF larger than this can still be opened.
+SOURCE_CACHE_BYTES = 256 * 1024 * 1024
+MOST_HELD_SOURCES = 8
 
 
 def zoom_step(scale: float) -> float:
@@ -150,179 +111,232 @@ class SheetKey:
 
 
 class _Worker(QThread):
-    """Renders on its own thread, taking work off a stack.
+    """Schedule a bounded pool of render processes without blocking Qt.
 
-    Deliberately a stack and not queued slot calls: handing Python objects
-    across threads through Qt's meta-object system is a way to crash, and
-    there is nothing here that needs it. What crosses back is a signal, which
-    Qt delivers on the window's thread by itself.
-
-    **A stack, not a queue.** What was asked for most recently is what is on
-    screen now, and what was asked for a second ago may be the same page at a
-    zoom nobody is looking at any more. Rendering in the order the requests
-    arrived means every zoom is served only after the whole of the previous
-    zoom has been drawn — which is what made zooming into a dense sheet take
-    ten seconds and then fifteen. Newest first, and anything nobody still
-    wants is dropped rather than drawn.
-
-    The thread keeps its own MuPDF document for each source, because a document
-    belongs to the thread that opened it, and a display list for each page it
-    has drawn: a page is parsed once and its tiles are rasterised from that
-    rather than running the content stream again for every square.
+    This thread only transfers jobs and pixels. MuPDF runs exclusively in the
+    child processes, outside the UI process and its Python interpreter lock.
+    Jobs stay here until a renderer is idle so obsolete zooms can be dropped.
     """
 
     tileDone = Signal(object, QImage)
     sheetDone = Signal(object, QImage)
 
-    def __init__(self, wanted: "Optional[set]" = None) -> None:
+    def __init__(self, wanted=None, processes=None):
         super().__init__()
-        self._work: list = []                # a stack; the newest is on top
+        from .pdfrender import worker_count
+        self.process_count = max(1, min(8, int(processes))) if processes is not None else worker_count()
+        self._work = {}
         self._lock = threading.Lock()
-        self._ready = threading.Semaphore(0)
-        self._open: dict[str, object] = {}
-        self._lists: "dict[tuple, object]" = {}
+        self._ready = threading.Event()
         self._wanted = wanted if wanted is not None else set()
         self._stopping = False
+        self._forgotten = set()
+        self.stats = {}
 
-    def submit(self, key, data: bytes, width: float, height: float) -> None:
+    def submit(self, key, data, width, height):
         with self._lock:
-            self._work.append((key, data, width, height))
-        self._ready.release()
+            self._work.pop(key, None)
+            self._work[key] = (key, data, width, height)
+        self._ready.set()
 
-    def stop(self) -> None:
+    def stop(self):
         self._stopping = True
-        with self._lock:
-            self._work.append(None)
-        self._ready.release()
+        self._ready.set()
 
-    def drop(self, source: str) -> None:
-        self.submit("forget", source, 0.0, 0.0)
+    def drop(self, source):
+        with self._lock:
+            self._forgotten.add(source)
+            for key in list(self._work):
+                if not source or key.source == source:
+                    self._work.pop(key, None)
+        self._ready.set()
 
     def _next(self):
-        """The most recent piece of work still worth doing."""
-        while True:
-            self._ready.acquire()
-            with self._lock:
-                if not self._work:
-                    continue
-                job = self._work.pop()
-            if job is None or job[0] == "forget":
-                return job
-            # Asked for, then superseded before the thread got to it. Skipping
-            # here is the whole point of the stack: the answer would be thrown
-            # away the moment it arrived.
-            if job[0] in self._wanted:
-                return job
+        with self._lock:
+            while self._work:
+                _, job = self._work.popitem()
+                if job[0] in self._wanted:
+                    return job
+        return None
 
-    def run(self) -> None:
-        while True:
-            job = self._next()
-            if job is None:
-                break
-            key, data, width, height = job
-            if key == "forget":
-                for held in [k for k in self._open if k[0] == data]:
-                    engine.close(self._open.pop(held, None))
-                for held in [k for k in self._lists if k[0] == data]:
-                    self._lists.pop(held, None)
-                continue
+    def _emit(self, key, image):
+        signal = self.sheetDone if isinstance(key, SheetKey) else self.tileDone
+        signal.emit(key, image if image is not None else QImage())
+
+    def run(self):
+        import multiprocessing
+        from multiprocessing.connection import wait
+        from multiprocessing.shared_memory import SharedMemory
+        import os
+        import tempfile
+        from .pdfrender import serve
+
+        context = multiprocessing.get_context('spawn')
+        slots, paths, sizes, retries = [], {}, {}, {}
+        deferred_deletes = set()
+
+        def start_slot():
+            parent, child = context.Pipe()
+            memory = SharedMemory(create=True, size=(max(TILE, THUMBNAIL_EDGE) + 2) ** 2 * 4)
+            process = context.Process(target=serve, args=(child, memory.name, memory.size), daemon=True,
+                                      name='MarkForge PDF renderer')
             try:
-                if isinstance(key, SheetKey):
-                    self._sheet(key, data, width, height)
-                else:
-                    self._tile(key, data, width, height)
-            except Exception:                              # noqa: BLE001
-                # A source that cannot be drawn must not take the thread down
-                # with it, or every page after it stops appearing.
-                signal = (self.sheetDone if isinstance(key, SheetKey)
-                          else self.tileDone)
-                signal.emit(key, QImage())
-        self._lists.clear()
-        for document in self._open.values():
-            engine.close(document)
-        self._open.clear()
+                process.start()
+            except Exception:
+                parent.close()
+                child.close()
+                memory.close()
+                memory.unlink()
+                raise
+            child.close()
+            return {'process': process, 'pipe': parent, 'memory': memory,
+                    'job': None, 'forgotten': set()}
 
-    def _document(self, source, data: bytes):
-        found = self._open.get(source)
-        if found is not None:
-            return found
-        try:
-            document = engine.open_bytes(data)
-        except PdfError:
-            return None
-        if document.page_count < 1:
-            engine.close(document)
-            return None
-        if len(self._open) >= MOST_HELD_PAGES:
-            engine.close(self._open.pop(next(iter(self._open))))
-        self._open[source] = document
-        return document
+        def finish_slot(slot):
+            process = slot['process']
+            if process.is_alive():
+                process.terminate()
+            process.join(.2)
+            if process.is_alive():
+                process.kill()
+                process.join(.2)
+            slot['pipe'].close()
+            slot['memory'].close()
+            slot['memory'].unlink()
+            process.close()
 
-    def _display_list(self, source: str, data: bytes, index: int,
-                      annotations: bool, without: tuple = ()):
-        """The page, parsed once, ready to be rasterised any number of times.
-
-        A dense drawing sheet is tens of thousands of path operations, and
-        asking the page for a square of itself runs all of them again. Held as
-        a display list they are run once and every tile after that is only
-        rasterising.
-        """
-        key = (source, index, annotations, without)
-        found = self._lists.get(key)
-        if found is not None:
-            return found
-        # A document of its own for each set of left-out annotations. Leaving
-        # one out is done by setting its hidden flag, and a flag put back
-        # again does not always give back what was there before — so the
-        # answer is never to put one back: each set gets a clean copy.
-        document = self._document((source, without), data)
-        if document is None or not 0 <= index < document.page_count:
-            return None
-        made = engine.display_list(document, index, annotations, without)
-        if made is None:
-            return None
-        if len(self._lists) >= MOST_HELD_PAGES:
-            self._lists.pop(next(iter(self._lists)), None)
-        self._lists[key] = made
-        return made
-
-    def _tile(self, key: "TileKey", data: bytes,
-              page_width: float, page_height: float) -> None:
-        from .pdfio import to_image
-
-        drawing = self._display_list(key.source, data, key.index,
-                                     key.annotations, key.without)
-        if drawing is None:
-            self.tileDone.emit(key, QImage())
-            return
-        # Where this tile is on the page, in points. The last tile in a row or
-        # column is the part of one that fits, and asking for more than the
-        # page has would stretch its edge across the difference.
-        size = TILE / key.scale
-        left, top = key.col * size, key.row * size
-        right = min(left + size, page_width)
-        bottom = min(top + size, page_height)
-        if right - left <= 0 or bottom - top <= 0:
-            self.tileDone.emit(key, QImage())
-            return
-        image = to_image(engine.raster_from(
-            drawing, (left, top, right, bottom), key.scale))
-        self.tileDone.emit(key, image if image is not None else QImage())
-
-    def _sheet(self, key: "SheetKey", data: bytes,
-               page_width: float, page_height: float) -> None:
-        from .pdfio import to_image
-
-        drawing = self._display_list(key.source, data, key.index,
-                                     key.annotations, key.without)
-        if drawing is None:
-            self.sheetDone.emit(key, QImage())
-            return
-        longest = max(page_width, page_height, 1.0)
-        shrink = min(THUMBNAIL_EDGE / longest, 4.0)
-        image = to_image(engine.raster_from(
-            drawing, (0.0, 0.0, page_width, page_height), shrink))
-        self.sheetDone.emit(key, image if image is not None else QImage())
+        with tempfile.TemporaryDirectory(prefix='markforge-render-') as folder:
+            try:
+                while not self._stopping:
+                    with self._lock:
+                        forgotten, self._forgotten = self._forgotten, set()
+                    for path in list(deferred_deletes):
+                        try:
+                            os.unlink(path)
+                            deferred_deletes.discard(path)
+                        except OSError:
+                            pass
+                    for source in list(paths):
+                        if '' in forgotten or source in forgotten:
+                            path = paths.pop(source)
+                            sizes.pop(source, None)
+                            for slot in slots:
+                                slot['forgotten'].add(path)
+                            # Open handles remain valid until their job completes.
+                            # On Windows defer deletion to TemporaryDirectory.
+                            try:
+                                os.unlink(path)
+                            except OSError:
+                                deferred_deletes.add(path)
+                    for slot in list(slots):
+                        process = slot['process']
+                        if not process.is_alive():
+                            job = slot['job']
+                            finish_slot(slot)
+                            slots.remove(slot)
+                            if job and job[0] in self._wanted:
+                                key = job[0]
+                                attempts = retries.get(key, 0)
+                                if attempts < 1:
+                                    retries[key] = attempts + 1
+                                    self.submit(*job)
+                                else:
+                                    self._emit(key, None)
+                    # Nothing is submitted into an unbounded child-side queue.
+                    idle = [slot for slot in slots if slot['job'] is None]
+                    while not self._stopping:
+                        if not idle and len(slots) >= self.process_count:
+                            break
+                        job = self._next()
+                        if job is None:
+                            break
+                        key, data, width, height = job
+                        slot = None
+                        try:
+                            if idle:
+                                slot = idle.pop(0)
+                            else:
+                                slot = start_slot()
+                                slots.append(slot)
+                            for path in slot['forgotten']:
+                                slot['pipe'].send(('forget', path))
+                            slot['forgotten'].clear()
+                            path = paths.pop(key.source, None)
+                            if path is not None:
+                                paths[key.source] = path
+                            if path is None:
+                                busy_sources = {held['job'][0].source for held in slots if held['job']}
+                                for source in list(paths):
+                                    if len(paths) < MOST_HELD_SOURCES and sum(sizes.values()) + len(data) <= SOURCE_CACHE_BYTES:
+                                        break
+                                    if source in busy_sources:
+                                        continue
+                                    old_path = paths.pop(source)
+                                    sizes.pop(source, None)
+                                    for held in slots:
+                                        held['forgotten'].add(old_path)
+                                    try:
+                                        os.unlink(old_path)
+                                    except OSError:
+                                        deferred_deletes.add(old_path)
+                                # Write the source once, off the UI thread. Children
+                                # open the same private file rather than receiving a
+                                # fresh copy of a large PDF for every tile.
+                                descriptor, path = tempfile.mkstemp(suffix='.pdf', dir=folder)
+                                with os.fdopen(descriptor, 'wb') as output:
+                                    output.write(data)
+                                paths[key.source] = path
+                                sizes[key.source] = len(data)
+                            if isinstance(key, SheetKey):
+                                region = (0., 0., width, height)
+                                scale = min(THUMBNAIL_EDGE / max(width, height, 1.), 4.)
+                            else:
+                                scale = key.scale
+                                size = TILE / scale
+                                left, top = key.col * size, key.row * size
+                                region = (left, top, min(left + size, width), min(top + size, height))
+                            slot['job'] = job
+                            slot['pipe'].send(('render', path, key.index,
+                                               key.annotations, key.without, region, scale))
+                        except Exception:
+                            self._emit(key, None)
+                            if slot in slots:
+                                finish_slot(slot)
+                                slots.remove(slot)
+                    busy = [slot for slot in slots if slot['job'] is not None]
+                    if not busy:
+                        self._ready.wait(.05)
+                        self._ready.clear()
+                        continue
+                    ready = wait([slot['pipe'] for slot in busy], timeout=.02)
+                    for slot in busy:
+                        if slot['pipe'] not in ready:
+                            continue
+                        try:
+                            description, stats = slot['pipe'].recv()
+                        except (EOFError, OSError):
+                            # The death/retry path above owns this job.
+                            continue
+                        key = slot['job'][0]
+                        slot['job'] = None
+                        self.stats[stats['pid']] = stats
+                        while len(self.stats) > 32:
+                            self.stats.pop(next(iter(self.stats)))
+                        retries.pop(key, None)
+                        if key in self._wanted:
+                            image = None
+                            if description is not None:
+                                width, height, stride, alpha = description
+                                shape = QImage.Format_RGBA8888_Premultiplied if alpha else QImage.Format_RGB888
+                                # Own the pixels before this worker gets another
+                                # job and overwrites its fixed shared buffer.
+                                image = QImage(slot['memory'].buf, width, height, stride, shape).copy()
+                            self._emit(key, image)
+            finally:
+                for slot in slots:
+                    finish_slot(slot)
+                with self._lock:
+                    self._work.clear()
 
 
 class TileCache(QObject):
@@ -345,6 +359,7 @@ class TileCache(QObject):
         # half a change.
         self._waiting: set = set()
         self._held = 0
+        self._failures = {}
         self._sheet_bytes = 0
         self._consumers = weakref.WeakKeyDictionary()
         self._worker: Optional[_Worker] = None
@@ -374,7 +389,7 @@ class TileCache(QObject):
         worker, self._worker = self._worker, None
         if worker is not None:
             worker.stop()
-            worker.wait(3000)
+            worker.wait()
         self.forget()
 
     # -- what is ready -----------------------------------------------------
@@ -430,7 +445,7 @@ class TileCache(QObject):
         last_col = int((wanted.right() - 1e-6) // size)
         first_row = max(int(wanted.top() // size), 0)
         last_row = int((wanted.bottom() - 1e-6) // size)
-        self._stop_wanting(source, index, step, without, consumer)
+        self._stop_wanting(source, index, step, without, consumer, wanted)
         ready: list[tuple[QRectF, QPixmap]] = []
         wanting: list = []
         missing = False
@@ -461,10 +476,11 @@ class TileCache(QObject):
         # tiles is a repaint whose answers arrive minutes later, by which time
         # the zoom has moved on; the rest are asked for on the repaints that
         # follow, by which time it is known whether they are still wanted.
-        if len(wanting) > MOST_TILES_AT_ONCE:
-            middle = wanted.center()
-            wanting.sort(key=lambda key: _distance_from(key, middle))
-            wanting = wanting[:MOST_TILES_AT_ONCE]
+        middle = wanted.center()
+        wanting.sort(key=lambda key: _distance_from(key, middle))
+        wanting = wanting[:MOST_TILES_AT_ONCE]
+        # The worker uses a stack: enqueue the centre last so it renders first.
+        wanting.reverse()
         for key in wanting:
             self._ask(key, data, page, sheet=False)
         return ready, missing
@@ -493,7 +509,7 @@ class TileCache(QObject):
         return [(where, pixmap) for _scale, where, pixmap in found]
 
     def _stop_wanting(self, source: str, index: int, step: float,
-                      without: tuple = (), consumer=None) -> None:
+                      without: tuple = (), consumer=None, region=None) -> None:
         """Give up on tiles of this page at a zoom nobody is looking at now.
 
         A zoom asks for a fresh rung of the ladder, and everything still
@@ -506,19 +522,25 @@ class TileCache(QObject):
         Only the same page's other zooms go. Tiles of *other* pages are still
         wanted — that is the next page in the scroll, coming.
         """
-        retained = {(step, without)}
+        request = (step, without, QRectF(region) if region is not None else None)
+        retained = [request]
         if consumer is not None:
-            self._consumers.setdefault(consumer, {})[(source, index)] = (step, without)
-            retained.update(requests[(source, index)] for requests in self._consumers.values()
+            self._consumers.setdefault(consumer, {})[(source, index)] = request
+            retained.extend(requests[(source, index)] for requests in self._consumers.values()
                             if (source, index) in requests)
         stale = [key for key in self._waiting
                  if isinstance(key, TileKey) and key.source == source
                  and key.index == index
-                 and (key.scale, key.without) not in retained]
+                 and not any(key.scale == scale and key.without == omitted
+                             and (area is None or key.page_rect().intersects(area))
+                             for scale, omitted, area in retained)]
         self._waiting.difference_update(stale)
 
     def _ask(self, key, data: bytes, page: QRectF, sheet: bool) -> None:
         if key in self._waiting or not data:
+            return
+        failed = self._failures.get(key)
+        if failed is not None and (failed[0] >= 3 or time.monotonic() < failed[1]):
             return
         worker = self._started()
         self._waiting.add(key)
@@ -528,8 +550,14 @@ class TileCache(QObject):
 
     # -- what comes back ---------------------------------------------------
     def _tile_arrived(self, key: TileKey, image: QImage) -> None:
+        if key not in self._waiting:
+            return
         self._waiting.discard(key)
-        pixmap = QPixmap.fromImage(image) if not image.isNull() else QPixmap()
+        if image.isNull():
+            self._render_failed(key)
+            return
+        self._failures.pop(key, None)
+        pixmap = QPixmap.fromImage(image)
         self._held -= _weight(self._tiles.pop(key, None))
         self._tiles[key] = pixmap
         self._held += _weight(pixmap)
@@ -537,14 +565,32 @@ class TileCache(QObject):
         self.tileReady.emit(key)
 
     def _sheet_arrived(self, key: SheetKey, image: QImage) -> None:
+        if key not in self._waiting:
+            return
         self._waiting.discard(key)
-        pixmap = QPixmap.fromImage(image) if not image.isNull() else QPixmap()
+        if image.isNull():
+            self._render_failed(key)
+            return
+        self._failures.pop(key, None)
+        pixmap = QPixmap.fromImage(image)
         self._sheet_bytes -= _weight(self._sheets.pop(key, None))
         self._sheets[key] = pixmap
         self._sheet_bytes += _weight(pixmap)
         while self._sheet_bytes > SHEET_CACHE_BYTES and self._sheets:
             self._sheet_bytes -= _weight(self._sheets.pop(next(iter(self._sheets))))
         self.sheetReady.emit(key)
+
+    def _render_failed(self, key):
+        attempts = self._failures.get(key, (0, 0))[0] + 1
+        delay = .1 if attempts == 1 else .5
+        self._failures[key] = (attempts, time.monotonic() + delay)
+        while len(self._failures) > 256:
+            self._failures.pop(next(iter(self._failures)))
+        signal = self.sheetReady if isinstance(key, SheetKey) else self.tileReady
+        # Keep drawing the fallback; an empty pixmap must never count as a
+        # successfully rendered tile. Retry transient failures, without a loop.
+        if attempts < 3:
+            QTimer.singleShot(round(delay * 1000), lambda: signal.emit(key))
 
     def _make_room(self) -> None:
         """Drop the oldest tiles until the cache is inside its ceiling.
@@ -564,8 +610,19 @@ class TileCache(QObject):
             self._held = 0
             self._sheet_bytes = 0
             self._waiting.clear()
+            self._failures.clear()
             self._consumers.clear()
+            if self._worker is not None:
+                self._worker.drop("")
             return
+        self._waiting.difference_update(key for key in list(self._waiting) if key.source == source)
+        for key in list(self._failures):
+            if key.source == source:
+                del self._failures[key]
+        for requests in self._consumers.values():
+            for page_key in list(requests):
+                if page_key[0] == source:
+                    del requests[page_key]
         for key in [k for k in self._tiles if k.source == source]:
             self._held -= _weight(self._tiles.pop(key))
         for key in [k for k in self._sheets if k.source == source]:

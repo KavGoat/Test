@@ -4,7 +4,7 @@
 
 | Complete | Task |
 | --- | --- |
-|  | Improve responsiveness and reliability when opening, scrolling, zooming and editing PDFs; measure performance on dense drawings and repair reproducible stalls or interaction failures. |
+|  | Improve responsiveness and reliability when opening, scrolling, zooming and editing PDFs. Use multiple CPU cores safely for background rendering, retain reusable parsed pages, prioritise visible tiles and cancel obsolete work. Measure dense-drawing rendering speed and UI responsiveness without reducing image quality or allowing unbounded memory use. |
 |  | Keep PDF linework sharp when zoomed out, including on high-density displays; replace temporary preview imagery with correctly resolved tiles. |
 |  | Repair PDF snapshots so repeated capture and paste reliably include the source PDF's vector linework, font outlines and embedded/scanned images. Exclude paper/background fills and page background colours, and include text markups only when explicitly selected. Preserve independent PDF stroke/fill opacity. Recolouring must remain undoable and must not change other snapshot copies that share the original recording. |
 |  | Add adjustable hatch scale in the style toolbar and Properties panel; preserve it through copy, undo, save and PDF export. |

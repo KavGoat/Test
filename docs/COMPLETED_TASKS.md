@@ -8,6 +8,14 @@ review. None has been marked complete. The audit checked the implementation,
 the cited test names and the current suite, rather than treating “Built” or
 “Fixed” in task wording as proof.
 
+Multicore rendering validation on 2026-09-12: **911 passed, one skipped**
+(152.98 seconds), plus **eight focused process-rendering regressions passed**.
+Native stress seed 97 completed 300 rounds with zero failures.
+`PDF_PERFORMANCE.md` records a **3.0× warm tile-batch speedup** (185.1 ms to
+61.7 ms) against the previous renderer, with matching pixel hashes and smaller
+UI heartbeat gaps. These are synthetic component measurements, not a claim
+about every PDF. Four processes and 1024-pixel tiles are the measured default.
+
 Follow-up validation on 2026-09-12: **903 passed, one skipped** in the full
 suite (135.50 seconds); **32 focused regressions passed** after the final
 mask-preservation guard. The skip is the unavailable external PDF corpus.
@@ -59,7 +67,14 @@ the frozen header and AutoFilter were retained, with filtering extended to all
   drag-out, and release over another tab bar transfers the document and undo
   history. Release elsewhere creates a window. Round-trip transfer and preview
   behaviour are tested, alongside the existing tab identity and split tests.
-- **Rendering and responsiveness:** views at different zooms no longer cancel
+- **Multicore rendering:** independent MuPDF processes replace the single
+  render thread. Parsed pages are reused per worker; source files are shared
+  privately and raster pixels use fixed shared-memory buffers. Centre tiles
+  are queued first, pan/zoom cancellation preserves other views, late results
+  cannot resurrect forgotten sources, and transient failures recover without
+  treating blank tiles as success. Child exit recovery and shutdown are tested.
+  GUI launchers and the fuzzer now guard startup for spawned processes.
+- **Earlier rendering and responsiveness work:** views at different zooms no longer cancel
   each other's tile requests; thumbnails have a 32 MiB ceiling; cache hits
   refresh tile recency; low-zoom rendering avoids redundant thumbnail jobs;
   external snapshot previews have a 16-million-pixel ceiling. Nearby snapping

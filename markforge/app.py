@@ -46,6 +46,8 @@ def apply_theme(application: QApplication, theme: str) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    import multiprocessing
+    multiprocessing.freeze_support()
     argv = list(sys.argv if argv is None else argv)
     application = build_application(argv)
 

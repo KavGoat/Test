@@ -47,6 +47,12 @@ markforge                         # or: markforge drawing.pdf
 
 On a headless machine (CI, a container) run with `QT_QPA_PLATFORM=offscreen`.
 
+PDF tiles render in separate processes, using up to four CPU cores by default.
+Set `MARKFORGE_PDF_WORKERS` to a value from `1` to `8` before launching to adjust
+concurrency. Cached views reuse their existing pixels. See
+[PDF performance](docs/PDF_PERFORMANCE.md) for measurements, memory bounds and
+commands to benchmark your own drawings.
+
 ---
 
 ## Markup
