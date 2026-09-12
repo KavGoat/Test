@@ -344,3 +344,192 @@ def test_snapshot_recolour_undo_does_not_change_other_copies(window, tmp_path, m
     window.undo_stack.undo()
     restored = [i for i in frame.markups() if isinstance(i, SnapshotItem)]
     assert all(replay(item).pixelColor(60, 60).red() < 30 for item in restored)
+
+
+def test_snapshot_includes_pdf_font_outlines_and_scan_without_paper(window, tmp_path):
+    from PySide6.QtCore import QBuffer, QIODevice
+    from markforge.io.recolour import swap_line_colour
+    pdf = pymupdf.open()
+    page = pdf.new_page(width=200, height=150)
+    page.draw_rect(page.rect, fill=(.8, .9, 1), color=None)
+    page.insert_text((20, 40), 'Captured text', fontsize=18)
+    scan = QImage(40, 40, QImage.Format_ARGB32)
+    scan.fill(Qt.white)
+    painter = QPainter(scan)
+    painter.fillRect(QRectF(10, 10, 20, 20), Qt.black)
+    painter.end()
+    buffer = QBuffer()
+    buffer.open(QIODevice.WriteOnly)
+    scan.save(buffer, 'PNG')
+    page.insert_image(pymupdf.Rect(20, 60, 60, 100), stream=bytes(buffer.data()))
+    path = tmp_path / 'text-scan.pdf'
+    pdf.save(path)
+    pdf.close()
+    pdfio.import_pages(window.document, str(path), [0], at=0)
+    window.rebuild_scenes()
+    frame = window.document.pages[0].frame
+    window.take_snapshot(frame, QRectF(0, 0, 180, 120))
+    payload = window._clipboard[0]
+    snapshot = build_item(payload)
+    snapshot.load_from_document(window.document)
+    image = replay(snapshot)
+    assert image.pixelColor(5, 5).alpha() == 0
+    assert image.pixelColor(22, 62).alpha() == 0
+    assert image.pixelColor(40, 80).alpha() == 255
+    assert any(image.pixelColor(x, y).alpha() > 100 for x in range(20, 150) for y in range(20, 42))
+    source = snapshot.source_markups(window.document)
+    assert swap_line_colour(source, QColor('black'), QColor('red')) > 0
+    snapshot.redraw_from(source)
+    tinted = replay(snapshot)
+    assert tinted.pixelColor(40, 80) == QColor("red")
+    assert tinted.pixelColor(22, 62).alpha() == 0
+    assert any(tinted.pixelColor(x, y).red() > 200 and tinted.pixelColor(x, y).alpha() > 100
+               for x in range(20, 150) for y in range(20, 42))
+    restored = build_item(snapshot.serialize())
+    restored.redraw_from(restored.source_markups(window.document))
+    assert replay(restored) == tinted
+
+
+@pytest.mark.parametrize('rotation', [0, 90, 180, 270])
+def test_whiteout_removes_geometry_instead_of_hiding_it(window, tmp_path, rotation):
+    frame = import_drawing(window, tmp_path, rotation)
+    with pymupdf.open(stream=window.document.asset(frame.page.pdf_key), filetype='pdf') as original:
+        native = pymupdf.Rect(70, 65, 120, 95)
+        box = native * original[0].rotation_matrix
+    window.whiteout_region(frame, QRectF(box.x0, box.y0, box.width, box.height))
+    page = window.document.pages[0]
+    with pymupdf.open(stream=window.document.asset(page.pdf_key), filetype='pdf') as changed:
+        edited = changed[0]
+        pix = edited.get_pixmap()
+        assert pix.pixel(int(box.x0 + box.width/2), int(box.y0 + box.height/2))[:3] == (255, 255, 255)
+        # Removing all PDF clipping operations must not resurrect erased ink.
+        drawings = edited.get_drawings()
+        from markforge.io.pdfsnapshot import _commands, path_from
+        for drawing in drawings:
+            shape = path_from(_commands(drawing, edited.rotation_matrix), drawing.get('even_odd', False))
+            assert not shape.contains(QPointF(box.x0 + box.width/2, box.y0 + box.height/2))
+        outside = pymupdf.Point(50, 80) * edited.rotation_matrix
+        assert max(pix.pixel(int(outside.x), int(outside.y))[:3]) < 30
+
+
+def test_whiteout_can_clear_a_whole_page(window, tmp_path):
+    frame = import_drawing(window, tmp_path)
+    window.whiteout_region(frame, frame.page_rect())
+    assert 'failed' not in window.status_hint.text().lower()
+    page = window.document.pages[0]
+    with pymupdf.open(stream=window.document.asset(page.pdf_key), filetype='pdf') as changed:
+        assert not changed[0].get_drawings()
+
+
+def test_escape_cancels_canvas_tool_when_toolbar_has_focus(window):
+    from PySide6.QtTest import QTest
+    window.select_tool('line')
+    window.hatch_scale_spin.setFocus()
+    QTest.keyClick(window.hatch_scale_spin, Qt.Key_Escape)
+    assert window.view.tool_key == 'select'
+
+
+def test_switching_tools_abandons_half_placed_callout(window):
+    window.select_tool('callout')
+    click(window.view, 150, 150)
+    assert window.view._pending_anchor is not None
+    window.select_tool('line')
+    assert window.view._pending_anchor is None
+    window.select_tool('callout')
+    click(window.view, 240, 210)
+    assert window.view._pending_anchor == QPointF(240, 210)
+    press_key(window.view, Qt.Key_Escape)
+    assert window.view.tool_key == 'select'
+
+
+def test_whiteout_text_and_scan_survive_outside_erased_region(window, tmp_path):
+    from PySide6.QtCore import QBuffer, QIODevice
+    pdf = pymupdf.open()
+    page = pdf.new_page(width=200, height=150)
+    page.insert_text((15, 30), 'Keep', fontsize=18)
+    page.insert_text((115, 30), 'Erase', fontsize=18)
+    scan = QImage(160, 60, QImage.Format_RGB32)
+    scan.fill(Qt.black)
+    buffer = QBuffer()
+    buffer.open(QIODevice.WriteOnly)
+    scan.save(buffer, 'PNG')
+    page.insert_image(pymupdf.Rect(20, 60, 180, 120), stream=bytes(buffer.data()))
+    path = tmp_path / 'whiteout-mixed.pdf'
+    pdf.save(path)
+    pdf.close()
+    pdfio.import_pages(window.document, str(path), [0], at=0)
+    window.rebuild_scenes()
+    frame = window.document.pages[0].frame
+    window.whiteout_region(frame, QRectF(100, 0, 100, 150))
+    assert 'failed' not in window.status_hint.text().lower()
+    saved = tmp_path / 'erased-mixed.pdf'
+    project.save_document(window.document, str(saved))
+    with pymupdf.open(saved) as result:
+        edited = result[0]
+        pix = edited.get_pixmap()
+        assert pix.pixel(50, 80)[:3] == (0, 0, 0)
+        assert pix.pixel(140, 80)[:3] == (255, 255, 255)
+        assert any(max(pix.pixel(x, y)[:3]) < 80 for x in range(15, 60) for y in range(12, 32))
+        assert all(pix.pixel(x, y)[:3] == (255, 255, 255) for x in range(110, 170) for y in range(12, 32))
+        assert 'Erase' not in edited.get_text()
+        assert 'Keep' in edited.get_text()
+
+
+def test_whiteout_does_not_flatten_source_annotations(window, tmp_path):
+    pdf = pymupdf.open()
+    page = pdf.new_page(width=200, height=150)
+    page.draw_line((10, 20), (190, 20), color=(0, 0, 0))
+    annot = page.add_rect_annot(pymupdf.Rect(30, 60, 80, 100))
+    annot.set_colors(stroke=(1, 0, 0), fill=(1, 0, 0))
+    annot.update()
+    path = tmp_path / 'annotated-whiteout.pdf'
+    pdf.save(path)
+    pdf.close()
+    pdfio.import_pages(window.document, str(path), [0], at=0)
+    window.rebuild_scenes()
+    frame = window.document.pages[0].frame
+    window.whiteout_region(frame, QRectF(100, 0, 30, 40))
+    data = window.document.asset(window.document.pages[0].pdf_key)
+    with pymupdf.open(stream=data, filetype='pdf') as changed:
+        assert list(changed[0].annots())
+        pix = changed[0].get_pixmap(annots=False)
+        assert pix.pixel(50, 80)[:3] == (255, 255, 255)
+
+
+def test_snapshot_keeps_independent_pdf_fill_and_stroke_opacity(window, tmp_path):
+    pdf = pymupdf.open()
+    page = pdf.new_page(width=150, height=150)
+    page.draw_rect(pymupdf.Rect(20, 20, 100, 100), color=(0, 0, 0), fill=(1, 0, 0),
+                   stroke_opacity=0, fill_opacity=1)
+    path = tmp_path / 'independent-alpha.pdf'
+    pdf.save(path)
+    pdf.close()
+    pdfio.import_pages(window.document, str(path), [0], at=0)
+    window.rebuild_scenes()
+    frame = window.document.pages[0].frame
+    window.take_snapshot(frame, QRectF(0, 0, 120, 120))
+    snapshot = build_item(window._clipboard[0])
+    snapshot.load_from_document(window.document)
+    assert replay(snapshot).pixelColor(50, 50).alpha() == 255
+
+
+@pytest.mark.parametrize('rotation', [0, 90, 180, 270])
+def test_whiteout_preserves_searchable_rotated_labels(window, tmp_path, rotation):
+    pdf = pymupdf.open()
+    page = pdf.new_page(width=200, height=150)
+    page.insert_text((30, 120), 'Vertical', fontsize=12, rotate=90)
+    page.insert_text((70, 30), 'Horizontal', fontsize=12)
+    page.set_rotation(rotation)
+    box = pymupdf.Rect(150, 70, 190, 140) * page.rotation_matrix
+    path = tmp_path / 'searchable-whiteout.pdf'
+    pdf.save(path)
+    pdf.close()
+    pdfio.import_pages(window.document, str(path), [0], at=0)
+    window.rebuild_scenes()
+    window.whiteout_region(window.document.pages[0].frame, QRectF(box.x0, box.y0, box.width, box.height))
+    data = window.document.asset(window.document.pages[0].pdf_key)
+    with pymupdf.open(stream=data, filetype='pdf') as edited:
+        assert 'Vertical' in edited[0].get_text()
+        assert 'Horizontal' in edited[0].get_text()
+        vertical = edited[0].search_for('Vertical')
+        assert vertical and vertical[0].x0 < 35

@@ -7,19 +7,23 @@ not as a second open-work list. Completion cells remain user-owned and blank.
 
 | Requirement | Current finding / next evidence needed |
 | --- | --- |
-| Intermittent tool lockup that survives Escape | Still not reproduced. The current native 300-round stress session had zero failures, and the event suite covers callout, leader, selection, resize, snapshot and painter cancellation. A concrete sequence reaching the reported lockup is still needed; passing unrelated tests does not close it. |
+| Intermittent tool lockup that survives Escape | A separate stale callout-anchor defect was reproduced and fixed on 2026-09-12: changing tools now abandons the old anchor and held payload. The exact Escape-resistant lockup is still not reproduced. The current native 300-round stress session had zero failures, and the event suite covers callout, leader, selection, resize, snapshot and painter cancellation. A concrete sequence reaching the reported lockup is still needed; passing unrelated tests does not close it. |
+| Dense-PDF responsiveness and low-zoom acceptance | Cache/snap optimizations and resolution tests pass; the user’s problematic PDFs have not been supplied, so their reported workload is not yet validated. |
 | Automatically resume after a usage-limit reset | Platform limitation; this repository cannot control session limits or guarantee automatic restart. The handover and task records preserve the work for continuation. |
 | Continue validating interactive changes through actual Qt events | Ongoing requirement. Current coverage includes pointer gestures, keyboard cancellation, tab transfer, printing/export and a native stress session. It must be repeated for future changes, so it is not a one-time completion. |
 
 ### Addressed in this review
 
-- PDF snapshot capture/paste, vector persistence/recolouring, and background
+- PDF snapshot capture/paste now includes font outlines and embedded/scanned
+  images as well as vector paths. Vector persistence/recolouring and background
   exclusion now have actual-PDF regressions. The previously contradictory
   background test has been corrected. The old “needs a gesture sequence”
   snapshot entry is superseded by this implementation evidence.
 - Hatch scale, Whiteout, arbitrary markup-edge snapping, persistent tab bars,
   floating drag previews and moving tabs back into existing windows are
-  implemented and tested. Whiteout is vector clipping, not secure redaction.
+  implemented and tested. Whiteout now removes geometry and image pixels from
+  the replacement appearance, with surviving crossing segments retained. Source
+  text outside the region remains searchable; it is not secure redaction.
 - Performance work fixes competing zoom requests, bounds preview memory and
   reduces snap candidate generation. Measurements and their limits are in
   `COMPLETED_TASKS.md`; responsiveness on the user's own dense PDFs still

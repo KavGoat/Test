@@ -2940,6 +2940,8 @@ class MainWindow(QMainWindow):
         self.status_hint.setText(f"Renumbered {total} count marker(s)")
 
     def select_tool(self, key: str) -> None:
+        if key != self.view.tool_key:
+            self.view.clear_pending_tool()
         self.put_the_format_painter_down()
         self.view.set_tool(key)
         action = self.tool_actions.get(key)
@@ -3355,20 +3357,28 @@ class MainWindow(QMainWindow):
                 sx, sy = pdf_page.rect.width / page.width_pt, pdf_page.rect.height / page.height_pt
                 box = pymupdf.Rect(region.left() * sx, region.top() * sy,
                                    region.right() * sx, region.bottom() * sy)
-                transform = pdf_page.derotation_matrix * ~pdf_page.transformation_matrix
-                hole = box * transform
-                outer = pdf_page.rect * transform
-                def rectangle(rect):
-                    return f"{rect.x0:g} {rect.y0:g} {rect.width:g} {rect.height:g} re\n"
-                # The even-odd clip leaves a hole in the PDF itself. It keeps
-                # the surviving line segments vector-sharp, including paths
-                # that cross the region, and adds no white foreground markup.
-                contents = pdf_page.read_contents()
-                body = ("q\n" + rectangle(outer) + rectangle(hole) + "W* n\n").encode()
+                from ..io.pdfwhiteout import erase_region, surviving_text, restore_search_text
+                # Annotations remain live; do not bake their appearances
+                # into the replacement page and then draw them a second time.
+                annots = source.xref_get_key(pdf_page.xref, "Annots")[1]
+                source.xref_set_key(pdf_page.xref, "Annots", "null")
+                pdf_page = source.reload_page(pdf_page)
+                search_text = surviving_text(pdf_page, box)
+                appearance = erase_region(pdf_page, box)
+                source.xref_set_key(pdf_page.xref, "Annots", annots)
+                pdf_page = source.reload_page(pdf_page)
+                # The replacement contains only surviving geometry. Preserve
+                # the page object and annotations while replacing its artwork.
                 xref = source.get_new_xref()
                 source.update_object(xref, "<<>>")
-                source.update_stream(xref, body + contents + b"\nQ\n")
+                source.update_stream(xref, b"")
                 pdf_page.set_contents(xref)
+                rotation = pdf_page.rotation
+                pdf_page.set_rotation(0)
+                with pymupdf.open(stream=appearance, filetype="pdf") as replacement:
+                    pdf_page.show_pdf_page(pdf_page.rect, replacement, 0, rotate=rotation)
+                restore_search_text(pdf_page, search_text)
+                pdf_page.set_rotation(rotation)
                 changed = source.tobytes(garbage=4, deflate=True)
         except Exception as error:
             self.status_hint.setText(f"Whiteout failed: {error}")
@@ -3875,8 +3885,8 @@ class MainWindow(QMainWindow):
             if key is None:
                 self.status_hint.setText(f"“{entry.label}” cannot be drawn as a tool")
                 return
-            self.view.set_pending_properties(entry.payload)
             self.select_tool(key)
+            self.view.set_pending_properties(entry.payload)
             self.status_hint.setText(
                 f"{entry.label}: draw one — it will have this tool's properties")
             return

@@ -8,9 +8,11 @@ review. None has been marked complete. The audit checked the implementation,
 the cited test names and the current suite, rather than treating “Built” or
 “Fixed” in task wording as proof.
 
-Final validation: **888 passed, one skipped** in the full suite (133.91 seconds).
-The focused review suite contains 17 tests, including rotated PDF capture,
-failure recovery and snapshot recolour undo/copy independence.
+Follow-up validation on 2026-09-12: **903 passed, one skipped** in the full
+suite (135.50 seconds); **32 focused regressions passed** after the final
+mask-preservation guard. The skip is the unavailable external PDF corpus.
+The focused review suite now contains 32 tests, including full-content capture,
+physical Whiteout removal, mixed source content and callout tool switching.
 The workbook contains **115 tasks**, matching the Markdown register exactly
 after normalizing Markdown emphasis. Existing completion cells remain blank;
 the frozen header and AutoFilter were retained, with filtering extended to all
@@ -21,21 +23,31 @@ the frozen header and AutoFilter were retained, with filtering extended to all
   One old snapshot test required an opaque background; it now requires
   transparency. Several cited test names did not exist; the references below
   have been corrected and focused coverage added for unsupported claims.
-- **PDF snapshots:** source paths are extracted independently of optional snap
-  geometry and recorded as vectors, preserving Bézier curves, clipping and
-  recolourable source data. Full-page fills and raster page backgrounds are
-  excluded. Repeat capture/paste, save/reopen, annotation output and recolour
-  are exercised in `tests/test_review_regressions.py`. This does not promise
-  reconstruction of scanned pixels, PDF text glyphs, shading or every blend
-  mode as vector linework. Background images placed as ordinary markups retain
-  their usual snapshot behaviour.
-  Recolouring now creates a fresh recording asset rather than overwriting the
-  recording referenced by Undo and other copies. Source image/snapshot assets
-  travel on the clipboard and load before a source recording is rebuilt.
-- **Whiteout:** a region cuts a hole in the source PDF artwork through vector
-  clipping, leaving live markups and surviving parts of crossing lines alone.
-  Undo/redo, saved output and subsequent snapshots are tested. It is visual
-  whiteout, not secure redaction: source content is clipped rather than purged.
+- **PDF snapshots:** vector-only pages retain the exact path extractor. Pages
+  containing PDF text or images now use a full SVG appearance with font
+  outlines, original image pixels, paint order and clipping. Paper fills and
+  white scan pixels are transparent. Image mask definitions are preserved;
+  stripping their white pixels initially made scans vanish and was caught by
+  the new regression. Source reconstruction and font/vector/scan recolouring are
+  tested, including transparency retention. Vector fill opacity no longer incorrectly depends on stroke opacity.
+  Recolouring creates a fresh recording asset, preserving Undo and other copies.
+  Scanned content retains its source resolution; it does not become vectors.
+- **Whiteout:** `io/pdfwhiteout.py` subtracts the region from fill geometry and
+  expanded strokes, clears intersecting image pixels, and writes a replacement
+  PDF appearance. Erased segments are removed from that appearance rather than
+  retained under a clipping hole. Crossing lines survive outside the region;
+  all four page rotations, whole-page clearing, mixed text/images, saved output
+  and annotation preservation are tested. Undo retains the original source.
+  Text retains exact font outlines plus an invisible search layer for surviving
+  characters; erased text is excluded. Horizontal/vertical labels and all page
+  rotations are covered.
+  This remains an editing tool, not secure redaction of backups/old PDF revisions.
+- **Callout cancellation:** a real-click regression reproduced an abandoned
+  arrow anchor surviving a tool switch. Tool changes now clear the anchor,
+  pending cloud state and held tool payload. Toolset property activation occurs
+  after switching, so the intended new properties remain armed. Unplaced arrow
+  leaders also count as active interactions when the canvas regains focus.
+  The specific Escape-resistant lockup is still not reproduced.
 - **Hatch scale:** Properties and the style toolbar share the persisted
   `Style.hatch_scale`; brush transforms apply the value during rendering and
   appearance export. Control synchronization, serialization and undo are tested.
@@ -74,7 +86,9 @@ the frozen header and AutoFilter were retained, with filtering extended to all
   section columns can be read. Toolset operations, multi-window editing and
   exported printing are covered by the existing interaction/output suites.
   Physical printing and third-party editor interaction were not performed.
-- **Stress session:** the native Qt run `python3 tools/session_fuzz.py 41 300`
+- **Follow-up stress session:** `python3 tools/session_fuzz.py 73 300`
+  completed **300 rounds, 4 pages, 22 markups, zero failures** on native Qt.
+- **Original stress session:** the native Qt run `python3 tools/session_fuzz.py 41 300`
   completed **300 rounds, 3 pages, 15 markups, zero failures**. The first launch
   was blocked by macOS GUI services inside the sandbox; the authorized rerun
   succeeded. The fuzzer now isolates settings instead of touching user preferences.
@@ -173,7 +187,7 @@ of a standalone parser are obsolete. Evidence: `tests/test_pdf_engine.py` and
 ## Bluebeam tool sets
 
 `.btx` import is held against the real files in `btx/`, not synthetic ones.
-Evidence: `tests/test_btx.py`, 28 tests — `test_every_tool_set_reads_without_losing_a_tool`,
+Evidence: `tests/test_btx.py`, 32 tests — `test_every_tool_set_reads_without_losing_a_tool`,
 `test_the_sample_tool_sets_are_where_the_tests_expect_them`,
 `test_importing_a_bluebeam_tool_set_fills_the_tool_chest`,
 `test_a_dashed_line_from_a_toolset_comes_in_dashed`,

@@ -24,12 +24,11 @@ def swap_colour(image: QImage, source: QColor, target: QColor,
                 tolerance: int = 40) -> QImage:
     """Every pixel near *source* becomes *target*; everything else is left."""
     out = image.convertToFormat(QImage.Format_ARGB32)
-    replacement = qRgba(target.red(), target.green(), target.blue(), 255)
     for y in range(out.height()):
         for x in range(out.width()):
             pixel = out.pixel(x, y)
             if qAlpha(pixel) and _distance(pixel, source) <= tolerance:
-                out.setPixel(x, y, replacement)
+                out.setPixel(x, y, qRgba(target.red(), target.green(), target.blue(), qAlpha(pixel)))
     return out
 
 
@@ -138,6 +137,9 @@ def swap_line_colour(items, source: QColor, target: QColor,
     name = target.name()
     changed = 0
     for item in items:
+        if hasattr(item, "change_colours"):
+            changed += item.change_colours(source, target, tolerance)
+            continue
         style = getattr(item, "style", None)
         if style is None:
             continue
@@ -155,6 +157,9 @@ def colourise_lines(items, colour: QColor) -> int:
     lighter = QColor(colour).lighter(150).name()
     changed = 0
     for item in items:
+        if hasattr(item, "change_colours"):
+            changed += item.change_colours(None, colour)
+            continue
         style = getattr(item, "style", None)
         if style is None:
             continue

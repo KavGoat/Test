@@ -436,6 +436,9 @@ class PageView(QGraphicsView):
         return TOOL_MAP.get(self.tool_key, TOOL_MAP["select"])
 
     def set_tool(self, key: str) -> None:
+        if key != self.tool_key:
+            self._pending_anchor = None
+            self._pending_cloud = None
         self.forget_snap()
         self.close_size_editor()
         if self._pending_arrow_leader is not None:
@@ -3852,6 +3855,7 @@ class PageView(QGraphicsView):
                 or self._pending_anchor is not None
                 or self._pending_cloud is not None
                 or self._pending_cloud_leader is not None
+                or self._pending_arrow_leader is not None
                 or self._pending_stamp is not None
                 or self._pending_properties is not None
                 or self._draft is not None
