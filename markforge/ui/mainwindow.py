@@ -1937,6 +1937,19 @@ class MainWindow(QMainWindow):
             owner = owner.parentWidget()
         if owner is not self:
             return super().eventFilter(watched, event)
+        # Inline panel editors can consume Escape before it bubbles up to
+        # this window. Cancel the canvas first, while leaving dialogs/popups
+        # to their own normal Escape behaviour.
+        if (event.type() in (QEvent.ShortcutOverride, QEvent.KeyPress)
+                and event.key() == Qt.Key_Escape and not event.modifiers()
+                and not isinstance(QWidget.window(watched), dialogs.QDialog)
+                and QApplication.activePopupWidget() is None
+                and watched is not self.view and not self.view.isAncestorOf(watched)
+                and watched is not self.document_tabs):
+            if event.type() == QEvent.KeyPress:
+                self.view.escape_everything()
+            event.accept()
+            return True
         if (event.type() == QEvent.MouseButtonPress and self.holding_a_format()
                 and isinstance(watched, QWidget)
                 and watched is not self.view and not self.view.isAncestorOf(watched)

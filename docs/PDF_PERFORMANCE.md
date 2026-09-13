@@ -96,3 +96,28 @@ ownership, parsed-page reuse, cache limits, pan cancellation across two views,
 centre priority, failure recovery and worker cleanup. The latest native
 `python tools/session_fuzz.py 97 300` run completed **300 rounds, zero failures**.
 The skipped test needs the external PDF corpus, which is not present.
+
+## Follow-up validation — 2026-09-13
+
+Both pages of `btx/Document1.pdf` and a generated mixed scan/text/vector sheet
+were benchmarked with one and four processes. All corresponding pixel hashes
+match. These small reference pages have roughly 8–9 ms warm batches with either
+configuration; their timing differences are not a meaningful speedup claim.
+The mixed sheet measured median warm batches of 48.3 ms (one worker) and
+39.7 ms (four workers). Raw results are in
+[`benchmarks/pdf_review_2026-09-13.json`](benchmarks/pdf_review_2026-09-13.json).
+
+```bash
+python tools/benchmark_pdf.py --pdf btx/Document1.pdf --page 0 --workers 1 4 --rounds 5
+python tools/benchmark_pdf.py --pdf btx/Document1.pdf --page 1 --workers 1 4 --rounds 5
+python tools/benchmark_pdf.py --fixture mixed --workers 1 4 --rounds 5
+```
+
+The current checksum uses RGBA8888 pixel bytes so unused RGB row padding cannot
+produce false differences. Its hashes should not be compared directly to the
+older RGB-format hashes. Annotations are included in the current benchmark.
+
+Latest full suite: **916 passed, no skips**. Both reference pages have exact
+serial/parallel comparisons at overview, normal and detail zooms. A native
+1,000-round Qt session also passed. The user's own problematic PDFs have not
+been supplied, so that specific acceptance check remains pending.

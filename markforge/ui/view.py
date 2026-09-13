@@ -1810,6 +1810,19 @@ class PageView(QGraphicsView):
             self.set_tool("select")
             self.toolFinished.emit("select")
         self.window.put_the_format_painter_down()
+        # Qt's mouse ownership is independent of our tool mode. A release
+        # lost to another window must not leave an item capturing later input.
+        scene = self.scene()
+        released = set()
+        while scene is not None and scene.mouseGrabberItem() is not None:
+            grabber = scene.mouseGrabberItem()
+            if id(grabber) in released:
+                break
+            released.add(id(grabber))
+            grabber.ungrabMouse()
+        grabber = QWidget.mouseGrabber()
+        if grabber is self or (grabber is not None and self.isAncestorOf(grabber)):
+            grabber.releaseMouse()
         self.viewport().update()
         message = "Back to nothing selected" if not undone else (
             "Cancelled " + ", ".join(undone))

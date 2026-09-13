@@ -1,5 +1,36 @@
 # MarkForge — evidence record
 
+## Follow-up review — 2026-09-13
+
+**916 tests passed, no skips** (132.66 seconds). Native Qt stress seed 127:
+**1,000 rounds, 2 pages, 72 markups, zero failures**.
+
+- Escape is caught before inline panel editors can consume it. The regression
+  harness creates a standard editable Qt tree inside the window to reproduce
+  this key-delivery failure while a callout anchor is active. Ordinary dialogs
+  retain their own Escape behaviour. This does not identify the user's exact
+  historical click sequence.
+- Escape now releases stale scene and canvas mouse grabs as well as clearing
+  tool state. The regression deliberately establishes a Qt mouse grab, proves
+  the old cancellation leaves it active, and verifies recovery after the fix.
+- The real-PDF engine test now includes the shipped `btx/Document1.pdf`, instead
+  of depending solely on a hard-coded Linux directory. Optional larger corpora
+  use `MARKFORGE_PDF_CORPUS`. The reference's pages are checked through the engine;
+  parallel/serial output is also compared at 0.25×, 1× and 4× with annotations.
+- Performance/quality checks now include both reference pages and a generated
+  scan/text/vector sheet. One- and four-worker configurations have matching
+  pixel hashes for every fixture. Small reference pages finish warm batches in
+  roughly 8–9 ms with either configuration; this is no universal speedup claim.
+- The benchmark now supports `--page` and `--fixture mixed`. Checksums use
+  RGBA8888 pixels rather than RGB row padding, which is not image content and
+  could previously produce false mismatches.
+- `UNADDRESSED_TASKS.md` now contains current verification, the external usage
+  limit blocker and the ongoing testing obligation separately. Superseded audit
+  text moved to `TASK_AUDIT_HISTORY.md`; no user completion cells were changed.
+
+The original user-specific lockup sequence and PDFs remain unverified. Automatic
+assistant restart after a usage reset remains outside this application's control.
+
 ## Current review — 2026-09-11–12
 
 This section supersedes stale statements in the historical review below.

@@ -11,6 +11,7 @@ pypdf — because a writer that only its own reader agrees with is not a writer.
 """
 import glob
 import os
+from pathlib import Path
 
 import pymupdf
 import pytest
@@ -20,9 +21,13 @@ from markforge.pdf import engine
 from markforge.pdf.engine import PdfError
 from markforge.pdf.objects import Name, Ref
 
-CORPUS = sorted(
-    glob.glob("/home/user/stirling-tools/stirling-pdf/testing/**/*.pdf",
-              recursive=True))
+# Always exercise the real reference PDF shipped with the repository. An
+# optional external corpus must not depend on one developer's Linux home path.
+_reference = Path(__file__).resolve().parents[1] / 'btx' / 'Document1.pdf'
+_external = os.environ.get('MARKFORGE_PDF_CORPUS', '')
+CORPUS = ([str(_reference)] if _reference.exists() else []) + (
+    sorted(glob.glob(os.path.join(_external, '**', '*.pdf'), recursive=True))
+    if _external else [])
 
 
 def a_drawing(width=400.0, height=800.0, rotation=0) -> bytes:
@@ -643,8 +648,9 @@ def test_a_real_pdf_comes_apart_into_its_pages(path):
     document = engine.open_path(path)
     try:
         assert document.page_count >= 1
-        width, height = engine.page_size(document, 0)
-        assert width > 0 and height > 0
-        assert engine.render_page(document, 0, 80, 80) is not None
+        for index in sorted({0, document.page_count // 2, document.page_count - 1}):
+            width, height = engine.page_size(document, index)
+            assert width > 0 and height > 0
+            assert engine.render_page(document, index, 80, 80) is not None
     finally:
         engine.close(document)

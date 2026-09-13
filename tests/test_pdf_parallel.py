@@ -181,3 +181,32 @@ def test_child_exit_recovers_and_shutdown_leaves_no_renderer(qapp):
         worker.stop()
         assert worker.wait(5000)
     assert not any(child.pid in pids for child in multiprocessing.active_children())
+
+
+def test_reference_pdf_matches_at_overview_and_detail_zooms(qapp):
+    from pathlib import Path
+    path = Path(__file__).resolve().parents[1] / 'btx' / 'Document1.pdf'
+    data = path.read_bytes()
+    keys = [pdftiles.TileKey('reference', page, scale, 0, 0, True)
+            for page in (0, 1) for scale in (.25, 1., 4.)]
+    wanted, images = set(keys), {}
+    worker = pdftiles._Worker(wanted, processes=2)
+    worker.tileDone.connect(lambda key, image: images.__setitem__(key, image), Qt.QueuedConnection)
+    worker.start()
+    try:
+        with pymupdf.open(stream=data, filetype='pdf') as source:
+            for key in keys:
+                page = source[key.index]
+                worker.submit(key, data, page.rect.width, page.rect.height)
+            until(qapp, lambda: len(images) == len(keys))
+            for key in keys:
+                page = source[key.index]
+                box = key.page_rect().intersected(QRectF(0, 0, page.rect.width, page.rect.height))
+                drawing = engine.display_list(source, key.index, True)
+                expected = to_image(engine.raster_from(drawing,
+                    (box.left(), box.top(), box.right(), box.bottom()), key.scale))
+                assert not images[key].isNull()
+                assert images[key] == expected
+    finally:
+        worker.stop()
+        assert worker.wait(5000)

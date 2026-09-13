@@ -40,8 +40,32 @@ def synthetic_pdf():
     return data
 
 
-def measure(application, data, width, height, processes, rounds, legacy=None, tile=1024):
+def mixed_pdf():
+    """A scanned sheet with searchable labels and vector markup."""
+    import pymupdf
+    pdf = pymupdf.open()
+    page = pdf.new_page(width=2384, height=1684)
+    scan = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 1600, 1200), False)
+    scan.clear_with(255)
+    for y in range(40, 1160, 16):
+        scan.set_rect(pymupdf.IRect(40, y, 1560, y + 2), (0, 0, 0))
+    page.insert_image(page.rect, stream=scan.tobytes('png'))
+    for y in range(100, 1600, 70):
+        page.insert_text((80, y), 'Drawing A123 - mixed scan and vector text',
+                         fontsize=24, color=(0, 0, 1))
+    shape = page.new_shape()
+    for y in range(50, 1600, 10):
+        shape.draw_line((40, y), (2300, y + 20))
+    shape.finish(color=(1, 0, 0), width=.5)
+    shape.commit()
+    data = pdf.tobytes()
+    pdf.close()
+    return data
+
+
+def measure(application, data, width, height, processes, rounds, legacy=None, tile=1024, page_index=0):
     from PySide6.QtCore import QTimer, Qt
+    from PySide6.QtGui import QImage
     from markforge.io import pdftiles
     module = pdftiles
     if legacy:
@@ -62,13 +86,14 @@ def measure(application, data, width, height, processes, rounds, legacy=None, ti
         if image.isNull():
             raise RuntimeError(f'Failed to render {key}')
         finished.add(key)
-        digests[(key.col, key.row)] = hashlib.sha256(image.constBits()).hexdigest()
+        pixels = image.convertToFormat(QImage.Format_RGBA8888)
+        digests[(key.col, key.row)] = hashlib.sha256(pixels.constBits()).hexdigest()
 
     worker.tileDone.connect(arrived, Qt.QueuedConnection)
     worker.start()
     try:
         for iteration in range(rounds):
-            keys = [module.TileKey('benchmark', 0, 2., col, row, False)
+            keys = [module.TileKey('benchmark', page_index, 2., col, row, True)
                     for row in range(int((min(height * 2, 3368) + tile - 1) // tile))
                     for col in range(int((min(width * 2, 4768) + tile - 1) // tile))]
             finished.clear()
@@ -99,7 +124,8 @@ def measure(application, data, width, height, processes, rounds, legacy=None, ti
         worker.wait()
         application.processEvents()
     return {'workers': 'legacy-thread' if legacy else processes, 'tile_pixels': tile, 'rounds': results,
-            'worker_pids': list(getattr(worker, 'stats', {})),
+            'worker_pids': list(getattr(worker, 'stats', {})), 'page_index': page_index,
+            'pixel_format': 'RGBA8888',
             'pixel_digest': hashlib.sha256(''.join(v for _, v in sorted(digests.items())).encode()).hexdigest()}
 
 
@@ -109,20 +135,24 @@ def main():
     parser.add_argument('--rounds', type=int, default=3)
     parser.add_argument('--tile', type=int, choices=[512, 1024, 2048], default=1024)
     parser.add_argument('--pdf')
+    parser.add_argument('--fixture', choices=['dense', 'mixed'], default='dense')
+    parser.add_argument('--page', type=int, default=0, help='Zero-based PDF page index')
     parser.add_argument('--legacy-worker')
     args = parser.parse_args()
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     from PySide6.QtWidgets import QApplication
     from markforge.pdf import engine
     application = QApplication([])
-    data = Path(args.pdf).read_bytes() if args.pdf else synthetic_pdf()
+    data = Path(args.pdf).read_bytes() if args.pdf else (mixed_pdf() if args.fixture == 'mixed' else synthetic_pdf())
     document = engine.open_bytes(data)
-    width, height = engine.page_size(document, 0)
+    if not 0 <= args.page < document.page_count:
+        parser.error('--page is outside the PDF')
+    width, height = engine.page_size(document, args.page)
     engine.close(document)
     if args.legacy_worker:
-        print(json.dumps(measure(application, data, width, height, 1, args.rounds, args.legacy_worker, args.tile)), flush=True)
+        print(json.dumps(measure(application, data, width, height, 1, args.rounds, args.legacy_worker, args.tile, args.page)), flush=True)
     for count in args.workers:
-        print(json.dumps(measure(application, data, width, height, count, args.rounds, tile=args.tile)), flush=True)
+        print(json.dumps(measure(application, data, width, height, count, args.rounds, tile=args.tile, page_index=args.page)), flush=True)
 
 
 if __name__ == '__main__':

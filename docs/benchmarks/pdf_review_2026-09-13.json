@@ -1,0 +1,297 @@
+{
+  "reference_page_0": [
+    {
+      "workers": 1,
+      "tile_pixels": 1024,
+      "rounds": [
+        {
+          "round": 0,
+          "tiles": 4,
+          "seconds": 0.1332,
+          "first_tile_seconds": 0.1255,
+          "max_ui_gap_ms": 7.41
+        },
+        {
+          "round": 1,
+          "tiles": 4,
+          "seconds": 0.0096,
+          "first_tile_seconds": 0.0019,
+          "max_ui_gap_ms": 5.03
+        },
+        {
+          "round": 2,
+          "tiles": 4,
+          "seconds": 0.0081,
+          "first_tile_seconds": 0.0032,
+          "max_ui_gap_ms": 6.8
+        },
+        {
+          "round": 3,
+          "tiles": 4,
+          "seconds": 0.0079,
+          "first_tile_seconds": 0.003,
+          "max_ui_gap_ms": 6.66
+        },
+        {
+          "round": 4,
+          "tiles": 4,
+          "seconds": 0.0078,
+          "first_tile_seconds": 0.0029,
+          "max_ui_gap_ms": 6.56
+        }
+      ],
+      "worker_pids": [
+        97265
+      ],
+      "pixel_digest": "fa94cec122d10e491e430b6b5a170a262b09a0779246ef6cf533ce02850fddd9"
+    },
+    {
+      "workers": 4,
+      "tile_pixels": 1024,
+      "rounds": [
+        {
+          "round": 0,
+          "tiles": 4,
+          "seconds": 0.1495,
+          "first_tile_seconds": 0.1273,
+          "max_ui_gap_ms": 10.6
+        },
+        {
+          "round": 1,
+          "tiles": 4,
+          "seconds": 0.0083,
+          "first_tile_seconds": 0.0035,
+          "max_ui_gap_ms": 7.06
+        },
+        {
+          "round": 2,
+          "tiles": 4,
+          "seconds": 0.0087,
+          "first_tile_seconds": 0.0039,
+          "max_ui_gap_ms": 7.48
+        },
+        {
+          "round": 3,
+          "tiles": 4,
+          "seconds": 0.0088,
+          "first_tile_seconds": 0.0021,
+          "max_ui_gap_ms": 7.53
+        },
+        {
+          "round": 4,
+          "tiles": 4,
+          "seconds": 0.0084,
+          "first_tile_seconds": 0.0022,
+          "max_ui_gap_ms": 7.18
+        }
+      ],
+      "worker_pids": [
+        97268,
+        97266,
+        97267,
+        97269
+      ],
+      "pixel_digest": "fa94cec122d10e491e430b6b5a170a262b09a0779246ef6cf533ce02850fddd9"
+    }
+  ],
+  "reference_page_1": [
+    {
+      "workers": 1,
+      "tile_pixels": 1024,
+      "rounds": [
+        {
+          "round": 0,
+          "tiles": 4,
+          "seconds": 0.1673,
+          "first_tile_seconds": 0.1328,
+          "max_ui_gap_ms": 8.69
+        },
+        {
+          "round": 1,
+          "tiles": 4,
+          "seconds": 0.0093,
+          "first_tile_seconds": 0.0016,
+          "max_ui_gap_ms": 8.05
+        },
+        {
+          "round": 2,
+          "tiles": 4,
+          "seconds": 0.0095,
+          "first_tile_seconds": 0.0015,
+          "max_ui_gap_ms": 8.2
+        },
+        {
+          "round": 3,
+          "tiles": 4,
+          "seconds": 0.0094,
+          "first_tile_seconds": 0.0016,
+          "max_ui_gap_ms": 8.16
+        },
+        {
+          "round": 4,
+          "tiles": 4,
+          "seconds": 0.0093,
+          "first_tile_seconds": 0.0016,
+          "max_ui_gap_ms": 8.04
+        }
+      ],
+      "worker_pids": [
+        97272
+      ],
+      "pixel_digest": "f44e10b858976497320644c6f62bd2ff895c191f7a0b4b8dd8e4ab80839478a4"
+    },
+    {
+      "workers": 4,
+      "tile_pixels": 1024,
+      "rounds": [
+        {
+          "round": 0,
+          "tiles": 4,
+          "seconds": 0.1735,
+          "first_tile_seconds": 0.1248,
+          "max_ui_gap_ms": 6.49
+        },
+        {
+          "round": 1,
+          "tiles": 4,
+          "seconds": 0.0098,
+          "first_tile_seconds": 0.0024,
+          "max_ui_gap_ms": 5.05
+        },
+        {
+          "round": 2,
+          "tiles": 4,
+          "seconds": 0.0079,
+          "first_tile_seconds": 0.0021,
+          "max_ui_gap_ms": 6.86
+        },
+        {
+          "round": 3,
+          "tiles": 4,
+          "seconds": 0.0085,
+          "first_tile_seconds": 0.0024,
+          "max_ui_gap_ms": 7.28
+        },
+        {
+          "round": 4,
+          "tiles": 4,
+          "seconds": 0.0097,
+          "first_tile_seconds": 0.0023,
+          "max_ui_gap_ms": 8.4
+        }
+      ],
+      "worker_pids": [
+        97275,
+        97274,
+        97273,
+        97276
+      ],
+      "pixel_digest": "f44e10b858976497320644c6f62bd2ff895c191f7a0b4b8dd8e4ab80839478a4"
+    }
+  ],
+  "mixed_scan_text_vectors": [
+    {
+      "workers": 1,
+      "tile_pixels": 1024,
+      "rounds": [
+        {
+          "round": 0,
+          "tiles": 20,
+          "seconds": 0.1644,
+          "first_tile_seconds": 0.1137,
+          "max_ui_gap_ms": 7.42
+        },
+        {
+          "round": 1,
+          "tiles": 20,
+          "seconds": 0.0476,
+          "first_tile_seconds": 0.0025,
+          "max_ui_gap_ms": 10.33
+        },
+        {
+          "round": 2,
+          "tiles": 20,
+          "seconds": 0.0485,
+          "first_tile_seconds": 0.0025,
+          "max_ui_gap_ms": 6.64
+        },
+        {
+          "round": 3,
+          "tiles": 20,
+          "seconds": 0.0488,
+          "first_tile_seconds": 0.0023,
+          "max_ui_gap_ms": 6.73
+        },
+        {
+          "round": 4,
+          "tiles": 20,
+          "seconds": 0.0481,
+          "first_tile_seconds": 0.0018,
+          "max_ui_gap_ms": 8.13
+        }
+      ],
+      "worker_pids": [
+        97374
+      ],
+      "page_index": 0,
+      "pixel_format": "RGBA8888",
+      "pixel_digest": "34193a479436a5d17746a17e985f4fc5d5c03dccb3c4eac200749551aaa71027"
+    },
+    {
+      "workers": 4,
+      "tile_pixels": 1024,
+      "rounds": [
+        {
+          "round": 0,
+          "tiles": 20,
+          "seconds": 0.1508,
+          "first_tile_seconds": 0.1146,
+          "max_ui_gap_ms": 18.98
+        },
+        {
+          "round": 1,
+          "tiles": 20,
+          "seconds": 0.0403,
+          "first_tile_seconds": 0.0043,
+          "max_ui_gap_ms": 18.8
+        },
+        {
+          "round": 2,
+          "tiles": 20,
+          "seconds": 0.0394,
+          "first_tile_seconds": 0.006,
+          "max_ui_gap_ms": 18.21
+        },
+        {
+          "round": 3,
+          "tiles": 20,
+          "seconds": 0.0377,
+          "first_tile_seconds": 0.0043,
+          "max_ui_gap_ms": 21.28
+        },
+        {
+          "round": 4,
+          "tiles": 20,
+          "seconds": 0.0399,
+          "first_tile_seconds": 0.0058,
+          "max_ui_gap_ms": 17.99
+        }
+      ],
+      "worker_pids": [
+        97375,
+        97376,
+        97377,
+        97378
+      ],
+      "page_index": 0,
+      "pixel_format": "RGBA8888",
+      "pixel_digest": "34193a479436a5d17746a17e985f4fc5d5c03dccb3c4eac200749551aaa71027"
+    }
+  ],
+  "notes": {
+    "date": "2026-09-13",
+    "reference": "btx/Document1.pdf",
+    "hash_format": "RGBA8888 pixel data; excludes row padding",
+    "rounds": "one cold plus four warm; small-page timing differences are not treated as meaningful speedups"
+  }
+}
