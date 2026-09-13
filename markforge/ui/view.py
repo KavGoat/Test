@@ -414,15 +414,18 @@ class PageView(QGraphicsView):
         """
         if not self._snapshot:
             return
-        changed = [(frame, before) for frame, before in self._snapshot
-                   if frame.serialize_items() != before]
+        changed = []
+        for frame, before in self._snapshot:
+            after = frame.serialize_items()
+            if after != before:
+                changed.append((frame, before, after))
         if not changed:
             return
         stack = self.window.undo_stack
         if len(changed) > 1:
             stack.beginMacro(text)
-        for frame, before in changed:
-            self.push_command(PageEditCommand(frame, before, frame.serialize_items(),
+        for frame, before, after in changed:
+            self.push_command(PageEditCommand(frame, before, after,
                                               text, on_apply=self.after_undo,
                                               coalesce=coalesce))
         if len(changed) > 1:
@@ -982,7 +985,17 @@ class PageView(QGraphicsView):
                 (rect.topLeft(), rect.topRight(),
                  rect.bottomLeft(), rect.bottomRight())]
 
-    def named_snap_targets(self, frame, ignore=(), near=None, reach=0.0) -> list:
+    @staticmethod
+    def _nearby_snap_items(frame, point, reach):
+        # Keep page order (including equal-distance snap tie-breaking). This
+        # list lives for one pointer event only, so edits/undo/page rotation
+        # never need to invalidate cached geometry.
+        return [item for item in frame.markups() if item.isVisible()
+                and item.sceneBoundingRect().adjusted(
+                    -reach, -reach, reach, reach).contains(point)]
+
+    def named_snap_targets(self, frame, ignore=(), near=None, reach=0.0,
+                           _nearby=None) -> list:
         """Every point worth catching hold of, and what each of them is.
 
         Two sources, each with its own switch: the markups drawn here, and
@@ -992,11 +1005,11 @@ class PageView(QGraphicsView):
         settings = self.document().settings
         found: list = []
         skip = set(ignore)
-        for item in frame.markups():
+        items = (_nearby if _nearby is not None else
+                 self._nearby_snap_items(frame, near, reach) if near is not None
+                 else frame.markups())
+        for item in items:
             if item in skip or not item.isVisible():
-                continue
-            if near is not None and not item.sceneBoundingRect().adjusted(
-                    -reach, -reach, reach, reach).contains(near):
                 continue
             if self.is_drawing(item):
                 if settings.snap_to_content:
@@ -1034,7 +1047,7 @@ class PageView(QGraphicsView):
         return list(zip(corners, corners[1:])) + [(corners[-1], corners[0])]
 
     def crossings_near(self, frame, scene_pos: QPointF, reach: float,
-                       ignore=()) -> list:
+                       ignore=(), _nearby=None) -> list:
         """Where drawn lines cross each other, close to the pointer.
 
         The point a drawing is most often aimed at and the one there is no
@@ -1046,16 +1059,15 @@ class PageView(QGraphicsView):
         settings = self.document().settings
         skip = set(ignore)
         near: list = []
-        for item in frame.markups():
+        items = (_nearby if _nearby is not None else
+                 self._nearby_snap_items(frame, scene_pos, reach))
+        for item in items:
             if item in skip or not item.isVisible():
                 continue
             if self.is_drawing(item):
                 if not settings.snap_to_content:
                     continue
             elif not settings.snap_to_items:
-                continue
-            box = item.sceneBoundingRect().adjusted(-reach, -reach, reach, reach)
-            if not box.contains(scene_pos):
                 continue
             for start, end in self.sides_of(item):
                 if _passes_near(start, end, scene_pos, reach):
@@ -1135,19 +1147,18 @@ class PageView(QGraphicsView):
         reach = SNAP_REACH / max(self._zoom, 0.05)
         best = None
         best_distance = reach
-        candidates = self.named_snap_targets(frame, ignore, scene_pos, reach)
-        candidates += self.crossings_near(frame, scene_pos, reach, ignore)
+        nearby = self._nearby_snap_items(frame, scene_pos, reach)
+        candidates = self.named_snap_targets(frame, ignore, scene_pos, reach, nearby)
+        candidates += self.crossings_near(frame, scene_pos, reach, ignore, nearby)
         # The body of an edge is a target too, not just its corners and middle.
         # Project onto the segment in scene coordinates so rotated callouts
         # behave the same way as upright ones.
         settings = self.document().settings
         skip = set(ignore)
-        for item in frame.markups():
+        for item in nearby:
             if item in skip or not item.isVisible():
                 continue
             if self.is_drawing(item) or not settings.snap_to_items:
-                continue
-            if not item.sceneBoundingRect().adjusted(-reach, -reach, reach, reach).contains(scene_pos):
                 continue
             for start, end in self.sides_of(item):
                 delta = end - start

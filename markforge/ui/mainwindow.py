@@ -1932,6 +1932,11 @@ class MainWindow(QMainWindow):
         command, and the handful of editor commands that are about the words
         themselves.
         """
+        # This application-wide filter also sees every paint/layout/timer
+        # event. Only input handled below needs a walk up the widget tree.
+        if event.type() not in (QEvent.ShortcutOverride, QEvent.KeyPress,
+                                QEvent.MouseButtonPress):
+            return super().eventFilter(watched, event)
         owner = watched if isinstance(watched, QWidget) else None
         while owner is not None and not isinstance(owner, MainWindow):
             owner = owner.parentWidget()

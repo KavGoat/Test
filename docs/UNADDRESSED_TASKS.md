@@ -15,6 +15,12 @@ No additional reproduced application defect from this review is currently
 awaiting implementation. The verification items above are not claims that
 all possible lockups or PDFs have been covered.
 
+Overall editing performance was profiled and improved in the follow-up review:
+the 500-markup native fixture measured 35× faster undo/redo and 1.83× faster
+pointer snapping. See [APP_PERFORMANCE.md](APP_PERFORMANCE.md) for timings and
+scope. This is verified implementation evidence; acceptance on the user's
+specific workload remains pending as above.
+
 ## External requirement — blocked
 
 **Automatically resume after a usage-limit reset.** This remains unfulfilled.
@@ -27,7 +33,7 @@ preserve progress for continuation; they do not implement automatic restart.
 **Validate interactive changes through actual Qt events.** This is a continuing
 engineering requirement, not an unfinished feature. The current revision has
 focused cancellation/rendering regressions and a native 1,000-round stress
-session (seed 127) with zero failures. Repeat relevant checks after future
+session (seed 131) with zero failures. Repeat relevant checks after future
 changes. Final suite counts are recorded in `COMPLETED_TASKS.md`.
 
 ## Archived material

@@ -9,9 +9,13 @@ from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPolygon
 
 from PySide6.QtGui import QFontMetricsF
 
-from ..core.units import format_quantity, parse_unit
+from ..core.units import format_quantity, parse_unit, ureg
 from .base import (HANDLE_SCREEN_PX, HANDLE_SIZE, MarkupItem, Style,
                    arrow_path, cloud_path, register_item)
+
+# Page refreshes construct two lengths per rectangle. The registry is shared
+# and fixed; parse this unit once rather than scanning unit names per length.
+_MILLIMETRES = ureg.Unit("mm")
 
 
 def _smooth_path(points: list[QPointF], tension: float = 0.42) -> QPainterPath:
@@ -172,8 +176,8 @@ class RectItem(MarkupItem):
                 self.height_value = convert(scale.length(rect.height()), scale.display_unit)
                 digits = max(scale.precision, 0)
             else:
-                self.width_value = Q_(rect.width() / MM_TO_PT, "mm")
-                self.height_value = Q_(rect.height() / MM_TO_PT, "mm")
+                self.width_value = Q_(rect.width() / MM_TO_PT, _MILLIMETRES)
+                self.height_value = Q_(rect.height() / MM_TO_PT, _MILLIMETRES)
                 digits = 1
             self.size_text = (f"{format_quantity(self.width_value, digits, 'fixed')}"
                               f" × {format_quantity(self.height_value, digits, 'fixed')}")

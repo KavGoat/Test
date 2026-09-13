@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import math
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
+from copy import deepcopy
 from datetime import datetime
 from typing import Optional
 
@@ -193,10 +194,16 @@ class Style:
         return horizontal.get(self.align, Qt.AlignLeft) | vertical.get(self.valign, Qt.AlignTop)
 
     def copy(self) -> "Style":
-        return Style(**asdict(self))
+        return Style(**self.to_dict())
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        # Styles are flat scalar records, apart from a possible dash list.
+        # Undo and saving visit every style: avoid dataclasses' recursive
+        # traversal for immutable values, but still detach mutable dash data.
+        return {name: value if isinstance(value, (str, int, float, bool, type(None)))
+                else deepcopy(value)
+                for name in self.__dataclass_fields__
+                for value in (getattr(self, name),)}
 
     @classmethod
     def from_dict(cls, data: dict) -> "Style":

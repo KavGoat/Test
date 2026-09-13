@@ -2,12 +2,20 @@
 
 ## Latest review: 2026-09-13
 
+Editing performance follow-up: see `APP_PERFORMANCE.md` and
+`tools/benchmark_editing.py`. Page restoration emits one final change signal,
+undo commits reuse serialized state, and snapping reuses nearby geometry only
+within the current event. Do not restore per-item panel refresh during undo or
+persist the snapping candidate list across edits. The 500-markup native
+benchmark measured 35× faster undo/redo and 1.8× faster pointer snapping.
+
 PDF rendering now uses `io/pdfrender.py` worker processes coordinated by
 `io/pdftiles.py`. Do not move MuPDF rendering back into Python threads.
 Sources are shared through private files; pixels use fixed shared buffers.
 The default is up to four processes (override `MARKFORGE_PDF_WORKERS=1..8`).
 See `PDF_PERFORMANCE.md` for timings, cache bounds and reproducible benchmarks.
-Latest full suite: 916 passed, no skips; native stress: 1,000 rounds, no failures.
+Latest full suite: 920 passed, no skips; native stress: seed 131, 1,000 rounds,
+4 pages, 71 markups, no failures.
 Escape recovery now handles inline panel editors and stale scene mouse grabs
 (`tests/test_escape_recovery.py`). Use `QWidget.window(widget)` in the event
 filter: `PageView.window` is an owner attribute, not QWidget's window method.

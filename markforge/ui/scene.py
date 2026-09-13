@@ -15,7 +15,7 @@ from __future__ import annotations
 import math
 from typing import Optional
 
-from PySide6.QtCore import QByteArray, QPointF, QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QByteArray, QPointF, QRectF, Qt, QTimer, Signal, QSignalBlocker
 from PySide6.QtGui import (QBrush, QColor, QImage, QLinearGradient, QPainter,
                            QPen, QPicture, QPixmap, QTransform)
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QGraphicsScene
@@ -634,16 +634,19 @@ class PageFrame(QGraphicsObject):
         return [item.serialize() for item in sorted(self.markups(), key=lambda i: i.zValue())]
 
     def load_items(self, data: list[dict]) -> None:
-        for item in self.markups():
-            self.remove_markup(item)
-        for entry in data:
-            item = build_item(entry)
-            if item is None:
-                continue
-            if hasattr(item, "load_from_document"):
-                item.load_from_document(self.document)
-            item.setParentItem(self)
-        self.refresh_items()
+        # Restoring one page is one change. Rebuilding the panels after each
+        # removal otherwise makes undo quadratic in the number of markups.
+        with QSignalBlocker(self):
+            for item in self.markups():
+                self.remove_markup(item)
+            for entry in data:
+                item = build_item(entry)
+                if item is None:
+                    continue
+                if hasattr(item, "load_from_document"):
+                    item.load_from_document(self.document)
+                item.setParentItem(self)
+            self.refresh_items()
         self.itemsChanged.emit()
 
     def refresh_items(self) -> None:

@@ -1,5 +1,7 @@
 # PDF rendering performance
 
+For editing, snapping and undo latency, see [APP_PERFORMANCE.md](APP_PERFORMANCE.md).
+
 Measured 2026-09-12 on this 8-core Apple Silicon Mac, macOS 26.4.1. The
 repeatable fixture is an A1 PDF with 60,000 vector segments. Each round draws
 20 tiles of 1024 × 1024 pixels (edge tiles are smaller), at two pixels per

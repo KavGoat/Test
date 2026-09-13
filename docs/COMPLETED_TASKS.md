@@ -1,5 +1,35 @@
 # MarkForge — evidence record
 
+## Editing performance review — 2026-09-13
+
+**920 tests passed, no skips** (145.03 seconds). Native Qt stress seed 131:
+**1,000 rounds, 4 pages, 71 markups, zero failures**.
+
+The user's request to improve overall application speed without sacrificing
+functionality, usability or visual quality is consolidated in both task
+registers. User-owned completion cells remain unchanged.
+
+Profiling found repeated panel rebuilds during page restoration, recursive
+style copying, repeated unit parsing and unnecessary widget ownership walks.
+The changes batch restoration notifications, reuse the serialized after-state
+for undo, retain independent style copies, reuse the fixed millimetre unit and
+avoid ownership checks for unrelated events. Snapping scans nearby geometry
+once per pointer event, preserving order and refreshing it on the next event.
+
+Against `a4dc33f`, the native 500-markup fixture measured median undo/redo at
+about 0.20 seconds instead of 6.9 seconds (35×), pointer snapping at 4.46 ms
+instead of 8.18 ms (1.83×), and nudging at 62.25 ms instead of 85.80 ms (1.38×).
+These are workload-specific operation timings, not a universal application
+speedup. [APP_PERFORMANCE.md](APP_PERFORMANCE.md) records the method and raw data.
+
+Four focused regressions verify complete page notifications, real-keyboard
+nudge with exact undo/redo and retained selection/panels, independent custom
+dash copies, and real-pointer snapping after moving, rotating, hiding and
+undoing a markup. The full suite also covers PDF appearance, save/reopen,
+snapshots, Whiteout, measurement, editing tools and multi-window interactions.
+No rendering resolution, tools, undo depth or snapping targets were reduced.
+The previously implemented bounded multicore PDF pipeline is retained.
+
 ## Follow-up review — 2026-09-13
 
 **916 tests passed, no skips** (132.66 seconds). Native Qt stress seed 127:
