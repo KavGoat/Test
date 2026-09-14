@@ -93,11 +93,13 @@ _DISPLAY_OPS = {
 class MathRenderer:
     """Renders math AST nodes onto a tkinter Canvas with proper typesetting."""
 
-    def __init__(self):
+    def __init__(self, canvas: Optional[tk.Canvas] = None):
         self._font_cache: dict[tuple[str, int, str], tkfont.Font] = {}
         self._measure_cache: dict[tuple, RenderBox] = {}
         self._font_family = "serif"
-        self._canvas: Optional[tk.Canvas] = None
+        self._canvas: Optional[tk.Canvas] = canvas
+        if canvas is not None:
+            self._detect_font(canvas)
 
     # -----------------------------------------------------------------
     # Public API
@@ -106,13 +108,75 @@ class MathRenderer:
     def render(
         self,
         canvas: tk.Canvas,
+        math_data_or_node: Any,
+        x: float,
+        y: float,
+        eval_result: Any = None,
+        *,
+        font_size: int = 12,
+        color: str = "#000000",
+        context: Any = None,
+    ) -> list[int]:
+        """Render a math region or AST node on *canvas*.
+
+        Accepts either a MathRegion (from parser) or a bare ASTNode.
+        Returns a list of canvas item IDs for easy deletion/management.
+        """
+        self._canvas = canvas
+        self._detect_font(canvas)
+
+        items_before = set(canvas.find_all())
+
+        from ..parser import MathRegion
+        if isinstance(math_data_or_node, MathRegion):
+            node = math_data_or_node.input_expr
+            if node is None:
+                return []
+            precision = math_data_or_node.decimal_places or 4
+            if isinstance(node, BinaryOp) and node.operator in (":", "=", "≡"):
+                self._render_node(canvas, node, x, y, font_size, context)
+            elif eval_result is not None:
+                self.render_with_result(
+                    canvas, node, eval_result, x, y,
+                    font_size=font_size, context=context, precision=precision,
+                )
+            elif math_data_or_node.result_expr is not None:
+                self.render_with_result(
+                    canvas, node, math_data_or_node.result_expr, x, y,
+                    font_size=font_size, context=context, precision=precision,
+                )
+            else:
+                self._render_node(canvas, node, x, y, font_size, context)
+        elif isinstance(math_data_or_node, ASTNode):
+            self._render_node(canvas, math_data_or_node, x, y, font_size, context)
+        else:
+            return []
+
+        # Render descriptions if present
+        if hasattr(math_data_or_node, 'descriptions'):
+            for desc in getattr(math_data_or_node, 'descriptions', []):
+                if desc.active and desc.text:
+                    f = self._get_font(canvas, max(font_size - 1, 8))
+                    bbox = canvas.bbox("all")
+                    desc_x = (bbox[2] + 10) if bbox else (x + 200)
+                    canvas.create_text(
+                        desc_x, y + 2, text=desc.text, anchor="nw",
+                        font=f, fill="#666666",
+                    )
+
+        items_after = set(canvas.find_all())
+        return list(items_after - items_before)
+
+    def render_node(
+        self,
+        canvas: tk.Canvas,
         node: ASTNode,
         x: float,
         y: float,
         font_size: int = 12,
         context: Any = None,
     ) -> RenderBox:
-        """Render *node* at (*x*, *y*) on *canvas*. Returns the bounding box."""
+        """Render a single AST node. Returns the bounding box."""
         self._canvas = canvas
         self._detect_font(canvas)
         return self._render_node(canvas, node, x, y, font_size, context)
@@ -859,20 +923,25 @@ class MathRenderer:
             canvas.create_text(ex, eq_y, text=eq_text, anchor="nw", font=f, fill=_OPERATOR_COLOR)
 
             res_x = ex + ew
-            res_text = _format_result(result, precision)
-            res_color = _UNIT_COLOR if isinstance(result, Quantity) else _NUMBER_COLOR
 
-            try:
-                if isinstance(result, np.ndarray):
-                    rb = self._render_matrix_value(canvas, result, res_x, y, font_size)
-                else:
+            # If result is an AST node (from result_expr), render it as math
+            if isinstance(result, ASTNode):
+                rb = self._render_node(canvas, result, res_x, y, font_size, context)
+            else:
+                res_text = _format_result(result, precision)
+                res_color = _UNIT_COLOR if isinstance(result, Quantity) else _NUMBER_COLOR
+
+                try:
+                    if isinstance(result, np.ndarray):
+                        rb = self._render_matrix_value(canvas, result, res_x, y, font_size)
+                    else:
+                        canvas.create_text(res_x, eq_y, text=res_text, anchor="nw", font=f, fill=res_color)
+                        rw, rh = self._text_size(canvas, res_text, font_size)
+                        rb = RenderBox(rw, rh, rh / 2)
+                except Exception:
                     canvas.create_text(res_x, eq_y, text=res_text, anchor="nw", font=f, fill=res_color)
                     rw, rh = self._text_size(canvas, res_text, font_size)
                     rb = RenderBox(rw, rh, rh / 2)
-            except Exception:
-                canvas.create_text(res_x, eq_y, text=res_text, anchor="nw", font=f, fill=res_color)
-                rw, rh = self._text_size(canvas, res_text, font_size)
-                rb = RenderBox(rw, rh, rh / 2)
 
             total_w = expr_box.width + ew + rb.width
             total_h = max(expr_box.height, eh, rb.height)
