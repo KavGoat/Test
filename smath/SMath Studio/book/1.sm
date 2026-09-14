@@ -1,0 +1,51 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<?application progid="SMath Studio" version="0.55"?>
+<regions>
+  <settings>
+    <Editable>false</Editable>
+    <Home>contents.sm</Home>
+    <Back>contents.sm</Back>
+    <pageModel viewMode="1"></pageModel>
+  </settings>
+  <region id="0" left="0" top="0" width="234" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="true" href="" build-in="true">1</p>
+    </text>
+  </region>
+  <region id="1" left="0" top="27" width="10" height="15" color="#000000" background-color="#ffffff">
+    <area single="true" is-collapsed="false" name="" show-name="false" />
+  </region>
+  <region id="2" left="0" top="45" width="144" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="false" href="1_1.sm" build-in="true">2</p>
+    </text>
+  </region>
+  <region id="3" left="0" top="63" width="250" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="false" href="1_2.sm" build-in="true">3</p>
+    </text>
+  </region>
+  <region id="4" left="0" top="81" width="127" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="false" href="1_3.sm" build-in="true">4</p>
+    </text>
+  </region>
+  <region id="5" left="0" top="99" width="251" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="false" href="1_5.sm" build-in="true">6</p>
+    </text>
+  </region>
+  <region id="6" left="0" top="117" width="136" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="false" href="1_7.sm" build-in="true">8</p>
+    </text>
+  </region>
+  <region id="7" left="0" top="144" width="10" height="15" color="#000000" background-color="#ffffff">
+    <area single="true" is-collapsed="false" name="" show-name="false" />
+  </region>
+  <region id="8" left="0" top="162" width="86" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="false" href="contents.sm" build-in="true">0</p>
+    </text>
+  </region>
+</regions>

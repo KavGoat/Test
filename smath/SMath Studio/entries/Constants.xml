@@ -1,0 +1,72 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<entries lang:default="eng" xmlns="http://smath.info/schemas/entries/1.0" xmlns:lang="http://smath.info/schemas/entries/1.0">
+  <constants>
+    <property dimension="250">
+      <add factor="9.80665" id="420">
+        <synonym name="g.e" lang:rus="g.з" lang:dan="g.n" />
+      </add>
+    </property>
+
+    <property dimension="286">
+      <add factor="2.99792458" exp="8" id="412">
+        <synonym name="c" />
+      </add>
+    </property>
+
+    <property dimension="256">
+      <add factor="1.60217648740" exp="-19" id="473">
+        <synonym name="e" />
+      </add>
+    </property>
+
+    <property dimension="273">
+      <add factor="9.1093821545" exp="-31" id="474">
+        <synonym name="m.e" />
+      </add>
+
+      <add factor="1.67262163783" exp="-27" id="475">
+        <synonym name="m.p" />
+      </add>
+
+      <add factor="1.67492721184" exp="-27" id="476">
+        <synonym name="m.n" />
+      </add>
+
+      <add factor="1.6605388628" exp="-27" id="477">
+        <synonym name="u" lang:rus="а\002E\е\002E\м\002E\" />
+      </add>
+    </property>
+
+    <add factor="8.85418781762039" exp="-12" connection="{A^2*s^4}/{kg*m^3}" title="Vacuum permittivity" lang:rus="Электрическая постоянная">
+      <synonym name="ε.0" />
+    </add>
+
+    <add factor="2.04548" exp="3" connection="(kg/{s^2*m})^0.5" id="612">
+      <synonym name="hildebrand" />
+    </add>
+
+    <add factor="6.6742867" exp="-11" connection="m^3/{kg*s^2}" id="469">
+      <synonym name="G.N" />
+    </add>
+
+    <add factor="6.6260689633" exp="-34" connection="{kg*m^2}/s" id="470">
+      <synonym name="h" />
+    </add>
+
+    <add factor="6.022141510" exp="23" connection="1/mol" id="471">
+      <synonym name="N.A" />
+    </add>
+
+    <add factor="4*π" exp="-7" connection="{kg*m}/{s^2*A^2}" id="472">
+      <synonym name="μ.0" />
+    </add>
+
+    <add factor="8.31447215" connection="{kg*m^2}/{K*mol*s^2}" id="478">
+      <synonym name="R.m" />
+    </add>
+
+    <add factor="1.380650424" exp="-23" connection="{kg*m^2}/{K*s^2}" id="479">
+      <synonym name="k" />
+    </add>
+  </constants>
+</entries>

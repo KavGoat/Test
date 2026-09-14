@@ -1,0 +1,424 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<?application progid="SMath Studio Desktop" version="0.99.0.0"?>
+<worksheet xmlns="http://smath.info/schemas/worksheet/1.0">
+  <settings ppi="96">
+    <identity>
+      <id>a4826bfc-4eba-416d-9928-f52a4882bd54</id>
+      <revision>5</revision>
+    </identity>
+    <metadata lang="rus">
+      <title>Решение систем нелинейных уравнений методом Ньютона</title>
+      <author>Кирилл Николаев, Андрей Ивашов</author>
+      <description>Пример алгоритма решения систем нелинейных уравнений (СНУ) методом Ньютона.
+Пользователь задаёт уравнения системы (допускается ввод как одного уравнения, так и нескольких) и начальные приближения.
+Расчёт вычисления корней СНУ производится с использованием матрицы Якоби. Алгоритм позволяет также задать точность, с которой необходимо получить корни.
+В результате работы программа демонстрирует полученные корни и проводит их проверку путём подстановки полученных корней в начальную систему уравнений.
+Для анализа работы алгоритма в примере выводится количество итераций (шагов в цикле), за которое удалось прийти к результату.</description>
+      <company>SMath, http://smath.info/</company>
+      <keywords>Примеры, Ньютон, Системы уравнений, Решение</keywords>
+    </metadata>
+    <metadata lang="ind">
+      <title>Penyelesaian sistem persamaan simultan nonlinear menggunakan metode Newton</title>
+      <author>Kirill Nikolaev, Andrey Ivashov</author>
+      <translator>Waluyo Adi Siswanto</translator>
+      <description>Penyelesaian sistem persamaan nonlinear simultan menggunakan metode Newton. Algoritma ini dapat juga digunakan untuk menyelesaikan satu persamaan nonlinear.
+Pengguna perlu menyatakan sistem persamaan simultan, perkiraan awal akar persamaan serta tingkat ketepatan hasil.
+Matriks Jacobi dibentuk melalui perintah program While.
+Jumlah langkah iterasi dari gelung While juga ditampilkan untuk tujuan analisis metode perhitungan.</description>
+      <company>SMath, http://smath.info/</company>
+      <keywords>Contoh, Newton, Sistem persamaan, Nonlinear, Penyelesaian persamaan</keywords>
+    </metadata>
+    <metadata lang="eng">
+      <title>Nonlinear systems of equations solving with Newton's method</title>
+      <author>Kirill Nikolaev, Andrey Ivashov</author>
+      <translator>Andrey Ivashov</translator>
+      <description>Newton's method of the nonlinear systems of equations solving. This algorithm can be used to solve standalone equation as well.
+User specifies system of the equations, first approximations of the roots and the result accuracy.
+While calculation Jacobi matrix is created.
+Number of steps (iterations) of the While loop also displayed for the analysis purposes.</description>
+      <company>SMath, http://smath.info/</company>
+      <keywords>Examples, Newton, Equations system, Solving</keywords>
+    </metadata>
+    <calculation>
+      <precision>4</precision>
+      <exponentialThreshold>5</exponentialThreshold>
+      <trailingZeros>false</trailingZeros>
+      <significantDigitsMode>false</significantDigitsMode>
+      <roundingMode>0</roundingMode>
+      <fractions>decimal</fractions>
+    </calculation>
+    <pageModel active="true" viewMode="0" printGrid="false" printAreas="true" simpleEqualsOnly="false" printBackgroundImages="true">
+      <paper id="1" orientation="Portrait" width="850" height="1100" />
+      <margins left="39" right="39" top="39" bottom="39" />
+      <header alignment="Center" color="#a9a9a9">&amp;[DATE] &amp;[TIME] - &amp;[FILENAME]</header>
+      <footer alignment="Center" color="#a9a9a9">&amp;[PAGENUM] / &amp;[COUNT]</footer>
+      <backgrounds />
+    </pageModel>
+    <dependencies>
+      <assembly name="SMath Studio Desktop" version="0.99.0.0" guid="a37cba83-b69c-4c71-9992-55ff666763bd" />
+      <assembly name="Math Region" version="0.99.0.0" guid="02f1ab51-215b-466e-a74d-5d8b1cf85e8d" />
+      <assembly name="SpecialFunctions" version="1.12.0.0" guid="2814e667-4e12-48b1-8d51-194e480eabc5" />
+      <assembly name="TextRegion" version="1.11.0.0" guid="485d28c5-349a-48b6-93be-12a35a1c1e39" />
+    </dependencies>
+  </settings>
+  <regions type="content">
+    <region id="0" left="9" top="9" width="359" height="48" color="#0000ff" bgColor="#ffffff" fontSize="12">
+      <text lang="rus">
+        <p bold="true">Решение систем нелинейных уравнений
+методом Ньютона</p>
+      </text>
+      <text lang="ind">
+        <p bold="true">Penyelesaian sistem persamaan nonlinear
+menggunakan metode Newton</p>
+      </text>
+      <text lang="eng">
+        <p bold="true">Nonlinear systems of equations solving
+with Newton's method</p>
+      </text>
+    </region>
+    <region id="1" left="9" top="54" width="136" height="24" border="true" color="#000000" bgColor="#dddddd" fontSize="10">
+      <text lang="rus">
+        <p>Входные данные:</p>
+      </text>
+      <text lang="ind">
+        <p>Data masukan:</p>
+      </text>
+      <text lang="eng">
+        <p>Input data:</p>
+      </text>
+    </region>
+    <region id="2" left="9" top="81" width="168" height="72" color="#000000" bgColor="#ffffff" fontSize="10">
+      <math>
+        <description active="true" position="Right" lang="rus">
+          <p>Система уравнений</p>
+        </description>
+        <description active="true" position="Right" lang="ind">
+          <p>Persamaan nonlinear</p>
+        </description>
+        <description active="true" position="Right" lang="eng">
+          <p>Equations set</p>
+        </description>
+        <input>
+          <e type="operand">x</e>
+          <e type="function" args="1">f</e>
+          <e type="operand">x</e>
+          <e type="operand">1</e>
+          <e type="function" args="2">el</e>
+          <e type="operand">2</e>
+          <e type="operator" args="2">^</e>
+          <e type="operand">4</e>
+          <e type="operator" args="2">-</e>
+          <e type="operand">2</e>
+          <e type="operand">x</e>
+          <e type="operand">1</e>
+          <e type="function" args="2">el</e>
+          <e type="operator" args="2">*</e>
+          <e type="operand">4</e>
+          <e type="operand">x</e>
+          <e type="operand">2</e>
+          <e type="function" args="2">el</e>
+          <e type="operator" args="2">*</e>
+          <e type="operator" args="2">+</e>
+          <e type="operand">2</e>
+          <e type="operand">1</e>
+          <e type="function" args="4">mat</e>
+          <e type="operator" args="2">:</e>
+        </input>
+      </math>
+    </region>
+    <region id="3" left="9" top="153" width="61" height="45" color="#000000" bgColor="#ffffff" fontSize="10">
+      <math>
+        <description active="true" position="Right" lang="rus">
+          <p>Приближения</p>
+        </description>
+        <description active="true" position="Right" lang="ind">
+          <p>Prediksi awal</p>
+        </description>
+        <description active="true" position="Right" lang="eng">
+          <p>Approximation</p>
+        </description>
+        <input>
+          <e type="operand">a</e>
+          <e type="operand">1</e>
+          <e type="operand">1</e>
+          <e type="operand">2</e>
+          <e type="operand">1</e>
+          <e type="function" args="4">mat</e>
+          <e type="operator" args="2">:</e>
+        </input>
+      </math>
+    </region>
+    <region id="4" left="9" top="198" width="84" height="33" color="#000000" bgColor="#ffffff" fontSize="10">
+      <math>
+        <description active="true" position="Right" lang="rus">
+          <p>Точность</p>
+        </description>
+        <description active="true" position="Right" lang="ind">
+          <p>Ketepatan</p>
+        </description>
+        <description active="true" position="Right" lang="eng">
+          <p>Accuracy</p>
+        </description>
+        <input>
+          <e type="operand">ε</e>
+          <e type="operand">10</e>
+          <e type="operand">15</e>
+          <e type="operator" args="1">-</e>
+          <e type="operator" args="2">^</e>
+          <e type="operator" args="2">:</e>
+        </input>
+      </math>
+    </region>
+    <region id="5" left="9" top="234" width="70" height="24" border="true" color="#000000" bgColor="#dddddd" fontSize="10">
+      <text lang="rus">
+        <p>Расчёт:</p>
+      </text>
+      <text lang="ind">
+        <p>Perhitungan:</p>
+      </text>
+      <text lang="eng">
+        <p>Calculation:</p>
+      </text>
+    </region>
+    <region id="6" left="9" top="261" width="120" height="28" color="#000000" bgColor="#ffffff" fontSize="10">
+      <math>
+        <input>
+          <e type="operand">n</e>
+          <e type="operand">x</e>
+          <e type="function" args="1">f</e>
+          <e type="function" args="1">rows</e>
+          <e type="operator" args="2">:</e>
+        </input>
+      </math>
+    </region>
+    <region id="7" left="9" top="288" width="213" height="85" color="#000000" bgColor="#ffffff" fontSize="10">
+      <math>
+        <input>
+          <e type="operand">j</e>
+          <e type="operand">1</e>
+          <e type="operator" args="2">:</e>
+          <e type="operand">j</e>
+          <e type="operand">n</e>
+          <e type="operator" args="2">≤</e>
+          <e type="operand">j</e>
+          <e type="operand">j</e>
+          <e type="operand">1</e>
+          <e type="operator" args="2">+</e>
+          <e type="operator" args="2">:</e>
+          <e type="operand">k</e>
+          <e type="operand">1</e>
+          <e type="operator" args="2">:</e>
+          <e type="operand">k</e>
+          <e type="operand">n</e>
+          <e type="operator" args="2">≤</e>
+          <e type="operand">k</e>
+          <e type="operand">k</e>
+          <e type="operand">1</e>
+          <e type="operator" args="2">+</e>
+          <e type="operator" args="2">:</e>
+          <e type="operand">m</e>
+          <e type="operand">j</e>
+          <e type="operand">k</e>
+          <e type="function" args="3">el</e>
+          <e type="operand">x</e>
+          <e type="function" args="1">f</e>
+          <e type="operand">j</e>
+          <e type="function" args="2">el</e>
+          <e type="operand">x</e>
+          <e type="operand">k</e>
+          <e type="function" args="2">el</e>
+          <e type="function" args="2">diff</e>
+          <e type="operator" args="2">:</e>
+          <e type="function" args="4">for</e>
+          <e type="function" args="4">for</e>
+        </input>
+      </math>
+    </region>
+    <region id="8" left="9" top="378" width="105" height="26" color="#000000" bgColor="#ffffff" fontSize="10">
+      <math>
+        <description active="true" position="Right" lang="rus">
+          <p>Матрица Якоби</p>
+        </description>
+        <description active="true" position="Right" lang="ind">
+          <p>Matriks Jacobi</p>
+        </description>
+        <description active="true" position="Right" lang="eng">
+          <p>Jacobi matrix</p>
+        </description>
+        <input>
+          <e type="operand">x</e>
+          <e type="function" args="1">Jacob</e>
+          <e type="operand">m</e>
+          <e type="operator" args="2">:</e>
+        </input>
+      </math>
+    </region>
+    <region id="9" left="9" top="396" width="195" height="35" color="#000000" bgColor="#ffffff" fontSize="10">
+      <math>
+        <input>
+          <e type="operand">x</e>
+          <e type="function" args="1">J</e>
+          <e type="operand">x</e>
+          <e type="function" args="1">Jacob</e>
+          <e type="operand">1</e>
+          <e type="operator" args="1">-</e>
+          <e type="operator" args="2">^</e>
+          <e type="operand">x</e>
+          <e type="function" args="1">f</e>
+          <e type="operator" args="2">*</e>
+          <e type="operator" args="2">:</e>
+        </input>
+      </math>
+    </region>
+    <region id="10" left="9" top="432" width="113" height="26" color="#000000" bgColor="#ffffff" fontSize="10">
+      <math>
+        <input>
+          <e type="operand">ans</e>
+          <e type="operand">a</e>
+          <e type="operand">a</e>
+          <e type="function" args="1">J</e>
+          <e type="operator" args="2">-</e>
+          <e type="operator" args="2">:</e>
+        </input>
+      </math>
+    </region>
+    <region id="11" left="9" top="450" width="70" height="24" color="#000000" bgColor="#ffffff" fontSize="10">
+      <math>
+        <input>
+          <e type="operand">next</e>
+          <e type="operand">1</e>
+          <e type="operator" args="2">:</e>
+        </input>
+      </math>
+    </region>
+    <region id="12" left="108" top="450" width="78" height="24" color="#000000" bgColor="#ffffff" fontSize="10">
+      <math>
+        <input>
+          <e type="operand">steps</e>
+          <e type="operand">0</e>
+          <e type="operator" args="2">:</e>
+        </input>
+      </math>
+    </region>
+    <region id="13" left="9" top="468" width="340" height="153" color="#000000" bgColor="#ffffff" fontSize="10">
+      <math>
+        <input>
+          <e type="operand">next</e>
+          <e type="operand">t</e>
+          <e type="operand">ans</e>
+          <e type="operand">ans</e>
+          <e type="function" args="1">J</e>
+          <e type="operator" args="2">-</e>
+          <e type="operator" args="2">:</e>
+          <e type="operand">t</e>
+          <e type="operand">ans</e>
+          <e type="operator" args="2">-</e>
+          <e type="function" args="1">min</e>
+          <e type="function" args="1">abs</e>
+          <e type="operand">ε</e>
+          <e type="operator" args="2">&lt;</e>
+          <e type="bracket">(</e>
+          <e type="operand">t</e>
+          <e type="operand">ans</e>
+          <e type="operator" args="2">-</e>
+          <e type="function" args="1">max</e>
+          <e type="function" args="1">abs</e>
+          <e type="operand">ε</e>
+          <e type="operator" args="2">&lt;</e>
+          <e type="bracket">(</e>
+          <e type="operator" args="2">&amp;</e>
+          <e type="operand">next</e>
+          <e type="operand">0</e>
+          <e type="operator" args="2">:</e>
+          <e type="operand">next</e>
+          <e type="operand">1</e>
+          <e type="operator" args="2">:</e>
+          <e type="function" args="3">if</e>
+          <e type="operand">ans</e>
+          <e type="operand">t</e>
+          <e type="operator" args="2">:</e>
+          <e type="operand">steps</e>
+          <e type="operand">steps</e>
+          <e type="operand">1</e>
+          <e type="operator" args="2">+</e>
+          <e type="operator" args="2">:</e>
+          <e type="operand">4</e>
+          <e type="operand">1</e>
+          <e type="function" args="6">line</e>
+          <e type="function" args="2">while</e>
+        </input>
+      </math>
+    </region>
+    <region id="14" left="9" top="621" width="88" height="24" color="#000000" bgColor="#ffffff" fontSize="10">
+      <math>
+        <description active="true" position="Right" lang="rus">
+          <p>Количество итераций</p>
+        </description>
+        <description active="true" position="Right" lang="ind">
+          <p>Jumlah iterasi</p>
+        </description>
+        <description active="true" position="Right" lang="eng">
+          <p>Number of iterations</p>
+        </description>
+        <input>
+          <e type="operand">steps</e>
+        </input>
+        <result action="numeric">
+          <e type="operand">5</e>
+        </result>
+      </math>
+    </region>
+    <region id="15" left="9" top="648" width="61" height="24" border="true" color="#000000" bgColor="#dddddd" fontSize="10">
+      <text lang="rus">
+        <p>Ответ:</p>
+      </text>
+      <text lang="ind">
+        <p>Hasil:</p>
+      </text>
+      <text lang="eng">
+        <p>Result:</p>
+      </text>
+    </region>
+    <region id="16" left="9" top="675" width="99" height="45" color="#000000" bgColor="#ffffff" fontSize="10">
+      <math>
+        <input>
+          <e type="operand">ans</e>
+        </input>
+        <result action="numeric">
+          <e type="operand">2</e>
+          <e type="operand">1</e>
+          <e type="operator" args="1">-</e>
+          <e type="operand">2</e>
+          <e type="operand">1</e>
+          <e type="function" args="4">mat</e>
+        </result>
+      </math>
+    </region>
+    <region id="17" left="9" top="729" width="86" height="24" border="true" color="#000000" bgColor="#dddddd" fontSize="10">
+      <text lang="rus">
+        <p>Проверка:</p>
+      </text>
+      <text lang="ind">
+        <p>Cek Hasil:</p>
+      </text>
+      <text lang="eng">
+        <p>Control:</p>
+      </text>
+    </region>
+    <region id="18" left="9" top="756" width="112" height="45" color="#000000" bgColor="#ffffff" fontSize="10">
+      <math>
+        <input>
+          <e type="operand">ans</e>
+          <e type="function" args="1">f</e>
+        </input>
+        <result action="numeric">
+          <e type="operand">0</e>
+          <e type="operand">0</e>
+          <e type="operand">2</e>
+          <e type="operand">1</e>
+          <e type="function" args="4">mat</e>
+        </result>
+      </math>
+    </region>
+  </regions>
+</worksheet>

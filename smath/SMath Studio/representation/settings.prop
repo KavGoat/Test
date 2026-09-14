@@ -1,0 +1,124 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<representation>
+  <!-- Default equations formatting preset -->
+  <drawing name="Default">
+    <!-- Default properties to be used if not set explicitely (optional attribute: family="Verdana") -->
+    <generic>
+      <font
+        color="#000000"
+        bgcolor="#ffffff"
+        bold="false"
+        italic="false"
+        underline="false"
+        strikeout="false"
+        size="100%"
+      />
+    </generic>
+
+    <math>
+      <!-- Numbers, including infinity and imaginary unit -->
+      <entry type="number">
+        <font />
+      </entry>
+
+      <!-- String used within equation (shown inside double quotes) -->
+      <entry type="string">
+        <font color="#a31515" />
+      </entry>
+
+      <!-- Variables included into standard application package or defined in plug-ins -->
+      <entry type="variable" condition="built-in">
+        <font bold="true" />
+        <subscript>
+          <font size="80%" />
+        </subscript>
+      </entry>
+
+      <!-- Variables defined in the scope of the worksheet -->
+      <entry type="variable" condition="user-defined">
+        <font italic="true" />
+        <subscript>
+          <font size="80%" />
+        </subscript>
+      </entry>
+
+      <!-- Functions included into standard application package or defined in plug-ins -->
+      <entry type="function" condition="built-in">
+        <font />
+        <subscript>
+          <font size="80%" />
+        </subscript>
+      </entry>
+
+      <!-- Functions defined in the scope of the worksheet -->
+      <entry type="function" condition="user-defined">
+        <font italic="true" />
+        <subscript>
+          <font size="80%" />
+        </subscript>
+      </entry>
+
+      <!-- Units and physical constants -->
+      <entry type="unit">
+        <font color="#0000ff" />
+        <subscript>
+          <font size="80%" />
+        </subscript>
+      </entry>
+
+      <!-- Absolute variables and functions (the ones have leading tilde in their names) -->
+      <entry type="special">
+        <font bold="true" />
+        <subscript>
+          <font size="80%" />
+        </subscript>
+      </entry>
+
+      <!-- Built-in operators used for calculations (note: font family cannot be changed) -->
+      <entry type="operator">
+        <font />
+      </entry>
+    </math>
+  </drawing>
+
+  <!-- Old style formatting preset -->
+  <drawing name="Old style (Obsolete)">
+    <math>
+      <entry type="number">
+        <font />
+      </entry>
+
+      <entry type="string">
+        <font color="#a31515" />
+      </entry>
+
+      <entry type="variable">
+        <font />
+        <subscript>
+          <font />
+        </subscript>
+      </entry>
+
+      <entry type="function">
+        <font />
+        <subscript>
+          <font />
+        </subscript>
+      </entry>
+
+      <entry type="unit">
+        <font color="#0000ff" italic="true" />
+        <subscript>
+          <font />
+        </subscript>
+      </entry>
+
+      <entry type="special">
+        <font bold="true" />
+        <subscript>
+          <font />
+        </subscript>
+      </entry>
+    </math>
+  </drawing>
+</representation>

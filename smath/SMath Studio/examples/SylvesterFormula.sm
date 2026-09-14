@@ -1,0 +1,440 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<?application progid="SMath Studio" version="0.96"?>
+<regions xmlns="http://smath.info/schemas/worksheet/1.0">
+  <settings>
+    <identity>
+      <id>8ccbcd54-756a-4fcc-ba28-11c45dc8b90d</id>
+      <revision>2</revision>
+    </identity>
+    <metadata lang="rus">
+      <title>Поиск функции от матрицы (Формула Сильвестра)</title>
+      <author>Кирилл Николаев</author>
+      <description>Вычисление определённой пользователем функции от заданной матрицы по формуле Сильвестра.
+В примере также показывается метод получения коэффициентов характеристического многочлена (векового уравнения) по методу Леверрье-Фаддеева.</description>
+      <keywords>Примеры, Матрицы, Формула Сильвестра, Метод Леверрье-Фаддеева, Собственные числа, Характеристический многочлен, Вековое уравнение</keywords>
+    </metadata>
+    <metadata lang="ind">
+      <title>Fungsi dari matriks (Formula Sylvester)</title>
+      <author>Kirill Nikolaev</author>
+      <translator>Waluyo Adi Siswanto</translator>
+      <description>Menghitung fungsi dari suatu matriks menggunakan formula Sylvester. Fungsi matriks ini merupakan fungsi yang dapat didefinisikan sendiri.
+Pada contoh ini, penentuan koefisien karakteristik polinomial dari matriks menggunakan metode Leverrie-Faddeev.</description>
+      <keywords>Contoh, Matriks,  Formula Sylvester,  Metode Leverrie-Faddeev, Angka Eigen, Karakteristik polinomial</keywords>
+    </metadata>
+    <metadata lang="eng">
+      <title>Function of the matrix (Sylvester's formula)</title>
+      <author>Kirill Nikolaev</author>
+      <translator>Andrey Ivashov</translator>
+      <description>Computing the user-defined function of the matrix using Sylvester's formula.
+Example also shows how to get the coefficients of matrix characteristic polynomial with Leverrie-Faddeev method.</description>
+      <keywords>Examples, Matrices, Sylvester's formula, Leverrie-Faddeev method, Eigenvalues, Characteristic polynomial</keywords>
+    </metadata>
+    <calculation>
+      <precision>4</precision>
+      <exponentialThreshold>5</exponentialThreshold>
+      <fractions>decimal</fractions>
+    </calculation>
+    <pageModel active="false" printAreas="true" simpleEqualsOnly="false" printBackgroundImages="true">
+      <paper id="1" orientation="Portrait" width="850" height="1100" />
+      <margins left="39" right="39" top="39" bottom="39" />
+      <header alignment="Center" color="#a9a9a9">&amp;[DATE] &amp;[TIME] - &amp;[FILENAME]</header>
+      <footer alignment="Center" color="#a9a9a9">&amp;[PAGENUM] / &amp;[COUNT]</footer>
+      <backgrounds />
+    </pageModel>
+    <dependences>
+      <assembly name="SMath Studio" version="0.96" guid="a37cba83-b69c-4c71-9992-55ff666763bd" />
+      <assembly name="Text Region" version="1.9.4884.25041" guid="485d28c5-349a-48b6-93be-12a35a1c1e39" />
+      <assembly name="Math Region" version="0.96" guid="02f1ab51-215b-466e-a74d-5d8b1cf85e8d" />
+      <assembly name="Special Functions" version="1.10.4884.25035" guid="2814e667-4e12-48b1-8d51-194e480eabc5" />
+    </dependences>
+  </settings>
+  <region id="0" left="9" top="9" width="449" height="28" color="#0000ff" bgColor="#ffffff" fontSize="12">
+    <text lang="rus">
+      <p bold="true">Поиск функции от матрицы (Формула Сильвестра)</p>
+    </text>
+    <text lang="ind">
+      <p bold="true">Fungsi dari matriks (Formula Sylvester)</p>
+    </text>
+    <text lang="eng">
+      <p bold="true">Function of the matrix (Sylvester's formula)</p>
+    </text>
+  </region>
+  <region id="1" left="9" top="36" width="102" height="24" border="true" color="#000000" bgColor="#dddddd" fontSize="10">
+    <text lang="rus">
+      <p>Входные данные:</p>
+    </text>
+    <text lang="ind">
+      <p>Data masukan:</p>
+    </text>
+    <text lang="eng">
+      <p>Input data:</p>
+    </text>
+  </region>
+  <region id="2" left="9" top="63" width="102" height="62" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <description active="true" position="Right" lang="rus">
+        <p>Задание матрицы</p>
+      </description>
+      <description active="true" position="Right" lang="ind">
+        <p>Data matriks</p>
+      </description>
+      <description active="true" position="Right" lang="eng">
+        <p>Considered matrix</p>
+      </description>
+      <input>
+        <e type="operand">A</e>
+        <e type="operand">1</e>
+        <e type="operator" args="1">-</e>
+        <e type="operand">2</e>
+        <e type="operand">7</e>
+        <e type="operand">5</e>
+        <e type="operand">2</e>
+        <e type="operand">9</e>
+        <e type="operand">6</e>
+        <e type="operand">3</e>
+        <e type="operand">4</e>
+        <e type="operator" args="1">-</e>
+        <e type="operand">3</e>
+        <e type="operand">3</e>
+        <e type="function" preserve="true" args="11">mat</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+  <region id="3" left="9" top="126" width="75" height="34" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <description active="true" position="Right" lang="rus">
+        <p>Искомая функция</p>
+      </description>
+      <description active="true" position="Right" lang="ind">
+        <p>Definisi fungsi</p>
+      </description>
+      <description active="true" position="Right" lang="eng">
+        <p>Function to proceed</p>
+      </description>
+      <input>
+        <e type="operand">α</e>
+        <e type="function" args="1">φ</e>
+        <e type="operand">α</e>
+        <e type="operand">2</e>
+        <e type="operator" args="2">^</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+  <region id="4" left="9" top="171" width="111" height="24" border="true" color="#000000" bgColor="#dddddd" fontSize="10">
+    <text lang="rus">
+      <p>Расчёт:</p>
+    </text>
+    <text lang="ind">
+      <p>Perhitungan:</p>
+    </text>
+    <text lang="eng">
+      <p>Calculation:</p>
+    </text>
+  </region>
+  <region id="5" left="9" top="198" width="434" height="48" color="#0000ff" bgColor="#ffffff" fontSize="12">
+    <text lang="rus">
+      <p bold="true">Нахождение коэффициентов векового уравненияметодом Леверрье-Фаддеева</p>
+    </text>
+    <text lang="ind">
+      <p bold="true">Menghitung karakteristik polinomial menggunakanmetode Leverrie-Faddee</p>
+    </text>
+    <text lang="eng">
+      <p bold="true">Computing the characteristic polynomial of the matrix with Leverrie-Faddeev method</p>
+    </text>
+  </region>
+  <region id="6" left="9" top="252" width="88" height="26" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <input>
+        <e type="operand">m</e>
+        <e type="operand">A</e>
+        <e type="function" preserve="true" args="1">cols</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+  <region id="7" left="9" top="279" width="199" height="32" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <input>
+        <e type="operand">B</e>
+        <e type="operand">1</e>
+        <e type="function" preserve="true" args="2">el</e>
+        <e type="operand">A</e>
+        <e type="operand">A</e>
+        <e type="function" preserve="true" args="1">tr</e>
+        <e type="operand">m</e>
+        <e type="function" preserve="true" args="1">identity</e>
+        <e type="operator" args="2">*</e>
+        <e type="operator" args="2">-</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+  <region id="8" left="9" top="315" width="85" height="32" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <input>
+        <e type="operand">q</e>
+        <e type="operand">1</e>
+        <e type="function" preserve="true" args="2">el</e>
+        <e type="operand">A</e>
+        <e type="function" preserve="true" args="1">tr</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+  <region id="9" left="9" top="351" width="224" height="147" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <input>
+        <e type="operand">n</e>
+        <e type="operand">2</e>
+        <e type="operator" args="2">:</e>
+        <e type="operand">n</e>
+        <e type="operand">m</e>
+        <e type="operator" args="2">≤</e>
+        <e type="operand">n</e>
+        <e type="operand">n</e>
+        <e type="operand">1</e>
+        <e type="operator" args="2">+</e>
+        <e type="operator" args="2">:</e>
+        <e type="operand">C</e>
+        <e type="operand">n</e>
+        <e type="function" preserve="true" args="2">el</e>
+        <e type="operand">A</e>
+        <e type="operand">B</e>
+        <e type="operand">n</e>
+        <e type="operand">1</e>
+        <e type="operator" args="2">-</e>
+        <e type="function" preserve="true" args="2">el</e>
+        <e type="operator" args="2">*</e>
+        <e type="operator" args="2">:</e>
+        <e type="operand">q</e>
+        <e type="operand">n</e>
+        <e type="function" preserve="true" args="2">el</e>
+        <e type="operand">C</e>
+        <e type="operand">n</e>
+        <e type="function" preserve="true" args="2">el</e>
+        <e type="function" preserve="true" args="1">tr</e>
+        <e type="operand">n</e>
+        <e type="operator" args="2">/</e>
+        <e type="operator" args="2">:</e>
+        <e type="operand">B</e>
+        <e type="operand">n</e>
+        <e type="function" preserve="true" args="2">el</e>
+        <e type="operand">C</e>
+        <e type="operand">n</e>
+        <e type="function" preserve="true" args="2">el</e>
+        <e type="operand">q</e>
+        <e type="operand">n</e>
+        <e type="function" preserve="true" args="2">el</e>
+        <e type="operand">m</e>
+        <e type="function" preserve="true" args="1">identity</e>
+        <e type="operator" args="2">*</e>
+        <e type="operator" args="2">-</e>
+        <e type="operator" args="2">:</e>
+        <e type="operand">p</e>
+        <e type="operand">n</e>
+        <e type="function" preserve="true" args="2">el</e>
+        <e type="operand">q</e>
+        <e type="operand">n</e>
+        <e type="operand">1</e>
+        <e type="operator" args="2">-</e>
+        <e type="function" preserve="true" args="2">el</e>
+        <e type="operator" args="1">-</e>
+        <e type="operator" args="2">:</e>
+        <e type="operand">4</e>
+        <e type="operand">1</e>
+        <e type="function" preserve="true" args="6">line</e>
+        <e type="function" preserve="true" args="4">for</e>
+      </input>
+    </math>
+  </region>
+  <region id="10" left="9" top="504" width="78" height="32" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <input>
+        <e type="operand">p</e>
+        <e type="operand">m</e>
+        <e type="operand">1</e>
+        <e type="operator" args="2">+</e>
+        <e type="function" preserve="true" args="2">el</e>
+        <e type="operand">1</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+  <region id="11" left="9" top="540" width="227" height="50" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <input>
+        <e type="operand">j</e>
+        <e type="operand">1</e>
+        <e type="operator" args="2">:</e>
+        <e type="operand">j</e>
+        <e type="operand">A</e>
+        <e type="function" preserve="true" args="1">cols</e>
+        <e type="operator" args="2">≤</e>
+        <e type="operand">j</e>
+        <e type="operand">j</e>
+        <e type="operand">1</e>
+        <e type="operator" args="2">+</e>
+        <e type="operator" args="2">:</e>
+        <e type="operand">p</e>
+        <e type="operand">j</e>
+        <e type="function" preserve="true" args="2">el</e>
+        <e type="operand">q</e>
+        <e type="operand">m</e>
+        <e type="operand">j</e>
+        <e type="operator" args="2">-</e>
+        <e type="operand">1</e>
+        <e type="operator" args="2">+</e>
+        <e type="function" preserve="true" args="2">el</e>
+        <e type="operator" args="1">-</e>
+        <e type="operator" args="2">:</e>
+        <e type="function" preserve="true" args="4">for</e>
+      </input>
+    </math>
+  </region>
+  <region id="12" left="9" top="594" width="88" height="80" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <description active="true" position="Right" lang="rus">
+        <p>Коэффициенты характеристическогомногочлена</p>
+      </description>
+      <description active="true" position="Right" lang="ind">
+        <p>Koefisien karakteristik polinomial</p>
+      </description>
+      <description active="true" position="Right" lang="eng">
+        <p>Characteristic polynomialcoefficients</p>
+      </description>
+      <input>
+        <e type="operand">p</e>
+      </input>
+      <result action="numeric">
+        <e type="operand">204</e>
+        <e type="operator" args="1">-</e>
+        <e type="operand">85</e>
+        <e type="operator" args="1">-</e>
+        <e type="operand">3</e>
+        <e type="operand">1</e>
+        <e type="operand">4</e>
+        <e type="operand">1</e>
+        <e type="function" preserve="true" args="6">mat</e>
+      </result>
+    </math>
+  </region>
+  <region id="13" left="9" top="675" width="174" height="28" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <input>
+        <e type="operand">λ</e>
+        <e type="operand">p</e>
+        <e type="function" preserve="true" args="1">polyroots</e>
+        <e type="function" preserve="true" args="1">eval</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+  <region id="14" left="9" top="711" width="112" height="62" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <description active="true" position="Right" lang="rus">
+        <p>Собственные числа матрцы А</p>
+      </description>
+      <description active="true" position="Right" lang="ind">
+        <p>Angka Eigen dari matriks A</p>
+      </description>
+      <description active="true" position="Right" lang="eng">
+        <p>Eigenvalues of A matrix</p>
+      </description>
+      <input>
+        <e type="operand">λ</e>
+      </input>
+      <result action="numeric">
+        <e type="operand">2.358</e>
+        <e type="operator" args="1">-</e>
+        <e type="operand">8.9858</e>
+        <e type="operand">9.6278</e>
+        <e type="operator" args="1">-</e>
+        <e type="operand">3</e>
+        <e type="operand">1</e>
+        <e type="function" preserve="true" args="5">mat</e>
+      </result>
+    </math>
+  </region>
+  <region id="15" left="9" top="783" width="407" height="128" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math optimize="2">
+      <input>
+        <e type="operand">ξ</e>
+        <e type="operand">λ</e>
+        <e type="operand">k</e>
+        <e type="function" preserve="true" args="2">el</e>
+        <e type="function" args="1">φ</e>
+        <e type="operand">k</e>
+        <e type="operand">j</e>
+        <e type="operator" args="2">≠</e>
+        <e type="operand">A</e>
+        <e type="operand">λ</e>
+        <e type="operand">j</e>
+        <e type="function" preserve="true" args="2">el</e>
+        <e type="operand">A</e>
+        <e type="function" preserve="true" args="1">cols</e>
+        <e type="function" preserve="true" args="1">identity</e>
+        <e type="operator" args="2">*</e>
+        <e type="operator" args="2">-</e>
+        <e type="operand">λ</e>
+        <e type="operand">k</e>
+        <e type="function" preserve="true" args="2">el</e>
+        <e type="operand">λ</e>
+        <e type="operand">j</e>
+        <e type="function" preserve="true" args="2">el</e>
+        <e type="operator" args="2">-</e>
+        <e type="operator" args="2">/</e>
+        <e type="operand">1</e>
+        <e type="function" preserve="true" args="3">if</e>
+        <e type="operand">j</e>
+        <e type="operand">1</e>
+        <e type="operand">A</e>
+        <e type="function" preserve="true" args="1">cols</e>
+        <e type="function" preserve="true" args="4">product</e>
+        <e type="operator" args="2">*</e>
+        <e type="bracket">(</e>
+        <e type="operand">k</e>
+        <e type="operand">1</e>
+        <e type="operand">A</e>
+        <e type="function" preserve="true" args="1">cols</e>
+        <e type="function" preserve="true" args="4">sum</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+  <region id="16" left="9" top="918" width="70" height="24" border="true" color="#000000" bgColor="#dddddd" fontSize="10">
+    <text lang="rus">
+      <p>Результат:</p>
+    </text>
+    <text lang="ind">
+      <p>Hasil:</p>
+    </text>
+    <text lang="eng">
+      <p>Result:</p>
+    </text>
+  </region>
+  <region id="17" left="9" top="945" width="136" height="62" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <input>
+        <e type="operand">ξ</e>
+      </input>
+      <result action="numeric">
+        <e type="operand">53</e>
+        <e type="operand">23</e>
+        <e type="operand">17</e>
+        <e type="operator" args="1">-</e>
+        <e type="operand">59</e>
+        <e type="operand">41</e>
+        <e type="operand">17</e>
+        <e type="operand">15</e>
+        <e type="operator" args="1">-</e>
+        <e type="operand">6</e>
+        <e type="operand">85</e>
+        <e type="operand">3</e>
+        <e type="operand">3</e>
+        <e type="function" preserve="true" args="11">mat</e>
+      </result>
+    </math>
+  </region>
+</regions>

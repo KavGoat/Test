@@ -1,0 +1,173 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<?application progid="SMath Studio" version="0.55"?>
+<regions>
+  <settings>
+    <Editable>false</Editable>
+    <Home>contents.sm</Home>
+    <Back>4.sm</Back>
+    <pageModel viewMode="1"></pageModel>
+  </settings>
+  <region id="0" left="0" top="0" width="210" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="true" href="" build-in="true">28</p>
+    </text>
+  </region>
+  <region id="1" left="0" top="27" width="10" height="15" color="#000000" background-color="#ffffff">
+    <area single="true" is-collapsed="false" name="" show-name="false" />
+  </region>
+  <region id="2" left="18" top="45" width="159" height="35" font-size="10" color="#000000" background-color="#ffffff">
+    <math>
+      <e type="operand">α</e>
+      <e type="function" args="1">cos</e>
+      <e type="operand">2</e>
+      <e type="operator" args="2">^</e>
+      <e type="operand">1</e>
+      <e type="operand">2</e>
+      <e type="operand">α</e>
+      <e type="operator" args="2">*</e>
+      <e type="function" args="1">cos</e>
+      <e type="operator" args="2">+</e>
+      <e type="operand">2</e>
+      <e type="operator" args="2">/</e>
+      <e type="operator" args="2">=</e>
+    </math>
+  </region>
+  <region id="3" left="0" top="54" width="12" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="false" href="">●</p>
+    </text>
+  </region>
+  <region id="4" left="18" top="90" width="159" height="35" font-size="10" color="#000000" background-color="#ffffff">
+    <math>
+      <e type="operand">α</e>
+      <e type="function" args="1">sin</e>
+      <e type="operand">2</e>
+      <e type="operator" args="2">^</e>
+      <e type="operand">1</e>
+      <e type="operand">2</e>
+      <e type="operand">α</e>
+      <e type="operator" args="2">*</e>
+      <e type="function" args="1">cos</e>
+      <e type="operator" args="2">-</e>
+      <e type="operand">2</e>
+      <e type="operator" args="2">/</e>
+      <e type="operator" args="2">=</e>
+    </math>
+  </region>
+  <region id="5" left="0" top="99" width="12" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="false" href="">●</p>
+    </text>
+  </region>
+  <region id="6" left="18" top="135" width="153" height="44" font-size="10" color="#000000" background-color="#ffffff">
+    <math>
+      <e type="operand">α</e>
+      <e type="function" args="1">ch</e>
+      <e type="operand">2</e>
+      <e type="operator" args="2">^</e>
+      <e type="operand">2</e>
+      <e type="operand">α</e>
+      <e type="operator" args="2">*</e>
+      <e type="function" args="1">ch</e>
+      <e type="operand">2</e>
+      <e type="operator" args="2">^</e>
+      <e type="operand">1</e>
+      <e type="operator" args="2">+</e>
+      <e type="operand">2</e>
+      <e type="operator" args="2">/</e>
+      <e type="operator" args="2">=</e>
+    </math>
+  </region>
+  <region id="7" left="0" top="153" width="12" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="false" href="">●</p>
+    </text>
+  </region>
+  <region id="8" left="18" top="189" width="153" height="44" font-size="10" color="#000000" background-color="#ffffff">
+    <math>
+      <e type="operand">α</e>
+      <e type="function" args="1">sh</e>
+      <e type="operand">2</e>
+      <e type="operator" args="2">^</e>
+      <e type="operand">2</e>
+      <e type="operand">α</e>
+      <e type="operator" args="2">*</e>
+      <e type="function" args="1">ch</e>
+      <e type="operand">2</e>
+      <e type="operator" args="2">^</e>
+      <e type="operand">1</e>
+      <e type="operator" args="2">-</e>
+      <e type="operand">2</e>
+      <e type="operator" args="2">/</e>
+      <e type="operator" args="2">=</e>
+    </math>
+  </region>
+  <region id="9" left="0" top="207" width="12" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="false" href="">●</p>
+    </text>
+  </region>
+  <region id="10" left="18" top="243" width="211" height="35" font-size="10" color="#000000" background-color="#ffffff">
+    <math>
+      <e type="operand">α</e>
+      <e type="function" args="1">cos</e>
+      <e type="operand">3</e>
+      <e type="operator" args="2">^</e>
+      <e type="operand">3</e>
+      <e type="operand">α</e>
+      <e type="function" args="1">cos</e>
+      <e type="operator" args="2">*</e>
+      <e type="operand">3</e>
+      <e type="operand">α</e>
+      <e type="operator" args="2">*</e>
+      <e type="function" args="1">cos</e>
+      <e type="operator" args="2">+</e>
+      <e type="operand">4</e>
+      <e type="operator" args="2">/</e>
+      <e type="operator" args="2">=</e>
+    </math>
+  </region>
+  <region id="11" left="0" top="252" width="12" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="false" href="">●</p>
+    </text>
+  </region>
+  <region id="12" left="18" top="288" width="211" height="35" font-size="10" color="#000000" background-color="#ffffff">
+    <math>
+      <e type="operand">α</e>
+      <e type="function" args="1">sin</e>
+      <e type="operand">3</e>
+      <e type="operator" args="2">^</e>
+      <e type="operand">3</e>
+      <e type="operand">α</e>
+      <e type="function" args="1">sin</e>
+      <e type="operator" args="2">*</e>
+      <e type="operand">3</e>
+      <e type="operand">α</e>
+      <e type="operator" args="2">*</e>
+      <e type="function" args="1">sin</e>
+      <e type="operator" args="2">-</e>
+      <e type="operand">4</e>
+      <e type="operator" args="2">/</e>
+      <e type="operator" args="2">=</e>
+    </math>
+  </region>
+  <region id="13" left="0" top="297" width="12" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="false" href="">●</p>
+    </text>
+  </region>
+  <region id="14" left="0" top="333" width="10" height="15" color="#000000" background-color="#ffffff">
+    <area single="true" is-collapsed="false" name="" show-name="false" />
+  </region>
+  <region id="15" left="0" top="351" width="111" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="false" href="4.sm" build-in="true">17</p>
+    </text>
+  </region>
+  <region id="16" left="0" top="369" width="86" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="false" href="contents.sm" build-in="true">0</p>
+    </text>
+  </region>
+</regions>
