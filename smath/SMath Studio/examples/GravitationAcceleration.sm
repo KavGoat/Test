@@ -1,0 +1,467 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<?application progid="SMath Studio Desktop" version="0.99.6654"?>
+<regions xmlns="http://smath.info/schemas/worksheet/1.0">
+  <settings dpi="96">
+    <identity>
+      <id>2b5e1e96-ed48-4412-9d9c-8134590ae329</id>
+      <revision>6</revision>
+    </identity>
+    <metadata lang="rus">
+      <title>Вычисление ускорения свободного падения на поверхности объектов</title>
+      <author>Андрей Ивашов</author>
+      <description>В примере показано использование закона всемирного тяготения Ньютона для вычисления ускорения свободного падения на поверхности астрономических объектов солнечной системы.
+Расчёт производится для восьми планет солнечной системы и Солнца.</description>
+      <company>SMath, http://smath.info/</company>
+      <keywords>Ускорение свободного падения, солнечная система, единицы измерения, Ньютон</keywords>
+    </metadata>
+    <metadata lang="ind">
+      <title>Perhitungan percepatan gravitasi pada permukaan planet</title>
+      <author>Andrey Ivashov</author>
+      <translator>Waluyo Adi Siswanto</translator>
+      <description>Contoh ini mendemonstrasikan suatu perhitungan percepatan gravitasi pada permukaan planet-planet yang termasuk dalam sistem Tata Surya. Perhitungan dilakukan pada delapan planet dalam sistem Tata Surya serta pada Matahari.</description>
+      <company>SMath, http://smath.info/</company>
+      <keywords>Percepatan gravitasi, Sistem Tata Surya, satuan, Newton</keywords>
+    </metadata>
+    <metadata lang="eng">
+      <title>Computation of gravitation acceleration on the object's surface</title>
+      <author>Andrey Ivashov</author>
+      <translator>Andrey Ivashov</translator>
+      <description>Example demonstrates a computation of gravitation acceleration on the Solar System astronomical object's surfaces.
+Computation performed for eight Solar System planets and for the Sun.</description>
+      <company>SMath, http://smath.info/</company>
+      <keywords>Gravitation acceleration, the Solar System, units, Newton</keywords>
+    </metadata>
+    <calculation>
+      <precision>4</precision>
+      <exponentialThreshold>5</exponentialThreshold>
+      <trailingZeros>false</trailingZeros>
+      <significantDigitsMode>false</significantDigitsMode>
+      <roundingMode>0</roundingMode>
+      <fractions>decimal</fractions>
+    </calculation>
+    <pageModel active="false" viewMode="2" printGrid="False" printAreas="True" simpleEqualsOnly="false" printBackgroundImages="true">
+      <paper id="9" orientation="Portrait" width="827" height="1169" />
+      <margins left="39" right="39" top="39" bottom="39" />
+      <header alignment="Center" color="#a9a9a9">&amp;[DATE] &amp;[TIME] - &amp;[FILENAME]</header>
+      <footer alignment="Center" color="#a9a9a9">&amp;[PAGENUM] / &amp;[COUNT]</footer>
+      <backgrounds />
+    </pageModel>
+    <dependencies>
+      <assembly name="SMath Studio Desktop" version="0.99.6661.38573" guid="a37cba83-b69c-4c71-9992-55ff666763bd" />
+      <assembly name="Math Region" version="0.99.6661.38573" guid="02f1ab51-215b-466e-a74d-5d8b1cf85e8d" />
+      <assembly name="Picture Region" version="1.10.6661.39755" guid="06b5df04-393e-4be7-9107-305196fcb861" />
+      <assembly name="Special Functions" version="1.11.6661.39755" guid="2814e667-4e12-48b1-8d51-194e480eabc5" />
+      <assembly name="Text Region" version="1.10.6661.39755" guid="485d28c5-349a-48b6-93be-12a35a1c1e39" />
+    </dependencies>
+  </settings>
+  <region id="0" left="9" top="9" width="627" height="28" color="#0000ff" bgColor="#ffffff" fontSize="12">
+    <text lang="rus">
+      <p bold="true">Вычисление ускорения свободного падения на поверхности объекта</p>
+    </text>
+    <text lang="ind">
+      <p bold="true">Perhitungan percepatan gravitasi pada permukaan planet di sistem tata surya</p>
+    </text>
+    <text lang="eng">
+      <p bold="true">Computation of gravitational acceleration on the object's surface</p>
+    </text>
+  </region>
+  <region id="1" left="9" top="36" width="451" height="44" color="#000000" bgColor="#ffffff">
+    <picture>
+      <raw format="png" encoding="base64">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</raw>
+    </picture>
+  </region>
+  <region id="2" left="9" top="81" width="220" height="62" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <description active="true" position="Right" lang="rus">
+        <p>Закон всемирного тяготения Ньютона</p>
+      </description>
+      <description active="true" position="Right" lang="ind">
+        <p>Hukum Newton tentang gravitasi umum</p>
+      </description>
+      <description active="true" position="Right" lang="eng">
+        <p>Newton's law of universal gravitation</p>
+      </description>
+      <input>
+        <e type="operand">M.obj</e>
+        <e type="operand">R.obj</e>
+        <e type="function" args="2">gravity</e>
+        <e type="operand">G</e>
+        <e type="operand">M.obj</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand">R.obj</e>
+        <e type="operand">2</e>
+        <e type="operator" args="2">^</e>
+        <e type="operator" args="2">/</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+  <region id="3" left="9" top="144" width="186" height="59" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <description active="true" position="Right" lang="rus">
+        <p>Гравитационная постоянная</p>
+      </description>
+      <description active="true" position="Right" lang="ind">
+        <p>Konstanta gravitasi</p>
+      </description>
+      <description active="true" position="Right" lang="eng">
+        <p>The gravitational constant</p>
+      </description>
+      <input>
+        <e type="operand">G</e>
+        <e type="operand">6.6728</e>
+        <e type="operand">10</e>
+        <e type="operand">11</e>
+        <e type="operator" args="1">-</e>
+        <e type="operator" args="2">^</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand" style="unit">m</e>
+        <e type="operand">3</e>
+        <e type="operator" args="2">^</e>
+        <e type="operand" style="unit">kg</e>
+        <e type="operand" style="unit">s</e>
+        <e type="operand">2</e>
+        <e type="operator" args="2">^</e>
+        <e type="operator" args="2">*</e>
+        <e type="operator" args="2">/</e>
+        <e type="operator" args="2">*</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+  <region id="4" left="9" top="207" width="136" height="24" border="true" color="#000000" bgColor="#dddddd" fontSize="10">
+    <text lang="rus">
+      <p>Входные данные:</p>
+    </text>
+    <text lang="ind">
+      <p>Data masukan:</p>
+    </text>
+    <text lang="eng">
+      <p>Input data:</p>
+    </text>
+  </region>
+  <region id="5" left="9" top="234" width="372" height="252" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <description active="true" position="Right" lang="rus">
+        <p>Данные представлены в видетаблицы записей, где столбцысодержат следующие значения:название объекта, его масса ирадиус</p>
+      </description>
+      <description active="true" position="Right" lang="ind">
+        <p>Data ditampilkan dengansemua isinya, dimanakolom  berisi data namaplanet, massa danjejari, secara berurutan</p>
+      </description>
+      <description active="true" position="Right" lang="eng">
+        <p>Data represented with therecords of values, wherecolumns stands for the nameof the object, its mass andradius, respectively</p>
+      </description>
+      <input>
+        <e type="operand">data</e>
+        <e type="operand" style="string">The Sun</e>
+        <e type="operand">1.9891</e>
+        <e type="operand">10</e>
+        <e type="operand">30</e>
+        <e type="operator" args="2">^</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand" style="unit">kg</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand">6.9550</e>
+        <e type="operand">10</e>
+        <e type="operand">5</e>
+        <e type="operator" args="2">^</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand" style="unit">km</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand" style="string">Mercury</e>
+        <e type="operand">3.3022</e>
+        <e type="operand">10</e>
+        <e type="operand">23</e>
+        <e type="operator" args="2">^</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand" style="unit">kg</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand">2.4397</e>
+        <e type="operand">10</e>
+        <e type="operand">3</e>
+        <e type="operator" args="2">^</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand" style="unit">km</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand" style="string">Venus</e>
+        <e type="operand">4.8685</e>
+        <e type="operand">10</e>
+        <e type="operand">24</e>
+        <e type="operator" args="2">^</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand" style="unit">kg</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand">6.0518</e>
+        <e type="operand">10</e>
+        <e type="operand">3</e>
+        <e type="operator" args="2">^</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand" style="unit">km</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand" style="string">Earth</e>
+        <e type="operand">5.9736</e>
+        <e type="operand">10</e>
+        <e type="operand">24</e>
+        <e type="operator" args="2">^</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand" style="unit">kg</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand">6.3781</e>
+        <e type="operand">10</e>
+        <e type="operand">3</e>
+        <e type="operator" args="2">^</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand" style="unit">km</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand" style="string">Mars</e>
+        <e type="operand">6.4185</e>
+        <e type="operand">10</e>
+        <e type="operand">23</e>
+        <e type="operator" args="2">^</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand" style="unit">kg</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand">3.3962</e>
+        <e type="operand">10</e>
+        <e type="operand">3</e>
+        <e type="operator" args="2">^</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand" style="unit">km</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand" style="string">Jupiter</e>
+        <e type="operand">1.8986</e>
+        <e type="operand">10</e>
+        <e type="operand">27</e>
+        <e type="operator" args="2">^</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand" style="unit">kg</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand">7.1492</e>
+        <e type="operand">10</e>
+        <e type="operand">4</e>
+        <e type="operator" args="2">^</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand" style="unit">km</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand" style="string">Saturn</e>
+        <e type="operand">5.6846</e>
+        <e type="operand">10</e>
+        <e type="operand">26</e>
+        <e type="operator" args="2">^</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand" style="unit">kg</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand">6.0268</e>
+        <e type="operand">10</e>
+        <e type="operand">4</e>
+        <e type="operator" args="2">^</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand" style="unit">km</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand" style="string">Uranus</e>
+        <e type="operand">8.6810</e>
+        <e type="operand">10</e>
+        <e type="operand">25</e>
+        <e type="operator" args="2">^</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand" style="unit">kg</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand">2.5559</e>
+        <e type="operand">10</e>
+        <e type="operand">4</e>
+        <e type="operator" args="2">^</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand" style="unit">km</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand" style="string">Neptune</e>
+        <e type="operand">1.0243</e>
+        <e type="operand">10</e>
+        <e type="operand">26</e>
+        <e type="operator" args="2">^</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand" style="unit">kg</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand">2.4764</e>
+        <e type="operand">10</e>
+        <e type="operand">4</e>
+        <e type="operator" args="2">^</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand" style="unit">km</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand">9</e>
+        <e type="operand">3</e>
+        <e type="function" args="29">mat</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+  <region id="6" left="9" top="495" width="103" height="24" border="true" color="#000000" bgColor="#dddddd" fontSize="10">
+    <text lang="rus">
+      <p>Вычисление:</p>
+    </text>
+    <text lang="ind">
+      <p>Perhitungan:</p>
+    </text>
+    <text lang="eng">
+      <p>Calculation:</p>
+    </text>
+  </region>
+  <region id="7" left="9" top="522" width="169" height="26" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <input>
+        <e type="operand">result</e>
+        <e type="operand">data</e>
+        <e type="operand">1</e>
+        <e type="function" args="2">col</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+  <region id="8" left="225" top="522" width="155" height="28" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <input>
+        <e type="operand">k</e>
+        <e type="operand">1</e>
+        <e type="operand">data</e>
+        <e type="function" args="1">rows</e>
+        <e type="function" args="2">range</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+  <region id="9" left="9" top="549" width="304" height="35" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <input>
+        <e type="operand">result</e>
+        <e type="operand">k</e>
+        <e type="operand">2</e>
+        <e type="function" args="3">el</e>
+        <e type="operand">data</e>
+        <e type="operand">k</e>
+        <e type="operand">2</e>
+        <e type="function" args="3">el</e>
+        <e type="operand">data</e>
+        <e type="operand">k</e>
+        <e type="operand">3</e>
+        <e type="function" args="3">el</e>
+        <e type="function" args="2">gravity</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+  <region id="10" left="9" top="585" width="201" height="26" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math>
+      <description active="true" position="Right" lang="rus">
+        <p>Сортировка результата в порядке возрастанияускорения свободного падения</p>
+      </description>
+      <description active="true" position="Right" lang="ind">
+        <p>Hasil perhitungan percepatan gravitasidisusun dengan urutan naik</p>
+      </description>
+      <description active="true" position="Right" lang="eng">
+        <p>Results sorting of the gravitation accelerationin the ascending order</p>
+      </description>
+      <input>
+        <e type="operand">result</e>
+        <e type="operand">result</e>
+        <e type="operand">2</e>
+        <e type="function" args="2">csort</e>
+        <e type="operator" args="2">:</e>
+      </input>
+    </math>
+  </region>
+  <region id="11" left="9" top="639" width="61" height="24" border="true" color="#000000" bgColor="#dddddd" fontSize="10">
+    <text lang="rus">
+      <p>Ответ:</p>
+    </text>
+    <text lang="ind">
+      <p>Hasil:</p>
+    </text>
+    <text lang="eng">
+      <p>Result:</p>
+    </text>
+  </region>
+  <region id="12" left="9" top="666" width="254" height="405" color="#000000" bgColor="#ffffff" fontSize="10">
+    <math decimalPlaces="5" significantDigitsMode="true" trailingZeros="true">
+      <input>
+        <e type="operand">result</e>
+      </input>
+      <result action="numeric">
+        <e type="operand" style="string">Mercury</e>
+        <e type="operand">3.7020</e>
+        <e type="operand" style="unit">m</e>
+        <e type="operand" style="unit">s</e>
+        <e type="operand">2</e>
+        <e type="operator" args="2">^</e>
+        <e type="operator" args="2">/</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand" style="string">Mars</e>
+        <e type="operand">3.7133</e>
+        <e type="operand" style="unit">m</e>
+        <e type="operand" style="unit">s</e>
+        <e type="operand">2</e>
+        <e type="operator" args="2">^</e>
+        <e type="operator" args="2">/</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand" style="string">Uranus</e>
+        <e type="operand">8.8673</e>
+        <e type="operand" style="unit">m</e>
+        <e type="operand" style="unit">s</e>
+        <e type="operand">2</e>
+        <e type="operator" args="2">^</e>
+        <e type="operator" args="2">/</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand" style="string">Venus</e>
+        <e type="operand">8.8702</e>
+        <e type="operand" style="unit">m</e>
+        <e type="operand" style="unit">s</e>
+        <e type="operand">2</e>
+        <e type="operator" args="2">^</e>
+        <e type="operator" args="2">/</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand" style="string">Earth</e>
+        <e type="operand">9.7985</e>
+        <e type="operand" style="unit">m</e>
+        <e type="operand" style="unit">s</e>
+        <e type="operand">2</e>
+        <e type="operator" args="2">^</e>
+        <e type="operator" args="2">/</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand" style="string">Saturn</e>
+        <e type="operand">10.443</e>
+        <e type="operand" style="unit">m</e>
+        <e type="operand" style="unit">s</e>
+        <e type="operand">2</e>
+        <e type="operator" args="2">^</e>
+        <e type="operator" args="2">/</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand" style="string">Neptune</e>
+        <e type="operand">11.145</e>
+        <e type="operand" style="unit">m</e>
+        <e type="operand" style="unit">s</e>
+        <e type="operand">2</e>
+        <e type="operator" args="2">^</e>
+        <e type="operator" args="2">/</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand" style="string">Jupiter</e>
+        <e type="operand">24.787</e>
+        <e type="operand" style="unit">m</e>
+        <e type="operand" style="unit">s</e>
+        <e type="operand">2</e>
+        <e type="operator" args="2">^</e>
+        <e type="operator" args="2">/</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand" style="string">The Sun</e>
+        <e type="operand">274.39</e>
+        <e type="operand" style="unit">m</e>
+        <e type="operand" style="unit">s</e>
+        <e type="operand">2</e>
+        <e type="operator" args="2">^</e>
+        <e type="operator" args="2">/</e>
+        <e type="operator" args="2">*</e>
+        <e type="operand">9</e>
+        <e type="operand">2</e>
+        <e type="function" args="20">mat</e>
+      </result>
+    </math>
+  </region>
+</regions>

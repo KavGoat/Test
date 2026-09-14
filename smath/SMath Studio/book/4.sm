@@ -1,0 +1,96 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<?application progid="SMath Studio" version="0.55"?>
+<regions>
+  <settings>
+    <Editable>false</Editable>
+    <Home>contents.sm</Home>
+    <Back>contents.sm</Back>
+    <pageModel viewMode="1"></pageModel>
+  </settings>
+  <region id="0" left="0" top="0" width="111" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="true" href="" build-in="true">17</p>
+    </text>
+  </region>
+  <region id="1" left="0" top="27" width="10" height="15" color="#000000" background-color="#ffffff">
+    <area single="true" is-collapsed="false" name="" show-name="false" />
+  </region>
+  <region id="2" left="0" top="45" width="136" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="false" href="4_1.sm" build-in="true">18</p>
+    </text>
+  </region>
+  <region id="3" left="0" top="63" width="95" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="false" href="4_2.sm" build-in="true">22</p>
+    </text>
+  </region>
+  <region id="4" left="0" top="81" width="209" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="false" href="4_3.sm" build-in="true">23</p>
+    </text>
+  </region>
+  <region id="5" left="0" top="99" width="226" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="false" href="4_4.sm" build-in="true">24</p>
+    </text>
+  </region>
+  <region id="6" left="0" top="117" width="218" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="false" href="4_5.sm" build-in="true">25</p>
+    </text>
+  </region>
+  <region id="7" left="0" top="135" width="292" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="false" href="4_6.sm" build-in="true">26</p>
+    </text>
+  </region>
+  <region id="8" left="0" top="153" width="325" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="false" href="4_7.sm" build-in="true">27</p>
+    </text>
+  </region>
+  <region id="9" left="0" top="171" width="210" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="false" href="4_8.sm" build-in="true">28</p>
+    </text>
+  </region>
+  <region id="10" left="0" top="189" width="202" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="false" href="4_9.sm" build-in="true">29</p>
+    </text>
+  </region>
+  <region id="11" left="0" top="207" width="366" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="false" href="4_10.sm" build-in="true">30</p>
+    </text>
+  </region>
+  <region id="12" left="0" top="225" width="292" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="false" href="4_11.sm" build-in="true">31</p>
+    </text>
+  </region>
+  <region id="13" left="0" top="243" width="317" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="false" href="4_12.sm" build-in="true">32</p>
+    </text>
+  </region>
+  <region id="14" left="0" top="261" width="284" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="false" href="4_13.sm" build-in="true">33</p>
+    </text>
+  </region>
+  <region id="15" left="0" top="279" width="201" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="false" href="4_14.sm" build-in="true">34</p>
+    </text>
+  </region>
+  <region id="16" left="0" top="306" width="10" height="15" color="#000000" background-color="#ffffff">
+    <area single="true" is-collapsed="false" name="" show-name="false" />
+  </region>
+  <region id="17" left="0" top="324" width="86" height="16" font-size="10" color="#000000" background-color="#ffffff">
+    <text>
+      <p bold="false" href="contents.sm" build-in="true">0</p>
+    </text>
+  </region>
+</regions>
