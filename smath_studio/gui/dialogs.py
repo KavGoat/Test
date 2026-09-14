@@ -1,0 +1,370 @@
+"""Dialog windows for SMath Studio GUI."""
+
+from __future__ import annotations
+
+import tkinter as tk
+from tkinter import ttk
+from typing import Optional
+
+from ..functions import BUILTIN_FUNCTIONS
+
+
+class AboutDialog(tk.Toplevel):
+    """About dialog showing application information."""
+
+    def __init__(self, parent: tk.Widget):
+        super().__init__(parent)
+        self.title("About SMath Studio")
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+
+        # Center on parent
+        self.geometry("400x280")
+        self.update_idletasks()
+        pw = parent.winfo_rootx() + parent.winfo_width() // 2
+        ph = parent.winfo_rooty() + parent.winfo_height() // 2
+        w = self.winfo_width()
+        h = self.winfo_height()
+        self.geometry(f"+{pw - w // 2}+{ph - h // 2}")
+
+        frame = ttk.Frame(self, padding=20)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        title_label = ttk.Label(
+            frame,
+            text="SMath Studio",
+            font=("Segoe UI", 18, "bold"),
+        )
+        title_label.pack(pady=(0, 4))
+
+        subtitle_label = ttk.Label(
+            frame,
+            text="Python Edition",
+            font=("Segoe UI", 12),
+        )
+        subtitle_label.pack(pady=(0, 12))
+
+        from .. import __version__
+        version_label = ttk.Label(
+            frame,
+            text=f"Version {__version__}",
+            font=("Segoe UI", 10),
+        )
+        version_label.pack(pady=(0, 8))
+
+        desc_label = ttk.Label(
+            frame,
+            text=(
+                "A Python reverse-engineering of SMath Studio,\n"
+                "the mathematical worksheet application.\n\n"
+                "Supports parsing, evaluating, and rendering\n"
+                "SMath Studio .sm worksheet files."
+            ),
+            justify=tk.CENTER,
+            font=("Segoe UI", 9),
+        )
+        desc_label.pack(pady=(0, 16))
+
+        ok_btn = ttk.Button(frame, text="OK", command=self.destroy, width=12)
+        ok_btn.pack()
+        ok_btn.focus_set()
+
+        self.bind("<Return>", lambda e: self.destroy())
+        self.bind("<Escape>", lambda e: self.destroy())
+
+
+class OptionsDialog(tk.Toplevel):
+    """Options dialog for calculation settings."""
+
+    def __init__(self, parent: tk.Widget, settings: dict):
+        super().__init__(parent)
+        self.title("Options")
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+        self.result: Optional[dict] = None
+
+        self.geometry("380x300")
+        self.update_idletasks()
+        pw = parent.winfo_rootx() + parent.winfo_width() // 2
+        ph = parent.winfo_rooty() + parent.winfo_height() // 2
+        w = self.winfo_width()
+        h = self.winfo_height()
+        self.geometry(f"+{pw - w // 2}+{ph - h // 2}")
+
+        frame = ttk.Frame(self, padding=16)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        # Notebook for tabs
+        notebook = ttk.Notebook(frame)
+        notebook.pack(fill=tk.BOTH, expand=True, pady=(0, 12))
+
+        # --- Calculation tab ---
+        calc_frame = ttk.Frame(notebook, padding=12)
+        notebook.add(calc_frame, text="Calculation")
+
+        # Precision
+        ttk.Label(calc_frame, text="Decimal precision:").grid(
+            row=0, column=0, sticky=tk.W, pady=4
+        )
+        self._precision_var = tk.IntVar(value=settings.get("precision", 4))
+        precision_spin = ttk.Spinbox(
+            calc_frame, from_=1, to=15, textvariable=self._precision_var, width=6
+        )
+        precision_spin.grid(row=0, column=1, sticky=tk.W, padx=(8, 0), pady=4)
+
+        # Fractions mode
+        ttk.Label(calc_frame, text="Result format:").grid(
+            row=1, column=0, sticky=tk.W, pady=4
+        )
+        self._fractions_var = tk.StringVar(
+            value=settings.get("fractions", "decimal")
+        )
+        fractions_combo = ttk.Combobox(
+            calc_frame,
+            textvariable=self._fractions_var,
+            values=["decimal", "fraction"],
+            state="readonly",
+            width=10,
+        )
+        fractions_combo.grid(row=1, column=1, sticky=tk.W, padx=(8, 0), pady=4)
+
+        # Angle units
+        ttk.Label(calc_frame, text="Angle units:").grid(
+            row=2, column=0, sticky=tk.W, pady=4
+        )
+        self._angle_var = tk.StringVar(
+            value=settings.get("angle_units", "radians")
+        )
+        angle_combo = ttk.Combobox(
+            calc_frame,
+            textvariable=self._angle_var,
+            values=["radians", "degrees"],
+            state="readonly",
+            width=10,
+        )
+        angle_combo.grid(row=2, column=1, sticky=tk.W, padx=(8, 0), pady=4)
+
+        # Trailing zeros
+        self._trailing_var = tk.BooleanVar(
+            value=settings.get("trailing_zeros", True)
+        )
+        trailing_check = ttk.Checkbutton(
+            calc_frame, text="Show trailing zeros", variable=self._trailing_var
+        )
+        trailing_check.grid(
+            row=3, column=0, columnspan=2, sticky=tk.W, pady=4
+        )
+
+        # Significant digits mode
+        self._sigdig_var = tk.BooleanVar(
+            value=settings.get("significant_digits_mode", False)
+        )
+        sigdig_check = ttk.Checkbutton(
+            calc_frame,
+            text="Significant digits mode",
+            variable=self._sigdig_var,
+        )
+        sigdig_check.grid(
+            row=4, column=0, columnspan=2, sticky=tk.W, pady=4
+        )
+
+        # --- Buttons ---
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(fill=tk.X)
+
+        ttk.Button(btn_frame, text="Cancel", command=self.destroy, width=10).pack(
+            side=tk.RIGHT, padx=(4, 0)
+        )
+        ttk.Button(btn_frame, text="OK", command=self._on_ok, width=10).pack(
+            side=tk.RIGHT
+        )
+
+        self.bind("<Escape>", lambda e: self.destroy())
+
+    def _on_ok(self):
+        self.result = {
+            "precision": self._precision_var.get(),
+            "fractions": self._fractions_var.get(),
+            "angle_units": self._angle_var.get(),
+            "trailing_zeros": self._trailing_var.get(),
+            "significant_digits_mode": self._sigdig_var.get(),
+        }
+        self.destroy()
+
+
+class InsertFunctionDialog(tk.Toplevel):
+    """Searchable dialog for inserting built-in functions."""
+
+    def __init__(self, parent: tk.Widget):
+        super().__init__(parent)
+        self.title("Insert Function")
+        self.resizable(True, True)
+        self.transient(parent)
+        self.grab_set()
+        self.result: Optional[str] = None
+
+        self.geometry("420x480")
+        self.update_idletasks()
+        pw = parent.winfo_rootx() + parent.winfo_width() // 2
+        ph = parent.winfo_rooty() + parent.winfo_height() // 2
+        w = self.winfo_width()
+        h = self.winfo_height()
+        self.geometry(f"+{pw - w // 2}+{ph - h // 2}")
+
+        frame = ttk.Frame(self, padding=12)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        # Search bar
+        search_frame = ttk.Frame(frame)
+        search_frame.pack(fill=tk.X, pady=(0, 8))
+        ttk.Label(search_frame, text="Search:").pack(side=tk.LEFT, padx=(0, 6))
+        self._search_var = tk.StringVar()
+        self._search_var.trace_add("write", self._on_search_changed)
+        search_entry = ttk.Entry(search_frame, textvariable=self._search_var)
+        search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        search_entry.focus_set()
+
+        # Function list
+        list_frame = ttk.Frame(frame)
+        list_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
+
+        scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL)
+        self._listbox = tk.Listbox(
+            list_frame,
+            yscrollcommand=scrollbar.set,
+            font=("Consolas", 10),
+            selectmode=tk.SINGLE,
+        )
+        scrollbar.config(command=self._listbox.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self._listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        self._listbox.bind("<Double-1>", lambda e: self._on_ok())
+
+        # Description area
+        self._desc_label = ttk.Label(
+            frame, text="", wraplength=380, justify=tk.LEFT
+        )
+        self._desc_label.pack(fill=tk.X, pady=(0, 8))
+
+        # Buttons
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(fill=tk.X)
+        ttk.Button(btn_frame, text="Cancel", command=self.destroy, width=10).pack(
+            side=tk.RIGHT, padx=(4, 0)
+        )
+        ttk.Button(btn_frame, text="Insert", command=self._on_ok, width=10).pack(
+            side=tk.RIGHT
+        )
+
+        # Build function list with descriptions
+        self._functions = _build_function_list()
+        self._populate_list("")
+
+        self._listbox.bind("<<ListboxSelect>>", self._on_select)
+        self.bind("<Return>", lambda e: self._on_ok())
+        self.bind("<Escape>", lambda e: self.destroy())
+
+    def _populate_list(self, query: str):
+        self._listbox.delete(0, tk.END)
+        query_lower = query.lower()
+        for name, desc in self._functions:
+            if query_lower in name.lower() or query_lower in desc.lower():
+                self._listbox.insert(tk.END, name)
+
+    def _on_search_changed(self, *_args):
+        self._populate_list(self._search_var.get())
+
+    def _on_select(self, _event):
+        sel = self._listbox.curselection()
+        if sel:
+            name = self._listbox.get(sel[0])
+            for fn, desc in self._functions:
+                if fn == name:
+                    self._desc_label.config(text=desc)
+                    break
+
+    def _on_ok(self):
+        sel = self._listbox.curselection()
+        if sel:
+            self.result = self._listbox.get(sel[0])
+        self.destroy()
+
+
+# ---------------------------------------------------------------------------
+# Function descriptions
+# ---------------------------------------------------------------------------
+
+_FUNCTION_DESCRIPTIONS: dict[str, str] = {
+    "sin": "sin(x) -- Sine of x (radians)",
+    "cos": "cos(x) -- Cosine of x (radians)",
+    "tan": "tan(x) -- Tangent of x (radians)",
+    "asin": "asin(x) -- Arcsine, returns radians",
+    "acos": "acos(x) -- Arccosine, returns radians",
+    "atan": "atan(x) -- Arctangent, returns radians",
+    "atan2": "atan2(y, x) -- Two-argument arctangent",
+    "sinh": "sinh(x) -- Hyperbolic sine",
+    "cosh": "cosh(x) -- Hyperbolic cosine",
+    "tanh": "tanh(x) -- Hyperbolic tangent",
+    "exp": "exp(x) -- Exponential function e^x",
+    "ln": "ln(x) -- Natural logarithm",
+    "log": "log(x) or log(x, base) -- Logarithm",
+    "sqrt": "sqrt(x) -- Square root",
+    "abs": "abs(x) -- Absolute value",
+    "sign": "sign(x) -- Sign function (-1, 0, or 1)",
+    "ceil": "ceil(x) -- Ceiling (round up to integer)",
+    "floor": "floor(x) -- Floor (round down to integer)",
+    "round": "round(x) or round(x, places) -- Round to nearest",
+    "max": "max(x) -- Maximum value in vector/matrix",
+    "min": "min(x) -- Minimum value in vector/matrix",
+    "mod": "mod(a, b) -- Remainder of a divided by b",
+    "factorial": "factorial(n) -- n! factorial",
+    "Gamma": "Gamma(x) -- Gamma function",
+    "erf": "erf(x) -- Error function",
+    "mat": "mat(e1, ..., rows, cols) -- Create a matrix",
+    "el": "el(M, row, col) -- Element access (1-based)",
+    "rows": "rows(M) -- Number of rows in matrix M",
+    "cols": "cols(M) -- Number of columns in matrix M",
+    "col": "col(M, j) -- Extract column j from matrix M",
+    "det": "det(M) -- Determinant of matrix M",
+    "invert": "invert(M) -- Inverse of matrix M",
+    "transpose": "transpose(M) -- Transpose of matrix M",
+    "identity": "identity(n) -- n x n identity matrix",
+    "stack": "stack(A, B) -- Stack matrices vertically",
+    "augment": "augment(A, B) -- Augment matrices horizontally",
+    "tr": "tr(M) -- Trace of matrix M (sum of diagonal)",
+    "polyroots": "polyroots(p) -- Polynomial roots from coefficients",
+    "csort": "csort(M, col) -- Sort matrix rows by column",
+    "mean": "mean(x) -- Arithmetic mean of vector/matrix",
+    "median": "median(x) -- Median of vector/matrix",
+    "stdev": "stdev(x) -- Standard deviation (sample)",
+    "if": "if(cond, true_val, false_val) -- Conditional",
+    "for": "for(init, cond, incr, body) -- For loop",
+    "while": "while(cond, body) -- While loop",
+    "line": "line(e1, e2, ..., n, 1) -- Block of statements",
+    "range": "range(start, end) -- Integer range vector",
+    "eval": "eval(expr) -- Force numeric evaluation",
+    "diff": "diff(f, x) -- Numerical derivative df/dx",
+    "int": "int(f, x, a, b) -- Numerical integration",
+    "sum": "sum(expr, var, start, end) -- Summation",
+    "product": "product(expr, var, start, end) -- Product",
+    "num2str": "num2str(x) -- Convert number to string",
+    "concat": "concat(a, b, ...) -- Concatenate strings",
+}
+
+
+def _build_function_list() -> list[tuple[str, str]]:
+    """Build sorted list of (name, description) for all known functions."""
+    result = []
+    seen = set()
+    # Include described functions first
+    for name in sorted(_FUNCTION_DESCRIPTIONS):
+        result.append((name, _FUNCTION_DESCRIPTIONS[name]))
+        seen.add(name)
+    # Add any remaining built-in functions without descriptions
+    for name in sorted(BUILTIN_FUNCTIONS):
+        if name not in seen:
+            result.append((name, f"{name}(...) -- Built-in function"))
+    return result
