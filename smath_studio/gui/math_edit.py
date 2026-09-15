@@ -92,6 +92,22 @@ class EMatrix(EditItem):
 
 
 @dataclass
+class ESummation(EditItem):
+    var_slot: EditSlot = field(default_factory=lambda: EditSlot())
+    lower_slot: EditSlot = field(default_factory=lambda: EditSlot())
+    upper_slot: EditSlot = field(default_factory=lambda: EditSlot())
+    body_slot: EditSlot = field(default_factory=lambda: EditSlot())
+
+
+@dataclass
+class EProduct(EditItem):
+    var_slot: EditSlot = field(default_factory=lambda: EditSlot())
+    lower_slot: EditSlot = field(default_factory=lambda: EditSlot())
+    upper_slot: EditSlot = field(default_factory=lambda: EditSlot())
+    body_slot: EditSlot = field(default_factory=lambda: EditSlot())
+
+
+@dataclass
 class EditSlot:
     items: list[EditItem] = field(default_factory=list)
     cursor_pos: int = 0
@@ -553,6 +569,9 @@ class MathEditor:
                 for cell in row:
                     result.extend(cell.items)
             return result
+        if isinstance(item, (ESummation, EProduct)):
+            result = list(item.body_slot.items)
+            return result if result else []
         return [item]
 
     # ---- Navigation ----
@@ -573,6 +592,10 @@ class MathEditor:
             for row in item.cells:
                 slots.extend(row)
             return slots
+        if isinstance(item, ESummation):
+            return [item.var_slot, item.lower_slot, item.upper_slot, item.body_slot]
+        if isinstance(item, EProduct):
+            return [item.var_slot, item.lower_slot, item.upper_slot, item.body_slot]
         return []
 
     def _move_left(self):
@@ -599,6 +622,10 @@ class MathEditor:
             elif isinstance(item, EAbs):
                 self._slot_stack.append(slot)
                 self._active_slot = item.inner
+                self._active_slot.cursor_pos = len(self._active_slot.items)
+            elif isinstance(item, (ESummation, EProduct)):
+                self._slot_stack.append(slot)
+                self._active_slot = item.body_slot
                 self._active_slot.cursor_pos = len(self._active_slot.items)
         elif self._slot_stack:
             parent = self._slot_stack[-1]
@@ -638,6 +665,10 @@ class MathEditor:
             elif isinstance(item, EAbs):
                 self._slot_stack.append(slot)
                 self._active_slot = item.inner
+                self._active_slot.cursor_pos = 0
+            elif isinstance(item, (ESummation, EProduct)):
+                self._slot_stack.append(slot)
+                self._active_slot = item.var_slot
                 self._active_slot.cursor_pos = 0
             else:
                 slot.cursor_pos += 1
@@ -986,6 +1017,10 @@ class MathEditor:
             self._render_unit(item, x, y, fs)
         elif isinstance(item, EMatrix):
             self._render_matrix(item, x, y, fs)
+        elif isinstance(item, ESummation):
+            self._render_sum_prod(item, x, y, fs, "∑")
+        elif isinstance(item, EProduct):
+            self._render_sum_prod(item, x, y, fs, "∏")
 
     def _render_text(self, item: EText, x: float, y: float, fs: int):
         style = self._text_style(item.text)
@@ -1133,6 +1168,38 @@ class MathEditor:
                 cx += col_widths[c] + cell_pad
             cy += row_heights[r] + cell_pad
 
+    def _measure_sum_prod(self, item, fs: int) -> _Box:
+        small_fs = max(int(fs * 0.65), 6)
+        sym_w, sym_h = self._text_size("∑", int(fs * 1.5))
+        lb = self._measure_slot(item.lower_slot, small_fs)
+        ub = self._measure_slot(item.upper_slot, small_fs)
+        bb = self._measure_slot(item.body_slot, fs)
+        col_w = max(sym_w, lb.width, ub.width)
+        w = col_w + bb.width + 4
+        h = ub.height + sym_h + lb.height + 4
+        return _Box(w, h, ub.height + sym_h * 0.6)
+
+    def _render_sum_prod(self, item, x: float, y: float, fs: int, symbol: str):
+        small_fs = max(int(fs * 0.65), 6)
+        big_fs = int(fs * 1.5)
+        sym_w, sym_h = self._text_size(symbol, big_fs)
+        ub = self._measure_slot(item.upper_slot, small_fs)
+        lb = self._measure_slot(item.lower_slot, small_fs)
+        bb = self._measure_slot(item.body_slot, fs)
+        col_w = max(sym_w, lb.width, ub.width)
+        uy = y
+        self._render_slot(item.upper_slot, x + (col_w - ub.width) / 2, uy, small_fs)
+        sy = uy + ub.height + 2
+        f = self._get_font(big_fs)
+        tid = self.canvas.create_text(
+            x + (col_w - sym_w) / 2, sy, text=symbol,
+            anchor="nw", font=f, fill=_OPERATOR_COLOR)
+        self._items.append(tid)
+        ly = sy + sym_h + 2
+        self._render_slot(item.lower_slot, x + (col_w - lb.width) / 2, ly, small_fs)
+        body_y = sy + (sym_h - bb.height) / 2
+        self._render_slot(item.body_slot, x + col_w + 4, body_y, fs)
+
     def _render_unit(self, item: EUnit, x: float, y: float, fs: int):
         f = self._get_font(fs)
         name = item.name or " "
@@ -1254,6 +1321,18 @@ class MathEditor:
                 cell_texts.append(str(item.rows))
                 cell_texts.append(str(item.cols))
                 parts.append(f"mat({', '.join(cell_texts)})")
+            elif isinstance(item, ESummation):
+                body = self._slot_to_text(item.body_slot) or "0"
+                var = self._slot_to_text(item.var_slot) or "i"
+                lo = self._slot_to_text(item.lower_slot) or "1"
+                hi = self._slot_to_text(item.upper_slot) or "n"
+                parts.append(f"sum({body}, {var}, {lo}, {hi})")
+            elif isinstance(item, EProduct):
+                body = self._slot_to_text(item.body_slot) or "0"
+                var = self._slot_to_text(item.var_slot) or "i"
+                lo = self._slot_to_text(item.lower_slot) or "1"
+                hi = self._slot_to_text(item.upper_slot) or "n"
+                parts.append(f"product({body}, {var}, {lo}, {hi})")
             elif isinstance(item, EUnit):
                 parts.append(f"'{item.name}'")
         return "".join(parts)
@@ -1327,6 +1406,28 @@ class MathEditor:
                 self._ast_to_slot(node.args[0], ab.inner)
                 ab.inner.cursor_pos = len(ab.inner.items)
                 slot.items.append(ab)
+            elif node.name == "sum" and len(node.args) == 4:
+                s = ESummation()
+                self._ast_to_slot(node.args[0], s.body_slot)
+                s.body_slot.cursor_pos = len(s.body_slot.items)
+                self._ast_to_slot(node.args[1], s.var_slot)
+                s.var_slot.cursor_pos = len(s.var_slot.items)
+                self._ast_to_slot(node.args[2], s.lower_slot)
+                s.lower_slot.cursor_pos = len(s.lower_slot.items)
+                self._ast_to_slot(node.args[3], s.upper_slot)
+                s.upper_slot.cursor_pos = len(s.upper_slot.items)
+                slot.items.append(s)
+            elif node.name == "product" and len(node.args) == 4:
+                p = EProduct()
+                self._ast_to_slot(node.args[0], p.body_slot)
+                p.body_slot.cursor_pos = len(p.body_slot.items)
+                self._ast_to_slot(node.args[1], p.var_slot)
+                p.var_slot.cursor_pos = len(p.var_slot.items)
+                self._ast_to_slot(node.args[2], p.lower_slot)
+                p.lower_slot.cursor_pos = len(p.lower_slot.items)
+                self._ast_to_slot(node.args[3], p.upper_slot)
+                p.upper_slot.cursor_pos = len(p.upper_slot.items)
+                slot.items.append(p)
             else:
                 slot.items.append(EText(node.name))
                 parens = EParens()

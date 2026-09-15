@@ -129,6 +129,11 @@ class SMathApp:
         file_menu.add_separator()
         file_menu.add_command(label="Print...", accelerator="Ctrl+P", command=self._on_print)
         file_menu.add_separator()
+        export_menu = tk.Menu(file_menu, tearoff=0)
+        file_menu.add_cascade(label="Export", menu=export_menu)
+        export_menu.add_command(label="Export as PNG...", command=self._on_export_png)
+        export_menu.add_command(label="Export as PostScript...", command=self._on_export_ps)
+        file_menu.add_separator()
         self._recent_menu = tk.Menu(file_menu, tearoff=0)
         file_menu.add_cascade(label="Recent Files", menu=self._recent_menu)
         self._recent_files: list[str] = []
@@ -513,6 +518,81 @@ class SMathApp:
             "Printing is not yet implemented in this edition.",
             parent=self._root,
         )
+
+    def _on_export_png(self):
+        """Export the worksheet canvas as a PNG image."""
+        path = filedialog.asksaveasfilename(
+            title="Export as PNG",
+            defaultextension=".png",
+            filetypes=[("PNG Image", "*.png"), ("All Files", "*.*")],
+            parent=self._root,
+        )
+        if not path:
+            return
+        try:
+            canvas = self._canvas_widget._canvas
+            # Generate PostScript then convert with PIL
+            bbox = canvas.bbox("all")
+            if bbox is None:
+                messagebox.showwarning("Export", "Nothing to export.", parent=self._root)
+                return
+            x1, y1, x2, y2 = bbox
+            margin = 20
+            ps = canvas.postscript(
+                x=x1 - margin, y=y1 - margin,
+                width=x2 - x1 + 2 * margin,
+                height=y2 - y1 + 2 * margin,
+                colormode="color",
+            )
+            from PIL import Image
+            import io
+            # Try ghostscript conversion via PIL
+            try:
+                from PIL import EpsImagePlugin
+                EpsImagePlugin.gs_windows_binary = "gs"
+                img = Image.open(io.BytesIO(ps.encode("utf-8")))
+                img.save(path, "PNG")
+                self._status_info.config(text=f"Exported to {Path(path).name}")
+            except Exception:
+                # Fallback: save as EPS
+                eps_path = path.replace(".png", ".eps")
+                with open(eps_path, "w") as f:
+                    f.write(ps)
+                self._status_info.config(
+                    text=f"Saved as EPS (install Ghostscript for PNG): {Path(eps_path).name}"
+                )
+        except Exception as ex:
+            messagebox.showerror("Export Error", str(ex), parent=self._root)
+
+    def _on_export_ps(self):
+        """Export the worksheet canvas as PostScript."""
+        path = filedialog.asksaveasfilename(
+            title="Export as PostScript",
+            defaultextension=".ps",
+            filetypes=[("PostScript", "*.ps"), ("EPS", "*.eps"), ("All Files", "*.*")],
+            parent=self._root,
+        )
+        if not path:
+            return
+        try:
+            canvas = self._canvas_widget._canvas
+            bbox = canvas.bbox("all")
+            if bbox is None:
+                messagebox.showwarning("Export", "Nothing to export.", parent=self._root)
+                return
+            x1, y1, x2, y2 = bbox
+            margin = 20
+            ps = canvas.postscript(
+                x=x1 - margin, y=y1 - margin,
+                width=x2 - x1 + 2 * margin,
+                height=y2 - y1 + 2 * margin,
+                colormode="color",
+            )
+            with open(path, "w") as f:
+                f.write(ps)
+            self._status_info.config(text=f"Exported to {Path(path).name}")
+        except Exception as ex:
+            messagebox.showerror("Export Error", str(ex), parent=self._root)
 
     # ------------------------------------------------------------------
     # Edit operations

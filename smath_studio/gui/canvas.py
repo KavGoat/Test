@@ -484,6 +484,34 @@ class WorksheetCanvas(ttk.Frame):
             x, y - sz, x, y + sz, fill="#ff0000", width=1, tags="cursor_marker"
         )
 
+    def _ensure_visible(self, x: int, y: int):
+        """Scroll the canvas to ensure the given position is visible."""
+        try:
+            sr = self._canvas.cget("scrollregion")
+            if not sr:
+                return
+            parts = sr.split()
+            if len(parts) != 4:
+                return
+            sx1, sy1, sx2, sy2 = [float(p) for p in parts]
+            sw = sx2 - sx1
+            sh = sy2 - sy1
+            if sw <= 0 or sh <= 0:
+                return
+            cw = self._canvas.winfo_width()
+            ch = self._canvas.winfo_height()
+            vx = float(self._canvas.canvasx(0))
+            vy = float(self._canvas.canvasy(0))
+            margin = 50
+            if x < vx + margin or x > vx + cw - margin:
+                new_x = max(0, (x - cw / 2 - sx1) / sw)
+                self._canvas.xview_moveto(min(new_x, 1.0))
+            if y < vy + margin or y > vy + ch - margin:
+                new_y = max(0, (y - ch / 2 - sy1) / sh)
+                self._canvas.yview_moveto(min(new_y, 1.0))
+        except Exception:
+            pass
+
     def _update_scroll_region(self):
         """Set the scrollable region to encompass all content."""
         bbox = self._canvas.bbox("all")
@@ -1213,6 +1241,7 @@ class WorksheetCanvas(ttk.Frame):
                 self._cursor_x += step
             self._canvas.delete("cursor_marker")
             self._draw_cursor_marker()
+            self._ensure_visible(self._cursor_x, self._cursor_y)
             hit = self._hit_test(self._cursor_x, self._cursor_y)
             self._select_region(hit)
             return "break"
@@ -1255,6 +1284,7 @@ class WorksheetCanvas(ttk.Frame):
         self._cursor_y = rr.region.top
         self._canvas.delete("cursor_marker")
         self._draw_cursor_marker()
+        self._ensure_visible(self._cursor_x, self._cursor_y)
 
     def evaluate_selected(self):
         """Evaluate just the selected region (F5)."""
@@ -1680,6 +1710,7 @@ class WorksheetCanvas(ttk.Frame):
         self._cursor_y = cy + 32
         self._canvas.delete("cursor_marker")
         self._draw_cursor_marker()
+        self._ensure_visible(self._cursor_x, self._cursor_y)
         self._canvas.focus_set()
 
     def _commit_math_edit(self, text: str):
