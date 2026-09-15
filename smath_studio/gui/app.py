@@ -783,6 +783,7 @@ class SMathApp:
                 self._worksheet.settings.calculation.significant_digits_mode = (
                     dlg.result["significant_digits_mode"]
                 )
+            self._canvas_widget.recalculate()
             self._status_info.config(text="Options updated")
 
     # ------------------------------------------------------------------

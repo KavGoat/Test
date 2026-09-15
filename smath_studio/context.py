@@ -121,10 +121,10 @@ def create_default_context() -> EvalContext:
         constants=constants,
     )
 
-    # Add some mathematical constants
     import math
     ctx.set_variable("pi", math.pi)
     ctx.set_variable("π", math.pi)
-    ctx.set_variable("e_const", math.e)
+    ctx.set_variable("e", math.e)
+    ctx.set_variable("i", complex(0, 1))
 
     return ctx

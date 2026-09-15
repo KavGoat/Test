@@ -79,6 +79,18 @@ _BUILTIN_VARS = {
     "ε.0", "μ.0",
 }
 
+_GREEK_DISPLAY = {
+    "alpha": "α", "beta": "β", "gamma": "γ", "delta": "δ",
+    "epsilon": "ε", "zeta": "ζ", "eta": "η", "theta": "θ",
+    "iota": "ι", "kappa": "κ", "lambda": "λ", "mu": "μ",
+    "nu": "ν", "xi": "ξ", "omicron": "ο", "pi": "π",
+    "rho": "ρ", "sigma": "σ", "tau": "τ", "upsilon": "υ",
+    "phi": "φ", "chi": "χ", "psi": "ψ", "omega": "ω",
+    "Gamma": "Γ", "Delta": "Δ", "Theta": "Θ", "Lambda": "Λ",
+    "Sigma": "Σ", "Phi": "Φ", "Psi": "Ψ", "Omega": "Ω",
+    "inf": "∞",
+}
+
 # Operators that render as special symbols
 _DISPLAY_OPS = {
     "*": "·",   # middle dot ·
@@ -260,14 +272,17 @@ class MathRenderer:
     def _measure_variable(self, c, node: Variable, fs: int) -> RenderBox:
         style = "bold" if node.name in _BUILTIN_VARS else "italic"
         if "." in node.name:
-            base, sub = node.name.split(".", 1)
+            parts = node.name.split(".", 1)
+            base = _GREEK_DISPLAY.get(parts[0], parts[0])
+            sub = _GREEK_DISPLAY.get(parts[1], parts[1])
             bw, bh = self._text_size(c, base, fs, style)
             sub_fs = max(int(fs * _SUB_SCALE), 6)
             sw, sh = self._text_size(c, sub, sub_fs, style)
             w = bw + sw
             h = bh + sh * _SUB_DROP
             return RenderBox(w, h, bh / 2)
-        w, h = self._text_size(c, node.name, fs, style)
+        display = _GREEK_DISPLAY.get(node.name, node.name)
+        w, h = self._text_size(c, display, fs, style)
         return RenderBox(w, h, h / 2)
 
     def _measure_unit(self, c, node: UnitRef, fs: int) -> RenderBox:
@@ -352,6 +367,8 @@ class MathRenderer:
             return self._measure_integral(c, node, fs, ctx)
         if name in ("diff", "nderiv") and len(node.args) == 2:
             return self._measure_derivative(c, node, fs, ctx)
+        if name == "if" and len(node.args) >= 2:
+            return self._measure_if(c, node, fs, ctx)
 
         style = "" if name in _BUILTIN_FUNCTIONS else "italic"
         nw, nh = self._text_size(c, name, fs, style)
@@ -419,6 +436,18 @@ class MathRenderer:
         h = max(sh + lo.height + hi.height, body.height)
         return RenderBox(w, h, h / 2)
 
+    def _measure_if(self, c, node: FunctionCall, fs: int, ctx) -> RenderBox:
+        total_h = 0.0
+        max_w = 0.0
+        for i in range(0, len(node.args), 2):
+            vm = self._measure_node(node.args[i], fs, ctx)
+            cm = self._measure_node(node.args[i + 1], fs, ctx) if i + 1 < len(node.args) else None
+            row_h = max(vm.height, cm.height if cm else 0) + 4
+            total_h += row_h
+            row_w = vm.width + 20 + (cm.width if cm else 0) + 30
+            max_w = max(max_w, row_w)
+        return RenderBox(max_w + 16, total_h, total_h / 2)
+
     def _measure_derivative(self, c, node: FunctionCall, fs: int, ctx) -> RenderBox:
         body = self._measure_node(node.args[0], fs, ctx)
         var = self._measure_node(node.args[1], fs, ctx)
@@ -472,7 +501,8 @@ class MathRenderer:
 
         if "." in node.name:
             parts = node.name.split(".", 1)
-            base, sub = parts[0], parts[1]
+            base = _GREEK_DISPLAY.get(parts[0], parts[0])
+            sub = _GREEK_DISPLAY.get(parts[1], parts[1])
             f_base = self._get_font(c, fs, style)
             c.create_text(x, y, text=base, anchor="nw", font=f_base, fill=color)
             bw, bh = self._text_size(c, base, fs, style)
@@ -487,9 +517,10 @@ class MathRenderer:
             h = max(bh, sub_y - y + sh)
             return RenderBox(w, h, bh / 2)
         else:
+            display = _GREEK_DISPLAY.get(node.name, node.name)
             f = self._get_font(c, fs, style)
-            c.create_text(x, y, text=node.name, anchor="nw", font=f, fill=color)
-            w, h = self._text_size(c, node.name, fs, style)
+            c.create_text(x, y, text=display, anchor="nw", font=f, fill=color)
+            w, h = self._text_size(c, display, fs, style)
             return RenderBox(w, h, h / 2)
 
     def _render_unit(self, c, node: UnitRef, x, y, fs) -> RenderBox:
@@ -658,6 +689,8 @@ class MathRenderer:
             return self._render_integral(c, node, x, y, fs, ctx)
         if name in ("diff", "nderiv") and len(node.args) == 2:
             return self._render_derivative(c, node, x, y, fs, ctx)
+        if name == "if" and len(node.args) >= 2:
+            return self._render_if(c, node, x, y, fs, ctx)
         if name == "line":
             return self._render_line_block(c, node, x, y, fs, ctx)
 
@@ -923,6 +956,58 @@ class MathRenderer:
         total_h = den_y + max(dh, var_m.height) - y
         return RenderBox(frac_w, total_h, bar_y - y)
 
+    def _render_if(self, c, node: FunctionCall, x, y, fs, ctx) -> RenderBox:
+        """Render an if() as a piecewise block with curly brace."""
+        cases = []
+        for i in range(0, len(node.args) - 1, 2):
+            val_node = node.args[i]
+            cond_node = node.args[i + 1] if i + 1 < len(node.args) else None
+            cases.append((val_node, cond_node))
+        if len(node.args) % 2 == 1:
+            cases.append((node.args[-1], None))
+
+        line_h = 0.0
+        case_data = []
+        for val_node, cond_node in cases:
+            vm = self._measure_node(val_node, fs, ctx)
+            cm = self._measure_node(cond_node, fs, ctx) if cond_node else None
+            row_h = max(vm.height, cm.height if cm else 0) + 4
+            line_h += row_h
+            case_data.append((val_node, cond_node, vm, cm, row_h))
+
+        brace_w = 12
+        f_if = self._get_font(c, max(int(line_h * 0.8), fs))
+
+        c.create_text(x, y + line_h * 0.3, text="{", anchor="nw", font=f_if, fill=_OPERATOR_COLOR)
+
+        cx = x + brace_w + 4
+        cy = y
+        max_val_w = 0.0
+        for val_node, cond_node, vm, cm, row_h in case_data:
+            self._render_node(c, val_node, cx, cy + (row_h - vm.height) / 2, fs, ctx)
+            max_val_w = max(max_val_w, vm.width)
+            cy += row_h
+
+        if_w = max_val_w + 8
+        cy = y
+        f = self._get_font(c, fs)
+        for val_node, cond_node, vm, cm, row_h in case_data:
+            if cond_node:
+                cw, _ = self._text_size(c, "if ", fs)
+                c.create_text(cx + if_w, cy + (row_h - (cm.height if cm else 0)) / 2,
+                              text="if ", anchor="nw", font=f, fill=_FUNCTION_COLOR)
+                self._render_node(c, cond_node, cx + if_w + cw,
+                                  cy + (row_h - (cm.height if cm else 0)) / 2, fs, ctx)
+            else:
+                c.create_text(cx + if_w, cy + (row_h - vm.height) / 2,
+                              text="otherwise", anchor="nw", font=f, fill=_FUNCTION_COLOR)
+            cy += row_h
+
+        total_w = brace_w + 4 + if_w + max(
+            (cm.width if cm else 0) + 20 for _, _, _, cm, _ in case_data
+        )
+        return RenderBox(total_w, line_h, line_h / 2)
+
     def _render_line_block(self, c, node: FunctionCall, x, y, fs, ctx) -> RenderBox:
         """Render a line() block (multi-line expression group)."""
         cy = y
@@ -959,6 +1044,22 @@ class MathRenderer:
 
         # If it's an evaluation or display, render expr = result
         expr_box = self._render_node(canvas, node, x, y, font_size, context)
+
+        if isinstance(result, Exception):
+            f = self._get_font(canvas, font_size)
+            eq_text = " = "
+            ew, eh = self._text_size(canvas, eq_text, font_size)
+            ex = x + expr_box.width
+            eq_y = y + expr_box.baseline - eh / 2
+            canvas.create_text(ex, eq_y, text=eq_text, anchor="nw", font=f, fill=_OPERATOR_COLOR)
+            err_text = str(result)
+            if len(err_text) > 50:
+                err_text = err_text[:47] + "..."
+            canvas.create_text(ex + ew, eq_y, text=err_text, anchor="nw", font=f, fill=_ERROR_COLOR)
+            rw, rh = self._text_size(canvas, err_text, font_size)
+            total_w = expr_box.width + ew + rw
+            total_h = max(expr_box.height, eh, rh)
+            return RenderBox(total_w, total_h, expr_box.baseline)
 
         if result is not None and not isinstance(result, str):
             f = self._get_font(canvas, font_size)
@@ -1099,12 +1200,30 @@ def _format_result(val: Any, precision: int = 4) -> str:
         return f"{num} {unit_str}".strip()
     if isinstance(val, np.ndarray):
         return f"[{val.shape[0]}×{val.shape[1] if val.ndim > 1 else 1} matrix]"
+    if isinstance(val, complex):
+        rp = _format_result(val.real, precision)
+        ip = _format_result(abs(val.imag), precision)
+        if val.imag == 0:
+            return rp
+        if val.real == 0:
+            sign = "-" if val.imag < 0 else ""
+            return f"{sign}{ip}i" if ip != "1" else f"{sign}i"
+        sign = " - " if val.imag < 0 else " + "
+        return f"{rp}{sign}{ip}i"
     if isinstance(val, float):
+        if val != val:
+            return "NaN"
+        if val == float('inf'):
+            return "∞"
+        if val == float('-inf'):
+            return "-∞"
         if val == int(val) and abs(val) < 1e15:
             return str(int(val))
         if abs(val) < 1e-4 or abs(val) >= 1e6:
             return f"{val:.{precision}e}"
         return f"{val:.{precision}f}".rstrip("0").rstrip(".")
+    if isinstance(val, bool):
+        return "1" if val else "0"
     if isinstance(val, int):
         return str(val)
     if isinstance(val, str):
