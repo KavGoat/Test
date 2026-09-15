@@ -290,6 +290,7 @@ class WorksheetCanvas(ttk.Frame):
 
         ws = self._worksheet
         if ws is None:
+            self._draw_cursor_marker()
             return
 
         # Draw page boundaries if page model is active
@@ -314,6 +315,9 @@ class WorksheetCanvas(ttk.Frame):
         for region in all_regions:
             result = eval_results.get(region.id)
             self._render_region(region, result)
+
+        # Draw the cursor crosshair
+        self._draw_cursor_marker()
 
         # Update scroll region
         self._update_scroll_region()
@@ -344,6 +348,18 @@ class WorksheetCanvas(ttk.Frame):
                 page_x, 0, page_x, ph * 5,
                 fill=_PAGE_BOUNDARY_COLOR, dash=(2, 4)
             )
+
+    def _draw_cursor_marker(self):
+        """Draw a red crosshair at the current cursor position."""
+        x = self._cursor_x
+        y = self._cursor_y
+        sz = 6
+        self._canvas.create_line(
+            x - sz, y, x + sz, y, fill="#ff0000", width=1, tags="cursor_marker"
+        )
+        self._canvas.create_line(
+            x, y - sz, x, y + sz, fill="#ff0000", width=1, tags="cursor_marker"
+        )
 
     def _update_scroll_region(self):
         """Set the scrollable region to encompass all content."""
@@ -820,6 +836,10 @@ class WorksheetCanvas(ttk.Frame):
 
     def _on_key(self, event: tk.Event):
         """Handle key events: forward to editor or start new editing."""
+        ctrl = event.state & 0x4
+        if ctrl:
+            return None
+
         if self._editing and self._math_editor is not None:
             result = self._math_editor.handle_key(event)
             if result == "commit":

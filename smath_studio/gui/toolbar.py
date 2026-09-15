@@ -17,30 +17,58 @@ class StandardToolbar(ttk.Frame):
 
     def _build(self):
         buttons = [
-            ("New", "new"),
-            ("Open", "open"),
-            ("Save", "save"),
-            None,  # separator
-            ("Print", "print"),
+            ("\U0001f4c4", "New", "new"),
+            ("\U0001f4c2", "Open", "open"),
+            ("\U0001f4be", "Save", "save"),
             None,
-            ("Undo", "undo"),
-            ("Redo", "redo"),
+            ("\U0001f5a8", "Print", "print"),
             None,
-            ("Cut", "cut"),
-            ("Copy", "copy"),
-            ("Paste", "paste"),
+            ("↩", "Undo", "undo"),
+            ("↪", "Redo", "redo"),
+            None,
+            ("✂", "Cut", "cut"),
+            ("⎘", "Copy", "copy"),
+            ("\U0001f4cb", "Paste", "paste"),
         ]
         for item in buttons:
             if item is None:
                 sep = ttk.Separator(self, orient=tk.VERTICAL)
                 sep.pack(side=tk.LEFT, fill=tk.Y, padx=3, pady=2)
             else:
-                label, cmd_key = item
+                icon, tooltip, cmd_key = item
                 cmd = self._commands.get(cmd_key, lambda: None)
-                btn = ttk.Button(
-                    self, text=label, command=cmd, width=6, style="Toolbutton.TButton"
+                btn = tk.Button(
+                    self, text=icon, command=cmd,
+                    width=3, height=1,
+                    font=("Segoe UI", 11),
+                    relief=tk.FLAT,
+                    bg="#f0f0f0",
+                    activebackground="#d0d0d0",
+                    bd=0,
                 )
                 btn.pack(side=tk.LEFT, padx=1, pady=2)
+                self._add_tooltip(btn, tooltip)
+
+    @staticmethod
+    def _add_tooltip(widget: tk.Widget, text: str):
+        tip = None
+        def enter(e):
+            nonlocal tip
+            x = widget.winfo_rootx() + widget.winfo_width() // 2
+            y = widget.winfo_rooty() + widget.winfo_height() + 2
+            tip = tk.Toplevel(widget)
+            tip.wm_overrideredirect(True)
+            tip.wm_geometry(f"+{x}+{y}")
+            lbl = tk.Label(tip, text=text, bg="#ffffdd", relief=tk.SOLID,
+                           borderwidth=1, font=("Segoe UI", 9))
+            lbl.pack()
+        def leave(e):
+            nonlocal tip
+            if tip:
+                tip.destroy()
+                tip = None
+        widget.bind("<Enter>", enter)
+        widget.bind("<Leave>", leave)
 
 
 class CollapsiblePanel(ttk.LabelFrame):

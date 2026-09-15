@@ -572,6 +572,17 @@ class MathEditor:
         self._cursor_ry = None
         self._cursor_rh = None
 
+        pre_box = self._measure_slot_only(self.root, self.font_size)
+        total_w = pre_box.width + 8
+        if self._eval_result is not None or self._eval_error:
+            total_w += 80
+        bg_id = self.canvas.create_rectangle(
+            self.x - 2, self.y - 2,
+            self.x + max(total_w, 20), self.y + max(pre_box.height, 16) + 2,
+            fill="#fffff0", outline="#c0c0c0", width=1, dash=(2, 2),
+        )
+        self._items.append(bg_id)
+
         box = self._render_slot(self.root, self.x, self.y, self.font_size)
 
         if self._eval_result is not None or self._eval_error:
@@ -579,6 +590,9 @@ class MathEditor:
 
         if self._cursor_visible and self._cursor_rx is not None:
             self._draw_cursor()
+
+    def _measure_slot_only(self, slot: EditSlot, fs: int) -> _Box:
+        return self._measure_slot(slot, fs)
 
     def _render_eval_result(self, rx: float, ry: float, box: _Box):
         from ..units import Quantity
@@ -660,7 +674,16 @@ class MathEditor:
     def _measure_item(self, item: EditItem, fs: int) -> _Box:
         if isinstance(item, EText):
             style = self._text_style(item.text)
-            w, h = self._text_size(item.text, fs, style)
+            text = item.text
+            if "." in text and style == "italic" and text and not text[0].isdigit():
+                parts = text.split(".", 1)
+                base_w, base_h = self._text_size(parts[0], fs, style)
+                sub_fs = max(int(fs * 0.70), 6)
+                sub_w, sub_h = self._text_size(parts[1], sub_fs, style)
+                w = base_w + sub_w
+                h = max(base_h, base_h * 0.45 + sub_h)
+                return _Box(w, h, base_h * 0.6)
+            w, h = self._text_size(text, fs, style)
             return _Box(w, h, h * 0.6)
         if isinstance(item, EOp):
             display = _OP_DISPLAY.get(item.op, f" {item.op} ")
@@ -734,8 +757,26 @@ class MathEditor:
     def _render_text(self, item: EText, x: float, y: float, fs: int):
         style = self._text_style(item.text)
         color = _NUMBER_COLOR
+        text = item.text
+
+        if "." in text and style == "italic" and not text[0].isdigit():
+            parts = text.split(".", 1)
+            f = self._get_font(fs, style)
+            tid = self.canvas.create_text(x, y, text=parts[0], anchor="nw",
+                                           font=f, fill=color)
+            self._items.append(tid)
+            base_w, _ = self._text_size(parts[0], fs, style)
+            sub_fs = max(int(fs * 0.70), 6)
+            sf = self._get_font(sub_fs, style)
+            base_h = self._line_height(fs)
+            sub_y = y + base_h * 0.45
+            sid = self.canvas.create_text(x + base_w, sub_y, text=parts[1],
+                                            anchor="nw", font=sf, fill=color)
+            self._items.append(sid)
+            return
+
         f = self._get_font(fs, style)
-        tid = self.canvas.create_text(x, y, text=item.text, anchor="nw",
+        tid = self.canvas.create_text(x, y, text=text, anchor="nw",
                                        font=f, fill=color)
         self._items.append(tid)
 

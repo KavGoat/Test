@@ -267,16 +267,15 @@ class SMathApp:
         self._root.bind("<Control-Z>", lambda e: self._on_undo())
         self._root.bind("<Control-y>", lambda e: self._on_redo())
         self._root.bind("<Control-Y>", lambda e: self._on_redo())
-        self._root.bind("<Control-x>", lambda e: self._on_cut())
-        self._root.bind("<Control-X>", lambda e: self._on_cut())
-        self._root.bind("<Control-c>", lambda e: self._on_copy())
-        self._root.bind("<Control-C>", lambda e: self._on_copy())
-        self._root.bind("<Control-v>", lambda e: self._on_paste())
-        self._root.bind("<Control-V>", lambda e: self._on_paste())
+        self._root.bind("<Control-x>", lambda e: self._safe_cut())
+        self._root.bind("<Control-X>", lambda e: self._safe_cut())
+        self._root.bind("<Control-c>", lambda e: self._safe_copy())
+        self._root.bind("<Control-C>", lambda e: self._safe_copy())
+        self._root.bind("<Control-v>", lambda e: self._safe_paste())
+        self._root.bind("<Control-V>", lambda e: self._safe_paste())
         self._root.bind("<Control-p>", lambda e: self._on_print())
         self._root.bind("<Control-P>", lambda e: self._on_print())
         self._root.bind("<F9>", lambda e: self._on_recalculate())
-        self._root.bind("<Delete>", lambda e: self._on_delete())
 
     # ------------------------------------------------------------------
     # Status bar update
@@ -426,6 +425,18 @@ class SMathApp:
     def _on_redo(self):
         self._status_info.config(text="Redo")
 
+    def _safe_cut(self):
+        if not self._canvas_widget._editing:
+            self._on_cut()
+
+    def _safe_copy(self):
+        if not self._canvas_widget._editing:
+            self._on_copy()
+
+    def _safe_paste(self):
+        if not self._canvas_widget._editing:
+            self._on_paste()
+
     def _on_cut(self):
         self._canvas_widget.cut_selected()
         self._status_info.config(text="Cut")
@@ -468,6 +479,7 @@ class SMathApp:
         dlg = InsertFunctionDialog(self._root)
         self._root.wait_window(dlg)
         if dlg.result:
+            self._canvas_widget.insert_symbol(f"{dlg.result}(")
             self._status_info.config(text=f"Insert: {dlg.result}()")
 
     # ------------------------------------------------------------------
