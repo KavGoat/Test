@@ -191,9 +191,16 @@ class WorksheetCanvas(ttk.Frame):
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
+        # Drag state
+        self._dragging = False
+        self._drag_start_x = 0
+        self._drag_start_y = 0
+
         # Events
         self._canvas.bind("<Button-1>", self._on_click)
         self._canvas.bind("<Double-Button-1>", self._on_double_click)
+        self._canvas.bind("<B1-Motion>", self._on_drag)
+        self._canvas.bind("<ButtonRelease-1>", self._on_drag_end)
         self._canvas.bind("<Button-3>", self._on_right_click)
         self._canvas.bind("<Key>", self._on_key)
         self._canvas.bind("<FocusIn>", lambda e: None)
@@ -802,10 +809,14 @@ class WorksheetCanvas(ttk.Frame):
         hit = self._hit_test(cx, cy)
         if hit is not None:
             self._select_region(hit)
+            self._dragging = False
+            self._drag_start_x = cx
+            self._drag_start_y = cy
         else:
             self._select_region(None)
             self._cursor_x = _snap(cx)
             self._cursor_y = _snap(cy)
+            self._dragging = False
         self._canvas.focus_set()
 
     def _on_right_click(self, event: tk.Event):
@@ -833,6 +844,53 @@ class WorksheetCanvas(ttk.Frame):
     def _on_shift_mousewheel(self, event: tk.Event):
         """Horizontal scroll with Shift+mousewheel."""
         self._canvas.xview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    def _on_drag(self, event: tk.Event):
+        """Handle mouse drag to move selected region."""
+        if self._editing or self._selected_index is None:
+            return
+        if self._selected_index >= len(self._rendered):
+            return
+        cx = int(self._canvas.canvasx(event.x))
+        cy = int(self._canvas.canvasy(event.y))
+        dx = cx - self._drag_start_x
+        dy = cy - self._drag_start_y
+        if abs(dx) < 4 and abs(dy) < 4 and not self._dragging:
+            return
+        self._dragging = True
+        rr = self._rendered[self._selected_index]
+        for item_id in rr.items:
+            self._canvas.move(item_id, dx, dy)
+        for item_id in self._selection_items:
+            self._canvas.move(item_id, dx, dy)
+        rr.bbox = (
+            rr.bbox[0] + dx, rr.bbox[1] + dy,
+            rr.bbox[2] + dx, rr.bbox[3] + dy,
+        )
+        self._drag_start_x = cx
+        self._drag_start_y = cy
+
+    def _on_drag_end(self, event: tk.Event):
+        """Snap region to grid after dragging."""
+        if not self._dragging or self._selected_index is None:
+            self._dragging = False
+            return
+        if self._selected_index >= len(self._rendered):
+            self._dragging = False
+            return
+        rr = self._rendered[self._selected_index]
+        region = rr.region
+        region.left = _snap(rr.bbox[0])
+        region.top = _snap(rr.bbox[1])
+        self._dragging = False
+        self._mark_modified()
+        self._evaluate_and_render()
+        idx = None
+        for i, r in enumerate(self._rendered):
+            if r.region is region:
+                idx = i
+                break
+        self._select_region(idx)
 
     def _on_key(self, event: tk.Event):
         """Handle key events: forward to editor or start new editing."""

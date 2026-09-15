@@ -53,6 +53,11 @@ class EParens(EditItem):
 
 
 @dataclass
+class ESqrt(EditItem):
+    radicand: EditSlot = field(default_factory=lambda: EditSlot())
+
+
+@dataclass
 class EUnit(EditItem):
     name: str = ""
 
@@ -102,6 +107,22 @@ _BUILTIN_VARS = {
     "G.N", "h", "N.A", "k", "R.m",
     "ε.0", "μ.0",
 }
+
+_GREEK_MAP = {
+    "alpha": "α", "beta": "β", "gamma": "γ", "delta": "δ",
+    "epsilon": "ε", "zeta": "ζ", "eta": "η", "theta": "θ",
+    "iota": "ι", "kappa": "κ", "lambda": "λ", "mu": "μ",
+    "nu": "ν", "xi": "ξ", "omicron": "ο", "pi": "π",
+    "rho": "ρ", "sigma": "σ", "tau": "τ", "upsilon": "υ",
+    "phi": "φ", "chi": "χ", "psi": "ψ", "omega": "ω",
+    "Gamma": "Γ", "Delta": "Δ", "Theta": "Θ", "Lambda": "Λ",
+    "Sigma": "Σ", "Phi": "Φ", "Psi": "Ψ", "Omega": "Ω",
+    "inf": "∞",
+}
+
+_GREEK_DISPLAY = {v: v for v in _GREEK_MAP.values()}
+for k, v in _GREEK_MAP.items():
+    _GREEK_DISPLAY[k] = v
 
 _SUP_SCALE = 0.70
 _FRAC_HPAD = 4
@@ -388,6 +409,8 @@ class MathEditor:
             return list(item.exponent.items)
         if isinstance(item, EParens):
             return list(item.inner.items)
+        if isinstance(item, ESqrt):
+            return list(item.radicand.items)
         return [item]
 
     # ---- Navigation ----
@@ -399,6 +422,8 @@ class MathEditor:
             return [item.exponent]
         if isinstance(item, EParens):
             return [item.inner]
+        if isinstance(item, ESqrt):
+            return [item.radicand]
         return []
 
     def _move_left(self):
@@ -677,13 +702,16 @@ class MathEditor:
             text = item.text
             if "." in text and style == "italic" and text and not text[0].isdigit():
                 parts = text.split(".", 1)
-                base_w, base_h = self._text_size(parts[0], fs, style)
+                dp0 = _GREEK_DISPLAY.get(parts[0], parts[0])
+                dp1 = _GREEK_DISPLAY.get(parts[1], parts[1])
+                base_w, base_h = self._text_size(dp0, fs, style)
                 sub_fs = max(int(fs * 0.70), 6)
-                sub_w, sub_h = self._text_size(parts[1], sub_fs, style)
+                sub_w, sub_h = self._text_size(dp1, sub_fs, style)
                 w = base_w + sub_w
                 h = max(base_h, base_h * 0.45 + sub_h)
                 return _Box(w, h, base_h * 0.6)
-            w, h = self._text_size(text, fs, style)
+            display = _GREEK_DISPLAY.get(text, text)
+            w, h = self._text_size(display, fs, style)
             return _Box(w, h, h * 0.6)
         if isinstance(item, EOp):
             display = _OP_DISPLAY.get(item.op, f" {item.op} ")
@@ -695,10 +723,19 @@ class MathEditor:
             return self._measure_sup(item, fs)
         if isinstance(item, EParens):
             return self._measure_parens(item, fs)
+        if isinstance(item, ESqrt):
+            return self._measure_sqrt(item, fs)
         if isinstance(item, EUnit):
             w, h = self._text_size(item.name or " ", fs)
             return _Box(w, h, h * 0.6)
         return _Box(0, 0, 0)
+
+    def _measure_sqrt(self, item: ESqrt, fs: int) -> _Box:
+        rb = self._measure_slot(item.radicand, fs)
+        sym_w, sym_h = self._text_size("√", fs)
+        w = sym_w + rb.width + 4
+        h = max(rb.height + 4, sym_h)
+        return _Box(w, h, max(rb.baseline + 2, sym_h * 0.6))
 
     def _measure_slot(self, slot: EditSlot, fs: int) -> _Box:
         if not slot.items:
@@ -751,6 +788,8 @@ class MathEditor:
             self._render_sup(item, x, y, fs)
         elif isinstance(item, EParens):
             self._render_parens(item, x, y, fs)
+        elif isinstance(item, ESqrt):
+            self._render_sqrt(item, x, y, fs)
         elif isinstance(item, EUnit):
             self._render_unit(item, x, y, fs)
 
@@ -758,25 +797,28 @@ class MathEditor:
         style = self._text_style(item.text)
         color = _NUMBER_COLOR
         text = item.text
+        display = _GREEK_DISPLAY.get(text, text)
 
-        if "." in text and style == "italic" and not text[0].isdigit():
+        if "." in text and style == "italic" and text and not text[0].isdigit():
             parts = text.split(".", 1)
+            dp0 = _GREEK_DISPLAY.get(parts[0], parts[0])
+            dp1 = _GREEK_DISPLAY.get(parts[1], parts[1])
             f = self._get_font(fs, style)
-            tid = self.canvas.create_text(x, y, text=parts[0], anchor="nw",
+            tid = self.canvas.create_text(x, y, text=dp0, anchor="nw",
                                            font=f, fill=color)
             self._items.append(tid)
-            base_w, _ = self._text_size(parts[0], fs, style)
+            base_w, _ = self._text_size(dp0, fs, style)
             sub_fs = max(int(fs * 0.70), 6)
             sf = self._get_font(sub_fs, style)
             base_h = self._line_height(fs)
             sub_y = y + base_h * 0.45
-            sid = self.canvas.create_text(x + base_w, sub_y, text=parts[1],
+            sid = self.canvas.create_text(x + base_w, sub_y, text=dp1,
                                             anchor="nw", font=sf, fill=color)
             self._items.append(sid)
             return
 
         f = self._get_font(fs, style)
-        tid = self.canvas.create_text(x, y, text=text, anchor="nw",
+        tid = self.canvas.create_text(x, y, text=display, anchor="nw",
                                        font=f, fill=color)
         self._items.append(tid)
 
@@ -823,6 +865,24 @@ class MathEditor:
         rp = self.canvas.create_text(x + pw + ib.width, y, text=")",
                                       anchor="nw", font=f, fill=_OPERATOR_COLOR)
         self._items.append(rp)
+
+    def _render_sqrt(self, item: ESqrt, x: float, y: float, fs: int):
+        rb = self._measure_slot(item.radicand, fs)
+        f = self._get_font(fs)
+        sym_w, sym_h = self._text_size("√", fs)
+
+        tid = self.canvas.create_text(x, y, text="√", anchor="nw",
+                                        font=f, fill=_OPERATOR_COLOR)
+        self._items.append(tid)
+
+        rad_x = x + sym_w
+        rad_y = y + 2
+        self._render_slot(item.radicand, rad_x, rad_y, fs)
+
+        lid = self.canvas.create_line(
+            rad_x - 1, y, rad_x + rb.width + 2, y,
+            fill=_OPERATOR_COLOR, width=1)
+        self._items.append(lid)
 
     def _render_unit(self, item: EUnit, x: float, y: float, fs: int):
         f = self._get_font(fs)
@@ -923,6 +983,9 @@ class MathEditor:
             elif isinstance(item, EParens):
                 inner = self._slot_to_text(item.inner) or "0"
                 parts.append(f"({inner})")
+            elif isinstance(item, ESqrt):
+                rad = self._slot_to_text(item.radicand) or "0"
+                parts.append(f"sqrt({rad})")
             elif isinstance(item, EUnit):
                 parts.append(f"'{item.name}'")
         return "".join(parts)
@@ -986,14 +1049,20 @@ class MathEditor:
                 slot.items.append(EOp(node.operator))
                 self._ast_to_slot(node.right, slot)
         elif isinstance(node, FunctionCall):
-            slot.items.append(EText(node.name))
-            parens = EParens()
-            for i, arg in enumerate(node.args):
-                if i > 0:
-                    parens.inner.items.append(EOp(","))
-                self._ast_to_slot(arg, parens.inner)
-            parens.inner.cursor_pos = len(parens.inner.items)
-            slot.items.append(parens)
+            if node.name == "sqrt" and len(node.args) == 1:
+                sq = ESqrt()
+                self._ast_to_slot(node.args[0], sq.radicand)
+                sq.radicand.cursor_pos = len(sq.radicand.items)
+                slot.items.append(sq)
+            else:
+                slot.items.append(EText(node.name))
+                parens = EParens()
+                for i, arg in enumerate(node.args):
+                    if i > 0:
+                        parens.inner.items.append(EOp(","))
+                    self._ast_to_slot(arg, parens.inner)
+                parens.inner.cursor_pos = len(parens.inner.items)
+                slot.items.append(parens)
         elif isinstance(node, Evaluation):
             self._ast_to_slot(node.expression, slot)
             slot.items.append(EOp("="))
