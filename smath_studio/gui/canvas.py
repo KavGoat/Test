@@ -11,13 +11,15 @@ from typing import Any, Optional
 
 from PIL import Image, ImageTk
 
-from ..parser import Worksheet, Region, TextContent, TextParagraph
+from ..parser import Worksheet, Region, TextContent, TextParagraph, MathRegion
 from ..context import EvalContext, create_default_context
 from ..expression import (
     ASTNode, Number, Variable, UnitRef, StringLiteral,
     BinaryOp, UnaryOp, FunctionCall, Evaluation,
 )
 from ..units import Quantity
+from ..infix_parser import parse_infix, ast_to_text, ast_to_elements
+from .math_edit import MathEditor
 
 # Try importing the MathRenderer from the sibling module (another agent's work).
 # If unavailable, fall back to plain text rendering.
@@ -155,6 +157,15 @@ class WorksheetCanvas(ttk.Frame):
         self._selection_items: list[int] = []
         self._photo_cache: list = []
 
+        # Inline editing state
+        self._editing = False
+        self._math_editor: Optional[MathEditor] = None
+        self._edit_region_idx: Optional[int] = None
+        self._edit_mode = "math"
+        self._cursor_x = 40
+        self._cursor_y = 40
+        self._on_modified: Optional[Any] = None
+
         # Build canvas with scrollbars
         self._canvas = tk.Canvas(
             self,
@@ -182,7 +193,10 @@ class WorksheetCanvas(ttk.Frame):
 
         # Events
         self._canvas.bind("<Button-1>", self._on_click)
+        self._canvas.bind("<Double-Button-1>", self._on_double_click)
         self._canvas.bind("<Button-3>", self._on_right_click)
+        self._canvas.bind("<Key>", self._on_key)
+        self._canvas.bind("<FocusIn>", lambda e: None)
 
         # Mouse-wheel scrolling
         self._canvas.bind("<MouseWheel>", self._on_mousewheel)
@@ -192,11 +206,19 @@ class WorksheetCanvas(ttk.Frame):
 
         # Context menu
         self._context_menu = tk.Menu(self._canvas, tearoff=0)
-        self._context_menu.add_command(label="Cut", accelerator="Ctrl+X")
-        self._context_menu.add_command(label="Copy", accelerator="Ctrl+C")
-        self._context_menu.add_command(label="Paste", accelerator="Ctrl+V")
+        self._context_menu.add_command(
+            label="Cut", accelerator="Ctrl+X", command=self.cut_selected
+        )
+        self._context_menu.add_command(
+            label="Copy", accelerator="Ctrl+C", command=self.copy_selected
+        )
+        self._context_menu.add_command(
+            label="Paste", accelerator="Ctrl+V", command=self.paste_at_cursor
+        )
         self._context_menu.add_separator()
-        self._context_menu.add_command(label="Delete", accelerator="Del")
+        self._context_menu.add_command(
+            label="Delete", accelerator="Del", command=self.delete_selected
+        )
 
         # Fonts (cached)
         self._font_cache: dict[tuple, tkfont.Font] = {}
@@ -753,11 +775,22 @@ class WorksheetCanvas(ttk.Frame):
     # ------------------------------------------------------------------
 
     def _on_click(self, event: tk.Event):
-        """Handle left-click: select region."""
+        """Handle left-click: commit edit, select region, or set cursor."""
         cx = int(self._canvas.canvasx(event.x))
         cy = int(self._canvas.canvasy(event.y))
+
+        if self._editing:
+            self._commit_edit()
+            self._canvas.focus_set()
+
         hit = self._hit_test(cx, cy)
-        self._select_region(hit)
+        if hit is not None:
+            self._select_region(hit)
+        else:
+            self._select_region(None)
+            self._cursor_x = _snap(cx)
+            self._cursor_y = _snap(cy)
+        self._canvas.focus_set()
 
     def _on_right_click(self, event: tk.Event):
         """Show context menu on right-click."""
@@ -784,3 +817,433 @@ class WorksheetCanvas(ttk.Frame):
     def _on_shift_mousewheel(self, event: tk.Event):
         """Horizontal scroll with Shift+mousewheel."""
         self._canvas.xview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    def _on_key(self, event: tk.Event):
+        """Handle key events: forward to editor or start new editing."""
+        if self._editing and self._math_editor is not None:
+            result = self._math_editor.handle_key(event)
+            if result == "commit":
+                self._commit_edit()
+            elif result == "cancel":
+                self._cancel_edit()
+            return "break"
+
+        keysym = event.keysym
+        char = event.char
+
+        if keysym == "Delete":
+            self.delete_selected()
+            return "break"
+
+        if char and ord(char) >= 32 and keysym not in (
+            "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9",
+            "F10", "F11", "F12",
+        ):
+            self._start_editing(self._cursor_x, self._cursor_y, initial_text=char)
+            return "break"
+
+        return None
+
+    def _eval_for_editor(self, expr_text: str) -> Any:
+        """Evaluate an expression for the live editor preview."""
+        if self._ctx is None:
+            return None
+        ast = parse_infix(expr_text)
+        if ast is None:
+            return None
+        return ast.evaluate(self._ctx)
+
+    def _on_double_click(self, event: tk.Event):
+        """Handle double-click: edit existing region or create new one."""
+        cx = int(self._canvas.canvasx(event.x))
+        cy = int(self._canvas.canvasy(event.y))
+        hit = self._hit_test(cx, cy)
+
+        if self._editing:
+            self._commit_edit()
+
+        if hit is not None:
+            rr = self._rendered[hit]
+            region = rr.region
+            if region.math is not None:
+                self._start_editing(
+                    region.left, region.top, editing_idx=hit,
+                    ast_node=region.math.input_expr,
+                    has_result=bool(region.math.result_elements),
+                )
+            elif region.text_contents:
+                tc = self._get_text_content(region.text_contents)
+                text = ""
+                if tc and tc.paragraphs:
+                    text = "\n".join(p.text for p in tc.paragraphs)
+                self._start_editing(
+                    region.left, region.top, initial_text=text,
+                    editing_idx=hit, mode="text",
+                )
+        else:
+            x = _snap(cx)
+            y = _snap(cy)
+            self._start_editing(x, y)
+
+        self._canvas.focus_set()
+
+    # ------------------------------------------------------------------
+    # Public editing API (called by app.py)
+    # ------------------------------------------------------------------
+
+    def set_on_modified(self, callback):
+        """Set a callback that fires when the worksheet is modified."""
+        self._on_modified = callback
+
+    def _mark_modified(self):
+        if self._on_modified:
+            self._on_modified()
+
+    def ensure_worksheet(self):
+        """Create a worksheet if none exists (for new documents)."""
+        if self._worksheet is None:
+            self._worksheet = Worksheet()
+            self._ctx = create_default_context()
+
+    def delete_selected(self):
+        """Delete the currently selected region."""
+        if self._selected_index is None or self._worksheet is None:
+            return
+        if self._selected_index >= len(self._rendered):
+            return
+        rr = self._rendered[self._selected_index]
+        region = rr.region
+        if region in self._worksheet.regions:
+            self._worksheet.regions.remove(region)
+        else:
+            self._remove_from_children(self._worksheet.regions, region)
+        self._selected_index = None
+        self._mark_modified()
+        self._evaluate_and_render()
+
+    def copy_selected(self) -> str:
+        """Copy selected region's expression to clipboard. Returns the text."""
+        if self._selected_index is None:
+            return ""
+        if self._selected_index >= len(self._rendered):
+            return ""
+        region = self._rendered[self._selected_index].region
+        text = self._region_to_edit_text(region)
+        if text:
+            try:
+                self._canvas.clipboard_clear()
+                self._canvas.clipboard_append(text)
+            except Exception:
+                pass
+        return text
+
+    def cut_selected(self):
+        """Cut selected region (copy + delete)."""
+        self.copy_selected()
+        self.delete_selected()
+
+    def paste_at_cursor(self):
+        """Paste clipboard text as a new math region at the cursor position."""
+        try:
+            text = self._canvas.clipboard_get()
+        except Exception:
+            return
+        if not text or not text.strip():
+            return
+        ast = parse_infix(text.strip())
+        if ast is None:
+            return
+        self.ensure_worksheet()
+        self._create_new_math_region(ast, self._cursor_x, self._cursor_y)
+        self._cursor_y += 30
+        self._mark_modified()
+        self._evaluate_and_render()
+
+    def insert_math_at(self, x: Optional[int] = None, y: Optional[int] = None):
+        """Start editing a new math region at the given or cursor position."""
+        if x is None:
+            x = self._cursor_x
+        if y is None:
+            y = self._cursor_y
+        self._start_editing(x, y, mode="math")
+
+    def insert_text_at(self, x: Optional[int] = None, y: Optional[int] = None):
+        """Start editing a new text region at the given or cursor position."""
+        if x is None:
+            x = self._cursor_x
+        if y is None:
+            y = self._cursor_y
+        self._start_editing(x, y, mode="text")
+
+    def insert_symbol(self, symbol: str):
+        """Insert a symbol/function into the current editor or create a new region."""
+        if self._editing and self._math_editor is not None:
+            for ch in symbol:
+                fake_event = tk.Event()
+                fake_event.keysym = ""
+                fake_event.char = ch
+                fake_event.state = 0
+                self._math_editor.handle_key(fake_event)
+            self._math_editor.render()
+            self._canvas.focus_set()
+        else:
+            self._start_editing(self._cursor_x, self._cursor_y, initial_text=symbol)
+
+    # ------------------------------------------------------------------
+    # Inline editor
+    # ------------------------------------------------------------------
+
+    def _start_editing(
+        self,
+        x: int,
+        y: int,
+        initial_text: str = "",
+        editing_idx: Optional[int] = None,
+        mode: str = "math",
+        ast_node: Optional[ASTNode] = None,
+        has_result: bool = False,
+    ):
+        if self._editing:
+            self._cancel_edit()
+
+        self._editing = True
+        self._edit_region_idx = editing_idx
+        self._edit_mode = mode
+        self._cursor_x = x
+        self._cursor_y = y
+
+        if mode == "text":
+            self._math_editor = None
+            self._edit_text_entry = tk.Entry(
+                self._canvas,
+                font=("DejaVu Sans", 11),
+                bd=1,
+                relief=tk.SOLID,
+                highlightthickness=1,
+                highlightcolor="#3366cc",
+                bg="#fffff0",
+                width=40,
+            )
+            self._edit_text_entry.insert(0, initial_text)
+            self._edit_text_entry.bind("<Return>", lambda e: self._commit_edit())
+            self._edit_text_entry.bind("<KP_Enter>", lambda e: self._commit_edit())
+            self._edit_text_entry.bind("<Escape>", lambda e: self._cancel_edit())
+            self._edit_text_window = self._canvas.create_window(
+                x, y, window=self._edit_text_entry, anchor=tk.NW
+            )
+            self._edit_text_entry.focus_set()
+            if initial_text:
+                self._edit_text_entry.icursor(tk.END)
+            return
+
+        if editing_idx is not None:
+            for item_id in self._rendered[editing_idx].items:
+                try:
+                    self._canvas.delete(item_id)
+                except Exception:
+                    pass
+
+        editor = MathEditor(
+            self._canvas, x, y,
+            font_size=12,
+            eval_callback=self._eval_for_editor,
+        )
+
+        if ast_node is not None:
+            editor.from_ast(ast_node, has_result=has_result)
+        elif initial_text:
+            ast = parse_infix(initial_text)
+            if ast is not None:
+                editor.from_ast(ast, has_result=initial_text.strip().endswith("="))
+            else:
+                for ch in initial_text:
+                    fake_event = tk.Event()
+                    fake_event.keysym = ""
+                    fake_event.char = ch
+                    fake_event.state = 0
+                    editor.handle_key(fake_event)
+                editor.render()
+
+        self._math_editor = editor
+        self._canvas.focus_set()
+
+    def _commit_edit(self):
+        if not self._editing:
+            return
+
+        if self._edit_mode == "text":
+            entry = getattr(self, "_edit_text_entry", None)
+            if entry is None:
+                self._cancel_edit()
+                return
+            text = entry.get().strip()
+            if not text:
+                self._cancel_edit()
+                return
+            self.ensure_worksheet()
+            self._commit_text_edit(text)
+        else:
+            if self._math_editor is None:
+                self._cancel_edit()
+                return
+            text = self._math_editor.to_text().strip()
+            if not text:
+                self._cancel_edit()
+                return
+            self.ensure_worksheet()
+            self._commit_math_edit(text)
+
+        y = self._cursor_y
+        self._cancel_edit()
+        self._mark_modified()
+        self._evaluate_and_render()
+        self._cursor_y = y + 30
+
+    def _commit_math_edit(self, text: str):
+        ast = parse_infix(text)
+        if ast is None:
+            return
+
+        if self._edit_region_idx is not None and self._edit_region_idx < len(self._rendered):
+            self._update_existing_math_region(ast, self._edit_region_idx)
+        else:
+            self._create_new_math_region(ast, self._cursor_x, self._cursor_y)
+
+    def _commit_text_edit(self, text: str):
+        if self._edit_region_idx is not None and self._edit_region_idx < len(self._rendered):
+            region = self._rendered[self._edit_region_idx].region
+            tc = self._get_text_content(region.text_contents)
+            if tc is None:
+                tc = TextContent(lang="eng")
+                region.text_contents.append(tc)
+            tc.paragraphs.clear()
+            for line in text.split("\n"):
+                tc.paragraphs.append(TextParagraph(text=line))
+        else:
+            region = Region()
+            region.id = self._generate_id()
+            region.left = self._cursor_x
+            region.top = self._cursor_y
+            region.width = max(len(text) * 8, _DEFAULT_REGION_WIDTH)
+            region.height = _DEFAULT_REGION_HEIGHT
+            region.font_size = 10
+            tc = TextContent(lang="eng")
+            for line in text.split("\n"):
+                tc.paragraphs.append(TextParagraph(text=line))
+            region.text_contents.append(tc)
+            self._worksheet.regions.append(region)
+
+    def _cancel_edit(self):
+        if self._math_editor is not None:
+            self._math_editor.destroy()
+            self._math_editor = None
+        entry = getattr(self, "_edit_text_entry", None)
+        if entry is not None:
+            entry.destroy()
+            self._edit_text_entry = None
+        win = getattr(self, "_edit_text_window", None)
+        if win is not None:
+            try:
+                self._canvas.delete(win)
+            except Exception:
+                pass
+            self._edit_text_window = None
+        self._editing = False
+        self._edit_region_idx = None
+
+    # ------------------------------------------------------------------
+    # Region creation / update helpers
+    # ------------------------------------------------------------------
+
+    def _create_new_math_region(self, ast: ASTNode, x: int, y: int):
+        region = Region()
+        region.id = self._generate_id()
+        region.left = x
+        region.top = y
+        region.width = _DEFAULT_REGION_WIDTH
+        region.height = _DEFAULT_REGION_HEIGHT
+        region.font_size = 10
+
+        math_region = MathRegion()
+
+        if isinstance(ast, BinaryOp) and ast.operator == ":":
+            math_region.input_expr = ast
+            math_region.input_elements = ast_to_elements(ast)
+        elif isinstance(ast, Evaluation):
+            math_region.input_expr = ast.expression
+            math_region.input_elements = ast_to_elements(ast.expression)
+            math_region.result_elements = list(math_region.input_elements)
+            math_region.result_action = "numeric"
+        else:
+            math_region.input_expr = ast
+            math_region.input_elements = ast_to_elements(ast)
+            math_region.result_elements = list(math_region.input_elements)
+            math_region.result_action = "numeric"
+
+        region.math = math_region
+        self._worksheet.regions.append(region)
+
+    def _update_existing_math_region(self, ast: ASTNode, rendered_idx: int):
+        region = self._rendered[rendered_idx].region
+        if region.math is None:
+            region.math = MathRegion()
+
+        math_region = region.math
+
+        if isinstance(ast, BinaryOp) and ast.operator == ":":
+            math_region.input_expr = ast
+            math_region.input_elements = ast_to_elements(ast)
+            math_region.result_elements = []
+            math_region.result_expr = None
+        elif isinstance(ast, Evaluation):
+            math_region.input_expr = ast.expression
+            math_region.input_elements = ast_to_elements(ast.expression)
+            math_region.result_elements = list(math_region.input_elements)
+            math_region.result_action = "numeric"
+            math_region.result_expr = None
+        else:
+            math_region.input_expr = ast
+            math_region.input_elements = ast_to_elements(ast)
+            math_region.result_elements = list(math_region.input_elements)
+            math_region.result_action = "numeric"
+            math_region.result_expr = None
+
+    def _region_to_edit_text(self, region: Region) -> str:
+        if region.math is None or region.math.input_expr is None:
+            return ""
+        expr = region.math.input_expr
+        text = ast_to_text(expr)
+        if region.math.result_elements and not (
+            isinstance(expr, BinaryOp) and expr.operator == ":"
+        ):
+            if not text.endswith("="):
+                text += " ="
+        return text
+
+    def _generate_id(self) -> str:
+        max_id = 0
+        if self._worksheet:
+            for r in self._worksheet.regions:
+                try:
+                    num = int(r.id)
+                    if num > max_id:
+                        max_id = num
+                except (ValueError, TypeError):
+                    pass
+                for c in r.children:
+                    try:
+                        num = int(c.id)
+                        if num > max_id:
+                            max_id = num
+                    except (ValueError, TypeError):
+                        pass
+        return str(max_id + 1)
+
+    def _remove_from_children(self, regions: list[Region], target: Region) -> bool:
+        for r in regions:
+            if target in r.children:
+                r.children.remove(target)
+                return True
+            if self._remove_from_children(r.children, target):
+                return True
+        return False

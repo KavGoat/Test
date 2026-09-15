@@ -205,6 +205,7 @@ class SMathApp:
 
         # Worksheet canvas (center)
         self._canvas_widget = WorksheetCanvas(self._paned)
+        self._canvas_widget.set_on_modified(self._on_canvas_modified)
         self._paned.add(self._canvas_widget, weight=1)
 
         # Math panels sidebar (right)
@@ -321,6 +322,7 @@ class SMathApp:
 
         self._canvas_widget.clear()
         self._worksheet = Worksheet()
+        self._canvas_widget.load_worksheet(self._worksheet)
         self._current_file = None
         self._modified = False
         self._update_title()
@@ -415,7 +417,7 @@ class SMathApp:
         )
 
     # ------------------------------------------------------------------
-    # Edit operations (stubs -- editing engine not yet built)
+    # Edit operations
     # ------------------------------------------------------------------
 
     def _on_undo(self):
@@ -425,32 +427,41 @@ class SMathApp:
         self._status_info.config(text="Redo")
 
     def _on_cut(self):
+        self._canvas_widget.cut_selected()
         self._status_info.config(text="Cut")
 
     def _on_copy(self):
-        self._status_info.config(text="Copy")
+        text = self._canvas_widget.copy_selected()
+        if text:
+            self._status_info.config(text=f"Copied: {text}")
+        else:
+            self._status_info.config(text="Nothing to copy")
 
     def _on_paste(self):
-        self._status_info.config(text="Paste")
+        self._canvas_widget.paste_at_cursor()
+        self._status_info.config(text="Pasted")
 
     def _on_delete(self):
-        self._status_info.config(text="Delete")
+        self._canvas_widget.delete_selected()
+        self._status_info.config(text="Deleted")
 
     # ------------------------------------------------------------------
     # Insert operations
     # ------------------------------------------------------------------
 
     def _on_insert_math(self):
-        self._status_info.config(text="Insert Math Region (click on canvas)")
+        self._canvas_widget.insert_math_at()
+        self._status_info.config(text="Type expression, press Enter to commit")
 
     def _on_insert_text(self):
-        self._status_info.config(text="Insert Text Region (click on canvas)")
+        self._canvas_widget.insert_text_at()
+        self._status_info.config(text="Type text, press Enter to commit")
 
     def _on_insert_plot(self):
-        self._status_info.config(text="Insert Plot Region (click on canvas)")
+        self._status_info.config(text="Insert Plot Region (not yet implemented)")
 
     def _on_insert_area(self):
-        self._status_info.config(text="Insert Area (click on canvas)")
+        self._status_info.config(text="Insert Area (not yet implemented)")
 
     def _on_insert_function(self):
         """Show the Insert Function dialog."""
@@ -508,7 +519,13 @@ class SMathApp:
 
     def _on_symbol_insert(self, symbol: str):
         """Handle a symbol/function insert from the math toolbar panels."""
+        self._canvas_widget.insert_symbol(symbol)
         self._status_info.config(text=f"Insert: {symbol}")
+
+    def _on_canvas_modified(self):
+        """Called when the canvas content is modified by editing."""
+        self._modified = True
+        self._update_title()
 
     # ------------------------------------------------------------------
     # Window close
