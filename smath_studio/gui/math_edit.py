@@ -130,6 +130,16 @@ class EDerivative(EditItem):
 
 
 @dataclass
+class ESystem(EditItem):
+    """System of equations block - curly brace with stacked rows."""
+    rows: list = field(default_factory=list)
+
+    def __post_init__(self):
+        if not self.rows:
+            self.rows = [EditSlot(), EditSlot()]
+
+
+@dataclass
 class EditSlot:
     items: list[EditItem] = field(default_factory=list)
     cursor_pos: int = 0
@@ -195,6 +205,36 @@ _SUP_SCALE = 0.70
 _FRAC_HPAD = 4
 _FRAC_VPAD = 3
 
+_FUNCTION_HINTS = {
+    "sin": "sin(x)", "cos": "cos(x)", "tan": "tan(x)",
+    "asin": "asin(x)", "acos": "acos(x)", "atan": "atan(x)",
+    "cot": "cot(x)", "sec": "sec(x)", "csc": "csc(x)",
+    "sinh": "sinh(x)", "cosh": "cosh(x)", "tanh": "tanh(x)",
+    "asinh": "asinh(x)", "acosh": "acosh(x)", "atanh": "atanh(x)",
+    "ln": "ln(x)", "log": "log(x, base)", "exp": "exp(x)",
+    "sqrt": "sqrt(x)", "abs": "abs(x)", "sign": "sign(x)",
+    "ceil": "ceil(x)", "floor": "floor(x)", "round": "round(x, digits)",
+    "max": "max(a, b, ...)", "min": "min(a, b, ...)", "mod": "mod(x, y)",
+    "sum": "sum(expr, var, from, to)", "product": "product(expr, var, from, to)",
+    "nintegrate": "nintegrate(expr, var, from, to)",
+    "diff": "diff(expr, var)", "nderiv": "nderiv(expr, var)",
+    "det": "det(M)", "invert": "invert(M)", "transpose": "transpose(M)",
+    "identity": "identity(n)", "el": "el(M, row, col)",
+    "rows": "rows(M)", "cols": "cols(M)",
+    "mean": "mean(list)", "median": "median(list)", "stdev": "stdev(list)",
+    "sort": "sort(list)", "reverse": "reverse(list)", "length": "length(list)",
+    "if": "if(val, cond, ...)", "for": "for(body, var, start, end)",
+    "while": "while(body, cond)", "line": "line(expr1, expr2, ...)",
+    "range": "range(start, end, [step])", "eval": "eval(expr)",
+    "mat": "mat(v1, ..., rows, cols)",
+    "re": "re(z)", "im": "im(z)", "arg": "arg(z)", "conj": "conj(z)",
+    "Gamma": "Gamma(x)", "Beta": "Beta(a, b)", "erf": "erf(x)",
+    "solve": "solve(expr, var, guess)",
+    "augment": "augment(M1, M2)", "stack": "stack(M1, M2)",
+    "col": "col(M, index)", "submatrix": "submatrix(M, r1, c1, r2, c2)",
+    "tr": "tr(M)", "num2str": "num2str(x)", "str2num": "str2num(s)",
+}
+
 
 class MathEditor:
     """Canvas-based WYSIWYG math expression editor."""
@@ -241,6 +281,9 @@ class MathEditor:
         self._ac_suggestions: list[str] = []
         self._ac_selected: int = 0
         self._ac_prefix: str = ""
+
+        # Function hint state
+        self._hint_items: list[int] = []
 
         self.render()
         self._start_blink()
@@ -349,7 +392,9 @@ class MathEditor:
             else:
                 self._move_down()
         elif keysym == "Tab":
-            if event.state & 0x1:
+            if not (event.state & 0x1) and self._ac_visible:
+                self._accept_autocomplete()
+            elif event.state & 0x1:
                 self._tab_prev()
             else:
                 self._tab_next()
@@ -446,8 +491,24 @@ class MathEditor:
                                     self._active_slot = item.cells[r_idx + 1][0]
                                     self._active_slot.cursor_pos = 0
                                     return
+                    if isinstance(item, ESystem):
+                        for r_idx, row in enumerate(item.rows):
+                            if self._active_slot is row:
+                                if r_idx + 1 < len(item.rows):
+                                    self._active_slot = item.rows[r_idx + 1]
+                                    self._active_slot.cursor_pos = 0
+                                else:
+                                    new_row = EditSlot()
+                                    item.rows.append(new_row)
+                                    self._active_slot = new_row
+                                    self._active_slot.cursor_pos = 0
+                                return
             slot.items.insert(pos, EOp(","))
             slot.cursor_pos = pos + 1
+            return
+
+        if ch == "{":
+            self._do_system()
             return
 
         if ch == "\\":
@@ -464,6 +525,17 @@ class MathEditor:
             unit = EUnit("")
             slot.items.insert(pos, unit)
             slot.cursor_pos = pos + 1
+            return
+
+        if ch == "}":
+            if self._slot_stack:
+                parent = self._slot_stack[-1]
+                for i, item in enumerate(parent.items):
+                    if isinstance(item, ESystem):
+                        if self._active_slot in item.rows:
+                            self._active_slot = self._slot_stack.pop()
+                            self._active_slot.cursor_pos = i + 1
+                            return
             return
 
         if pos > 0 and isinstance(slot.items[pos - 1], EText):
@@ -629,6 +701,25 @@ class MathEditor:
         self._active_slot = r.end_slot
         self._active_slot.cursor_pos = 0
 
+    def _do_system(self):
+        slot = self._active_slot
+        pos = slot.cursor_pos
+        sys = ESystem()
+        if pos > 0:
+            prev_items = slot.items[:pos]
+            slot.items = slot.items[pos:]
+            sys.rows[0].items = prev_items
+            sys.rows[0].cursor_pos = len(prev_items)
+            pos = 0
+        slot.items.insert(pos, sys)
+        slot.cursor_pos = pos + 1
+        self._slot_stack.append(slot)
+        if sys.rows[0].items:
+            self._active_slot = sys.rows[1]
+        else:
+            self._active_slot = sys.rows[0]
+        self._active_slot.cursor_pos = 0
+
     def _do_matrix(self, rows: int = 2, cols: int = 2):
         slot = self._active_slot
         pos = slot.cursor_pos
@@ -653,7 +744,7 @@ class MathEditor:
                 item.name = item.name[:-1]
             elif isinstance(item, (EFraction, ESuperscript, EParens, ESqrt, EAbs,
                                     EMatrix, ESummation, EProduct, EIntegral,
-                                    ERange, EDerivative)):
+                                    ERange, EDerivative, ESystem)):
                 contents = self._flatten_structure(item)
                 slot.items.pop(pos - 1)
                 for j, c in enumerate(contents):
@@ -711,6 +802,11 @@ class MathEditor:
             result = list(item.start_slot.items)
             result.extend(item.end_slot.items)
             return result if result else []
+        if isinstance(item, ESystem):
+            result = []
+            for row in item.rows:
+                result.extend(row.items)
+            return result if result else []
         return [item]
 
     # ---- Navigation ----
@@ -745,6 +841,8 @@ class MathEditor:
             return slots
         if isinstance(item, EDerivative):
             return [item.body_slot, item.var_slot]
+        if isinstance(item, ESystem):
+            return list(item.rows)
         return []
 
     def _move_left(self):
@@ -777,9 +875,9 @@ class MathEditor:
                 self._active_slot = item.body_slot
                 self._active_slot.cursor_pos = len(self._active_slot.items)
             elif isinstance(item, EDerivative):
-                body = self._slot_to_text(item.body_slot) or "f"
-                var = self._slot_to_text(item.var_slot) or "x"
-                parts.append(f"diff({body}, {var})")
+                self._slot_stack.append(slot)
+                self._active_slot = item.body_slot
+                self._active_slot.cursor_pos = len(self._active_slot.items)
             elif isinstance(item, EIntegral):
                 self._slot_stack.append(slot)
                 self._active_slot = item.body_slot
@@ -787,6 +885,10 @@ class MathEditor:
             elif isinstance(item, ERange):
                 self._slot_stack.append(slot)
                 self._active_slot = item.end_slot
+                self._active_slot.cursor_pos = len(self._active_slot.items)
+            elif isinstance(item, ESystem):
+                self._slot_stack.append(slot)
+                self._active_slot = item.rows[-1]
                 self._active_slot.cursor_pos = len(self._active_slot.items)
         elif self._slot_stack:
             parent = self._slot_stack[-1]
@@ -843,6 +945,10 @@ class MathEditor:
                 self._slot_stack.append(slot)
                 self._active_slot = item.start_slot
                 self._active_slot.cursor_pos = 0
+            elif isinstance(item, ESystem):
+                self._slot_stack.append(slot)
+                self._active_slot = item.rows[0]
+                self._active_slot.cursor_pos = 0
             else:
                 slot.cursor_pos += 1
         elif self._slot_stack:
@@ -876,6 +982,15 @@ class MathEditor:
                             len(self._active_slot.items),
                         )
                         return
+                if isinstance(item, ESystem):
+                    for r_idx, row in enumerate(item.rows):
+                        if self._active_slot is row and r_idx > 0:
+                            self._active_slot = item.rows[r_idx - 1]
+                            self._active_slot.cursor_pos = min(
+                                self._active_slot.cursor_pos,
+                                len(self._active_slot.items),
+                            )
+                            return
 
     def _move_down(self):
         if self._slot_stack:
@@ -889,6 +1004,15 @@ class MathEditor:
                             len(self._active_slot.items),
                         )
                         return
+                if isinstance(item, ESystem):
+                    for r_idx, row in enumerate(item.rows):
+                        if self._active_slot is row and r_idx + 1 < len(item.rows):
+                            self._active_slot = item.rows[r_idx + 1]
+                            self._active_slot.cursor_pos = min(
+                                self._active_slot.cursor_pos,
+                                len(self._active_slot.items),
+                            )
+                            return
 
     def _tab_next(self):
         if not self._slot_stack:
@@ -986,6 +1110,7 @@ class MathEditor:
             self._draw_cursor()
 
         self._update_autocomplete()
+        self._update_function_hint()
 
     def _measure_slot_only(self, slot: EditSlot, fs: int) -> _Box:
         return self._measure_slot(slot, fs)
@@ -1101,6 +1226,20 @@ class MathEditor:
         if isinstance(item, EUnit):
             w, h = self._text_size(item.name or " ", fs)
             return _Box(w, h, h * 0.6)
+        if isinstance(item, EMatrix):
+            return self._measure_matrix(item, fs)
+        if isinstance(item, ESummation):
+            return self._measure_sum_prod(item, fs)
+        if isinstance(item, EProduct):
+            return self._measure_sum_prod(item, fs)
+        if isinstance(item, EIntegral):
+            return self._measure_integral(item, fs)
+        if isinstance(item, ERange):
+            return self._measure_range(item, fs)
+        if isinstance(item, EDerivative):
+            return self._measure_derivative(item, fs)
+        if isinstance(item, ESystem):
+            return self._measure_system(item, fs)
         return _Box(0, 0, 0)
 
     def _measure_sqrt(self, item: ESqrt, fs: int) -> _Box:
@@ -1200,6 +1339,8 @@ class MathEditor:
             self._render_range(item, x, y, fs)
         elif isinstance(item, EDerivative):
             self._render_derivative(item, x, y, fs)
+        elif isinstance(item, ESystem):
+            self._render_system(item, x, y, fs)
 
     def _render_text(self, item: EText, x: float, y: float, fs: int):
         style = self._text_style(item.text)
@@ -1453,6 +1594,54 @@ class MathEditor:
         cx += dots_w
         self._render_slot(item.end_slot, cx, y, fs)
 
+    def _measure_system(self, item: ESystem, fs: int) -> _Box:
+        brace_w = max(int(fs * 0.8), 10)
+        row_pad = 4
+        max_w = 0.0
+        total_h = 0.0
+        for row in item.rows:
+            rb = self._measure_slot(row, fs)
+            max_w = max(max_w, rb.width)
+            total_h += rb.height + row_pad
+        total_h -= row_pad
+        total_h = max(total_h, self._line_height(fs))
+        return _Box(brace_w + 4 + max_w, total_h, total_h * 0.5)
+
+    def _render_system(self, item: ESystem, x: float, y: float, fs: int):
+        brace_w = max(int(fs * 0.8), 10)
+        row_pad = 4
+        row_boxes = []
+        total_h = 0.0
+        for row in item.rows:
+            rb = self._measure_slot(row, fs)
+            row_boxes.append(rb)
+            total_h += rb.height + row_pad
+        total_h -= row_pad
+        total_h = max(total_h, self._line_height(fs))
+        # Draw curly brace
+        brace_fs = max(int(total_h * 0.7), fs)
+        f = self._get_font(brace_fs)
+        tid = self.canvas.create_text(
+            x, y + total_h * 0.15, text="{",
+            anchor="nw", font=f, fill=_OPERATOR_COLOR)
+        self._items.append(tid)
+        # If brace doesn't span full height, draw vertical lines
+        if total_h > self._line_height(fs) * 1.5:
+            mid_y = y + total_h * 0.5
+            lid = self.canvas.create_line(
+                x + 3, y + 2, x + 3, mid_y - 4,
+                fill=_OPERATOR_COLOR, width=1)
+            self._items.append(lid)
+            lid2 = self.canvas.create_line(
+                x + 3, mid_y + 4, x + 3, y + total_h - 2,
+                fill=_OPERATOR_COLOR, width=1)
+            self._items.append(lid2)
+        content_x = x + brace_w + 4
+        cy = y
+        for row, rb in zip(item.rows, row_boxes):
+            self._render_slot(row, content_x, cy, fs)
+            cy += rb.height + row_pad
+
     def _measure_sum_prod(self, item, fs: int) -> _Box:
         small_fs = max(int(fs * 0.65), 6)
         sym_w, sym_h = self._text_size("∑", int(fs * 1.5))
@@ -1636,6 +1825,12 @@ class MathEditor:
                 body = self._slot_to_text(item.body_slot) or "f"
                 var = self._slot_to_text(item.var_slot) or "x"
                 parts.append(f"diff({body}, {var})")
+            elif isinstance(item, ESystem):
+                row_texts = []
+                for row in item.rows:
+                    rt = self._slot_to_text(row) or "0"
+                    row_texts.append(rt)
+                parts.append("line(" + ", ".join(row_texts) + ")")
             elif isinstance(item, EUnit):
                 parts.append(f"'{item.name}'")
         return "".join(parts)
@@ -1749,6 +1944,15 @@ class MathEditor:
                 self._ast_to_slot(node.args[3], p.upper_slot)
                 p.upper_slot.cursor_pos = len(p.upper_slot.items)
                 slot.items.append(p)
+            elif node.name == "line" and len(node.args) >= 2:
+                sys = ESystem()
+                sys.rows = []
+                for arg in node.args:
+                    row_slot = EditSlot()
+                    self._ast_to_slot(arg, row_slot)
+                    row_slot.cursor_pos = len(row_slot.items)
+                    sys.rows.append(row_slot)
+                slot.items.append(sys)
             else:
                 slot.items.append(EText(node.name))
                 parens = EParens()
@@ -1857,11 +2061,58 @@ class MathEditor:
         return True
 
     # ================================================================
+    # Function hints
+    # ================================================================
+
+    def _update_function_hint(self):
+        self._hide_function_hint()
+        if self._ac_visible:
+            return
+        func_name = self._find_enclosing_function()
+        if func_name and func_name in _FUNCTION_HINTS:
+            hint_text = _FUNCTION_HINTS[func_name]
+            cx = self._cursor_rx or self.x
+            cy = (self._cursor_ry or self.y) - self._line_height(self.font_size) - 4
+            if cy < self.y - 20:
+                cy = (self._cursor_ry or self.y) + (self._cursor_rh or 16) + 2
+            f = self._get_font(max(self.font_size - 2, 8))
+            tw, th = self._text_size(hint_text, max(self.font_size - 2, 8))
+            bg = self.canvas.create_rectangle(
+                cx - 2, cy - 1, cx + tw + 6, cy + th + 2,
+                fill="#ffffcc", outline="#cccc88", width=1)
+            self._hint_items.append(bg)
+            tid = self.canvas.create_text(
+                cx + 2, cy, text=hint_text, anchor="nw",
+                font=f, fill="#666666")
+            self._hint_items.append(tid)
+
+    def _hide_function_hint(self):
+        for item_id in self._hint_items:
+            try:
+                self.canvas.delete(item_id)
+            except Exception:
+                pass
+        self._hint_items.clear()
+
+    def _find_enclosing_function(self) -> Optional[str]:
+        if not self._slot_stack:
+            return None
+        parent = self._slot_stack[-1]
+        for i, item in enumerate(parent.items):
+            if isinstance(item, EParens) and item.inner is self._active_slot:
+                if i > 0 and isinstance(parent.items[i - 1], EText):
+                    name = parent.items[i - 1].text
+                    if name in _FUNCTION_HINTS:
+                        return name
+        return None
+
+    # ================================================================
     # Cleanup
     # ================================================================
 
     def destroy(self):
         self._hide_autocomplete()
+        self._hide_function_hint()
         self.stop_blink()
         for item_id in self._items:
             try:

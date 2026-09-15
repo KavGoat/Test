@@ -1128,15 +1128,38 @@ class MathRenderer:
         return RenderBox(total_w, line_h, line_h / 2)
 
     def _render_line_block(self, c, node: FunctionCall, x, y, fs, ctx) -> RenderBox:
-        """Render a line() block (multi-line expression group)."""
-        cy = y
+        """Render a line() block as system of equations with curly brace."""
+        brace_w = max(int(fs * 0.8), 10)
+        row_pad = 4
+        content_x = x + brace_w + 4
+        # Measure rows first
+        row_data = []
+        total_h = 0.0
         max_w = 0.0
         for arg in node.args:
-            ab = self._render_node(c, arg, x, cy, fs, ctx)
-            max_w = max(max_w, ab.width)
-            cy += ab.height + 4
-        total_h = cy - y - 4 if node.args else 0
-        return RenderBox(max_w, max(total_h, 1), total_h / 2)
+            am = self._measure_node(arg, fs, ctx)
+            row_data.append(am)
+            max_w = max(max_w, am.width)
+            total_h += am.height + row_pad
+        total_h -= row_pad if node.args else 0
+        total_h = max(total_h, self._text_size(c, "X", fs)[1])
+        # Draw curly brace
+        brace_fs = max(int(total_h * 0.7), fs)
+        f_brace = self._get_font(c, brace_fs)
+        c.create_text(x, y + total_h * 0.15, text="{", anchor="nw",
+                      font=f_brace, fill=_OPERATOR_COLOR)
+        if total_h > self._text_size(c, "X", fs)[1] * 1.5:
+            mid_y = y + total_h * 0.5
+            c.create_line(x + 3, y + 2, x + 3, mid_y - 4,
+                         fill=_OPERATOR_COLOR, width=1)
+            c.create_line(x + 3, mid_y + 4, x + 3, y + total_h - 2,
+                         fill=_OPERATOR_COLOR, width=1)
+        # Render rows
+        cy = y
+        for arg, am in zip(node.args, row_data):
+            self._render_node(c, arg, content_x, cy, fs, ctx)
+            cy += am.height + row_pad
+        return RenderBox(brace_w + 4 + max_w, max(total_h, 1), total_h / 2)
 
     # -----------------------------------------------------------------
     # Result rendering
@@ -1311,17 +1334,17 @@ def _format_number(val) -> str:
     return str(val)
 
 
-def _format_result(val: Any, precision: int = 4) -> str:
+def _format_result(val: Any, precision: int = 4, trailing_zeros: bool = False) -> str:
     """Format an evaluation result for display."""
     if isinstance(val, Quantity):
-        num = _format_result(val.value, precision)
+        num = _format_result(val.value, precision, trailing_zeros)
         unit_str = val.display_unit if hasattr(val, 'display_unit') else str(val.unit)
         return f"{num} {unit_str}".strip()
     if isinstance(val, np.ndarray):
         return f"[{val.shape[0]}×{val.shape[1] if val.ndim > 1 else 1} matrix]"
     if isinstance(val, complex):
-        rp = _format_result(val.real, precision)
-        ip = _format_result(abs(val.imag), precision)
+        rp = _format_result(val.real, precision, trailing_zeros)
+        ip = _format_result(abs(val.imag), precision, trailing_zeros)
         if val.imag == 0:
             return rp
         if val.real == 0:
@@ -1337,13 +1360,20 @@ def _format_result(val: Any, precision: int = 4) -> str:
         if val == float('-inf'):
             return "-∞"
         if val == int(val) and abs(val) < 1e15:
+            if trailing_zeros and precision > 0:
+                return f"{val:.{precision}f}"
             return str(int(val))
         if abs(val) < 1e-4 or abs(val) >= 1e6:
             return f"{val:.{precision}e}"
-        return f"{val:.{precision}f}".rstrip("0").rstrip(".")
+        result = f"{val:.{precision}f}"
+        if not trailing_zeros:
+            result = result.rstrip("0").rstrip(".")
+        return result
     if isinstance(val, bool):
         return "1" if val else "0"
     if isinstance(val, int):
+        if trailing_zeros and precision > 0:
+            return f"{float(val):.{precision}f}"
         return str(val)
     if isinstance(val, str):
         return val
