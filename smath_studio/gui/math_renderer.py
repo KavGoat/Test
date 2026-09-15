@@ -928,18 +928,19 @@ class MathRenderer:
             if isinstance(result, ASTNode):
                 rb = self._render_node(canvas, result, res_x, y, font_size, context)
             else:
-                res_text = _format_result(result, precision)
-                res_color = _UNIT_COLOR if isinstance(result, Quantity) else _NUMBER_COLOR
-
                 try:
                     if isinstance(result, np.ndarray):
                         rb = self._render_matrix_value(canvas, result, res_x, y, font_size)
+                    elif isinstance(result, Quantity):
+                        rb = self._render_quantity_result(canvas, result, res_x, eq_y, font_size, precision)
                     else:
-                        canvas.create_text(res_x, eq_y, text=res_text, anchor="nw", font=f, fill=res_color)
+                        res_text = _format_result(result, precision)
+                        canvas.create_text(res_x, eq_y, text=res_text, anchor="nw", font=f, fill=_NUMBER_COLOR)
                         rw, rh = self._text_size(canvas, res_text, font_size)
                         rb = RenderBox(rw, rh, rh / 2)
                 except Exception:
-                    canvas.create_text(res_x, eq_y, text=res_text, anchor="nw", font=f, fill=res_color)
+                    res_text = _format_result(result, precision)
+                    canvas.create_text(res_x, eq_y, text=res_text, anchor="nw", font=f, fill=_NUMBER_COLOR)
                     rw, rh = self._text_size(canvas, res_text, font_size)
                     rb = RenderBox(rw, rh, rh / 2)
 
@@ -948,6 +949,27 @@ class MathRenderer:
             return RenderBox(total_w, total_h, expr_box.baseline)
 
         return expr_box
+
+    def _render_quantity_result(self, c: tk.Canvas, qty: Quantity, x, y, fs, precision=4) -> RenderBox:
+        """Render a Quantity with the number in black and the unit in blue."""
+        f = self._get_font(c, fs)
+        num_text = _format_result(qty.value, precision)
+        unit_str = qty.display_unit if hasattr(qty, 'display_unit') else str(qty.unit)
+
+        # Render number
+        c.create_text(x, y, text=num_text, anchor="nw", font=f, fill=_NUMBER_COLOR)
+        nw, nh = self._text_size(c, num_text, fs)
+
+        total_w = nw
+        if unit_str:
+            # Space before unit
+            sp_w, _ = self._text_size(c, " ", fs)
+            ux = x + nw + sp_w
+            c.create_text(ux, y, text=unit_str, anchor="nw", font=f, fill=_UNIT_COLOR)
+            uw, uh = self._text_size(c, unit_str, fs)
+            total_w = nw + sp_w + uw
+
+        return RenderBox(total_w, nh, nh / 2)
 
     def _render_matrix_value(self, c, arr: np.ndarray, x, y, fs) -> RenderBox:
         """Render a numpy array as a bracketed matrix."""
@@ -1027,7 +1049,7 @@ def _format_result(val: Any, precision: int = 4) -> str:
     """Format an evaluation result for display."""
     if isinstance(val, Quantity):
         num = _format_result(val.value, precision)
-        unit_str = str(val.unit) if hasattr(val, 'unit') else ""
+        unit_str = val.display_unit if hasattr(val, 'display_unit') else str(val.unit)
         return f"{num} {unit_str}".strip()
     if isinstance(val, np.ndarray):
         return f"[{val.shape[0]}×{val.shape[1] if val.ndim > 1 else 1} matrix]"

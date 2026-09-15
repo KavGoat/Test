@@ -179,13 +179,106 @@ class Quantity:
         return f"Quantity({self.value}, {self.unit.name})"
 
     def __str__(self):
-        return f"{self.value} {self.unit.name}"
+        return f"{self.value} {simplify_unit_name(self.unit.name)}"
+
+    @property
+    def display_unit(self) -> str:
+        return simplify_unit_name(self.unit.name)
 
     def to_unit(self, target_unit: Unit) -> "Quantity":
         """Convert this quantity to a different unit of the same dimension."""
         si_val = self.value * self.unit.si_factor
         new_val = si_val / target_unit.si_factor
         return Quantity(new_val, target_unit)
+
+
+def simplify_unit_name(name: str) -> str:
+    """Simplify a compound unit name like 'm*m*m/kg*s*s' to 'm^3/(kg·s^2)'.
+
+    Handles nested compound names produced by repeated arithmetic, e.g.
+    'kg*m/s*s*kg/km^2*s^2' by flattening all tokens into a single
+    numerator/denominator collection.
+    """
+    if not name or name == "1":
+        return ""
+
+    totals: dict[str, float] = {}
+
+    def _parse_token(tok: str) -> tuple[str, float]:
+        tok = tok.strip()
+        if not tok:
+            return ("", 1.0)
+        if "^" in tok:
+            base, exp_s = tok.rsplit("^", 1)
+            try:
+                return base.strip(), float(exp_s)
+            except ValueError:
+                return tok, 1.0
+        return tok, 1.0
+
+    def _collect(expr: str, sign: float):
+        """Recursively flatten unit tokens from a compound expression."""
+        expr = expr.strip().strip("()")
+        if not expr or expr == "1":
+            return
+
+        # Split on the first '/' that isn't inside parentheses
+        slash_pos = -1
+        depth = 0
+        for i, ch in enumerate(expr):
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+            elif ch == "/" and depth == 0 and i > 0:
+                slash_pos = i
+                break
+
+        if slash_pos >= 0:
+            num_part = expr[:slash_pos]
+            den_part = expr[slash_pos + 1:]
+            _collect(num_part, sign)
+            _collect(den_part, -sign)
+        else:
+            # Split by * or · within this part
+            for tok_str in re.split(r"[*·]", expr):
+                tok_str = tok_str.strip()
+                if not tok_str or tok_str == "1":
+                    continue
+                # If the token itself contains a slash, recurse
+                if "/" in tok_str:
+                    _collect(tok_str, sign)
+                else:
+                    base, exp = _parse_token(tok_str)
+                    if base:
+                        totals[base] = totals.get(base, 0) + exp * sign
+
+    _collect(name, 1.0)
+
+    # Split into numerator (positive exponents) and denominator (negative)
+    def _fmt(base: str, exp: float) -> str:
+        aexp = abs(exp)
+        if abs(aexp - 1.0) < 1e-12:
+            return base
+        if aexp == int(aexp):
+            return f"{base}^{int(aexp)}"
+        return f"{base}^{aexp}"
+
+    num_strs = [_fmt(b, e) for b, e in sorted(totals.items()) if e > 1e-12]
+    den_strs = [_fmt(b, e) for b, e in sorted(totals.items()) if e < -1e-12]
+
+    if not num_strs and not den_strs:
+        return ""
+    if not den_strs:
+        return "·".join(num_strs)
+    if not num_strs:
+        num_strs = ["1"]
+
+    num_text = "·".join(num_strs)
+    den_text = "·".join(den_strs)
+    if len(den_strs) > 1:
+        return f"{num_text}/({den_text})"
+    return f"{num_text}/{den_text}"
 
 
 def _convert_value(value: float, from_unit: Unit, to_unit: Unit) -> float:

@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import base64
+import io
 import math
 import tkinter as tk
 from tkinter import ttk, font as tkfont
 from typing import Any, Optional
+
+from PIL import Image, ImageTk
 
 from ..parser import Worksheet, Region, TextContent, TextParagraph
 from ..context import EvalContext, create_default_context
@@ -22,6 +26,14 @@ try:
     _HAS_MATH_RENDERER = True
 except Exception:
     _HAS_MATH_RENDERER = False
+
+# Try importing the plot renderer for matplotlib-based plot rendering.
+try:
+    from .plot_renderer import render_plot
+    from PIL import ImageTk
+    _HAS_PLOT_RENDERER = True
+except Exception:
+    _HAS_PLOT_RENDERER = False
 
 
 # ---------------------------------------------------------------------------
@@ -91,7 +103,8 @@ def _expr_to_text(node: Optional[ASTNode]) -> str:
 def _format_value(val: Any, precision: int = 4) -> str:
     """Format an evaluated value for display."""
     if isinstance(val, Quantity):
-        return f"{val.value:.{precision}g} {val.unit.name}"
+        unit_str = val.display_unit if hasattr(val, 'display_unit') else val.unit.name
+        return f"{val.value:.{precision}g} {unit_str}"
     if isinstance(val, float):
         if math.isnan(val):
             return "NaN"
@@ -140,6 +153,7 @@ class WorksheetCanvas(ttk.Frame):
         self._rendered: list[_RenderedRegion] = []
         self._selected_index: Optional[int] = None
         self._selection_items: list[int] = []
+        self._photo_cache: list = []
 
         # Build canvas with scrollbars
         self._canvas = tk.Canvas(
@@ -212,6 +226,7 @@ class WorksheetCanvas(ttk.Frame):
         self._canvas.delete("all")
         self._rendered.clear()
         self._selection_items.clear()
+        self._photo_cache.clear()
         self._selected_index = None
         self._worksheet = None
         self._ctx = None
@@ -249,6 +264,7 @@ class WorksheetCanvas(ttk.Frame):
         self._canvas.delete("all")
         self._rendered.clear()
         self._selection_items.clear()
+        self._photo_cache.clear()
 
         ws = self._worksheet
         if ws is None:
@@ -584,11 +600,27 @@ class WorksheetCanvas(ttk.Frame):
         return items
 
     def _render_plot_placeholder(self, region: Region, x: int, y: int) -> list[int]:
-        """Render a placeholder for plot regions."""
+        """Render a plot region using matplotlib, falling back to a placeholder."""
         items: list[int] = []
         w = max(region.width, 200)
         h = max(region.height, 150)
 
+        # Try to render using matplotlib
+        if _HAS_PLOT_RENDERER and region.plot is not None:
+            try:
+                ctx = self._ctx if self._ctx is not None else create_default_context()
+                pil_img = render_plot(region.plot, ctx, width=w, height=h)
+                tk_img = ImageTk.PhotoImage(pil_img)
+                self._photo_cache.append(tk_img)
+                img_id = self._canvas.create_image(
+                    x, y, image=tk_img, anchor=tk.NW,
+                )
+                items.append(img_id)
+                return items
+            except Exception:
+                pass  # Fall through to placeholder
+
+        # Fallback: simple placeholder
         rect_id = self._canvas.create_rectangle(
             x, y, x + w, y + h,
             fill="#f8f8f8", outline="#cccccc",
@@ -606,11 +638,31 @@ class WorksheetCanvas(ttk.Frame):
         return items
 
     def _render_picture_placeholder(self, region: Region, x: int, y: int) -> list[int]:
-        """Render a placeholder for picture regions."""
+        """Render an embedded picture, or a placeholder if decoding fails."""
         items: list[int] = []
         w = max(region.width, 80)
         h = max(region.height, 60)
 
+        # Attempt to decode and display the actual image data.
+        pic = region.picture
+        if pic is not None and pic.data:
+            try:
+                raw_bytes = base64.b64decode(pic.data)
+                pil_image = Image.open(io.BytesIO(raw_bytes))
+                # Resize to fit the region dimensions while preserving aspect ratio.
+                pil_image.thumbnail((w, h), Image.LANCZOS)
+                photo = ImageTk.PhotoImage(pil_image)
+                # Keep a reference so the image is not garbage-collected.
+                self._photo_cache.append(photo)
+                img_id = self._canvas.create_image(
+                    x, y, image=photo, anchor=tk.NW,
+                )
+                items.append(img_id)
+                return items
+            except Exception:
+                pass  # Fall through to placeholder below.
+
+        # Fallback placeholder when image data is missing or cannot be decoded.
         rect_id = self._canvas.create_rectangle(
             x, y, x + w, y + h,
             fill="#f0f0f0", outline="#cccccc",
