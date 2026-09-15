@@ -388,6 +388,9 @@ class SMathApp:
             self._status_position.config(text=f"Position: {cx}, {cy}")
             zoom = self._canvas_widget.get_zoom_percent()
             self._status_zoom.config(text=f"{zoom}%")
+            info = self._canvas_widget.get_selected_info()
+            if info:
+                self._status_info.config(text=info)
         except Exception:
             pass
         self._root.after(250, self._update_status_bar)

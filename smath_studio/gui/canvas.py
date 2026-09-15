@@ -210,6 +210,12 @@ class WorksheetCanvas(ttk.Frame):
         self._hover_index: Optional[int] = None
         self._hover_items: list[int] = []
 
+        # Selection rubberband state
+        self._rubberband = False
+        self._rb_start_x = 0
+        self._rb_start_y = 0
+        self._rb_item: Optional[int] = None
+
         # Events
         self._canvas.bind("<Button-1>", self._on_click)
         self._canvas.bind("<Double-Button-1>", self._on_double_click)
@@ -323,6 +329,29 @@ class WorksheetCanvas(ttk.Frame):
             return (cx, cy)
         except Exception:
             return (0, 0)
+
+    def get_selected_info(self) -> str:
+        """Return a description of the selected region for the status bar."""
+        if self._editing:
+            return "Editing"
+        if self._selected_index is None:
+            return "Ready"
+        if self._selected_index >= len(self._rendered):
+            return "Ready"
+        region = self._rendered[self._selected_index].region
+        if region.math and region.math.input_expr:
+            expr = _expr_to_text(region.math.input_expr)
+            if len(expr) > 40:
+                expr = expr[:37] + "..."
+            return f"Math: {expr}"
+        if region.text_contents:
+            tc = self._get_text_content(region.text_contents)
+            if tc and tc.paragraphs:
+                text = tc.paragraphs[0].text
+                if len(text) > 40:
+                    text = text[:37] + "..."
+                return f"Text: {text}"
+        return "Selected"
 
     # ------------------------------------------------------------------
     # Evaluation and rendering
@@ -1123,32 +1152,69 @@ class WorksheetCanvas(ttk.Frame):
                 self._hover_items.append(rect)
 
     def _on_drag(self, event: tk.Event):
-        """Handle mouse drag to move selected region."""
-        if self._editing or self._selected_index is None:
-            return
-        if self._selected_index >= len(self._rendered):
+        """Handle mouse drag to move selected region or draw rubberband."""
+        if self._editing:
             return
         cx = int(self._canvas.canvasx(event.x))
         cy = int(self._canvas.canvasy(event.y))
-        dx = cx - self._drag_start_x
-        dy = cy - self._drag_start_y
-        if abs(dx) < 4 and abs(dy) < 4 and not self._dragging:
-            return
-        self._dragging = True
-        rr = self._rendered[self._selected_index]
-        for item_id in rr.items:
-            self._canvas.move(item_id, dx, dy)
-        for item_id in self._selection_items:
-            self._canvas.move(item_id, dx, dy)
-        rr.bbox = (
-            rr.bbox[0] + dx, rr.bbox[1] + dy,
-            rr.bbox[2] + dx, rr.bbox[3] + dy,
-        )
-        self._drag_start_x = cx
-        self._drag_start_y = cy
+
+        if self._selected_index is not None and not self._rubberband:
+            # Moving a selected region
+            if self._selected_index >= len(self._rendered):
+                return
+            dx = cx - self._drag_start_x
+            dy = cy - self._drag_start_y
+            if abs(dx) < 4 and abs(dy) < 4 and not self._dragging:
+                return
+            self._dragging = True
+            rr = self._rendered[self._selected_index]
+            for item_id in rr.items:
+                self._canvas.move(item_id, dx, dy)
+            for item_id in self._selection_items:
+                self._canvas.move(item_id, dx, dy)
+            rr.bbox = (
+                rr.bbox[0] + dx, rr.bbox[1] + dy,
+                rr.bbox[2] + dx, rr.bbox[3] + dy,
+            )
+            self._drag_start_x = cx
+            self._drag_start_y = cy
+        else:
+            # Rubberband selection
+            if not self._rubberband:
+                self._rubberband = True
+                self._rb_start_x = cx
+                self._rb_start_y = cy
+            if self._rb_item is not None:
+                self._canvas.delete(self._rb_item)
+            self._rb_item = self._canvas.create_rectangle(
+                self._rb_start_x, self._rb_start_y, cx, cy,
+                outline="#3366cc", dash=(3, 3), width=1,
+            )
 
     def _on_drag_end(self, event: tk.Event):
-        """Snap region to grid after dragging."""
+        """Snap region to grid after dragging, or complete rubberband selection."""
+        if self._rubberband:
+            cx = int(self._canvas.canvasx(event.x))
+            cy = int(self._canvas.canvasy(event.y))
+            if self._rb_item is not None:
+                self._canvas.delete(self._rb_item)
+                self._rb_item = None
+            # Select all regions within the rubberband rectangle
+            x1 = min(self._rb_start_x, cx)
+            y1 = min(self._rb_start_y, cy)
+            x2 = max(self._rb_start_x, cx)
+            y2 = max(self._rb_start_y, cy)
+            self._multi_selected.clear()
+            for i, rr in enumerate(self._rendered):
+                rx1, ry1, rx2, ry2 = rr.bbox
+                if rx1 >= x1 and ry1 >= y1 and rx2 <= x2 and ry2 <= y2:
+                    self._multi_selected.add(i)
+            if self._multi_selected:
+                first = min(self._multi_selected)
+                self._select_region(first)
+                self._draw_multi_selection()
+            self._rubberband = False
+            return
         if not self._dragging or self._selected_index is None:
             self._dragging = False
             return
