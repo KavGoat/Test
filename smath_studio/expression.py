@@ -118,7 +118,7 @@ class UnaryOp(ASTNode):
             from . import units as units_mod
             if isinstance(val, units_mod.Quantity):
                 return units_mod.Quantity(-val.value, val.unit)
-            return -val
+            return -_num(val)
         return val
 
     def __repr__(self):
@@ -363,10 +363,18 @@ def _apply_binary_op(operator: str, left: Any, right: Any) -> Any:
 
     if operator == "/":
         if lq and rq:
-            return left / right
+            try:
+                return left / right
+            except ZeroDivisionError:
+                return math.inf
         if lq:
-            return left / right
+            try:
+                return left / right
+            except ZeroDivisionError:
+                return math.inf
         if rq:
+            if right.value == 0:
+                return math.inf
             return units_mod.Quantity(_num(left) / right.value, right.unit.reciprocal())
         try:
             import numpy as np
@@ -374,12 +382,18 @@ def _apply_binary_op(operator: str, left: Any, right: Any) -> Any:
                 return left / right
         except ImportError:
             pass
-        return _num(left) / _num(right)
+        r = _num(right)
+        if r == 0:
+            return math.inf
+        return _num(left) / r
 
     if operator == "^":
         if lq:
             exp = _num(right)
-            return left ** exp
+            try:
+                return left ** exp
+            except (ValueError, ZeroDivisionError, OverflowError):
+                return math.inf
         # Matrix power: A^(-1) = inverse
         try:
             import numpy as np
@@ -394,12 +408,18 @@ def _apply_binary_op(operator: str, left: Any, right: Any) -> Any:
                     return np.linalg.matrix_power(arr, int(exp))
         except (ImportError, np.linalg.LinAlgError):
             pass
-        return _num(left) ** _num(right)
+        try:
+            return _num(left) ** _num(right)
+        except (ValueError, ZeroDivisionError, OverflowError):
+            return math.inf
 
     if operator in _COMPARISON_OPS:
-        lv = left.value if lq else _num(left) if not isinstance(left, str) else left
-        rv = right.value if rq else _num(right) if not isinstance(right, str) else right
-        return int(bool(_COMPARISON_OPS[operator](lv, rv)))
+        lv = left.value if lq else _num(left)
+        rv = right.value if rq else _num(right)
+        try:
+            return int(bool(_COMPARISON_OPS[operator](lv, rv)))
+        except TypeError:
+            return 0
 
     if operator == ":":
         # Assignment -- handled at BinaryOp.evaluate level

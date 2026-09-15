@@ -372,7 +372,12 @@ def _parse_region(elem: ET.Element, ns: str) -> Region:
 
 
 def _parse_math(elem: ET.Element, ns: str) -> MathRegion:
-    """Parse a <math> element."""
+    """Parse a <math> element.
+
+    Handles two XML layouts:
+    1. Wrapped: <math><input><e>...</e></input><result>...</result></math>
+    2. Flat:    <math><e>...</e><e>...</e></math>  (older/simpler files)
+    """
     math = MathRegion()
     math.optimize = elem.get("optimize")
 
@@ -404,34 +409,48 @@ def _parse_math(elem: ET.Element, ns: str) -> MathRegion:
             md.text = p.text or ""
         math.descriptions.append(md)
 
-    # Input
+    # Detect format: check for <input> wrapper vs flat <e> children
     input_elem = elem.find(f"{ns}input")
-    if input_elem is not None:
+    has_wrapped = input_elem is not None
+
+    if has_wrapped:
+        # Wrapped format: <e> elements inside <input>, <output>, etc.
         e_elements = list(input_elem.findall(f"{ns}e"))
         math.input_elements = e_elements
         math.input_expr = parse_postfix(e_elements, ns)
 
-    # Output
-    output_elem = elem.find(f"{ns}output")
-    if output_elem is not None:
-        e_elements = list(output_elem.findall(f"{ns}e"))
-        math.output_elements = e_elements
-        math.output_expr = parse_postfix(e_elements, ns)
+        output_elem = elem.find(f"{ns}output")
+        if output_elem is not None:
+            e_elements = list(output_elem.findall(f"{ns}e"))
+            math.output_elements = e_elements
+            math.output_expr = parse_postfix(e_elements, ns)
 
-    # Contract (unit conversion target)
-    contract_elem = elem.find(f"{ns}contract")
-    if contract_elem is not None:
-        e_elements = list(contract_elem.findall(f"{ns}e"))
-        math.contract_elements = e_elements
-        math.contract_expr = parse_postfix(e_elements, ns)
+        contract_elem = elem.find(f"{ns}contract")
+        if contract_elem is not None:
+            e_elements = list(contract_elem.findall(f"{ns}e"))
+            math.contract_elements = e_elements
+            math.contract_expr = parse_postfix(e_elements, ns)
 
-    # Result
-    result_elem = elem.find(f"{ns}result")
-    if result_elem is not None:
-        math.result_action = result_elem.get("action", "numeric")
-        e_elements = list(result_elem.findall(f"{ns}e"))
-        math.result_elements = e_elements
-        math.result_expr = parse_postfix(e_elements, ns)
+        result_elem = elem.find(f"{ns}result")
+        if result_elem is not None:
+            math.result_action = result_elem.get("action", "numeric")
+            e_elements = list(result_elem.findall(f"{ns}e"))
+            math.result_elements = e_elements
+            math.result_expr = parse_postfix(e_elements, ns)
+    else:
+        # Flat format: <e> elements directly under <math>
+        e_tag = f"{ns}e" if ns else "e"
+        all_e = [c for c in elem if c.tag == e_tag]
+        if all_e:
+            math.input_elements = all_e
+            math.input_expr = parse_postfix(all_e, ns)
+
+            # In flat format, check if the expression ends with "=" operator
+            # which means it has a result display
+            last_e = all_e[-1]
+            if last_e.get("type") == "operator" and (last_e.text or "").strip() == "=":
+                math.result_elements = all_e
+                math.result_expr = math.input_expr
 
     return math
 

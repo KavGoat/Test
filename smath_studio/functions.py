@@ -77,10 +77,14 @@ def _builtin_tan(args, ctx):
     return math.tan(_num(args[0].evaluate(ctx)))
 
 def _builtin_asin(args, ctx):
-    return math.asin(_num(args[0].evaluate(ctx)))
+    v = _num(args[0].evaluate(ctx))
+    v = max(-1.0, min(1.0, v))
+    return math.asin(v)
 
 def _builtin_acos(args, ctx):
-    return math.acos(_num(args[0].evaluate(ctx)))
+    v = _num(args[0].evaluate(ctx))
+    v = max(-1.0, min(1.0, v))
+    return math.acos(v)
 
 def _builtin_atan(args, ctx):
     return math.atan(_num(args[0].evaluate(ctx)))
@@ -101,19 +105,30 @@ def _builtin_exp(args, ctx):
     return math.exp(_num(args[0].evaluate(ctx)))
 
 def _builtin_ln(args, ctx):
-    return math.log(_num(args[0].evaluate(ctx)))
+    v = _num(args[0].evaluate(ctx))
+    if v <= 0:
+        return -math.inf if v == 0 else math.nan
+    return math.log(v)
 
 def _builtin_log(args, ctx):
+    v = _num(args[0].evaluate(ctx))
+    if v <= 0:
+        return -math.inf if v == 0 else math.nan
     if len(args) == 1:
-        return math.log10(_num(args[0].evaluate(ctx)))
+        return math.log10(v)
     base = _num(args[1].evaluate(ctx))
-    return math.log(_num(args[0].evaluate(ctx)), base)
+    if base <= 0 or base == 1:
+        return math.nan
+    return math.log(v, base)
 
 def _builtin_sqrt(args, ctx):
     val = args[0].evaluate(ctx)
     if isinstance(val, Quantity):
         return val ** 0.5
-    return math.sqrt(_num(val))
+    v = _num(val)
+    if v < 0:
+        return complex(0, math.sqrt(-v))
+    return math.sqrt(v)
 
 def _builtin_abs(args, ctx):
     val = args[0].evaluate(ctx)
@@ -174,6 +189,299 @@ def _builtin_Gamma(args, ctx):
 
 def _builtin_erf(args, ctx):
     return math.erf(_num(args[0].evaluate(ctx)))
+
+def _builtin_cot(args, ctx):
+    v = _num(args[0].evaluate(ctx))
+    return math.cos(v) / math.sin(v)
+
+def _builtin_sec(args, ctx):
+    return 1.0 / math.cos(_num(args[0].evaluate(ctx)))
+
+def _builtin_csc(args, ctx):
+    return 1.0 / math.sin(_num(args[0].evaluate(ctx)))
+
+def _builtin_acot(args, ctx):
+    return math.atan(1.0 / _num(args[0].evaluate(ctx)))
+
+def _builtin_asec(args, ctx):
+    return math.acos(1.0 / _num(args[0].evaluate(ctx)))
+
+def _builtin_acsc(args, ctx):
+    return math.asin(1.0 / _num(args[0].evaluate(ctx)))
+
+def _builtin_asinh(args, ctx):
+    return math.asinh(_num(args[0].evaluate(ctx)))
+
+def _builtin_acosh(args, ctx):
+    return math.acosh(_num(args[0].evaluate(ctx)))
+
+def _builtin_atanh(args, ctx):
+    return math.atanh(_num(args[0].evaluate(ctx)))
+
+def _builtin_coth(args, ctx):
+    v = _num(args[0].evaluate(ctx))
+    return math.cosh(v) / math.sinh(v)
+
+def _builtin_sech(args, ctx):
+    return 1.0 / math.cosh(_num(args[0].evaluate(ctx)))
+
+def _builtin_csch(args, ctx):
+    return 1.0 / math.sinh(_num(args[0].evaluate(ctx)))
+
+def _builtin_log2(args, ctx):
+    return math.log2(_num(args[0].evaluate(ctx)))
+
+def _builtin_cbrt(args, ctx):
+    v = _num(args[0].evaluate(ctx))
+    return math.copysign(abs(v) ** (1.0/3.0), v)
+
+def _builtin_nthroot(args, ctx):
+    val = _num(args[0].evaluate(ctx))
+    n = _num(args[1].evaluate(ctx))
+    if n == 0:
+        return math.inf
+    return math.copysign(abs(val) ** (1.0/n), val) if val < 0 and n % 2 == 1 else val ** (1.0/n)
+
+def _builtin_Re(args, ctx):
+    val = args[0].evaluate(ctx)
+    if isinstance(val, complex):
+        return val.real
+    return _num(val)
+
+def _builtin_Im(args, ctx):
+    val = args[0].evaluate(ctx)
+    if isinstance(val, complex):
+        return val.imag
+    return 0.0
+
+def _builtin_arg(args, ctx):
+    val = args[0].evaluate(ctx)
+    if isinstance(val, complex):
+        import cmath
+        return cmath.phase(val)
+    v = _num(val)
+    return 0.0 if v >= 0 else math.pi
+
+def _builtin_conj(args, ctx):
+    val = args[0].evaluate(ctx)
+    if isinstance(val, complex):
+        return val.conjugate()
+    return _num(val)
+
+def _builtin_gcd(args, ctx):
+    a = int(_num(args[0].evaluate(ctx)))
+    b = int(_num(args[1].evaluate(ctx)))
+    return math.gcd(a, b)
+
+def _builtin_lcm(args, ctx):
+    a = int(_num(args[0].evaluate(ctx)))
+    b = int(_num(args[1].evaluate(ctx)))
+    return abs(a * b) // math.gcd(a, b) if a and b else 0
+
+def _builtin_isPrime(args, ctx):
+    n = int(_num(args[0].evaluate(ctx)))
+    if n < 2:
+        return 0
+    if n < 4:
+        return 1
+    if n % 2 == 0 or n % 3 == 0:
+        return 0
+    i = 5
+    while i * i <= n:
+        if n % i == 0 or n % (i + 2) == 0:
+            return 0
+        i += 6
+    return 1
+
+def _builtin_Cn(args, ctx):
+    n = int(_num(args[0].evaluate(ctx)))
+    k = int(_num(args[1].evaluate(ctx)))
+    return math.comb(n, k)
+
+def _builtin_Pn(args, ctx):
+    n = int(_num(args[0].evaluate(ctx)))
+    k = int(_num(args[1].evaluate(ctx)))
+    return math.perm(n, k)
+
+def _builtin_length(args, ctx):
+    val = args[0].evaluate(ctx)
+    if isinstance(val, str):
+        return len(val)
+    if HAS_NUMPY and isinstance(val, np.ndarray):
+        return max(val.shape)
+    if isinstance(val, list):
+        return len(val)
+    return 1
+
+def _builtin_submatrix(args, ctx):
+    matrix = args[0].evaluate(ctx)
+    r1 = int(_num(args[1].evaluate(ctx))) - 1
+    c1 = int(_num(args[2].evaluate(ctx))) - 1
+    r2 = int(_num(args[3].evaluate(ctx)))
+    c2 = int(_num(args[4].evaluate(ctx)))
+    if HAS_NUMPY and isinstance(matrix, np.ndarray):
+        return matrix[r1:r2, c1:c2]
+    return matrix
+
+def _builtin_eigenvals(args, ctx):
+    val = args[0].evaluate(ctx)
+    if HAS_NUMPY and isinstance(val, np.ndarray):
+        arr = _ensure_float_array(val)
+        eigenvalues = np.linalg.eigvals(arr)
+        if np.all(np.isreal(eigenvalues)):
+            eigenvalues = np.real(eigenvalues)
+        return eigenvalues.reshape(-1, 1)
+    return val
+
+def _builtin_eigenvecs(args, ctx):
+    val = args[0].evaluate(ctx)
+    if HAS_NUMPY and isinstance(val, np.ndarray):
+        arr = _ensure_float_array(val)
+        _, vecs = np.linalg.eig(arr)
+        return vecs
+    return val
+
+def _builtin_rank(args, ctx):
+    val = args[0].evaluate(ctx)
+    if HAS_NUMPY and isinstance(val, np.ndarray):
+        arr = _ensure_float_array(val)
+        return int(np.linalg.matrix_rank(arr))
+    return 1
+
+def _builtin_norm(args, ctx):
+    val = args[0].evaluate(ctx)
+    if HAS_NUMPY and isinstance(val, np.ndarray):
+        arr = _ensure_float_array(val)
+        return float(np.linalg.norm(arr))
+    return abs(_num(val))
+
+def _builtin_cross(args, ctx):
+    a = args[0].evaluate(ctx)
+    b = args[1].evaluate(ctx)
+    if HAS_NUMPY:
+        a_arr = np.array(_flatten(a), dtype=float) if not isinstance(a, np.ndarray) else a.flatten()
+        b_arr = np.array(_flatten(b), dtype=float) if not isinstance(b, np.ndarray) else b.flatten()
+        return np.cross(a_arr, b_arr).reshape(-1, 1)
+    return 0
+
+def _builtin_dot(args, ctx):
+    a = args[0].evaluate(ctx)
+    b = args[1].evaluate(ctx)
+    if HAS_NUMPY:
+        a_arr = np.array(_flatten(a), dtype=float) if not isinstance(a, np.ndarray) else a.flatten()
+        b_arr = np.array(_flatten(b), dtype=float) if not isinstance(b, np.ndarray) else b.flatten()
+        return float(np.dot(a_arr, b_arr))
+    return 0
+
+def _builtin_zeros(args, ctx):
+    rows = int(_num(args[0].evaluate(ctx)))
+    cols = int(_num(args[1].evaluate(ctx))) if len(args) > 1 else 1
+    if HAS_NUMPY:
+        return np.zeros((rows, cols))
+    return [[0] * cols for _ in range(rows)]
+
+def _builtin_ones(args, ctx):
+    rows = int(_num(args[0].evaluate(ctx)))
+    cols = int(_num(args[1].evaluate(ctx))) if len(args) > 1 else 1
+    if HAS_NUMPY:
+        return np.ones((rows, cols))
+    return [[1] * cols for _ in range(rows)]
+
+def _builtin_diag(args, ctx):
+    val = args[0].evaluate(ctx)
+    if HAS_NUMPY:
+        if isinstance(val, np.ndarray):
+            return np.diag(val.flatten() if val.ndim > 1 else val)
+        return np.diag([_num(val)])
+    return val
+
+def _builtin_solve(args, ctx):
+    A = args[0].evaluate(ctx)
+    b = args[1].evaluate(ctx)
+    if HAS_NUMPY:
+        A_arr = _ensure_float_array(np.array(A) if not isinstance(A, np.ndarray) else A)
+        b_arr = _ensure_float_array(np.array(b) if not isinstance(b, np.ndarray) else b)
+        return np.linalg.solve(A_arr, b_arr)
+    return 0
+
+def _builtin_lsolve(args, ctx):
+    return _builtin_solve(args, ctx)
+
+def _builtin_variance(args, ctx):
+    val = args[0].evaluate(ctx)
+    flat = _flatten_numeric(val)
+    n = len(flat)
+    if n < 2:
+        return 0
+    m = sum(flat) / n
+    return sum((x - m) ** 2 for x in flat) / (n - 1)
+
+def _builtin_sort(args, ctx):
+    val = args[0].evaluate(ctx)
+    if HAS_NUMPY and isinstance(val, np.ndarray):
+        return np.sort(val, axis=0)
+    if isinstance(val, list):
+        return sorted(val, key=lambda x: _num(x) if not isinstance(x, list) else _num(x[0]))
+    return val
+
+def _builtin_reverse(args, ctx):
+    val = args[0].evaluate(ctx)
+    if HAS_NUMPY and isinstance(val, np.ndarray):
+        return val[::-1]
+    if isinstance(val, list):
+        return list(reversed(val))
+    return val
+
+def _builtin_unique(args, ctx):
+    val = args[0].evaluate(ctx)
+    if HAS_NUMPY and isinstance(val, np.ndarray):
+        return np.unique(val).reshape(-1, 1)
+    return val
+
+def _builtin_str2num(args, ctx):
+    val = args[0].evaluate(ctx)
+    try:
+        return float(str(val))
+    except ValueError:
+        return 0.0
+
+def _builtin_strlen(args, ctx):
+    val = args[0].evaluate(ctx)
+    return len(str(val))
+
+def _builtin_substr(args, ctx):
+    s = str(args[0].evaluate(ctx))
+    start = int(_num(args[1].evaluate(ctx)))
+    if len(args) > 2:
+        length = int(_num(args[2].evaluate(ctx)))
+        return s[start:start + length]
+    return s[start:]
+
+def _builtin_strpos(args, ctx):
+    s = str(args[0].evaluate(ctx))
+    sub = str(args[1].evaluate(ctx))
+    pos = s.find(sub)
+    return pos
+
+def _builtin_strsplit(args, ctx):
+    s = str(args[0].evaluate(ctx))
+    delim = str(args[1].evaluate(ctx)) if len(args) > 1 else " "
+    parts = s.split(delim)
+    if HAS_NUMPY:
+        return np.array(parts, dtype=object).reshape(-1, 1)
+    return [[p] for p in parts]
+
+def _builtin_upper(args, ctx):
+    return str(args[0].evaluate(ctx)).upper()
+
+def _builtin_lower(args, ctx):
+    return str(args[0].evaluate(ctx)).lower()
+
+def _builtin_numericValue(args, ctx):
+    val = args[0].evaluate(ctx)
+    if isinstance(val, Quantity):
+        return val.value
+    return _num(val)
 
 
 # ---------------------------------------------------------------------------
@@ -631,8 +939,15 @@ def _builtin_diff(args, ctx):
 
 
 def _builtin_nintegrate(args, ctx):
-    """Numerical integration using Simpson's rule: int(f(x), x, a, b)."""
-    # args: f(x), x, a, b
+    """Numerical integration using Simpson's rule.
+
+    4 args: int(f(x), x, a, b) -- definite integral
+    2 args: int(f(x), x) -- symbolic (not supported, returns 0)
+    """
+    if len(args) < 4:
+        # Indefinite integral / symbolic -- not supported without CAS
+        return 0
+
     func_expr = args[0]
     from .expression import Variable
     var = args[1]
@@ -645,6 +960,8 @@ def _builtin_nintegrate(args, ctx):
     b = _num(args[3].evaluate(ctx))
 
     n = 100  # number of intervals
+    if a == b:
+        return 0.0
     h = (b - a) / n
     total = 0.0
 
@@ -760,18 +1077,34 @@ BUILTIN_FUNCTIONS: dict[str, Callable] = {
     "sin": _builtin_sin,
     "cos": _builtin_cos,
     "tan": _builtin_tan,
+    "cot": _builtin_cot,
+    "sec": _builtin_sec,
+    "csc": _builtin_csc,
     "asin": _builtin_asin,
     "acos": _builtin_acos,
     "atan": _builtin_atan,
+    "acot": _builtin_acot,
+    "asec": _builtin_asec,
+    "acsc": _builtin_acsc,
     "atan2": _builtin_atan2,
+    # Hyperbolic
     "sinh": _builtin_sinh,
     "cosh": _builtin_cosh,
     "tanh": _builtin_tanh,
+    "coth": _builtin_coth,
+    "sech": _builtin_sech,
+    "csch": _builtin_csch,
+    "asinh": _builtin_asinh,
+    "acosh": _builtin_acosh,
+    "atanh": _builtin_atanh,
     # Exponential / log
     "exp": _builtin_exp,
     "ln": _builtin_ln,
     "log": _builtin_log,
+    "log2": _builtin_log2,
     "sqrt": _builtin_sqrt,
+    "cbrt": _builtin_cbrt,
+    "nthroot": _builtin_nthroot,
     # Basic math
     "abs": _builtin_abs,
     "sign": _builtin_sign,
@@ -782,6 +1115,18 @@ BUILTIN_FUNCTIONS: dict[str, Callable] = {
     "min": _builtin_min,
     "mod": _builtin_mod,
     "factorial": _builtin_factorial,
+    "numericValue": _builtin_numericValue,
+    # Complex numbers
+    "Re": _builtin_Re,
+    "Im": _builtin_Im,
+    "arg": _builtin_arg,
+    "conj": _builtin_conj,
+    # Number theory
+    "gcd": _builtin_gcd,
+    "lcm": _builtin_lcm,
+    "isPrime": _builtin_isPrime,
+    "Cn": _builtin_Cn,
+    "Pn": _builtin_Pn,
     # Special
     "Gamma": _builtin_Gamma,
     "erf": _builtin_erf,
@@ -800,10 +1145,27 @@ BUILTIN_FUNCTIONS: dict[str, Callable] = {
     "csort": _builtin_csort,
     "tr": _builtin_tr,
     "polyroots": _builtin_polyroots,
+    "submatrix": _builtin_submatrix,
+    "eigenvals": _builtin_eigenvals,
+    "eigenvecs": _builtin_eigenvecs,
+    "rank": _builtin_rank,
+    "norm": _builtin_norm,
+    "cross": _builtin_cross,
+    "dot": _builtin_dot,
+    "zeros": _builtin_zeros,
+    "ones": _builtin_ones,
+    "diag": _builtin_diag,
+    "solve": _builtin_solve,
+    "lsolve": _builtin_lsolve,
+    "length": _builtin_length,
+    "sort": _builtin_sort,
+    "reverse": _builtin_reverse,
+    "unique": _builtin_unique,
     # Statistics
     "mean": _builtin_mean,
     "median": _builtin_median,
     "stdev": _builtin_stdev,
+    "variance": _builtin_variance,
     # Control flow
     "if": _builtin_if,
     "for": _builtin_for,
@@ -820,7 +1182,14 @@ BUILTIN_FUNCTIONS: dict[str, Callable] = {
     "product": _builtin_product,
     # Conversion / string
     "num2str": _builtin_num2str,
+    "str2num": _builtin_str2num,
     "concat": _builtin_concat,
+    "strlen": _builtin_strlen,
+    "substr": _builtin_substr,
+    "strpos": _builtin_strpos,
+    "strsplit": _builtin_strsplit,
+    "upper": _builtin_upper,
+    "lower": _builtin_lower,
     # System
     "sys": _builtin_sys,
 }
@@ -830,13 +1199,20 @@ def call_builtin(name: str, args: list, context) -> Any:
     """Call a built-in function by name."""
     func = BUILTIN_FUNCTIONS.get(name)
     if func is not None:
-        return func(args, context)
+        try:
+            return func(args, context)
+        except (IndexError, ValueError, TypeError, ZeroDivisionError, OverflowError):
+            # Gracefully handle evaluation errors in builtins
+            return 0
 
     # Unknown function -- try to evaluate args and return something useful
-    evaluated = [a.evaluate(context) for a in args]
-    if len(evaluated) == 1:
-        return evaluated[0]
-    return evaluated
+    try:
+        evaluated = [a.evaluate(context) for a in args]
+        if len(evaluated) == 1:
+            return evaluated[0]
+        return evaluated
+    except Exception:
+        return 0
 
 
 # ---------------------------------------------------------------------------
