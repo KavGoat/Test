@@ -276,6 +276,10 @@ class SMathApp:
         self._root.bind("<Control-p>", lambda e: self._on_print())
         self._root.bind("<Control-P>", lambda e: self._on_print())
         self._root.bind("<F9>", lambda e: self._on_recalculate())
+        self._root.bind("<Control-plus>", lambda e: self._canvas_widget._zoom_in())
+        self._root.bind("<Control-equal>", lambda e: self._canvas_widget._zoom_in())
+        self._root.bind("<Control-minus>", lambda e: self._canvas_widget._zoom_out())
+        self._root.bind("<Control-0>", lambda e: self._reset_zoom())
 
     # ------------------------------------------------------------------
     # Status bar update
@@ -286,6 +290,8 @@ class SMathApp:
         try:
             cx, cy = self._canvas_widget.get_cursor_position()
             self._status_position.config(text=f"Position: {cx}, {cy}")
+            zoom = self._canvas_widget.get_zoom_percent()
+            self._status_zoom.config(text=f"{zoom}%")
         except Exception:
             pass
         self._root.after(250, self._update_status_bar)
@@ -420,9 +426,11 @@ class SMathApp:
     # ------------------------------------------------------------------
 
     def _on_undo(self):
+        self._canvas_widget.undo()
         self._status_info.config(text="Undo")
 
     def _on_redo(self):
+        self._canvas_widget.redo()
         self._status_info.config(text="Redo")
 
     def _safe_cut(self):
@@ -490,6 +498,11 @@ class SMathApp:
         """Recalculate the entire worksheet."""
         self._canvas_widget.recalculate()
         self._status_info.config(text="Recalculated")
+
+    def _reset_zoom(self):
+        self._canvas_widget._zoom = 1.0
+        self._canvas_widget._apply_zoom()
+        self._status_info.config(text="Zoom: 100%")
 
     # ------------------------------------------------------------------
     # Tools

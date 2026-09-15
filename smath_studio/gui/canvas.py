@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import copy
 import io
 import math
 import tkinter as tk
@@ -157,6 +158,11 @@ class WorksheetCanvas(ttk.Frame):
         self._selection_items: list[int] = []
         self._photo_cache: list = []
 
+        # Undo/redo stacks
+        self._undo_stack: list = []
+        self._redo_stack: list = []
+        self._max_undo = 50
+
         # Inline editing state
         self._editing = False
         self._math_editor: Optional[MathEditor] = None
@@ -196,20 +202,31 @@ class WorksheetCanvas(ttk.Frame):
         self._drag_start_x = 0
         self._drag_start_y = 0
 
+        # Hover state
+        self._hover_index: Optional[int] = None
+        self._hover_items: list[int] = []
+
         # Events
         self._canvas.bind("<Button-1>", self._on_click)
         self._canvas.bind("<Double-Button-1>", self._on_double_click)
         self._canvas.bind("<B1-Motion>", self._on_drag)
         self._canvas.bind("<ButtonRelease-1>", self._on_drag_end)
         self._canvas.bind("<Button-3>", self._on_right_click)
+        self._canvas.bind("<Motion>", self._on_motion)
         self._canvas.bind("<Key>", self._on_key)
         self._canvas.bind("<FocusIn>", lambda e: None)
+
+        # Zoom level
+        self._zoom = 1.0
 
         # Mouse-wheel scrolling
         self._canvas.bind("<MouseWheel>", self._on_mousewheel)
         self._canvas.bind("<Button-4>", self._on_mousewheel_linux_up)
         self._canvas.bind("<Button-5>", self._on_mousewheel_linux_down)
         self._canvas.bind("<Shift-MouseWheel>", self._on_shift_mousewheel)
+        self._canvas.bind("<Control-MouseWheel>", self._on_ctrl_mousewheel)
+        self._canvas.bind("<Control-Button-4>", self._on_ctrl_mousewheel_up)
+        self._canvas.bind("<Control-Button-5>", self._on_ctrl_mousewheel_down)
 
         # Context menu
         self._context_menu = tk.Menu(self._canvas, tearoff=0)
@@ -293,12 +310,17 @@ class WorksheetCanvas(ttk.Frame):
         self._canvas.delete("all")
         self._rendered.clear()
         self._selection_items.clear()
+        self._hover_items.clear()
+        self._hover_index = None
         self._photo_cache.clear()
 
         ws = self._worksheet
         if ws is None:
+            self._draw_left_margin()
             self._draw_cursor_marker()
             return
+
+        self._draw_left_margin()
 
         # Draw page boundaries if page model is active
         if ws.settings.page_model.active:
@@ -355,6 +377,15 @@ class WorksheetCanvas(ttk.Frame):
                 page_x, 0, page_x, ph * 5,
                 fill=_PAGE_BOUNDARY_COLOR, dash=(2, 4)
             )
+
+    def _draw_left_margin(self):
+        """Draw a subtle left margin line like SMath Studio."""
+        margin_x = 30
+        h = 5000
+        self._canvas.create_line(
+            margin_x, 0, margin_x, h,
+            fill="#e8e8e8", width=1, tags="margin_line"
+        )
 
     def _draw_cursor_marker(self):
         """Draw a red crosshair at the current cursor position."""
@@ -782,6 +813,14 @@ class WorksheetCanvas(ttk.Frame):
             width=2,
         )
         self._selection_items.append(sel_rect)
+        hs = 3
+        for hx, hy in [(x1 - pad, y1 - pad), (x2 + pad, y1 - pad),
+                        (x1 - pad, y2 + pad), (x2 + pad, y2 + pad)]:
+            h = self._canvas.create_rectangle(
+                hx - hs, hy - hs, hx + hs, hy + hs,
+                fill=_SELECTION_COLOR, outline=_SELECTION_COLOR,
+            )
+            self._selection_items.append(h)
 
     def _hit_test(self, cx: int, cy: int) -> Optional[int]:
         """Return the index of the rendered region at canvas coords (cx, cy)."""
@@ -845,6 +884,62 @@ class WorksheetCanvas(ttk.Frame):
         """Horizontal scroll with Shift+mousewheel."""
         self._canvas.xview_scroll(int(-1 * (event.delta / 120)), "units")
 
+    def _on_ctrl_mousewheel(self, event: tk.Event):
+        """Zoom with Ctrl+mousewheel."""
+        if event.delta > 0:
+            self._zoom_in()
+        else:
+            self._zoom_out()
+
+    def _on_ctrl_mousewheel_up(self, _event):
+        self._zoom_in()
+
+    def _on_ctrl_mousewheel_down(self, _event):
+        self._zoom_out()
+
+    def _zoom_in(self):
+        if self._zoom < 3.0:
+            self._zoom = min(3.0, self._zoom * 1.1)
+            self._apply_zoom()
+
+    def _zoom_out(self):
+        if self._zoom > 0.3:
+            self._zoom = max(0.3, self._zoom / 1.1)
+            self._apply_zoom()
+
+    def _apply_zoom(self):
+        self._canvas.delete("all")
+        self._canvas.scale("all", 0, 0, self._zoom, self._zoom)
+        self._evaluate_and_render()
+
+    def get_zoom_percent(self) -> int:
+        return int(self._zoom * 100)
+
+    def _on_motion(self, event: tk.Event):
+        """Highlight region under mouse on hover."""
+        if self._editing:
+            return
+        cx = int(self._canvas.canvasx(event.x))
+        cy = int(self._canvas.canvasy(event.y))
+        hit = self._hit_test(cx, cy)
+        if hit != self._hover_index:
+            for item_id in self._hover_items:
+                try:
+                    self._canvas.delete(item_id)
+                except Exception:
+                    pass
+            self._hover_items.clear()
+            self._hover_index = hit
+            if hit is not None and hit != self._selected_index:
+                rr = self._rendered[hit]
+                x1, y1, x2, y2 = rr.bbox
+                pad = 2
+                rect = self._canvas.create_rectangle(
+                    x1 - pad, y1 - pad, x2 + pad, y2 + pad,
+                    outline="#aaccee", width=1, dash=(3, 3),
+                )
+                self._hover_items.append(rect)
+
     def _on_drag(self, event: tk.Event):
         """Handle mouse drag to move selected region."""
         if self._editing or self._selected_index is None:
@@ -878,6 +973,7 @@ class WorksheetCanvas(ttk.Frame):
         if self._selected_index >= len(self._rendered):
             self._dragging = False
             return
+        self._save_undo_state()
         rr = self._rendered[self._selected_index]
         region = rr.region
         region.left = _snap(rr.bbox[0])
@@ -911,6 +1007,43 @@ class WorksheetCanvas(ttk.Frame):
 
         if keysym == "Delete":
             self.delete_selected()
+            return "break"
+
+        if keysym == "Return" or keysym == "KP_Enter":
+            if self._selected_index is not None:
+                rr = self._rendered[self._selected_index]
+                region = rr.region
+                if region.math is not None:
+                    self._start_editing(
+                        region.left, region.top, editing_idx=self._selected_index,
+                        ast_node=region.math.input_expr,
+                        has_result=bool(region.math.result_elements),
+                    )
+                elif region.text_contents:
+                    tc = self._get_text_content(region.text_contents)
+                    text = ""
+                    if tc and tc.paragraphs:
+                        text = "\n".join(p.text for p in tc.paragraphs)
+                    self._start_editing(
+                        region.left, region.top, initial_text=text,
+                        editing_idx=self._selected_index, mode="text",
+                    )
+            return "break"
+
+        if keysym in ("Up", "Down", "Left", "Right"):
+            step = _GRID_SIZE * 3
+            if keysym == "Up":
+                self._cursor_y = max(0, self._cursor_y - step)
+            elif keysym == "Down":
+                self._cursor_y += step
+            elif keysym == "Left":
+                self._cursor_x = max(0, self._cursor_x - step)
+            elif keysym == "Right":
+                self._cursor_x += step
+            self._canvas.delete("cursor_marker")
+            self._draw_cursor_marker()
+            hit = self._hit_test(self._cursor_x, self._cursor_y)
+            self._select_region(hit)
             return "break"
 
         if char and ord(char) >= 32 and keysym not in (
@@ -977,6 +1110,102 @@ class WorksheetCanvas(ttk.Frame):
         if self._on_modified:
             self._on_modified()
 
+    def _save_undo_state(self):
+        """Save a snapshot of the current worksheet for undo."""
+        if self._worksheet is None:
+            return
+        try:
+            snapshot = []
+            for r in self._worksheet.regions:
+                snapshot.append(self._snapshot_region(r))
+            self._undo_stack.append(snapshot)
+            if len(self._undo_stack) > self._max_undo:
+                self._undo_stack.pop(0)
+            self._redo_stack.clear()
+        except Exception:
+            pass
+
+    def _snapshot_region(self, r) -> dict:
+        """Create a minimal snapshot of a region's position and expression."""
+        snap = {
+            "id": r.id, "left": r.left, "top": r.top,
+            "width": r.width, "height": r.height,
+            "font_size": r.font_size, "color": r.color,
+            "bg_color": r.bg_color, "border": r.border,
+        }
+        if r.math is not None and r.math.input_expr is not None:
+            from ..infix_parser import ast_to_text
+            snap["math_text"] = ast_to_text(r.math.input_expr)
+            snap["has_result"] = bool(r.math.result_elements)
+        elif r.text_contents:
+            tc = self._get_text_content(r.text_contents)
+            if tc and tc.paragraphs:
+                snap["text"] = "\n".join(p.text for p in tc.paragraphs)
+        children = []
+        for c in r.children:
+            children.append(self._snapshot_region(c))
+        if children:
+            snap["children"] = children
+        return snap
+
+    def _restore_snapshot(self, snapshot: list):
+        """Restore worksheet regions from a snapshot."""
+        if self._worksheet is None:
+            return
+        from ..infix_parser import parse_infix, ast_to_elements
+        self._worksheet.regions.clear()
+        for snap in snapshot:
+            region = Region()
+            region.id = snap["id"]
+            region.left = snap["left"]
+            region.top = snap["top"]
+            region.width = snap["width"]
+            region.height = snap["height"]
+            region.font_size = snap.get("font_size", 10)
+            region.color = snap.get("color", "#000000")
+            region.bg_color = snap.get("bg_color", "#ffffff")
+            region.border = snap.get("border", False)
+            if "math_text" in snap:
+                ast = parse_infix(snap["math_text"])
+                if ast is not None:
+                    math_r = MathRegion()
+                    math_r.input_expr = ast
+                    math_r.input_elements = ast_to_elements(ast)
+                    if snap.get("has_result"):
+                        math_r.result_elements = list(math_r.input_elements)
+                        math_r.result_action = "numeric"
+                    region.math = math_r
+            elif "text" in snap:
+                tc = TextContent(lang="eng")
+                for line in snap["text"].split("\n"):
+                    tc.paragraphs.append(TextParagraph(text=line))
+                region.text_contents.append(tc)
+            self._worksheet.regions.append(region)
+
+    def undo(self):
+        """Undo the last modification."""
+        if not self._undo_stack or self._worksheet is None:
+            return
+        current = []
+        for r in self._worksheet.regions:
+            current.append(self._snapshot_region(r))
+        self._redo_stack.append(current)
+        snapshot = self._undo_stack.pop()
+        self._restore_snapshot(snapshot)
+        self._evaluate_and_render()
+
+    def redo(self):
+        """Redo the last undone modification."""
+        if not self._redo_stack or self._worksheet is None:
+            return
+        current = []
+        for r in self._worksheet.regions:
+            current.append(self._snapshot_region(r))
+        self._undo_stack.append(current)
+        snapshot = self._redo_stack.pop()
+        self._restore_snapshot(snapshot)
+        self._evaluate_and_render()
+
     def ensure_worksheet(self):
         """Create a worksheet if none exists (for new documents)."""
         if self._worksheet is None:
@@ -987,6 +1216,7 @@ class WorksheetCanvas(ttk.Frame):
         """Delete the currently selected region."""
         if self._selected_index is None or self._worksheet is None:
             return
+        self._save_undo_state()
         if self._selected_index >= len(self._rendered):
             return
         rr = self._rendered[self._selected_index]
@@ -1032,6 +1262,7 @@ class WorksheetCanvas(ttk.Frame):
         if ast is None:
             return
         self.ensure_worksheet()
+        self._save_undo_state()
         self._create_new_math_region(ast, self._cursor_x, self._cursor_y)
         self._cursor_y += 30
         self._mark_modified()
@@ -1148,6 +1379,8 @@ class WorksheetCanvas(ttk.Frame):
     def _commit_edit(self):
         if not self._editing:
             return
+
+        self._save_undo_state()
 
         if self._edit_mode == "text":
             entry = getattr(self, "_edit_text_entry", None)

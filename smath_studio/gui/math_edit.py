@@ -58,6 +58,11 @@ class ESqrt(EditItem):
 
 
 @dataclass
+class EAbs(EditItem):
+    inner: EditSlot = field(default_factory=lambda: EditSlot())
+
+
+@dataclass
 class EUnit(EditItem):
     name: str = ""
 
@@ -299,6 +304,10 @@ class MathEditor:
             slot.cursor_pos = pos + 1
             return
 
+        if ch == "|":
+            self._do_abs()
+            return
+
         if ch == "'":
             if pos > 0 and isinstance(slot.items[pos - 1], EUnit):
                 return
@@ -362,6 +371,16 @@ class MathEditor:
                     return
             self._active_slot = self._slot_stack.pop()
 
+    def _do_abs(self):
+        slot = self._active_slot
+        pos = slot.cursor_pos
+        absv = EAbs()
+        slot.items.insert(pos, absv)
+        slot.cursor_pos = pos + 1
+        self._slot_stack.append(slot)
+        self._active_slot = absv.inner
+        self._active_slot.cursor_pos = 0
+
     # ---- Deletion ----
 
     def _do_backspace(self):
@@ -411,6 +430,8 @@ class MathEditor:
             return list(item.inner.items)
         if isinstance(item, ESqrt):
             return list(item.radicand.items)
+        if isinstance(item, EAbs):
+            return list(item.inner.items)
         return [item]
 
     # ---- Navigation ----
@@ -424,6 +445,8 @@ class MathEditor:
             return [item.inner]
         if isinstance(item, ESqrt):
             return [item.radicand]
+        if isinstance(item, EAbs):
+            return [item.inner]
         return []
 
     def _move_left(self):
@@ -725,6 +748,8 @@ class MathEditor:
             return self._measure_parens(item, fs)
         if isinstance(item, ESqrt):
             return self._measure_sqrt(item, fs)
+        if isinstance(item, EAbs):
+            return self._measure_abs(item, fs)
         if isinstance(item, EUnit):
             w, h = self._text_size(item.name or " ", fs)
             return _Box(w, h, h * 0.6)
@@ -736,6 +761,13 @@ class MathEditor:
         w = sym_w + rb.width + 4
         h = max(rb.height + 4, sym_h)
         return _Box(w, h, max(rb.baseline + 2, sym_h * 0.6))
+
+    def _measure_abs(self, item: EAbs, fs: int) -> _Box:
+        ib = self._measure_slot(item.inner, fs)
+        bw, bh = self._text_size("|", fs)
+        w = bw + ib.width + bw + 4
+        h = max(bh, ib.height)
+        return _Box(w, h, max(bh * 0.6, ib.baseline))
 
     def _measure_slot(self, slot: EditSlot, fs: int) -> _Box:
         if not slot.items:
@@ -790,6 +822,8 @@ class MathEditor:
             self._render_parens(item, x, y, fs)
         elif isinstance(item, ESqrt):
             self._render_sqrt(item, x, y, fs)
+        elif isinstance(item, EAbs):
+            self._render_abs(item, x, y, fs)
         elif isinstance(item, EUnit):
             self._render_unit(item, x, y, fs)
 
@@ -883,6 +917,22 @@ class MathEditor:
             rad_x - 1, y, rad_x + rb.width + 2, y,
             fill=_OPERATOR_COLOR, width=1)
         self._items.append(lid)
+
+    def _render_abs(self, item: EAbs, x: float, y: float, fs: int):
+        ib = self._measure_slot(item.inner, fs)
+        f = self._get_font(fs)
+        bw, bh = self._text_size("|", fs)
+
+        lp = self.canvas.create_text(x, y, text="|", anchor="nw",
+                                      font=f, fill=_OPERATOR_COLOR)
+        self._items.append(lp)
+
+        inner_y = y + max(0, (bh - ib.height) / 2)
+        self._render_slot(item.inner, x + bw + 2, inner_y, fs)
+
+        rp = self.canvas.create_text(x + bw + 2 + ib.width + 2, y, text="|",
+                                      anchor="nw", font=f, fill=_OPERATOR_COLOR)
+        self._items.append(rp)
 
     def _render_unit(self, item: EUnit, x: float, y: float, fs: int):
         f = self._get_font(fs)
@@ -986,6 +1036,9 @@ class MathEditor:
             elif isinstance(item, ESqrt):
                 rad = self._slot_to_text(item.radicand) or "0"
                 parts.append(f"sqrt({rad})")
+            elif isinstance(item, EAbs):
+                inner = self._slot_to_text(item.inner) or "0"
+                parts.append(f"abs({inner})")
             elif isinstance(item, EUnit):
                 parts.append(f"'{item.name}'")
         return "".join(parts)
@@ -1054,6 +1107,11 @@ class MathEditor:
                 self._ast_to_slot(node.args[0], sq.radicand)
                 sq.radicand.cursor_pos = len(sq.radicand.items)
                 slot.items.append(sq)
+            elif node.name == "abs" and len(node.args) == 1:
+                ab = EAbs()
+                self._ast_to_slot(node.args[0], ab.inner)
+                ab.inner.cursor_pos = len(ab.inner.items)
+                slot.items.append(ab)
             else:
                 slot.items.append(EText(node.name))
                 parens = EParens()
