@@ -43,7 +43,7 @@ except Exception:
 # Constants
 # ---------------------------------------------------------------------------
 
-_CANVAS_BG = "#ffffff"
+_CANVAS_BG = "#e8e8e8"
 _PAGE_BOUNDARY_COLOR = "#d0d0d0"
 _SELECTION_COLOR = "#3366cc"
 _SELECTION_DASH = (4, 4)
@@ -252,6 +252,9 @@ class WorksheetCanvas(ttk.Frame):
         self._context_menu.add_command(
             label="Insert Text Region", command=self._ctx_insert_text
         )
+        self._context_menu.add_command(
+            label="Insert Comment", command=self._ctx_insert_comment
+        )
         self._context_menu.add_separator()
         self._context_menu.add_command(
             label="Evaluate (F5)", command=self.evaluate_selected
@@ -332,6 +335,7 @@ class WorksheetCanvas(ttk.Frame):
 
         ws = self._worksheet
         if ws is None:
+            self._draw_page_background(None)
             if self._show_grid:
                 self._draw_grid_dots()
             if self._show_margin:
@@ -339,6 +343,7 @@ class WorksheetCanvas(ttk.Frame):
             self._draw_cursor_marker()
             return
 
+        self._draw_page_background(ws)
         if self._show_grid:
             self._draw_grid_dots()
         if self._show_margin:
@@ -381,6 +386,28 @@ class WorksheetCanvas(ttk.Frame):
             if r.children:
                 result.extend(self._flatten_regions(r.children))
         return result
+
+    def _draw_page_background(self, ws: Worksheet):
+        """Draw a white page rectangle on the gray canvas background."""
+        if ws and ws.settings.page_model.active:
+            pw = ws.settings.page_model.paper_width
+            ph = ws.settings.page_model.paper_height
+        else:
+            pw = 800
+            ph = 5000
+        self._canvas.create_rectangle(
+            0, 0, pw, ph,
+            fill="#ffffff", outline="#cccccc", width=1, tags="page_bg"
+        )
+        shadow_w = 3
+        self._canvas.create_rectangle(
+            pw, shadow_w, pw + shadow_w, ph + shadow_w,
+            fill="#cccccc", outline="", tags="page_shadow"
+        )
+        self._canvas.create_rectangle(
+            shadow_w, ph, pw + shadow_w, ph + shadow_w,
+            fill="#cccccc", outline="", tags="page_shadow"
+        )
 
     def _draw_page_boundaries(self, ws: Worksheet):
         """Draw light gray page boundary lines."""
@@ -942,6 +969,11 @@ class WorksheetCanvas(ttk.Frame):
         y = getattr(self, "_right_click_y", self._cursor_y)
         self._start_editing(x, y, mode="text")
 
+    def _ctx_insert_comment(self):
+        x = getattr(self, "_right_click_x", self._cursor_x)
+        y = getattr(self, "_right_click_y", self._cursor_y)
+        self._start_editing(x, y, mode="comment")
+
     def _on_mousewheel(self, event: tk.Event):
         """Vertical scroll with mouse wheel (Windows/macOS)."""
         self._canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
@@ -1090,6 +1122,10 @@ class WorksheetCanvas(ttk.Frame):
             self._select_region(None)
             return "break"
 
+        if keysym == "Tab":
+            self._tab_next_region(shift=bool(event.state & 0x1))
+            return "break"
+
         if keysym == "Delete":
             self.delete_selected()
             return "break"
@@ -1147,6 +1183,28 @@ class WorksheetCanvas(ttk.Frame):
             return "break"
 
         return None
+
+    def _tab_next_region(self, shift: bool = False):
+        """Move selection to the next (or previous) region in reading order."""
+        if not self._rendered:
+            return
+        if self._selected_index is None:
+            self._select_region(0)
+            return
+        if shift:
+            new_idx = self._selected_index - 1
+            if new_idx < 0:
+                new_idx = len(self._rendered) - 1
+        else:
+            new_idx = self._selected_index + 1
+            if new_idx >= len(self._rendered):
+                new_idx = 0
+        self._select_region(new_idx)
+        rr = self._rendered[new_idx]
+        self._cursor_x = rr.region.left
+        self._cursor_y = rr.region.top
+        self._canvas.delete("cursor_marker")
+        self._draw_cursor_marker()
 
     def evaluate_selected(self):
         """Evaluate just the selected region (F5)."""
@@ -1397,6 +1455,14 @@ class WorksheetCanvas(ttk.Frame):
             y = self._cursor_y
         self._start_editing(x, y, mode="text")
 
+    def insert_comment_at(self, x: Optional[int] = None, y: Optional[int] = None):
+        """Insert a comment (yellow background text) at the cursor position."""
+        if x is None:
+            x = self._cursor_x
+        if y is None:
+            y = self._cursor_y
+        self._start_editing(x, y, mode="comment")
+
     def insert_line_separator(self, x: Optional[int] = None, y: Optional[int] = None):
         """Insert a horizontal line separator at the given or cursor position."""
         if x is None:
@@ -1455,8 +1521,9 @@ class WorksheetCanvas(ttk.Frame):
         self._cursor_x = x
         self._cursor_y = y
 
-        if mode == "text":
+        if mode in ("text", "comment"):
             self._math_editor = None
+            bg_color = "#ffff80" if mode == "comment" else "#fffff0"
             self._edit_text_entry = tk.Text(
                 self._canvas,
                 font=("DejaVu Sans", 11),
@@ -1464,7 +1531,7 @@ class WorksheetCanvas(ttk.Frame):
                 relief=tk.SOLID,
                 highlightthickness=1,
                 highlightcolor="#3366cc",
-                bg="#fffff0",
+                bg=bg_color,
                 width=40,
                 height=3,
                 wrap=tk.WORD,
@@ -1521,7 +1588,7 @@ class WorksheetCanvas(ttk.Frame):
 
         self._save_undo_state()
 
-        if self._edit_mode == "text":
+        if self._edit_mode in ("text", "comment"):
             entry = getattr(self, "_edit_text_entry", None)
             if entry is None:
                 self._cancel_edit()
@@ -1543,11 +1610,16 @@ class WorksheetCanvas(ttk.Frame):
             self.ensure_worksheet()
             self._commit_math_edit(text)
 
-        y = self._cursor_y
+        cx = self._cursor_x
+        cy = self._cursor_y
         self._cancel_edit()
         self._mark_modified()
         self._evaluate_and_render()
-        self._cursor_y = y + 30
+        self._cursor_x = cx
+        self._cursor_y = cy + 32
+        self._canvas.delete("cursor_marker")
+        self._draw_cursor_marker()
+        self._canvas.focus_set()
 
     def _commit_math_edit(self, text: str):
         ast = parse_infix(text)
@@ -1560,6 +1632,7 @@ class WorksheetCanvas(ttk.Frame):
             self._create_new_math_region(ast, self._cursor_x, self._cursor_y)
 
     def _commit_text_edit(self, text: str):
+        is_comment = self._edit_mode == "comment"
         if self._edit_region_idx is not None and self._edit_region_idx < len(self._rendered):
             region = self._rendered[self._edit_region_idx].region
             tc = self._get_text_content(region.text_contents)
@@ -1569,16 +1642,23 @@ class WorksheetCanvas(ttk.Frame):
             tc.paragraphs.clear()
             for line in text.split("\n"):
                 tc.paragraphs.append(TextParagraph(text=line))
+            if is_comment:
+                region.bg_color = "#ffff80"
+                region.border = True
         else:
             region = Region()
             region.id = self._generate_id()
             region.left = self._cursor_x
             region.top = self._cursor_y
-            region.width = max(len(text) * 8, _DEFAULT_REGION_WIDTH)
-            region.height = _DEFAULT_REGION_HEIGHT
+            lines = text.split("\n")
+            region.width = max(max(len(l) for l in lines) * 8, _DEFAULT_REGION_WIDTH)
+            region.height = max(len(lines) * 18, _DEFAULT_REGION_HEIGHT)
             region.font_size = 10
+            if is_comment:
+                region.bg_color = "#ffff80"
+                region.border = True
             tc = TextContent(lang="eng")
-            for line in text.split("\n"):
+            for line in lines:
                 tc.paragraphs.append(TextParagraph(text=line))
             region.text_contents.append(tc)
             self._worksheet.regions.append(region)

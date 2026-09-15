@@ -323,6 +323,21 @@ class MathEditor:
             slot.cursor_pos = pos + 1
             return
 
+        if ch == ";":
+            if self._slot_stack:
+                parent = self._slot_stack[-1]
+                for item in parent.items:
+                    if isinstance(item, EMatrix):
+                        for r_idx, row in enumerate(item.cells):
+                            if self._active_slot in row:
+                                if r_idx + 1 < item.rows:
+                                    self._active_slot = item.cells[r_idx + 1][0]
+                                    self._active_slot.cursor_pos = 0
+                                    return
+            slot.items.insert(pos, EOp(","))
+            slot.cursor_pos = pos + 1
+            return
+
         if ch == "\\":
             self._do_sqrt()
             return
@@ -392,6 +407,31 @@ class MathEditor:
                     self._active_slot = self._slot_stack.pop()
                     self._active_slot.cursor_pos = i + 1
                     return
+                if isinstance(item, ESqrt) and item.radicand is self._active_slot:
+                    self._active_slot = self._slot_stack.pop()
+                    self._active_slot.cursor_pos = i + 1
+                    return
+                if isinstance(item, EAbs) and item.inner is self._active_slot:
+                    self._active_slot = self._slot_stack.pop()
+                    self._active_slot.cursor_pos = i + 1
+                    return
+                if isinstance(item, EMatrix):
+                    for row in item.cells:
+                        if self._active_slot in row:
+                            idx = row.index(self._active_slot)
+                            r_idx = item.cells.index(row)
+                            if idx + 1 < item.cols:
+                                self._active_slot = row[idx + 1]
+                                self._active_slot.cursor_pos = 0
+                                return
+                            elif r_idx + 1 < item.rows:
+                                self._active_slot = item.cells[r_idx + 1][0]
+                                self._active_slot.cursor_pos = 0
+                                return
+                            else:
+                                self._active_slot = self._slot_stack.pop()
+                                self._active_slot.cursor_pos = i + 1
+                                return
             self._active_slot = self._slot_stack.pop()
 
     def _do_abs(self):

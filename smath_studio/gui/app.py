@@ -25,6 +25,15 @@ class SMathApp:
         self._root.geometry("1024x768")
         self._root.minsize(640, 480)
 
+        try:
+            icon_path = Path(__file__).parent / "icon.png"
+            if icon_path.exists():
+                icon = tk.PhotoImage(file=str(icon_path))
+                self._root.iconphoto(False, icon)
+                self._icon_ref = icon
+        except Exception:
+            pass
+
         self._current_file: Optional[Path] = None
         self._worksheet: Optional[Worksheet] = None
         self._modified = False
@@ -120,6 +129,11 @@ class SMathApp:
         file_menu.add_separator()
         file_menu.add_command(label="Print...", accelerator="Ctrl+P", command=self._on_print)
         file_menu.add_separator()
+        self._recent_menu = tk.Menu(file_menu, tearoff=0)
+        file_menu.add_cascade(label="Recent Files", menu=self._recent_menu)
+        self._recent_files: list[str] = []
+        self._load_recent_files()
+        file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self._on_exit)
 
         # --- Edit menu ---
@@ -151,6 +165,7 @@ class SMathApp:
         menubar.add_cascade(label="Insert", menu=insert_menu)
         insert_menu.add_command(label="Math Region", command=self._on_insert_math)
         insert_menu.add_command(label="Text Region", command=self._on_insert_text)
+        insert_menu.add_command(label="Comment", command=self._on_insert_comment)
         insert_menu.add_command(label="Plot Region", command=self._on_insert_plot)
         insert_menu.add_command(label="Matrix", accelerator="Ctrl+M", command=self._on_insert_matrix)
         insert_menu.add_command(label="Line Separator", command=self._on_insert_line)
@@ -400,6 +415,7 @@ class SMathApp:
             )
 
             self._canvas_widget.load_worksheet(ws)
+            self._add_recent_file(str(path))
             self._update_title()
             n_regions = len(ws.regions)
             self._status_info.config(
@@ -441,6 +457,7 @@ class SMathApp:
             write_file(self._worksheet, str(path))
             self._current_file = path
             self._modified = False
+            self._add_recent_file(str(path))
             self._update_title()
             self._status_info.config(text=f"Saved {path.name}")
         except Exception as ex:
@@ -511,7 +528,11 @@ class SMathApp:
 
     def _on_insert_text(self):
         self._canvas_widget.insert_text_at()
-        self._status_info.config(text="Type text, press Enter to commit")
+        self._status_info.config(text="Type text, press Ctrl+Enter to commit")
+
+    def _on_insert_comment(self):
+        self._canvas_widget.insert_comment_at()
+        self._status_info.config(text="Type comment, press Ctrl+Enter to commit")
 
     def _on_insert_plot(self):
         self._status_info.config(text="Insert Plot Region (not yet implemented)")
@@ -635,6 +656,60 @@ class SMathApp:
         """Called when the canvas content is modified by editing."""
         self._modified = True
         self._update_title()
+
+    # ------------------------------------------------------------------
+    # Window close
+    # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Recent files
+    # ------------------------------------------------------------------
+
+    def _load_recent_files(self):
+        """Load recent files list from config."""
+        self._recent_files = []
+        cfg = Path.home() / ".smath_studio" / "recent_files.txt"
+        if cfg.exists():
+            try:
+                for line in cfg.read_text().splitlines():
+                    line = line.strip()
+                    if line and Path(line).exists():
+                        self._recent_files.append(line)
+            except Exception:
+                pass
+        self._update_recent_menu()
+
+    def _save_recent_files(self):
+        """Persist recent files list to config."""
+        cfg_dir = Path.home() / ".smath_studio"
+        cfg_dir.mkdir(exist_ok=True)
+        cfg = cfg_dir / "recent_files.txt"
+        try:
+            cfg.write_text("\n".join(self._recent_files[:10]))
+        except Exception:
+            pass
+
+    def _add_recent_file(self, path: str):
+        """Add a file to the recent files list."""
+        path = str(Path(path).resolve())
+        if path in self._recent_files:
+            self._recent_files.remove(path)
+        self._recent_files.insert(0, path)
+        self._recent_files = self._recent_files[:10]
+        self._save_recent_files()
+        self._update_recent_menu()
+
+    def _update_recent_menu(self):
+        """Rebuild the Recent Files submenu."""
+        self._recent_menu.delete(0, tk.END)
+        if not self._recent_files:
+            self._recent_menu.add_command(label="(empty)", state=tk.DISABLED)
+            return
+        for p in self._recent_files:
+            name = Path(p).name
+            self._recent_menu.add_command(
+                label=name, command=lambda fp=p: self._open_file(fp)
+            )
 
     # ------------------------------------------------------------------
     # Window close
