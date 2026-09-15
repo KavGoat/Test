@@ -369,6 +369,12 @@ class MathRenderer:
             return self._measure_derivative(c, node, fs, ctx)
         if name == "if" and len(node.args) >= 2:
             return self._measure_if(c, node, fs, ctx)
+        if name == "for" and len(node.args) >= 4:
+            return self._measure_for(c, node, fs, ctx)
+        if name == "while" and len(node.args) >= 2:
+            return self._measure_while(c, node, fs, ctx)
+        if name == "range" and 2 <= len(node.args) <= 3:
+            return self._measure_range(c, node, fs, ctx)
 
         style = "" if name in _BUILTIN_FUNCTIONS else "italic"
         nw, nh = self._text_size(c, name, fs, style)
@@ -435,6 +441,40 @@ class MathRenderer:
         w = sym_w + body.width + 8
         h = max(sh + lo.height + hi.height, body.height)
         return RenderBox(w, h, h / 2)
+
+    def _measure_range(self, c, node: FunctionCall, fs: int, ctx) -> RenderBox:
+        start_m = self._measure_node(node.args[0], fs, ctx)
+        end_m = self._measure_node(node.args[1], fs, ctx)
+        dot_w, _ = self._text_size(c, " .. ", fs)
+        w = start_m.width + dot_w + end_m.width
+        if len(node.args) == 3:
+            step_m = self._measure_node(node.args[2], fs, ctx)
+            comma_w, _ = self._text_size(c, ", ", fs)
+            w += comma_w + step_m.width
+        h = max(start_m.height, end_m.height)
+        return RenderBox(w, h, h / 2)
+
+    def _measure_for(self, c, node: FunctionCall, fs: int, ctx) -> RenderBox:
+        kw_w, kw_h = self._text_size(c, "for ", fs, "bold")
+        var_m = self._measure_node(node.args[1], fs, ctx)
+        start_m = self._measure_node(node.args[2], fs, ctx)
+        end_m = self._measure_node(node.args[3], fs, ctx)
+        body_m = self._measure_node(node.args[0], fs, ctx)
+        header_w = kw_w + var_m.width + 20 + start_m.width + 20 + end_m.width
+        header_h = max(kw_h, var_m.height, start_m.height, end_m.height)
+        total_w = max(header_w, 16 + body_m.width)
+        total_h = header_h + 4 + body_m.height
+        return RenderBox(total_w, total_h, header_h / 2)
+
+    def _measure_while(self, c, node: FunctionCall, fs: int, ctx) -> RenderBox:
+        kw_w, kw_h = self._text_size(c, "while ", fs, "bold")
+        cond_m = self._measure_node(node.args[1], fs, ctx)
+        body_m = self._measure_node(node.args[0], fs, ctx)
+        header_w = kw_w + cond_m.width
+        header_h = max(kw_h, cond_m.height)
+        total_w = max(header_w, 16 + body_m.width)
+        total_h = header_h + 4 + body_m.height
+        return RenderBox(total_w, total_h, header_h / 2)
 
     def _measure_if(self, c, node: FunctionCall, fs: int, ctx) -> RenderBox:
         total_h = 0.0
@@ -691,6 +731,12 @@ class MathRenderer:
             return self._render_derivative(c, node, x, y, fs, ctx)
         if name == "if" and len(node.args) >= 2:
             return self._render_if(c, node, x, y, fs, ctx)
+        if name == "for" and len(node.args) >= 4:
+            return self._render_for(c, node, x, y, fs, ctx)
+        if name == "while" and len(node.args) >= 2:
+            return self._render_while(c, node, x, y, fs, ctx)
+        if name == "range" and 2 <= len(node.args) <= 3:
+            return self._render_range(c, node, x, y, fs, ctx)
         if name == "line":
             return self._render_line_block(c, node, x, y, fs, ctx)
 
@@ -955,6 +1001,79 @@ class MathRenderer:
 
         total_h = den_y + max(dh, var_m.height) - y
         return RenderBox(frac_w, total_h, bar_y - y)
+
+    def _render_range(self, c, node: FunctionCall, x, y, fs, ctx) -> RenderBox:
+        """Render range(start, end) or range(start, end, step) as start .. end."""
+        f = self._get_font(c, fs)
+        start_b = self._render_node(c, node.args[0], x, y, fs, ctx)
+        cx = x + start_b.width
+        if len(node.args) == 3:
+            comma_w, _ = self._text_size(c, ", ", fs)
+            c.create_text(cx, y, text=", ", anchor="nw", font=f, fill=_OPERATOR_COLOR)
+            cx += comma_w
+            step_b = self._render_node(c, node.args[2], cx, y, fs, ctx)
+            cx += step_b.width
+        dot_text = " .. "
+        dot_w, _ = self._text_size(c, dot_text, fs)
+        c.create_text(cx, y, text=dot_text, anchor="nw", font=f, fill=_OPERATOR_COLOR)
+        cx += dot_w
+        end_b = self._render_node(c, node.args[1], cx, y, fs, ctx)
+        total_w = cx + end_b.width - x
+        total_h = max(start_b.height, end_b.height)
+        return RenderBox(total_w, total_h, total_h / 2)
+
+    def _render_for(self, c, node: FunctionCall, x, y, fs, ctx) -> RenderBox:
+        """Render for(body, var, start, end) as 'for var ∈ start..end' with body below."""
+        f = self._get_font(c, fs, "bold")
+        f_norm = self._get_font(c, fs)
+        kw = "for "
+        kw_w, kw_h = self._text_size(c, kw, fs, "bold")
+        c.create_text(x, y, text=kw, anchor="nw", font=f, fill=_FUNCTION_COLOR)
+
+        cx = x + kw_w
+        var_b = self._render_node(c, node.args[1], cx, y, fs, ctx)
+        cx += var_b.width
+        eq_text = " ∈ "
+        eq_w, _ = self._text_size(c, eq_text, fs)
+        c.create_text(cx, y, text=eq_text, anchor="nw", font=f_norm, fill=_OPERATOR_COLOR)
+        cx += eq_w
+        start_b = self._render_node(c, node.args[2], cx, y, fs, ctx)
+        cx += start_b.width
+        dot_text = " .. "
+        dot_w, _ = self._text_size(c, dot_text, fs)
+        c.create_text(cx, y, text=dot_text, anchor="nw", font=f_norm, fill=_OPERATOR_COLOR)
+        cx += dot_w
+        end_b = self._render_node(c, node.args[3], cx, y, fs, ctx)
+
+        header_w = cx + end_b.width - x
+        header_h = max(kw_h, var_b.height, start_b.height, end_b.height)
+
+        body_y = y + header_h + 4
+        indent = 16
+        body_b = self._render_node(c, node.args[0], x + indent, body_y, fs, ctx)
+
+        total_w = max(header_w, indent + body_b.width)
+        total_h = header_h + 4 + body_b.height
+        return RenderBox(total_w, total_h, header_h / 2)
+
+    def _render_while(self, c, node: FunctionCall, x, y, fs, ctx) -> RenderBox:
+        """Render while(body, condition) as 'while condition' with body below."""
+        f = self._get_font(c, fs, "bold")
+        kw = "while "
+        kw_w, kw_h = self._text_size(c, kw, fs, "bold")
+        c.create_text(x, y, text=kw, anchor="nw", font=f, fill=_FUNCTION_COLOR)
+
+        cond_b = self._render_node(c, node.args[1], x + kw_w, y, fs, ctx)
+        header_w = kw_w + cond_b.width
+        header_h = max(kw_h, cond_b.height)
+
+        body_y = y + header_h + 4
+        indent = 16
+        body_b = self._render_node(c, node.args[0], x + indent, body_y, fs, ctx)
+
+        total_w = max(header_w, indent + body_b.width)
+        total_h = header_h + 4 + body_b.height
+        return RenderBox(total_w, total_h, header_h / 2)
 
     def _render_if(self, c, node: FunctionCall, x, y, fs, ctx) -> RenderBox:
         """Render an if() as a piecewise block with curly brace."""
