@@ -124,6 +124,12 @@ class ERange(EditItem):
 
 
 @dataclass
+class EDerivative(EditItem):
+    body_slot: EditSlot = field(default_factory=lambda: EditSlot())
+    var_slot: EditSlot = field(default_factory=lambda: EditSlot())
+
+
+@dataclass
 class EditSlot:
     items: list[EditItem] = field(default_factory=list)
     cursor_pos: int = 0
@@ -591,6 +597,9 @@ class MathEditor:
         if isinstance(item, EIntegral):
             result = list(item.body_slot.items)
             return result if result else []
+        if isinstance(item, EDerivative):
+            result = list(item.body_slot.items)
+            return result if result else []
         if isinstance(item, ERange):
             result = list(item.start_slot.items)
             result.extend(item.end_slot.items)
@@ -627,6 +636,8 @@ class MathEditor:
                 slots.append(item.step_slot)
             slots.append(item.end_slot)
             return slots
+        if isinstance(item, EDerivative):
+            return [item.body_slot, item.var_slot]
         return []
 
     def _move_left(self):
@@ -658,6 +669,10 @@ class MathEditor:
                 self._slot_stack.append(slot)
                 self._active_slot = item.body_slot
                 self._active_slot.cursor_pos = len(self._active_slot.items)
+            elif isinstance(item, EDerivative):
+                body = self._slot_to_text(item.body_slot) or "f"
+                var = self._slot_to_text(item.var_slot) or "x"
+                parts.append(f"diff({body}, {var})")
             elif isinstance(item, EIntegral):
                 self._slot_stack.append(slot)
                 self._active_slot = item.body_slot
@@ -710,6 +725,10 @@ class MathEditor:
                 self._active_slot = item.var_slot
                 self._active_slot.cursor_pos = 0
             elif isinstance(item, EIntegral):
+                self._slot_stack.append(slot)
+                self._active_slot = item.body_slot
+                self._active_slot.cursor_pos = 0
+            elif isinstance(item, EDerivative):
                 self._slot_stack.append(slot)
                 self._active_slot = item.body_slot
                 self._active_slot.cursor_pos = 0
@@ -1072,6 +1091,8 @@ class MathEditor:
             self._render_integral(item, x, y, fs)
         elif isinstance(item, ERange):
             self._render_range(item, x, y, fs)
+        elif isinstance(item, EDerivative):
+            self._render_derivative(item, x, y, fs)
 
     def _render_text(self, item: EText, x: float, y: float, fs: int):
         style = self._text_style(item.text)
@@ -1218,6 +1239,39 @@ class MathEditor:
                 self._render_slot(item.cells[r][c], cx, cy, fs)
                 cx += col_widths[c] + cell_pad
             cy += row_heights[r] + cell_pad
+
+    def _measure_derivative(self, item: EDerivative, fs: int) -> _Box:
+        db = self._measure_slot(item.body_slot, fs)
+        vb = self._measure_slot(item.var_slot, fs)
+        d_w, d_h = self._text_size("d", fs, "italic")
+        frac_w = max(d_w + db.width, d_w + vb.width) + 2 * _FRAC_HPAD
+        h = db.height + vb.height + d_h * 2 + 2 * _FRAC_VPAD + 4
+        return _Box(frac_w, h, db.height + d_h + _FRAC_VPAD + 1)
+
+    def _render_derivative(self, item: EDerivative, x: float, y: float, fs: int):
+        db = self._measure_slot(item.body_slot, fs)
+        vb = self._measure_slot(item.var_slot, fs)
+        d_w, d_h = self._text_size("d", fs, "italic")
+        frac_w = max(d_w + db.width, d_w + vb.width) + 2 * _FRAC_HPAD
+        f = self._get_font(fs, "italic")
+        # Numerator: d + body
+        num_w = d_w + db.width
+        nx = x + (frac_w - num_w) / 2
+        tid = self.canvas.create_text(nx, y, text="d", anchor="nw", font=f, fill=_OPERATOR_COLOR)
+        self._items.append(tid)
+        self._render_slot(item.body_slot, nx + d_w, y, fs)
+        # Fraction bar
+        bar_y = y + max(db.height, d_h) + _FRAC_VPAD
+        lid = self.canvas.create_line(x, bar_y, x + frac_w, bar_y,
+                                       fill=_OPERATOR_COLOR, width=1)
+        self._items.append(lid)
+        # Denominator: d + var
+        den_y = bar_y + _FRAC_VPAD + 2
+        den_w = d_w + vb.width
+        dx = x + (frac_w - den_w) / 2
+        tid2 = self.canvas.create_text(dx, den_y, text="d", anchor="nw", font=f, fill=_OPERATOR_COLOR)
+        self._items.append(tid2)
+        self._render_slot(item.var_slot, dx + d_w, den_y, fs)
 
     def _measure_integral(self, item: EIntegral, fs: int) -> _Box:
         small_fs = max(int(fs * 0.65), 6)
@@ -1471,6 +1525,10 @@ class MathEditor:
                     parts.append(f"range({s}, {e}, {st})")
                 else:
                     parts.append(f"range({s}, {e})")
+            elif isinstance(item, EDerivative):
+                body = self._slot_to_text(item.body_slot) or "f"
+                var = self._slot_to_text(item.var_slot) or "x"
+                parts.append(f"diff({body}, {var})")
             elif isinstance(item, EUnit):
                 parts.append(f"'{item.name}'")
         return "".join(parts)
@@ -1544,6 +1602,13 @@ class MathEditor:
                 self._ast_to_slot(node.args[0], ab.inner)
                 ab.inner.cursor_pos = len(ab.inner.items)
                 slot.items.append(ab)
+            elif node.name in ("diff", "nderiv") and len(node.args) == 2:
+                d = EDerivative()
+                self._ast_to_slot(node.args[0], d.body_slot)
+                d.body_slot.cursor_pos = len(d.body_slot.items)
+                self._ast_to_slot(node.args[1], d.var_slot)
+                d.var_slot.cursor_pos = len(d.var_slot.items)
+                slot.items.append(d)
             elif node.name in ("nintegrate", "int") and len(node.args) == 4:
                 ig = EIntegral()
                 self._ast_to_slot(node.args[0], ig.body_slot)
