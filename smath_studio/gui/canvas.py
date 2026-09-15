@@ -218,6 +218,8 @@ class WorksheetCanvas(ttk.Frame):
 
         # Zoom level
         self._zoom = 1.0
+        self._show_grid = True
+        self._show_margin = True
 
         # Mouse-wheel scrolling
         self._canvas.bind("<MouseWheel>", self._on_mousewheel)
@@ -242,6 +244,20 @@ class WorksheetCanvas(ttk.Frame):
         self._context_menu.add_separator()
         self._context_menu.add_command(
             label="Delete", accelerator="Del", command=self.delete_selected
+        )
+        self._context_menu.add_separator()
+        self._context_menu.add_command(
+            label="Insert Math Region", command=self._ctx_insert_math
+        )
+        self._context_menu.add_command(
+            label="Insert Text Region", command=self._ctx_insert_text
+        )
+        self._context_menu.add_separator()
+        self._context_menu.add_command(
+            label="Evaluate (F5)", command=self.evaluate_selected
+        )
+        self._context_menu.add_command(
+            label="Recalculate All (F9)", command=self.recalculate
         )
 
         # Fonts (cached)
@@ -316,11 +332,17 @@ class WorksheetCanvas(ttk.Frame):
 
         ws = self._worksheet
         if ws is None:
-            self._draw_left_margin()
+            if self._show_grid:
+                self._draw_grid_dots()
+            if self._show_margin:
+                self._draw_left_margin()
             self._draw_cursor_marker()
             return
 
-        self._draw_left_margin()
+        if self._show_grid:
+            self._draw_grid_dots()
+        if self._show_margin:
+            self._draw_left_margin()
 
         # Draw page boundaries if page model is active
         if ws.settings.page_model.active:
@@ -378,6 +400,36 @@ class WorksheetCanvas(ttk.Frame):
                 fill=_PAGE_BOUNDARY_COLOR, dash=(2, 4)
             )
 
+    def _draw_grid_dots(self):
+        """Draw subtle grid dots for alignment like SMath Studio."""
+        visible = self._get_visible_area()
+        if visible is None:
+            return
+        x1, y1, x2, y2 = visible
+        grid = _GRID_SIZE * 3
+        sx = (int(x1) // grid) * grid
+        sy = (int(y1) // grid) * grid
+        for gx in range(sx, int(x2) + grid, grid):
+            for gy in range(sy, int(y2) + grid, grid):
+                self._canvas.create_oval(
+                    gx - 1, gy - 1, gx + 1, gy + 1,
+                    fill="#e0e0e0", outline="", tags="grid_dots",
+                )
+
+    def _get_visible_area(self) -> tuple[float, float, float, float] | None:
+        try:
+            w = self._canvas.winfo_width()
+            h = self._canvas.winfo_height()
+            if w < 2 or h < 2:
+                return None
+            x1 = float(self._canvas.canvasx(0))
+            y1 = float(self._canvas.canvasy(0))
+            x2 = float(self._canvas.canvasx(w))
+            y2 = float(self._canvas.canvasy(h))
+            return (x1, y1, x2, y2)
+        except Exception:
+            return None
+
     def _draw_left_margin(self):
         """Draw a subtle left margin line like SMath Studio."""
         margin_x = 30
@@ -389,6 +441,8 @@ class WorksheetCanvas(ttk.Frame):
 
     def _draw_cursor_marker(self):
         """Draw a red crosshair at the current cursor position."""
+        if self._editing:
+            return
         x = self._cursor_x
         y = self._cursor_y
         sz = 6
@@ -436,8 +490,14 @@ class WorksheetCanvas(ttk.Frame):
         elif region.picture is not None:
             items = self._render_picture_placeholder(region, x, y)
 
+        if not items and region.border and region.width > 0:
+            line_id = self._canvas.create_line(
+                x, y + 2, x + region.width, y + 2,
+                fill=region.color or "#aaaaaa", width=1, dash=(4, 2),
+            )
+            items.append(line_id)
+
         if items:
-            # Compute bounding box for hit testing
             all_bbox = self._canvas.bbox(*items) if items else (x, y, x + 10, y + 10)
             if all_bbox is None:
                 all_bbox = (x, y, x + 10, y + 10)
@@ -862,6 +922,8 @@ class WorksheetCanvas(ttk.Frame):
         """Show context menu on right-click."""
         cx = int(self._canvas.canvasx(event.x))
         cy = int(self._canvas.canvasy(event.y))
+        self._right_click_x = _snap(cx)
+        self._right_click_y = _snap(cy)
         hit = self._hit_test(cx, cy)
         if hit is not None:
             self._select_region(hit)
@@ -869,6 +931,16 @@ class WorksheetCanvas(ttk.Frame):
             self._context_menu.tk_popup(event.x_root, event.y_root)
         finally:
             self._context_menu.grab_release()
+
+    def _ctx_insert_math(self):
+        x = getattr(self, "_right_click_x", self._cursor_x)
+        y = getattr(self, "_right_click_y", self._cursor_y)
+        self._start_editing(x, y, mode="math")
+
+    def _ctx_insert_text(self):
+        x = getattr(self, "_right_click_x", self._cursor_x)
+        y = getattr(self, "_right_click_y", self._cursor_y)
+        self._start_editing(x, y, mode="text")
 
     def _on_mousewheel(self, event: tk.Event):
         """Vertical scroll with mouse wheel (Windows/macOS)."""
@@ -991,7 +1063,16 @@ class WorksheetCanvas(ttk.Frame):
     def _on_key(self, event: tk.Event):
         """Handle key events: forward to editor or start new editing."""
         ctrl = event.state & 0x4
-        if ctrl:
+
+        if ctrl and not self._editing:
+            keysym = event.keysym.lower()
+            if keysym == "m":
+                self._start_editing(self._cursor_x, self._cursor_y)
+                if self._math_editor:
+                    self._math_editor._do_matrix()
+                    self._math_editor._update_eval()
+                    self._math_editor.render()
+                return "break"
             return None
 
         if self._editing and self._math_editor is not None:
@@ -1004,6 +1085,10 @@ class WorksheetCanvas(ttk.Frame):
 
         keysym = event.keysym
         char = event.char
+
+        if keysym == "Escape":
+            self._select_region(None)
+            return "break"
 
         if keysym == "Delete":
             self.delete_selected()
@@ -1046,6 +1131,14 @@ class WorksheetCanvas(ttk.Frame):
             self._select_region(hit)
             return "break"
 
+        if keysym == "F5":
+            self.evaluate_selected()
+            return "break"
+
+        if keysym == "F9":
+            self.recalculate()
+            return "break"
+
         if char and ord(char) >= 32 and keysym not in (
             "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9",
             "F10", "F11", "F12",
@@ -1054,6 +1147,26 @@ class WorksheetCanvas(ttk.Frame):
             return "break"
 
         return None
+
+    def evaluate_selected(self):
+        """Evaluate just the selected region (F5)."""
+        if self._selected_index is None or self._worksheet is None:
+            return
+        if self._selected_index >= len(self._rendered):
+            return
+        region = self._rendered[self._selected_index].region
+        if region.math is not None and region.math.input_expr is not None:
+            if self._ctx is None:
+                self._ctx = create_default_context()
+            try:
+                region.math.input_expr.evaluate(self._ctx)
+            except Exception:
+                pass
+            self._evaluate_and_render()
+            for i, rr in enumerate(self._rendered):
+                if rr.region is region:
+                    self._select_region(i)
+                    break
 
     def _eval_for_editor(self, expr_text: str) -> Any:
         """Evaluate an expression for the live editor preview."""
@@ -1284,6 +1397,27 @@ class WorksheetCanvas(ttk.Frame):
             y = self._cursor_y
         self._start_editing(x, y, mode="text")
 
+    def insert_line_separator(self, x: Optional[int] = None, y: Optional[int] = None):
+        """Insert a horizontal line separator at the given or cursor position."""
+        if x is None:
+            x = self._cursor_x
+        if y is None:
+            y = self._cursor_y
+        self.ensure_worksheet()
+        self._save_undo_state()
+        region = Region()
+        region.id = self._generate_id()
+        region.left = x
+        region.top = y
+        region.width = 400
+        region.height = 4
+        region.border = True
+        region.color = "#aaaaaa"
+        self._worksheet.regions.append(region)
+        self._cursor_y = y + 16
+        self._mark_modified()
+        self._evaluate_and_render()
+
     def insert_symbol(self, symbol: str):
         """Insert a symbol/function into the current editor or create a new region."""
         if self._editing and self._math_editor is not None:
@@ -1323,7 +1457,7 @@ class WorksheetCanvas(ttk.Frame):
 
         if mode == "text":
             self._math_editor = None
-            self._edit_text_entry = tk.Entry(
+            self._edit_text_entry = tk.Text(
                 self._canvas,
                 font=("DejaVu Sans", 11),
                 bd=1,
@@ -1332,17 +1466,22 @@ class WorksheetCanvas(ttk.Frame):
                 highlightcolor="#3366cc",
                 bg="#fffff0",
                 width=40,
+                height=3,
+                wrap=tk.WORD,
+                undo=True,
             )
-            self._edit_text_entry.insert(0, initial_text)
-            self._edit_text_entry.bind("<Return>", lambda e: self._commit_edit())
-            self._edit_text_entry.bind("<KP_Enter>", lambda e: self._commit_edit())
+            if initial_text:
+                self._edit_text_entry.insert("1.0", initial_text)
             self._edit_text_entry.bind("<Escape>", lambda e: self._cancel_edit())
+            self._edit_text_entry.bind(
+                "<Control-Return>", lambda e: self._commit_edit()
+            )
             self._edit_text_window = self._canvas.create_window(
                 x, y, window=self._edit_text_entry, anchor=tk.NW
             )
             self._edit_text_entry.focus_set()
             if initial_text:
-                self._edit_text_entry.icursor(tk.END)
+                self._edit_text_entry.mark_set("insert", "end")
             return
 
         if editing_idx is not None:
@@ -1387,7 +1526,7 @@ class WorksheetCanvas(ttk.Frame):
             if entry is None:
                 self._cancel_edit()
                 return
-            text = entry.get().strip()
+            text = entry.get("1.0", "end-1c").strip()
             if not text:
                 self._cancel_edit()
                 return
@@ -1485,11 +1624,12 @@ class WorksheetCanvas(ttk.Frame):
             math_region.input_elements = ast_to_elements(ast.expression)
             math_region.result_elements = list(math_region.input_elements)
             math_region.result_action = "numeric"
+        elif isinstance(ast, BinaryOp) and ast.operator == "=":
+            math_region.input_expr = ast
+            math_region.input_elements = ast_to_elements(ast)
         else:
             math_region.input_expr = ast
             math_region.input_elements = ast_to_elements(ast)
-            math_region.result_elements = list(math_region.input_elements)
-            math_region.result_action = "numeric"
 
         region.math = math_region
         self._worksheet.regions.append(region)
@@ -1512,11 +1652,15 @@ class WorksheetCanvas(ttk.Frame):
             math_region.result_elements = list(math_region.input_elements)
             math_region.result_action = "numeric"
             math_region.result_expr = None
+        elif isinstance(ast, BinaryOp) and ast.operator == "=":
+            math_region.input_expr = ast
+            math_region.input_elements = ast_to_elements(ast)
+            math_region.result_elements = []
+            math_region.result_expr = None
         else:
             math_region.input_expr = ast
             math_region.input_elements = ast_to_elements(ast)
-            math_region.result_elements = list(math_region.input_elements)
-            math_region.result_action = "numeric"
+            math_region.result_elements = []
             math_region.result_expr = None
 
     def _region_to_edit_text(self, region: Region) -> str:

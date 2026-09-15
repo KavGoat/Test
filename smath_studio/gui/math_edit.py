@@ -68,6 +68,17 @@ class EUnit(EditItem):
 
 
 @dataclass
+class EMatrix(EditItem):
+    rows: int = 2
+    cols: int = 2
+    cells: list = field(default_factory=list)
+
+    def __post_init__(self):
+        if not self.cells:
+            self.cells = [[EditSlot() for _ in range(self.cols)] for _ in range(self.rows)]
+
+
+@dataclass
 class EditSlot:
     items: list[EditItem] = field(default_factory=list)
     cursor_pos: int = 0
@@ -217,10 +228,18 @@ class MathEditor:
         keysym = event.keysym
         char = event.char
 
+        ctrl = event.state & 0x4
+
         if keysym in ("Return", "KP_Enter"):
             return "commit"
         if keysym == "Escape":
             return "cancel"
+
+        if ctrl and keysym.lower() == "m":
+            self._do_matrix()
+            self._update_eval()
+            self.render()
+            return "consumed"
 
         if keysym == "BackSpace":
             self._do_backspace()
@@ -304,6 +323,10 @@ class MathEditor:
             slot.cursor_pos = pos + 1
             return
 
+        if ch == "\\":
+            self._do_sqrt()
+            return
+
         if ch == "|":
             self._do_abs()
             return
@@ -381,6 +404,26 @@ class MathEditor:
         self._active_slot = absv.inner
         self._active_slot.cursor_pos = 0
 
+    def _do_sqrt(self):
+        slot = self._active_slot
+        pos = slot.cursor_pos
+        sq = ESqrt()
+        slot.items.insert(pos, sq)
+        slot.cursor_pos = pos + 1
+        self._slot_stack.append(slot)
+        self._active_slot = sq.radicand
+        self._active_slot.cursor_pos = 0
+
+    def _do_matrix(self, rows: int = 2, cols: int = 2):
+        slot = self._active_slot
+        pos = slot.cursor_pos
+        mat = EMatrix(rows=rows, cols=cols)
+        slot.items.insert(pos, mat)
+        slot.cursor_pos = pos + 1
+        self._slot_stack.append(slot)
+        self._active_slot = mat.cells[0][0]
+        self._active_slot.cursor_pos = 0
+
     # ---- Deletion ----
 
     def _do_backspace(self):
@@ -393,7 +436,7 @@ class MathEditor:
                 item.text = item.text[:-1]
             elif isinstance(item, EUnit) and len(item.name) > 1:
                 item.name = item.name[:-1]
-            elif isinstance(item, (EFraction, ESuperscript, EParens)):
+            elif isinstance(item, (EFraction, ESuperscript, EParens, ESqrt, EAbs)):
                 contents = self._flatten_structure(item)
                 slot.items.pop(pos - 1)
                 for j, c in enumerate(contents):
@@ -432,6 +475,12 @@ class MathEditor:
             return list(item.radicand.items)
         if isinstance(item, EAbs):
             return list(item.inner.items)
+        if isinstance(item, EMatrix):
+            result = []
+            for row in item.cells:
+                for cell in row:
+                    result.extend(cell.items)
+            return result
         return [item]
 
     # ---- Navigation ----
@@ -447,6 +496,11 @@ class MathEditor:
             return [item.radicand]
         if isinstance(item, EAbs):
             return [item.inner]
+        if isinstance(item, EMatrix):
+            slots = []
+            for row in item.cells:
+                slots.extend(row)
+            return slots
         return []
 
     def _move_left(self):
@@ -463,6 +517,14 @@ class MathEditor:
                 self._active_slot = item.exponent
                 self._active_slot.cursor_pos = len(self._active_slot.items)
             elif isinstance(item, EParens):
+                self._slot_stack.append(slot)
+                self._active_slot = item.inner
+                self._active_slot.cursor_pos = len(self._active_slot.items)
+            elif isinstance(item, ESqrt):
+                self._slot_stack.append(slot)
+                self._active_slot = item.radicand
+                self._active_slot.cursor_pos = len(self._active_slot.items)
+            elif isinstance(item, EAbs):
                 self._slot_stack.append(slot)
                 self._active_slot = item.inner
                 self._active_slot.cursor_pos = len(self._active_slot.items)
@@ -494,6 +556,14 @@ class MathEditor:
                 self._active_slot = item.exponent
                 self._active_slot.cursor_pos = 0
             elif isinstance(item, EParens):
+                self._slot_stack.append(slot)
+                self._active_slot = item.inner
+                self._active_slot.cursor_pos = 0
+            elif isinstance(item, ESqrt):
+                self._slot_stack.append(slot)
+                self._active_slot = item.radicand
+                self._active_slot.cursor_pos = 0
+            elif isinstance(item, EAbs):
                 self._slot_stack.append(slot)
                 self._active_slot = item.inner
                 self._active_slot.cursor_pos = 0
@@ -826,6 +896,8 @@ class MathEditor:
             self._render_abs(item, x, y, fs)
         elif isinstance(item, EUnit):
             self._render_unit(item, x, y, fs)
+        elif isinstance(item, EMatrix):
+            self._render_matrix(item, x, y, fs)
 
     def _render_text(self, item: EText, x: float, y: float, fs: int):
         style = self._text_style(item.text)
@@ -933,6 +1005,45 @@ class MathEditor:
         rp = self.canvas.create_text(x + bw + 2 + ib.width + 2, y, text="|",
                                       anchor="nw", font=f, fill=_OPERATOR_COLOR)
         self._items.append(rp)
+
+    def _render_matrix(self, item: EMatrix, x: float, y: float, fs: int):
+        col_widths = [0.0] * item.cols
+        row_heights = [0.0] * item.rows
+        for r in range(item.rows):
+            for c in range(item.cols):
+                cb = self._measure_slot(item.cells[r][c], fs)
+                col_widths[c] = max(col_widths[c], cb.width)
+                row_heights[r] = max(row_heights[r], cb.height)
+        cell_pad = 6
+        bracket_w = 6
+        total_w = sum(col_widths) + cell_pad * (item.cols - 1) + 2 * bracket_w + 8
+        total_h = sum(row_heights) + cell_pad * (item.rows - 1) + 8
+
+        # Left bracket
+        lid = self.canvas.create_line(
+            x + 2, y, x + bracket_w, y, x + bracket_w - 4, y,
+            x + bracket_w - 4, y + total_h, x + bracket_w, y + total_h,
+            x + 2, y + total_h,
+            fill=_OPERATOR_COLOR, width=1)
+        self._items.append(lid)
+
+        # Right bracket
+        rx = x + total_w - bracket_w
+        rid = self.canvas.create_line(
+            rx + bracket_w - 2, y, rx, y, rx + 4, y,
+            rx + 4, y + total_h, rx, y + total_h,
+            rx + bracket_w - 2, y + total_h,
+            fill=_OPERATOR_COLOR, width=1)
+        self._items.append(rid)
+
+        # Render cells
+        cy = y + 4
+        for r in range(item.rows):
+            cx = x + bracket_w + 4
+            for c in range(item.cols):
+                self._render_slot(item.cells[r][c], cx, cy, fs)
+                cx += col_widths[c] + cell_pad
+            cy += row_heights[r] + cell_pad
 
     def _render_unit(self, item: EUnit, x: float, y: float, fs: int):
         f = self._get_font(fs)

@@ -152,17 +152,51 @@ class SMathApp:
         insert_menu.add_command(label="Math Region", command=self._on_insert_math)
         insert_menu.add_command(label="Text Region", command=self._on_insert_text)
         insert_menu.add_command(label="Plot Region", command=self._on_insert_plot)
+        insert_menu.add_command(label="Matrix", accelerator="Ctrl+M", command=self._on_insert_matrix)
+        insert_menu.add_command(label="Line Separator", command=self._on_insert_line)
         insert_menu.add_command(label="Area", command=self._on_insert_area)
         insert_menu.add_separator()
         insert_menu.add_command(
             label="Function...", command=self._on_insert_function
         )
 
+        # --- View menu ---
+        view_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="View", menu=view_menu)
+        view_menu.add_command(
+            label="Zoom In", accelerator="Ctrl++", command=lambda: self._canvas_widget._zoom_in()
+        )
+        view_menu.add_command(
+            label="Zoom Out", accelerator="Ctrl+-", command=lambda: self._canvas_widget._zoom_out()
+        )
+        view_menu.add_command(
+            label="Zoom 100%", accelerator="Ctrl+0", command=self._reset_zoom
+        )
+        view_menu.add_separator()
+        self._show_grid_var = tk.BooleanVar(value=True)
+        view_menu.add_checkbutton(
+            label="Show Grid", variable=self._show_grid_var,
+            command=self._toggle_grid
+        )
+        self._show_margin_var = tk.BooleanVar(value=True)
+        view_menu.add_checkbutton(
+            label="Show Margin Line", variable=self._show_margin_var,
+            command=self._toggle_margin
+        )
+        view_menu.add_separator()
+        view_menu.add_command(
+            label="Regions List", command=self._show_regions_list
+        )
+
         # --- Calculation menu ---
         calc_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Calculation", menu=calc_menu)
         calc_menu.add_command(
-            label="Recalculate", accelerator="F9", command=self._on_recalculate
+            label="Evaluate Selection", accelerator="F5",
+            command=lambda: self._canvas_widget.evaluate_selected()
+        )
+        calc_menu.add_command(
+            label="Recalculate All", accelerator="F9", command=self._on_recalculate
         )
 
         # --- Tools menu ---
@@ -275,11 +309,14 @@ class SMathApp:
         self._root.bind("<Control-V>", lambda e: self._safe_paste())
         self._root.bind("<Control-p>", lambda e: self._on_print())
         self._root.bind("<Control-P>", lambda e: self._on_print())
+        self._root.bind("<F5>", lambda e: self._canvas_widget.evaluate_selected())
         self._root.bind("<F9>", lambda e: self._on_recalculate())
         self._root.bind("<Control-plus>", lambda e: self._canvas_widget._zoom_in())
         self._root.bind("<Control-equal>", lambda e: self._canvas_widget._zoom_in())
         self._root.bind("<Control-minus>", lambda e: self._canvas_widget._zoom_out())
         self._root.bind("<Control-0>", lambda e: self._reset_zoom())
+        self._root.bind("<Control-m>", lambda e: self._on_insert_matrix())
+        self._root.bind("<Control-M>", lambda e: self._on_insert_matrix())
 
     # ------------------------------------------------------------------
     # Status bar update
@@ -479,8 +516,25 @@ class SMathApp:
     def _on_insert_plot(self):
         self._status_info.config(text="Insert Plot Region (not yet implemented)")
 
+    def _on_insert_line(self):
+        self._canvas_widget.insert_line_separator()
+        self._status_info.config(text="Line separator inserted")
+
     def _on_insert_area(self):
         self._status_info.config(text="Insert Area (not yet implemented)")
+
+    def _on_insert_matrix(self):
+        """Insert a 2x2 matrix at the cursor position."""
+        if not self._canvas_widget._editing:
+            self._canvas_widget._start_editing(
+                self._canvas_widget._cursor_x,
+                self._canvas_widget._cursor_y
+            )
+        if self._canvas_widget._math_editor:
+            self._canvas_widget._math_editor._do_matrix()
+            self._canvas_widget._math_editor._update_eval()
+            self._canvas_widget._math_editor.render()
+        self._status_info.config(text="Matrix inserted (Ctrl+M)")
 
     def _on_insert_function(self):
         """Show the Insert Function dialog."""
@@ -503,6 +557,36 @@ class SMathApp:
         self._canvas_widget._zoom = 1.0
         self._canvas_widget._apply_zoom()
         self._status_info.config(text="Zoom: 100%")
+
+    def _toggle_grid(self):
+        self._canvas_widget._show_grid = self._show_grid_var.get()
+        self._canvas_widget._evaluate_and_render()
+
+    def _toggle_margin(self):
+        self._canvas_widget._show_margin = self._show_margin_var.get()
+        self._canvas_widget._evaluate_and_render()
+
+    def _show_regions_list(self):
+        """Show a simple list of all regions in the worksheet."""
+        ws = self._canvas_widget._worksheet
+        if ws is None or not ws.regions:
+            messagebox.showinfo("Regions", "No regions in worksheet.", parent=self._root)
+            return
+        lines = []
+        for i, r in enumerate(ws.regions):
+            kind = "math" if r.math else "text" if r.text_contents else "other"
+            desc = ""
+            if r.math and r.math.input_expr:
+                from ..infix_parser import ast_to_text
+                desc = ast_to_text(r.math.input_expr)[:50]
+            elif r.text_contents:
+                tc = r.text_contents[0] if r.text_contents else None
+                if tc and tc.paragraphs:
+                    desc = tc.paragraphs[0].text[:50]
+            lines.append(f"{i+1}. [{kind}] ({r.left},{r.top}) {desc}")
+        messagebox.showinfo(
+            "Regions List", "\n".join(lines), parent=self._root
+        )
 
     # ------------------------------------------------------------------
     # Tools
