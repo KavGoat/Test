@@ -19,6 +19,19 @@ from ..expression import (
     BinaryOp, UnaryOp, FunctionCall, Evaluation,
 )
 
+_FUNCTION_NAMES = sorted([
+    "sin", "cos", "tan", "asin", "acos", "atan", "cot", "sec", "csc",
+    "sinh", "cosh", "tanh", "asinh", "acosh", "atanh",
+    "ln", "log", "exp", "sqrt", "abs", "sign", "ceil", "floor", "round",
+    "max", "min", "mod", "sum", "product", "nintegrate", "diff", "nderiv",
+    "det", "invert", "transpose", "identity", "el", "rows", "cols",
+    "mean", "median", "stdev", "sort", "reverse", "length",
+    "if", "for", "while", "line", "range", "eval", "mat",
+    "re", "im", "arg", "conj", "Gamma", "Beta", "erf",
+    "polyroots", "solve", "augment", "stack", "col", "submatrix",
+    "csort", "rsort", "tr", "num2str", "str2num",
+])
+
 
 # ---- Edit tree nodes ----
 
@@ -155,12 +168,14 @@ class MathEditor:
         y: int,
         font_size: int = 12,
         eval_callback: Optional[Callable[[str], Any]] = None,
+        precision: int = 4,
     ):
         self.canvas = canvas
         self.x = x
         self.y = y
         self.font_size = font_size
         self._eval_callback = eval_callback
+        self._precision = precision
 
         self.root = EditSlot()
         self._active_slot: EditSlot = self.root
@@ -181,6 +196,13 @@ class MathEditor:
         self._font_family = "serif"
         self._font_cache: dict[tuple, tkfont.Font] = {}
         self._detect_font()
+
+        # Autocomplete state
+        self._ac_visible = False
+        self._ac_items: list[int] = []
+        self._ac_suggestions: list[str] = []
+        self._ac_selected: int = 0
+        self._ac_prefix: str = ""
 
         self.render()
         self._start_blink()
@@ -250,9 +272,19 @@ class MathEditor:
         elif keysym == "Right":
             self._move_right()
         elif keysym == "Up":
-            self._move_up()
+            if self._ac_visible and self._ac_suggestions:
+                self._ac_selected = max(0, self._ac_selected - 1)
+                self._hide_autocomplete()
+                self._show_autocomplete()
+            else:
+                self._move_up()
         elif keysym == "Down":
-            self._move_down()
+            if self._ac_visible and self._ac_suggestions:
+                self._ac_selected = min(len(self._ac_suggestions) - 1, self._ac_selected + 1)
+                self._hide_autocomplete()
+                self._show_autocomplete()
+            else:
+                self._move_down()
         elif keysym == "Tab":
             if event.state & 0x1:
                 self._tab_prev()
@@ -749,6 +781,8 @@ class MathEditor:
         if self._cursor_visible and self._cursor_rx is not None:
             self._draw_cursor()
 
+        self._update_autocomplete()
+
     def _measure_slot_only(self, slot: EditSlot, fs: int) -> _Box:
         return self._measure_slot(slot, fs)
 
@@ -916,6 +950,20 @@ class MathEditor:
         w = pw + ib.width + pw
         h = max(ph, ib.height)
         return _Box(w, h, max(ph * 0.6, ib.baseline))
+
+    def _measure_matrix(self, item: EMatrix, fs: int) -> _Box:
+        col_widths = [0.0] * item.cols
+        row_heights = [0.0] * item.rows
+        for r in range(item.rows):
+            for c in range(item.cols):
+                cb = self._measure_slot(item.cells[r][c], fs)
+                col_widths[c] = max(col_widths[c], cb.width)
+                row_heights[r] = max(row_heights[r], cb.height)
+        cell_pad = 6
+        bracket_w = 6
+        total_w = sum(col_widths) + cell_pad * (item.cols - 1) + 2 * bracket_w + 8
+        total_h = sum(row_heights) + cell_pad * (item.rows - 1) + 8
+        return _Box(total_w, total_h, total_h * 0.5)
 
     # ---- Render items ----
 
@@ -1140,6 +1188,7 @@ class MathEditor:
         return "italic"
 
     def _fmt(self, val: Any) -> str:
+        p = self._precision
         if isinstance(val, float):
             if _math.isnan(val):
                 return "NaN"
@@ -1147,9 +1196,16 @@ class MathEditor:
                 return "∞" if val > 0 else "-∞"
             if val == int(val) and abs(val) < 1e15:
                 return str(int(val))
-            return f"{val:.4g}"
+            return f"{val:.{p}g}"
         if isinstance(val, int):
             return str(val)
+        try:
+            import numpy as np
+            if isinstance(val, np.ndarray):
+                with np.printoptions(precision=p, suppress=True):
+                    return str(val)
+        except ImportError:
+            pass
         return str(val)
 
     # ================================================================
@@ -1190,6 +1246,14 @@ class MathEditor:
             elif isinstance(item, EAbs):
                 inner = self._slot_to_text(item.inner) or "0"
                 parts.append(f"abs({inner})")
+            elif isinstance(item, EMatrix):
+                cell_texts = []
+                for row in item.cells:
+                    for cell in row:
+                        cell_texts.append(self._slot_to_text(cell) or "0")
+                cell_texts.append(str(item.rows))
+                cell_texts.append(str(item.cols))
+                parts.append(f"mat({', '.join(cell_texts)})")
             elif isinstance(item, EUnit):
                 parts.append(f"'{item.name}'")
         return "".join(parts)
@@ -1291,10 +1355,91 @@ class MathEditor:
             self.render()
 
     # ================================================================
+    # Autocomplete
+    # ================================================================
+
+    def _update_autocomplete(self):
+        self._hide_autocomplete()
+        slot = self._active_slot
+        pos = slot.cursor_pos
+        if pos == 0:
+            return
+        item = slot.items[pos - 1]
+        if not isinstance(item, EText):
+            return
+        text = item.text
+        if not text or text[0].isdigit():
+            return
+        if len(text) < 2:
+            return
+        matches = [n for n in _FUNCTION_NAMES if n.startswith(text) and n != text]
+        if not matches:
+            return
+        self._ac_suggestions = matches[:8]
+        self._ac_selected = 0
+        self._ac_prefix = text
+        self._show_autocomplete()
+
+    def _show_autocomplete(self):
+        if not self._ac_suggestions:
+            return
+        self._ac_visible = True
+        cx = self._cursor_rx or self.x
+        cy = (self._cursor_ry or self.y) + (self._cursor_rh or 16) + 2
+        f = self._get_font(self.font_size - 1)
+        max_w = 0
+        for s in self._ac_suggestions:
+            w, _ = self._text_size(s, self.font_size - 1)
+            max_w = max(max_w, w)
+        row_h = self._line_height(self.font_size - 1) + 2
+        total_h = row_h * len(self._ac_suggestions) + 4
+        bg = self.canvas.create_rectangle(
+            cx, cy, cx + max_w + 12, cy + total_h,
+            fill="#ffffff", outline="#cccccc", width=1)
+        self._ac_items.append(bg)
+        for i, name in enumerate(self._ac_suggestions):
+            ry = cy + 2 + i * row_h
+            if i == self._ac_selected:
+                sel_bg = self.canvas.create_rectangle(
+                    cx + 1, ry, cx + max_w + 11, ry + row_h,
+                    fill="#3366cc", outline="")
+                self._ac_items.append(sel_bg)
+                color = "#ffffff"
+            else:
+                color = "#000000"
+            tid = self.canvas.create_text(
+                cx + 4, ry + 1, text=name, anchor="nw",
+                font=f, fill=color)
+            self._ac_items.append(tid)
+
+    def _hide_autocomplete(self):
+        for item_id in self._ac_items:
+            try:
+                self.canvas.delete(item_id)
+            except Exception:
+                pass
+        self._ac_items.clear()
+        self._ac_visible = False
+        self._ac_suggestions = []
+
+    def _accept_autocomplete(self):
+        if not self._ac_visible or not self._ac_suggestions:
+            return False
+        chosen = self._ac_suggestions[self._ac_selected]
+        slot = self._active_slot
+        pos = slot.cursor_pos
+        if pos > 0 and isinstance(slot.items[pos - 1], EText):
+            slot.items[pos - 1].text = chosen
+        self._hide_autocomplete()
+        self._insert_char("(")
+        return True
+
+    # ================================================================
     # Cleanup
     # ================================================================
 
     def destroy(self):
+        self._hide_autocomplete()
         self.stop_blink()
         for item_id in self._items:
             try:

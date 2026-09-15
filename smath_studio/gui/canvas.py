@@ -202,6 +202,10 @@ class WorksheetCanvas(ttk.Frame):
         self._drag_start_x = 0
         self._drag_start_y = 0
 
+        # Multi-selection
+        self._multi_selected: set[int] = set()
+        self._multi_selection_items: list[int] = []
+
         # Hover state
         self._hover_index: Optional[int] = None
         self._hover_items: list[int] = []
@@ -528,6 +532,13 @@ class WorksheetCanvas(ttk.Frame):
             all_bbox = self._canvas.bbox(*items) if items else (x, y, x + 10, y + 10)
             if all_bbox is None:
                 all_bbox = (x, y, x + 10, y + 10)
+            # Auto-update region dimensions from rendered size
+            rw = all_bbox[2] - all_bbox[0]
+            rh = all_bbox[3] - all_bbox[1]
+            if rw > region.width:
+                region.width = rw + 4
+            if rh > region.height:
+                region.height = rh + 4
             rr = _RenderedRegion(region, items, all_bbox)
             self._rendered.append(rr)
 
@@ -909,6 +920,30 @@ class WorksheetCanvas(ttk.Frame):
             )
             self._selection_items.append(h)
 
+    def _draw_multi_selection(self):
+        """Draw selection outlines for all multi-selected regions."""
+        self._clear_multi_selection()
+        for idx in self._multi_selected:
+            if idx >= len(self._rendered):
+                continue
+            rr = self._rendered[idx]
+            x1, y1, x2, y2 = rr.bbox
+            pad = 3
+            rect = self._canvas.create_rectangle(
+                x1 - pad, y1 - pad, x2 + pad, y2 + pad,
+                outline="#3366cc", dash=(4, 4), width=2,
+            )
+            self._multi_selection_items.append(rect)
+
+    def _clear_multi_selection(self):
+        """Remove multi-selection outlines."""
+        for item_id in self._multi_selection_items:
+            try:
+                self._canvas.delete(item_id)
+            except Exception:
+                pass
+        self._multi_selection_items.clear()
+
     def _hit_test(self, cx: int, cy: int) -> Optional[int]:
         """Return the index of the rendered region at canvas coords (cx, cy)."""
         # Search in reverse order (top-most rendered last)
@@ -927,6 +962,7 @@ class WorksheetCanvas(ttk.Frame):
         """Handle left-click: commit edit, select region, or set cursor."""
         cx = int(self._canvas.canvasx(event.x))
         cy = int(self._canvas.canvasy(event.y))
+        ctrl = event.state & 0x4
 
         if self._editing:
             self._commit_edit()
@@ -934,11 +970,25 @@ class WorksheetCanvas(ttk.Frame):
 
         hit = self._hit_test(cx, cy)
         if hit is not None:
-            self._select_region(hit)
+            if ctrl:
+                if hit in self._multi_selected:
+                    self._multi_selected.discard(hit)
+                else:
+                    self._multi_selected.add(hit)
+                    if self._selected_index is not None:
+                        self._multi_selected.add(self._selected_index)
+                self._select_region(hit)
+                self._draw_multi_selection()
+            else:
+                self._multi_selected.clear()
+                self._clear_multi_selection()
+                self._select_region(hit)
             self._dragging = False
             self._drag_start_x = cx
             self._drag_start_y = cy
         else:
+            self._multi_selected.clear()
+            self._clear_multi_selection()
             self._select_region(None)
             self._cursor_x = _snap(cx)
             self._cursor_y = _snap(cy)
@@ -1384,19 +1434,26 @@ class WorksheetCanvas(ttk.Frame):
             self._ctx = create_default_context()
 
     def delete_selected(self):
-        """Delete the currently selected region."""
-        if self._selected_index is None or self._worksheet is None:
+        """Delete the currently selected region(s)."""
+        if self._worksheet is None:
+            return
+        indices = set(self._multi_selected)
+        if self._selected_index is not None:
+            indices.add(self._selected_index)
+        if not indices:
             return
         self._save_undo_state()
-        if self._selected_index >= len(self._rendered):
-            return
-        rr = self._rendered[self._selected_index]
-        region = rr.region
-        if region in self._worksheet.regions:
-            self._worksheet.regions.remove(region)
-        else:
-            self._remove_from_children(self._worksheet.regions, region)
+        regions_to_remove = []
+        for idx in sorted(indices, reverse=True):
+            if idx < len(self._rendered):
+                regions_to_remove.append(self._rendered[idx].region)
+        for region in regions_to_remove:
+            if region in self._worksheet.regions:
+                self._worksheet.regions.remove(region)
+            else:
+                self._remove_from_children(self._worksheet.regions, region)
         self._selected_index = None
+        self._multi_selected.clear()
         self._mark_modified()
         self._evaluate_and_render()
 
@@ -1558,10 +1615,14 @@ class WorksheetCanvas(ttk.Frame):
                 except Exception:
                     pass
 
+        precision = 4
+        if self._ctx:
+            precision = getattr(self._ctx, '_precision', 4)
         editor = MathEditor(
             self._canvas, x, y,
             font_size=12,
             eval_callback=self._eval_for_editor,
+            precision=precision,
         )
 
         if ast_node is not None:

@@ -417,6 +417,69 @@ _FUNCTION_DESCRIPTIONS: dict[str, str] = {
 }
 
 
+class FindReplaceDialog(tk.Toplevel):
+    """Find and Replace dialog for worksheet expressions."""
+
+    def __init__(self, parent: tk.Widget, on_find=None, on_replace=None, on_replace_all=None):
+        super().__init__(parent)
+        self.title("Find and Replace")
+        self.resizable(True, False)
+        self.transient(parent)
+        self.geometry("420x180")
+
+        self.update_idletasks()
+        pw = parent.winfo_rootx() + parent.winfo_width() // 2
+        ph = parent.winfo_rooty() + parent.winfo_height() // 2
+        self.geometry(f"+{pw - 210}+{ph - 90}")
+
+        self._on_find = on_find
+        self._on_replace = on_replace
+        self._on_replace_all = on_replace_all
+
+        frame = ttk.Frame(self, padding=12)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(frame, text="Find:").grid(row=0, column=0, sticky="w", pady=4)
+        self.find_var = tk.StringVar()
+        self.find_entry = ttk.Entry(frame, textvariable=self.find_var, width=30)
+        self.find_entry.grid(row=0, column=1, padx=(8, 0), pady=4, sticky="ew")
+
+        ttk.Label(frame, text="Replace:").grid(row=1, column=0, sticky="w", pady=4)
+        self.replace_var = tk.StringVar()
+        self.replace_entry = ttk.Entry(frame, textvariable=self.replace_var, width=30)
+        self.replace_entry.grid(row=1, column=1, padx=(8, 0), pady=4, sticky="ew")
+
+        self.case_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(frame, text="Match case", variable=self.case_var).grid(
+            row=2, column=0, columnspan=2, sticky="w", pady=4
+        )
+
+        btn_frame = ttk.Frame(frame)
+        btn_frame.grid(row=0, column=2, rowspan=3, padx=(12, 0), sticky="n")
+
+        ttk.Button(btn_frame, text="Find Next", command=self._do_find, width=12).pack(pady=2)
+        ttk.Button(btn_frame, text="Replace", command=self._do_replace, width=12).pack(pady=2)
+        ttk.Button(btn_frame, text="Replace All", command=self._do_replace_all, width=12).pack(pady=2)
+        ttk.Button(btn_frame, text="Close", command=self.destroy, width=12).pack(pady=2)
+
+        frame.columnconfigure(1, weight=1)
+        self.find_entry.focus_set()
+        self.bind("<Return>", lambda e: self._do_find())
+        self.bind("<Escape>", lambda e: self.destroy())
+
+    def _do_find(self):
+        if self._on_find:
+            self._on_find(self.find_var.get(), self.case_var.get())
+
+    def _do_replace(self):
+        if self._on_replace:
+            self._on_replace(self.find_var.get(), self.replace_var.get(), self.case_var.get())
+
+    def _do_replace_all(self):
+        if self._on_replace_all:
+            self._on_replace_all(self.find_var.get(), self.replace_var.get(), self.case_var.get())
+
+
 def _build_function_list() -> list[tuple[str, str]]:
     """Build sorted list of (name, description) for all known functions."""
     result = []

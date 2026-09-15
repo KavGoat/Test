@@ -13,7 +13,7 @@ from ..parser import parse_file, Worksheet
 from ..writer import write_file
 from .canvas import WorksheetCanvas
 from .toolbar import StandardToolbar, MathPanelContainer
-from .dialogs import AboutDialog, OptionsDialog, InsertFunctionDialog
+from .dialogs import AboutDialog, OptionsDialog, InsertFunctionDialog, FindReplaceDialog
 
 
 class SMathApp:
@@ -159,6 +159,11 @@ class SMathApp:
         edit_menu.add_command(
             label="Delete", accelerator="Del", command=self._on_delete
         )
+        edit_menu.add_separator()
+        edit_menu.add_command(
+            label="Find and Replace...", accelerator="Ctrl+H",
+            command=self._on_find_replace,
+        )
 
         # --- Insert menu ---
         insert_menu = tk.Menu(menubar, tearoff=0)
@@ -174,6 +179,30 @@ class SMathApp:
         insert_menu.add_command(
             label="Function...", command=self._on_insert_function
         )
+
+        # --- Format menu ---
+        format_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Format", menu=format_menu)
+        format_menu.add_command(
+            label="Bold", accelerator="Ctrl+B", command=self._on_format_bold
+        )
+        format_menu.add_command(
+            label="Italic", accelerator="Ctrl+I", command=self._on_format_italic
+        )
+        format_menu.add_command(
+            label="Underline", accelerator="Ctrl+U", command=self._on_format_underline
+        )
+        format_menu.add_separator()
+        self._font_size_var = tk.IntVar(value=10)
+        size_menu = tk.Menu(format_menu, tearoff=0)
+        for sz in (8, 9, 10, 11, 12, 14, 16, 18, 20, 24):
+            size_menu.add_radiobutton(
+                label=str(sz), variable=self._font_size_var, value=sz,
+                command=self._on_font_size_change,
+            )
+        format_menu.add_cascade(label="Font Size", menu=size_menu)
+        format_menu.add_separator()
+        format_menu.add_command(label="Text Color...", command=self._on_text_color)
 
         # --- View menu ---
         view_menu = tk.Menu(menubar, tearoff=0)
@@ -306,6 +335,16 @@ class SMathApp:
 
     def _bind_shortcuts(self):
         """Bind keyboard shortcuts."""
+        self._root.bind("<Control-b>", lambda e: self._on_format_bold())
+        self._root.bind("<Control-B>", lambda e: self._on_format_bold())
+        self._root.bind("<Control-i>", lambda e: self._on_format_italic())
+        self._root.bind("<Control-I>", lambda e: self._on_format_italic())
+        self._root.bind("<Control-u>", lambda e: self._on_format_underline())
+        self._root.bind("<Control-U>", lambda e: self._on_format_underline())
+        self._root.bind("<Control-h>", lambda e: self._on_find_replace())
+        self._root.bind("<Control-H>", lambda e: self._on_find_replace())
+        self._root.bind("<Control-f>", lambda e: self._on_find_replace())
+        self._root.bind("<Control-F>", lambda e: self._on_find_replace())
         self._root.bind("<Control-n>", lambda e: self._on_new())
         self._root.bind("<Control-N>", lambda e: self._on_new())
         self._root.bind("<Control-o>", lambda e: self._on_open())
@@ -660,6 +699,177 @@ class SMathApp:
     # ------------------------------------------------------------------
     # Window close
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Find and Replace
+    # ------------------------------------------------------------------
+
+    def _on_find_replace(self):
+        """Open the Find and Replace dialog."""
+        self._find_idx = 0
+        FindReplaceDialog(
+            self._root,
+            on_find=self._do_find,
+            on_replace=self._do_replace,
+            on_replace_all=self._do_replace_all,
+        )
+
+    def _do_find(self, text: str, match_case: bool):
+        """Find and select the next region containing the search text."""
+        if not text or self._canvas_widget._worksheet is None:
+            return
+        ws = self._canvas_widget._worksheet
+        rendered = self._canvas_widget._rendered
+        start = getattr(self, "_find_idx", 0)
+        for i in range(len(rendered)):
+            idx = (start + i) % len(rendered)
+            region = rendered[idx].region
+            expr_text = self._canvas_widget._region_to_edit_text(region)
+            if not expr_text and region.text_contents:
+                tc = self._canvas_widget._get_text_content(region.text_contents)
+                if tc and tc.paragraphs:
+                    expr_text = " ".join(p.text for p in tc.paragraphs)
+            if not expr_text:
+                continue
+            check = expr_text if match_case else expr_text.lower()
+            target = text if match_case else text.lower()
+            if target in check:
+                self._canvas_widget._select_region(idx)
+                self._find_idx = idx + 1
+                self._status_info.config(text=f"Found at region {idx + 1}")
+                return
+        self._status_info.config(text="Not found")
+        self._find_idx = 0
+
+    def _do_replace(self, find: str, replace: str, match_case: bool):
+        """Replace in the currently selected region."""
+        if not find:
+            return
+        idx = self._canvas_widget._selected_index
+        if idx is None or idx >= len(self._canvas_widget._rendered):
+            self._do_find(find, match_case)
+            return
+        region = self._canvas_widget._rendered[idx].region
+        if region.math and region.math.input_expr:
+            from ..infix_parser import ast_to_text, parse_infix, ast_to_elements
+            expr_text = ast_to_text(region.math.input_expr)
+            if match_case:
+                new_text = expr_text.replace(find, replace)
+            else:
+                import re
+                new_text = re.sub(re.escape(find), replace, expr_text, flags=re.IGNORECASE)
+            if new_text != expr_text:
+                self._canvas_widget._save_undo_state()
+                ast = parse_infix(new_text)
+                if ast:
+                    region.math.input_expr = ast
+                    region.math.input_elements = ast_to_elements(ast)
+                    self._canvas_widget._mark_modified()
+                    self._canvas_widget._evaluate_and_render()
+                    self._status_info.config(text="Replaced")
+        self._do_find(find, match_case)
+
+    def _do_replace_all(self, find: str, replace: str, match_case: bool):
+        """Replace in all regions."""
+        if not find:
+            return
+        ws = self._canvas_widget._worksheet
+        if ws is None:
+            return
+        from ..infix_parser import ast_to_text, parse_infix, ast_to_elements
+        count = 0
+        self._canvas_widget._save_undo_state()
+        for region in ws.regions:
+            if region.math and region.math.input_expr:
+                expr_text = ast_to_text(region.math.input_expr)
+                if match_case:
+                    new_text = expr_text.replace(find, replace)
+                else:
+                    import re
+                    new_text = re.sub(re.escape(find), replace, expr_text, flags=re.IGNORECASE)
+                if new_text != expr_text:
+                    ast = parse_infix(new_text)
+                    if ast:
+                        region.math.input_expr = ast
+                        region.math.input_elements = ast_to_elements(ast)
+                        count += 1
+        if count > 0:
+            self._canvas_widget._mark_modified()
+            self._canvas_widget._evaluate_and_render()
+        self._status_info.config(text=f"Replaced {count} occurrence(s)")
+
+    # ------------------------------------------------------------------
+    # Format operations
+    # ------------------------------------------------------------------
+
+    def _on_format_bold(self):
+        entry = getattr(self._canvas_widget, "_edit_text_entry", None)
+        if entry and isinstance(entry, tk.Text):
+            try:
+                sel_start = entry.index("sel.first")
+                sel_end = entry.index("sel.last")
+                if "bold" in entry.tag_names(sel_start):
+                    entry.tag_remove("bold", sel_start, sel_end)
+                else:
+                    entry.tag_add("bold", sel_start, sel_end)
+                    entry.tag_configure("bold", font=("DejaVu Sans", 11, "bold"))
+            except tk.TclError:
+                pass
+
+    def _on_format_italic(self):
+        entry = getattr(self._canvas_widget, "_edit_text_entry", None)
+        if entry and isinstance(entry, tk.Text):
+            try:
+                sel_start = entry.index("sel.first")
+                sel_end = entry.index("sel.last")
+                if "italic" in entry.tag_names(sel_start):
+                    entry.tag_remove("italic", sel_start, sel_end)
+                else:
+                    entry.tag_add("italic", sel_start, sel_end)
+                    entry.tag_configure("italic", font=("DejaVu Sans", 11, "italic"))
+            except tk.TclError:
+                pass
+
+    def _on_format_underline(self):
+        entry = getattr(self._canvas_widget, "_edit_text_entry", None)
+        if entry and isinstance(entry, tk.Text):
+            try:
+                sel_start = entry.index("sel.first")
+                sel_end = entry.index("sel.last")
+                if "underline" in entry.tag_names(sel_start):
+                    entry.tag_remove("underline", sel_start, sel_end)
+                else:
+                    entry.tag_add("underline", sel_start, sel_end)
+                    entry.tag_configure("underline", underline=True)
+            except tk.TclError:
+                pass
+
+    def _on_font_size_change(self):
+        size = self._font_size_var.get()
+        if self._canvas_widget._selected_index is not None:
+            idx = self._canvas_widget._selected_index
+            if idx < len(self._canvas_widget._rendered):
+                region = self._canvas_widget._rendered[idx].region
+                region.font_size = size
+                self._canvas_widget._evaluate_and_render()
+                self._status_info.config(text=f"Font size: {size}")
+
+    def _on_text_color(self):
+        try:
+            from tkinter import colorchooser
+            color = colorchooser.askcolor(
+                title="Text Color", parent=self._root
+            )
+            if color[1]:
+                if self._canvas_widget._selected_index is not None:
+                    idx = self._canvas_widget._selected_index
+                    if idx < len(self._canvas_widget._rendered):
+                        region = self._canvas_widget._rendered[idx].region
+                        region.color = color[1]
+                        self._canvas_widget._evaluate_and_render()
+                        self._status_info.config(text=f"Color: {color[1]}")
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Recent files
