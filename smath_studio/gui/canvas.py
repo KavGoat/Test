@@ -1242,10 +1242,24 @@ class WorksheetCanvas(ttk.Frame):
 
         if ctrl and not self._editing:
             keysym = event.keysym.lower()
-            if keysym == "m":
+            shift = event.state & 0x1
+            _struct_shortcuts = {
+                "m": "_do_matrix",
+                "d": "_do_derivative",
+                "i": "_do_integral",
+            }
+            if shift:
+                _struct_shortcuts_shift = {
+                    "s": "_do_summation",
+                    "p": "_do_product",
+                }
+                method = _struct_shortcuts_shift.get(keysym)
+            else:
+                method = _struct_shortcuts.get(keysym)
+            if method:
                 self._start_editing(self._cursor_x, self._cursor_y)
                 if self._math_editor:
-                    self._math_editor._do_matrix()
+                    getattr(self._math_editor, method)()
                     self._math_editor._update_eval()
                     self._math_editor.render()
                 return "break"

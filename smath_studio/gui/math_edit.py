@@ -301,6 +301,31 @@ class MathEditor:
             self.render()
             return "consumed"
 
+        if ctrl and keysym.lower() == "d":
+            self._do_derivative()
+            self._update_eval()
+            self.render()
+            return "consumed"
+
+        if ctrl and keysym.lower() == "i":
+            self._do_integral()
+            self._update_eval()
+            self.render()
+            return "consumed"
+
+        shift = event.state & 0x1
+        if ctrl and shift and keysym.lower() == "s":
+            self._do_summation()
+            self._update_eval()
+            self.render()
+            return "consumed"
+
+        if ctrl and shift and keysym.lower() == "p":
+            self._do_product()
+            self._update_eval()
+            self.render()
+            return "consumed"
+
         if keysym == "BackSpace":
             self._do_backspace()
         elif keysym == "Delete":
@@ -346,6 +371,23 @@ class MathEditor:
     def _insert_char(self, ch: str):
         slot = self._active_slot
         pos = slot.cursor_pos
+
+        if ch == ".":
+            if pos > 0 and isinstance(slot.items[pos - 1], EText):
+                prev_text = slot.items[pos - 1].text
+                if prev_text.endswith("."):
+                    slot.items[pos - 1].text = prev_text[:-1]
+                    if not slot.items[pos - 1].text:
+                        slot.items.pop(pos - 1)
+                        pos -= 1
+                    self._do_range()
+                    return
+            if pos > 0 and isinstance(slot.items[pos - 1], EText):
+                slot.items[pos - 1].text += ch
+            else:
+                slot.items.insert(pos, EText(ch))
+                slot.cursor_pos = pos + 1
+            return
 
         if ch == "/":
             self._do_fraction()
@@ -524,6 +566,69 @@ class MathEditor:
         self._active_slot = sq.radicand
         self._active_slot.cursor_pos = 0
 
+    def _do_derivative(self):
+        slot = self._active_slot
+        pos = slot.cursor_pos
+        d = EDerivative()
+        if pos > 0 and isinstance(slot.items[pos - 1], (EText, EParens)):
+            prev = slot.items.pop(pos - 1)
+            pos -= 1
+            d.body_slot.items.append(prev)
+            d.body_slot.cursor_pos = len(d.body_slot.items)
+        slot.items.insert(pos, d)
+        slot.cursor_pos = pos + 1
+        self._slot_stack.append(slot)
+        if d.body_slot.items:
+            self._active_slot = d.var_slot
+        else:
+            self._active_slot = d.body_slot
+        self._active_slot.cursor_pos = 0
+
+    def _do_integral(self):
+        slot = self._active_slot
+        pos = slot.cursor_pos
+        ig = EIntegral()
+        slot.items.insert(pos, ig)
+        slot.cursor_pos = pos + 1
+        self._slot_stack.append(slot)
+        self._active_slot = ig.body_slot
+        self._active_slot.cursor_pos = 0
+
+    def _do_summation(self):
+        slot = self._active_slot
+        pos = slot.cursor_pos
+        s = ESummation()
+        slot.items.insert(pos, s)
+        slot.cursor_pos = pos + 1
+        self._slot_stack.append(slot)
+        self._active_slot = s.body_slot
+        self._active_slot.cursor_pos = 0
+
+    def _do_product(self):
+        slot = self._active_slot
+        pos = slot.cursor_pos
+        p = EProduct()
+        slot.items.insert(pos, p)
+        slot.cursor_pos = pos + 1
+        self._slot_stack.append(slot)
+        self._active_slot = p.body_slot
+        self._active_slot.cursor_pos = 0
+
+    def _do_range(self):
+        slot = self._active_slot
+        pos = slot.cursor_pos
+        r = ERange()
+        if pos > 0 and isinstance(slot.items[pos - 1], EText):
+            prev = slot.items.pop(pos - 1)
+            pos -= 1
+            r.start_slot.items.append(prev)
+            r.start_slot.cursor_pos = len(r.start_slot.items)
+        slot.items.insert(pos, r)
+        slot.cursor_pos = pos + 1
+        self._slot_stack.append(slot)
+        self._active_slot = r.end_slot
+        self._active_slot.cursor_pos = 0
+
     def _do_matrix(self, rows: int = 2, cols: int = 2):
         slot = self._active_slot
         pos = slot.cursor_pos
@@ -546,7 +651,9 @@ class MathEditor:
                 item.text = item.text[:-1]
             elif isinstance(item, EUnit) and len(item.name) > 1:
                 item.name = item.name[:-1]
-            elif isinstance(item, (EFraction, ESuperscript, EParens, ESqrt, EAbs)):
+            elif isinstance(item, (EFraction, ESuperscript, EParens, ESqrt, EAbs,
+                                    EMatrix, ESummation, EProduct, EIntegral,
+                                    ERange, EDerivative)):
                 contents = self._flatten_structure(item)
                 slot.items.pop(pos - 1)
                 for j, c in enumerate(contents):

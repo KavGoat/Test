@@ -350,6 +350,8 @@ class MathRenderer:
             return self._measure_bigop(c, node, fs, ctx)
         if name == "nintegrate" and len(node.args) >= 3:
             return self._measure_integral(c, node, fs, ctx)
+        if name in ("diff", "nderiv") and len(node.args) == 2:
+            return self._measure_derivative(c, node, fs, ctx)
 
         style = "" if name in _BUILTIN_FUNCTIONS else "italic"
         nw, nh = self._text_size(c, name, fs, style)
@@ -416,6 +418,14 @@ class MathRenderer:
         w = sym_w + body.width + 8
         h = max(sh + lo.height + hi.height, body.height)
         return RenderBox(w, h, h / 2)
+
+    def _measure_derivative(self, c, node: FunctionCall, fs: int, ctx) -> RenderBox:
+        body = self._measure_node(node.args[0], fs, ctx)
+        var = self._measure_node(node.args[1], fs, ctx)
+        dw, dh = self._text_size(c, "d", fs, "italic")
+        frac_w = max(dw + body.width, dw + var.width) + 8
+        h = body.height + var.height + dh * 2 + 8
+        return RenderBox(frac_w, h, body.height + dh + 4)
 
     # -----------------------------------------------------------------
     # Render (draw on canvas)
@@ -646,6 +656,8 @@ class MathRenderer:
             return self._render_bigop(c, node, x, y, fs, ctx)
         if name == "nintegrate" and len(node.args) >= 3:
             return self._render_integral(c, node, x, y, fs, ctx)
+        if name in ("diff", "nderiv") and len(node.args) == 2:
+            return self._render_derivative(c, node, x, y, fs, ctx)
         if name == "line":
             return self._render_line_block(c, node, x, y, fs, ctx)
 
@@ -876,6 +888,40 @@ class MathRenderer:
 
         total_w = sym_col_w + 4 + body_m.width + dx_w
         return RenderBox(total_w, total_h, total_h / 2)
+
+    def _render_derivative(self, c, node: FunctionCall, x, y, fs, ctx) -> RenderBox:
+        body_node = node.args[0]
+        var_node = node.args[1]
+
+        body_m = self._measure_node(body_node, fs, ctx)
+        var_m = self._measure_node(var_node, fs, ctx)
+
+        f_italic = self._get_font(c, fs, "italic")
+        dw, dh = self._text_size(c, "d", fs, "italic")
+
+        num_w = dw + body_m.width
+        den_w = dw + var_m.width
+        frac_w = max(num_w, den_w) + 8
+
+        num_y = y
+        bar_y = y + max(dh, body_m.height) + 2
+        den_y = bar_y + 4
+
+        # Numerator: d + body
+        nx = x + (frac_w - num_w) / 2
+        c.create_text(nx, num_y, text="d", anchor="nw", font=f_italic, fill=_OPERATOR_COLOR)
+        self._render_node(c, body_node, nx + dw, num_y, fs, ctx)
+
+        # Fraction bar
+        c.create_line(x, bar_y, x + frac_w, bar_y, fill=_OPERATOR_COLOR, width=1)
+
+        # Denominator: d + var
+        dx = x + (frac_w - den_w) / 2
+        c.create_text(dx, den_y, text="d", anchor="nw", font=f_italic, fill=_OPERATOR_COLOR)
+        self._render_node(c, var_node, dx + dw, den_y, fs, ctx)
+
+        total_h = den_y + max(dh, var_m.height) - y
+        return RenderBox(frac_w, total_h, bar_y - y)
 
     def _render_line_block(self, c, node: FunctionCall, x, y, fs, ctx) -> RenderBox:
         """Render a line() block (multi-line expression group)."""

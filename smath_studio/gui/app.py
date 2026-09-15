@@ -178,6 +178,10 @@ class SMathApp:
         insert_menu.add_command(label="Comment", command=self._on_insert_comment)
         insert_menu.add_command(label="Plot Region", command=self._on_insert_plot)
         insert_menu.add_command(label="Matrix", accelerator="Ctrl+M", command=self._on_insert_matrix)
+        insert_menu.add_command(label="Derivative", accelerator="Ctrl+D", command=self._on_insert_derivative)
+        insert_menu.add_command(label="Integral", accelerator="Ctrl+I", command=self._on_insert_integral)
+        insert_menu.add_command(label="Summation", accelerator="Ctrl+Shift+S", command=self._on_insert_summation)
+        insert_menu.add_command(label="Product", accelerator="Ctrl+Shift+P", command=self._on_insert_product)
         insert_menu.add_command(label="Line Separator", command=self._on_insert_line)
         insert_menu.add_command(label="Area", command=self._on_insert_area)
         insert_menu.add_separator()
@@ -678,6 +682,30 @@ class SMathApp:
             self._canvas_widget._math_editor._update_eval()
             self._canvas_widget._math_editor.render()
         self._status_info.config(text="Matrix inserted (Ctrl+M)")
+
+    def _on_insert_derivative(self):
+        self._insert_structure("_do_derivative", "Derivative")
+
+    def _on_insert_integral(self):
+        self._insert_structure("_do_integral", "Integral")
+
+    def _on_insert_summation(self):
+        self._insert_structure("_do_summation", "Summation")
+
+    def _on_insert_product(self):
+        self._insert_structure("_do_product", "Product")
+
+    def _insert_structure(self, method_name: str, label: str):
+        if not self._canvas_widget._editing:
+            self._canvas_widget._start_editing(
+                self._canvas_widget._cursor_x,
+                self._canvas_widget._cursor_y
+            )
+        if self._canvas_widget._math_editor:
+            getattr(self._canvas_widget._math_editor, method_name)()
+            self._canvas_widget._math_editor._update_eval()
+            self._canvas_widget._math_editor.render()
+        self._status_info.config(text=f"{label} inserted")
 
     def _on_insert_function(self):
         """Show the Insert Function dialog."""
