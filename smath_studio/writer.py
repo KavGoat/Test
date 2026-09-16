@@ -104,9 +104,9 @@ def _write_settings(lines: list[str], settings: Settings):
 def _write_region(lines: list[str], region: Region, indent: int = 2):
     pad = " " * indent
     attrs = [f'id="{region.id}"']
-    if region.left:
+    if region.left is not None:
         attrs.append(f'left="{region.left}"')
-    if region.top:
+    if region.top is not None:
         attrs.append(f'top="{region.top}"')
     if region.width:
         attrs.append(f'width="{region.width}"')

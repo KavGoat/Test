@@ -128,7 +128,12 @@ class _Parser:
         node = self._parse_comparison()
         if self._match("ASSIGN"):
             value = self._parse_comparison()
-            return BinaryOp(":", node, value)
+            node = BinaryOp(":", node, value)
+            tok = self._peek()
+            if tok and tok.type == "OP" and tok.value == "=" and self._pos == len(self._tokens) - 1:
+                self._advance()
+                return Evaluation(node)
+            return node
         tok = self._peek()
         if tok and tok.type == "OP" and tok.value == "=":
             if self._pos == len(self._tokens) - 1:

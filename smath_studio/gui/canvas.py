@@ -746,6 +746,19 @@ class WorksheetCanvas(ttk.Frame):
         if math_data is None:
             return items
 
+        # Handle showInputData=False: only show the result value
+        if region.show_input_data is not None and not region.show_input_data:
+            if eval_result is not None and not isinstance(eval_result, Exception):
+                precision = self._ctx.precision if self._ctx else 4
+                result_text = _format_value(eval_result, precision)
+                fnt = self._get_font(region.font_size, bold=False, italic=False)
+                text_id = self._canvas.create_text(
+                    x + _REGION_PADDING, y + _REGION_PADDING,
+                    text=result_text, anchor=tk.NW, font=fnt,
+                    fill=region.color or "#000000",
+                )
+                return [text_id]
+
         # Try the dedicated math renderer first
         if self._math_renderer is not None:
             try:
@@ -2066,9 +2079,7 @@ class WorksheetCanvas(ttk.Frame):
             return ""
         expr = region.math.input_expr
         text = ast_to_text(expr)
-        if region.math.result_elements and not (
-            isinstance(expr, BinaryOp) and expr.operator == ":"
-        ):
+        if region.math.result_elements:
             if not text.endswith("="):
                 text += " ="
         return text

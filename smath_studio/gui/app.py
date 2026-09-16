@@ -82,27 +82,38 @@ class SMathApp:
     # ------------------------------------------------------------------
 
     def _setup_styles(self):
-        """Configure ttk styles for a clean appearance."""
+        """Configure ttk styles for a clean appearance matching SMath Studio."""
         style = ttk.Style()
         try:
             style.theme_use("clam")
         except tk.TclError:
             pass
 
+        style.configure(".", background="#f0f0f0")
         style.configure(
             "Toolbutton.TButton",
             padding=(4, 2),
             font=("Segoe UI", 9),
         )
         style.configure(
+            "Toolbar.TFrame",
+            background="#e8e8e8",
+        )
+        style.configure(
             "Status.TLabel",
             font=("Segoe UI", 9),
             padding=(4, 2),
+            background="#f0f0f0",
         )
         style.configure(
             "StatusSep.TLabel",
             font=("Segoe UI", 9),
             foreground="#888888",
+            background="#f0f0f0",
+        )
+        style.configure(
+            "Status.TFrame",
+            background="#f0f0f0",
         )
 
     def _build_menu_bar(self):
@@ -303,7 +314,7 @@ class SMathApp:
 
     def _build_status_bar(self):
         """Build the status bar at the bottom."""
-        status_frame = ttk.Frame(self._root, relief=tk.SUNKEN)
+        status_frame = ttk.Frame(self._root, relief=tk.SUNKEN, style="Status.TFrame")
         status_frame.pack(side=tk.BOTTOM, fill=tk.X)
 
         self._status_position = ttk.Label(

@@ -1099,11 +1099,13 @@ class MathEditor:
         pre_box = self._measure_slot_only(self.root, self.font_size)
         total_w = pre_box.width + 8
         if self._eval_result is not None or self._eval_error:
-            total_w += 80
+            eq_w, _ = self._text_size(" = ", self.font_size)
+            res_w = self._measure_result_width()
+            total_w += eq_w + res_w + 8
         bg_id = self.canvas.create_rectangle(
             self.x - 2, self.y - 2,
             self.x + max(total_w, 20), self.y + max(pre_box.height, 16) + 2,
-            fill="#ffffff", outline="#b0b0b0", width=1,
+            fill="#f0f4ff", outline="#7090c0", width=1,
         )
         self._items.append(bg_id)
 
@@ -1121,11 +1123,38 @@ class MathEditor:
     def _measure_slot_only(self, slot: EditSlot, fs: int) -> _Box:
         return self._measure_slot(slot, fs)
 
+    def _measure_result_width(self) -> float:
+        from ..units import Quantity
+        if self._eval_error:
+            w, _ = self._text_size(self._eval_error, self.font_size)
+            return w
+        val = self._eval_result
+        if val is None:
+            return 0
+        if isinstance(val, Quantity):
+            val_text = self._fmt(val.value)
+            unit_str = val.display_unit if hasattr(val, "display_unit") else str(val.unit)
+            vw, _ = self._text_size(val_text, self.font_size)
+            if unit_str:
+                sp, _ = self._text_size(" ", self.font_size)
+                uw, _ = self._text_size(unit_str, self.font_size)
+                return vw + sp + uw
+            return vw
+        res_text = self._fmt(val)
+        w, _ = self._text_size(res_text, self.font_size)
+        return w
+
     def _render_eval_result(self, rx: float, ry: float, box: _Box):
         from ..units import Quantity
 
         f = self._get_font(self.font_size)
         base_y = ry + box.baseline - self._line_height(self.font_size) * 0.6
+
+        eq_id = self.canvas.create_text(
+            rx, base_y, text=" = ", anchor="nw", font=f, fill=_OPERATOR_COLOR)
+        self._items.append(eq_id)
+        eq_w, _ = self._text_size(" = ", self.font_size)
+        rx += eq_w
 
         if self._eval_error:
             tid = self.canvas.create_text(
