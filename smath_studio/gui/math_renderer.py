@@ -422,24 +422,28 @@ class MathRenderer:
 
     def _measure_sqrt(self, c, node: FunctionCall, fs: int, ctx) -> RenderBox:
         inner = self._measure_node(node.args[0], fs, ctx)
-        sw, sh = self._text_size(c, "√", fs)
-        w = sw + inner.width + 4
-        h = inner.height + 4
-        return RenderBox(w, h, h / 2)
+        pad = 3
+        rad_w = max(int(fs * 0.7), 10)
+        w = rad_w + inner.width + 4
+        h = inner.height + pad + 1
+        return RenderBox(w, h, pad + 1 + inner.baseline)
 
     def _measure_nthroot(self, c, node: FunctionCall, fs: int, ctx) -> RenderBox:
         inner = self._measure_node(node.args[0], fs, ctx)
-        idx = self._measure_node(node.args[1], int(fs * 0.6), ctx)
-        sw, sh = self._text_size(c, "√", fs)
-        idx_offset = max(idx.width - sw * 0.4, 0)
-        w = idx_offset + sw + inner.width + 4
-        h = inner.height + 4
-        return RenderBox(w, h, h / 2)
+        idx_fs = max(int(fs * 0.6), 6)
+        idx = self._measure_node(node.args[1], idx_fs, ctx)
+        pad = 3
+        rad_w = max(int(fs * 0.7), 10)
+        idx_offset = max(idx.width - rad_w * 0.4, 0)
+        w = idx_offset + rad_w + inner.width + 4
+        h = inner.height + pad + 1
+        return RenderBox(w, h, pad + 1 + inner.baseline)
 
     def _measure_abs(self, c, node: FunctionCall, fs: int, ctx) -> RenderBox:
         inner = self._measure_node(node.args[0], fs, ctx)
-        bw, _ = self._text_size(c, "|", fs)
-        return RenderBox(inner.width + bw * 2 + 4, inner.height, inner.baseline)
+        bar_w = 2
+        pad = 3
+        return RenderBox(inner.width + bar_w * 2 + pad * 2, inner.height, inner.baseline)
 
     def _measure_matrix(self, c, node: FunctionCall, fs: int, ctx) -> RenderBox:
         rows, cols = _matrix_dims(node)
@@ -474,19 +478,20 @@ class MathRenderer:
 
     def _measure_integral(self, c, node: FunctionCall, fs: int, ctx) -> RenderBox:
         body_node, lo_node, hi_node, var_node = self._integral_args(node)
-        sw, sh = self._text_size(c, "∫", int(fs * 1.6))
+        int_w = max(int(fs * 0.8), 12)
+        int_h = max(int(fs * 1.8), 20)
         body = self._measure_node(body_node, fs, ctx)
         sub_fs = max(int(fs * _SUB_SCALE), 6)
         lo = self._measure_node(lo_node, sub_fs, ctx)
         hi = self._measure_node(hi_node, sub_fs, ctx)
-        sym_w = max(sw, lo.width, hi.width) + 4
+        sym_w = max(int_w, lo.width, hi.width) + 4
         dx_w = 0
         if var_node is not None:
             dw, _ = self._text_size(c, "d", fs)
             var_m = self._measure_node(var_node, fs, ctx)
             dx_w = 4 + dw + var_m.width
         w = sym_w + body.width + dx_w + 8
-        h = max(sh + lo.height + hi.height, body.height)
+        h = max(int_h + lo.height + hi.height + 4, body.height)
         return RenderBox(w, h, h / 2)
 
     def _measure_range(self, c, node: FunctionCall, fs: int, ctx) -> RenderBox:
@@ -886,74 +891,75 @@ class MathRenderer:
 
     def _render_sqrt(self, c, node: FunctionCall, x, y, fs, ctx) -> RenderBox:
         inner_m = self._measure_node(node.args[0], fs, ctx)
+        pad = 3
+        content_h = inner_m.height + pad
+        rad_w = max(int(fs * 0.7), 10)
+        inner_x = x + rad_w
+        inner_y = y + pad + 1
 
-        # Draw radical symbol
-        f = self._get_font(c, int(fs * 1.2))
-        radical = "√"
-        c.create_text(x, y, text=radical, anchor="nw", font=f, fill=_OPERATOR_COLOR)
-        sw, sh = self._text_size(c, radical, int(fs * 1.2))
-
-        # Draw the inner expression
-        inner_x = x + sw
-        inner_y = y + 4
         ib = self._render_node(c, node.args[0], inner_x, inner_y, fs, ctx)
 
-        # Draw vinculum (overline)
-        line_y = y + 2
-        c.create_line(inner_x - 2, line_y, inner_x + ib.width + 2, line_y,
-                       fill=_OPERATOR_COLOR, width=1)
+        total_h = ib.height + pad + 1
+        self._draw_radical(c, x, y, rad_w, total_h, inner_m.width + 4)
 
-        w = sw + ib.width + 4
-        h = max(sh, ib.height + 4)
-        return RenderBox(w, h, h / 2)
+        w = rad_w + ib.width + 4
+        return RenderBox(w, total_h, inner_y - y + inner_m.baseline)
+
+    def _draw_radical(self, c: tk.Canvas, x: float, y: float,
+                      rad_w: float, h: float, bar_len: float):
+        tail_x = x + 1
+        tail_y = y + h * 0.55
+        notch_x = x + rad_w * 0.35
+        notch_y = y + h * 0.4
+        bottom_x = x + rad_w * 0.55
+        bottom_y = y + h - 1
+        top_x = x + rad_w - 1
+        top_y = y + 1
+        c.create_line(tail_x, tail_y, notch_x, notch_y,
+                     fill=_OPERATOR_COLOR, width=1)
+        c.create_line(notch_x, notch_y, bottom_x, bottom_y,
+                     fill=_OPERATOR_COLOR, width=1.2)
+        c.create_line(bottom_x, bottom_y, top_x, top_y,
+                     fill=_OPERATOR_COLOR, width=1.2)
+        c.create_line(top_x, top_y, top_x + bar_len, top_y,
+                     fill=_OPERATOR_COLOR, width=1)
 
     def _render_nthroot(self, c, node: FunctionCall, x, y, fs, ctx) -> RenderBox:
         inner_m = self._measure_node(node.args[0], fs, ctx)
-        idx_fs = int(fs * 0.6)
-
-        f_rad = self._get_font(c, int(fs * 1.2))
-        radical = "√"
-        sw, sh = self._text_size(c, radical, int(fs * 1.2))
+        idx_fs = max(int(fs * 0.6), 6)
+        pad = 3
+        rad_w = max(int(fs * 0.7), 10)
 
         idx_m = self._measure_node(node.args[1], idx_fs, ctx)
-        idx_offset = max(idx_m.width - sw * 0.4, 0)
+        idx_offset = max(idx_m.width - rad_w * 0.4, 0)
 
-        self._render_node(c, node.args[1], x + idx_offset - idx_m.width, y, idx_fs, ctx)
+        self._render_node(c, node.args[1], x + idx_offset - idx_m.width + rad_w * 0.3, y, idx_fs, ctx)
 
         rx = x + idx_offset
-        c.create_text(rx, y, text=radical, anchor="nw", font=f_rad, fill=_OPERATOR_COLOR)
-
-        inner_x = rx + sw
-        inner_y = y + 4
+        inner_x = rx + rad_w
+        inner_y = y + pad + 1
         ib = self._render_node(c, node.args[0], inner_x, inner_y, fs, ctx)
 
-        line_y = y + 2
-        c.create_line(inner_x - 2, line_y, inner_x + ib.width + 2, line_y,
-                       fill=_OPERATOR_COLOR, width=1)
+        total_h = ib.height + pad + 1
+        self._draw_radical(c, rx, y, rad_w, total_h, inner_m.width + 4)
 
-        w = idx_offset + sw + ib.width + 4
-        h = max(sh, ib.height + 4)
-        return RenderBox(w, h, h / 2)
+        w = idx_offset + rad_w + ib.width + 4
+        return RenderBox(w, total_h, inner_y - y + inner_m.baseline)
 
     def _render_abs(self, c, node: FunctionCall, x, y, fs, ctx) -> RenderBox:
         inner_m = self._measure_node(node.args[0], fs, ctx)
-        f = self._get_font(c, fs)
-        bw, bh = self._text_size(c, "|", fs)
+        bar_w = 2
+        pad = 3
+        h = inner_m.height
 
-        # Left bar
-        c.create_text(x, y, text="|", anchor="nw", font=f, fill=_OPERATOR_COLOR)
-
-        # Inner
-        ix = x + bw + 2
+        c.create_line(x + 1, y, x + 1, y + h, fill=_OPERATOR_COLOR, width=1.5)
+        ix = x + bar_w + pad
         ib = self._render_node(c, node.args[0], ix, y, fs, ctx)
+        rx = ix + ib.width + pad
+        c.create_line(rx + 1, y, rx + 1, y + h, fill=_OPERATOR_COLOR, width=1.5)
 
-        # Right bar
-        rx = ix + ib.width + 2
-        c.create_text(rx, y, text="|", anchor="nw", font=f, fill=_OPERATOR_COLOR)
-
-        w = bw + 2 + ib.width + 2 + bw
-        h = max(bh, ib.height)
-        return RenderBox(w, h, h / 2)
+        w = bar_w + pad + ib.width + pad + bar_w
+        return RenderBox(w, h, inner_m.baseline)
 
     def _render_matrix(self, c, node: FunctionCall, x, y, fs, ctx) -> RenderBox:
         rows, cols = _matrix_dims(node)
@@ -1059,29 +1065,27 @@ class MathRenderer:
     def _render_integral(self, c, node: FunctionCall, x, y, fs, ctx) -> RenderBox:
         """Render integral sign with limits."""
         body_node, lo_node, hi_node, var_node = self._integral_args(node)
-        big_fs = int(fs * 1.6)
-        f_sym = self._get_font(c, big_fs)
-        sym = "∫"
-        sw, sh = self._text_size(c, sym, big_fs)
 
         sub_fs = max(int(fs * _SUB_SCALE), 6)
         lo_m = self._measure_node(lo_node, sub_fs, ctx)
         hi_m = self._measure_node(hi_node, sub_fs, ctx)
         body_m = self._measure_node(body_node, fs, ctx)
 
-        sym_col_w = max(sw, lo_m.width, hi_m.width) + 4
+        int_w = max(int(fs * 0.8), 12)
+        int_h = max(int(fs * 1.8), body_m.height)
+        sym_col_w = max(int_w, lo_m.width, hi_m.width) + 4
 
         hi_y = y
         sym_y = hi_y + hi_m.height + 2
-        lo_y = sym_y + sh + 2
+        lo_y = sym_y + int_h + 2
         total_h = lo_y + lo_m.height - y
         body_y = y + (total_h - body_m.height) / 2
 
         hi_x = x + (sym_col_w - hi_m.width) / 2
         self._render_node(c, hi_node, hi_x, hi_y, sub_fs, ctx)
 
-        sym_x = x + (sym_col_w - sw) / 2
-        c.create_text(sym_x, sym_y, text=sym, anchor="nw", font=f_sym, fill=_OPERATOR_COLOR)
+        sym_cx = x + sym_col_w / 2
+        self._draw_integral_sign(c, sym_cx, sym_y, int_h, int_w)
 
         lo_x = x + (sym_col_w - lo_m.width) / 2
         self._render_node(c, lo_node, lo_x, lo_y, sub_fs, ctx)
@@ -1091,10 +1095,10 @@ class MathRenderer:
 
         dx_w = 0
         if var_node is not None:
-            f_d = self._get_font(c, fs)
+            f_d = self._get_font(c, fs, "italic")
             dx_x = body_x + body_m.width + 4
             c.create_text(dx_x, body_y, text="d", anchor="nw", font=f_d, fill=_OPERATOR_COLOR)
-            dw, _ = self._text_size(c, "d", fs)
+            dw, _ = self._text_size(c, "d", fs, "italic")
             self._render_node(c, var_node, dx_x + dw, body_y, fs, ctx)
             var_m = self._measure_node(var_node, fs, ctx)
             dx_w = 4 + dw + var_m.width
@@ -1102,38 +1106,51 @@ class MathRenderer:
         total_w = sym_col_w + 4 + body_m.width + dx_w
         return RenderBox(total_w, total_h, total_h / 2)
 
+    def _draw_integral_sign(self, c: tk.Canvas, cx: float, y: float,
+                            h: float, w: float):
+        r = w * 0.25
+        c.create_line(
+            cx + r, y,
+            cx + r * 0.5, y + h * 0.03,
+            cx, y + h * 0.12,
+            cx, y + h * 0.5,
+            cx, y + h * 0.88,
+            cx - r * 0.5, y + h * 0.97,
+            cx - r, y + h,
+            smooth=True, fill=_OPERATOR_COLOR, width=1.5)
+
     def _measure_indef_integral(self, c, node: FunctionCall, fs: int, ctx) -> RenderBox:
-        big_fs = int(fs * 1.6)
-        sw, sh = self._text_size(c, "∫", big_fs)
+        int_w = max(int(fs * 0.8), 12)
+        int_h = max(int(fs * 1.8), 20)
         body = self._measure_node(node.args[0], fs, ctx)
         dw, _ = self._text_size(c, "d", fs)
         var_m = self._measure_node(node.args[1], fs, ctx)
-        w = sw + 4 + body.width + 4 + dw + var_m.width
-        h = max(sh, body.height)
+        w = int_w + 4 + body.width + 4 + dw + var_m.width
+        h = max(int_h, body.height)
         return RenderBox(w, h, h / 2)
 
     def _render_indef_integral(self, c, node: FunctionCall, x, y, fs, ctx) -> RenderBox:
-        big_fs = int(fs * 1.6)
-        f_sym = self._get_font(c, big_fs)
-        sw, sh = self._text_size(c, "∫", big_fs)
+        int_w = max(int(fs * 0.8), 12)
+        int_h = max(int(fs * 1.8), 20)
         body_m = self._measure_node(node.args[0], fs, ctx)
-        total_h = max(sh, body_m.height)
+        total_h = max(int_h, body_m.height)
 
-        sym_y = y + (total_h - sh) / 2
-        c.create_text(x, sym_y, text="∫", anchor="nw", font=f_sym, fill=_OPERATOR_COLOR)
+        sym_cx = x + int_w / 2
+        sym_y = y + (total_h - int_h) / 2
+        self._draw_integral_sign(c, sym_cx, sym_y, int_h, int_w)
 
-        body_x = x + sw + 4
+        body_x = x + int_w + 4
         body_y = y + (total_h - body_m.height) / 2
         self._render_node(c, node.args[0], body_x, body_y, fs, ctx)
 
-        f_d = self._get_font(c, fs)
-        dw, _ = self._text_size(c, "d", fs)
+        f_d = self._get_font(c, fs, "italic")
+        dw, _ = self._text_size(c, "d", fs, "italic")
         dx_x = body_x + body_m.width + 4
         c.create_text(dx_x, body_y, text="d", anchor="nw", font=f_d, fill=_OPERATOR_COLOR)
         self._render_node(c, node.args[1], dx_x + dw, body_y, fs, ctx)
         var_m = self._measure_node(node.args[1], fs, ctx)
 
-        total_w = sw + 4 + body_m.width + 4 + dw + var_m.width
+        total_w = int_w + 4 + body_m.width + 4 + dw + var_m.width
         return RenderBox(total_w, total_h, total_h / 2)
 
     def _measure_lim(self, c, node: FunctionCall, fs: int, ctx) -> RenderBox:
@@ -1519,20 +1536,57 @@ class MathRenderer:
         num_text = _format_result(qty.value, precision, trailing_zeros)
         unit_str = qty.display_unit if hasattr(qty, 'display_unit') else str(qty.unit)
 
-        # Render number
         c.create_text(x, y, text=num_text, anchor="nw", font=f, fill=_NUMBER_COLOR)
         nw, nh = self._text_size(c, num_text, fs)
 
         total_w = nw
+        total_h = nh
         if unit_str:
-            # Space before unit
-            sp_w, _ = self._text_size(c, " ", fs)
+            sp_w, _ = self._text_size(c, " ", fs)
             ux = x + nw + sp_w
-            c.create_text(ux, y, text=unit_str, anchor="nw", font=f, fill=_UNIT_COLOR)
-            uw, uh = self._text_size(c, unit_str, fs)
-            total_w = nw + sp_w + uw
+            ub = self._render_unit_string(c, unit_str, ux, y, fs)
+            total_w = nw + sp_w + ub.width
+            total_h = max(nh, ub.height)
 
-        return RenderBox(total_w, nh, nh / 2)
+        return RenderBox(total_w, total_h, total_h / 2)
+
+    def _render_unit_string(self, c: tk.Canvas, unit_str: str, x: float, y: float, fs: int) -> RenderBox:
+        """Render a unit string like 'm^3/(kg·s^2)' with proper superscripts."""
+        import re
+        f = self._get_font(c, fs)
+        sup_fs = max(int(fs * _SUP_SCALE), 6)
+        f_sup = self._get_font(c, sup_fs)
+        _, base_h = self._text_size(c, "M", fs)
+        cx = x
+        max_h = base_h
+        i = 0
+        while i < len(unit_str):
+            if unit_str[i] == '^':
+                i += 1
+                exp_text = ""
+                while i < len(unit_str) and (unit_str[i].isdigit() or unit_str[i] in "+-"):
+                    exp_text += unit_str[i]
+                    i += 1
+                if exp_text:
+                    ew, eh = self._text_size(c, exp_text, sup_fs)
+                    c.create_text(cx, y, text=exp_text, anchor="nw", font=f_sup, fill=_UNIT_COLOR)
+                    cx += ew
+                    max_h = max(max_h, eh)
+            elif unit_str[i:i+2] == '·' or unit_str[i] == '·':
+                c.create_text(cx, y, text="·", anchor="nw", font=f, fill=_UNIT_COLOR)
+                dw, _ = self._text_size(c, "·", fs)
+                cx += dw
+                i += 1
+            else:
+                chunk = ""
+                while i < len(unit_str) and unit_str[i] not in "^·":
+                    chunk += unit_str[i]
+                    i += 1
+                if chunk:
+                    c.create_text(cx, y, text=chunk, anchor="nw", font=f, fill=_UNIT_COLOR)
+                    cw, _ = self._text_size(c, chunk, fs)
+                    cx += cw
+        return RenderBox(cx - x, max_h, max_h / 2)
 
     def _render_matrix_value(self, c, arr: np.ndarray, x, y, fs) -> RenderBox:
         """Render a numpy array as a bracketed matrix."""
