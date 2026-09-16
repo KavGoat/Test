@@ -61,8 +61,11 @@ _MATRIX_BRACKET_W = 4  # width of matrix brackets
 _BUILTIN_FUNCTIONS = {
     "sin", "cos", "tan", "asin", "acos", "atan", "cot", "sec", "csc",
     "acot", "asec", "acsc", "sinh", "cosh", "tanh", "asinh", "acosh", "atanh",
-    "ln", "log", "exp", "sqrt", "abs", "sign", "ceil", "floor", "round",
+    "tg", "ctg", "sh", "ch", "th", "cth", "cosec", "arcsec", "arccosec",
+    "arctg", "arcctg", "arcsin", "arccos",
+    "ln", "log", "lg", "exp", "sqrt", "nthroot", "abs", "sign", "ceil", "floor", "round",
     "max", "min", "mod", "sum", "product", "nintegrate", "diff", "nderiv",
+    "lim", "int", "sys",
     "det", "invert", "transpose", "identity", "el", "rows", "cols",
     "mean", "median", "stdev", "sort", "reverse", "length",
     "if", "for", "while", "line", "range", "eval", "mat",
@@ -367,14 +370,20 @@ class MathRenderer:
         name = node.name
         if name == "sqrt" and len(node.args) == 1:
             return self._measure_sqrt(c, node, fs, ctx)
+        if name == "nthroot" and len(node.args) == 2:
+            return self._measure_nthroot(c, node, fs, ctx)
         if name == "abs" and len(node.args) == 1:
             return self._measure_abs(c, node, fs, ctx)
         if name == "mat":
             return self._measure_matrix(c, node, fs, ctx)
         if name in ("sum", "product") and len(node.args) == 4:
             return self._measure_bigop(c, node, fs, ctx)
-        if name == "nintegrate" and len(node.args) >= 3:
+        if name in ("nintegrate", "int") and len(node.args) >= 3:
             return self._measure_integral(c, node, fs, ctx)
+        if name == "int" and len(node.args) == 2:
+            return self._measure_indef_integral(c, node, fs, ctx)
+        if name == "lim" and len(node.args) == 3:
+            return self._measure_lim(c, node, fs, ctx)
         if name in ("diff", "nderiv") and len(node.args) == 2:
             return self._measure_derivative(c, node, fs, ctx)
         if name == "if" and len(node.args) >= 2:
@@ -385,6 +394,10 @@ class MathRenderer:
             return self._measure_while(c, node, fs, ctx)
         if name == "range" and 2 <= len(node.args) <= 3:
             return self._measure_range(c, node, fs, ctx)
+        if name == "sys" and len(node.args) >= 3:
+            return self._measure_sys(c, node, fs, ctx)
+        if name == "log" and len(node.args) == 2:
+            return self._measure_log_base(c, node, fs, ctx)
 
         style = "" if name in _BUILTIN_FUNCTIONS else "italic"
         nw, nh = self._text_size(c, name, fs, style)
@@ -410,6 +423,15 @@ class MathRenderer:
         inner = self._measure_node(node.args[0], fs, ctx)
         sw, sh = self._text_size(c, "√", fs)
         w = sw + inner.width + 4
+        h = inner.height + 4
+        return RenderBox(w, h, h / 2)
+
+    def _measure_nthroot(self, c, node: FunctionCall, fs: int, ctx) -> RenderBox:
+        inner = self._measure_node(node.args[0], fs, ctx)
+        idx = self._measure_node(node.args[1], int(fs * 0.6), ctx)
+        sw, sh = self._text_size(c, "√", fs)
+        idx_offset = max(idx.width - sw * 0.4, 0)
+        w = idx_offset + sw + inner.width + 4
         h = inner.height + 4
         return RenderBox(w, h, h / 2)
 
@@ -444,14 +466,25 @@ class MathRenderer:
         h = max(sh + lo.height + hi.height, body.height)
         return RenderBox(w, h, h / 2)
 
+    def _integral_args(self, node: FunctionCall):
+        if node.name == "int" and len(node.args) >= 4:
+            return node.args[0], node.args[2], node.args[3], node.args[1]
+        return node.args[0], node.args[1], node.args[2], (node.args[3] if len(node.args) >= 4 else None)
+
     def _measure_integral(self, c, node: FunctionCall, fs: int, ctx) -> RenderBox:
+        body_node, lo_node, hi_node, var_node = self._integral_args(node)
         sw, sh = self._text_size(c, "∫", int(fs * 1.6))
-        body = self._measure_node(node.args[0], fs, ctx)
+        body = self._measure_node(body_node, fs, ctx)
         sub_fs = max(int(fs * _SUB_SCALE), 6)
-        lo = self._measure_node(node.args[1], sub_fs, ctx)
-        hi = self._measure_node(node.args[2], sub_fs, ctx)
+        lo = self._measure_node(lo_node, sub_fs, ctx)
+        hi = self._measure_node(hi_node, sub_fs, ctx)
         sym_w = max(sw, lo.width, hi.width) + 4
-        w = sym_w + body.width + 8
+        dx_w = 0
+        if var_node is not None:
+            dw, _ = self._text_size(c, "d", fs)
+            var_m = self._measure_node(var_node, fs, ctx)
+            dx_w = 4 + dw + var_m.width
+        w = sym_w + body.width + dx_w + 8
         h = max(sh + lo.height + hi.height, body.height)
         return RenderBox(w, h, h / 2)
 
@@ -760,14 +793,20 @@ class MathRenderer:
 
         if name == "sqrt" and len(node.args) == 1:
             return self._render_sqrt(c, node, x, y, fs, ctx)
+        if name == "nthroot" and len(node.args) == 2:
+            return self._render_nthroot(c, node, x, y, fs, ctx)
         if name == "abs" and len(node.args) == 1:
             return self._render_abs(c, node, x, y, fs, ctx)
         if name == "mat":
             return self._render_matrix(c, node, x, y, fs, ctx)
         if name in ("sum", "product") and len(node.args) == 4:
             return self._render_bigop(c, node, x, y, fs, ctx)
-        if name == "nintegrate" and len(node.args) >= 3:
+        if name in ("nintegrate", "int") and len(node.args) >= 3:
             return self._render_integral(c, node, x, y, fs, ctx)
+        if name == "int" and len(node.args) == 2:
+            return self._render_indef_integral(c, node, x, y, fs, ctx)
+        if name == "lim" and len(node.args) == 3:
+            return self._render_lim(c, node, x, y, fs, ctx)
         if name in ("diff", "nderiv") and len(node.args) == 2:
             return self._render_derivative(c, node, x, y, fs, ctx)
         if name == "if" and len(node.args) >= 2:
@@ -780,6 +819,10 @@ class MathRenderer:
             return self._render_range(c, node, x, y, fs, ctx)
         if name == "line":
             return self._render_line_block(c, node, x, y, fs, ctx)
+        if name == "sys" and len(node.args) >= 3:
+            return self._render_sys(c, node, x, y, fs, ctx)
+        if name == "log" and len(node.args) == 2:
+            return self._render_log_base(c, node, x, y, fs, ctx)
 
         # General function: name(arg1, arg2, ...)
         is_builtin = name in _BUILTIN_FUNCTIONS
@@ -839,6 +882,34 @@ class MathRenderer:
                        fill=_OPERATOR_COLOR, width=1)
 
         w = sw + ib.width + 4
+        h = max(sh, ib.height + 4)
+        return RenderBox(w, h, h / 2)
+
+    def _render_nthroot(self, c, node: FunctionCall, x, y, fs, ctx) -> RenderBox:
+        inner_m = self._measure_node(node.args[0], fs, ctx)
+        idx_fs = int(fs * 0.6)
+
+        f_rad = self._get_font(c, int(fs * 1.2))
+        radical = "√"
+        sw, sh = self._text_size(c, radical, int(fs * 1.2))
+
+        idx_m = self._measure_node(node.args[1], idx_fs, ctx)
+        idx_offset = max(idx_m.width - sw * 0.4, 0)
+
+        self._render_node(c, node.args[1], x + idx_offset - idx_m.width, y, idx_fs, ctx)
+
+        rx = x + idx_offset
+        c.create_text(rx, y, text=radical, anchor="nw", font=f_rad, fill=_OPERATOR_COLOR)
+
+        inner_x = rx + sw
+        inner_y = y + 4
+        ib = self._render_node(c, node.args[0], inner_x, inner_y, fs, ctx)
+
+        line_y = y + 2
+        c.create_line(inner_x - 2, line_y, inner_x + ib.width + 2, line_y,
+                       fill=_OPERATOR_COLOR, width=1)
+
+        w = idx_offset + sw + ib.width + 4
         h = max(sh, ib.height + 4)
         return RenderBox(w, h, h / 2)
 
@@ -965,16 +1036,13 @@ class MathRenderer:
 
     def _render_integral(self, c, node: FunctionCall, x, y, fs, ctx) -> RenderBox:
         """Render integral sign with limits."""
+        body_node, lo_node, hi_node, var_node = self._integral_args(node)
         big_fs = int(fs * 1.6)
         f_sym = self._get_font(c, big_fs)
         sym = "∫"
         sw, sh = self._text_size(c, sym, big_fs)
 
         sub_fs = max(int(fs * _SUB_SCALE), 6)
-        body_node = node.args[0]
-        lo_node = node.args[1]
-        hi_node = node.args[2]
-
         lo_m = self._measure_node(lo_node, sub_fs, ctx)
         hi_m = self._measure_node(hi_node, sub_fs, ctx)
         body_m = self._measure_node(body_node, fs, ctx)
@@ -987,26 +1055,20 @@ class MathRenderer:
         total_h = lo_y + lo_m.height - y
         body_y = y + (total_h - body_m.height) / 2
 
-        # Upper limit
         hi_x = x + (sym_col_w - hi_m.width) / 2
         self._render_node(c, hi_node, hi_x, hi_y, sub_fs, ctx)
 
-        # Integral symbol
         sym_x = x + (sym_col_w - sw) / 2
         c.create_text(sym_x, sym_y, text=sym, anchor="nw", font=f_sym, fill=_OPERATOR_COLOR)
 
-        # Lower limit
         lo_x = x + (sym_col_w - lo_m.width) / 2
         self._render_node(c, lo_node, lo_x, lo_y, sub_fs, ctx)
 
-        # Body
         body_x = x + sym_col_w + 4
         self._render_node(c, body_node, body_x, body_y, fs, ctx)
 
-        # dx  (if there's a 4th arg for the variable)
         dx_w = 0
-        if len(node.args) >= 4:
-            var_node = node.args[3]
+        if var_node is not None:
             f_d = self._get_font(c, fs)
             dx_x = body_x + body_m.width + 4
             c.create_text(dx_x, body_y, text="d", anchor="nw", font=f_d, fill=_OPERATOR_COLOR)
@@ -1017,6 +1079,121 @@ class MathRenderer:
 
         total_w = sym_col_w + 4 + body_m.width + dx_w
         return RenderBox(total_w, total_h, total_h / 2)
+
+    def _measure_indef_integral(self, c, node: FunctionCall, fs: int, ctx) -> RenderBox:
+        big_fs = int(fs * 1.6)
+        sw, sh = self._text_size(c, "∫", big_fs)
+        body = self._measure_node(node.args[0], fs, ctx)
+        dw, _ = self._text_size(c, "d", fs)
+        var_m = self._measure_node(node.args[1], fs, ctx)
+        w = sw + 4 + body.width + 4 + dw + var_m.width
+        h = max(sh, body.height)
+        return RenderBox(w, h, h / 2)
+
+    def _render_indef_integral(self, c, node: FunctionCall, x, y, fs, ctx) -> RenderBox:
+        big_fs = int(fs * 1.6)
+        f_sym = self._get_font(c, big_fs)
+        sw, sh = self._text_size(c, "∫", big_fs)
+        body_m = self._measure_node(node.args[0], fs, ctx)
+        total_h = max(sh, body_m.height)
+
+        sym_y = y + (total_h - sh) / 2
+        c.create_text(x, sym_y, text="∫", anchor="nw", font=f_sym, fill=_OPERATOR_COLOR)
+
+        body_x = x + sw + 4
+        body_y = y + (total_h - body_m.height) / 2
+        self._render_node(c, node.args[0], body_x, body_y, fs, ctx)
+
+        f_d = self._get_font(c, fs)
+        dw, _ = self._text_size(c, "d", fs)
+        dx_x = body_x + body_m.width + 4
+        c.create_text(dx_x, body_y, text="d", anchor="nw", font=f_d, fill=_OPERATOR_COLOR)
+        self._render_node(c, node.args[1], dx_x + dw, body_y, fs, ctx)
+        var_m = self._measure_node(node.args[1], fs, ctx)
+
+        total_w = sw + 4 + body_m.width + 4 + dw + var_m.width
+        return RenderBox(total_w, total_h, total_h / 2)
+
+    def _measure_lim(self, c, node: FunctionCall, fs: int, ctx) -> RenderBox:
+        sub_fs = max(int(fs * _SUB_SCALE), 6)
+        kw, kh = self._text_size(c, "lim", fs)
+        var_m = self._measure_node(node.args[1], sub_fs, ctx)
+        arrow_w, _ = self._text_size(c, "→", sub_fs)
+        val_m = self._measure_node(node.args[2], sub_fs, ctx)
+        sub_w = var_m.width + arrow_w + val_m.width
+        lim_col_w = max(kw, sub_w)
+        body_m = self._measure_node(node.args[0], fs, ctx)
+        w = lim_col_w + 6 + body_m.width
+        h = kh + max(var_m.height, val_m.height) + 2
+        h = max(h, body_m.height)
+        return RenderBox(w, h, kh * 0.5)
+
+    def _render_lim(self, c, node: FunctionCall, x, y, fs, ctx) -> RenderBox:
+        sub_fs = max(int(fs * _SUB_SCALE), 6)
+        f_kw = self._get_font(c, fs)
+        kw, kh = self._text_size(c, "lim", fs)
+        var_m = self._measure_node(node.args[1], sub_fs, ctx)
+        arrow_w, arrow_h = self._text_size(c, "→", sub_fs)
+        val_m = self._measure_node(node.args[2], sub_fs, ctx)
+        sub_w = var_m.width + arrow_w + val_m.width
+        lim_col_w = max(kw, sub_w)
+
+        c.create_text(x + (lim_col_w - kw) / 2, y, text="lim",
+                       anchor="nw", font=f_kw, fill=_FUNCTION_COLOR)
+
+        sub_y = y + kh + 2
+        sub_x = x + (lim_col_w - sub_w) / 2
+        self._render_node(c, node.args[1], sub_x, sub_y, sub_fs, ctx)
+        f_arrow = self._get_font(c, sub_fs)
+        c.create_text(sub_x + var_m.width, sub_y, text="→",
+                       anchor="nw", font=f_arrow, fill=_OPERATOR_COLOR)
+        self._render_node(c, node.args[2], sub_x + var_m.width + arrow_w, sub_y, sub_fs, ctx)
+
+        total_h = kh + max(var_m.height, val_m.height) + 2
+        body_m = self._measure_node(node.args[0], fs, ctx)
+        total_h = max(total_h, body_m.height)
+        body_x = x + lim_col_w + 6
+        body_y = y + (kh - body_m.height) / 2
+        self._render_node(c, node.args[0], body_x, body_y, fs, ctx)
+
+        total_w = lim_col_w + 6 + body_m.width
+        return RenderBox(total_w, total_h, kh * 0.5)
+
+    def _measure_log_base(self, c, node: FunctionCall, fs: int, ctx) -> RenderBox:
+        sub_fs = max(int(fs * _SUB_SCALE), 6)
+        nw, nh = self._text_size(c, "log", fs)
+        base_m = self._measure_node(node.args[1], sub_fs, ctx)
+        pw, ph = self._text_size(c, "(", fs)
+        val_m = self._measure_node(node.args[0], fs, ctx)
+        sub_y_off = nh * 0.55
+        w = nw + base_m.width + pw + val_m.width + pw
+        h = max(nh, sub_y_off + base_m.height, val_m.height)
+        return RenderBox(w, h, max(nh / 2, val_m.baseline))
+
+    def _render_log_base(self, c, node: FunctionCall, x, y, fs, ctx) -> RenderBox:
+        sub_fs = max(int(fs * _SUB_SCALE), 6)
+        f = self._get_font(c, fs)
+        nw, nh = self._text_size(c, "log", fs)
+        base_m = self._measure_node(node.args[1], sub_fs, ctx)
+        pw, ph = self._text_size(c, "(", fs)
+        val_m = self._measure_node(node.args[0], fs, ctx)
+        sub_y_off = nh * 0.55
+
+        total_h = max(nh, sub_y_off + base_m.height, val_m.height)
+        bl = max(nh / 2, val_m.baseline)
+
+        c.create_text(x, y + bl - nh / 2, text="log", anchor="nw", font=f, fill=_FUNCTION_COLOR)
+        cx = x + nw
+        self._render_node(c, node.args[1], cx, y + sub_y_off, sub_fs, ctx)
+        cx += base_m.width
+        self._draw_stretchy_paren(c, "(", cx, y, total_h, fs)
+        cx += pw
+        self._render_node(c, node.args[0], cx, y + bl - val_m.baseline, fs, ctx)
+        cx += val_m.width
+        self._draw_stretchy_paren(c, ")", cx, y, total_h, fs)
+        cx += pw
+
+        return RenderBox(cx - x, total_h, bl)
 
     def _render_derivative(self, c, node: FunctionCall, x, y, fs, ctx) -> RenderBox:
         body_node = node.args[0]
@@ -1176,6 +1353,53 @@ class MathRenderer:
             (cm.width if cm else 0) + 20 for _, _, _, cm, _ in case_data
         )
         return RenderBox(total_w, line_h, line_h / 2)
+
+    def _measure_sys(self, c, node: FunctionCall, fs: int, ctx) -> RenderBox:
+        n_eqs = int(node.args[-2].value) if hasattr(node.args[-2], 'value') else len(node.args) - 2
+        eqs = node.args[:n_eqs]
+        brace_w = max(int(fs * 0.8), 10)
+        row_pad = 4
+        total_h = 0.0
+        max_w = 0.0
+        for eq in eqs:
+            em = self._measure_node(eq, fs, ctx)
+            max_w = max(max_w, em.width)
+            total_h += em.height + row_pad
+        total_h -= row_pad if eqs else 0
+        total_h = max(total_h, self._text_size(c, "X", fs)[1])
+        return RenderBox(brace_w + 4 + max_w, total_h, total_h / 2)
+
+    def _render_sys(self, c, node: FunctionCall, x, y, fs, ctx) -> RenderBox:
+        n_eqs = int(node.args[-2].value) if hasattr(node.args[-2], 'value') else len(node.args) - 2
+        eqs = node.args[:n_eqs]
+        brace_w = max(int(fs * 0.8), 10)
+        row_pad = 4
+        content_x = x + brace_w + 4
+        row_data = []
+        total_h = 0.0
+        max_w = 0.0
+        for eq in eqs:
+            em = self._measure_node(eq, fs, ctx)
+            row_data.append(em)
+            max_w = max(max_w, em.width)
+            total_h += em.height + row_pad
+        total_h -= row_pad if eqs else 0
+        total_h = max(total_h, self._text_size(c, "X", fs)[1])
+        brace_fs = max(int(total_h * 0.7), fs)
+        f_brace = self._get_font(c, brace_fs)
+        c.create_text(x, y + total_h * 0.15, text="{", anchor="nw",
+                      font=f_brace, fill=_OPERATOR_COLOR)
+        if total_h > self._text_size(c, "X", fs)[1] * 1.5:
+            mid_y = y + total_h * 0.5
+            c.create_line(x + 3, y + 2, x + 3, mid_y - 4,
+                         fill=_OPERATOR_COLOR, width=1)
+            c.create_line(x + 3, mid_y + 4, x + 3, y + total_h - 2,
+                         fill=_OPERATOR_COLOR, width=1)
+        cy = y
+        for eq, em in zip(eqs, row_data):
+            self._render_node(c, eq, content_x, cy, fs, ctx)
+            cy += em.height + row_pad
+        return RenderBox(brace_w + 4 + max_w, max(total_h, 1), total_h / 2)
 
     def _render_line_block(self, c, node: FunctionCall, x, y, fs, ctx) -> RenderBox:
         """Render a line() block as system of equations with curly brace."""
