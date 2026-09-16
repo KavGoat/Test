@@ -93,7 +93,8 @@ _GREEK_DISPLAY = {
 
 # Operators that render as special symbols
 _DISPLAY_OPS = {
-    "*": "·",   # middle dot ·
+    "*": "·",
+    "-": "−",
     "≤": "≤",
     "≥": "≥",
     "≠": "≠",
@@ -172,7 +173,8 @@ class MathRenderer:
             for desc in getattr(math_data_or_node, 'descriptions', []):
                 if desc.active and desc.text:
                     f = self._get_font(canvas, max(font_size - 1, 8))
-                    bbox = canvas.bbox("all")
+                    my_items = list(set(canvas.find_all()) - items_before)
+                    bbox = canvas.bbox(*my_items) if my_items else None
                     desc_x = (bbox[2] + 10) if bbox else (x + 200)
                     canvas.create_text(
                         desc_x, y + 2, text=desc.text, anchor="nw",
@@ -318,10 +320,14 @@ class MathRenderer:
         left = self._measure_node(node.left, fs, ctx)
         right = self._measure_node(node.right, fs, ctx)
         op_text = _DISPLAY_OPS.get(node.operator, node.operator)
-        ow, oh = self._text_size(c, f" {op_text} ", fs)
+        if node.operator == "*" and _is_implicit_mult(node):
+            ow, oh = self._text_size(c, " ", fs)
+        else:
+            ow, oh = self._text_size(c, f" {op_text} ", fs)
         w = left.width + ow + right.width
-        h = max(left.height, right.height, oh)
         bl = max(left.baseline, right.baseline, oh / 2)
+        desc = max(left.height - left.baseline, right.height - right.baseline, oh / 2)
+        h = bl + desc
         return RenderBox(w, h, bl)
 
     def _measure_fraction(self, c, node: BinaryOp, fs: int, ctx) -> RenderBox:
@@ -384,18 +390,21 @@ class MathRenderer:
         nw, nh = self._text_size(c, name, fs, style)
         pw, ph = self._text_size(c, "(", fs)
 
-        args_w = 0
-        args_h = nh
-        for i, arg in enumerate(node.args):
-            a = self._measure_node(arg, fs, ctx)
+        args_w = 0.0
+        arg_measures = [self._measure_node(a, fs, ctx) for a in node.args]
+        max_bl = max((m.baseline for m in arg_measures), default=nh / 2)
+        max_bl = max(max_bl, nh / 2)
+        max_desc = max((m.height - m.baseline for m in arg_measures), default=nh / 2)
+        max_desc = max(max_desc, nh / 2)
+        for i, a in enumerate(arg_measures):
             args_w += a.width
-            args_h = max(args_h, a.height)
             if i < len(node.args) - 1:
                 cw, _ = self._text_size(c, ", ", fs)
                 args_w += cw
 
+        total_h = max_bl + max_desc
         w = nw + pw + args_w + pw
-        return RenderBox(w, args_h, args_h / 2)
+        return RenderBox(w, total_h, max_bl)
 
     def _measure_sqrt(self, c, node: FunctionCall, fs: int, ctx) -> RenderBox:
         inner = self._measure_node(node.args[0], fs, ctx)
@@ -499,6 +508,34 @@ class MathRenderer:
         frac_w = max(dw + body.width, dw + var.width) + 8
         h = body.height + var.height + dh * 2 + 8
         return RenderBox(frac_w, h, body.height + dh + 4)
+
+    # -----------------------------------------------------------------
+    # Stretchy delimiters
+    # -----------------------------------------------------------------
+
+    def _draw_stretchy_paren(self, c: tk.Canvas, ch: str, x: float, y: float,
+                             content_h: float, fs: int):
+        _, char_h = self._text_size(c, ch, fs)
+        if content_h <= char_h * 1.3:
+            f = self._get_font(c, fs)
+            py = y + (content_h - char_h) / 2
+            c.create_text(x, py, text=ch, anchor="nw", font=f, fill=_OPERATOR_COLOR)
+            return
+        pad = 2
+        if ch == "(":
+            cx = x + 4
+            c.create_line(cx + 3, y + pad, cx, y + content_h * 0.15,
+                         cx - 1, y + content_h * 0.5,
+                         cx, y + content_h * 0.85,
+                         cx + 3, y + content_h - pad,
+                         smooth=True, fill=_OPERATOR_COLOR, width=1)
+        elif ch == ")":
+            cx = x + 2
+            c.create_line(cx, y + pad, cx + 3, y + content_h * 0.15,
+                         cx + 4, y + content_h * 0.5,
+                         cx + 3, y + content_h * 0.85,
+                         cx, y + content_h - pad,
+                         smooth=True, fill=_OPERATOR_COLOR, width=1)
 
     # -----------------------------------------------------------------
     # Render (draw on canvas)
@@ -750,28 +787,37 @@ class MathRenderer:
         f_name = self._get_font(c, fs, style)
         f_paren = self._get_font(c, fs)
 
-        c.create_text(x, y, text=name, anchor="nw", font=f_name, fill=_FUNCTION_COLOR)
         nw, nh = self._text_size(c, name, fs, style)
+        pw, ph = self._text_size(c, "(", fs)
+        cw_comma, _ = self._text_size(c, ", ", fs)
+
+        arg_measures = [self._measure_node(a, fs, ctx) for a in node.args]
+        max_bl = max((m.baseline for m in arg_measures), default=nh / 2)
+        max_bl = max(max_bl, nh / 2)
+        max_desc = max((m.height - m.baseline for m in arg_measures), default=nh / 2)
+        max_desc = max(max_desc, nh / 2)
+        total_h = max_bl + max_desc
+
+        name_y = y + max_bl - nh / 2
+        c.create_text(x, name_y, text=name, anchor="nw", font=f_name, fill=_FUNCTION_COLOR)
 
         cx = x + nw
-        c.create_text(cx, y, text="(", anchor="nw", font=f_paren, fill=_OPERATOR_COLOR)
-        pw, ph = self._text_size(c, "(", fs)
+        self._draw_stretchy_paren(c, "(", cx, y, total_h, fs)
         cx += pw
 
-        total_h = nh
-        for i, arg in enumerate(node.args):
-            ab = self._render_node(c, arg, cx, y, fs, ctx)
-            cx += ab.width
-            total_h = max(total_h, ab.height)
+        for i, (arg, am) in enumerate(zip(node.args, arg_measures)):
+            arg_y = y + max_bl - am.baseline
+            self._render_node(c, arg, cx, arg_y, fs, ctx)
+            cx += am.width
             if i < len(node.args) - 1:
-                c.create_text(cx, y, text=", ", anchor="nw", font=f_paren, fill=_OPERATOR_COLOR)
-                cw, _ = self._text_size(c, ", ", fs)
-                cx += cw
+                comma_y = y + max_bl - ph / 2
+                c.create_text(cx, comma_y, text=", ", anchor="nw", font=f_paren, fill=_OPERATOR_COLOR)
+                cx += cw_comma
 
-        c.create_text(cx, y, text=")", anchor="nw", font=f_paren, fill=_OPERATOR_COLOR)
+        self._draw_stretchy_paren(c, ")", cx, y, total_h, fs)
         cx += pw
 
-        return RenderBox(cx - x, total_h, total_h / 2)
+        return RenderBox(cx - x, total_h, max_bl)
 
     def _render_sqrt(self, c, node: FunctionCall, x, y, fs, ctx) -> RenderBox:
         inner_m = self._measure_node(node.args[0], fs, ctx)

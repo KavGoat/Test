@@ -45,8 +45,8 @@ except Exception:
 
 _CANVAS_BG = "#e8e8e8"
 _PAGE_BOUNDARY_COLOR = "#d0d0d0"
-_SELECTION_COLOR = "#3366cc"
-_SELECTION_DASH = (4, 4)
+_SELECTION_COLOR = "#4477dd"
+_SELECTION_DASH = ()
 _GRID_SIZE = 8  # snap grid in pixels
 _DEFAULT_REGION_WIDTH = 120
 _DEFAULT_REGION_HEIGHT = 24
@@ -1043,15 +1043,14 @@ class WorksheetCanvas(ttk.Frame):
 
         rr = self._rendered[index]
         x1, y1, x2, y2 = rr.bbox
-        pad = 3
+        pad = 2
         sel_rect = self._canvas.create_rectangle(
             x1 - pad, y1 - pad, x2 + pad, y2 + pad,
             outline=_SELECTION_COLOR,
-            dash=_SELECTION_DASH,
-            width=2,
+            width=1,
         )
         self._selection_items.append(sel_rect)
-        hs = 3
+        hs = 2
         for hx, hy in [(x1 - pad, y1 - pad), (x2 + pad, y1 - pad),
                         (x1 - pad, y2 + pad), (x2 + pad, y2 + pad)]:
             h = self._canvas.create_rectangle(
@@ -1234,7 +1233,7 @@ class WorksheetCanvas(ttk.Frame):
                 pad = 2
                 rect = self._canvas.create_rectangle(
                     x1 - pad, y1 - pad, x2 + pad, y2 + pad,
-                    outline="#aaccee", width=1, dash=(3, 3),
+                    outline="#c0c0c0", width=1, dash=(2, 2),
                 )
                 self._hover_items.append(rect)
 

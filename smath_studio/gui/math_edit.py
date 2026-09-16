@@ -1103,7 +1103,7 @@ class MathEditor:
         bg_id = self.canvas.create_rectangle(
             self.x - 2, self.y - 2,
             self.x + max(total_w, 20), self.y + max(pre_box.height, 16) + 2,
-            fill="#fffff0", outline="#c0c0c0", width=1, dash=(2, 2),
+            fill="#ffffff", outline="#b0b0b0", width=1,
         )
         self._items.append(bg_id)
 
