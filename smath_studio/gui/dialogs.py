@@ -536,6 +536,96 @@ class MatrixSizeDialog(tk.Toplevel):
         self.destroy()
 
 
+class InsertPlotDialog(tk.Toplevel):
+    """Dialog for inserting a 2D plot region."""
+
+    def __init__(self, parent: tk.Widget):
+        super().__init__(parent)
+        self.title("Insert Plot")
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+        self.result: Optional[dict] = None
+
+        frame = ttk.Frame(self, padding=15)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(frame, text="Expression (e.g. sin(x)):", font=("DejaVu Sans", 10)).grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=(0, 5)
+        )
+        self._expr_var = tk.StringVar(value="sin(x)")
+        expr_entry = ttk.Entry(frame, textvariable=self._expr_var, width=30)
+        expr_entry.grid(row=1, column=0, columnspan=2, sticky="ew", pady=2)
+
+        ttk.Label(frame, text="X min:", font=("DejaVu Sans", 9)).grid(
+            row=2, column=0, sticky="e", padx=5, pady=3
+        )
+        self._xmin_var = tk.StringVar(value="-10")
+        ttk.Entry(frame, textvariable=self._xmin_var, width=8).grid(
+            row=2, column=1, sticky="w", pady=3
+        )
+
+        ttk.Label(frame, text="X max:", font=("DejaVu Sans", 9)).grid(
+            row=3, column=0, sticky="e", padx=5, pady=3
+        )
+        self._xmax_var = tk.StringVar(value="10")
+        ttk.Entry(frame, textvariable=self._xmax_var, width=8).grid(
+            row=3, column=1, sticky="w", pady=3
+        )
+
+        ttk.Label(frame, text="Width:", font=("DejaVu Sans", 9)).grid(
+            row=4, column=0, sticky="e", padx=5, pady=3
+        )
+        self._width_var = tk.StringVar(value="400")
+        ttk.Entry(frame, textvariable=self._width_var, width=8).grid(
+            row=4, column=1, sticky="w", pady=3
+        )
+
+        ttk.Label(frame, text="Height:", font=("DejaVu Sans", 9)).grid(
+            row=5, column=0, sticky="e", padx=5, pady=3
+        )
+        self._height_var = tk.StringVar(value="300")
+        ttk.Entry(frame, textvariable=self._height_var, width=8).grid(
+            row=5, column=1, sticky="w", pady=3
+        )
+
+        btn_frame = ttk.Frame(frame)
+        btn_frame.grid(row=6, column=0, columnspan=2, pady=(10, 0))
+        ttk.Button(btn_frame, text="Insert", command=self._on_ok, width=8).pack(
+            side=tk.LEFT, padx=5
+        )
+        ttk.Button(btn_frame, text="Cancel", command=self.destroy, width=8).pack(
+            side=tk.LEFT, padx=5
+        )
+
+        self.bind("<Return>", lambda e: self._on_ok())
+        self.bind("<Escape>", lambda e: self.destroy())
+        expr_entry.focus_set()
+        expr_entry.select_range(0, tk.END)
+        self.wait_window()
+
+    def _on_ok(self):
+        expr = self._expr_var.get().strip()
+        if not expr:
+            self.destroy()
+            return
+        try:
+            xmin = float(self._xmin_var.get())
+            xmax = float(self._xmax_var.get())
+            w = int(self._width_var.get())
+            h = int(self._height_var.get())
+        except ValueError:
+            xmin, xmax, w, h = -10, 10, 400, 300
+        self.result = {
+            "expression": expr,
+            "x_min": xmin,
+            "x_max": xmax,
+            "width": w,
+            "height": h,
+        }
+        self.destroy()
+
+
 def _build_function_list() -> list[tuple[str, str]]:
     """Build sorted list of (name, description) for all known functions."""
     result = []

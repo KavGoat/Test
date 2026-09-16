@@ -15,7 +15,7 @@ from .canvas import WorksheetCanvas
 from .toolbar import StandardToolbar, FormatToolbar, MathPanelContainer
 from .dialogs import (
     AboutDialog, OptionsDialog, InsertFunctionDialog, FindReplaceDialog,
-    MatrixSizeDialog,
+    MatrixSizeDialog, InsertPlotDialog,
 )
 
 
@@ -782,7 +782,17 @@ class SMathApp:
         self._status_info.config(text="Type comment, press Ctrl+Enter to commit")
 
     def _on_insert_plot(self):
-        self._status_info.config(text="Insert Plot Region (not yet implemented)")
+        dlg = InsertPlotDialog(self._root)
+        if dlg.result is None:
+            return
+        self._canvas_widget.insert_plot_region(
+            dlg.result["expression"],
+            x_min=dlg.result["x_min"],
+            x_max=dlg.result["x_max"],
+            width=dlg.result["width"],
+            height=dlg.result["height"],
+        )
+        self._status_info.config(text=f"Plot inserted: {dlg.result['expression']}")
 
     def _on_insert_line(self):
         self._canvas_widget.insert_line_separator()

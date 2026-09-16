@@ -990,8 +990,8 @@ class WorksheetCanvas(ttk.Frame):
     def _render_plot_placeholder(self, region: Region, x: int, y: int) -> list[int]:
         """Render a plot region using matplotlib, falling back to a placeholder."""
         items: list[int] = []
-        w = max(region.width, 200)
-        h = max(region.height, 150)
+        w = _z(max(region.width, 200), self._zoom)
+        h = _z(max(region.height, 150), self._zoom)
 
         # Try to render using matplotlib
         if _HAS_PLOT_RENDERER and region.plot is not None:
@@ -1015,11 +1015,12 @@ class WorksheetCanvas(ttk.Frame):
         )
         items.append(rect_id)
 
+        fs = max(7, _z(10, self._zoom))
         label_id = self._canvas.create_text(
             x + w // 2, y + h // 2,
             text="[Plot Region]",
             anchor=tk.CENTER,
-            font=("DejaVu Sans", 10, "italic"),
+            font=("DejaVu Sans", fs, "italic"),
             fill="#999999",
         )
         items.append(label_id)
@@ -1028,19 +1029,16 @@ class WorksheetCanvas(ttk.Frame):
     def _render_picture_placeholder(self, region: Region, x: int, y: int) -> list[int]:
         """Render an embedded picture, or a placeholder if decoding fails."""
         items: list[int] = []
-        w = max(region.width, 80)
-        h = max(region.height, 60)
+        w = _z(max(region.width, 80), self._zoom)
+        h = _z(max(region.height, 60), self._zoom)
 
-        # Attempt to decode and display the actual image data.
         pic = region.picture
         if pic is not None and pic.data:
             try:
                 raw_bytes = base64.b64decode(pic.data)
                 pil_image = Image.open(io.BytesIO(raw_bytes))
-                # Resize to fit the region dimensions while preserving aspect ratio.
                 pil_image.thumbnail((w, h), Image.LANCZOS)
                 photo = ImageTk.PhotoImage(pil_image)
-                # Keep a reference so the image is not garbage-collected.
                 self._photo_cache.append(photo)
                 img_id = self._canvas.create_image(
                     x, y, image=photo, anchor=tk.NW,
@@ -1048,20 +1046,20 @@ class WorksheetCanvas(ttk.Frame):
                 items.append(img_id)
                 return items
             except Exception:
-                pass  # Fall through to placeholder below.
+                pass
 
-        # Fallback placeholder when image data is missing or cannot be decoded.
         rect_id = self._canvas.create_rectangle(
             x, y, x + w, y + h,
             fill="#f0f0f0", outline="#cccccc",
         )
         items.append(rect_id)
 
+        fs = max(7, _z(9, self._zoom))
         label_id = self._canvas.create_text(
             x + w // 2, y + h // 2,
             text="[Image]",
             anchor=tk.CENTER,
-            font=("DejaVu Sans", 9, "italic"),
+            font=("DejaVu Sans", fs, "italic"),
             fill="#999999",
         )
         items.append(label_id)
@@ -1962,6 +1960,47 @@ class WorksheetCanvas(ttk.Frame):
         if y is None:
             y = self._cursor_y
         self._start_editing(x, y, mode="comment")
+
+    def insert_plot_region(
+        self,
+        expression: str,
+        x: Optional[int] = None,
+        y: Optional[int] = None,
+        x_min: float = -10,
+        x_max: float = 10,
+        width: int = 400,
+        height: int = 300,
+    ):
+        """Insert a plot region at the cursor position."""
+        if x is None:
+            x = self._cursor_x
+        if y is None:
+            y = self._cursor_y
+        self.ensure_worksheet()
+        self._save_undo_state()
+        from ..parser import PlotRegion as PlotRegionData
+        ast = parse_infix(expression)
+        region = Region()
+        region.id = self._generate_id()
+        region.left = x
+        region.top = y
+        region.width = width
+        region.height = height
+        region.font_size = 10
+        plot = PlotRegionData()
+        plot.plot_type = "2d"
+        plot.input_expr = ast
+        if ast is not None:
+            plot.input_elements = ast_to_elements(ast)
+        plot.attributes = {
+            "x_min": str(x_min),
+            "x_max": str(x_max),
+        }
+        region.plot = plot
+        self._worksheet.regions.append(region)
+        self._cursor_y = y + height + 16
+        self._mark_modified()
+        self._evaluate_and_render()
 
     def insert_line_separator(self, x: Optional[int] = None, y: Optional[int] = None):
         """Insert a horizontal line separator at the given or cursor position."""
