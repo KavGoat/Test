@@ -626,6 +626,235 @@ class InsertPlotDialog(tk.Toplevel):
         self.destroy()
 
 
+class PageSetupDialog(tk.Toplevel):
+    """Dialog for configuring page size, margins, and orientation."""
+
+    PAPER_SIZES = {
+        "Letter": (850, 1100),
+        "A4": (793, 1122),
+        "A3": (1122, 1587),
+        "A5": (559, 793),
+        "Legal": (850, 1400),
+        "B5": (665, 944),
+    }
+
+    def __init__(self, parent: tk.Widget, page_model=None):
+        super().__init__(parent)
+        self.title("Page Setup")
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+        self.result: Optional[dict] = None
+
+        frame = ttk.Frame(self, padding=15)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        pw = page_model.paper_width if page_model else 850
+        ph = page_model.paper_height if page_model else 1100
+        orient = page_model.paper_orientation if page_model else "Portrait"
+        ml = page_model.margin_left if page_model else 39
+        mr = page_model.margin_right if page_model else 39
+        mt = page_model.margin_top if page_model else 39
+        mb = page_model.margin_bottom if page_model else 39
+
+        ttk.Label(frame, text="Paper Size:", font=("DejaVu Sans", 10)).grid(
+            row=0, column=0, sticky="e", padx=5, pady=4
+        )
+        self._paper_var = tk.StringVar(value="Letter")
+        for name, (w, h) in self.PAPER_SIZES.items():
+            if (w == pw and h == ph) or (h == pw and w == ph):
+                self._paper_var.set(name)
+                break
+        paper_combo = ttk.Combobox(
+            frame, textvariable=self._paper_var,
+            values=list(self.PAPER_SIZES.keys()), state="readonly", width=12
+        )
+        paper_combo.grid(row=0, column=1, sticky="w", pady=4)
+
+        ttk.Label(frame, text="Orientation:", font=("DejaVu Sans", 10)).grid(
+            row=1, column=0, sticky="e", padx=5, pady=4
+        )
+        self._orient_var = tk.StringVar(value=orient)
+        orient_frame = ttk.Frame(frame)
+        orient_frame.grid(row=1, column=1, sticky="w", pady=4)
+        ttk.Radiobutton(orient_frame, text="Portrait", variable=self._orient_var, value="Portrait").pack(side=tk.LEFT)
+        ttk.Radiobutton(orient_frame, text="Landscape", variable=self._orient_var, value="Landscape").pack(side=tk.LEFT, padx=8)
+
+        margin_frame = ttk.LabelFrame(frame, text="Margins", padding=8)
+        margin_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=8)
+
+        for i, (lbl, val, attr) in enumerate([
+            ("Left:", ml, "ml"), ("Right:", mr, "mr"),
+            ("Top:", mt, "mt"), ("Bottom:", mb, "mb"),
+        ]):
+            ttk.Label(margin_frame, text=lbl, font=("DejaVu Sans", 9)).grid(
+                row=i // 2, column=(i % 2) * 2, sticky="e", padx=3, pady=2
+            )
+            var = tk.StringVar(value=str(val))
+            setattr(self, f"_{attr}_var", var)
+            ttk.Entry(margin_frame, textvariable=var, width=6).grid(
+                row=i // 2, column=(i % 2) * 2 + 1, sticky="w", padx=3, pady=2
+            )
+
+        btn_frame = ttk.Frame(frame)
+        btn_frame.grid(row=3, column=0, columnspan=2, pady=(10, 0))
+        ttk.Button(btn_frame, text="OK", command=self._on_ok, width=8).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Cancel", command=self.destroy, width=8).pack(side=tk.LEFT, padx=5)
+
+        self.bind("<Return>", lambda e: self._on_ok())
+        self.bind("<Escape>", lambda e: self.destroy())
+        self.wait_window()
+
+    def _on_ok(self):
+        paper_name = self._paper_var.get()
+        pw, ph = self.PAPER_SIZES.get(paper_name, (850, 1100))
+        if self._orient_var.get() == "Landscape":
+            pw, ph = ph, pw
+        try:
+            ml = int(self._ml_var.get())
+            mr = int(self._mr_var.get())
+            mt = int(self._mt_var.get())
+            mb = int(self._mb_var.get())
+        except ValueError:
+            ml = mr = mt = mb = 39
+        self.result = {
+            "paper_width": pw, "paper_height": ph,
+            "orientation": self._orient_var.get(),
+            "margin_left": ml, "margin_right": mr,
+            "margin_top": mt, "margin_bottom": mb,
+        }
+        self.destroy()
+
+
+class UnitsBrowserDialog(tk.Toplevel):
+    """Dialog for browsing and inserting measurement units."""
+
+    UNIT_CATEGORIES = {
+        "Length": [
+            ("m", "meter"), ("km", "kilometer"), ("cm", "centimeter"),
+            ("mm", "millimeter"), ("um", "micrometer"), ("nm", "nanometer"),
+            ("mi", "mile"), ("yd", "yard"), ("ft", "foot"), ("in", "inch"),
+        ],
+        "Mass": [
+            ("kg", "kilogram"), ("g", "gram"), ("mg", "milligram"),
+            ("t", "metric ton"), ("lb", "pound"), ("oz", "ounce"),
+        ],
+        "Time": [
+            ("s", "second"), ("ms", "millisecond"), ("us", "microsecond"),
+            ("min", "minute"), ("hr", "hour"), ("day", "day"),
+        ],
+        "Force": [
+            ("N", "newton"), ("kN", "kilonewton"), ("lbf", "pound-force"),
+            ("dyn", "dyne"), ("kgf", "kilogram-force"),
+        ],
+        "Energy": [
+            ("J", "joule"), ("kJ", "kilojoule"), ("MJ", "megajoule"),
+            ("cal", "calorie"), ("kcal", "kilocalorie"),
+            ("eV", "electronvolt"), ("kWh", "kilowatt-hour"),
+            ("BTU", "British thermal unit"),
+        ],
+        "Power": [
+            ("W", "watt"), ("kW", "kilowatt"), ("MW", "megawatt"),
+            ("hp", "horsepower"),
+        ],
+        "Pressure": [
+            ("Pa", "pascal"), ("kPa", "kilopascal"), ("MPa", "megapascal"),
+            ("bar", "bar"), ("atm", "atmosphere"), ("psi", "psi"),
+            ("mmHg", "millimeters of mercury"),
+        ],
+        "Temperature": [
+            ("K", "kelvin"), ("degC", "degree Celsius"), ("degF", "degree Fahrenheit"),
+        ],
+        "Angle": [
+            ("rad", "radian"), ("deg", "degree"), ("grad", "gradian"),
+            ("rev", "revolution"),
+        ],
+        "Electric": [
+            ("A", "ampere"), ("V", "volt"), ("ohm", "ohm"),
+            ("F", "farad"), ("H", "henry"), ("C", "coulomb"),
+            ("S", "siemens"), ("Wb", "weber"), ("T", "tesla"),
+        ],
+        "Frequency": [
+            ("Hz", "hertz"), ("kHz", "kilohertz"), ("MHz", "megahertz"),
+            ("GHz", "gigahertz"),
+        ],
+        "Volume": [
+            ("L", "liter"), ("mL", "milliliter"), ("gal", "gallon"),
+            ("qt", "quart"), ("pt", "pint"), ("fl_oz", "fluid ounce"),
+        ],
+        "Area": [
+            ("m2", "square meter"), ("cm2", "square centimeter"),
+            ("km2", "square kilometer"), ("ha", "hectare"),
+            ("acre", "acre"), ("ft2", "square foot"), ("in2", "square inch"),
+        ],
+        "Velocity": [
+            ("m/s", "meters per second"), ("km/h", "kilometers per hour"),
+            ("mph", "miles per hour"), ("kn", "knot"),
+        ],
+    }
+
+    def __init__(self, parent: tk.Widget):
+        super().__init__(parent)
+        self.title("Units Browser")
+        self.geometry("450x400")
+        self.transient(parent)
+        self.grab_set()
+        self.result: Optional[str] = None
+
+        frame = ttk.Frame(self, padding=8)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        paned = ttk.PanedWindow(frame, orient=tk.HORIZONTAL)
+        paned.pack(fill=tk.BOTH, expand=True)
+
+        cat_frame = ttk.Frame(paned)
+        paned.add(cat_frame, weight=1)
+
+        ttk.Label(cat_frame, text="Category", font=("DejaVu Sans", 9, "bold")).pack(anchor="w")
+        self._cat_list = tk.Listbox(cat_frame, font=("DejaVu Sans", 9), exportselection=False)
+        self._cat_list.pack(fill=tk.BOTH, expand=True)
+        for cat in self.UNIT_CATEGORIES:
+            self._cat_list.insert(tk.END, cat)
+        self._cat_list.bind("<<ListboxSelect>>", self._on_cat_select)
+
+        unit_frame = ttk.Frame(paned)
+        paned.add(unit_frame, weight=2)
+
+        ttk.Label(unit_frame, text="Unit", font=("DejaVu Sans", 9, "bold")).pack(anchor="w")
+        self._unit_list = tk.Listbox(unit_frame, font=("DejaVu Sans", 9), exportselection=False)
+        self._unit_list.pack(fill=tk.BOTH, expand=True)
+        self._unit_list.bind("<Double-1>", lambda e: self._on_ok())
+
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(fill=tk.X, pady=(8, 0))
+        ttk.Button(btn_frame, text="Insert", command=self._on_ok, width=8).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Cancel", command=self.destroy, width=8).pack(side=tk.LEFT, padx=5)
+
+        self.bind("<Return>", lambda e: self._on_ok())
+        self.bind("<Escape>", lambda e: self.destroy())
+        self._cat_list.select_set(0)
+        self._on_cat_select(None)
+        self.wait_window()
+
+    def _on_cat_select(self, event):
+        sel = self._cat_list.curselection()
+        if not sel:
+            return
+        cat = self._cat_list.get(sel[0])
+        units = self.UNIT_CATEGORIES.get(cat, [])
+        self._unit_list.delete(0, tk.END)
+        for symbol, name in units:
+            self._unit_list.insert(tk.END, f"{symbol}  —  {name}")
+
+    def _on_ok(self):
+        sel = self._unit_list.curselection()
+        if not sel:
+            return
+        text = self._unit_list.get(sel[0])
+        self.result = text.split("  —")[0].strip()
+        self.destroy()
+
+
 def _build_function_list() -> list[tuple[str, str]]:
     """Build sorted list of (name, description) for all known functions."""
     result = []

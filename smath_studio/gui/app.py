@@ -15,7 +15,7 @@ from .canvas import WorksheetCanvas
 from .toolbar import StandardToolbar, FormatToolbar, MathPanelContainer
 from .dialogs import (
     AboutDialog, OptionsDialog, InsertFunctionDialog, FindReplaceDialog,
-    MatrixSizeDialog, InsertPlotDialog,
+    MatrixSizeDialog, InsertPlotDialog, PageSetupDialog, UnitsBrowserDialog,
 )
 
 
@@ -144,6 +144,7 @@ class SMathApp:
             label="Save As...", command=self._on_save_as
         )
         file_menu.add_separator()
+        file_menu.add_command(label="Page Setup...", command=self._on_page_setup)
         file_menu.add_command(label="Print...", accelerator="Ctrl+P", command=self._on_print)
         file_menu.add_separator()
         export_menu = tk.Menu(file_menu, tearoff=0)
@@ -209,6 +210,9 @@ class SMathApp:
         insert_menu.add_command(
             label="Function...", command=self._on_insert_function
         )
+        insert_menu.add_command(
+            label="Unit...", command=self._on_insert_unit
+        )
 
         # --- Format menu ---
         format_menu = tk.Menu(menubar, tearoff=0)
@@ -233,6 +237,16 @@ class SMathApp:
         format_menu.add_cascade(label="Font Size", menu=size_menu)
         format_menu.add_separator()
         format_menu.add_command(label="Text Color...", command=self._on_text_color)
+        format_menu.add_separator()
+        align_menu = tk.Menu(format_menu, tearoff=0)
+        format_menu.add_cascade(label="Align Regions", menu=align_menu)
+        align_menu.add_command(label="Align Left", command=lambda: self._canvas_widget.align_left())
+        align_menu.add_command(label="Align Right", command=lambda: self._canvas_widget.align_right())
+        align_menu.add_command(label="Align Top", command=lambda: self._canvas_widget.align_top())
+        align_menu.add_command(label="Align Bottom", command=lambda: self._canvas_widget.align_bottom())
+        align_menu.add_separator()
+        align_menu.add_command(label="Distribute Horizontally", command=lambda: self._canvas_widget.distribute_horizontal())
+        align_menu.add_command(label="Distribute Vertically", command=lambda: self._canvas_widget.distribute_vertical())
 
         # --- View menu ---
         view_menu = tk.Menu(menubar, tearoff=0)
@@ -261,6 +275,13 @@ class SMathApp:
         view_menu.add_command(
             label="Regions List", command=self._show_regions_list
         )
+        view_menu.add_separator()
+        self._fullscreen_var = tk.BooleanVar(value=False)
+        view_menu.add_checkbutton(
+            label="Full Screen", accelerator="F11",
+            variable=self._fullscreen_var,
+            command=self._toggle_fullscreen,
+        )
 
         # --- Calculation menu ---
         calc_menu = tk.Menu(menubar, tearoff=0)
@@ -283,6 +304,8 @@ class SMathApp:
         # --- Tools menu ---
         tools_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Tools", menu=tools_menu)
+        tools_menu.add_command(label="Units Browser...", command=self._on_units_browser)
+        tools_menu.add_separator()
         tools_menu.add_command(label="Options...", command=self._on_options)
 
         # --- Help menu ---
@@ -418,6 +441,7 @@ class SMathApp:
         self._root.bind("<Control-0>", lambda e: self._reset_zoom())
         self._root.bind("<Control-m>", lambda e: self._on_insert_matrix())
         self._root.bind("<Control-M>", lambda e: self._on_insert_matrix())
+        self._root.bind("<F11>", lambda e: self._toggle_fullscreen_key())
 
     # ------------------------------------------------------------------
     # Status bar update
@@ -503,6 +527,7 @@ class SMathApp:
                 ws.settings.calculation.significant_digits_mode
             )
 
+            self._canvas_widget._filename = Path(path).stem
             self._canvas_widget.load_worksheet(ws)
             self._add_recent_file(str(path))
             self._update_title()
@@ -942,6 +967,44 @@ class SMathApp:
                 )
             self._canvas_widget.recalculate()
             self._status_info.config(text="Options updated")
+
+    def _on_page_setup(self):
+        """Show the Page Setup dialog."""
+        ws = self._worksheet
+        pm = ws.settings.page_model if ws else None
+        dlg = PageSetupDialog(self._root, pm)
+        if dlg.result is not None and ws is not None:
+            ws.settings.page_model.paper_width = dlg.result["paper_width"]
+            ws.settings.page_model.paper_height = dlg.result["paper_height"]
+            ws.settings.page_model.paper_orientation = dlg.result["orientation"]
+            ws.settings.page_model.margin_left = dlg.result["margin_left"]
+            ws.settings.page_model.margin_right = dlg.result["margin_right"]
+            ws.settings.page_model.margin_top = dlg.result["margin_top"]
+            ws.settings.page_model.margin_bottom = dlg.result["margin_bottom"]
+            ws.settings.page_model.active = True
+            self._canvas_widget.recalculate()
+            self._status_info.config(text="Page setup updated")
+
+    def _on_insert_unit(self):
+        """Open the Units Browser and insert the selected unit."""
+        dlg = UnitsBrowserDialog(self._root)
+        if dlg.result:
+            self._canvas_widget.insert_symbol(dlg.result)
+            self._status_info.config(text=f"Inserted unit: {dlg.result}")
+
+    def _on_units_browser(self):
+        """Open the Units Browser dialog."""
+        self._on_insert_unit()
+
+    def _toggle_fullscreen(self):
+        """Toggle fullscreen mode."""
+        is_fs = self._fullscreen_var.get()
+        self._root.attributes("-fullscreen", is_fs)
+
+    def _toggle_fullscreen_key(self):
+        """Toggle fullscreen via keyboard shortcut."""
+        self._fullscreen_var.set(not self._fullscreen_var.get())
+        self._toggle_fullscreen()
 
     # ------------------------------------------------------------------
     # Help

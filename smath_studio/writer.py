@@ -89,6 +89,10 @@ def _write_settings(lines: list[str], settings: Settings):
     lines.append(f'    <pageModel active="{_bool(pm.active)}">')
     lines.append(f'      <paper orientation="{pm.paper_orientation}" width="{pm.paper_width}" height="{pm.paper_height}" />')
     lines.append(f'      <margins left="{pm.margin_left}" right="{pm.margin_right}" top="{pm.margin_top}" bottom="{pm.margin_bottom}" />')
+    if pm.header is not None:
+        lines.append(f'      <header alignment="{pm.header.alignment}" color="{pm.header.color}">{_esc(pm.header.text)}</header>')
+    if pm.footer is not None:
+        lines.append(f'      <footer alignment="{pm.footer.alignment}" color="{pm.footer.color}">{_esc(pm.footer.text)}</footer>')
     lines.append("    </pageModel>")
 
     # Dependencies

@@ -189,6 +189,7 @@ class WorksheetCanvas(ttk.Frame):
         self._cursor_y = 40
         self._on_modified: Optional[Any] = None
         self._trailing_zeros = True
+        self._filename: str = ""
 
         # Build canvas with scrollbars
         self._canvas = tk.Canvas(
@@ -487,9 +488,24 @@ class WorksheetCanvas(ttk.Frame):
         self._update_scroll_region()
 
     def _flatten_regions(self, regions: list[Region]) -> list[Region]:
-        """Flatten nested regions from area blocks."""
+        """Flatten nested regions from area blocks, hiding collapsed sections."""
         result: list[Region] = []
+        skip_until_terminator = False
         for r in regions:
+            if r.area is not None:
+                if r.area.is_terminator:
+                    skip_until_terminator = False
+                    result.append(r)
+                    continue
+                result.append(r)
+                if r.area.collapsed:
+                    skip_until_terminator = True
+                    continue
+                if r.children:
+                    result.extend(self._flatten_regions(r.children))
+                continue
+            if skip_until_terminator:
+                continue
             result.append(r)
             if r.children:
                 result.extend(self._flatten_regions(r.children))
@@ -578,6 +594,65 @@ class WorksheetCanvas(ttk.Frame):
                     _z(pw - mr, z), _z(page_y, z),
                     _z(pw - mr, z), _z(page_y + ph, z),
                     fill="#e0e0e0", dash=(1, 3), tags="page_bounds"
+                )
+
+        self._draw_headers_footers(ws)
+
+    def _draw_headers_footers(self, ws: Worksheet):
+        """Draw header and footer text on each page."""
+        pm = ws.settings.page_model
+        if pm.header is None and pm.footer is None:
+            return
+        pw = pm.paper_width
+        ph = pm.paper_height
+        ml = pm.margin_left
+        mr = pm.margin_right
+        mt = pm.margin_top
+        mb = pm.margin_bottom
+        num_pages = getattr(self, '_num_pages', 5)
+        page_gap = getattr(self, '_page_gap', 10)
+        z = self._zoom
+        fs = max(7, _z(8, z))
+        fnt = ("DejaVu Sans", fs)
+
+        import datetime
+        now = datetime.datetime.now()
+        filename = ""
+        if self._worksheet is not None:
+            filename = getattr(self, '_filename', '') or 'Untitled'
+
+        for page in range(num_pages):
+            page_y = page * (ph + page_gap)
+            page_num = page + 1
+
+            for hf, y_offset in [
+                (pm.header, page_y + mt // 2),
+                (pm.footer, page_y + ph - mb // 2),
+            ]:
+                if hf is None:
+                    continue
+                text = hf.text
+                text = text.replace("&[DATE]", now.strftime("%Y-%m-%d"))
+                text = text.replace("&[TIME]", now.strftime("%H:%M"))
+                text = text.replace("&[FILENAME]", filename)
+                text = text.replace("&[PAGENUM]", str(page_num))
+                text = text.replace("&[COUNT]", str(num_pages))
+
+                anchor_map = {"Left": "w", "Center": "center", "Right": "e"}
+                anc = anchor_map.get(hf.alignment, "center")
+                if anc == "w":
+                    tx = _z(ml, z)
+                elif anc == "e":
+                    tx = _z(pw - mr, z)
+                else:
+                    tx = _z(pw // 2, z)
+                    anc = tk.CENTER
+
+                self._canvas.create_text(
+                    tx, _z(y_offset, z),
+                    text=text, anchor=anc, font=fnt,
+                    fill=hf.color or "#a9a9a9",
+                    tags="page_hf",
                 )
 
     def _draw_grid_dots(self):
@@ -929,38 +1004,37 @@ class WorksheetCanvas(ttk.Frame):
         if area is None:
             return items
 
+        z = self._zoom
+        ts = _z(_AREA_TRIANGLE_SIZE, z)
+
         if area.is_terminator:
-            # Area end marker: horizontal line
-            w = max(region.width, 200)
+            w = _z(max(region.width, 200), z)
             line_id = self._canvas.create_line(
                 x, y, x + w, y,
                 fill="#aaaaaa", dash=(4, 2)
             )
             items.append(line_id)
         else:
-            # Area start marker: triangle + label
             collapsed = area.collapsed
 
-            # Draw expand/collapse triangle
             if collapsed:
-                # Right-pointing triangle
                 tri_id = self._canvas.create_polygon(
                     x, y,
-                    x + _AREA_TRIANGLE_SIZE, y + _AREA_TRIANGLE_SIZE // 2,
-                    x, y + _AREA_TRIANGLE_SIZE,
+                    x + ts, y + ts // 2,
+                    x, y + ts,
                     fill="#555555", outline="#333333",
                 )
             else:
-                # Down-pointing triangle
                 tri_id = self._canvas.create_polygon(
                     x, y,
-                    x + _AREA_TRIANGLE_SIZE, y,
-                    x + _AREA_TRIANGLE_SIZE // 2, y + _AREA_TRIANGLE_SIZE,
+                    x + ts, y,
+                    x + ts // 2, y + ts,
                     fill="#555555", outline="#333333",
                 )
             items.append(tri_id)
+            self._canvas.tag_bind(tri_id, "<Button-1>",
+                                  lambda e, r=region: self._toggle_area_collapse(r))
 
-            # Area label from text contents
             label = ""
             tc = self._get_text_content(region.text_contents)
             if tc and tc.paragraphs:
@@ -968,7 +1042,7 @@ class WorksheetCanvas(ttk.Frame):
             if label:
                 fnt = self._get_font(region.font_size, bold=True, italic=False)
                 label_id = self._canvas.create_text(
-                    x + _AREA_TRIANGLE_SIZE + 6, y,
+                    x + ts + _z(6, z), y,
                     text=label,
                     anchor=tk.NW,
                     font=fnt,
@@ -976,16 +1050,24 @@ class WorksheetCanvas(ttk.Frame):
                 )
                 items.append(label_id)
 
-            # Horizontal line after label
-            w = max(region.width, 200)
+            w = _z(max(region.width, 200), z)
             line_id = self._canvas.create_line(
-                x, y + _AREA_TRIANGLE_SIZE + 2,
-                x + w, y + _AREA_TRIANGLE_SIZE + 2,
+                x, y + ts + _z(2, z),
+                x + w, y + ts + _z(2, z),
                 fill="#aaaaaa", dash=(4, 2)
             )
             items.append(line_id)
 
         return items
+
+    def _toggle_area_collapse(self, region: Region):
+        """Toggle the collapsed state of an area region."""
+        if region.area is None:
+            return
+        self._save_undo_state()
+        region.area.collapsed = not region.area.collapsed
+        self._mark_modified()
+        self._evaluate_and_render()
 
     def _render_plot_placeholder(self, region: Region, x: int, y: int) -> list[int]:
         """Render a plot region using matplotlib, falling back to a placeholder."""
@@ -1860,6 +1942,91 @@ class WorksheetCanvas(ttk.Frame):
         if self._rendered:
             self._select_region(0)
             self._draw_multi_selection()
+
+    def _get_selected_regions(self) -> list[Region]:
+        """Get the list of currently selected Region objects."""
+        indices = set(self._multi_selected)
+        if self._selected_index is not None:
+            indices.add(self._selected_index)
+        return [self._rendered[i].region for i in sorted(indices) if i < len(self._rendered)]
+
+    def align_left(self):
+        """Align selected regions to the leftmost region's left edge."""
+        regions = self._get_selected_regions()
+        if len(regions) < 2:
+            return
+        self._save_undo_state()
+        left = min(r.left for r in regions)
+        for r in regions:
+            r.left = left
+        self._mark_modified()
+        self._evaluate_and_render()
+
+    def align_right(self):
+        """Align selected regions to the rightmost region's right edge."""
+        regions = self._get_selected_regions()
+        if len(regions) < 2:
+            return
+        self._save_undo_state()
+        right = max(r.left + r.width for r in regions)
+        for r in regions:
+            r.left = right - r.width
+        self._mark_modified()
+        self._evaluate_and_render()
+
+    def align_top(self):
+        """Align selected regions to the topmost region's top edge."""
+        regions = self._get_selected_regions()
+        if len(regions) < 2:
+            return
+        self._save_undo_state()
+        top = min(r.top for r in regions)
+        for r in regions:
+            r.top = top
+        self._mark_modified()
+        self._evaluate_and_render()
+
+    def align_bottom(self):
+        """Align selected regions to the bottommost region's bottom edge."""
+        regions = self._get_selected_regions()
+        if len(regions) < 2:
+            return
+        self._save_undo_state()
+        bottom = max(r.top + r.height for r in regions)
+        for r in regions:
+            r.top = bottom - r.height
+        self._mark_modified()
+        self._evaluate_and_render()
+
+    def distribute_horizontal(self):
+        """Evenly distribute selected regions horizontally."""
+        regions = self._get_selected_regions()
+        if len(regions) < 3:
+            return
+        self._save_undo_state()
+        regions.sort(key=lambda r: r.left)
+        left = regions[0].left
+        right = regions[-1].left
+        step = (right - left) / (len(regions) - 1)
+        for i, r in enumerate(regions):
+            r.left = int(left + i * step)
+        self._mark_modified()
+        self._evaluate_and_render()
+
+    def distribute_vertical(self):
+        """Evenly distribute selected regions vertically."""
+        regions = self._get_selected_regions()
+        if len(regions) < 3:
+            return
+        self._save_undo_state()
+        regions.sort(key=lambda r: r.top)
+        top = regions[0].top
+        bottom = regions[-1].top
+        step = (bottom - top) / (len(regions) - 1)
+        for i, r in enumerate(regions):
+            r.top = int(top + i * step)
+        self._mark_modified()
+        self._evaluate_and_render()
 
     def delete_selected(self):
         """Delete the currently selected region(s)."""

@@ -136,6 +136,14 @@ class CalculationSettings:
 
 
 @dataclass
+class HeaderFooter:
+    """Header or footer text for pages."""
+    text: str = ""
+    alignment: str = "Center"
+    color: str = "#a9a9a9"
+
+
+@dataclass
 class PageModel:
     active: bool = False
     view_mode: int = 0
@@ -146,6 +154,8 @@ class PageModel:
     margin_right: int = 39
     margin_top: int = 39
     margin_bottom: int = 39
+    header: Optional[HeaderFooter] = None
+    footer: Optional[HeaderFooter] = None
 
 
 @dataclass
@@ -282,6 +292,20 @@ def _parse_settings(elem: ET.Element, ns: str) -> Settings:
             s.page_model.margin_right = int(margins.get("right", "39") or "39")
             s.page_model.margin_top = int(margins.get("top", "39") or "39")
             s.page_model.margin_bottom = int(margins.get("bottom", "39") or "39")
+        hdr = pm_elem.find(f"{ns}header")
+        if hdr is not None and hdr.text:
+            s.page_model.header = HeaderFooter(
+                text=hdr.text,
+                alignment=hdr.get("alignment", "Center"),
+                color=hdr.get("color", "#a9a9a9"),
+            )
+        ftr = pm_elem.find(f"{ns}footer")
+        if ftr is not None and ftr.text:
+            s.page_model.footer = HeaderFooter(
+                text=ftr.text,
+                alignment=ftr.get("alignment", "Center"),
+                color=ftr.get("color", "#a9a9a9"),
+            )
 
     # Dependencies (both spellings: dependencies and dependences)
     for dep_tag in (f"{ns}dependencies", f"{ns}dependences"):
