@@ -81,6 +81,8 @@ class SMathApp:
     # UI construction
     # ------------------------------------------------------------------
 
+    _UI_FONT = ("DejaVu Sans", 9)
+
     def _setup_styles(self):
         """Configure ttk styles for a clean appearance matching SMath Studio."""
         style = ttk.Style()
@@ -89,31 +91,32 @@ class SMathApp:
         except tk.TclError:
             pass
 
-        style.configure(".", background="#f0f0f0")
+        bg = "#f0f0f0"
+        style.configure(".", background=bg, font=self._UI_FONT)
         style.configure(
             "Toolbutton.TButton",
             padding=(4, 2),
-            font=("Segoe UI", 9),
+            font=self._UI_FONT,
         )
         style.configure(
             "Toolbar.TFrame",
-            background="#e8e8e8",
+            background="#e0e0e0",
         )
         style.configure(
             "Status.TLabel",
-            font=("Segoe UI", 9),
+            font=self._UI_FONT,
             padding=(4, 2),
-            background="#f0f0f0",
+            background=bg,
         )
         style.configure(
             "StatusSep.TLabel",
-            font=("Segoe UI", 9),
+            font=self._UI_FONT,
             foreground="#888888",
-            background="#f0f0f0",
+            background=bg,
         )
         style.configure(
             "Status.TFrame",
-            background="#f0f0f0",
+            background=bg,
         )
 
     def _build_menu_bar(self):

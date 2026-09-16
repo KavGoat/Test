@@ -2011,7 +2011,7 @@ class MathEditor:
         self._active_slot = self.root
         self._slot_stack = []
         self._ast_to_slot(node, self.root)
-        if has_result and not (isinstance(node, BinaryOp) and node.operator == ":"):
+        if has_result and not isinstance(node, Evaluation) and not (isinstance(node, BinaryOp) and node.operator == ":"):
             self.root.items.append(EOp("="))
         self.root.cursor_pos = len(self.root.items)
         self._update_eval()

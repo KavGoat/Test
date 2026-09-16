@@ -10,6 +10,9 @@ from typing import Callable, Optional
 class StandardToolbar(ttk.Frame):
     """Standard toolbar row with New, Open, Save, Print, Undo, Redo, Cut, Copy, Paste."""
 
+    _BG = "#e0e0e0"
+    _HOVER_BG = "#c8d8e8"
+
     def __init__(self, parent: tk.Widget, commands: dict[str, Callable]):
         super().__init__(parent)
         self._commands = commands
@@ -17,18 +20,18 @@ class StandardToolbar(ttk.Frame):
 
     def _build(self):
         buttons = [
-            ("\U0001f4c4", "New", "new"),
-            ("\U0001f4c2", "Open", "open"),
-            ("\U0001f4be", "Save", "save"),
+            ("\U0001f4c4", "New (Ctrl+N)", "new"),
+            ("\U0001f4c2", "Open (Ctrl+O)", "open"),
+            ("\U0001f4be", "Save (Ctrl+S)", "save"),
             None,
-            ("\U0001f5a8", "Print", "print"),
+            ("\U0001f5a8", "Print (Ctrl+P)", "print"),
             None,
-            ("↩", "Undo", "undo"),
-            ("↪", "Redo", "redo"),
+            ("↩", "Undo (Ctrl+Z)", "undo"),
+            ("↪", "Redo (Ctrl+Y)", "redo"),
             None,
-            ("✂", "Cut", "cut"),
-            ("⎘", "Copy", "copy"),
-            ("\U0001f4cb", "Paste", "paste"),
+            ("✂", "Cut (Ctrl+X)", "cut"),
+            ("⎘", "Copy (Ctrl+C)", "copy"),
+            ("\U0001f4cb", "Paste (Ctrl+V)", "paste"),
         ]
         for item in buttons:
             if item is None:
@@ -40,13 +43,16 @@ class StandardToolbar(ttk.Frame):
                 btn = tk.Button(
                     self, text=icon, command=cmd,
                     width=3, height=1,
-                    font=("Segoe UI", 11),
+                    font=("DejaVu Sans", 11),
                     relief=tk.FLAT,
-                    bg="#f0f0f0",
-                    activebackground="#d0d0d0",
+                    bg=self._BG,
+                    activebackground=self._HOVER_BG,
                     bd=0,
+                    highlightthickness=0,
                 )
                 btn.pack(side=tk.LEFT, padx=1, pady=2)
+                btn.bind("<Enter>", lambda e, b=btn: b.configure(bg=self._HOVER_BG))
+                btn.bind("<Leave>", lambda e, b=btn: b.configure(bg=self._BG))
                 self._add_tooltip(btn, tooltip)
 
     @staticmethod
@@ -60,7 +66,7 @@ class StandardToolbar(ttk.Frame):
             tip.wm_overrideredirect(True)
             tip.wm_geometry(f"+{x}+{y}")
             lbl = tk.Label(tip, text=text, bg="#ffffdd", relief=tk.SOLID,
-                           borderwidth=1, font=("Segoe UI", 9))
+                           borderwidth=1, font=("DejaVu Sans", 9))
             lbl.pack()
         def leave(e):
             nonlocal tip
@@ -125,7 +131,7 @@ class ArithmeticPanel(CollapsiblePanel):
                 text=label,
                 width=4,
                 height=1,
-                font=("Segoe UI", 10),
+                font=("DejaVu Sans", 10),
                 relief=tk.FLAT,
                 bg="#f0f0f0",
                 activebackground="#d8d8d8",
@@ -172,7 +178,7 @@ class SymbolsPanel(CollapsiblePanel):
                 text=label,
                 width=4,
                 height=1,
-                font=("Segoe UI", 11),
+                font=("DejaVu Sans", 11),
                 relief=tk.FLAT,
                 bg="#f0f0f0",
                 activebackground="#d8d8d8",
@@ -212,7 +218,7 @@ class MatricesPanel(CollapsiblePanel):
                 text=label,
                 width=6,
                 height=1,
-                font=("Segoe UI", 9),
+                font=("DejaVu Sans", 9),
                 relief=tk.FLAT,
                 bg="#f0f0f0",
                 activebackground="#d8d8d8",
@@ -329,7 +335,7 @@ class BooleanPanel(CollapsiblePanel):
             col = i % cols
             btn = tk.Button(
                 frame, text=label, width=4, height=1,
-                font=("Segoe UI", 9), relief=tk.FLAT,
+                font=("DejaVu Sans", 9), relief=tk.FLAT,
                 bg="#f0f0f0", activebackground="#d8d8d8",
                 command=lambda v=value: self._insert(v),
             )
@@ -396,7 +402,7 @@ class PlotPanel(CollapsiblePanel):
             col = i % cols
             btn = tk.Button(
                 frame, text=label, width=8, height=1,
-                font=("Segoe UI", 9), relief=tk.FLAT,
+                font=("DejaVu Sans", 9), relief=tk.FLAT,
                 bg="#f0f0f0", activebackground="#d8d8d8",
                 command=lambda v=value: self._insert(v),
             )
@@ -431,7 +437,7 @@ class ConstantsPanel(CollapsiblePanel):
             col = i % cols
             btn = tk.Button(
                 frame, text=label, width=4, height=1,
-                font=("Segoe UI", 10), relief=tk.FLAT,
+                font=("DejaVu Sans", 10), relief=tk.FLAT,
                 bg="#f0f0f0", activebackground="#d8d8d8",
                 command=lambda v=value: self._insert(v),
             )

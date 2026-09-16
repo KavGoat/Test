@@ -43,10 +43,10 @@ except Exception:
 # Constants
 # ---------------------------------------------------------------------------
 
-_CANVAS_BG = "#e8e8e8"
-_PAGE_BOUNDARY_COLOR = "#d0d0d0"
-_SELECTION_COLOR = "#4477dd"
-_SELECTION_DASH = ()
+_CANVAS_BG = "#d4d0c8"
+_PAGE_BOUNDARY_COLOR = "#c0c0c0"
+_SELECTION_COLOR = "#3366cc"
+_SELECTION_DASH = (4, 4)
 _GRID_SIZE = 8  # snap grid in pixels
 _DEFAULT_REGION_WIDTH = 120
 _DEFAULT_REGION_HEIGHT = 24
@@ -59,6 +59,8 @@ _TITLE_FG = "#0000ff"
 _BORDER_BG = "#dddddd"
 _UNIT_FG = "#0000ff"
 _ERROR_FG = "#ff0000"
+_PAGE_SHADOW = "#a0a0a0"
+_CURSOR_COLOR = "#3366cc"
 
 
 def _snap(value: int, grid: int = _GRID_SIZE) -> int:
@@ -103,18 +105,17 @@ def _expr_to_text(node: Optional[ASTNode]) -> str:
     return repr(node)
 
 
-def _format_value(val: Any, precision: int = 4) -> str:
+def _format_value(val: Any, precision: int = 4, trailing_zeros: bool = True) -> str:
     """Format an evaluated value for display."""
     if isinstance(val, Quantity):
         unit_str = val.display_unit if hasattr(val, 'display_unit') else val.unit.name
-        return f"{val.value:.{precision}g} {unit_str}"
+        num = _format_number(val.value, precision, trailing_zeros)
+        return f"{num} {unit_str}"
     if isinstance(val, float):
-        if math.isnan(val):
-            return "NaN"
-        if math.isinf(val):
-            return "Inf" if val > 0 else "-Inf"
-        return f"{val:.{precision}g}"
+        return _format_number(val, precision, trailing_zeros)
     if isinstance(val, int):
+        if trailing_zeros and precision > 0:
+            return f"{val}.{'0' * precision}"
         return str(val)
     try:
         import numpy as np
@@ -125,6 +126,17 @@ def _format_value(val: Any, precision: int = 4) -> str:
     except ImportError:
         pass
     return str(val)
+
+
+def _format_number(val: float, precision: int, trailing_zeros: bool) -> str:
+    """Format a float with SMath-style precision."""
+    if math.isnan(val):
+        return "NaN"
+    if math.isinf(val):
+        return "Inf" if val > 0 else "-Inf"
+    if trailing_zeros:
+        return f"{val:.{precision}f}"
+    return f"{val:.{precision}g}"
 
 
 # ---------------------------------------------------------------------------
@@ -171,7 +183,7 @@ class WorksheetCanvas(ttk.Frame):
         self._cursor_x = 40
         self._cursor_y = 40
         self._on_modified: Optional[Any] = None
-        self._trailing_zeros = False
+        self._trailing_zeros = True
 
         # Build canvas with scrollbars
         self._canvas = tk.Canvas(
@@ -314,13 +326,15 @@ class WorksheetCanvas(ttk.Frame):
     # Public interface
     # ------------------------------------------------------------------
 
-    def load_worksheet(self, worksheet: Worksheet):
+    def load_worksheet(self, worksheet: Optional[Worksheet]):
         """Load a worksheet and render all its regions."""
+        if worksheet is None:
+            worksheet = Worksheet()
         self._worksheet = worksheet
         self._initial_page_drawn = True
         self._ctx = create_default_context()
         self._ctx._precision = worksheet.settings.calculation.precision
-        self._trailing_zeros = getattr(worksheet.settings.calculation, 'trailing_zeros', False)
+        self._trailing_zeros = getattr(worksheet.settings.calculation, 'trailing_zeros', True)
         self._selected_index = None
         self._evaluate_and_render()
         self._canvas.xview_moveto(0)
@@ -472,7 +486,7 @@ class WorksheetCanvas(ttk.Frame):
         return result
 
     def _draw_page_background(self, ws: Worksheet):
-        """Draw white page rectangles on the gray canvas background."""
+        """Draw white page rectangles with drop shadow on the gray canvas."""
         if ws and ws.settings.page_model.active:
             pw = ws.settings.page_model.paper_width
             ph = ws.settings.page_model.paper_height
@@ -481,22 +495,24 @@ class WorksheetCanvas(ttk.Frame):
             ph = 1100
 
         num_pages = max(5, self._estimate_page_count(ws, ph))
-        shadow_w = 3
-        page_gap = 8
+        shadow_w = 4
+        page_gap = 10
 
         for page in range(num_pages):
             page_y = page * (ph + page_gap)
+            # Drop shadow (right and bottom edges)
             self._canvas.create_rectangle(
-                0, page_y, pw, page_y + ph,
-                fill="#ffffff", outline="#cccccc", width=1, tags="page_bg"
+                shadow_w, page_y + ph, pw + shadow_w, page_y + ph + shadow_w,
+                fill=_PAGE_SHADOW, outline="", tags="page_shadow"
             )
             self._canvas.create_rectangle(
                 pw, page_y + shadow_w, pw + shadow_w, page_y + ph + shadow_w,
-                fill="#cccccc", outline="", tags="page_shadow"
+                fill=_PAGE_SHADOW, outline="", tags="page_shadow"
             )
+            # White page
             self._canvas.create_rectangle(
-                shadow_w, page_y + ph, pw + shadow_w, page_y + ph + shadow_w,
-                fill="#cccccc", outline="", tags="page_shadow"
+                0, page_y, pw, page_y + ph,
+                fill="#ffffff", outline="#b0b0b0", width=1, tags="page_bg"
             )
         self._page_height = ph
         self._page_width = pw
@@ -524,7 +540,7 @@ class WorksheetCanvas(ttk.Frame):
         mb = pm.margin_bottom
 
         num_pages = getattr(self, '_num_pages', 5)
-        page_gap = getattr(self, '_page_gap', 8)
+        page_gap = getattr(self, '_page_gap', 10)
         for page in range(num_pages):
             page_y = page * (ph + page_gap)
             if mt > 0:
@@ -552,20 +568,21 @@ class WorksheetCanvas(ttk.Frame):
         """Draw subtle grid dots for alignment like SMath Studio.
 
         Only draws dots on the first two pages for performance.
-        Additional pages get dots drawn as the user scrolls.
         """
         pw = getattr(self, '_page_width', 800)
         ph = getattr(self, '_page_height', 1100)
-        pg = getattr(self, '_page_gap', 8)
+        pg = getattr(self, '_page_gap', 10)
         grid = _GRID_SIZE * 3
+        ml = 4
+        mt = 4
         for page in range(2):
             page_y = page * (ph + pg)
-            for gx in range(grid, pw, grid):
-                for gy in range(grid, ph, grid):
+            for gx in range(grid, pw - ml, grid):
+                for gy in range(grid, ph - mt, grid):
                     py = page_y + gy
-                    self._canvas.create_oval(
+                    self._canvas.create_rectangle(
                         gx, py, gx + 1, py + 1,
-                        fill="#d8d8d8", outline="", tags="grid_dots",
+                        fill="#c8c8c8", outline="", tags="grid_dots",
                     )
 
     def _get_visible_area(self) -> tuple[float, float, float, float] | None:
@@ -583,32 +600,31 @@ class WorksheetCanvas(ttk.Frame):
             return None
 
     def _draw_left_margin(self):
-        """Draw a subtle left margin line like SMath Studio."""
-        margin_x = 30
+        """Draw left margin lines on each page like SMath Studio."""
+        pw = getattr(self, '_page_width', 800)
         ph = getattr(self, '_page_height', 1100)
-        pg = getattr(self, '_page_gap', 8)
+        pg = getattr(self, '_page_gap', 10)
         num = getattr(self, '_num_pages', 5)
-        h = num * (ph + pg)
-        self._canvas.create_line(
-            margin_x, 0, margin_x, h,
-            fill="#d0d0d0", width=1, tags="margin_line"
-        )
+        margin_x = 30
+        for page in range(num):
+            page_y = page * (ph + pg)
+            self._canvas.create_line(
+                margin_x, page_y, margin_x, page_y + ph,
+                fill="#d8d8d8", width=1, tags="margin_line"
+            )
 
     def _draw_cursor_marker(self):
-        """Draw a blinking text cursor at the current position."""
+        """Draw a small blue crosshair at the current insertion position."""
         if self._editing:
             return
         x = self._cursor_x
         y = self._cursor_y
-        h = 14
+        sz = 5
         self._canvas.create_line(
-            x, y - 1, x, y + h, fill="#3366cc", width=1.5, tags="cursor_marker"
+            x - sz, y, x + sz, y, fill=_CURSOR_COLOR, width=1, tags="cursor_marker"
         )
         self._canvas.create_line(
-            x - 3, y - 1, x + 3, y - 1, fill="#3366cc", width=1, tags="cursor_marker"
-        )
-        self._canvas.create_line(
-            x - 3, y + h, x + 3, y + h, fill="#3366cc", width=1, tags="cursor_marker"
+            x, y - sz, x, y + sz, fill=_CURSOR_COLOR, width=1, tags="cursor_marker"
         )
 
     def _ensure_visible(self, x: int, y: int):
@@ -767,7 +783,7 @@ class WorksheetCanvas(ttk.Frame):
         if region.show_input_data is not None and not region.show_input_data:
             if display_result is not None and not isinstance(display_result, Exception):
                 precision = self._ctx.precision if self._ctx else 4
-                result_text = _format_value(display_result, precision)
+                result_text = _format_value(display_result, precision, self._trailing_zeros)
                 fnt = self._get_font(region.font_size, bold=False, italic=False)
                 text_id = self._canvas.create_text(
                     x + _REGION_PADDING, y + _REGION_PADDING,
@@ -843,7 +859,7 @@ class WorksheetCanvas(ttk.Frame):
                 result_fg = _ERROR_FG
             else:
                 precision = self._ctx.precision if self._ctx else 4
-                result_text = _format_value(display_result, precision)
+                result_text = _format_value(display_result, precision, self._trailing_zeros)
                 result_fg = fg
 
             result_id = self._canvas.create_text(
@@ -978,7 +994,7 @@ class WorksheetCanvas(ttk.Frame):
             x + w // 2, y + h // 2,
             text="[Plot Region]",
             anchor=tk.CENTER,
-            font=("Segoe UI", 10, "italic"),
+            font=("DejaVu Sans", 10, "italic"),
             fill="#999999",
         )
         items.append(label_id)
@@ -1020,7 +1036,7 @@ class WorksheetCanvas(ttk.Frame):
             x + w // 2, y + h // 2,
             text="[Image]",
             anchor=tk.CENTER,
-            font=("Segoe UI", 9, "italic"),
+            font=("DejaVu Sans", 9, "italic"),
             fill="#999999",
         )
         items.append(label_id)
@@ -1052,7 +1068,7 @@ class WorksheetCanvas(ttk.Frame):
             weight = "bold" if bold else "normal"
             slant = "italic" if italic else "roman"
             self._font_cache[key] = tkfont.Font(
-                family="Segoe UI",
+                family="DejaVu Sans",
                 size=size,
                 weight=weight,
                 slant=slant,
@@ -1076,19 +1092,24 @@ class WorksheetCanvas(ttk.Frame):
 
         rr = self._rendered[index]
         x1, y1, x2, y2 = rr.bbox
-        pad = 2
+        pad = 3
         sel_rect = self._canvas.create_rectangle(
             x1 - pad, y1 - pad, x2 + pad, y2 + pad,
             outline=_SELECTION_COLOR,
             width=1,
+            dash=_SELECTION_DASH,
         )
         self._selection_items.append(sel_rect)
-        hs = 2
-        for hx, hy in [(x1 - pad, y1 - pad), (x2 + pad, y1 - pad),
-                        (x1 - pad, y2 + pad), (x2 + pad, y2 + pad)]:
+        hs = 3
+        for hx, hy in [
+            (x1 - pad, y1 - pad), (x2 + pad, y1 - pad),
+            (x1 - pad, y2 + pad), (x2 + pad, y2 + pad),
+            ((x1 + x2) // 2, y1 - pad), ((x1 + x2) // 2, y2 + pad),
+            (x1 - pad, (y1 + y2) // 2), (x2 + pad, (y1 + y2) // 2),
+        ]:
             h = self._canvas.create_rectangle(
                 hx - hs, hy - hs, hx + hs, hy + hs,
-                fill=_SELECTION_COLOR, outline=_SELECTION_COLOR,
+                fill="#ffffff", outline=_SELECTION_COLOR, width=1,
             )
             self._selection_items.append(h)
 
@@ -1266,13 +1287,11 @@ class WorksheetCanvas(ttk.Frame):
                 rr = self._rendered[hit]
                 x1, y1, x2, y2 = rr.bbox
                 pad = 3
-                bg_rect = self._canvas.create_rectangle(
+                hover_rect = self._canvas.create_rectangle(
                     x1 - pad, y1 - pad, x2 + pad, y2 + pad,
-                    fill="#e8f0ff", outline="#b0c8e8", width=1,
-                    stipple="",
+                    outline="#a0b8d8", width=1, dash=(2, 2),
                 )
-                self._canvas.tag_lower(bg_rect)
-                self._hover_items.append(bg_rect)
+                self._hover_items.append(hover_rect)
 
     def _on_drag(self, event: tk.Event):
         """Handle mouse drag to move selected region or draw rubberband."""

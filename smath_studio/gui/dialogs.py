@@ -34,14 +34,14 @@ class AboutDialog(tk.Toplevel):
         title_label = ttk.Label(
             frame,
             text="SMath Studio",
-            font=("Segoe UI", 18, "bold"),
+            font=("DejaVu Sans", 18, "bold"),
         )
         title_label.pack(pady=(0, 4))
 
         subtitle_label = ttk.Label(
             frame,
             text="Python Edition",
-            font=("Segoe UI", 12),
+            font=("DejaVu Sans", 12),
         )
         subtitle_label.pack(pady=(0, 12))
 
@@ -49,7 +49,7 @@ class AboutDialog(tk.Toplevel):
         version_label = ttk.Label(
             frame,
             text=f"Version {__version__}",
-            font=("Segoe UI", 10),
+            font=("DejaVu Sans", 10),
         )
         version_label.pack(pady=(0, 8))
 
@@ -62,7 +62,7 @@ class AboutDialog(tk.Toplevel):
                 "SMath Studio .sm worksheet files."
             ),
             justify=tk.CENTER,
-            font=("Segoe UI", 9),
+            font=("DejaVu Sans", 9),
         )
         desc_label.pack(pady=(0, 16))
 
