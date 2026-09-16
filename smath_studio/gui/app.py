@@ -12,8 +12,11 @@ from typing import Optional
 from ..parser import parse_file, Worksheet
 from ..writer import write_file
 from .canvas import WorksheetCanvas
-from .toolbar import StandardToolbar, MathPanelContainer
-from .dialogs import AboutDialog, OptionsDialog, InsertFunctionDialog, FindReplaceDialog
+from .toolbar import StandardToolbar, FormatToolbar, MathPanelContainer
+from .dialogs import (
+    AboutDialog, OptionsDialog, InsertFunctionDialog, FindReplaceDialog,
+    MatrixSizeDialog,
+)
 
 
 class SMathApp:
@@ -145,6 +148,7 @@ class SMathApp:
         file_menu.add_separator()
         export_menu = tk.Menu(file_menu, tearoff=0)
         file_menu.add_cascade(label="Export", menu=export_menu)
+        export_menu.add_command(label="Export as PDF...", command=self._on_export_pdf)
         export_menu.add_command(label="Export as PNG...", command=self._on_export_png)
         export_menu.add_command(label="Export as PostScript...", command=self._on_export_ps)
         file_menu.add_separator()
@@ -178,6 +182,9 @@ class SMathApp:
         edit_menu.add_command(
             label="Delete", accelerator="Del", command=self._on_delete
         )
+        edit_menu.add_command(
+            label="Select All", accelerator="Ctrl+A", command=self._on_select_all
+        )
         edit_menu.add_separator()
         edit_menu.add_command(
             label="Find and Replace...", accelerator="Ctrl+H",
@@ -210,7 +217,7 @@ class SMathApp:
             label="Bold", accelerator="Ctrl+B", command=self._on_format_bold
         )
         format_menu.add_command(
-            label="Italic", accelerator="Ctrl+I", command=self._on_format_italic
+            label="Italic", command=self._on_format_italic
         )
         format_menu.add_command(
             label="Underline", accelerator="Ctrl+U", command=self._on_format_underline
@@ -258,6 +265,13 @@ class SMathApp:
         # --- Calculation menu ---
         calc_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Calculation", menu=calc_menu)
+        self._auto_calc_var = tk.BooleanVar(value=True)
+        calc_menu.add_checkbutton(
+            label="Automatic Calculation",
+            variable=self._auto_calc_var,
+            command=self._toggle_auto_calc,
+        )
+        calc_menu.add_separator()
         calc_menu.add_command(
             label="Evaluate Selection", accelerator="F5",
             command=lambda: self._canvas_widget.evaluate_selected()
@@ -293,7 +307,17 @@ class SMathApp:
             "paste": self._on_paste,
         }
         self._toolbar = StandardToolbar(toolbar_frame, commands)
-        self._toolbar.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2, pady=1)
+        self._toolbar.pack(side=tk.LEFT, fill=tk.X, padx=2, pady=1)
+
+        fmt_commands = {
+            "bold": self._on_format_bold,
+            "italic": self._on_format_italic,
+            "underline": self._on_format_underline,
+            "font_size": self._on_font_size_change,
+            "zoom": self._on_zoom_change,
+        }
+        self._format_toolbar = FormatToolbar(toolbar_frame, fmt_commands)
+        self._format_toolbar.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2, pady=1)
 
     def _build_main_area(self):
         """Build the central area: worksheet canvas + right-side math panels."""
@@ -360,10 +384,10 @@ class SMathApp:
         """Bind keyboard shortcuts."""
         self._root.bind("<Control-b>", lambda e: self._on_format_bold())
         self._root.bind("<Control-B>", lambda e: self._on_format_bold())
-        self._root.bind("<Control-i>", lambda e: self._on_format_italic())
-        self._root.bind("<Control-I>", lambda e: self._on_format_italic())
         self._root.bind("<Control-u>", lambda e: self._on_format_underline())
         self._root.bind("<Control-U>", lambda e: self._on_format_underline())
+        self._root.bind("<Control-a>", lambda e: self._on_select_all())
+        self._root.bind("<Control-A>", lambda e: self._on_select_all())
         self._root.bind("<Control-h>", lambda e: self._on_find_replace())
         self._root.bind("<Control-H>", lambda e: self._on_find_replace())
         self._root.bind("<Control-f>", lambda e: self._on_find_replace())
@@ -533,12 +557,91 @@ class SMathApp:
             )
 
     def _on_print(self):
-        """Print placeholder -- not yet implemented."""
-        messagebox.showinfo(
-            "Print",
-            "Printing is not yet implemented in this edition.",
+        """Print by exporting to PDF and opening with system viewer."""
+        import tempfile
+        try:
+            canvas = self._canvas_widget._canvas
+            bbox = canvas.bbox("all")
+            if bbox is None:
+                messagebox.showwarning("Print", "Nothing to print.", parent=self._root)
+                return
+            x1, y1, x2, y2 = bbox
+            margin = 20
+            ps = canvas.postscript(
+                x=x1 - margin, y=y1 - margin,
+                width=x2 - x1 + 2 * margin,
+                height=y2 - y1 + 2 * margin,
+                colormode="color",
+            )
+            tmp = tempfile.NamedTemporaryFile(suffix=".ps", delete=False)
+            tmp.write(ps.encode("utf-8"))
+            tmp.close()
+            pdf_path = tmp.name.replace(".ps", ".pdf")
+            import subprocess
+            result = subprocess.run(
+                ["gs", "-dBATCH", "-dNOPAUSE", "-sDEVICE=pdfwrite",
+                 f"-sOutputFile={pdf_path}", tmp.name],
+                capture_output=True, timeout=30,
+            )
+            import os
+            os.unlink(tmp.name)
+            if result.returncode == 0:
+                subprocess.Popen(["xdg-open", pdf_path])
+                self._status_info.config(text="Sent to print preview")
+            else:
+                messagebox.showwarning(
+                    "Print", "Could not generate PDF for printing.",
+                    parent=self._root,
+                )
+        except Exception as ex:
+            messagebox.showerror("Print Error", str(ex), parent=self._root)
+
+    def _on_export_pdf(self):
+        """Export the worksheet canvas as a PDF file."""
+        path = filedialog.asksaveasfilename(
+            title="Export as PDF",
+            defaultextension=".pdf",
+            filetypes=[("PDF Document", "*.pdf"), ("All Files", "*.*")],
             parent=self._root,
         )
+        if not path:
+            return
+        try:
+            canvas = self._canvas_widget._canvas
+            bbox = canvas.bbox("all")
+            if bbox is None:
+                messagebox.showwarning("Export", "Nothing to export.", parent=self._root)
+                return
+            x1, y1, x2, y2 = bbox
+            margin = 20
+            ps = canvas.postscript(
+                x=x1 - margin, y=y1 - margin,
+                width=x2 - x1 + 2 * margin,
+                height=y2 - y1 + 2 * margin,
+                colormode="color",
+            )
+            import tempfile, subprocess
+            tmp = tempfile.NamedTemporaryFile(suffix=".ps", delete=False)
+            tmp.write(ps.encode("utf-8"))
+            tmp.close()
+            result = subprocess.run(
+                ["gs", "-dBATCH", "-dNOPAUSE", "-sDEVICE=pdfwrite",
+                 f"-sOutputFile={path}", tmp.name],
+                capture_output=True, timeout=30,
+            )
+            import os
+            os.unlink(tmp.name)
+            if result.returncode == 0:
+                self._status_info.config(text=f"Exported to {Path(path).name}")
+            else:
+                eps_path = path.replace(".pdf", ".ps")
+                with open(eps_path, "w") as f:
+                    f.write(ps)
+                self._status_info.config(
+                    text=f"PDF conversion failed. Saved as PS: {Path(eps_path).name}"
+                )
+        except Exception as ex:
+            messagebox.showerror("Export Error", str(ex), parent=self._root)
 
     def _on_export_png(self):
         """Export the worksheet canvas as a PNG image."""
@@ -654,6 +757,10 @@ class SMathApp:
         self._canvas_widget.paste_at_cursor()
         self._status_info.config(text="Pasted")
 
+    def _on_select_all(self):
+        self._canvas_widget.select_all()
+        self._status_info.config(text="Selected all regions")
+
     def _on_delete(self):
         self._canvas_widget.delete_selected()
         self._status_info.config(text="Deleted")
@@ -685,17 +792,21 @@ class SMathApp:
         self._status_info.config(text="Insert Area (not yet implemented)")
 
     def _on_insert_matrix(self):
-        """Insert a 2x2 matrix at the cursor position."""
+        """Insert a matrix at the cursor position, asking for dimensions."""
+        dlg = MatrixSizeDialog(self._root)
+        if dlg.result is None:
+            return
+        rows, cols = dlg.result
         if not self._canvas_widget._editing:
             self._canvas_widget._start_editing(
                 self._canvas_widget._cursor_x,
                 self._canvas_widget._cursor_y
             )
         if self._canvas_widget._math_editor:
-            self._canvas_widget._math_editor._do_matrix()
+            self._canvas_widget._math_editor._do_matrix(rows=rows, cols=cols)
             self._canvas_widget._math_editor._update_eval()
             self._canvas_widget._math_editor.render()
-        self._status_info.config(text="Matrix inserted (Ctrl+M)")
+        self._status_info.config(text=f"Matrix {rows}x{cols} inserted")
 
     def _on_insert_derivative(self):
         self._insert_structure("_do_derivative", "Derivative")
@@ -738,10 +849,32 @@ class SMathApp:
         self._canvas_widget.recalculate()
         self._status_info.config(text="Recalculated")
 
+    def _toggle_auto_calc(self):
+        mode = "Automatic" if self._auto_calc_var.get() else "Manual"
+        self._status_calc.config(text=mode)
+        self._status_info.config(text=f"Calculation mode: {mode}")
+
+    def _on_font_size_change(self, size: int):
+        region = self._canvas_widget.get_selected_region()
+        if region is not None:
+            region.font_size = size
+            self._canvas_widget._evaluate_and_render()
+            self._status_info.config(text=f"Font size: {size}")
+
+    def _on_zoom_change(self, zoom: float):
+        self._canvas_widget._zoom = max(0.3, min(3.0, zoom))
+        self._canvas_widget._apply_zoom()
+        pct = self._canvas_widget.get_zoom_percent()
+        self._status_info.config(text=f"Zoom: {pct}%")
+        if hasattr(self, '_format_toolbar'):
+            self._format_toolbar.set_zoom(pct)
+
     def _reset_zoom(self):
         self._canvas_widget._zoom = 1.0
         self._canvas_widget._apply_zoom()
         self._status_info.config(text="Zoom: 100%")
+        if hasattr(self, '_format_toolbar'):
+            self._format_toolbar.set_zoom(100)
 
     def _toggle_grid(self):
         self._canvas_widget._show_grid = self._show_grid_var.get()

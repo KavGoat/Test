@@ -77,6 +77,91 @@ class StandardToolbar(ttk.Frame):
         widget.bind("<Leave>", leave)
 
 
+class FormatToolbar(ttk.Frame):
+    """Formatting toolbar with Bold, Italic, Underline, font size."""
+
+    _BG = "#e0e0e0"
+    _HOVER_BG = "#c8d8e8"
+
+    def __init__(self, parent: tk.Widget, commands: dict[str, Callable]):
+        super().__init__(parent)
+        self._commands = commands
+        self._build()
+
+    def _build(self):
+        fmt_buttons = [
+            ("B", "Bold (Ctrl+B)", "bold", ("DejaVu Sans", 10, "bold")),
+            ("I", "Italic", "italic", ("DejaVu Sans", 10, "italic")),
+            ("U", "Underline (Ctrl+U)", "underline", ("DejaVu Sans", 10, "underline")),
+        ]
+        for text, tooltip, cmd_key, font in fmt_buttons:
+            cmd = self._commands.get(cmd_key, lambda: None)
+            btn = tk.Button(
+                self, text=text, command=cmd,
+                width=2, height=1,
+                font=font,
+                relief=tk.FLAT,
+                bg=self._BG,
+                activebackground=self._HOVER_BG,
+                bd=0,
+                highlightthickness=0,
+            )
+            btn.pack(side=tk.LEFT, padx=1, pady=2)
+            btn.bind("<Enter>", lambda e, b=btn: b.configure(bg=self._HOVER_BG))
+            btn.bind("<Leave>", lambda e, b=btn: b.configure(bg=self._BG))
+            StandardToolbar._add_tooltip(btn, tooltip)
+
+        sep = ttk.Separator(self, orient=tk.VERTICAL)
+        sep.pack(side=tk.LEFT, fill=tk.Y, padx=3, pady=2)
+
+        lbl = tk.Label(self, text="Size:", font=("DejaVu Sans", 9), bg=self._BG)
+        lbl.pack(side=tk.LEFT, padx=(2, 0))
+        self._font_size_var = tk.StringVar(value="10")
+        size_combo = ttk.Combobox(
+            self, textvariable=self._font_size_var,
+            values=["8", "9", "10", "11", "12", "14", "16", "18", "20", "24"],
+            width=4, state="readonly",
+        )
+        size_combo.pack(side=tk.LEFT, padx=2)
+        size_combo.bind("<<ComboboxSelected>>", self._on_size_change)
+
+        sep2 = ttk.Separator(self, orient=tk.VERTICAL)
+        sep2.pack(side=tk.LEFT, fill=tk.Y, padx=3, pady=2)
+
+        zoom_label = tk.Label(self, text="Zoom:", font=("DejaVu Sans", 9), bg=self._BG)
+        zoom_label.pack(side=tk.LEFT, padx=(2, 0))
+        self._zoom_var = tk.StringVar(value="100%")
+        zoom_combo = ttk.Combobox(
+            self, textvariable=self._zoom_var,
+            values=["50%", "75%", "100%", "125%", "150%", "200%", "300%"],
+            width=5, state="readonly",
+        )
+        zoom_combo.pack(side=tk.LEFT, padx=2)
+        zoom_combo.bind("<<ComboboxSelected>>", self._on_zoom_change)
+
+    def _on_size_change(self, event=None):
+        cmd = self._commands.get("font_size")
+        if cmd:
+            try:
+                size = int(self._font_size_var.get())
+                cmd(size)
+            except ValueError:
+                pass
+
+    def _on_zoom_change(self, event=None):
+        cmd = self._commands.get("zoom")
+        if cmd:
+            try:
+                zoom_text = self._zoom_var.get().replace("%", "")
+                zoom = int(zoom_text) / 100
+                cmd(zoom)
+            except ValueError:
+                pass
+
+    def set_zoom(self, pct: int):
+        self._zoom_var.set(f"{pct}%")
+
+
 class CollapsiblePanel(ttk.LabelFrame):
     """A collapsible panel with a header and content area.
 

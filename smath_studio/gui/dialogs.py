@@ -480,6 +480,62 @@ class FindReplaceDialog(tk.Toplevel):
             self._on_replace_all(self.find_var.get(), self.replace_var.get(), self.case_var.get())
 
 
+class MatrixSizeDialog(tk.Toplevel):
+    """Dialog for choosing matrix dimensions."""
+
+    def __init__(self, parent: tk.Widget):
+        super().__init__(parent)
+        self.title("Insert Matrix")
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+        self.result: Optional[tuple[int, int]] = None
+
+        frame = ttk.Frame(self, padding=15)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(frame, text="Rows:", font=("DejaVu Sans", 10)).grid(
+            row=0, column=0, padx=5, pady=5, sticky="e"
+        )
+        self._rows_var = tk.StringVar(value="2")
+        rows_spin = ttk.Spinbox(
+            frame, from_=1, to=20, textvariable=self._rows_var, width=5
+        )
+        rows_spin.grid(row=0, column=1, padx=5, pady=5)
+
+        ttk.Label(frame, text="Columns:", font=("DejaVu Sans", 10)).grid(
+            row=1, column=0, padx=5, pady=5, sticky="e"
+        )
+        self._cols_var = tk.StringVar(value="2")
+        cols_spin = ttk.Spinbox(
+            frame, from_=1, to=20, textvariable=self._cols_var, width=5
+        )
+        cols_spin.grid(row=1, column=1, padx=5, pady=5)
+
+        btn_frame = ttk.Frame(frame)
+        btn_frame.grid(row=2, column=0, columnspan=2, pady=(10, 0))
+        ttk.Button(btn_frame, text="OK", command=self._on_ok, width=8).pack(
+            side=tk.LEFT, padx=5
+        )
+        ttk.Button(btn_frame, text="Cancel", command=self.destroy, width=8).pack(
+            side=tk.LEFT, padx=5
+        )
+
+        self.bind("<Return>", lambda e: self._on_ok())
+        self.bind("<Escape>", lambda e: self.destroy())
+        rows_spin.focus_set()
+        self.wait_window()
+
+    def _on_ok(self):
+        try:
+            rows = max(1, min(20, int(self._rows_var.get())))
+            cols = max(1, min(20, int(self._cols_var.get())))
+            self.result = (rows, cols)
+        except ValueError:
+            self.result = (2, 2)
+        self.destroy()
+
+
 def _build_function_list() -> list[tuple[str, str]]:
     """Build sorted list of (name, description) for all known functions."""
     result = []

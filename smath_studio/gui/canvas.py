@@ -68,6 +68,11 @@ def _snap(value: int, grid: int = _GRID_SIZE) -> int:
     return round(value / grid) * grid
 
 
+def _z(value: float, zoom: float) -> int:
+    """Scale a coordinate by zoom factor."""
+    return int(value * zoom)
+
+
 # ---------------------------------------------------------------------------
 # Utility: AST to display text
 # ---------------------------------------------------------------------------
@@ -285,6 +290,10 @@ class WorksheetCanvas(ttk.Frame):
         self._context_menu.add_command(
             label="Recalculate All (F9)", command=self.recalculate
         )
+        self._context_menu.add_separator()
+        self._context_menu.add_command(
+            label="Properties...", command=self._show_region_properties
+        )
 
         # Fonts (cached)
         self._font_cache: dict[tuple, tkfont.Font] = {}
@@ -318,7 +327,8 @@ class WorksheetCanvas(ttk.Frame):
             dummy_ws = Worksheet()
             self._draw_page_background(dummy_ws)
             self._draw_page_boundaries(dummy_ws)
-            self._canvas.configure(scrollregion=(0, 0, 850, 5540))
+            z = self._zoom
+            self._canvas.configure(scrollregion=(0, 0, _z(850, z), _z(5540, z)))
             self._canvas.xview_moveto(0)
             self._canvas.yview_moveto(0)
 
@@ -365,12 +375,12 @@ class WorksheetCanvas(ttk.Frame):
         return None
 
     def get_cursor_position(self) -> tuple[int, int]:
-        """Return the canvas position under the mouse (for status bar)."""
+        """Return the logical canvas position under the mouse (for status bar)."""
         try:
             x = self._canvas.winfo_pointerx() - self._canvas.winfo_rootx()
             y = self._canvas.winfo_pointery() - self._canvas.winfo_rooty()
-            cx = int(self._canvas.canvasx(x))
-            cy = int(self._canvas.canvasy(y))
+            cx = self._unzoom(int(self._canvas.canvasx(x)))
+            cy = self._unzoom(int(self._canvas.canvasy(y)))
             return (cx, cy)
         except Exception:
             return (0, 0)
@@ -498,20 +508,21 @@ class WorksheetCanvas(ttk.Frame):
         shadow_w = 4
         page_gap = 10
 
+        z = self._zoom
         for page in range(num_pages):
             page_y = page * (ph + page_gap)
-            # Drop shadow (right and bottom edges)
             self._canvas.create_rectangle(
-                shadow_w, page_y + ph, pw + shadow_w, page_y + ph + shadow_w,
+                _z(shadow_w, z), _z(page_y + ph, z),
+                _z(pw + shadow_w, z), _z(page_y + ph + shadow_w, z),
                 fill=_PAGE_SHADOW, outline="", tags="page_shadow"
             )
             self._canvas.create_rectangle(
-                pw, page_y + shadow_w, pw + shadow_w, page_y + ph + shadow_w,
+                _z(pw, z), _z(page_y + shadow_w, z),
+                _z(pw + shadow_w, z), _z(page_y + ph + shadow_w, z),
                 fill=_PAGE_SHADOW, outline="", tags="page_shadow"
             )
-            # White page
             self._canvas.create_rectangle(
-                0, page_y, pw, page_y + ph,
+                0, _z(page_y, z), _z(pw, z), _z(page_y + ph, z),
                 fill="#ffffff", outline="#b0b0b0", width=1, tags="page_bg"
             )
         self._page_height = ph
@@ -541,26 +552,31 @@ class WorksheetCanvas(ttk.Frame):
 
         num_pages = getattr(self, '_num_pages', 5)
         page_gap = getattr(self, '_page_gap', 10)
+        z = self._zoom
         for page in range(num_pages):
             page_y = page * (ph + page_gap)
             if mt > 0:
                 self._canvas.create_line(
-                    ml, page_y + mt, pw - mr, page_y + mt,
+                    _z(ml, z), _z(page_y + mt, z),
+                    _z(pw - mr, z), _z(page_y + mt, z),
                     fill="#e0e0e0", dash=(1, 3), tags="page_bounds"
                 )
             if mb > 0:
                 self._canvas.create_line(
-                    ml, page_y + ph - mb, pw - mr, page_y + ph - mb,
+                    _z(ml, z), _z(page_y + ph - mb, z),
+                    _z(pw - mr, z), _z(page_y + ph - mb, z),
                     fill="#e0e0e0", dash=(1, 3), tags="page_bounds"
                 )
             if ml > 0:
                 self._canvas.create_line(
-                    ml, page_y, ml, page_y + ph,
+                    _z(ml, z), _z(page_y, z),
+                    _z(ml, z), _z(page_y + ph, z),
                     fill="#e0e0e0", dash=(1, 3), tags="page_bounds"
                 )
             if mr > 0:
                 self._canvas.create_line(
-                    pw - mr, page_y, pw - mr, page_y + ph,
+                    _z(pw - mr, z), _z(page_y, z),
+                    _z(pw - mr, z), _z(page_y + ph, z),
                     fill="#e0e0e0", dash=(1, 3), tags="page_bounds"
                 )
 
@@ -575,13 +591,17 @@ class WorksheetCanvas(ttk.Frame):
         grid = _GRID_SIZE * 3
         ml = 4
         mt = 4
+        z = self._zoom
+        dot_size = max(1, _z(1, z))
         for page in range(2):
             page_y = page * (ph + pg)
             for gx in range(grid, pw - ml, grid):
                 for gy in range(grid, ph - mt, grid):
                     py = page_y + gy
+                    zx = _z(gx, z)
+                    zy = _z(py, z)
                     self._canvas.create_rectangle(
-                        gx, py, gx + 1, py + 1,
+                        zx, zy, zx + dot_size, zy + dot_size,
                         fill="#c8c8c8", outline="", tags="grid_dots",
                     )
 
@@ -606,10 +626,12 @@ class WorksheetCanvas(ttk.Frame):
         pg = getattr(self, '_page_gap', 10)
         num = getattr(self, '_num_pages', 5)
         margin_x = 30
+        z = self._zoom
         for page in range(num):
             page_y = page * (ph + pg)
             self._canvas.create_line(
-                margin_x, page_y, margin_x, page_y + ph,
+                _z(margin_x, z), _z(page_y, z),
+                _z(margin_x, z), _z(page_y + ph, z),
                 fill="#d8d8d8", width=1, tags="margin_line"
             )
 
@@ -617,9 +639,9 @@ class WorksheetCanvas(ttk.Frame):
         """Draw a small blue crosshair at the current insertion position."""
         if self._editing:
             return
-        x = self._cursor_x
-        y = self._cursor_y
-        sz = 5
+        x = _z(self._cursor_x, self._zoom)
+        y = _z(self._cursor_y, self._zoom)
+        sz = max(4, _z(5, self._zoom))
         self._canvas.create_line(
             x - sz, y, x + sz, y, fill=_CURSOR_COLOR, width=1, tags="cursor_marker"
         )
@@ -676,8 +698,8 @@ class WorksheetCanvas(ttk.Frame):
     def _render_region(self, region: Region, eval_result: Any = None):
         """Render a single region on the canvas."""
         items: list[int] = []
-        x = region.left
-        y = region.top
+        x = _z(region.left, self._zoom)
+        y = _z(region.top, self._zoom)
 
         if region.area is not None:
             items = self._render_area(region, x, y)
@@ -728,8 +750,8 @@ class WorksheetCanvas(ttk.Frame):
         # Background rectangle for bordered/colored regions
         if has_border or bg:
             draw_bg = bg if bg else _BORDER_BG
-            rw = max(region.width, _DEFAULT_REGION_WIDTH)
-            rh = max(region.height, _DEFAULT_REGION_HEIGHT)
+            rw = _z(max(region.width, _DEFAULT_REGION_WIDTH), self._zoom)
+            rh = _z(max(region.height, _DEFAULT_REGION_HEIGHT), self._zoom)
             rect_id = self._canvas.create_rectangle(
                 x, y, x + rw, y + rh,
                 fill=draw_bg,
@@ -739,11 +761,12 @@ class WorksheetCanvas(ttk.Frame):
             items.append(rect_id)
 
         # Render each paragraph
-        cy = y + _REGION_PADDING
+        zpad = _z(_REGION_PADDING, self._zoom)
+        cy = y + zpad
         for para in tc.paragraphs:
             fnt = self._get_font(region.font_size, para.bold, para.italic)
             text_id = self._canvas.create_text(
-                x + _REGION_PADDING, cy,
+                x + zpad, cy,
                 text=para.text,
                 anchor=tk.NW,
                 font=fnt,
@@ -780,24 +803,26 @@ class WorksheetCanvas(ttk.Frame):
             display_result = None
 
         # Handle showInputData=False: only show the result value
+        zpad = _z(_REGION_PADDING, self._zoom)
         if region.show_input_data is not None and not region.show_input_data:
             if display_result is not None and not isinstance(display_result, Exception):
                 precision = self._ctx.precision if self._ctx else 4
                 result_text = _format_value(display_result, precision, self._trailing_zeros)
                 fnt = self._get_font(region.font_size, bold=False, italic=False)
                 text_id = self._canvas.create_text(
-                    x + _REGION_PADDING, y + _REGION_PADDING,
+                    x + zpad, y + zpad,
                     text=result_text, anchor=tk.NW, font=fnt,
                     fill=region.color or "#000000",
                 )
                 return [text_id]
 
         # Try the dedicated math renderer first
+        zoomed_font_size = max(6, int(region.font_size * self._zoom))
         if self._math_renderer is not None:
             try:
                 rendered_items = self._math_renderer.render(
                     self._canvas, math_data, x, y, display_result,
-                    font_size=region.font_size,
+                    font_size=zoomed_font_size,
                     color=region.color,
                     trailing_zeros=self._trailing_zeros,
                 )
@@ -812,8 +837,8 @@ class WorksheetCanvas(ttk.Frame):
         fnt_unit = self._get_font(region.font_size, bold=False, italic=False)
 
         fg = region.color if region.color else "#000000"
-        cx = x + _REGION_PADDING
-        cy = y + _REGION_PADDING
+        cx = x + zpad
+        cy = y + zpad
 
         # Render input expression
         input_text = _expr_to_text(math_data.input_expr)
@@ -1062,14 +1087,15 @@ class WorksheetCanvas(ttk.Frame):
     def _get_font(
         self, size: int, bold: bool = False, italic: bool = False
     ) -> tkfont.Font:
-        """Return a cached tkinter Font object."""
-        key = (size, bold, italic)
+        """Return a cached tkinter Font object, scaled by current zoom."""
+        zoomed_size = max(6, int(size * self._zoom))
+        key = (zoomed_size, bold, italic)
         if key not in self._font_cache:
             weight = "bold" if bold else "normal"
             slant = "italic" if italic else "roman"
             self._font_cache[key] = tkfont.Font(
                 family="DejaVu Sans",
-                size=size,
+                size=zoomed_size,
                 weight=weight,
                 slant=slant,
             )
@@ -1151,6 +1177,12 @@ class WorksheetCanvas(ttk.Frame):
     # Event handlers
     # ------------------------------------------------------------------
 
+    def _unzoom(self, val: int) -> int:
+        """Convert a zoomed canvas coordinate back to logical coordinate."""
+        if self._zoom == 1.0:
+            return val
+        return int(val / self._zoom)
+
     def _on_click(self, event: tk.Event):
         """Handle left-click: commit edit, select region, or set cursor."""
         cx = int(self._canvas.canvasx(event.x))
@@ -1187,8 +1219,8 @@ class WorksheetCanvas(ttk.Frame):
             self._multi_selected.clear()
             self._clear_multi_selection()
             self._select_region(None)
-            self._cursor_x = _snap(cx)
-            self._cursor_y = _snap(cy)
+            self._cursor_x = _snap(self._unzoom(cx))
+            self._cursor_y = _snap(self._unzoom(cy))
             self._dragging = False
             self._canvas.delete("cursor_marker")
             self._draw_cursor_marker()
@@ -1198,8 +1230,8 @@ class WorksheetCanvas(ttk.Frame):
         """Show context menu on right-click."""
         cx = int(self._canvas.canvasx(event.x))
         cy = int(self._canvas.canvasy(event.y))
-        self._right_click_x = _snap(cx)
-        self._right_click_y = _snap(cy)
+        self._right_click_x = _snap(self._unzoom(cx))
+        self._right_click_y = _snap(self._unzoom(cy))
         hit = self._hit_test(cx, cy)
         if hit is not None:
             self._select_region(hit)
@@ -1222,6 +1254,87 @@ class WorksheetCanvas(ttk.Frame):
         x = getattr(self, "_right_click_x", self._cursor_x)
         y = getattr(self, "_right_click_y", self._cursor_y)
         self._start_editing(x, y, mode="comment")
+
+    def _show_region_properties(self):
+        """Show a properties dialog for the selected region."""
+        region = self.get_selected_region()
+        if region is None:
+            return
+        dlg = tk.Toplevel(self._canvas)
+        dlg.title("Region Properties")
+        dlg.resizable(False, False)
+        dlg.transient(self._canvas.winfo_toplevel())
+        dlg.grab_set()
+
+        frame = tk.Frame(dlg, padx=15, pady=10)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        row = 0
+        tk.Label(frame, text=f"ID: {region.id}", font=("DejaVu Sans", 9)).grid(
+            row=row, column=0, columnspan=2, sticky="w", pady=2
+        )
+
+        row += 1
+        tk.Label(frame, text="Position:", font=("DejaVu Sans", 9)).grid(
+            row=row, column=0, sticky="e", padx=5
+        )
+        pos_var = tk.StringVar(value=f"{region.left}, {region.top}")
+        tk.Entry(frame, textvariable=pos_var, width=15).grid(row=row, column=1, pady=2)
+
+        row += 1
+        tk.Label(frame, text="Font Size:", font=("DejaVu Sans", 9)).grid(
+            row=row, column=0, sticky="e", padx=5
+        )
+        size_var = tk.StringVar(value=str(region.font_size))
+        tk.Spinbox(frame, from_=6, to=72, textvariable=size_var, width=5).grid(
+            row=row, column=1, sticky="w", pady=2
+        )
+
+        row += 1
+        tk.Label(frame, text="Color:", font=("DejaVu Sans", 9)).grid(
+            row=row, column=0, sticky="e", padx=5
+        )
+        color_var = tk.StringVar(value=region.color or "#000000")
+        color_entry = tk.Entry(frame, textvariable=color_var, width=10)
+        color_entry.grid(row=row, column=1, sticky="w", pady=2)
+
+        row += 1
+        border_var = tk.BooleanVar(value=region.border)
+        tk.Checkbutton(frame, text="Show Border", variable=border_var).grid(
+            row=row, column=0, columnspan=2, sticky="w", pady=2
+        )
+
+        row += 1
+        btn_frame = tk.Frame(frame)
+        btn_frame.grid(row=row, column=0, columnspan=2, pady=(10, 0))
+
+        def on_ok():
+            try:
+                parts = pos_var.get().split(",")
+                if len(parts) == 2:
+                    region.left = int(parts[0].strip())
+                    region.top = int(parts[1].strip())
+            except ValueError:
+                pass
+            try:
+                region.font_size = int(size_var.get())
+            except ValueError:
+                pass
+            region.color = color_var.get().strip() or None
+            region.border = border_var.get()
+            dlg.destroy()
+            self._mark_modified()
+            self._evaluate_and_render()
+
+        tk.Button(btn_frame, text="OK", command=on_ok, width=8).pack(
+            side=tk.LEFT, padx=5
+        )
+        tk.Button(btn_frame, text="Cancel", command=dlg.destroy, width=8).pack(
+            side=tk.LEFT, padx=5
+        )
+        dlg.bind("<Return>", lambda e: on_ok())
+        dlg.bind("<Escape>", lambda e: dlg.destroy())
+        dlg.wait_window()
 
     def _on_mousewheel(self, event: tk.Event):
         """Vertical scroll with mouse wheel (Windows/macOS)."""
@@ -1261,8 +1374,7 @@ class WorksheetCanvas(ttk.Frame):
             self._apply_zoom()
 
     def _apply_zoom(self):
-        self._canvas.delete("all")
-        self._canvas.scale("all", 0, 0, self._zoom, self._zoom)
+        self._font_cache.clear()
         self._evaluate_and_render()
 
     def get_zoom_percent(self) -> int:
@@ -1366,8 +1478,8 @@ class WorksheetCanvas(ttk.Frame):
         self._save_undo_state()
         rr = self._rendered[self._selected_index]
         region = rr.region
-        region.left = _snap(rr.bbox[0])
-        region.top = _snap(rr.bbox[1])
+        region.left = _snap(self._unzoom(rr.bbox[0]))
+        region.top = _snap(self._unzoom(rr.bbox[1]))
         self._dragging = False
         self._mark_modified()
         self._evaluate_and_render()
@@ -1385,6 +1497,9 @@ class WorksheetCanvas(ttk.Frame):
         if ctrl and not self._editing:
             keysym = event.keysym.lower()
             shift = event.state & 0x1
+            if keysym == "a":
+                self.select_all()
+                return "break"
             _struct_shortcuts = {
                 "m": "_do_matrix",
                 "d": "_do_derivative",
@@ -1463,8 +1578,8 @@ class WorksheetCanvas(ttk.Frame):
                 self._cursor_x += step
             self._canvas.delete("cursor_marker")
             self._draw_cursor_marker()
-            self._ensure_visible(self._cursor_x, self._cursor_y)
-            hit = self._hit_test(self._cursor_x, self._cursor_y)
+            self._ensure_visible(_z(self._cursor_x, self._zoom), _z(self._cursor_y, self._zoom))
+            hit = self._hit_test(_z(self._cursor_x, self._zoom), _z(self._cursor_y, self._zoom))
             self._select_region(hit)
             return "break"
 
@@ -1506,7 +1621,7 @@ class WorksheetCanvas(ttk.Frame):
         self._cursor_y = rr.region.top
         self._canvas.delete("cursor_marker")
         self._draw_cursor_marker()
-        self._ensure_visible(self._cursor_x, self._cursor_y)
+        self._ensure_visible(_z(self._cursor_x, self._zoom), _z(self._cursor_y, self._zoom))
 
     def evaluate_selected(self):
         """Evaluate just the selected region (F5)."""
@@ -1576,8 +1691,8 @@ class WorksheetCanvas(ttk.Frame):
                     editing_idx=hit, mode="text",
                 )
         else:
-            x = _snap(cx)
-            y = _snap(cy)
+            x = _snap(self._unzoom(cx))
+            y = _snap(self._unzoom(cy))
             self._start_editing(x, y)
 
         self._canvas.focus_set()
@@ -1739,6 +1854,15 @@ class WorksheetCanvas(ttk.Frame):
             self._worksheet = Worksheet()
             self._ctx = create_default_context()
 
+    def select_all(self):
+        """Select all regions on the worksheet."""
+        if not self._rendered:
+            return
+        self._multi_selected = set(range(len(self._rendered)))
+        if self._rendered:
+            self._select_region(0)
+            self._draw_multi_selection()
+
     def delete_selected(self):
         """Delete the currently selected region(s)."""
         if self._worksheet is None:
@@ -1764,13 +1888,26 @@ class WorksheetCanvas(ttk.Frame):
         self._evaluate_and_render()
 
     def copy_selected(self) -> str:
-        """Copy selected region's expression to clipboard. Returns the text."""
-        if self._selected_index is None:
+        """Copy selected region(s) expression to clipboard. Returns the text."""
+        indices = set(self._multi_selected)
+        if self._selected_index is not None:
+            indices.add(self._selected_index)
+        if not indices:
             return ""
-        if self._selected_index >= len(self._rendered):
-            return ""
-        region = self._rendered[self._selected_index].region
-        text = self._region_to_edit_text(region)
+        texts = []
+        for idx in sorted(indices):
+            if idx >= len(self._rendered):
+                continue
+            region = self._rendered[idx].region
+            if region.math is not None:
+                t = self._region_to_edit_text(region)
+                if t:
+                    texts.append(t)
+            elif region.text_contents:
+                tc = self._get_text_content(region.text_contents)
+                if tc and tc.paragraphs:
+                    texts.append("\n".join(p.text for p in tc.paragraphs))
+        text = "\n".join(texts)
         if text:
             try:
                 self._canvas.clipboard_clear()
@@ -1884,12 +2021,16 @@ class WorksheetCanvas(ttk.Frame):
         self._cursor_x = x
         self._cursor_y = y
 
+        zx = _z(x, self._zoom)
+        zy = _z(y, self._zoom)
+
         if mode in ("text", "comment"):
             self._math_editor = None
             bg_color = "#ffff80" if mode == "comment" else "#fffff0"
+            zoomed_text_size = max(8, int(11 * self._zoom))
             self._edit_text_entry = tk.Text(
                 self._canvas,
-                font=("DejaVu Sans", 11),
+                font=("DejaVu Sans", zoomed_text_size),
                 bd=1,
                 relief=tk.SOLID,
                 highlightthickness=1,
@@ -1907,7 +2048,7 @@ class WorksheetCanvas(ttk.Frame):
                 "<Control-Return>", lambda e: self._commit_edit()
             )
             self._edit_text_window = self._canvas.create_window(
-                x, y, window=self._edit_text_entry, anchor=tk.NW
+                zx, zy, window=self._edit_text_entry, anchor=tk.NW
             )
             self._edit_text_entry.focus_set()
             if initial_text:
@@ -1924,9 +2065,10 @@ class WorksheetCanvas(ttk.Frame):
         precision = 4
         if self._ctx:
             precision = getattr(self._ctx, '_precision', 4)
+        zoomed_editor_size = max(8, int(12 * self._zoom))
         editor = MathEditor(
-            self._canvas, x, y,
-            font_size=12,
+            self._canvas, zx, zy,
+            font_size=zoomed_editor_size,
             eval_callback=self._eval_for_editor,
             precision=precision,
         )
