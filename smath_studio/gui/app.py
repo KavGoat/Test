@@ -311,6 +311,8 @@ class SMathApp:
         # --- Help menu ---
         help_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Help", menu=help_menu)
+        help_menu.add_command(label="Keyboard Shortcuts", command=self._show_shortcuts)
+        help_menu.add_separator()
         help_menu.add_command(label="About SMath Studio", command=self._on_about)
 
     def _build_toolbar(self):
@@ -920,26 +922,71 @@ class SMathApp:
         self._canvas_widget._evaluate_and_render()
 
     def _show_regions_list(self):
-        """Show a simple list of all regions in the worksheet."""
+        """Show a dialog listing all regions with navigation."""
         ws = self._canvas_widget._worksheet
         if ws is None or not ws.regions:
             messagebox.showinfo("Regions", "No regions in worksheet.", parent=self._root)
             return
-        lines = []
+
+        dlg = tk.Toplevel(self._root)
+        dlg.title("Regions List")
+        dlg.geometry("500x400")
+        dlg.transient(self._root)
+
+        frame = ttk.Frame(dlg, padding=8)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        columns = ("num", "type", "position", "content")
+        tree = ttk.Treeview(frame, columns=columns, show="headings", height=15)
+        tree.heading("num", text="#")
+        tree.heading("type", text="Type")
+        tree.heading("position", text="Position")
+        tree.heading("content", text="Content")
+        tree.column("num", width=40, anchor="center")
+        tree.column("type", width=60, anchor="center")
+        tree.column("position", width=80, anchor="center")
+        tree.column("content", width=300)
+
+        scroll = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=tree.yview)
+        tree.configure(yscrollcommand=scroll.set)
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scroll.pack(side=tk.RIGHT, fill=tk.Y)
+
+        from ..infix_parser import ast_to_text
         for i, r in enumerate(ws.regions):
-            kind = "math" if r.math else "text" if r.text_contents else "other"
+            if r.math:
+                kind = "Math"
+            elif r.text_contents:
+                kind = "Text"
+            elif r.area:
+                kind = "Area"
+            elif r.plot:
+                kind = "Plot"
+            elif r.picture:
+                kind = "Image"
+            else:
+                kind = "Other"
             desc = ""
             if r.math and r.math.input_expr:
-                from ..infix_parser import ast_to_text
-                desc = ast_to_text(r.math.input_expr)[:50]
+                desc = ast_to_text(r.math.input_expr)[:60]
             elif r.text_contents:
                 tc = r.text_contents[0] if r.text_contents else None
                 if tc and tc.paragraphs:
-                    desc = tc.paragraphs[0].text[:50]
-            lines.append(f"{i+1}. [{kind}] ({r.left},{r.top}) {desc}")
-        messagebox.showinfo(
-            "Regions List", "\n".join(lines), parent=self._root
-        )
+                    desc = tc.paragraphs[0].text[:60]
+            tree.insert("", tk.END, values=(i + 1, kind, f"({r.left}, {r.top})", desc))
+
+        def on_select(event):
+            sel = tree.selection()
+            if sel:
+                idx = tree.index(sel[0])
+                if idx < len(self._canvas_widget._rendered):
+                    self._canvas_widget._select_region(idx)
+                    rr = self._canvas_widget._rendered[idx]
+                    self._canvas_widget._ensure_visible(rr.bbox[0], rr.bbox[1])
+
+        tree.bind("<<TreeviewSelect>>", on_select)
+
+        ttk.Button(frame, text="Close", command=dlg.destroy).pack(side=tk.BOTTOM, pady=(4, 0))
 
     # ------------------------------------------------------------------
     # Tools
@@ -1013,6 +1060,65 @@ class SMathApp:
     def _on_about(self):
         """Show the About dialog."""
         AboutDialog(self._root)
+
+    def _show_shortcuts(self):
+        """Show keyboard shortcuts reference."""
+        shortcuts = (
+            "Keyboard Shortcuts\n"
+            "═══════════════════════════\n\n"
+            "File\n"
+            "  Ctrl+N        New worksheet\n"
+            "  Ctrl+O        Open file\n"
+            "  Ctrl+S        Save\n"
+            "  Ctrl+P        Print\n\n"
+            "Edit\n"
+            "  Ctrl+Z        Undo\n"
+            "  Ctrl+Y        Redo\n"
+            "  Ctrl+X        Cut\n"
+            "  Ctrl+C        Copy\n"
+            "  Ctrl+V        Paste\n"
+            "  Ctrl+A        Select All\n"
+            "  Ctrl+H        Find/Replace\n"
+            "  Delete        Delete region\n\n"
+            "Math Input\n"
+            "  :=            Define variable\n"
+            "  =             Evaluate expression\n"
+            "  Ctrl+M        Insert matrix\n"
+            "  Ctrl+D        Insert derivative\n"
+            "  Ctrl+I        Insert integral\n"
+            "  Ctrl+Shift+S  Insert summation\n"
+            "  Ctrl+Shift+P  Insert product\n"
+            "  /             Fraction (in editor)\n"
+            "  ^             Superscript\n"
+            "  (             Parentheses\n"
+            "  |             Absolute value\n\n"
+            "Calculation\n"
+            "  F5            Evaluate selection\n"
+            "  F9            Recalculate all\n\n"
+            "View\n"
+            "  Ctrl++        Zoom in\n"
+            "  Ctrl+-        Zoom out\n"
+            "  Ctrl+0        Zoom 100%\n"
+            "  F11           Toggle fullscreen\n\n"
+            "Format\n"
+            "  Ctrl+B        Bold\n"
+            "  Ctrl+U        Underline\n\n"
+            "Navigation\n"
+            "  Tab           Next region\n"
+            "  Shift+Tab     Previous region\n"
+            "  Arrow keys    Move cursor\n"
+            "  Enter         Edit selected region\n"
+            "  Escape        Deselect / Cancel edit\n"
+        )
+        dlg = tk.Toplevel(self._root)
+        dlg.title("Keyboard Shortcuts")
+        dlg.geometry("380x520")
+        dlg.transient(self._root)
+        text = tk.Text(dlg, font=("DejaVu Sans Mono", 9), wrap=tk.WORD, padx=12, pady=12)
+        text.insert("1.0", shortcuts)
+        text.config(state=tk.DISABLED)
+        text.pack(fill=tk.BOTH, expand=True)
+        dlg.bind("<Escape>", lambda e: dlg.destroy())
 
     # ------------------------------------------------------------------
     # Symbol insert from toolbar panels
