@@ -346,8 +346,9 @@ class MathRenderer:
         exp = self._measure_node(node.right, sup_fs, ctx)
         w = base.width + exp.width
         raise_amt = base.height * _SUP_RAISE
-        h = max(base.height, exp.height + raise_amt)
-        return RenderBox(w, h, base.baseline)
+        h = raise_amt + base.height
+        h = max(h, exp.height)
+        return RenderBox(w, h, raise_amt + base.baseline)
 
     def _measure_assignment(self, c, node: BinaryOp, fs: int, ctx) -> RenderBox:
         left = self._measure_node(node.left, fs, ctx)
@@ -570,6 +571,28 @@ class MathRenderer:
                          cx, y + content_h - pad,
                          smooth=True, fill=_OPERATOR_COLOR, width=1)
 
+    def _draw_curly_brace(self, c: tk.Canvas, x: float, y: float,
+                          h: float, fs: int):
+        _, char_h = self._text_size(c, "{", fs)
+        if h <= char_h * 1.3:
+            f = self._get_font(c, fs)
+            py = y + (h - char_h) / 2
+            c.create_text(x, py, text="{", anchor="nw", font=f, fill=_OPERATOR_COLOR)
+            return
+        pad = 2
+        cx = x + 5
+        mid = y + h * 0.5
+        tip_x = cx - 4
+        c.create_line(cx + 3, y + pad, cx + 1, y + h * 0.08,
+                     cx, y + h * 0.2,
+                     cx, mid - h * 0.05,
+                     tip_x, mid,
+                     cx, mid + h * 0.05,
+                     cx, y + h * 0.8,
+                     cx + 1, y + h * 0.92,
+                     cx + 3, y + h - pad,
+                     smooth=True, fill=_OPERATOR_COLOR, width=1)
+
     # -----------------------------------------------------------------
     # Render (draw on canvas)
     # -----------------------------------------------------------------
@@ -733,16 +756,15 @@ class MathRenderer:
         exp_m = self._measure_node(node.right, sup_fs, ctx)
 
         raise_amt = base_m.height * _SUP_RAISE
-
-        base_y = y + max(0, raise_amt + exp_m.height - base_m.height)
-        bb = self._render_node(c, node.left, x, base_y, fs, ctx)
-
         exp_y = y
+        base_y = y + raise_amt
+        total_h = max(base_y + base_m.height, exp_y + exp_m.height) - y
+
+        bb = self._render_node(c, node.left, x, base_y, fs, ctx)
         self._render_node(c, node.right, x + bb.width, exp_y, sup_fs, ctx)
 
         w = bb.width + exp_m.width
-        h = max(base_y + base_m.height, exp_y + exp_m.height) - y
-        return RenderBox(w, h, base_y - y + base_m.baseline)
+        return RenderBox(w, total_h, base_y - y + base_m.baseline)
 
     def _render_assignment(self, c, node: BinaryOp, x, y, fs, ctx) -> RenderBox:
         total = self._measure_assignment(c, node, fs, ctx)
@@ -1322,9 +1344,7 @@ class MathRenderer:
             case_data.append((val_node, cond_node, vm, cm, row_h))
 
         brace_w = 12
-        f_if = self._get_font(c, max(int(line_h * 0.8), fs))
-
-        c.create_text(x, y + line_h * 0.3, text="{", anchor="nw", font=f_if, fill=_OPERATOR_COLOR)
+        self._draw_curly_brace(c, x, y, line_h, fs)
 
         cx = x + brace_w + 4
         cy = y
@@ -1385,16 +1405,7 @@ class MathRenderer:
             total_h += em.height + row_pad
         total_h -= row_pad if eqs else 0
         total_h = max(total_h, self._text_size(c, "X", fs)[1])
-        brace_fs = max(int(total_h * 0.7), fs)
-        f_brace = self._get_font(c, brace_fs)
-        c.create_text(x, y + total_h * 0.15, text="{", anchor="nw",
-                      font=f_brace, fill=_OPERATOR_COLOR)
-        if total_h > self._text_size(c, "X", fs)[1] * 1.5:
-            mid_y = y + total_h * 0.5
-            c.create_line(x + 3, y + 2, x + 3, mid_y - 4,
-                         fill=_OPERATOR_COLOR, width=1)
-            c.create_line(x + 3, mid_y + 4, x + 3, y + total_h - 2,
-                         fill=_OPERATOR_COLOR, width=1)
+        self._draw_curly_brace(c, x, y, total_h, fs)
         cy = y
         for eq, em in zip(eqs, row_data):
             self._render_node(c, eq, content_x, cy, fs, ctx)
@@ -1406,7 +1417,6 @@ class MathRenderer:
         brace_w = max(int(fs * 0.8), 10)
         row_pad = 4
         content_x = x + brace_w + 4
-        # Measure rows first
         row_data = []
         total_h = 0.0
         max_w = 0.0
@@ -1417,18 +1427,7 @@ class MathRenderer:
             total_h += am.height + row_pad
         total_h -= row_pad if node.args else 0
         total_h = max(total_h, self._text_size(c, "X", fs)[1])
-        # Draw curly brace
-        brace_fs = max(int(total_h * 0.7), fs)
-        f_brace = self._get_font(c, brace_fs)
-        c.create_text(x, y + total_h * 0.15, text="{", anchor="nw",
-                      font=f_brace, fill=_OPERATOR_COLOR)
-        if total_h > self._text_size(c, "X", fs)[1] * 1.5:
-            mid_y = y + total_h * 0.5
-            c.create_line(x + 3, y + 2, x + 3, mid_y - 4,
-                         fill=_OPERATOR_COLOR, width=1)
-            c.create_line(x + 3, mid_y + 4, x + 3, y + total_h - 2,
-                         fill=_OPERATOR_COLOR, width=1)
-        # Render rows
+        self._draw_curly_brace(c, x, y, total_h, fs)
         cy = y
         for arg, am in zip(node.args, row_data):
             self._render_node(c, arg, content_x, cy, fs, ctx)
@@ -1656,11 +1655,14 @@ def _format_result(val: Any, precision: int = 4, trailing_zeros: bool = False) -
 
 
 def _is_implicit_mult(node: BinaryOp) -> bool:
-    """Check if multiplication should be rendered implicitly (no dot)."""
+    """Check if multiplication should be rendered implicitly (thin space, no dot)."""
     if isinstance(node.right, UnitRef):
         return True
-    if isinstance(node.left, (Number, Variable)) and isinstance(node.right, Variable):
-        return False  # show dot between number and variable
+    if isinstance(node.left, Number) and isinstance(node.right, (Variable, FunctionCall)):
+        return True
+    if isinstance(node.left, Number) and isinstance(node.right, BinaryOp) and node.right.operator == "^":
+        if isinstance(node.right.left, (Variable, FunctionCall)):
+            return True
     return False
 
 
