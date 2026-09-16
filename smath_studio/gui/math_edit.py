@@ -1230,9 +1230,7 @@ class MathEditor:
         if isinstance(item, EAbs):
             return self._measure_abs(item, fs)
         if isinstance(item, EUnit):
-            sp_w, _ = self._text_size(" ", fs)
-            w, h = self._text_size(item.name or " ", fs)
-            return _Box(sp_w + w, h, h * 0.6)
+            return self._measure_unit(item, fs)
         if isinstance(item, EMatrix):
             return self._measure_matrix(item, fs)
         if isinstance(item, ESummation):
@@ -1251,17 +1249,52 @@ class MathEditor:
 
     def _measure_sqrt(self, item: ESqrt, fs: int) -> _Box:
         rb = self._measure_slot(item.radicand, fs)
-        sym_w, sym_h = self._text_size("√", fs)
-        w = sym_w + rb.width + 4
-        h = max(rb.height + 4, sym_h)
-        return _Box(w, h, max(rb.baseline + 2, sym_h * 0.6))
+        rad_w = max(int(fs * 0.7), 10)
+        pad = 3
+        w = rad_w + rb.width + pad * 2
+        h = rb.height + pad * 2
+        return _Box(w, h, rb.baseline + pad)
 
     def _measure_abs(self, item: EAbs, fs: int) -> _Box:
         ib = self._measure_slot(item.inner, fs)
-        bw, bh = self._text_size("|", fs)
-        w = bw + ib.width + bw + 4
-        h = max(bh, ib.height)
-        return _Box(w, h, max(bh * 0.6, ib.baseline))
+        bar_w = 2
+        pad = 3
+        w = bar_w + pad + ib.width + pad + bar_w
+        h = ib.height
+        return _Box(w, h, ib.baseline)
+
+    def _measure_unit(self, item: EUnit, fs: int) -> _Box:
+        name = item.name or " "
+        sp_w, _ = self._text_size(" ", fs)
+        sup_fs = max(int(fs * _SUP_SCALE), 6)
+        _, base_h = self._text_size("M", fs)
+        cx = sp_w
+        i = 0
+        max_h = base_h
+        while i < len(name):
+            if name[i] == '^':
+                i += 1
+                exp_text = ""
+                while i < len(name) and (name[i].isdigit() or name[i] in "+-"):
+                    exp_text += name[i]
+                    i += 1
+                if exp_text:
+                    ew, eh = self._text_size(exp_text, sup_fs)
+                    cx += ew
+                    max_h = max(max_h, eh)
+            elif name[i] == '·':
+                dw, _ = self._text_size("·", fs)
+                cx += dw
+                i += 1
+            else:
+                chunk = ""
+                while i < len(name) and name[i] not in "^·":
+                    chunk += name[i]
+                    i += 1
+                if chunk:
+                    cw, _ = self._text_size(chunk, fs)
+                    cx += cw
+        return _Box(cx, max_h, max_h * 0.6)
 
     def _measure_slot(self, slot: EditSlot, fs: int) -> _Box:
         if not slot.items:
@@ -1406,55 +1439,100 @@ class MathEditor:
         sup_fs = max(int(fs * _SUP_SCALE), 6)
         self._render_slot(item.exponent, x, y, sup_fs)
 
+    def _draw_stretchy_paren(self, ch: str, x: float, y: float,
+                             content_h: float, fs: int):
+        _, char_h = self._text_size(ch, fs)
+        if content_h <= char_h * 1.3:
+            f = self._get_font(fs)
+            py = y + (content_h - char_h) / 2
+            tid = self.canvas.create_text(x, py, text=ch, anchor="nw",
+                                          font=f, fill=_OPERATOR_COLOR)
+            self._items.append(tid)
+            return
+        pad = 2
+        if ch == "(":
+            cx = x + 4
+            lid = self.canvas.create_line(
+                cx + 3, y + pad, cx, y + content_h * 0.15,
+                cx - 1, y + content_h * 0.5,
+                cx, y + content_h * 0.85,
+                cx + 3, y + content_h - pad,
+                smooth=True, fill=_OPERATOR_COLOR, width=1)
+            self._items.append(lid)
+        elif ch == ")":
+            cx = x + 2
+            lid = self.canvas.create_line(
+                cx, y + pad, cx + 3, y + content_h * 0.15,
+                cx + 4, y + content_h * 0.5,
+                cx + 3, y + content_h * 0.85,
+                cx, y + content_h - pad,
+                smooth=True, fill=_OPERATOR_COLOR, width=1)
+            self._items.append(lid)
+
     def _render_parens(self, item: EParens, x: float, y: float, fs: int):
         ib = self._measure_slot(item.inner, fs)
-        f = self._get_font(fs)
         pw, ph = self._text_size("(", fs)
+        h = max(ph, ib.height)
 
-        lp = self.canvas.create_text(x, y, text="(", anchor="nw",
-                                      font=f, fill=_OPERATOR_COLOR)
-        self._items.append(lp)
+        self._draw_stretchy_paren("(", x, y, h, fs)
 
-        inner_y = y + max(0, (ph - ib.height) / 2)
+        inner_y = y + max(0, (h - ib.height) / 2)
         self._render_slot(item.inner, x + pw, inner_y, fs)
 
-        rp = self.canvas.create_text(x + pw + ib.width, y, text=")",
-                                      anchor="nw", font=f, fill=_OPERATOR_COLOR)
-        self._items.append(rp)
+        self._draw_stretchy_paren(")", x + pw + ib.width, y, h, fs)
+
+    def _draw_radical(self, x: float, y: float, rad_w: float,
+                      h: float, bar_len: float):
+        tail_x = x + 1
+        tail_y = y + h * 0.55
+        notch_x = x + rad_w * 0.35
+        notch_y = y + h * 0.4
+        bottom_x = x + rad_w * 0.55
+        bottom_y = y + h - 1
+        top_x = x + rad_w - 1
+        top_y = y + 1
+        l1 = self.canvas.create_line(tail_x, tail_y, notch_x, notch_y,
+                                     fill=_OPERATOR_COLOR, width=1)
+        self._items.append(l1)
+        l2 = self.canvas.create_line(notch_x, notch_y, bottom_x, bottom_y,
+                                     fill=_OPERATOR_COLOR, width=1.2)
+        self._items.append(l2)
+        l3 = self.canvas.create_line(bottom_x, bottom_y, top_x, top_y,
+                                     fill=_OPERATOR_COLOR, width=1.2)
+        self._items.append(l3)
+        l4 = self.canvas.create_line(top_x, top_y, top_x + bar_len, top_y,
+                                     fill=_OPERATOR_COLOR, width=1)
+        self._items.append(l4)
 
     def _render_sqrt(self, item: ESqrt, x: float, y: float, fs: int):
         rb = self._measure_slot(item.radicand, fs)
-        f = self._get_font(fs)
-        sym_w, sym_h = self._text_size("√", fs)
+        rad_w = max(int(fs * 0.7), 10)
+        pad = 3
+        h = rb.height + pad * 2
 
-        tid = self.canvas.create_text(x, y, text="√", anchor="nw",
-                                        font=f, fill=_OPERATOR_COLOR)
-        self._items.append(tid)
+        self._draw_radical(x, y, rad_w, h, rb.width + pad * 2)
 
-        rad_x = x + sym_w
-        rad_y = y + 2
+        rad_x = x + rad_w + pad
+        rad_y = y + pad
         self._render_slot(item.radicand, rad_x, rad_y, fs)
-
-        lid = self.canvas.create_line(
-            rad_x - 1, y, rad_x + rb.width + 2, y,
-            fill=_OPERATOR_COLOR, width=1)
-        self._items.append(lid)
 
     def _render_abs(self, item: EAbs, x: float, y: float, fs: int):
         ib = self._measure_slot(item.inner, fs)
-        f = self._get_font(fs)
-        bw, bh = self._text_size("|", fs)
+        bar_w = 2
+        pad = 3
+        h = ib.height
 
-        lp = self.canvas.create_text(x, y, text="|", anchor="nw",
-                                      font=f, fill=_OPERATOR_COLOR)
-        self._items.append(lp)
+        l1 = self.canvas.create_line(x + 1, y, x + 1, y + h,
+                                     fill=_OPERATOR_COLOR, width=1.5)
+        self._items.append(l1)
 
-        inner_y = y + max(0, (bh - ib.height) / 2)
-        self._render_slot(item.inner, x + bw + 2, inner_y, fs)
+        ix = x + bar_w + pad
+        self._render_slot(item.inner, ix, y, fs)
 
-        rp = self.canvas.create_text(x + bw + 2 + ib.width + 2, y, text="|",
-                                      anchor="nw", font=f, fill=_OPERATOR_COLOR)
-        self._items.append(rp)
+        rx = ix + ib.width + pad
+        l2 = self.canvas.create_line(rx + 1, y, rx + 1, y + h,
+                                     fill=_OPERATOR_COLOR, width=1.5)
+        self._items.append(l2)
 
     def _render_matrix(self, item: EMatrix, x: float, y: float, fs: int):
         col_widths = [0.0] * item.cols
@@ -1528,41 +1606,45 @@ class MathEditor:
         self._items.append(tid2)
         self._render_slot(item.var_slot, dx + d_w, den_y, fs)
 
+    def _draw_integral_sign(self, cx: float, y: float, h: float, w: float):
+        r = w * 0.25
+        lid = self.canvas.create_line(
+            cx + r, y, cx + r * 0.5, y + h * 0.03, cx, y + h * 0.12,
+            cx, y + h * 0.5, cx, y + h * 0.88, cx - r * 0.5, y + h * 0.97,
+            cx - r, y + h, smooth=True, fill=_OPERATOR_COLOR, width=1.5)
+        self._items.append(lid)
+
     def _measure_integral(self, item: EIntegral, fs: int) -> _Box:
         small_fs = max(int(fs * 0.65), 6)
-        sym_w, sym_h = self._text_size("∫", int(fs * 1.6))
+        int_w = max(int(fs * 0.8), 12)
+        int_h = max(int(fs * 1.8), 20)
         lb = self._measure_slot(item.lower_slot, small_fs)
         ub = self._measure_slot(item.upper_slot, small_fs)
         bb = self._measure_slot(item.body_slot, fs)
         vb = self._measure_slot(item.var_slot, fs)
         dw, _ = self._text_size("d", fs, "italic")
-        col_w = max(sym_w, lb.width, ub.width)
+        col_w = max(int_w, lb.width, ub.width)
         w = col_w + bb.width + dw + vb.width + 6
-        h = max(ub.height + sym_h + lb.height + 4, bb.height)
-        return _Box(w, h, ub.height + sym_h * 0.6)
+        h = max(ub.height + int_h + lb.height + 4, bb.height)
+        return _Box(w, h, ub.height + int_h * 0.6)
 
     def _render_integral(self, item: EIntegral, x: float, y: float, fs: int):
         small_fs = max(int(fs * 0.65), 6)
-        big_fs = int(fs * 1.6)
-        sym_w, sym_h = self._text_size("∫", big_fs)
+        int_w = max(int(fs * 0.8), 12)
+        int_h = max(int(fs * 1.8), 20)
         ub = self._measure_slot(item.upper_slot, small_fs)
         lb = self._measure_slot(item.lower_slot, small_fs)
         bb = self._measure_slot(item.body_slot, fs)
-        col_w = max(sym_w, lb.width, ub.width)
+        col_w = max(int_w, lb.width, ub.width)
         uy = y
         self._render_slot(item.upper_slot, x + (col_w - ub.width) / 2, uy, small_fs)
         sy = uy + ub.height + 2
-        f = self._get_font(big_fs)
-        tid = self.canvas.create_text(
-            x + (col_w - sym_w) / 2, sy, text="∫",
-            anchor="nw", font=f, fill=_OPERATOR_COLOR)
-        self._items.append(tid)
-        ly = sy + sym_h + 2
+        self._draw_integral_sign(x + col_w / 2, sy, int_h, int_w)
+        ly = sy + int_h + 2
         self._render_slot(item.lower_slot, x + (col_w - lb.width) / 2, ly, small_fs)
-        body_y = sy + (sym_h - bb.height) / 2
+        body_y = sy + (int_h - bb.height) / 2
         bx = x + col_w + 4
         self._render_slot(item.body_slot, bx, body_y, fs)
-        # Render "d" + var
         dx = bx + bb.width + 2
         df = self._get_font(fs, "italic")
         did = self.canvas.create_text(
@@ -1614,6 +1696,31 @@ class MathEditor:
         total_h = max(total_h, self._line_height(fs))
         return _Box(brace_w + 4 + max_w, total_h, total_h * 0.5)
 
+    def _draw_curly_brace(self, x: float, y: float, h: float, fs: int):
+        _, char_h = self._text_size("{", fs)
+        if h <= char_h * 1.3:
+            f = self._get_font(fs)
+            py = y + (h - char_h) / 2
+            tid = self.canvas.create_text(x, py, text="{", anchor="nw",
+                                          font=f, fill=_OPERATOR_COLOR)
+            self._items.append(tid)
+            return
+        pad = 2
+        cx = x + 5
+        mid = y + h * 0.5
+        tip_x = cx - 4
+        lid = self.canvas.create_line(
+            cx + 3, y + pad, cx + 1, y + h * 0.08,
+            cx, y + h * 0.2,
+            cx, mid - h * 0.05,
+            tip_x, mid,
+            cx, mid + h * 0.05,
+            cx, y + h * 0.8,
+            cx + 1, y + h * 0.92,
+            cx + 3, y + h - pad,
+            smooth=True, fill=_OPERATOR_COLOR, width=1)
+        self._items.append(lid)
+
     def _render_system(self, item: ESystem, x: float, y: float, fs: int):
         brace_w = max(int(fs * 0.8), 10)
         row_pad = 4
@@ -1625,24 +1732,9 @@ class MathEditor:
             total_h += rb.height + row_pad
         total_h -= row_pad
         total_h = max(total_h, self._line_height(fs))
-        # Draw curly brace
-        brace_fs = max(int(total_h * 0.7), fs)
-        f = self._get_font(brace_fs)
-        tid = self.canvas.create_text(
-            x, y + total_h * 0.15, text="{",
-            anchor="nw", font=f, fill=_OPERATOR_COLOR)
-        self._items.append(tid)
-        # If brace doesn't span full height, draw vertical lines
-        if total_h > self._line_height(fs) * 1.5:
-            mid_y = y + total_h * 0.5
-            lid = self.canvas.create_line(
-                x + 3, y + 2, x + 3, mid_y - 4,
-                fill=_OPERATOR_COLOR, width=1)
-            self._items.append(lid)
-            lid2 = self.canvas.create_line(
-                x + 3, mid_y + 4, x + 3, y + total_h - 2,
-                fill=_OPERATOR_COLOR, width=1)
-            self._items.append(lid2)
+
+        self._draw_curly_brace(x, y, total_h, fs)
+
         content_x = x + brace_w + 4
         cy = y
         for row, rb in zip(item.rows, row_boxes):
@@ -1685,9 +1777,41 @@ class MathEditor:
         f = self._get_font(fs)
         name = item.name or " "
         sp_w, _ = self._text_size(" ", fs)
-        tid = self.canvas.create_text(x + sp_w, y, text=name, anchor="nw",
-                                       font=f, fill=_UNIT_COLOR)
-        self._items.append(tid)
+        cx = x + sp_w
+        i = 0
+        sup_fs = max(int(fs * _SUP_SCALE), 6)
+        f_sup = self._get_font(sup_fs)
+        while i < len(name):
+            if name[i] == '^':
+                i += 1
+                exp_text = ""
+                while i < len(name) and (name[i].isdigit() or name[i] in "+-"):
+                    exp_text += name[i]
+                    i += 1
+                if exp_text:
+                    tid = self.canvas.create_text(cx, y, text=exp_text,
+                                                  anchor="nw", font=f_sup, fill=_UNIT_COLOR)
+                    self._items.append(tid)
+                    ew, _ = self._text_size(exp_text, sup_fs)
+                    cx += ew
+            elif name[i] == '·':
+                tid = self.canvas.create_text(cx, y, text="·",
+                                              anchor="nw", font=f, fill=_UNIT_COLOR)
+                self._items.append(tid)
+                dw, _ = self._text_size("·", fs)
+                cx += dw
+                i += 1
+            else:
+                chunk = ""
+                while i < len(name) and name[i] not in "^·":
+                    chunk += name[i]
+                    i += 1
+                if chunk:
+                    tid = self.canvas.create_text(cx, y, text=chunk,
+                                                  anchor="nw", font=f, fill=_UNIT_COLOR)
+                    self._items.append(tid)
+                    cw, _ = self._text_size(chunk, fs)
+                    cx += cw
 
     # ---- Cursor ----
 
