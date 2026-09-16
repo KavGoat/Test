@@ -826,7 +826,8 @@ class SMathApp:
         self._status_info.config(text="Line separator inserted")
 
     def _on_insert_area(self):
-        self._status_info.config(text="Insert Area (not yet implemented)")
+        self._canvas_widget.insert_area_region()
+        self._status_info.config(text="Area region inserted")
 
     def _on_insert_matrix(self):
         """Insert a matrix at the cursor position, asking for dimensions."""
@@ -1029,6 +1030,21 @@ class SMathApp:
             ws.settings.page_model.margin_top = dlg.result["margin_top"]
             ws.settings.page_model.margin_bottom = dlg.result["margin_bottom"]
             ws.settings.page_model.active = True
+            from ..parser import HeaderFooter
+            hdr = dlg.result.get("header", "")
+            ftr = dlg.result.get("footer", "")
+            if hdr:
+                if ws.settings.page_model.header is None:
+                    ws.settings.page_model.header = HeaderFooter()
+                ws.settings.page_model.header.text = hdr
+            else:
+                ws.settings.page_model.header = None
+            if ftr:
+                if ws.settings.page_model.footer is None:
+                    ws.settings.page_model.footer = HeaderFooter()
+                ws.settings.page_model.footer.text = ftr
+            else:
+                ws.settings.page_model.footer = None
             self._canvas_widget.recalculate()
             self._status_info.config(text="Page setup updated")
 

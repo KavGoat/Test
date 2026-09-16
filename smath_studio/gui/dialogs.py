@@ -696,8 +696,39 @@ class PageSetupDialog(tk.Toplevel):
                 row=i // 2, column=(i % 2) * 2 + 1, sticky="w", padx=3, pady=2
             )
 
+        hf_frame = ttk.LabelFrame(frame, text="Header / Footer", padding=8)
+        hf_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=4)
+
+        hdr_text = ""
+        ftr_text = ""
+        if page_model and page_model.header:
+            hdr_text = page_model.header.text
+        if page_model and page_model.footer:
+            ftr_text = page_model.footer.text
+
+        ttk.Label(hf_frame, text="Header:", font=("DejaVu Sans", 9)).grid(
+            row=0, column=0, sticky="e", padx=3, pady=2
+        )
+        self._header_var = tk.StringVar(value=hdr_text)
+        ttk.Entry(hf_frame, textvariable=self._header_var, width=30).grid(
+            row=0, column=1, sticky="ew", padx=3, pady=2
+        )
+
+        ttk.Label(hf_frame, text="Footer:", font=("DejaVu Sans", 9)).grid(
+            row=1, column=0, sticky="e", padx=3, pady=2
+        )
+        self._footer_var = tk.StringVar(value=ftr_text)
+        ttk.Entry(hf_frame, textvariable=self._footer_var, width=30).grid(
+            row=1, column=1, sticky="ew", padx=3, pady=2
+        )
+
+        ttk.Label(hf_frame, text="Codes: &[DATE] &[TIME] &[FILENAME] &[PAGENUM] &[COUNT]",
+                  font=("DejaVu Sans", 7)).grid(
+            row=2, column=0, columnspan=2, sticky="w", padx=3
+        )
+
         btn_frame = ttk.Frame(frame)
-        btn_frame.grid(row=3, column=0, columnspan=2, pady=(10, 0))
+        btn_frame.grid(row=4, column=0, columnspan=2, pady=(10, 0))
         ttk.Button(btn_frame, text="OK", command=self._on_ok, width=8).pack(side=tk.LEFT, padx=5)
         ttk.Button(btn_frame, text="Cancel", command=self.destroy, width=8).pack(side=tk.LEFT, padx=5)
 
@@ -722,6 +753,8 @@ class PageSetupDialog(tk.Toplevel):
             "orientation": self._orient_var.get(),
             "margin_left": ml, "margin_right": mr,
             "margin_top": mt, "margin_bottom": mb,
+            "header": self._header_var.get(),
+            "footer": self._footer_var.get(),
         }
         self.destroy()
 

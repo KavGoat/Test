@@ -1493,7 +1493,7 @@ class WorksheetCanvas(ttk.Frame):
         cy = int(self._canvas.canvasy(event.y))
 
         if self._selected_index is not None and not self._rubberband:
-            # Moving a selected region
+            # Moving selected region(s)
             if self._selected_index >= len(self._rendered):
                 return
             dx = cx - self._drag_start_x
@@ -1501,15 +1501,22 @@ class WorksheetCanvas(ttk.Frame):
             if abs(dx) < 4 and abs(dy) < 4 and not self._dragging:
                 return
             self._dragging = True
-            rr = self._rendered[self._selected_index]
-            for item_id in rr.items:
-                self._canvas.move(item_id, dx, dy)
+            indices_to_move = set(self._multi_selected) if self._multi_selected else {self._selected_index}
+            indices_to_move.add(self._selected_index)
+            for idx in indices_to_move:
+                if idx >= len(self._rendered):
+                    continue
+                rr = self._rendered[idx]
+                for item_id in rr.items:
+                    self._canvas.move(item_id, dx, dy)
+                rr.bbox = (
+                    rr.bbox[0] + dx, rr.bbox[1] + dy,
+                    rr.bbox[2] + dx, rr.bbox[3] + dy,
+                )
             for item_id in self._selection_items:
                 self._canvas.move(item_id, dx, dy)
-            rr.bbox = (
-                rr.bbox[0] + dx, rr.bbox[1] + dy,
-                rr.bbox[2] + dx, rr.bbox[3] + dy,
-            )
+            for item_id in self._multi_selection_items:
+                self._canvas.move(item_id, dx, dy)
             self._drag_start_x = cx
             self._drag_start_y = cy
         else:
@@ -1556,19 +1563,35 @@ class WorksheetCanvas(ttk.Frame):
             self._dragging = False
             return
         self._save_undo_state()
-        rr = self._rendered[self._selected_index]
-        region = rr.region
-        region.left = _snap(self._unzoom(rr.bbox[0]))
-        region.top = _snap(self._unzoom(rr.bbox[1]))
+        indices_to_snap = set(self._multi_selected) if self._multi_selected else {self._selected_index}
+        indices_to_snap.add(self._selected_index)
+        moved_regions = []
+        for idx in indices_to_snap:
+            if idx >= len(self._rendered):
+                continue
+            rr = self._rendered[idx]
+            rr.region.left = _snap(self._unzoom(rr.bbox[0]))
+            rr.region.top = _snap(self._unzoom(rr.bbox[1]))
+            moved_regions.append(rr.region)
         self._dragging = False
         self._mark_modified()
         self._evaluate_and_render()
+        primary = moved_regions[0] if moved_regions else None
         idx = None
         for i, r in enumerate(self._rendered):
-            if r.region is region:
+            if r.region is primary:
                 idx = i
                 break
         self._select_region(idx)
+        if self._multi_selected:
+            new_multi = set()
+            for mr in moved_regions:
+                for i, r in enumerate(self._rendered):
+                    if r.region is mr:
+                        new_multi.add(i)
+                        break
+            self._multi_selected = new_multi
+            self._draw_multi_selection()
 
     def _on_key(self, event: tk.Event):
         """Handle key events: forward to editor or start new editing."""
@@ -2166,6 +2189,39 @@ class WorksheetCanvas(ttk.Frame):
         region.plot = plot
         self._worksheet.regions.append(region)
         self._cursor_y = y + height + 16
+        self._mark_modified()
+        self._evaluate_and_render()
+
+    def insert_area_region(self, x: Optional[int] = None, y: Optional[int] = None):
+        """Insert an area (collapsible section) start and end marker pair."""
+        if x is None:
+            x = self._cursor_x
+        if y is None:
+            y = self._cursor_y
+        self.ensure_worksheet()
+        self._save_undo_state()
+
+        from ..parser import AreaRegion, TextContent, TextParagraph
+        start = Region()
+        start.id = self._generate_id()
+        start.left = x
+        start.top = y
+        start.width = 400
+        start.height = 16
+        start.area = AreaRegion(collapsed=False, is_terminator=False)
+        start.text_contents = [TextContent(paragraphs=[TextParagraph(text="Section")])]
+
+        end = Region()
+        end.id = self._generate_id()
+        end.left = x
+        end.top = y + 200
+        end.width = 400
+        end.height = 4
+        end.area = AreaRegion(collapsed=False, is_terminator=True)
+
+        self._worksheet.regions.append(start)
+        self._worksheet.regions.append(end)
+        self._cursor_y = y + 24
         self._mark_modified()
         self._evaluate_and_render()
 
