@@ -591,17 +591,20 @@ class WorksheetCanvas(ttk.Frame):
         )
 
     def _draw_cursor_marker(self):
-        """Draw a red crosshair at the current cursor position."""
+        """Draw a blinking text cursor at the current position."""
         if self._editing:
             return
         x = self._cursor_x
         y = self._cursor_y
-        sz = 6
+        h = 14
         self._canvas.create_line(
-            x - sz, y, x + sz, y, fill="#ff0000", width=1, tags="cursor_marker"
+            x, y - 1, x, y + h, fill="#3366cc", width=1.5, tags="cursor_marker"
         )
         self._canvas.create_line(
-            x, y - sz, x, y + sz, fill="#ff0000", width=1, tags="cursor_marker"
+            x - 3, y - 1, x + 3, y - 1, fill="#3366cc", width=1, tags="cursor_marker"
+        )
+        self._canvas.create_line(
+            x - 3, y + h, x + 3, y + h, fill="#3366cc", width=1, tags="cursor_marker"
         )
 
     def _ensure_visible(self, x: int, y: int):
@@ -1136,6 +1139,8 @@ class WorksheetCanvas(ttk.Frame):
             self._cursor_x = _snap(cx)
             self._cursor_y = _snap(cy)
             self._dragging = False
+            self._canvas.delete("cursor_marker")
+            self._draw_cursor_marker()
         self._canvas.focus_set()
 
     def _on_right_click(self, event: tk.Event):
@@ -1233,7 +1238,7 @@ class WorksheetCanvas(ttk.Frame):
                 pad = 2
                 rect = self._canvas.create_rectangle(
                     x1 - pad, y1 - pad, x2 + pad, y2 + pad,
-                    outline="#c0c0c0", width=1, dash=(2, 2),
+                    outline="#a0c0e0", width=1,
                 )
                 self._hover_items.append(rect)
 
