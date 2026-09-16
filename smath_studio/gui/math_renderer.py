@@ -315,6 +315,12 @@ class MathRenderer:
         if node.operator == "-":
             mw, _ = self._text_size(c, "−", fs)
             return RenderBox(mw + inner.width, inner.height, inner.baseline)
+        if node.operator == "!":
+            ew, _ = self._text_size(c, "!", fs)
+            return RenderBox(inner.width + ew, inner.height, inner.baseline)
+        if node.operator == "%":
+            ew, _ = self._text_size(c, "%", fs)
+            return RenderBox(inner.width + ew, inner.height, inner.baseline)
         return inner
 
     def _measure_binary(self, c, node: BinaryOp, fs: int, ctx) -> RenderBox:
@@ -697,6 +703,13 @@ class MathRenderer:
             w = mw + inner.width
             h = max(mh, inner.height)
             return RenderBox(w, h, max(mh / 2, inner.baseline))
+        if node.operator in ("!", "%"):
+            f = self._get_font(c, fs)
+            inner = self._render_node(c, node.operand, x, y, fs, ctx)
+            sym = node.operator
+            c.create_text(x + inner.width, y, text=sym, anchor="nw", font=f, fill=_OPERATOR_COLOR)
+            sw, sh = self._text_size(c, sym, fs)
+            return RenderBox(inner.width + sw, max(inner.height, sh), inner.baseline)
         return self._render_node(c, node.operand, x, y, fs, ctx)
 
     # -- Binary --

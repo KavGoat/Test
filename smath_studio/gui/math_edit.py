@@ -8,6 +8,7 @@ between slots, blinking cursor, and live evaluation preview.
 
 from __future__ import annotations
 
+import copy
 import math as _math
 import tkinter as tk
 from tkinter import font as tkfont
@@ -275,6 +276,10 @@ class MathEditor:
         self._font_cache: dict[tuple, tkfont.Font] = {}
         self._detect_font()
 
+        # Undo stack
+        self._undo_stack: list[tuple] = []
+        self._max_undo = 50
+
         # Autocomplete state
         self._ac_visible = False
         self._ac_items: list[int] = []
@@ -323,6 +328,29 @@ class MathEditor:
         return h
 
     # ================================================================
+    # Undo support
+    # ================================================================
+
+    def _save_undo(self):
+        state = (copy.deepcopy(self.root), copy.deepcopy(self._slot_stack))
+        if len(self._undo_stack) >= self._max_undo:
+            self._undo_stack.pop(0)
+        self._undo_stack.append(state)
+
+    def _do_undo(self):
+        if not self._undo_stack:
+            return
+        root_copy, stack_copy = self._undo_stack.pop()
+        self.root = root_copy
+        self._slot_stack = stack_copy
+        if self._slot_stack:
+            self._active_slot = self._slot_stack[-1]
+        else:
+            self._active_slot = self.root
+        if self._active_slot.cursor_pos > len(self._active_slot.items):
+            self._active_slot.cursor_pos = len(self._active_slot.items)
+
+    # ================================================================
     # Key handling
     # ================================================================
 
@@ -338,19 +366,28 @@ class MathEditor:
         if keysym == "Escape":
             return "cancel"
 
+        if ctrl and keysym.lower() == "z":
+            self._do_undo()
+            self._update_eval()
+            self.render()
+            return "consumed"
+
         if ctrl and keysym.lower() == "m":
+            self._save_undo()
             self._do_matrix()
             self._update_eval()
             self.render()
             return "consumed"
 
         if ctrl and keysym.lower() == "d":
+            self._save_undo()
             self._do_derivative()
             self._update_eval()
             self.render()
             return "consumed"
 
         if ctrl and keysym.lower() == "i":
+            self._save_undo()
             self._do_integral()
             self._update_eval()
             self.render()
@@ -358,20 +395,24 @@ class MathEditor:
 
         shift = event.state & 0x1
         if ctrl and shift and keysym.lower() == "s":
+            self._save_undo()
             self._do_summation()
             self._update_eval()
             self.render()
             return "consumed"
 
         if ctrl and shift and keysym.lower() == "p":
+            self._save_undo()
             self._do_product()
             self._update_eval()
             self.render()
             return "consumed"
 
         if keysym == "BackSpace":
+            self._save_undo()
             self._do_backspace()
         elif keysym == "Delete":
+            self._save_undo()
             self._do_delete()
         elif keysym == "Left":
             self._move_left()
@@ -403,6 +444,7 @@ class MathEditor:
         elif keysym == "End":
             self._active_slot.cursor_pos = len(self._active_slot.items)
         elif char and ord(char) >= 32:
+            self._save_undo()
             self._insert_char(char)
         else:
             return "consumed"

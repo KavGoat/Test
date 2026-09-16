@@ -67,7 +67,7 @@ def _tokenize(text: str) -> list[_Token]:
             tokens.append(_Token("OP", op_map.get(c + "=", c + "=")))
             i += 2
             continue
-        if c in "+-*/^=<>%&|±":
+        if c in "+-*/^=<>%&|±!":
             tokens.append(_Token("OP", c))
             i += 1
             continue
@@ -206,15 +206,18 @@ class _Parser:
 
     def _parse_postfix(self) -> ASTNode:
         node = self._parse_primary()
-        while (
-            self._peek()
-            and self._peek().type == "LPAREN"
-            and isinstance(node, Variable)
-        ):
-            self._advance()
-            args = self._parse_arglist()
-            self._match("RPAREN")
-            node = FunctionCall(node.name, args)
+        while self._peek():
+            tok = self._peek()
+            if tok.type == "LPAREN" and isinstance(node, Variable):
+                self._advance()
+                args = self._parse_arglist()
+                self._match("RPAREN")
+                node = FunctionCall(node.name, args)
+            elif tok.type == "OP" and tok.value == "!":
+                self._advance()
+                node = UnaryOp("!", node)
+            else:
+                break
         return node
 
     def _parse_arglist(self) -> list[ASTNode]:
@@ -300,6 +303,10 @@ def ast_to_text(node: Optional[ASTNode], parent_prec: int = -1) -> str:
         inner = ast_to_text(node.operand, 5)
         if node.operator == "-":
             return f"-{inner}"
+        if node.operator == "!":
+            return f"{inner}!"
+        if node.operator == "%":
+            return f"{inner}%"
         return inner
     if isinstance(node, BinaryOp):
         prec = _PRECEDENCE.get(node.operator, 2)

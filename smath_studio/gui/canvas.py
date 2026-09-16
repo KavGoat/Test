@@ -1686,6 +1686,28 @@ class WorksheetCanvas(ttk.Frame):
             self._select_region(hit)
             return "break"
 
+        if keysym in ("Prior", "Next", "Home", "End"):
+            canvas_h = self._canvas.winfo_height()
+            page_step = max(100, int(canvas_h / self._zoom))
+            if keysym == "Prior":
+                self._cursor_y = max(0, self._cursor_y - page_step)
+            elif keysym == "Next":
+                self._cursor_y += page_step
+            elif keysym == "Home":
+                self._cursor_x = 20
+                self._cursor_y = 20
+            elif keysym == "End":
+                max_y = 20
+                for rr in self._rendered:
+                    max_y = max(max_y, self._unzoom(rr.bbox[3]) + 30)
+                self._cursor_y = max_y
+            self._canvas.delete("cursor_marker")
+            self._draw_cursor_marker()
+            self._ensure_visible(_z(self._cursor_x, self._zoom), _z(self._cursor_y, self._zoom))
+            hit = self._hit_test(_z(self._cursor_x, self._zoom), _z(self._cursor_y, self._zoom))
+            self._select_region(hit)
+            return "break"
+
         if keysym == "F5":
             self.evaluate_selected()
             return "break"
@@ -2110,19 +2132,28 @@ class WorksheetCanvas(ttk.Frame):
         self.delete_selected()
 
     def paste_at_cursor(self):
-        """Paste clipboard text as a new math region at the cursor position."""
+        """Paste clipboard text as a math or text region at the cursor position."""
         try:
             text = self._canvas.clipboard_get()
         except Exception:
             return
         if not text or not text.strip():
             return
-        ast = parse_infix(text.strip())
-        if ast is None:
-            return
         self.ensure_worksheet()
         self._save_undo_state()
-        self._create_new_math_region(ast, self._cursor_x, self._cursor_y)
+        ast = parse_infix(text.strip())
+        if ast is not None:
+            self._create_new_math_region(ast, self._cursor_x, self._cursor_y)
+        else:
+            region = Region()
+            region.id = self._generate_id()
+            region.left = self._cursor_x
+            region.top = self._cursor_y
+            tc = TextContent(lang="eng")
+            for line in text.strip().split("\n"):
+                tc.paragraphs.append(TextParagraph(text=line))
+            region.text_contents.append(tc)
+            self._worksheet.regions.append(region)
         self._cursor_y += 30
         self._mark_modified()
         self._evaluate_and_render()
