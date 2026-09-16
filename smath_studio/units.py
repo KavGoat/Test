@@ -111,7 +111,10 @@ class Quantity:
 
     def __add__(self, other):
         if isinstance(other, Quantity):
-            # Convert other to same unit if dimensions match
+            if self.unit.dimension != other.unit.dimension:
+                raise TypeError(
+                    f"Cannot add '{self.unit.name}' and '{other.unit.name}': incompatible units"
+                )
             converted = _convert_value(other.value, other.unit, self.unit)
             return Quantity(self.value + converted, self.unit)
         return Quantity(self.value + _num(other), self.unit)
@@ -121,12 +124,20 @@ class Quantity:
 
     def __sub__(self, other):
         if isinstance(other, Quantity):
+            if self.unit.dimension != other.unit.dimension:
+                raise TypeError(
+                    f"Cannot subtract '{other.unit.name}' from '{self.unit.name}': incompatible units"
+                )
             converted = _convert_value(other.value, other.unit, self.unit)
             return Quantity(self.value - converted, self.unit)
         return Quantity(self.value - _num(other), self.unit)
 
     def __rsub__(self, other):
         if isinstance(other, Quantity):
+            if self.unit.dimension != other.unit.dimension:
+                raise TypeError(
+                    f"Cannot subtract '{self.unit.name}' from '{other.unit.name}': incompatible units"
+                )
             converted = _convert_value(self.value, self.unit, other.unit)
             return Quantity(other.value - converted, other.unit)
         return Quantity(_num(other) - self.value, self.unit)

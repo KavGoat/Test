@@ -285,6 +285,21 @@ class WorksheetCanvas(ttk.Frame):
             except Exception:
                 pass
 
+        # Page layout defaults
+        self._page_height = 1100
+        self._page_width = 800
+        self._page_gap = 8
+        self._num_pages = 5
+
+        self._canvas.after(50, self._draw_initial_page)
+
+    def _draw_initial_page(self):
+        """Draw an initial empty page so the user sees a white workspace."""
+        if self._worksheet is None and not self._rendered:
+            dummy_ws = Worksheet()
+            self._draw_page_background(dummy_ws)
+            self._update_scroll_region()
+
     # ------------------------------------------------------------------
     # Public interface
     # ------------------------------------------------------------------
@@ -371,12 +386,14 @@ class WorksheetCanvas(ttk.Frame):
 
         ws = self._worksheet
         if ws is None:
-            self._draw_page_background(None)
+            dummy_ws = Worksheet()
+            self._draw_page_background(dummy_ws)
             if self._show_grid:
                 self._draw_grid_dots()
             if self._show_margin:
                 self._draw_left_margin()
             self._draw_cursor_marker()
+            self._update_scroll_region()
             return
 
         self._draw_page_background(ws)
@@ -385,13 +402,31 @@ class WorksheetCanvas(ttk.Frame):
         if self._show_margin:
             self._draw_left_margin()
 
-        # Draw page boundaries if page model is active
-        if ws.settings.page_model.active:
-            self._draw_page_boundaries(ws)
+        # Draw page boundaries
+        self._draw_page_boundaries(ws)
 
         # Flatten regions and sort by reading order (top, then left)
+        # Group regions at similar Y positions into the same row
         all_regions = self._flatten_regions(ws.regions)
+        row_threshold = 15
         all_regions.sort(key=lambda r: (r.top, r.left))
+        if all_regions:
+            rows: list[list[Region]] = []
+            current_row: list[Region] = [all_regions[0]]
+            current_y = all_regions[0].top
+            for r in all_regions[1:]:
+                if abs(r.top - current_y) <= row_threshold:
+                    current_row.append(r)
+                else:
+                    current_row.sort(key=lambda r: r.left)
+                    rows.append(current_row)
+                    current_row = [r]
+                    current_y = r.top
+            current_row.sort(key=lambda r: r.left)
+            rows.append(current_row)
+            all_regions = []
+            for row in rows:
+                all_regions.extend(row)
 
         # Phase 1: evaluate all math regions in order
         eval_results: dict[str, Any] = {}
@@ -424,26 +459,46 @@ class WorksheetCanvas(ttk.Frame):
         return result
 
     def _draw_page_background(self, ws: Worksheet):
-        """Draw a white page rectangle on the gray canvas background."""
+        """Draw white page rectangles on the gray canvas background."""
         if ws and ws.settings.page_model.active:
             pw = ws.settings.page_model.paper_width
             ph = ws.settings.page_model.paper_height
         else:
             pw = 800
-            ph = 5000
-        self._canvas.create_rectangle(
-            0, 0, pw, ph,
-            fill="#ffffff", outline="#cccccc", width=1, tags="page_bg"
-        )
+            ph = 1100
+
+        num_pages = max(5, self._estimate_page_count(ws, ph))
         shadow_w = 3
-        self._canvas.create_rectangle(
-            pw, shadow_w, pw + shadow_w, ph + shadow_w,
-            fill="#cccccc", outline="", tags="page_shadow"
-        )
-        self._canvas.create_rectangle(
-            shadow_w, ph, pw + shadow_w, ph + shadow_w,
-            fill="#cccccc", outline="", tags="page_shadow"
-        )
+        page_gap = 8
+
+        for page in range(num_pages):
+            page_y = page * (ph + page_gap)
+            self._canvas.create_rectangle(
+                0, page_y, pw, page_y + ph,
+                fill="#ffffff", outline="#cccccc", width=1, tags="page_bg"
+            )
+            self._canvas.create_rectangle(
+                pw, page_y + shadow_w, pw + shadow_w, page_y + ph + shadow_w,
+                fill="#cccccc", outline="", tags="page_shadow"
+            )
+            self._canvas.create_rectangle(
+                shadow_w, page_y + ph, pw + shadow_w, page_y + ph + shadow_w,
+                fill="#cccccc", outline="", tags="page_shadow"
+            )
+        self._page_height = ph
+        self._page_width = pw
+        self._page_gap = page_gap
+        self._num_pages = num_pages
+
+    def _estimate_page_count(self, ws: Worksheet, ph: int) -> int:
+        if ws is None:
+            return 5
+        max_y = 0
+        for r in ws.regions:
+            bottom = r.top + r.height
+            if bottom > max_y:
+                max_y = bottom
+        return max(5, (max_y // ph) + 3)
 
     def _draw_page_boundaries(self, ws: Worksheet):
         """Draw light gray page boundary lines and margin guides."""
@@ -455,13 +510,10 @@ class WorksheetCanvas(ttk.Frame):
         mt = pm.margin_top
         mb = pm.margin_bottom
 
-        num_pages = 5
+        num_pages = getattr(self, '_num_pages', 5)
+        page_gap = getattr(self, '_page_gap', 8)
         for page in range(num_pages):
-            page_y = page * ph
-            self._canvas.create_line(
-                0, page_y, pw, page_y,
-                fill=_PAGE_BOUNDARY_COLOR, dash=(2, 4), tags="page_bounds"
-            )
+            page_y = page * (ph + page_gap)
             if mt > 0:
                 self._canvas.create_line(
                     ml, page_y + mt, pw - mr, page_y + mt,
@@ -472,16 +524,16 @@ class WorksheetCanvas(ttk.Frame):
                     ml, page_y + ph - mb, pw - mr, page_y + ph - mb,
                     fill="#e0e0e0", dash=(1, 3), tags="page_bounds"
                 )
-        if ml > 0:
-            self._canvas.create_line(
-                ml, 0, ml, ph * num_pages,
-                fill="#e0e0e0", dash=(1, 3), tags="page_bounds"
-            )
-        if mr > 0:
-            self._canvas.create_line(
-                pw - mr, 0, pw - mr, ph * num_pages,
-                fill="#e0e0e0", dash=(1, 3), tags="page_bounds"
-            )
+            if ml > 0:
+                self._canvas.create_line(
+                    ml, page_y, ml, page_y + ph,
+                    fill="#e0e0e0", dash=(1, 3), tags="page_bounds"
+                )
+            if mr > 0:
+                self._canvas.create_line(
+                    pw - mr, page_y, pw - mr, page_y + ph,
+                    fill="#e0e0e0", dash=(1, 3), tags="page_bounds"
+                )
 
     def _draw_grid_dots(self):
         """Draw subtle grid dots for alignment like SMath Studio."""
@@ -516,7 +568,10 @@ class WorksheetCanvas(ttk.Frame):
     def _draw_left_margin(self):
         """Draw a subtle left margin line like SMath Studio."""
         margin_x = 30
-        h = 5000
+        ph = getattr(self, '_page_height', 1100)
+        pg = getattr(self, '_page_gap', 8)
+        num = getattr(self, '_num_pages', 5)
+        h = num * (ph + pg)
         self._canvas.create_line(
             margin_x, 0, margin_x, h,
             fill="#e8e8e8", width=1, tags="margin_line"
@@ -612,13 +667,6 @@ class WorksheetCanvas(ttk.Frame):
             all_bbox = self._canvas.bbox(*items) if items else (x, y, x + 10, y + 10)
             if all_bbox is None:
                 all_bbox = (x, y, x + 10, y + 10)
-            # Auto-update region dimensions from rendered size
-            rw = all_bbox[2] - all_bbox[0]
-            rh = all_bbox[3] - all_bbox[1]
-            if rw > region.width:
-                region.width = rw + 4
-            if rh > region.height:
-                region.height = rh + 4
             rr = _RenderedRegion(region, items, all_bbox)
             self._rendered.append(rr)
 
@@ -1046,6 +1094,10 @@ class WorksheetCanvas(ttk.Frame):
         ctrl = event.state & 0x4
 
         if self._editing:
+            hit = self._hit_test(cx, cy)
+            if hit is not None and self._edit_region_idx == hit:
+                self._canvas.focus_set()
+                return
             self._commit_edit()
             self._canvas.focus_set()
 
@@ -1414,7 +1466,10 @@ class WorksheetCanvas(ttk.Frame):
         """Evaluate an expression for the live editor preview."""
         if self._ctx is None:
             return None
-        ast = parse_infix(expr_text)
+        try:
+            ast = parse_infix(expr_text)
+        except Exception:
+            return None
         if ast is None:
             return None
         return ast.evaluate(self._ctx)
@@ -1423,15 +1478,23 @@ class WorksheetCanvas(ttk.Frame):
         """Handle double-click: edit existing region or create new one."""
         cx = int(self._canvas.canvasx(event.x))
         cy = int(self._canvas.canvasy(event.y))
-        hit = self._hit_test(cx, cy)
 
         if self._editing:
+            if self._edit_region_idx is not None:
+                hit = self._hit_test(cx, cy)
+                if hit == self._edit_region_idx:
+                    self._canvas.focus_set()
+                    return
             self._commit_edit()
 
-        if hit is not None:
+        hit = self._hit_test(cx, cy)
+
+        if hit is not None and hit < len(self._rendered):
             rr = self._rendered[hit]
             region = rr.region
             if region.math is not None:
+                if self._try_unit_change(region, rr, cx, cy):
+                    return
                 self._start_editing(
                     region.left, region.top, editing_idx=hit,
                     ast_node=region.math.input_expr,
@@ -1452,6 +1515,49 @@ class WorksheetCanvas(ttk.Frame):
             self._start_editing(x, y)
 
         self._canvas.focus_set()
+
+    def _try_unit_change(self, region: Region, rr: _RenderedRegion, cx: int, cy: int) -> bool:
+        """Check if click is on a result unit and offer to change it. Returns True if handled."""
+        if region.math is None or not region.math.result_elements:
+            return False
+        x1, y1, x2, y2 = rr.bbox
+        mid_x = (x1 + x2) / 2
+        if cx < mid_x:
+            return False
+        if self._ctx is None:
+            return False
+        try:
+            val = region.math.input_expr.evaluate(self._ctx)
+        except Exception:
+            return False
+        if not isinstance(val, Quantity):
+            return False
+        from tkinter import simpledialog
+        current_unit = val.display_unit if hasattr(val, 'display_unit') else str(val.unit)
+        new_unit = simpledialog.askstring(
+            "Convert Unit",
+            f"Current unit: {current_unit}\nEnter new unit:",
+            parent=self._canvas,
+        )
+        if not new_unit or not new_unit.strip():
+            return True
+        new_unit = new_unit.strip()
+        registry = self._ctx.get_unit_registry()
+        if registry is None:
+            return True
+        target_unit = registry.lookup(new_unit)
+        if target_unit is None:
+            return True
+        try:
+            converted = val.to(target_unit)
+            converted.display_unit = new_unit
+            if isinstance(region.math.input_expr, BinaryOp) and region.math.input_expr.operator == ":":
+                var_name = _expr_to_text(region.math.input_expr.left)
+                self._ctx.set_variable(var_name, converted)
+            self._evaluate_and_render()
+        except Exception:
+            pass
+        return True
 
     # ------------------------------------------------------------------
     # Public editing API (called by app.py)
@@ -1775,6 +1881,7 @@ class WorksheetCanvas(ttk.Frame):
                 editor.render()
 
         self._math_editor = editor
+        self._select_region(None)
         self._canvas.focus_set()
 
     def _commit_edit(self):

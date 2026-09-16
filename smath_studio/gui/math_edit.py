@@ -201,9 +201,9 @@ _GREEK_DISPLAY = {v: v for v in _GREEK_MAP.values()}
 for k, v in _GREEK_MAP.items():
     _GREEK_DISPLAY[k] = v
 
-_SUP_SCALE = 0.70
-_FRAC_HPAD = 4
-_FRAC_VPAD = 3
+_SUP_SCALE = 0.72
+_FRAC_HPAD = 6
+_FRAC_VPAD = 2
 
 _FUNCTION_HINTS = {
     "sin": "sin(x)", "cos": "cos(x)", "tan": "tan(x)",
@@ -539,7 +539,13 @@ class MathEditor:
             return
 
         if pos > 0 and isinstance(slot.items[pos - 1], EText):
-            slot.items[pos - 1].text += ch
+            prev_text = slot.items[pos - 1].text
+            if ch.isalpha() and prev_text and prev_text[-1].isdigit():
+                unit = EUnit(ch)
+                slot.items.insert(pos, unit)
+                slot.cursor_pos = pos + 1
+            else:
+                slot.items[pos - 1].text += ch
         elif pos > 0 and isinstance(slot.items[pos - 1], EUnit):
             slot.items[pos - 1].name += ch
         else:
@@ -1224,8 +1230,9 @@ class MathEditor:
         if isinstance(item, EAbs):
             return self._measure_abs(item, fs)
         if isinstance(item, EUnit):
+            sp_w, _ = self._text_size(" ", fs)
             w, h = self._text_size(item.name or " ", fs)
-            return _Box(w, h, h * 0.6)
+            return _Box(sp_w + w, h, h * 0.6)
         if isinstance(item, EMatrix):
             return self._measure_matrix(item, fs)
         if isinstance(item, ESummation):
@@ -1677,7 +1684,8 @@ class MathEditor:
     def _render_unit(self, item: EUnit, x: float, y: float, fs: int):
         f = self._get_font(fs)
         name = item.name or " "
-        tid = self.canvas.create_text(x, y, text=name, anchor="nw",
+        sp_w, _ = self._text_size(" ", fs)
+        tid = self.canvas.create_text(x + sp_w, y, text=name, anchor="nw",
                                        font=f, fill=_UNIT_COLOR)
         self._items.append(tid)
 
@@ -1694,13 +1702,19 @@ class MathEditor:
         self._items.append(self._cursor_item)
 
     def _start_blink(self):
-        self._blink()
+        self._cursor_visible = True
+        if self._cursor_rx is not None:
+            self._draw_cursor()
+        try:
+            self._blink_id = self.canvas.after(530, self._blink)
+        except Exception:
+            pass
 
     def _blink(self):
         self._cursor_visible = not self._cursor_visible
         if self._cursor_item is not None:
             try:
-                fill = _CURSOR_COLOR if self._cursor_visible else self.canvas["bg"]
+                fill = _CURSOR_COLOR if self._cursor_visible else ""
                 self.canvas.itemconfigure(self._cursor_item, fill=fill)
             except Exception:
                 pass

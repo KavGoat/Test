@@ -52,8 +52,7 @@ class Variable(ASTNode):
     def evaluate(self, context):
         val = context.get_variable(self.name)
         if val is None:
-            # Return the variable name symbolically
-            return self.name
+            raise NameError(f"'{self.name}' is not defined")
         return val
 
     def __repr__(self):
