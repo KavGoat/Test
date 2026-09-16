@@ -178,7 +178,7 @@ class WorksheetCanvas(ttk.Frame):
             self,
             bg=_CANVAS_BG,
             highlightthickness=0,
-            cursor="arrow",
+            cursor="crosshair",
         )
         self._h_scroll = ttk.Scrollbar(
             self, orient=tk.HORIZONTAL, command=self._canvas.xview
@@ -549,20 +549,24 @@ class WorksheetCanvas(ttk.Frame):
                 )
 
     def _draw_grid_dots(self):
-        """Draw subtle grid dots for alignment like SMath Studio."""
-        visible = self._get_visible_area()
-        if visible is None:
-            return
-        x1, y1, x2, y2 = visible
+        """Draw subtle grid dots for alignment like SMath Studio.
+
+        Only draws dots on the first two pages for performance.
+        Additional pages get dots drawn as the user scrolls.
+        """
+        pw = getattr(self, '_page_width', 800)
+        ph = getattr(self, '_page_height', 1100)
+        pg = getattr(self, '_page_gap', 8)
         grid = _GRID_SIZE * 3
-        sx = (int(x1) // grid) * grid
-        sy = (int(y1) // grid) * grid
-        for gx in range(sx, int(x2) + grid, grid):
-            for gy in range(sy, int(y2) + grid, grid):
-                self._canvas.create_oval(
-                    gx - 1, gy - 1, gx + 1, gy + 1,
-                    fill="#e0e0e0", outline="", tags="grid_dots",
-                )
+        for page in range(2):
+            page_y = page * (ph + pg)
+            for gx in range(grid, pw, grid):
+                for gy in range(grid, ph, grid):
+                    py = page_y + gy
+                    self._canvas.create_oval(
+                        gx, py, gx + 1, py + 1,
+                        fill="#d8d8d8", outline="", tags="grid_dots",
+                    )
 
     def _get_visible_area(self) -> tuple[float, float, float, float] | None:
         try:
@@ -746,11 +750,24 @@ class WorksheetCanvas(ttk.Frame):
         if math_data is None:
             return items
 
+        # Determine if this region expects a visible result
+        expects_result = bool(
+            math_data.result_elements
+            or math_data.result_expr is not None
+            or (math_data.input_expr is not None
+                and isinstance(math_data.input_expr, Evaluation))
+        )
+
+        # Suppress error display for regions that don't explicitly show results
+        display_result = eval_result
+        if isinstance(eval_result, Exception) and not expects_result:
+            display_result = None
+
         # Handle showInputData=False: only show the result value
         if region.show_input_data is not None and not region.show_input_data:
-            if eval_result is not None and not isinstance(eval_result, Exception):
+            if display_result is not None and not isinstance(display_result, Exception):
                 precision = self._ctx.precision if self._ctx else 4
-                result_text = _format_value(eval_result, precision)
+                result_text = _format_value(display_result, precision)
                 fnt = self._get_font(region.font_size, bold=False, italic=False)
                 text_id = self._canvas.create_text(
                     x + _REGION_PADDING, y + _REGION_PADDING,
@@ -763,7 +780,7 @@ class WorksheetCanvas(ttk.Frame):
         if self._math_renderer is not None:
             try:
                 rendered_items = self._math_renderer.render(
-                    self._canvas, math_data, x, y, eval_result,
+                    self._canvas, math_data, x, y, display_result,
                     font_size=region.font_size,
                     color=region.color,
                     trailing_zeros=self._trailing_zeros,
@@ -806,7 +823,7 @@ class WorksheetCanvas(ttk.Frame):
                 and math_data.input_expr.operator == "=")
         )
 
-        if has_result and eval_result is not None:
+        if has_result and display_result is not None:
             # Draw equals sign
             eq_id = self._canvas.create_text(
                 cx, cy,
@@ -821,12 +838,12 @@ class WorksheetCanvas(ttk.Frame):
                 cx = bbox[2] + 2
 
             # Draw result value
-            if isinstance(eval_result, Exception):
-                result_text = f"Error: {eval_result}"
+            if isinstance(display_result, Exception):
+                result_text = f"Error: {display_result}"
                 result_fg = _ERROR_FG
             else:
                 precision = self._ctx.precision if self._ctx else 4
-                result_text = _format_value(eval_result, precision)
+                result_text = _format_value(display_result, precision)
                 result_fg = fg
 
             result_id = self._canvas.create_text(
@@ -1248,12 +1265,14 @@ class WorksheetCanvas(ttk.Frame):
             if hit is not None and hit != self._selected_index:
                 rr = self._rendered[hit]
                 x1, y1, x2, y2 = rr.bbox
-                pad = 2
-                rect = self._canvas.create_rectangle(
+                pad = 3
+                bg_rect = self._canvas.create_rectangle(
                     x1 - pad, y1 - pad, x2 + pad, y2 + pad,
-                    outline="#a0c0e0", width=1,
+                    fill="#e8f0ff", outline="#b0c8e8", width=1,
+                    stipple="",
                 )
-                self._hover_items.append(rect)
+                self._canvas.tag_lower(bg_rect)
+                self._hover_items.append(bg_rect)
 
     def _on_drag(self, event: tk.Event):
         """Handle mouse drag to move selected region or draw rubberband."""

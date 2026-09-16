@@ -1482,6 +1482,8 @@ class MathRenderer:
         expr_box = self._render_node(canvas, node, x, y, font_size, context)
 
         if isinstance(result, Exception):
+            if isinstance(result, NameError):
+                return expr_box
             f = self._get_font(canvas, font_size)
             eq_text = " = "
             ew, eh = self._text_size(canvas, eq_text, font_size)
