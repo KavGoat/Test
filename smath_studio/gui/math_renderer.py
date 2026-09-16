@@ -151,7 +151,14 @@ class MathRenderer:
                 return []
             precision = math_data_or_node.decimal_places or 4
             if isinstance(node, BinaryOp) and node.operator in (":", "=", "≡"):
-                self._render_node(canvas, node, x, y, font_size, context)
+                if eval_result is not None and math_data_or_node.result_elements:
+                    self.render_with_result(
+                        canvas, node, eval_result, x, y,
+                        font_size=font_size, context=context, precision=precision,
+                        trailing_zeros=trailing_zeros,
+                    )
+                else:
+                    self._render_node(canvas, node, x, y, font_size, context)
             elif eval_result is not None:
                 self.render_with_result(
                     canvas, node, eval_result, x, y,
@@ -1471,11 +1478,7 @@ class MathRenderer:
         self._canvas = canvas
         self._detect_font(canvas)
 
-        # If the expression is an assignment (:), just render it without result
-        if isinstance(node, BinaryOp) and node.operator == ":":
-            return self._render_node(canvas, node, x, y, font_size, context)
-
-        # If it's an evaluation or display, render expr = result
+        # Render the expression first
         expr_box = self._render_node(canvas, node, x, y, font_size, context)
 
         if isinstance(result, Exception):

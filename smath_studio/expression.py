@@ -118,6 +118,13 @@ class UnaryOp(ASTNode):
             if isinstance(val, units_mod.Quantity):
                 return units_mod.Quantity(-val.value, val.unit)
             return -_num(val)
+        if self.operator == "!":
+            n = _num(val)
+            if n == int(n) and 0 <= n <= 170:
+                return math.factorial(int(n))
+            return math.gamma(n + 1)
+        if self.operator == "%":
+            return _num(val) / 100.0
         return val
 
     def __repr__(self):
@@ -429,10 +436,19 @@ def _apply_binary_op(operator: str, left: Any, right: Any) -> Any:
         return left
 
     if operator == "≡":
-        # Display-only definition -- no side effects
         return left
 
-    # Fallback
+    if operator == "%":
+        r = _num(right)
+        if r == 0:
+            return math.inf
+        return _num(left) % r
+
+    if operator == "±":
+        lv = _num(left)
+        rv = _num(right)
+        return [lv + rv, lv - rv]
+
     return _num(left)
 
 

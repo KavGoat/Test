@@ -126,5 +126,7 @@ def create_default_context() -> EvalContext:
     ctx.set_variable("π", math.pi)
     ctx.set_variable("e", math.e)
     ctx.set_variable("i", complex(0, 1))
+    ctx.set_variable("∞", math.inf)
+    ctx.set_variable("inf", math.inf)
 
     return ctx

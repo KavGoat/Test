@@ -1068,6 +1068,52 @@ def _builtin_sys(args, ctx):
     return [a.evaluate(ctx) for a in args]
 
 
+def _builtin_row(args, ctx):
+    """Extract a row from a matrix. row(M, i) returns the i-th row (1-based)."""
+    matrix = args[0].evaluate(ctx)
+    row_idx = int(_num(args[1].evaluate(ctx))) - 1
+
+    if HAS_NUMPY and isinstance(matrix, np.ndarray):
+        return matrix[row_idx:row_idx+1, :]
+    if isinstance(matrix, list) and row_idx < len(matrix):
+        row = matrix[row_idx]
+        if isinstance(row, list):
+            return [row]
+        return [[row]]
+    return matrix
+
+
+def _builtin_lim(args, ctx):
+    """Numeric limit approximation. lim(expr, var, value).
+    Evaluates the expression at values approaching the limit point."""
+    if len(args) < 3:
+        return args[0].evaluate(ctx)
+
+    from .expression import Variable
+    expr = args[0]
+    var_node = args[1]
+    target = _num(args[2].evaluate(ctx))
+
+    var_name = var_node.name if isinstance(var_node, Variable) else str(var_node.evaluate(ctx))
+    old_val = ctx.get_variable(var_name)
+
+    try:
+        deltas = [1e-2, 1e-4, 1e-6, 1e-8, 1e-10]
+        results = []
+        for d in deltas:
+            ctx.set_variable(var_name, target + d)
+            v1 = _num(expr.evaluate(ctx))
+            ctx.set_variable(var_name, target - d)
+            v2 = _num(expr.evaluate(ctx))
+            results.append((v1 + v2) / 2)
+        return results[-1]
+    finally:
+        if old_val is not None:
+            ctx.set_variable(var_name, old_val)
+        else:
+            ctx.set_variable(var_name, None)
+
+
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
@@ -1192,6 +1238,23 @@ BUILTIN_FUNCTIONS: dict[str, Callable] = {
     "lower": _builtin_lower,
     # System
     "sys": _builtin_sys,
+    # European/Russian aliases used in SMath .sm files
+    "tg": _builtin_tan,
+    "ctg": _builtin_cot,
+    "cosec": _builtin_csc,
+    "arcsin": _builtin_asin,
+    "arccos": _builtin_acos,
+    "arctg": _builtin_atan,
+    "arcctg": _builtin_acot,
+    "arcsec": _builtin_asec,
+    "arccosec": _builtin_acsc,
+    "sh": _builtin_sinh,
+    "ch": _builtin_cosh,
+    "th": _builtin_tanh,
+    "cth": _builtin_coth,
+    "lg": _builtin_log,
+    "row": _builtin_row,
+    "lim": _builtin_lim,
 }
 
 

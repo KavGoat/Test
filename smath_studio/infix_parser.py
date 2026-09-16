@@ -67,7 +67,7 @@ def _tokenize(text: str) -> list[_Token]:
             tokens.append(_Token("OP", op_map.get(c + "=", c + "=")))
             i += 2
             continue
-        if c in "+-*/^=<>":
+        if c in "+-*/^=<>%&|±":
             tokens.append(_Token("OP", c))
             i += 1
             continue
@@ -152,6 +152,10 @@ class _Parser:
                 self._advance()
                 right = self._parse_additive()
                 node = BinaryOp(tok.value, node, right)
+            elif tok and tok.type == "OP" and tok.value in ("&", "|"):
+                self._advance()
+                right = self._parse_additive()
+                node = BinaryOp(tok.value, node, right)
             else:
                 break
         return node
@@ -160,7 +164,7 @@ class _Parser:
         node = self._parse_multiplicative()
         while True:
             tok = self._peek()
-            if tok and tok.type == "OP" and tok.value in ("+", "-"):
+            if tok and tok.type == "OP" and tok.value in ("+", "-", "±"):
                 self._advance()
                 right = self._parse_multiplicative()
                 node = BinaryOp(tok.value, node, right)
@@ -172,7 +176,7 @@ class _Parser:
         node = self._parse_power()
         while True:
             tok = self._peek()
-            if tok and tok.type == "OP" and tok.value in ("*", "/"):
+            if tok and tok.type == "OP" and tok.value in ("*", "/", "%"):
                 self._advance()
                 right = self._parse_power()
                 node = BinaryOp(tok.value, node, right)
@@ -269,9 +273,10 @@ def parse_infix(text: str) -> Optional[ASTNode]:
 
 _PRECEDENCE = {
     ":": 0, "=": 0, "≡": 0,
+    "&": 0.5, "|": 0.5,
     "<": 1, ">": 1, "≤": 1, "≥": 1, "≠": 1,
-    "+": 2, "-": 2,
-    "*": 3, "/": 3,
+    "+": 2, "-": 2, "±": 2,
+    "*": 3, "/": 3, "%": 3,
     "^": 4,
 }
 
