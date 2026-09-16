@@ -184,6 +184,9 @@ class SMathApp:
             label="Delete", accelerator="Del", command=self._on_delete
         )
         edit_menu.add_command(
+            label="Duplicate", command=lambda: self._canvas_widget.duplicate_selected()
+        )
+        edit_menu.add_command(
             label="Select All", accelerator="Ctrl+A", command=self._on_select_all
         )
         edit_menu.add_separator()

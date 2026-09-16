@@ -272,6 +272,9 @@ class WorksheetCanvas(ttk.Frame):
         )
         self._context_menu.add_separator()
         self._context_menu.add_command(
+            label="Duplicate", command=self.duplicate_selected
+        )
+        self._context_menu.add_command(
             label="Delete", accelerator="Del", command=self.delete_selected
         )
         self._context_menu.add_separator()
@@ -2143,6 +2146,27 @@ class WorksheetCanvas(ttk.Frame):
                 self._remove_from_children(self._worksheet.regions, region)
         self._selected_index = None
         self._multi_selected.clear()
+        self._mark_modified()
+        self._evaluate_and_render()
+
+    def duplicate_selected(self):
+        """Duplicate the currently selected region(s), offset below."""
+        if self._worksheet is None:
+            return
+        indices = set(self._multi_selected)
+        if self._selected_index is not None:
+            indices.add(self._selected_index)
+        if not indices:
+            return
+        self._save_undo_state()
+        for idx in sorted(indices):
+            if idx >= len(self._rendered):
+                continue
+            src = self._rendered[idx].region
+            dup = copy.deepcopy(src)
+            dup.id = self._generate_id()
+            dup.top = (src.top or 0) + 40
+            self._worksheet.regions.append(dup)
         self._mark_modified()
         self._evaluate_and_render()
 
