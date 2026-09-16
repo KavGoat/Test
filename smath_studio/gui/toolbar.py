@@ -308,6 +308,142 @@ class SystemPanel(CollapsiblePanel):
             self._on_insert(value)
 
 
+class BooleanPanel(CollapsiblePanel):
+    """Boolean and comparison operators panel."""
+
+    def __init__(self, parent: tk.Widget, on_insert: Optional[Callable] = None):
+        super().__init__(parent, title="Boolean")
+        self._on_insert = on_insert
+        self._build()
+
+    def _build(self):
+        items = [
+            ("AND", "and"), ("OR", "or"), ("NOT", "not"), ("XOR", "xor"),
+            ("=", "=="), ("≠", "!="), ("<", "<"), (">", ">"),
+            ("≤", "<="), ("≥", ">="), ("true", "true"), ("false", "false"),
+        ]
+        frame = self.content
+        cols = 4
+        for i, (label, value) in enumerate(items):
+            row = i // cols
+            col = i % cols
+            btn = tk.Button(
+                frame, text=label, width=4, height=1,
+                font=("Segoe UI", 9), relief=tk.FLAT,
+                bg="#f0f0f0", activebackground="#d8d8d8",
+                command=lambda v=value: self._insert(v),
+            )
+            btn.grid(row=row, column=col, padx=1, pady=1, sticky="nsew")
+        for c in range(cols):
+            frame.columnconfigure(c, weight=1)
+
+    def _insert(self, value: str):
+        if self._on_insert:
+            self._on_insert(value)
+
+
+class ProgrammingPanel(CollapsiblePanel):
+    """Programming constructs panel."""
+
+    def __init__(self, parent: tk.Widget, on_insert: Optional[Callable] = None):
+        super().__init__(parent, title="Programming")
+        self._on_insert = on_insert
+        self._build()
+
+    def _build(self):
+        items = [
+            ("if", "if"), ("for", "for"), ("while", "while"),
+            ("line", "line"), ("{}", "system"),
+            ("break", "break"), ("continue", "continue"), ("return", "return"),
+        ]
+        frame = self.content
+        cols = 3
+        for i, (label, value) in enumerate(items):
+            row = i // cols
+            col = i % cols
+            btn = tk.Button(
+                frame, text=label, width=6, height=1,
+                font=("Consolas", 9), relief=tk.FLAT,
+                bg="#f0f0f0", activebackground="#d8d8d8",
+                command=lambda v=value: self._insert(v),
+            )
+            btn.grid(row=row, column=col, padx=1, pady=1, sticky="nsew")
+        for c in range(cols):
+            frame.columnconfigure(c, weight=1)
+
+    def _insert(self, value: str):
+        if self._on_insert:
+            self._on_insert(value)
+
+
+class PlotPanel(CollapsiblePanel):
+    """Plot/graph panel."""
+
+    def __init__(self, parent: tk.Widget, on_insert: Optional[Callable] = None):
+        super().__init__(parent, title="Plots")
+        self._on_insert = on_insert
+        self._build()
+
+    def _build(self):
+        items = [
+            ("2D Plot", "plot2d"), ("Parametric", "plotparam"),
+            ("Polar", "plotpolar"), ("3D Plot", "plot3d"),
+        ]
+        frame = self.content
+        cols = 2
+        for i, (label, value) in enumerate(items):
+            row = i // cols
+            col = i % cols
+            btn = tk.Button(
+                frame, text=label, width=8, height=1,
+                font=("Segoe UI", 9), relief=tk.FLAT,
+                bg="#f0f0f0", activebackground="#d8d8d8",
+                command=lambda v=value: self._insert(v),
+            )
+            btn.grid(row=row, column=col, padx=1, pady=1, sticky="nsew")
+        for c in range(cols):
+            frame.columnconfigure(c, weight=1)
+
+    def _insert(self, value: str):
+        if self._on_insert:
+            self._on_insert(value)
+
+
+class ConstantsPanel(CollapsiblePanel):
+    """Physical and mathematical constants panel."""
+
+    def __init__(self, parent: tk.Widget, on_insert: Optional[Callable] = None):
+        super().__init__(parent, title="Constants")
+        self._on_insert = on_insert
+        self._build()
+
+    def _build(self):
+        items = [
+            ("π", "pi"), ("e", "e"), ("i", "i"), ("∞", "inf"),
+            ("c₀", "c_0"), ("h", "h_planck"), ("k_B", "k_B"),
+            ("N_A", "N_A"), ("R", "R_gas"), ("g", "g"),
+            ("ε₀", "epsilon_0"), ("μ₀", "mu_0"),
+        ]
+        frame = self.content
+        cols = 4
+        for i, (label, value) in enumerate(items):
+            row = i // cols
+            col = i % cols
+            btn = tk.Button(
+                frame, text=label, width=4, height=1,
+                font=("Segoe UI", 10), relief=tk.FLAT,
+                bg="#f0f0f0", activebackground="#d8d8d8",
+                command=lambda v=value: self._insert(v),
+            )
+            btn.grid(row=row, column=col, padx=1, pady=1, sticky="nsew")
+        for c in range(cols):
+            frame.columnconfigure(c, weight=1)
+
+    def _insert(self, value: str):
+        if self._on_insert:
+            self._on_insert(value)
+
+
 class MathPanelContainer(ttk.Frame):
     """Container holding all math toolbar panels in a scrollable sidebar."""
 
@@ -344,6 +480,18 @@ class MathPanelContainer(ttk.Frame):
 
         self.functions = FunctionsPanel(self._inner, on_insert=on_insert)
         self.functions.pack(fill=tk.X, padx=2, pady=2)
+
+        self.boolean = BooleanPanel(self._inner, on_insert=on_insert)
+        self.boolean.pack(fill=tk.X, padx=2, pady=2)
+
+        self.constants = ConstantsPanel(self._inner, on_insert=on_insert)
+        self.constants.pack(fill=tk.X, padx=2, pady=2)
+
+        self.programming = ProgrammingPanel(self._inner, on_insert=on_insert)
+        self.programming.pack(fill=tk.X, padx=2, pady=2)
+
+        self.plots = PlotPanel(self._inner, on_insert=on_insert)
+        self.plots.pack(fill=tk.X, padx=2, pady=2)
 
         self.system = SystemPanel(self._inner, on_insert=on_insert)
         self.system.pack(fill=tk.X, padx=2, pady=2)

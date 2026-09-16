@@ -128,6 +128,7 @@ class MathRenderer:
         font_size: int = 12,
         color: str = "#000000",
         context: Any = None,
+        trailing_zeros: bool = False,
     ) -> list[int]:
         """Render a math region or AST node on *canvas*.
 
@@ -151,11 +152,13 @@ class MathRenderer:
                 self.render_with_result(
                     canvas, node, eval_result, x, y,
                     font_size=font_size, context=context, precision=precision,
+                    trailing_zeros=trailing_zeros,
                 )
             elif math_data_or_node.result_expr is not None:
                 self.render_with_result(
                     canvas, node, math_data_or_node.result_expr, x, y,
                     font_size=font_size, context=context, precision=precision,
+                    trailing_zeros=trailing_zeros,
                 )
             else:
                 self._render_node(canvas, node, x, y, font_size, context)
@@ -1175,6 +1178,7 @@ class MathRenderer:
         font_size: int = 12,
         context: Any = None,
         precision: int = 4,
+        trailing_zeros: bool = False,
     ) -> RenderBox:
         """Render an expression, then `` = result`` after it."""
         self._canvas = canvas
@@ -1221,14 +1225,14 @@ class MathRenderer:
                     if isinstance(result, np.ndarray):
                         rb = self._render_matrix_value(canvas, result, res_x, y, font_size)
                     elif isinstance(result, Quantity):
-                        rb = self._render_quantity_result(canvas, result, res_x, eq_y, font_size, precision)
+                        rb = self._render_quantity_result(canvas, result, res_x, eq_y, font_size, precision, trailing_zeros)
                     else:
-                        res_text = _format_result(result, precision)
+                        res_text = _format_result(result, precision, trailing_zeros)
                         canvas.create_text(res_x, eq_y, text=res_text, anchor="nw", font=f, fill=_NUMBER_COLOR)
                         rw, rh = self._text_size(canvas, res_text, font_size)
                         rb = RenderBox(rw, rh, rh / 2)
                 except Exception:
-                    res_text = _format_result(result, precision)
+                    res_text = _format_result(result, precision, trailing_zeros)
                     canvas.create_text(res_x, eq_y, text=res_text, anchor="nw", font=f, fill=_NUMBER_COLOR)
                     rw, rh = self._text_size(canvas, res_text, font_size)
                     rb = RenderBox(rw, rh, rh / 2)
@@ -1239,10 +1243,10 @@ class MathRenderer:
 
         return expr_box
 
-    def _render_quantity_result(self, c: tk.Canvas, qty: Quantity, x, y, fs, precision=4) -> RenderBox:
+    def _render_quantity_result(self, c: tk.Canvas, qty: Quantity, x, y, fs, precision=4, trailing_zeros=False) -> RenderBox:
         """Render a Quantity with the number in black and the unit in blue."""
         f = self._get_font(c, fs)
-        num_text = _format_result(qty.value, precision)
+        num_text = _format_result(qty.value, precision, trailing_zeros)
         unit_str = qty.display_unit if hasattr(qty, 'display_unit') else str(qty.unit)
 
         # Render number

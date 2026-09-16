@@ -171,6 +171,7 @@ class WorksheetCanvas(ttk.Frame):
         self._cursor_x = 40
         self._cursor_y = 40
         self._on_modified: Optional[Any] = None
+        self._trailing_zeros = False
 
         # Build canvas with scrollbars
         self._canvas = tk.Canvas(
@@ -293,6 +294,7 @@ class WorksheetCanvas(ttk.Frame):
         self._worksheet = worksheet
         self._ctx = create_default_context()
         self._ctx._precision = worksheet.settings.calculation.precision
+        self._trailing_zeros = getattr(worksheet.settings.calculation, 'trailing_zeros', False)
         self._selected_index = None
         self._evaluate_and_render()
 
@@ -311,6 +313,7 @@ class WorksheetCanvas(ttk.Frame):
         if self._worksheet is not None:
             self._ctx = create_default_context()
             self._ctx._precision = self._worksheet.settings.calculation.precision
+            self._trailing_zeros = getattr(self._worksheet.settings.calculation, 'trailing_zeros', False)
             self._evaluate_and_render()
 
     def get_selected_region(self) -> Optional[Region]:
@@ -443,21 +446,41 @@ class WorksheetCanvas(ttk.Frame):
         )
 
     def _draw_page_boundaries(self, ws: Worksheet):
-        """Draw light gray page boundary lines."""
+        """Draw light gray page boundary lines and margin guides."""
         pm = ws.settings.page_model
         pw = pm.paper_width
         ph = pm.paper_height
+        ml = pm.margin_left
+        mr = pm.margin_right
+        mt = pm.margin_top
+        mb = pm.margin_bottom
 
-        # Draw several pages worth of boundaries
-        for page_y in range(0, ph * 5, ph):
+        num_pages = 5
+        for page in range(num_pages):
+            page_y = page * ph
             self._canvas.create_line(
-                0, page_y, pw * 2, page_y,
-                fill=_PAGE_BOUNDARY_COLOR, dash=(2, 4)
+                0, page_y, pw, page_y,
+                fill=_PAGE_BOUNDARY_COLOR, dash=(2, 4), tags="page_bounds"
             )
-        for page_x in range(0, pw * 3, pw):
+            if mt > 0:
+                self._canvas.create_line(
+                    ml, page_y + mt, pw - mr, page_y + mt,
+                    fill="#e0e0e0", dash=(1, 3), tags="page_bounds"
+                )
+            if mb > 0:
+                self._canvas.create_line(
+                    ml, page_y + ph - mb, pw - mr, page_y + ph - mb,
+                    fill="#e0e0e0", dash=(1, 3), tags="page_bounds"
+                )
+        if ml > 0:
             self._canvas.create_line(
-                page_x, 0, page_x, ph * 5,
-                fill=_PAGE_BOUNDARY_COLOR, dash=(2, 4)
+                ml, 0, ml, ph * num_pages,
+                fill="#e0e0e0", dash=(1, 3), tags="page_bounds"
+            )
+        if mr > 0:
+            self._canvas.create_line(
+                pw - mr, 0, pw - mr, ph * num_pages,
+                fill="#e0e0e0", dash=(1, 3), tags="page_bounds"
             )
 
     def _draw_grid_dots(self):
@@ -668,6 +691,7 @@ class WorksheetCanvas(ttk.Frame):
                     self._canvas, math_data, x, y, eval_result,
                     font_size=region.font_size,
                     color=region.color,
+                    trailing_zeros=self._trailing_zeros,
                 )
                 if rendered_items:
                     return rendered_items
