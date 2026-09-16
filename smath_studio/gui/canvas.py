@@ -291,14 +291,24 @@ class WorksheetCanvas(ttk.Frame):
         self._page_gap = 8
         self._num_pages = 5
 
-        self._canvas.after(50, self._draw_initial_page)
+        self._initial_page_drawn = False
+        self._canvas.bind("<Map>", self._on_map)
+        self._canvas.after(100, self._draw_initial_page)
+
+    def _on_map(self, event=None):
+        if not self._initial_page_drawn:
+            self._draw_initial_page()
 
     def _draw_initial_page(self):
         """Draw an initial empty page so the user sees a white workspace."""
-        if self._worksheet is None and not self._rendered:
+        if self._worksheet is None and not self._rendered and not self._initial_page_drawn:
+            self._initial_page_drawn = True
             dummy_ws = Worksheet()
             self._draw_page_background(dummy_ws)
-            self._update_scroll_region()
+            self._draw_page_boundaries(dummy_ws)
+            self._canvas.configure(scrollregion=(0, 0, 850, 5540))
+            self._canvas.xview_moveto(0)
+            self._canvas.yview_moveto(0)
 
     # ------------------------------------------------------------------
     # Public interface
@@ -307,11 +317,14 @@ class WorksheetCanvas(ttk.Frame):
     def load_worksheet(self, worksheet: Worksheet):
         """Load a worksheet and render all its regions."""
         self._worksheet = worksheet
+        self._initial_page_drawn = True
         self._ctx = create_default_context()
         self._ctx._precision = worksheet.settings.calculation.precision
         self._trailing_zeros = getattr(worksheet.settings.calculation, 'trailing_zeros', False)
         self._selected_index = None
         self._evaluate_and_render()
+        self._canvas.xview_moveto(0)
+        self._canvas.yview_moveto(0)
 
     def clear(self):
         """Clear the canvas and reset state."""
@@ -574,7 +587,7 @@ class WorksheetCanvas(ttk.Frame):
         h = num * (ph + pg)
         self._canvas.create_line(
             margin_x, 0, margin_x, h,
-            fill="#e8e8e8", width=1, tags="margin_line"
+            fill="#d0d0d0", width=1, tags="margin_line"
         )
 
     def _draw_cursor_marker(self):
@@ -623,15 +636,13 @@ class WorksheetCanvas(ttk.Frame):
         """Set the scrollable region to encompass all content."""
         bbox = self._canvas.bbox("all")
         if bbox:
-            # Add margin around the content
-            margin = 100
             x1, y1, x2, y2 = bbox
+            pw = getattr(self, '_page_width', 850)
             self._canvas.configure(
                 scrollregion=(
-                    min(x1, 0) - margin,
-                    min(y1, 0) - margin,
-                    x2 + margin,
-                    y2 + margin,
+                    0, 0,
+                    max(x2, pw) + 20,
+                    y2 + 50,
                 )
             )
 

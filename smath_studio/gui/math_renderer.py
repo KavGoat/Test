@@ -47,9 +47,9 @@ _FUNCTION_COLOR = "#000000"
 _ERROR_COLOR = "#ff0000"
 
 _OP_HPAD = 4       # horizontal padding around binary operators
-_FRAC_HPAD = 3     # horizontal padding inside fraction bar
+_FRAC_HPAD = 6     # horizontal padding inside fraction bar
 _FRAC_VPAD = 2     # vertical padding above/below fraction bar
-_SUP_SCALE = 0.70  # superscript size ratio
+_SUP_SCALE = 0.72  # superscript size ratio
 _SUB_SCALE = 0.80  # subscript size ratio
 _SUP_RAISE = 0.35  # superscript vertical shift (fraction of parent height)
 _SUB_DROP = 0.25   # subscript vertical shift
@@ -282,7 +282,8 @@ class MathRenderer:
             sub_fs = max(int(fs * _SUB_SCALE), 6)
             sw, sh = self._text_size(c, sub, sub_fs, style)
             w = bw + sw
-            h = bh + sh * _SUB_DROP
+            sub_y_off = bh * 0.55
+            h = max(bh, sub_y_off + sh)
             return RenderBox(w, h, bh / 2)
         display = _GREEK_DISPLAY.get(node.name, node.name)
         w, h = self._text_size(c, display, fs, style)
