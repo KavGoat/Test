@@ -840,13 +840,22 @@ class WorksheetCanvas(ttk.Frame):
         cy = y + zpad
         for para in tc.paragraphs:
             fnt = self._get_font(region.font_size, para.bold, para.italic)
+            text_color = fg
+            if para.href:
+                text_color = "#0066cc"
+                fnt = self._get_font(region.font_size, para.bold, para.italic, underline=True)
             text_id = self._canvas.create_text(
                 x + zpad, cy,
                 text=para.text,
                 anchor=tk.NW,
                 font=fnt,
-                fill=fg,
+                fill=text_color,
             )
+            if para.href:
+                href = para.href
+                self._canvas.tag_bind(text_id, "<Button-1>", lambda e, url=href: self._open_link(url))
+                self._canvas.tag_bind(text_id, "<Enter>", lambda e: self._canvas.configure(cursor="hand2"))
+                self._canvas.tag_bind(text_id, "<Leave>", lambda e: self._canvas.configure(cursor=""))
             items.append(text_id)
             # Advance y by the text height
             bbox = self._canvas.bbox(text_id)
@@ -1165,11 +1174,11 @@ class WorksheetCanvas(ttk.Frame):
     # ------------------------------------------------------------------
 
     def _get_font(
-        self, size: int, bold: bool = False, italic: bool = False
+        self, size: int, bold: bool = False, italic: bool = False, underline: bool = False
     ) -> tkfont.Font:
         """Return a cached tkinter Font object, scaled by current zoom."""
         zoomed_size = max(6, int(size * self._zoom))
-        key = (zoomed_size, bold, italic)
+        key = (zoomed_size, bold, italic, underline)
         if key not in self._font_cache:
             weight = "bold" if bold else "normal"
             slant = "italic" if italic else "roman"
@@ -1178,6 +1187,7 @@ class WorksheetCanvas(ttk.Frame):
                 size=zoomed_size,
                 weight=weight,
                 slant=slant,
+                underline=underline,
             )
         return self._font_cache[key]
 
@@ -1262,6 +1272,14 @@ class WorksheetCanvas(ttk.Frame):
         if self._zoom == 1.0:
             return val
         return int(val / self._zoom)
+
+    def _open_link(self, url: str):
+        """Open a hyperlink in the default browser."""
+        import webbrowser
+        try:
+            webbrowser.open(url)
+        except Exception:
+            pass
 
     def _on_click(self, event: tk.Event):
         """Handle left-click: commit edit, select region, or set cursor."""
@@ -1375,8 +1393,38 @@ class WorksheetCanvas(ttk.Frame):
             row=row, column=0, sticky="e", padx=5
         )
         color_var = tk.StringVar(value=region.color or "#000000")
-        color_entry = tk.Entry(frame, textvariable=color_var, width=10)
-        color_entry.grid(row=row, column=1, sticky="w", pady=2)
+        color_frame = tk.Frame(frame)
+        color_frame.grid(row=row, column=1, sticky="w", pady=2)
+        color_entry = tk.Entry(color_frame, textvariable=color_var, width=10)
+        color_entry.pack(side=tk.LEFT)
+        color_swatch = tk.Label(color_frame, text="  ", bg=color_var.get(), relief=tk.SUNKEN, width=3)
+        color_swatch.pack(side=tk.LEFT, padx=4)
+        def _pick_color():
+            from tkinter import colorchooser
+            c = colorchooser.askcolor(color=color_var.get(), parent=dlg)
+            if c[1]:
+                color_var.set(c[1])
+                color_swatch.configure(bg=c[1])
+        tk.Button(color_frame, text="...", command=_pick_color, width=2).pack(side=tk.LEFT)
+
+        row += 1
+        tk.Label(frame, text="Background:", font=("DejaVu Sans", 9)).grid(
+            row=row, column=0, sticky="e", padx=5
+        )
+        bg_var = tk.StringVar(value=region.bg_color or "#ffffff")
+        bg_frame = tk.Frame(frame)
+        bg_frame.grid(row=row, column=1, sticky="w", pady=2)
+        bg_entry = tk.Entry(bg_frame, textvariable=bg_var, width=10)
+        bg_entry.pack(side=tk.LEFT)
+        bg_swatch = tk.Label(bg_frame, text="  ", bg=bg_var.get(), relief=tk.SUNKEN, width=3)
+        bg_swatch.pack(side=tk.LEFT, padx=4)
+        def _pick_bg():
+            from tkinter import colorchooser
+            c = colorchooser.askcolor(color=bg_var.get(), parent=dlg)
+            if c[1]:
+                bg_var.set(c[1])
+                bg_swatch.configure(bg=c[1])
+        tk.Button(bg_frame, text="...", command=_pick_bg, width=2).pack(side=tk.LEFT)
 
         row += 1
         border_var = tk.BooleanVar(value=region.border)
@@ -1401,6 +1449,7 @@ class WorksheetCanvas(ttk.Frame):
             except ValueError:
                 pass
             region.color = color_var.get().strip() or None
+            region.bg_color = bg_var.get().strip() or "#ffffff"
             region.border = border_var.get()
             dlg.destroy()
             self._mark_modified()
