@@ -260,7 +260,7 @@ def test_a_page_the_update_cannot_describe_is_assembled_instead(window, tmp_path
 
 def test_what_is_drawn_on_the_page_is_in_the_saved_pdf(window, tmp_path):
     """Any reader opening the file sees the markups, not an empty sheet."""
-    from PySide6.QtCore import QRectF, QSize
+    from PySide6.QtCore import QRectF, QSize, Qt
     from PySide6.QtPdf import QPdfDocumentRenderOptions
 
     from markforge.items.shapes import RectItem
@@ -280,8 +280,16 @@ def test_what_is_drawn_on_the_page_is_in_the_saved_pdf(window, tmp_path):
         options = QPdfDocumentRenderOptions()
         options.setRenderFlags(QPdfDocumentRenderOptions.RenderFlag.Annotations)
         page = _readable_pdf(path).render(0, QSize(595, 842), options)
-        return sum(1 for y in range(page.height()) for x in range(page.width())
-                   if page.pixelColor(x, y).lightness() < 220)
+        # Qt returns transparent pixels for unpainted paper. Composite onto
+        # white as a viewer does; transparent black is not printed ink.
+        from PySide6.QtGui import QImage, QPainter
+        shown = QImage(page.size(), QImage.Format_RGB32)
+        shown.fill(Qt.white)
+        painter = QPainter(shown)
+        painter.drawImage(0, 0, page)
+        painter.end()
+        return sum(1 for y in range(shown.height()) for x in range(shown.width())
+                   if shown.pixelColor(x, y).lightness() < 220)
 
     assert ink(after) > ink(before) + 200, \
         "the rectangle should be visible in the saved PDF"

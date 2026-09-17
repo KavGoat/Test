@@ -86,6 +86,7 @@ class PageSetupDialog(QDialog):
         layout.addWidget(self.apply_all)
         layout.addWidget(_buttons(self))
 
+
     def _size_changed(self, name: str) -> None:
         if name in PAGE_SIZES:
             width, height = PAGE_SIZES[name]
@@ -99,6 +100,36 @@ class PageSetupDialog(QDialog):
                           orientation=self.orientation.currentText())
         for key, spin in self.margins.items():
             setattr(setup, key, spin.value())
+        return setup
+
+
+class NewPagesDialog(QDialog):
+    """Number and paper size for pages inserted in one undo step."""
+
+    def __init__(self, setup: PageSetup, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Add pages")
+        form = QFormLayout(self)
+        self.count = QSpinBox()
+        self.count.setRange(1, 500)
+        self.count.setValue(1)
+        form.addRow("Number", self.count)
+        self.paper = QComboBox()
+        self.paper.addItems(["Same as current"] + list(PAGE_SIZES))
+        form.addRow("Paper", self.paper)
+        self.orientation = QComboBox()
+        self.orientation.addItems(["portrait", "landscape"])
+        self.orientation.setCurrentText(setup.orientation)
+        form.addRow("Orientation", self.orientation)
+        form.addRow(_buttons(self))
+
+    def chosen_setup(self, current: PageSetup) -> PageSetup:
+        setup = PageSetup.from_dict(current.to_dict())
+        if self.paper.currentIndex() > 0:
+            size = self.paper.currentText()
+            setup.size_name = size
+            setup.width_mm, setup.height_mm = PAGE_SIZES[size]
+            setup.orientation = self.orientation.currentText()
         return setup
 
 

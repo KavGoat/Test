@@ -18,7 +18,7 @@ from typing import Optional
 from PySide6.QtCore import QByteArray, QPointF, QRectF, Qt, QTimer, Signal, QSignalBlocker
 from PySide6.QtGui import (QBrush, QColor, QImage, QLinearGradient, QPainter,
                            QPen, QPicture, QPixmap, QTransform)
-from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QGraphicsScene
+from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QGraphicsScene, QGraphicsItemGroup
 
 from ..core.document import MM_TO_PT, Document, Page
 from ..theme import CANVAS, LIGHT
@@ -379,7 +379,10 @@ class PageFrame(QGraphicsObject):
         if not self.print_mode:
             self._paint_shadow(painter, rect)
         if not self._pdf_overlay:
-            painter.fillRect(rect, PAPER)
+            # Paper is viewing chrome, not opaque PDF artwork. A painted white
+            # rectangle is copied as a background by other viewers' snapshots.
+            if not self.print_mode:
+                painter.fillRect(rect, PAPER)
             if self._background is None and self.page.background_key:
                 self.load_background()
             painter.save()
@@ -589,6 +592,70 @@ class PageFrame(QGraphicsObject):
                              self.document.expand_fields(right, index))
 
     # -- items -------------------------------------------------------------
+    def pdf_snap_items(self, near=None, reach=0.0) -> list:
+        """Lazy, disposable geometry; never paint or persist it as markups."""
+        if not self.page.pdf_key or not self.document.settings.snap_to_content:
+            return []
+        key = (self.page.pdf_key, self.page.pdf_page_index, self.page.width_pt,
+               self.page.height_pt)
+        if getattr(self, "_pdf_snap_key", None) == key:
+            return self._near_pdf_snap_items(near, reach)
+        previous = getattr(self, "_pdf_snap_group", None)
+        if previous is not None:
+            previous.setParentItem(None)
+            if previous.scene() is not None:
+                previous.scene().removeItem(previous)
+        self._pdf_snap_key = key
+        self._pdf_snap_items = []
+        self._pdf_snap_bins = {}
+        self._pdf_snap_broad = []
+        self._pdf_snap_group = QGraphicsItemGroup(self)
+        self._pdf_snap_group.setHandlesChildEvents(False)
+        from ..io import pdfio, pdfvector
+        data = self.document.asset(self.page.pdf_key)
+        if not data:
+            return []
+        try:
+            source = pdfvector.PdfFile.from_bytes(data)
+        except pdfvector.PdfError:
+            return []
+        try:
+            width, _ = source.page_size(self.page.pdf_page_index)
+            strokes = pdfvector.strokes_of_page(source, self.page.pdf_page_index)
+            for payload in pdfio._items_from(strokes[:pdfio.MOST_STROKES],
+                                            self.page.width_pt / max(width, 1)):
+                item = build_item(payload)
+                item.setParentItem(self._pdf_snap_group)
+                item.setFlag(QGraphicsItem.ItemHasNoContents, True)
+                item.setFlag(QGraphicsItem.ItemIsSelectable, False)
+                item.setAcceptedMouseButtons(Qt.NoButton)
+                bounds = item.mapRectToParent(item.boundingRect())
+                left, right = math.floor(bounds.left() / 64), math.floor(bounds.right() / 64)
+                top, bottom = math.floor(bounds.top() / 64), math.floor(bounds.bottom() / 64)
+                order = len(self._pdf_snap_items)
+                self._pdf_snap_items.append(item)
+                if (right - left + 1) * (bottom - top + 1) > 256:
+                    self._pdf_snap_broad.append(order)
+                else:
+                    for x in range(left, right + 1):
+                        for y in range(top, bottom + 1):
+                            self._pdf_snap_bins.setdefault((x, y), []).append(order)
+        finally:
+            source.close()
+        return self._near_pdf_snap_items(near, reach)
+
+    def _near_pdf_snap_items(self, near, reach):
+        if near is None:
+            return self._pdf_snap_items
+        local = self.mapFromScene(near)
+        indices = set(self._pdf_snap_broad)
+        for x in range(math.floor((local.x() - reach) / 64),
+                       math.floor((local.x() + reach) / 64) + 1):
+            for y in range(math.floor((local.y() - reach) / 64),
+                           math.floor((local.y() + reach) / 64) + 1):
+                indices.update(self._pdf_snap_bins.get((x, y), ()))
+        return [self._pdf_snap_items[index] for index in sorted(indices)]
+
     def markups(self) -> list[MarkupItem]:
         return [item for item in self.childItems() if isinstance(item, MarkupItem)]
 

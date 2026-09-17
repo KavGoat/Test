@@ -63,6 +63,20 @@ class ContentsItem(MarkupItem):
                 return index, y
         return None
 
+    def link_rows(self) -> list:
+        """Link geometry independent of whether Qt has painted the item yet."""
+        rect = self._rect.normalized()
+        pad = self.style.padding
+        y = rect.top() + pad + (self.style.font_size * 1.9 if self.title else 0)
+        rows = []
+        for mark, index in self.entries():
+            if y + self.row_height > rect.bottom() - pad:
+                break
+            rows.append((QRectF(rect.left() + pad, y, rect.width() - 2 * pad,
+                                self.row_height), index, mark.y))
+            y += self.row_height
+        return rows
+
     # -- painting ----------------------------------------------------------
     def paint_content(self, painter: QPainter) -> None:
         painter.setRenderHint(QPainter.Antialiasing, True)

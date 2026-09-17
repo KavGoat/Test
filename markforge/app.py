@@ -68,8 +68,5 @@ def main(argv: list[str] | None = None) -> int:
             except Exception as exc:  # noqa: BLE001
                 print(f"Could not open {argument}: {exc}", file=sys.stderr)
             break
-        if argument in ("--sample", "-s"):
-            window.load_sample()
-            break
 
     return application.exec()

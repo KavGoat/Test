@@ -127,6 +127,11 @@ def save(document, path: str, original: bytes, appearance: bool = True) -> int:
         try:
             if appearance:
                 written = _add_the_markups(target, document, leftovers)
+                from .export import outline_and_links
+                from . import pdflinks
+                outline, links = outline_and_links(document, document.pages)
+                pdflinks._set_outline(target, outline)
+                pdflinks._add_links(target, links)
             engine.embed(target, pdfbase.RECORD_ENTRY,
                          pdfbase.record_bytes(document))
             if not engine.save_incremental(target, temporary):

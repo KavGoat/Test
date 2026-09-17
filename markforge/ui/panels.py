@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox,
                                QFontComboBox, QFormLayout, QGroupBox, QHBoxLayout,
                                QHeaderView, QLabel, QLineEdit, QListView, QListWidget,
                                QListWidgetItem, QMenu, QPlainTextEdit, QPushButton,
-                               QScrollArea, QSpinBox, QTableWidget, QTableWidgetItem,
+                               QScrollArea, QSpinBox, QTableWidget, QTableWidgetItem, QLayout,
                                QToolButton, QTreeWidget, QTreeWidgetItem,
                                QVBoxLayout, QWidget)
 
@@ -21,13 +21,14 @@ from ..items.base import (ARROW_HEADS, DASH_ARRAYS, HATCH_PATTERNS,
                           LINE_STYLES, MarkupItem)
 from ..items.contents import ContentsItem
 from ..items.media import ImageItem
+from ..items.snapshot import SnapshotItem
 from ..items.measure import CountItem, MeasureItem
 from ..items.shapes import PolyItem, RectItem
 from ..items.text import STAMP_PRESETS, CalloutItem, NoteItem, StampItem, TextItem
 from .icons import icon
 from .stylecaps import (DASH, FILL, FILL_OPACITY, HATCH, OPACITY, STROKE,
                         WIDTH, common_capabilities)
-from .widgets import ColorButton, LabeledSlider, UnitCombo
+from .widgets import ColorButton, LabeledSlider, UnitCombo, arrow_combo
 
 
 def _line_style_icon(name: str, colour: str, width: float) -> QIcon:
@@ -1301,6 +1302,7 @@ class PropertiesPanel(QScrollArea):
         self.body = QWidget()
         self.setWidget(self.body)
         self.layout = QVBoxLayout(self.body)
+        self.layout.setSizeConstraint(QLayout.SetMinimumSize)
         self.layout.setContentsMargins(6, 6, 6, 6)
         self.layout.setSpacing(8)
         self.show_items([])
@@ -1361,14 +1363,37 @@ class PropertiesPanel(QScrollArea):
                 self._add_note(first)
             elif isinstance(first, ImageItem):
                 self._add_image(first)
+            elif isinstance(first, SnapshotItem):
+                form = self._group("Snapshot")
+                keep = QCheckBox("Keep ratio")
+                keep.setChecked(first.keep_aspect)
+                keep.toggled.connect(lambda on: self._apply(
+                    lambda i: setattr(i, "keep_aspect", on), "Snapshot ratio"))
+                form.addRow("", keep)
+                form.addRow("Source page", QLabel(str(first.source_page)))
+                colours = QPushButton("Change colours…")
+                colours.clicked.connect(lambda: self.window.recolour_item(first))
+                form.addRow("", colours)
             elif isinstance(first, RectItem) and first.kind in ("rect", "ellipse"):
                 self._add_size(first)
+                if first.kind == "rect":
+                    form = self._group("Corners")
+                    radius = QDoubleSpinBox()
+                    radius.setRange(0, 200)
+                    radius.setValue(first.style.corner_radius)
+                    radius.setSuffix(" pt")
+                    radius.valueChanged.connect(lambda value: self._slide(
+                        lambda i: setattr(i.style, "corner_radius", value),
+                        "Corner radius"))
+                    form.addRow("Radius", radius)
             elif isinstance(first, RectItem) and first.kind == "cloud":
                 self._add_cloud(first)
             elif isinstance(first, PolyItem) and first.kind == "cloud":
                 self._add_cloud(first)
         if len(self._items) == 1:
             self._add_geometry(first)
+            if isinstance(first, PolyItem) and first.broken:
+                self._add_breaks(first)
         self._add_metadata(first)
         if len(self._items) == 1:
             self._add_defaults(first)
@@ -1383,7 +1408,16 @@ class PropertiesPanel(QScrollArea):
         selection for one more event loop turn, which leaves the panel showing
         empty space below content that is no longer there.
         """
+        for group in self.body.findChildren(QGroupBox):
+            if group.layout() is not None:
+                group.layout().activate()
+            group.setMinimumHeight(group.sizeHint().height())
+        self.layout.invalidate()
         self.layout.activate()
+        # A resizable scroll area can shrink every group to the viewport
+        # height, clipping spin boxes into thin strips. Keep the form's own
+        # height and let the panel scroll instead.
+        self.body.setMinimumHeight(self.layout.sizeHint().height())
         self.body.adjustSize()
         self.verticalScrollBar().setValue(0)
         self.horizontalScrollBar().setValue(0)
@@ -1487,7 +1521,7 @@ class PropertiesPanel(QScrollArea):
         form = self._group("Appearance")
 
         if controls == {OPACITY}:
-            opacity = LabeledSlider(5, 100, int(first.style.opacity * 100))
+            opacity = LabeledSlider(0, 100, int(first.style.opacity * 100))
             opacity.valueChanged.connect(
                 lambda value: self._slide(
                     lambda i: setattr(i.style, "opacity", value), "Opacity"))
@@ -1563,7 +1597,7 @@ class PropertiesPanel(QScrollArea):
             form.addRow("Hatch scale", hatch_scale)
 
         if OPACITY in controls:
-            opacity = LabeledSlider(5, 100, int(first.style.opacity * 100))
+            opacity = LabeledSlider(0, 100, int(first.style.opacity * 100))
             opacity.valueChanged.connect(
                 lambda value: self._slide(
                     lambda i: setattr(i.style, "opacity", value), "Opacity"))
@@ -1577,6 +1611,24 @@ class PropertiesPanel(QScrollArea):
                     "Fill opacity"))
             form.addRow("Fill opacity", fill_opacity)
 
+
+    def _add_breaks(self, item: PolyItem) -> None:
+        for segment in sorted(item.broken):
+            form = self._group(f"Break {segment + 1}")
+            size, position = item.break_settings(segment)
+            for label, value, high, suffix in (("Size", size, 200, " pt"),
+                                               ("Position", position * 100, 95, " %")):
+                spin = QDoubleSpinBox()
+                spin.setRange(0.5 if label == "Size" else 5, high)
+                spin.setValue(value)
+                spin.setSuffix(suffix)
+                spin.setObjectName(f"break{label}{segment}")
+                spin.valueChanged.connect(lambda value, s=segment, name=label: self._slide(
+                    lambda i: i.set_break_settings(s,
+                        value if name == "Size" else i.break_settings(s)[0],
+                        value / 100 if name == "Position" else i.break_settings(s)[1]),
+                    "Break " + name.lower()))
+                form.addRow(label, spin)
 
     def _add_text(self, first: MarkupItem) -> None:
         form = self._group("Text")
@@ -1629,6 +1681,13 @@ class PropertiesPanel(QScrollArea):
         valign.currentTextChanged.connect(
             lambda value: self._apply(lambda i: setattr(i.style, "valign", value), "Alignment"))
         form.addRow("Vertical", valign)
+        padding = QDoubleSpinBox()
+        padding.setRange(0, 100)
+        padding.setSuffix(" pt")
+        padding.setValue(first.style.padding)
+        padding.valueChanged.connect(lambda value: self._slide(
+            lambda i: setattr(i.style, "padding", value), "Text padding"))
+        form.addRow("Padding", padding)
 
     def _add_arrows(self, first: MarkupItem) -> None:
         """What the ends of a line carry.
@@ -1640,8 +1699,7 @@ class PropertiesPanel(QScrollArea):
         """
         if isinstance(first, CalloutItem):
             form = self._group("Leader")
-            head = QComboBox()
-            head.addItems(ARROW_HEADS)
+            head = arrow_combo()
             head.setCurrentText(first.style.arrow_end)
             head.currentTextChanged.connect(
                 lambda value: self._apply(
@@ -1680,14 +1738,12 @@ class PropertiesPanel(QScrollArea):
                 form.addRow("Leaders", count)
             return
         form = self._group("Ends")
-        start = QComboBox()
-        start.addItems(ARROW_HEADS)
+        start = arrow_combo()
         start.setCurrentText(first.style.arrow_start)
         start.currentTextChanged.connect(
             lambda value: self._apply(lambda i: setattr(i.style, "arrow_start", value), "Arrow"))
         form.addRow("Start", start)
-        end = QComboBox()
-        end.addItems(ARROW_HEADS)
+        end = arrow_combo()
         end.setCurrentText(first.style.arrow_end)
         end.currentTextChanged.connect(
             lambda value: self._apply(lambda i: setattr(i.style, "arrow_end", value), "Arrow"))
@@ -1755,6 +1811,18 @@ class PropertiesPanel(QScrollArea):
                 lambda on, a=attribute: self._apply(
                     lambda i: setattr(i, a, on), "Contents"))
             form.addRow("", box)
+
+        text_size = QDoubleSpinBox()
+        text_size.setRange(3, 96)
+        text_size.setValue(item.style.font_size)
+        text_size.setSuffix(" pt")
+        text_size.valueChanged.connect(lambda value: self._slide(
+            lambda i: setattr(i.style, "font_size", value), "Text size"))
+        form.addRow("Text size", text_size)
+        text_colour = ColorButton(item.style.text_color, label="Text colour")
+        text_colour.colorChanged.connect(lambda value: self._apply(
+            lambda i: setattr(i.style, "text_color", value), "Text colour"))
+        form.addRow("Text colour", text_colour)
 
         height = QDoubleSpinBox()
         height.setRange(8.0, 60.0)
@@ -1829,6 +1897,10 @@ class PropertiesPanel(QScrollArea):
                 lambda selected: setattr(selected.style, "font_size", size),
                 "Measurement text size"))
         form.addRow("Text size", text_size)
+        colour = ColorButton(item.style.text_color, label="Text colour")
+        colour.colorChanged.connect(lambda value: self._apply(
+            lambda i: setattr(i.style, "text_color", value), "Text colour"))
+        form.addRow("Text colour", colour)
 
         subject = QLineEdit(item.subject)
         subject.setToolTip("Measurements sharing a subject are totalled in the markups list")

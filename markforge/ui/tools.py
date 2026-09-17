@@ -102,10 +102,10 @@ TOOLS: list[Tool] = [
 
     Tool("text", "Text box", "text", DRAG, "Annotate", "T", "Text box",
          factory=lambda: TextItem("")),
-    Tool("callout", "Call-out", "callout", ANCHOR, "Annotate", "Q",
+    Tool("callout", "Callout", "callout", ANCHOR, "Annotate", "Q",
          "Click what it points at, then click where the words go",
          factory=lambda: CalloutItem("")),
-    Tool("cloud_callout", "Cloud call-out", "cloud_callout", CLOUD, "Annotate", "Shift+Q",
+    Tool("cloud_callout", "Cloud+", "cloud_callout", CLOUD, "Annotate", "Shift+Q",
          "Drag a rectangular Cloud or click the corners of a custom Cloud+, "
          "then click where the words go — the cloud and note are one thing",
          factory=lambda: CalloutItem("")),
@@ -142,7 +142,7 @@ TOOLS: list[Tool] = [
     Tool("measure_angle", "Angle", "measure_angle", POLY, "Measure", "Shift+Alt+G",
          "Measure an angle from three points", min_points=3, max_points=3,
          factory=_measure(measure_module.ANGLE)),
-    Tool("measure_radius", "Centre radius", "measure_radius", DRAG, "Measure", "",
+    Tool("measure_radius", "Center radius", "measure_radius", DRAG, "Measure", "",
          "Measure a radius", max_points=2, factory=_measure(measure_module.RADIUS)),
     Tool("measure_diameter", "Diameter", "measure_diameter", DRAG, "Measure",
          "Shift+Alt+D",
@@ -155,7 +155,7 @@ TOOLS: list[Tool] = [
          factory=_rect("ellipse")),
     Tool("count", "Count", "count", CLICK, "Measure", "Shift+Alt+C",
          "Drop counting markers", factory=lambda: CountItem()),
-    Tool("calibrate", "Set scale", "calibrate", DRAG, "Measure", "",
+    Tool("calibrate", "Calibrate", "calibrate", DRAG, "Measure", "",
          "Click each end of something you know the length of, then type that "
          "length — the page scale follows", max_points=2,
          factory=_measure(measure_module.CALIBRATE)),

@@ -467,6 +467,15 @@ class MeasureItem(MarkupItem):
     # -- painting ----------------------------------------------------------
     def paint_content(self, painter: QPainter) -> None:
         painter.setRenderHint(QPainter.Antialiasing, True)
+        if self.kind == CALIBRATE:
+            if len(self.points) >= 2:
+                pen = QPen(QColor(self.style.stroke or "#268bd2"))
+                pen.setWidthF(1.0)
+                pen.setCosmetic(True)
+                pen.setStyle(Qt.DashLine)
+                painter.setPen(pen)
+                painter.drawLine(self.points[0], self.points[-1])
+            return
         path = self.build_path()
         if self.closed and self.style.fill:
             filled = QPainterPath()
@@ -544,7 +553,10 @@ class MeasureItem(MarkupItem):
         colour = QColor(self.style.stroke)
         colour.setAlphaF(self.style.opacity)
         painter.setBrush(QBrush(colour))
-        painter.setPen(QPen(colour, max(self.style.width * 0.8, 0.4)))
+        pen = QPen(colour, max(self.style.width * 0.8, 0.4))
+        pen.setJoinStyle(Qt.MiterJoin)
+        pen.setMiterLimit(8.0)
+        painter.setPen(pen)
         if self.is_dimensioned():
             start, end = self.dimension_ends()
             if self.style.arrow_end != "none":

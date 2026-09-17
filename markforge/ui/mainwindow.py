@@ -13,7 +13,7 @@ from PySide6.QtGui import (QAction, QActionGroup, QColor, QCursor, QFont, QImage
                            QKeySequence, QPainter, QTextBlockFormat,
                            QTextCharFormat, QTextCursor, QTransform, QUndoStack)
 from PySide6.QtPrintSupport import QPrintDialog, QPrintPreviewDialog, QPrinter
-from PySide6.QtWidgets import (QTabBar, QApplication, QComboBox, QDockWidget, QDoubleSpinBox,
+from PySide6.QtWidgets import (QTabBar, QApplication, QComboBox, QDockWidget, QDoubleSpinBox, QFontComboBox,
                                QFileDialog, QGraphicsItem, QHBoxLayout,
                                QInputDialog, QLabel, QLineEdit, QMainWindow,
                                QMenu, QMessageBox, QSizePolicy, QSpinBox,
@@ -27,7 +27,7 @@ from ..core.units import format_quantity, parse_unit
 from ..io import export as export_io
 from ..io import pdfio
 from ..io import project as project_io
-from ..items.base import (HATCH_PATTERNS, MarkupItem, Style, build_item,
+from ..items.base import (DASH_ARRAYS, HATCH_PATTERNS, MarkupItem, Style, build_item,
                           rename_groups)
 from ..items.contents import ContentsItem
 from ..items.measure import MeasureItem
@@ -40,7 +40,7 @@ from ..settings import app_settings
 from . import dialogs
 from .commands import DocumentStructureCommand
 from .icons import icon
-from .panels import (BookmarksPanel, MarkupsPanel, PagesPanel,
+from .panels import (_hatch_icon, _line_style_icon, BookmarksPanel, MarkupsPanel, PagesPanel,
                      PropertiesPanel, ToolSetsPanel)
 from .docks import PanelDock, load_panel_state, save_panel_state
 from .rail import (AREAS, LEFT, RIGHT, PanelRail, RailBar, load_sides,
@@ -54,7 +54,7 @@ from . import toolsets
 from .tools import CATEGORIES, NONE, TOOL_MAP, TOOLS, tools_in
 from .view import SIZED_SHAPES
 from .view import PageView, typing_somewhere_else
-from .widgets import ColorButton, keep_the_wheel_with_the_scroller
+from .widgets import ColorButton, keep_the_wheel_with_the_scroller, arrow_combo
 
 APP_NAME = "MarkForge"
 ORGANISATION = "MarkForge"
@@ -772,18 +772,57 @@ class MainWindow(QMainWindow):
         self.arrow_size_spin.valueChanged.connect(self._style_arrow_size)
         self._style_widgets[ARROW_SIZE].append(
             style_bar.addWidget(self.arrow_size_spin))
+        self.arrow_start_combo = arrow_combo()
+        self.arrow_end_combo = arrow_combo()
+        self.arrow_start_label_action = None
+        for label, control, attribute in (("Start", self.arrow_start_combo, "arrow_start"),
+                                           ("End", self.arrow_end_combo, "arrow_end")):
+            control.setToolTip(f"{label} line ending")
+            control.currentTextChanged.connect(
+                lambda value, name=attribute: self._style_line_ending(name, value))
+            label_action = style_bar.addWidget(QLabel(f" {label} "))
+            if label == "Start":
+                self.arrow_start_label_action = label_action
+            self._style_widgets[ARROW_SIZE].append(label_action)
+            self._style_widgets[ARROW_SIZE].append(style_bar.addWidget(control))
         self._style_widgets[DASH].append(style_bar.addWidget(QLabel(" Dash ")))
         self.dash_combo = QComboBox()
-        self.dash_combo.addItems(["solid", "dash", "dot", "dashdot", "dashdotdot"])
+        for name in DASH_ARRAYS:
+            self.dash_combo.addItem(_line_style_icon(name, "#555555", 1), name)
         self.dash_combo.currentTextChanged.connect(self._style_dash)
         self._style_widgets[DASH].append(style_bar.addWidget(self.dash_combo))
         self._style_widgets[FONT].append(style_bar.addWidget(QLabel(" Text ")))
+        self.font_family_combo = QFontComboBox()
+        self.font_family_combo.setMaximumWidth(145)
+        self.font_family_combo.currentFontChanged.connect(lambda font: self._style_change(
+            FONT, lambda style: setattr(style, "font_family", font.family()), "Font"))
+        self._style_widgets[FONT].append(style_bar.addWidget(self.font_family_combo))
         self.font_spin = QDoubleSpinBox()
         self.font_spin.setRange(3.0, 96.0)
         self.font_spin.setValue(self.default_style.font_size)
         self.font_spin.setSuffix(" pt")
         self.font_spin.valueChanged.connect(self._style_font)
         self._style_widgets[FONT].append(style_bar.addWidget(self.font_spin))
+        self.text_colour_button = ColorButton(self.default_style.text_color, label="Text colour")
+        self.text_colour_button.colorChanged.connect(lambda value: self._style_change(
+            FONT, lambda style: setattr(style, "text_color", value), "Text colour"))
+        self._style_widgets[FONT].append(style_bar.addWidget(self.text_colour_button))
+        self.font_buttons = {}
+        for name, label in (("bold", "B"), ("italic", "I"), ("underline", "U")):
+            button = QToolButton()
+            button.setText(label)
+            button.setCheckable(True)
+            button.setToolTip(name.capitalize())
+            button.toggled.connect(lambda on, field=name: self._style_change(
+                FONT, lambda style: setattr(style, field, on), "Font style"))
+            self.font_buttons[name] = button
+            self._style_widgets[FONT].append(style_bar.addWidget(button))
+        self.text_align_combo = QComboBox()
+        self.text_align_combo.addItems(["left", "center", "right", "justify"])
+        self.text_align_combo.setToolTip("Text alignment")
+        self.text_align_combo.currentTextChanged.connect(lambda value: self._style_change(
+            FONT, lambda style: setattr(style, "align", value), "Text alignment"))
+        self._style_widgets[FONT].append(style_bar.addWidget(self.text_align_combo))
         # Hatch and the two opacities were only ever in the Properties panel,
         # so the two surfaces disagreed about every markup that has them: the
         # panel offered a hatch and a transparency the toolbar had no way to
@@ -792,7 +831,7 @@ class MainWindow(QMainWindow):
         self.hatch_combo = QComboBox()
         self.hatch_combo.setObjectName("hatchPattern")
         for name in HATCH_PATTERNS:
-            self.hatch_combo.addItem(name or "plain", name)
+            self.hatch_combo.addItem(_hatch_icon(name, "#748096"), name or "plain", name)
         self.hatch_combo.setToolTip("Pattern drawn over the fill")
         self.hatch_combo.currentIndexChanged.connect(
             lambda _index: self._style_hatch(self.hatch_combo.currentData()))
@@ -808,7 +847,7 @@ class MainWindow(QMainWindow):
         self._style_widgets[HATCH].append(style_bar.addWidget(self.hatch_scale_spin))
         self._style_widgets[OPACITY].append(style_bar.addWidget(QLabel(" Opacity ")))
         self.opacity_spin = QSpinBox()
-        self.opacity_spin.setRange(5, 100)
+        self.opacity_spin.setRange(0, 100)
         self.opacity_spin.setSuffix(" %")
         self.opacity_spin.setToolTip("How much of what is underneath shows through")
         self.opacity_spin.setValue(int(self.default_style.opacity * 100))
@@ -1145,6 +1184,8 @@ class MainWindow(QMainWindow):
         # The controls are permanent widgets and gather on the right, and the
         # page navigation goes in the middle of what is left between them.
         self.status_hint = QLabel("Ready")
+        self.status_hint.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.status_hint.setMinimumWidth(0)
         status.addWidget(self.status_hint)
 
         self.status_position = QLabel("")
@@ -1185,6 +1226,8 @@ class MainWindow(QMainWindow):
         page_bar.addWidget(self.page_total)
 
         self.page_label = QLabel("")
+        self.page_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.page_label.setMaximumWidth(180)
         self.page_label.setAlignment(Qt.AlignCenter)
         self.page_label.setToolTip("Current page label")
         page_bar.addWidget(self.page_label)
@@ -1249,6 +1292,7 @@ class MainWindow(QMainWindow):
         self.window_sync = QComboBox()
         self.window_sync.setObjectName("windowSync")
         self.window_sync.addItems(["Sync off", "Page sync", "Document sync"])
+        self.window_sync.currentIndexChanged.connect(self._set_window_sync)
         self.window_sync.setToolTip(
             "Link this view with other windows showing the same document")
         status.addPermanentWidget(self.window_sync)
@@ -1271,7 +1315,7 @@ class MainWindow(QMainWindow):
         self.view.statusMessage.connect(self.status_hint.setText)
         self.view.cursorMoved.connect(self._show_position)
         self.view.zoomChanged.connect(self._show_zoom)
-        self.view.zoomChanged.connect(lambda _zoom: self._sync_other_windows(False))
+        self.view.zoomChanged.connect(lambda _zoom: self._sync_other_windows(True))
         self.view.selectionChanged.connect(self.refresh_selection)
         self.view.toolFinished.connect(self.select_tool)
         self.view.documentEdited.connect(self.mark_modified)
@@ -1340,6 +1384,12 @@ class MainWindow(QMainWindow):
         self.refresh_lists()
         self.update_title()
         self._refresh_undo_actions()
+
+        mode = next((other.window_sync.currentIndex() for other in type(self)._windows
+                     if other is not self and other.document is self.document), 0)
+        self.window_sync.blockSignals(True)
+        self.window_sync.setCurrentIndex(mode)
+        self.window_sync.blockSignals(False)
 
     def _tab_title(self, document) -> str:
         return os.path.basename(document.path) if document.path else "Untitled"
@@ -1708,10 +1758,20 @@ class MainWindow(QMainWindow):
                                               project_io.FILTER)
         if not path:
             return False
+        old_path, old_title = self.document.path, self.document.title
+        old_recovery = self.autosave_path()
         self.document.path = path
         if self.document.title in ("", "Untitled"):
             self.document.title = project_io.describe(path)
-        return self.save_document()
+        if not self.save_document():
+            self.document.path, self.document.title = old_path, old_title
+            return False
+        if os.path.exists(old_recovery):
+            try:
+                os.remove(old_recovery)
+            except OSError:
+                pass
+        return True
 
     def confirm_discard(self) -> bool:
         if self.undo_stack.isClean() and not self.document.modified:
@@ -1890,9 +1950,26 @@ class MainWindow(QMainWindow):
         self.refresh_selection()
         self._sync_other_windows(True)
 
+    def _set_window_sync(self, mode: int) -> None:
+        """One synchronization choice applies to every view of this document."""
+        for other in list(type(self)._windows):
+            if other is self or other.document is not self.document:
+                continue
+            other.window_sync.blockSignals(True)
+            other.window_sync.setCurrentIndex(mode)
+            other.window_sync.blockSignals(False)
+        self._sync_other_windows(True)
+
     def _sync_other_windows(self, document_change: bool) -> None:
         """Copy this viewport to opted-in windows showing the same document."""
-        if self._syncing_view or not hasattr(self, "window_sync"):
+        if (self._syncing_view or getattr(self.view, "_zooming", False)
+                or not hasattr(self, "window_sync")):
+            return
+        # Views share a scene. Resizing its pan margin changes *every*
+        # scrollbar; a peer must not echo its old zoom back during that step.
+        if any(other is not self and other.document is self.document
+               and (other._syncing_view or getattr(other.view, "_zooming", False))
+               for other in list(type(self)._windows)):
             return
         mode = self.window_sync.currentIndex()
         if mode == 0:
@@ -2181,11 +2258,21 @@ class MainWindow(QMainWindow):
 
     def add_page(self, index: Optional[int] = None, before: bool = False) -> None:
         target = self.page_index(index) + (0 if before else 1)
+        count = 1
+        setup = PageSetup.from_dict(self.current_page().setup.to_dict())
+        if self.interactive_prompts:
+            dialog = dialogs.NewPagesDialog(setup, self)
+            if dialog.exec() != dialogs.QDialog.Accepted:
+                return
+            count = dialog.count.value()
+            setup = dialog.chosen_setup(setup)
 
         def mutate():
-            self.document.add_page(target)
+            for offset in range(count):
+                page = self.document.add_page(target + offset)
+                page.setup = PageSetup.from_dict(setup.to_dict())
             self.current_index = target
-        self._structural_change("Add page", mutate)
+        self._structural_change("Add page" if count == 1 else f"Add {count} pages", mutate)
 
     def add_page_before(self, index: Optional[int] = None) -> None:
         self.add_page(index, before=True)
@@ -3010,6 +3097,11 @@ class MainWindow(QMainWindow):
         for field, actions in self._style_widgets.items():
             for action in actions:
                 action.setVisible(field in supported)
+        for control in (self.font_family_combo, self.text_align_combo,
+                        *self.font_buttons.values()):
+            control.setVisible(FONT in supported and isinstance(active, _TextBase))
+        self.arrow_start_combo.setVisible(ARROW_SIZE in supported and not isinstance(active, CalloutItem))
+        self.arrow_start_label_action.setVisible(ARROW_SIZE in supported and not isinstance(active, CalloutItem))
         # With nothing selected and a tool that styles nothing, every control
         # on this bar is hidden and what is left is an empty band with one
         # disabled button stranded in it. A toolbar with nothing to offer is
@@ -3022,8 +3114,13 @@ class MainWindow(QMainWindow):
                     (self.fill_button, active.style.fill, "set_color"),
                     (self.width_spin, active.style.width, "setValue"),
                     (self.arrow_size_spin, active.style.arrow_size, "setValue"),
+                    (self.arrow_start_combo, active.style.arrow_start, "setCurrentText"),
+                    (self.arrow_end_combo, active.style.arrow_end, "setCurrentText"),
                     (self.dash_combo, active.style.line_style, "setCurrentText"),
                     (self.font_spin, active.style.font_size, "setValue"),
+                    (self.font_family_combo, QFont(active.style.font_family), "setCurrentFont"),
+                    (self.text_colour_button, active.style.text_color, "set_color"),
+                    (self.text_align_combo, active.style.align, "setCurrentText"),
                     (self.hatch_combo, active.style.hatch or "plain",
                      "setCurrentText"),
                     (self.hatch_scale_spin, active.style.hatch_scale, "setValue"),
@@ -3035,6 +3132,10 @@ class MainWindow(QMainWindow):
             control.blockSignals(True)
             getattr(control, method)(value)
             control.blockSignals(False)
+        for name, button in self.font_buttons.items():
+            button.blockSignals(True)
+            button.setChecked(getattr(active.style, name))
+            button.blockSignals(False)
 
     # -- undo --------------------------------------------------------------
     def _open_editor_document(self):
@@ -3089,8 +3190,20 @@ class MainWindow(QMainWindow):
             ARROW_SIZE, lambda style: setattr(style, "arrow_size", value),
             "Arrowhead size")
 
+    def _style_line_ending(self, attribute: str, value: str) -> None:
+        if not self.selected_items():
+            item = self._style_default_item()
+            if item is not None:
+                self.apply_default_style(item)
+                setattr(item.style, attribute, value)
+                toolsets.remember_default(item)
+                return
+        self._style_change(ARROW_SIZE, lambda style: setattr(style, attribute, value),
+                           "Line ending")
+
     def _style_dash(self, value: str) -> None:
-        self._style_change(DASH, lambda style: setattr(style, "line_style", value),
+        self._style_change(DASH, lambda style: (setattr(style, "line_style", value),
+                                               setattr(style, "dash_array", ())),
                            "Line style")
 
     def _style_font(self, value: float) -> None:
@@ -3102,7 +3215,7 @@ class MainWindow(QMainWindow):
                            "Hatch")
 
     def _style_opacity(self, percent: int) -> None:
-        value = max(percent, 1) / 100.0
+        value = percent / 100.0
         self._style_change(OPACITY, lambda style: setattr(style, "opacity", value),
                            "Opacity")
 
@@ -3237,6 +3350,14 @@ class MainWindow(QMainWindow):
         item.style.width = style.width
         item.style.line_style = style.line_style
         item.style.opacity = style.opacity
+        item.style.fill_opacity = style.fill_opacity
+        item.style.arrow_size = style.arrow_size
+        item.style.text_color = style.text_color
+        item.style.font_family = style.font_family
+        item.style.bold = style.bold
+        item.style.italic = style.italic
+        item.style.underline = style.underline
+        item.style.align = style.align
         if HATCH in capabilities(item):
             item.style.hatch = style.hatch
             item.style.hatch_scale = style.hatch_scale
@@ -3460,6 +3581,9 @@ class MainWindow(QMainWindow):
                     "source_page": self.document.pages.index(frame.page) + 1
                     if frame.page in self.document.pages else 0,
                     "keep_aspect": True, "uid": os.urandom(8).hex()}]
+        default_snapshot = SnapshotItem()
+        self.apply_default_style(default_snapshot)
+        payload[0]["style"] = default_snapshot.serialize()["style"]
         assets = {key: base64.b64encode(data).decode("ascii")}
         for source_item in taken:
             for asset in source_item.assets_used():
@@ -5075,8 +5199,12 @@ class MainWindow(QMainWindow):
         dpi, ok = QInputDialog.getInt(self, "Export images", "Resolution (dpi):", 200, 72, 600)
         if not ok:
             return
-        written = export_io.export_images(self.document, folder, dpi,
-                                          self.document.title or "page")
+        try:
+            written = export_io.export_images(self.document, folder, dpi,
+                                              self.document.title or "page")
+        except Exception as exc:
+            QMessageBox.critical(self, "Export images", str(exc))
+            return
         self.status_hint.setText(f"Wrote {len(written)} image(s) to {folder}")
 
     def export_markups(self) -> None:
@@ -5084,7 +5212,11 @@ class MainWindow(QMainWindow):
                                               "CSV files (*.csv)")
         if not path:
             return
-        count = export_io.export_markups_csv(self.document, path)
+        try:
+            count = export_io.export_markups_csv(self.document, path)
+        except Exception as exc:
+            QMessageBox.critical(self, "Export markups", str(exc))
+            return
         self.status_hint.setText(f"Exported {count} markup(s)")
 
 

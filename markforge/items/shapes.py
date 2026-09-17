@@ -617,7 +617,8 @@ class PolyItem(MarkupItem):
                                   2 * apex.y() - (leaves.y() + arrives.y()) / 2)
                 path.quadTo(control, arrives)
             elif self.broken.get(index):
-                jink = _break_symbol(leaves, arrives, self.break_size())
+                size, position = self.break_settings(index)
+                jink = _break_symbol(leaves, arrives, size, position)
                 if jink.isEmpty():
                     path.lineTo(arrives)
                 else:
@@ -636,6 +637,16 @@ class PolyItem(MarkupItem):
     def break_size(self) -> float:
         """How big the break symbol is drawn: with the line, not fixed."""
         return max(self.style.width * 2.4, 5.0)
+
+    def break_settings(self, segment: int) -> tuple[float, float]:
+        value = self.broken.get(segment)
+        return tuple(value) if isinstance(value, (list, tuple)) else (self.break_size(), 0.5)
+
+    def set_break_settings(self, segment: int, size: float, position: float) -> None:
+        self.prepareGeometryChange()
+        self.broken[segment] = (max(0.5, float(size)), max(0.05, min(0.95, float(position))))
+        self.touch()
+        self.geometryChanged.emit()
 
     def _corner_exit(self, segment: int, start: QPointF) -> QPointF:
         """Where a segment starts, allowing for a rounded corner behind it."""
@@ -668,7 +679,8 @@ class PolyItem(MarkupItem):
 
     def boundingRect(self) -> QRectF:
         margin = self.style.width + HANDLE_SIZE + 12
-        return self.local_rect().adjusted(-margin, -margin, margin, margin)
+        rect = self.local_rect().united(self.build_path().boundingRect())
+        return rect.adjusted(-margin, -margin, margin, margin)
 
     # -- handles -----------------------------------------------------------
     def handle_points(self) -> dict[str, QPointF]:
@@ -690,6 +702,14 @@ class PolyItem(MarkupItem):
                 if 0 <= segment < self.segment_count() and self.is_curved(segment):
                     handles[f"c{segment}"] = self.curve_apex(segment)
                     handles[f"n{segment}"] = self.curve_lean(segment)
+            for segment in sorted(self.broken):
+                if 0 <= segment < self.segment_count():
+                    start, end = self.segment_ends(segment)
+                    size, position = self.break_settings(segment)
+                    centre = start + (end - start) * position
+                    direction = _unit(end - start)
+                    handles[f"b{segment}"] = centre
+                    handles[f"z{segment}"] = centre + QPointF(-direction.y(), direction.x()) * size
             if self.kind in ("polyline", "polygon", "cloud") and len(self.points) > 2:
                 rect = self.local_rect()
                 handles["rot"] = QPointF(rect.center().x(), rect.top() - 22)
@@ -697,6 +717,15 @@ class PolyItem(MarkupItem):
         return super().handle_points()
 
     def move_handle(self, key: str, local_pos: QPointF, keep_ratio: bool = False) -> None:
+        if key.startswith(("b", "z")) and key[1:].isdigit():
+            segment = int(key[1:])
+            if segment in self.broken:
+                start, end = self.segment_ends(segment)
+                size, position = self.break_settings(segment)
+                along, sideways = _project(start, end, local_pos)
+                self.set_break_settings(segment, abs(sideways) if key[0] == "z" else size,
+                                        along if key[0] == "b" else position)
+                return
         if self.kind == "arc" and key == "c0" and len(self.points) >= 2:
             self.prepareGeometryChange()
             if len(self.points) == 2:
@@ -874,6 +903,8 @@ class PolyItem(MarkupItem):
         painter.setBrush(QBrush(colour))
         pen = QPen(colour)
         pen.setWidthF(max(self.style.width * 0.9, 0.5))
+        pen.setJoinStyle(Qt.MiterJoin)
+        pen.setMiterLimit(8.0)
         painter.setPen(pen)
         if self.style.arrow_end != "none":
             tip = self.points[-1]
@@ -933,6 +964,7 @@ class PolyItem(MarkupItem):
                               for k, v in self.curved.items()}
         if self.broken:
             data["broken"] = sorted(self.broken)
+            data["break_settings"] = {str(k): list(self.break_settings(k)) for k in self.broken}
         if self.cutouts:
             data["cutouts"] = self.cutouts_as_data()
         return data
@@ -947,6 +979,10 @@ class PolyItem(MarkupItem):
         self.curved = {int(k): (float(v[0]), float(v[1]))
                        for k, v in (data.get("curved") or {}).items()}
         self.broken = {int(k): True for k in (data.get("broken") or [])}
+        for key, value in (data.get("break_settings") or {}).items():
+            if int(key) in self.broken and len(value) == 2:
+                self.broken[int(key)] = (max(0.5, float(value[0])),
+                                         max(0.05, min(0.95, float(value[1]))))
         self.cutouts_from_data(data)
         self.load_base(data)
 
@@ -992,7 +1028,7 @@ def _project(start: QPointF, end: QPointF, point: QPointF) -> tuple[float, float
     return max(0.1, min(0.9, forward)), sideways
 
 
-def _break_symbol(start: QPointF, end: QPointF, size: float) -> QPainterPath:
+def _break_symbol(start: QPointF, end: QPointF, size: float, position: float = 0.5) -> QPainterPath:
     """The drafting break: the line stops, jinks across itself and goes on.
 
     The symbol every structural drawing uses to say "this carries on, and the
@@ -1003,7 +1039,8 @@ def _break_symbol(start: QPointF, end: QPointF, size: float) -> QPainterPath:
         return QPainterPath()
     along = _unit(_towards(start, end))
     across = QPointF(-along.y(), along.x())
-    middle = QPointF((start.x() + end.x()) / 2, (start.y() + end.y()) / 2)
+    position = max(size * 1.4 / length, min(1 - size * 1.4 / length, position))
+    middle = start + (end - start) * position
 
     def at(forward: float, sideways: float) -> QPointF:
         return QPointF(middle.x() + along.x() * forward + across.x() * sideways,

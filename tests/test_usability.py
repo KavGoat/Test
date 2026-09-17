@@ -837,23 +837,16 @@ def test_a_snapshot_has_a_border_that_starts_at_none_and_can_be_set(window):
     assert shot.style.stroke and shot.style.width > 0, "a set outline is kept"
 
 
-def test_a_photos_own_border_is_not_offered_but_its_default_is(window):
-    """Two different questions about the same control.
-
-    A stroke colour on a raster photo has nowhere to go, so a selected image
-    does not offer one. What frame a placed image starts with is a real
-    setting, though, and with no way to reach it the only frame available was
-    whatever the code happened to begin with.
-    """
+def test_a_photos_optional_border_is_offered_and_starts_disabled(window):
+    """Selected images and tool defaults both expose the optional border."""
     from markforge.items.media import ImageItem
-    from markforge.ui.stylecaps import OPACITY, STROKE, WIDTH, capabilities
+    from markforge.ui.stylecaps import DASH, OPACITY, STROKE, WIDTH, capabilities
 
     photo = ImageItem()
-    assert capabilities(photo) == {OPACITY}, "nothing to change on the photo"
-    assert {STROKE, WIDTH} <= capabilities(photo, for_default=True), \
-        "but the default frame is settable"
+    assert capabilities(photo) == {OPACITY, STROKE, WIDTH, DASH}
+    assert {STROKE, WIDTH, DASH} <= capabilities(photo, for_default=True)
     assert photo.style.stroke == "" or photo.style.width == 0.0, \
-        "and it starts with no frame"
+        "a new image starts with no frame"
 
 
 def test_a_cut_out_belongs_to_any_closed_shape(window):
@@ -4629,7 +4622,7 @@ def test_an_image_can_be_swapped_for_another(window, tmp_path, monkeypatch):
     assert markups(window)[0].asset_key == original
 
 
-def test_a_raster_image_has_no_line_or_fill_style_controls(window, tmp_path):
+def test_a_raster_image_offers_its_frame_but_no_fill_style_controls(window, tmp_path):
     from PySide6.QtGui import QImage
     from PySide6.QtWidgets import QFileDialog, QGroupBox
     from markforge.items.media import ImageItem
@@ -4652,11 +4645,11 @@ def test_a_raster_image_has_no_line_or_fill_style_controls(window, tmp_path):
                       window.properties_panel.findChildren(QGroupBox)
                       if group.title() == "Appearance")
     labels = [label.text() for label in appearance.findChildren(QLabel)]
-    assert "Line" not in labels and "Fill" not in labels
+    assert "Line" in labels and "Fill" not in labels
 
     before = image.style.stroke
     window._style_stroke("#c92a2a")
-    assert image.style.stroke == before
+    assert image.style.stroke != before
 
 
 def test_an_image_keeps_its_aspect_ratio_unless_shift_releases_it(window):
@@ -7351,8 +7344,8 @@ def test_dimension_text_size_is_editable_in_properties(window):
     assert dimension.style.width == pytest.approx(line_width)
 
 
-def test_an_image_does_not_get_shape_style_controls(window):
-    """A photograph has no line style and no hatch, so it is offered neither."""
+def test_an_image_offers_border_style_but_not_hatch(window):
+    """A photograph has an optional border and no painted hatch."""
     from markforge.items.media import ImageItem
     from PySide6.QtWidgets import QComboBox
 
@@ -7361,7 +7354,7 @@ def test_an_image_does_not_get_shape_style_controls(window):
     click(window.view, 150, 290)
     assert {"Appearance", "Image"} <= _property_groups(window)
     assert "Text" not in _property_groups(window)
-    assert window.properties_panel.findChild(QComboBox, "lineStyle") is None
+    assert window.properties_panel.findChild(QComboBox, "lineStyle") is not None
     assert window.properties_panel.findChild(QComboBox, "hatchPattern") is None
 
 
@@ -7589,6 +7582,12 @@ def _a_pdf_with_lines(window, tmp_path):
     drag(window.view, 120, 320, 380, 320)
     path = str(tmp_path / "drawing.pdf")
     export_io.export_pdf(window.document, path)
+    # Supply actual source linework as well as annotations. White paper is
+    # viewing chrome and no longer creates a spurious full-page PDF path.
+    import pymupdf
+    with pymupdf.open(path) as pdf:
+        pdf[0].draw_line((40, 40), (200, 40))
+        pdf.saveIncr()
     return path
 
 

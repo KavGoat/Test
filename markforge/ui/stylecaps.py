@@ -22,12 +22,9 @@ ARROW_SIZE = "arrow_size"
 def capabilities(item, for_default: bool = False) -> set[str]:
     """Return only controls whose values the item visibly uses.
 
-    ``for_default`` asks the other question: not "what can be changed about
-    this markup" but "what can be set as the default for making one". They
-    differ for a photo. Its own border means nothing — a stroke colour on a
-    raster image has nowhere to go — but the frame a placed image is given is
-    a real setting, and with no way to reach it the only frame available was
-    whatever the code happened to start with.
+    ``for_default`` asks what can be set for a newly created markup. Images
+    expose their optional drawn border in both selected-item and default
+    controls; their raster pixels are unaffected by its colour.
     """
     if isinstance(item, SnapshotItem):
         # A snapshot is drawn linework, not a photo: it has an outline, that
@@ -35,9 +32,9 @@ def capabilities(item, for_default: bool = False) -> set[str]:
         # its weight and what kind of line it is.
         return {OPACITY, STROKE, WIDTH, DASH}
     if isinstance(item, ImageItem):
-        # A photo's own border means nothing, but the frame a placed one is
-        # given is a real setting, and a frame has a line type like any other.
-        return {OPACITY, STROKE, WIDTH, DASH} if for_default else {OPACITY}
+        # The raster pixels are not recoloured by these fields, but its
+        # optional drawn border uses all three in both style surfaces.
+        return {OPACITY, STROKE, WIDTH, DASH}
     if isinstance(item, ContentsItem):
         return {STROKE, FILL, WIDTH, FONT, OPACITY, FILL_OPACITY}
     if isinstance(item, _TextBase):

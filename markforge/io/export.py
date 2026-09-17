@@ -108,7 +108,7 @@ def outline_and_links(document: Document, printed: list) -> tuple[list, list]:
             continue
         height = page.height_pt
         for item in page.frame.markups():
-            rows = getattr(item, "rows", None)
+            rows = item.link_rows() if hasattr(item, "link_rows") else getattr(item, "rows", None)
             if not rows or not hasattr(item, "row_at"):
                 continue
             for rect, target, y in rows:
@@ -462,13 +462,16 @@ def print_document(document: Document, printer: QPrinter,
 
 def export_images(document: Document, folder: str, dpi: float = 200.0,
                   prefix: str = "page") -> list[str]:
+    import re
+    prefix = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", prefix).strip(" .") or "page"
     written = []
     for index, page in enumerate(document.pages):
         if page.frame is None or not page.printable:
             continue
         image = page.frame.render_image(dpi=dpi, for_print=True)
         path = f"{folder}/{prefix}_{index + 1:02d}.png"
-        image.save(path, "PNG")
+        if not image.save(path, "PNG"):
+            raise OSError(f"Could not write {path}")
         written.append(path)
     return written
 
@@ -489,4 +492,3 @@ def export_markups_csv(document: Document, path: str) -> int:
                          "Modified", "Comment"])
         writer.writerows(rows)
     return len(rows)
-

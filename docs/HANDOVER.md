@@ -1,6 +1,19 @@
 # MarkForge — start here
 
-## Latest review: 2026-09-13
+## Latest review: 2026-09-17
+
+The September 17 user reports are recorded in both task registers. See
+`REVIEW_2026-09-17.md` for the visual/Qt-event walkthrough, repaired findings,
+Bluebeam documentation comparison, and the validation still needed on Windows
+and in third-party viewers. PDF content snapping is now lazily extracted from
+the source PDF; these targets stay outside document markups. Export no longer
+paints viewing paper into the PDF. Contents links are written on both Save and
+Export. Appearance controls are shared between Properties and the dynamic
+style toolbar, including numeric step buttons and visual line-end previews.
+Do not mark task-list completion cells: only the user can do that. The latest
+suite evidence is in `COMPLETED_TASKS.md`.
+
+## Previous review: 2026-09-13
 
 Editing performance follow-up: see `APP_PERFORMANCE.md` and
 `tools/benchmark_editing.py`. Page restoration emits one final change signal,

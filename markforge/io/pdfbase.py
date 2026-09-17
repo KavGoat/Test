@@ -142,6 +142,10 @@ def _assemble(document, path: str, appearance: bool = True) -> None:
         from . import annotate
 
         annotate.add_markups(path, document, _drawn_pages(document), carried)
+        from .export import outline_and_links
+        from . import pdflinks
+        outline, links = outline_and_links(document, _drawn_pages(document))
+        pdflinks.add_outline_and_links(path, outline, links)
 
 
 def _add_page_body(output, document, page, sources: dict) -> bool:

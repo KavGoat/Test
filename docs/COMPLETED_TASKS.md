@@ -1,5 +1,44 @@
 # MarkForge — evidence record
 
+## Review evidence — 2026-09-17
+
+**940 tests passed, no skips** in the complete offscreen Qt suite (166.04
+seconds). This includes the previously untracked file-lifecycle regression
+file, whose nine tests failed at baseline and now pass. The user-owned
+completion cells in both task registers remain unchanged; the registers now
+contain 131 matching requests. See [REVIEW_2026-09-17.md](REVIEW_2026-09-17.md)
+for the visual review, Bluebeam documentation comparison, and acceptance work
+that remains on the affected Windows machine or in other PDF viewers.
+The native Cocoa stress session (`session_fuzz.py 41 300`) completed 300
+randomized rounds across three pages with zero reported failures and exited
+cleanly. The offscreen backend completed the same session and reported zero
+failures but crashed during Qt shutdown; the native run did not reproduce it.
+
+- Untouched PDF page pixels export transparently instead of carrying a white
+  paper rectangle. Contents links and outline entries are embedded on Save
+  and Export, checked by reopening with MuPDF. Save writes atomically and
+  preserves image assets needed by Undo.
+- A two-point calibration draft is a temporary dashed guide. PDF source
+  endpoints can be snapped without importing them as markups; the current
+  drawing draft no longer traps its own second point. Curved-shape previews
+  retain their full painted bounds.
+- One synchronization choice applies to all windows showing a document;
+  synchronized zoom preserves its source anchor. Break symbols have size and
+  placement controls. Adding pages accepts a quantity and paper size in one
+  undo step.
+- The Properties panel and style toolbar expose numeric steppers, visual
+  arrowhead/line/hatch choices, and relevant image, text, measurement and
+  snapshot styles. The Properties scroll layout now gives each expanded group
+  its proper height. A 1280×860 window, selected rectangle and selected text
+  were rendered and inspected; real Qt pointer, click, typing and Escape
+  events exercised those states. The test also checks a width below 1920 px.
+
+Focused evidence is in `tests/test_september17_review.py`, plus the updated
+export/format/usability tests. The review's 500-markup editing benchmark was
+run, but under a different environment and concurrent load from the prior
+baseline, so no comparative speedup is claimed. Dense user PDFs, native
+Bluebeam interaction and third-party viewer clicks remain acceptance checks.
+
 ## Editing performance review — 2026-09-13
 
 **920 tests passed, no skips** (145.03 seconds). Native Qt stress seed 131:

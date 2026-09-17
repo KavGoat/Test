@@ -735,6 +735,7 @@ class _TextBase(MarkupItem):
         # off — but a leader with no line is just a floating arrow head, so it
         # borrows the text colour rather than disappearing.
         pen = self.style.pen()
+        pen.setMiterLimit(8.0)
         if not self.style.stroke or self.style.width <= 0:
             pen = QPen(self.style.text_qcolor())
             pen.setWidthF(1.0)

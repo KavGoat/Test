@@ -581,6 +581,7 @@ class PageView(QGraphicsView):
         keep_scene = self.mapToScene(keep_view.toPoint())
 
         self.setTransformationAnchor(QGraphicsView.NoAnchor)
+        self._zooming = True
         self._zoom = factor
         self.apply_view_transform()
         self._update_desk_margin()
@@ -591,6 +592,7 @@ class PageView(QGraphicsView):
             self.horizontalScrollBar().value() + round(drift.x()))
         self.verticalScrollBar().setValue(
             self.verticalScrollBar().value() + round(drift.y()))
+        self._zooming = False
         self.zoomChanged.emit(factor)
 
     def apply_view_transform(self) -> None:
@@ -831,6 +833,11 @@ class PageView(QGraphicsView):
         if not preferences.current().snap_while_drawing or self.snapping_off_now():
             self.forget_snap()
             return QPointF(scene_pos)
+        # The moving draft is not a target: its previous endpoint otherwise
+        # catches the next move, making second-point placement sticky.
+        ignore = set(ignore)
+        if self._draft is not None:
+            ignore.add(self._draft)
         caught = self.snap_to_item(scene_pos, ignore)
         if caught is not None:
             return caught
@@ -990,7 +997,7 @@ class PageView(QGraphicsView):
         # Keep page order (including equal-distance snap tie-breaking). This
         # list lives for one pointer event only, so edits/undo/page rotation
         # never need to invalidate cached geometry.
-        return [item for item in frame.markups() if item.isVisible()
+        return [item for item in frame.markups() + frame.pdf_snap_items(point, reach) if item.isVisible()
                 and item.sceneBoundingRect().adjusted(
                     -reach, -reach, reach, reach).contains(point)]
 

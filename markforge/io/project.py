@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 import zipfile
 
 from . import pdfbase
@@ -43,6 +44,11 @@ def assets_in_use(document) -> set[str]:
                 used.add(page.background_key)
             if page.pdf_key:
                 used.add(page.pdf_key)
+            from ..items.base import build_item
+            for payload in page._pending_items:
+                item = build_item(payload)
+                if item is not None:
+                    used |= item.assets_used()
     return used
 
 
@@ -56,8 +62,21 @@ def save_document(document, path: str, enforce_extension: bool = True,
     """
     if enforce_extension and not path.lower().endswith(EXTENSION):
         path += EXTENSION
-    document.prune_assets(assets_in_use(document))
-    pdfbase.write(document, path, appearance=appearance)
+    # Undo may still reference unused assets. Prune only the persisted view,
+    # and never let a failed write replace the user's previous drawing.
+    assets = document.assets
+    used = assets_in_use(document)
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=".markforge-save-", suffix=".pdf", dir=os.path.dirname(os.path.abspath(path)))
+    os.close(descriptor)
+    try:
+        document.assets = {key: value for key, value in assets.items() if key in used}
+        pdfbase.write(document, temporary, appearance=appearance)
+        os.replace(temporary, path)
+    finally:
+        document.assets = assets
+        if os.path.exists(temporary):
+            os.remove(temporary)
     document.path = path
     document.modified = False
 

@@ -204,10 +204,6 @@ QToolTip {{
 QGraphicsView {{ border: 0; }}
 
 /* --- the odds and ends ---------------------------------------------------- */
-QSpinBox::up-button, QSpinBox::down-button,
-QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
-    width: 14px; border: 0; background: transparent;
-}}
 QComboBox QAbstractItemView {{
     border: 1px solid {field_edge}; selection-background-color: {accent};
 }}

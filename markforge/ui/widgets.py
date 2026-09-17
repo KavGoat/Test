@@ -2,14 +2,38 @@
 from __future__ import annotations
 
 
-from PySide6.QtCore import QEvent, QObject, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
+from PySide6.QtCore import QEvent, QObject, QPointF, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap, QPen
 from PySide6.QtWidgets import (QAbstractSpinBox, QColorDialog, QComboBox,
                                QGridLayout, QHBoxLayout, QLabel, QMenu, QSlider,
-                               QToolButton, QWidget, QWidgetAction)
+                               QToolButton, QWidget, QWidgetAction, QSpinBox)
 
 from ..items.base import PALETTE
 from .icons import colour_icon
+
+
+def arrow_combo() -> QComboBox:
+    """Line endings with the same geometry used on the drawing."""
+    from ..items.base import ARROW_HEADS, arrow_path
+    combo = QComboBox()
+    combo.setIconSize(QSize(42, 20))
+    for kind in ARROW_HEADS:
+        pixmap = QPixmap(42, 20)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        colour = combo.palette().text().color()
+        pen = QPen(colour, 1.3)
+        pen.setJoinStyle(Qt.MiterJoin)
+        pen.setMiterLimit(8)
+        painter.setPen(pen)
+        painter.drawLine(QPointF(3, 10), QPointF(31, 10))
+        painter.setBrush(colour if kind in ("arrow", "dot", "square", "diamond")
+                         else Qt.NoBrush)
+        painter.drawPath(arrow_path(QPointF(31, 10), 0, 11, kind))
+        painter.end()
+        combo.addItem(QIcon(pixmap), kind)
+    return combo
 
 
 class ColorButton(QToolButton):
@@ -87,7 +111,7 @@ class ColorButton(QToolButton):
 
 
 class LabeledSlider(QWidget):
-    """A slider with a percentage read-out, used for opacity."""
+    """Editable percentage with step buttons (legacy class name)."""
 
     valueChanged = Signal(float)
 
@@ -96,24 +120,20 @@ class LabeledSlider(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
-        self.slider = QSlider(Qt.Horizontal)
+        self.slider = QSpinBox()
+        self.slider.setSuffix(" %")
+        self.slider.setKeyboardTracking(False)
         self.slider.setRange(minimum, maximum)
         self.slider.setValue(value)
-        self.readout = QLabel(f"{value}%")
-        self.readout.setMinimumWidth(34)
-        self.readout.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         layout.addWidget(self.slider, 1)
-        layout.addWidget(self.readout)
         self.slider.valueChanged.connect(self._changed)
 
     def _changed(self, value: int) -> None:
-        self.readout.setText(f"{value}%")
         self.valueChanged.emit(value / 100.0)
 
     def set_value(self, fraction: float) -> None:
         self.slider.blockSignals(True)
         self.slider.setValue(int(round(fraction * 100)))
-        self.readout.setText(f"{int(round(fraction * 100))}%")
         self.slider.blockSignals(False)
 
 

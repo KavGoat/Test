@@ -1,5 +1,28 @@
 # Task list
 
+## Requests reported 2026-09-17
+
+Completion status remains user-owned. This review must record evidence separately.
+
+| Complete | Task |
+| --- | --- |
+|  | Exported PDFs must not introduce an opaque white page background that appears when taking a snapshot in Bluebeam. Verify actual PDF content and transparency in saved/exported output. |
+|  | Two-point scale calibration must show only a temporary dashed guide with a consistent on-screen size, without dimension graphics or a permanent measurement. |
+|  | Replace sliders with editable numeric controls and visible up/down buttons for opacity, font size, thickness and other numeric styles in both Properties and the style toolbar. |
+|  | Arrowheads must finish at a sharp point. Show visual arrowhead previews in line-end dropdowns and the style toolbar. |
+|  | Title-block hyperlinks must work in exported PDFs opened in other viewers. Support selected paper size with a chosen quantity or fit option; clarify whether the quantity refers to pages or title blocks. |
+|  | Changing view synchronization must apply across all windows and split views of the same document, without enabling it separately in each view. Repair zoom and cursor anchoring while Document sync is active. |
+|  | Live polygon/segment curve edits must not clip when the preview extends beyond its previous bounds or viewport; update the preview throughout the gesture. |
+|  | Snapshot outline defaults must persist and apply to subsequent snapshots. |
+|  | Structural break lines must expose size and placement controls, including moving the break along its segment. |
+|  | Repair alignment snapping during second-point placement; guides and snapped geometry must remain stable and agree. |
+|  | Repair snapping to PDF content, including endpoints and intersections. |
+|  | Clarify the unfinished report “whiteout should”; retain existing Whiteout requirements pending the missing detail. |
+|  | Fix excessive window minimum width on Windows: a 1920-pixel display currently requests a 1941-pixel client width and triggers QWindowsWindow::setGeometry warnings. Controls must remain accessible at that display size. |
+|  | Run the full automated suite and a fresh visual mouse/keyboard walkthrough of existing features; compare Bluebeam terminology, colours, formatting and workflows. Record concrete issues and repair them. |
+|  | Audit every markup type: expose all applicable editable properties in Properties, and important colour, hatch, line-end, arrowhead, line-style, thickness and opacity controls in the style toolbar. |
+|  | Continue profiling and improving responsiveness without reducing rendering quality or functionality, including synchronized zoom, drawing previews and snapping. |
+
 ## Requests reported 2026-09-11
 
 | Complete | Task |
