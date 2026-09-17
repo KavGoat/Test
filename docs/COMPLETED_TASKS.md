@@ -2,7 +2,7 @@
 
 ## Review evidence — 2026-09-17
 
-**940 tests passed, no skips** in the complete offscreen Qt suite (166.04
+**943 tests passed, no skips** in the complete offscreen Qt suite (169.98
 seconds). This includes the previously untracked file-lifecycle regression
 file, whose nine tests failed at baseline and now pass. The user-owned
 completion cells in both task registers remain unchanged; the registers now
@@ -28,7 +28,8 @@ failures but crashed during Qt shutdown; the native run did not reproduce it.
   undo step.
 - The Properties panel and style toolbar expose numeric steppers, visual
   arrowhead/line/hatch choices, and relevant image, text, measurement and
-  snapshot styles. The Properties scroll layout now gives each expanded group
+  snapshot styles. Count markers expose their number and font styling;
+  imported drawings show only effective opacity. The Properties scroll layout now gives each expanded group
   its proper height. A 1280×860 window, selected rectangle and selected text
   were rendered and inspected; real Qt pointer, click, typing and Escape
   events exercised those states. The test also checks a width below 1920 px.

@@ -3,12 +3,16 @@ import pymupdf
 import pytest
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QSlider, QSpinBox
+from PySide6.QtWidgets import QDoubleSpinBox, QSlider, QSpinBox
 
 from markforge.items.shapes import PolyItem, RectItem
 from markforge.items.base import build_item
 from markforge.items.snapshot import SnapshotItem
 from markforge.items.contents import ContentsItem
+from markforge.items.measure import CountItem
+from markforge.items.shapes import SketchItem
+from markforge.items.text import FlagItem, StampItem
+from markforge.ui.stylecaps import DASH, FONT, HATCH, OPACITY, capabilities
 from markforge.io import export, project
 from tests.test_usability import click, hover, drag, press_key, type_text
 
@@ -85,6 +89,44 @@ def test_opacity_has_keyboard_and_step_buttons(window):
     QTest.keyClick(spin, Qt.Key_Down)
     assert spin.value() == before - 1
     assert item.style.opacity == pytest.approx((before - 1) / 100)
+
+
+def test_count_properties_expose_number_and_text_style(window):
+    count = CountItem()
+    window.view.frame().add_markup(count, QPointF(100, 100))
+    count.setSelected(True)
+    window.refresh_selection()
+    assert FONT in capabilities(count)
+    number = window.properties_panel.findChild(QSpinBox, "countNumber")
+    size = window.properties_panel.findChild(QDoubleSpinBox, "countTextSize")
+    assert number is not None and size is not None
+    assert any(action.isVisible() for action in window._style_widgets[FONT]
+               if action.defaultWidget() is window.font_spin)
+    assert any(action.isVisible() for action in window._style_widgets[FONT]
+               if action.defaultWidget() is window.font_family_combo)
+    number.setValue(8)
+    size.setValue(11)
+    assert count.index == 8
+    assert count.style.font_size == 11
+
+
+def test_imported_drawing_offers_only_effective_opacity(window):
+    drawing = SketchItem()
+    assert capabilities(drawing) == {OPACITY}
+
+
+def test_stamp_text_and_corners_are_editable_but_flag_has_no_false_dash(window):
+    stamp = StampItem()
+    assert FONT in capabilities(stamp)
+    window.view.frame().add_markup(stamp, QPointF(100, 100))
+    stamp.setSelected(True)
+    window.refresh_selection()
+    corners = window.properties_panel.findChild(QDoubleSpinBox, "stampCornerRadius")
+    assert corners is not None
+    corners.setValue(12)
+    assert stamp.style.corner_radius == 12
+    assert DASH not in capabilities(FlagItem())
+    assert HATCH not in capabilities(FlagItem())
 
 
 def test_sync_choice_propagates_and_zoom_preserves_source_anchor(window, qapp):

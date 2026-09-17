@@ -3097,9 +3097,9 @@ class MainWindow(QMainWindow):
         for field, actions in self._style_widgets.items():
             for action in actions:
                 action.setVisible(field in supported)
-        for control in (self.font_family_combo, self.text_align_combo,
-                        *self.font_buttons.values()):
-            control.setVisible(FONT in supported and isinstance(active, _TextBase))
+        for control in (self.font_family_combo, *self.font_buttons.values()):
+            control.setVisible(FONT in supported and not isinstance(active, ContentsItem))
+        self.text_align_combo.setVisible(FONT in supported and isinstance(active, _TextBase))
         self.arrow_start_combo.setVisible(ARROW_SIZE in supported and not isinstance(active, CalloutItem))
         self.arrow_start_label_action.setVisible(ARROW_SIZE in supported and not isinstance(active, CalloutItem))
         # With nothing selected and a tool that styles nothing, every control

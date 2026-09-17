@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 from ..items.contents import ContentsItem
-from ..items.measure import MeasureItem
+from ..items.measure import CountItem, MeasureItem
 from ..items.media import ImageItem
-from ..items.shapes import PolyItem, RectItem
+from ..items.shapes import PolyItem, RectItem, SketchItem
 from ..items.snapshot import SnapshotItem
-from ..items.text import CalloutItem, _TextBase
+from ..items.text import CalloutItem, FlagItem, StampItem, _TextBase
 
 STROKE = "stroke"
 FILL = "fill"
@@ -35,6 +35,15 @@ def capabilities(item, for_default: bool = False) -> set[str]:
         # The raster pixels are not recoloured by these fields, but its
         # optional drawn border uses all three in both style surfaces.
         return {OPACITY, STROKE, WIDTH, DASH}
+    if isinstance(item, SketchItem):
+        # Imported drawing strokes carry their own per-path colours and widths.
+        return {OPACITY}
+    if isinstance(item, CountItem):
+        return {STROKE, FILL, WIDTH, DASH, HATCH, OPACITY, FILL_OPACITY, FONT}
+    if isinstance(item, StampItem):
+        return {STROKE, FILL, WIDTH, DASH, HATCH, OPACITY, FILL_OPACITY, FONT}
+    if isinstance(item, FlagItem):
+        return {STROKE, FILL, WIDTH, OPACITY, FILL_OPACITY}
     if isinstance(item, ContentsItem):
         return {STROKE, FILL, WIDTH, FONT, OPACITY, FILL_OPACITY}
     if isinstance(item, _TextBase):

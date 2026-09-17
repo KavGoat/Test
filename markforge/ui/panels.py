@@ -1345,9 +1345,9 @@ class PropertiesPanel(QScrollArea):
         appearance = common_capabilities(self._items)
         if appearance - {"font"}:
             self._add_appearance(first, appearance)
-        if all(getattr(i, "HAS_TEXT", False) or isinstance(i, StampItem)
+        if all(getattr(i, "HAS_TEXT", False) or isinstance(i, (StampItem, CountItem, MeasureItem))
                for i in self._items):
-            self._add_text(first)
+            self._add_text(first, compact=not getattr(first, "HAS_TEXT", False))
         if all(isinstance(i, (PolyItem, MeasureItem, CalloutItem)) for i in self._items):
             self._add_arrows(first)
         if len(self._items) == 1:
@@ -1630,7 +1630,7 @@ class PropertiesPanel(QScrollArea):
                     "Break " + name.lower()))
                 form.addRow(label, spin)
 
-    def _add_text(self, first: MarkupItem) -> None:
+    def _add_text(self, first: MarkupItem, compact: bool = False) -> None:
         form = self._group("Text")
         family = QFontComboBox()
         family.setCurrentFont(QFont(first.style.font_family))
@@ -1640,6 +1640,10 @@ class PropertiesPanel(QScrollArea):
         form.addRow("Font", family)
 
         size = QDoubleSpinBox()
+        if isinstance(first, MeasureItem):
+            size.setObjectName("measurementTextSize")
+        elif isinstance(first, CountItem):
+            size.setObjectName("countTextSize")
         size.setRange(3.0, 96.0)
         size.setSingleStep(0.5)
         size.setValue(first.style.font_size)
@@ -1667,6 +1671,9 @@ class PropertiesPanel(QScrollArea):
             lambda value: self._apply(lambda i: setattr(i.style, "text_color", value),
                                       "Text colour"))
         form.addRow("Colour", colour)
+
+        if compact:
+            return
 
         align = QComboBox()
         align.addItems(["left", "center", "right", "justify"])
@@ -1886,22 +1893,6 @@ class PropertiesPanel(QScrollArea):
         value.setFont(font)
         form.addRow("Value", value)
 
-        text_size = QDoubleSpinBox()
-        text_size.setObjectName("measurementTextSize")
-        text_size.setRange(3.0, 96.0)
-        text_size.setSingleStep(0.5)
-        text_size.setValue(item.style.font_size)
-        text_size.setSuffix(" pt")
-        text_size.valueChanged.connect(
-            lambda size: self._slide(
-                lambda selected: setattr(selected.style, "font_size", size),
-                "Measurement text size"))
-        form.addRow("Text size", text_size)
-        colour = ColorButton(item.style.text_color, label="Text colour")
-        colour.colorChanged.connect(lambda value: self._apply(
-            lambda i: setattr(i.style, "text_color", value), "Text colour"))
-        form.addRow("Text colour", colour)
-
         subject = QLineEdit(item.subject)
         subject.setToolTip("Measurements sharing a subject are totalled in the markups list")
         subject.textEdited.connect(
@@ -1965,6 +1956,13 @@ class PropertiesPanel(QScrollArea):
         symbol.currentTextChanged.connect(
             lambda value: self._apply(lambda i: setattr(i, "symbol", value), "Count symbol"))
         form.addRow("Symbol", symbol)
+        number = QSpinBox()
+        number.setObjectName("countNumber")
+        number.setRange(1, 999999)
+        number.setValue(item.index)
+        number.valueChanged.connect(
+            lambda value: self._apply(lambda i: setattr(i, "index", value), "Count number"))
+        form.addRow("Number", number)
         show = QCheckBox("Show number")
         show.setChecked(item.show_index)
         show.toggled.connect(
@@ -1984,6 +1982,16 @@ class PropertiesPanel(QScrollArea):
         subtext.textEdited.connect(
             lambda text: self._apply(lambda i: setattr(i, "subtext", text), "Stamp"))
         form.addRow("Sub-text", subtext)
+        radius = QDoubleSpinBox()
+        radius.setObjectName("stampCornerRadius")
+        radius.setRange(0, 100)
+        radius.setSingleStep(0.5)
+        radius.setValue(item.style.corner_radius)
+        radius.setSuffix(" pt")
+        radius.valueChanged.connect(lambda value: self._slide(
+            lambda selected: setattr(selected.style, "corner_radius", value),
+            "Stamp corners"))
+        form.addRow("Corners", radius)
 
     def _set_stamp_text(self, text: str) -> None:
         colour = STAMP_PRESETS.get(text.upper())
