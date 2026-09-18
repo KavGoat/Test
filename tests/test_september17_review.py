@@ -2,6 +2,7 @@
 import pymupdf
 import pytest
 from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import QImage, QPainter
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QDoubleSpinBox, QSlider, QSpinBox
 
@@ -21,6 +22,7 @@ def test_pdf_content_snaps_without_vector_import(window, tmp_path):
     source = pymupdf.open()
     page = source.new_page(width=400, height=300)
     page.draw_line((40, 80), (180, 80))
+    page.draw_line((110, 35), (110, 125))
     path = tmp_path / "snap.pdf"
     source.save(path)
     source.close()
@@ -34,6 +36,9 @@ def test_pdf_content_snaps_without_vector_import(window, tmp_path):
     point = frame.mapToScene(QPointF(42, 82))
     hover(window.view, point.x(), point.y())
     assert window.view._snap_marker == frame.mapToScene(QPointF(40, 80))
+    hover(window.view, *tuple(frame.mapToScene(QPointF(111, 79)).toTuple()))
+    assert window.view._snap_marker == frame.mapToScene(QPointF(110, 80))
+    assert window.view._snap_caught.startswith("crossing")
     assert not frame.markups(), "snap geometry must not become document markups"
     first = frame.pdf_snap_items()
     assert frame.pdf_snap_items() is first
@@ -127,6 +132,18 @@ def test_stamp_text_and_corners_are_editable_but_flag_has_no_false_dash(window):
     assert stamp.style.corner_radius == 12
     assert DASH not in capabilities(FlagItem())
     assert HATCH not in capabilities(FlagItem())
+
+
+def test_flag_opacity_applies_to_pole_as_well_as_flag(window):
+    flag = FlagItem()
+    flag.style.opacity = 0.0
+    image = QImage(30, 30, QImage.Format_ARGB32)
+    image.fill(Qt.transparent)
+    painter = QPainter(image)
+    flag.paint_content(painter)
+    painter.end()
+    assert image.pixelColor(2, 17).alpha() == 0
+    assert image.pixelColor(10, 5).alpha() == 0
 
 
 def test_sync_choice_propagates_and_zoom_preserves_source_anchor(window, qapp):

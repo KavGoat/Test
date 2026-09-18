@@ -1113,7 +1113,9 @@ class FlagItem(MarkupItem):
 
     def paint_content(self, painter: QPainter) -> None:
         painter.setRenderHint(QPainter.Antialiasing, True)
-        pole = QPen(QColor(self.style.stroke or "#c92a2a"))
+        pole_colour = QColor(self.style.stroke or "#c92a2a")
+        pole_colour.setAlphaF(max(0.0, min(1.0, self.style.opacity)))
+        pole = QPen(pole_colour)
         pole.setWidthF(max(self.style.width, 0.8))
         painter.setPen(pole)
         painter.drawLine(QPointF(2, 0), QPointF(2, self.HEIGHT))
