@@ -1,5 +1,25 @@
 # MarkForge — evidence record
 
+## Clarification and usability follow-up — 2026-09-18
+
+**947 tests passed, no skips** in the full offscreen Qt suite. The native Cocoa
+stress session (`session_fuzz.py 41 300`) completed 300 mouse/keyboard actions
+across three pages with zero failures and a clean exit. A focused native run
+also checked Whiteout, break controls and window fit after the final label
+changes. Rendered screenshots of second-point snapping and the break Properties
+panel were inspected. The alignment guide paints continuously and clears after
+placement; the break now has independent width, height and position controls
+with separate handles. The style toolbar now uses the same “Thickness” and
+“Head size” names as Properties.
+
+PDF content snapping now reaches source vectors beyond the old import cap
+while building interactive snap items only near the pointer. The real PDF
+test checks an intersection and re-editing a line endpoint. Whiteout was
+verified to remove flattened source artwork while retaining a live markup
+through Undo and Redo. The task list clarification was mirrored in Markdown
+and XLSX without changing user-owned completion cells. Windows geometry,
+third-party viewer clicks and dense user-PDF acceptance remain unverified.
+
 ## Follow-up — 2026-09-18
 
 **945 tests passed, no skips** in the final full offscreen Qt suite (163.46 seconds).

@@ -606,6 +606,7 @@ class PageFrame(QGraphicsObject):
             if previous.scene() is not None:
                 previous.scene().removeItem(previous)
         self._pdf_snap_key = key
+        self._pdf_snap_payloads = []
         self._pdf_snap_items = []
         self._pdf_snap_bins = {}
         self._pdf_snap_broad = []
@@ -622,18 +623,17 @@ class PageFrame(QGraphicsObject):
         try:
             width, _ = source.page_size(self.page.pdf_page_index)
             strokes = pdfvector.strokes_of_page(source, self.page.pdf_page_index)
-            for payload in pdfio._items_from(strokes[:pdfio.MOST_STROKES],
+            for payload in pdfio._items_from(strokes,
                                             self.page.width_pt / max(width, 1)):
-                item = build_item(payload)
-                item.setParentItem(self._pdf_snap_group)
-                item.setFlag(QGraphicsItem.ItemHasNoContents, True)
-                item.setFlag(QGraphicsItem.ItemIsSelectable, False)
-                item.setAcceptedMouseButtons(Qt.NoButton)
-                bounds = item.mapRectToParent(item.boundingRect())
+                points = payload["points"]
+                bounds = QRectF(payload["x"], payload["y"],
+                                max(point[0] for point in points),
+                                max(point[1] for point in points))
                 left, right = math.floor(bounds.left() / 64), math.floor(bounds.right() / 64)
                 top, bottom = math.floor(bounds.top() / 64), math.floor(bounds.bottom() / 64)
-                order = len(self._pdf_snap_items)
-                self._pdf_snap_items.append(item)
+                order = len(self._pdf_snap_payloads)
+                self._pdf_snap_payloads.append(payload)
+                self._pdf_snap_items.append(None)
                 if (right - left + 1) * (bottom - top + 1) > 256:
                     self._pdf_snap_broad.append(order)
                 else:
@@ -646,6 +646,8 @@ class PageFrame(QGraphicsObject):
 
     def _near_pdf_snap_items(self, near, reach):
         if near is None:
+            for index in range(len(self._pdf_snap_items)):
+                self._materialize_pdf_snap_item(index)
             return self._pdf_snap_items
         local = self.mapFromScene(near)
         indices = set(self._pdf_snap_broad)
@@ -654,7 +656,18 @@ class PageFrame(QGraphicsObject):
             for y in range(math.floor((local.y() - reach) / 64),
                            math.floor((local.y() + reach) / 64) + 1):
                 indices.update(self._pdf_snap_bins.get((x, y), ()))
-        return [self._pdf_snap_items[index] for index in sorted(indices)]
+        return [self._materialize_pdf_snap_item(index) for index in sorted(indices)]
+
+    def _materialize_pdf_snap_item(self, index):
+        item = self._pdf_snap_items[index]
+        if item is None:
+            item = build_item(self._pdf_snap_payloads[index])
+            item.setParentItem(self._pdf_snap_group)
+            item.setFlag(QGraphicsItem.ItemHasNoContents, True)
+            item.setFlag(QGraphicsItem.ItemIsSelectable, False)
+            item.setAcceptedMouseButtons(Qt.NoButton)
+            self._pdf_snap_items[index] = item
+        return item
 
     def markups(self) -> list[MarkupItem]:
         return [item for item in self.childItems() if isinstance(item, MarkupItem)]

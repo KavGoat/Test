@@ -1,7 +1,7 @@
 """Regressions for the September 17 interactive review."""
 import pymupdf
 import pytest
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt
 from PySide6.QtGui import QFontInfo, QImage, QPainter
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QDoubleSpinBox, QFontComboBox, QSlider, QSpinBox
@@ -42,6 +42,39 @@ def test_pdf_content_snaps_without_vector_import(window, tmp_path):
     assert not frame.markups(), "snap geometry must not become document markups"
     first = frame.pdf_snap_items()
     assert frame.pdf_snap_items() is first
+    window.select_tool("select")
+    line = PolyItem("line", [QPointF(220, 180), QPointF(260, 180)])
+    frame.add_markup(line, QPointF(0, 0))
+    line.setSelected(True)
+    handle = line.mapToScene(line.handle_points()["v1"])
+    target = frame.mapToScene(QPointF(40, 80))
+    drag(window.view, handle.x(), handle.y(), target.x() + 2, target.y() + 2)
+    assert (line.mapToScene(line.points[-1]) - target).manhattanLength() < 0.1
+
+
+def test_pdf_snap_reaches_vectors_after_the_import_limit(window, tmp_path, monkeypatch):
+    from markforge.io import pdfio
+
+    source = pymupdf.open()
+    page = source.new_page(width=400, height=300)
+    page.draw_line((30, 30), (60, 30))
+    page.draw_line((260, 190), (320, 190))
+    path = tmp_path / "later-vector.pdf"
+    source.save(path)
+    source.close()
+    monkeypatch.setattr(pdfio, "MOST_STROKES", 1)
+    window.open_path(str(path))
+    window.rebuild_scenes()
+    window.view.set_zoom(1)
+    window.document.settings.snap_to_content = True
+    window.document.settings.snap_to_items = False
+    window.select_tool("line")
+    frame = window.view.frame()
+    target = frame.mapToScene(QPointF(260, 190))
+    hover(window.view, target.x() + 2, target.y() + 2)
+    assert window.view._snap_marker == target
+    assert len(frame._pdf_snap_payloads) == 2
+    assert sum(item is not None for item in frame._pdf_snap_items) == 1
 
 
 def test_second_point_does_not_snap_to_previous_draft_endpoint(window):
@@ -54,6 +87,57 @@ def test_second_point_does_not_snap_to_previous_draft_endpoint(window):
     assert draft.mapToScene(draft.points[-1]) == QPointF(204, 164)
     press_key(window.view, Qt.Key_Escape)
     assert window.view._draft is None
+
+
+def test_second_line_point_snaps_to_alignment_and_clears_guides(window, qapp):
+    class PaintRegions(QObject):
+        def __init__(self):
+            super().__init__()
+            self.rects = []
+
+        def eventFilter(self, _object, event):
+            if event.type() == QEvent.Paint:
+                self.rects.append(event.rect())
+            return False
+
+    settings = window.document.settings
+    settings.snap_to_grid = False
+    settings.snap_to_items = True
+    settings.snap_to_alignment = True
+    anchor = RectItem(rect=QRectF(0, 0, 120, 70))
+    window.view.frame().add_markup(anchor, QPointF(100, 100))
+    window.show()
+    paints = PaintRegions()
+    window.view.viewport().installEventFilter(paints)
+    window.view.sticky_tool = True
+    window.select_tool("line")
+    click(window.view, 280, 300)
+    hover(window.view, 102, 340)
+    assert window.view._snap_guides == [("down", 100)]
+    assert window.view._draft.mapToScene(window.view._draft.points[-1]).x() == 100
+    qapp.processEvents()
+    assert any(rect.height() >= window.view.viewport().height() - 2
+               for rect in paints.rects), "the full guide must be repainted"
+    paints.rects.clear()
+    hover(window.view, 450, 520)
+    qapp.processEvents()
+    assert window.view._snap_guides == []
+    assert any(rect.height() >= window.view.viewport().height() - 2
+               for rect in paints.rects), "the old guide must be erased end to end"
+    hover(window.view, 102, 340)
+    import os
+    folder = os.environ.get("MARKFORGE_REVIEW_IMAGES")
+    if folder:
+        os.makedirs(folder, exist_ok=True)
+        qapp.processEvents()
+        window.grab().save(os.path.join(folder, "line-second-point.png"))
+    click(window.view, 102, 340)
+    assert window.view._draft is None
+    assert window.view._snap_guides == []
+    assert window.view._snap_marker is None
+    if folder:
+        qapp.processEvents()
+        window.grab().save(os.path.join(folder, "line-after-placement.png"))
 
 
 def test_curve_bounds_include_live_bow(window):
@@ -220,18 +304,49 @@ def test_add_pages_accepts_count_and_paper_size_in_one_undo(window, monkeypatch)
     assert len(window.document.pages) == before
 
 
-def test_break_controls_persist(window):
+def test_break_controls_persist(window, qapp):
     item = PolyItem("line", [QPointF(0, 0), QPointF(200, 0)])
     item.break_segment(0)
-    item.set_break_settings(0, 12, 0.7)
+    item.set_break_settings(0, 34, 24, 0.7)
     restored = build_item(item.serialize())
-    assert restored.break_settings(0) == (12, 0.7)
-    assert "b0" in restored.handle_points() and "z0" in restored.handle_points()
+    assert restored.break_settings(0) == (34, 24, 0.7)
+    assert {"b0", "w0", "z0"} <= restored.handle_points().keys()
+    old = item.serialize()
+    old["break_settings"] = {"0": [12, 0.7]}
+    assert build_item(old).break_settings(0) == pytest.approx((33.6, 24, 0.7))
     window.view.frame().add_markup(item, QPointF(100, 100))
     item.setSelected(True)
     window.refresh_selection()
     from PySide6.QtWidgets import QDoubleSpinBox
-    assert window.properties_panel.findChild(QDoubleSpinBox, "breakSize0") is not None
+    width = window.properties_panel.findChild(QDoubleSpinBox, "breakWidth0")
+    height = window.properties_panel.findChild(QDoubleSpinBox, "breakHeight0")
+    assert width is not None and height is not None
+    width.setValue(42)
+    height.setValue(15)
+    assert item.break_settings(0) == (42, 15, 0.7)
+    item.move_handle("w0", QPointF(110, 0))
+    assert item.break_settings(0)[0] == pytest.approx(60)
+    item.move_handle("z0", QPointF(140, 10))
+    assert item.break_settings(0)[1] == pytest.approx(20)
+    for key, shape in (("b0", Qt.SizeAllCursor), ("w0", Qt.SizeHorCursor),
+                       ("z0", Qt.SizeVerCursor)):
+        point = item.mapToScene(item.handle_points()[key])
+        hover(window.view, point.x(), point.y())
+        assert window.view.cursor().shape() == shape
+    width_handle = item.mapToScene(item.handle_points()["w0"])
+    drag(window.view, width_handle.x(), width_handle.y(),
+         width_handle.x() + 10, width_handle.y())
+    assert item.break_settings(0)[0] > 60
+    height_handle = item.mapToScene(item.handle_points()["z0"])
+    drag(window.view, height_handle.x(), height_handle.y(),
+         height_handle.x(), height_handle.y() + 6)
+    assert item.break_settings(0)[1] > 20
+    import os
+    folder = os.environ.get("MARKFORGE_REVIEW_IMAGES")
+    if folder:
+        window.show()
+        qapp.processEvents()
+        window.grab().save(os.path.join(folder, "break-properties.png"))
 
 
 def test_window_fits_standard_display_and_capture(window, qapp):

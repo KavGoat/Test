@@ -8,7 +8,7 @@ import re
 from copy import deepcopy
 from typing import Optional
 
-from PySide6.QtCore import (QEvent, QMimeData, QPoint, QPointF, QRectF, Qt,
+from PySide6.QtCore import (QEvent, QMimeData, QPoint, QPointF, QRect, QRectF, Qt,
                             QTimer, Signal)
 from PySide6.QtGui import (QBrush, QColor, QCursor, QFontMetricsF, QKeyEvent,
                            QMouseEvent, QPainter, QPen, QPolygonF, QTextCursor,
@@ -522,6 +522,7 @@ class PageView(QGraphicsView):
         return QCursor(Qt.PointingHandCursor)
 
     def finish_tool(self) -> None:
+        self.forget_snap()
         if self.tool_key == "count":
             self.statusMessage.emit(
                 "Count: click to place the next marker — Esc to finish")
@@ -851,9 +852,24 @@ class PageView(QGraphicsView):
 
     def forget_snap(self) -> None:
         """Nothing is caught: take the marker off."""
+        self._invalidate_snap_overlay(self._snap_marker, self._snap_guides)
         self._snap_marker = None
         self._snap_caught = ""
         self._snap_guides = []
+
+    def _invalidate_snap_overlay(self, marker=None, guides=()) -> None:
+        """Repaint the full length of old/new guides, not only the draft's bounds."""
+        viewport = self.viewport()
+        if marker is not None:
+            point = self.mapFromScene(marker)
+            viewport.update(QRect(point.x() - 8, point.y() - 8, 17, 17))
+        for direction, value in guides:
+            if direction == "across":
+                y = self.mapFromScene(QPointF(0, value)).y()
+                viewport.update(QRect(0, y - 3, viewport.width(), 7))
+            else:
+                x = self.mapFromScene(QPointF(value, 0)).x()
+                viewport.update(QRect(x - 3, 0, 7, viewport.height()))
 
     def snap_to_alignment(self, scene_pos: QPointF, frame,
                           ignore=()) -> Optional[QPointF]:
@@ -883,8 +899,10 @@ class PageView(QGraphicsView):
             guides.append(("down", nearest_x))
         if not guides:
             return None
+        self._invalidate_snap_overlay(self._snap_marker, self._snap_guides)
         self._snap_marker = QPointF(x, y)
         self._snap_guides = guides
+        self._invalidate_snap_overlay(self._snap_marker, self._snap_guides)
         caught = ("level and in line with what is drawn" if len(guides) > 1
                   else "level with what is drawn" if guides[0][0] == "across"
                   else "in line with what is drawn")
@@ -1116,7 +1134,9 @@ class PageView(QGraphicsView):
 
     def snap_moved(self, items: list, delta: QPointF) -> QPointF:
         """Nudge a move so a corner of what is dragged lands on a drawn point."""
+        self._invalidate_snap_overlay(self._snap_marker, self._snap_guides)
         self._snap_marker = None
+        self._snap_guides = []
         if not self.document().settings.snap_to_items or not items:
             return delta
         item, origin = items[0]
@@ -1141,10 +1161,12 @@ class PageView(QGraphicsView):
             return delta
         offset, marker = best
         self._snap_marker = QPointF(marker)
+        self._invalidate_snap_overlay(self._snap_marker)
         return delta + offset
 
     def snap_to_item(self, scene_pos: QPointF, ignore=()) -> Optional[QPointF]:
         """The nearest interesting point of another markup, if one is close."""
+        self._invalidate_snap_overlay(self._snap_marker, self._snap_guides)
         self._snap_marker = None
         self._snap_caught = ""
         self._snap_guides = []
@@ -1187,6 +1209,7 @@ class PageView(QGraphicsView):
         if best is not None:
             point, what, item = best
             self._snap_marker = QPointF(point)
+            self._invalidate_snap_overlay(self._snap_marker)
             caught = (f"crossing at {item.display_name().lower()}"
                       if what == "crossing"
                       else f"{what} of {item.display_name().lower()}")
@@ -2157,6 +2180,10 @@ class PageView(QGraphicsView):
                 key = item.handle_at(item.mapFromScene(scene_pos))
                 if key:
                     self.setCursor(cursor_for_handle(key))
+                    if key[:1] in ("b", "w", "z") and key[1:].isdigit():
+                        self.statusMessage.emit({"b": "Move break",
+                                                 "w": "Break width",
+                                                 "z": "Break height"}[key[0]])
                     return
         # A table's column and row edges, which are grabbable only while it is
         # open for typing into. The gutters carrying A/B/C and 1/2/3 are what

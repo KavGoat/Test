@@ -1,19 +1,19 @@
 # Tasks requiring follow-up
 
-Reviewed 2026-09-17. This file contains current follow-up only. Implementation
+Reviewed 2026-09-18. This file contains current follow-up only. Implementation
 and test evidence is in `COMPLETED_TASKS.md`. User-owned completion cells in
 `tasklist.md` and `tasklist.xlsx` remain unchanged.
 
 ## Application verification pending
 
 The September 17 findings and verified repairs are in
-[REVIEW_2026-09-17.md](REVIEW_2026-09-17.md). Still open: the cut-off Whiteout
-request; the meaning of “choose size and fits”; Windows 1920-pixel geometry;
-third-party viewer click acceptance for title/contents links; cold snapping
-latency on a dense user PDF; the full item-property/dialog audit; and native
-Bluebeam comparison on Windows. The 1280-pixel text style toolbar still puts
-some controls in overflow. These remain requirements in `tasklist.md` with
-all completion status left to the user.
+[REVIEW_2026-09-17.md](REVIEW_2026-09-17.md). The Whiteout request was clarified
+and verified; the fit option was withdrawn. Still open: Windows 1920-pixel
+geometry; third-party viewer click acceptance for title/contents links; cold
+snapping latency on a dense user PDF; the full item-property/dialog audit; and
+native Bluebeam comparison on Windows. The 1280-pixel text style toolbar still
+puts some controls in overflow. These remain requirements in `tasklist.md`
+with all completion status left to the user.
 The offscreen-only randomized session reported zero application failures but
 segfaulted during Qt shutdown; the same 300-round seed on the native Cocoa
 backend exited cleanly. The cause of that backend-specific teardown remains

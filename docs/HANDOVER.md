@@ -1,6 +1,17 @@
 # MarkForge — start here
 
-## Latest review: 2026-09-17
+## Latest review: 2026-09-18
+
+The clarified Whiteout behavior is flattened PDF artwork only; live markups
+remain editable and untouched. The requested fit option was withdrawn. PDF
+content snapping now includes vectors beyond the old import cap and creates
+interactive geometry only near the pointer. Second-point alignment guides
+repaint their full extent and clear after placement. Break symbols expose
+independent width, height and position with three handles; older saved settings
+still load. Both task registers were updated without changing completion
+status. See `COMPLETED_TASKS.md` for the 947-test suite and native stress run.
+
+## Previous review: 2026-09-17
 
 The September 17 user reports are recorded in both task registers. See
 `REVIEW_2026-09-17.md` for the visual/Qt-event walkthrough, repaired findings,

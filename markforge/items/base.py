@@ -293,6 +293,10 @@ def cursor_for_handle(key: str):
         return HANDLE_CURSORS[key]
     letter, rest = key[:1], key[1:]
     if rest.isdigit():
+        if letter == "w":
+            return Qt.SizeHorCursor
+        if letter == "z":
+            return Qt.SizeVerCursor
         if letter == "e":
             # A hinge slides along a line and hops from side to side: an open
             # hand says "take hold of this", which is what it is for.

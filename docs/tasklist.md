@@ -10,14 +10,14 @@ Completion status remains user-owned. This review must record evidence separatel
 |  | Two-point scale calibration must show only a temporary dashed guide with a consistent on-screen size, without dimension graphics or a permanent measurement. |
 |  | Replace sliders with editable numeric controls and visible up/down buttons for opacity, font size, thickness and other numeric styles in both Properties and the style toolbar. |
 |  | Arrowheads must finish at a sharp point. Show visual arrowhead previews in line-end dropdowns and the style toolbar. |
-|  | Title-block hyperlinks must work in exported PDFs opened in other viewers. Support selected paper size with a chosen quantity or fit option; clarify whether the quantity refers to pages or title blocks. |
+|  | Title-block hyperlinks must work in exported PDFs opened in other viewers. Support selected paper size with a chosen page quantity. The previously mentioned fit option was withdrawn 2026-09-18. |
 |  | Changing view synchronization must apply across all windows and split views of the same document, without enabling it separately in each view. Repair zoom and cursor anchoring while Document sync is active. |
 |  | Live polygon/segment curve edits must not clip when the preview extends beyond its previous bounds or viewport; update the preview throughout the gesture. |
 |  | Snapshot outline defaults must persist and apply to subsequent snapshots. |
-|  | Structural break lines must expose size and placement controls, including moving the break along its segment. |
+|  | Structural break lines must expose independent width, height and placement controls, including clear drag handles for each and moving the break along its segment. |
 |  | Repair alignment snapping during second-point placement; guides and snapped geometry must remain stable and agree. |
 |  | Repair snapping to PDF content, including endpoints and intersections. |
-|  | Clarify the unfinished report “whiteout should”; retain existing Whiteout requirements pending the missing detail. |
+|  | Whiteout removes only flattened PDF linework in the selected region; live editable markups must remain untouched. Scanned linework is flattened page content. |
 |  | Fix excessive window minimum width on Windows: a 1920-pixel display currently requests a 1941-pixel client width and triggers QWindowsWindow::setGeometry warnings. Controls must remain accessible at that display size. |
 |  | Run the full automated suite and a fresh visual mouse/keyboard walkthrough of existing features; compare Bluebeam terminology, colours, formatting and workflows. Record concrete issues and repair them. |
 |  | Audit every markup type: expose all applicable editable properties in Properties, and important colour, hatch, line-end, arrowhead, line-style, thickness and opacity controls in the style toolbar. |

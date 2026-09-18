@@ -6,6 +6,7 @@ from PySide6.QtGui import QColor, QImage, QPainter
 
 from markforge.io import pdfio, project
 from markforge.items.base import build_item
+from markforge.items.shapes import PolyItem
 from markforge.items.snapshot import SnapshotItem
 from tests.test_usability import drag, click, press_key
 
@@ -88,11 +89,15 @@ def test_pdf_snapshot_recolours_curves_without_losing_source(window, tmp_path):
 def test_whiteout_preserves_outside_vectors_and_undo(window, tmp_path):
     frame = import_drawing(window, tmp_path)
     original = frame.page.pdf_key
+    markup = PolyItem("line", [QPointF(70, 70), QPointF(120, 70)])
+    frame.add_markup(markup)
+    markup_id = markup.uid
     window.select_tool("whiteout")
     a, b = frame.mapToScene(QPointF(70, 60)), frame.mapToScene(QPointF(120, 90))
     drag(window.view, a.x(), a.y(), b.x(), b.y())
     page = window.document.pages[0]
     assert page.pdf_key != original
+    assert any(item.uid == markup_id for item in page.frame.markups())
     with pymupdf.open(stream=window.document.asset(page.pdf_key), filetype="pdf") as source:
         pix = source[0].get_pixmap()
         assert pix.pixel(90, 80)[:3] == (255, 255, 255)
@@ -100,8 +105,10 @@ def test_whiteout_preserves_outside_vectors_and_undo(window, tmp_path):
         assert max(pix.pixel(160, 80)[:3]) < 30
     window.undo_stack.undo()
     assert window.document.pages[0].pdf_key == original
+    assert any(item.uid == markup_id for item in window.document.pages[0].frame.markups())
     window.undo_stack.redo()
     assert window.document.pages[0].pdf_key != original
+    assert any(item.uid == markup_id for item in window.document.pages[0].frame.markups())
     saved = tmp_path / "whiteout.pdf"
     project.save_document(window.document, str(saved))
     with pymupdf.open(saved) as source:

@@ -1615,18 +1615,21 @@ class PropertiesPanel(QScrollArea):
     def _add_breaks(self, item: PolyItem) -> None:
         for segment in sorted(item.broken):
             form = self._group(f"Break {segment + 1}")
-            size, position = item.break_settings(segment)
-            for label, value, high, suffix in (("Size", size, 200, " pt"),
+            width, height, position = item.break_settings(segment)
+            for label, value, high, suffix in (("Width", width, 500, " pt"),
+                                               ("Height", height, 500, " pt"),
                                                ("Position", position * 100, 95, " %")):
                 spin = QDoubleSpinBox()
-                spin.setRange(0.5 if label == "Size" else 5, high)
+                spin.setRange(1 if label != "Position" else 5, high)
                 spin.setValue(value)
                 spin.setSuffix(suffix)
                 spin.setObjectName(f"break{label}{segment}")
                 spin.valueChanged.connect(lambda value, s=segment, name=label: self._slide(
-                    lambda i: i.set_break_settings(s,
-                        value if name == "Size" else i.break_settings(s)[0],
-                        value / 100 if name == "Position" else i.break_settings(s)[1]),
+                    lambda i: i.set_break_settings(
+                        s,
+                        value if name == "Width" else i.break_settings(s)[0],
+                        value if name == "Height" else i.break_settings(s)[1],
+                        value / 100 if name == "Position" else i.break_settings(s)[2]),
                     "Break " + name.lower()))
                 form.addRow(label, spin)
 

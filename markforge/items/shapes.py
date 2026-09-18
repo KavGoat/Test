@@ -617,8 +617,8 @@ class PolyItem(MarkupItem):
                                   2 * apex.y() - (leaves.y() + arrives.y()) / 2)
                 path.quadTo(control, arrives)
             elif self.broken.get(index):
-                size, position = self.break_settings(index)
-                jink = _break_symbol(leaves, arrives, size, position)
+                width, height, position = self.break_settings(index)
+                jink = _break_symbol(leaves, arrives, width, height, position)
                 if jink.isEmpty():
                     path.lineTo(arrives)
                 else:
@@ -638,13 +638,21 @@ class PolyItem(MarkupItem):
         """How big the break symbol is drawn: with the line, not fixed."""
         return max(self.style.width * 2.4, 5.0)
 
-    def break_settings(self, segment: int) -> tuple[float, float]:
+    def break_settings(self, segment: int) -> tuple[float, float, float]:
         value = self.broken.get(segment)
-        return tuple(value) if isinstance(value, (list, tuple)) else (self.break_size(), 0.5)
+        if isinstance(value, (list, tuple)):
+            if len(value) == 3:
+                return tuple(value)
+            if len(value) == 2:
+                return (value[0] * 2.8, value[0] * 2, value[1])
+        size = self.break_size()
+        return (size * 2.8, size * 2, 0.5)
 
-    def set_break_settings(self, segment: int, size: float, position: float) -> None:
+    def set_break_settings(self, segment: int, width: float, height: float,
+                           position: float) -> None:
         self.prepareGeometryChange()
-        self.broken[segment] = (max(0.5, float(size)), max(0.05, min(0.95, float(position))))
+        self.broken[segment] = (max(1.4, float(width)), max(1.0, float(height)),
+                                max(0.05, min(0.95, float(position))))
         self.touch()
         self.geometryChanged.emit()
 
@@ -705,11 +713,12 @@ class PolyItem(MarkupItem):
             for segment in sorted(self.broken):
                 if 0 <= segment < self.segment_count():
                     start, end = self.segment_ends(segment)
-                    size, position = self.break_settings(segment)
+                    width, height, position = self.break_settings(segment)
                     centre = start + (end - start) * position
                     direction = _unit(end - start)
                     handles[f"b{segment}"] = centre
-                    handles[f"z{segment}"] = centre + QPointF(-direction.y(), direction.x()) * size
+                    handles[f"w{segment}"] = centre + direction * (width / 2)
+                    handles[f"z{segment}"] = centre + QPointF(-direction.y(), direction.x()) * (height / 2)
             if self.kind in ("polyline", "polygon", "cloud") and len(self.points) > 2:
                 rect = self.local_rect()
                 handles["rot"] = QPointF(rect.center().x(), rect.top() - 22)
@@ -717,14 +726,19 @@ class PolyItem(MarkupItem):
         return super().handle_points()
 
     def move_handle(self, key: str, local_pos: QPointF, keep_ratio: bool = False) -> None:
-        if key.startswith(("b", "z")) and key[1:].isdigit():
+        if key.startswith(("b", "w", "z")) and key[1:].isdigit():
             segment = int(key[1:])
             if segment in self.broken:
                 start, end = self.segment_ends(segment)
-                size, position = self.break_settings(segment)
+                width, height, position = self.break_settings(segment)
                 along, sideways = _project(start, end, local_pos)
-                self.set_break_settings(segment, abs(sideways) if key[0] == "z" else size,
-                                        along if key[0] == "b" else position)
+                if key[0] == "w":
+                    width = 2 * abs(along - position) * _distance(start, end)
+                elif key[0] == "z":
+                    height = 2 * abs(sideways)
+                else:
+                    position = along
+                self.set_break_settings(segment, width, height, position)
                 return
         if self.kind == "arc" and key == "c0" and len(self.points) >= 2:
             self.prepareGeometryChange()
@@ -943,6 +957,20 @@ class PolyItem(MarkupItem):
                 painter.setBrush(QBrush(QColor(120, 200, 120)))
                 painter.drawEllipse(point, half, half)
                 painter.setBrush(QBrush(QColor(255, 255, 255)))
+            elif key.startswith("b") and key[1:].isdigit():
+                painter.setBrush(QBrush(QColor("#1971c2")))
+                painter.drawEllipse(point, 3 / zoom, 3 / zoom)
+                painter.setBrush(QBrush(QColor(255, 255, 255)))
+            elif key[:1] in ("w", "z") and key[1:].isdigit():
+                extent = 3.5 / zoom
+                painter.drawRect(QRectF(point.x() - extent, point.y() - extent,
+                                        2 * extent, 2 * extent))
+                if key[0] == "w":
+                    painter.drawLine(QPointF(point.x() - extent * 0.6, point.y()),
+                                     QPointF(point.x() + extent * 0.6, point.y()))
+                else:
+                    painter.drawLine(QPointF(point.x(), point.y() - extent * 0.6),
+                                     QPointF(point.x(), point.y() + extent * 0.6))
             else:
                 painter.drawRect(QRectF(point.x() - half, point.y() - half,
                                         handle, handle))
@@ -980,9 +1008,12 @@ class PolyItem(MarkupItem):
                        for k, v in (data.get("curved") or {}).items()}
         self.broken = {int(k): True for k in (data.get("broken") or [])}
         for key, value in (data.get("break_settings") or {}).items():
-            if int(key) in self.broken and len(value) == 2:
-                self.broken[int(key)] = (max(0.5, float(value[0])),
-                                         max(0.05, min(0.95, float(value[1]))))
+            if int(key) in self.broken and len(value) in (2, 3):
+                width, height, position = (value if len(value) == 3 else
+                                           (value[0] * 2.8, value[0] * 2, value[1]))
+                self.broken[int(key)] = (max(1.4, float(width)),
+                                         max(1.0, float(height)),
+                                         max(0.05, min(0.95, float(position))))
         self.cutouts_from_data(data)
         self.load_base(data)
 
@@ -1028,18 +1059,19 @@ def _project(start: QPointF, end: QPointF, point: QPointF) -> tuple[float, float
     return max(0.1, min(0.9, forward)), sideways
 
 
-def _break_symbol(start: QPointF, end: QPointF, size: float, position: float = 0.5) -> QPainterPath:
+def _break_symbol(start: QPointF, end: QPointF, width: float, height: float,
+                  position: float = 0.5) -> QPainterPath:
     """The drafting break: the line stops, jinks across itself and goes on.
 
     The symbol every structural drawing uses to say "this carries on, and the
     middle of it is not drawn to length".
     """
     length = _distance(start, end)
-    if length < size * 3:
+    if length < width * 1.07:
         return QPainterPath()
     along = _unit(_towards(start, end))
     across = QPointF(-along.y(), along.x())
-    position = max(size * 1.4 / length, min(1 - size * 1.4 / length, position))
+    position = max(width / (2 * length), min(1 - width / (2 * length), position))
     middle = start + (end - start) * position
 
     def at(forward: float, sideways: float) -> QPointF:
@@ -1047,10 +1079,10 @@ def _break_symbol(start: QPointF, end: QPointF, size: float, position: float = 0
                        middle.y() + along.y() * forward + across.y() * sideways)
 
     path = QPainterPath(start)
-    path.lineTo(at(-size * 1.4, 0))
-    path.lineTo(at(-size * 0.5, size))
-    path.lineTo(at(size * 0.5, -size))
-    path.lineTo(at(size * 1.4, 0))
+    path.lineTo(at(-width / 2, 0))
+    path.lineTo(at(-width / 5.6, height / 2))
+    path.lineTo(at(width / 5.6, -height / 2))
+    path.lineTo(at(width / 2, 0))
     path.lineTo(end)
     return path
 
