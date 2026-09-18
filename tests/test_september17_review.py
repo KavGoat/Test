@@ -2,9 +2,9 @@
 import pymupdf
 import pytest
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QImage, QPainter
+from PySide6.QtGui import QFontInfo, QImage, QPainter
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QDoubleSpinBox, QSlider, QSpinBox
+from PySide6.QtWidgets import QDoubleSpinBox, QFontComboBox, QSlider, QSpinBox
 
 from markforge.items.shapes import PolyItem, RectItem
 from markforge.items.base import build_item
@@ -12,7 +12,7 @@ from markforge.items.snapshot import SnapshotItem
 from markforge.items.contents import ContentsItem
 from markforge.items.measure import CountItem
 from markforge.items.shapes import SketchItem
-from markforge.items.text import FlagItem, StampItem
+from markforge.items.text import FlagItem, StampItem, TextItem
 from markforge.ui.stylecaps import DASH, FONT, HATCH, OPACITY, capabilities
 from markforge.io import export, project
 from tests.test_usability import click, hover, drag, press_key, type_text
@@ -144,6 +144,19 @@ def test_flag_opacity_applies_to_pole_as_well_as_flag(window):
     painter.end()
     assert image.pixelColor(2, 17).alpha() == 0
     assert image.pixelColor(10, 5).alpha() == 0
+
+
+def test_font_controls_show_the_font_actually_used_on_this_system(window):
+    item = TextItem("Beam revision")
+    window.view.frame().add_markup(item, QPointF(100, 100))
+    item.setSelected(True)
+    window.refresh_selection()
+    rendered = QFontInfo(item.style.font()).family()
+    panel_font = window.properties_panel.findChild(QFontComboBox)
+    assert panel_font is not None
+    assert panel_font.currentFont().family() == rendered
+    assert window.font_family_combo.currentFont().family() == rendered
+    assert item.style.font_family == "Segoe UI"
 
 
 def test_sync_choice_propagates_and_zoom_preserves_source_anchor(window, qapp):

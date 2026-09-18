@@ -2,13 +2,16 @@
 
 ## Follow-up — 2026-09-18
 
-**944 tests passed, no skips** in the full offscreen Qt suite (161.92 seconds).
+**945 tests passed, no skips** in the final full offscreen Qt suite (163.46 seconds).
 The native Cocoa stress session (`session_fuzz.py 41 300`) completed 300
 randomized actions with zero reported failures and a clean exit. A real PDF
 fixture now verifies snapping at the crossing of two source lines as well as
 an endpoint. Flag opacity now affects its pole as well as its fabric; a
-transparent render regression covers the failure. User-owned task completion
-cells remain unchanged.
+transparent render regression covers the failure. On systems without the
+saved font family, Properties and the style toolbar now name the font Qt
+actually renders instead of an unrelated first font in the picker. A fresh
+rendered window screenshot confirmed the text controls agree. User-owned task
+completion cells remain unchanged.
 
 ## Review evidence — 2026-09-17
 

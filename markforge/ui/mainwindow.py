@@ -9,7 +9,7 @@ from typing import Optional
 from PySide6.QtCore import (QBuffer, QEvent, QIODevice, QMimeData, QPoint, QPointF,
                             QRect, QRectF,
                             QSize, Qt, QTimer, Signal)
-from PySide6.QtGui import (QAction, QActionGroup, QColor, QCursor, QFont, QImage,
+from PySide6.QtGui import (QAction, QActionGroup, QColor, QCursor, QFont, QFontInfo, QImage,
                            QKeySequence, QPainter, QTextBlockFormat,
                            QTextCharFormat, QTextCursor, QTransform, QUndoStack)
 from PySide6.QtPrintSupport import QPrintDialog, QPrintPreviewDialog, QPrinter
@@ -3118,7 +3118,8 @@ class MainWindow(QMainWindow):
                     (self.arrow_end_combo, active.style.arrow_end, "setCurrentText"),
                     (self.dash_combo, active.style.line_style, "setCurrentText"),
                     (self.font_spin, active.style.font_size, "setValue"),
-                    (self.font_family_combo, QFont(active.style.font_family), "setCurrentFont"),
+                    (self.font_family_combo, QFont(QFontInfo(active.style.font()).family()),
+                     "setCurrentFont"),
                     (self.text_colour_button, active.style.text_color, "set_color"),
                     (self.text_align_combo, active.style.align, "setCurrentText"),
                     (self.hatch_combo, active.style.hatch or "plain",

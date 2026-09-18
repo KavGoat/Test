@@ -5,7 +5,7 @@ import csv
 import re
 
 from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, QTimer, Qt, Signal
-from PySide6.QtGui import (QBrush, QColor, QFont, QIcon, QKeySequence,
+from PySide6.QtGui import (QBrush, QColor, QFont, QFontInfo, QIcon, QKeySequence,
                            QPainter, QPen, QPixmap)
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox,
                                QDoubleSpinBox, QInputDialog, QMessageBox,
@@ -1633,7 +1633,7 @@ class PropertiesPanel(QScrollArea):
     def _add_text(self, first: MarkupItem, compact: bool = False) -> None:
         form = self._group("Text")
         family = QFontComboBox()
-        family.setCurrentFont(QFont(first.style.font_family))
+        family.setCurrentFont(QFont(QFontInfo(first.style.font()).family()))
         family.currentFontChanged.connect(
             lambda font: self._apply(lambda i: setattr(i.style, "font_family", font.family()),
                                      "Font"))
