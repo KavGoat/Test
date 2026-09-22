@@ -287,23 +287,25 @@ class CollapsiblePanel(tk.Frame):
     """
 
     def __init__(self, parent: tk.Widget, title: str):
-        super().__init__(parent, bd=1, relief=tk.GROOVE, bg="#f0f0f0")
+        super().__init__(parent, bd=0, relief=tk.FLAT, bg="#ece9d8")
         self._expanded = True
         self._title = title
-        self._header = tk.Frame(self, bg="#dcd8d0", cursor="hand2")
+        self._header = tk.Frame(self, bg="#ece9d8", cursor="hand2")
         self._header.pack(fill=tk.X)
         self._arrow_label = tk.Label(
-            self._header, text="▼", font=("DejaVu Sans", 7),
-            bg="#dcd8d0", fg="#444444", padx=2,
+            self._header, text="▼", font=("DejaVu Sans", 6),
+            bg="#ece9d8", fg="#666666", padx=1,
         )
-        self._arrow_label.pack(side=tk.LEFT, padx=(4, 0))
+        self._arrow_label.pack(side=tk.LEFT, padx=(2, 0))
         self._title_label = tk.Label(
             self._header, text=title, font=("DejaVu Sans", 8, "bold"),
-            bg="#dcd8d0", fg="#333333", anchor=tk.W, padx=2, pady=2,
+            bg="#ece9d8", fg="#000000", anchor=tk.W, padx=2, pady=1,
         )
         self._title_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        self._content = tk.Frame(self, bg="#f0f0f0")
-        self._content.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
+        # Separator line below header
+        tk.Frame(self, height=1, bg="#c0c0c0").pack(fill=tk.X)
+        self._content = tk.Frame(self, bg="#ffffff", bd=1, relief=tk.SUNKEN)
+        self._content.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
 
         for w in (self._header, self._arrow_label, self._title_label):
             w.bind("<Button-1>", self._toggle)
@@ -317,7 +319,7 @@ class CollapsiblePanel(tk.Frame):
             self._content.pack_forget()
             self._arrow_label.configure(text="▶")
         else:
-            self._content.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
+            self._content.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
             self._arrow_label.configure(text="▼")
         self._expanded = not self._expanded
 
@@ -328,13 +330,13 @@ def _make_panel_btn(frame: tk.Widget, label: str, value: str,
     btn = tk.Button(
         frame, text=label, width=4, height=1,
         font=("DejaVu Sans", 9), relief=tk.FLAT,
-        bg="#f0f0f0", activebackground="#c1d2ee",
+        bg="#ffffff", activebackground="#c1d2ee",
         bd=0, highlightthickness=0, padx=1, pady=0,
         command=lambda: on_insert(value) if on_insert else None,
     )
     btn.grid(row=row, column=col, padx=0, pady=0, sticky="nsew")
     def enter(e): btn.configure(bg="#dce6f4", relief=tk.RAISED)
-    def leave(e): btn.configure(bg="#f0f0f0", relief=tk.FLAT)
+    def leave(e): btn.configure(bg="#ffffff", relief=tk.FLAT)
     btn.bind("<Enter>", enter)
     btn.bind("<Leave>", leave)
     return btn
@@ -655,7 +657,7 @@ class MathPanelContainer(ttk.Frame):
         super().__init__(parent)
         self._on_insert = on_insert
 
-        self._canvas = tk.Canvas(self, width=180, highlightthickness=0)
+        self._canvas = tk.Canvas(self, width=180, highlightthickness=0, bg="#ece9d8")
         self._scrollbar = ttk.Scrollbar(
             self, orient=tk.VERTICAL, command=self._canvas.yview
         )

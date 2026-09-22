@@ -553,36 +553,44 @@ class WorksheetCanvas(ttk.Frame):
             ph = 1100
 
         num_pages = max(5, self._estimate_page_count(ws, ph))
-        shadow_w = 3
+        shadow_w = 4
         page_gap = 10
 
         z = self._zoom
         for page in range(num_pages):
             page_y = page * (ph + page_gap)
             sw = max(2, _z(shadow_w, z))
-            # Right shadow
-            self._canvas.create_rectangle(
-                _z(pw, z) + 1, _z(page_y, z) + sw,
-                _z(pw, z) + sw, _z(page_y + ph, z) + sw,
-                fill="#808080", outline="", tags="page_shadow"
-            )
-            # Bottom shadow
-            self._canvas.create_rectangle(
-                sw, _z(page_y + ph, z) + 1,
-                _z(pw, z) + sw, _z(page_y + ph, z) + sw,
-                fill="#808080", outline="", tags="page_shadow"
-            )
+            # Right shadow (gradient effect: darker near edge)
+            for si in range(sw):
+                shade = 128 + si * 20
+                shade = min(shade, 200)
+                c = f"#{shade:02x}{shade:02x}{shade:02x}"
+                self._canvas.create_line(
+                    _z(pw, z) + 1 + si, _z(page_y, z) + sw,
+                    _z(pw, z) + 1 + si, _z(page_y + ph, z) + sw,
+                    fill=c, tags="page_shadow"
+                )
+            # Bottom shadow (gradient)
+            for si in range(sw):
+                shade = 128 + si * 20
+                shade = min(shade, 200)
+                c = f"#{shade:02x}{shade:02x}{shade:02x}"
+                self._canvas.create_line(
+                    sw, _z(page_y + ph, z) + 1 + si,
+                    _z(pw, z) + sw, _z(page_y + ph, z) + 1 + si,
+                    fill=c, tags="page_shadow"
+                )
             # White page
             self._canvas.create_rectangle(
                 0, _z(page_y, z), _z(pw, z), _z(page_y + ph, z),
-                fill="#ffffff", outline="#b0b0b0", width=1, tags="page_bg"
+                fill="#ffffff", outline="#c0c0c0", width=1, tags="page_bg"
             )
-            # Page break separator line (dashed blue like SMath Studio)
+            # Page break line (thin gray like real SMath Studio)
             if page > 0:
                 sep_y = _z(page_y, z)
                 self._canvas.create_line(
                     0, sep_y, _z(pw, z), sep_y,
-                    fill="#6699cc", dash=(6, 3), width=1, tags="page_bounds"
+                    fill="#808080", width=1, tags="page_bounds"
                 )
         self._page_height = ph
         self._page_width = pw
@@ -614,41 +622,30 @@ class WorksheetCanvas(ttk.Frame):
         z = self._zoom
         for page in range(num_pages):
             page_y = page * (ph + page_gap)
+            margin_color = "#e8e8e8"
             if mt > 0:
                 self._canvas.create_line(
                     _z(ml, z), _z(page_y + mt, z),
                     _z(pw - mr, z), _z(page_y + mt, z),
-                    fill="#e0e0e0", dash=(1, 3), tags="page_bounds"
+                    fill=margin_color, dash=(1, 4), tags="page_bounds"
                 )
             if mb > 0:
                 self._canvas.create_line(
                     _z(ml, z), _z(page_y + ph - mb, z),
                     _z(pw - mr, z), _z(page_y + ph - mb, z),
-                    fill="#e0e0e0", dash=(1, 3), tags="page_bounds"
+                    fill=margin_color, dash=(1, 4), tags="page_bounds"
                 )
             if ml > 0:
                 self._canvas.create_line(
                     _z(ml, z), _z(page_y, z),
                     _z(ml, z), _z(page_y + ph, z),
-                    fill="#e0e0e0", dash=(1, 3), tags="page_bounds"
+                    fill=margin_color, dash=(1, 4), tags="page_bounds"
                 )
             if mr > 0:
                 self._canvas.create_line(
                     _z(pw - mr, z), _z(page_y, z),
                     _z(pw - mr, z), _z(page_y + ph, z),
-                    fill="#e0e0e0", dash=(1, 3), tags="page_bounds"
-                )
-
-            # Page number in the gap between pages
-            if page > 0:
-                gap_y = page * (ph + page_gap) - page_gap // 2
-                fs_pg = max(7, _z(8, z))
-                self._canvas.create_text(
-                    _z(pw // 2, z), _z(gap_y, z),
-                    text=f"Page {page + 1}",
-                    font=("DejaVu Sans", fs_pg),
-                    fill="#a0a0a0", anchor="center",
-                    tags="page_bounds",
+                    fill=margin_color, dash=(1, 4), tags="page_bounds"
                 )
 
         self._draw_headers_footers(ws)
@@ -894,18 +891,19 @@ class WorksheetCanvas(ttk.Frame):
                 self._v_ruler.create_line(w - 1 - tick_w, spy, w - 1, spy, fill="#909090")
 
     def _update_scroll_region(self):
-        """Set the scrollable region to encompass all content."""
+        """Set the scrollable region to encompass all pages."""
+        pw = getattr(self, '_page_width', 850)
+        ph = getattr(self, '_page_height', 1100)
+        pg = getattr(self, '_page_gap', 10)
+        num = getattr(self, '_num_pages', 5)
+        z = self._zoom
+        total_h = _z(num * (ph + pg), z)
+        total_w = _z(pw, z) + 20
         bbox = self._canvas.bbox("all")
         if bbox:
-            x1, y1, x2, y2 = bbox
-            pw = getattr(self, '_page_width', 850)
-            self._canvas.configure(
-                scrollregion=(
-                    0, 0,
-                    max(x2, pw) + 20,
-                    y2 + 50,
-                )
-            )
+            total_w = max(total_w, bbox[2] + 20)
+            total_h = max(total_h, bbox[3] + 50)
+        self._canvas.configure(scrollregion=(0, 0, total_w, total_h))
         self._draw_ruler()
         self._draw_v_ruler()
 
