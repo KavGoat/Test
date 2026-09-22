@@ -207,6 +207,10 @@ class SMathApp:
         insert_menu.add_command(label="Integral", accelerator="Ctrl+I", command=self._on_insert_integral)
         insert_menu.add_command(label="Summation", accelerator="Ctrl+Shift+S", command=self._on_insert_summation)
         insert_menu.add_command(label="Product", accelerator="Ctrl+Shift+P", command=self._on_insert_product)
+        insert_menu.add_command(label="Square Root", command=self._on_insert_sqrt)
+        insert_menu.add_command(label="Absolute Value", command=self._on_insert_abs)
+        insert_menu.add_command(label="System of Equations", command=self._on_insert_system)
+        insert_menu.add_separator()
         insert_menu.add_command(label="Line Separator", command=self._on_insert_line)
         insert_menu.add_command(label="Area", command=self._on_insert_area)
         insert_menu.add_separator()
@@ -280,6 +284,11 @@ class SMathApp:
         view_menu.add_checkbutton(
             label="Show Margin Line", variable=self._show_margin_var,
             command=self._toggle_margin
+        )
+        self._show_sidebar_var = tk.BooleanVar(value=True)
+        view_menu.add_checkbutton(
+            label="Sidebar", variable=self._show_sidebar_var,
+            command=self._toggle_sidebar
         )
         view_menu.add_separator()
         view_menu.add_command(
@@ -477,6 +486,9 @@ class SMathApp:
             self._status_position.config(text=f"Position: {cx}, {cy}")
             zoom = self._canvas_widget.get_zoom_percent()
             self._status_zoom.config(text=f"{zoom}%")
+            calc_mode = "Automatic" if self._auto_calc_var.get() else "Manual"
+            n_regions = self._canvas_widget.get_region_count()
+            self._status_calc.config(text=f"{calc_mode} ({n_regions})")
             info = self._canvas_widget.get_selected_info()
             if info:
                 self._status_info.config(text=info)
@@ -896,6 +908,15 @@ class SMathApp:
     def _on_insert_product(self):
         self._insert_structure("_do_product", "Product")
 
+    def _on_insert_sqrt(self):
+        self._insert_structure("_do_sqrt", "Square Root")
+
+    def _on_insert_abs(self):
+        self._insert_structure("_do_abs", "Absolute Value")
+
+    def _on_insert_system(self):
+        self._insert_structure("_do_system", "System of Equations")
+
     def _insert_structure(self, method_name: str, label: str):
         if not self._canvas_widget._editing:
             self._canvas_widget._start_editing(
@@ -965,6 +986,12 @@ class SMathApp:
     def _toggle_margin(self):
         self._canvas_widget._show_margin = self._show_margin_var.get()
         self._canvas_widget._evaluate_and_render()
+
+    def _toggle_sidebar(self):
+        if self._show_sidebar_var.get():
+            self._paned.add(self._math_panels, weight=0)
+        else:
+            self._paned.forget(self._math_panels)
 
     def _show_regions_list(self):
         """Show a dialog listing all regions with navigation."""

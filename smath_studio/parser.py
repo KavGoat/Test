@@ -95,6 +95,7 @@ class Region:
     bg_color: str = "#ffffff"
     font_size: int = 10
     border: bool = False
+    locked: bool = False
     show_input_data: Optional[bool] = None
 
     # Content -- exactly one is set
@@ -342,6 +343,7 @@ def _parse_region(elem: ET.Element, ns: str) -> Region:
     region.bg_color = elem.get("bgColor", "#ffffff")
     region.font_size = int(elem.get("fontSize", "10") or "10")
     region.border = elem.get("border", "false").lower() == "true"
+    region.locked = elem.get("isLocked", "false").lower() == "true"
     sid = elem.get("showInputData")
     if sid is not None:
         region.show_input_data = sid.lower() != "false"

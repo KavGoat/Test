@@ -393,6 +393,11 @@ class WorksheetCanvas(ttk.Frame):
         except Exception:
             return (0, 0)
 
+    def get_region_count(self) -> int:
+        if self._worksheet:
+            return len(self._worksheet.regions)
+        return 0
+
     def get_selected_info(self) -> str:
         """Return a description of the selected region for the status bar."""
         if self._editing:
@@ -1235,9 +1240,17 @@ class WorksheetCanvas(ttk.Frame):
         ]:
             h = self._canvas.create_rectangle(
                 hx - hs, hy - hs, hx + hs, hy + hs,
-                fill="#ffffff", outline=_SELECTION_COLOR, width=1,
+                fill=_SELECTION_COLOR, outline=_SELECTION_COLOR, width=1,
             )
             self._selection_items.append(h)
+
+        if rr.region.locked:
+            lock_item = self._canvas.create_text(
+                x2 + pad + 10, y1 - pad,
+                text="\U0001F512", font=("DejaVu Sans", 8),
+                fill="#666666", anchor="nw",
+            )
+            self._selection_items.append(lock_item)
 
     def _hit_resize_handle(self, cx: int, cy: int) -> Optional[str]:
         """Check if (cx, cy) is on a resize handle of the selected region.
@@ -1334,6 +1347,10 @@ class WorksheetCanvas(ttk.Frame):
 
         handle = self._hit_resize_handle(cx, cy)
         if handle is not None:
+            if self._selected_index is not None and self._selected_index < len(self._rendered):
+                if self._rendered[self._selected_index].region.locked:
+                    self._canvas.focus_set()
+                    return
             self._resizing = True
             self._resize_handle = handle
             self._drag_start_x = cx
@@ -1414,7 +1431,19 @@ class WorksheetCanvas(ttk.Frame):
         frame.pack(fill=tk.BOTH, expand=True)
 
         row = 0
-        tk.Label(frame, text=f"ID: {region.id}", font=("DejaVu Sans", 9)).grid(
+        if region.math is not None:
+            rtype = "Math"
+        elif region.text_contents:
+            rtype = "Text"
+        elif region.area:
+            rtype = "Area"
+        elif region.plot:
+            rtype = "Plot"
+        elif region.picture:
+            rtype = "Picture"
+        else:
+            rtype = "Region"
+        tk.Label(frame, text=f"Type: {rtype}    ID: {region.id}", font=("DejaVu Sans", 9)).grid(
             row=row, column=0, columnspan=2, sticky="w", pady=2
         )
 
@@ -1478,6 +1507,12 @@ class WorksheetCanvas(ttk.Frame):
             row=row, column=0, columnspan=2, sticky="w", pady=2
         )
 
+        row += 1
+        locked_var = tk.BooleanVar(value=region.locked)
+        tk.Checkbutton(frame, text="Locked (prevent moving/editing)", variable=locked_var).grid(
+            row=row, column=0, columnspan=2, sticky="w", pady=2
+        )
+
         dec_var = None
         trailing_var = None
         if region.math is not None:
@@ -1516,6 +1551,7 @@ class WorksheetCanvas(ttk.Frame):
             region.color = color_var.get().strip() or None
             region.bg_color = bg_var.get().strip() or "#ffffff"
             region.border = border_var.get()
+            region.locked = locked_var.get()
             if dec_var is not None and region.math is not None:
                 try:
                     region.math.decimal_places = int(dec_var.get())
@@ -1581,12 +1617,25 @@ class WorksheetCanvas(ttk.Frame):
     def get_zoom_percent(self) -> int:
         return int(self._zoom * 100)
 
+    _HANDLE_CURSORS = {
+        "nw": "top_left_corner", "n": "top_side", "ne": "top_right_corner",
+        "w": "left_side", "e": "right_side",
+        "sw": "bottom_left_corner", "s": "bottom_side", "se": "bottom_right_corner",
+    }
+
     def _on_motion(self, event: tk.Event):
-        """Highlight region under mouse on hover."""
+        """Highlight region under mouse on hover, change cursor for resize handles."""
         if self._editing:
             return
         cx = int(self._canvas.canvasx(event.x))
         cy = int(self._canvas.canvasy(event.y))
+
+        handle = self._hit_resize_handle(cx, cy)
+        if handle:
+            self._canvas.config(cursor=self._HANDLE_CURSORS[handle])
+        else:
+            self._canvas.config(cursor="")
+
         hit = self._hit_test(cx, cy)
         if hit != self._hover_index:
             for item_id in self._hover_items:
@@ -1606,10 +1655,30 @@ class WorksheetCanvas(ttk.Frame):
                 )
                 self._hover_items.append(hover_rect)
 
+    def _auto_scroll_on_drag(self, event: tk.Event):
+        """Scroll canvas when dragging near edges."""
+        margin = 30
+        w = self._canvas.winfo_width()
+        h = self._canvas.winfo_height()
+        dx = dy = 0
+        if event.x < margin:
+            dx = -20
+        elif event.x > w - margin:
+            dx = 20
+        if event.y < margin:
+            dy = -20
+        elif event.y > h - margin:
+            dy = 20
+        if dx:
+            self._canvas.xview_scroll(dx, "units")
+        if dy:
+            self._canvas.yview_scroll(dy, "units")
+
     def _on_drag(self, event: tk.Event):
         """Handle mouse drag to move selected region, resize, or draw rubberband."""
         if self._editing:
             return
+        self._auto_scroll_on_drag(event)
         cx = int(self._canvas.canvasx(event.x))
         cy = int(self._canvas.canvasy(event.y))
 
@@ -1652,6 +1721,8 @@ class WorksheetCanvas(ttk.Frame):
         if self._selected_index is not None and not self._rubberband:
             # Moving selected region(s)
             if self._selected_index >= len(self._rendered):
+                return
+            if self._rendered[self._selected_index].region.locked:
                 return
             dx = cx - self._drag_start_x
             dy = cy - self._drag_start_y
@@ -1882,6 +1953,10 @@ class WorksheetCanvas(ttk.Frame):
             self._select_region(hit)
             return "break"
 
+        if keysym == "F2":
+            self._start_editing(self._cursor_x, self._cursor_y, mode="text")
+            return "break"
+
         if keysym == "F5":
             self.evaluate_selected()
             return "break"
@@ -1972,6 +2047,10 @@ class WorksheetCanvas(ttk.Frame):
         if hit is not None and hit < len(self._rendered):
             rr = self._rendered[hit]
             region = rr.region
+            if region.locked:
+                self._select_region(hit)
+                self._canvas.focus_set()
+                return
             if region.math is not None:
                 if self._try_unit_change(region, rr, cx, cy):
                     return
@@ -2260,6 +2339,8 @@ class WorksheetCanvas(ttk.Frame):
         regions_to_remove = []
         for idx in sorted(indices, reverse=True):
             if idx < len(self._rendered):
+                if self._rendered[idx].region.locked:
+                    continue
                 regions_to_remove.append(self._rendered[idx].region)
         for region in regions_to_remove:
             if region in self._worksheet.regions:

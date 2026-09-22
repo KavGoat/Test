@@ -122,6 +122,8 @@ def _write_region(lines: list[str], region: Region, indent: int = 2):
         attrs.append(f'fontSize="{region.font_size}"')
     if region.border:
         attrs.append('border="true"')
+    if region.locked:
+        attrs.append('isLocked="true"')
     if region.show_input_data is not None and not region.show_input_data:
         attrs.append('showInputData="False"')
 
