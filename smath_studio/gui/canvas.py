@@ -907,11 +907,14 @@ class WorksheetCanvas(ttk.Frame):
         zoomed_font_size = max(6, int(region.font_size * self._zoom))
         if self._math_renderer is not None:
             try:
+                tz = self._trailing_zeros
+                if hasattr(math_data, 'trailing_zeros') and math_data.trailing_zeros is not None:
+                    tz = math_data.trailing_zeros
                 rendered_items = self._math_renderer.render(
                     self._canvas, math_data, x, y, display_result,
                     font_size=zoomed_font_size,
                     color=region.color,
-                    trailing_zeros=self._trailing_zeros,
+                    trailing_zeros=tz,
                 )
                 if rendered_items:
                     return rendered_items
@@ -1435,6 +1438,25 @@ class WorksheetCanvas(ttk.Frame):
             row=row, column=0, columnspan=2, sticky="w", pady=2
         )
 
+        dec_var = None
+        trailing_var = None
+        if region.math is not None:
+            row += 1
+            tk.Label(frame, text="Decimal Places:", font=("DejaVu Sans", 9)).grid(
+                row=row, column=0, sticky="e", padx=5
+            )
+            dec_val = region.math.decimal_places if region.math.decimal_places else 4
+            dec_var = tk.StringVar(value=str(dec_val))
+            tk.Spinbox(frame, from_=0, to=15, textvariable=dec_var, width=5).grid(
+                row=row, column=1, sticky="w", pady=2
+            )
+
+            row += 1
+            trailing_var = tk.BooleanVar(value=getattr(region.math, 'trailing_zeros', False))
+            tk.Checkbutton(frame, text="Show Trailing Zeros", variable=trailing_var).grid(
+                row=row, column=0, columnspan=2, sticky="w", pady=2
+            )
+
         row += 1
         btn_frame = tk.Frame(frame)
         btn_frame.grid(row=row, column=0, columnspan=2, pady=(10, 0))
@@ -1454,6 +1476,13 @@ class WorksheetCanvas(ttk.Frame):
             region.color = color_var.get().strip() or None
             region.bg_color = bg_var.get().strip() or "#ffffff"
             region.border = border_var.get()
+            if dec_var is not None and region.math is not None:
+                try:
+                    region.math.decimal_places = int(dec_var.get())
+                except ValueError:
+                    pass
+            if trailing_var is not None and region.math is not None:
+                region.math.trailing_zeros = trailing_var.get()
             dlg.destroy()
             self._mark_modified()
             self._evaluate_and_render()
