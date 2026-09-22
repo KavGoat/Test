@@ -85,7 +85,7 @@ class OptionsDialog(tk.Toplevel):
         self.grab_set()
         self.result: Optional[dict] = None
 
-        self.geometry("380x300")
+        self.geometry("400x380")
         self.update_idletasks()
         pw = parent.winfo_rootx() + parent.winfo_width() // 2
         ph = parent.winfo_rooty() + parent.winfo_height() // 2
@@ -170,6 +170,66 @@ class OptionsDialog(tk.Toplevel):
             row=4, column=0, columnspan=2, sticky=tk.W, pady=4
         )
 
+        # --- Display tab ---
+        disp_frame = ttk.Frame(notebook, padding=12)
+        notebook.add(disp_frame, text="Display")
+
+        self._exp_threshold_var = tk.IntVar(
+            value=settings.get("exponential_threshold", 3)
+        )
+        ttk.Label(disp_frame, text="Exponential threshold:").grid(
+            row=0, column=0, sticky=tk.W, pady=4
+        )
+        ttk.Spinbox(
+            disp_frame, from_=1, to=15,
+            textvariable=self._exp_threshold_var, width=6
+        ).grid(row=0, column=1, sticky=tk.W, padx=(8, 0), pady=4)
+
+        self._show_border_var = tk.BooleanVar(
+            value=settings.get("show_region_borders", False)
+        )
+        ttk.Checkbutton(
+            disp_frame, text="Show region borders",
+            variable=self._show_border_var,
+        ).grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=4)
+
+        self._syntax_color_var = tk.BooleanVar(
+            value=settings.get("syntax_coloring", True)
+        )
+        ttk.Checkbutton(
+            disp_frame, text="Syntax coloring",
+            variable=self._syntax_color_var,
+        ).grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=4)
+
+        # --- Interface tab ---
+        iface_frame = ttk.Frame(notebook, padding=12)
+        notebook.add(iface_frame, text="Interface")
+
+        self._auto_scroll_var = tk.BooleanVar(
+            value=settings.get("auto_scroll", True)
+        )
+        ttk.Checkbutton(
+            iface_frame, text="Auto-scroll to cursor",
+            variable=self._auto_scroll_var,
+        ).grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=4)
+
+        self._snap_grid_var = tk.BooleanVar(
+            value=settings.get("snap_to_grid", True)
+        )
+        ttk.Checkbutton(
+            iface_frame, text="Snap to grid",
+            variable=self._snap_grid_var,
+        ).grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=4)
+
+        ttk.Label(iface_frame, text="Grid size:").grid(
+            row=2, column=0, sticky=tk.W, pady=4
+        )
+        self._grid_size_var = tk.IntVar(value=settings.get("grid_size", 8))
+        ttk.Spinbox(
+            iface_frame, from_=4, to=32,
+            textvariable=self._grid_size_var, width=6
+        ).grid(row=2, column=1, sticky=tk.W, padx=(8, 0), pady=4)
+
         # --- Buttons ---
         btn_frame = ttk.Frame(frame)
         btn_frame.pack(fill=tk.X)
@@ -190,6 +250,12 @@ class OptionsDialog(tk.Toplevel):
             "angle_units": self._angle_var.get(),
             "trailing_zeros": self._trailing_var.get(),
             "significant_digits_mode": self._sigdig_var.get(),
+            "exponential_threshold": self._exp_threshold_var.get(),
+            "show_region_borders": self._show_border_var.get(),
+            "syntax_coloring": self._syntax_color_var.get(),
+            "auto_scroll": self._auto_scroll_var.get(),
+            "snap_to_grid": self._snap_grid_var.get(),
+            "grid_size": self._grid_size_var.get(),
         }
         self.destroy()
 

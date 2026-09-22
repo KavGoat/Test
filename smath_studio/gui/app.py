@@ -477,6 +477,7 @@ class SMathApp:
         self._root.bind("<Control-I>", lambda e: self._on_insert_integral())
         self._root.bind("<Control-Shift-S>", lambda e: self._on_insert_summation())
         self._root.bind("<Control-Shift-P>", lambda e: self._on_insert_product())
+        self._root.bind("<Control-Shift-D>", lambda e: self._canvas_widget.duplicate_selected())
         self._root.bind("<Control-w>", lambda e: self._on_new())
         self._root.bind("<Control-W>", lambda e: self._on_new())
         self._root.bind("<Control-r>", lambda e: self._on_recalculate())
