@@ -60,7 +60,7 @@ _BORDER_BG = "#dddddd"
 _UNIT_FG = "#0000ff"
 _ERROR_FG = "#ff0000"
 _PAGE_SHADOW = "#a0a0a0"
-_CURSOR_COLOR = "#3366cc"
+_CURSOR_COLOR = "#ff0000"
 
 
 def _snap(value: int, grid: int = _GRID_SIZE) -> int:
@@ -234,6 +234,10 @@ class WorksheetCanvas(ttk.Frame):
         self._rb_start_x = 0
         self._rb_start_y = 0
         self._rb_item: Optional[int] = None
+
+        # Resize state
+        self._resizing = False
+        self._resize_handle: Optional[str] = None  # e.g. "se", "e", "s"
 
         # Events
         self._canvas.bind("<Button-1>", self._on_click)
@@ -1235,6 +1239,33 @@ class WorksheetCanvas(ttk.Frame):
             )
             self._selection_items.append(h)
 
+    def _hit_resize_handle(self, cx: int, cy: int) -> Optional[str]:
+        """Check if (cx, cy) is on a resize handle of the selected region.
+
+        Returns a handle id like 'nw', 'n', 'ne', 'w', 'e', 'sw', 's', 'se',
+        or None.
+        """
+        if self._selected_index is None or self._selected_index >= len(self._rendered):
+            return None
+        rr = self._rendered[self._selected_index]
+        x1, y1, x2, y2 = rr.bbox
+        pad = 3
+        hs = 5
+        handles = [
+            ("nw", x1 - pad, y1 - pad),
+            ("ne", x2 + pad, y1 - pad),
+            ("sw", x1 - pad, y2 + pad),
+            ("se", x2 + pad, y2 + pad),
+            ("n", (x1 + x2) // 2, y1 - pad),
+            ("s", (x1 + x2) // 2, y2 + pad),
+            ("w", x1 - pad, (y1 + y2) // 2),
+            ("e", x2 + pad, (y1 + y2) // 2),
+        ]
+        for name, hx, hy in handles:
+            if abs(cx - hx) <= hs and abs(cy - hy) <= hs:
+                return name
+        return None
+
     def _draw_multi_selection(self):
         """Draw selection outlines for all multi-selected regions."""
         self._clear_multi_selection()
@@ -1300,6 +1331,15 @@ class WorksheetCanvas(ttk.Frame):
                 return
             self._commit_edit()
             self._canvas.focus_set()
+
+        handle = self._hit_resize_handle(cx, cy)
+        if handle is not None:
+            self._resizing = True
+            self._resize_handle = handle
+            self._drag_start_x = cx
+            self._drag_start_y = cy
+            self._canvas.focus_set()
+            return
 
         hit = self._hit_test(cx, cy)
         if hit is not None:
@@ -1567,11 +1607,47 @@ class WorksheetCanvas(ttk.Frame):
                 self._hover_items.append(hover_rect)
 
     def _on_drag(self, event: tk.Event):
-        """Handle mouse drag to move selected region or draw rubberband."""
+        """Handle mouse drag to move selected region, resize, or draw rubberband."""
         if self._editing:
             return
         cx = int(self._canvas.canvasx(event.x))
         cy = int(self._canvas.canvasy(event.y))
+
+        if self._resizing and self._selected_index is not None:
+            if self._selected_index >= len(self._rendered):
+                self._resizing = False
+                return
+            rr = self._rendered[self._selected_index]
+            region = rr.region
+            dx = self._unzoom(cx - self._drag_start_x)
+            dy = self._unzoom(cy - self._drag_start_y)
+            h = self._resize_handle
+            new_w = region.width
+            new_h = region.height
+            new_left = region.left
+            new_top = region.top
+            if h in ("e", "ne", "se"):
+                new_w = max(20, region.width + dx)
+            if h in ("w", "nw", "sw"):
+                new_left = region.left + dx
+                new_w = max(20, region.width - dx)
+            if h in ("s", "se", "sw"):
+                new_h = max(10, region.height + dy)
+            if h in ("n", "ne", "nw"):
+                new_top = region.top + dy
+                new_h = max(10, region.height - dy)
+            region.left = new_left
+            region.top = new_top
+            region.width = new_w
+            region.height = new_h
+            self._drag_start_x = cx
+            self._drag_start_y = cy
+            self._evaluate_and_render()
+            for i, r in enumerate(self._rendered):
+                if r.region is region:
+                    self._select_region(i)
+                    break
+            return
 
         if self._selected_index is not None and not self._rubberband:
             # Moving selected region(s)
@@ -1614,7 +1690,24 @@ class WorksheetCanvas(ttk.Frame):
             )
 
     def _on_drag_end(self, event: tk.Event):
-        """Snap region to grid after dragging, or complete rubberband selection."""
+        """Snap region to grid after dragging, resize, or complete rubberband selection."""
+        if self._resizing:
+            if self._selected_index is not None and self._selected_index < len(self._rendered):
+                self._save_undo_state()
+                region = self._rendered[self._selected_index].region
+                region.left = _snap(region.left)
+                region.top = _snap(region.top)
+                region.width = _snap(region.width)
+                region.height = _snap(region.height)
+                self._mark_modified()
+                self._evaluate_and_render()
+                for i, r in enumerate(self._rendered):
+                    if r.region is region:
+                        self._select_region(i)
+                        break
+            self._resizing = False
+            self._resize_handle = None
+            return
         if self._rubberband:
             cx = int(self._canvas.canvasx(event.x))
             cy = int(self._canvas.canvasy(event.y))

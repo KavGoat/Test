@@ -553,6 +553,14 @@ class MathEditor:
             self._do_system()
             return
 
+        if ch == "_":
+            if pos > 0 and isinstance(slot.items[pos - 1], EText):
+                slot.items[pos - 1].text += "."
+            else:
+                slot.items.insert(pos, EText("."))
+                slot.cursor_pos = pos + 1
+            return
+
         if ch == "\\":
             self._do_sqrt()
             return

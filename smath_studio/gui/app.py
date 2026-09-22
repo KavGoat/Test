@@ -454,6 +454,16 @@ class SMathApp:
         self._root.bind("<Control-0>", lambda e: self._reset_zoom())
         self._root.bind("<Control-m>", lambda e: self._on_insert_matrix())
         self._root.bind("<Control-M>", lambda e: self._on_insert_matrix())
+        self._root.bind("<Control-d>", lambda e: self._on_insert_derivative())
+        self._root.bind("<Control-D>", lambda e: self._on_insert_derivative())
+        self._root.bind("<Control-i>", lambda e: self._on_insert_integral())
+        self._root.bind("<Control-I>", lambda e: self._on_insert_integral())
+        self._root.bind("<Control-Shift-S>", lambda e: self._on_insert_summation())
+        self._root.bind("<Control-Shift-P>", lambda e: self._on_insert_product())
+        self._root.bind("<Control-w>", lambda e: self._on_new())
+        self._root.bind("<Control-W>", lambda e: self._on_new())
+        self._root.bind("<Control-r>", lambda e: self._on_recalculate())
+        self._root.bind("<Control-R>", lambda e: self._on_recalculate())
         self._root.bind("<F11>", lambda e: self._toggle_fullscreen_key())
 
     # ------------------------------------------------------------------
