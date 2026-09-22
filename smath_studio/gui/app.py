@@ -453,6 +453,15 @@ class SMathApp:
             side=tk.LEFT, padx=4
         )
 
+        self._status_page = ttk.Label(
+            status_frame, text="Page 1/1", style="Status.TLabel", width=10
+        )
+        self._status_page.pack(side=tk.LEFT)
+
+        ttk.Label(status_frame, text="|", style="StatusSep.TLabel").pack(
+            side=tk.LEFT, padx=4
+        )
+
         self._status_info = ttk.Label(
             status_frame, text="Ready", style="Status.TLabel"
         )
@@ -529,6 +538,9 @@ class SMathApp:
             n_regions = self._canvas_widget.get_region_count()
             self._status_calc.config(text=calc_mode)
             self._status_regions.config(text=f"{n_regions} regions")
+            page = self._canvas_widget.get_current_page()
+            total = getattr(self._canvas_widget, '_num_pages', 5)
+            self._status_page.config(text=f"Page {page}/{total}")
             info = self._canvas_widget.get_selected_info()
             if info:
                 self._status_info.config(text=info)

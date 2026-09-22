@@ -201,7 +201,7 @@ class WorksheetCanvas(ttk.Frame):
             self,
             bg=_CANVAS_BG,
             highlightthickness=0,
-            cursor="crosshair",
+            cursor="arrow",
         )
         self._h_scroll = ttk.Scrollbar(
             self, orient=tk.HORIZONTAL, command=self._on_hscroll
@@ -1767,6 +1767,19 @@ class WorksheetCanvas(ttk.Frame):
     def get_zoom_percent(self) -> int:
         return int(self._zoom * 100)
 
+    def get_current_page(self) -> int:
+        """Return the 1-based page number currently visible."""
+        try:
+            vy = float(self._canvas.canvasy(0))
+        except Exception:
+            return 1
+        ph = getattr(self, '_page_height', 1100)
+        pg = getattr(self, '_page_gap', 10)
+        z = self._zoom
+        y_unzoomed = vy / z if z > 0 else vy
+        page = int(y_unzoomed / (ph + pg)) + 1
+        return max(1, page)
+
     _HANDLE_CURSORS = {
         "nw": "top_left_corner", "n": "top_side", "ne": "top_right_corner",
         "w": "left_side", "e": "right_side",
@@ -1784,7 +1797,7 @@ class WorksheetCanvas(ttk.Frame):
         if handle:
             self._canvas.config(cursor=self._HANDLE_CURSORS[handle])
         else:
-            self._canvas.config(cursor="")
+            self._canvas.config(cursor="arrow")
 
         hit = self._hit_test(cx, cy)
         if hit != self._hover_index:
