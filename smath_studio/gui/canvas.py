@@ -193,9 +193,9 @@ class WorksheetCanvas(ttk.Frame):
 
         # Build rulers and canvas with scrollbars
         _RULER_SIZE = 18
-        self._ruler = tk.Canvas(self, height=_RULER_SIZE, bg="#ffffff", highlightthickness=0)
-        self._v_ruler = tk.Canvas(self, width=_RULER_SIZE, bg="#ffffff", highlightthickness=0)
-        self._ruler_corner = tk.Frame(self, width=_RULER_SIZE, height=_RULER_SIZE, bg="#ece9d8")
+        self._ruler = tk.Canvas(self, height=_RULER_SIZE, bg="#f8f4ec", highlightthickness=0)
+        self._v_ruler = tk.Canvas(self, width=_RULER_SIZE, bg="#f8f4ec", highlightthickness=0)
+        self._ruler_corner = tk.Frame(self, width=_RULER_SIZE, height=_RULER_SIZE, bg="#f8f4ec")
 
         self._canvas = tk.Canvas(
             self,
@@ -730,7 +730,7 @@ class WorksheetCanvas(ttk.Frame):
                     zy = _z(py, z)
                     self._canvas.create_oval(
                         zx, zy, zx + 1, zy + 1,
-                        fill="#d0d0d0", outline="", tags="grid_dots",
+                        fill="#c8c8c8", outline="", tags="grid_dots",
                     )
 
     def _get_visible_area(self) -> tuple[float, float, float, float] | None:
@@ -760,7 +760,7 @@ class WorksheetCanvas(ttk.Frame):
             self._canvas.create_line(
                 _z(margin_x, z), _z(page_y, z),
                 _z(margin_x, z), _z(page_y + ph, z),
-                fill="#d8d8d8", width=1, tags="margin_line"
+                fill="#e0dcd6", width=1, tags="margin_line"
             )
 
     def _draw_cursor_marker(self):
@@ -845,21 +845,21 @@ class WorksheetCanvas(ttk.Frame):
         z = self._zoom
         cm = 37.8 * z
         h = 18
-        self._ruler.create_line(0, h - 1, rw, h - 1, fill="#b0b0b0", width=1)
+        self._ruler.create_line(0, h - 1, rw, h - 1, fill="#c0b8a8", width=1)
         start_cm = int(x_offset / cm)
         end_cm = int((x_offset + rw) / cm) + 2
         for i in range(max(0, start_cm), end_cm):
             px = i * cm - x_offset
-            self._ruler.create_line(px, 2, px, h - 1, fill="#808080", width=1)
+            self._ruler.create_line(px, 4, px, h - 1, fill="#8a8070", width=1)
             if i > 0:
                 self._ruler.create_text(
-                    px + 3, 3, text=str(i), anchor="nw",
-                    font=("DejaVu Sans", 7), fill="#606060",
+                    px + 3, 2, text=str(i), anchor="nw",
+                    font=("DejaVu Sans", 7), fill="#5a5040",
                 )
             for sub in range(1, 10):
                 spx = px + sub * cm / 10
                 tick_h = 6 if sub == 5 else 3
-                self._ruler.create_line(spx, h - 1 - tick_h, spx, h - 1, fill="#909090")
+                self._ruler.create_line(spx, h - 1 - tick_h, spx, h - 1, fill="#a09888")
 
     def _draw_v_ruler(self):
         """Draw a vertical ruler showing centimetre ticks."""
@@ -874,21 +874,21 @@ class WorksheetCanvas(ttk.Frame):
         z = self._zoom
         cm = 37.8 * z
         w = 18
-        self._v_ruler.create_line(w - 1, 0, w - 1, rh, fill="#b0b0b0", width=1)
+        self._v_ruler.create_line(w - 1, 0, w - 1, rh, fill="#c0b8a8", width=1)
         start_cm = int(y_offset / cm)
         end_cm = int((y_offset + rh) / cm) + 2
         for i in range(max(0, start_cm), end_cm):
             py = i * cm - y_offset
-            self._v_ruler.create_line(2, py, w - 1, py, fill="#808080", width=1)
+            self._v_ruler.create_line(4, py, w - 1, py, fill="#8a8070", width=1)
             if i > 0:
                 self._v_ruler.create_text(
                     3, py + 3, text=str(i), anchor="nw",
-                    font=("DejaVu Sans", 7), fill="#606060", angle=0,
+                    font=("DejaVu Sans", 7), fill="#5a5040", angle=0,
                 )
             for sub in range(1, 10):
                 spy = py + sub * cm / 10
                 tick_w = 6 if sub == 5 else 3
-                self._v_ruler.create_line(w - 1 - tick_w, spy, w - 1, spy, fill="#909090")
+                self._v_ruler.create_line(w - 1 - tick_w, spy, w - 1, spy, fill="#a09888")
 
     def _update_scroll_region(self):
         """Set the scrollable region to encompass all pages."""
@@ -990,6 +990,8 @@ class WorksheetCanvas(ttk.Frame):
         cy = y + zpad
         wrap_width = max(1, rw - 2 * zpad)
         for para in tc.paragraphs:
+            if para.built_in:
+                continue
             fnt = self._get_font(region.font_size, para.bold, para.italic)
             text_color = fg
             if para.href:

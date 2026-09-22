@@ -140,6 +140,8 @@ def _write_region(lines: list[str], region: Region, indent: int = 2):
                 p_attrs += ' italic="true"'
             if p.href:
                 p_attrs += f' href="{_esc(p.href)}"'
+            if p.built_in:
+                p_attrs += ' build-in="true"'
             lines.append(f"{pad}    <p{p_attrs}>{_esc(p.text)}</p>")
         lines.append(f"{pad}  </text>")
 

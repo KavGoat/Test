@@ -21,6 +21,7 @@ class TextParagraph:
     bold: bool = False
     italic: bool = False
     href: Optional[str] = None
+    built_in: bool = False
 
 
 @dataclass
@@ -357,6 +358,7 @@ def _parse_region(elem: ET.Element, ns: str) -> Region:
                 bold=p_elem.get("bold", "false").lower() == "true",
                 italic=p_elem.get("italic", "false").lower() == "true",
                 href=p_elem.get("href"),
+                built_in=p_elem.get("build-in", "false").lower() == "true",
             )
             tc.paragraphs.append(tp)
         region.text_contents.append(tc)
