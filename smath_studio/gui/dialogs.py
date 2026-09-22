@@ -8,6 +8,47 @@ from typing import Optional
 
 from ..functions import BUILTIN_FUNCTIONS
 
+_BG = "#ece9d8"
+_FNT = ("DejaVu Sans", 9)
+_FNT_BOLD = ("DejaVu Sans", 9, "bold")
+_FNT_SM = ("DejaVu Sans", 8)
+
+
+def _xp_btn(parent, text, command, width=10):
+    """Create a Windows-XP-classic styled button."""
+    btn = tk.Button(
+        parent, text=text, command=command, width=width,
+        font=_FNT, bg=_BG, activebackground="#c1d2ee",
+        relief=tk.RAISED, bd=1, padx=6, pady=2,
+    )
+    return btn
+
+
+def _xp_label(parent, text, **kw):
+    return tk.Label(parent, text=text, font=kw.pop("font", _FNT), bg=_BG, fg="#000000", **kw)
+
+
+def _xp_entry(parent, textvariable, width=20):
+    return tk.Entry(parent, textvariable=textvariable, width=width,
+                    font=_FNT, relief=tk.SUNKEN, bd=2)
+
+
+def _xp_check(parent, text, variable):
+    return tk.Checkbutton(parent, text=text, variable=variable,
+                          font=_FNT, bg=_BG, activebackground=_BG,
+                          selectcolor="white", anchor="w")
+
+
+def _xp_radio(parent, text, variable, value):
+    return tk.Radiobutton(parent, text=text, variable=variable, value=value,
+                          font=_FNT, bg=_BG, activebackground=_BG,
+                          selectcolor="white", anchor="w")
+
+
+def _xp_spin(parent, textvariable, from_=1, to=99, width=5):
+    return tk.Spinbox(parent, textvariable=textvariable, from_=from_, to=to,
+                      width=width, font=_FNT, relief=tk.SUNKEN, bd=2)
+
 
 class AboutDialog(tk.Toplevel):
     """About dialog showing application information."""
@@ -76,6 +117,35 @@ class AboutDialog(tk.Toplevel):
         self.bind("<Escape>", lambda e: self.destroy())
 
 
+class _TabBar(tk.Frame):
+    """Simple tab bar widget styled to match Windows classic look."""
+
+    def __init__(self, parent, tabs, on_select):
+        super().__init__(parent, bg=_BG)
+        self._tabs = tabs
+        self._on_select = on_select
+        self._buttons: list[tk.Label] = []
+        self._selected = 0
+        for i, name in enumerate(tabs):
+            lbl = tk.Label(
+                self, text=f"  {name}  ", font=_FNT,
+                bg=_BG, fg="#000000", bd=1, relief=tk.RAISED, padx=6, pady=2,
+            )
+            lbl.pack(side=tk.LEFT, padx=(0, 1))
+            lbl.bind("<Button-1>", lambda e, idx=i: self._select(idx))
+            self._buttons.append(lbl)
+        self._select(0)
+
+    def _select(self, idx):
+        self._selected = idx
+        for i, btn in enumerate(self._buttons):
+            if i == idx:
+                btn.configure(relief=tk.FLAT, bg="white", fg="#000000")
+            else:
+                btn.configure(relief=tk.RAISED, bg=_BG, fg="#000000")
+        self._on_select(idx)
+
+
 class OptionsDialog(tk.Toplevel):
     """Options dialog for calculation settings."""
 
@@ -85,6 +155,7 @@ class OptionsDialog(tk.Toplevel):
         self.resizable(False, False)
         self.transient(parent)
         self.grab_set()
+        self.configure(bg=_BG)
         self.result: Optional[dict] = None
 
         self.geometry("400x380")
@@ -95,155 +166,127 @@ class OptionsDialog(tk.Toplevel):
         h = self.winfo_height()
         self.geometry(f"+{pw - w // 2}+{ph - h // 2}")
 
-        frame = ttk.Frame(self, padding=16)
+        frame = tk.Frame(self, bg=_BG, padx=16, pady=12)
         frame.pack(fill=tk.BOTH, expand=True)
 
-        # Notebook for tabs
-        notebook = ttk.Notebook(frame)
-        notebook.pack(fill=tk.BOTH, expand=True, pady=(0, 12))
+        # Tab pages
+        self._pages: list[tk.Frame] = []
 
-        # --- Calculation tab ---
-        calc_frame = ttk.Frame(notebook, padding=12)
-        notebook.add(calc_frame, text="Calculation")
+        # --- Build tab content frames ---
+        # Calculation
+        calc_frame = tk.Frame(frame, bg="white", bd=1, relief=tk.SUNKEN, padx=12, pady=12)
+        self._pages.append(calc_frame)
 
-        # Precision
-        ttk.Label(calc_frame, text="Decimal precision:").grid(
-            row=0, column=0, sticky=tk.W, pady=4
-        )
+        _xp_label(calc_frame, "Decimal precision:").configure(bg="white")
+        _xp_label(calc_frame, "Decimal precision:").destroy()
+        r = 0
+        lbl = tk.Label(calc_frame, text="Decimal precision:", font=_FNT, bg="white")
+        lbl.grid(row=r, column=0, sticky=tk.W, pady=4)
         self._precision_var = tk.IntVar(value=settings.get("precision", 4))
-        precision_spin = ttk.Spinbox(
-            calc_frame, from_=1, to=15, textvariable=self._precision_var, width=6
-        )
-        precision_spin.grid(row=0, column=1, sticky=tk.W, padx=(8, 0), pady=4)
+        _xp_spin(calc_frame, self._precision_var, 1, 15, 6).grid(
+            row=r, column=1, sticky=tk.W, padx=(8, 0), pady=4)
 
-        # Fractions mode
-        ttk.Label(calc_frame, text="Result format:").grid(
-            row=1, column=0, sticky=tk.W, pady=4
-        )
-        self._fractions_var = tk.StringVar(
-            value=settings.get("fractions", "decimal")
-        )
-        fractions_combo = ttk.Combobox(
-            calc_frame,
-            textvariable=self._fractions_var,
-            values=["decimal", "fraction"],
-            state="readonly",
-            width=10,
-        )
-        fractions_combo.grid(row=1, column=1, sticky=tk.W, padx=(8, 0), pady=4)
+        r += 1
+        tk.Label(calc_frame, text="Result format:", font=_FNT, bg="white").grid(
+            row=r, column=0, sticky=tk.W, pady=4)
+        self._fractions_var = tk.StringVar(value=settings.get("fractions", "decimal"))
+        frac_menu = tk.OptionMenu(calc_frame, self._fractions_var, "decimal", "fraction")
+        frac_menu.configure(font=_FNT, bg="white", relief=tk.SUNKEN, bd=1,
+                            highlightthickness=0, width=10)
+        frac_menu.grid(row=r, column=1, sticky=tk.W, padx=(8, 0), pady=4)
 
-        # Angle units
-        ttk.Label(calc_frame, text="Angle units:").grid(
-            row=2, column=0, sticky=tk.W, pady=4
-        )
-        self._angle_var = tk.StringVar(
-            value=settings.get("angle_units", "radians")
-        )
-        angle_combo = ttk.Combobox(
-            calc_frame,
-            textvariable=self._angle_var,
-            values=["radians", "degrees"],
-            state="readonly",
-            width=10,
-        )
-        angle_combo.grid(row=2, column=1, sticky=tk.W, padx=(8, 0), pady=4)
+        r += 1
+        tk.Label(calc_frame, text="Angle units:", font=_FNT, bg="white").grid(
+            row=r, column=0, sticky=tk.W, pady=4)
+        self._angle_var = tk.StringVar(value=settings.get("angle_units", "radians"))
+        angle_menu = tk.OptionMenu(calc_frame, self._angle_var, "radians", "degrees")
+        angle_menu.configure(font=_FNT, bg="white", relief=tk.SUNKEN, bd=1,
+                             highlightthickness=0, width=10)
+        angle_menu.grid(row=r, column=1, sticky=tk.W, padx=(8, 0), pady=4)
 
-        # Trailing zeros
-        self._trailing_var = tk.BooleanVar(
-            value=settings.get("trailing_zeros", True)
-        )
-        trailing_check = ttk.Checkbutton(
-            calc_frame, text="Show trailing zeros", variable=self._trailing_var
-        )
-        trailing_check.grid(
-            row=3, column=0, columnspan=2, sticky=tk.W, pady=4
-        )
+        r += 1
+        self._trailing_var = tk.BooleanVar(value=settings.get("trailing_zeros", True))
+        tk.Checkbutton(calc_frame, text="Show trailing zeros", variable=self._trailing_var,
+                       font=_FNT, bg="white", activebackground="white",
+                       selectcolor="white", anchor="w").grid(
+            row=r, column=0, columnspan=2, sticky=tk.W, pady=4)
 
-        # Significant digits mode
-        self._sigdig_var = tk.BooleanVar(
-            value=settings.get("significant_digits_mode", False)
-        )
-        sigdig_check = ttk.Checkbutton(
-            calc_frame,
-            text="Significant digits mode",
-            variable=self._sigdig_var,
-        )
-        sigdig_check.grid(
-            row=4, column=0, columnspan=2, sticky=tk.W, pady=4
-        )
+        r += 1
+        self._sigdig_var = tk.BooleanVar(value=settings.get("significant_digits_mode", False))
+        tk.Checkbutton(calc_frame, text="Significant digits mode", variable=self._sigdig_var,
+                       font=_FNT, bg="white", activebackground="white",
+                       selectcolor="white", anchor="w").grid(
+            row=r, column=0, columnspan=2, sticky=tk.W, pady=4)
 
-        # --- Display tab ---
-        disp_frame = ttk.Frame(notebook, padding=12)
-        notebook.add(disp_frame, text="Display")
+        # Display
+        disp_frame = tk.Frame(frame, bg="white", bd=1, relief=tk.SUNKEN, padx=12, pady=12)
+        self._pages.append(disp_frame)
 
-        self._exp_threshold_var = tk.IntVar(
-            value=settings.get("exponential_threshold", 3)
-        )
-        ttk.Label(disp_frame, text="Exponential threshold:").grid(
-            row=0, column=0, sticky=tk.W, pady=4
-        )
-        ttk.Spinbox(
-            disp_frame, from_=1, to=15,
-            textvariable=self._exp_threshold_var, width=6
-        ).grid(row=0, column=1, sticky=tk.W, padx=(8, 0), pady=4)
+        r = 0
+        tk.Label(disp_frame, text="Exponential threshold:", font=_FNT, bg="white").grid(
+            row=r, column=0, sticky=tk.W, pady=4)
+        self._exp_threshold_var = tk.IntVar(value=settings.get("exponential_threshold", 3))
+        _xp_spin(disp_frame, self._exp_threshold_var, 1, 15, 6).grid(
+            row=r, column=1, sticky=tk.W, padx=(8, 0), pady=4)
 
-        self._show_border_var = tk.BooleanVar(
-            value=settings.get("show_region_borders", False)
-        )
-        ttk.Checkbutton(
-            disp_frame, text="Show region borders",
-            variable=self._show_border_var,
-        ).grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=4)
+        r += 1
+        self._show_border_var = tk.BooleanVar(value=settings.get("show_region_borders", False))
+        tk.Checkbutton(disp_frame, text="Show region borders", variable=self._show_border_var,
+                       font=_FNT, bg="white", activebackground="white",
+                       selectcolor="white", anchor="w").grid(
+            row=r, column=0, columnspan=2, sticky=tk.W, pady=4)
 
-        self._syntax_color_var = tk.BooleanVar(
-            value=settings.get("syntax_coloring", True)
-        )
-        ttk.Checkbutton(
-            disp_frame, text="Syntax coloring",
-            variable=self._syntax_color_var,
-        ).grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=4)
+        r += 1
+        self._syntax_color_var = tk.BooleanVar(value=settings.get("syntax_coloring", True))
+        tk.Checkbutton(disp_frame, text="Syntax coloring", variable=self._syntax_color_var,
+                       font=_FNT, bg="white", activebackground="white",
+                       selectcolor="white", anchor="w").grid(
+            row=r, column=0, columnspan=2, sticky=tk.W, pady=4)
 
-        # --- Interface tab ---
-        iface_frame = ttk.Frame(notebook, padding=12)
-        notebook.add(iface_frame, text="Interface")
+        # Interface
+        iface_frame = tk.Frame(frame, bg="white", bd=1, relief=tk.SUNKEN, padx=12, pady=12)
+        self._pages.append(iface_frame)
 
-        self._auto_scroll_var = tk.BooleanVar(
-            value=settings.get("auto_scroll", True)
-        )
-        ttk.Checkbutton(
-            iface_frame, text="Auto-scroll to cursor",
-            variable=self._auto_scroll_var,
-        ).grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=4)
+        r = 0
+        self._auto_scroll_var = tk.BooleanVar(value=settings.get("auto_scroll", True))
+        tk.Checkbutton(iface_frame, text="Auto-scroll to cursor", variable=self._auto_scroll_var,
+                       font=_FNT, bg="white", activebackground="white",
+                       selectcolor="white", anchor="w").grid(
+            row=r, column=0, columnspan=2, sticky=tk.W, pady=4)
 
-        self._snap_grid_var = tk.BooleanVar(
-            value=settings.get("snap_to_grid", True)
-        )
-        ttk.Checkbutton(
-            iface_frame, text="Snap to grid",
-            variable=self._snap_grid_var,
-        ).grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=4)
+        r += 1
+        self._snap_grid_var = tk.BooleanVar(value=settings.get("snap_to_grid", True))
+        tk.Checkbutton(iface_frame, text="Snap to grid", variable=self._snap_grid_var,
+                       font=_FNT, bg="white", activebackground="white",
+                       selectcolor="white", anchor="w").grid(
+            row=r, column=0, columnspan=2, sticky=tk.W, pady=4)
 
-        ttk.Label(iface_frame, text="Grid size:").grid(
-            row=2, column=0, sticky=tk.W, pady=4
-        )
+        r += 1
+        tk.Label(iface_frame, text="Grid size:", font=_FNT, bg="white").grid(
+            row=r, column=0, sticky=tk.W, pady=4)
         self._grid_size_var = tk.IntVar(value=settings.get("grid_size", 8))
-        ttk.Spinbox(
-            iface_frame, from_=4, to=32,
-            textvariable=self._grid_size_var, width=6
-        ).grid(row=2, column=1, sticky=tk.W, padx=(8, 0), pady=4)
+        _xp_spin(iface_frame, self._grid_size_var, 4, 32, 6).grid(
+            row=r, column=1, sticky=tk.W, padx=(8, 0), pady=4)
 
-        # --- Buttons ---
-        btn_frame = ttk.Frame(frame)
+        # Tab bar
+        tab_bar = _TabBar(frame, ["Calculation", "Display", "Interface"], self._show_tab)
+        tab_bar.pack(fill=tk.X)
+        self._tab_container = tk.Frame(frame, bg=_BG)
+        self._tab_container.pack(fill=tk.BOTH, expand=True, pady=(0, 12))
+        self._show_tab(0)
+
+        # Buttons
+        btn_frame = tk.Frame(frame, bg=_BG)
         btn_frame.pack(fill=tk.X)
-
-        ttk.Button(btn_frame, text="Cancel", command=self.destroy, width=10).pack(
-            side=tk.RIGHT, padx=(4, 0)
-        )
-        ttk.Button(btn_frame, text="OK", command=self._on_ok, width=10).pack(
-            side=tk.RIGHT
-        )
+        _xp_btn(btn_frame, "Cancel", self.destroy).pack(side=tk.RIGHT, padx=(4, 0))
+        _xp_btn(btn_frame, "OK", self._on_ok).pack(side=tk.RIGHT)
 
         self.bind("<Escape>", lambda e: self.destroy())
+
+    def _show_tab(self, idx):
+        for p in self._pages:
+            p.pack_forget()
+        self._pages[idx].pack(in_=self._tab_container, fill=tk.BOTH, expand=True)
 
     def _on_ok(self):
         self.result = {
@@ -271,6 +314,7 @@ class InsertFunctionDialog(tk.Toplevel):
         self.resizable(True, True)
         self.transient(parent)
         self.grab_set()
+        self.configure(bg=_BG)
         self.result: Optional[str] = None
 
         self.geometry("420x480")
@@ -281,53 +325,44 @@ class InsertFunctionDialog(tk.Toplevel):
         h = self.winfo_height()
         self.geometry(f"+{pw - w // 2}+{ph - h // 2}")
 
-        frame = ttk.Frame(self, padding=12)
+        frame = tk.Frame(self, bg=_BG, padx=12, pady=12)
         frame.pack(fill=tk.BOTH, expand=True)
 
-        # Search bar
-        search_frame = ttk.Frame(frame)
+        search_frame = tk.Frame(frame, bg=_BG)
         search_frame.pack(fill=tk.X, pady=(0, 8))
-        ttk.Label(search_frame, text="Search:").pack(side=tk.LEFT, padx=(0, 6))
+        tk.Label(search_frame, text="Search:", font=_FNT, bg=_BG).pack(side=tk.LEFT, padx=(0, 6))
         self._search_var = tk.StringVar()
         self._search_var.trace_add("write", self._on_search_changed)
-        search_entry = ttk.Entry(search_frame, textvariable=self._search_var)
+        search_entry = _xp_entry(search_frame, self._search_var, 30)
         search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
         search_entry.focus_set()
 
-        # Function list
-        list_frame = ttk.Frame(frame)
+        list_frame = tk.Frame(frame, bg=_BG)
         list_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
 
-        scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL)
+        scrollbar = tk.Scrollbar(list_frame, orient=tk.VERTICAL)
         self._listbox = tk.Listbox(
-            list_frame,
-            yscrollcommand=scrollbar.set,
-            font=("Consolas", 10),
-            selectmode=tk.SINGLE,
+            list_frame, yscrollcommand=scrollbar.set,
+            font=("Consolas", 10), selectmode=tk.SINGLE,
+            bg="white", selectbackground="#316ac5", selectforeground="white",
+            relief=tk.SUNKEN, bd=2,
         )
         scrollbar.config(command=self._listbox.yview)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self._listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
         self._listbox.bind("<Double-1>", lambda e: self._on_ok())
 
-        # Description area
-        self._desc_label = ttk.Label(
-            frame, text="", wraplength=380, justify=tk.LEFT
+        self._desc_label = tk.Label(
+            frame, text="", wraplength=380, justify=tk.LEFT,
+            font=_FNT, bg=_BG, fg="#444444", anchor="w",
         )
         self._desc_label.pack(fill=tk.X, pady=(0, 8))
 
-        # Buttons
-        btn_frame = ttk.Frame(frame)
+        btn_frame = tk.Frame(frame, bg=_BG)
         btn_frame.pack(fill=tk.X)
-        ttk.Button(btn_frame, text="Cancel", command=self.destroy, width=10).pack(
-            side=tk.RIGHT, padx=(4, 0)
-        )
-        ttk.Button(btn_frame, text="Insert", command=self._on_ok, width=10).pack(
-            side=tk.RIGHT
-        )
+        _xp_btn(btn_frame, "Cancel", self.destroy).pack(side=tk.RIGHT, padx=(4, 0))
+        _xp_btn(btn_frame, "Insert", self._on_ok).pack(side=tk.RIGHT)
 
-        # Build function list with descriptions
         self._functions = _build_function_list()
         self._populate_list("")
 
@@ -493,6 +528,7 @@ class FindReplaceDialog(tk.Toplevel):
         self.title("Find and Replace")
         self.resizable(True, False)
         self.transient(parent)
+        self.configure(bg=_BG)
         self.geometry("420x180")
 
         self.update_idletasks()
@@ -504,31 +540,30 @@ class FindReplaceDialog(tk.Toplevel):
         self._on_replace = on_replace
         self._on_replace_all = on_replace_all
 
-        frame = ttk.Frame(self, padding=12)
+        frame = tk.Frame(self, bg=_BG, padx=12, pady=12)
         frame.pack(fill=tk.BOTH, expand=True)
 
-        ttk.Label(frame, text="Find:").grid(row=0, column=0, sticky="w", pady=4)
+        tk.Label(frame, text="Find:", font=_FNT, bg=_BG).grid(row=0, column=0, sticky="w", pady=4)
         self.find_var = tk.StringVar()
-        self.find_entry = ttk.Entry(frame, textvariable=self.find_var, width=30)
+        self.find_entry = _xp_entry(frame, self.find_var, 30)
         self.find_entry.grid(row=0, column=1, padx=(8, 0), pady=4, sticky="ew")
 
-        ttk.Label(frame, text="Replace:").grid(row=1, column=0, sticky="w", pady=4)
+        tk.Label(frame, text="Replace:", font=_FNT, bg=_BG).grid(row=1, column=0, sticky="w", pady=4)
         self.replace_var = tk.StringVar()
-        self.replace_entry = ttk.Entry(frame, textvariable=self.replace_var, width=30)
+        self.replace_entry = _xp_entry(frame, self.replace_var, 30)
         self.replace_entry.grid(row=1, column=1, padx=(8, 0), pady=4, sticky="ew")
 
         self.case_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(frame, text="Match case", variable=self.case_var).grid(
-            row=2, column=0, columnspan=2, sticky="w", pady=4
-        )
+        _xp_check(frame, "Match case", self.case_var).grid(
+            row=2, column=0, columnspan=2, sticky="w", pady=4)
 
-        btn_frame = ttk.Frame(frame)
+        btn_frame = tk.Frame(frame, bg=_BG)
         btn_frame.grid(row=0, column=2, rowspan=3, padx=(12, 0), sticky="n")
 
-        ttk.Button(btn_frame, text="Find Next", command=self._do_find, width=12).pack(pady=2)
-        ttk.Button(btn_frame, text="Replace", command=self._do_replace, width=12).pack(pady=2)
-        ttk.Button(btn_frame, text="Replace All", command=self._do_replace_all, width=12).pack(pady=2)
-        ttk.Button(btn_frame, text="Close", command=self.destroy, width=12).pack(pady=2)
+        _xp_btn(btn_frame, "Find Next", self._do_find, 12).pack(pady=2)
+        _xp_btn(btn_frame, "Replace", self._do_replace, 12).pack(pady=2)
+        _xp_btn(btn_frame, "Replace All", self._do_replace_all, 12).pack(pady=2)
+        _xp_btn(btn_frame, "Close", self.destroy, 12).pack(pady=2)
 
         frame.columnconfigure(1, weight=1)
         self.find_entry.focus_set()
@@ -557,37 +592,27 @@ class MatrixSizeDialog(tk.Toplevel):
         self.resizable(False, False)
         self.transient(parent)
         self.grab_set()
+        self.configure(bg=_BG)
         self.result: Optional[tuple[int, int]] = None
 
-        frame = ttk.Frame(self, padding=15)
+        frame = tk.Frame(self, bg=_BG, padx=15, pady=15)
         frame.pack(fill=tk.BOTH, expand=True)
 
-        ttk.Label(frame, text="Rows:", font=("DejaVu Sans", 10)).grid(
-            row=0, column=0, padx=5, pady=5, sticky="e"
-        )
+        tk.Label(frame, text="Rows:", font=_FNT, bg=_BG).grid(
+            row=0, column=0, padx=5, pady=5, sticky="e")
         self._rows_var = tk.StringVar(value="2")
-        rows_spin = ttk.Spinbox(
-            frame, from_=1, to=20, textvariable=self._rows_var, width=5
-        )
+        rows_spin = _xp_spin(frame, self._rows_var, 1, 20, 5)
         rows_spin.grid(row=0, column=1, padx=5, pady=5)
 
-        ttk.Label(frame, text="Columns:", font=("DejaVu Sans", 10)).grid(
-            row=1, column=0, padx=5, pady=5, sticky="e"
-        )
+        tk.Label(frame, text="Columns:", font=_FNT, bg=_BG).grid(
+            row=1, column=0, padx=5, pady=5, sticky="e")
         self._cols_var = tk.StringVar(value="2")
-        cols_spin = ttk.Spinbox(
-            frame, from_=1, to=20, textvariable=self._cols_var, width=5
-        )
-        cols_spin.grid(row=1, column=1, padx=5, pady=5)
+        _xp_spin(frame, self._cols_var, 1, 20, 5).grid(row=1, column=1, padx=5, pady=5)
 
-        btn_frame = ttk.Frame(frame)
+        btn_frame = tk.Frame(frame, bg=_BG)
         btn_frame.grid(row=2, column=0, columnspan=2, pady=(10, 0))
-        ttk.Button(btn_frame, text="OK", command=self._on_ok, width=8).pack(
-            side=tk.LEFT, padx=5
-        )
-        ttk.Button(btn_frame, text="Cancel", command=self.destroy, width=8).pack(
-            side=tk.LEFT, padx=5
-        )
+        _xp_btn(btn_frame, "OK", self._on_ok, 8).pack(side=tk.LEFT, padx=5)
+        _xp_btn(btn_frame, "Cancel", self.destroy, 8).pack(side=tk.LEFT, padx=5)
 
         self.bind("<Return>", lambda e: self._on_ok())
         self.bind("<Escape>", lambda e: self.destroy())
@@ -613,58 +638,32 @@ class InsertPlotDialog(tk.Toplevel):
         self.resizable(False, False)
         self.transient(parent)
         self.grab_set()
+        self.configure(bg=_BG)
         self.result: Optional[dict] = None
 
-        frame = ttk.Frame(self, padding=15)
+        frame = tk.Frame(self, bg=_BG, padx=15, pady=15)
         frame.pack(fill=tk.BOTH, expand=True)
 
-        ttk.Label(frame, text="Expression (e.g. sin(x)):", font=("DejaVu Sans", 10)).grid(
-            row=0, column=0, columnspan=2, sticky="w", pady=(0, 5)
-        )
+        tk.Label(frame, text="Expression (e.g. sin(x)):", font=_FNT, bg=_BG).grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=(0, 5))
         self._expr_var = tk.StringVar(value="sin(x)")
-        expr_entry = ttk.Entry(frame, textvariable=self._expr_var, width=30)
+        expr_entry = _xp_entry(frame, self._expr_var, 30)
         expr_entry.grid(row=1, column=0, columnspan=2, sticky="ew", pady=2)
 
-        ttk.Label(frame, text="X min:", font=("DejaVu Sans", 9)).grid(
-            row=2, column=0, sticky="e", padx=5, pady=3
-        )
-        self._xmin_var = tk.StringVar(value="-10")
-        ttk.Entry(frame, textvariable=self._xmin_var, width=8).grid(
-            row=2, column=1, sticky="w", pady=3
-        )
+        for r, lbl_text, default in [
+            (2, "X min:", "-10"), (3, "X max:", "10"),
+            (4, "Width:", "400"), (5, "Height:", "300"),
+        ]:
+            tk.Label(frame, text=lbl_text, font=_FNT, bg=_BG).grid(
+                row=r, column=0, sticky="e", padx=5, pady=3)
+            var = tk.StringVar(value=default)
+            _xp_entry(frame, var, 8).grid(row=r, column=1, sticky="w", pady=3)
+            setattr(self, f"_{'xmin' if r==2 else 'xmax' if r==3 else 'width' if r==4 else 'height'}_var", var)
 
-        ttk.Label(frame, text="X max:", font=("DejaVu Sans", 9)).grid(
-            row=3, column=0, sticky="e", padx=5, pady=3
-        )
-        self._xmax_var = tk.StringVar(value="10")
-        ttk.Entry(frame, textvariable=self._xmax_var, width=8).grid(
-            row=3, column=1, sticky="w", pady=3
-        )
-
-        ttk.Label(frame, text="Width:", font=("DejaVu Sans", 9)).grid(
-            row=4, column=0, sticky="e", padx=5, pady=3
-        )
-        self._width_var = tk.StringVar(value="400")
-        ttk.Entry(frame, textvariable=self._width_var, width=8).grid(
-            row=4, column=1, sticky="w", pady=3
-        )
-
-        ttk.Label(frame, text="Height:", font=("DejaVu Sans", 9)).grid(
-            row=5, column=0, sticky="e", padx=5, pady=3
-        )
-        self._height_var = tk.StringVar(value="300")
-        ttk.Entry(frame, textvariable=self._height_var, width=8).grid(
-            row=5, column=1, sticky="w", pady=3
-        )
-
-        btn_frame = ttk.Frame(frame)
+        btn_frame = tk.Frame(frame, bg=_BG)
         btn_frame.grid(row=6, column=0, columnspan=2, pady=(10, 0))
-        ttk.Button(btn_frame, text="Insert", command=self._on_ok, width=8).pack(
-            side=tk.LEFT, padx=5
-        )
-        ttk.Button(btn_frame, text="Cancel", command=self.destroy, width=8).pack(
-            side=tk.LEFT, padx=5
-        )
+        _xp_btn(btn_frame, "Insert", self._on_ok, 8).pack(side=tk.LEFT, padx=5)
+        _xp_btn(btn_frame, "Cancel", self.destroy, 8).pack(side=tk.LEFT, padx=5)
 
         self.bind("<Return>", lambda e: self._on_ok())
         self.bind("<Escape>", lambda e: self.destroy())
@@ -712,9 +711,10 @@ class PageSetupDialog(tk.Toplevel):
         self.resizable(False, False)
         self.transient(parent)
         self.grab_set()
+        self.configure(bg=_BG)
         self.result: Optional[dict] = None
 
-        frame = ttk.Frame(self, padding=15)
+        frame = tk.Frame(self, bg=_BG, padx=15, pady=15)
         frame.pack(fill=tk.BOTH, expand=True)
 
         pw = page_model.paper_width if page_model else 850
@@ -725,46 +725,43 @@ class PageSetupDialog(tk.Toplevel):
         mt = page_model.margin_top if page_model else 39
         mb = page_model.margin_bottom if page_model else 39
 
-        ttk.Label(frame, text="Paper Size:", font=("DejaVu Sans", 10)).grid(
-            row=0, column=0, sticky="e", padx=5, pady=4
-        )
+        tk.Label(frame, text="Paper Size:", font=_FNT, bg=_BG).grid(
+            row=0, column=0, sticky="e", padx=5, pady=4)
         self._paper_var = tk.StringVar(value="Letter")
         for name, (w, h) in self.PAPER_SIZES.items():
             if (w == pw and h == ph) or (h == pw and w == ph):
                 self._paper_var.set(name)
                 break
-        paper_combo = ttk.Combobox(
-            frame, textvariable=self._paper_var,
-            values=list(self.PAPER_SIZES.keys()), state="readonly", width=12
-        )
-        paper_combo.grid(row=0, column=1, sticky="w", pady=4)
+        paper_menu = tk.OptionMenu(frame, self._paper_var, *list(self.PAPER_SIZES.keys()))
+        paper_menu.configure(font=_FNT, bg=_BG, relief=tk.SUNKEN, bd=1,
+                             highlightthickness=0, width=12)
+        paper_menu.grid(row=0, column=1, sticky="w", pady=4)
 
-        ttk.Label(frame, text="Orientation:", font=("DejaVu Sans", 10)).grid(
-            row=1, column=0, sticky="e", padx=5, pady=4
-        )
+        tk.Label(frame, text="Orientation:", font=_FNT, bg=_BG).grid(
+            row=1, column=0, sticky="e", padx=5, pady=4)
         self._orient_var = tk.StringVar(value=orient)
-        orient_frame = ttk.Frame(frame)
+        orient_frame = tk.Frame(frame, bg=_BG)
         orient_frame.grid(row=1, column=1, sticky="w", pady=4)
-        ttk.Radiobutton(orient_frame, text="Portrait", variable=self._orient_var, value="Portrait").pack(side=tk.LEFT)
-        ttk.Radiobutton(orient_frame, text="Landscape", variable=self._orient_var, value="Landscape").pack(side=tk.LEFT, padx=8)
+        _xp_radio(orient_frame, "Portrait", self._orient_var, "Portrait").pack(side=tk.LEFT)
+        _xp_radio(orient_frame, "Landscape", self._orient_var, "Landscape").pack(side=tk.LEFT, padx=8)
 
-        margin_frame = ttk.LabelFrame(frame, text="Margins", padding=8)
+        margin_frame = tk.LabelFrame(frame, text="Margins", font=_FNT, bg=_BG,
+                                     padx=8, pady=8)
         margin_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=8)
 
         for i, (lbl, val, attr) in enumerate([
             ("Left:", ml, "ml"), ("Right:", mr, "mr"),
             ("Top:", mt, "mt"), ("Bottom:", mb, "mb"),
         ]):
-            ttk.Label(margin_frame, text=lbl, font=("DejaVu Sans", 9)).grid(
-                row=i // 2, column=(i % 2) * 2, sticky="e", padx=3, pady=2
-            )
+            tk.Label(margin_frame, text=lbl, font=_FNT, bg=_BG).grid(
+                row=i // 2, column=(i % 2) * 2, sticky="e", padx=3, pady=2)
             var = tk.StringVar(value=str(val))
             setattr(self, f"_{attr}_var", var)
-            ttk.Entry(margin_frame, textvariable=var, width=6).grid(
-                row=i // 2, column=(i % 2) * 2 + 1, sticky="w", padx=3, pady=2
-            )
+            _xp_entry(margin_frame, var, 6).grid(
+                row=i // 2, column=(i % 2) * 2 + 1, sticky="w", padx=3, pady=2)
 
-        hf_frame = ttk.LabelFrame(frame, text="Header / Footer", padding=8)
+        hf_frame = tk.LabelFrame(frame, text="Header / Footer", font=_FNT, bg=_BG,
+                                 padx=8, pady=8)
         hf_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=4)
 
         hdr_text = ""
@@ -774,31 +771,26 @@ class PageSetupDialog(tk.Toplevel):
         if page_model and page_model.footer:
             ftr_text = page_model.footer.text
 
-        ttk.Label(hf_frame, text="Header:", font=("DejaVu Sans", 9)).grid(
-            row=0, column=0, sticky="e", padx=3, pady=2
-        )
+        tk.Label(hf_frame, text="Header:", font=_FNT, bg=_BG).grid(
+            row=0, column=0, sticky="e", padx=3, pady=2)
         self._header_var = tk.StringVar(value=hdr_text)
-        ttk.Entry(hf_frame, textvariable=self._header_var, width=30).grid(
-            row=0, column=1, sticky="ew", padx=3, pady=2
-        )
+        _xp_entry(hf_frame, self._header_var, 30).grid(
+            row=0, column=1, sticky="ew", padx=3, pady=2)
 
-        ttk.Label(hf_frame, text="Footer:", font=("DejaVu Sans", 9)).grid(
-            row=1, column=0, sticky="e", padx=3, pady=2
-        )
+        tk.Label(hf_frame, text="Footer:", font=_FNT, bg=_BG).grid(
+            row=1, column=0, sticky="e", padx=3, pady=2)
         self._footer_var = tk.StringVar(value=ftr_text)
-        ttk.Entry(hf_frame, textvariable=self._footer_var, width=30).grid(
-            row=1, column=1, sticky="ew", padx=3, pady=2
-        )
+        _xp_entry(hf_frame, self._footer_var, 30).grid(
+            row=1, column=1, sticky="ew", padx=3, pady=2)
 
-        ttk.Label(hf_frame, text="Codes: &[DATE] &[TIME] &[FILENAME] &[PAGENUM] &[COUNT]",
-                  font=("DejaVu Sans", 7)).grid(
-            row=2, column=0, columnspan=2, sticky="w", padx=3
-        )
+        tk.Label(hf_frame, text="Codes: &[DATE] &[TIME] &[FILENAME] &[PAGENUM] &[COUNT]",
+                 font=_FNT_SM, bg=_BG, fg="#666666").grid(
+            row=2, column=0, columnspan=2, sticky="w", padx=3)
 
-        btn_frame = ttk.Frame(frame)
+        btn_frame = tk.Frame(frame, bg=_BG)
         btn_frame.grid(row=4, column=0, columnspan=2, pady=(10, 0))
-        ttk.Button(btn_frame, text="OK", command=self._on_ok, width=8).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="Cancel", command=self.destroy, width=8).pack(side=tk.LEFT, padx=5)
+        _xp_btn(btn_frame, "OK", self._on_ok, 8).pack(side=tk.LEFT, padx=5)
+        _xp_btn(btn_frame, "Cancel", self.destroy, 8).pack(side=tk.LEFT, padx=5)
 
         self.bind("<Return>", lambda e: self._on_ok())
         self.bind("<Escape>", lambda e: self.destroy())
@@ -900,36 +892,42 @@ class UnitsBrowserDialog(tk.Toplevel):
         self.geometry("450x400")
         self.transient(parent)
         self.grab_set()
+        self.configure(bg=_BG)
         self.result: Optional[str] = None
 
-        frame = ttk.Frame(self, padding=8)
+        frame = tk.Frame(self, bg=_BG, padx=8, pady=8)
         frame.pack(fill=tk.BOTH, expand=True)
 
-        paned = ttk.PanedWindow(frame, orient=tk.HORIZONTAL)
+        paned = tk.PanedWindow(frame, orient=tk.HORIZONTAL, bg=_BG,
+                               sashwidth=4, sashrelief=tk.RAISED)
         paned.pack(fill=tk.BOTH, expand=True)
 
-        cat_frame = ttk.Frame(paned)
-        paned.add(cat_frame, weight=1)
+        cat_frame = tk.Frame(paned, bg=_BG)
+        paned.add(cat_frame)
 
-        ttk.Label(cat_frame, text="Category", font=("DejaVu Sans", 9, "bold")).pack(anchor="w")
-        self._cat_list = tk.Listbox(cat_frame, font=("DejaVu Sans", 9), exportselection=False)
+        tk.Label(cat_frame, text="Category", font=_FNT_BOLD, bg=_BG).pack(anchor="w")
+        self._cat_list = tk.Listbox(cat_frame, font=_FNT, exportselection=False,
+                                    bg="white", selectbackground="#316ac5",
+                                    selectforeground="white", relief=tk.SUNKEN, bd=2)
         self._cat_list.pack(fill=tk.BOTH, expand=True)
         for cat in self.UNIT_CATEGORIES:
             self._cat_list.insert(tk.END, cat)
         self._cat_list.bind("<<ListboxSelect>>", self._on_cat_select)
 
-        unit_frame = ttk.Frame(paned)
-        paned.add(unit_frame, weight=2)
+        unit_frame = tk.Frame(paned, bg=_BG)
+        paned.add(unit_frame)
 
-        ttk.Label(unit_frame, text="Unit", font=("DejaVu Sans", 9, "bold")).pack(anchor="w")
-        self._unit_list = tk.Listbox(unit_frame, font=("DejaVu Sans", 9), exportselection=False)
+        tk.Label(unit_frame, text="Unit", font=_FNT_BOLD, bg=_BG).pack(anchor="w")
+        self._unit_list = tk.Listbox(unit_frame, font=_FNT, exportselection=False,
+                                     bg="white", selectbackground="#316ac5",
+                                     selectforeground="white", relief=tk.SUNKEN, bd=2)
         self._unit_list.pack(fill=tk.BOTH, expand=True)
         self._unit_list.bind("<Double-1>", lambda e: self._on_ok())
 
-        btn_frame = ttk.Frame(frame)
+        btn_frame = tk.Frame(frame, bg=_BG)
         btn_frame.pack(fill=tk.X, pady=(8, 0))
-        ttk.Button(btn_frame, text="Insert", command=self._on_ok, width=8).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="Cancel", command=self.destroy, width=8).pack(side=tk.LEFT, padx=5)
+        _xp_btn(btn_frame, "Insert", self._on_ok, 8).pack(side=tk.LEFT, padx=5)
+        _xp_btn(btn_frame, "Cancel", self.destroy, 8).pack(side=tk.LEFT, padx=5)
 
         self.bind("<Return>", lambda e: self._on_ok())
         self.bind("<Escape>", lambda e: self.destroy())
@@ -964,6 +962,7 @@ class PrintPreviewDialog(tk.Toplevel):
         self.title("Print Preview")
         self.transient(parent)
         self.grab_set()
+        self.configure(bg=_BG)
         self.geometry("700x550")
         self.minsize(500, 400)
 
@@ -974,23 +973,26 @@ class PrintPreviewDialog(tk.Toplevel):
         self._current_page = 0
         self._scale = 0.5
 
-        toolbar = ttk.Frame(self)
+        toolbar = tk.Frame(self, bg=_BG)
         toolbar.pack(fill=tk.X, padx=4, pady=4)
 
-        ttk.Button(toolbar, text="Print", command=self._on_print).pack(side=tk.LEFT, padx=2)
-        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=4, pady=2)
+        _xp_btn(toolbar, "Print", self._on_print, 6).pack(side=tk.LEFT, padx=2)
+        tk.Frame(toolbar, width=2, height=20, bg="#a0a0a0", bd=0).pack(
+            side=tk.LEFT, fill=tk.Y, padx=4, pady=2)
 
-        ttk.Button(toolbar, text="<", width=3, command=self._prev_page).pack(side=tk.LEFT)
-        self._page_label = ttk.Label(toolbar, text=f"Page 1 of {self._num_pages}")
+        _xp_btn(toolbar, "<", self._prev_page, 3).pack(side=tk.LEFT)
+        self._page_label = tk.Label(toolbar, text=f"Page 1 of {self._num_pages}",
+                                    font=_FNT, bg=_BG)
         self._page_label.pack(side=tk.LEFT, padx=6)
-        ttk.Button(toolbar, text=">", width=3, command=self._next_page).pack(side=tk.LEFT)
+        _xp_btn(toolbar, ">", self._next_page, 3).pack(side=tk.LEFT)
 
-        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=4, pady=2)
-        ttk.Button(toolbar, text="Zoom In", command=lambda: self._zoom(1.25)).pack(side=tk.LEFT, padx=2)
-        ttk.Button(toolbar, text="Zoom Out", command=lambda: self._zoom(0.8)).pack(side=tk.LEFT, padx=2)
-        ttk.Button(toolbar, text="Close", command=self.destroy).pack(side=tk.RIGHT, padx=2)
+        tk.Frame(toolbar, width=2, height=20, bg="#a0a0a0", bd=0).pack(
+            side=tk.LEFT, fill=tk.Y, padx=4, pady=2)
+        _xp_btn(toolbar, "Zoom In", lambda: self._zoom(1.25), 8).pack(side=tk.LEFT, padx=2)
+        _xp_btn(toolbar, "Zoom Out", lambda: self._zoom(0.8), 8).pack(side=tk.LEFT, padx=2)
+        _xp_btn(toolbar, "Close", self.destroy, 6).pack(side=tk.RIGHT, padx=2)
 
-        container = ttk.Frame(self)
+        container = tk.Frame(self, bg=_BG)
         container.pack(fill=tk.BOTH, expand=True)
         self._preview = tk.Canvas(container, bg="#808080", highlightthickness=0)
         self._preview.pack(fill=tk.BOTH, expand=True)

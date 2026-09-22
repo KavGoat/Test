@@ -1356,6 +1356,23 @@ class WorksheetCanvas(ttk.Frame):
             )
         return self._font_cache[key]
 
+    def _is_on_page(self, cx: int, cy: int) -> bool:
+        """Check whether canvas coordinates (cx, cy) fall on a white page."""
+        pw = _z(getattr(self, '_page_width', 800), self._zoom)
+        if cx < 0 or cx > pw:
+            return False
+        ph = getattr(self, '_page_height', 1100)
+        pg = getattr(self, '_page_gap', 10)
+        num = getattr(self, '_num_pages', 5)
+        z = self._zoom
+        for page in range(num):
+            page_y = page * (ph + pg)
+            top_z = _z(page_y, z)
+            bot_z = _z(page_y + ph, z)
+            if top_z <= cy <= bot_z:
+                return True
+        return False
+
     # ------------------------------------------------------------------
     # Selection
     # ------------------------------------------------------------------
@@ -1825,7 +1842,10 @@ class WorksheetCanvas(ttk.Frame):
         if handle:
             self._canvas.config(cursor=self._HANDLE_CURSORS[handle])
         else:
-            self._canvas.config(cursor="arrow")
+            if self._is_on_page(cx, cy):
+                self._canvas.config(cursor="crosshair")
+            else:
+                self._canvas.config(cursor="arrow")
 
         hit = self._hit_test(cx, cy)
         if hit != self._hover_index:
