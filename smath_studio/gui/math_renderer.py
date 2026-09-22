@@ -346,7 +346,11 @@ class MathRenderer:
             ow, oh = self._text_size(c, " ", fs)
         else:
             ow, oh = self._text_size(c, f" {op_text} ", fs)
-        w = left.width + ow + right.width
+        lp = _needs_parens(node.left, node.operator, False)
+        rp = _needs_parens(node.right, node.operator, True)
+        pw, _ = self._text_size(c, "(", fs)
+        paren_extra = (pw * 2 if lp else 0) + (pw * 2 if rp else 0)
+        w = left.width + ow + right.width + paren_extra
         bl = max(left.baseline, right.baseline, oh / 2)
         desc = max(left.height - left.baseline, right.height - right.baseline, oh / 2)
         h = bl + desc
@@ -747,32 +751,49 @@ class MathRenderer:
         if node.operator == "=" or node.operator == "≡":
             return self._render_equals(c, node, x, y, fs, ctx)
 
-        # General infix operator
         total = self._measure_binary(c, node, fs, ctx)
         left_m = self._measure_node(node.left, fs, ctx)
         right_m = self._measure_node(node.right, fs, ctx)
 
+        lp = _needs_parens(node.left, node.operator, False)
+        rp = _needs_parens(node.right, node.operator, True)
+        pw, _ = self._text_size(c, "(", fs)
+
         bl = total.baseline
+        cx_pos = x
+        if lp:
+            self._draw_stretchy_paren(c, "(", cx_pos, y, total.height, fs)
+            cx_pos += pw
         left_y = y + bl - left_m.baseline
-        lb = self._render_node(c, node.left, x, left_y, fs, ctx)
+        lb = self._render_node(c, node.left, cx_pos, left_y, fs, ctx)
+        cx_pos += lb.width
+        if lp:
+            self._draw_stretchy_paren(c, ")", cx_pos, y, total.height, fs)
+            cx_pos += pw
 
         op_text = _DISPLAY_OPS.get(node.operator, node.operator)
         display = f" {op_text} "
 
-        # For multiplication between a number/var and a unit, use thin space
         if node.operator == "*" and _is_implicit_mult(node):
-            display = " "  # thin space
+            display = " "
 
         f = self._get_font(c, fs)
-        ox = x + lb.width
         ow, oh = self._text_size(c, display, fs)
         op_y = y + bl - oh / 2
-        c.create_text(ox, op_y, text=display, anchor="nw", font=f, fill=_OPERATOR_COLOR)
+        c.create_text(cx_pos, op_y, text=display, anchor="nw", font=f, fill=_OPERATOR_COLOR)
+        cx_pos += ow
 
+        if rp:
+            self._draw_stretchy_paren(c, "(", cx_pos, y, total.height, fs)
+            cx_pos += pw
         right_y = y + bl - right_m.baseline
-        rb = self._render_node(c, node.right, ox + ow, right_y, fs, ctx)
+        rb = self._render_node(c, node.right, cx_pos, right_y, fs, ctx)
+        cx_pos += rb.width
+        if rp:
+            self._draw_stretchy_paren(c, ")", cx_pos, y, total.height, fs)
+            cx_pos += pw
 
-        w = lb.width + ow + rb.width
+        w = cx_pos - x
         h = total.height
         return RenderBox(w, h, bl)
 
@@ -1792,6 +1813,29 @@ def _format_result(val: Any, precision: int = 4, trailing_zeros: bool = False) -
     if isinstance(val, str):
         return val
     return str(val)
+
+
+_PRECEDENCE = {
+    "|": 1, "&": 2,
+    "=": 3, "≡": 3, "≠": 3, "<": 3, ">": 3, "≤": 3, "≥": 3,
+    "+": 4, "-": 4, "±": 4,
+    "*": 5, "·": 5,
+    "/": 6, "^": 7, ":": 0,
+}
+
+
+def _needs_parens(child: ASTNode, parent_op: str, is_right: bool) -> bool:
+    if not isinstance(child, BinaryOp):
+        return False
+    if child.operator in ("/", "^", ":"):
+        return False
+    child_prec = _PRECEDENCE.get(child.operator, 10)
+    parent_prec = _PRECEDENCE.get(parent_op, 10)
+    if child_prec < parent_prec:
+        return True
+    if child_prec == parent_prec and is_right and parent_op in ("-", "/"):
+        return True
+    return False
 
 
 def _is_implicit_mult(node: BinaryOp) -> bool:
