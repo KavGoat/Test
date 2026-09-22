@@ -382,6 +382,7 @@ class SMathApp:
             "cut": self._on_cut,
             "copy": self._on_copy,
             "paste": self._on_paste,
+            "find": self._on_find_replace,
         }
         self._toolbar = StandardToolbar(toolbar_frame, commands)
         self._toolbar.pack(side=tk.LEFT, fill=tk.X, padx=2, pady=1)
@@ -474,8 +475,14 @@ class SMathApp:
         )
         self._status_info.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(1, 2), pady=2)
 
-        grip = tk.Label(status_frame, text="  ", bg=_sbg, relief=tk.FLAT, width=2)
-        grip.pack(side=tk.RIGHT, padx=0)
+        grip = tk.Canvas(status_frame, width=14, height=14, bg=_sbg,
+                         highlightthickness=0)
+        grip.pack(side=tk.RIGHT, padx=1, pady=1)
+        for row in range(3):
+            for col in range(row + 1):
+                gx = 10 - col * 4
+                gy = 10 - (2 - row) * 4
+                grip.create_rectangle(gx, gy, gx + 2, gy + 2, fill="#a0a0a0", outline="#ffffff")
 
     # ------------------------------------------------------------------
     # Keyboard shortcuts

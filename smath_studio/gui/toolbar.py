@@ -6,6 +6,61 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Callable, Optional
 
+try:
+    from PIL import Image, ImageDraw, ImageTk
+    _HAS_PIL = True
+except ImportError:
+    _HAS_PIL = False
+
+
+def _make_icon(name: str) -> "Image.Image":
+    """Create a 16x16 toolbar icon."""
+    img = Image.new("RGBA", (16, 16), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    if name == "new":
+        d.rectangle([3, 0, 12, 15], outline="#444", fill="#fff")
+        d.polygon([(9, 0), (12, 3), (9, 3)], fill="#ddd", outline="#444")
+        for y in (5, 7, 9, 11): d.line([(5, y), (10, y)], fill="#999")
+    elif name == "open":
+        d.rectangle([1, 4, 14, 14], outline="#886600", fill="#ffdd44")
+        d.rectangle([1, 4, 14, 7], outline="#886600", fill="#ccaa00")
+        d.polygon([(0, 7), (3, 14), (14, 14), (11, 7)], fill="#ffee88", outline="#886600")
+    elif name == "save":
+        d.rectangle([1, 1, 14, 14], outline="#336", fill="#448")
+        d.rectangle([3, 1, 12, 6], outline="#336", fill="#aab")
+        d.rectangle([4, 8, 11, 14], outline="#336", fill="#ddd")
+        d.rectangle([8, 2, 10, 5], fill="#336")
+    elif name == "print":
+        d.rectangle([3, 0, 12, 5], outline="#555", fill="#fff")
+        d.rectangle([0, 5, 15, 12], outline="#555", fill="#ddd")
+        d.rectangle([3, 10, 12, 15], outline="#555", fill="#fff")
+        d.rectangle([5, 12, 10, 14], fill="#ccc")
+        d.ellipse([10, 7, 13, 10], fill="#0a0")
+    elif name == "undo":
+        d.arc([2, 2, 14, 14], 120, 340, fill="#226")
+        d.polygon([(2, 4), (6, 1), (6, 7)], fill="#226")
+    elif name == "redo":
+        d.arc([2, 2, 14, 14], 200, 60, fill="#226")
+        d.polygon([(14, 4), (10, 1), (10, 7)], fill="#226")
+    elif name == "cut":
+        d.line([(7, 0), (5, 8)], fill="#555", width=2)
+        d.line([(9, 0), (11, 8)], fill="#555", width=2)
+        d.ellipse([2, 9, 8, 15], outline="#555", fill=None)
+        d.ellipse([8, 9, 14, 15], outline="#555", fill=None)
+    elif name == "copy":
+        d.rectangle([0, 3, 9, 15], outline="#448", fill="#dde8ff")
+        d.rectangle([4, 0, 13, 12], outline="#448", fill="#dde8ff")
+        for y in (3, 5, 7, 9): d.line([(6, y), (11, y)], fill="#99a")
+    elif name == "paste":
+        d.rectangle([3, 3, 14, 15], outline="#448", fill="#ffe")
+        d.rectangle([5, 0, 11, 5], outline="#886600", fill="#ccaa00")
+        d.rectangle([6, 1, 10, 4], fill="#ffe")
+        for y in (7, 9, 11, 13): d.line([(5, y), (12, y)], fill="#999")
+    elif name == "find":
+        d.ellipse([0, 0, 10, 10], outline="#448", fill="#dde8ff", width=2)
+        d.line([(9, 9), (15, 15)], fill="#448", width=2)
+    return img
+
 
 class StandardToolbar(ttk.Frame):
     """Standard toolbar row with New, Open, Save, Print, Undo, Redo, Cut, Copy, Paste."""
@@ -17,43 +72,58 @@ class StandardToolbar(ttk.Frame):
     def __init__(self, parent: tk.Widget, commands: dict[str, Callable]):
         super().__init__(parent)
         self._commands = commands
+        self._icon_refs: list = []
         self._build()
 
     def _build(self):
         buttons = [
-            ("\U0001f4c4", "New (Ctrl+N)", "new"),
-            ("\U0001f4c2", "Open (Ctrl+O)", "open"),
-            ("\U0001f4be", "Save (Ctrl+S)", "save"),
+            ("new", "New (Ctrl+N)", "new"),
+            ("open", "Open (Ctrl+O)", "open"),
+            ("save", "Save (Ctrl+S)", "save"),
             None,
-            ("\U0001f5a8", "Print (Ctrl+P)", "print"),
+            ("print", "Print (Ctrl+P)", "print"),
             None,
-            ("↶", "Undo (Ctrl+Z)", "undo"),
-            ("↷", "Redo (Ctrl+Y)", "redo"),
+            ("undo", "Undo (Ctrl+Z)", "undo"),
+            ("redo", "Redo (Ctrl+Y)", "redo"),
             None,
-            ("✂", "Cut (Ctrl+X)", "cut"),
-            ("⎘", "Copy (Ctrl+C)", "copy"),
-            ("\U0001f4cb", "Paste (Ctrl+V)", "paste"),
+            ("cut", "Cut (Ctrl+X)", "cut"),
+            ("copy", "Copy (Ctrl+C)", "copy"),
+            ("paste", "Paste (Ctrl+V)", "paste"),
             None,
-            ("\U0001f50d", "Find (Ctrl+H)", "find"),
+            ("find", "Find (Ctrl+H)", "find"),
         ]
         for item in buttons:
             if item is None:
                 sep = ttk.Separator(self, orient=tk.VERTICAL)
                 sep.pack(side=tk.LEFT, fill=tk.Y, padx=2, pady=3)
             else:
-                icon, tooltip, cmd_key = item
+                icon_name, tooltip, cmd_key = item
                 cmd = self._commands.get(cmd_key, lambda: None)
-                btn = tk.Button(
-                    self, text=icon, command=cmd,
-                    width=2, height=1,
-                    font=("DejaVu Sans", 10),
-                    relief=tk.FLAT,
-                    bg=self._BG,
-                    activebackground=self._PRESS_BG,
-                    bd=0,
-                    highlightthickness=0,
-                    padx=2, pady=1,
-                )
+                if _HAS_PIL:
+                    pil_img = _make_icon(icon_name)
+                    photo = ImageTk.PhotoImage(pil_img)
+                    self._icon_refs.append(photo)
+                    btn = tk.Button(
+                        self, image=photo, command=cmd,
+                        relief=tk.FLAT, bg=self._BG,
+                        activebackground=self._PRESS_BG,
+                        bd=0, highlightthickness=0,
+                        padx=3, pady=3,
+                    )
+                else:
+                    fallback = {"new": "⬜", "open": "\U0001f4c2",
+                                "save": "\U0001f4be", "print": "\U0001f5a8",
+                                "undo": "↶", "redo": "↷",
+                                "cut": "✂", "copy": "⎘",
+                                "paste": "\U0001f4cb", "find": "\U0001f50d"}
+                    btn = tk.Button(
+                        self, text=fallback.get(icon_name, "?"), command=cmd,
+                        width=2, height=1, font=("DejaVu Sans", 10),
+                        relief=tk.FLAT, bg=self._BG,
+                        activebackground=self._PRESS_BG,
+                        bd=0, highlightthickness=0,
+                        padx=2, pady=1,
+                    )
                 btn.pack(side=tk.LEFT, padx=0, pady=1)
                 self._bind_hover_tooltip(btn, tooltip)
 

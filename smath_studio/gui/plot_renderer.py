@@ -138,13 +138,17 @@ def render_plot(
     fig = Figure(figsize=(fig_w, fig_h), dpi=dpi, facecolor="white")
     ax = fig.add_subplot(111)
 
-    # Style the axes
     ax.set_facecolor("white")
-    ax.grid(True, linewidth=0.5, alpha=0.4, color="#cccccc")
-    ax.tick_params(labelsize=8)
+    ax.grid(True, linewidth=0.5, alpha=0.3, color="#c0c0c0", linestyle="-")
+    ax.tick_params(labelsize=7, direction="in", length=3, width=0.5, colors="#444")
+    for spine in ax.spines.values():
+        spine.set_linewidth(0.8)
+        spine.set_color("#666666")
 
     expr_label = ""
     plotted = False
+    colors = ["#0000cc", "#cc0000", "#008800", "#cc6600", "#8800cc"]
+    color_idx = 0
 
     if plot.input_expr is not None:
         inner_expr = _unwrap_evaluation(plot.input_expr)
@@ -164,27 +168,24 @@ def render_plot(
 
             ys_arr = np.array(ys, dtype=float)
 
-            # Only plot if we got at least some valid values
             valid_mask = np.isfinite(ys_arr)
             if np.any(valid_mask):
-                ax.plot(xs, ys_arr, color="#2060c0", linewidth=1.5)
+                ax.plot(xs, ys_arr, color=colors[color_idx % len(colors)],
+                        linewidth=1.2, antialiased=True)
                 plotted = True
 
-    ax.set_xlabel("x", fontsize=8)
-    ax.set_ylabel("y", fontsize=8)
-
-    if expr_label:
-        ax.set_title(expr_label, fontsize=9, pad=6)
+    ax.set_xlabel("x", fontsize=7, color="#444")
+    ax.set_ylabel("y", fontsize=7, color="#444")
 
     if not plotted:
         ax.text(
             0.5, 0.5, "(no data)",
             transform=ax.transAxes,
             ha="center", va="center",
-            fontsize=10, color="#999999", style="italic",
+            fontsize=9, color="#999999", style="italic",
         )
 
-    fig.tight_layout(pad=1.0)
+    fig.tight_layout(pad=1.2)
 
     # Render to PIL Image
     buf = io.BytesIO()
