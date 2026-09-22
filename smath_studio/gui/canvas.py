@@ -608,6 +608,18 @@ class WorksheetCanvas(ttk.Frame):
                     fill="#e0e0e0", dash=(1, 3), tags="page_bounds"
                 )
 
+            # Page number in the gap between pages
+            if page > 0:
+                gap_y = page * (ph + page_gap) - page_gap // 2
+                fs_pg = max(7, _z(8, z))
+                self._canvas.create_text(
+                    _z(pw // 2, z), _z(gap_y, z),
+                    text=f"Page {page + 1}",
+                    font=("DejaVu Sans", fs_pg),
+                    fill="#a0a0a0", anchor="center",
+                    tags="page_bounds",
+                )
+
         self._draw_headers_footers(ws)
 
     def _draw_headers_footers(self, ws: Worksheet):
