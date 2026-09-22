@@ -94,7 +94,7 @@ class SMathApp:
         except tk.TclError:
             pass
 
-        bg = "#f0f0f0"
+        bg = "#ece9d8"
         style.configure(".", background=bg, font=self._UI_FONT)
         style.configure(
             "Toolbutton.TButton",
@@ -103,23 +103,24 @@ class SMathApp:
         )
         style.configure(
             "Toolbar.TFrame",
-            background="#e0e0e0",
+            background="#ece9d8",
         )
+        status_bg = "#ece9d8"
         style.configure(
             "Status.TLabel",
             font=self._UI_FONT,
             padding=(4, 2),
-            background=bg,
+            background=status_bg,
         )
         style.configure(
             "StatusSep.TLabel",
             font=self._UI_FONT,
             foreground="#888888",
-            background=bg,
+            background=status_bg,
         )
         style.configure(
             "Status.TFrame",
-            background=bg,
+            background=status_bg,
         )
 
     def _build_menu_bar(self):
@@ -398,7 +399,8 @@ class SMathApp:
 
         # Math panels sidebar (right)
         self._math_panels = MathPanelContainer(
-            self._paned, on_insert=self._on_symbol_insert
+            self._paned, on_insert=self._on_symbol_insert,
+            on_navigate=self._on_doc_map_navigate,
         )
         self._paned.add(self._math_panels, weight=0)
 
@@ -604,6 +606,7 @@ class SMathApp:
             self._canvas_widget.load_worksheet(ws)
             self._add_recent_file(str(path))
             self._update_title()
+            self._update_doc_map()
             n_regions = len(ws.regions)
             self._status_info.config(
                 text=f"Loaded {self._current_file.name} ({n_regions} regions)"
@@ -1410,6 +1413,41 @@ class SMathApp:
         """Called when the canvas content is modified by editing."""
         self._modified = True
         self._update_title()
+        self._update_doc_map()
+
+    def _update_doc_map(self):
+        """Refresh the Document Map panel with title regions."""
+        if self._worksheet is None:
+            self._math_panels.doc_map.update_entries([])
+            return
+        entries: list[tuple[str, float]] = []
+        for r in self._worksheet.regions:
+            if not r.text_contents:
+                continue
+            fg = (r.color or "#000000").lower()
+            if fg not in ("#0000ff", "#0000cc"):
+                continue
+            tc = self._canvas_widget._get_text_content(r.text_contents)
+            if tc and tc.paragraphs:
+                title = " ".join(p.text for p in tc.paragraphs).strip()
+                if title:
+                    entries.append((title, r.top))
+        self._math_panels.doc_map.update_entries(entries)
+
+    def _on_doc_map_navigate(self, top: float):
+        """Scroll the canvas to show the region at the given top position."""
+        zoom = self._canvas_widget._zoom
+        canvas = self._canvas_widget._canvas
+        y = int(top * zoom)
+        canvas.yview_moveto(0)
+        canvas.update_idletasks()
+        sr = canvas.cget("scrollregion")
+        if sr:
+            parts = sr.split()
+            total_h = float(parts[3]) - float(parts[1])
+            if total_h > 0:
+                target = max(0, y - 40)
+                canvas.yview_moveto(target / total_h)
 
     # ------------------------------------------------------------------
     # Window close

@@ -10,8 +10,9 @@ from typing import Callable, Optional
 class StandardToolbar(ttk.Frame):
     """Standard toolbar row with New, Open, Save, Print, Undo, Redo, Cut, Copy, Paste."""
 
-    _BG = "#e0e0e0"
-    _HOVER_BG = "#c8d8e8"
+    _BG = "#ece9d8"
+    _HOVER_BG = "#c1d2ee"
+    _PRESS_BG = "#98b5e2"
 
     def __init__(self, parent: tk.Widget, commands: dict[str, Callable]):
         super().__init__(parent)
@@ -26,33 +27,36 @@ class StandardToolbar(ttk.Frame):
             None,
             ("\U0001f5a8", "Print (Ctrl+P)", "print"),
             None,
-            ("↩", "Undo (Ctrl+Z)", "undo"),
-            ("↪", "Redo (Ctrl+Y)", "redo"),
+            ("↶", "Undo (Ctrl+Z)", "undo"),
+            ("↷", "Redo (Ctrl+Y)", "redo"),
             None,
             ("✂", "Cut (Ctrl+X)", "cut"),
             ("⎘", "Copy (Ctrl+C)", "copy"),
             ("\U0001f4cb", "Paste (Ctrl+V)", "paste"),
+            None,
+            ("\U0001f50d", "Find (Ctrl+H)", "find"),
         ]
         for item in buttons:
             if item is None:
                 sep = ttk.Separator(self, orient=tk.VERTICAL)
-                sep.pack(side=tk.LEFT, fill=tk.Y, padx=3, pady=2)
+                sep.pack(side=tk.LEFT, fill=tk.Y, padx=2, pady=3)
             else:
                 icon, tooltip, cmd_key = item
                 cmd = self._commands.get(cmd_key, lambda: None)
                 btn = tk.Button(
                     self, text=icon, command=cmd,
-                    width=3, height=1,
-                    font=("DejaVu Sans", 11),
+                    width=2, height=1,
+                    font=("DejaVu Sans", 10),
                     relief=tk.FLAT,
                     bg=self._BG,
-                    activebackground=self._HOVER_BG,
+                    activebackground=self._PRESS_BG,
                     bd=0,
                     highlightthickness=0,
+                    padx=2, pady=1,
                 )
-                btn.pack(side=tk.LEFT, padx=1, pady=2)
-                btn.bind("<Enter>", lambda e, b=btn: b.configure(bg=self._HOVER_BG))
-                btn.bind("<Leave>", lambda e, b=btn: b.configure(bg=self._BG))
+                btn.pack(side=tk.LEFT, padx=0, pady=1)
+                btn.bind("<Enter>", lambda e, b=btn: b.configure(bg=self._HOVER_BG, relief=tk.RAISED))
+                btn.bind("<Leave>", lambda e, b=btn: b.configure(bg=self._BG, relief=tk.FLAT))
                 self._add_tooltip(btn, tooltip)
 
     @staticmethod
@@ -80,8 +84,8 @@ class StandardToolbar(ttk.Frame):
 class FormatToolbar(ttk.Frame):
     """Formatting toolbar with Bold, Italic, Underline, font size."""
 
-    _BG = "#e0e0e0"
-    _HOVER_BG = "#c8d8e8"
+    _BG = "#ece9d8"
+    _HOVER_BG = "#c1d2ee"
 
     def __init__(self, parent: tk.Widget, commands: dict[str, Callable]):
         super().__init__(parent)
@@ -102,13 +106,14 @@ class FormatToolbar(ttk.Frame):
                 font=font,
                 relief=tk.FLAT,
                 bg=self._BG,
-                activebackground=self._HOVER_BG,
+                activebackground="#98b5e2",
                 bd=0,
                 highlightthickness=0,
+                padx=2, pady=1,
             )
-            btn.pack(side=tk.LEFT, padx=1, pady=2)
-            btn.bind("<Enter>", lambda e, b=btn: b.configure(bg=self._HOVER_BG))
-            btn.bind("<Leave>", lambda e, b=btn: b.configure(bg=self._BG))
+            btn.pack(side=tk.LEFT, padx=0, pady=1)
+            btn.bind("<Enter>", lambda e, b=btn: b.configure(bg=self._HOVER_BG, relief=tk.RAISED))
+            btn.bind("<Leave>", lambda e, b=btn: b.configure(bg=self._BG, relief=tk.FLAT))
             StandardToolbar._add_tooltip(btn, tooltip)
 
         sep = ttk.Separator(self, orient=tk.VERTICAL)
@@ -500,6 +505,43 @@ class PlotPanel(CollapsiblePanel):
             self._on_insert(value)
 
 
+class UnitsPanel(CollapsiblePanel):
+    """Common physical units panel."""
+
+    def __init__(self, parent: tk.Widget, on_insert: Optional[Callable] = None):
+        super().__init__(parent, title="Units")
+        self._on_insert = on_insert
+        self._build()
+
+    def _build(self):
+        items = [
+            ("m", "'m'"), ("kg", "'kg'"), ("s", "'s'"), ("A", "'A'"),
+            ("K", "'K'"), ("N", "'N'"), ("Pa", "'Pa'"), ("J", "'J'"),
+            ("W", "'W'"), ("V", "'V'"), ("Hz", "'Hz'"), ("rad", "'rad'"),
+            ("mm", "'mm'"), ("cm", "'cm'"), ("km", "'km'"), ("in", "'in'"),
+            ("ft", "'ft'"), ("kN", "'kN'"), ("MPa", "'MPa'"), ("kPa", "'kPa'"),
+            ("kJ", "'kJ'"), ("kW", "'kW'"), ("deg", "'deg'"), ("L", "'L'"),
+        ]
+        frame = self.content
+        cols = 4
+        for i, (label, value) in enumerate(items):
+            row = i // cols
+            col = i % cols
+            btn = tk.Button(
+                frame, text=label, width=4, height=1,
+                font=("DejaVu Sans", 9), relief=tk.FLAT,
+                bg="#f0f0f0", activebackground="#d8d8d8",
+                command=lambda v=value: self._insert(v),
+            )
+            btn.grid(row=row, column=col, padx=1, pady=1, sticky="nsew")
+        for c in range(cols):
+            frame.columnconfigure(c, weight=1)
+
+    def _insert(self, value: str):
+        if self._on_insert:
+            self._on_insert(value)
+
+
 class ConstantsPanel(CollapsiblePanel):
     """Physical and mathematical constants panel."""
 
@@ -535,14 +577,43 @@ class ConstantsPanel(CollapsiblePanel):
             self._on_insert(value)
 
 
+class DocumentMapPanel(CollapsiblePanel):
+    """Document Map panel showing title regions as navigable links."""
+
+    def __init__(self, parent: tk.Widget, on_navigate: Optional[Callable] = None):
+        super().__init__(parent, title="Document Map")
+        self._on_navigate = on_navigate
+        self._listbox = tk.Listbox(
+            self.content, font=("DejaVu Sans", 9), fg="#0000ff",
+            selectbackground="#c8d8e8", selectforeground="#000000",
+            activestyle="none", relief=tk.FLAT, highlightthickness=0,
+            height=6,
+        )
+        self._listbox.pack(fill=tk.BOTH, expand=True)
+        self._listbox.bind("<Double-Button-1>", self._on_click)
+        self._entries: list[tuple[str, float]] = []
+
+    def update_entries(self, entries: list[tuple[str, float]]):
+        self._entries = entries
+        self._listbox.delete(0, tk.END)
+        for title, _top in entries:
+            self._listbox.insert(tk.END, title)
+
+    def _on_click(self, _event=None):
+        sel = self._listbox.curselection()
+        if sel and self._on_navigate and sel[0] < len(self._entries):
+            _, top = self._entries[sel[0]]
+            self._on_navigate(top)
+
+
 class MathPanelContainer(ttk.Frame):
     """Container holding all math toolbar panels in a scrollable sidebar."""
 
-    def __init__(self, parent: tk.Widget, on_insert: Optional[Callable] = None):
+    def __init__(self, parent: tk.Widget, on_insert: Optional[Callable] = None,
+                 on_navigate: Optional[Callable] = None):
         super().__init__(parent)
         self._on_insert = on_insert
 
-        # Inner canvas with scrollbar for the panels
         self._canvas = tk.Canvas(self, width=180, highlightthickness=0)
         self._scrollbar = ttk.Scrollbar(
             self, orient=tk.VERTICAL, command=self._canvas.yview
@@ -559,7 +630,9 @@ class MathPanelContainer(ttk.Frame):
         self._inner.bind("<Configure>", self._on_inner_configure)
         self._canvas.bind("<Configure>", self._on_canvas_configure)
 
-        # Build panels
+        self.doc_map = DocumentMapPanel(self._inner, on_navigate=on_navigate)
+        self.doc_map.pack(fill=tk.X, padx=2, pady=2)
+
         self.arithmetic = ArithmeticPanel(self._inner, on_insert=on_insert)
         self.arithmetic.pack(fill=tk.X, padx=2, pady=2)
 
@@ -574,6 +647,9 @@ class MathPanelContainer(ttk.Frame):
 
         self.boolean = BooleanPanel(self._inner, on_insert=on_insert)
         self.boolean.pack(fill=tk.X, padx=2, pady=2)
+
+        self.units = UnitsPanel(self._inner, on_insert=on_insert)
+        self.units.pack(fill=tk.X, padx=2, pady=2)
 
         self.constants = ConstantsPanel(self._inner, on_insert=on_insert)
         self.constants.pack(fill=tk.X, padx=2, pady=2)

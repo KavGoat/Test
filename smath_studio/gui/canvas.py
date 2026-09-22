@@ -307,6 +307,13 @@ class WorksheetCanvas(ttk.Frame):
         self._context_menu.add_command(
             label="Recalculate All (F9)", command=self.recalculate
         )
+        self._context_menu.add_command(
+            label="Lock/Unlock Region", command=self._toggle_lock_selected
+        )
+        self._context_menu.add_separator()
+        self._context_menu.add_command(
+            label="Select All", accelerator="Ctrl+A", command=self.select_all
+        )
         self._context_menu.add_separator()
         self._context_menu.add_command(
             label="Properties...", command=self._show_region_properties
@@ -548,20 +555,30 @@ class WorksheetCanvas(ttk.Frame):
         z = self._zoom
         for page in range(num_pages):
             page_y = page * (ph + page_gap)
+            # Bottom shadow
             self._canvas.create_rectangle(
                 _z(shadow_w, z), _z(page_y + ph, z),
                 _z(pw + shadow_w, z), _z(page_y + ph + shadow_w, z),
                 fill=_PAGE_SHADOW, outline="", tags="page_shadow"
             )
+            # Right shadow
             self._canvas.create_rectangle(
                 _z(pw, z), _z(page_y + shadow_w, z),
                 _z(pw + shadow_w, z), _z(page_y + ph + shadow_w, z),
                 fill=_PAGE_SHADOW, outline="", tags="page_shadow"
             )
+            # White page
             self._canvas.create_rectangle(
                 0, _z(page_y, z), _z(pw, z), _z(page_y + ph, z),
                 fill="#ffffff", outline="#b0b0b0", width=1, tags="page_bg"
             )
+            # Page break separator line (dashed blue like SMath Studio)
+            if page > 0:
+                sep_y = _z(page_y, z)
+                self._canvas.create_line(
+                    0, sep_y, _z(pw, z), sep_y,
+                    fill="#6699cc", dash=(6, 3), width=1, tags="page_bounds"
+                )
         self._page_height = ph
         self._page_width = pw
         self._page_gap = page_gap
@@ -919,11 +936,9 @@ class WorksheetCanvas(ttk.Frame):
         if tc is None:
             return items
 
-        # Determine style
         fg = region.color if region.color else "#000000"
         bg = region.bg_color if region.bg_color != "#ffffff" else None
 
-        # Detect special styles from colors
         is_title = fg.lower() in ("#0000ff", "#0000cc")
         is_comment = bg and bg.lower() in ("#ffff80", "#ffffcc")
         has_border = region.border
@@ -933,11 +948,11 @@ class WorksheetCanvas(ttk.Frame):
         if is_comment and bg is None:
             bg = _COMMENT_BG
 
-        # Background rectangle for bordered/colored regions
+        rw = _z(max(region.width, _DEFAULT_REGION_WIDTH), self._zoom)
+        rh = _z(max(region.height, _DEFAULT_REGION_HEIGHT), self._zoom)
+
         if has_border or bg:
             draw_bg = bg if bg else _BORDER_BG
-            rw = _z(max(region.width, _DEFAULT_REGION_WIDTH), self._zoom)
-            rh = _z(max(region.height, _DEFAULT_REGION_HEIGHT), self._zoom)
             rect_id = self._canvas.create_rectangle(
                 x, y, x + rw, y + rh,
                 fill=draw_bg,
@@ -946,7 +961,6 @@ class WorksheetCanvas(ttk.Frame):
             )
             items.append(rect_id)
 
-        # Render each paragraph
         zpad = _z(_REGION_PADDING, self._zoom)
         cy = y + zpad
         for para in tc.paragraphs:
@@ -955,20 +969,28 @@ class WorksheetCanvas(ttk.Frame):
             if para.href:
                 text_color = "#0066cc"
                 fnt = self._get_font(region.font_size, para.bold, para.italic, underline=True)
+            if is_title:
+                anchor = tk.N
+                tx = x + rw // 2
+            else:
+                anchor = tk.NW
+                tx = x + zpad
             text_id = self._canvas.create_text(
-                x + zpad, cy,
+                tx, cy,
                 text=para.text,
-                anchor=tk.NW,
+                anchor=anchor,
                 font=fnt,
                 fill=text_color,
             )
+            if is_title:
+                self._canvas.itemconfigure(text_id, width=max(1, rw - 2 * zpad))
+                self._canvas.itemconfigure(text_id, justify=tk.CENTER)
             if para.href:
                 href = para.href
                 self._canvas.tag_bind(text_id, "<Button-1>", lambda e, url=href: self._open_link(url))
                 self._canvas.tag_bind(text_id, "<Enter>", lambda e: self._canvas.configure(cursor="hand2"))
                 self._canvas.tag_bind(text_id, "<Leave>", lambda e: self._canvas.configure(cursor=""))
             items.append(text_id)
-            # Advance y by the text height
             bbox = self._canvas.bbox(text_id)
             if bbox:
                 cy = bbox[3] + 2
@@ -1327,7 +1349,6 @@ class WorksheetCanvas(ttk.Frame):
             x1 - pad, y1 - pad, x2 + pad, y2 + pad,
             outline=_SELECTION_COLOR,
             width=1,
-            dash=_SELECTION_DASH,
         )
         self._selection_items.append(sel_rect)
         hs = 3
@@ -1339,7 +1360,7 @@ class WorksheetCanvas(ttk.Frame):
         ]:
             h = self._canvas.create_rectangle(
                 hx - hs, hy - hs, hx + hs, hy + hs,
-                fill=_SELECTION_COLOR, outline=_SELECTION_COLOR, width=1,
+                fill="white", outline=_SELECTION_COLOR, width=1,
             )
             self._selection_items.append(h)
 
@@ -1514,6 +1535,14 @@ class WorksheetCanvas(ttk.Frame):
         x = getattr(self, "_right_click_x", self._cursor_x)
         y = getattr(self, "_right_click_y", self._cursor_y)
         self._start_editing(x, y, mode="comment")
+
+    def _toggle_lock_selected(self):
+        """Toggle the lock state of the selected region."""
+        region = self.get_selected_region()
+        if region is None:
+            return
+        region.locked = not region.locked
+        self._select_region(self._selected_index)
 
     def _show_region_properties(self):
         """Show a properties dialog for the selected region."""
@@ -1966,7 +1995,8 @@ class WorksheetCanvas(ttk.Frame):
                 self._canvas.delete(self._rb_item)
             self._rb_item = self._canvas.create_rectangle(
                 self._rb_start_x, self._rb_start_y, cx, cy,
-                outline="#3366cc", dash=(3, 3), width=1,
+                outline="#3366cc", fill="#3366cc", stipple="gray12",
+                dash=(3, 3), width=1,
             )
 
     def _on_drag_end(self, event: tk.Event):
