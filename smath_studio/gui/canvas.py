@@ -191,7 +191,9 @@ class WorksheetCanvas(ttk.Frame):
         self._trailing_zeros = True
         self._filename: str = ""
 
-        # Build canvas with scrollbars
+        # Build ruler and canvas with scrollbars
+        self._ruler = tk.Canvas(self, height=18, bg="#f8f8f0", highlightthickness=0)
+
         self._canvas = tk.Canvas(
             self,
             bg=_CANVAS_BG,
@@ -199,7 +201,7 @@ class WorksheetCanvas(ttk.Frame):
             cursor="crosshair",
         )
         self._h_scroll = ttk.Scrollbar(
-            self, orient=tk.HORIZONTAL, command=self._canvas.xview
+            self, orient=tk.HORIZONTAL, command=self._on_hscroll
         )
         self._v_scroll = ttk.Scrollbar(
             self, orient=tk.VERTICAL, command=self._canvas.yview
@@ -209,11 +211,12 @@ class WorksheetCanvas(ttk.Frame):
             yscrollcommand=self._v_scroll.set,
         )
 
-        # Grid layout: canvas fills center, scrollbars on edges
-        self._canvas.grid(row=0, column=0, sticky="nsew")
-        self._v_scroll.grid(row=0, column=1, sticky="ns")
-        self._h_scroll.grid(row=1, column=0, sticky="ew")
-        self.grid_rowconfigure(0, weight=1)
+        # Grid layout: ruler on top, canvas fills center, scrollbars on edges
+        self._ruler.grid(row=0, column=0, sticky="ew")
+        self._canvas.grid(row=1, column=0, sticky="nsew")
+        self._v_scroll.grid(row=0, column=1, rowspan=2, sticky="ns")
+        self._h_scroll.grid(row=2, column=0, sticky="ew")
+        self.grid_rowconfigure(1, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
         # Drag state
@@ -776,6 +779,38 @@ class WorksheetCanvas(ttk.Frame):
         except Exception:
             pass
 
+    def _on_hscroll(self, *args):
+        self._canvas.xview(*args)
+        self._draw_ruler()
+
+    def _draw_ruler(self):
+        """Draw a horizontal ruler showing centimetre ticks."""
+        self._ruler.delete("all")
+        try:
+            x_offset = float(self._canvas.canvasx(0))
+        except Exception:
+            x_offset = 0
+        rw = self._ruler.winfo_width()
+        if rw < 10:
+            rw = 800
+        z = self._zoom
+        cm = 37.8 * z
+        h = 18
+        start_cm = int(x_offset / cm)
+        end_cm = int((x_offset + rw) / cm) + 2
+        for i in range(max(0, start_cm), end_cm):
+            px = i * cm - x_offset
+            self._ruler.create_line(px, 0, px, h, fill="#c0c0c0", width=1)
+            if i > 0:
+                self._ruler.create_text(
+                    px + 2, 2, text=str(i), anchor="nw",
+                    font=("DejaVu Sans", 7), fill="#888888",
+                )
+            for sub in range(1, 10):
+                spx = px + sub * cm / 10
+                tick_h = 4 if sub == 5 else 2
+                self._ruler.create_line(spx, h - tick_h, spx, h, fill="#c0c0c0")
+
     def _update_scroll_region(self):
         """Set the scrollable region to encompass all content."""
         bbox = self._canvas.bbox("all")
@@ -789,6 +824,7 @@ class WorksheetCanvas(ttk.Frame):
                     y2 + 50,
                 )
             )
+        self._draw_ruler()
 
     # ------------------------------------------------------------------
     # Region rendering
