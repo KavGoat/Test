@@ -55,9 +55,30 @@ class StandardToolbar(ttk.Frame):
                     padx=2, pady=1,
                 )
                 btn.pack(side=tk.LEFT, padx=0, pady=1)
-                btn.bind("<Enter>", lambda e, b=btn: b.configure(bg=self._HOVER_BG, relief=tk.RAISED))
-                btn.bind("<Leave>", lambda e, b=btn: b.configure(bg=self._BG, relief=tk.FLAT))
-                self._add_tooltip(btn, tooltip)
+                self._bind_hover_tooltip(btn, tooltip)
+
+    def _bind_hover_tooltip(self, widget: tk.Widget, text: str):
+        tip = None
+        def enter(e):
+            nonlocal tip
+            widget.configure(bg=self._HOVER_BG, relief=tk.RAISED)
+            x = widget.winfo_rootx() + widget.winfo_width() // 2
+            y = widget.winfo_rooty() + widget.winfo_height() + 2
+            tip = tk.Toplevel(widget)
+            tip.wm_overrideredirect(True)
+            tip.wm_geometry(f"+{x}+{y}")
+            lbl = tk.Label(tip, text=text, bg="#ffffdd", relief=tk.SOLID,
+                           borderwidth=1, font=("DejaVu Sans", 8),
+                           padx=3, pady=1)
+            lbl.pack()
+        def leave(e):
+            nonlocal tip
+            widget.configure(bg=self._BG, relief=tk.FLAT)
+            if tip:
+                tip.destroy()
+                tip = None
+        widget.bind("<Enter>", enter)
+        widget.bind("<Leave>", leave)
 
     @staticmethod
     def _add_tooltip(widget: tk.Widget, text: str):
@@ -70,7 +91,8 @@ class StandardToolbar(ttk.Frame):
             tip.wm_overrideredirect(True)
             tip.wm_geometry(f"+{x}+{y}")
             lbl = tk.Label(tip, text=text, bg="#ffffdd", relief=tk.SOLID,
-                           borderwidth=1, font=("DejaVu Sans", 9))
+                           borderwidth=1, font=("DejaVu Sans", 8),
+                           padx=3, pady=1)
             lbl.pack()
         def leave(e):
             nonlocal tip
@@ -92,6 +114,29 @@ class FormatToolbar(ttk.Frame):
         self._commands = commands
         self._build()
 
+    def _bind_hover_tooltip(self, widget: tk.Widget, text: str):
+        tip = None
+        def enter(e):
+            nonlocal tip
+            widget.configure(bg=self._HOVER_BG, relief=tk.RAISED)
+            x = widget.winfo_rootx() + widget.winfo_width() // 2
+            y = widget.winfo_rooty() + widget.winfo_height() + 2
+            tip = tk.Toplevel(widget)
+            tip.wm_overrideredirect(True)
+            tip.wm_geometry(f"+{x}+{y}")
+            lbl = tk.Label(tip, text=text, bg="#ffffdd", relief=tk.SOLID,
+                           borderwidth=1, font=("DejaVu Sans", 8),
+                           padx=3, pady=1)
+            lbl.pack()
+        def leave(e):
+            nonlocal tip
+            widget.configure(bg=self._BG, relief=tk.FLAT)
+            if tip:
+                tip.destroy()
+                tip = None
+        widget.bind("<Enter>", enter)
+        widget.bind("<Leave>", leave)
+
     def _build(self):
         fmt_buttons = [
             ("B", "Bold (Ctrl+B)", "bold", ("DejaVu Sans", 10, "bold")),
@@ -112,9 +157,7 @@ class FormatToolbar(ttk.Frame):
                 padx=2, pady=1,
             )
             btn.pack(side=tk.LEFT, padx=0, pady=1)
-            btn.bind("<Enter>", lambda e, b=btn: b.configure(bg=self._HOVER_BG, relief=tk.RAISED))
-            btn.bind("<Leave>", lambda e, b=btn: b.configure(bg=self._BG, relief=tk.FLAT))
-            StandardToolbar._add_tooltip(btn, tooltip)
+            self._bind_hover_tooltip(btn, tooltip)
 
         sep = ttk.Separator(self, orient=tk.VERTICAL)
         sep.pack(side=tk.LEFT, fill=tk.Y, padx=3, pady=2)

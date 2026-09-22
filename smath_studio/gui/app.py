@@ -405,67 +405,60 @@ class SMathApp:
         self._paned.add(self._math_panels, weight=0)
 
     def _build_status_bar(self):
-        """Build the status bar at the bottom."""
-        status_frame = ttk.Frame(self._root, relief=tk.SUNKEN, style="Status.TFrame")
+        """Build the status bar at the bottom with sunken panels like real SMath Studio."""
+        status_frame = tk.Frame(self._root, bg="#ece9d8", bd=1, relief=tk.RAISED)
         status_frame.pack(side=tk.BOTTOM, fill=tk.X)
 
-        self._status_position = ttk.Label(
-            status_frame, text="Position: 0, 0", style="Status.TLabel", width=20
-        )
-        self._status_position.pack(side=tk.LEFT, padx=(4, 0))
+        _sf = ("DejaVu Sans", 8)
+        _sbg = "#ece9d8"
 
-        ttk.Label(status_frame, text="|", style="StatusSep.TLabel").pack(
-            side=tk.LEFT, padx=4
+        self._status_position = tk.Label(
+            status_frame, text="Position: 0, 0", font=_sf, bg=_sbg,
+            anchor=tk.W, relief=tk.SUNKEN, bd=1, padx=4, pady=1, width=18,
         )
+        self._status_position.pack(side=tk.LEFT, padx=(2, 1), pady=2, fill=tk.Y)
 
-        self._status_calc = ttk.Label(
-            status_frame, text="Automatic", style="Status.TLabel", width=14
+        self._status_calc = tk.Label(
+            status_frame, text="Automatic", font=_sf, bg=_sbg,
+            anchor=tk.W, relief=tk.SUNKEN, bd=1, padx=4, pady=1, width=10,
         )
-        self._status_calc.pack(side=tk.LEFT)
+        self._status_calc.pack(side=tk.LEFT, padx=1, pady=2, fill=tk.Y)
 
-        ttk.Label(status_frame, text="|", style="StatusSep.TLabel").pack(
-            side=tk.LEFT, padx=4
+        self._status_zoom = tk.Label(
+            status_frame, text="100%", font=_sf, bg=_sbg,
+            anchor=tk.CENTER, relief=tk.SUNKEN, bd=1, padx=4, pady=1, width=5,
         )
-
-        self._status_zoom = ttk.Label(
-            status_frame, text="100%", style="Status.TLabel", width=6
-        )
-        self._status_zoom.pack(side=tk.LEFT)
+        self._status_zoom.pack(side=tk.LEFT, padx=1, pady=2, fill=tk.Y)
 
         self._zoom_scale = tk.Scale(
             status_frame, from_=30, to=300, orient=tk.HORIZONTAL,
-            length=100, showvalue=False, command=self._on_zoom_slider,
+            length=80, showvalue=False, command=self._on_zoom_slider,
             relief=tk.FLAT, bd=0, highlightthickness=0, sliderrelief=tk.FLAT,
+            bg=_sbg, troughcolor="#c0c0c0",
         )
         self._zoom_scale.set(100)
-        self._zoom_scale.pack(side=tk.LEFT, padx=2)
+        self._zoom_scale.pack(side=tk.LEFT, padx=1, pady=2)
 
-        ttk.Label(status_frame, text="|", style="StatusSep.TLabel").pack(
-            side=tk.LEFT, padx=4
+        self._status_regions = tk.Label(
+            status_frame, text="0 regions", font=_sf, bg=_sbg,
+            anchor=tk.W, relief=tk.SUNKEN, bd=1, padx=4, pady=1, width=10,
         )
+        self._status_regions.pack(side=tk.LEFT, padx=1, pady=2, fill=tk.Y)
 
-        self._status_regions = ttk.Label(
-            status_frame, text="0 regions", style="Status.TLabel", width=12
+        self._status_page = tk.Label(
+            status_frame, text="Page 1/1", font=_sf, bg=_sbg,
+            anchor=tk.CENTER, relief=tk.SUNKEN, bd=1, padx=4, pady=1, width=8,
         )
-        self._status_regions.pack(side=tk.LEFT)
+        self._status_page.pack(side=tk.LEFT, padx=1, pady=2, fill=tk.Y)
 
-        ttk.Label(status_frame, text="|", style="StatusSep.TLabel").pack(
-            side=tk.LEFT, padx=4
+        self._status_info = tk.Label(
+            status_frame, text="Ready", font=_sf, bg=_sbg,
+            anchor=tk.W, relief=tk.SUNKEN, bd=1, padx=4, pady=1,
         )
+        self._status_info.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(1, 2), pady=2)
 
-        self._status_page = ttk.Label(
-            status_frame, text="Page 1/1", style="Status.TLabel", width=10
-        )
-        self._status_page.pack(side=tk.LEFT)
-
-        ttk.Label(status_frame, text="|", style="StatusSep.TLabel").pack(
-            side=tk.LEFT, padx=4
-        )
-
-        self._status_info = ttk.Label(
-            status_frame, text="Ready", style="Status.TLabel"
-        )
-        self._status_info.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        grip = tk.Label(status_frame, text="  ", bg=_sbg, relief=tk.FLAT, width=2)
+        grip.pack(side=tk.RIGHT, padx=0)
 
     # ------------------------------------------------------------------
     # Keyboard shortcuts

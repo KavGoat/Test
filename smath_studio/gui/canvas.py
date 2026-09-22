@@ -549,28 +549,32 @@ class WorksheetCanvas(ttk.Frame):
             ph = 1100
 
         num_pages = max(5, self._estimate_page_count(ws, ph))
-        shadow_w = 4
+        shadow_w = 3
         page_gap = 10
 
         z = self._zoom
         for page in range(num_pages):
             page_y = page * (ph + page_gap)
-            # Bottom shadow
-            self._canvas.create_rectangle(
-                _z(shadow_w, z), _z(page_y + ph, z),
-                _z(pw + shadow_w, z), _z(page_y + ph + shadow_w, z),
-                fill=_PAGE_SHADOW, outline="", tags="page_shadow"
-            )
-            # Right shadow
-            self._canvas.create_rectangle(
-                _z(pw, z), _z(page_y + shadow_w, z),
-                _z(pw + shadow_w, z), _z(page_y + ph + shadow_w, z),
-                fill=_PAGE_SHADOW, outline="", tags="page_shadow"
-            )
+            sw = _z(shadow_w, z)
+            # Shadow layers (progressively lighter for soft shadow effect)
+            for si in range(max(1, sw)):
+                alpha_colors = ["#b0b0b0", "#c0c0c0", "#d0d0d0"]
+                sc = alpha_colors[min(si, len(alpha_colors) - 1)]
+                off = si + 1
+                self._canvas.create_rectangle(
+                    _z(pw, z) + off, _z(page_y, z) + off + sw,
+                    _z(pw, z) + off + 1, _z(page_y + ph, z) + off + 1,
+                    fill=sc, outline="", tags="page_shadow"
+                )
+                self._canvas.create_rectangle(
+                    off + sw, _z(page_y + ph, z) + off,
+                    _z(pw, z) + off + 1, _z(page_y + ph, z) + off + 1,
+                    fill=sc, outline="", tags="page_shadow"
+                )
             # White page
             self._canvas.create_rectangle(
                 0, _z(page_y, z), _z(pw, z), _z(page_y + ph, z),
-                fill="#ffffff", outline="#b0b0b0", width=1, tags="page_bg"
+                fill="#ffffff", outline="#c0c0c0", width=1, tags="page_bg"
             )
             # Page break separator line (dashed blue like SMath Studio)
             if page > 0:
@@ -713,7 +717,6 @@ class WorksheetCanvas(ttk.Frame):
         num_pages = getattr(self, '_num_pages', 5)
         grid = _GRID_SIZE * 3
         z = self._zoom
-        dot_size = max(1, _z(1, z))
         vis = self._get_visible_area()
         for page in range(min(num_pages, 4)):
             page_y = page * (ph + pg)
@@ -727,9 +730,9 @@ class WorksheetCanvas(ttk.Frame):
                     py = page_y + gy
                     zx = _z(gx, z)
                     zy = _z(py, z)
-                    self._canvas.create_rectangle(
-                        zx, zy, zx + dot_size, zy + dot_size,
-                        fill="#c8c8c8", outline="", tags="grid_dots",
+                    self._canvas.create_oval(
+                        zx, zy, zx + 1, zy + 1,
+                        fill="#d0d0d0", outline="", tags="grid_dots",
                     )
 
     def _get_visible_area(self) -> tuple[float, float, float, float] | None:
@@ -775,6 +778,25 @@ class WorksheetCanvas(ttk.Frame):
         self._canvas.create_line(
             x, y, x, y + sz, fill=_CURSOR_COLOR, width=1, tags="cursor_marker"
         )
+        self._start_cursor_blink()
+
+    def _start_cursor_blink(self):
+        """Start blinking the cursor marker."""
+        blink_id = getattr(self, "_blink_after", None)
+        if blink_id is not None:
+            self._canvas.after_cancel(blink_id)
+        self._cursor_visible = True
+        self._blink_cursor()
+
+    def _blink_cursor(self):
+        """Toggle cursor visibility for blink effect."""
+        if self._editing:
+            return
+        self._cursor_visible = not self._cursor_visible
+        state = tk.NORMAL if self._cursor_visible else tk.HIDDEN
+        for item_id in self._canvas.find_withtag("cursor_marker"):
+            self._canvas.itemconfigure(item_id, state=state)
+        self._blink_after = self._canvas.after(530, self._blink_cursor)
 
     def _ensure_visible(self, x: int, y: int):
         """Scroll the canvas to ensure the given position is visible."""
@@ -930,7 +952,7 @@ class WorksheetCanvas(ttk.Frame):
             self._rendered.append(rr)
 
     def _render_text(self, region: Region, x: int, y: int) -> list[int]:
-        """Render a text region."""
+        """Render a text region with wrapping support."""
         items: list[int] = []
         tc = self._get_text_content(region.text_contents)
         if tc is None:
@@ -951,18 +973,21 @@ class WorksheetCanvas(ttk.Frame):
         rw = _z(max(region.width, _DEFAULT_REGION_WIDTH), self._zoom)
         rh = _z(max(region.height, _DEFAULT_REGION_HEIGHT), self._zoom)
 
+        zpad = _z(_REGION_PADDING, self._zoom)
+
         if has_border or bg:
             draw_bg = bg if bg else _BORDER_BG
+            outline_color = "#b0b0b0" if is_comment else "#aaaaaa"
             rect_id = self._canvas.create_rectangle(
                 x, y, x + rw, y + rh,
                 fill=draw_bg,
-                outline="#aaaaaa" if has_border else "",
+                outline=outline_color if has_border else "",
                 width=1 if has_border else 0,
             )
             items.append(rect_id)
 
-        zpad = _z(_REGION_PADDING, self._zoom)
         cy = y + zpad
+        wrap_width = max(1, rw - 2 * zpad)
         for para in tc.paragraphs:
             fnt = self._get_font(region.font_size, para.bold, para.italic)
             text_color = fg
@@ -972,19 +997,20 @@ class WorksheetCanvas(ttk.Frame):
             if is_title:
                 anchor = tk.N
                 tx = x + rw // 2
+                justify = tk.CENTER
             else:
                 anchor = tk.NW
                 tx = x + zpad
+                justify = tk.LEFT
             text_id = self._canvas.create_text(
                 tx, cy,
                 text=para.text,
                 anchor=anchor,
                 font=fnt,
                 fill=text_color,
+                width=wrap_width,
+                justify=justify,
             )
-            if is_title:
-                self._canvas.itemconfigure(text_id, width=max(1, rw - 2 * zpad))
-                self._canvas.itemconfigure(text_id, justify=tk.CENTER)
             if para.href:
                 href = para.href
                 self._canvas.tag_bind(text_id, "<Button-1>", lambda e, url=href: self._open_link(url))
@@ -1156,7 +1182,7 @@ class WorksheetCanvas(ttk.Frame):
             w = _z(max(region.width, 200), z)
             line_id = self._canvas.create_line(
                 x, y, x + w, y,
-                fill="#aaaaaa", dash=(4, 2)
+                fill="#b0b0b0", dash=(3, 3), width=1
             )
             items.append(line_id)
         else:
@@ -1167,14 +1193,14 @@ class WorksheetCanvas(ttk.Frame):
                     x, y,
                     x + ts, y + ts // 2,
                     x, y + ts,
-                    fill="#555555", outline="#333333",
+                    fill="#808080", outline="#606060", width=1,
                 )
             else:
                 tri_id = self._canvas.create_polygon(
                     x, y,
                     x + ts, y,
                     x + ts // 2, y + ts,
-                    fill="#555555", outline="#333333",
+                    fill="#808080", outline="#606060", width=1,
                 )
             items.append(tri_id)
             self._canvas.tag_bind(tri_id, "<Button-1>",
@@ -1187,7 +1213,7 @@ class WorksheetCanvas(ttk.Frame):
             if label:
                 fnt = self._get_font(region.font_size, bold=True, italic=False)
                 label_id = self._canvas.create_text(
-                    x + ts + _z(6, z), y,
+                    x + ts + _z(6, z), y + 1,
                     text=label,
                     anchor=tk.NW,
                     font=fnt,
@@ -1196,10 +1222,10 @@ class WorksheetCanvas(ttk.Frame):
                 items.append(label_id)
 
             w = _z(max(region.width, 200), z)
+            line_y = y + ts + _z(3, z)
             line_id = self._canvas.create_line(
-                x, y + ts + _z(2, z),
-                x + w, y + ts + _z(2, z),
-                fill="#aaaaaa", dash=(4, 2)
+                x, line_y, x + w, line_y,
+                fill="#b0b0b0", dash=(3, 3), width=1
             )
             items.append(line_id)
 
