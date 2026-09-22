@@ -46,17 +46,19 @@ _OPERATOR_COLOR = "#000000"
 _FUNCTION_COLOR = "#000080"
 _ERROR_COLOR = "#ff0000"
 _RESULT_COLOR = "#0000ff"
+_ERROR_BG_COLOR = "#fff0f0"
+_ERROR_BORDER_COLOR = "#cc0000"
 
 _OP_HPAD = 4       # horizontal padding around binary operators
 _FRAC_HPAD = 6     # horizontal padding inside fraction bar
-_FRAC_VPAD = 2     # vertical padding above/below fraction bar
-_SUP_SCALE = 0.72  # superscript size ratio
-_SUB_SCALE = 0.80  # subscript size ratio
-_SUP_RAISE = 0.35  # superscript vertical shift (fraction of parent height)
+_FRAC_VPAD = 3     # vertical padding above/below fraction bar
+_SUP_SCALE = 0.70  # superscript size ratio
+_SUB_SCALE = 0.75  # subscript size ratio
+_SUP_RAISE = 0.38  # superscript vertical shift (fraction of parent height)
 _SUB_DROP = 0.25   # subscript vertical shift
 _PAREN_HPAD = 2    # padding inside parentheses
-_MATRIX_CELL_PAD = 6  # padding between matrix cells
-_MATRIX_BRACKET_W = 4  # width of matrix brackets
+_MATRIX_CELL_PAD = 8  # padding between matrix cells
+_MATRIX_BRACKET_W = 5  # width of matrix brackets
 
 # Built-in function names recognized by SMath Studio
 _BUILTIN_FUNCTIONS = {
@@ -577,21 +579,32 @@ class MathRenderer:
             py = y + (content_h - char_h) / 2
             c.create_text(x, py, text=ch, anchor="nw", font=f, fill=_OPERATOR_COLOR)
             return
-        pad = 2
+        pad = 1
+        lw = 1.2 if content_h > char_h * 2 else 1
         if ch == "(":
             cx = x + 4
-            c.create_line(cx + 3, y + pad, cx, y + content_h * 0.15,
+            c.create_line(cx + 4, y + pad,
+                         cx + 2, y + content_h * 0.08,
+                         cx, y + content_h * 0.2,
+                         cx - 1, y + content_h * 0.35,
                          cx - 1, y + content_h * 0.5,
-                         cx, y + content_h * 0.85,
-                         cx + 3, y + content_h - pad,
-                         smooth=True, fill=_OPERATOR_COLOR, width=1)
+                         cx - 1, y + content_h * 0.65,
+                         cx, y + content_h * 0.8,
+                         cx + 2, y + content_h * 0.92,
+                         cx + 4, y + content_h - pad,
+                         smooth=True, fill=_OPERATOR_COLOR, width=lw)
         elif ch == ")":
             cx = x + 2
-            c.create_line(cx, y + pad, cx + 3, y + content_h * 0.15,
-                         cx + 4, y + content_h * 0.5,
-                         cx + 3, y + content_h * 0.85,
+            c.create_line(cx, y + pad,
+                         cx + 2, y + content_h * 0.08,
+                         cx + 4, y + content_h * 0.2,
+                         cx + 5, y + content_h * 0.35,
+                         cx + 5, y + content_h * 0.5,
+                         cx + 5, y + content_h * 0.65,
+                         cx + 4, y + content_h * 0.8,
+                         cx + 2, y + content_h * 0.92,
                          cx, y + content_h - pad,
-                         smooth=True, fill=_OPERATOR_COLOR, width=1)
+                         smooth=True, fill=_OPERATOR_COLOR, width=lw)
 
     def _draw_curly_brace(self, c: tk.Canvas, x: float, y: float,
                           h: float, fs: int):
@@ -601,19 +614,23 @@ class MathRenderer:
             py = y + (h - char_h) / 2
             c.create_text(x, py, text="{", anchor="nw", font=f, fill=_OPERATOR_COLOR)
             return
-        pad = 2
-        cx = x + 5
+        pad = 1
+        cx = x + 6
         mid = y + h * 0.5
-        tip_x = cx - 4
-        c.create_line(cx + 3, y + pad, cx + 1, y + h * 0.08,
-                     cx, y + h * 0.2,
-                     cx, mid - h * 0.05,
+        tip_x = cx - 5
+        lw = 1.2 if h > char_h * 2 else 1
+        c.create_line(cx + 4, y + pad,
+                     cx + 2, y + h * 0.04,
+                     cx, y + h * 0.1,
+                     cx - 1, y + h * 0.2,
+                     cx - 1, mid - h * 0.08,
                      tip_x, mid,
-                     cx, mid + h * 0.05,
-                     cx, y + h * 0.8,
-                     cx + 1, y + h * 0.92,
-                     cx + 3, y + h - pad,
-                     smooth=True, fill=_OPERATOR_COLOR, width=1)
+                     cx - 1, mid + h * 0.08,
+                     cx - 1, y + h * 0.8,
+                     cx, y + h * 0.9,
+                     cx + 2, y + h * 0.96,
+                     cx + 4, y + h - pad,
+                     smooth=True, fill=_OPERATOR_COLOR, width=lw)
 
     # -----------------------------------------------------------------
     # Render (draw on canvas)
@@ -655,6 +672,8 @@ class MathRenderer:
 
     def _render_variable(self, c, node: Variable, x, y, fs) -> RenderBox:
         is_builtin = node.name in _BUILTIN_VARS
+        is_greek = node.name in _GREEK_DISPLAY or (
+            "." in node.name and node.name.split(".", 1)[0] in _GREEK_DISPLAY)
         style = "bold" if is_builtin else "italic"
         color = _BUILTIN_VAR_COLOR if is_builtin else _USER_VAR_COLOR
 
@@ -764,14 +783,12 @@ class MathRenderer:
         bar_w = max(num_m.width, den_m.width) + 2 * _FRAC_HPAD
         bar_y = y + num_m.height + _FRAC_VPAD
 
-        # Draw numerator (centered)
         num_x = x + (bar_w - num_m.width) / 2
         self._render_node(c, node.left, num_x, y, fs, ctx)
 
-        # Draw fraction bar
-        c.create_line(x, bar_y, x + bar_w, bar_y, fill=_OPERATOR_COLOR, width=1)
+        line_w = 1.2 if fs >= 10 else 1
+        c.create_line(x, bar_y, x + bar_w, bar_y, fill=_OPERATOR_COLOR, width=line_w)
 
-        # Draw denominator (centered)
         den_y = bar_y + _FRAC_VPAD + 2
         den_x = x + (bar_w - den_m.width) / 2
         self._render_node(c, node.right, den_x, den_y, fs, ctx)
@@ -804,11 +821,14 @@ class MathRenderer:
         lb = self._render_node(c, node.left, x, left_y, fs, ctx)
 
         f = self._get_font(c, fs)
-        op_text = " := "
-        ow, oh = self._text_size(c, op_text, fs)
+        ow, oh = self._text_size(c, " := ", fs)
         ox = x + lb.width
         op_y = y + bl - oh / 2
-        c.create_text(ox, op_y, text=op_text, anchor="nw", font=f, fill=_OPERATOR_COLOR)
+        sp_w, _ = self._text_size(c, " ", fs)
+        colon_w, _ = self._text_size(c, ":", fs)
+        eq_w, _ = self._text_size(c, "=", fs)
+        c.create_text(ox + sp_w, op_y, text=":", anchor="nw", font=f, fill=_OPERATOR_COLOR)
+        c.create_text(ox + sp_w + colon_w, op_y, text="=", anchor="nw", font=f, fill=_OPERATOR_COLOR)
 
         right_m = self._measure_node(node.right, fs, ctx)
         right_y = y + bl - right_m.baseline
@@ -933,20 +953,20 @@ class MathRenderer:
                       rad_w: float, h: float, bar_len: float):
         tail_x = x + 1
         tail_y = y + h * 0.55
-        notch_x = x + rad_w * 0.35
-        notch_y = y + h * 0.4
-        bottom_x = x + rad_w * 0.55
+        notch_x = x + rad_w * 0.3
+        notch_y = y + h * 0.45
+        bottom_x = x + rad_w * 0.5
         bottom_y = y + h - 1
         top_x = x + rad_w - 1
         top_y = y + 1
         c.create_line(tail_x, tail_y, notch_x, notch_y,
-                     fill=_OPERATOR_COLOR, width=1)
+                     fill=_OPERATOR_COLOR, width=0.8)
         c.create_line(notch_x, notch_y, bottom_x, bottom_y,
-                     fill=_OPERATOR_COLOR, width=1.2)
+                     fill=_OPERATOR_COLOR, width=1.5)
         c.create_line(bottom_x, bottom_y, top_x, top_y,
-                     fill=_OPERATOR_COLOR, width=1.2)
-        c.create_line(top_x, top_y, top_x + bar_len, top_y,
-                     fill=_OPERATOR_COLOR, width=1)
+                     fill=_OPERATOR_COLOR, width=1.5)
+        c.create_line(top_x, top_y, top_x + bar_len + 1, top_y,
+                     fill=_OPERATOR_COLOR, width=0.8)
 
     def _render_nthroot(self, c, node: FunctionCall, x, y, fs, ctx) -> RenderBox:
         inner_m = self._measure_node(node.args[0], fs, ctx)
@@ -974,16 +994,17 @@ class MathRenderer:
         inner_m = self._measure_node(node.args[0], fs, ctx)
         bar_w = 2
         pad = 3
-        h = inner_m.height
+        h = inner_m.height + 2
+        ext = 1
 
-        c.create_line(x + 1, y, x + 1, y + h, fill=_OPERATOR_COLOR, width=1.5)
+        c.create_line(x + 1, y - ext, x + 1, y + h + ext, fill=_OPERATOR_COLOR, width=1.5)
         ix = x + bar_w + pad
-        ib = self._render_node(c, node.args[0], ix, y, fs, ctx)
+        ib = self._render_node(c, node.args[0], ix, y + 1, fs, ctx)
         rx = ix + ib.width + pad
-        c.create_line(rx + 1, y, rx + 1, y + h, fill=_OPERATOR_COLOR, width=1.5)
+        c.create_line(rx + 1, y - ext, rx + 1, y + h + ext, fill=_OPERATOR_COLOR, width=1.5)
 
         w = bar_w + pad + ib.width + pad + bar_w
-        return RenderBox(w, h, inner_m.baseline)
+        return RenderBox(w, h, inner_m.baseline + 1)
 
     def _render_matrix(self, c, node: FunctionCall, x, y, fs, ctx) -> RenderBox:
         rows, cols = _matrix_dims(node)
@@ -1008,21 +1029,17 @@ class MathRenderer:
         total_w = inner_w + 2 * _MATRIX_BRACKET_W + 8
         total_h = inner_h + 8
 
-        # Draw left bracket
         bx = x
-        c.create_line(bx + _MATRIX_BRACKET_W, y + 2,
-                       bx + 2, y + 2,
-                       bx + 2, y + total_h - 2,
-                       bx + _MATRIX_BRACKET_W, y + total_h - 2,
-                       fill=_OPERATOR_COLOR, width=1.5)
+        bw = _MATRIX_BRACKET_W
+        lw = 1.2
+        c.create_line(bx + bw, y + 1, bx + 1, y + 1, fill=_OPERATOR_COLOR, width=lw)
+        c.create_line(bx + 1, y + 1, bx + 1, y + total_h - 1, fill=_OPERATOR_COLOR, width=lw)
+        c.create_line(bx + 1, y + total_h - 1, bx + bw, y + total_h - 1, fill=_OPERATOR_COLOR, width=lw)
 
-        # Draw right bracket
-        rx = x + total_w - _MATRIX_BRACKET_W
-        c.create_line(rx, y + 2,
-                       rx + _MATRIX_BRACKET_W - 2, y + 2,
-                       rx + _MATRIX_BRACKET_W - 2, y + total_h - 2,
-                       rx, y + total_h - 2,
-                       fill=_OPERATOR_COLOR, width=1.5)
+        rx = x + total_w - bw
+        c.create_line(rx, y + 1, rx + bw - 1, y + 1, fill=_OPERATOR_COLOR, width=lw)
+        c.create_line(rx + bw - 1, y + 1, rx + bw - 1, y + total_h - 1, fill=_OPERATOR_COLOR, width=lw)
+        c.create_line(rx + bw - 1, y + total_h - 1, rx, y + total_h - 1, fill=_OPERATOR_COLOR, width=lw)
 
         # Render cells
         cy = y + 4
@@ -1132,16 +1149,21 @@ class MathRenderer:
 
     def _draw_integral_sign(self, c: tk.Canvas, cx: float, y: float,
                             h: float, w: float):
-        r = w * 0.25
+        r = w * 0.28
+        lw = max(1.5, w * 0.08)
         c.create_line(
-            cx + r, y,
-            cx + r * 0.5, y + h * 0.03,
+            cx + r * 1.2, y + h * 0.01,
+            cx + r * 0.8, y + h * 0.02,
+            cx + r * 0.3, y + h * 0.05,
             cx, y + h * 0.12,
-            cx, y + h * 0.5,
-            cx, y + h * 0.88,
-            cx - r * 0.5, y + h * 0.97,
-            cx - r, y + h,
-            smooth=True, fill=_OPERATOR_COLOR, width=1.5)
+            cx - r * 0.1, y + h * 0.25,
+            cx - r * 0.1, y + h * 0.5,
+            cx, y + h * 0.75,
+            cx + r * 0.1, y + h * 0.88,
+            cx - r * 0.3, y + h * 0.95,
+            cx - r * 0.8, y + h * 0.98,
+            cx - r * 1.2, y + h * 0.99,
+            smooth=True, fill=_OPERATOR_COLOR, width=lw)
 
     def _measure_indef_integral(self, c, node: FunctionCall, fs: int, ctx) -> RenderBox:
         int_w = max(int(fs * 0.8), 12)
@@ -1554,10 +1576,17 @@ class MathRenderer:
             err_text = str(result)
             if len(err_text) > 50:
                 err_text = err_text[:47] + "..."
-            canvas.create_text(ex + ew, eq_y, text=err_text, anchor="nw", font=f, fill=_ERROR_COLOR)
             rw, rh = self._text_size(canvas, err_text, font_size)
-            total_w = expr_box.width + ew + rw
-            total_h = max(expr_box.height, eh, rh)
+            err_x = ex + ew
+            pad = 3
+            canvas.create_rectangle(
+                err_x - pad, eq_y - pad,
+                err_x + rw + pad, eq_y + rh + pad,
+                fill=_ERROR_BG_COLOR, outline=_ERROR_BORDER_COLOR, width=1,
+            )
+            canvas.create_text(err_x, eq_y, text=err_text, anchor="nw", font=f, fill=_ERROR_COLOR)
+            total_w = expr_box.width + ew + rw + 2 * pad
+            total_h = max(expr_box.height, eh, rh + 2 * pad)
             return RenderBox(total_w, total_h, expr_box.baseline)
 
         if result is not None and not isinstance(result, str):
@@ -1675,19 +1704,15 @@ class MathRenderer:
         total_w = inner_w + 2 * _MATRIX_BRACKET_W + 8
         total_h = inner_h + 8
 
-        # Left bracket
-        c.create_line(x + _MATRIX_BRACKET_W, y + 2,
-                       x + 2, y + 2,
-                       x + 2, y + total_h - 2,
-                       x + _MATRIX_BRACKET_W, y + total_h - 2,
-                       fill=_OPERATOR_COLOR, width=1.5)
-        # Right bracket
-        rx = x + total_w - _MATRIX_BRACKET_W
-        c.create_line(rx, y + 2,
-                       rx + _MATRIX_BRACKET_W - 2, y + 2,
-                       rx + _MATRIX_BRACKET_W - 2, y + total_h - 2,
-                       rx, y + total_h - 2,
-                       fill=_OPERATOR_COLOR, width=1.5)
+        bw = _MATRIX_BRACKET_W
+        lw = 1.2
+        c.create_line(x + bw, y + 1, x + 1, y + 1, fill=_OPERATOR_COLOR, width=lw)
+        c.create_line(x + 1, y + 1, x + 1, y + total_h - 1, fill=_OPERATOR_COLOR, width=lw)
+        c.create_line(x + 1, y + total_h - 1, x + bw, y + total_h - 1, fill=_OPERATOR_COLOR, width=lw)
+        rx = x + total_w - bw
+        c.create_line(rx, y + 1, rx + bw - 1, y + 1, fill=_OPERATOR_COLOR, width=lw)
+        c.create_line(rx + bw - 1, y + 1, rx + bw - 1, y + total_h - 1, fill=_OPERATOR_COLOR, width=lw)
+        c.create_line(rx + bw - 1, y + total_h - 1, rx, y + total_h - 1, fill=_OPERATOR_COLOR, width=lw)
 
         # Cells
         cy = y + 4

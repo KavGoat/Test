@@ -145,6 +145,7 @@ class SMathApp:
         )
         file_menu.add_separator()
         file_menu.add_command(label="Page Setup...", command=self._on_page_setup)
+        file_menu.add_command(label="Print Preview...", command=self._on_print_preview)
         file_menu.add_command(label="Print...", accelerator="Ctrl+P", command=self._on_print)
         file_menu.add_separator()
         export_menu = tk.Menu(file_menu, tearoff=0)
@@ -416,9 +417,26 @@ class SMathApp:
         )
 
         self._status_zoom = ttk.Label(
-            status_frame, text="100%", style="Status.TLabel", width=8
+            status_frame, text="100%", style="Status.TLabel", width=6
         )
         self._status_zoom.pack(side=tk.LEFT)
+
+        self._zoom_scale = tk.Scale(
+            status_frame, from_=30, to=300, orient=tk.HORIZONTAL,
+            length=100, showvalue=False, command=self._on_zoom_slider,
+            relief=tk.FLAT, bd=0, highlightthickness=0, sliderrelief=tk.FLAT,
+        )
+        self._zoom_scale.set(100)
+        self._zoom_scale.pack(side=tk.LEFT, padx=2)
+
+        ttk.Label(status_frame, text="|", style="StatusSep.TLabel").pack(
+            side=tk.LEFT, padx=4
+        )
+
+        self._status_regions = ttk.Label(
+            status_frame, text="0 regions", style="Status.TLabel", width=12
+        )
+        self._status_regions.pack(side=tk.LEFT)
 
         ttk.Label(status_frame, text="|", style="StatusSep.TLabel").pack(
             side=tk.LEFT, padx=4
@@ -495,9 +513,11 @@ class SMathApp:
             self._status_position.config(text=f"Position: {cx}, {cy}")
             zoom = self._canvas_widget.get_zoom_percent()
             self._status_zoom.config(text=f"{zoom}%")
+            self._zoom_scale.set(zoom)
             calc_mode = "Automatic" if self._auto_calc_var.get() else "Manual"
             n_regions = self._canvas_widget.get_region_count()
-            self._status_calc.config(text=f"{calc_mode} ({n_regions})")
+            self._status_calc.config(text=calc_mode)
+            self._status_regions.config(text=f"{n_regions} regions")
             info = self._canvas_widget.get_selected_info()
             if info:
                 self._status_info.config(text=info)
@@ -624,6 +644,14 @@ class SMathApp:
                 f"Could not save to {path}:\n\n{ex}",
                 parent=self._root,
             )
+
+    def _on_print_preview(self):
+        from .dialogs import PrintPreviewDialog
+        ws = self._canvas_widget._worksheet
+        pw = int(ws.settings.page.width * 96 / 25.4) if ws else 794
+        ph = int(ws.settings.page.height * 96 / 25.4) if ws else 1123
+        pages = max(1, self._canvas_widget._num_pages if hasattr(self._canvas_widget, '_num_pages') else 1)
+        PrintPreviewDialog(self._root, self._canvas_widget._canvas, pw, ph, pages)
 
     def _on_print(self):
         """Print by exporting to PDF and opening with system viewer."""
@@ -1012,6 +1040,13 @@ class SMathApp:
             self._paned.add(self._math_panels, weight=0)
         else:
             self._paned.forget(self._math_panels)
+
+    def _on_zoom_slider(self, val):
+        z = int(float(val)) / 100.0
+        z = max(0.3, min(3.0, z))
+        if abs(z - self._canvas_widget._zoom) > 0.005:
+            self._canvas_widget._zoom = z
+            self._canvas_widget._apply_zoom()
 
     def _zoom_to_fit(self):
         bbox = self._canvas_widget._canvas.bbox("all")

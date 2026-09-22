@@ -954,6 +954,85 @@ class UnitsBrowserDialog(tk.Toplevel):
         self.destroy()
 
 
+class PrintPreviewDialog(tk.Toplevel):
+    """Print preview showing a scaled rendering of worksheet pages."""
+
+    def __init__(self, parent: tk.Widget, canvas: tk.Canvas, page_w: int, page_h: int, num_pages: int = 1):
+        super().__init__(parent)
+        self.title("Print Preview")
+        self.transient(parent)
+        self.grab_set()
+        self.geometry("700x550")
+        self.minsize(500, 400)
+
+        self._src_canvas = canvas
+        self._page_w = page_w
+        self._page_h = page_h
+        self._num_pages = max(num_pages, 1)
+        self._current_page = 0
+        self._scale = 0.5
+
+        toolbar = ttk.Frame(self)
+        toolbar.pack(fill=tk.X, padx=4, pady=4)
+
+        ttk.Button(toolbar, text="Print", command=self._on_print).pack(side=tk.LEFT, padx=2)
+        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=4, pady=2)
+
+        ttk.Button(toolbar, text="<", width=3, command=self._prev_page).pack(side=tk.LEFT)
+        self._page_label = ttk.Label(toolbar, text=f"Page 1 of {self._num_pages}")
+        self._page_label.pack(side=tk.LEFT, padx=6)
+        ttk.Button(toolbar, text=">", width=3, command=self._next_page).pack(side=tk.LEFT)
+
+        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=4, pady=2)
+        ttk.Button(toolbar, text="Zoom In", command=lambda: self._zoom(1.25)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(toolbar, text="Zoom Out", command=lambda: self._zoom(0.8)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(toolbar, text="Close", command=self.destroy).pack(side=tk.RIGHT, padx=2)
+
+        container = ttk.Frame(self)
+        container.pack(fill=tk.BOTH, expand=True)
+        self._preview = tk.Canvas(container, bg="#808080", highlightthickness=0)
+        self._preview.pack(fill=tk.BOTH, expand=True)
+        self._draw_page()
+        self.bind("<Configure>", lambda e: self._draw_page())
+
+    def _draw_page(self):
+        self._preview.delete("all")
+        pw = self._preview.winfo_width() or 680
+        ph = self._preview.winfo_height() or 480
+        scaled_w = int(self._page_w * self._scale)
+        scaled_h = int(self._page_h * self._scale)
+        ox = max((pw - scaled_w) // 2, 10)
+        oy = max((ph - scaled_h) // 2, 10)
+
+        self._preview.create_rectangle(ox + 3, oy + 3, ox + scaled_w + 3, oy + scaled_h + 3,
+                                        fill="#666666", outline="")
+        self._preview.create_rectangle(ox, oy, ox + scaled_w, oy + scaled_h,
+                                        fill="white", outline="#333333")
+
+        margin = int(40 * self._scale)
+        self._preview.create_rectangle(ox + margin, oy + margin,
+                                        ox + scaled_w - margin, oy + scaled_h - margin,
+                                        outline="#e0e0e0", dash=(2, 4))
+        self._page_label.config(text=f"Page {self._current_page + 1} of {self._num_pages}")
+
+    def _prev_page(self):
+        if self._current_page > 0:
+            self._current_page -= 1
+            self._draw_page()
+
+    def _next_page(self):
+        if self._current_page < self._num_pages - 1:
+            self._current_page += 1
+            self._draw_page()
+
+    def _zoom(self, factor):
+        self._scale = max(0.2, min(2.0, self._scale * factor))
+        self._draw_page()
+
+    def _on_print(self):
+        self.destroy()
+
+
 def _build_function_list() -> list[tuple[str, str]]:
     """Build sorted list of (name, description) for all known functions."""
     result = []

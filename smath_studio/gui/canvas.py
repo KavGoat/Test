@@ -1680,17 +1680,16 @@ class WorksheetCanvas(ttk.Frame):
         self._draw_ruler()
 
     def _on_ctrl_mousewheel(self, event: tk.Event):
-        """Zoom with Ctrl+mousewheel."""
         if event.delta > 0:
-            self._zoom_in()
+            self._zoom_at(1.1, event.x, event.y)
         else:
-            self._zoom_out()
+            self._zoom_at(1 / 1.1, event.x, event.y)
 
-    def _on_ctrl_mousewheel_up(self, _event):
-        self._zoom_in()
+    def _on_ctrl_mousewheel_up(self, event):
+        self._zoom_at(1.1, getattr(event, 'x', None), getattr(event, 'y', None))
 
-    def _on_ctrl_mousewheel_down(self, _event):
-        self._zoom_out()
+    def _on_ctrl_mousewheel_down(self, event):
+        self._zoom_at(1 / 1.1, getattr(event, 'x', None), getattr(event, 'y', None))
 
     def _zoom_in(self):
         if self._zoom < 3.0:
@@ -1701,6 +1700,25 @@ class WorksheetCanvas(ttk.Frame):
         if self._zoom > 0.3:
             self._zoom = max(0.3, self._zoom / 1.1)
             self._apply_zoom()
+
+    def _zoom_at(self, factor: float, px=None, py=None):
+        old_zoom = self._zoom
+        new_zoom = self._zoom * factor
+        new_zoom = max(0.3, min(3.0, new_zoom))
+        if new_zoom == old_zoom:
+            return
+        if px is not None and py is not None:
+            cx = self._canvas.canvasx(px)
+            cy = self._canvas.canvasy(py)
+            lx = cx / old_zoom
+            ly = cy / old_zoom
+        self._zoom = new_zoom
+        self._apply_zoom()
+        if px is not None and py is not None:
+            new_cx = lx * new_zoom
+            new_cy = ly * new_zoom
+            self._canvas.xview_moveto((new_cx - px) / max(1, self._canvas.winfo_width() * 4))
+            self._canvas.yview_moveto((new_cy - py) / max(1, int(self._canvas.cget('scrollregion').split()[3]) if self._canvas.cget('scrollregion') else 5000))
 
     def _apply_zoom(self):
         self._font_cache.clear()
