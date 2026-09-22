@@ -232,8 +232,9 @@ class MathRenderer:
 
     def _detect_font(self, canvas: tk.Canvas):
         """Pick the best available math font."""
-        for family in ("Cambria Math", "STIX Two Math", "Times New Roman",
-                       "DejaVu Serif", "Liberation Serif", "serif"):
+        for family in ("Cambria Math", "STIX Two Math", "STIX",
+                       "Times New Roman", "DejaVu Serif", "Liberation Serif",
+                       "serif"):
             try:
                 f = tkfont.Font(root=canvas, family=family, size=12)
                 if f.actual("family"):

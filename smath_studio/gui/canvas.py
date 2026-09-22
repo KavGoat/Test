@@ -354,11 +354,18 @@ class WorksheetCanvas(ttk.Frame):
             self._initial_page_drawn = True
             dummy_ws = Worksheet()
             self._draw_page_background(dummy_ws)
+            if self._show_grid:
+                self._draw_grid_dots()
+            if self._show_margin:
+                self._draw_left_margin()
             self._draw_page_boundaries(dummy_ws)
+            self._draw_cursor_marker()
             z = self._zoom
             self._canvas.configure(scrollregion=(0, 0, _z(850, z), _z(5540, z)))
             self._canvas.xview_moveto(0)
             self._canvas.yview_moveto(0)
+            self._draw_ruler()
+            self._draw_v_ruler()
 
     # ------------------------------------------------------------------
     # Public interface
@@ -553,44 +560,46 @@ class WorksheetCanvas(ttk.Frame):
             ph = 1100
 
         num_pages = max(5, self._estimate_page_count(ws, ph))
-        shadow_w = 4
-        page_gap = 10
+        shadow_w = 3
+        page_gap = 8
 
         z = self._zoom
         for page in range(num_pages):
             page_y = page * (ph + page_gap)
             sw = max(2, _z(shadow_w, z))
-            # Right shadow (gradient effect: darker near edge)
+            zpw = _z(pw, z)
+            zpy = _z(page_y, z)
+            zph = _z(page_y + ph, z)
+            # Right shadow (gradient: darker near edge, lighter away)
             for si in range(sw):
-                shade = 128 + si * 20
-                shade = min(shade, 200)
+                alpha = 1.0 - si / sw
+                shade = int(160 + (1.0 - alpha) * 60)
                 c = f"#{shade:02x}{shade:02x}{shade:02x}"
                 self._canvas.create_line(
-                    _z(pw, z) + 1 + si, _z(page_y, z) + sw,
-                    _z(pw, z) + 1 + si, _z(page_y + ph, z) + sw,
+                    zpw + 1 + si, zpy + si + 2,
+                    zpw + 1 + si, zph + 1,
                     fill=c, tags="page_shadow"
                 )
             # Bottom shadow (gradient)
             for si in range(sw):
-                shade = 128 + si * 20
-                shade = min(shade, 200)
+                alpha = 1.0 - si / sw
+                shade = int(160 + (1.0 - alpha) * 60)
                 c = f"#{shade:02x}{shade:02x}{shade:02x}"
                 self._canvas.create_line(
-                    sw, _z(page_y + ph, z) + 1 + si,
-                    _z(pw, z) + sw, _z(page_y + ph, z) + 1 + si,
+                    si + 2, zph + 1 + si,
+                    zpw + 1, zph + 1 + si,
                     fill=c, tags="page_shadow"
                 )
             # White page
             self._canvas.create_rectangle(
-                0, _z(page_y, z), _z(pw, z), _z(page_y + ph, z),
+                0, zpy, zpw, zph,
                 fill="#ffffff", outline="#c0c0c0", width=1, tags="page_bg"
             )
-            # Page break line (thin gray like real SMath Studio)
-            if page > 0:
-                sep_y = _z(page_y, z)
+            # Page break dashed line at the bottom of each page
+            if page < num_pages - 1:
                 self._canvas.create_line(
-                    0, sep_y, _z(pw, z), sep_y,
-                    fill="#808080", width=1, tags="page_bounds"
+                    0, zph, zpw, zph,
+                    fill="#a0a0a0", dash=(4, 3), width=1, tags="page_bounds"
                 )
         self._page_height = ph
         self._page_width = pw
@@ -1752,11 +1761,11 @@ class WorksheetCanvas(ttk.Frame):
         self._draw_v_ruler()
 
     def _on_mousewheel_linux_up(self, _event):
-        self._canvas.yview_scroll(-3, "units")
+        self._canvas.yview_scroll(-4, "units")
         self._draw_v_ruler()
 
     def _on_mousewheel_linux_down(self, _event):
-        self._canvas.yview_scroll(3, "units")
+        self._canvas.yview_scroll(4, "units")
         self._draw_v_ruler()
 
     def _on_shift_mousewheel(self, event: tk.Event):
