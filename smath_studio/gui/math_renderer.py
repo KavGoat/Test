@@ -39,12 +39,13 @@ class RenderBox:
 
 _NUMBER_COLOR = "#000000"
 _STRING_COLOR = "#a31515"
-_BUILTIN_VAR_COLOR = "#000000"
+_BUILTIN_VAR_COLOR = "#000080"
 _USER_VAR_COLOR = "#000000"
 _UNIT_COLOR = "#0000ff"
 _OPERATOR_COLOR = "#000000"
-_FUNCTION_COLOR = "#000000"
+_FUNCTION_COLOR = "#000080"
 _ERROR_COLOR = "#ff0000"
+_RESULT_COLOR = "#0000ff"
 
 _OP_HPAD = 4       # horizontal padding around binary operators
 _FRAC_HPAD = 6     # horizontal padding inside fraction bar
@@ -655,7 +656,7 @@ class MathRenderer:
     def _render_variable(self, c, node: Variable, x, y, fs) -> RenderBox:
         is_builtin = node.name in _BUILTIN_VARS
         style = "bold" if is_builtin else "italic"
-        color = _BUILTIN_VAR_COLOR
+        color = _BUILTIN_VAR_COLOR if is_builtin else _USER_VAR_COLOR
 
         if "." in node.name:
             parts = node.name.split(".", 1)
@@ -1475,6 +1476,50 @@ class MathRenderer:
         return RenderBox(brace_w + 4 + max_w, max(total_h, 1), total_h / 2)
 
     # -----------------------------------------------------------------
+    # Scientific notation rendering
+    # -----------------------------------------------------------------
+
+    def _render_sci_number(self, c: tk.Canvas, text: str, x: float, y: float,
+                           fs: int, color: str = _RESULT_COLOR) -> RenderBox:
+        """Render a number, using ·10ⁿ notation for scientific notation."""
+        import re
+        m = re.match(r'^(-?\d+\.?\d*)[eE]([+-]?\d+)$', text)
+        if not m:
+            f = self._get_font(c, fs)
+            c.create_text(x, y, text=text, anchor="nw", font=f, fill=color)
+            w, h = self._text_size(c, text, fs)
+            return RenderBox(w, h, h / 2)
+
+        mantissa = m.group(1)
+        exponent = m.group(2)
+        if exponent.startswith('+'):
+            exponent = exponent[1:]
+        if exponent.startswith('0') and len(exponent) > 1:
+            exponent = exponent.lstrip('0') or '0'
+
+        f = self._get_font(c, fs)
+        sup_fs = max(int(fs * _SUP_SCALE), 6)
+        f_sup = self._get_font(c, sup_fs)
+
+        cx = x
+        mw, mh = self._text_size(c, mantissa, fs)
+        c.create_text(cx, y, text=mantissa, anchor="nw", font=f, fill=color)
+        cx += mw
+
+        dot_text = "·10"
+        dw, dh = self._text_size(c, dot_text, fs)
+        c.create_text(cx, y, text=dot_text, anchor="nw", font=f, fill=color)
+        cx += dw
+
+        ew, eh = self._text_size(c, exponent, sup_fs)
+        c.create_text(cx, y, text=exponent, anchor="nw", font=f_sup, fill=color)
+        cx += ew
+
+        total_w = cx - x
+        total_h = max(mh, dh, eh)
+        return RenderBox(total_w, total_h, total_h / 2)
+
+    # -----------------------------------------------------------------
     # Result rendering
     # -----------------------------------------------------------------
 
@@ -1536,14 +1581,10 @@ class MathRenderer:
                         rb = self._render_quantity_result(canvas, result, res_x, eq_y, font_size, precision, trailing_zeros)
                     else:
                         res_text = _format_result(result, precision, trailing_zeros)
-                        canvas.create_text(res_x, eq_y, text=res_text, anchor="nw", font=f, fill=_NUMBER_COLOR)
-                        rw, rh = self._text_size(canvas, res_text, font_size)
-                        rb = RenderBox(rw, rh, rh / 2)
+                        rb = self._render_sci_number(canvas, res_text, res_x, eq_y, font_size)
                 except Exception:
                     res_text = _format_result(result, precision, trailing_zeros)
-                    canvas.create_text(res_x, eq_y, text=res_text, anchor="nw", font=f, fill=_NUMBER_COLOR)
-                    rw, rh = self._text_size(canvas, res_text, font_size)
-                    rb = RenderBox(rw, rh, rh / 2)
+                    rb = self._render_sci_number(canvas, res_text, res_x, eq_y, font_size)
 
             total_w = expr_box.width + ew + rb.width
             total_h = max(expr_box.height, eh, rb.height)
@@ -1552,13 +1593,12 @@ class MathRenderer:
         return expr_box
 
     def _render_quantity_result(self, c: tk.Canvas, qty: Quantity, x, y, fs, precision=4, trailing_zeros=False) -> RenderBox:
-        """Render a Quantity with the number in black and the unit in blue."""
-        f = self._get_font(c, fs)
+        """Render a Quantity with the number in blue and the unit in blue."""
         num_text = _format_result(qty.value, precision, trailing_zeros)
         unit_str = qty.display_unit if hasattr(qty, 'display_unit') else str(qty.unit)
 
-        c.create_text(x, y, text=num_text, anchor="nw", font=f, fill=_NUMBER_COLOR)
-        nw, nh = self._text_size(c, num_text, fs)
+        num_box = self._render_sci_number(c, num_text, x, y, fs)
+        nw, nh = num_box.width, num_box.height
 
         total_w = nw
         total_h = nh
@@ -1658,7 +1698,7 @@ class MathRenderer:
                 tw, th = self._text_size(c, txt, fs)
                 cell_x = cx + (cell_w - tw) / 2
                 cell_y = cy + (cell_h - th) / 2
-                c.create_text(cell_x, cell_y, text=txt, anchor="nw", font=f, fill=_NUMBER_COLOR)
+                c.create_text(cell_x, cell_y, text=txt, anchor="nw", font=f, fill=_RESULT_COLOR)
                 cx += cell_w + _MATRIX_CELL_PAD
             cy += cell_h + _MATRIX_CELL_PAD
 

@@ -2350,6 +2350,41 @@ class WorksheetCanvas(ttk.Frame):
         self._mark_modified()
         self._evaluate_and_render()
 
+    def insert_picture_region(self, filepath: str, x: Optional[int] = None, y: Optional[int] = None):
+        """Insert a picture region from a file path."""
+        if x is None:
+            x = self._cursor_x
+        if y is None:
+            y = self._cursor_y
+        self.ensure_worksheet()
+        self._save_undo_state()
+        try:
+            img = Image.open(filepath)
+            w, h = img.size
+            if w > 600:
+                ratio = 600 / w
+                w = 600
+                h = int(h * ratio)
+                img = img.resize((w, h), Image.LANCZOS)
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            data = base64.b64encode(buf.getvalue()).decode("ascii")
+            from ..parser import PictureRegion as PicRegion
+            region = Region()
+            region.id = self._generate_id()
+            region.left = x
+            region.top = y
+            region.width = w
+            region.height = h
+            region.picture = PicRegion(format="png", encoding="base64", data=data)
+            self._worksheet.regions.append(region)
+            self._cursor_y = y + h + 16
+            self._mark_modified()
+            self._evaluate_and_render()
+        except Exception as exc:
+            import traceback
+            traceback.print_exc()
+
     def insert_symbol(self, symbol: str):
         """Insert a symbol/function into the current editor or create a new region."""
         if self._editing and self._math_editor is not None:

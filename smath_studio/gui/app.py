@@ -210,6 +210,8 @@ class SMathApp:
         insert_menu.add_command(label="Line Separator", command=self._on_insert_line)
         insert_menu.add_command(label="Area", command=self._on_insert_area)
         insert_menu.add_separator()
+        insert_menu.add_command(label="Picture...", command=self._on_insert_picture)
+        insert_menu.add_separator()
         insert_menu.add_command(
             label="Function...", command=self._on_insert_function
         )
@@ -264,6 +266,11 @@ class SMathApp:
             label="Zoom 100%", accelerator="Ctrl+0", command=self._reset_zoom
         )
         view_menu.add_separator()
+        self._show_toolbar_var = tk.BooleanVar(value=True)
+        view_menu.add_checkbutton(
+            label="Toolbar", variable=self._show_toolbar_var,
+            command=self._toggle_toolbar
+        )
         self._show_grid_var = tk.BooleanVar(value=True)
         view_menu.add_checkbutton(
             label="Show Grid", variable=self._show_grid_var,
@@ -320,8 +327,9 @@ class SMathApp:
 
     def _build_toolbar(self):
         """Build the standard toolbar row."""
-        toolbar_frame = ttk.Frame(self._root)
-        toolbar_frame.pack(side=tk.TOP, fill=tk.X)
+        self._toolbar_frame = ttk.Frame(self._root)
+        self._toolbar_frame.pack(side=tk.TOP, fill=tk.X)
+        toolbar_frame = self._toolbar_frame
 
         commands = {
             "new": self._on_new,
@@ -832,6 +840,23 @@ class SMathApp:
         self._canvas_widget.insert_area_region()
         self._status_info.config(text="Area region inserted")
 
+    def _on_insert_picture(self):
+        from tkinter import filedialog
+        path = filedialog.askopenfilename(
+            parent=self._root,
+            title="Insert Picture",
+            filetypes=[
+                ("Image files", "*.png *.jpg *.jpeg *.gif *.bmp"),
+                ("PNG", "*.png"),
+                ("JPEG", "*.jpg *.jpeg"),
+                ("All files", "*.*"),
+            ],
+        )
+        if not path:
+            return
+        self._canvas_widget.insert_picture_region(path)
+        self._status_info.config(text=f"Picture inserted: {os.path.basename(path)}")
+
     def _on_insert_matrix(self):
         """Insert a matrix at the cursor position, asking for dimensions."""
         dlg = MatrixSizeDialog(self._root)
@@ -916,6 +941,12 @@ class SMathApp:
         self._status_info.config(text="Zoom: 100%")
         if hasattr(self, '_format_toolbar'):
             self._format_toolbar.set_zoom(100)
+
+    def _toggle_toolbar(self):
+        if self._show_toolbar_var.get():
+            self._toolbar_frame.pack(side=tk.TOP, fill=tk.X, after=self._root.winfo_children()[0])
+        else:
+            self._toolbar_frame.pack_forget()
 
     def _toggle_grid(self):
         self._canvas_widget._show_grid = self._show_grid_var.get()
