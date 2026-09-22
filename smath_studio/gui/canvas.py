@@ -261,6 +261,7 @@ class WorksheetCanvas(ttk.Frame):
         self._zoom = 1.0
         self._show_grid = True
         self._show_margin = True
+        self._show_borders = False
 
         # Mouse-wheel scrolling
         self._canvas.bind("<MouseWheel>", self._on_mousewheel)
@@ -898,6 +899,16 @@ class WorksheetCanvas(ttk.Frame):
             all_bbox = self._canvas.bbox(*items) if items else (x, y, x + 10, y + 10)
             if all_bbox is None:
                 all_bbox = (x, y, x + 10, y + 10)
+            if self._show_borders:
+                pad = 2
+                border_id = self._canvas.create_rectangle(
+                    all_bbox[0] - pad, all_bbox[1] - pad,
+                    all_bbox[2] + pad, all_bbox[3] + pad,
+                    outline="#cccccc", width=1, dash=(2, 2),
+                )
+                items.append(border_id)
+                all_bbox = (all_bbox[0] - pad, all_bbox[1] - pad,
+                            all_bbox[2] + pad, all_bbox[3] + pad)
             rr = _RenderedRegion(region, items, all_bbox)
             self._rendered.append(rr)
 

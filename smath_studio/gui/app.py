@@ -152,6 +152,8 @@ class SMathApp:
         file_menu.add_cascade(label="Export", menu=export_menu)
         export_menu.add_command(label="Export as PDF...", command=self._on_export_pdf)
         export_menu.add_command(label="Export as PNG...", command=self._on_export_png)
+        export_menu.add_command(label="Export as HTML...", command=self._on_export_html)
+        export_menu.add_command(label="Export as LaTeX...", command=self._on_export_latex)
         export_menu.add_command(label="Export as PostScript...", command=self._on_export_ps)
         file_menu.add_separator()
         self._recent_menu = tk.Menu(file_menu, tearoff=0)
@@ -303,6 +305,13 @@ class SMathApp:
         view_menu.add_command(
             label="Regions List", command=self._show_regions_list
         )
+        self._show_borders_var = tk.BooleanVar(value=False)
+        view_menu.add_checkbutton(
+            label="Region Borders", variable=self._show_borders_var,
+            command=self._toggle_region_borders,
+        )
+        view_menu.add_separator()
+        view_menu.add_command(label="Go to Page...", command=self._go_to_page)
         view_menu.add_separator()
         self._fullscreen_var = tk.BooleanVar(value=False)
         view_menu.add_checkbutton(
@@ -815,6 +824,91 @@ class SMathApp:
         except Exception as ex:
             messagebox.showerror("Export Error", str(ex), parent=self._root)
 
+    def _on_export_html(self):
+        path = filedialog.asksaveasfilename(
+            title="Export as HTML",
+            defaultextension=".html",
+            filetypes=[("HTML", "*.html"), ("All Files", "*.*")],
+            parent=self._root,
+        )
+        if not path:
+            return
+        try:
+            ws = self._canvas_widget._worksheet
+            if ws is None:
+                messagebox.showwarning("Export", "No worksheet loaded.", parent=self._root)
+                return
+            from ..infix_parser import ast_to_text
+            lines = ['<!DOCTYPE html>', '<html><head>',
+                     '<meta charset="utf-8">',
+                     '<title>SMath Studio Worksheet</title>',
+                     '<style>body{font-family:serif;max-width:800px;margin:40px auto;padding:0 20px}',
+                     '.math{margin:12px 0;font-family:serif;font-style:italic}',
+                     '.text{margin:8px 0}.comment{background:#ffffcc;padding:8px;border-left:3px solid #cca}',
+                     '.result{color:#0000ff}</style>',
+                     '</head><body>']
+            for region in ws.regions:
+                if region.text_contents:
+                    tc = region.text_contents[0] if region.text_contents else None
+                    if tc:
+                        for p in tc.paragraphs:
+                            cls = "comment" if region.bg_color and region.bg_color.lower() in ("#ffff80", "#ffffcc") else "text"
+                            lines.append(f'<p class="{cls}">{self._html_escape(p.text)}</p>')
+                elif region.math and region.math.input_expr:
+                    expr_text = ast_to_text(region.math.input_expr)
+                    lines.append(f'<div class="math">{self._html_escape(expr_text)}</div>')
+            lines.append('</body></html>')
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines))
+            self._status_info.config(text=f"Exported to {Path(path).name}")
+        except Exception as ex:
+            messagebox.showerror("Export Error", str(ex), parent=self._root)
+
+    def _on_export_latex(self):
+        path = filedialog.asksaveasfilename(
+            title="Export as LaTeX",
+            defaultextension=".tex",
+            filetypes=[("LaTeX", "*.tex"), ("All Files", "*.*")],
+            parent=self._root,
+        )
+        if not path:
+            return
+        try:
+            ws = self._canvas_widget._worksheet
+            if ws is None:
+                messagebox.showwarning("Export", "No worksheet loaded.", parent=self._root)
+                return
+            from ..infix_parser import ast_to_text
+            lines = [r'\documentclass{article}', r'\usepackage{amsmath}',
+                     r'\begin{document}', '']
+            for region in ws.regions:
+                if region.text_contents:
+                    tc = region.text_contents[0] if region.text_contents else None
+                    if tc:
+                        for p in tc.paragraphs:
+                            lines.append(self._latex_escape(p.text))
+                            lines.append('')
+                elif region.math and region.math.input_expr:
+                    expr_text = ast_to_text(region.math.input_expr)
+                    lines.append(f'$$ {self._latex_escape(expr_text)} $$')
+                    lines.append('')
+            lines.append(r'\end{document}')
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines))
+            self._status_info.config(text=f"Exported to {Path(path).name}")
+        except Exception as ex:
+            messagebox.showerror("Export Error", str(ex), parent=self._root)
+
+    @staticmethod
+    def _html_escape(text: str) -> str:
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    @staticmethod
+    def _latex_escape(text: str) -> str:
+        for ch in ('#', '$', '%', '&', '_', '{', '}'):
+            text = text.replace(ch, '\\' + ch)
+        return text
+
     # ------------------------------------------------------------------
     # Edit operations
     # ------------------------------------------------------------------
@@ -1034,6 +1128,29 @@ class SMathApp:
             self._canvas_widget._ruler_corner.grid_remove()
             self._canvas_widget._ruler.grid_remove()
             self._canvas_widget._v_ruler.grid_remove()
+
+    def _toggle_region_borders(self):
+        self._canvas_widget._show_borders = self._show_borders_var.get()
+        self._canvas_widget._evaluate_and_render()
+
+    def _go_to_page(self):
+        from tkinter import simpledialog
+        num_pages = getattr(self._canvas_widget, '_num_pages', 1)
+        page = simpledialog.askinteger(
+            "Go to Page", f"Page number (1-{num_pages}):",
+            parent=self._root, minvalue=1, maxvalue=max(num_pages, 1),
+        )
+        if page is not None:
+            ws = self._canvas_widget._worksheet
+            if ws:
+                ph = ws.settings.page.height
+                target_y = (page - 1) * (ph + 20)
+                zy = int(target_y * self._canvas_widget._zoom)
+                sr = self._canvas_widget._canvas.cget('scrollregion')
+                if sr:
+                    parts = sr.split()
+                    total = max(int(parts[3]), 1)
+                    self._canvas_widget._canvas.yview_moveto(zy / total)
 
     def _toggle_sidebar(self):
         if self._show_sidebar_var.get():
