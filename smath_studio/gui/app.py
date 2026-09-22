@@ -285,12 +285,20 @@ class SMathApp:
             label="Show Margin Line", variable=self._show_margin_var,
             command=self._toggle_margin
         )
+        self._show_ruler_var = tk.BooleanVar(value=True)
+        view_menu.add_checkbutton(
+            label="Rulers", variable=self._show_ruler_var,
+            command=self._toggle_rulers
+        )
         self._show_sidebar_var = tk.BooleanVar(value=True)
         view_menu.add_checkbutton(
             label="Sidebar", variable=self._show_sidebar_var,
             command=self._toggle_sidebar
         )
         view_menu.add_separator()
+        view_menu.add_command(
+            label="Zoom to Fit", command=self._zoom_to_fit
+        )
         view_menu.add_command(
             label="Regions List", command=self._show_regions_list
         )
@@ -987,11 +995,35 @@ class SMathApp:
         self._canvas_widget._show_margin = self._show_margin_var.get()
         self._canvas_widget._evaluate_and_render()
 
+    def _toggle_rulers(self):
+        show = self._show_ruler_var.get()
+        if show:
+            self._canvas_widget._ruler_corner.grid()
+            self._canvas_widget._ruler.grid()
+            self._canvas_widget._v_ruler.grid()
+        else:
+            self._canvas_widget._ruler_corner.grid_remove()
+            self._canvas_widget._ruler.grid_remove()
+            self._canvas_widget._v_ruler.grid_remove()
+
     def _toggle_sidebar(self):
         if self._show_sidebar_var.get():
             self._paned.add(self._math_panels, weight=0)
         else:
             self._paned.forget(self._math_panels)
+
+    def _zoom_to_fit(self):
+        bbox = self._canvas_widget._canvas.bbox("all")
+        if not bbox:
+            return
+        x1, y1, x2, y2 = bbox
+        cw = max(self._canvas_widget._canvas.winfo_width(), 100)
+        ch = max(self._canvas_widget._canvas.winfo_height(), 100)
+        content_w = max(x2 - x1, 1)
+        content_h = max(y2 - y1, 1)
+        scale = min(cw / content_w, ch / content_h) * 0.95
+        self._canvas_widget._zoom = max(0.3, min(3.0, scale))
+        self._canvas_widget._apply_zoom()
 
     def _show_regions_list(self):
         """Show a dialog listing all regions with navigation."""

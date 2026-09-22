@@ -191,8 +191,11 @@ class WorksheetCanvas(ttk.Frame):
         self._trailing_zeros = True
         self._filename: str = ""
 
-        # Build ruler and canvas with scrollbars
-        self._ruler = tk.Canvas(self, height=18, bg="#f8f8f0", highlightthickness=0)
+        # Build rulers and canvas with scrollbars
+        _RULER_SIZE = 18
+        self._ruler = tk.Canvas(self, height=_RULER_SIZE, bg="#f8f8f0", highlightthickness=0)
+        self._v_ruler = tk.Canvas(self, width=_RULER_SIZE, bg="#f8f8f0", highlightthickness=0)
+        self._ruler_corner = tk.Frame(self, width=_RULER_SIZE, height=_RULER_SIZE, bg="#f0f0e8")
 
         self._canvas = tk.Canvas(
             self,
@@ -204,20 +207,22 @@ class WorksheetCanvas(ttk.Frame):
             self, orient=tk.HORIZONTAL, command=self._on_hscroll
         )
         self._v_scroll = ttk.Scrollbar(
-            self, orient=tk.VERTICAL, command=self._canvas.yview
+            self, orient=tk.VERTICAL, command=self._on_vscroll
         )
         self._canvas.configure(
             xscrollcommand=self._h_scroll.set,
             yscrollcommand=self._v_scroll.set,
         )
 
-        # Grid layout: ruler on top, canvas fills center, scrollbars on edges
-        self._ruler.grid(row=0, column=0, sticky="ew")
-        self._canvas.grid(row=1, column=0, sticky="nsew")
-        self._v_scroll.grid(row=0, column=1, rowspan=2, sticky="ns")
-        self._h_scroll.grid(row=2, column=0, sticky="ew")
+        # Grid layout: corner+rulers on top/left, canvas fills center
+        self._ruler_corner.grid(row=0, column=0, sticky="nsew")
+        self._ruler.grid(row=0, column=1, sticky="ew")
+        self._v_ruler.grid(row=1, column=0, sticky="ns")
+        self._canvas.grid(row=1, column=1, sticky="nsew")
+        self._v_scroll.grid(row=0, column=2, rowspan=2, sticky="ns")
+        self._h_scroll.grid(row=2, column=1, sticky="ew")
         self.grid_rowconfigure(1, weight=1)
-        self.grid_columnconfigure(0, weight=1)
+        self.grid_columnconfigure(1, weight=1)
 
         # Drag state
         self._dragging = False
@@ -683,22 +688,24 @@ class WorksheetCanvas(ttk.Frame):
                 )
 
     def _draw_grid_dots(self):
-        """Draw subtle grid dots for alignment like SMath Studio.
-
-        Only draws dots on the first two pages for performance.
-        """
+        """Draw subtle grid dots on visible pages for alignment like SMath Studio."""
         pw = getattr(self, '_page_width', 800)
         ph = getattr(self, '_page_height', 1100)
         pg = getattr(self, '_page_gap', 10)
+        num_pages = getattr(self, '_num_pages', 5)
         grid = _GRID_SIZE * 3
-        ml = 4
-        mt = 4
         z = self._zoom
         dot_size = max(1, _z(1, z))
-        for page in range(2):
+        vis = self._get_visible_area()
+        for page in range(min(num_pages, 4)):
             page_y = page * (ph + pg)
-            for gx in range(grid, pw - ml, grid):
-                for gy in range(grid, ph - mt, grid):
+            if vis:
+                page_top_z = _z(page_y, z)
+                page_bot_z = _z(page_y + ph, z)
+                if page_bot_z < vis[1] or page_top_z > vis[3]:
+                    continue
+            for gx in range(grid, pw, grid):
+                for gy in range(grid, ph, grid):
                     py = page_y + gy
                     zx = _z(gx, z)
                     zy = _z(py, z)
@@ -738,17 +745,17 @@ class WorksheetCanvas(ttk.Frame):
             )
 
     def _draw_cursor_marker(self):
-        """Draw a small blue crosshair at the current insertion position."""
+        """Draw a small red L-bracket cursor at the insertion position (SMath style)."""
         if self._editing:
             return
         x = _z(self._cursor_x, self._zoom)
         y = _z(self._cursor_y, self._zoom)
-        sz = max(4, _z(5, self._zoom))
+        sz = max(6, _z(8, self._zoom))
         self._canvas.create_line(
-            x - sz, y, x + sz, y, fill=_CURSOR_COLOR, width=1, tags="cursor_marker"
+            x, y, x + sz, y, fill=_CURSOR_COLOR, width=1, tags="cursor_marker"
         )
         self._canvas.create_line(
-            x, y - sz, x, y + sz, fill=_CURSOR_COLOR, width=1, tags="cursor_marker"
+            x, y, x, y + sz, fill=_CURSOR_COLOR, width=1, tags="cursor_marker"
         )
 
     def _ensure_visible(self, x: int, y: int):
@@ -783,6 +790,10 @@ class WorksheetCanvas(ttk.Frame):
         self._canvas.xview(*args)
         self._draw_ruler()
 
+    def _on_vscroll(self, *args):
+        self._canvas.yview(*args)
+        self._draw_v_ruler()
+
     def _draw_ruler(self):
         """Draw a horizontal ruler showing centimetre ticks."""
         self._ruler.delete("all")
@@ -811,6 +822,34 @@ class WorksheetCanvas(ttk.Frame):
                 tick_h = 4 if sub == 5 else 2
                 self._ruler.create_line(spx, h - tick_h, spx, h, fill="#c0c0c0")
 
+    def _draw_v_ruler(self):
+        """Draw a vertical ruler showing centimetre ticks."""
+        self._v_ruler.delete("all")
+        try:
+            y_offset = float(self._canvas.canvasy(0))
+        except Exception:
+            y_offset = 0
+        rh = self._v_ruler.winfo_height()
+        if rh < 10:
+            rh = 600
+        z = self._zoom
+        cm = 37.8 * z
+        w = 18
+        start_cm = int(y_offset / cm)
+        end_cm = int((y_offset + rh) / cm) + 2
+        for i in range(max(0, start_cm), end_cm):
+            py = i * cm - y_offset
+            self._v_ruler.create_line(0, py, w, py, fill="#c0c0c0", width=1)
+            if i > 0:
+                self._v_ruler.create_text(
+                    2, py + 2, text=str(i), anchor="nw",
+                    font=("DejaVu Sans", 7), fill="#888888", angle=0,
+                )
+            for sub in range(1, 10):
+                spy = py + sub * cm / 10
+                tick_w = 4 if sub == 5 else 2
+                self._v_ruler.create_line(w - tick_w, spy, w, spy, fill="#c0c0c0")
+
     def _update_scroll_region(self):
         """Set the scrollable region to encompass all content."""
         bbox = self._canvas.bbox("all")
@@ -825,6 +864,7 @@ class WorksheetCanvas(ttk.Frame):
                 )
             )
         self._draw_ruler()
+        self._draw_v_ruler()
 
     # ------------------------------------------------------------------
     # Region rendering
@@ -1624,16 +1664,20 @@ class WorksheetCanvas(ttk.Frame):
     def _on_mousewheel(self, event: tk.Event):
         """Vertical scroll with mouse wheel (Windows/macOS)."""
         self._canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        self._draw_v_ruler()
 
     def _on_mousewheel_linux_up(self, _event):
         self._canvas.yview_scroll(-3, "units")
+        self._draw_v_ruler()
 
     def _on_mousewheel_linux_down(self, _event):
         self._canvas.yview_scroll(3, "units")
+        self._draw_v_ruler()
 
     def _on_shift_mousewheel(self, event: tk.Event):
         """Horizontal scroll with Shift+mousewheel."""
         self._canvas.xview_scroll(int(-1 * (event.delta / 120)), "units")
+        self._draw_ruler()
 
     def _on_ctrl_mousewheel(self, event: tk.Event):
         """Zoom with Ctrl+mousewheel."""
@@ -1692,6 +1736,7 @@ class WorksheetCanvas(ttk.Frame):
                 except Exception:
                     pass
             self._hover_items.clear()
+            self._hide_tooltip()
             self._hover_index = hit
             if hit is not None and hit != self._selected_index:
                 rr = self._rendered[hit]
@@ -1702,6 +1747,92 @@ class WorksheetCanvas(ttk.Frame):
                     outline="#a0b8d8", width=1, dash=(2, 2),
                 )
                 self._hover_items.append(hover_rect)
+                self._schedule_tooltip(rr.region, event.x_root, event.y_root)
+
+    def _schedule_tooltip(self, region: Region, x: int, y: int):
+        self._tooltip_after = self._canvas.after(
+            600, lambda: self._show_tooltip(region, x, y)
+        )
+
+    def _show_tooltip(self, region: Region, x: int, y: int):
+        tip = ""
+        if region.math and region.math.descriptions:
+            for d in region.math.descriptions:
+                if d.text:
+                    tip = d.text
+                    break
+        if not tip:
+            return
+        self._tooltip_win = tw = tk.Toplevel(self._canvas)
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry(f"+{x + 12}+{y + 12}")
+        lbl = tk.Label(
+            tw, text=tip, justify=tk.LEFT, background="#ffffcc",
+            relief=tk.SOLID, borderwidth=1, font=("DejaVu Sans", 8),
+            padx=4, pady=2,
+        )
+        lbl.pack()
+
+    def _hide_tooltip(self):
+        after_id = getattr(self, "_tooltip_after", None)
+        if after_id:
+            self._canvas.after_cancel(after_id)
+            self._tooltip_after = None
+        tw = getattr(self, "_tooltip_win", None)
+        if tw:
+            tw.destroy()
+            self._tooltip_win = None
+
+    def _draw_snap_guides(self, moving_indices: set[int]):
+        """Draw alignment guide lines when a dragged region aligns with others."""
+        self._canvas.delete("snap_guide")
+        if not self._rendered:
+            return
+        snap_tolerance = _z(6, self._zoom)
+        edges_x: list[int] = []
+        edges_y: list[int] = []
+        for idx in moving_indices:
+            if idx >= len(self._rendered):
+                continue
+            b = self._rendered[idx].bbox
+            edges_x.extend([b[0], (b[0] + b[2]) // 2, b[2]])
+            edges_y.extend([b[1], (b[1] + b[3]) // 2, b[3]])
+        if not edges_x:
+            return
+        target_x: set[int] = set()
+        target_y: set[int] = set()
+        for i, rr in enumerate(self._rendered):
+            if i in moving_indices:
+                continue
+            b = rr.bbox
+            target_x.update([b[0], (b[0] + b[2]) // 2, b[2]])
+            target_y.update([b[1], (b[1] + b[3]) // 2, b[3]])
+        sr = self._canvas.cget("scrollregion")
+        if sr:
+            parts = sr.split()
+            sy2 = int(float(parts[3])) if len(parts) > 3 else 5000
+        else:
+            sy2 = 5000
+        sx2 = _z(getattr(self, '_page_width', 850), self._zoom)
+        for ex in edges_x:
+            for tx in target_x:
+                if abs(ex - tx) <= snap_tolerance:
+                    self._canvas.create_line(
+                        tx, 0, tx, sy2,
+                        fill="#3399ff", dash=(3, 3), width=1, tags="snap_guide",
+                    )
+                    break
+        for ey in edges_y:
+            for ty in target_y:
+                if abs(ey - ty) <= snap_tolerance:
+                    self._canvas.create_line(
+                        0, ty, sx2, ty,
+                        fill="#3399ff", dash=(3, 3), width=1, tags="snap_guide",
+                    )
+                    break
+
+    def _clear_snap_guides(self):
+        self._canvas.delete("snap_guide")
 
     def _auto_scroll_on_drag(self, event: tk.Event):
         """Scroll canvas when dragging near edges."""
@@ -1795,6 +1926,7 @@ class WorksheetCanvas(ttk.Frame):
                 self._canvas.move(item_id, dx, dy)
             self._drag_start_x = cx
             self._drag_start_y = cy
+            self._draw_snap_guides(indices_to_move)
         else:
             # Rubberband selection
             if not self._rubberband:
@@ -1810,6 +1942,7 @@ class WorksheetCanvas(ttk.Frame):
 
     def _on_drag_end(self, event: tk.Event):
         """Snap region to grid after dragging, resize, or complete rubberband selection."""
+        self._clear_snap_guides()
         if self._resizing:
             if self._selected_index is not None and self._selected_index < len(self._rendered):
                 self._save_undo_state()
