@@ -210,31 +210,64 @@ class FormatToolbar(ttk.Frame):
         self._zoom_var.set(f"{pct}%")
 
 
-class CollapsiblePanel(ttk.LabelFrame):
+class CollapsiblePanel(tk.Frame):
     """A collapsible panel with a header and content area.
 
     Clicking the header toggles the body visibility.
     """
 
     def __init__(self, parent: tk.Widget, title: str):
-        super().__init__(parent, text=title)
+        super().__init__(parent, bd=1, relief=tk.GROOVE, bg="#f0f0f0")
         self._expanded = True
-        self._content = ttk.Frame(self)
+        self._title = title
+        self._header = tk.Frame(self, bg="#dcd8d0", cursor="hand2")
+        self._header.pack(fill=tk.X)
+        self._arrow_label = tk.Label(
+            self._header, text="▼", font=("DejaVu Sans", 7),
+            bg="#dcd8d0", fg="#444444", padx=2,
+        )
+        self._arrow_label.pack(side=tk.LEFT, padx=(4, 0))
+        self._title_label = tk.Label(
+            self._header, text=title, font=("DejaVu Sans", 8, "bold"),
+            bg="#dcd8d0", fg="#333333", anchor=tk.W, padx=2, pady=2,
+        )
+        self._title_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self._content = tk.Frame(self, bg="#f0f0f0")
         self._content.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
 
-        # Bind the label click to toggle
-        self.bind("<Button-1>", self._toggle)
+        for w in (self._header, self._arrow_label, self._title_label):
+            w.bind("<Button-1>", self._toggle)
 
     @property
-    def content(self) -> ttk.Frame:
+    def content(self) -> tk.Frame:
         return self._content
 
     def _toggle(self, _event=None):
         if self._expanded:
             self._content.pack_forget()
+            self._arrow_label.configure(text="▶")
         else:
             self._content.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
+            self._arrow_label.configure(text="▼")
         self._expanded = not self._expanded
+
+
+def _make_panel_btn(frame: tk.Widget, label: str, value: str,
+                    on_insert, row: int, col: int, cols: int = 4):
+    """Create a styled panel button with hover effect."""
+    btn = tk.Button(
+        frame, text=label, width=4, height=1,
+        font=("DejaVu Sans", 9), relief=tk.FLAT,
+        bg="#f0f0f0", activebackground="#c1d2ee",
+        bd=0, highlightthickness=0, padx=1, pady=0,
+        command=lambda: on_insert(value) if on_insert else None,
+    )
+    btn.grid(row=row, column=col, padx=0, pady=0, sticky="nsew")
+    def enter(e): btn.configure(bg="#dce6f4", relief=tk.RAISED)
+    def leave(e): btn.configure(bg="#f0f0f0", relief=tk.FLAT)
+    btn.bind("<Enter>", enter)
+    btn.bind("<Leave>", leave)
+    return btn
 
 
 class ArithmeticPanel(CollapsiblePanel):
@@ -257,20 +290,7 @@ class ArithmeticPanel(CollapsiblePanel):
         frame = self.content
         cols = 4
         for i, (label, value) in enumerate(symbols):
-            row = i // cols
-            col = i % cols
-            btn = tk.Button(
-                frame,
-                text=label,
-                width=4,
-                height=1,
-                font=("DejaVu Sans", 10),
-                relief=tk.FLAT,
-                bg="#f0f0f0",
-                activebackground="#d8d8d8",
-                command=lambda v=value: self._insert(v),
-            )
-            btn.grid(row=row, column=col, padx=1, pady=1, sticky="nsew")
+            _make_panel_btn(frame, label, value, self._on_insert, i // cols, i % cols)
         for c in range(cols):
             frame.columnconfigure(c, weight=1)
 
@@ -304,20 +324,7 @@ class SymbolsPanel(CollapsiblePanel):
         frame = self.content
         cols = 4
         for i, (label, value) in enumerate(greek):
-            row = i // cols
-            col = i % cols
-            btn = tk.Button(
-                frame,
-                text=label,
-                width=4,
-                height=1,
-                font=("DejaVu Sans", 11),
-                relief=tk.FLAT,
-                bg="#f0f0f0",
-                activebackground="#d8d8d8",
-                command=lambda v=value: self._insert(v),
-            )
-            btn.grid(row=row, column=col, padx=1, pady=1, sticky="nsew")
+            _make_panel_btn(frame, label, value, self._on_insert, i // cols, i % cols)
         for c in range(cols):
             frame.columnconfigure(c, weight=1)
 
@@ -344,20 +351,7 @@ class MatricesPanel(CollapsiblePanel):
         frame = self.content
         cols = 3
         for i, (label, value) in enumerate(items):
-            row = i // cols
-            col = i % cols
-            btn = tk.Button(
-                frame,
-                text=label,
-                width=6,
-                height=1,
-                font=("DejaVu Sans", 9),
-                relief=tk.FLAT,
-                bg="#f0f0f0",
-                activebackground="#d8d8d8",
-                command=lambda v=value: self._insert(v),
-            )
-            btn.grid(row=row, column=col, padx=1, pady=1, sticky="nsew")
+            _make_panel_btn(frame, label, value, self._on_insert, i // cols, i % cols, cols)
         for c in range(cols):
             frame.columnconfigure(c, weight=1)
 
@@ -387,20 +381,7 @@ class FunctionsPanel(CollapsiblePanel):
         frame = self.content
         cols = 3
         for i, (label, value) in enumerate(funcs):
-            row = i // cols
-            col = i % cols
-            btn = tk.Button(
-                frame,
-                text=label,
-                width=6,
-                height=1,
-                font=("Consolas", 9),
-                relief=tk.FLAT,
-                bg="#f0f0f0",
-                activebackground="#d8d8d8",
-                command=lambda v=value: self._insert(v),
-            )
-            btn.grid(row=row, column=col, padx=1, pady=1, sticky="nsew")
+            _make_panel_btn(frame, label, value, self._on_insert, i // cols, i % cols, cols)
         for c in range(cols):
             frame.columnconfigure(c, weight=1)
 
@@ -425,20 +406,7 @@ class SystemPanel(CollapsiblePanel):
         frame = self.content
         cols = 3
         for i, (label, value) in enumerate(items):
-            row = i // cols
-            col = i % cols
-            btn = tk.Button(
-                frame,
-                text=label,
-                width=6,
-                height=1,
-                font=("Consolas", 9),
-                relief=tk.FLAT,
-                bg="#f0f0f0",
-                activebackground="#d8d8d8",
-                command=lambda v=value: self._insert(v),
-            )
-            btn.grid(row=row, column=col, padx=1, pady=1, sticky="nsew")
+            _make_panel_btn(frame, label, value, self._on_insert, i // cols, i % cols, cols)
         for c in range(cols):
             frame.columnconfigure(c, weight=1)
 
@@ -464,15 +432,7 @@ class BooleanPanel(CollapsiblePanel):
         frame = self.content
         cols = 4
         for i, (label, value) in enumerate(items):
-            row = i // cols
-            col = i % cols
-            btn = tk.Button(
-                frame, text=label, width=4, height=1,
-                font=("DejaVu Sans", 9), relief=tk.FLAT,
-                bg="#f0f0f0", activebackground="#d8d8d8",
-                command=lambda v=value: self._insert(v),
-            )
-            btn.grid(row=row, column=col, padx=1, pady=1, sticky="nsew")
+            _make_panel_btn(frame, label, value, self._on_insert, i // cols, i % cols)
         for c in range(cols):
             frame.columnconfigure(c, weight=1)
 
@@ -498,15 +458,7 @@ class ProgrammingPanel(CollapsiblePanel):
         frame = self.content
         cols = 3
         for i, (label, value) in enumerate(items):
-            row = i // cols
-            col = i % cols
-            btn = tk.Button(
-                frame, text=label, width=6, height=1,
-                font=("Consolas", 9), relief=tk.FLAT,
-                bg="#f0f0f0", activebackground="#d8d8d8",
-                command=lambda v=value: self._insert(v),
-            )
-            btn.grid(row=row, column=col, padx=1, pady=1, sticky="nsew")
+            _make_panel_btn(frame, label, value, self._on_insert, i // cols, i % cols, cols)
         for c in range(cols):
             frame.columnconfigure(c, weight=1)
 
@@ -531,15 +483,7 @@ class PlotPanel(CollapsiblePanel):
         frame = self.content
         cols = 2
         for i, (label, value) in enumerate(items):
-            row = i // cols
-            col = i % cols
-            btn = tk.Button(
-                frame, text=label, width=8, height=1,
-                font=("DejaVu Sans", 9), relief=tk.FLAT,
-                bg="#f0f0f0", activebackground="#d8d8d8",
-                command=lambda v=value: self._insert(v),
-            )
-            btn.grid(row=row, column=col, padx=1, pady=1, sticky="nsew")
+            _make_panel_btn(frame, label, value, self._on_insert, i // cols, i % cols, cols)
         for c in range(cols):
             frame.columnconfigure(c, weight=1)
 
@@ -568,15 +512,7 @@ class UnitsPanel(CollapsiblePanel):
         frame = self.content
         cols = 4
         for i, (label, value) in enumerate(items):
-            row = i // cols
-            col = i % cols
-            btn = tk.Button(
-                frame, text=label, width=4, height=1,
-                font=("DejaVu Sans", 9), relief=tk.FLAT,
-                bg="#f0f0f0", activebackground="#d8d8d8",
-                command=lambda v=value: self._insert(v),
-            )
-            btn.grid(row=row, column=col, padx=1, pady=1, sticky="nsew")
+            _make_panel_btn(frame, label, value, self._on_insert, i // cols, i % cols)
         for c in range(cols):
             frame.columnconfigure(c, weight=1)
 
@@ -603,15 +539,7 @@ class ConstantsPanel(CollapsiblePanel):
         frame = self.content
         cols = 4
         for i, (label, value) in enumerate(items):
-            row = i // cols
-            col = i % cols
-            btn = tk.Button(
-                frame, text=label, width=4, height=1,
-                font=("DejaVu Sans", 10), relief=tk.FLAT,
-                bg="#f0f0f0", activebackground="#d8d8d8",
-                command=lambda v=value: self._insert(v),
-            )
-            btn.grid(row=row, column=col, padx=1, pady=1, sticky="nsew")
+            _make_panel_btn(frame, label, value, self._on_insert, i // cols, i % cols)
         for c in range(cols):
             frame.columnconfigure(c, weight=1)
 

@@ -18,9 +18,9 @@ class AboutDialog(tk.Toplevel):
         self.resizable(False, False)
         self.transient(parent)
         self.grab_set()
+        self.configure(bg="#ece9d8")
 
-        # Center on parent
-        self.geometry("400x280")
+        self.geometry("420x300")
         self.update_idletasks()
         pw = parent.winfo_rootx() + parent.winfo_width() // 2
         ph = parent.winfo_rooty() + parent.winfo_height() // 2
@@ -28,45 +28,47 @@ class AboutDialog(tk.Toplevel):
         h = self.winfo_height()
         self.geometry(f"+{pw - w // 2}+{ph - h // 2}")
 
-        frame = ttk.Frame(self, padding=20)
+        # Blue header banner
+        banner = tk.Frame(self, bg="#003399", height=60)
+        banner.pack(fill=tk.X)
+        banner.pack_propagate(False)
+        tk.Label(
+            banner, text="SMath Studio", font=("DejaVu Sans", 20, "bold"),
+            fg="white", bg="#003399",
+        ).pack(pady=(12, 0))
+        tk.Label(
+            banner, text="Python Edition", font=("DejaVu Sans", 10),
+            fg="#aaccff", bg="#003399",
+        ).pack()
+
+        frame = tk.Frame(self, bg="#ece9d8", padx=20, pady=16)
         frame.pack(fill=tk.BOTH, expand=True)
 
-        title_label = ttk.Label(
-            frame,
-            text="SMath Studio",
-            font=("DejaVu Sans", 18, "bold"),
-        )
-        title_label.pack(pady=(0, 4))
-
-        subtitle_label = ttk.Label(
-            frame,
-            text="Python Edition",
-            font=("DejaVu Sans", 12),
-        )
-        subtitle_label.pack(pady=(0, 12))
-
         from .. import __version__
-        version_label = ttk.Label(
-            frame,
-            text=f"Version {__version__}",
-            font=("DejaVu Sans", 10),
-        )
-        version_label.pack(pady=(0, 8))
+        tk.Label(
+            frame, text=f"Version {__version__}", font=("DejaVu Sans", 10),
+            bg="#ece9d8", fg="#333333",
+        ).pack(pady=(0, 10))
 
-        desc_label = ttk.Label(
+        tk.Label(
             frame,
             text=(
-                "A Python reverse-engineering of SMath Studio,\n"
+                "A Python implementation of SMath Studio,\n"
                 "the mathematical worksheet application.\n\n"
                 "Supports parsing, evaluating, and rendering\n"
                 "SMath Studio .sm worksheet files."
             ),
-            justify=tk.CENTER,
-            font=("DejaVu Sans", 9),
-        )
-        desc_label.pack(pady=(0, 16))
+            justify=tk.CENTER, font=("DejaVu Sans", 9),
+            bg="#ece9d8", fg="#444444",
+        ).pack(pady=(0, 16))
 
-        ok_btn = ttk.Button(frame, text="OK", command=self.destroy, width=12)
+        btn_frame = tk.Frame(frame, bg="#ece9d8")
+        btn_frame.pack()
+        ok_btn = tk.Button(
+            btn_frame, text="OK", command=self.destroy, width=12,
+            font=("DejaVu Sans", 9), bg="#ece9d8", activebackground="#c1d2ee",
+            relief=tk.RAISED, bd=1, padx=8, pady=2,
+        )
         ok_btn.pack()
         ok_btn.focus_set()
 

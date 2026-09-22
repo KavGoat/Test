@@ -125,11 +125,13 @@ class SMathApp:
 
     def _build_menu_bar(self):
         """Build the menu bar matching SMath Studio's structure."""
-        menubar = tk.Menu(self._root)
+        menubar = tk.Menu(self._root, bg="#ece9d8", activebackground="#316ac5",
+                         activeforeground="white", font=("DejaVu Sans", 9))
         self._root.config(menu=menubar)
 
         # --- File menu ---
-        file_menu = tk.Menu(menubar, tearoff=0)
+        file_menu = tk.Menu(menubar, tearoff=0, bg="#ffffff", activebackground="#316ac5",
+                         activeforeground="white", font=("DejaVu Sans", 9))
         menubar.add_cascade(label="File", menu=file_menu)
         file_menu.add_command(
             label="New", accelerator="Ctrl+N", command=self._on_new
@@ -149,7 +151,8 @@ class SMathApp:
         file_menu.add_command(label="Print Preview...", command=self._on_print_preview)
         file_menu.add_command(label="Print...", accelerator="Ctrl+P", command=self._on_print)
         file_menu.add_separator()
-        export_menu = tk.Menu(file_menu, tearoff=0)
+        export_menu = tk.Menu(file_menu, tearoff=0, bg="#ffffff", activebackground="#316ac5",
+                              activeforeground="white", font=("DejaVu Sans", 9))
         file_menu.add_cascade(label="Export", menu=export_menu)
         export_menu.add_command(label="Export as PDF...", command=self._on_export_pdf)
         export_menu.add_command(label="Export as PNG...", command=self._on_export_png)
@@ -157,7 +160,8 @@ class SMathApp:
         export_menu.add_command(label="Export as LaTeX...", command=self._on_export_latex)
         export_menu.add_command(label="Export as PostScript...", command=self._on_export_ps)
         file_menu.add_separator()
-        self._recent_menu = tk.Menu(file_menu, tearoff=0)
+        self._recent_menu = tk.Menu(file_menu, tearoff=0, bg="#ffffff", activebackground="#316ac5",
+                                     activeforeground="white", font=("DejaVu Sans", 9))
         file_menu.add_cascade(label="Recent Files", menu=self._recent_menu)
         self._recent_files: list[str] = []
         self._load_recent_files()
@@ -165,7 +169,8 @@ class SMathApp:
         file_menu.add_command(label="Exit", command=self._on_exit)
 
         # --- Edit menu ---
-        edit_menu = tk.Menu(menubar, tearoff=0)
+        edit_menu = tk.Menu(menubar, tearoff=0, bg="#ffffff", activebackground="#316ac5",
+                         activeforeground="white", font=("DejaVu Sans", 9))
         menubar.add_cascade(label="Edit", menu=edit_menu)
         edit_menu.add_command(
             label="Undo", accelerator="Ctrl+Z", command=self._on_undo
@@ -200,7 +205,8 @@ class SMathApp:
         )
 
         # --- Insert menu ---
-        insert_menu = tk.Menu(menubar, tearoff=0)
+        insert_menu = tk.Menu(menubar, tearoff=0, bg="#ffffff", activebackground="#316ac5",
+                         activeforeground="white", font=("DejaVu Sans", 9))
         menubar.add_cascade(label="Insert", menu=insert_menu)
         insert_menu.add_command(label="Math Region", command=self._on_insert_math)
         insert_menu.add_command(label="Text Region", command=self._on_insert_text)
@@ -228,7 +234,8 @@ class SMathApp:
         )
 
         # --- Format menu ---
-        format_menu = tk.Menu(menubar, tearoff=0)
+        format_menu = tk.Menu(menubar, tearoff=0, bg="#ffffff", activebackground="#316ac5",
+                         activeforeground="white", font=("DejaVu Sans", 9))
         menubar.add_cascade(label="Format", menu=format_menu)
         format_menu.add_command(
             label="Bold", accelerator="Ctrl+B", command=self._on_format_bold
@@ -241,7 +248,8 @@ class SMathApp:
         )
         format_menu.add_separator()
         self._font_size_var = tk.IntVar(value=10)
-        size_menu = tk.Menu(format_menu, tearoff=0)
+        size_menu = tk.Menu(format_menu, tearoff=0, bg="#ffffff", activebackground="#316ac5",
+                            activeforeground="white", font=("DejaVu Sans", 9))
         for sz in (8, 9, 10, 11, 12, 14, 16, 18, 20, 24):
             size_menu.add_radiobutton(
                 label=str(sz), variable=self._font_size_var, value=sz,
@@ -251,7 +259,8 @@ class SMathApp:
         format_menu.add_separator()
         format_menu.add_command(label="Text Color...", command=self._on_text_color)
         format_menu.add_separator()
-        align_menu = tk.Menu(format_menu, tearoff=0)
+        align_menu = tk.Menu(format_menu, tearoff=0, bg="#ffffff", activebackground="#316ac5",
+                             activeforeground="white", font=("DejaVu Sans", 9))
         format_menu.add_cascade(label="Align Regions", menu=align_menu)
         align_menu.add_command(label="Align Left", command=lambda: self._canvas_widget.align_left())
         align_menu.add_command(label="Align Right", command=lambda: self._canvas_widget.align_right())
@@ -262,7 +271,8 @@ class SMathApp:
         align_menu.add_command(label="Distribute Vertically", command=lambda: self._canvas_widget.distribute_vertical())
 
         # --- View menu ---
-        view_menu = tk.Menu(menubar, tearoff=0)
+        view_menu = tk.Menu(menubar, tearoff=0, bg="#ffffff", activebackground="#316ac5",
+                         activeforeground="white", font=("DejaVu Sans", 9))
         menubar.add_cascade(label="View", menu=view_menu)
         view_menu.add_command(
             label="Zoom In", accelerator="Ctrl++", command=lambda: self._canvas_widget._zoom_in()
@@ -322,7 +332,8 @@ class SMathApp:
         )
 
         # --- Calculation menu ---
-        calc_menu = tk.Menu(menubar, tearoff=0)
+        calc_menu = tk.Menu(menubar, tearoff=0, bg="#ffffff", activebackground="#316ac5",
+                         activeforeground="white", font=("DejaVu Sans", 9))
         menubar.add_cascade(label="Calculation", menu=calc_menu)
         self._auto_calc_var = tk.BooleanVar(value=True)
         calc_menu.add_checkbutton(
@@ -340,14 +351,16 @@ class SMathApp:
         )
 
         # --- Tools menu ---
-        tools_menu = tk.Menu(menubar, tearoff=0)
+        tools_menu = tk.Menu(menubar, tearoff=0, bg="#ffffff", activebackground="#316ac5",
+                         activeforeground="white", font=("DejaVu Sans", 9))
         menubar.add_cascade(label="Tools", menu=tools_menu)
         tools_menu.add_command(label="Units Browser...", command=self._on_units_browser)
         tools_menu.add_separator()
         tools_menu.add_command(label="Options...", command=self._on_options)
 
         # --- Help menu ---
-        help_menu = tk.Menu(menubar, tearoff=0)
+        help_menu = tk.Menu(menubar, tearoff=0, bg="#ffffff", activebackground="#316ac5",
+                         activeforeground="white", font=("DejaVu Sans", 9))
         menubar.add_cascade(label="Help", menu=help_menu)
         help_menu.add_command(label="Keyboard Shortcuts", command=self._show_shortcuts)
         help_menu.add_separator()
@@ -355,7 +368,7 @@ class SMathApp:
 
     def _build_toolbar(self):
         """Build the standard toolbar row."""
-        self._toolbar_frame = ttk.Frame(self._root)
+        self._toolbar_frame = tk.Frame(self._root, bg="#ece9d8")
         self._toolbar_frame.pack(side=tk.TOP, fill=tk.X)
         toolbar_frame = self._toolbar_frame
 
@@ -382,6 +395,10 @@ class SMathApp:
         }
         self._format_toolbar = FormatToolbar(toolbar_frame, fmt_commands)
         self._format_toolbar.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2, pady=1)
+
+        # Etched separator below toolbar
+        sep = tk.Frame(self._root, height=2, bd=1, relief=tk.SUNKEN, bg="#ece9d8")
+        sep.pack(side=tk.TOP, fill=tk.X)
 
     def _build_main_area(self):
         """Build the central area: worksheet canvas + right-side math panels."""
@@ -526,7 +543,9 @@ class SMathApp:
             self._status_position.config(text=f"Position: {cx}, {cy}")
             zoom = self._canvas_widget.get_zoom_percent()
             self._status_zoom.config(text=f"{zoom}%")
+            self._updating_slider = True
             self._zoom_scale.set(zoom)
+            self._updating_slider = False
             calc_mode = "Automatic" if self._auto_calc_var.get() else "Manual"
             n_regions = self._canvas_widget.get_region_count()
             self._status_calc.config(text=calc_mode)
@@ -539,7 +558,7 @@ class SMathApp:
                 self._status_info.config(text=info)
         except Exception:
             pass
-        self._root.after(250, self._update_status_bar)
+        self._root.after(500, self._update_status_bar)
 
     # ------------------------------------------------------------------
     # Title management
@@ -1167,6 +1186,8 @@ class SMathApp:
             self._paned.forget(self._math_panels)
 
     def _on_zoom_slider(self, val):
+        if getattr(self, '_updating_slider', False):
+            return
         z = int(float(val)) / 100.0
         z = max(0.3, min(3.0, z))
         if abs(z - self._canvas_widget._zoom) > 0.005:

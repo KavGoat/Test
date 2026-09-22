@@ -193,9 +193,9 @@ class WorksheetCanvas(ttk.Frame):
 
         # Build rulers and canvas with scrollbars
         _RULER_SIZE = 18
-        self._ruler = tk.Canvas(self, height=_RULER_SIZE, bg="#f8f8f0", highlightthickness=0)
-        self._v_ruler = tk.Canvas(self, width=_RULER_SIZE, bg="#f8f8f0", highlightthickness=0)
-        self._ruler_corner = tk.Frame(self, width=_RULER_SIZE, height=_RULER_SIZE, bg="#f0f0e8")
+        self._ruler = tk.Canvas(self, height=_RULER_SIZE, bg="#ffffff", highlightthickness=0)
+        self._v_ruler = tk.Canvas(self, width=_RULER_SIZE, bg="#ffffff", highlightthickness=0)
+        self._ruler_corner = tk.Frame(self, width=_RULER_SIZE, height=_RULER_SIZE, bg="#ece9d8")
 
         self._canvas = tk.Canvas(
             self,
@@ -273,7 +273,11 @@ class WorksheetCanvas(ttk.Frame):
         self._canvas.bind("<Control-Button-5>", self._on_ctrl_mousewheel_down)
 
         # Context menu
-        self._context_menu = tk.Menu(self._canvas, tearoff=0)
+        self._context_menu = tk.Menu(
+            self._canvas, tearoff=0, bg="#ffffff",
+            activebackground="#316ac5", activeforeground="white",
+            font=("DejaVu Sans", 9),
+        )
         self._context_menu.add_command(
             label="Cut", accelerator="Ctrl+X", command=self.cut_selected
         )
@@ -555,26 +559,23 @@ class WorksheetCanvas(ttk.Frame):
         z = self._zoom
         for page in range(num_pages):
             page_y = page * (ph + page_gap)
-            sw = _z(shadow_w, z)
-            # Shadow layers (progressively lighter for soft shadow effect)
-            for si in range(max(1, sw)):
-                alpha_colors = ["#b0b0b0", "#c0c0c0", "#d0d0d0"]
-                sc = alpha_colors[min(si, len(alpha_colors) - 1)]
-                off = si + 1
-                self._canvas.create_rectangle(
-                    _z(pw, z) + off, _z(page_y, z) + off + sw,
-                    _z(pw, z) + off + 1, _z(page_y + ph, z) + off + 1,
-                    fill=sc, outline="", tags="page_shadow"
-                )
-                self._canvas.create_rectangle(
-                    off + sw, _z(page_y + ph, z) + off,
-                    _z(pw, z) + off + 1, _z(page_y + ph, z) + off + 1,
-                    fill=sc, outline="", tags="page_shadow"
-                )
+            sw = max(2, _z(shadow_w, z))
+            # Right shadow
+            self._canvas.create_rectangle(
+                _z(pw, z) + 1, _z(page_y, z) + sw,
+                _z(pw, z) + sw, _z(page_y + ph, z) + sw,
+                fill="#808080", outline="", tags="page_shadow"
+            )
+            # Bottom shadow
+            self._canvas.create_rectangle(
+                sw, _z(page_y + ph, z) + 1,
+                _z(pw, z) + sw, _z(page_y + ph, z) + sw,
+                fill="#808080", outline="", tags="page_shadow"
+            )
             # White page
             self._canvas.create_rectangle(
                 0, _z(page_y, z), _z(pw, z), _z(page_y + ph, z),
-                fill="#ffffff", outline="#c0c0c0", width=1, tags="page_bg"
+                fill="#ffffff", outline="#b0b0b0", width=1, tags="page_bg"
             )
             # Page break separator line (dashed blue like SMath Studio)
             if page > 0:
@@ -847,20 +848,21 @@ class WorksheetCanvas(ttk.Frame):
         z = self._zoom
         cm = 37.8 * z
         h = 18
+        self._ruler.create_line(0, h - 1, rw, h - 1, fill="#b0b0b0", width=1)
         start_cm = int(x_offset / cm)
         end_cm = int((x_offset + rw) / cm) + 2
         for i in range(max(0, start_cm), end_cm):
             px = i * cm - x_offset
-            self._ruler.create_line(px, 0, px, h, fill="#c0c0c0", width=1)
+            self._ruler.create_line(px, 2, px, h - 1, fill="#808080", width=1)
             if i > 0:
                 self._ruler.create_text(
-                    px + 2, 2, text=str(i), anchor="nw",
-                    font=("DejaVu Sans", 7), fill="#888888",
+                    px + 3, 3, text=str(i), anchor="nw",
+                    font=("DejaVu Sans", 7), fill="#606060",
                 )
             for sub in range(1, 10):
                 spx = px + sub * cm / 10
-                tick_h = 4 if sub == 5 else 2
-                self._ruler.create_line(spx, h - tick_h, spx, h, fill="#c0c0c0")
+                tick_h = 6 if sub == 5 else 3
+                self._ruler.create_line(spx, h - 1 - tick_h, spx, h - 1, fill="#909090")
 
     def _draw_v_ruler(self):
         """Draw a vertical ruler showing centimetre ticks."""
@@ -875,20 +877,21 @@ class WorksheetCanvas(ttk.Frame):
         z = self._zoom
         cm = 37.8 * z
         w = 18
+        self._v_ruler.create_line(w - 1, 0, w - 1, rh, fill="#b0b0b0", width=1)
         start_cm = int(y_offset / cm)
         end_cm = int((y_offset + rh) / cm) + 2
         for i in range(max(0, start_cm), end_cm):
             py = i * cm - y_offset
-            self._v_ruler.create_line(0, py, w, py, fill="#c0c0c0", width=1)
+            self._v_ruler.create_line(2, py, w - 1, py, fill="#808080", width=1)
             if i > 0:
                 self._v_ruler.create_text(
-                    2, py + 2, text=str(i), anchor="nw",
-                    font=("DejaVu Sans", 7), fill="#888888", angle=0,
+                    3, py + 3, text=str(i), anchor="nw",
+                    font=("DejaVu Sans", 7), fill="#606060", angle=0,
                 )
             for sub in range(1, 10):
                 spy = py + sub * cm / 10
-                tick_w = 4 if sub == 5 else 2
-                self._v_ruler.create_line(w - tick_w, spy, w, spy, fill="#c0c0c0")
+                tick_w = 6 if sub == 5 else 3
+                self._v_ruler.create_line(w - 1 - tick_w, spy, w - 1, spy, fill="#909090")
 
     def _update_scroll_region(self):
         """Set the scrollable region to encompass all content."""
@@ -1373,8 +1376,7 @@ class WorksheetCanvas(ttk.Frame):
         pad = 3
         sel_rect = self._canvas.create_rectangle(
             x1 - pad, y1 - pad, x2 + pad, y2 + pad,
-            outline=_SELECTION_COLOR,
-            width=1,
+            outline="#4a6ea9", width=1, dash=(3, 3),
         )
         self._selection_items.append(sel_rect)
         hs = 3
@@ -1386,7 +1388,7 @@ class WorksheetCanvas(ttk.Frame):
         ]:
             h = self._canvas.create_rectangle(
                 hx - hs, hy - hs, hx + hs, hy + hs,
-                fill="white", outline=_SELECTION_COLOR, width=1,
+                fill="#4a6ea9", outline="#4a6ea9", width=1,
             )
             self._selection_items.append(h)
 
@@ -1436,7 +1438,7 @@ class WorksheetCanvas(ttk.Frame):
             pad = 3
             rect = self._canvas.create_rectangle(
                 x1 - pad, y1 - pad, x2 + pad, y2 + pad,
-                outline="#3366cc", dash=(4, 4), width=2,
+                outline="#4a6ea9", dash=(3, 3), width=1,
             )
             self._multi_selection_items.append(rect)
 
