@@ -508,6 +508,13 @@ class MathEditor:
                     return
                 if prev.op == ":":
                     return
+            if self._active_slot is not self.root:
+                while self._slot_stack:
+                    self._active_slot = self._slot_stack.pop()
+                self._active_slot = self.root
+                slot = self.root
+                pos = len(slot.items)
+                slot.cursor_pos = pos
             slot.items.insert(pos, EOp("="))
             slot.cursor_pos = pos + 1
             return
