@@ -74,6 +74,7 @@ class AreaRegion:
     """A collapsible area region."""
     collapsed: bool = False
     is_terminator: bool = False
+    single: bool = False
 
 
 @dataclass
@@ -381,6 +382,7 @@ def _parse_region(elem: ET.Element, ns: str) -> Region:
         region.area = AreaRegion(
             collapsed=collapsed,
             is_terminator=area_elem.get("terminator", "false").lower() == "true",
+            single=area_elem.get("single", "false").lower() == "true",
         )
 
     # Picture content

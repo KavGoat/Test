@@ -157,10 +157,14 @@ def _write_region(lines: list[str], region: Region, indent: int = 2):
     if region.area is not None:
         if region.area.is_terminator:
             lines.append(f'{pad}  <area terminator="true" />')
-        elif region.area.collapsed:
-            lines.append(f'{pad}  <area collapsed="true" />')
         else:
-            lines.append(f"{pad}  <area />")
+            attrs = []
+            if region.area.single:
+                attrs.append('single="true"')
+            if region.area.collapsed:
+                attrs.append('collapsed="true"')
+            attr_str = (" " + " ".join(attrs)) if attrs else ""
+            lines.append(f"{pad}  <area{attr_str} />")
 
     # Picture
     if region.picture is not None:

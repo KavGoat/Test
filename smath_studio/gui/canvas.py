@@ -538,6 +538,10 @@ class WorksheetCanvas(ttk.Frame):
                     result.append(r)
                     continue
                 result.append(r)
+                if r.area.single:
+                    if r.children:
+                        result.extend(self._flatten_regions(r.children))
+                    continue
                 if r.area.collapsed:
                     skip_until_terminator = True
                     continue
@@ -1001,6 +1005,25 @@ class WorksheetCanvas(ttk.Frame):
         wrap_width = max(1, rw - 2 * zpad)
         for para in tc.paragraphs:
             if para.built_in:
+                if para.href and para.href.endswith(".sm"):
+                    display = para.href.replace(".sm", "").replace("_", ".")
+                    if display == "contents":
+                        display = "Contents"
+                    fnt = self._get_font(region.font_size, para.bold, False, underline=True)
+                    text_id = self._canvas.create_text(
+                        x + zpad, cy, text=display, anchor=tk.NW,
+                        font=fnt, fill="#0066cc", width=wrap_width,
+                    )
+                    href = para.href
+                    self._canvas.tag_bind(text_id, "<Button-1>", lambda e, url=href: self._open_link(url))
+                    self._canvas.tag_bind(text_id, "<Enter>", lambda e: self._canvas.configure(cursor="hand2"))
+                    self._canvas.tag_bind(text_id, "<Leave>", lambda e: self._canvas.configure(cursor=""))
+                    items.append(text_id)
+                    bbox = self._canvas.bbox(text_id)
+                    if bbox:
+                        cy = bbox[3] + 2
+                    else:
+                        cy += region.font_size + 4
                 continue
             fnt = self._get_font(region.font_size, para.bold, para.italic)
             text_color = fg
@@ -1191,7 +1214,7 @@ class WorksheetCanvas(ttk.Frame):
         z = self._zoom
         ts = _z(_AREA_TRIANGLE_SIZE, z)
 
-        if area.is_terminator:
+        if area.is_terminator or area.single:
             w = _z(max(region.width, 200), z)
             line_id = self._canvas.create_line(
                 x, y, x + w, y,
