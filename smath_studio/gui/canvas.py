@@ -165,14 +165,15 @@ def _expr_to_text(node: Optional[ASTNode]) -> str:
     return repr(node)
 
 
-def _format_value(val: Any, precision: int = 4, trailing_zeros: bool = True) -> str:
+def _format_value(val: Any, precision: int = 4, trailing_zeros: bool = True,
+                   exp_threshold: int = 5) -> str:
     """Format an evaluated value for display."""
     if isinstance(val, Quantity):
         unit_str = val.display_unit if hasattr(val, 'display_unit') else val.unit.name
-        num = _format_number(val.value, precision, trailing_zeros)
+        num = _format_number(val.value, precision, trailing_zeros, exp_threshold)
         return f"{num} {unit_str}"
     if isinstance(val, float):
-        return _format_number(val, precision, trailing_zeros)
+        return _format_number(val, precision, trailing_zeros, exp_threshold)
     if isinstance(val, int):
         if trailing_zeros and precision > 0:
             return f"{val}.{'0' * precision}"
@@ -188,15 +189,21 @@ def _format_value(val: Any, precision: int = 4, trailing_zeros: bool = True) -> 
     return str(val)
 
 
-def _format_number(val: float, precision: int, trailing_zeros: bool) -> str:
+def _format_number(val: float, precision: int, trailing_zeros: bool,
+                   exp_threshold: int = 5) -> str:
     """Format a float with SMath-style precision."""
     if math.isnan(val):
         return "NaN"
     if math.isinf(val):
         return "Inf" if val > 0 else "-Inf"
+    if val != 0 and (abs(val) >= 10 ** exp_threshold or abs(val) < 10 ** -exp_threshold):
+        return f"{val:.{precision}e}"
     if trailing_zeros:
         return f"{val:.{precision}f}"
-    return f"{val:.{precision}g}"
+    formatted = f"{val:.{precision}f}"
+    if "." in formatted:
+        formatted = formatted.rstrip("0").rstrip(".")
+    return formatted
 
 
 # ---------------------------------------------------------------------------
@@ -873,6 +880,11 @@ class WorksheetCanvas(ttk.Frame):
         """Toggle cursor visibility for blink effect."""
         if self._editing:
             return
+        try:
+            if not self._canvas.winfo_exists():
+                return
+        except Exception:
+            return
         self._cursor_visible = not self._cursor_visible
         state = tk.NORMAL if self._cursor_visible else tk.HIDDEN
         for item_id in self._canvas.find_withtag("cursor_marker"):
@@ -1169,7 +1181,8 @@ class WorksheetCanvas(ttk.Frame):
         if region.show_input_data is not None and not region.show_input_data:
             if display_result is not None and not isinstance(display_result, Exception):
                 precision = self._ctx.precision if self._ctx else 4
-                result_text = _format_value(display_result, precision, self._trailing_zeros)
+                et = getattr(self._ctx, '_exponential_threshold', 5) if self._ctx else 5
+                result_text = _format_value(display_result, precision, self._trailing_zeros, et)
                 fnt = self._get_font(region.font_size, bold=False, italic=False)
                 text_id = self._canvas.create_text(
                     x + zpad, y + zpad,
@@ -1253,7 +1266,8 @@ class WorksheetCanvas(ttk.Frame):
                 result_fg = _ERROR_FG
             else:
                 precision = self._ctx.precision if self._ctx else 4
-                result_text = _format_value(display_result, precision, self._trailing_zeros)
+                et = getattr(self._ctx, '_exponential_threshold', 5) if self._ctx else 5
+                result_text = _format_value(display_result, precision, self._trailing_zeros, et)
                 result_fg = fg
 
             result_id = self._canvas.create_text(
@@ -1377,7 +1391,7 @@ class WorksheetCanvas(ttk.Frame):
             try:
                 ctx = self._ctx if self._ctx is not None else create_default_context()
                 pil_img = render_plot(region.plot, ctx, width=w, height=h)
-                tk_img = ImageTk.PhotoImage(pil_img)
+                tk_img = ImageTk.PhotoImage(pil_img, master=self._canvas)
                 self._photo_cache.append(tk_img)
                 img_id = self._canvas.create_image(
                     x, y, image=tk_img, anchor=tk.NW,
@@ -1417,7 +1431,7 @@ class WorksheetCanvas(ttk.Frame):
                 raw_bytes = base64.b64decode(pic.data)
                 pil_image = Image.open(io.BytesIO(raw_bytes))
                 pil_image.thumbnail((w, h), Image.LANCZOS)
-                photo = ImageTk.PhotoImage(pil_image)
+                photo = ImageTk.PhotoImage(pil_image, master=self._canvas)
                 self._photo_cache.append(photo)
                 img_id = self._canvas.create_image(
                     x, y, image=photo, anchor=tk.NW,

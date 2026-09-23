@@ -31,7 +31,7 @@ class SMathApp:
         try:
             icon_path = Path(__file__).parent / "icon.png"
             if icon_path.exists():
-                icon = tk.PhotoImage(file=str(icon_path))
+                icon = tk.PhotoImage(file=str(icon_path), master=self._root)
                 self._root.iconphoto(False, icon)
                 self._icon_ref = icon
         except Exception:
@@ -569,7 +569,11 @@ class SMathApp:
                 self._status_info.config(text=info)
         except Exception:
             pass
-        self._root.after(500, self._update_status_bar)
+        try:
+            if self._root.winfo_exists():
+                self._root.after(500, self._update_status_bar)
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Title management

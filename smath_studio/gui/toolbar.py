@@ -101,7 +101,7 @@ class StandardToolbar(ttk.Frame):
                 cmd = self._commands.get(cmd_key, lambda: None)
                 if _HAS_PIL:
                     pil_img = _make_icon(icon_name)
-                    photo = ImageTk.PhotoImage(pil_img)
+                    photo = ImageTk.PhotoImage(pil_img, master=self)
                     self._icon_refs.append(photo)
                     btn = tk.Button(
                         self, image=photo, command=cmd,
