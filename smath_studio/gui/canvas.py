@@ -62,6 +62,61 @@ _ERROR_FG = "#ff0000"
 _PAGE_SHADOW = "#a0a0a0"
 _CURSOR_COLOR = "#ff0000"
 
+_SMATH_BUILTIN_STRINGS = {
+    "0": "Contents",
+    "1": "1. Introduction",
+    "2": "1.1. Entering simple expression",
+    "3": "1.2. Using variables",
+    "4": "1.3. Using functions",
+    "6": "1.5. Using units of measurement",
+    "8": "1.7. Working with text regions",
+    "17": "4. Mathematical expressions",
+    "18": "4.1. Degrees and radians",
+    "22": "4.2. Trigonometric functions",
+    "23": "4.3. Inverse trig functions",
+    "24": "4.4. Hyperbolic functions",
+    "25": "4.5. Powers and logarithms",
+    "26": "4.6. Derivatives",
+    "27": "4.7. Integrals",
+    "28": "4.8. Summation and product",
+    "29": "4.9. Piecewise functions",
+    "30": "4.10. Range variables",
+    "31": "4.11. Systems of equations",
+    "32": "4.12. Boolean algebra",
+    "33": "4.13. Complex numbers",
+    "34": "4.14. Strings",
+    "35": "5. Matrices and vectors",
+    "36": "5.1. Creating matrices",
+    "37": "5.2. Matrix operations",
+    "38": "5.3. Matrix functions",
+    "62": "9. Graphs and charts",
+    "63": "9.1. 2D graphs",
+    "64": "9.2. Parametric plots",
+    "69": "10. Units of measurement",
+    "70": "10.1. Defining units",
+    "71": "10.2. Unit conversions",
+    "78": "13. Calculus",
+    "79": "13.1. Integration table",
+    "80": "13.2. Differentiation table",
+    "89": "16. Programming",
+    "93": "16.4. Line function",
+    "118": "Converting degrees to radians",
+    "119": "Converting radians to degrees",
+    "120": "Imaginary unit",
+    "121": "Conjugate",
+    "122": "Polar form",
+    "123": "Example",
+    "124": "Determinant",
+    "125": "Inverse matrix",
+    "126": "Transpose",
+    "127": "Eigenvalues",
+    "128": "Derivative rules",
+    "129": "Chain rule",
+    "130": "Product rule",
+    "131": "Quotient rule",
+    "132": "Higher derivatives",
+}
+
 
 def _snap(value: int, grid: int = _GRID_SIZE) -> int:
     """Snap a coordinate to the nearest grid point."""
@@ -785,17 +840,18 @@ class WorksheetCanvas(ttk.Frame):
             )
 
     def _draw_cursor_marker(self):
-        """Draw a small red L-bracket cursor at the insertion position (SMath style)."""
+        """Draw a blue crosshair cursor at the insertion position (SMath style)."""
         if self._editing:
             return
         x = _z(self._cursor_x, self._zoom)
         y = _z(self._cursor_y, self._zoom)
         sz = max(6, _z(8, self._zoom))
+        color = "#0000ff"
         self._canvas.create_line(
-            x, y, x + sz, y, fill=_CURSOR_COLOR, width=1, tags="cursor_marker"
+            x - sz, y, x + sz, y, fill=color, width=1, tags="cursor_marker"
         )
         self._canvas.create_line(
-            x, y, x, y + sz, fill=_CURSOR_COLOR, width=1, tags="cursor_marker"
+            x, y - sz, x, y + sz, fill=color, width=1, tags="cursor_marker"
         )
         self._start_cursor_blink()
 
@@ -1012,10 +1068,12 @@ class WorksheetCanvas(ttk.Frame):
         wrap_width = max(1, rw - 2 * zpad)
         for para in tc.paragraphs:
             if para.built_in:
+                display = _SMATH_BUILTIN_STRINGS.get(para.text)
                 if para.href and para.href.endswith(".sm"):
-                    display = para.href.replace(".sm", "").replace("_", ".")
-                    if display == "contents":
-                        display = "Contents"
+                    if display is None:
+                        display = para.href.replace(".sm", "").replace("_", ".")
+                        if display == "contents":
+                            display = "Contents"
                     fnt = self._get_font(region.font_size, para.bold, False, underline=True)
                     text_id = self._canvas.create_text(
                         x + zpad, cy, text=display, anchor=tk.NW,
@@ -1025,6 +1083,18 @@ class WorksheetCanvas(ttk.Frame):
                     self._canvas.tag_bind(text_id, "<Button-1>", lambda e, url=href: self._open_link(url))
                     self._canvas.tag_bind(text_id, "<Enter>", lambda e: self._canvas.configure(cursor="hand2"))
                     self._canvas.tag_bind(text_id, "<Leave>", lambda e: self._canvas.configure(cursor=""))
+                    items.append(text_id)
+                    bbox = self._canvas.bbox(text_id)
+                    if bbox:
+                        cy = bbox[3] + 2
+                    else:
+                        cy += region.font_size + 4
+                elif display is not None:
+                    fnt = self._get_font(region.font_size, para.bold, para.italic)
+                    text_id = self._canvas.create_text(
+                        x + zpad, cy, text=display, anchor=tk.NW,
+                        font=fnt, fill=fg, width=wrap_width,
+                    )
                     items.append(text_id)
                     bbox = self._canvas.bbox(text_id)
                     if bbox:
