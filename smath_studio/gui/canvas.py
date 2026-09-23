@@ -51,7 +51,7 @@ _GRID_SIZE = 8  # snap grid in pixels
 _DEFAULT_REGION_WIDTH = 120
 _DEFAULT_REGION_HEIGHT = 24
 _REGION_PADDING = 4
-_AREA_TRIANGLE_SIZE = 10
+_AREA_TRIANGLE_SIZE = 8
 
 # Colors matching SMath Studio conventions
 _COMMENT_BG = "#ffff80"
@@ -188,6 +188,7 @@ class WorksheetCanvas(ttk.Frame):
         self._cursor_x = 40
         self._cursor_y = 40
         self._on_modified: Optional[Any] = None
+        self._on_navigate: Optional[Any] = None
         self._trailing_zeros = True
         self._filename: str = ""
 
@@ -1205,14 +1206,14 @@ class WorksheetCanvas(ttk.Frame):
                     x, y,
                     x + ts, y + ts // 2,
                     x, y + ts,
-                    fill="#808080", outline="#606060", width=1,
+                    fill="#6a6a6a", outline="#5a5a5a", width=1,
                 )
             else:
                 tri_id = self._canvas.create_polygon(
                     x, y,
                     x + ts, y,
                     x + ts // 2, y + ts,
-                    fill="#808080", outline="#606060", width=1,
+                    fill="#6a6a6a", outline="#5a5a5a", width=1,
                 )
             items.append(tri_id)
             self._canvas.tag_bind(tri_id, "<Button-1>",
@@ -1498,7 +1499,11 @@ class WorksheetCanvas(ttk.Frame):
         return int(val / self._zoom)
 
     def _open_link(self, url: str):
-        """Open a hyperlink in the default browser."""
+        """Open a hyperlink -- .sm files navigate internally, others use browser."""
+        if url.endswith(".sm"):
+            if self._on_navigate:
+                self._on_navigate(url)
+            return
         import webbrowser
         try:
             webbrowser.open(url)

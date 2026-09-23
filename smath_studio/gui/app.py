@@ -413,6 +413,7 @@ class SMathApp:
         # Worksheet canvas (center)
         self._canvas_widget = WorksheetCanvas(self._paned)
         self._canvas_widget.set_on_modified(self._on_canvas_modified)
+        self._canvas_widget._on_navigate = self._on_sm_navigate
         self._paned.add(self._canvas_widget, weight=1)
 
         # Math panels sidebar (right)
@@ -1441,6 +1442,15 @@ class SMathApp:
         """Handle a symbol/function insert from the math toolbar panels."""
         self._canvas_widget.insert_symbol(symbol)
         self._status_info.config(text=f"Insert: {symbol}")
+
+    def _on_sm_navigate(self, filename: str):
+        """Navigate to a linked .sm file relative to the current file."""
+        if self._current_file is not None:
+            target = self._current_file.parent / filename
+        else:
+            target = Path(filename)
+        if target.exists():
+            self._open_file(str(target))
 
     def _on_canvas_modified(self):
         """Called when the canvas content is modified by editing."""

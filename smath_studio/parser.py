@@ -341,8 +341,8 @@ def _parse_region(elem: ET.Element, ns: str) -> Region:
     region.width = int(elem.get("width", "0") or "0")
     region.height = int(elem.get("height", "0") or "0")
     region.color = elem.get("color", "#000000")
-    region.bg_color = elem.get("bgColor", "#ffffff")
-    region.font_size = int(elem.get("fontSize", "10") or "10")
+    region.bg_color = elem.get("bgColor") or elem.get("background-color", "#ffffff")
+    region.font_size = int((elem.get("fontSize") or elem.get("font-size", "10")) or "10")
     region.border = elem.get("border", "false").lower() == "true"
     region.locked = elem.get("isLocked", "false").lower() == "true"
     sid = elem.get("showInputData")
@@ -376,8 +376,10 @@ def _parse_region(elem: ET.Element, ns: str) -> Region:
     # Area content
     area_elem = elem.find(f"{ns}area")
     if area_elem is not None:
+        collapsed = (area_elem.get("collapsed", "false").lower() == "true"
+                     or area_elem.get("is-collapsed", "false").lower() == "true")
         region.area = AreaRegion(
-            collapsed=area_elem.get("collapsed", "false").lower() == "true",
+            collapsed=collapsed,
             is_terminator=area_elem.get("terminator", "false").lower() == "true",
         )
 
