@@ -640,8 +640,9 @@ class SMathApp:
             self._update_title()
             self._update_doc_map()
             n_regions = len(ws.regions)
+            ro = "" if ws.settings.editable else " [Read-Only]"
             self._status_info.config(
-                text=f"Loaded {self._current_file.name} ({n_regions} regions)"
+                text=f"Loaded {self._current_file.name} ({n_regions} regions){ro}"
             )
         except Exception as ex:
             messagebox.showerror(

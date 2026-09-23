@@ -163,6 +163,10 @@ def _write_region(lines: list[str], region: Region, indent: int = 2):
                 attrs.append('single="true"')
             if region.area.collapsed:
                 attrs.append('collapsed="true"')
+            if region.area.name:
+                attrs.append(f'name="{_esc(region.area.name)}"')
+            if region.area.show_name:
+                attrs.append('showName="true"')
             attr_str = (" " + " ".join(attrs)) if attrs else ""
             lines.append(f"{pad}  <area{attr_str} />")
 

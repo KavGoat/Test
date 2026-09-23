@@ -190,6 +190,7 @@ class WorksheetCanvas(ttk.Frame):
         self._on_modified: Optional[Any] = None
         self._on_navigate: Optional[Any] = None
         self._trailing_zeros = True
+        self._editable = True
         self._filename: str = ""
 
         # Build rulers and canvas with scrollbars
@@ -381,6 +382,7 @@ class WorksheetCanvas(ttk.Frame):
         self._ctx = create_default_context()
         self._ctx._precision = worksheet.settings.calculation.precision
         self._trailing_zeros = getattr(worksheet.settings.calculation, 'trailing_zeros', True)
+        self._editable = getattr(worksheet.settings, 'editable', True)
         self._selected_index = None
         self._evaluate_and_render()
         self._canvas.xview_moveto(0)
@@ -1243,9 +1245,12 @@ class WorksheetCanvas(ttk.Frame):
                                   lambda e, r=region: self._toggle_area_collapse(r))
 
             label = ""
-            tc = self._get_text_content(region.text_contents)
-            if tc and tc.paragraphs:
-                label = tc.paragraphs[0].text
+            if area.show_name and area.name:
+                label = area.name
+            if not label:
+                tc = self._get_text_content(region.text_contents)
+                if tc and tc.paragraphs:
+                    label = tc.paragraphs[0].text
             if label:
                 fnt = self._get_font(region.font_size, bold=True, italic=False)
                 label_id = self._canvas.create_text(
@@ -2666,7 +2671,7 @@ class WorksheetCanvas(ttk.Frame):
 
     def delete_selected(self):
         """Delete the currently selected region(s)."""
-        if self._worksheet is None:
+        if self._worksheet is None or not self._editable:
             return
         indices = set(self._multi_selected)
         if self._selected_index is not None:
@@ -2954,6 +2959,8 @@ class WorksheetCanvas(ttk.Frame):
         ast_node: Optional[ASTNode] = None,
         has_result: bool = False,
     ):
+        if not self._editable:
+            return
         if self._editing:
             self._cancel_edit()
 

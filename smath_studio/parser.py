@@ -75,6 +75,8 @@ class AreaRegion:
     collapsed: bool = False
     is_terminator: bool = False
     single: bool = False
+    name: str = ""
+    show_name: bool = False
 
 
 @dataclass
@@ -171,6 +173,7 @@ class Assembly:
 @dataclass
 class Settings:
     dpi: int = 96
+    editable: bool = True
     identity: Identity = field(default_factory=Identity)
     metadata: list[Metadata] = field(default_factory=list)
     calculation: CalculationSettings = field(default_factory=CalculationSettings)
@@ -242,6 +245,13 @@ def _detect_ns(root: ET.Element) -> str:
 def _parse_settings(elem: ET.Element, ns: str) -> Settings:
     s = Settings()
     s.dpi = int(elem.get("dpi", "96") or "96")
+
+    # Editable
+    ed = elem.find(f"{ns}editable")
+    if ed is None:
+        ed = elem.find(f"{ns}Editable")
+    if ed is not None and ed.text:
+        s.editable = ed.text.lower() != "false"
 
     # Identity
     identity_elem = elem.find(f"{ns}identity")
@@ -383,6 +393,8 @@ def _parse_region(elem: ET.Element, ns: str) -> Region:
             collapsed=collapsed,
             is_terminator=area_elem.get("terminator", "false").lower() == "true",
             single=area_elem.get("single", "false").lower() == "true",
+            name=area_elem.get("name", ""),
+            show_name=area_elem.get("show-name", area_elem.get("showName", "false")).lower() == "true",
         )
 
     # Picture content
