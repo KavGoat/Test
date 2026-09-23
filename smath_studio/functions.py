@@ -159,6 +159,9 @@ def _builtin_round(args, ctx):
     return round(val)
 
 def _builtin_max(args, ctx):
+    if len(args) >= 2:
+        vals = [_num(a.evaluate(ctx)) for a in args]
+        return max(vals)
     val = args[0].evaluate(ctx)
     if isinstance(val, list):
         flat = _flatten(val)
@@ -168,6 +171,9 @@ def _builtin_max(args, ctx):
     return _num(val)
 
 def _builtin_min(args, ctx):
+    if len(args) >= 2:
+        vals = [_num(a.evaluate(ctx)) for a in args]
+        return min(vals)
     val = args[0].evaluate(ctx)
     if isinstance(val, list):
         flat = _flatten(val)

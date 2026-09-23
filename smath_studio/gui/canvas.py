@@ -190,6 +190,7 @@ class WorksheetCanvas(ttk.Frame):
         self._on_modified: Optional[Any] = None
         self._on_navigate: Optional[Any] = None
         self._trailing_zeros = True
+        self._fractions_mode = "decimal"
         self._editable = True
         self._filename: str = ""
 
@@ -383,6 +384,7 @@ class WorksheetCanvas(ttk.Frame):
         self._ctx._precision = worksheet.settings.calculation.precision
         self._ctx._exponential_threshold = worksheet.settings.calculation.exponential_threshold
         self._trailing_zeros = getattr(worksheet.settings.calculation, 'trailing_zeros', True)
+        self._fractions_mode = getattr(worksheet.settings.calculation, 'fractions', 'decimal')
         self._editable = getattr(worksheet.settings, 'editable', True)
         self._selected_index = None
         self._evaluate_and_render()
@@ -406,6 +408,7 @@ class WorksheetCanvas(ttk.Frame):
             self._ctx._precision = self._worksheet.settings.calculation.precision
             self._ctx._exponential_threshold = self._worksheet.settings.calculation.exponential_threshold
             self._trailing_zeros = getattr(self._worksheet.settings.calculation, 'trailing_zeros', False)
+            self._fractions_mode = getattr(self._worksheet.settings.calculation, 'fractions', 'decimal')
             self._evaluate_and_render()
 
     def get_selected_region(self) -> Optional[Region]:
@@ -1107,12 +1110,14 @@ class WorksheetCanvas(ttk.Frame):
                 if hasattr(math_data, 'trailing_zeros') and math_data.trailing_zeros is not None:
                     tz = math_data.trailing_zeros
                 et = getattr(self._ctx, '_exponential_threshold', 5) if self._ctx else 5
+                fm = self._fractions_mode if hasattr(self, '_fractions_mode') else "decimal"
                 rendered_items = self._math_renderer.render(
                     self._canvas, math_data, x, y, display_result,
                     font_size=zoomed_font_size,
                     color=region.color,
                     trailing_zeros=tz,
                     exp_threshold=et,
+                    fractions_mode=fm,
                 )
                 if rendered_items:
                     return rendered_items

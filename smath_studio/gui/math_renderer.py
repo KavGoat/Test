@@ -144,6 +144,7 @@ class MathRenderer:
         context: Any = None,
         trailing_zeros: bool = False,
         exp_threshold: int = 5,
+        fractions_mode: str = "decimal",
     ) -> list[int]:
         """Render a math region or AST node on *canvas*.
 
@@ -167,6 +168,7 @@ class MathRenderer:
                         canvas, node, eval_result, x, y,
                         font_size=font_size, context=context, precision=precision,
                         trailing_zeros=trailing_zeros, exp_threshold=exp_threshold,
+                        fractions_mode=fractions_mode,
                     )
                 else:
                     self._render_node(canvas, node, x, y, font_size, context)
@@ -175,12 +177,14 @@ class MathRenderer:
                     canvas, node, eval_result, x, y,
                     font_size=font_size, context=context, precision=precision,
                     trailing_zeros=trailing_zeros, exp_threshold=exp_threshold,
+                    fractions_mode=fractions_mode,
                 )
             elif math_data_or_node.result_expr is not None:
                 self.render_with_result(
                     canvas, node, math_data_or_node.result_expr, x, y,
                     font_size=font_size, context=context, precision=precision,
                     trailing_zeros=trailing_zeros, exp_threshold=exp_threshold,
+                    fractions_mode=fractions_mode,
                 )
             else:
                 self._render_node(canvas, node, x, y, font_size, context)
@@ -1584,6 +1588,7 @@ class MathRenderer:
         precision: int = 4,
         trailing_zeros: bool = False,
         exp_threshold: int = 5,
+        fractions_mode: str = "decimal",
     ) -> RenderBox:
         """Render an expression, then `` = result`` after it."""
         self._canvas = canvas
@@ -1635,10 +1640,14 @@ class MathRenderer:
                     if isinstance(result, np.ndarray):
                         rb = self._render_matrix_value(canvas, result, res_x, y, font_size)
                     elif isinstance(result, Quantity):
-                        rb = self._render_quantity_result(canvas, result, res_x, eq_y, font_size, precision, trailing_zeros, exp_threshold)
+                        rb = self._render_quantity_result(canvas, result, res_x, eq_y, font_size, precision, trailing_zeros, exp_threshold, fractions_mode)
                     else:
-                        res_text = _format_result(result, precision, trailing_zeros, exp_threshold)
-                        rb = self._render_sci_number(canvas, res_text, res_x, eq_y, font_size)
+                        frac = _to_fraction(result, precision) if fractions_mode == "fraction" else None
+                        if frac is not None:
+                            rb = self._render_fraction_result(canvas, frac[0], frac[1], res_x, eq_y, font_size)
+                        else:
+                            res_text = _format_result(result, precision, trailing_zeros, exp_threshold)
+                            rb = self._render_sci_number(canvas, res_text, res_x, eq_y, font_size)
                 except Exception:
                     res_text = _format_result(result, precision, trailing_zeros, exp_threshold)
                     rb = self._render_sci_number(canvas, res_text, res_x, eq_y, font_size)
@@ -1649,12 +1658,17 @@ class MathRenderer:
 
         return expr_box
 
-    def _render_quantity_result(self, c: tk.Canvas, qty: Quantity, x, y, fs, precision=4, trailing_zeros=False, exp_threshold=5) -> RenderBox:
+    def _render_quantity_result(self, c: tk.Canvas, qty: Quantity, x, y, fs, precision=4, trailing_zeros=False, exp_threshold=5, fractions_mode="decimal") -> RenderBox:
         """Render a Quantity with the number in blue and the unit in blue."""
-        num_text = _format_result(qty.value, precision, trailing_zeros, exp_threshold)
+        frac = _to_fraction(qty.value, precision) if fractions_mode == "fraction" else None
+        if frac is not None:
+            num_box = self._render_fraction_result(c, frac[0], frac[1], x, y, fs)
+        else:
+            num_text = _format_result(qty.value, precision, trailing_zeros, exp_threshold)
         unit_str = qty.display_unit if hasattr(qty, 'display_unit') else str(qty.unit)
 
-        num_box = self._render_sci_number(c, num_text, x, y, fs)
+        if frac is None:
+            num_box = self._render_sci_number(c, num_text, x, y, fs)
         nw, nh = num_box.width, num_box.height
 
         total_w = nw
@@ -1705,6 +1719,30 @@ class MathRenderer:
                     cw, _ = self._text_size(c, chunk, fs)
                     cx += cw
         return RenderBox(cx - x, max_h, max_h / 2)
+
+    def _render_fraction_result(self, c: tk.Canvas, num: int, den: int, x: float, y: float, fs: int) -> RenderBox:
+        """Render a fraction result as a proper fraction with bar."""
+        f = self._get_font(c, fs)
+        num_text = str(abs(num))
+        den_text = str(den)
+        nw, nh = self._text_size(c, num_text, fs)
+        dw, dh = self._text_size(c, den_text, fs)
+        bar_w = max(nw, dw) + 2 * _FRAC_HPAD
+        total_h = nh + dh + 2 * _FRAC_VPAD + 1
+        sign_w = 0
+        if num < 0:
+            sign_text = "−"
+            sw, sh = self._text_size(c, sign_text, fs)
+            sign_w = sw + 3
+            c.create_text(x, y + total_h / 2 - sh / 2, text=sign_text, anchor="nw", font=f, fill=_RESULT_COLOR)
+        sx = x + sign_w
+        num_x = sx + (bar_w - nw) / 2
+        den_x = sx + (bar_w - dw) / 2
+        c.create_text(num_x, y, text=num_text, anchor="nw", font=f, fill=_RESULT_COLOR)
+        bar_y = y + nh + _FRAC_VPAD
+        c.create_line(sx, bar_y, sx + bar_w, bar_y, fill=_RESULT_COLOR, width=1)
+        c.create_text(den_x, bar_y + _FRAC_VPAD, text=den_text, anchor="nw", font=f, fill=_RESULT_COLOR)
+        return RenderBox(sign_w + bar_w, total_h, bar_y)
 
     def _render_matrix_value(self, c, arr: np.ndarray, x, y, fs) -> RenderBox:
         """Render a numpy array as a bracketed matrix."""
@@ -1774,6 +1812,36 @@ def _format_number(val) -> str:
         formatted = f"{val:.6g}"
         return formatted
     return str(val)
+
+
+
+def _to_fraction(val: float, precision: int = 4) -> tuple[int, int] | None:
+    """Try to express a float as a simple fraction p/q.
+    
+    Returns (numerator, denominator) or None if no simple fraction exists.
+    SMath Studio displays fractions when the denominator is reasonably small
+    and the fraction is exact to the display precision.
+    """
+    if not isinstance(val, (int, float)):
+        return None
+    if isinstance(val, int):
+        return None  # integers don't need fraction display
+    if val != val or val == float('inf') or val == float('-inf'):
+        return None
+    if val == int(val):
+        return None
+    from fractions import Fraction
+    try:
+        frac = Fraction(val).limit_denominator(1000)
+        if frac.denominator == 1:
+            return None
+        if frac.denominator > 100:
+            return None
+        if abs(float(frac) - val) < 10 ** (-(precision + 2)):
+            return (frac.numerator, frac.denominator)
+    except (ValueError, OverflowError, ZeroDivisionError):
+        pass
+    return None
 
 
 def _format_result(val: Any, precision: int = 4, trailing_zeros: bool = False, exp_threshold: int = 5) -> str:

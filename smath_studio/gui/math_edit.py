@@ -131,6 +131,19 @@ class EDerivative(EditItem):
 
 
 @dataclass
+class ELimit(EditItem):
+    body_slot: EditSlot = field(default_factory=lambda: EditSlot())
+    var_slot: EditSlot = field(default_factory=lambda: EditSlot())
+    target_slot: EditSlot = field(default_factory=lambda: EditSlot())
+
+
+@dataclass
+class ENthRoot(EditItem):
+    index_slot: EditSlot = field(default_factory=lambda: EditSlot())
+    radicand: EditSlot = field(default_factory=lambda: EditSlot())
+
+
+@dataclass
 class ESystem(EditItem):
     """System of equations block - curly brace with stacked rows."""
     rows: list = field(default_factory=list)
@@ -411,6 +424,20 @@ class MathEditor:
         if ctrl and keysym.lower() == "g":
             self._save_undo()
             self._do_greek_convert()
+            self._update_eval()
+            self.render()
+            return "consumed"
+
+        if ctrl and keysym.lower() == "l":
+            self._save_undo()
+            self._do_limit()
+            self._update_eval()
+            self.render()
+            return "consumed"
+
+        if ctrl and keysym == "backslash":
+            self._save_undo()
+            self._do_nthroot()
             self._update_eval()
             self.render()
             return "consumed"
@@ -766,6 +793,26 @@ class MathEditor:
         self._active_slot = p.body_slot
         self._active_slot.cursor_pos = 0
 
+    def _do_limit(self):
+        slot = self._active_slot
+        pos = slot.cursor_pos
+        lm = ELimit()
+        slot.items.insert(pos, lm)
+        slot.cursor_pos = pos + 1
+        self._slot_stack.append(slot)
+        self._active_slot = lm.body_slot
+        self._active_slot.cursor_pos = 0
+
+    def _do_nthroot(self):
+        slot = self._active_slot
+        pos = slot.cursor_pos
+        nr = ENthRoot()
+        slot.items.insert(pos, nr)
+        slot.cursor_pos = pos + 1
+        self._slot_stack.append(slot)
+        self._active_slot = nr.index_slot
+        self._active_slot.cursor_pos = 0
+
     def _do_range(self):
         slot = self._active_slot
         pos = slot.cursor_pos
@@ -878,6 +925,12 @@ class MathEditor:
         if isinstance(item, EDerivative):
             result = list(item.body_slot.items)
             return result if result else []
+        if isinstance(item, ELimit):
+            result = list(item.body_slot.items)
+            return result if result else []
+        if isinstance(item, ENthRoot):
+            result = list(item.radicand.items)
+            return result if result else []
         if isinstance(item, ERange):
             result = list(item.start_slot.items)
             result.extend(item.end_slot.items)
@@ -921,6 +974,10 @@ class MathEditor:
             return slots
         if isinstance(item, EDerivative):
             return [item.body_slot, item.var_slot]
+        if isinstance(item, ELimit):
+            return [item.body_slot, item.var_slot, item.target_slot]
+        if isinstance(item, ENthRoot):
+            return [item.index_slot, item.radicand]
         if isinstance(item, ESystem):
             return list(item.rows)
         return []
@@ -961,6 +1018,14 @@ class MathEditor:
             elif isinstance(item, EIntegral):
                 self._slot_stack.append(slot)
                 self._active_slot = item.body_slot
+                self._active_slot.cursor_pos = len(self._active_slot.items)
+            elif isinstance(item, ELimit):
+                self._slot_stack.append(slot)
+                self._active_slot = item.body_slot
+                self._active_slot.cursor_pos = len(self._active_slot.items)
+            elif isinstance(item, ENthRoot):
+                self._slot_stack.append(slot)
+                self._active_slot = item.radicand
                 self._active_slot.cursor_pos = len(self._active_slot.items)
             elif isinstance(item, ERange):
                 self._slot_stack.append(slot)
@@ -1346,6 +1411,10 @@ class MathEditor:
             return self._measure_range(item, fs)
         if isinstance(item, EDerivative):
             return self._measure_derivative(item, fs)
+        if isinstance(item, ELimit):
+            return self._measure_limit(item, fs)
+        if isinstance(item, ENthRoot):
+            return self._measure_nthroot(item, fs)
         if isinstance(item, ESystem):
             return self._measure_system(item, fs)
         return _Box(0, 0, 0)
@@ -1482,6 +1551,10 @@ class MathEditor:
             self._render_range(item, x, y, fs)
         elif isinstance(item, EDerivative):
             self._render_derivative(item, x, y, fs)
+        elif isinstance(item, ELimit):
+            self._render_limit(item, x, y, fs)
+        elif isinstance(item, ENthRoot):
+            self._render_nthroot(item, x, y, fs)
         elif isinstance(item, ESystem):
             self._render_system(item, x, y, fs)
 
@@ -1708,6 +1781,76 @@ class MathEditor:
         tid2 = self.canvas.create_text(dx, den_y, text="d", anchor="nw", font=f, fill=_OPERATOR_COLOR)
         self._items.append(tid2)
         self._render_slot(item.var_slot, dx + d_w, den_y, fs)
+
+    def _measure_limit(self, item: ELimit, fs: int) -> _Box:
+        small_fs = max(int(fs * 0.65), 6)
+        kw, kh = self._text_size("lim", fs)
+        vb = self._measure_slot(item.var_slot, small_fs)
+        aw, ah = self._text_size("→", small_fs)
+        tb = self._measure_slot(item.target_slot, small_fs)
+        sub_w = vb.width + aw + tb.width
+        lim_col_w = max(kw, sub_w)
+        bb = self._measure_slot(item.body_slot, fs)
+        w = lim_col_w + 4 + bb.width
+        h = max(kh + small_fs + 2, bb.height)
+        return _Box(w, h, kh * 0.6)
+
+    def _render_limit(self, item: ELimit, x: float, y: float, fs: int):
+        small_fs = max(int(fs * 0.65), 6)
+        f = self._get_font(fs)
+        f_sm = self._get_font(small_fs)
+        kw, kh = self._text_size("lim", fs)
+        vb = self._measure_slot(item.var_slot, small_fs)
+        aw, ah = self._text_size("→", small_fs)
+        tb = self._measure_slot(item.target_slot, small_fs)
+        sub_w = vb.width + aw + tb.width
+        lim_col_w = max(kw, sub_w)
+        tid = self.canvas.create_text(
+            x + (lim_col_w - kw) / 2, y, text="lim",
+            anchor="nw", font=f, fill=_OPERATOR_COLOR)
+        self._items.append(tid)
+        sub_y = y + kh + 1
+        sx = x + (lim_col_w - sub_w) / 2
+        self._render_slot(item.var_slot, sx, sub_y, small_fs)
+        aid = self.canvas.create_text(
+            sx + vb.width, sub_y, text="→",
+            anchor="nw", font=f_sm, fill=_OPERATOR_COLOR)
+        self._items.append(aid)
+        self._render_slot(item.target_slot, sx + vb.width + aw, sub_y, small_fs)
+        bb = self._measure_slot(item.body_slot, fs)
+        self._render_slot(item.body_slot, x + lim_col_w + 4, y, fs)
+
+    def _measure_nthroot(self, item: ENthRoot, fs: int) -> _Box:
+        idx_fs = max(int(fs * 0.6), 6)
+        ib = self._measure_slot(item.index_slot, idx_fs)
+        rb = self._measure_slot(item.radicand, fs)
+        rad_w = max(int(fs * 0.7), 10)
+        pad = 3
+        w = ib.width + rad_w + rb.width + pad * 2
+        h = rb.height + pad * 2
+        return _Box(w, h, rb.baseline + pad)
+
+    def _render_nthroot(self, item: ENthRoot, x: float, y: float, fs: int):
+        idx_fs = max(int(fs * 0.6), 6)
+        ib = self._measure_slot(item.index_slot, idx_fs)
+        rb = self._measure_slot(item.radicand, fs)
+        rad_w = max(int(fs * 0.7), 10)
+        pad = 3
+        h = rb.height + pad * 2
+        self._render_slot(item.index_slot, x, y, idx_fs)
+        sx = x + ib.width
+        tip_x = sx + rad_w * 0.3
+        tip_y = y + h - 2
+        mid_x = sx + rad_w * 0.5
+        top_x = sx + rad_w
+        top_y = y + 1
+        end_x = sx + rad_w + rb.width + pad * 2
+        lid = self.canvas.create_line(
+            sx, y + h * 0.6, tip_x, tip_y, mid_x, top_y,
+            top_x, top_y, end_x, top_y,
+            fill=_OPERATOR_COLOR, width=1.2)
+        self._items.append(lid)
+        self._render_slot(item.radicand, sx + rad_w + pad, y + pad, fs)
 
     def _draw_integral_sign(self, cx: float, y: float, h: float, w: float):
         r = w * 0.25
@@ -2072,6 +2215,15 @@ class MathEditor:
                     rt = self._slot_to_text(row) or "0"
                     row_texts.append(rt)
                 parts.append("line(" + ", ".join(row_texts) + ")")
+            elif isinstance(item, ELimit):
+                body = self._slot_to_text(item.body_slot) or "f"
+                var = self._slot_to_text(item.var_slot) or "x"
+                tgt = self._slot_to_text(item.target_slot) or "0"
+                parts.append(f"lim({body}, {var}, {tgt})")
+            elif isinstance(item, ENthRoot):
+                idx = self._slot_to_text(item.index_slot) or "3"
+                rad = self._slot_to_text(item.radicand) or "0"
+                parts.append(f"nthroot({rad}, {idx})")
             elif isinstance(item, EUnit):
                 parts.append(f"'{item.name}'")
         return "".join(parts)
@@ -2185,6 +2337,22 @@ class MathEditor:
                 self._ast_to_slot(node.args[3], p.upper_slot)
                 p.upper_slot.cursor_pos = len(p.upper_slot.items)
                 slot.items.append(p)
+            elif node.name == "lim" and len(node.args) == 3:
+                lm = ELimit()
+                self._ast_to_slot(node.args[0], lm.body_slot)
+                lm.body_slot.cursor_pos = len(lm.body_slot.items)
+                self._ast_to_slot(node.args[1], lm.var_slot)
+                lm.var_slot.cursor_pos = len(lm.var_slot.items)
+                self._ast_to_slot(node.args[2], lm.target_slot)
+                lm.target_slot.cursor_pos = len(lm.target_slot.items)
+                slot.items.append(lm)
+            elif node.name == "nthroot" and len(node.args) == 2:
+                nr = ENthRoot()
+                self._ast_to_slot(node.args[0], nr.radicand)
+                nr.radicand.cursor_pos = len(nr.radicand.items)
+                self._ast_to_slot(node.args[1], nr.index_slot)
+                nr.index_slot.cursor_pos = len(nr.index_slot.items)
+                slot.items.append(nr)
             elif node.name == "line" and len(node.args) >= 2:
                 sys = ESystem()
                 sys.rows = []

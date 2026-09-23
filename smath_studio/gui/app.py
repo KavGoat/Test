@@ -217,7 +217,9 @@ class SMathApp:
         insert_menu.add_command(label="Integral", accelerator="Ctrl+I", command=self._on_insert_integral)
         insert_menu.add_command(label="Summation", accelerator="Ctrl+Shift+S", command=self._on_insert_summation)
         insert_menu.add_command(label="Product", accelerator="Ctrl+Shift+P", command=self._on_insert_product)
+        insert_menu.add_command(label="Limit", accelerator="Ctrl+L", command=self._on_insert_limit)
         insert_menu.add_command(label="Square Root", command=self._on_insert_sqrt)
+        insert_menu.add_command(label="Nth Root", accelerator="Ctrl+\\", command=self._on_insert_nthroot)
         insert_menu.add_command(label="Absolute Value", command=self._on_insert_abs)
         insert_menu.add_command(label="System of Equations", command=self._on_insert_system)
         insert_menu.add_separator()
@@ -1082,6 +1084,12 @@ class SMathApp:
     def _on_insert_abs(self):
         self._insert_structure("_do_abs", "Absolute Value")
 
+    def _on_insert_limit(self):
+        self._insert_structure("_do_limit", "Limit")
+
+    def _on_insert_nthroot(self):
+        self._insert_structure("_do_nthroot", "Nth Root")
+
     def _on_insert_system(self):
         self._insert_structure("_do_system", "System of Equations")
 
@@ -1407,6 +1415,8 @@ class SMathApp:
             "  '             Unit entry mode\n"
             "  _             Subscript dot\n"
             "  Ctrl+G        Convert to Greek letter\n"
+            "  Ctrl+L        Insert limit\n"
+            "  Ctrl+\\        Insert nth root\n"
             "  {             System of equations\n\n"
             "Calculation\n"
             "  F2            Insert text region\n"
