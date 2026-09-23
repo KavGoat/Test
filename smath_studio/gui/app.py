@@ -538,6 +538,7 @@ class SMathApp:
         self._root.bind("<Control-W>", lambda e: self._on_new())
         self._root.bind("<Control-r>", lambda e: self._on_recalculate())
         self._root.bind("<Control-R>", lambda e: self._on_recalculate())
+        self._root.bind("<F2>", lambda e: self._on_insert_text())
         self._root.bind("<F11>", lambda e: self._toggle_fullscreen_key())
 
     # ------------------------------------------------------------------
@@ -1404,7 +1405,9 @@ class SMathApp:
             "  \\             Square root\n"
             "  |             Absolute value\n"
             "  '             Unit entry mode\n"
-            "  _             Subscript dot\n\n"
+            "  _             Subscript dot\n"
+            "  Ctrl+G        Convert to Greek letter\n"
+            "  {             System of equations\n\n"
             "Calculation\n"
             "  F2            Insert text region\n"
             "  F5            Evaluate selection\n"
@@ -1468,12 +1471,15 @@ class SMathApp:
         for r in self._worksheet.regions:
             if not r.text_contents:
                 continue
-            fg = (r.color or "#000000").lower()
-            if fg not in ("#0000ff", "#0000cc"):
-                continue
             tc = self._canvas_widget._get_text_content(r.text_contents)
-            if tc and tc.paragraphs:
-                title = " ".join(p.text for p in tc.paragraphs).strip()
+            if not tc or not tc.paragraphs:
+                continue
+            fg = (r.color or "#000000").lower()
+            is_blue = fg in ("#0000ff", "#0000cc", "#000080")
+            is_large = r.font_size >= 14
+            is_bold = any(p.bold for p in tc.paragraphs)
+            if is_blue or is_large or is_bold:
+                title = " ".join(p.text for p in tc.paragraphs if not p.built_in).strip()
                 if title:
                     entries.append((title, r.top))
         self._math_panels.doc_map.update_entries(entries)

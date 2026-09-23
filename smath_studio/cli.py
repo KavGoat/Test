@@ -60,6 +60,7 @@ def cmd_evaluate(args):
     ws = parse_file(args.file)
     ctx = create_default_context()
     ctx._precision = ws.settings.calculation.precision
+    ctx._exponential_threshold = ws.settings.calculation.exponential_threshold
 
     # Sort regions by top then left (natural reading order)
     all_regions = _flatten_regions(ws.regions)

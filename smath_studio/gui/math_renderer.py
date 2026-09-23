@@ -109,6 +109,10 @@ _DISPLAY_OPS = {
     "&": "∧",
     "|": "∨",
     "±": "±",
+    "⇔": "⇔",
+    "→": "→",
+    "←": "←",
+    "⇒": "⇒",
 }
 
 
@@ -139,6 +143,7 @@ class MathRenderer:
         color: str = "#000000",
         context: Any = None,
         trailing_zeros: bool = False,
+        exp_threshold: int = 5,
     ) -> list[int]:
         """Render a math region or AST node on *canvas*.
 
@@ -161,7 +166,7 @@ class MathRenderer:
                     self.render_with_result(
                         canvas, node, eval_result, x, y,
                         font_size=font_size, context=context, precision=precision,
-                        trailing_zeros=trailing_zeros,
+                        trailing_zeros=trailing_zeros, exp_threshold=exp_threshold,
                     )
                 else:
                     self._render_node(canvas, node, x, y, font_size, context)
@@ -169,13 +174,13 @@ class MathRenderer:
                 self.render_with_result(
                     canvas, node, eval_result, x, y,
                     font_size=font_size, context=context, precision=precision,
-                    trailing_zeros=trailing_zeros,
+                    trailing_zeros=trailing_zeros, exp_threshold=exp_threshold,
                 )
             elif math_data_or_node.result_expr is not None:
                 self.render_with_result(
                     canvas, node, math_data_or_node.result_expr, x, y,
                     font_size=font_size, context=context, precision=precision,
-                    trailing_zeros=trailing_zeros,
+                    trailing_zeros=trailing_zeros, exp_threshold=exp_threshold,
                 )
             else:
                 self._render_node(canvas, node, x, y, font_size, context)
@@ -1578,6 +1583,7 @@ class MathRenderer:
         context: Any = None,
         precision: int = 4,
         trailing_zeros: bool = False,
+        exp_threshold: int = 5,
     ) -> RenderBox:
         """Render an expression, then `` = result`` after it."""
         self._canvas = canvas
@@ -1629,12 +1635,12 @@ class MathRenderer:
                     if isinstance(result, np.ndarray):
                         rb = self._render_matrix_value(canvas, result, res_x, y, font_size)
                     elif isinstance(result, Quantity):
-                        rb = self._render_quantity_result(canvas, result, res_x, eq_y, font_size, precision, trailing_zeros)
+                        rb = self._render_quantity_result(canvas, result, res_x, eq_y, font_size, precision, trailing_zeros, exp_threshold)
                     else:
-                        res_text = _format_result(result, precision, trailing_zeros)
+                        res_text = _format_result(result, precision, trailing_zeros, exp_threshold)
                         rb = self._render_sci_number(canvas, res_text, res_x, eq_y, font_size)
                 except Exception:
-                    res_text = _format_result(result, precision, trailing_zeros)
+                    res_text = _format_result(result, precision, trailing_zeros, exp_threshold)
                     rb = self._render_sci_number(canvas, res_text, res_x, eq_y, font_size)
 
             total_w = expr_box.width + ew + rb.width
@@ -1643,9 +1649,9 @@ class MathRenderer:
 
         return expr_box
 
-    def _render_quantity_result(self, c: tk.Canvas, qty: Quantity, x, y, fs, precision=4, trailing_zeros=False) -> RenderBox:
+    def _render_quantity_result(self, c: tk.Canvas, qty: Quantity, x, y, fs, precision=4, trailing_zeros=False, exp_threshold=5) -> RenderBox:
         """Render a Quantity with the number in blue and the unit in blue."""
-        num_text = _format_result(qty.value, precision, trailing_zeros)
+        num_text = _format_result(qty.value, precision, trailing_zeros, exp_threshold)
         unit_str = qty.display_unit if hasattr(qty, 'display_unit') else str(qty.unit)
 
         num_box = self._render_sci_number(c, num_text, x, y, fs)
@@ -1770,17 +1776,17 @@ def _format_number(val) -> str:
     return str(val)
 
 
-def _format_result(val: Any, precision: int = 4, trailing_zeros: bool = False) -> str:
+def _format_result(val: Any, precision: int = 4, trailing_zeros: bool = False, exp_threshold: int = 5) -> str:
     """Format an evaluation result for display."""
     if isinstance(val, Quantity):
-        num = _format_result(val.value, precision, trailing_zeros)
+        num = _format_result(val.value, precision, trailing_zeros, exp_threshold)
         unit_str = val.display_unit if hasattr(val, 'display_unit') else str(val.unit)
         return f"{num} {unit_str}".strip()
     if isinstance(val, np.ndarray):
         return f"[{val.shape[0]}×{val.shape[1] if val.ndim > 1 else 1} matrix]"
     if isinstance(val, complex):
-        rp = _format_result(val.real, precision, trailing_zeros)
-        ip = _format_result(abs(val.imag), precision, trailing_zeros)
+        rp = _format_result(val.real, precision, trailing_zeros, exp_threshold)
+        ip = _format_result(abs(val.imag), precision, trailing_zeros, exp_threshold)
         if val.imag == 0:
             return rp
         if val.real == 0:
@@ -1799,7 +1805,9 @@ def _format_result(val: Any, precision: int = 4, trailing_zeros: bool = False) -
             if trailing_zeros and precision > 0:
                 return f"{val:.{precision}f}"
             return str(int(val))
-        if abs(val) < 1e-4 or abs(val) >= 1e6:
+        exp_lo = 10.0 ** (-exp_threshold)
+        exp_hi = 10.0 ** exp_threshold
+        if abs(val) < exp_lo or abs(val) >= exp_hi:
             return f"{val:.{precision}e}"
         result = f"{val:.{precision}f}"
         if not trailing_zeros:

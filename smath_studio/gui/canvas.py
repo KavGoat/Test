@@ -381,6 +381,7 @@ class WorksheetCanvas(ttk.Frame):
         self._initial_page_drawn = True
         self._ctx = create_default_context()
         self._ctx._precision = worksheet.settings.calculation.precision
+        self._ctx._exponential_threshold = worksheet.settings.calculation.exponential_threshold
         self._trailing_zeros = getattr(worksheet.settings.calculation, 'trailing_zeros', True)
         self._editable = getattr(worksheet.settings, 'editable', True)
         self._selected_index = None
@@ -403,6 +404,7 @@ class WorksheetCanvas(ttk.Frame):
         if self._worksheet is not None:
             self._ctx = create_default_context()
             self._ctx._precision = self._worksheet.settings.calculation.precision
+            self._ctx._exponential_threshold = self._worksheet.settings.calculation.exponential_threshold
             self._trailing_zeros = getattr(self._worksheet.settings.calculation, 'trailing_zeros', False)
             self._evaluate_and_render()
 
@@ -1104,11 +1106,13 @@ class WorksheetCanvas(ttk.Frame):
                 tz = self._trailing_zeros
                 if hasattr(math_data, 'trailing_zeros') and math_data.trailing_zeros is not None:
                     tz = math_data.trailing_zeros
+                et = getattr(self._ctx, '_exponential_threshold', 5) if self._ctx else 5
                 rendered_items = self._math_renderer.render(
                     self._canvas, math_data, x, y, display_result,
                     font_size=zoomed_font_size,
                     color=region.color,
                     trailing_zeros=tz,
+                    exp_threshold=et,
                 )
                 if rendered_items:
                     return rendered_items

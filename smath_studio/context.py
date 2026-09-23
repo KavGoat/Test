@@ -19,6 +19,7 @@ class EvalContext:
         unit_registry: Optional[UnitRegistry] = None,
         constants: Optional[ConstantsRegistry] = None,
         precision: int = 4,
+        exponential_threshold: int = 5,
     ):
         self._variables: dict[str, Any] = {}
         self._functions: dict[str, tuple[list[str], "ASTNode"]] = {}
@@ -27,6 +28,7 @@ class EvalContext:
         self._unit_registry = unit_registry
         self._constants = constants
         self._precision = precision
+        self._exponential_threshold = exponential_threshold
 
         # Load constants as variables
         if constants is not None:
@@ -36,6 +38,10 @@ class EvalContext:
     @property
     def precision(self) -> int:
         return self._precision
+
+    @property
+    def exponential_threshold(self) -> int:
+        return self._exponential_threshold
 
     def get_unit_registry(self) -> Optional[UnitRegistry]:
         return self._unit_registry

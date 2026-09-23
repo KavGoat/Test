@@ -408,6 +408,13 @@ class MathEditor:
             self.render()
             return "consumed"
 
+        if ctrl and keysym.lower() == "g":
+            self._save_undo()
+            self._do_greek_convert()
+            self._update_eval()
+            self.render()
+            return "consumed"
+
         if keysym == "BackSpace":
             self._save_undo()
             self._do_backspace()
@@ -690,6 +697,16 @@ class MathEditor:
         self._slot_stack.append(slot)
         self._active_slot = absv.inner
         self._active_slot.cursor_pos = 0
+
+    def _do_greek_convert(self):
+        slot = self._active_slot
+        pos = slot.cursor_pos
+        if pos > 0 and isinstance(slot.items[pos - 1], EText):
+            text = slot.items[pos - 1].text
+            if text in _GREEK_MAP:
+                slot.items[pos - 1].text = _GREEK_MAP[text]
+            elif text.lower() in _GREEK_MAP:
+                slot.items[pos - 1].text = _GREEK_MAP[text.lower()]
 
     def _do_sqrt(self):
         slot = self._active_slot
