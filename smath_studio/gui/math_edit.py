@@ -645,13 +645,18 @@ class MathEditor:
         if pos > 0 and isinstance(slot.items[pos - 1], EText):
             prev_text = slot.items[pos - 1].text
             if ch.isalpha() and prev_text and prev_text[-1].isdigit():
-                unit = EUnit(ch)
-                slot.items.insert(pos, unit)
-                slot.cursor_pos = pos + 1
+                if pos < len(slot.items) and isinstance(slot.items[pos], EUnit):
+                    slot.items[pos].name = ch + slot.items[pos].name
+                else:
+                    unit = EUnit(ch)
+                    slot.items.insert(pos, unit)
+                    slot.cursor_pos = pos + 1
             else:
                 slot.items[pos - 1].text += ch
         elif pos > 0 and isinstance(slot.items[pos - 1], EUnit):
             slot.items[pos - 1].name += ch
+        elif pos < len(slot.items) and isinstance(slot.items[pos], EUnit) and ch.isalpha():
+            slot.items[pos].name = ch + slot.items[pos].name
         else:
             slot.items.insert(pos, EText(ch))
             slot.cursor_pos = pos + 1
@@ -929,6 +934,8 @@ class MathEditor:
                 elif self._unit_cursor >= len(unit.name):
                     self._unit_cursor = -1
                 return
+            else:
+                self._unit_cursor = -1
 
         if pos < len(slot.items):
             item = slot.items[pos]
