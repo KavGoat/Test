@@ -50,8 +50,8 @@ _ERROR_BG_COLOR = "#fff0f0"
 _ERROR_BORDER_COLOR = "#cc0000"
 
 _OP_HPAD = 4       # horizontal padding around binary operators
-_FRAC_HPAD = 6     # horizontal padding inside fraction bar
-_FRAC_VPAD = 3     # vertical padding above/below fraction bar
+_FRAC_HPAD = 3     # horizontal padding inside fraction bar
+_FRAC_VPAD = 1     # vertical padding above/below fraction bar
 _SUP_SCALE = 0.70  # superscript size ratio
 _SUB_SCALE = 0.75  # subscript size ratio
 _SUP_RAISE = 0.38  # superscript vertical shift (fraction of parent height)
@@ -370,8 +370,8 @@ class MathRenderer:
         num = self._measure_node(node.left, fs, ctx)
         den = self._measure_node(node.right, fs, ctx)
         w = max(num.width, den.width) + 2 * _FRAC_HPAD
-        h = num.height + den.height + 2 * _FRAC_VPAD + 2
-        return RenderBox(w, h, num.height + _FRAC_VPAD + 1)
+        h = num.height + den.height + 2 * _FRAC_VPAD + 1
+        return RenderBox(w, h, num.height + _FRAC_VPAD)
 
     def _measure_superscript(self, c, node: BinaryOp, fs: int, ctx) -> RenderBox:
         base = self._measure_node(node.left, fs, ctx)
@@ -820,11 +820,11 @@ class MathRenderer:
         line_w = 1.2 if fs >= 10 else 1
         c.create_line(x, bar_y, x + bar_w, bar_y, fill=_OPERATOR_COLOR, width=line_w)
 
-        den_y = bar_y + _FRAC_VPAD + 2
+        den_y = bar_y + _FRAC_VPAD + 1
         den_x = x + (bar_w - den_m.width) / 2
         self._render_node(c, node.right, den_x, den_y, fs, ctx)
 
-        h = num_m.height + den_m.height + 2 * _FRAC_VPAD + 2
+        h = num_m.height + den_m.height + 2 * _FRAC_VPAD + 1
         return RenderBox(bar_w, h, bar_y - y)
 
     def _render_superscript(self, c, node: BinaryOp, x, y, fs, ctx) -> RenderBox:

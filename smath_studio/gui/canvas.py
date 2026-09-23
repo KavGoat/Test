@@ -3099,6 +3099,7 @@ class WorksheetCanvas(ttk.Frame):
             font_size=zoomed_editor_size,
             eval_callback=self._eval_for_editor,
             precision=precision,
+            eval_context=self._ctx,
         )
 
         if ast_node is not None:

@@ -172,7 +172,7 @@ _NUMBER_COLOR = "#000000"
 _UNIT_COLOR = "#0000ff"
 _OPERATOR_COLOR = "#000000"
 _STRING_COLOR = "#a31515"
-_CURSOR_COLOR = "#000000"
+_CURSOR_COLOR = "#0000ff"
 _PLACEHOLDER_COLOR = "#999999"
 _RESULT_COLOR = "#000000"
 _ERROR_COLOR = "#ff0000"
@@ -261,6 +261,7 @@ class MathEditor:
         font_size: int = 12,
         eval_callback: Optional[Callable[[str], Any]] = None,
         precision: int = 4,
+        eval_context: Any = None,
     ):
         self.canvas = canvas
         self.x = x
@@ -268,6 +269,7 @@ class MathEditor:
         self.font_size = font_size
         self._eval_callback = eval_callback
         self._precision = precision
+        self._eval_context = eval_context
 
         self.root = EditSlot()
         self._active_slot: EditSlot = self.root
@@ -299,6 +301,7 @@ class MathEditor:
         self._ac_suggestions: list[str] = []
         self._ac_selected: int = 0
         self._ac_prefix: str = ""
+        self._ac_is_unit: bool = False
 
         # Function hint state
         self._hint_items: list[int] = []
@@ -2400,6 +2403,20 @@ class MathEditor:
         if pos == 0:
             return
         item = slot.items[pos - 1]
+        if isinstance(item, EUnit):
+            text = item.name
+            if not text:
+                return
+            unit_names = self._get_unit_names()
+            matches = [n for n in unit_names if n.startswith(text) and n != text]
+            if not matches:
+                return
+            self._ac_suggestions = matches[:8]
+            self._ac_selected = 0
+            self._ac_prefix = text
+            self._ac_is_unit = True
+            self._show_autocomplete()
+            return
         if not isinstance(item, EText):
             return
         text = item.text
@@ -2408,12 +2425,48 @@ class MathEditor:
         if len(text) < 2:
             return
         matches = [n for n in _FUNCTION_NAMES if n.startswith(text) and n != text]
-        if not matches:
+        var_names = self._get_variable_names()
+        var_matches = [n for n in var_names if n.startswith(text) and n != text and n not in matches]
+        all_matches = matches + var_matches
+        if not all_matches:
             return
-        self._ac_suggestions = matches[:8]
+        self._ac_suggestions = all_matches[:8]
         self._ac_selected = 0
         self._ac_prefix = text
+        self._ac_is_unit = False
         self._show_autocomplete()
+
+    def _get_variable_names(self) -> list[str]:
+        if self._eval_context is None:
+            return []
+        ctx = self._eval_context
+        names = []
+        if hasattr(ctx, '_variables'):
+            names.extend(ctx._variables.keys())
+        if hasattr(ctx, '_constants'):
+            names.extend(ctx._constants.keys())
+        return sorted(set(names))
+
+    def _get_unit_names(self) -> list[str]:
+        try:
+            from ..units import get_default_registry
+            reg = get_default_registry()
+            if hasattr(reg, '_units'):
+                return sorted(reg._units.keys())
+        except Exception:
+            pass
+        return sorted([
+            "m", "km", "cm", "mm", "in", "ft", "yd", "mi",
+            "kg", "g", "mg", "lb", "oz", "ton",
+            "s", "ms", "min", "hr", "day",
+            "N", "kN", "lbf", "Pa", "kPa", "MPa", "GPa", "bar", "atm", "psi",
+            "J", "kJ", "MJ", "cal", "kcal", "Wh", "kWh",
+            "W", "kW", "MW", "hp",
+            "A", "mA", "V", "kV", "ohm", "F", "H",
+            "K", "degC", "degF",
+            "mol", "rad", "deg", "Hz", "kHz", "MHz",
+            "L", "mL", "gal",
+        ])
 
     def _show_autocomplete(self):
         if not self._ac_suggestions:
@@ -2463,10 +2516,19 @@ class MathEditor:
         chosen = self._ac_suggestions[self._ac_selected]
         slot = self._active_slot
         pos = slot.cursor_pos
-        if pos > 0 and isinstance(slot.items[pos - 1], EText):
+        is_unit = getattr(self, '_ac_is_unit', False)
+        if is_unit:
+            if pos > 0 and isinstance(slot.items[pos - 1], EUnit):
+                slot.items[pos - 1].name = chosen
+        elif pos > 0 and isinstance(slot.items[pos - 1], EText):
             slot.items[pos - 1].text = chosen
+            if chosen in _FUNCTION_NAMES:
+                self._hide_autocomplete()
+                self._insert_char("(")
+                return True
         self._hide_autocomplete()
-        self._insert_char("(")
+        self._update_eval()
+        self.render()
         return True
 
     # ================================================================
