@@ -66,10 +66,13 @@ class SMathApp:
         self._root.protocol("WM_DELETE_WINDOW", self._on_exit)
 
         # Load file if provided
+        self._pending_afters: list = []
         if file_path is not None:
-            self._root.after(100, lambda: self._open_file(file_path))
+            aid = self._root.after(100, lambda: self._open_file(file_path))
+            self._pending_afters.append(aid)
 
         # Start status bar update loop
+        self._status_after: str | None = None
         self._update_status_bar()
 
     # ------------------------------------------------------------------
@@ -571,7 +574,7 @@ class SMathApp:
             pass
         try:
             if self._root.winfo_exists():
-                self._root.after(500, self._update_status_bar)
+                self._status_after = self._root.after(500, self._update_status_bar)
         except Exception:
             pass
 
@@ -1753,4 +1756,20 @@ class SMathApp:
                 return  # Cancel
             if answer:
                 self._on_save()
+        self._cancel_pending_afters()
         self._root.destroy()
+
+    def _cancel_pending_afters(self):
+        """Cancel all pending after callbacks to prevent Tcl errors."""
+        if self._status_after is not None:
+            try:
+                self._root.after_cancel(self._status_after)
+            except Exception:
+                pass
+            self._status_after = None
+        for aid in getattr(self, '_pending_afters', []):
+            try:
+                self._root.after_cancel(aid)
+            except Exception:
+                pass
+        self._pending_afters = []
