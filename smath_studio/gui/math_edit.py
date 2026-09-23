@@ -2550,8 +2550,8 @@ class MathEditor:
         names = []
         if hasattr(ctx, '_variables'):
             names.extend(ctx._variables.keys())
-        if hasattr(ctx, '_constants'):
-            names.extend(ctx._constants.keys())
+        if hasattr(ctx, '_constants') and ctx._constants is not None:
+            names.extend(ctx._constants.all_constants().keys())
         return sorted(set(names))
 
     def _get_unit_names(self) -> list[str]:
