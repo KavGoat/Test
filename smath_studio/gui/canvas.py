@@ -407,7 +407,7 @@ class WorksheetCanvas(ttk.Frame):
 
         self._initial_page_drawn = False
         self._canvas.bind("<Map>", self._on_map)
-        self._canvas.after(100, self._draw_initial_page)
+        self._initial_page_after = self._canvas.after(100, self._draw_initial_page)
 
     def _on_map(self, event=None):
         if not self._initial_page_drawn:
@@ -415,6 +415,11 @@ class WorksheetCanvas(ttk.Frame):
 
     def _draw_initial_page(self):
         """Draw an initial empty page so the user sees a white workspace."""
+        try:
+            if not self._canvas.winfo_exists():
+                return
+        except Exception:
+            return
         if self._worksheet is None and not self._rendered and not self._initial_page_drawn:
             self._initial_page_drawn = True
             dummy_ws = Worksheet()
@@ -431,6 +436,17 @@ class WorksheetCanvas(ttk.Frame):
             self._canvas.yview_moveto(0)
             self._draw_ruler()
             self._draw_v_ruler()
+
+    def destroy(self):
+        for attr in ("_blink_after", "_initial_page_after"):
+            after_id = getattr(self, attr, None)
+            if after_id is not None:
+                try:
+                    self._canvas.after_cancel(after_id)
+                except Exception:
+                    pass
+                setattr(self, attr, None)
+        super().destroy()
 
     # ------------------------------------------------------------------
     # Public interface
