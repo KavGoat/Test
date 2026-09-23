@@ -524,6 +524,12 @@ class WorksheetCanvas(ttk.Frame):
         self._hover_index = None
         self._photo_cache.clear()
 
+        # Fresh context each time so evaluation order matters
+        if self._worksheet is not None:
+            self._ctx = create_default_context()
+            self._ctx._precision = self._worksheet.settings.calculation.precision
+            self._ctx._exponential_threshold = self._worksheet.settings.calculation.exponential_threshold
+
         ws = self._worksheet
         if ws is None:
             dummy_ws = Worksheet()

@@ -306,6 +306,10 @@ class MathEditor:
         # Function hint state
         self._hint_items: list[int] = []
 
+        # Unit sub-cursor: -1 = not in unit, 1..len(name)-1 = position within unit
+        # When active, the unit is at slot.items[slot.cursor_pos - 1]
+        self._unit_cursor: int = -1
+
         self.render()
         self._start_blink()
 
@@ -456,6 +460,7 @@ class MathEditor:
         elif keysym == "Right":
             self._move_right()
         elif keysym == "Up":
+            self._unit_cursor = -1
             if self._ac_visible and self._ac_suggestions:
                 self._ac_selected = max(0, self._ac_selected - 1)
                 self._hide_autocomplete()
@@ -463,6 +468,7 @@ class MathEditor:
             else:
                 self._move_up()
         elif keysym == "Down":
+            self._unit_cursor = -1
             if self._ac_visible and self._ac_suggestions:
                 self._ac_selected = min(len(self._ac_suggestions) - 1, self._ac_selected + 1)
                 self._hide_autocomplete()
@@ -470,6 +476,7 @@ class MathEditor:
             else:
                 self._move_down()
         elif keysym == "Tab":
+            self._unit_cursor = -1
             if not (event.state & 0x1) and self._ac_visible:
                 self._accept_autocomplete()
             elif event.state & 0x1:
@@ -477,10 +484,13 @@ class MathEditor:
             else:
                 self._tab_next()
         elif keysym == "Home":
+            self._unit_cursor = -1
             self._active_slot.cursor_pos = 0
         elif keysym == "End":
+            self._unit_cursor = -1
             self._active_slot.cursor_pos = len(self._active_slot.items)
         elif char and ord(char) >= 32:
+            self._unit_cursor = -1
             self._save_undo()
             self._insert_char(char)
         else:
@@ -866,6 +876,22 @@ class MathEditor:
         slot = self._active_slot
         pos = slot.cursor_pos
 
+        # If inside a unit, delete character at _unit_cursor - 1
+        if self._unit_cursor > 0:
+            unit = slot.items[pos - 1]
+            if isinstance(unit, EUnit):
+                uc = self._unit_cursor
+                unit.name = unit.name[:uc - 1] + unit.name[uc:]
+                self._unit_cursor -= 1
+                if len(unit.name) == 0:
+                    slot.items.pop(pos - 1)
+                    slot.cursor_pos = pos - 1
+                    self._unit_cursor = -1
+                elif self._unit_cursor == 0:
+                    self._unit_cursor = -1
+                    slot.cursor_pos -= 1
+                return
+
         if pos > 0:
             item = slot.items[pos - 1]
             if isinstance(item, EText) and len(item.text) > 1:
@@ -889,6 +915,21 @@ class MathEditor:
     def _do_delete(self):
         slot = self._active_slot
         pos = slot.cursor_pos
+
+        # If inside a unit, delete character at _unit_cursor
+        if self._unit_cursor > 0:
+            unit = slot.items[pos - 1]
+            if isinstance(unit, EUnit) and self._unit_cursor < len(unit.name):
+                uc = self._unit_cursor
+                unit.name = unit.name[:uc] + unit.name[uc + 1:]
+                if len(unit.name) == 0:
+                    slot.items.pop(pos - 1)
+                    slot.cursor_pos = pos - 1
+                    self._unit_cursor = -1
+                elif self._unit_cursor >= len(unit.name):
+                    self._unit_cursor = -1
+                return
+
         if pos < len(slot.items):
             item = slot.items[pos]
             if isinstance(item, EText) and len(item.text) > 1:
@@ -987,7 +1028,18 @@ class MathEditor:
 
     def _move_left(self):
         slot = self._active_slot
+        # If inside a unit, move within it
+        if self._unit_cursor > 0:
+            self._unit_cursor -= 1
+            if self._unit_cursor == 0:
+                self._unit_cursor = -1
+                slot.cursor_pos -= 1
+            return
         if slot.cursor_pos > 0:
+            item = slot.items[slot.cursor_pos - 1]
+            if isinstance(item, EUnit) and len(item.name) > 1:
+                self._unit_cursor = len(item.name) - 1
+                return
             slot.cursor_pos -= 1
             item = slot.items[slot.cursor_pos]
             if isinstance(item, EFraction):
@@ -1055,8 +1107,22 @@ class MathEditor:
 
     def _move_right(self):
         slot = self._active_slot
+        # If inside a unit, move within it
+        if self._unit_cursor > 0:
+            unit = slot.items[slot.cursor_pos - 1]
+            if isinstance(unit, EUnit) and self._unit_cursor < len(unit.name):
+                self._unit_cursor += 1
+                if self._unit_cursor >= len(unit.name):
+                    self._unit_cursor = -1
+            else:
+                self._unit_cursor = -1
+            return
         if slot.cursor_pos < len(slot.items):
             item = slot.items[slot.cursor_pos]
+            if isinstance(item, EUnit) and len(item.name) > 1:
+                self._unit_cursor = 1
+                slot.cursor_pos += 1
+                return
             if isinstance(item, EFraction):
                 self._slot_stack.append(slot)
                 self._active_slot = item.numerator
@@ -1358,6 +1424,15 @@ class MathEditor:
 
             item_y = y + max_bl - mbox.baseline
             self._render_item(item, cx, item_y, fs)
+
+            # If cursor is inside this unit, compute sub-cursor position
+            if (slot is self._active_slot and self._unit_cursor > 0
+                    and i == slot.cursor_pos - 1 and isinstance(item, EUnit)):
+                uc_x = self._unit_cursor_x(item, cx, fs)
+                self._cursor_rx = uc_x
+                self._cursor_ry = y
+                self._cursor_rh = total_h
+
             cx += mbox.width
 
         if slot is self._active_slot and slot.cursor_pos == len(slot.items):
@@ -2061,6 +2136,31 @@ class MathEditor:
                     self._items.append(tid)
                     cw, _ = self._text_size(chunk, fs)
                     cx += cw
+
+    def _unit_cursor_x(self, unit: EUnit, unit_x: float, fs: int) -> float:
+        """Compute pixel x for cursor at _unit_cursor within a unit name."""
+        name = unit.name or ""
+        sp_w, _ = self._text_size(" ", fs)
+        cx = unit_x + sp_w
+        target = self._unit_cursor
+        ci = 0
+        while ci < len(name) and ci < target:
+            if name[ci] == '^':
+                ci += 1
+                while ci < len(name) and ci < target and (name[ci].isdigit() or name[ci] in "+-"):
+                    sup_fs = max(int(fs * _SUP_SCALE), 6)
+                    cw, _ = self._text_size(name[ci], sup_fs)
+                    cx += cw
+                    ci += 1
+            elif name[ci] == '·':
+                dw, _ = self._text_size("·", fs)
+                cx += dw
+                ci += 1
+            else:
+                cw, _ = self._text_size(name[ci], fs)
+                cx += cw
+                ci += 1
+        return cx
 
     # ---- Cursor ----
 
