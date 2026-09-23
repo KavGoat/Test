@@ -693,9 +693,9 @@ class SMathApp:
     def _on_print_preview(self):
         from .dialogs import PrintPreviewDialog
         ws = self._canvas_widget._worksheet
-        pw = int(ws.settings.page.width * 96 / 25.4) if ws else 794
-        ph = int(ws.settings.page.height * 96 / 25.4) if ws else 1123
-        pages = max(1, self._canvas_widget._num_pages if hasattr(self._canvas_widget, '_num_pages') else 1)
+        pw = ws.settings.page_model.paper_width if ws else 850
+        ph = ws.settings.page_model.paper_height if ws else 1100
+        pages = max(1, getattr(self._canvas_widget, '_num_pages', 1))
         PrintPreviewDialog(self._root, self._canvas_widget._canvas, pw, ph, pages)
 
     def _on_print(self):

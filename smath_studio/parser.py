@@ -292,8 +292,9 @@ def _parse_settings(elem: ET.Element, ns: str) -> Settings:
     # Page model
     pm_elem = elem.find(f"{ns}pageModel")
     if pm_elem is not None:
-        s.page_model.active = pm_elem.get("active", "false").lower() == "true"
         s.page_model.view_mode = int(pm_elem.get("viewMode", "0") or "0")
+        s.page_model.active = (pm_elem.get("active", "false").lower() == "true"
+                               or s.page_model.view_mode == 1)
         paper = pm_elem.find(f"{ns}paper")
         if paper is not None:
             s.page_model.paper_width = int(paper.get("width", "850") or "850")
