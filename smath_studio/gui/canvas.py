@@ -231,7 +231,7 @@ class WorksheetCanvas(ttk.Frame):
     def __init__(self, parent: tk.Widget, **kwargs):
         super().__init__(parent, **kwargs)
         self._worksheet: Optional[Worksheet] = None
-        self._ctx: Optional[EvalContext] = None
+        self._ctx: Optional[EvalContext] = create_default_context()
         self._rendered: list[_RenderedRegion] = []
         self._selected_index: Optional[int] = None
         self._selection_items: list[int] = []
@@ -1187,9 +1187,9 @@ class WorksheetCanvas(ttk.Frame):
                 and isinstance(math_data.input_expr, Evaluation))
         )
 
-        # Suppress error display for regions that don't explicitly show results
+        # Only show results for regions that explicitly expect them (have = sign)
         display_result = eval_result
-        if isinstance(eval_result, Exception) and not expects_result:
+        if not expects_result:
             display_result = None
 
         # Handle showInputData=False: only show the result value

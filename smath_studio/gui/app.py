@@ -65,11 +65,14 @@ class SMathApp:
         # Protocol for window close
         self._root.protocol("WM_DELETE_WINDOW", self._on_exit)
 
-        # Load file if provided
+        # Load file or start with blank worksheet
         self._pending_afters: list = []
         if file_path is not None:
             aid = self._root.after(100, lambda: self._open_file(file_path))
             self._pending_afters.append(aid)
+        else:
+            self._worksheet = Worksheet()
+            self._canvas_widget.load_worksheet(self._worksheet)
 
         # Start status bar update loop
         self._status_after: str | None = None
