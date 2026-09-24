@@ -1533,7 +1533,7 @@ class MathRenderer:
     # -----------------------------------------------------------------
 
     def _render_sci_number(self, c: tk.Canvas, text: str, x: float, y: float,
-                           fs: int, color: str = _RESULT_COLOR) -> RenderBox:
+                           fs: int, color: str = _NUMBER_COLOR) -> RenderBox:
         """Render a number, using ·10ⁿ notation for scientific notation."""
         import re
         m = re.match(r'^(-?\d+\.?\d*)[eE]([+-]?\d+)$', text)
@@ -1598,8 +1598,6 @@ class MathRenderer:
         expr_box = self._render_node(canvas, node, x, y, font_size, context)
 
         if isinstance(result, Exception):
-            if isinstance(result, NameError):
-                return expr_box
             f = self._get_font(canvas, font_size)
             eq_text = " = "
             ew, eh = self._text_size(canvas, eq_text, font_size)
@@ -1659,7 +1657,7 @@ class MathRenderer:
         return expr_box
 
     def _render_quantity_result(self, c: tk.Canvas, qty: Quantity, x, y, fs, precision=4, trailing_zeros=False, exp_threshold=5, fractions_mode="decimal") -> RenderBox:
-        """Render a Quantity with the number in blue and the unit in blue."""
+        """Render a Quantity with number in black and unit in blue."""
         frac = _to_fraction(qty.value, precision) if fractions_mode == "fraction" else None
         if frac is not None:
             num_box = self._render_fraction_result(c, frac[0], frac[1], x, y, fs)
@@ -1701,7 +1699,8 @@ class MathRenderer:
                     i += 1
                 if exp_text:
                     ew, eh = self._text_size(c, exp_text, sup_fs)
-                    c.create_text(cx, y, text=exp_text, anchor="nw", font=f_sup, fill=_UNIT_COLOR)
+                    raise_amt = base_h * _SUP_RAISE
+                    c.create_text(cx, y - raise_amt, text=exp_text, anchor="nw", font=f_sup, fill=_UNIT_COLOR)
                     cx += ew
                     max_h = max(max_h, eh)
             elif unit_str[i:i+2] == '·' or unit_str[i] == '·':
@@ -1734,14 +1733,14 @@ class MathRenderer:
             sign_text = "−"
             sw, sh = self._text_size(c, sign_text, fs)
             sign_w = sw + 3
-            c.create_text(x, y + total_h / 2 - sh / 2, text=sign_text, anchor="nw", font=f, fill=_RESULT_COLOR)
+            c.create_text(x, y + total_h / 2 - sh / 2, text=sign_text, anchor="nw", font=f, fill=_NUMBER_COLOR)
         sx = x + sign_w
         num_x = sx + (bar_w - nw) / 2
         den_x = sx + (bar_w - dw) / 2
-        c.create_text(num_x, y, text=num_text, anchor="nw", font=f, fill=_RESULT_COLOR)
+        c.create_text(num_x, y, text=num_text, anchor="nw", font=f, fill=_NUMBER_COLOR)
         bar_y = y + nh + _FRAC_VPAD
-        c.create_line(sx, bar_y, sx + bar_w, bar_y, fill=_RESULT_COLOR, width=1)
-        c.create_text(den_x, bar_y + _FRAC_VPAD, text=den_text, anchor="nw", font=f, fill=_RESULT_COLOR)
+        c.create_line(sx, bar_y, sx + bar_w, bar_y, fill=_NUMBER_COLOR, width=1)
+        c.create_text(den_x, bar_y + _FRAC_VPAD, text=den_text, anchor="nw", font=f, fill=_NUMBER_COLOR)
         return RenderBox(sign_w + bar_w, total_h, bar_y)
 
     def _render_matrix_value(self, c, arr: np.ndarray, x, y, fs) -> RenderBox:
@@ -1789,7 +1788,7 @@ class MathRenderer:
                 tw, th = self._text_size(c, txt, fs)
                 cell_x = cx + (cell_w - tw) / 2
                 cell_y = cy + (cell_h - th) / 2
-                c.create_text(cell_x, cell_y, text=txt, anchor="nw", font=f, fill=_RESULT_COLOR)
+                c.create_text(cell_x, cell_y, text=txt, anchor="nw", font=f, fill=_NUMBER_COLOR)
                 cx += cell_w + _MATRIX_CELL_PAD
             cy += cell_h + _MATRIX_CELL_PAD
 

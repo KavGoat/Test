@@ -215,9 +215,10 @@ _GREEK_DISPLAY = {v: v for v in _GREEK_MAP.values()}
 for k, v in _GREEK_MAP.items():
     _GREEK_DISPLAY[k] = v
 
-_SUP_SCALE = 0.72
-_FRAC_HPAD = 6
-_FRAC_VPAD = 2
+_SUP_SCALE = 0.70
+_SUP_RAISE = 0.38
+_FRAC_HPAD = 3
+_FRAC_VPAD = 1
 
 _FUNCTION_HINTS = {
     "sin": "sin(x)", "cos": "cos(x)", "tan": "tan(x)",
@@ -309,6 +310,10 @@ class MathEditor:
         # Unit sub-cursor: -1 = not in unit, 1..len(name)-1 = position within unit
         # When active, the unit is at slot.items[slot.cursor_pos - 1]
         self._unit_cursor: int = -1
+
+        # Text sub-cursor: -1 = not in text, 0..len(text) = position within EText
+        # When active, the EText is at slot.items[slot.cursor_pos - 1]
+        self._text_cursor: int = -1
 
         self.render()
         self._start_blink()
@@ -461,6 +466,7 @@ class MathEditor:
             self._move_right()
         elif keysym == "Up":
             self._unit_cursor = -1
+            self._text_cursor = -1
             if self._ac_visible and self._ac_suggestions:
                 self._ac_selected = max(0, self._ac_selected - 1)
                 self._hide_autocomplete()
@@ -469,6 +475,7 @@ class MathEditor:
                 self._move_up()
         elif keysym == "Down":
             self._unit_cursor = -1
+            self._text_cursor = -1
             if self._ac_visible and self._ac_suggestions:
                 self._ac_selected = min(len(self._ac_suggestions) - 1, self._ac_selected + 1)
                 self._hide_autocomplete()
@@ -477,6 +484,7 @@ class MathEditor:
                 self._move_down()
         elif keysym == "Tab":
             self._unit_cursor = -1
+            self._text_cursor = -1
             if not (event.state & 0x1) and self._ac_visible:
                 self._accept_autocomplete()
             elif event.state & 0x1:
@@ -485,12 +493,15 @@ class MathEditor:
                 self._tab_next()
         elif keysym == "Home":
             self._unit_cursor = -1
+            self._text_cursor = -1
             self._active_slot.cursor_pos = 0
         elif keysym == "End":
             self._unit_cursor = -1
+            self._text_cursor = -1
             self._active_slot.cursor_pos = len(self._active_slot.items)
         elif char == " ":
             self._unit_cursor = -1
+            self._text_cursor = -1
             slot = self._active_slot
             ends_with_eq = (slot.cursor_pos > 0
                             and isinstance(slot.items[slot.cursor_pos - 1], EOp)
@@ -500,6 +511,7 @@ class MathEditor:
             return "switch_to_text"
         elif char and ord(char) >= 32:
             self._unit_cursor = -1
+            self._text_cursor = -1
             self._save_undo()
             self._insert_char(char)
         else:
@@ -514,6 +526,17 @@ class MathEditor:
     def _insert_char(self, ch: str):
         slot = self._active_slot
         pos = slot.cursor_pos
+
+        # If inside a text item, insert at the text cursor position
+        if self._text_cursor > 0 and pos > 0 and isinstance(slot.items[pos - 1], EText):
+            txt = slot.items[pos - 1]
+            tc = self._text_cursor
+            if ch.isalnum() or ch in "_.":
+                txt.text = txt.text[:tc] + ch + txt.text[tc:]
+                self._text_cursor += 1
+            else:
+                self._text_cursor = -1
+            return
 
         if ch == ".":
             if pos > 0 and isinstance(slot.items[pos - 1], EText):
@@ -935,6 +958,22 @@ class MathEditor:
                     slot.cursor_pos -= 1
                 return
 
+        # If inside a text item, delete character at _text_cursor - 1
+        if self._text_cursor > 0:
+            txt = slot.items[pos - 1]
+            if isinstance(txt, EText):
+                tc = self._text_cursor
+                txt.text = txt.text[:tc - 1] + txt.text[tc:]
+                self._text_cursor -= 1
+                if len(txt.text) == 0:
+                    slot.items.pop(pos - 1)
+                    slot.cursor_pos = pos - 1
+                    self._text_cursor = -1
+                elif self._text_cursor == 0:
+                    self._text_cursor = -1
+                    slot.cursor_pos -= 1
+                return
+
         if pos > 0:
             item = slot.items[pos - 1]
             if isinstance(item, EText) and len(item.text) > 1:
@@ -974,6 +1013,22 @@ class MathEditor:
                 return
             else:
                 self._unit_cursor = -1
+
+        # If inside a text item, delete character at _text_cursor
+        if self._text_cursor > 0:
+            txt = slot.items[pos - 1]
+            if isinstance(txt, EText) and self._text_cursor < len(txt.text):
+                tc = self._text_cursor
+                txt.text = txt.text[:tc] + txt.text[tc + 1:]
+                if len(txt.text) == 0:
+                    slot.items.pop(pos - 1)
+                    slot.cursor_pos = pos - 1
+                    self._text_cursor = -1
+                elif self._text_cursor >= len(txt.text):
+                    self._text_cursor = -1
+                return
+            else:
+                self._text_cursor = -1
 
         if pos < len(slot.items):
             item = slot.items[pos]
@@ -1080,10 +1135,20 @@ class MathEditor:
                 self._unit_cursor = -1
                 slot.cursor_pos -= 1
             return
+        # If inside a text item, move within it
+        if self._text_cursor > 0:
+            self._text_cursor -= 1
+            if self._text_cursor == 0:
+                self._text_cursor = -1
+                slot.cursor_pos -= 1
+            return
         if slot.cursor_pos > 0:
             item = slot.items[slot.cursor_pos - 1]
             if isinstance(item, EUnit) and len(item.name) > 1:
                 self._unit_cursor = len(item.name) - 1
+                return
+            if isinstance(item, EText) and len(item.text) > 1:
+                self._text_cursor = len(item.text) - 1
                 return
             slot.cursor_pos -= 1
             item = slot.items[slot.cursor_pos]
@@ -1162,10 +1227,24 @@ class MathEditor:
             else:
                 self._unit_cursor = -1
             return
+        # If inside a text item, move within it
+        if self._text_cursor > 0:
+            txt = slot.items[slot.cursor_pos - 1]
+            if isinstance(txt, EText) and self._text_cursor < len(txt.text):
+                self._text_cursor += 1
+                if self._text_cursor >= len(txt.text):
+                    self._text_cursor = -1
+            else:
+                self._text_cursor = -1
+            return
         if slot.cursor_pos < len(slot.items):
             item = slot.items[slot.cursor_pos]
             if isinstance(item, EUnit) and len(item.name) > 1:
                 self._unit_cursor = 1
+                slot.cursor_pos += 1
+                return
+            if isinstance(item, EText) and len(item.text) > 1:
+                self._text_cursor = 1
                 slot.cursor_pos += 1
                 return
             if isinstance(item, EFraction):
@@ -1418,7 +1497,7 @@ class MathEditor:
             val_text = self._fmt(val.value)
             unit_str = val.display_unit if hasattr(val, "display_unit") else str(val.unit)
             tid = self.canvas.create_text(
-                rx, base_y, text=val_text, anchor="nw", font=f, fill=_RESULT_COLOR)
+                rx, base_y, text=val_text, anchor="nw", font=f, fill=_NUMBER_COLOR)
             self._items.append(tid)
             if unit_str:
                 vw, _ = self._text_size(val_text, self.font_size)
@@ -1431,7 +1510,7 @@ class MathEditor:
             res_text = self._fmt(val)
             tid = self.canvas.create_text(
                 rx, base_y, text=res_text,
-                anchor="nw", font=f, fill=_RESULT_COLOR)
+                anchor="nw", font=f, fill=_NUMBER_COLOR)
             self._items.append(tid)
 
     def _render_slot(self, slot: EditSlot, x: float, y: float, fs: int) -> _Box:
@@ -1472,6 +1551,14 @@ class MathEditor:
                     and i == slot.cursor_pos - 1 and isinstance(item, EUnit)):
                 uc_x = self._unit_cursor_x(item, cx, fs)
                 self._cursor_rx = uc_x
+                self._cursor_ry = y
+                self._cursor_rh = total_h
+
+            # If cursor is inside this text item, compute sub-cursor position
+            if (slot is self._active_slot and self._text_cursor > 0
+                    and i == slot.cursor_pos - 1 and isinstance(item, EText)):
+                tc_x = self._text_cursor_x(item, cx, item_y, fs)
+                self._cursor_rx = tc_x
                 self._cursor_ry = y
                 self._cursor_rh = total_h
 
@@ -1607,8 +1694,8 @@ class MathEditor:
         nb = self._measure_slot(item.numerator, fs)
         db = self._measure_slot(item.denominator, fs)
         w = max(nb.width, db.width) + 2 * _FRAC_HPAD
-        h = nb.height + db.height + 2 * _FRAC_VPAD + 2
-        return _Box(w, h, nb.height + _FRAC_VPAD + 1)
+        h = nb.height + db.height + 2 * _FRAC_VPAD + 1
+        return _Box(w, h, nb.height + _FRAC_VPAD)
 
     def _measure_sup(self, item: ESuperscript, fs: int) -> _Box:
         sup_fs = max(int(fs * _SUP_SCALE), 6)
@@ -1723,11 +1810,12 @@ class MathEditor:
         self._render_slot(item.numerator, num_x, y, fs)
 
         bar_y = y + nb.height + _FRAC_VPAD
+        line_w = 1.2 if fs >= 10 else 1
         lid = self.canvas.create_line(x, bar_y, x + bar_w, bar_y,
-                                       fill=_OPERATOR_COLOR, width=1)
+                                       fill=_OPERATOR_COLOR, width=line_w)
         self._items.append(lid)
 
-        den_y = bar_y + _FRAC_VPAD + 2
+        den_y = bar_y + _FRAC_VPAD + 1
         den_x = x + (bar_w - db.width) / 2
         self._render_slot(item.denominator, den_x, den_y, fs)
 
@@ -2147,6 +2235,8 @@ class MathEditor:
         i = 0
         sup_fs = max(int(fs * _SUP_SCALE), 6)
         f_sup = self._get_font(sup_fs)
+        base_h = self._line_height(fs)
+        raise_amt = base_h * _SUP_RAISE
         while i < len(name):
             if name[i] == '^':
                 i += 1
@@ -2155,7 +2245,8 @@ class MathEditor:
                     exp_text += name[i]
                     i += 1
                 if exp_text:
-                    tid = self.canvas.create_text(cx, y, text=exp_text,
+                    sup_y = y - raise_amt
+                    tid = self.canvas.create_text(cx, sup_y, text=exp_text,
                                                   anchor="nw", font=f_sup, fill=_UNIT_COLOR)
                     self._items.append(tid)
                     ew, _ = self._text_size(exp_text, sup_fs)
@@ -2203,6 +2294,33 @@ class MathEditor:
                 cx += cw
                 ci += 1
         return cx
+
+    def _text_cursor_x(self, item: EText, item_x: float, item_y: float, fs: int) -> float:
+        """Compute pixel x for cursor at _text_cursor within an EText."""
+        text = item.text or ""
+        style = self._text_style(text)
+        target = self._text_cursor
+
+        if "." in text and style == "italic" and text and not text[0].isdigit():
+            parts = text.split(".", 1)
+            dp0 = _GREEK_DISPLAY.get(parts[0], parts[0])
+            if target <= len(parts[0]):
+                prefix = dp0[:target]
+                w, _ = self._text_size(prefix, fs, style)
+                return item_x + w
+            else:
+                base_w, _ = self._text_size(dp0, fs, style)
+                sub_idx = target - len(parts[0]) - 1
+                dp1 = _GREEK_DISPLAY.get(parts[1], parts[1])
+                sub_fs = max(int(fs * 0.70), 6)
+                prefix = dp1[:sub_idx]
+                sw, _ = self._text_size(prefix, sub_fs, style)
+                return item_x + base_w + sw
+
+        display = _GREEK_DISPLAY.get(text, text)
+        prefix = display[:target]
+        w, _ = self._text_size(prefix, fs, style)
+        return item_x + w
 
     # ---- Cursor ----
 
