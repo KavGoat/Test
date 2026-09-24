@@ -489,6 +489,15 @@ class MathEditor:
         elif keysym == "End":
             self._unit_cursor = -1
             self._active_slot.cursor_pos = len(self._active_slot.items)
+        elif char == " ":
+            self._unit_cursor = -1
+            slot = self._active_slot
+            ends_with_eq = (slot.cursor_pos > 0
+                            and isinstance(slot.items[slot.cursor_pos - 1], EOp)
+                            and slot.items[slot.cursor_pos - 1].op in ("=", ":"))
+            if ends_with_eq:
+                return "consumed"
+            return "switch_to_text"
         elif char and ord(char) >= 32:
             self._unit_cursor = -1
             self._save_undo()
@@ -562,8 +571,12 @@ class MathEditor:
                 slot = self.root
                 pos = len(slot.items)
                 slot.cursor_pos = pos
-            slot.items.insert(pos, EOp("="))
-            slot.cursor_pos = pos + 1
+            if self._should_auto_define(slot, pos):
+                slot.items.insert(pos, EOp(":"))
+                slot.cursor_pos = pos + 1
+            else:
+                slot.items.insert(pos, EOp("="))
+                slot.cursor_pos = pos + 1
             return
 
         if ch in ("+", "-", "*", "<", ">", "!"):
@@ -660,6 +673,31 @@ class MathEditor:
         else:
             slot.items.insert(pos, EText(ch))
             slot.cursor_pos = pos + 1
+
+    def _should_auto_define(self, slot: EditSlot, pos: int) -> bool:
+        if slot is not self.root:
+            return False
+        has_op = any(isinstance(it, EOp) for it in slot.items[:pos])
+        if has_op:
+            return False
+        name_parts = []
+        for it in slot.items[:pos]:
+            if isinstance(it, EText):
+                name_parts.append(it.text)
+            elif isinstance(it, EParens):
+                name_parts.append("()")
+            else:
+                return False
+        if not name_parts:
+            return False
+        name = "".join(p for p in name_parts if p != "()")
+        if not name or not (name[0].isalpha() or name[0] == "_"):
+            return False
+        if self._eval_context is not None:
+            val = self._eval_context.get_variable(name)
+            if val is not None:
+                return False
+        return True
 
     def _do_fraction(self):
         slot = self._active_slot
@@ -1280,7 +1318,7 @@ class MathEditor:
             return
 
         text = self.to_text().strip()
-        if text.endswith("="):
+        if text.endswith("=") and not text.endswith(":="):
             expr_text = text[:-1].strip()
             if expr_text:
                 try:
@@ -1314,9 +1352,9 @@ class MathEditor:
         pre_box = self._measure_slot_only(self.root, self.font_size)
         total_w = pre_box.width + 8
         if self._eval_result is not None or self._eval_error:
-            eq_w, _ = self._text_size(" = ", self.font_size)
+            sp_w, _ = self._text_size(" ", self.font_size)
             res_w = self._measure_result_width()
-            total_w += eq_w + res_w + 8
+            total_w += sp_w + res_w + 8
         bg_id = self.canvas.create_rectangle(
             self.x - 2, self.y - 2,
             self.x + max(total_w, 20), self.y + max(pre_box.height, 16) + 2,
@@ -1365,11 +1403,8 @@ class MathEditor:
         f = self._get_font(self.font_size)
         base_y = ry + box.baseline - self._line_height(self.font_size) * 0.6
 
-        eq_id = self.canvas.create_text(
-            rx, base_y, text=" = ", anchor="nw", font=f, fill=_OPERATOR_COLOR)
-        self._items.append(eq_id)
-        eq_w, _ = self._text_size(" = ", self.font_size)
-        rx += eq_w
+        sp_w, _ = self._text_size(" ", self.font_size)
+        rx += sp_w
 
         if self._eval_error:
             tid = self.canvas.create_text(

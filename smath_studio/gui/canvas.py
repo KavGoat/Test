@@ -2334,6 +2334,8 @@ class WorksheetCanvas(ttk.Frame):
                 self._commit_edit()
             elif result == "cancel":
                 self._cancel_edit()
+            elif result == "switch_to_text":
+                self._switch_math_to_text()
             return "break"
 
         keysym = event.keysym
@@ -2423,11 +2425,12 @@ class WorksheetCanvas(ttk.Frame):
             self.recalculate()
             return "break"
 
-        if char and ord(char) >= 32 and keysym not in (
-            "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9",
-            "F10", "F11", "F12",
-        ):
-            self._start_editing(self._cursor_x, self._cursor_y, initial_text=char)
+        if char == "'":
+            self._start_editing(self._cursor_x, self._cursor_y)
+            return "break"
+
+        if char == '"':
+            self._start_editing(self._cursor_x, self._cursor_y, mode="text")
             return "break"
 
         return None
@@ -2534,47 +2537,14 @@ class WorksheetCanvas(ttk.Frame):
         self._canvas.focus_set()
 
     def _try_unit_change(self, region: Region, rr: _RenderedRegion, cx: int, cy: int) -> bool:
-        """Check if click is on a result unit and offer to change it. Returns True if handled."""
+        """Check if click is on a result unit; if so, enter edit mode. Returns True if handled."""
         if region.math is None or not region.math.result_elements:
             return False
         x1, y1, x2, y2 = rr.bbox
         mid_x = (x1 + x2) / 2
         if cx < mid_x:
             return False
-        if self._ctx is None:
-            return False
-        try:
-            val = region.math.input_expr.evaluate(self._ctx)
-        except Exception:
-            return False
-        if not isinstance(val, Quantity):
-            return False
-        from tkinter import simpledialog
-        current_unit = val.display_unit if hasattr(val, 'display_unit') else str(val.unit)
-        new_unit = simpledialog.askstring(
-            "Convert Unit",
-            f"Current unit: {current_unit}\nEnter new unit:",
-            parent=self._canvas,
-        )
-        if not new_unit or not new_unit.strip():
-            return True
-        new_unit = new_unit.strip()
-        registry = self._ctx.get_unit_registry()
-        if registry is None:
-            return True
-        target_unit = registry.lookup(new_unit)
-        if target_unit is None:
-            return True
-        try:
-            converted = val.to(target_unit)
-            converted.display_unit = new_unit
-            if isinstance(region.math.input_expr, BinaryOp) and region.math.input_expr.operator == ":":
-                var_name = _expr_to_text(region.math.input_expr.left)
-                self._ctx.set_variable(var_name, converted)
-            self._evaluate_and_render()
-        except Exception:
-            pass
-        return True
+        return False
 
     # ------------------------------------------------------------------
     # Public editing API (called by app.py)
@@ -3238,6 +3208,19 @@ class WorksheetCanvas(ttk.Frame):
                 tc.paragraphs.append(TextParagraph(text=line))
             region.text_contents.append(tc)
             self._worksheet.regions.append(region)
+
+    def _switch_math_to_text(self):
+        if self._math_editor is None:
+            return
+        text = self._math_editor.to_text().strip()
+        x = self._cursor_x
+        y = self._cursor_y
+        editing_idx = self._edit_region_idx
+        self._math_editor.destroy()
+        self._math_editor = None
+        self._editing = False
+        self._edit_region_idx = None
+        self._start_editing(x, y, initial_text=text, editing_idx=editing_idx, mode="text")
 
     def _cancel_edit(self):
         if self._math_editor is not None:
