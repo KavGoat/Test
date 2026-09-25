@@ -294,6 +294,7 @@ class MathEditor:
 
         # Undo stack
         self._undo_stack: list[tuple] = []
+        self._redo_stack: list[tuple] = []
         self._max_undo = 50
 
         # Autocomplete state
@@ -361,11 +362,29 @@ class MathEditor:
         if len(self._undo_stack) >= self._max_undo:
             self._undo_stack.pop(0)
         self._undo_stack.append(state)
+        self._redo_stack.clear()
 
     def _do_undo(self):
         if not self._undo_stack:
             return
+        redo_state = (copy.deepcopy(self.root), copy.deepcopy(self._slot_stack))
+        self._redo_stack.append(redo_state)
         root_copy, stack_copy = self._undo_stack.pop()
+        self.root = root_copy
+        self._slot_stack = stack_copy
+        if self._slot_stack:
+            self._active_slot = self._slot_stack[-1]
+        else:
+            self._active_slot = self.root
+        if self._active_slot.cursor_pos > len(self._active_slot.items):
+            self._active_slot.cursor_pos = len(self._active_slot.items)
+
+    def _do_redo(self):
+        if not self._redo_stack:
+            return
+        undo_state = (copy.deepcopy(self.root), copy.deepcopy(self._slot_stack))
+        self._undo_stack.append(undo_state)
+        root_copy, stack_copy = self._redo_stack.pop()
         self.root = root_copy
         self._slot_stack = stack_copy
         if self._slot_stack:
@@ -563,6 +582,12 @@ class MathEditor:
 
         if ctrl and keysym.lower() == "z":
             self._do_undo()
+            self._update_eval()
+            self.render()
+            return "consumed"
+
+        if ctrl and keysym.lower() == "y":
+            self._do_redo()
             self._update_eval()
             self.render()
             return "consumed"

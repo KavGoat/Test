@@ -353,7 +353,7 @@ class MathRenderer:
         right = self._measure_node(node.right, fs, ctx)
         op_text = _DISPLAY_OPS.get(node.operator, node.operator)
         if node.operator == "*" and _is_implicit_mult(node):
-            ow, oh = self._text_size(c, " ", fs)
+            ow, oh = self._text_size(c, " ", fs)
         else:
             ow, oh = self._text_size(c, f" {op_text} ", fs)
         lp = _needs_parens(node.left, node.operator, False)
