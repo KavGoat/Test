@@ -426,6 +426,51 @@ class MathEditor:
         self._unit_cursor = -1
         self._text_cursor = -1
 
+    def _wrap_selection(self, ch: str):
+        """Wrap selected items in a structure: ( → parens, / → fraction, ^ → superscript."""
+        if not self._has_selection():
+            return
+        lo, hi = self._sel_range()
+        slot = self._active_slot
+        selected = slot.items[lo:hi]
+        del slot.items[lo:hi]
+        self._sel_anchor = None
+        if ch == "(":
+            parens = EParens()
+            parens.inner.items = selected
+            parens.inner.cursor_pos = len(selected)
+            slot.items.insert(lo, parens)
+            slot.cursor_pos = lo + 1
+        elif ch == "/":
+            frac = EFraction()
+            frac.numerator.items = selected
+            frac.numerator.cursor_pos = len(selected)
+            slot.items.insert(lo, frac)
+            slot.cursor_pos = lo + 1
+            self._slot_stack.append(slot)
+            self._active_slot = frac.denominator
+            self._active_slot.cursor_pos = 0
+        elif ch == "^":
+            sup = ESuperscript()
+            if selected:
+                last = selected[-1]
+                rest = selected[:-1]
+                for j, item in enumerate(rest):
+                    slot.items.insert(lo + j, item)
+                sup_pos = lo + len(rest)
+                slot.items.insert(sup_pos, sup)
+                slot.cursor_pos = sup_pos + 1
+                self._slot_stack.append(slot)
+                self._active_slot = sup.exponent
+                self._active_slot.items = [last] if isinstance(last, (EText, EOp)) else [last]
+                self._active_slot.cursor_pos = len(self._active_slot.items)
+            else:
+                slot.items.insert(lo, sup)
+                slot.cursor_pos = lo + 1
+                self._slot_stack.append(slot)
+                self._active_slot = sup.exponent
+                self._active_slot.cursor_pos = 0
+
     def _do_copy(self):
         if not self._has_selection():
             return
@@ -655,6 +700,24 @@ class MathEditor:
         if keysym in ("Return", "KP_Enter"):
             return "commit"
         if keysym == "Escape":
+            if self._has_selection():
+                self._clear_selection()
+                self.render()
+                return "consumed"
+            if self._slot_stack:
+                parent = self._slot_stack[-1]
+                for i, item in enumerate(parent.items):
+                    children = self._get_child_slots(item)
+                    if self._active_slot in children:
+                        self._active_slot = self._slot_stack.pop()
+                        self._active_slot.cursor_pos = i + 1
+                        self._update_eval()
+                        self.render()
+                        return "consumed"
+                self._active_slot = self._slot_stack.pop()
+                self._update_eval()
+                self.render()
+                return "consumed"
             return "cancel"
 
         if ctrl and keysym.lower() == "z":
@@ -868,9 +931,12 @@ class MathEditor:
             self._unit_cursor = -1
             self._text_cursor = -1
             self._save_undo()
-            if self._has_selection():
-                self._delete_selection()
-            self._insert_char(char)
+            if self._has_selection() and char in ("(", "/", "^"):
+                self._wrap_selection(char)
+            else:
+                if self._has_selection():
+                    self._delete_selection()
+                self._insert_char(char)
         else:
             return "consumed"
 
@@ -1185,7 +1251,6 @@ class MathEditor:
                                 self._active_slot = self._slot_stack.pop()
                                 self._active_slot.cursor_pos = i + 1
                                 return
-            self._active_slot = self._slot_stack.pop()
 
     def _do_abs(self):
         slot = self._active_slot
@@ -2884,7 +2949,9 @@ class MathEditor:
         if prev_is_close and cur_is_open:
             return True
         if prev_is_var and cur_is_open and not isinstance(cur, EFraction):
-            pass
+            name = prev.text if isinstance(prev, EText) else ""
+            if name.lower() not in {fn.lower() for fn in _FUNCTION_NAMES}:
+                return True
         return False
 
     def _slot_to_text(self, slot: EditSlot) -> str:
