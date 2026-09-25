@@ -873,6 +873,10 @@ class MathEditor:
         has_op = any(isinstance(it, EOp) for it in slot.items[:pos])
         if has_op:
             return False
+        has_structured = any(isinstance(it, (EFraction, ESuperscript, ESqrt, EAbs))
+                             for it in slot.items[:pos])
+        if has_structured:
+            return False
         name_parts = []
         for it in slot.items[:pos]:
             if isinstance(it, EText):
@@ -885,6 +889,10 @@ class MathEditor:
             return False
         name = "".join(p for p in name_parts if p != "()")
         if not name or not (name[0].isalpha() or name[0] == "_"):
+            return False
+        if name.lower() in {fn.lower() for fn in _FUNCTION_NAMES}:
+            return False
+        if name in _BUILTIN_VARS:
             return False
         if self._eval_context is not None:
             val = self._eval_context.get_variable(name)
