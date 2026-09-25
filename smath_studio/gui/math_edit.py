@@ -316,6 +316,10 @@ class MathEditor:
         # When active, the EText is at slot.items[slot.cursor_pos - 1]
         self._text_cursor: int = -1
 
+        # Selection: anchor position in the active slot (None = no selection)
+        # Selected range is min(anchor, cursor_pos) .. max(anchor, cursor_pos)
+        self._sel_anchor: Optional[int] = None
+
         self.render()
         self._start_blink()
 
@@ -395,6 +399,78 @@ class MathEditor:
             self._active_slot.cursor_pos = len(self._active_slot.items)
 
     # ================================================================
+    # Selection
+    # ================================================================
+
+    def _has_selection(self) -> bool:
+        return self._sel_anchor is not None and self._sel_anchor != self._active_slot.cursor_pos
+
+    def _sel_range(self) -> tuple[int, int]:
+        if self._sel_anchor is None:
+            return (self._active_slot.cursor_pos, self._active_slot.cursor_pos)
+        a = self._sel_anchor
+        b = self._active_slot.cursor_pos
+        return (min(a, b), max(a, b))
+
+    def _clear_selection(self):
+        self._sel_anchor = None
+
+    def _delete_selection(self):
+        if not self._has_selection():
+            return
+        lo, hi = self._sel_range()
+        slot = self._active_slot
+        del slot.items[lo:hi]
+        slot.cursor_pos = lo
+        self._sel_anchor = None
+        self._unit_cursor = -1
+        self._text_cursor = -1
+
+    def _do_copy(self):
+        if not self._has_selection():
+            return
+        lo, hi = self._sel_range()
+        items = self._active_slot.items[lo:hi]
+        text_parts = []
+        for item in items:
+            if isinstance(item, EText):
+                text_parts.append(item.text)
+            elif isinstance(item, EOp):
+                text_parts.append(item.op)
+            elif isinstance(item, EFraction):
+                text_parts.append("/")
+            elif isinstance(item, ESuperscript):
+                text_parts.append("^")
+            elif isinstance(item, EParens):
+                text_parts.append("()")
+            else:
+                text_parts.append("?")
+        text = "".join(text_parts)
+        try:
+            self.canvas.clipboard_clear()
+            self.canvas.clipboard_append(text)
+        except Exception:
+            pass
+        self._clipboard_items = copy.deepcopy(items)
+
+    def _do_cut(self):
+        self._do_copy()
+        self._delete_selection()
+
+    def _do_paste(self):
+        if self._has_selection():
+            self._delete_selection()
+        if hasattr(self, '_clipboard_items') and self._clipboard_items:
+            items = copy.deepcopy(self._clipboard_items)
+            slot = self._active_slot
+            pos = slot.cursor_pos
+            for item in items:
+                slot.items.insert(pos, item)
+                pos += 1
+            slot.cursor_pos = pos
+            self._clear_selection()
+
+    # ================================================================
     # Click-to-position
     # ================================================================
 
@@ -407,6 +483,7 @@ class MathEditor:
         """
         self._unit_cursor = -1
         self._text_cursor = -1
+        self._clear_selection()
         self._slot_stack = []
         self._active_slot = self.root
         self._click_into_slot(self.root, self.x, self.y, self.font_size, cx, cy)
@@ -582,12 +659,32 @@ class MathEditor:
 
         if ctrl and keysym.lower() == "z":
             self._do_undo()
+            self._clear_selection()
             self._update_eval()
             self.render()
             return "consumed"
 
         if ctrl and keysym.lower() == "y":
             self._do_redo()
+            self._clear_selection()
+            self._update_eval()
+            self.render()
+            return "consumed"
+
+        if ctrl and keysym.lower() == "c":
+            self._do_copy()
+            return "consumed"
+
+        if ctrl and keysym.lower() == "x":
+            self._save_undo()
+            self._do_cut()
+            self._update_eval()
+            self.render()
+            return "consumed"
+
+        if ctrl and keysym.lower() == "v":
+            self._save_undo()
+            self._do_paste()
             self._update_eval()
             self.render()
             return "consumed"
@@ -649,19 +746,67 @@ class MathEditor:
             self.render()
             return "consumed"
 
+        if ctrl and keysym.lower() == "a":
+            self._unit_cursor = -1
+            self._text_cursor = -1
+            self._sel_anchor = 0
+            self._active_slot.cursor_pos = len(self._active_slot.items)
+            self._update_eval()
+            self.render()
+            return "consumed"
+
         if keysym == "BackSpace":
             self._save_undo()
-            self._do_backspace()
+            if self._has_selection():
+                self._delete_selection()
+            else:
+                self._do_backspace()
         elif keysym == "Delete":
             self._save_undo()
-            self._do_delete()
+            if self._has_selection():
+                self._delete_selection()
+            else:
+                self._do_delete()
         elif keysym == "Left":
-            self._move_left()
+            if shift:
+                self._unit_cursor = -1
+                self._text_cursor = -1
+                if self._sel_anchor is None:
+                    self._sel_anchor = self._active_slot.cursor_pos
+                if self._active_slot.cursor_pos > 0:
+                    self._active_slot.cursor_pos -= 1
+            else:
+                if self._has_selection():
+                    lo, _ = self._sel_range()
+                    self._active_slot.cursor_pos = lo
+                    self._clear_selection()
+                    self._unit_cursor = -1
+                    self._text_cursor = -1
+                else:
+                    self._clear_selection()
+                    self._move_left()
         elif keysym == "Right":
-            self._move_right()
+            if shift:
+                self._unit_cursor = -1
+                self._text_cursor = -1
+                if self._sel_anchor is None:
+                    self._sel_anchor = self._active_slot.cursor_pos
+                if self._active_slot.cursor_pos < len(self._active_slot.items):
+                    self._active_slot.cursor_pos += 1
+            else:
+                if self._has_selection():
+                    _, hi = self._sel_range()
+                    self._active_slot.cursor_pos = hi
+                    self._clear_selection()
+                    self._unit_cursor = -1
+                    self._text_cursor = -1
+                else:
+                    self._clear_selection()
+                    self._move_right()
         elif keysym == "Up":
             self._unit_cursor = -1
             self._text_cursor = -1
+            self._clear_selection()
             if self._ac_visible and self._ac_suggestions:
                 self._ac_selected = max(0, self._ac_selected - 1)
                 self._hide_autocomplete()
@@ -671,6 +816,7 @@ class MathEditor:
         elif keysym == "Down":
             self._unit_cursor = -1
             self._text_cursor = -1
+            self._clear_selection()
             if self._ac_visible and self._ac_suggestions:
                 self._ac_selected = min(len(self._ac_suggestions) - 1, self._ac_selected + 1)
                 self._hide_autocomplete()
@@ -680,6 +826,7 @@ class MathEditor:
         elif keysym == "Tab":
             self._unit_cursor = -1
             self._text_cursor = -1
+            self._clear_selection()
             if not (event.state & 0x1) and self._ac_visible:
                 self._accept_autocomplete()
             elif event.state & 0x1:
@@ -689,14 +836,27 @@ class MathEditor:
         elif keysym == "Home":
             self._unit_cursor = -1
             self._text_cursor = -1
+            if shift:
+                if self._sel_anchor is None:
+                    self._sel_anchor = self._active_slot.cursor_pos
+            else:
+                self._clear_selection()
             self._active_slot.cursor_pos = 0
         elif keysym == "End":
             self._unit_cursor = -1
             self._text_cursor = -1
+            if shift:
+                if self._sel_anchor is None:
+                    self._sel_anchor = self._active_slot.cursor_pos
+            else:
+                self._clear_selection()
             self._active_slot.cursor_pos = len(self._active_slot.items)
         elif char == " ":
             self._unit_cursor = -1
             self._text_cursor = -1
+            if self._has_selection():
+                self._save_undo()
+                self._delete_selection()
             slot = self._active_slot
             ends_with_eq = (slot.cursor_pos > 0
                             and isinstance(slot.items[slot.cursor_pos - 1], EOp)
@@ -708,6 +868,8 @@ class MathEditor:
             self._unit_cursor = -1
             self._text_cursor = -1
             self._save_undo()
+            if self._has_selection():
+                self._delete_selection()
             self._insert_char(char)
         else:
             return "consumed"
@@ -947,10 +1109,21 @@ class MathEditor:
         pos = slot.cursor_pos
         frac = EFraction()
 
-        if pos > 0 and isinstance(slot.items[pos - 1], (EText, EParens, ESuperscript)):
-            prev = slot.items.pop(pos - 1)
-            pos -= 1
-            frac.numerator.items.append(prev)
+        # Collect the full "term" before cursor for the numerator:
+        # Walk backwards collecting EText, ESuperscript, EParens, ESqrt, EAbs
+        # (items that form a single multiplicative term), stopping at operators.
+        start = pos
+        while start > 0:
+            prev = slot.items[start - 1]
+            if isinstance(prev, (EText, ESuperscript, EParens, ESqrt, EAbs)):
+                start -= 1
+            else:
+                break
+        if start < pos:
+            num_items = slot.items[start:pos]
+            del slot.items[start:pos]
+            pos = start
+            frac.numerator.items.extend(num_items)
             frac.numerator.cursor_pos = len(frac.numerator.items)
 
         slot.items.insert(pos, frac)
@@ -1787,8 +1960,14 @@ class MathEditor:
             total_h = self._line_height(fs)
             max_bl = total_h * 0.6
 
+        # Compute item x-positions for selection highlighting
+        sel_lo, sel_hi = (-1, -1)
+        if slot is self._active_slot and self._has_selection():
+            sel_lo, sel_hi = self._sel_range()
+
         cx = x
         prev_item = None
+        item_xs: list[float] = []
         for i, (item, mbox) in enumerate(zip(slot.items, measures)):
             if self._needs_implicit_mul(prev_item, item):
                 f = self._get_font(fs)
@@ -1799,12 +1978,22 @@ class MathEditor:
                 self._items.append(did)
                 cx += dw
 
+            item_xs.append(cx)
+
             if slot is self._active_slot and i == slot.cursor_pos:
                 self._cursor_rx = cx
                 self._cursor_ry = y
                 self._cursor_rh = total_h
 
             item_y = y + max_bl - mbox.baseline
+
+            # Draw selection highlight behind selected items
+            if sel_lo <= i < sel_hi:
+                rid = self.canvas.create_rectangle(
+                    cx, y, cx + mbox.width, y + total_h,
+                    fill="#3399ff", outline="")
+                self._items.append(rid)
+
             self._render_item(item, cx, item_y, fs)
 
             # If cursor is inside this unit, compute sub-cursor position
