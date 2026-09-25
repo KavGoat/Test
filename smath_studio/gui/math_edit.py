@@ -726,15 +726,19 @@ class MathEditor:
             return
 
         if ch == "/":
+            self._try_greek_auto(slot)
             self._do_fraction()
             return
         if ch == "^":
+            self._try_greek_auto(slot)
             self._do_superscript()
             return
         if ch == "(":
+            self._try_greek_auto(slot)
             self._do_open_paren()
             return
         if ch == ")":
+            self._try_greek_auto(slot)
             self._do_close_paren()
             return
 
@@ -744,6 +748,8 @@ class MathEditor:
             return
 
         if ch == "=":
+            self._try_greek_auto(slot)
+            pos = slot.cursor_pos
             if pos > 0 and isinstance(slot.items[pos - 1], EOp):
                 prev = slot.items[pos - 1]
                 if prev.op == "<":
@@ -773,6 +779,8 @@ class MathEditor:
             return
 
         if ch in ("+", "-", "*", "<", ">", "!"):
+            self._try_greek_auto(slot)
+            pos = slot.cursor_pos
             slot.items.insert(pos, EOp(ch))
             slot.cursor_pos = pos + 1
             return
@@ -848,21 +856,16 @@ class MathEditor:
                             return
             return
 
-        if pos > 0 and isinstance(slot.items[pos - 1], EText):
+        if pos > 0 and isinstance(slot.items[pos - 1], EUnit):
+            slot.items[pos - 1].name += ch
+        elif pos > 0 and isinstance(slot.items[pos - 1], EText):
             prev_text = slot.items[pos - 1].text
             if ch.isalpha() and prev_text and prev_text[-1].isdigit():
-                if pos < len(slot.items) and isinstance(slot.items[pos], EUnit):
-                    slot.items[pos].name = ch + slot.items[pos].name
-                else:
-                    unit = EUnit(ch)
-                    slot.items.insert(pos, unit)
-                    slot.cursor_pos = pos + 1
+                slot.items.insert(pos, EText(ch))
+                slot.cursor_pos = pos + 1
             else:
                 slot.items[pos - 1].text += ch
-        elif pos > 0 and isinstance(slot.items[pos - 1], EUnit):
-            slot.items[pos - 1].name += ch
-        elif pos < len(slot.items) and isinstance(slot.items[pos], EUnit) and ch.isalpha():
-            slot.items[pos].name = ch + slot.items[pos].name
+                self._try_greek_auto(slot)
         else:
             slot.items.insert(pos, EText(ch))
             slot.cursor_pos = pos + 1
@@ -899,6 +902,20 @@ class MathEditor:
             if val is not None:
                 return False
         return True
+
+    def _try_greek_auto(self, slot: EditSlot):
+        """Auto-convert Greek names as they're typed (e.g. 'pi' -> 'π')."""
+        pos = slot.cursor_pos
+        if pos == 0:
+            return
+        item = slot.items[pos - 1]
+        if not isinstance(item, EText):
+            return
+        text = item.text
+        if text in _GREEK_MAP:
+            item.text = _GREEK_MAP[text]
+        elif text.lower() in _GREEK_MAP and text.lower() != text:
+            pass
 
     def _do_fraction(self):
         slot = self._active_slot
@@ -1170,6 +1187,17 @@ class MathEditor:
                 slot.items.pop(pos - 1)
                 slot.cursor_pos = pos - 1
         elif self._slot_stack:
+            parent = self._slot_stack[-1]
+            for i, pitem in enumerate(parent.items):
+                children = self._get_child_slots(pitem)
+                if slot in children:
+                    contents = self._flatten_structure(pitem)
+                    parent.items.pop(i)
+                    for j, c in enumerate(contents):
+                        parent.items.insert(i + j, c)
+                    self._active_slot = self._slot_stack.pop()
+                    self._active_slot.cursor_pos = i
+                    return
             self._active_slot = self._slot_stack.pop()
 
     def _do_delete(self):
@@ -1735,7 +1763,17 @@ class MathEditor:
             max_bl = total_h * 0.6
 
         cx = x
+        prev_item = None
         for i, (item, mbox) in enumerate(zip(slot.items, measures)):
+            if self._needs_implicit_mul(prev_item, item):
+                f = self._get_font(fs)
+                dw, _ = self._text_size("·", fs)
+                dot_y = y + max_bl - self._line_height(fs) * 0.6
+                did = self.canvas.create_text(cx, dot_y, text="·", anchor="nw",
+                                               font=f, fill="#888888")
+                self._items.append(did)
+                cx += dw
+
             if slot is self._active_slot and i == slot.cursor_pos:
                 self._cursor_rx = cx
                 self._cursor_ry = y
@@ -1761,6 +1799,7 @@ class MathEditor:
                 self._cursor_rh = total_h
 
             cx += mbox.width
+            prev_item = item
 
         if slot is self._active_slot and slot.cursor_pos == len(slot.items):
             self._cursor_rx = cx
@@ -1881,11 +1920,16 @@ class MathEditor:
         total_w = 0.0
         max_bl = 0.0
         max_desc = 0.0
+        prev = None
         for item in slot.items:
+            if self._needs_implicit_mul(prev, item):
+                dw, _ = self._text_size("·", fs)
+                total_w += dw
             m = self._measure_item(item, fs)
             total_w += m.width
             max_bl = max(max_bl, m.baseline)
             max_desc = max(max_desc, m.height - m.baseline)
+            prev = item
         return _Box(total_w, max_bl + max_desc, max_bl)
 
     def _measure_fraction(self, item: EFraction, fs: int) -> _Box:
@@ -2601,9 +2645,33 @@ class MathEditor:
     def to_text(self) -> str:
         return self._slot_to_text(self.root)
 
+    def _needs_implicit_mul(self, prev, cur) -> bool:
+        """Check if implicit multiplication operator is needed between items."""
+        if prev is None:
+            return False
+        prev_is_num = isinstance(prev, EText) and prev.text and prev.text[-1].isdigit()
+        prev_is_var = isinstance(prev, EText) and prev.text and prev.text[-1].isalpha()
+        prev_is_close = isinstance(prev, (EParens, EAbs, ESuperscript))
+        cur_is_var = isinstance(cur, EText) and cur.text and cur.text[0].isalpha()
+        cur_is_open = isinstance(cur, (EParens, ESqrt, EAbs, EFraction))
+        if prev_is_num and cur_is_var:
+            return True
+        if prev_is_num and cur_is_open:
+            return True
+        if prev_is_close and cur_is_var:
+            return True
+        if prev_is_close and cur_is_open:
+            return True
+        if prev_is_var and cur_is_open and not isinstance(cur, EFraction):
+            pass
+        return False
+
     def _slot_to_text(self, slot: EditSlot) -> str:
         parts: list[str] = []
+        prev_item = None
         for item in slot.items:
+            if self._needs_implicit_mul(prev_item, item):
+                parts.append("*")
             if isinstance(item, EText):
                 parts.append(item.text)
             elif isinstance(item, EOp):
@@ -2687,6 +2755,7 @@ class MathEditor:
                 parts.append(f"nthroot({rad}, {idx})")
             elif isinstance(item, EUnit):
                 parts.append(f"'{item.name}'")
+            prev_item = item
         return "".join(parts)
 
     # ================================================================
