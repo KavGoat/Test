@@ -1440,6 +1440,13 @@ class MathEditor:
                 item.text = item.text[1:]
             elif isinstance(item, EUnit) and len(item.name) > 1:
                 item.name = item.name[1:]
+            elif isinstance(item, (EFraction, ESuperscript, EParens, ESqrt, EAbs,
+                                    EMatrix, ESummation, EProduct, EIntegral,
+                                    ERange, EDerivative, ESystem)):
+                contents = self._flatten_structure(item)
+                slot.items.pop(pos)
+                for j, c in enumerate(contents):
+                    slot.items.insert(pos + j, c)
             else:
                 slot.items.pop(pos)
 
