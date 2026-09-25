@@ -521,7 +521,27 @@ class MathEditor:
         self._slot_stack = []
         self._active_slot = self.root
         self._click_into_slot(self.root, self.x, self.y, self.font_size, cx, cy)
+        self._sel_anchor = self._active_slot.cursor_pos
         self._update_eval()
+        self.render()
+
+    def handle_drag(self, cx: float, cy: float):
+        """Handle mouse drag to extend selection from click anchor."""
+        old_slot = self._active_slot
+        old_stack = list(self._slot_stack)
+        old_anchor = self._sel_anchor
+        self._slot_stack = []
+        self._active_slot = self.root
+        self._click_into_slot(self.root, self.x, self.y, self.font_size, cx, cy)
+        if self._active_slot is not old_slot:
+            self._active_slot = old_slot
+            self._slot_stack = old_stack
+            new_pos = self._find_closest_pos_x(
+                old_slot, self.x, self.font_size, cx)
+            self._active_slot.cursor_pos = new_pos
+        self._sel_anchor = old_anchor
+        self._unit_cursor = -1
+        self._text_cursor = -1
         self.render()
 
     def _click_into_slot(self, slot: EditSlot, x: float, y: float, fs: int,

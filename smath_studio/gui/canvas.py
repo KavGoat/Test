@@ -2140,6 +2140,11 @@ class WorksheetCanvas(ttk.Frame):
 
     def _on_drag(self, event: tk.Event):
         """Handle mouse drag to move selected region, resize, or draw rubberband."""
+        if self._editing and self._math_editor is not None:
+            cx = int(self._canvas.canvasx(event.x))
+            cy = int(self._canvas.canvasy(event.y))
+            self._math_editor.handle_drag(cx, cy)
+            return
         if self._editing:
             return
         self._auto_scroll_on_drag(event)
