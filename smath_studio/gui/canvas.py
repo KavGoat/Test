@@ -2478,9 +2478,56 @@ class WorksheetCanvas(ttk.Frame):
                     self._select_region(i)
                     break
 
+    def _build_context_up_to(self, edit_y: int, edit_x: int, edit_idx: Optional[int] = None) -> EvalContext:
+        """Build an eval context containing only definitions above the editing position."""
+        ctx = create_default_context()
+        if self._worksheet is None:
+            return ctx
+        ctx._precision = self._worksheet.settings.calculation.precision
+        ctx._exponential_threshold = self._worksheet.settings.calculation.exponential_threshold
+
+        all_regions = self._flatten_regions(self._worksheet.regions)
+        row_threshold = 15
+        all_regions.sort(key=lambda r: (r.top, r.left))
+        if all_regions:
+            rows: list[list[Region]] = []
+            current_row: list[Region] = [all_regions[0]]
+            current_y = all_regions[0].top
+            for r in all_regions[1:]:
+                if abs(r.top - current_y) <= row_threshold:
+                    current_row.append(r)
+                else:
+                    current_row.sort(key=lambda r2: r2.left)
+                    rows.append(current_row)
+                    current_row = [r]
+                    current_y = r.top
+            current_row.sort(key=lambda r2: r2.left)
+            rows.append(current_row)
+            all_regions = []
+            for row in rows:
+                all_regions.extend(row)
+
+        for i, region in enumerate(all_regions):
+            if edit_idx is not None:
+                rr = next((r for r in self._rendered if r.region is region), None)
+                if rr is not None:
+                    idx = self._rendered.index(rr)
+                    if idx >= edit_idx:
+                        break
+            else:
+                if region.top > edit_y or (region.top >= edit_y - row_threshold and region.left >= edit_x):
+                    break
+            if region.math is not None and region.math.input_expr is not None:
+                try:
+                    region.math.input_expr.evaluate(ctx)
+                except Exception:
+                    pass
+        return ctx
+
     def _eval_for_editor(self, expr_text: str) -> Any:
         """Evaluate an expression for the live editor preview."""
-        if self._ctx is None:
+        ctx = getattr(self, '_editor_ctx', None) or self._ctx
+        if ctx is None:
             return None
         try:
             ast = parse_infix(expr_text)
@@ -2488,7 +2535,7 @@ class WorksheetCanvas(ttk.Frame):
             return None
         if ast is None:
             return None
-        return ast.evaluate(self._ctx)
+        return ast.evaluate(ctx)
 
     def _on_double_click(self, event: tk.Event):
         """Handle double-click: edit existing region or create new one."""
@@ -3096,16 +3143,17 @@ class WorksheetCanvas(ttk.Frame):
                 except Exception:
                     pass
 
+        self._editor_ctx = self._build_context_up_to(y, x, editing_idx)
         precision = 4
-        if self._ctx:
-            precision = getattr(self._ctx, '_precision', 4)
+        if self._editor_ctx:
+            precision = getattr(self._editor_ctx, '_precision', 4)
         zoomed_editor_size = max(8, int(12 * self._zoom))
         editor = MathEditor(
             self._canvas, zx, zy,
             font_size=zoomed_editor_size,
             eval_callback=self._eval_for_editor,
             precision=precision,
-            eval_context=self._ctx,
+            eval_context=self._editor_ctx,
         )
 
         if ast_node is not None:
@@ -3239,6 +3287,7 @@ class WorksheetCanvas(ttk.Frame):
             self._edit_text_window = None
         self._editing = False
         self._edit_region_idx = None
+        self._editor_ctx = None
 
     # ------------------------------------------------------------------
     # Region creation / update helpers

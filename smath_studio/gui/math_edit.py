@@ -172,7 +172,7 @@ _NUMBER_COLOR = "#000000"
 _UNIT_COLOR = "#0000ff"
 _OPERATOR_COLOR = "#000000"
 _STRING_COLOR = "#a31515"
-_CURSOR_COLOR = "#0000ff"
+_CURSOR_COLOR = "#000000"
 _PLACEHOLDER_COLOR = "#999999"
 _RESULT_COLOR = "#000000"
 _ERROR_COLOR = "#ff0000"
@@ -215,8 +215,8 @@ _GREEK_DISPLAY = {v: v for v in _GREEK_MAP.values()}
 for k, v in _GREEK_MAP.items():
     _GREEK_DISPLAY[k] = v
 
-_SUP_SCALE = 0.70
-_SUP_RAISE = 0.38
+_SUP_SCALE = 0.65
+_SUP_RAISE = 0.22
 _FRAC_HPAD = 3
 _FRAC_VPAD = 1
 
@@ -1701,7 +1701,7 @@ class MathEditor:
         sup_fs = max(int(fs * _SUP_SCALE), 6)
         eb = self._measure_slot(item.exponent, sup_fs)
         base_h = self._line_height(fs)
-        raise_amt = base_h * 0.35
+        raise_amt = base_h * _SUP_RAISE
         w = eb.width + 1
         h = max(base_h, eb.height + raise_amt)
         return _Box(w, h, h * 0.6)
