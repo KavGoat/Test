@@ -452,24 +452,13 @@ class MathEditor:
             self._active_slot.cursor_pos = 0
         elif ch == "^":
             sup = ESuperscript()
-            if selected:
-                last = selected[-1]
-                rest = selected[:-1]
-                for j, item in enumerate(rest):
-                    slot.items.insert(lo + j, item)
-                sup_pos = lo + len(rest)
-                slot.items.insert(sup_pos, sup)
-                slot.cursor_pos = sup_pos + 1
-                self._slot_stack.append(slot)
-                self._active_slot = sup.exponent
-                self._active_slot.items = [last] if isinstance(last, (EText, EOp)) else [last]
-                self._active_slot.cursor_pos = len(self._active_slot.items)
-            else:
-                slot.items.insert(lo, sup)
-                slot.cursor_pos = lo + 1
-                self._slot_stack.append(slot)
-                self._active_slot = sup.exponent
-                self._active_slot.cursor_pos = 0
+            sup.exponent.items = selected
+            sup.exponent.cursor_pos = len(selected)
+            slot.items.insert(lo, sup)
+            slot.cursor_pos = lo + 1
+            self._slot_stack.append(slot)
+            self._active_slot = sup.exponent
+            self._active_slot.cursor_pos = len(self._active_slot.items)
 
     def _do_copy(self):
         if not self._has_selection():
