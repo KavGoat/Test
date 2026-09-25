@@ -1662,6 +1662,8 @@ class WorksheetCanvas(ttk.Frame):
         if self._editing:
             hit = self._hit_test(cx, cy)
             if hit is not None and self._edit_region_idx == hit:
+                if self._math_editor is not None:
+                    self._math_editor.handle_click(cx, cy)
                 self._canvas.focus_set()
                 return
             self._commit_edit()
@@ -2353,6 +2355,10 @@ class WorksheetCanvas(ttk.Frame):
             self.delete_selected()
             return "break"
 
+        if keysym == "BackSpace":
+            self.delete_selected()
+            return "break"
+
         if keysym == "Return" or keysym == "KP_Enter":
             if self._selected_index is not None:
                 rr = self._rendered[self._selected_index]
@@ -2372,6 +2378,8 @@ class WorksheetCanvas(ttk.Frame):
                         region.left, region.top, initial_text=text,
                         editing_idx=self._selected_index, mode="text",
                     )
+            else:
+                self._start_editing(self._cursor_x, self._cursor_y)
             return "break"
 
         if keysym in ("Up", "Down", "Left", "Right"):
@@ -2431,6 +2439,12 @@ class WorksheetCanvas(ttk.Frame):
 
         if char == '"':
             self._start_editing(self._cursor_x, self._cursor_y, mode="text")
+            return "break"
+
+        if char and ord(char) >= 32:
+            self._start_editing(self._cursor_x, self._cursor_y)
+            if self._math_editor is not None:
+                self._math_editor.handle_key(event)
             return "break"
 
         return None
@@ -2546,6 +2560,8 @@ class WorksheetCanvas(ttk.Frame):
             if self._edit_region_idx is not None:
                 hit = self._hit_test(cx, cy)
                 if hit == self._edit_region_idx:
+                    if self._math_editor is not None:
+                        self._math_editor.handle_click(cx, cy)
                     self._canvas.focus_set()
                     return
             self._commit_edit()
@@ -2567,6 +2583,8 @@ class WorksheetCanvas(ttk.Frame):
                     ast_node=region.math.input_expr,
                     has_result=bool(region.math.result_elements),
                 )
+                if self._math_editor is not None:
+                    self._math_editor.handle_click(cx, cy)
             elif region.text_contents:
                 tc = self._get_text_content(region.text_contents)
                 text = ""

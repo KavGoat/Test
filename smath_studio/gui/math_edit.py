@@ -376,6 +376,39 @@ class MathEditor:
             self._active_slot.cursor_pos = len(self._active_slot.items)
 
     # ================================================================
+    # Click-to-position
+    # ================================================================
+
+    def handle_click(self, cx: float, cy: float):
+        """Move cursor to the position closest to canvas coords (cx, cy)."""
+        self._unit_cursor = -1
+        self._text_cursor = -1
+        self._slot_stack = []
+        self._active_slot = self.root
+        best_pos = self._find_closest_pos(self.root, self.x, self.y, self.font_size, cx)
+        self.root.cursor_pos = best_pos
+        self._update_eval()
+        self.render()
+
+    def _find_closest_pos(self, slot: EditSlot, x: float, y: float, fs: int, target_x: float) -> int:
+        """Find the cursor position in slot closest to target_x."""
+        if not slot.items:
+            return 0
+        measures = [self._measure_item(it, fs) for it in slot.items]
+        cx = x
+        best_pos = 0
+        best_dist = abs(target_x - cx)
+        for i, mbox in enumerate(measures):
+            next_cx = cx + mbox.width
+            mid = cx + mbox.width / 2
+            dist_after = abs(target_x - next_cx)
+            if dist_after < best_dist:
+                best_dist = dist_after
+                best_pos = i + 1
+            cx = next_cx
+        return best_pos
+
+    # ================================================================
     # Key handling
     # ================================================================
 
