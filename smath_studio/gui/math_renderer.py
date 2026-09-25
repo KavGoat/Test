@@ -1869,8 +1869,6 @@ def _format_result(val: Any, precision: int = 4, trailing_zeros: bool = False, e
         if val == float('-inf'):
             return "-∞"
         if val == int(val) and abs(val) < 1e15:
-            if trailing_zeros and precision > 0:
-                return f"{val:.{precision}f}"
             return str(int(val))
         exp_lo = 10.0 ** (-exp_threshold)
         exp_hi = 10.0 ** exp_threshold
@@ -1883,8 +1881,6 @@ def _format_result(val: Any, precision: int = 4, trailing_zeros: bool = False, e
     if isinstance(val, bool):
         return "1" if val else "0"
     if isinstance(val, int):
-        if trailing_zeros and precision > 0:
-            return f"{float(val):.{precision}f}"
         return str(val)
     if isinstance(val, str):
         return val

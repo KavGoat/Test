@@ -175,8 +175,6 @@ def _format_value(val: Any, precision: int = 4, trailing_zeros: bool = True,
     if isinstance(val, float):
         return _format_number(val, precision, trailing_zeros, exp_threshold)
     if isinstance(val, int):
-        if trailing_zeros and precision > 0:
-            return f"{val}.{'0' * precision}"
         return str(val)
     try:
         import numpy as np
@@ -196,6 +194,8 @@ def _format_number(val: float, precision: int, trailing_zeros: bool,
         return "NaN"
     if math.isinf(val):
         return "Inf" if val > 0 else "-Inf"
+    if isinstance(val, float) and val == int(val) and abs(val) < 1e15:
+        return str(int(val))
     if val != 0 and (abs(val) >= 10 ** exp_threshold or abs(val) < 10 ** -exp_threshold):
         return f"{val:.{precision}e}"
     if trailing_zeros:
@@ -1623,13 +1623,20 @@ class WorksheetCanvas(ttk.Frame):
 
     def _hit_test(self, cx: int, cy: int) -> Optional[int]:
         """Return the index of the rendered region at canvas coords (cx, cy)."""
-        # Search in reverse order (top-most rendered last)
+        pad = 8
+        best_idx = None
+        best_dist = float("inf")
         for i in range(len(self._rendered) - 1, -1, -1):
             rr = self._rendered[i]
             x1, y1, x2, y2 = rr.bbox
-            if x1 <= cx <= x2 and y1 <= cy <= y2:
-                return i
-        return None
+            if x1 - pad <= cx <= x2 + pad and y1 - pad <= cy <= y2 + pad:
+                dx = max(x1 - cx, 0, cx - x2)
+                dy = max(y1 - cy, 0, cy - y2)
+                dist = dx * dx + dy * dy
+                if dist < best_dist:
+                    best_dist = dist
+                    best_idx = i
+        return best_idx
 
     # ------------------------------------------------------------------
     # Event handlers
@@ -3227,7 +3234,12 @@ class WorksheetCanvas(ttk.Frame):
         self._mark_modified()
         self._evaluate_and_render()
         self._cursor_x = cx
-        self._cursor_y = cy + 32
+        region_h = 0
+        for rr in self._rendered:
+            if rr.region.top == cy and rr.region.left == cx:
+                region_h = rr.bbox[3] - rr.bbox[1]
+                break
+        self._cursor_y = cy + max(region_h + 8, 32)
         self._canvas.delete("cursor_marker")
         self._draw_cursor_marker()
         self._ensure_visible(self._cursor_x, self._cursor_y)
