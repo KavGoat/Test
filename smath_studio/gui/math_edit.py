@@ -153,7 +153,7 @@ class ESystem(EditItem):
             self.rows = [EditSlot(), EditSlot()]
 
 
-@dataclass
+@dataclass(eq=False)
 class EditSlot:
     items: list[EditItem] = field(default_factory=list)
     cursor_pos: int = 0
@@ -380,32 +380,169 @@ class MathEditor:
     # ================================================================
 
     def handle_click(self, cx: float, cy: float):
-        """Move cursor to the position closest to canvas coords (cx, cy)."""
+        """Move cursor to the position closest to canvas coords (cx, cy).
+
+        Descends into structured elements (fractions, parens, superscripts,
+        sqrt, abs, matrices) when the click lands inside them, matching
+        SMath Studio behavior.
+        """
         self._unit_cursor = -1
         self._text_cursor = -1
         self._slot_stack = []
         self._active_slot = self.root
-        best_pos = self._find_closest_pos(self.root, self.x, self.y, self.font_size, cx)
-        self.root.cursor_pos = best_pos
+        self._click_into_slot(self.root, self.x, self.y, self.font_size, cx, cy)
         self._update_eval()
         self.render()
 
-    def _find_closest_pos(self, slot: EditSlot, x: float, y: float, fs: int, target_x: float) -> int:
-        """Find the cursor position in slot closest to target_x."""
+    def _click_into_slot(self, slot: EditSlot, x: float, y: float, fs: int,
+                         cx: float, cy: float):
+        """Recursively find the deepest slot+position for click (cx, cy)."""
+        if not slot.items:
+            slot.cursor_pos = 0
+            return
+
+        measures = [self._measure_item(it, fs) for it in slot.items]
+        max_bl = max(m.baseline for m in measures)
+        max_desc = max(m.height - m.baseline for m in measures)
+        total_h = max_bl + max_desc
+
+        ix = x
+        for i, (item, mbox) in enumerate(zip(slot.items, measures)):
+            item_y = y + max_bl - mbox.baseline
+            item_x = ix
+            item_x2 = ix + mbox.width
+            item_y2 = item_y + mbox.height
+
+            if cx >= item_x and cx < item_x2:
+                child_slot = self._click_hit_child(item, item_x, item_y,
+                                                   mbox, fs, cx, cy)
+                if child_slot is not None:
+                    self._slot_stack.append(slot)
+                    self._active_slot = child_slot[0]
+                    self._click_into_slot(child_slot[0], child_slot[1],
+                                          child_slot[2], child_slot[3],
+                                          cx, cy)
+                    return
+
+                if isinstance(item, EText) and len(item.text) > 1:
+                    pos_in_text = self._click_text_pos(item, item_x, fs, cx)
+                    if 0 < pos_in_text < len(item.text):
+                        slot.cursor_pos = i + 1
+                        self._text_cursor = pos_in_text
+                        return
+
+            ix += mbox.width
+
+        best_pos = self._find_closest_pos_x(slot, x, fs, cx)
+        slot.cursor_pos = best_pos
+
+    def _click_hit_child(self, item: EditItem, ix: float, iy: float,
+                         mbox: _Box, fs: int, cx: float, cy: float):
+        """Check if click hits a child slot of a structured item.
+
+        Returns (slot, slot_x, slot_y, slot_fs) or None.
+        """
+        if isinstance(item, EFraction):
+            nb = self._measure_slot(item.numerator, fs)
+            db = self._measure_slot(item.denominator, fs)
+            bar_w = max(nb.width, db.width) + 2 * _FRAC_HPAD
+            bar_y = iy + nb.height + _FRAC_VPAD
+
+            if cy < bar_y:
+                num_x = ix + (bar_w - nb.width) / 2
+                return (item.numerator, num_x, iy, fs)
+            else:
+                den_y = bar_y + _FRAC_VPAD + 1
+                den_x = ix + (bar_w - db.width) / 2
+                return (item.denominator, den_x, den_y, fs)
+
+        if isinstance(item, ESuperscript):
+            sup_fs = max(int(fs * _SUP_SCALE), 6)
+            return (item.exponent, ix, iy, sup_fs)
+
+        if isinstance(item, EParens):
+            ib = self._measure_slot(item.inner, fs)
+            pw, ph = self._text_size("(", fs)
+            h = max(ph, ib.height)
+            inner_x = ix + pw
+            inner_y = iy + max(0, (h - ib.height) / 2)
+            if cx >= inner_x and cx < ix + pw + ib.width:
+                return (item.inner, inner_x, inner_y, fs)
+            return None
+
+        if isinstance(item, ESqrt):
+            rb = self._measure_slot(item.radicand, fs)
+            rad_w = max(int(fs * 0.7), 10)
+            pad = 3
+            rad_x = ix + rad_w + pad
+            rad_y = iy + pad
+            if cx >= rad_x:
+                return (item.radicand, rad_x, rad_y, fs)
+            return None
+
+        if isinstance(item, EAbs):
+            ib = self._measure_slot(item.inner, fs)
+            bar_w = 2
+            pad = 3
+            inner_x = ix + bar_w + pad
+            if cx >= inner_x and cx < ix + bar_w + pad + ib.width:
+                return (item.inner, inner_x, iy, fs)
+            return None
+
+        if isinstance(item, EMatrix):
+            col_widths = [0.0] * item.cols
+            row_heights = [0.0] * item.rows
+            for r in range(item.rows):
+                for c in range(item.cols):
+                    cb = self._measure_slot(item.cells[r][c], fs)
+                    col_widths[c] = max(col_widths[c], cb.width)
+                    row_heights[r] = max(row_heights[r], cb.height)
+            cell_pad = 6
+            bracket_w = 6
+            cell_x = ix + bracket_w + 4
+            cell_y = iy + 4
+            for r in range(item.rows):
+                cx2 = cell_x
+                for c in range(item.cols):
+                    if (cx >= cx2 and cx < cx2 + col_widths[c] and
+                            cy >= cell_y and cy < cell_y + row_heights[r]):
+                        return (item.cells[r][c], cx2, cell_y, fs)
+                    cx2 += col_widths[c] + cell_pad
+                cell_y += row_heights[r] + cell_pad
+            return None
+
+        return None
+
+    def _click_text_pos(self, item: EText, x: float, fs: int,
+                        target_x: float) -> int:
+        """Find character position within an EText item."""
+        style = self._text_style(item.text)
+        text = _GREEK_DISPLAY.get(item.text, item.text)
+        px = x
+        for ci in range(len(text)):
+            cw, _ = self._text_size(text[ci], fs, style)
+            mid = px + cw / 2
+            if target_x < mid:
+                return ci
+            px += cw
+        return len(text)
+
+    def _find_closest_pos_x(self, slot: EditSlot, x: float, fs: int,
+                            target_x: float) -> int:
+        """Find the cursor position in slot closest to target_x (flat)."""
         if not slot.items:
             return 0
         measures = [self._measure_item(it, fs) for it in slot.items]
-        cx = x
+        px = x
         best_pos = 0
-        best_dist = abs(target_x - cx)
+        best_dist = abs(target_x - px)
         for i, mbox in enumerate(measures):
-            next_cx = cx + mbox.width
-            mid = cx + mbox.width / 2
-            dist_after = abs(target_x - next_cx)
+            next_px = px + mbox.width
+            dist_after = abs(target_x - next_px)
             if dist_after < best_dist:
                 best_dist = dist_after
                 best_pos = i + 1
-            cx = next_cx
+            px = next_px
         return best_pos
 
     # ================================================================
@@ -1353,6 +1490,16 @@ class MathEditor:
                             len(self._active_slot.items),
                         )
                         return
+                if isinstance(item, EMatrix):
+                    for r in range(item.rows):
+                        for c in range(item.cols):
+                            if self._active_slot is item.cells[r][c] and r > 0:
+                                self._active_slot = item.cells[r - 1][c]
+                                self._active_slot.cursor_pos = min(
+                                    self._active_slot.cursor_pos,
+                                    len(self._active_slot.items),
+                                )
+                                return
                 if isinstance(item, ESystem):
                     for r_idx, row in enumerate(item.rows):
                         if self._active_slot is row and r_idx > 0:
@@ -1375,6 +1522,16 @@ class MathEditor:
                             len(self._active_slot.items),
                         )
                         return
+                if isinstance(item, EMatrix):
+                    for r in range(item.rows):
+                        for c in range(item.cols):
+                            if self._active_slot is item.cells[r][c] and r + 1 < item.rows:
+                                self._active_slot = item.cells[r + 1][c]
+                                self._active_slot.cursor_pos = min(
+                                    self._active_slot.cursor_pos,
+                                    len(self._active_slot.items),
+                                )
+                                return
                 if isinstance(item, ESystem):
                     for r_idx, row in enumerate(item.rows):
                         if self._active_slot is row and r_idx + 1 < len(item.rows):
