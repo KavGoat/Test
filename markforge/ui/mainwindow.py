@@ -6,8 +6,8 @@ import json
 import os
 from typing import Optional
 
-from PySide6.QtCore import (QBuffer, QEvent, QIODevice, QMimeData, QPoint, QPointF,
-                            QRect, QRectF,
+from PySide6.QtCore import (QBuffer, QEvent, QIODevice, QMimeData, QModelIndex,
+                            QPoint, QPointF, QRect, QRectF,
                             QSize, Qt, QTimer, Signal)
 from PySide6.QtGui import (QAction, QActionGroup, QColor, QCursor, QFont, QFontInfo, QImage,
                            QKeySequence, QPainter, QTextBlockFormat,
@@ -717,7 +717,7 @@ class MainWindow(QMainWindow):
 
         self._act("shortcuts", "Shortcuts…", self.show_shortcuts, "F1",
                   tip="Every shortcut, and the keys you want them on")
-        self._act("find_tool", "Find tool…", self.find_a_tool, "Shift+F1",
+        self._act("find_tool", "Search…", self.find_a_tool, "Shift+F1",
                   tip="Type what you want to do, and it says which tool does "
                       "it and which key it is on")
         self._act("renumber_counts", "Renumber counts", self.renumber_counts,
@@ -1108,8 +1108,130 @@ class MainWindow(QMainWindow):
             if name in self.PANEL_ICONS:
                 self.rail_for(name).show_open(name, not dock.isHidden())
 
+    def _build_search(self) -> None:
+        """The search field in the menu bar's corner, with its live dropdown."""
+        from PySide6.QtGui import QStandardItemModel
+        from PySide6.QtWidgets import QCompleter
+
+        field = QLineEdit(self)
+        field.setObjectName("searchField")
+        field.setPlaceholderText("Search")
+        field.setToolTip("Search tools, commands, markups and pages as you type")
+        field.setClearButtonEnabled(True)
+        field.setFixedWidth(260)
+        self.search_field = field
+        self._search_results: list = []
+        self._search_model = QStandardItemModel(self)
+        completer = QCompleter(self._search_model, self)
+        completer.setCompletionMode(QCompleter.UnfilteredPopupCompletion)
+        completer.setCaseSensitivity(Qt.CaseInsensitive)
+        completer.setMaxVisibleItems(14)
+        completer.setWidget(field)
+        completer.activated[QModelIndex].connect(self._search_chosen)
+        self._search_completer = completer
+        field.textEdited.connect(self._search_typed)
+        field.returnPressed.connect(self._search_enter)
+        holder = QWidget(self)
+        row = QHBoxLayout(holder)
+        row.setContentsMargins(0, 1, 8, 1)
+        row.addWidget(field)
+        self.menuBar().setCornerWidget(holder, Qt.TopRightCorner)
+
+    def search_everything(self, wanted: str) -> list:
+        """Everything that matches *wanted*: (label, kind, target), best first."""
+        text = wanted.strip().lower()
+        if not text:
+            return []
+        words = text.split()
+        found: list = []
+        for tool in self.tools_matching(wanted):
+            label = tool.label + (f"  ({tool.shortcut})" if tool.shortcut else "")
+            found.append((label, "Tool", tool.key))
+        seen = {tool.label.lower() for tool in TOOLS}
+        commands = []
+        for action in self.findChildren(QAction):
+            name = action.text().replace("&", "").rstrip("…").strip()
+            if (not name or action.isSeparator() or action.menu() is not None
+                    or name.lower() in seen):
+                continue
+            haystack = f"{name} {action.toolTip()}".lower()
+            if all(word in haystack for word in words):
+                seen.add(name.lower())
+                first = name.lower().startswith(words[0])
+                commands.append((0 if first else 1, name, action))
+        commands.sort(key=lambda row: (row[0], row[1]))
+        for _rank, name, action in commands:
+            key = action.shortcut().toString()
+            found.append((name + (f"  ({key})" if key else ""), "Command", action))
+        for index, page in enumerate(self.document.pages):
+            label = page.label.strip() or f"Page {index + 1}"
+            if all(word in f"{label} page {index + 1}".lower() for word in words):
+                found.append((label, "Page", index))
+            if page.frame is None:
+                continue
+            for item in page.frame.markups():
+                if getattr(item, "from_drawing", False):
+                    continue
+                words_on_it = " ".join(str(getattr(item, name, "") or "") for name in
+                                       ("written", "value_text", "subject",
+                                        "comment", "label", "text"))
+                haystack = f"{item.display_name()} {words_on_it}".lower()
+                if all(word in haystack for word in words):
+                    shown = " ".join(words_on_it.split())[:48]
+                    found.append((f"{item.display_name()}: {shown}" if shown
+                                  else item.display_name(),
+                                  f"Markup · page {index + 1}", (index, item.uid)))
+        return found[:60]
+
+    def _search_typed(self, wanted: str) -> None:
+        from PySide6.QtGui import QStandardItem
+
+        self._search_results = self.search_everything(wanted)
+        self._search_model.clear()
+        for number, (label, kind, _target) in enumerate(self._search_results):
+            row = QStandardItem(f"{label}    —  {kind}")
+            row.setData(number, Qt.UserRole)
+            row.setEditable(False)
+            self._search_model.appendRow(row)
+        if self._search_results:
+            self._search_completer.complete()
+        else:
+            self._search_completer.popup().hide()
+
+    def _search_enter(self) -> None:
+        popup = self._search_completer.popup()
+        current = popup.currentIndex() if popup.isVisible() else QModelIndex()
+        number = current.data(Qt.UserRole) if current.isValid() else None
+        self._run_search_result(int(number) if number is not None else 0)
+
+    def _search_chosen(self, index) -> None:
+        number = index.data(Qt.UserRole)
+        if number is not None:
+            self._run_search_result(int(number))
+
+    def _run_search_result(self, number: int) -> None:
+        if not 0 <= number < len(self._search_results):
+            return
+        label, kind, target = self._search_results[number]
+        # Spent: a second signal for the same Enter finds nothing to run.
+        self._search_results = []
+        self.search_field.clear()
+        self._search_completer.popup().hide()
+        self.view.setFocus(Qt.OtherFocusReason)
+        if kind == "Tool":
+            self.select_tool(target)
+            self.status_hint.setText(label)
+        elif kind == "Command":
+            target.trigger()
+        elif kind == "Page":
+            self.go_to_page(target)
+        else:
+            page_index, uid = target
+            self.reveal_markup(page_index, uid)
+
     def _build_menus(self) -> None:
         bar = self.menuBar()
+        self._build_search()
 
         file_menu = bar.addMenu("&File")
         for action in (self.act_new, self.act_new_tab, self.act_new_window, self.act_open,
@@ -4663,6 +4785,13 @@ class MainWindow(QMainWindow):
         is searched is every tool's name, what it is for, and the key it is
         on, so "revision", "cloud" and "C" all find the same thing.
         """
+        # Not a pop-up: the search field is where searching happens, and its
+        # dropdown lists everything that matches while it is typed.
+        field = getattr(self, "search_field", None)
+        if field is not None and field.isVisible():
+            field.setFocus(Qt.ShortcutFocusReason)
+            field.selectAll()
+            return
         from PySide6.QtWidgets import QInputDialog
 
         wanted, said = QInputDialog.getText(
@@ -4796,8 +4925,8 @@ class MainWindow(QMainWindow):
                  "arrow_size", "bold", "italic", "underline", "text_color",
                  "align", "valign")
             }
-        brush = icon("format_painter").pixmap(24, 24)
-        self.view.setCursor(QCursor(brush, 2, 22))
+        from .view import format_painter_cursor
+        self.view.setCursor(format_painter_cursor())
         self.status_hint.setText(
             f"Format painter: click what should look like this "
             f"{items[0].display_name().lower()} · Esc to put it down")
@@ -4837,6 +4966,8 @@ class MainWindow(QMainWindow):
         item.update()
         self.view.commit_snapshot("Format painter")
         self.refresh_selection()
+        from .view import format_painter_cursor
+        self.view.setCursor(format_painter_cursor())
         return True
 
     def hide_selection(self) -> None:

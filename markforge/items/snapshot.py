@@ -143,9 +143,55 @@ class SnapshotItem(MarkupItem):
         return QRectF(self.source_rect).normalized()
 
     # -- painting ----------------------------------------------------------
+    def _vector_sources(self) -> list:
+        """The kept source markups, built once and reused for vector output."""
+        key = id(self.source_items), len(self.source_items)
+        cached = getattr(self, "_built_sources", None)
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        scene = self.scene()
+        document = getattr(scene, "document", None) if scene is not None else None
+        built = self.source_markups(document)
+        self._built_sources = (key, built)
+        return built
+
+    @staticmethod
+    def _painting_a_file(painter: QPainter) -> bool:
+        """Whether *painter* writes a PDF or a print rather than pixels."""
+        from PySide6.QtGui import QPaintEngine
+
+        engine = painter.paintEngine()
+        return engine is not None and engine.type() in (QPaintEngine.Pdf,
+                                                        QPaintEngine.Windows,
+                                                        QPaintEngine.MacPrinter)
+
     def paint_content(self, painter: QPainter) -> None:
         rect = self._rect.normalized()
-        if self._picture is None or self._picture.isNull():
+        sources = self._vector_sources() if (
+            self.source_items and self._painting_a_file(painter)) else []
+        if sources:
+            # Into a PDF the kept drawing is painted directly. Replaying the
+            # screen recording into Qt's PDF writer rescales its transforms a
+            # second time: other viewers then show the text as black blobs
+            # and hairlines many times too thick.
+            taken = self.natural_size()
+            painter.save()
+            painter.setOpacity(self.style.opacity)
+            painter.setClipRect(rect)
+            painter.translate(rect.topLeft())
+            if taken.width() > 0 and taken.height() > 0:
+                painter.scale(rect.width() / taken.width(),
+                              rect.height() / taken.height())
+            painter.setClipRect(QRectF(0, 0, taken.width(), taken.height()),
+                                Qt.IntersectClip)
+            for item in sorted(sources, key=lambda markup: markup.zValue()):
+                painter.save()
+                painter.translate(item.pos())
+                painter.setTransform(item.transform(), True)
+                item.paint_visible(painter)
+                painter.restore()
+            painter.restore()
+        elif self._picture is None or self._picture.isNull():
             painter.fillRect(rect, Qt.lightGray)
             painter.drawText(rect, Qt.AlignCenter, "snapshot missing")
         else:

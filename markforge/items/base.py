@@ -116,7 +116,8 @@ def hatch_tile(pattern, fill: "Optional[QColor]", ink: QColor):
     """
     from PySide6.QtGui import QImage
 
-    key = (int(pattern), fill.rgba() if fill is not None else None, ink.rgba())
+    key = (getattr(pattern, "value", pattern), fill.rgba() if fill is not None else None,
+           ink.rgba())
     tile = _HATCH_TILES.get(key)
     if tile is not None:
         return tile

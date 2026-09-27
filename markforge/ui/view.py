@@ -14,8 +14,8 @@ from PySide6.QtGui import (QBrush, QColor, QCursor, QFontMetricsF, QKeyEvent,
                            QMouseEvent, QPainter, QPen, QPolygonF, QTextCursor,
                            QPixmap, QTransform, QWheelEvent)
 from PySide6.QtWidgets import (QApplication, QCompleter, QGraphicsProxyWidget,
-                               QGraphicsView, QHBoxLayout, QLabel, QLineEdit,
-                               QWidget)
+                               QGraphicsView, QGridLayout, QHBoxLayout, QLabel,
+                               QLineEdit, QWidget)
 
 from ..core.document import MM_TO_PT
 from ..core.units import parse_unit
@@ -107,6 +107,23 @@ def _reshape_cursor(operation: str) -> QCursor:
     return cursor
 
 
+def format_painter_cursor() -> QCursor:
+    """The paint-brush pointer shown while Format Painter holds a look."""
+    if "format_painter" not in _DRAWING_CURSORS:
+        from . import icons
+
+        pixmap = QPixmap(28, 28)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        # A white halo so the brush reads on a dark drawing as well as paper.
+        halo = icons.cursor_pixmap("format_painter", 26)
+        painter.drawPixmap(1, 1, halo)
+        painter.end()
+        _DRAWING_CURSORS["format_painter"] = QCursor(pixmap, 3, 25)
+    return _DRAWING_CURSORS["format_painter"]
+
+
 def drawing_cursor(icon_name: str) -> QCursor:
     """A precise crosshair carrying the icon of the active drawing gesture."""
     if icon_name in _DRAWING_CURSORS:
@@ -131,16 +148,36 @@ def drawing_cursor(icon_name: str) -> QCursor:
 
 
 class _SizeEdit(QLineEdit):
-    """A canvas size field whose Escape always cancels the drawing."""
+    """A canvas size field: Escape cancels, Tab moves on, Enter places."""
 
     escapePressed = Signal()
+    tabPressed = Signal(bool)          # True forwards, False backwards
+    enterPressed = Signal()
 
     def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key_Escape:
             self.escapePressed.emit()
             event.accept()
             return
+        if event.key() in (Qt.Key_Tab, Qt.Key_Backtab):
+            forwards = (event.key() == Qt.Key_Tab
+                        and not event.modifiers() & Qt.ShiftModifier)
+            self.tabPressed.emit(forwards)
+            event.accept()
+            return
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            self.enterPressed.emit()
+            event.accept()
+            return
         super().keyPressEvent(event)
+
+    def event(self, event) -> bool:
+        # Tab must reach keyPressEvent rather than move focus off the canvas.
+        if event.type() == QEvent.KeyPress and event.key() in (Qt.Key_Tab,
+                                                                 Qt.Key_Backtab):
+            self.keyPressEvent(event)
+            return True
+        return super().event(event)
 
     def focusInEvent(self, event) -> None:
         # The box shows the size the shape is at, so the first thing typed
@@ -278,7 +315,13 @@ class PageView(QGraphicsView):
         self._size_proxy: Optional[QGraphicsProxyWidget] = None
         self._size_width: Optional[QLineEdit] = None
         self._size_height: Optional[QLineEdit] = None
+        self._size_rotation: Optional[QLineEdit] = None
+        self._size_current: Optional[QLineEdit] = None
+        self._size_unit = "mm"
         self._typed_size = False
+        self._typed_w: Optional[float] = None
+        self._typed_h: Optional[float] = None
+        self._typed_rotation: Optional[float] = None
         self._editing_item = None
         # What the region being typed into said when the answers were last
         # worked out.
@@ -1628,8 +1671,7 @@ class PageView(QGraphicsView):
             # The second click of a click-click drawing.
             self._mode = "idle"
             self.close_size_editor()
-            if not self._typed_size:
-                self._update_draft(scene_pos, event.modifiers())
+            self._update_draft(scene_pos, event.modifiers())
             self.finish_draft(scene_pos, clicked=True)
             event.accept()
             return
@@ -1710,6 +1752,12 @@ class PageView(QGraphicsView):
             self._draft.set_local_rect(QRectF(0, 0, 1, 1))
         frame.add_markup(self._draft)
         self._mode = "draw_free" if tool.mode == FREE else "draw_drag"
+        self._typed_size = False
+        self._typed_w = self._typed_h = self._typed_rotation = None
+        if isinstance(self._draft, RectItem) and self._draft.kind in SIZED_SHAPES:
+            # Bluebeam's size bar appears the moment the shape starts, and
+            # rides the corner for a drag as well as a click-click.
+            self.open_size_editor(self._draft)
         event.accept()
 
     # The modes that only make sense while a button is held down. If the
@@ -2008,12 +2056,34 @@ class PageView(QGraphicsView):
                 side = max(abs(dx), abs(dy))
                 corner = QPointF(origin.x() + (side if dx >= 0 else -side),
                                  origin.y() + (side if dy >= 0 else -side))
-            rect = QRectF(origin, corner).normalized()
             parent = draft.parentItem()
-            top_left = parent.mapFromScene(rect.topLeft()) if parent is not None \
-                else rect.topLeft()
-            draft.setPos(top_left)
-            draft.set_local_rect(QRectF(0, 0, rect.width(), rect.height()))
+            typed_w = getattr(self, "_typed_w", None)
+            typed_h = getattr(self, "_typed_h", None)
+            if parent is not None and (typed_w is not None or typed_h is not None):
+                # A typed width or height holds; the other still follows the
+                # pointer, in whichever direction it is being dragged.
+                start = parent.mapFromScene(origin)
+                end = parent.mapFromScene(corner)
+                if typed_w is not None:
+                    way = 1.0 if end.x() >= start.x() else -1.0
+                    end.setX(start.x() + way * typed_w)
+                if typed_h is not None:
+                    way = 1.0 if end.y() >= start.y() else -1.0
+                    end.setY(start.y() + way * typed_h)
+                local = QRectF(start, end).normalized()
+                draft.setRotation(0.0)
+                draft.setPos(local.topLeft())
+                draft.set_local_rect(QRectF(0, 0, local.width(), local.height()))
+            else:
+                rect = QRectF(origin, corner).normalized()
+                top_left = parent.mapFromScene(rect.topLeft()) if parent is not None \
+                    else rect.topLeft()
+                draft.setRotation(0.0)
+                draft.setPos(top_left)
+                draft.set_local_rect(QRectF(0, 0, rect.width(), rect.height()))
+            turned = getattr(self, "_typed_rotation", None)
+            if turned and hasattr(draft, "set_item_rotation"):
+                draft.set_item_rotation(turned, zero_snap=0.0)
         if isinstance(draft, MeasureItem):
             draft.refresh(page=self.page())
         self.follow_size_editor()
@@ -2182,6 +2252,10 @@ class PageView(QGraphicsView):
                              event_modifiers=Qt.NoModifier) -> None:
         """Say what the pointer would do here, before it is pressed."""
         if self.tool_key != "select":
+            return
+        if getattr(self.window, "_held_style", None) is not None:
+            # A format is held: the brush stays in hand wherever it goes.
+            self.setCursor(format_painter_cursor())
             return
         if self._pending_arrow_leader is not None:
             self.setCursor(drawing_cursor("arrow"))
@@ -2379,7 +2453,7 @@ class PageView(QGraphicsView):
                 self._mode = "draw_click"
                 if (isinstance(self._draft, RectItem)
                         and self._draft.kind in SIZED_SHAPES
-                        and self.page().scale.is_calibrated()):
+                        and self._size_editor is None):
                     self.open_size_editor(self._draft)
                 self.statusMessage.emit(
                     f"{self.current_tool().label}: click again to finish · "
@@ -2753,7 +2827,8 @@ class PageView(QGraphicsView):
         self._draw_origin = None
         # A drawing finished by a second click is the size the two clicks made
         # it, however small; only a stray tap gets a default size.
-        degenerate = self._is_a_click(scene_pos, origin)
+        typed = bool(getattr(self, "_typed_size", False))
+        degenerate = self._is_a_click(scene_pos, origin) and not typed
         tiny = not clicked and degenerate
 
         # Two clicks in the same spot mean the drawing was thought better of,
@@ -2774,8 +2849,10 @@ class PageView(QGraphicsView):
             draft.prepareGeometryChange()
         else:
             rect = draft.local_rect()
-            if tiny or rect.width() < 6 or rect.height() < 6:
+            if not typed and (tiny or rect.width() < 6 or rect.height() < 6):
                 draft.set_local_rect(QRectF(0, 0, *self._default_size(draft)))
+        self._typed_size = False
+        self._typed_w = self._typed_h = self._typed_rotation = None
 
         if isinstance(draft, StampItem):
             draft.text = self.stamp_text
@@ -3017,70 +3094,101 @@ class PageView(QGraphicsView):
         self.forget_snap()
 
     def open_size_editor(self, draft: RectItem) -> None:
-        """Show live page-scale width/height entry after a shape's first click."""
+        """The Bluebeam size bar: Width, Height and Rotation beside the corner.
+
+        A compact dark bar that rides the corner being dragged. It reports the
+        live size as the pointer moves, with the Width value selected so that
+        typing a number replaces it; Tab moves to Height and on to Rotation,
+        Enter places the shape. A typed width holds while the height still
+        follows the pointer, and the other way about.
+        """
         self.close_size_editor()
         panel = QWidget()
         panel.setObjectName("canvasSizeEntry")
+        panel.setAttribute(Qt.WA_StyledBackground, True)
         panel.setStyleSheet(
-            "QWidget#canvasSizeEntry { background:#ffffff; border:1px solid #1971c2; } "
-            "QLineEdit { min-width:72px; border:0; padding:2px; color:#111318; }")
-        layout = QHBoxLayout(panel)
-        layout.setContentsMargins(4, 2, 4, 2)
-        layout.setSpacing(3)
-        width = _SizeEdit()
-        height = _SizeEdit()
-        unit = self.page().scale.display_unit
-        if draft.kind == "ellipse":
-            width.setPlaceholderText(f"D1 ({unit})")
-            height.setPlaceholderText(f"D2 ({unit})")
-            width.setToolTip("Horizontal diameter")
-            height.setToolTip("Vertical diameter; leave blank to make a circle")
-        else:
-            width.setPlaceholderText(f"Width ({unit})")
-            height.setPlaceholderText(f"Height ({unit})")
-        layout.addWidget(width)
-        layout.addWidget(QLabel("×"))
-        layout.addWidget(height)
+            "QWidget#canvasSizeEntry { background:#45484f; border:1px solid #2a2c31;"
+            " border-radius:2px; }"
+            "QLabel { color:#f1f3f5; background:transparent; font-size:11px; }"
+            "QLabel[role='caption'] { color:#dfe3e8; }"
+            "QLineEdit { background:#5b5f67; color:#ffffff; border:1px solid #6d727b;"
+            " border-radius:1px; padding:0 3px; min-width:46px; max-width:62px;"
+            " font-size:11px; selection-background-color:#1971c2;"
+            " selection-color:#ffffff; }"
+            "QLineEdit:focus { border-color:#4dabf7; }")
+        grid = QGridLayout(panel)
+        grid.setContentsMargins(5, 2, 5, 4)
+        grid.setHorizontalSpacing(3)
+        grid.setVerticalSpacing(0)
+        unit = self.page().scale.display_unit if self.page().scale.is_calibrated() \
+            else "mm"
+        ellipse = draft.kind == "ellipse"
+        fields = []
+        for column, (caption, suffix, tip) in enumerate((
+                ("Width", unit, "Horizontal diameter" if ellipse else "Width"),
+                ("Height", unit, "Vertical diameter" if ellipse else "Height"),
+                ("Rotation", "°", "Rotation in degrees"))):
+            label = QLabel(caption)
+            label.setProperty("role", "caption")
+            grid.addWidget(label, 0, column * 2, 1, 2)
+            box = _SizeEdit()
+            box.setToolTip(tip)
+            box.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            grid.addWidget(box, 1, column * 2)
+            grid.addWidget(QLabel(suffix), 1, column * 2 + 1)
+            fields.append(box)
+        width, height, rotation = fields
+        rotation.setText("0.00")
         proxy = self.scene().addWidget(panel)
         proxy.setZValue(20_000)
         # A tooltip belongs to the screen, not to the paper. Ignoring the view
         # transform keeps it upright and the same size whatever the zoom is
-        # and whichever way the page has been turned for reading — a size
-        # entry lying on its side with its labels reading bottom-to-top is not
-        # something anybody can use.
+        # and whichever way the page has been turned for reading.
         from PySide6.QtWidgets import QGraphicsItem
 
         proxy.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
         proxy.setRotation(0.0)
-        width.textEdited.connect(self.update_typed_size)
-        height.textEdited.connect(self.update_typed_size)
-        width.escapePressed.connect(self.escape_everything)
-        height.escapePressed.connect(self.escape_everything)
         self._size_editor = panel
         self._size_proxy = proxy
         self._size_width = width
         self._size_height = height
+        self._size_rotation = rotation
+        self._size_unit = unit
         self._typed_size = False
-        # Positioned but not filled in: a first click has no size to report,
-        # and a number sitting in the box is one the next thing typed would
-        # land on the end of.
+        self._typed_w = self._typed_h = None
+        self._typed_rotation = None
+        for box in fields:
+            box.textEdited.connect(lambda _text, edited=box: self._size_typed(edited))
+            box.escapePressed.connect(self.escape_everything)
+            box.tabPressed.connect(lambda forwards, at=box: self._size_tab(at, forwards))
+            box.enterPressed.connect(self.place_sized_draft)
         self.place_size_editor()
+        self.follow_size_editor()
+        self._size_current = width
         width.setFocus(Qt.OtherFocusReason)
+        width.selectAll()
         self.statusMessage.emit(
-            "Type the size, then click to place · Esc to cancel")
+            "Type a width, Tab for height and rotation, Enter or click to place "
+            "· Esc to cancel")
+
+    def _size_tab(self, current, forwards: bool) -> None:
+        fields = [self._size_width, self._size_height, self._size_rotation]
+        if current not in fields:
+            return
+        step = 1 if forwards else -1
+        target = fields[(fields.index(current) + step) % len(fields)]
+        self._size_current = target
+        target.setFocus(Qt.TabFocusReason)
+        target.selectAll()
 
     def place_size_editor(self) -> None:
-        """Put the size entry beside the corner being dragged.
-
-        It used to be pinned once to the shape's top-left and left there, so
-        it did not move as the shape grew. It rides the bottom-right corner
-        now — the corner under the pointer.
-        """
+        """Put the size bar just past the corner being dragged."""
         draft = self._draft
         proxy = self._size_proxy
         if proxy is None or not isinstance(draft, RectItem):
             return
-        proxy.setPos(self._drag_corner(draft) + QPointF(10, 10))
+        corner = self.mapFromScene(self._drag_corner(draft))
+        proxy.setPos(self.mapToScene(corner + QPoint(14, 12)))
 
     def _drag_corner(self, draft) -> QPointF:
         """The shape's corner that is bottom-right *on screen*, in scene points.
@@ -3101,29 +3209,28 @@ class PageView(QGraphicsView):
         return best if best is not None else draft.mapToScene(rect.bottomRight())
 
     def follow_size_editor(self) -> None:
-        """Ride the corner, and say how big the shape is while it is dragged.
+        """Ride the corner, and report the live size in the fields not typed in.
 
-        The boxes were empty from the first click to the last, so the only way
-        to learn a size was to type one. They now report the size as it
-        changes — but only while the pointer is driving the shape, and never
-        into a box being typed into, because a number already sitting there is
-        one the next keystroke would land on the end of.
+        The field with the keyboard keeps its value selected, so the next
+        number typed replaces it rather than landing on the end of it.
         """
         self.place_size_editor()
         draft = self._draft
-        if self._typed_size or not isinstance(draft, RectItem):
+        if self._size_editor is None or not isinstance(draft, RectItem):
             return
         page = self.page()
-        if page is None or not page.scale.is_calibrated():
+        if page is None:
             return
         draft.refresh(page=page)
-        digits = max(page.scale.precision, 0)
-        for box, value in ((self._size_width, draft.width_value),
-                           (self._size_height, draft.height_value)):
-            if box is None or value is None or box.hasFocus():
+        digits = max(page.scale.precision, 0) if page.scale.is_calibrated() else 2
+        for box, value, typed in ((self._size_width, draft.width_value, self._typed_w),
+                                  (self._size_height, draft.height_value, self._typed_h)):
+            if box is None or value is None or typed is not None:
                 continue
             was = box.blockSignals(True)
             box.setText(f"{float(value.magnitude):.{digits}f}")
+            if box is self._size_current:
+                box.selectAll()
             box.blockSignals(was)
 
     @staticmethod
@@ -3133,23 +3240,65 @@ class PageView(QGraphicsView):
             return f"{stripped} {unit}"
         return stripped
 
-    def update_typed_size(self) -> None:
-        draft = self._draft
-        if not isinstance(draft, RectItem) or self._size_width is None \
-                or self._size_height is None:
-            return
-        width = self._size_width.text().strip()
-        height = self._size_height.text().strip()
-        if draft.kind == "ellipse" and width and not height:
-            height = width
-        if not width or not height:
-            return
-        unit = self.page().scale.display_unit
-        if draft.set_real_size(self._size_with_default_unit(width, unit),
-                               self._size_with_default_unit(height, unit),
-                               self.page()):
-            self._typed_size = True
+    def _points_for(self, text: str) -> Optional[float]:
+        """A typed length as page points, in the page's scale; None if unreadable."""
+        from ..core.units import parse_unit
+
+        page = self.page()
+        quantity = parse_unit(self._size_with_default_unit(text, self._size_unit))
+        if quantity is None or page is None:
+            return None
+        try:
+            if page.scale.is_calibrated():
+                points = float((quantity / page.scale.length(1.0))
+                               .to("dimensionless").magnitude)
+            else:
+                points = float(quantity.to("mm").magnitude) * MM_TO_PT
+        except Exception:                                  # noqa: BLE001
+            return None
+        return points if points > 0 else None
+
+    def _size_typed(self, box) -> None:
+        """A field was typed into: hold that value and redraw the shape."""
+        text = box.text().strip()
+        if box is self._size_rotation:
+            try:
+                self._typed_rotation = float(text) if text else None
+            except ValueError:
+                self._typed_rotation = None
+        else:
+            points = self._points_for(text) if text else None
+            if box is self._size_width:
+                self._typed_w = points
+            else:
+                self._typed_h = points
+            draft = self._draft
+            if (isinstance(draft, RectItem) and draft.kind == "ellipse"
+                    and box is self._size_width and points is not None
+                    and not self._size_height.isModified()):
+                # One diameter typed is a circle until the other is given.
+                self._typed_h = points
+        self._typed_size = any(value is not None for value in
+                               (self._typed_w, self._typed_h, self._typed_rotation))
+        if self._draft is not None:
+            self._update_draft(self._last_scene_pos, Qt.NoModifier)
             self.viewport().update()
+
+    def update_typed_size(self) -> None:
+        """Read every field again, as if each had just been typed into."""
+        for box in (self._size_width, self._size_height, self._size_rotation):
+            if box is not None and box.isModified():
+                self._size_typed(box)
+
+    def place_sized_draft(self) -> None:
+        """Enter in the size bar: put the shape down at the size it shows."""
+        if self._draft is None or self._mode not in ("draw_drag", "draw_click"):
+            return
+        at = QPointF(self._last_scene_pos)
+        self._update_draft(at, Qt.NoModifier)
+        self._mode = "idle"
+        self.close_size_editor()
+        self.finish_draft(at, clicked=True)
 
     def close_size_editor(self) -> None:
         proxy = self._size_proxy
@@ -3157,6 +3306,7 @@ class PageView(QGraphicsView):
         self._size_proxy = None
         self._size_width = None
         self._size_height = None
+        self._size_rotation = None
         if proxy is not None:
             widget = proxy.widget()
             if widget is not None:

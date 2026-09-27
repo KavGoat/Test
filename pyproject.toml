@@ -13,6 +13,7 @@ dependencies = [
     "PySide6>=6.6",
     "pint>=0.23",
     "pymupdf>=1.24",
+    "numpy>=1.24",
 ]
 
 [project.optional-dependencies]

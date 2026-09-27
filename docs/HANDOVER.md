@@ -1,6 +1,29 @@
 # MarkForge — start here
 
-## Latest review: 2026-09-18
+## Latest review: 2026-09-27
+
+At the user's request every earlier entry in `tasklist.md`, `tasklist.xlsx`,
+`COMPLETED_TASKS.md` and `UNADDRESSED_TASKS.md` was deleted; the registers
+restart with the 2026-09-27 report. The "nothing is ever deleted" rule in §4
+still applies from here on. Work is on branch `claude/handover-issues-bugs-yis0ql`.
+Evidence for this round is in `COMPLETED_TASKS.md`; open follow-up (the Revit
+red cross needs the user's file) is in `UNADDRESSED_TASKS.md`.
+
+Things learnt this round that will bite again:
+- Qt 6.11's `QSvgRenderer` strokes a `stroke="none"` path with a default pen
+  when painting to `QPdfWriter`, and Qt's PDF writer loses precision on MuPDF's
+  unit-sized glyph outlines. `pdfsnapshot.inline_glyphs` writes glyphs out in
+  page coordinates with `stroke-opacity="0"`; snapshots paint their kept
+  vector source (not the QPicture) whenever the painter is a PDF or printer.
+- `hatch_named()` returns a Qt enum; never `int()` it. An exception in
+  `paint` is a segfault a few events later.
+- Hatch is its own linework (`Style.hatch_color`) over a solid fill. Styles
+  saved before that are converted on load in `Style.from_dict`.
+- PySide 6.11 on Linux: run the suite with `QT_QPA_PLATFORM=offscreen`; it
+  is several times faster than `xvfb-run` and does not hang. `numpy` and
+  `cffi` must be installed (units formatting and pypdf respectively).
+
+## Previous review: 2026-09-18
 
 The clarified Whiteout behavior is flattened PDF artwork only; live markups
 remain editable and untouched. The requested fit option was withdrawn. PDF
@@ -81,8 +104,9 @@ the product context, code map, validation approach and task-tracking rules
 needed to work safely without re-reading earlier chat.
 
 - Repository: `KavGoat/Test`
-- Branch: **`claude/markforge-mupdf-pdf-handling-vpyj1t`** — all work goes here. Never push to
-  another branch without being asked.
+- Branch: the one the session names — currently
+  **`claude/handover-issues-bugs-yis0ql`**. Never push to another branch
+  without being asked.
 - The living task list: **`docs/tasklist.md`** — read it, work from it, keep it
   updated. `docs/tasklist.xlsx` is the user's companion status sheet: column A
   is blank for open work and `1` for user-confirmed completion. Rules for both
@@ -347,7 +371,7 @@ in a state somebody else could pick up from, because they may have to.
 
 - Commit and push **continuously** — every completed piece of work, not at the
   end. The container is ephemeral; unpushed work is lost work.
-- `git push -u origin claude/markforge-mupdf-pdf-handling-vpyj1t`
+- `git push -u origin <the session's branch>`
 - Commit messages: a short title, then prose explaining **what was wrong and
   why the new behaviour is right**. The user reads them. Look at the recent log
   for the register.

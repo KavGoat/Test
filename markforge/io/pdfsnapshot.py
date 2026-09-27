@@ -103,7 +103,13 @@ class PdfSvgItem(MarkupItem):
             self._renderer = QSvgRenderer(QByteArray(self.svg.encode()))
             if not self._renderer.isValid():
                 raise ValueError("PDF snapshot appearance could not be decoded")
+        # Whatever pen the painter was left holding would otherwise outline
+        # every glyph the SVG only fills, turning text bold in a PDF.
+        painter.save()
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(Qt.NoBrush)
         self._renderer.render(painter, self._rect)
+        painter.restore()
 
     def serialize(self):
         data = self.base_dict()
@@ -113,7 +119,7 @@ class PdfSvgItem(MarkupItem):
 
     def deserialize(self, data):
         self.load_base(data)
-        self.svg = data["svg"]
+        self.svg = inline_glyphs(data["svg"])
         self._rect = QRectF(*data["rect"])
         self._renderer = None
 
@@ -158,6 +164,90 @@ class PdfSvgItem(MarkupItem):
             self.svg = ET.tostring(root, encoding="unicode")
             self._renderer = None
         return changed
+
+
+_SVG = "{http://www.w3.org/2000/svg}"
+NORMALISED_ATTRIBUTE = "data-markforge-normalised"
+NORMALISED = NORMALISED_ATTRIBUTE + '="2"'
+_HREF = "{http://www.w3.org/1999/xlink}href"
+
+
+def _svg_d(path: QPainterPath) -> str:
+    """A path as SVG path data, in absolute coordinates."""
+    out = []
+    count = path.elementCount()
+    index = 0
+    while index < count:
+        element = path.elementAt(index)
+        if element.type == QPainterPath.MoveToElement:
+            out.append(f"M{element.x:.4f} {element.y:.4f}")
+        elif element.type == QPainterPath.LineToElement:
+            out.append(f"L{element.x:.4f} {element.y:.4f}")
+        elif element.type == QPainterPath.CurveToElement and index + 2 < count:
+            one, two = path.elementAt(index + 1), path.elementAt(index + 2)
+            out.append(f"C{element.x:.4f} {element.y:.4f} {one.x:.4f} {one.y:.4f} "
+                       f"{two.x:.4f} {two.y:.4f}")
+            index += 2
+        index += 1
+    return "".join(out)
+
+
+def _matrix_of(node) -> QTransform:
+    found = re.fullmatch(r"matrix\(([^)]+)\)", node.get("transform", "").strip())
+    if not found:
+        return QTransform()
+    values = [float(v) for v in re.split(r"[,\s]+", found[1].strip())]
+    return QTransform(*values) if len(values) == 6 else QTransform()
+
+
+def inline_glyphs(svg: str) -> str:
+    """Replace each ``<use>`` of a glyph with the glyph's own path, placed.
+
+    MuPDF writes text as glyph outlines a unit high, reused through ``<use>``
+    with a scaling transform. Qt's PDF writer keeps too few decimals of those
+    tiny coordinates, so in any other viewer the letters of an exported
+    snapshot came out as fat black blobs. Written out at their real size,
+    in page coordinates, they are the same letters everywhere.
+    """
+    if NORMALISED in svg[:600]:
+        return svg
+    try:
+        root = ET.fromstring(svg)
+    except ET.ParseError:
+        return svg
+    glyphs = {node.get("id"): node for node in root.iter()
+              if node.get("id") and node.tag == _SVG + "path"}
+    for parent in list(root.iter()):
+        for position, child in enumerate(list(parent)):
+            if child.tag != _SVG + "use":
+                continue
+            glyph = glyphs.get(child.get(_HREF, "").lstrip("#"))
+            if glyph is None:
+                continue
+            outline = _svg_path(glyph.get("d", ""))
+            if outline is None:
+                continue
+            placed = _matrix_of(child).map(outline)
+            attributes = {key: value for key, value in glyph.attrib.items()
+                          if key not in ("id", "d", "transform")}
+            attributes.update({key: value for key, value in child.attrib.items()
+                               if key not in (_HREF, "transform", "x", "y",
+                                              "width", "height")})
+            attributes["d"] = _svg_d(placed)
+            parent.remove(child)
+            parent.insert(position, ET.Element(_SVG + "path", attributes))
+    # A shape the SVG only fills says so outright, twice over. Qt's SVG
+    # renderer strokes even a stroke="none" path with a one-unit default pen
+    # when writing a PDF — which made every letter of an exported snapshot
+    # bold — but it does honour a stroke that cannot be seen.
+    for node in root.iter():
+        if node.tag not in (_SVG + "path", _SVG + "use"):
+            continue
+        if node.get("stroke", "none") == "none":
+            node.set("stroke", "none")
+            node.set("stroke-opacity", "0")
+    root.set(NORMALISED_ATTRIBUTE, "2")
+    return ET.tostring(root, encoding="unicode")
 
 
 def _svg_path(value):
@@ -234,7 +324,7 @@ def full_appearance(pdf_page, width, height):
                     or child.get("{http://www.w3.org/1999/xlink}href", "").lstrip("#") in empty):
                 parent.remove(child)
     item = PdfSvgItem()
-    item.svg = ET.tostring(root, encoding="unicode")
+    item.svg = inline_glyphs(ET.tostring(root, encoding="unicode"))
     item._rect = QRectF(0, 0, width, height)
     item.setZValue(-1000000)
     return item

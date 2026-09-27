@@ -1145,7 +1145,7 @@ def test_one_ellipse_diameter_makes_a_circle_and_escape_cancels(window, qapp):
     window.select_tool("ellipse")
     click(window.view, 300, 120)
     width = window.view._size_width
-    assert width.placeholderText().startswith("D1")
+    assert width.toolTip() == "Horizontal diameter"
     QTest.keyClicks(width, "1.5m")
     qapp.processEvents()
     draft = window.view._draft
@@ -7167,18 +7167,37 @@ def test_find_a_tool_is_on_the_help_menu(window):
     for entry in window.menuBar().actions():
         if entry.text() == "&Help":
             labels = [a.text() for a in entry.menu().actions()]
-    assert "Find tool…" in labels
+    assert "Search…" in labels
     assert window.act_find_tool.shortcut().toString() == "Shift+F1"
 
 
-def test_finding_a_tool_picks_it_up(window, monkeypatch):
-    from PySide6.QtWidgets import QInputDialog
+def test_finding_a_tool_picks_it_up(window):
+    from PySide6.QtTest import QTest
 
-    monkeypatch.setattr(QInputDialog, "getText",
-                        staticmethod(lambda *a, **k: ("revision cloud", True)))
+    window.show()
     window.find_a_tool()
+    QApplication.processEvents()
+    assert window.search_field.hasFocus()
+    QTest.keyClicks(window.search_field, "revision cloud")
+    QApplication.processEvents()
+    popup = window._search_completer.popup()
+    assert popup.isVisible()
+    rows = [window._search_model.item(i).text()
+            for i in range(window._search_model.rowCount())]
+    assert rows and rows[0].startswith("Cloud")
+    QTest.keyClick(window.search_field, Qt.Key_Return)
+    QApplication.processEvents()
     assert window.view.tool_key == "cloud"
-    assert "Cloud" in window.status_hint.text()
+    assert window.search_field.text() == ""
+
+
+def test_search_lists_commands_and_markups_too(window):
+    _a_rectangle(window)
+    kinds = {kind for _label, kind, _target in window.search_everything("rect")}
+    assert "Tool" in kinds and any(k.startswith("Markup") for k in kinds)
+    labels = [label for label, kind, _t in window.search_everything("split")
+              if kind == "Command"]
+    assert any(label.startswith("Split view") for label in labels)
 
 
 # ---------------------------------------------------------------------------
@@ -7191,8 +7210,18 @@ def test_a_hatched_fill_is_not_a_flat_one(window):
 
     plain = Style(fill="#888888")
     assert plain.brush().style() == QtNS.SolidPattern
-    hatched = Style(fill="#888888", hatch="diagonal up")
-    assert hatched.brush().style() == QtNS.BDiagPattern
+    hatched = Style(fill="#888888", hatch="diagonal up", hatch_color="#c92a2a")
+    assert hatched.brush().style() == QtNS.TexturePattern
+    tile = hatched.brush().textureImage()
+    # The solid fill is under the hatch, and the hatch is in its own colour.
+    colours = {tile.pixelColor(x, y).name() for x in range(0, tile.width(), 4)
+               for y in range(0, tile.height(), 4)}
+    greys = [QColor(c) for c in colours
+             if QColor(c).red() == QColor(c).green() == QColor(c).blue()]
+    assert any(abs(g.red() - 0x88) <= 2 for g in greys)
+    assert any(QColor(c).red() > 150 and QColor(c).green() < 100 for c in colours)
+    no_fill = Style(fill="", hatch="cross", hatch_color="#000000")
+    assert no_fill.paints_inside()
 
 
 def test_bluebeams_spellings_of_a_hatch_all_land(window):
@@ -8362,7 +8391,7 @@ def test_snap_feedback_is_a_blue_target_not_an_orange_square(window):
     assert not orange
 
 
-def test_the_three_snaps_are_on_the_view_menu(window):
+def test_the_snaps_are_on_the_view_menu(window):
     labels = []
     for entry in window.menuBar().actions():
         if entry.text() == "&View":
@@ -8370,7 +8399,8 @@ def test_the_three_snaps_are_on_the_view_menu(window):
     assert "Grid snap" in labels
     assert "Markup snap" in labels
     assert "PDF snap" in labels
-    assert "Align snap" in labels
+    assert "Align markups" in labels
+    assert "Align PDF" in labels
 
 
 # ---------------------------------------------------------------------------
@@ -9529,3 +9559,148 @@ def test_check_spelling_walks_every_text_markup(window, monkeypatch):
     texts = [item.doc.toPlainText() for item in window.view.frame().markups()
              if isinstance(item, TextItem)]
     assert texts == ["the colour of teh beam"]
+
+
+def test_format_painter_keeps_the_brush_over_markups(window):
+    from markforge.ui.view import format_painter_cursor
+
+    _a_rectangle(window)
+    window.format_painter()
+    assert window.holding_a_format()
+    hover(window.view, 180, 160)        # over the rectangle itself
+    assert (window.view.cursor().pixmap().cacheKey()
+            == format_painter_cursor().pixmap().cacheKey())
+    window.put_the_format_painter_down()
+    hover(window.view, 180, 160)
+    assert window.view.cursor().shape() != Qt.BitmapCursor
+
+
+
+def test_size_bar_matches_bluebeam_width_tab_height_enter(window, qapp):
+    """Width, Height and Rotation beside the corner; type, Tab, Enter."""
+    from PySide6.QtTest import QTest
+    from markforge.core.document import MM_TO_PT
+    from markforge.items.shapes import RectItem
+
+    window.show()
+    window.select_tool("rect")
+    QApplication.sendEvent(window.view.viewport(),
+                           _mouse(window.view, QEvent.MouseButtonPress, 100, 100))
+    view = window.view
+    assert view._size_editor is not None, "the bar appears as the drag starts"
+    captions = [label.text() for label in view._size_editor.findChildren(QLabel)]
+    assert {"Width", "Height", "Rotation"} <= set(captions)
+    QApplication.sendEvent(view.viewport(), _mouse(
+        view, QEvent.MouseMove, 220, 180, Qt.NoButton, Qt.LeftButton))
+    assert view._size_width.text() and view._size_width.selectedText() == \
+        view._size_width.text(), "the live width is selected, ready to be typed over"
+    QTest.keyClicks(view._size_width, "40")
+    QTest.keyClick(view._size_width, Qt.Key_Tab)
+    qapp.processEvents()
+    assert view._size_height.hasFocus(), "Tab moves on to the height"
+    QApplication.sendEvent(view.viewport(), _mouse(
+        view, QEvent.MouseMove, 400, 260, Qt.NoButton, Qt.LeftButton))
+    draft = view._draft
+    assert draft.local_rect().width() == pytest.approx(40 * MM_TO_PT, rel=1e-3), \
+        "a typed width holds while the pointer moves"
+    QTest.keyClicks(view._size_height, "20")
+    QTest.keyClick(view._size_height, Qt.Key_Return)
+    qapp.processEvents()
+    rects = [i for i in markups(window) if isinstance(i, RectItem)]
+    assert rects and view._draft is None and view._size_editor is None
+    placed = rects[-1].local_rect()
+    assert placed.width() == pytest.approx(40 * MM_TO_PT, rel=1e-3)
+    assert placed.height() == pytest.approx(20 * MM_TO_PT, rel=1e-3)
+
+
+def test_old_hatches_keep_their_look_when_loaded(window):
+    from markforge.items.base import Style
+
+    old = Style.from_dict({"fill": "#2f9e44", "hatch": "cross"})
+    assert old.hatch_color == "#2f9e44" and old.fill == ""
+
+
+def test_changing_the_scale_unit_updates_existing_dimensions(window):
+    from markforge.core.document import PageScale
+
+    window.current_page().scale = PageScale.from_ratio(100, "m")
+    window.apply_scale_change()
+    item = MeasureItem(DIMENSION)
+    item.points = [QPointF(0, 0), QPointF(MM_TO_PT * 10, 0)]
+    window.view.frame().add_markup(item, QPointF(100, 100))
+    item.refresh(page=window.current_page())
+    assert item.value_text.endswith(" m")
+    window.current_page().scale.display_unit = "mm"
+    window.apply_scale_change()
+    assert item.value_text == "1000.00 mm"
+
+
+def test_a_diameter_reports_what_was_drawn_across_the_circle(window):
+    from markforge.core.document import PageScale
+    from markforge.items.measure import DIAMETER
+
+    window.current_page().scale = PageScale.from_ratio(1, "mm")
+    item = MeasureItem(DIAMETER)
+    item.points = [QPointF(0, 0), QPointF(MM_TO_PT * 30, 0)]
+    window.view.frame().add_markup(item, QPointF(100, 100))
+    item.refresh(page=window.current_page())
+    assert item.value_text == "30.00 mm"
+    circle = item.build_path().boundingRect()
+    assert circle.width() == pytest.approx(MM_TO_PT * 30, rel=1e-3)
+
+
+def test_align_to_pdf_lines_up_with_the_drawing(window, tmp_path):
+    import pymupdf
+    from markforge.io import pdfio
+
+    source = pymupdf.open()
+    page = source.new_page(width=400, height=300)
+    page.draw_line((100, 50), (100, 250), color=(0, 0, 0), width=1)
+    path = tmp_path / "grid.pdf"
+    source.save(path)
+    source.close()
+    pdfio.import_pages(window.document, str(path), [0], at=0)
+    window.rebuild_scenes()
+    window.go_to_page(0)
+    frame = window.document.pages[0].frame
+    settings = window.document.settings
+    settings.snap_to_pdf_alignment = False
+    near = frame.mapToScene(QPointF(102, 180))
+    assert window.view.snap_to_alignment(near, frame) is None
+    settings.snap_to_pdf_alignment = True
+    caught = window.view.snap_to_alignment(near, frame)
+    assert caught is not None
+    assert frame.mapFromScene(caught).x() == pytest.approx(100, abs=0.6)
+
+
+def test_every_drawing_tool_has_a_drawing_cursor(window):
+    from markforge.ui.view import cloud_cursor, drawing_cursor
+
+    for key in ("callout", "cloud_callout", "cloud", "note", "snapshot", "rect"):
+        window.select_tool(key)
+        assert window.view.cursor().shape() == Qt.BitmapCursor, key
+    window.select_tool("cloud")
+    assert window.view.cursor().pixmap().cacheKey() == cloud_cursor().pixmap().cacheKey()
+    window.select_tool("callout")
+    assert (window.view.cursor().pixmap().cacheKey()
+            == drawing_cursor("callout").pixmap().cacheKey())
+
+
+def test_the_snapshot_marquee_is_not_the_last_rectangle_drawn(window):
+    from markforge.items.shapes import RectItem
+
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 200, 180)
+    rect = [i for i in markups(window) if isinstance(i, RectItem)][-1]
+    rect.style.stroke, rect.style.width = "#ff00ff", 6.0
+    window.set_as_default(rect)
+    window.select_tool("snapshot")
+    QApplication.sendEvent(window.view.viewport(),
+                           _mouse(window.view, QEvent.MouseButtonPress, 300, 300))
+    QApplication.sendEvent(window.view.viewport(), _mouse(
+        window.view, QEvent.MouseMove, 380, 360, Qt.NoButton, Qt.LeftButton))
+    draft = window.view._draft
+    assert draft.kind == "marquee"
+    assert draft.style.stroke != "#ff00ff" and draft.style.width != 6.0
+    window.view.escape_everything()
+    window.forget_defaults()

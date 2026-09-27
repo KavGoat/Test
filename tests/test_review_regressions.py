@@ -127,7 +127,9 @@ def test_hatch_scale_controls_and_undo(window):
     window.refresh_selection()
     window.hatch_scale_spin.setValue(2.5)
     assert item.style.hatch_scale == 2.5
-    assert item.style.brush().transform().m11() == 2.5
+    from markforge.items.base import HATCH_CELL, HATCH_TILE
+    assert item.style.brush().transform().m11() == pytest.approx(
+        2.5 * HATCH_CELL / HATCH_TILE)
     prop = window.properties_panel.findChild(QDoubleSpinBox, "hatchScale")
     assert prop.value() == 2.5
     prop.setValue(3)
@@ -542,3 +544,60 @@ def test_whiteout_preserves_searchable_rotated_labels(window, tmp_path, rotation
         assert 'Horizontal' in edited[0].get_text()
         vertical = edited[0].search_for('Vertical')
         assert vertical and vertical[0].x0 < 35
+
+
+def test_exported_text_snapshot_matches_its_source_in_another_viewer(window, tmp_path):
+    """Text in a snapshot must not turn into fat blobs outside this app.
+
+    Replaying the screen recording into Qt's PDF writer lost the glyphs'
+    tiny coordinates, and Qt's SVG renderer stroked the fill-only glyphs.
+    MuPDF stands in for "another viewer" here.
+    """
+    source = pymupdf.open()
+    page = source.new_page(width=400, height=300)
+    page.insert_text((50, 110), "GRID A  BEAM 310UB40", fontsize=9)
+    page.draw_line((40, 90), (180, 90), color=(0, 0, 0), width=0.25)
+    path = tmp_path / "text.pdf"
+    source.save(path)
+    source.close()
+    pdfio.import_pages(window.document, str(path), [0], at=0)
+    window.rebuild_scenes()
+    window.go_to_page(0)
+    window.view.set_zoom(1)
+    frame = window.document.pages[0].frame
+    window.take_snapshot(frame, QRectF(30, 60, 170, 140))
+    window.paste_items()
+    snapshot = [i for i in frame.markups() if isinstance(i, SnapshotItem)][-1]
+    snapshot.setPos(QPointF(200, 150))
+    saved = tmp_path / "out.pdf"
+    project.save_document(window.document, str(saved))
+
+    def ink(pdf, box):
+        pixmap = pdf[0].get_pixmap(dpi=200, clip=box, colorspace=pymupdf.csGRAY)
+        return sum(1 for value in pixmap.samples if value < 128)
+
+    with pymupdf.open(saved) as pdf:
+        original = ink(pdf, (45, 98, 160, 114))
+        copied = ink(pdf, (215, 188, 330, 204))
+    assert original > 0
+    assert 0.7 < copied / original < 1.3
+
+
+def test_zoomed_out_hairlines_are_not_faded():
+    """Hairlines rasterise a pixel wide, and tiles are never much finer than
+    the screen, so a zoomed-out sheet is not a pale wash."""
+    from markforge.io import pdftiles
+    from markforge.pdf import engine
+
+    assert pymupdf.TOOLS.show_aa_level()["graphics_min_line_width"] >= 1.0
+    for zoom in (0.13, 0.3, 0.45, 0.7, 1.0, 1.6, 3.1):
+        rung = pdftiles.zoom_step(zoom)
+        assert rung >= zoom - 1e-9
+        assert rung / zoom <= 2 ** 0.25 + 1e-6 or rung == 0.25
+    source = pymupdf.open()
+    page = source.new_page(width=600, height=600)
+    for row in range(20):
+        page.draw_line((10, 10 + row * 25), (590, 10 + row * 25), width=0.1)
+    pixmap = page.get_pixmap(matrix=pymupdf.Matrix(0.3, 0.3))
+    ink = sum(255 - value for value in pixmap.samples) / len(pixmap.samples)
+    assert engine.MIN_LINE_PIXELS >= 1.0 and ink > 15
