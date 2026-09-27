@@ -124,13 +124,24 @@ def paint_hatch(painter: QPainter, region: QPainterPath, style) -> None:
         return
     step = style.hatch_spacing()
     span = box.width() + box.height()
-    while span / step > MOST_HATCH_LINES:
-        step *= 2.0
     ink = QColor(style.hatch_color or style.stroke or "#000000")
     ink.setAlphaF(max(0.0, min(1.0, style.opacity)))
     painter.save()
     painter.setClipPath(region, Qt.IntersectClip)
     painter.setRenderHint(QPainter.Antialiasing, True)
+    if span / step > MOST_HATCH_LINES:
+        # Closer than this the lines merge into a tint anyway. Drawing that
+        # tint keeps the scale honest however small it goes, where spreading
+        # the lines out would quietly ignore the number typed.
+        directions = {Qt.HorPattern: 1, Qt.VerPattern: 1, Qt.BDiagPattern: 1,
+                      Qt.FDiagPattern: 1, Qt.CrossPattern: 2,
+                      Qt.DiagCrossPattern: 2}.get(pattern, 1)
+        cover = min(1.0, directions * HATCH_WIDTH / step)
+        tint = QColor(ink)
+        tint.setAlphaF(ink.alphaF() * cover)
+        painter.fillPath(region, tint)
+        painter.restore()
+        return
     lines = []
     left, top, right, bottom = box.left(), box.top(), box.right(), box.bottom()
 
@@ -161,10 +172,14 @@ def paint_hatch(painter: QPainter, region: QPainterPath, style) -> None:
         painter.drawLines([QLineF(a, b) for a, b in lines])
     if pattern in (Qt.Dense5Pattern, Qt.Dense3Pattern):
         gap = step if pattern == Qt.Dense5Pattern else step / 2.0
-        while (box.width() / gap) * (box.height() / gap) > MOST_HATCH_LINES * 5:
-            gap *= 2.0
         radius = HATCH_WIDTH * (0.9 if pattern == Qt.Dense5Pattern else 1.1)
         painter.setPen(Qt.NoPen)
+        if (box.width() / gap) * (box.height() / gap) > MOST_HATCH_LINES * 5:
+            tint = QColor(ink)
+            tint.setAlphaF(ink.alphaF() * min(1.0, math.pi * radius * radius / (gap * gap)))
+            painter.fillPath(region, tint)
+            painter.restore()
+            return
         painter.setBrush(ink)
         y = math.floor(top / gap) * gap + gap / 2
         while y <= bottom:
@@ -263,7 +278,7 @@ class Style:
 
     def hatch_spacing(self) -> float:
         """Distance between hatch lines, in page points. No upper limit."""
-        return HATCH_CELL * max(float(self.hatch_scale or 1.0), 1e-3)
+        return HATCH_CELL * max(float(self.hatch_scale or 1.0), 1e-12)
 
     def font(self) -> QFont:
         return page_font(self.font_family, self.font_size, self.bold, self.italic,

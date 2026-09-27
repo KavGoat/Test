@@ -79,3 +79,11 @@ difference between Helvetica and the fallback font here. Fractional font sizes a
 whole pixels (10.87 pt → 11), about 1 % wider. Evidence:
 `test_sketch_tools_match_bluebeams_own_drawing`,
 `test_bluebeam_line_spacing_is_exact`. Full suite: 958 passed.
+
+## 2026-09-27 — infinite hatch scale
+
+Both hatch-scale boxes are `UnboundedSpin` (1e-12 to 1e15, shown compactly,
+arrows step by 10 %). Drawing no longer spreads lines out past 4 000 lines:
+beyond that density the hatch is an even tint of its colour at the coverage
+the lines would give, so every scale typed is honoured.
+`test_hatch_scale_has_no_practical_limit`. Full suite: 959 passed.

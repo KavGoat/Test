@@ -9724,3 +9724,32 @@ def test_the_snapshot_marquee_is_not_the_last_rectangle_drawn(window):
     assert draft.style.stroke != "#ff00ff" and draft.style.width != 6.0
     window.view.escape_everything()
     window.forget_defaults()
+
+
+def test_hatch_scale_has_no_practical_limit(window):
+    from PySide6.QtGui import QImage, QPainter
+    from markforge.ui.widgets import UnboundedSpin
+
+    spin = window.hatch_scale_spin
+    assert isinstance(spin, UnboundedSpin)
+    for value in (0.0001, 0.5, 2.5, 250_000.0, 1e9):
+        spin.setValue(value)
+        assert spin.value() == pytest.approx(value)
+    assert spin.textFromValue(1e9) == "1e+09"
+    spin.setValue(10.0)
+    spin.stepBy(1)
+    assert spin.value() == pytest.approx(11.0)
+
+    box = RectItem("rect")
+    box.set_local_rect(QRectF(0, 0, 400, 400))
+    box.style.fill = ""
+    box.style.hatch, box.style.hatch_color = "cross", "#000000"
+    for scale in (1e-6, 1e6):
+        box.style.hatch_scale = scale
+        image = QImage(100, 100, QImage.Format_ARGB32)
+        image.fill(Qt.white)
+        painter = QPainter(image)
+        painter.scale(0.25, 0.25)
+        box.paint_visible(painter)       # neither hangs nor draws millions of lines
+        painter.end()
+    assert image.pixelColor(50, 50).name() == "#ffffff"   # one line, off-centre

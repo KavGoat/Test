@@ -1592,12 +1592,9 @@ class PropertiesPanel(QScrollArea):
                 lambda colour: self._apply(
                     lambda i: setattr(i.style, "hatch_color", colour), "Hatch colour"))
             form.addRow("Hatch colour", hatch_ink)
-            hatch_scale = QDoubleSpinBox()
+            from .widgets import UnboundedSpin
+            hatch_scale = UnboundedSpin()
             hatch_scale.setObjectName("hatchScale")
-            hatch_scale.setDecimals(2)
-            hatch_scale.setRange(0.01, 1_000_000.0)
-            hatch_scale.setSingleStep(0.1)
-            hatch_scale.setStepType(QDoubleSpinBox.AdaptiveDecimalStepType)
             hatch_scale.setSuffix(" ×")
             hatch_scale.setValue(first.style.hatch_scale)
             hatch_scale.valueChanged.connect(lambda value: self._apply(

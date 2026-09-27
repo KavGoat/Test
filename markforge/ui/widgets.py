@@ -6,7 +6,8 @@ from PySide6.QtCore import QEvent, QObject, QPointF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap, QPen
 from PySide6.QtWidgets import (QAbstractSpinBox, QColorDialog, QComboBox,
                                QGridLayout, QHBoxLayout, QLabel, QMenu, QSlider,
-                               QToolButton, QWidget, QWidgetAction, QSpinBox)
+                               QToolButton, QWidget, QWidgetAction, QSpinBox,
+                               QDoubleSpinBox)
 
 from ..items.base import PALETTE
 from .icons import colour_icon
@@ -189,3 +190,47 @@ class WheelBelongsToTheScroller(QObject):
         # Not focused: hand it on. The scroll area above it will take it.
         event.ignore()
         return True
+
+
+class UnboundedSpin(QDoubleSpinBox):
+    """A number box with no practical upper or lower limit.
+
+    Shown compactly (``0.0001``, ``2.5``, ``1e+09``) rather than with a fixed
+    number of decimals, and stepped by a tenth of its own size, so the arrows
+    are as useful at 0.002 as at 20 000.
+    """
+
+    SMALLEST = 1e-12
+    LARGEST = 1e15
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setDecimals(15)
+        self.setRange(self.SMALLEST, self.LARGEST)
+        self.setKeyboardTracking(False)
+
+    def textFromValue(self, value: float) -> str:
+        return f"{value:.6g}"
+
+    def valueFromText(self, text: str) -> float:
+        cleaned = text.replace(self.suffix(), "").replace(",", "").strip()
+        try:
+            return min(max(float(cleaned), self.SMALLEST), self.LARGEST)
+        except ValueError:
+            return self.value()
+
+    def validate(self, text: str, position: int):
+        from PySide6.QtGui import QValidator
+        cleaned = text.replace(self.suffix(), "").replace(",", "").strip()
+        if cleaned in ("", ".", "-", "e", "E") or cleaned.lower().endswith(("e", "e-", "e+")):
+            return QValidator.Intermediate, text, position
+        try:
+            return (QValidator.Acceptable if float(cleaned) > 0
+                    else QValidator.Intermediate), text, position
+        except ValueError:
+            return QValidator.Invalid, text, position
+
+    def stepBy(self, steps: int) -> None:
+        value = self.value()
+        factor = 1.1 ** steps
+        self.setValue(min(max(value * factor, self.SMALLEST), self.LARGEST))

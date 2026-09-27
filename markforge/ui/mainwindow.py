@@ -903,12 +903,10 @@ class MainWindow(QMainWindow):
         self.hatch_colour_button.colorChanged.connect(lambda value: self._style_change(
             HATCH, lambda style: setattr(style, "hatch_color", value), "Hatch colour"))
         self._style_widgets[HATCH].append(style_bar.addWidget(self.hatch_colour_button))
-        self.hatch_scale_spin = QDoubleSpinBox()
+        from .widgets import UnboundedSpin
+        self.hatch_scale_spin = UnboundedSpin()
         self.hatch_scale_spin.setObjectName("hatchScale")
-        self.hatch_scale_spin.setDecimals(2)
-        self.hatch_scale_spin.setRange(0.01, 1_000_000.0)
-        self.hatch_scale_spin.setSingleStep(0.1)
-        self.hatch_scale_spin.setStepType(QDoubleSpinBox.AdaptiveDecimalStepType)
+        self.hatch_scale_spin.setMinimumWidth(84)
         self.hatch_scale_spin.setSuffix(" ×")
         self.hatch_scale_spin.setToolTip("Hatch scale")
         self.hatch_scale_spin.valueChanged.connect(lambda value: self._style_change(

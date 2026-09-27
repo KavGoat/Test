@@ -27,5 +27,5 @@ restarts with the report below. Completion status is user-owned.
 |  | PDF linework on the page looks blurrier than a snapshot of the same lines pasted beside it until zoomed in. Page lines must look as sharp as the pasted snapshot at every zoom. |
 |  | A pasted snapshot shows stray repeated dots in the app that do not appear in other PDF editors. The app must draw it as the export does. |
 |  | After placing a rectangle or ellipse no size dialog may pop up; the size bar while drawing is the only size entry. |
-|  | Hatch must stay sharp at any hatch scale and zoom: linework, not a tiled picture. |
+|  | Hatch must stay sharp at any hatch scale and zoom: linework, not a tiled picture. **(amended)** Hatch scale is effectively infinite in both directions, in both the style toolbar and Properties. |
 |  | Bluebeam tool set import must line up one to one with Bluebeam: verify Sketch Tools against btx/Document1.pdf, where Bluebeam placed the same tools. |
