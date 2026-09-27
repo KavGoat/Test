@@ -161,12 +161,35 @@ class SpellChecker:
 _shared: Optional[SpellChecker] = None
 
 
+PERSONAL_KEY = "spelling/personal"
+
+
 def shared() -> SpellChecker:
     """The one checker the whole application uses."""
     global _shared
     if _shared is None:
-        _shared = SpellChecker()
+        _shared = SpellChecker(_personal_words())
     return _shared
+
+
+def _personal_words() -> list:
+    try:
+        from ..settings import app_settings
+        stored = app_settings().value(PERSONAL_KEY, "") or ""
+    except Exception:                       # noqa: BLE001
+        return []
+    return [word for word in str(stored).split("\n") if word]
+
+
+def remember(word: str) -> None:
+    """Learn *word* for good: it is kept in the personal list on disk."""
+    checker = shared()
+    checker.learn(word)
+    try:
+        from ..settings import app_settings
+        app_settings().setValue(PERSONAL_KEY, "\n".join(sorted(checker.personal)))
+    except Exception:                       # noqa: BLE001
+        pass
 
 
 def forget() -> None:

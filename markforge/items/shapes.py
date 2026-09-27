@@ -235,10 +235,23 @@ class RectItem(MarkupItem):
     def paint_content(self, painter: QPainter) -> None:
         rect = self._rect.normalized()
         painter.setRenderHint(QPainter.Antialiasing, True)
+        if self.kind == "marquee":
+            # The selection marquee, dashed: a one-pixel line whatever the
+            # zoom, never the pen of whatever rectangle was drawn last.
+            pen = QPen(QColor("#1971c2"))
+            pen.setWidthF(0)
+            pen.setCosmetic(True)
+            pen.setStyle(Qt.DashLine)
+            painter.setPen(pen)
+            fill = QColor("#1971c2")
+            fill.setAlpha(28)
+            painter.setBrush(fill)
+            painter.drawRect(rect)
+            return
         pen = self.style.pen() if self.style.stroke else QPen(Qt.NoPen)
         painter.setPen(pen)
         painter.setBrush(self.style.brush())
-        if self.cutouts and self.style.fill and self.kind in ("rect", "ellipse"):
+        if self.cutouts and self.style.paints_inside() and self.kind in ("rect", "ellipse"):
             # A hole in a filled shape has to be a hole in the fill, or the
             # only sign of it is the dashed outline sitting on solid colour.
             solid = QPainterPath()
@@ -258,7 +271,7 @@ class RectItem(MarkupItem):
             polygon = QPolygonF([rect.topLeft(), rect.topRight(),
                                  rect.bottomRight(), rect.bottomLeft()])
             path = cloud_path(polygon, self.cloud_radius)
-            if self.style.fill:
+            if self.style.paints_inside():
                 filled = QPainterPath(path)
                 filled.closeSubpath()
                 painter.fillPath(filled, self.style.brush())
@@ -681,7 +694,7 @@ class PolyItem(MarkupItem):
         stroker.setWidth(max(self.style.width, 6.0) + 4)
         stroker.setCapStyle(Qt.RoundCap)
         path = stroker.createStroke(self.build_path())
-        if self.closed and self.style.fill:
+        if self.closed and self.style.paints_inside():
             path.addPath(self.build_path())
         return path
 
@@ -848,7 +861,7 @@ class PolyItem(MarkupItem):
     def paint_content(self, painter: QPainter) -> None:
         painter.setRenderHint(QPainter.Antialiasing, True)
         path = self.build_path()
-        if self.closed and self.style.fill:
+        if self.closed and self.style.paints_inside():
             filled = QPainterPath(path)
             filled.closeSubpath()
             if self.cutouts:

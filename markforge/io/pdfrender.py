@@ -12,14 +12,15 @@ import time
 
 from ..pdf import engine
 
-MAX_DOCUMENTS = 3
-MAX_DISPLAY_LISTS = 6
+MAX_DOCUMENTS = 6
+# Parsed pages are what make a re-render fast; keep plenty of them.
+MAX_DISPLAY_LISTS = 24
 
 
 def worker_count() -> int:
-    """Use several cores while reserving CPU capacity for the window and OS."""
+    """Use every core but one, which is kept for the window and the OS."""
     available = getattr(os, 'process_cpu_count', os.cpu_count)() or 1
-    default = min(4, max(1, available - 1))
+    default = min(8, max(1, available - 1))
     try:
         requested = int(os.environ.get('MARKFORGE_PDF_WORKERS', default))
     except ValueError:

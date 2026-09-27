@@ -1,6 +1,7 @@
 """Modal dialogs: page setup, scale, PDF import, document properties and more."""
 from __future__ import annotations
 
+import html
 import os
 from typing import Optional
 
@@ -10,7 +11,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox,
                                QDialog,
                                QDialogButtonBox, QDoubleSpinBox, QFileDialog,
                                QFormLayout, QGroupBox, QHBoxLayout, QHeaderView,
-                               QLabel, QLineEdit, QMessageBox, QPushButton,
+                               QLabel, QLineEdit, QListWidget, QMessageBox, QPushButton,
                                QRadioButton, QSpinBox, QTableWidget, QTableWidgetItem,
                                QTabWidget, QVBoxLayout, QWidget)
 
@@ -1329,3 +1330,53 @@ class PreferencesDialog(QDialog):
             autosize_text=self.autosize.isChecked(),
             insertion_point=self.insertion.isChecked(),
             recover_flattened=self.recover_flattened.isChecked())
+
+
+class SpellingDialog(QDialog):
+    """One misspelt word: change it, skip it, or learn it.
+
+    *choice* says which button closed it: ``change``, ``ignore``, ``add`` or
+    ``stop``.
+    """
+
+    def __init__(self, word: str, text: str, at: int, suggestions: list,
+                 parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Check spelling")
+        self.choice = "stop"
+        layout = QVBoxLayout(self)
+        before = text[max(at - 30, 0):at]
+        after = text[at + len(word):at + len(word) + 30]
+        context = QLabel(f"…{html.escape(before)}<b style='color:#e03131'>"
+                         f"{html.escape(word)}</b>{html.escape(after)}…")
+        context.setTextFormat(Qt.RichText)
+        context.setWordWrap(True)
+        layout.addWidget(context)
+        form = QFormLayout()
+        self.edit = QLineEdit(suggestions[0] if suggestions else word)
+        form.addRow("Change to", self.edit)
+        self.options = QListWidget()
+        self.options.addItems(suggestions)
+        self.options.currentTextChanged.connect(self.edit.setText)
+        self.options.itemDoubleClicked.connect(lambda _item: self._close("change"))
+        form.addRow("Suggestions", self.options)
+        layout.addLayout(form)
+        buttons = QHBoxLayout()
+        for label, choice in (("Change", "change"), ("Ignore", "ignore"),
+                              ("Add word", "add"), ("Stop", "stop")):
+            button = QPushButton(label)
+            button.clicked.connect(lambda _checked=False, c=choice: self._close(c))
+            buttons.addWidget(button)
+            if choice == "change":
+                button.setDefault(True)
+        layout.addLayout(buttons)
+
+    def _close(self, choice: str) -> None:
+        self.choice = choice
+        if choice == "stop":
+            self.reject()
+        else:
+            self.accept()
+
+    def replacement(self) -> str:
+        return self.edit.text().strip()

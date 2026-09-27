@@ -596,10 +596,36 @@ class PageFrame(QGraphicsObject):
         """Lazy, disposable geometry; never paint or persist it as markups."""
         if not self.page.pdf_key or not self.document.settings.snap_to_content:
             return []
+        if not self._load_pdf_snap():
+            return []
+        return self._near_pdf_snap_items(near, reach)
+
+    def pdf_alignment_axes(self) -> tuple:
+        """Sorted x and y values of every PDF line-work vertex, page-local.
+
+        What the PDF alignment guides look up by bisection, so a sheet with a
+        hundred thousand vertices costs a couple of comparisons per move.
+        """
+        if not self.page.pdf_key or not self._load_pdf_snap():
+            return ((), ())
+        axes = getattr(self, "_pdf_axes", None)
+        if axes is not None and axes[0] == self._pdf_snap_key:
+            return axes[1], axes[2]
+        xs, ys = set(), set()
+        for payload in self._pdf_snap_payloads:
+            left, top = payload["x"], payload["y"]
+            for x, y in payload["points"]:
+                xs.add(round(left + x, 2))
+                ys.add(round(top + y, 2))
+        self._pdf_axes = (self._pdf_snap_key, sorted(xs), sorted(ys))
+        return self._pdf_axes[1], self._pdf_axes[2]
+
+    def _load_pdf_snap(self) -> bool:
+        """Read this page's PDF line work once; True when there is some."""
         key = (self.page.pdf_key, self.page.pdf_page_index, self.page.width_pt,
                self.page.height_pt)
         if getattr(self, "_pdf_snap_key", None) == key:
-            return self._near_pdf_snap_items(near, reach)
+            return True
         previous = getattr(self, "_pdf_snap_group", None)
         if previous is not None:
             previous.setParentItem(None)
@@ -615,11 +641,11 @@ class PageFrame(QGraphicsObject):
         from ..io import pdfio, pdfvector
         data = self.document.asset(self.page.pdf_key)
         if not data:
-            return []
+            return False
         try:
             source = pdfvector.PdfFile.from_bytes(data)
         except pdfvector.PdfError:
-            return []
+            return False
         try:
             width, _ = source.page_size(self.page.pdf_page_index)
             strokes = pdfvector.strokes_of_page(source, self.page.pdf_page_index)
@@ -642,7 +668,7 @@ class PageFrame(QGraphicsObject):
                             self._pdf_snap_bins.setdefault((x, y), []).append(order)
         finally:
             source.close()
-        return self._near_pdf_snap_items(near, reach)
+        return True
 
     def _near_pdf_snap_items(self, near, reach):
         if near is None:

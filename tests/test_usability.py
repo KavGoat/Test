@@ -4853,17 +4853,16 @@ def test_alt_z_brings_the_box_back_in_around_the_words(window):
 
 def test_misspelt_words_are_underlined_only_while_typing(window):
     """The squiggle helps whoever is writing; it never reaches the paper."""
-    from PySide6.QtGui import QTextCharFormat
-
     window.select_tool("text")
     drag(window.view, 100, 100, 320, 150)
     box = window.view.editing_item()
     box.set_text("the colour of teh beam")
     assert box._speller is not None
 
+    from markforge.items.text import MISSPELT
+
     formats = box.doc.findBlockByNumber(0).layout().formats()
-    squiggles = [f for f in formats
-                 if f.format.underlineStyle() == QTextCharFormat.SpellCheckUnderline]
+    squiggles = [f for f in formats if f.format.property(MISSPELT)]
     assert len(squiggles) == 1
     assert squiggles[0].start == "the colour of teh beam".index("teh")
 
@@ -7428,7 +7427,8 @@ def test_the_grid_and_snap_buttons_are_on_the_bar(window):
     assert not window.document.settings.snap_to_grid
 
     labels = [action.text() for action in window.status_snap.menu().actions()]
-    assert labels == ["Grid snap", "Markup snap", "PDF snap", "Align snap"]
+    assert labels == ["Grid snap", "Markup snap", "PDF snap", "Align markups",
+                      "Align PDF"]
 
 
 def test_the_snap_dropdown_toggles_a_target_through_qt(window):
@@ -9477,3 +9477,55 @@ def test_split_views_share_edits_but_new_document_keeps_other_undo(window):
         other.close()
         other.deleteLater()
         QApplication.processEvents()
+
+
+def test_closing_a_split_panes_tab_turns_the_split_off(window):
+    host = window.split_document()
+    other = host.panes[1]
+    other.confirm_discard = lambda: True
+    QApplication.processEvents()
+    assert window.act_split_view.isChecked()
+    other.close_document_tab(0)
+    QApplication.processEvents()
+    assert window._split_host is None
+    assert window.isWindow()
+    assert not window.act_split_view.isChecked()
+
+
+def test_split_view_action_turns_the_split_off(window):
+    window.open_in_new_tab()
+    host = window.split_document(0)
+    other = host.panes[1]
+    other.confirm_discard = lambda: True
+    QApplication.processEvents()
+    window.act_split_view.trigger()
+    QApplication.processEvents()
+    assert window._split_host is None
+    # The other pane's document came back as a tab rather than being lost.
+    assert len(window._open_documents) == 2
+
+
+def test_check_spelling_walks_every_text_markup(window, monkeypatch):
+    from markforge.ui import dialogs
+
+    window.select_tool("text")
+    drag(window.view, 100, 100, 320, 150)
+    box = window.view.editing_item()
+    box.set_text("the colour of teh beam")
+    window.view.end_item_edit()
+    assert [word for _i, _s, _l, word in window.spelling_mistakes()] == ["teh"]
+
+    class Accept(dialogs.SpellingDialog):
+        def exec(self):
+            self.edit.setText("the")
+            self.choice = "change"
+            return 1
+
+    monkeypatch.setattr(dialogs, "SpellingDialog", Accept)
+    window.interactive_prompts = True
+    assert window.check_spelling() == 1
+    assert box.doc.toPlainText() == "the colour of the beam"
+    window.undo_stack.undo()
+    texts = [item.doc.toPlainText() for item in window.view.frame().markups()
+             if isinstance(item, TextItem)]
+    assert texts == ["the colour of teh beam"]

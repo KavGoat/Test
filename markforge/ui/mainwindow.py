@@ -205,8 +205,60 @@ class SplitDocumentWindow(QSplitter):
                 action.setShortcutContext(Qt.WindowShortcut)
             pane.setGeometry(self.geometry().adjusted(36 * offset, 36 * offset,
                                                        36 * offset, 36 * offset))
+            pane.act_split_view.blockSignals(True)
+            pane.act_split_view.setChecked(False)
+            pane.act_split_view.blockSignals(False)
             pane.show()
         self.panes = []
+        self.close()
+
+    def unsplit(self, keep, carry_over: bool = True):
+        """Turn the split off: *keep* becomes an ordinary window again.
+
+        The other pane goes. With *carry_over*, any document it held that is
+        not already open in *keep* moves across as a tab, so turning the split
+        off never closes somebody's work.
+        """
+        if keep not in self.panes:
+            return
+        leaving = next(pane for pane in self.panes if pane is not keep)
+        if carry_over:
+            held = {id(state["document"]) for state in keep._open_documents}
+            held.add(id(keep.document))
+            states = (list(leaving._open_documents)
+                      if leaving._open_documents
+                      else [leaving._current_document_state()])
+            if leaving._open_documents and 0 <= leaving._active_tab < len(states):
+                states[leaving._active_tab] = leaving._current_document_state()
+            for state in states:
+                if id(state["document"]) in held:
+                    continue
+                held.add(id(state["document"]))
+                where = keep.open_in_new_tab()
+                keep._open_documents[where] = dict(state)
+                keep._adopt_document_state(dict(state))
+                keep.document_tabs.setTabText(
+                    where, keep._tab_title(state["document"]))
+        self.panes = []
+        # The leaving pane still thinks it is split while it closes, so it
+        # does not write its trimmed-down split layout over the saved one.
+        leaving._closing_confirmed = True
+        leaving.close()
+        leaving._closing_confirmed = False
+        leaving._split_host = None
+        keep._split_host = None
+        keep.setParent(None, Qt.Window)
+        state, status_visible = keep._before_split
+        keep.restoreState(state)
+        keep.statusBar().setVisible(status_visible)
+        keep.menuBar().setNativeMenuBar(True)
+        for action in keep.findChildren(QAction):
+            action.setShortcutContext(Qt.WindowShortcut)
+        keep.setGeometry(self.geometry())
+        keep.show()
+        keep.act_split_view.blockSignals(True)
+        keep.act_split_view.setChecked(False)
+        keep.act_split_view.blockSignals(False)
         self.close()
 
     def closeEvent(self, event):
@@ -257,6 +309,7 @@ _SHORTCUT_GROUPS = {
     "fit_page": "View", "fit_width": "View", "actual_size": "View",
     "prev_page": "View", "next_page": "View", "grid": "View", "snap": "View",
     "snap_items": "View", "snap_content": "View", "snap_alignment": "View",
+    "snap_pdf_alignment": "View",
     "margins": "View", "dark": "View",
     "turn_view_cw": "View", "turn_view_acw": "View",
     "turn_view_reset": "View",
@@ -266,7 +319,7 @@ _SHORTCUT_GROUPS = {
     "add_page": "Page", "duplicate_page": "Page", "delete_page": "Page",
     "page_setup": "Page", "scale": "Page", "header_footer": "Page",
     "bookmark": "Page", "contents": "Page", "doc_props": "Page",
-    "renumber_counts": "Markup",
+    "renumber_counts": "Markup", "check_spelling": "Markup",
     "shortcuts": "Help", "sample": "Help",
     "find_tool": "Help",
     "about": "Help",
@@ -474,8 +527,10 @@ class MainWindow(QMainWindow):
                   tip="Open another document beside this one, in its own tab")
         self._act("new_window", "New window", self.open_new_window, "Ctrl+Shift+N",
                   tip="Open a second window with a document of its own")
-        self._act("split_view", "Split view", self.split_document,
-                  tip="View this document beside another editable pane")
+        self._act("split_view", "Split view", self.toggle_split_view,
+                  checkable=True,
+                  tip="View this document beside another editable pane; "
+                      "choose again to turn the split off")
         self._act("separate_views", "Separate views", self.separate_views,
                   tip="Return split panes to independent windows")
         self._act("open", "Open…", self.open_document, "Ctrl+O", "open")
@@ -637,11 +692,14 @@ class MainWindow(QMainWindow):
                   tip="Catch the corners and ends of the line work that came "
                       "in on the page — and only those, because a drawing has "
                       "thousands of them")
-        self._act("snap_alignment", "Align snap",
+        self._act("snap_alignment", "Align markups",
                   self.toggle_alignment_snap, "", checkable=True,
                   tip="Line a new markup up level with, or directly under, a "
-                      "point on one already drawn. Never off the drawing "
-                      "underneath — every line on that would offer a guide")
+                      "point on a markup already drawn")
+        self._act("snap_pdf_alignment", "Align PDF",
+                  self.toggle_pdf_alignment_snap, "", checkable=True,
+                  tip="Line a new markup up level with, or directly under, a "
+                      "corner or line end in the PDF drawing itself")
         self._act("dark", "Dark theme", self.toggle_theme, "", checkable=True)
         self._act("margins", "Show margins", self.toggle_margins, "", checkable=True)
         self.act_margins.setChecked(True)
@@ -651,6 +709,9 @@ class MainWindow(QMainWindow):
         self._act("sticky", "Stay active", self.toggle_sticky, "", "pin",
                   checkable=True,
                   tip="Stay on the current tool after drawing instead of returning to Select")
+        self._act("check_spelling", "Check spelling…", self.check_spelling, "F7",
+                  tip="Go through every text markup in the document, word by "
+                      "word, and correct what the dictionary does not know")
         self._act("apply_redactions", "Apply redactions…", self.apply_redactions, "",
                   tip="Permanently remove what the black boxes cover")
 
@@ -832,14 +893,22 @@ class MainWindow(QMainWindow):
         self.hatch_combo.setObjectName("hatchPattern")
         for name in HATCH_PATTERNS:
             self.hatch_combo.addItem(_hatch_icon(name, "#748096"), name or "plain", name)
-        self.hatch_combo.setToolTip("Pattern drawn over the fill")
+        self.hatch_combo.setToolTip("Hatch pattern, drawn over the fill in its own colour")
         self.hatch_combo.currentIndexChanged.connect(
             lambda _index: self._style_hatch(self.hatch_combo.currentData()))
         self._style_widgets[HATCH].append(style_bar.addWidget(self.hatch_combo))
+        self.hatch_colour_button = ColorButton(self.default_style.hatch_color,
+                                               label="Hatch colour")
+        self.hatch_colour_button.setObjectName("hatchColour")
+        self.hatch_colour_button.colorChanged.connect(lambda value: self._style_change(
+            HATCH, lambda style: setattr(style, "hatch_color", value), "Hatch colour"))
+        self._style_widgets[HATCH].append(style_bar.addWidget(self.hatch_colour_button))
         self.hatch_scale_spin = QDoubleSpinBox()
         self.hatch_scale_spin.setObjectName("hatchScale")
-        self.hatch_scale_spin.setRange(0.1, 100.0)
+        self.hatch_scale_spin.setDecimals(2)
+        self.hatch_scale_spin.setRange(0.01, 1_000_000.0)
         self.hatch_scale_spin.setSingleStep(0.1)
+        self.hatch_scale_spin.setStepType(QDoubleSpinBox.AdaptiveDecimalStepType)
         self.hatch_scale_spin.setSuffix(" ×")
         self.hatch_scale_spin.setToolTip("Hatch scale")
         self.hatch_scale_spin.valueChanged.connect(lambda value: self._style_change(
@@ -1076,7 +1145,8 @@ class MainWindow(QMainWindow):
                        self.act_turn_view_cw, self.act_turn_view_acw,
                        self.act_turn_view_reset, None, self.act_grid,
                        self.act_snap, self.act_snap_items, self.act_snap_content,
-                       self.act_snap_alignment, self.act_margins,
+                       self.act_snap_alignment, self.act_snap_pdf_alignment,
+                       self.act_margins,
                        self.act_dark, None,
                        self.act_prev_page,
                        self.act_next_page):
@@ -1119,6 +1189,7 @@ class MainWindow(QMainWindow):
         markup_menu.addAction(self.act_recover_flattened)
         markup_menu.addSeparator()
         markup_menu.addAction(self.act_renumber_counts)
+        markup_menu.addAction(self.act_check_spelling)
         markup_menu.addAction(self.act_forget_defaults)
         markup_menu.addSeparator()
         markup_menu.addAction(self.act_apply_redactions)
@@ -1283,7 +1354,8 @@ class MainWindow(QMainWindow):
         self.status_snap.setToolTip("Choose what drawing points snap to")
         snap_menu = QMenu(self.status_snap)
         for action in (self.act_snap, self.act_snap_items,
-                       self.act_snap_content, self.act_snap_alignment):
+                       self.act_snap_content, self.act_snap_alignment,
+                       self.act_snap_pdf_alignment):
             snap_menu.addAction(action)
         self.status_snap.setMenu(snap_menu)
         self.status_snap.setPopupMode(QToolButton.InstantPopup)
@@ -1516,9 +1588,20 @@ class MainWindow(QMainWindow):
         second.interactive_prompts = self.interactive_prompts
         second._adopt_document_state(state)
         host = SplitDocumentWindow(self, second)
+        for pane in host.panes:
+            pane.act_split_view.blockSignals(True)
+            pane.act_split_view.setChecked(True)
+            pane.act_split_view.blockSignals(False)
         host.show()
         second.view.setFocus(Qt.OtherFocusReason)
         return host
+
+    def toggle_split_view(self, on: bool = True):
+        """Split this window in two, or turn an existing split off."""
+        if self._split_host is not None:
+            self._split_host.unsplit(self)
+            return None
+        return self.split_document()
 
     def separate_views(self):
         if self._split_host is not None:
@@ -1545,6 +1628,14 @@ class MainWindow(QMainWindow):
         target = self._state_for_tab(index)
         shared = any(state["document"] is target["document"]
                      for i, state in enumerate(self._open_documents) if i != index)
+        host = self._split_host
+        if host is not None:
+            for pane in host.panes:
+                if pane is not self and (
+                        pane.document is target["document"]
+                        or any(state["document"] is target["document"]
+                               for state in pane._open_documents)):
+                    shared = True
         if not moving and not shared:
             previous = self._active_tab
             self.switch_to_document(index)
@@ -1552,6 +1643,13 @@ class MainWindow(QMainWindow):
                 self.switch_to_document(previous)
                 return
             self.switch_to_document(previous)
+        if len(self._open_documents) == 1 and host is not None and not moving:
+            # The pane's last tab going is the split going: the other pane
+            # carries on as an ordinary window.
+            other = next((pane for pane in host.panes if pane is not self), None)
+            if other is not None:
+                host.unsplit(other, carry_over=False)
+                return
         if len(self._open_documents) == 1:
             self.new_document(confirm=False)
             self._open_documents[0] = self._current_document_state()
@@ -2896,15 +2994,112 @@ class MainWindow(QMainWindow):
         added up.
         """
         self.refresh_scale_label()
+        # Every value already on the page is re-read in the new scale and
+        # unit, so changing the unit changes the dimensions drawn with it.
+        self.refresh_page_measurements(self.current_page())
         # Measurements and rectangle sizes are in the takeoff list too, so it
         # goes stale unless it is rebuilt with them.
         self.refresh_lists()
         self.refresh_selection()
         self.mark_modified()
 
+    def spelling_mistakes(self) -> list:
+        """Every misspelt word in the document's text markups, in page order.
+
+        Each is (item, start, length, word); positions are in the item's
+        plain text.
+        """
+        from ..core.spelling import shared
+
+        checker = shared()
+        found = []
+        for page in self.document.pages:
+            frame = page.frame
+            if frame is None:
+                continue
+            for item in frame.markups():
+                if not isinstance(item, _TextBase) or item.locked:
+                    continue
+                text = item.doc.toPlainText()
+                for start, length, word in checker.mistakes(text):
+                    found.append((item, start, length, word))
+        return found
+
+    def check_spelling(self) -> int:
+        """Walk every misspelt word in the document, as Bluebeam's F7 does.
+
+        Returns how many words were changed.
+        """
+        from PySide6.QtGui import QTextCursor
+        from ..core.spelling import remember, shared
+
+        self.view.end_item_edit()
+        mistakes = self.spelling_mistakes()
+        if not mistakes:
+            self.status_hint.setText("Spelling: no mistakes found")
+            if self.interactive_prompts:
+                QMessageBox.information(self, "Check spelling",
+                                        "No spelling mistakes were found.")
+            return 0
+        checker = shared()
+        ignored: set = set()
+        changed = 0
+        shift: dict = {}
+        self.view.begin_snapshot(self.view.all_frames())
+        for item, start, length, word in mistakes:
+            key = word.lower()
+            if key in ignored or checker.knows(word):
+                continue
+            at = start + shift.get(id(item), 0)
+            self.scene.clearSelection()
+            item.setSelected(True)
+            self.view.ensureVisible(item)
+            dialog = dialogs.SpellingDialog(word, item.doc.toPlainText(), at,
+                                            checker.suggestions(word), self)
+            answer = dialog.exec() if self.interactive_prompts else 0
+            action = dialog.choice if answer else "stop"
+            if action == "stop":
+                break
+            if action == "ignore":
+                ignored.add(key)
+                continue
+            if action == "add":
+                remember(word)
+                continue
+            replacement = dialog.replacement()
+            if not replacement or replacement == word:
+                continue
+            cursor = QTextCursor(item.doc)
+            cursor.setPosition(at)
+            cursor.setPosition(at + length, QTextCursor.KeepAnchor)
+            cursor.insertText(replacement)
+            item.written = item.doc.toPlainText()
+            if hasattr(item, "refresh_layout"):
+                item.refresh_layout()
+            item.update()
+            shift[id(item)] = shift.get(id(item), 0) + len(replacement) - length
+            changed += 1
+        if changed:
+            self.view.commit_snapshot("Check spelling")
+        else:
+            self.view.forget_snapshot()
+        self.status_hint.setText(f"Spelling: {changed} word(s) changed")
+        return changed
+
+    def refresh_page_measurements(self, page) -> None:
+        """Re-read every measured value on *page* from its current scale."""
+        for frame in (self.scene.frames if self.scene is not None else []):
+            if getattr(frame, "page", None) is not page:
+                continue
+            for item in frame.markups():
+                if isinstance(item, MeasureItem) or (
+                        isinstance(item, RectItem) and item.kind in SIZED_SHAPES):
+                    item.refresh(page=page)
+
     def set_area_unit(self, unit: str) -> None:
         if unit:
             self.current_page().scale.area_unit = unit
+            self.refresh_page_measurements(self.current_page())
             self.refresh_lists()
             self.mark_modified()
 
@@ -3125,6 +3320,7 @@ class MainWindow(QMainWindow):
                     (self.hatch_combo, active.style.hatch or "plain",
                      "setCurrentText"),
                     (self.hatch_scale_spin, active.style.hatch_scale, "setValue"),
+                    (self.hatch_colour_button, active.style.hatch_color, "set_color"),
                     (self.opacity_spin, int(round(active.style.opacity * 100)),
                      "setValue"),
                     (self.fill_opacity_spin,
@@ -3362,6 +3558,7 @@ class MainWindow(QMainWindow):
         if HATCH in capabilities(item):
             item.style.hatch = style.hatch
             item.style.hatch_scale = style.hatch_scale
+            item.style.hatch_color = style.hatch_color
         item.style.font_size = style.font_size
         if hasattr(item, "apply_style"):
             item.apply_style()
@@ -5271,7 +5468,9 @@ class MainWindow(QMainWindow):
                 (getattr(self, "act_snap_items", None), settings.snap_to_items),
                 (getattr(self, "act_snap_content", None), settings.snap_to_content),
                 (getattr(self, "act_snap_alignment", None),
-                 settings.snap_to_alignment)):
+                 settings.snap_to_alignment),
+                (getattr(self, "act_snap_pdf_alignment", None),
+                 settings.snap_to_pdf_alignment)):
             if widget is None or widget.isChecked() == bool(value):
                 continue
             widget.blockSignals(True)
@@ -5288,6 +5487,10 @@ class MainWindow(QMainWindow):
 
     def toggle_alignment_snap(self, on: bool) -> None:
         self.document.settings.snap_to_alignment = bool(on)
+        self._say_snap_state()
+
+    def toggle_pdf_alignment_snap(self, on: bool) -> None:
+        self.document.settings.snap_to_pdf_alignment = bool(on)
         self._say_snap_state()
 
     def toggle_margins(self, on: bool) -> None:
@@ -5683,6 +5886,8 @@ class MainWindow(QMainWindow):
             self.act_snap_content.setChecked(self.document.settings.snap_to_content)
             self.act_snap_alignment.setChecked(
                 self.document.settings.snap_to_alignment)
+            self.act_snap_pdf_alignment.setChecked(
+                self.document.settings.snap_to_pdf_alignment)
             self.act_margins.setChecked(self.document.settings.show_margins)
             self._refresh_all_scenes()
             self.update_title()

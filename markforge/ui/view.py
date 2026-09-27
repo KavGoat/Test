@@ -517,9 +517,13 @@ class PageView(QGraphicsView):
             return QCursor(Qt.ArrowCursor)
         if tool.key == "pan":
             return QCursor(Qt.OpenHandCursor)
-        if tool.mode in (DRAG, POLY, FREE):
-            return drawing_cursor(tool.icon)
-        return QCursor(Qt.PointingHandCursor)
+        if tool.mode in (CLOUDY, CLOUD):
+            # Cloud and Cloud+ start by drawing a cloud round something, the
+            # same gesture as adding a cloud leader, so they carry its cursor.
+            return cloud_cursor()
+        # Every other tool — callouts, click-placed notes and stamps, the
+        # snapshot region — is a precise crosshair carrying its own icon.
+        return drawing_cursor(tool.icon)
 
     def finish_tool(self) -> None:
         self.forget_snap()
@@ -532,6 +536,10 @@ class PageView(QGraphicsView):
         if not self.sticky_tool and self.tool_key not in ("select", "pan"):
             self.set_tool("select")
             self.toolFinished.emit("select")
+        else:
+            # A tool kept in hand goes back to its own cursor, whatever a
+            # gesture within it changed the pointer to.
+            self.setCursor(self._cursor_for_tool(self.current_tool()))
 
     # ------------------------------------------------------------------
     # zoom & navigation
@@ -882,6 +890,11 @@ class PageView(QGraphicsView):
         if frame is None:
             return None
         across, down = self.alignment_lines(frame, ignore)
+        across, down = list(across), list(down)
+        if self.document().settings.snap_to_pdf_alignment:
+            nearest = self._pdf_alignment_near(frame, scene_pos)
+            across += nearest[0]
+            down += nearest[1]
         if not across and not down:
             return None
         reach = SNAP_REACH / max(self._zoom, 0.05)
@@ -1110,6 +1123,37 @@ class PageView(QGraphicsView):
                 if where is not None and _within(where, scene_pos, reach):
                     found.append((where, "crossing", item))
         return found
+
+    def _pdf_alignment_near(self, frame, scene_pos: QPointF) -> tuple:
+        """The PDF vertex levels and uprights nearest the pointer, in scene.
+
+        Looked up page-locally by bisection, then turned into scene values.
+        Only the neighbours either side are returned, which is all the
+        nearest-guide choice needs.
+        """
+        import bisect
+        loader = getattr(frame, "pdf_alignment_axes", None)
+        if loader is None:
+            return ([], [])
+        xs, ys = loader()
+        if not xs and not ys:
+            return ([], [])
+        local = frame.mapFromScene(scene_pos)
+        across, down = [], []
+        transform = frame.sceneTransform()
+        upright = abs(transform.m12()) < 1e-9 and abs(transform.m21()) < 1e-9
+
+        def neighbours(values, value):
+            at = bisect.bisect_left(values, value)
+            return [values[i] for i in (at - 1, at) if 0 <= i < len(values)]
+
+        for x in neighbours(xs, local.x()):
+            point = frame.mapToScene(QPointF(x, local.y()))
+            (down if upright else across).append(point.x() if upright else point.y())
+        for y in neighbours(ys, local.y()):
+            point = frame.mapToScene(QPointF(local.x(), y))
+            (across if upright else down).append(point.y() if upright else point.x())
+        return (across, down)
 
     def alignment_lines(self, frame, ignore=()) -> tuple:
         """The levels and the uprights worth lining a new markup up with.
@@ -2597,6 +2641,9 @@ class PageView(QGraphicsView):
 
     def _prepare_draft(self, item: MarkupItem) -> None:
         item.author = self.document().settings.default_author or self.document().author
+        if isinstance(item, RectItem) and item.kind == "marquee":
+            # A region being chosen is not a markup and wears no markup style.
+            return
         self.window.apply_default_style(item)
         if self._pending_properties:
             # Drawn with a tool taken from a set: its properties win over both
@@ -2844,6 +2891,8 @@ class PageView(QGraphicsView):
         self.forget_snapshot()
         self._pending_cloud = corners
         self._pending_anchor = QPointF(corners[0])
+        # The cloud is done; what comes next is placing the words.
+        self.setCursor(drawing_cursor("callout"))
         self.statusMessage.emit(
             f"{tool.label}: now click where the words go · Esc to cancel")
         self.viewport().update()

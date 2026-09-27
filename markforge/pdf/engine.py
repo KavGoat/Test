@@ -43,6 +43,14 @@ from .objects import Name, Ref, Stream
 pymupdf.TOOLS.mupdf_display_errors(False)
 pymupdf.TOOLS.mupdf_display_warnings(False)
 
+# A zoomed-out sheet is mostly hairlines narrower than a pixel. Anti-aliased
+# at their true width they come out as a pale grey wash that only darkens
+# once zoomed in. Every stroke is rasterised at least one device pixel wide,
+# which is how Bluebeam keeps a whole sheet legible at fit-to-page. It only
+# changes rendered pixels, never the PDF that is saved or exported.
+MIN_LINE_PIXELS = 1.0
+pymupdf.TOOLS.set_graphics_min_line_width(MIN_LINE_PIXELS)
+
 
 def drain_messages() -> str:
     """Whatever MuPDF has been complaining about, and a clean slate."""

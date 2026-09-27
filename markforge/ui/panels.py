@@ -1577,7 +1577,7 @@ class PropertiesPanel(QScrollArea):
             hatch = QComboBox()
             hatch.setObjectName("hatchPattern")
             hatch.setIconSize(QSize(76, 22))
-            hatch_colour = first.style.fill or first.style.stroke
+            hatch_colour = first.style.hatch_color or first.style.stroke
             for name in HATCH_PATTERNS:
                 hatch.addItem(_hatch_icon(name, hatch_colour), name or "plain", name)
             hatch.setCurrentIndex(max(hatch.findData(first.style.hatch or ""), 0))
@@ -1586,10 +1586,18 @@ class PropertiesPanel(QScrollArea):
                     lambda i: setattr(i.style, "hatch", hatch.currentData()),
                                           "Hatch"))
             form.addRow("Hatch", hatch)
+            hatch_ink = ColorButton(first.style.hatch_color, label="Hatch colour")
+            hatch_ink.setObjectName("hatchColour")
+            hatch_ink.colorChanged.connect(
+                lambda colour: self._apply(
+                    lambda i: setattr(i.style, "hatch_color", colour), "Hatch colour"))
+            form.addRow("Hatch colour", hatch_ink)
             hatch_scale = QDoubleSpinBox()
             hatch_scale.setObjectName("hatchScale")
-            hatch_scale.setRange(0.1, 100.0)
+            hatch_scale.setDecimals(2)
+            hatch_scale.setRange(0.01, 1_000_000.0)
             hatch_scale.setSingleStep(0.1)
+            hatch_scale.setStepType(QDoubleSpinBox.AdaptiveDecimalStepType)
             hatch_scale.setSuffix(" ×")
             hatch_scale.setValue(first.style.hatch_scale)
             hatch_scale.valueChanged.connect(lambda value: self._apply(

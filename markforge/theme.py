@@ -142,6 +142,34 @@ QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QSpinBox:focus,
 QDoubleSpinBox:focus, QComboBox:focus {{ border-color: {accent}; }}
 QLineEdit:disabled, QComboBox:disabled {{ color: {ink_faint}; }}
 QComboBox::drop-down {{ border: 0; width: 18px; }}
+QComboBox::down-arrow {{ image: url("{arrow_down}"); width: 9px; height: 9px; }}
+
+/* A styled spin box loses the platform's arrows, so they are drawn here. */
+QSpinBox, QDoubleSpinBox {{ padding-right: 18px; }}
+QSpinBox::up-button, QDoubleSpinBox::up-button {{
+    subcontrol-origin: border; subcontrol-position: top right;
+    width: 16px; border: 0; border-left: 1px solid {field_edge};
+    border-top-right-radius: 3px;
+}}
+QSpinBox::down-button, QDoubleSpinBox::down-button {{
+    subcontrol-origin: border; subcontrol-position: bottom right;
+    width: 16px; border: 0; border-left: 1px solid {field_edge};
+    border-bottom-right-radius: 3px;
+}}
+QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
+QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {{
+    background: {accent_soft};
+}}
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{
+    image: url("{arrow_up}"); width: 9px; height: 9px;
+}}
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
+    image: url("{arrow_down}"); width: 9px; height: 9px;
+}}
+QSpinBox::up-arrow:disabled, QDoubleSpinBox::up-arrow:disabled,
+QSpinBox::down-arrow:disabled, QDoubleSpinBox::down-arrow:disabled {{
+    image: none;
+}}
 
 QPushButton {{
     background: {chrome}; border: 1px solid {field_edge}; border-radius: 3px;
@@ -222,8 +250,42 @@ QMenu::icon {{ padding-left: 6px; }}
 QLabel:disabled {{ color: {ink_faint}; }}
 """
 
-STYLESHEET = TEMPLATE.format(**_LIGHT_TOKENS)
-DARK_STYLESHEET = TEMPLATE.format(**_DARK_TOKENS)
+def _arrow_files(ink: str, name: str) -> dict:
+    """Small up and down arrow images for the stylesheet, in *ink*.
+
+    A stylesheet can only take an arrow as an image file, so the two are
+    written once to a private folder and referred to by path.
+    """
+    import os
+    import tempfile
+
+    folder = os.path.join(tempfile.gettempdir(), "markforge-theme")
+    shapes = {"up": "1,7 5,2 9,7", "down": "1,3 5,8 9,3"}
+    paths = {}
+    for way, points in shapes.items():
+        path = os.path.join(folder, f"{name}-{way}.svg")
+        svg = ('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" '
+               f'viewBox="0 0 10 10"><polygon points="{points}" '
+               f'fill="{ink}"/></svg>')
+        try:
+            os.makedirs(folder, exist_ok=True)
+            current = ""
+            if os.path.exists(path):
+                with open(path, encoding="utf-8") as handle:
+                    current = handle.read()
+            if current != svg:
+                with open(path, "w", encoding="utf-8") as handle:
+                    handle.write(svg)
+        except OSError:
+            pass
+        paths[f"arrow_{way}"] = path.replace("\\", "/")
+    return paths
+
+
+STYLESHEET = TEMPLATE.format(**_LIGHT_TOKENS,
+                             **_arrow_files(_LIGHT_TOKENS["ink_soft"], "light"))
+DARK_STYLESHEET = TEMPLATE.format(**_DARK_TOKENS,
+                                  **_arrow_files(_DARK_TOKENS["ink_soft"], "dark"))
 
 # The desk the paper lies on, per theme.  Dark enough that a white sheet has an
 # unmistakable edge, neutral enough that it never competes with a markup.

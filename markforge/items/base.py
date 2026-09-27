@@ -101,6 +101,63 @@ def hatch_named(name: str):
         return Qt.Dense3Pattern
     return Qt.SolidPattern
 
+#: One repeat of a hatch, in page points at a hatch scale of one, and the
+#: pixels it is drawn at: fine enough to stay crisp when zoomed in.
+HATCH_CELL = 8.0
+HATCH_TILE = 128
+_HATCH_TILES: dict = {}
+
+
+def hatch_tile(pattern, fill: "Optional[QColor]", ink: QColor):
+    """One repeat of a hatch as an image: the fill, then the lines over it.
+
+    Drawn as antialiased vector lines rather than Qt's one-pixel bitmap
+    patterns, so a hatch reads as linework at any zoom and in any export.
+    """
+    from PySide6.QtGui import QImage
+
+    key = (int(pattern), fill.rgba() if fill is not None else None, ink.rgba())
+    tile = _HATCH_TILES.get(key)
+    if tile is not None:
+        return tile
+    size = HATCH_TILE
+    tile = QImage(size, size, QImage.Format_ARGB32_Premultiplied)
+    tile.fill(fill if fill is not None else Qt.transparent)
+    painter = QPainter(tile)
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    pen = QPen(ink, size / HATCH_CELL * 0.6)
+    pen.setCapStyle(Qt.FlatCap)
+    painter.setPen(pen)
+    half = size / 2.0
+    lines = []
+    if pattern in (Qt.HorPattern, Qt.CrossPattern):
+        lines.append(((0, half), (size, half)))
+    if pattern in (Qt.VerPattern, Qt.CrossPattern):
+        lines.append(((half, 0), (half, size)))
+    if pattern in (Qt.BDiagPattern, Qt.DiagCrossPattern):
+        for shift in (-size, 0, size):
+            lines.append(((shift, size), (shift + size, 0)))
+    if pattern in (Qt.FDiagPattern, Qt.DiagCrossPattern):
+        for shift in (-size, 0, size):
+            lines.append(((shift, 0), (shift + size, size)))
+    for (x1, y1), (x2, y2) in lines:
+        painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
+    if pattern in (Qt.Dense5Pattern, Qt.Dense3Pattern):
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(ink)
+        radius = size / HATCH_CELL * (0.55 if pattern == Qt.Dense5Pattern else 0.7)
+        spots = ([(half, half)] if pattern == Qt.Dense5Pattern else
+                 [(size / 4, size / 4), (3 * size / 4, size / 4),
+                  (size / 4, 3 * size / 4), (3 * size / 4, 3 * size / 4)])
+        for x, y in spots:
+            painter.drawEllipse(QPointF(x, y), radius, radius)
+    painter.end()
+    if len(_HATCH_TILES) > 256:
+        _HATCH_TILES.clear()
+    _HATCH_TILES[key] = tile
+    return tile
+
+
 ARROW_HEADS = ["none", "arrow", "open", "dot", "square", "diamond", "slash", "half"]
 
 # Bluebeam-ish default palette offered in colour pickers.
@@ -135,9 +192,11 @@ class Style:
     blend: str = "normal"              # 'multiply' for highlighter
     corner_radius: float = 0.0
     padding: float = 4.0
-    # A hatch pattern over the fill, by name — "" is a plain fill.
+    # A hatch pattern, by name — "" is none. It is drawn over the fill in a
+    # colour of its own: the fill is a solid wash, the hatch is linework.
     hatch: str = ""
     hatch_scale: float = 1.0
+    hatch_color: str = "#000000"
     # A dash pattern of this line's own, in multiples of its width. Empty
     # means the named line style decides, which is the usual case; a line
     # read out of a Bluebeam file brings its own.
@@ -168,13 +227,27 @@ class Style:
         pen.setCosmetic(False)
         return pen
 
+    def paints_inside(self) -> bool:
+        """Whether anything is drawn inside the outline: a fill or a hatch."""
+        return bool(self.fill) or self.hatched()
+
+    def hatched(self) -> bool:
+        """Whether a hatch pattern is drawn, rather than only a fill."""
+        return bool(self.hatch) and hatch_named(self.hatch) != Qt.SolidPattern
+
     def brush(self) -> QBrush:
-        if not self.fill:
-            return QBrush(Qt.NoBrush)
-        colour = QColor(self.fill)
-        colour.setAlphaF(max(0.0, min(1.0, self.fill_opacity * self.opacity)))
-        brush = QBrush(colour, hatch_named(self.hatch))
-        scale = max(0.1, min(float(self.hatch_scale), 100.0))
+        """The solid fill, with the hatch drawn over it in its own colour."""
+        fill = None
+        if self.fill:
+            fill = QColor(self.fill)
+            fill.setAlphaF(max(0.0, min(1.0, self.fill_opacity * self.opacity)))
+        if not self.hatched():
+            return QBrush(fill) if fill is not None else QBrush(Qt.NoBrush)
+        ink = QColor(self.hatch_color or self.stroke or "#000000")
+        ink.setAlphaF(max(0.0, min(1.0, self.opacity)))
+        brush = QBrush(hatch_tile(hatch_named(self.hatch), fill, ink))
+        # No upper bound: a hatch can be as coarse as the drawing needs.
+        scale = max(float(self.hatch_scale or 1.0), 1e-3) * HATCH_CELL / HATCH_TILE
         brush.setTransform(QTransform.fromScale(scale, scale))
         return brush
 
@@ -208,6 +281,12 @@ class Style:
     @classmethod
     def from_dict(cls, data: dict) -> "Style":
         known = {f: data[f] for f in cls.__dataclass_fields__ if f in data}
+        if "hatch_color" not in data and known.get("hatch") and \
+                hatch_named(known["hatch"]) != Qt.SolidPattern:
+            # Saved before hatch and fill were separate: the hatch was drawn
+            # in the fill colour with nothing under it. Keep that look.
+            known["hatch_color"] = known.get("fill") or known.get("stroke") or "#000000"
+            known["fill"] = ""
         return cls(**known)
 
 

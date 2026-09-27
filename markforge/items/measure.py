@@ -154,6 +154,8 @@ class MeasureItem(MarkupItem):
 
     def boundingRect(self) -> QRectF:
         rect = self.local_rect()
+        if self.kind in (RADIUS, DIAMETER) and len(self.points) >= 2:
+            rect = rect.united(self.build_path().boundingRect())
         if self.is_dimensioned() and abs(self.witness_reach) > 1e-9:
             start, end = self.dimension_ends()
             rect = rect.united(QRectF(start, end).normalized())
@@ -213,10 +215,14 @@ class MeasureItem(MarkupItem):
             path.lineTo(end)
             return path
         if self.kind in (RADIUS, DIAMETER):
-            centre, edge = self.points[0], self.points[1]
-            radius = _distance(centre, edge)
+            start, edge = self.points[0], self.points[1]
+            if self.kind == DIAMETER:
+                centre = (start + edge) / 2
+                radius = _distance(start, edge) / 2
+            else:
+                centre, radius = start, _distance(start, edge)
             path.addEllipse(centre, radius, radius)
-            path.moveTo(centre)
+            path.moveTo(start)
             path.lineTo(edge)
             return path
         path.moveTo(self.points[0])
@@ -435,8 +441,10 @@ class MeasureItem(MarkupItem):
                 return "angle", 0.0
             return "angle", math.degrees(math.acos(max(-1.0, min(1.0, dot / magnitudes))))
         if self.kind in (RADIUS, DIAMETER) and len(points) >= 2:
-            radius = _distance(points[0], points[1])
-            return "length", radius * (2 if self.kind == DIAMETER else 1)
+            # A radius is drawn from the centre out to the edge; a diameter
+            # from one edge straight across to the other, so what was drawn is
+            # what is reported.
+            return "length", _distance(points[0], points[1])
         return "none", 0.0
 
     def refresh(self, workspace=None, page=None) -> None:
@@ -477,7 +485,7 @@ class MeasureItem(MarkupItem):
                 painter.drawLine(self.points[0], self.points[-1])
             return
         path = self.build_path()
-        if self.closed and self.style.fill:
+        if self.closed and self.style.paints_inside():
             filled = QPainterPath()
             filled.addPolygon(QPolygonF(self.points))
             filled.closeSubpath()
@@ -589,33 +597,20 @@ class MeasureItem(MarkupItem):
         text = self.value_text
         width = metrics.horizontalAdvance(text) + 8
         height = metrics.height() + 4
-        plain = self.is_dimensioned()
 
-        if self.label_is_off_the_line():
+        if self.is_dimensioned() and self.label_is_off_the_line():
             pen = QPen(QColor(self.style.stroke), max(self.style.width * 0.6, 0.4))
             pen.setStyle(Qt.SolidLine)
             painter.setPen(pen)
-            if plain:
-                painter.drawPolyline(QPolygonF(self.leader_path()))
-            else:
-                painter.drawLine(anchor, position)
+            painter.drawPolyline(QPolygonF(self.leader_path()))
 
+        # Every value is written the way a dimension's is: plain words, no
+        # box and no tail back to where it came from. An area's value, a
+        # radius and a diameter are moved by dragging the words themselves.
         painter.save()
         painter.translate(position)
         painter.rotate(self.label_rotation())
         box = QRectF(-width / 2, -height / 2, width, height)
-        if plain:
-            # A dimension's value is written on the line, not in a box on top
-            # of it. The line is broken behind it instead, which is how a
-            # dimension is drawn and what makes the drawn one and the typed one
-            # look like the same thing.
-            painter.setPen(QPen(self.style.text_qcolor()))
-            painter.drawText(box, Qt.AlignCenter, text)
-            painter.restore()
-            return
-        painter.setBrush(QBrush(QColor(255, 255, 255, 215)))
-        painter.setPen(QPen(QColor(self.style.stroke), 0.5))
-        painter.drawRoundedRect(box, 2.5, 2.5)
         painter.setPen(QPen(self.style.text_qcolor()))
         painter.drawText(box, Qt.AlignCenter, text)
         painter.restore()

@@ -12,6 +12,9 @@ Printing/export retain the synchronous renderer in pdfio.LivePages.
 """
 from __future__ import annotations
 
+import math
+import os
+
 from dataclasses import dataclass
 from typing import Optional
 
@@ -35,10 +38,39 @@ TILE = 1024
 #: The longest edge of the small picture kept of a whole page.
 THUMBNAIL_EDGE = 1100
 
-#: How much of the tile cache to keep, in bytes of image. Roughly forty
-#: A1-sized screenfuls, and a hard ceiling rather than a hope.
-CACHE_BYTES = 192 * 1024 * 1024
-SHEET_CACHE_BYTES = 32 * 1024 * 1024
+def _installed_memory() -> int:
+    """Physical memory in bytes, or 0 when the system will not say."""
+    try:
+        return int(os.sysconf("SC_PAGE_SIZE")) * int(os.sysconf("SC_PHYS_PAGES"))
+    except (AttributeError, OSError, ValueError):
+        pass
+    try:                                    # Windows
+        import ctypes
+
+        class _Status(ctypes.Structure):
+            _fields_ = [("length", ctypes.c_ulong), ("load", ctypes.c_ulong),
+                        ("total", ctypes.c_ulonglong), ("free", ctypes.c_ulonglong),
+                        ("page_total", ctypes.c_ulonglong),
+                        ("page_free", ctypes.c_ulonglong),
+                        ("virtual_total", ctypes.c_ulonglong),
+                        ("virtual_free", ctypes.c_ulonglong),
+                        ("extended", ctypes.c_ulonglong)]
+        status = _Status()
+        status.length = ctypes.sizeof(_Status)
+        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+            return int(status.total)
+    except Exception:                       # noqa: BLE001
+        pass
+    return 0
+
+
+#: How much of the tile cache to keep, in bytes of image. An eighth of the
+#: machine's memory, between 192 MB and 2 GB: a workstation keeps every zoom
+#: of every sheet it has shown, so going back is instant, and a small laptop
+#: still has a hard ceiling rather than a hope.
+CACHE_BYTES = max(192 * 1024 * 1024,
+                  min(_installed_memory() // 8, 2048 * 1024 * 1024))
+SHEET_CACHE_BYTES = max(32 * 1024 * 1024, CACHE_BYTES // 6)
 
 #: The most tiles one repaint will ask for. A screenful is about a dozen, so
 #: this is several screenfuls of margin and still a bound: past it the answers
@@ -60,14 +92,16 @@ def zoom_step(scale: float) -> float:
     """The rung of the ladder at or above *scale*.
 
     Rendering at exactly the zoom on screen would mean re-rendering on every
-    notch of the wheel. Rendering at the next power of two up means a zoom is
-    one round of work, and never gives back less resolution than the screen is
-    showing.
+    notch of the wheel. The rungs are a quarter of a doubling apart: never
+    less resolution than the screen is showing, and never more than about a
+    fifth more. A whole doubling used to be allowed, and shrinking a picture
+    by up to half on screen is what turned one-pixel hairlines into a faded
+    grey wash on a zoomed-out sheet.
     """
-    step = 0.25
-    while step < scale and step < 64.0:
-        step *= 2.0
-    return step
+    if scale <= 0.25:
+        return 0.25
+    rung = math.ceil(math.log2(scale) * 4.0 - 1e-9) / 4.0
+    return min(2.0 ** rung, 64.0)
 
 
 @dataclass(frozen=True)

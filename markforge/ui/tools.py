@@ -98,7 +98,7 @@ TOOLS: list[Tool] = [
          "Opaque black-out box", factory=_rect("redact")),
     Tool("whiteout", "Whiteout", "eraser", SNAPSHOT, "Draw", "",
          "Drag a region to clear flattened PDF artwork; Undo restores it",
-         factory=_rect("rect")),
+         factory=_rect("marquee")),
 
     Tool("text", "Text box", "text", DRAG, "Annotate", "T", "Text box",
          factory=lambda: TextItem("")),

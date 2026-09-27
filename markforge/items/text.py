@@ -33,6 +33,10 @@ STAMP_PRESETS = {
 }
 
 
+#: The text-format property the spelling highlighter marks words with.
+MISSPELT = QTextCharFormat.UserProperty + 17
+
+
 class _InlineEditor(QGraphicsTextItem):
     """A text editor with none of Qt's own decoration.
 
@@ -46,6 +50,54 @@ class _InlineEditor(QGraphicsTextItem):
         trimmed.state &= ~QStyle.State_HasFocus
         trimmed.state &= ~QStyle.State_Selected
         super().paint(painter, trimmed, widget)
+        self._paint_misspellings(painter)
+
+    def _paint_misspellings(self, painter: QPainter) -> None:
+        """A red wave under each misspelt word, the same size at any zoom.
+
+        Qt's own spell-check underline is sized to the font, and a page font
+        at an ordinary zoom makes it a faint dotted smudge nobody sees. This
+        one is drawn in screen pixels, the way a word processor draws it.
+        """
+        document = self.document()
+        if document is None:
+            return
+        transform = painter.worldTransform()
+        scale = math.hypot(transform.m11(), transform.m12()) or 1.0
+        step = 2.0 / scale
+        pen = QPen(QColor("#e03131"), 1.3)
+        pen.setCosmetic(True)
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        margin = document.documentMargin()
+        block = document.begin()
+        while block.isValid():
+            layout = block.layout()
+            origin = layout.position()
+            for piece in layout.formats():
+                if not piece.format.property(MISSPELT):
+                    continue
+                start, end = piece.start, piece.start + piece.length
+                for number in range(layout.lineCount()):
+                    line = layout.lineAt(number)
+                    first = max(start, line.textStart())
+                    last = min(end, line.textStart() + line.textLength())
+                    if last <= first:
+                        continue
+                    left = origin.x() + line.cursorToX(first)[0] + margin
+                    right = origin.x() + line.cursorToX(last)[0] + margin
+                    base = origin.y() + line.y() + line.ascent() + margin + step
+                    wave = QPainterPath(QPointF(left, base))
+                    x, up = left, True
+                    while x < right:
+                        x = min(x + step, right)
+                        wave.lineTo(QPointF(x, base + (-step if up else step) * 0.6))
+                        up = not up
+                    painter.drawPath(wave)
+            block = block.next()
+        painter.restore()
 
     # What ends a run of subscript or superscript: anything that is not part
     # of the same token. A space, an operator, a bracket — the moment the
@@ -115,7 +167,18 @@ class _InlineEditor(QGraphicsTextItem):
         change.triggered.connect(
             lambda _checked=False, at=QTextCursor(cursor), old=word:
             self._ask_spelling(at, old))
+        learn = menu.addAction("Add word")
+        learn.setToolTip("Add this word to your dictionary")
+        learn.triggered.connect(lambda _checked=False, new=word: self._learn(new))
         return menu
+
+    def _learn(self, word: str) -> None:
+        from ..core.spelling import remember
+        remember(word)
+        owner = self.parentItem()
+        speller = getattr(owner, "_speller", None)
+        if speller is not None:
+            speller.rehighlight()
 
     def _replace_spelling(self, cursor: QTextCursor, replacement: str) -> None:
         cursor.insertText(replacement)
@@ -308,9 +371,10 @@ class _SpellHighlighter(QSyntaxHighlighter):
         checker = shared()
         if not checker.ready():
             return
+        # Marked rather than underlined: the editor draws its own wave, at
+        # a size that can be seen whatever the zoom.
         style = QTextCharFormat()
-        style.setUnderlineColor(QColor("#e03131"))
-        style.setUnderlineStyle(QTextCharFormat.SpellCheckUnderline)
+        style.setProperty(MISSPELT, True)
         for start, length, _word in checker.mistakes(text):
             self.setFormat(start, length, style)
 

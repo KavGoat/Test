@@ -334,6 +334,10 @@ class DocumentSettings:
     # Lining a markup up with the ones already drawn — level with this, in
     # line with that. Only for what has been drawn here, never for the PDF.
     snap_to_alignment: bool = True
+    # Lining up with the PDF's own line work instead: level with the end of a
+    # beam, directly under a column line. A separate switch, off by default,
+    # because a busy sheet offers a guide almost everywhere.
+    snap_to_pdf_alignment: bool = False
     grid_mm: float = 5.0
     show_margins: bool = True
     header_left: str = ""
