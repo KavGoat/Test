@@ -25,3 +25,6 @@ restarts with the report below. Completion status is user-owned.
 |  | A snapshot of a real PDF looks right in the app but, opened in another viewer, appears black or with massive line widths. Exported snapshots must match the app. |
 |  | Rectangle and ellipse drawing tooltip must match Bluebeam (reference video): a compact bar beside the dragged corner with editable Width, Height and Rotation fields; typing sets the value and Tab moves to the next field. |
 |  | PDF linework on the page looks blurrier than a snapshot of the same lines pasted beside it until zoomed in. Page lines must look as sharp as the pasted snapshot at every zoom. |
+|  | A pasted snapshot shows stray repeated dots in the app that do not appear in other PDF editors. The app must draw it as the export does. |
+|  | After placing a rectangle or ellipse no size dialog may pop up; the size bar while drawing is the only size entry. |
+|  | Hatch must stay sharp at any hatch scale and zoom: linework, not a tiled picture. |

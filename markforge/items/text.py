@@ -1501,6 +1501,12 @@ class StampItem(MarkupItem):
     def set_local_rect(self, rect: QRectF) -> None:
         self._rect = QRectF(rect)
 
+    def hatch_region(self):
+        path = QPainterPath()
+        path.addRoundedRect(self._rect.normalized(), self.style.corner_radius,
+                            self.style.corner_radius)
+        return path
+
     def paint_content(self, painter: QPainter) -> None:
         painter.setRenderHint(QPainter.Antialiasing, True)
         rect = self._rect.normalized()

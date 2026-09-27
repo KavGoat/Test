@@ -2923,9 +2923,9 @@ class PageView(QGraphicsView):
 
         # Tools that ask a question do it now, while the markup is still fresh.
         note_scale = False
-        if isinstance(draft, RectItem) and draft.kind in SIZED_SHAPES:
-            self.window.prompt_rectangle_size(draft)
-        elif isinstance(draft, MeasureItem):
+        # A rectangle or ellipse is sized in the bar beside the corner while
+        # it is drawn; nothing more is asked once it is down.
+        if isinstance(draft, MeasureItem):
             if draft.kind != DIMENSION:
                 note_scale = True
         self.commit_snapshot(f"Add {tool.label.lower()}")

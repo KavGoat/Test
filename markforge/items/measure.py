@@ -745,6 +745,15 @@ class CountItem(MarkupItem):
     def summary(self) -> str:
         return self.comment or f"#{self.index}"
 
+    def hatch_region(self):
+        path = QPainterPath()
+        rect = self.local_rect()
+        if self.symbol == "square":
+            path.addRect(rect)
+        else:
+            path.addEllipse(rect)
+        return path
+
     def paint_content(self, painter: QPainter) -> None:
         painter.setRenderHint(QPainter.Antialiasing, True)
         rect = self.local_rect()

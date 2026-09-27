@@ -43,3 +43,21 @@ size matches (`scene._draw_on_the_pixel_grid`). Before/after screenshots at
 62 % zoom were compared. Evidence:
 `test_page_tiles_land_on_whole_pixels_without_resampling`. Full suite:
 953 passed.
+
+## 2026-09-27 second follow-up
+
+- **Snapshot dots in the app only:** the app replayed the recording made at
+  capture time, while the export (which the user says is right) painted the
+  kept vector source. The app now paints the kept source too, cached at
+  screen resolution per zoom (`DeviceCoordinateCache`). The dots were not
+  reproduced with `btx/Document1.pdf`; confirmation needs the user's file.
+- **Size dialog after placing:** `prompt_rectangle_size` no longer runs when
+  a rectangle or ellipse is placed; **Exact size…** stays on the right-click
+  menu. `test_no_size_dialog_pops_up_once_a_rectangle_is_placed`.
+- **Blurry hatch at large scale:** the hatch was a picture tile, magnified.
+  It is now drawn as lines clipped to the shape (`base.paint_hatch`) for
+  rectangles, ellipses, clouds, polygons, stamps and count markers. It is
+  vector in exports too. `test_a_hatched_fill_is_not_a_flat_one` checks a
+  crisp line at a hatch scale of 1000 and of 12.
+
+Full suite: 953 passed.

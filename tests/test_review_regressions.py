@@ -127,9 +127,8 @@ def test_hatch_scale_controls_and_undo(window):
     window.refresh_selection()
     window.hatch_scale_spin.setValue(2.5)
     assert item.style.hatch_scale == 2.5
-    from markforge.items.base import HATCH_CELL, HATCH_TILE
-    assert item.style.brush().transform().m11() == pytest.approx(
-        2.5 * HATCH_CELL / HATCH_TILE)
+    from markforge.items.base import HATCH_CELL
+    assert item.style.hatch_spacing() == pytest.approx(2.5 * HATCH_CELL)
     prop = window.properties_panel.findChild(QDoubleSpinBox, "hatchScale")
     assert prop.value() == 2.5
     prop.setValue(3)

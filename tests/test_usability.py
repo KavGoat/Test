@@ -1186,7 +1186,8 @@ def test_a_dimension_carries_its_own_text(window):
     assert dimension.value_text == dimension.measured_text
 
 
-def test_the_rectangle_size_prompt_appears_after_scale_is_known(window, monkeypatch):
+def test_no_size_dialog_pops_up_once_a_rectangle_is_placed(window, monkeypatch):
+    """The size bar while drawing is the only size entry, as in Bluebeam."""
     from markforge.ui import dialogs
     asked = []
     monkeypatch.setattr(dialogs.RectangleSizeDialog, "exec",
@@ -1195,7 +1196,7 @@ def test_the_rectangle_size_prompt_appears_after_scale_is_known(window, monkeypa
     scaled_page(window)
     window.select_tool("rect")
     drag(window.view, 300, 100, 400, 180)
-    assert asked == [True]
+    assert asked == []
 
 
 def test_a_rectangle_knows_its_paper_size_without_a_scale(window):
@@ -7205,23 +7206,42 @@ def test_search_lists_commands_and_markups_too(window):
 # ---------------------------------------------------------------------------
 
 def test_a_hatched_fill_is_not_a_flat_one(window):
+    """Fill is a solid wash; hatch is linework in its own colour over it,
+    drawn as real lines so it stays sharp at any scale."""
     from PySide6.QtCore import Qt as QtNS
+    from PySide6.QtGui import QImage, QPainter
     from markforge.items.base import Style
 
     plain = Style(fill="#888888")
     assert plain.brush().style() == QtNS.SolidPattern
-    hatched = Style(fill="#888888", hatch="diagonal up", hatch_color="#c92a2a")
-    assert hatched.brush().style() == QtNS.TexturePattern
-    tile = hatched.brush().textureImage()
-    # The solid fill is under the hatch, and the hatch is in its own colour.
-    colours = {tile.pixelColor(x, y).name() for x in range(0, tile.width(), 4)
-               for y in range(0, tile.height(), 4)}
-    greys = [QColor(c) for c in colours
-             if QColor(c).red() == QColor(c).green() == QColor(c).blue()]
-    assert any(abs(g.red() - 0x88) <= 2 for g in greys)
-    assert any(QColor(c).red() > 150 and QColor(c).green() < 100 for c in colours)
+    hatched = Style(fill="#888888", fill_opacity=1.0, hatch="diagonal up",
+                    hatch_color="#c92a2a")
+    assert hatched.brush().style() == QtNS.SolidPattern
     no_fill = Style(fill="", hatch="cross", hatch_color="#000000")
     assert no_fill.paints_inside()
+
+    box = RectItem("rect")
+    box.set_local_rect(QRectF(0, 0, 200, 200))
+    box.style = hatched
+    box.style.hatch_scale = 1000.0          # far past any old limit
+    image = QImage(400, 400, QImage.Format_ARGB32)
+    image.fill(QtNS.white)
+    painter = QPainter(image)
+    painter.scale(2, 2)
+    box.paint_visible(painter)
+    painter.end()
+    colours = {image.pixelColor(x, y).name() for x in range(10, 390, 3)
+               for y in range(10, 390, 3)}
+    assert "#888888" in colours
+    # At a huge scale the one line left is still a crisp line, not a blur.
+    box.style.hatch_scale = 12.0
+    image.fill(QtNS.white)
+    painter = QPainter(image)
+    painter.scale(2, 2)
+    box.paint_visible(painter)
+    painter.end()
+    reds = [image.pixelColor(x, y) for x in range(0, 400, 2) for y in range(0, 400, 2)]
+    assert any(c.red() > 180 and c.green() < 80 for c in reds)
 
 
 def test_bluebeams_spellings_of_a_hatch_all_land(window):

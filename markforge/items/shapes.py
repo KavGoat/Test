@@ -232,6 +232,26 @@ class RectItem(MarkupItem):
     def summary(self) -> str:
         return self.comment or self.size_text or self.label
 
+    def hatch_region(self) -> Optional[QPainterPath]:
+        if self.kind not in ("rect", "ellipse", "cloud"):
+            return None
+        rect = self._rect.normalized()
+        path = QPainterPath()
+        if self.kind == "ellipse":
+            path.addEllipse(rect)
+        elif self.kind == "cloud":
+            path = cloud_path(QPolygonF([rect.topLeft(), rect.topRight(),
+                                         rect.bottomRight(), rect.bottomLeft()]),
+                              self.cloud_radius)
+            path.closeSubpath()
+        elif self.style.corner_radius > 0:
+            path.addRoundedRect(rect, self.style.corner_radius, self.style.corner_radius)
+        else:
+            path.addRect(rect)
+        if self.cutouts:
+            path = path.subtracted(self.clipped_holes_path())
+        return path
+
     def paint_content(self, painter: QPainter) -> None:
         rect = self._rect.normalized()
         painter.setRenderHint(QPainter.Antialiasing, True)
@@ -893,6 +913,14 @@ class PolyItem(MarkupItem):
         painter.drawPath(path)
         self.paint_cutouts(painter)
         self._paint_arrows(painter)
+
+    def hatch_region(self) -> Optional[QPainterPath]:
+        path = self.outline_path()
+        if path.isEmpty():
+            return None
+        if self.cutouts:
+            path = path.subtracted(self.clipped_holes_path())
+        return path
 
     def outline_ring(self) -> list:
         """A closed polygon encloses something; an open polyline does not."""

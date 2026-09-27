@@ -70,6 +70,10 @@ class SnapshotItem(MarkupItem):
         # — so what it was taken of is kept beside it. That is what makes a
         # snapshot's colours changeable at all.
         self.source_items: list[dict] = []
+        # Drawing the kept vectors is heavier than replaying a recording, so
+        # the result is kept at screen resolution until the zoom changes.
+        from PySide6.QtWidgets import QGraphicsItem
+        self.setCacheMode(QGraphicsItem.DeviceCoordinateCache)
 
     # -- the recording -----------------------------------------------------
     def set_picture(self, picture: QPicture) -> None:
@@ -155,25 +159,15 @@ class SnapshotItem(MarkupItem):
         self._built_sources = (key, built)
         return built
 
-    @staticmethod
-    def _painting_a_file(painter: QPainter) -> bool:
-        """Whether *painter* writes a PDF or a print rather than pixels."""
-        from PySide6.QtGui import QPaintEngine
-
-        engine = painter.paintEngine()
-        return engine is not None and engine.type() in (QPaintEngine.Pdf,
-                                                        QPaintEngine.Windows,
-                                                        QPaintEngine.MacPrinter)
-
     def paint_content(self, painter: QPainter) -> None:
         rect = self._rect.normalized()
-        sources = self._vector_sources() if (
-            self.source_items and self._painting_a_file(painter)) else []
+        sources = self._vector_sources() if self.source_items else []
         if sources:
-            # Into a PDF the kept drawing is painted directly. Replaying the
-            # screen recording into Qt's PDF writer rescales its transforms a
-            # second time: other viewers then show the text as black blobs
-            # and hairlines many times too thick.
+            # The kept drawing is painted directly, on screen as well as into
+            # a PDF, so the page shows exactly what an export writes. The
+            # screen recording is only a fallback for snapshots that kept no
+            # source: replayed, it showed stray repeated dots in the app, and
+            # replayed into Qt's PDF writer it turned text into black blobs.
             taken = self.natural_size()
             painter.save()
             painter.setOpacity(self.style.opacity)

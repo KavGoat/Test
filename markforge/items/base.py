@@ -101,62 +101,79 @@ def hatch_named(name: str):
         return Qt.Dense3Pattern
     return Qt.SolidPattern
 
-#: One repeat of a hatch, in page points at a hatch scale of one, and the
-#: pixels it is drawn at: fine enough to stay crisp when zoomed in.
+#: The distance between hatch lines at a hatch scale of one, in page points,
+#: and the weight of those lines.
 HATCH_CELL = 8.0
-HATCH_TILE = 128
-_HATCH_TILES: dict = {}
+HATCH_WIDTH = 0.5
+#: A hatch that would need more lines than this is drawn coarser instead,
+#: so a tiny scale over a huge shape cannot stall a repaint.
+MOST_HATCH_LINES = 4000
 
 
-def hatch_tile(pattern, fill: "Optional[QColor]", ink: QColor):
-    """One repeat of a hatch as an image: the fill, then the lines over it.
+def paint_hatch(painter: QPainter, region: QPainterPath, style) -> None:
+    """Draw *style*'s hatch over *region* as real lines, clipped to it.
 
-    Drawn as antialiased vector lines rather than Qt's one-pixel bitmap
-    patterns, so a hatch reads as linework at any zoom and in any export.
+    Linework, not a tiled picture: it stays sharp at any zoom and any hatch
+    scale, and is written into a PDF as vector strokes.
     """
-    from PySide6.QtGui import QImage
-
-    key = (getattr(pattern, "value", pattern), fill.rgba() if fill is not None else None,
-           ink.rgba())
-    tile = _HATCH_TILES.get(key)
-    if tile is not None:
-        return tile
-    size = HATCH_TILE
-    tile = QImage(size, size, QImage.Format_ARGB32_Premultiplied)
-    tile.fill(fill if fill is not None else Qt.transparent)
-    painter = QPainter(tile)
+    if region is None or region.isEmpty() or not style.hatched():
+        return
+    pattern = hatch_named(style.hatch)
+    box = region.boundingRect()
+    if box.isEmpty():
+        return
+    step = style.hatch_spacing()
+    span = box.width() + box.height()
+    while span / step > MOST_HATCH_LINES:
+        step *= 2.0
+    ink = QColor(style.hatch_color or style.stroke or "#000000")
+    ink.setAlphaF(max(0.0, min(1.0, style.opacity)))
+    painter.save()
+    painter.setClipPath(region, Qt.IntersectClip)
     painter.setRenderHint(QPainter.Antialiasing, True)
-    pen = QPen(ink, size / HATCH_CELL * 0.6)
-    pen.setCapStyle(Qt.FlatCap)
-    painter.setPen(pen)
-    half = size / 2.0
     lines = []
+    left, top, right, bottom = box.left(), box.top(), box.right(), box.bottom()
+
+    def run(start, stop):
+        value = math.floor(start / step) * step
+        while value <= stop:
+            yield value
+            value += step
+
     if pattern in (Qt.HorPattern, Qt.CrossPattern):
-        lines.append(((0, half), (size, half)))
+        lines += [(QPointF(left, y), QPointF(right, y)) for y in run(top, bottom)]
     if pattern in (Qt.VerPattern, Qt.CrossPattern):
-        lines.append(((half, 0), (half, size)))
+        lines += [(QPointF(x, top), QPointF(x, bottom)) for x in run(left, right)]
     if pattern in (Qt.BDiagPattern, Qt.DiagCrossPattern):
-        for shift in (-size, 0, size):
-            lines.append(((shift, size), (shift + size, 0)))
+        # "/" : x + y constant
+        lines += [(QPointF(c - top, top), QPointF(c - bottom, bottom))
+                  for c in run(left + top, right + bottom)]
     if pattern in (Qt.FDiagPattern, Qt.DiagCrossPattern):
-        for shift in (-size, 0, size):
-            lines.append(((shift, 0), (shift + size, size)))
-    for (x1, y1), (x2, y2) in lines:
-        painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
+        # "\" : x - y constant
+        lines += [(QPointF(c + top, top), QPointF(c + bottom, bottom))
+                  for c in run(left - bottom, right - top)]
+    if lines:
+        pen = QPen(ink, HATCH_WIDTH)
+        pen.setCapStyle(Qt.FlatCap)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        from PySide6.QtCore import QLineF
+        painter.drawLines([QLineF(a, b) for a, b in lines])
     if pattern in (Qt.Dense5Pattern, Qt.Dense3Pattern):
+        gap = step if pattern == Qt.Dense5Pattern else step / 2.0
+        while (box.width() / gap) * (box.height() / gap) > MOST_HATCH_LINES * 5:
+            gap *= 2.0
+        radius = HATCH_WIDTH * (0.9 if pattern == Qt.Dense5Pattern else 1.1)
         painter.setPen(Qt.NoPen)
         painter.setBrush(ink)
-        radius = size / HATCH_CELL * (0.55 if pattern == Qt.Dense5Pattern else 0.7)
-        spots = ([(half, half)] if pattern == Qt.Dense5Pattern else
-                 [(size / 4, size / 4), (3 * size / 4, size / 4),
-                  (size / 4, 3 * size / 4), (3 * size / 4, 3 * size / 4)])
-        for x, y in spots:
-            painter.drawEllipse(QPointF(x, y), radius, radius)
-    painter.end()
-    if len(_HATCH_TILES) > 256:
-        _HATCH_TILES.clear()
-    _HATCH_TILES[key] = tile
-    return tile
+        y = math.floor(top / gap) * gap + gap / 2
+        while y <= bottom:
+            x = math.floor(left / gap) * gap + gap / 2
+            while x <= right:
+                painter.drawEllipse(QPointF(x, y), radius, radius)
+                x += gap
+            y += gap
+    painter.restore()
 
 
 ARROW_HEADS = ["none", "arrow", "open", "dot", "square", "diamond", "slash", "half"]
@@ -237,20 +254,16 @@ class Style:
         return bool(self.hatch) and hatch_named(self.hatch) != Qt.SolidPattern
 
     def brush(self) -> QBrush:
-        """The solid fill, with the hatch drawn over it in its own colour."""
-        fill = None
-        if self.fill:
-            fill = QColor(self.fill)
-            fill.setAlphaF(max(0.0, min(1.0, self.fill_opacity * self.opacity)))
-        if not self.hatched():
-            return QBrush(fill) if fill is not None else QBrush(Qt.NoBrush)
-        ink = QColor(self.hatch_color or self.stroke or "#000000")
-        ink.setAlphaF(max(0.0, min(1.0, self.opacity)))
-        brush = QBrush(hatch_tile(hatch_named(self.hatch), fill, ink))
-        # No upper bound: a hatch can be as coarse as the drawing needs.
-        scale = max(float(self.hatch_scale or 1.0), 1e-3) * HATCH_CELL / HATCH_TILE
-        brush.setTransform(QTransform.fromScale(scale, scale))
-        return brush
+        """The solid fill. A hatch is linework, drawn over it by paint_hatch."""
+        if not self.fill:
+            return QBrush(Qt.NoBrush)
+        colour = QColor(self.fill)
+        colour.setAlphaF(max(0.0, min(1.0, self.fill_opacity * self.opacity)))
+        return QBrush(colour)
+
+    def hatch_spacing(self) -> float:
+        """Distance between hatch lines, in page points. No upper limit."""
+        return HATCH_CELL * max(float(self.hatch_scale or 1.0), 1e-3)
 
     def font(self) -> QFont:
         return page_font(self.font_family, self.font_size, self.bold, self.italic,
@@ -697,6 +710,12 @@ class MarkupItem(QGraphicsObject):
             self.paint_their_picture(painter)
         else:
             self.paint_content(painter)
+            if self.style.hatched():
+                paint_hatch(painter, self.hatch_region(), self.style)
+
+    def hatch_region(self) -> Optional[QPainterPath]:
+        """The area a hatch covers, in item coordinates; None for no hatch."""
+        return None
 
     def paint_their_picture(self, painter: QPainter) -> None:
         picture = self._their_picture
