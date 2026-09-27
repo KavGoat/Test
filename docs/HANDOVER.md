@@ -5,7 +5,8 @@
 At the user's request every earlier entry in `tasklist.md`, `tasklist.xlsx`,
 `COMPLETED_TASKS.md` and `UNADDRESSED_TASKS.md` was deleted; the registers
 restart with the 2026-09-27 report. The "nothing is ever deleted" rule in §4
-still applies from here on. Work is on branch `claude/handover-issues-bugs-yis0ql`.
+still applies from here on. Work is on branch
+`claude/markforge-mupdf-pdf-handling-vpyj1t`.
 Evidence for this round is in `COMPLETED_TASKS.md`; open follow-up (the Revit
 red cross needs the user's file) is in `UNADDRESSED_TASKS.md`.
 
@@ -104,8 +105,8 @@ the product context, code map, validation approach and task-tracking rules
 needed to work safely without re-reading earlier chat.
 
 - Repository: `KavGoat/Test`
-- Branch: the one the session names — currently
-  **`claude/handover-issues-bugs-yis0ql`**. Never push to another branch
+- Branch: **`claude/markforge-mupdf-pdf-handling-vpyj1t`** — all work goes
+  here, whatever branch a session starts on. Never push to another branch
   without being asked.
 - The living task list: **`docs/tasklist.md`** — read it, work from it, keep it
   updated. `docs/tasklist.xlsx` is the user's companion status sheet: column A
@@ -371,7 +372,7 @@ in a state somebody else could pick up from, because they may have to.
 
 - Commit and push **continuously** — every completed piece of work, not at the
   end. The container is ephemeral; unpushed work is lost work.
-- `git push -u origin <the session's branch>`
+- `git push -u origin claude/markforge-mupdf-pdf-handling-vpyj1t`
 - Commit messages: a short title, then prose explaining **what was wrong and
   why the new behaviour is right**. The user reads them. Look at the recent log
   for the register.
