@@ -89,19 +89,17 @@ MOST_HELD_SOURCES = 8
 
 
 def zoom_step(scale: float) -> float:
-    """The rung of the ladder at or above *scale*.
+    """The resolution to render tiles at for a painter showing *scale*.
 
-    Rendering at exactly the zoom on screen would mean re-rendering on every
-    notch of the wheel. The rungs are a quarter of a doubling apart: never
-    less resolution than the screen is showing, and never more than about a
-    fifth more. A whole doubling used to be allowed, and shrinking a picture
-    by up to half on screen is what turned one-pixel hairlines into a faded
-    grey wash on a zoomed-out sheet.
+    The zoom on screen itself, to four significant figures, so a tile's
+    pixels land one-to-one on the screen's. Rendering a rung above and
+    shrinking it to fit is what made the page look softer than a pasted
+    snapshot of the same lines, which Qt draws as vectors at exactly the
+    screen's resolution. A new zoom is one round of rendering; the tiles of
+    the zoom before stand in until it arrives.
     """
-    if scale <= 0.25:
-        return 0.25
-    rung = math.ceil(math.log2(scale) * 4.0 - 1e-9) / 4.0
-    return min(2.0 ** rung, 64.0)
+    scale = min(max(float(scale), 0.02), 64.0)
+    return float(f"{scale:.4g}")
 
 
 @dataclass(frozen=True)

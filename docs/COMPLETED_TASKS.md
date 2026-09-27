@@ -31,3 +31,15 @@ after the changes; the final result is at the end of this section.
 387 s). Screenshots of the size bar, search dropdown, spin-box arrows, plain
 measurement labels and a MuPDF render of an exported text snapshot were
 inspected. Not yet checked on Windows or in Bluebeam itself.
+
+## 2026-09-27 follow-up — page lines softer than a pasted snapshot
+
+Tiles were rendered on a ladder of resolutions above the screen's and drawn
+at fractional pixel positions, so Qt shrank and smoothed every tile; a
+snapshot is drawn as vectors at exactly screen resolution. Tiles are now
+rendered at the zoom on screen (`pdftiles.zoom_step`, four significant
+figures) and drawn snapped to whole device pixels without smoothing when the
+size matches (`scene._draw_on_the_pixel_grid`). Before/after screenshots at
+62 % zoom were compared. Evidence:
+`test_page_tiles_land_on_whole_pixels_without_resampling`. Full suite:
+953 passed.

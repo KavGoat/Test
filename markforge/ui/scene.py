@@ -108,6 +108,37 @@ def _painted_scale(painter) -> float:
     return max(across, down, 0.01) * max(float(real or 1.0), 1.0)
 
 
+def _draw_on_the_pixel_grid(painter, where: QRectF, tile) -> None:
+    """Draw a tile so its pixels sit exactly on the device's pixels.
+
+    A tile placed at a fractional position, or a pixel or so off its own
+    size, is resampled by Qt and every line in it goes soft. With the page
+    upright the tile's corners are snapped to whole device pixels and, when
+    that is the tile's own size, it is copied without any smoothing at all.
+    Turned pages keep the ordinary smoothed draw.
+    """
+    shape = painter.transform()
+    if abs(shape.m12()) > 1e-9 or abs(shape.m21()) > 1e-9:
+        painter.drawPixmap(where, tile, QRectF(tile.rect()))
+        return
+    device = painter.device()
+    ratio = max(float(device.devicePixelRatio() if device is not None else 1.0), 1.0)
+    placed = shape.mapRect(where)
+    left = round(placed.left() * ratio)
+    top = round(placed.top() * ratio)
+    right = round(placed.right() * ratio)
+    bottom = round(placed.bottom() * ratio)
+    if right <= left or bottom <= top:
+        return
+    exact = (right - left == tile.width() and bottom - top == tile.height())
+    painter.save()
+    painter.resetTransform()
+    painter.setRenderHint(QPainter.SmoothPixmapTransform, not exact)
+    painter.drawPixmap(QRectF(left / ratio, top / ratio, (right - left) / ratio,
+                              (bottom - top) / ratio), tile, QRectF(tile.rect()))
+    painter.restore()
+
+
 def _exposed_part(option, whole: QRectF, item=None) -> QRectF:
     """The part of the page this repaint is actually for.
 
@@ -369,7 +400,7 @@ class PageFrame(QGraphicsObject):
                            part.width() * across, part.height() * down))
                 drew = True
         for where, tile in tiles:
-            painter.drawPixmap(where, tile, QRectF(tile.rect()))
+            _draw_on_the_pixel_grid(painter, where, tile)
             drew = True
         painter.restore()
         return drew

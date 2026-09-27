@@ -601,3 +601,27 @@ def test_zoomed_out_hairlines_are_not_faded():
     pixmap = page.get_pixmap(matrix=pymupdf.Matrix(0.3, 0.3))
     ink = sum(255 - value for value in pixmap.samples) / len(pixmap.samples)
     assert engine.MIN_LINE_PIXELS >= 1.0 and ink > 15
+
+
+def test_page_tiles_land_on_whole_pixels_without_resampling(qapp):
+    """A tile at a fractional position used to be smoothed, so page lines
+    looked softer than a pasted snapshot of the same lines."""
+    from PySide6.QtGui import QPixmap
+    from markforge.io import pdftiles
+    from markforge.ui.scene import _draw_on_the_pixel_grid
+
+    assert pdftiles.zoom_step(0.6234) == pytest.approx(0.6234)
+    tile = QImage(50, 50, QImage.Format_RGB32)
+    tile.fill(Qt.white)
+    for y in range(50):
+        tile.setPixelColor(25, y, QColor("#000000"))
+    screen = QImage(80, 80, QImage.Format_RGB32)
+    screen.fill(Qt.white)
+    painter = QPainter(screen)
+    painter.translate(10.3, 10.3)
+    painter.scale(0.5, 0.5)
+    _draw_on_the_pixel_grid(painter, QRectF(0, 0, 100, 100), QPixmap.fromImage(tile))
+    painter.end()
+    assert screen.pixelColor(35, 30).name() == "#000000"
+    assert screen.pixelColor(34, 30).name() == "#ffffff"
+    assert screen.pixelColor(36, 30).name() == "#ffffff"

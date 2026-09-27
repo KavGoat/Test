@@ -24,3 +24,4 @@ restarts with the report below. Completion status is user-owned.
 |  | Format Painter must show a paint-brush cursor while a format is armed. |
 |  | A snapshot of a real PDF looks right in the app but, opened in another viewer, appears black or with massive line widths. Exported snapshots must match the app. |
 |  | Rectangle and ellipse drawing tooltip must match Bluebeam (reference video): a compact bar beside the dragged corner with editable Width, Height and Rotation fields; typing sets the value and Tab moves to the next field. |
+|  | PDF linework on the page looks blurrier than a snapshot of the same lines pasted beside it until zoomed in. Page lines must look as sharp as the pasted snapshot at every zoom. |
