@@ -26,3 +26,8 @@ after the changes; the final result is at the end of this section.
 | Format Painter brush cursor | The brush was set once and replaced by hover cursors. | The brush stays while a format is held, over markups too. | `test_format_painter_keeps_the_brush_over_markups` |
 | Snapshot black / thick in other viewers | Three faults: the screen recording was replayed into Qt's PDF writer, which rescaled its transforms; MuPDF's unit-sized glyph outlines lost precision; Qt's SVG renderer stroked fill-only glyphs. | PDF/print output paints the kept vector source; glyphs are written in page coordinates with an invisible stroke. Existing snapshots are normalised on load. | `test_exported_text_snapshot_matches_its_source_in_another_viewer` (rendered by MuPDF) |
 | Bluebeam rectangle/ellipse tooltip | A white two-field entry appeared only after a click, only on calibrated pages. | A dark bar with Width, Height and Rotation beside the dragged corner, for drags and clicks. The live width is selected, typing holds a value, Tab moves on, Enter places it. | `test_size_bar_matches_bluebeam_width_tab_height_enter`; screenshot compared with the reference video |
+
+**Final suite: 952 passed, 0 failed** (offscreen Qt, Linux, PySide6 6.11,
+387 s). Screenshots of the size bar, search dropdown, spin-box arrows, plain
+measurement labels and a MuPDF render of an exported text snapshot were
+inspected. Not yet checked on Windows or in Bluebeam itself.
