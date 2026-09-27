@@ -626,3 +626,114 @@ def test_every_tool_still_fits_in_a_sensible_box(qapp):
                 box = here if box is None else box.united(here)
             assert box.width() < 700 and box.height() < 700, \
                 f"{tool.name} came out {box.width():.0f}x{box.height():.0f}"
+
+
+# ---------------------------------------------------------------------------
+# one to one with the reference sheet
+#
+# btx/Document1.pdf has Sketch Tools placed on it by Bluebeam. Each tool is
+# rendered here and laid over Bluebeam's own appearance of the same
+# annotations; the share of ink the two have in common is what is checked.
+# ---------------------------------------------------------------------------
+
+REFERENCE_PAIRS = [      # tool index, xrefs on page 1, least overlap
+    (1, [19, 21, 23, 25, 28], 0.9),                          # Elevation
+    (8, [117, 119, 121, 123, 125, 127, 129, 132], 0.9),      # Section
+    (13, [43, 45, 49, 51], 0.6),                             # Legend
+    (14, [53, 90, 93, 96, 99, 102, 105, 108, 111], 0.75),    # Titleblock
+]
+
+
+def _reference_ink(xrefs, zoom=6.0):
+    import numpy as np
+    import pymupdf
+
+    doc = pymupdf.open(os.path.join(HERE, "btx", "Document1.pdf"))
+    page = doc[0]
+    doc.xref_set_key(page.xref, "Annots",
+                     "[" + " ".join(f"{x} 0 R" for x in xrefs) + "]")
+    page = doc.reload_page(page)
+    box = None
+    for annotation in page.annots():
+        if not annotation.rect.is_empty:
+            box = annotation.rect if box is None else box | annotation.rect
+    for number in page.get_contents():
+        doc.update_stream(number, b"")
+    box = pymupdf.Rect(box) + (-6, -6, 6, 6)
+    pixmap = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), clip=box, alpha=False)
+    image = np.frombuffer(pixmap.samples, np.uint8).reshape(
+        pixmap.height, pixmap.width, pixmap.n)[:, :, :3]
+    return image.min(axis=2) < 200
+
+
+def _tool_ink(tool, zoom=6.0):
+    import numpy as np
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QImage, QPainter
+
+    items = [build_item(dict(p)) for p in tool.payloads]
+    bound = None
+    for item in items:
+        placed = item.boundingRect().translated(item.pos())
+        bound = placed if bound is None else bound.united(placed)
+    bound = bound.adjusted(-6, -6, 6, 6)
+    wide, high = int(bound.width() * zoom), int(bound.height() * zoom)
+    image = QImage(wide, high, QImage.Format_RGB32)
+    image.fill(Qt.white)
+    painter = QPainter(image)
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.scale(zoom, zoom)
+    painter.translate(-bound.left(), -bound.top())
+    for item in sorted(items, key=lambda each: each.zValue()):
+        painter.save()
+        painter.translate(item.pos())
+        item.paint_visible(painter)
+        painter.restore()
+    painter.end()
+    pixels = np.frombuffer(image.constBits(), np.uint8).reshape(
+        high, image.bytesPerLine() // 4, 4)[:, :wide, :3]
+    return pixels.min(axis=2) < 200
+
+
+def _overlap(first, second) -> float:
+    """Share of ink in common, once the two are slid onto each other."""
+    import numpy as np
+
+    height = max(first.shape[0], second.shape[0]) * 2
+    width = max(first.shape[1], second.shape[1]) * 2
+    product = np.fft.irfft2(np.fft.rfft2(first.astype(float), (height, width))
+                            * np.conj(np.fft.rfft2(second.astype(float), (height, width))),
+                            (height, width))
+    dy, dx = np.unravel_index(np.argmax(product), product.shape)
+    dy = dy - height if dy > height // 2 else dy
+    dx = dx - width if dx > width // 2 else dx
+    canvas_h = height
+    canvas_w = width
+    a = np.zeros((canvas_h, canvas_w), bool)
+    b = np.zeros((canvas_h, canvas_w), bool)
+    oy, ox = canvas_h // 4, canvas_w // 4
+    a[oy:oy + first.shape[0], ox:ox + first.shape[1]] = first
+    b[oy + dy:oy + dy + second.shape[0], ox + dx:ox + dx + second.shape[1]] = second
+    return (a & b).sum() / max((a | b).sum(), 1)
+
+
+@pytest.mark.parametrize("index, xrefs, least", REFERENCE_PAIRS)
+def test_sketch_tools_match_bluebeams_own_drawing(qapp, index, xrefs, least):
+    tool = _sketch_tools().tools[index]
+    assert _overlap(_reference_ink(xrefs), _tool_ink(tool)) >= least, tool.name
+
+
+def test_bluebeam_line_spacing_is_exact(qapp):
+    """line-height is Bluebeam's exact spacing, not Qt's minimum."""
+    tool = _sketch_tools().tools[13]
+    legend = build_item(dict(next(p for p in tool.payloads if p.get("type") == "text")))
+    legend.doc.setTextWidth(200)
+    first = legend.doc.firstBlock()
+    assert first.blockFormat().lineHeight() == pytest.approx(12.495, abs=0.01)
+    blocks = []
+    block = first
+    while block.isValid():
+        blocks.append(block.layout().position().y())
+        block = block.next()
+    gaps = [b - a for a, b in zip(blocks, blocks[1:])]
+    assert all(gap == pytest.approx(12.495, abs=0.05) for gap in gaps)

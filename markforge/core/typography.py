@@ -19,10 +19,31 @@ MONO = ["Cascadia Mono", "Consolas", "Menlo", "DejaVu Sans Mono", "monospace"]
 
 MIN_PIXELS = 1
 
+# Helvetica is what Bluebeam sets nearly every markup in, and few machines
+# have it. Qt's own fallback can land on DejaVu Sans, which is a size wider
+# and draws a foot on its "1". These three share Helvetica's metrics.
+HELVETICA_STAND_INS = ["Arial", "Liberation Sans", "Nimbus Sans", "Nimbus Sans L",
+                       "TeX Gyre Heros"]
+_SUBSTITUTED = False
+
+
+def install_substitutions() -> None:
+    """Point Helvetica, and Bluebeam's names for it, at a same-metric face."""
+    global _SUBSTITUTED
+    if _SUBSTITUTED:
+        return
+    from PySide6.QtGui import QGuiApplication
+    if QGuiApplication.instance() is None:
+        return
+    for name in ("Helvetica", "Helv", "HelveticaNeue", "Helvetica Neue"):
+        QFont.insertSubstitutions(name, HELVETICA_STAND_INS)
+    _SUBSTITUTED = True
+
 
 def page_font(family: str, size: float, bold: bool = False, italic: bool = False,
               underline: bool = False, fallbacks: list[str] | None = None) -> QFont:
     """A font whose height is *size* scene units (points) on any paint device."""
+    install_substitutions()
     font = QFont()
     families = [family] if family else []
     families += [name for name in (fallbacks or SANS) if name != family]
@@ -34,6 +55,10 @@ def page_font(family: str, size: float, bold: bool = False, italic: bool = False
     font.setItalic(italic)
     font.setUnderline(underline)
     font.setStyleStrategy(QFont.PreferAntialias)
+    # Text on a PDF page is set at each glyph's own width, with no pair
+    # kerning; Bluebeam's is. Kerned, a title came out a point narrower
+    # here than the same title in Bluebeam.
+    font.setKerning(False)
     return font
 
 

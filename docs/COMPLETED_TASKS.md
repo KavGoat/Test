@@ -61,3 +61,21 @@ size matches (`scene._draw_on_the_pixel_grid`). Before/after screenshots at
   crisp line at a hatch scale of 1000 and of 12.
 
 Full suite: 953 passed.
+
+## 2026-09-27 — Sketch Tools against Bluebeam's own drawing
+
+Each Sketch Tools tool was rendered and overlaid on Bluebeam's appearance of
+the same annotations in `btx/Document1.pdf` (ink overlap after alignment):
+
+| Tool | Before | After | What was wrong |
+| --- | --- | --- | --- |
+| Elevation / Section / Detail Label | 0.92–0.94 | 0.92–0.94 | Already one to one; part positions match to 0.01 pt |
+| Titleblock | 0.28 | 0.83 | The stamp form's `/Matrix` was applied twice, so logo, labels and dividers were drawn about 2× too big |
+| Legend | 0.46 | 0.67 | `line-height` was dropped (Qt treats it as a minimum), so every line drifted 0.5 pt lower |
+| Drawing / Detail Title | 0.49–0.57 | 0.54–0.56 | Second line used the paragraph's 18.4 pt instead of its span's 13.8 pt; first baseline 1.8 pt low; text 1 pt left; Qt kerning made titles 1 pt narrow |
+
+Per text box, the remaining difference is under ~0.5 pt, which is the glyph
+difference between Helvetica and the fallback font here. Fractional font sizes are still rounded to
+whole pixels (10.87 pt → 11), about 1 % wider. Evidence:
+`test_sketch_tools_match_bluebeams_own_drawing`,
+`test_bluebeam_line_spacing_is_exact`. Full suite: 958 passed.

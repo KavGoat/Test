@@ -252,7 +252,10 @@ def _text_look(annotation: dict) -> dict:
         margin = re.search(r"(?<!-)margin\s*:\s*([\d.]+)pt", settings)
         if margin:
             try:
-                look["padding"] = float(margin.group(1))
+                # Bluebeam sets its words one point further in than the
+                # margin it states: the appearance streams in
+                # btx/Document1.pdf all start the text at margin + 1.
+                look["padding"] = float(margin.group(1)) + 1.0
             except ValueError:
                 pass
         if re.search(r"font\s*:\s*[^;]*\bbold\b", settings):
@@ -356,6 +359,12 @@ def _showable(declarations: str) -> str:
             continue
         if name == "font-size":
             parts.append(f"font-size:{_points(value)}")
+        elif name == "line-height":
+            # Bluebeam's line spacing is exact. Qt reads a bare line-height
+            # as a minimum, which Helvetica's own spacing always beats, so
+            # every line of a legend crept half a point lower than the last.
+            parts.append(f"line-height:{_points(value)}")
+            parts.append("-qt-line-height-type:fixed")
         elif name in _SHOWABLE:
             parts.append(f"{name}:{value}")
         elif name == "font":
@@ -429,12 +438,27 @@ def _rich_text(annotation: dict) -> str:
         return ""
     paragraphs = []
     anything = False
+    spacing = re.search(r"line-height\s*:\s*([\d.]+\s*(?:pt|px)?)",
+                        str(annotation.get("DS") or "") + ";" + body.get("style", ""))
     for node in body.iter():
         if _plain_tag(node.tag) != "p":
             continue
         words = _inline(node).strip()
         anything = anything or bool(words)
-        style = _showable(node.get("style", ""))
+        own = node.get("style", "")
+        # A line is as tall as the runs on it say. A paragraph whose words
+        # are all in spans that set their own line height takes theirs: that
+        # is how Bluebeam sets "N.T.S. / SCALE 1:xxxx" 13.8pt under a title
+        # whose paragraph says 18.4pt.
+        runs = [child for child in node if _plain_tag(child.tag) != "br"]
+        inner = [re.search(r"line-height\s*:\s*([\d.]+)", child.get("style", ""))
+                 for child in runs]
+        if runs and all(inner) and not (node.text or "").strip():
+            tallest = max(float(found.group(1)) for found in inner)
+            own = re.sub(r"line-height\s*:[^;]*", "", own) + f";line-height:{tallest}pt"
+        if spacing and "line-height" not in own:
+            own = f"{own};line-height:{spacing.group(1)}"
+        style = _showable(own)
         style = f"{style};margin:0px" if style else "margin:0px"
         # An empty paragraph is a blank line, and a blank line with nothing in
         # it is no line at all: the space is what keeps two legend entries
@@ -650,7 +674,11 @@ def _stamp_picture(annotation: dict, resources: dict) -> Optional[bytes]:
 
     extra = len(numbers) + 1
     top_num = numbers[top_name]
-    content = (f"q {mtx[0]} 0 0 {mtx[3]} 0 0 cm /XF Do Q").encode()
+    # The form applies its own /Matrix when it is drawn. Scaling by it here
+    # as well drew a title block's logo and labels at twice their size
+    # (1.43 squared), up and to the right of the fields they belong beside.
+    # Only the BBox's own origin is moved to the corner of the page.
+    content = (f"q 1 0 0 1 {-box[0] * mtx[0]} {-box[1] * mtx[3]} cm /XF Do Q").encode()
     for number, body in (
         (extra, b"<< /Type /Catalog /Pages %d 0 R >>" % (extra + 1)),
         (extra + 1, b"<< /Type /Pages /Kids [%d 0 R] /Count 1 >>" % (extra + 2)),
@@ -675,7 +703,7 @@ def _stamp_picture(annotation: dict, resources: dict) -> Optional[bytes]:
     try:
         import pymupdf
         doc = pymupdf.open(stream=bytes(out), filetype="pdf")
-        pixmap = doc[0].get_pixmap(matrix=pymupdf.Matrix(3, 3), alpha=True)
+        pixmap = doc[0].get_pixmap(matrix=pymupdf.Matrix(6, 6), alpha=True)
         png = pixmap.tobytes("png")
         doc.close()
         return png

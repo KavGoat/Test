@@ -355,6 +355,13 @@ class _Leader:
                    str(data.get("kind") or "arrow"), cloud)
 
 
+def _blocks(document):
+    block = document.firstBlock()
+    while block.isValid():
+        yield block
+        block = block.next()
+
+
 def _merged(base: QTextCharFormat, extra: QTextCharFormat) -> QTextCharFormat:
     """*base* with *extra* laid over it — the font and colour are kept."""
     out = QTextCharFormat(base)
@@ -395,7 +402,15 @@ class _TextBase(MarkupItem):
         # Parented to the item so Qt owns it: a document that outlives its
         # item, or dies before it, fires contentsChanged into a half-destroyed
         # receiver on the way out.
+        from ..core.typography import install_substitutions
+        install_substitutions()
         self.doc = QTextDocument(self)
+        # PDF text, Bluebeam's included, is set at each glyph's own width with
+        # no pair kerning. Kerned, a sixteen-point title came out a point
+        # narrower than the same title in Bluebeam.
+        unkerned = self.doc.defaultFont()
+        unkerned.setKerning(False)
+        self.doc.setDefaultFont(unkerned)
         self.doc.setDocumentMargin(0)
         self.doc.setPlainText(text)
         self._editor: Optional[QGraphicsTextItem] = None
@@ -1034,8 +1049,52 @@ class _TextBase(MarkupItem):
         if self._editor is None:
             return
         rect = self.text_rect()
-        self._editor.setPos(rect.topLeft())
         self._editor.setTextWidth(max(rect.width(), 8.0))
+        offset = 0.0
+        if self.style.valign in ("middle", "bottom"):
+            spare = rect.height() - self.doc.size().height()
+            offset = max(spare, 0) * (0.5 if self.style.valign == "middle" else 1.0)
+        # Where the words are typed is where they are drawn: no jump when
+        # editing starts or stops.
+        nudge = self._bluebeam_nudge(rect.height(), offset)
+        self._editor.setPos(rect.topLeft() + QPointF(0, offset + nudge))
+
+    def _bluebeam_nudge(self, height: float, offset: float) -> float:
+        """How far to move Bluebeam-set text so its baselines land on Bluebeam's.
+
+        Only text read from Bluebeam carries its exact line height, and only
+        that is moved. Qt puts the first baseline at the font's ascent below
+        the top of the line. Bluebeam's own appearance streams put it 0.776
+        of the type size below the inset when the text is top-aligned, and
+        centre the capital height (0.718 of the size, Helvetica) when it is
+        middle-aligned. Read off ``btx/Document1.pdf``.
+        """
+        from PySide6.QtGui import QTextBlockFormat
+
+        block = self.doc.firstBlock()
+        form = block.blockFormat()
+        fixed = getattr(QTextBlockFormat.FixedHeight, "value", QTextBlockFormat.FixedHeight)
+        if int(form.lineHeightType()) != int(fixed):
+            return 0.0
+        self.doc.size()                  # lays the lines out if not yet done
+        layout = block.layout()
+        if layout is None or layout.lineCount() == 0:
+            return 0.0
+        fragment = block.begin().fragment() if not block.begin().atEnd() else None
+        font = fragment.charFormat().font() if fragment is not None else self.doc.defaultFont()
+        size = font.pixelSize() if font.pixelSize() > 0 else font.pointSizeF()
+        if size <= 0:
+            return 0.0
+        line = layout.lineAt(0)
+        baseline = offset + layout.position().y() + line.y() + line.ascent()
+        if self.style.valign == "top":
+            target = 0.776 * size
+        elif self.style.valign == "middle":
+            lines = sum(b.layout().lineCount() for b in _blocks(self.doc) if b.layout())
+            target = height / 2 - (lines - 1) * form.lineHeight() / 2 + 0.359 * size
+        else:
+            return 0.0
+        return target - baseline
 
     # -- painting ----------------------------------------------------------
     def paint_text(self, painter: QPainter) -> None:
@@ -1051,6 +1110,7 @@ class _TextBase(MarkupItem):
             spare = rect.height() - self.doc.size().height()
             offset = max(spare, 0) * (0.5 if self.style.valign == "middle" else 1.0)
             painter.translate(0, offset)
+        painter.translate(0, self._bluebeam_nudge(rect.height(), offset))
         # The colour has to be handed to the document layout explicitly. Left
         # to itself it takes the application's palette, which would mean the
         # words on the paper changed colour when the user switched the

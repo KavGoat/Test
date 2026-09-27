@@ -16,6 +16,8 @@ def build_application(argv: list[str]) -> QApplication:
     QApplication.setOrganizationName(ORGANISATION)
     QApplication.setApplicationDisplayName(APP_NAME)
     application = QApplication(argv)
+    from .core.typography import install_substitutions
+    install_substitutions()
     font = QFont()
     font.setFamilies(["Segoe UI", "Inter", "DejaVu Sans", "Helvetica Neue", "sans-serif"])
     font.setPointSizeF(9.5)
