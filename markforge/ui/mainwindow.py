@@ -858,8 +858,10 @@ class MainWindow(QMainWindow):
             self._style_widgets[ARROW_SIZE].append(style_bar.addWidget(control))
         self._style_widgets[DASH].append(style_bar.addWidget(QLabel(" Dash ")))
         self.dash_combo = QComboBox()
+        from .widgets import big_pattern_dropdown
+        big_pattern_dropdown(self.dash_combo)
         for name in DASH_ARRAYS:
-            self.dash_combo.addItem(_line_style_icon(name, "#555555", 1), name)
+            self.dash_combo.addItem(_line_style_icon(name, "#212529", 1), name)
         self.dash_combo.currentTextChanged.connect(self._style_dash)
         self._style_widgets[DASH].append(style_bar.addWidget(self.dash_combo))
         self._style_widgets[FONT].append(style_bar.addWidget(QLabel(" Text ")))
@@ -901,8 +903,9 @@ class MainWindow(QMainWindow):
         self._style_widgets[HATCH].append(style_bar.addWidget(QLabel(" Hatch ")))
         self.hatch_combo = QComboBox()
         self.hatch_combo.setObjectName("hatchPattern")
+        big_pattern_dropdown(self.hatch_combo)
         for name in HATCH_PATTERNS:
-            self.hatch_combo.addItem(_hatch_icon(name, "#748096"), name or "plain", name)
+            self.hatch_combo.addItem(_hatch_icon(name, "#212529"), name or "plain", name)
         self.hatch_combo.setToolTip("Hatch pattern, drawn over the fill in its own colour")
         self.hatch_combo.currentIndexChanged.connect(
             lambda _index: self._style_hatch(self.hatch_combo.currentData()))

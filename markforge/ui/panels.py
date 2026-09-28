@@ -28,37 +28,31 @@ from ..items.text import STAMP_PRESETS, CalloutItem, NoteItem, StampItem, TextIt
 from .icons import icon
 from .stylecaps import (DASH, FILL, FILL_OPACITY, HATCH, OPACITY, STROKE,
                         WIDTH, common_capabilities)
-from .widgets import ColorButton, LabeledSlider, UnitCombo, arrow_combo
+from .widgets import (ColorButton, LabeledSlider, UnitCombo, arrow_combo,
+                      big_pattern_dropdown)
 
 
 def _line_style_icon(name: str, colour: str, width: float) -> QIcon:
-    pixmap = QPixmap(76, 22)
+    pixmap = QPixmap(150, 34)
     pixmap.fill(Qt.transparent)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.Antialiasing, True)
     pen = QPen(QColor(colour or "#111318"))
-    pen.setWidthF(max(0.75, min(float(width), 6.0)))
+    pen.setWidthF(max(2.0, min(float(width) * 1.5, 6.0)))
     dashes = DASH_ARRAYS.get(name, [])
     if dashes:
         pen.setStyle(Qt.CustomDashLine)
         pen.setDashPattern(dashes)
         pen.setCapStyle(Qt.FlatCap)
     painter.setPen(pen)
-    painter.drawLine(3, 11, 73, 11)
+    painter.drawLine(4, 17, 146, 17)
     painter.end()
     return QIcon(pixmap)
 
 
 def _hatch_icon(name: str, colour: str) -> QIcon:
-    pixmap = QPixmap(76, 22)
-    pixmap.fill(Qt.transparent)
-    painter = QPainter(pixmap)
-    ink = QColor(colour or "#748096")
-    painter.setPen(QPen(ink.darker(135), 1))
-    painter.setBrush(QBrush(ink, HATCH_PATTERNS.get(name, Qt.SolidPattern)))
-    painter.drawRect(3, 3, 69, 15)
-    painter.end()
-    return QIcon(pixmap)
+    from ..items.hatches import sample_icon
+    return sample_icon(name, colour, 150, 34)
 
 
 # ---------------------------------------------------------------------------
@@ -1808,7 +1802,7 @@ class PropertiesPanel(QScrollArea):
         if DASH in controls:
             line_style = QComboBox()
             line_style.setObjectName("lineStyle")
-            line_style.setIconSize(QSize(76, 22))
+            big_pattern_dropdown(line_style, QSize(76, 22))
             for name in DASH_ARRAYS:
                 line_style.addItem(
                     _line_style_icon(name, first.style.stroke, first.style.width),
@@ -1827,7 +1821,7 @@ class PropertiesPanel(QScrollArea):
         if HATCH in controls:
             hatch = QComboBox()
             hatch.setObjectName("hatchPattern")
-            hatch.setIconSize(QSize(76, 22))
+            big_pattern_dropdown(hatch, QSize(76, 22))
             hatch_colour = first.style.hatch_color or first.style.stroke
             for name in HATCH_PATTERNS:
                 hatch.addItem(_hatch_icon(name, hatch_colour), name or "plain", name)

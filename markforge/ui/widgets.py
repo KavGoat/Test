@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QObject, QPointF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap, QPen
-from PySide6.QtWidgets import (QAbstractSpinBox, QColorDialog, QComboBox,
+from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QColorDialog, QComboBox,
                                QGridLayout, QHBoxLayout, QLabel, QMenu, QSlider,
                                QToolButton, QWidget, QWidgetAction, QSpinBox,
                                QDoubleSpinBox)
@@ -185,10 +185,19 @@ class WheelBelongsToTheScroller(QObject):
     def eventFilter(self, watched, event):
         if event.type() != QEvent.Wheel or not isinstance(watched, self.WATCHED):
             return False
-        if watched.hasFocus():
-            return False                  # clicked into: the wheel is its own
-        # Not focused: hand it on. The scroll area above it will take it.
-        event.ignore()
+        # A dropdown never changes under the wheel, focused or not: turning
+        # the wheel over one cycled through its values without being asked.
+        # Its open list still scrolls, since that is a different widget.
+        if not isinstance(watched, QComboBox) and watched.hasFocus():
+            return False                  # a clicked-into number box keeps it
+        # Hand it on to whatever is scrolling underneath.
+        parent = watched.parentWidget()
+        while parent is not None and not isinstance(parent, QAbstractScrollArea):
+            parent = parent.parentWidget()
+        if parent is not None:
+            from PySide6.QtWidgets import QApplication
+            QApplication.sendEvent(parent.viewport(), event)
+        event.accept()
         return True
 
 
@@ -234,3 +243,57 @@ class UnboundedSpin(QDoubleSpinBox):
         value = self.value()
         factor = 1.1 ** steps
         self.setValue(min(max(value * factor, self.SMALLEST), self.LARGEST))
+
+
+def big_pattern_dropdown(combo, closed=QSize(64, 20)) -> None:
+    """A line-style or hatch picker whose list shows each pattern large.
+
+    Small swatches of dashes and hatches all look alike, so the open list
+    draws every pattern big, with its name beside it, like Bluebeam's.
+    """
+    from PySide6.QtWidgets import QListView
+    from PySide6.QtWidgets import QStyledItemDelegate
+    view = QListView()
+    view.setIconSize(QSize(150, 34))
+    view.setSpacing(2)
+    view.setUniformItemSizes(True)
+    combo.setView(view)
+    # The combo's own delegate draws icons at the closed box's small size;
+    # this one draws each pattern at full size, with its name.
+    view.setItemDelegate(_BigPatternDelegate(view))
+    combo.setIconSize(closed)
+    combo.setMaxVisibleItems(14)
+    combo.setMinimumContentsLength(8)
+    view.setMinimumWidth(300)
+
+
+class _BigPatternDelegate(QStyledItemDelegateBase := __import__(
+        "PySide6.QtWidgets", fromlist=["QStyledItemDelegate"]).QStyledItemDelegate):
+    """One row of a big pattern list: the pattern 150 × 34, then its name."""
+
+    SWATCH = QSize(150, 34)
+
+    def sizeHint(self, option, index):
+        return QSize(self.SWATCH.width() + 160, self.SWATCH.height() + 6)
+
+    def paint(self, painter, option, index):
+        from PySide6.QtWidgets import QStyle
+        painter.save()
+        if option.state & QStyle.State_Selected:
+            painter.fillRect(option.rect, option.palette.highlight())
+            text_colour = option.palette.highlightedText().color()
+        else:
+            if option.state & QStyle.State_MouseOver:
+                painter.fillRect(option.rect, option.palette.alternateBase())
+            text_colour = option.palette.text().color()
+        swatch = option.rect.adjusted(6, 3, 0, -3)
+        swatch.setWidth(self.SWATCH.width())
+        painter.fillRect(swatch, QColor("#ffffff"))
+        icon = index.data(Qt.DecorationRole)
+        if icon is not None:
+            icon.paint(painter, swatch)
+        painter.setPen(text_colour)
+        words = option.rect.adjusted(self.SWATCH.width() + 16, 0, -4, 0)
+        painter.drawText(words, Qt.AlignVCenter | Qt.AlignLeft,
+                         str(index.data(Qt.DisplayRole) or ""))
+        painter.restore()

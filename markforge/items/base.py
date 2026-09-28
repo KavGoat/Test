@@ -41,23 +41,33 @@ DASH_ARRAYS = {
     "centre": [10.0, 2.5, 2.0, 2.5],
     "phantom": [10.0, 2.5, 2.0, 2.5, 2.0, 2.5],
     "hidden": [3.0, 2.0],
+    "short dash": [2.0, 2.0],
+    "dense dot": [1.0, 1.0],
+    "sparse dot": [1.0, 5.0],
+    "long dash dot": [12.0, 3.0, 1.0, 3.0],
+    "long dash dot dot": [12.0, 3.0, 1.0, 3.0, 1.0, 3.0],
+    "border": [8.0, 2.0, 8.0, 2.0, 1.0, 2.0],
+    "divide": [8.0, 2.0, 1.0, 2.0, 1.0, 2.0],
+    "double dash": [6.0, 2.0, 6.0, 6.0],
+    "dash long gap": [4.0, 6.0],
 }
 
 # Hatch patterns, by the names Bluebeam uses for them. A hatched fill is how
 # a section is shown as concrete or as steel, and a tool set full of sections
 # is worth nothing if they all come in as flat colour.
-HATCH_PATTERNS = {
-    "": Qt.SolidPattern,
-    "solid": Qt.SolidPattern,
-    "horizontal": Qt.HorPattern,
-    "vertical": Qt.VerPattern,
-    "cross": Qt.CrossPattern,
-    "up": Qt.BDiagPattern,
-    "down": Qt.FDiagPattern,
-    "diagonal cross": Qt.DiagCrossPattern,
-    "dots": Qt.Dense5Pattern,
-    "dense": Qt.Dense3Pattern,
-}
+class _HatchNames(dict):
+    """Every hatch the pickers offer, in order ("" is none).
+
+    Values are unused; kept a mapping so older callers iterating it still work.
+    """
+
+
+def _hatch_names():
+    from . import hatches
+    return _HatchNames({"": None, **{name: None for name in hatches.NAMES}})
+
+
+HATCH_PATTERNS = _hatch_names()
 
 
 def hatch_named(name: str):
@@ -101,94 +111,23 @@ def hatch_named(name: str):
         return Qt.Dense3Pattern
     return Qt.SolidPattern
 
-#: The distance between hatch lines at a hatch scale of one, in page points,
-#: and the weight of those lines.
+#: The distance between hatch lines at a hatch scale of one, in page points.
 HATCH_CELL = 8.0
-HATCH_WIDTH = 0.5
-#: A hatch that would need more lines than this is drawn coarser instead,
-#: so a tiny scale over a huge shape cannot stall a repaint.
-MOST_HATCH_LINES = 4000
 
 
 def paint_hatch(painter: QPainter, region: QPainterPath, style) -> None:
-    """Draw *style*'s hatch over *region* as real lines, clipped to it.
-
-    Linework, not a tiled picture: it stays sharp at any zoom and any hatch
-    scale, and is written into a PDF as vector strokes.
-    """
+    """Draw *style*'s hatch over *region* as real lines, clipped to it."""
     if region is None or region.isEmpty() or not style.hatched():
         return
-    pattern = hatch_named(style.hatch)
-    box = region.boundingRect()
-    if box.isEmpty():
-        return
-    step = style.hatch_spacing()
-    span = box.width() + box.height()
+    from . import hatches
     ink = QColor(style.hatch_color or style.stroke or "#000000")
     ink.setAlphaF(max(0.0, min(1.0, style.opacity)))
-    painter.save()
-    painter.setClipPath(region, Qt.IntersectClip)
-    painter.setRenderHint(QPainter.Antialiasing, True)
-    if span / step > MOST_HATCH_LINES:
-        # Closer than this the lines merge into a tint anyway. Drawing that
-        # tint keeps the scale honest however small it goes, where spreading
-        # the lines out would quietly ignore the number typed.
-        directions = {Qt.HorPattern: 1, Qt.VerPattern: 1, Qt.BDiagPattern: 1,
-                      Qt.FDiagPattern: 1, Qt.CrossPattern: 2,
-                      Qt.DiagCrossPattern: 2}.get(pattern, 1)
-        cover = min(1.0, directions * HATCH_WIDTH / step)
-        tint = QColor(ink)
-        tint.setAlphaF(ink.alphaF() * cover)
-        painter.fillPath(region, tint)
-        painter.restore()
-        return
-    lines = []
-    left, top, right, bottom = box.left(), box.top(), box.right(), box.bottom()
+    hatches.paint(painter, region, style.hatch, style.hatch_scale, ink)
 
-    def run(start, stop):
-        value = math.floor(start / step) * step
-        while value <= stop:
-            yield value
-            value += step
 
-    if pattern in (Qt.HorPattern, Qt.CrossPattern):
-        lines += [(QPointF(left, y), QPointF(right, y)) for y in run(top, bottom)]
-    if pattern in (Qt.VerPattern, Qt.CrossPattern):
-        lines += [(QPointF(x, top), QPointF(x, bottom)) for x in run(left, right)]
-    if pattern in (Qt.BDiagPattern, Qt.DiagCrossPattern):
-        # "/" : x + y constant
-        lines += [(QPointF(c - top, top), QPointF(c - bottom, bottom))
-                  for c in run(left + top, right + bottom)]
-    if pattern in (Qt.FDiagPattern, Qt.DiagCrossPattern):
-        # "\" : x - y constant
-        lines += [(QPointF(c + top, top), QPointF(c + bottom, bottom))
-                  for c in run(left - bottom, right - top)]
-    if lines:
-        pen = QPen(ink, HATCH_WIDTH)
-        pen.setCapStyle(Qt.FlatCap)
-        painter.setPen(pen)
-        painter.setBrush(Qt.NoBrush)
-        from PySide6.QtCore import QLineF
-        painter.drawLines([QLineF(a, b) for a, b in lines])
-    if pattern in (Qt.Dense5Pattern, Qt.Dense3Pattern):
-        gap = step if pattern == Qt.Dense5Pattern else step / 2.0
-        radius = HATCH_WIDTH * (0.9 if pattern == Qt.Dense5Pattern else 1.1)
-        painter.setPen(Qt.NoPen)
-        if (box.width() / gap) * (box.height() / gap) > MOST_HATCH_LINES * 5:
-            tint = QColor(ink)
-            tint.setAlphaF(ink.alphaF() * min(1.0, math.pi * radius * radius / (gap * gap)))
-            painter.fillPath(region, tint)
-            painter.restore()
-            return
-        painter.setBrush(ink)
-        y = math.floor(top / gap) * gap + gap / 2
-        while y <= bottom:
-            x = math.floor(left / gap) * gap + gap / 2
-            while x <= right:
-                painter.drawEllipse(QPointF(x, y), radius, radius)
-                x += gap
-            y += gap
-    painter.restore()
+def _is_hatch(name: str) -> bool:
+    from . import hatches
+    return hatches.is_hatch(name)
 
 
 ARROW_HEADS = ["none", "arrow", "open", "dot", "square", "diamond", "slash", "half"]
@@ -266,7 +205,8 @@ class Style:
 
     def hatched(self) -> bool:
         """Whether a hatch pattern is drawn, rather than only a fill."""
-        return bool(self.hatch) and hatch_named(self.hatch) != Qt.SolidPattern
+        from . import hatches
+        return hatches.is_hatch(self.hatch)
 
     def brush(self) -> QBrush:
         """The solid fill. A hatch is linework, drawn over it by paint_hatch."""
@@ -311,7 +251,7 @@ class Style:
     def from_dict(cls, data: dict) -> "Style":
         known = {f: data[f] for f in cls.__dataclass_fields__ if f in data}
         if "hatch_color" not in data and known.get("hatch") and \
-                hatch_named(known["hatch"]) != Qt.SolidPattern:
+                _is_hatch(known["hatch"]):
             # Saved before hatch and fill were separate: the hatch was drawn
             # in the fill colour with nothing under it. Keep that look.
             known["hatch_color"] = known.get("fill") or known.get("stroke") or "#000000"
@@ -729,9 +669,24 @@ class MarkupItem(QGraphicsObject):
         elif self._their_picture is not None:
             self.paint_their_picture(painter)
         else:
-            self.paint_content(painter)
-            if self.style.hatched():
-                paint_hatch(painter, self.hatch_region(), self.style)
+            region = self.hatch_region() if self.style.hatched() else None
+            if region is None or region.isEmpty():
+                self.paint_content(painter)
+                return
+            # Fill, then hatch, then the markup itself without its fill: the
+            # hatch sits behind the outline, not over it.
+            if self.style.fill:
+                painter.save()
+                painter.setRenderHint(QPainter.Antialiasing, True)
+                painter.fillPath(region, self.style.brush())
+                painter.restore()
+            paint_hatch(painter, region, self.style)
+            fill = self.style.fill
+            self.style.fill = ""
+            try:
+                self.paint_content(painter)
+            finally:
+                self.style.fill = fill
 
     def hatch_region(self) -> Optional[QPainterPath]:
         """The area a hatch covers, in item coordinates; None for no hatch."""

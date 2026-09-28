@@ -44,3 +44,8 @@ restarts with the report below. Completion status is user-owned.
 |  | C5: Extract or split pages into a new PDF. |
 |  | Markups list panel like Bluebeam's: columns for colour, line style, font and similar; filter and sort; select rows to change colour, style or delete several markups at once. |
 |  | Panel rail buttons can move between the left and right side but cannot be reordered top to bottom by dragging. They must be. |
+|  | The Markups list panel lives only at the bottom of the window, and is shown or hidden by dragging its edge up or down, exactly like Bluebeam. |
+|  | Hatch must be drawn behind the markup's outline, not over it. |
+|  | Line style and hatch pickers must be big dropdowns where each pattern is easy to tell apart, with its name. |
+|  | The scroll wheel over a dropdown must not cycle through its values, anywhere: toolbar, Properties and every dialog. |
+|  | The Cloud+ (cloud callout) icon shows only a cloud; it must show a cloud with a callout. Add leader icons for adding an arrow leader and a cloud leader, not just an arrow or just a cloud. |

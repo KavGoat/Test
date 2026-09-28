@@ -6108,8 +6108,9 @@ def test_the_wheel_over_a_dropdown_scrolls_the_panel(window):
     QApplication.sendEvent(combo, wheel)
     assert combo.currentIndex() == before      # the panel scrolled, not the box
 
-    # And the filter hands it straight back the moment it has been clicked
-    # into, so a deliberate wheel over an open box still works.
+    # Not even once it has been clicked into: a dropdown never cycles under
+    # the wheel. A clicked-into number box still takes it.
+    from PySide6.QtWidgets import QSpinBox
     from markforge.ui.widgets import WheelBelongsToTheScroller
 
     kept = WheelBelongsToTheScroller()
@@ -6117,7 +6118,11 @@ def test_the_wheel_over_a_dropdown_scrolls_the_panel(window):
     wheel = QWheelEvent(QPointF(5, 5), combo.mapToGlobal(QPoint(5, 5)),
                         QPoint(0, -120), QPoint(0, -120), Qt.NoButton,
                         Qt.NoModifier, Qt.NoScrollPhase, False)
-    assert kept.eventFilter(combo, wheel) is False
+    assert kept.eventFilter(combo, wheel) is True
+    assert combo.currentIndex() == before
+    spin = QSpinBox()
+    spin.hasFocus = lambda: True
+    assert kept.eventFilter(spin, wheel) is False
 
 
 # ---------------------------------------------------------------------------
@@ -9949,3 +9954,33 @@ def test_a_link_goes_to_a_page_and_is_a_real_link_in_the_pdf(window, tmp_path):
                    for kind, _page, uri in kinds)
         # Not drawn as a markup appearance: it is a link, nothing more.
         assert all(annot.type[1] != "Square" for annot in pdf[0].annots())
+
+
+def test_the_hatch_library_draws_every_pattern_behind_the_outline(window):
+    from PySide6.QtGui import QImage, QPainter
+    from markforge.items import hatches
+    from markforge.items.base import Style
+
+    assert len(hatches.NAMES) >= 30
+    assert hatches.key_for("Hatch-Concrete") == "concrete"
+    assert hatches.key_for("DiagonalCross") == "diagonal cross"
+    assert hatches.key_for("Hatch-DiagonalUp") == "up"
+    assert hatches.key_for("") == ""
+    box = RectItem("rect")
+    box.set_local_rect(QRectF(0, 0, 100, 60))
+    for name in hatches.NAMES:
+        box.style = Style(stroke="#1971c2", width=4.0, fill="", hatch=name,
+                          hatch_color="#c92a2a")
+        image = QImage(480, 320, QImage.Format_ARGB32)
+        image.fill(Qt.white)
+        painter = QPainter(image)
+        painter.scale(4, 4)
+        painter.translate(10, 10)
+        box.paint_visible(painter)
+        painter.end()
+        inside = [image.pixelColor(x, y) for x in range(80, 400, 2)
+                  for y in range(80, 240, 2)]
+        assert any(c.red() - c.blue() >= 60 for c in inside), name
+        # The outline is on top: its middle is outline blue, not hatch red.
+        edge = image.pixelColor(240, 40)
+        assert edge.blue() > 150 and edge.red() < 80, name
