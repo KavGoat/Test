@@ -29,3 +29,18 @@ restarts with the report below. Completion status is user-owned.
 |  | After placing a rectangle or ellipse no size dialog may pop up; the size bar while drawing is the only size entry. |
 |  | Hatch must stay sharp at any hatch scale and zoom: linework, not a tiled picture. **(amended)** Hatch scale is effectively infinite in both directions, in both the style toolbar and Properties. |
 |  | Bluebeam tool set import must line up one to one with Bluebeam: verify Sketch Tools against btx/Document1.pdf, where Bluebeam placed the same tools. |
+
+## Requests reported 2026-09-28
+
+| Complete | Task |
+| --- | --- |
+|  | A1: Keep fractional font sizes exact (10.87 pt stays 10.87 pt, not rounded to a whole pixel). |
+|  | A2: Draw stamp artwork (e.g. the Titleblock) as linework, not a picture. |
+|  | B3: Viewports: different scales in different regions of one sheet. |
+|  | B6: Link tool: a region that jumps to a page, a view, a file or a web address. |
+|  | B8: A library of named hatches and line styles like Bluebeam's. |
+|  | C2: Search the PDF's own text and the markups' text across all pages, list every hit, and replace text in markups. |
+|  | C4: Crop pages. |
+|  | C5: Extract or split pages into a new PDF. |
+|  | Markups list panel like Bluebeam's: columns for colour, line style, font and similar; filter and sort; select rows to change colour, style or delete several markups at once. |
+|  | Panel rail buttons can move between the left and right side but cannot be reordered top to bottom by dragging. They must be. |

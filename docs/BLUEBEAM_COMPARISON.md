@@ -51,3 +51,9 @@ different:
 | D3 | Profiles | Save and switch whole workspace layouts (panels, toolbars) |
 | D4 | Tool chest Properties / Drawing mode | A tool either keeps its stored look or takes the current toolbar look |
 | D5 | Typewriter tool on the toolbar | Borderless text tool (W) as its own button; MarkForge only creates one by typing on the canvas |
+
+## User decisions — 2026-09-28
+
+Add: A1, A2, B3, B6, B8, C2 (with markup search and replace), C4, C5, and a
+Bluebeam-style Markups list (in place of C7).
+Ignore: B1, B2, B4, B5, B7, C1, C3, C6, C7 (report), C8, D1–D5.
