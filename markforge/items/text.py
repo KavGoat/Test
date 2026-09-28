@@ -6,7 +6,8 @@ import re
 from typing import Optional
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import (QAbstractTextDocumentLayout, QBrush, QColor, QPainter,
+from PySide6.QtGui import (QAbstractTextDocumentLayout, QBrush, QColor, QFont,
+                           QPainter,
                            QPainterPath, QPainterPathStroker, QPalette, QPen,
                            QPolygonF,
                            QSyntaxHighlighter, QTextCharFormat, QTextCursor,
@@ -444,7 +445,62 @@ class _TextBase(MarkupItem):
         return self.doc.toHtml()
 
     def set_html(self, html: str) -> None:
-        self.doc.setHtml(html)
+        self._load_html(html)
+
+    def _load_html(self, html: str) -> None:
+        """Load rich text, sizing its runs exactly before the box fits them.
+
+        Qt lays text out the moment it is set, with point sizes read at the
+        screen's dpi. Growing the box to fit that first layout made a field
+        that fits on one line two lines tall for good, since a box never
+        shrinks on its own.
+        """
+        growing = self.auto_size
+        self.auto_size = False
+        try:
+            self.doc.setHtml(html)
+            self.exact_sizes()
+        finally:
+            self.auto_size = growing
+        if growing:
+            self._fit_height()
+
+    def exact_sizes(self) -> None:
+        """Draw runs sized in points at exactly that many page units.
+
+        A size in points is what the document keeps: Qt holds it to every
+        decimal and writes it back out. Left alone, Qt would draw it at the
+        screen's dpi (a third too big on Windows), and pixel sizes are whole
+        numbers. So each such run is drawn at the nearest whole pixel size
+        with its letters spaced to the exact size, worked out again whenever
+        the words are loaded.
+        """
+        from PySide6.QtGui import QTextFormat
+        from ..core.typography import exact_advances
+
+        cursor = QTextCursor(self.doc)
+        block = self.doc.firstBlock()
+        while block.isValid():
+            it = block.begin()
+            while not it.atEnd():
+                fragment = it.fragment()
+                size = fragment.charFormat().fontPointSize()
+                if size > 0:
+                    pixels = max(int(round(size)), 1)
+                    font = QFont()
+                    exact_advances(font, size, pixels)
+                    change = QTextCharFormat()
+                    change.setProperty(QTextFormat.FontPixelSize, pixels)
+                    change.setFontKerning(False)
+                    if abs(size - pixels) > 1e-6:
+                        change.setFontLetterSpacingType(QFont.PercentageSpacing)
+                        change.setFontLetterSpacing(font.letterSpacing())
+                    cursor.setPosition(fragment.position())
+                    cursor.setPosition(fragment.position() + fragment.length(),
+                                       QTextCursor.KeepAnchor)
+                    cursor.mergeCharFormat(change)
+                it += 1
+            block = block.next()
 
     def _on_contents_changed(self) -> None:
         self.prepareGeometryChange()
@@ -1161,7 +1217,7 @@ class _TextBase(MarkupItem):
         self.load_base(data)
         html = data.get("html")
         if html:
-            self.doc.setHtml(html)
+            self._load_html(html)
         else:
             self.doc.setPlainText(data.get("text", ""))
         self.digits = int(data.get("digits", 4))

@@ -364,10 +364,19 @@ def test_a_legend_keeps_its_heading_and_the_space_between_its_entries(qapp):
     assert words["text"].count("\n") >= 4, "the blank lines have gone"
     set_out = words["html"]
     assert "underline" in set_out and "bold" in set_out
-    # Point sizes are the page's own units, not the screen's: saying "pt" here
-    # has Qt read them against the screen's resolution and set every line a
-    # third too big, which is what broke a drawing title across two lines.
-    assert "pt" not in set_out and "font-size:10.8654px" in set_out
+    # The size is kept to every decimal, in points, and drawn at exactly that
+    # many page units — not at the screen's dpi, which set every line a third
+    # too big and broke a drawing title across two lines.
+    assert "font-size:10.8654pt" in set_out
+    item = build_item(words)
+    run = item.doc.firstBlock().begin().fragment().charFormat()
+    assert run.fontPointSize() == pytest.approx(10.8654)
+    assert run.font().pixelSize() == 11
+    assert run.fontLetterSpacing() == pytest.approx(100 * 10.8654 / 11, rel=1e-3)
+    title = build_item(_part(next(t for t in _sketch_tools().tools
+                                  if t.name == "Drawing Title"), "text"))
+    title.doc.setTextWidth(title.text_rect().width())
+    assert title.doc.firstBlock().layout().lineCount() == 1
 
 
 # ---------------------------------------------------------------------------

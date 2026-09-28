@@ -363,7 +363,9 @@ def _showable(declarations: str) -> str:
             # Bluebeam's line spacing is exact. Qt reads a bare line-height
             # as a minimum, which Helvetica's own spacing always beats, so
             # every line of a legend crept half a point lower than the last.
-            parts.append(f"line-height:{_points(value)}")
+            spacing = re.match(r"^\s*([\d.]+)", value)
+            parts.append(f"line-height:{spacing.group(1)}px" if spacing
+                         else f"line-height:{value}")
             parts.append("-qt-line-height-type:fixed")
         elif name in _SHOWABLE:
             parts.append(f"{name}:{value}")
@@ -373,15 +375,14 @@ def _showable(declarations: str) -> str:
 
 
 def _points(size: str) -> str:
-    """A type size in the units the page is measured in.
+    """A type size in points, kept to every decimal it was given.
 
-    A scene unit here *is* a PDF point, but Qt's rich text reads ``pt``
-    against the screen's resolution and makes it a third bigger again. Saying
-    ``px`` instead is what keeps sixteen point sixteen points — and what
-    keeps a drawing title on the one line it was set on.
+    Qt keeps a point size to every decimal, where pixel sizes are whole, and
+    ``_TextBase.exact_sizes`` draws it at exactly that many page units. A
+    pixel size here set 10.87pt text at 11.
     """
     match = re.match(r"^\s*([\d.]+)\s*(pt|px)?\s*$", size)
-    return f"{match.group(1)}px" if match else size
+    return f"{match.group(1)}pt" if match else size
 
 
 def _shorthand(value: str) -> list[str]:
@@ -389,7 +390,7 @@ def _shorthand(value: str) -> list[str]:
     if not match:
         return []
     weight, slant, family, size = match.groups()
-    parts = [f"font-size:{size}px"]
+    parts = [f"font-size:{size}pt"]
     if family:
         parts.append(f"font-family:{family}")
     if weight:

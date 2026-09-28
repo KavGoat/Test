@@ -27,6 +27,18 @@ HELVETICA_STAND_INS = ["Arial", "Liberation Sans", "Nimbus Sans", "Nimbus Sans L
 _SUBSTITUTED = False
 
 
+def exact_advances(font: QFont, size: float, pixels: float) -> None:
+    """Space *font*'s glyphs as if it were *size*, though drawn at *pixels*.
+
+    Qt draws text only at whole-pixel sizes, so 10.87 pt text was set at 11
+    and every line ran about one per cent long. Scaling the advances by the
+    ratio puts each glyph where the fractional size puts it; the glyph shapes
+    themselves are then a tenth of a point off at most.
+    """
+    if size > 0 and pixels > 0 and abs(size - pixels) > 1e-6:
+        font.setLetterSpacing(QFont.PercentageSpacing, 100.0 * size / pixels)
+
+
 def install_substitutions() -> None:
     """Point Helvetica, and Bluebeam's names for it, at a same-metric face."""
     global _SUBSTITUTED
@@ -50,7 +62,9 @@ def page_font(family: str, size: float, bold: bool = False, italic: bool = False
     # setFamilies() must be the last family call: in Qt 6 setFamily() replaces
     # the whole list, which would throw the fallback chain away.
     font.setFamilies(families)
-    font.setPixelSize(max(int(round(size)), MIN_PIXELS))
+    pixels = max(int(round(size)), MIN_PIXELS)
+    font.setPixelSize(pixels)
+    exact_advances(font, size, pixels)
     font.setBold(bold)
     font.setItalic(italic)
     font.setUnderline(underline)
