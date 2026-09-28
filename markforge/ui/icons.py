@@ -429,6 +429,10 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
             y = 6.5 + offset * 5
             painter.drawRect(QRectF(3.5, y - 1.5, 3, 3))
             painter.drawLine(QPointF(9, y), QPointF(20.5, y))
+    elif name == "panel_search":
+        _pen(painter, INK, 1.5)
+        painter.drawEllipse(QRectF(4.5, 4.5, 11, 11))
+        painter.drawLine(QPointF(13.8, 13.8), QPointF(19.5, 19.5))
     elif name == "panel_properties":
         _pen(painter, INK, 1.3)
         painter.drawRect(QRectF(3.5, 4.5, 17, 15))

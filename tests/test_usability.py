@@ -9803,3 +9803,52 @@ def test_markups_list_filters_sorts_and_changes_several_at_once(window):
     rows[0].setSelected(True)
     panel.batch_delete()
     assert len(window.view.frame().markups()) == 2
+
+
+def test_search_finds_drawing_and_markup_text_and_replaces_in_markups(window, tmp_path):
+    import pymupdf
+    from markforge.io import pdfio
+
+    source = pymupdf.open()
+    page = source.new_page(width=400, height=300)
+    page.insert_text((60, 80), "BEAM B1 310UB40", fontsize=10)
+    page.insert_text((60, 200), "beam B2", fontsize=10)
+    path = tmp_path / "words.pdf"
+    source.save(path)
+    source.close()
+    pdfio.import_pages(window.document, str(path), [0], at=0)
+    window.rebuild_scenes()
+    window.go_to_page(0)
+    window.select_tool("text")
+    drag(window.view, 100, 400, 320, 450)
+    box = window.view.editing_item()
+    box.set_text("Check beam size")
+    window.view.end_item_edit()
+
+    window.find_in_document("beam")
+    panel = window.search_panel
+    kinds = [hit["kind"] for hit in panel.hits]
+    assert kinds.count("drawing") == 2 and kinds.count("markup") == 1
+    drawing = [hit for hit in panel.hits if hit["kind"] == "drawing"][0]
+    assert drawing["box"].top() == pytest.approx(80 - 10, abs=4)
+    panel.results.setCurrentItem(panel.results.topLevelItem(0))
+    assert window.view._search_marks
+
+    panel.replacement.setText("joist")
+    assert panel.replace_all() == 1
+    texts = [i.doc.toPlainText() for i in window.view.scene().markups()
+             if isinstance(i, TextItem)]
+    assert texts == ["Check joist size"]
+    window.undo_stack.undo()
+    texts = [i.doc.toPlainText() for i in window.view.scene().markups()
+             if isinstance(i, TextItem)]
+    assert texts == ["Check beam size"]
+    # The drawing's own words are never changed.
+    kinds = [hit["kind"] for hit in panel.run()]
+    assert kinds.count("drawing") == 2
+
+
+def test_ctrl_f_opens_the_search_panel(window):
+    assert window.act_find_text.shortcut().toString() == "Ctrl+F"
+    window.act_find_text.trigger()
+    assert not window.dock_search.isHidden()

@@ -3629,6 +3629,8 @@ class PageView(QGraphicsView):
         if (preferences.current().insertion_point
                 and self._insertion_point is not None):
             self._draw_insertion_point(painter, self._insertion_point)
+        if getattr(self, "_search_marks", None):
+            self._draw_search_marks(painter)
         if self._snap_guides:
             self._draw_snap_guides(painter, rect)
         if self._snap_marker is not None:
@@ -3637,6 +3639,25 @@ class PageView(QGraphicsView):
             self._draw_pending_leader(painter, self._pending_anchor)
         if self._pending_arrow_leader is not None:
             self._draw_arrow_leader_preview(painter)
+
+    def set_search_marks(self, marks) -> None:
+        """Outline where the Search panel found words: [(scene rect, current)]."""
+        self._search_marks = list(marks)
+        self.viewport().update()
+
+    def _draw_search_marks(self, painter: QPainter) -> None:
+        painter.save()
+        for box, current in self._search_marks:
+            colour = QColor("#f08c00" if current else "#fab005")
+            fill = QColor(colour)
+            fill.setAlpha(90 if current else 45)
+            pen = QPen(colour)
+            pen.setWidthF(2.0 if current else 1.0)
+            pen.setCosmetic(True)
+            painter.setPen(pen)
+            painter.setBrush(fill)
+            painter.drawRect(box.adjusted(-1, -1, 1, 1))
+        painter.restore()
 
     def _draw_pending_preview(self, painter: QPainter) -> None:
         """Show what is about to be put down, under the pointer.

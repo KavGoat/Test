@@ -321,7 +321,7 @@ _SHORTCUT_GROUPS = {
     "bookmark": "Page", "contents": "Page", "doc_props": "Page",
     "renumber_counts": "Markup", "check_spelling": "Markup",
     "shortcuts": "Help", "sample": "Help",
-    "find_tool": "Help",
+    "find_tool": "Help", "find_text": "Edit",
     "about": "Help",
 }
 
@@ -717,6 +717,9 @@ class MainWindow(QMainWindow):
 
         self._act("shortcuts", "Shortcuts…", self.show_shortcuts, "F1",
                   tip="Every shortcut, and the keys you want them on")
+        self._act("find_text", "Find…", self.find_in_document, "Ctrl+F",
+                  tip="Find words in the drawing and in the markups, on every "
+                      "page, and replace them in the markups")
         self._act("find_tool", "Search…", self.find_a_tool, "Shift+F1",
                   tip="Type what you want to do, and it says which tool does "
                       "it and which key it is on")
@@ -986,6 +989,10 @@ class MainWindow(QMainWindow):
         self.bookmarks_panel.bookmarkActivated.connect(self.go_to_bookmark)
         self.dock_bookmarks = self._dock("Bookmarks", self.bookmarks_panel,
                                          Qt.BottomDockWidgetArea, "dock_bookmarks")
+        from .searchpanel import SearchPanel
+        self.search_panel = SearchPanel(self)
+        self.dock_search = self._dock("Search", self.search_panel,
+                                      Qt.LeftDockWidgetArea, "dock_search")
         self.reference_docks = [self.dock_markups,
                                 self.dock_toolsets, self.dock_bookmarks]
         self._build_rails()
@@ -1002,10 +1009,11 @@ class MainWindow(QMainWindow):
         "dock_toolsets": ("Tool sets", "panel_toolsets"),
         "dock_markups": ("Markups", "panel_markups"),
         "dock_properties": ("Properties", "panel_properties"),
+        "dock_search": ("Search", "panel_search"),
     }
     DEFAULT_SIDES = {
         "dock_pages": LEFT, "dock_bookmarks": LEFT, "dock_toolsets": LEFT,
-        "dock_markups": LEFT,
+        "dock_markups": LEFT, "dock_search": LEFT,
         "dock_properties": RIGHT,
     }
 
@@ -1187,7 +1195,10 @@ class MainWindow(QMainWindow):
                     found.append((f"{item.display_name()}: {shown}" if shown
                                   else item.display_name(),
                                   f"Markup · page {index + 1}", (index, item.uid)))
-        return found[:60]
+        # Last, so Enter still picks the best tool or command: the same words
+        # looked for in the drawing and the markups, in the Search panel.
+        return found[:59] + [(f"Find “{wanted.strip()}” in the document", "Find",
+                              wanted.strip())]
 
     def _search_typed(self, wanted: str) -> None:
         from PySide6.QtGui import QStandardItem
@@ -1231,6 +1242,8 @@ class MainWindow(QMainWindow):
             target.trigger()
         elif kind == "Page":
             self.go_to_page(target)
+        elif kind == "Find":
+            self.find_in_document(target)
         else:
             page_index, uid = target
             self.reveal_markup(page_index, uid)
@@ -1253,7 +1266,8 @@ class MainWindow(QMainWindow):
         for action in (self.act_undo, self.act_redo, None, self.act_cut, self.act_copy,
                        self.act_paste, self.act_paste_in_place, self.act_paste_here,
                        self.act_duplicate, self.act_delete, None,
-                       self.act_select_all, self.act_lock, self.act_array):
+                       self.act_select_all, self.act_lock, self.act_array, None,
+                       self.act_find_text):
             edit_menu.addSeparator() if action is None else edit_menu.addAction(action)
         order_menu = edit_menu.addMenu("Order")
         for action in (self.act_front, self.act_forward, self.act_backward, self.act_back):
@@ -4797,6 +4811,16 @@ class MainWindow(QMainWindow):
                 if callable(collect):
                     names |= collect()
         return names
+
+    def find_in_document(self, text: str = "") -> None:
+        """Open the Search panel, with *text* searched for straight away."""
+        self.show_panel("dock_search", True)
+        panel = self.search_panel
+        if text:
+            panel.query.setText(text)
+            panel.run()
+        panel.query.setFocus(Qt.ShortcutFocusReason)
+        panel.query.selectAll()
 
     def find_a_tool(self) -> None:
         """Type what you want to do; it says which tool does it.
