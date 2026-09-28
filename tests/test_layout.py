@@ -393,7 +393,7 @@ def test_showing_panels_unrolls_the_default_panels(window):
 
 def test_rolling_a_panel_up_schedules_a_save(window):
     window._layout_timer.stop()
-    panels(window)["dock_markups"].set_collapsed(True)
+    panels(window)["dock_bookmarks"].set_collapsed(True)
     assert window._layout_timer.isActive()
 
 
@@ -476,3 +476,21 @@ def test_rail_icons_can_be_reordered_top_to_bottom(window):
     first = rail.order()[0]
     window.move_panel_to_side(first, "left", 2)
     assert rail.order()[2] == first
+
+
+def test_the_markups_list_lives_under_the_drawing(window):
+    """Like Bluebeam: not a side panel, a bar dragged up to open, down to close."""
+    assert "dock_markups" not in panels(window)
+    split = window.bottom_split
+    assert split.orientation() == Qt.Vertical
+    assert split.widget(0) is window.view and split.widget(1) is window.markups_panel
+    assert split.isCollapsible(1) and not split.isCollapsible(0)
+    window.resize(1200, 900)
+    window.show_markups_list(True)
+    assert window.markups_list_open() and window.act_markups_list.isChecked()
+    total = sum(split.sizes())
+    split.setSizes([total, 0])  # what dragging the bar to the bottom does
+    window._markups_list_moved(total, 1)
+    assert not window.markups_list_open() and not window.act_markups_list.isChecked()
+    window.act_markups_list.trigger()
+    assert window.markups_list_open()

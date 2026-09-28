@@ -309,7 +309,7 @@ _SHORTCUT_GROUPS = {
     "fit_page": "View", "fit_width": "View", "actual_size": "View",
     "prev_page": "View", "next_page": "View", "grid": "View", "snap": "View",
     "snap_items": "View", "snap_content": "View", "snap_alignment": "View",
-    "snap_pdf_alignment": "View",
+    "snap_pdf_alignment": "View", "markups_list": "View",
     "margins": "View", "dark": "View",
     "turn_view_cw": "View", "turn_view_acw": "View",
     "turn_view_reset": "View",
@@ -454,7 +454,16 @@ class MainWindow(QMainWindow):
         self.document_tabs.detachRequested.connect(self.tear_off_document)
         layout.addWidget(self.document_tabs)
 
-        layout.addWidget(self.view, 1)
+        # The markups list sits under the canvas, as Bluebeam's does: a bar
+        # that is dragged up to open the list and down to close it again.
+        self.bottom_split = QSplitter(Qt.Vertical)
+        self.bottom_split.setObjectName("markupsSplit")
+        self.bottom_split.setChildrenCollapsible(True)
+        self.bottom_split.setHandleWidth(7)
+        self.bottom_split.addWidget(self.view)
+        self.bottom_split.setCollapsible(0, False)
+        self.bottom_split.splitterMoved.connect(self._markups_list_moved)
+        layout.addWidget(self.bottom_split, 1)
         self.setCentralWidget(central)
 
         # The rails go in the toolbar areas, which is what puts them hard
@@ -528,6 +537,10 @@ class MainWindow(QMainWindow):
                   tip="Open another document beside this one, in its own tab")
         self._act("new_window", "New window", self.open_new_window, "Ctrl+Shift+N",
                   tip="Open a second window with a document of its own")
+        self._act("markups_list", "Markups list", self.show_markups_list, "Alt+L",
+                  checkable=True,
+                  tip="Open or close the markups list under the drawing — or "
+                      "drag its bar up and down")
         self._act("crop_page", "Crop page", lambda: self.select_tool("crop"),
                   tip="Drag the part of the page to keep; Undo restores the rest")
         self._act("extract_pages", "Extract pages…", lambda: self.extract_pages(),
@@ -990,8 +1003,11 @@ class MainWindow(QMainWindow):
         self.dock_properties = self._dock("Properties", self.properties_panel,
                                           Qt.RightDockWidgetArea, "dock_properties")
         self.markups_panel = MarkupsPanel(self)
-        self.dock_markups = self._dock("Markups", self.markups_panel,
-                                       Qt.BottomDockWidgetArea, "dock_markups")
+        self.markups_panel.setObjectName("markupsList")
+        self.bottom_split.addWidget(self.markups_panel)
+        self.bottom_split.setCollapsible(1, True)
+        self._markups_height = 220
+        self.bottom_split.setSizes([1, 0])
         self.toolsets_panel = ToolSetsPanel(self)
         self.dock_toolsets = self._dock("Tool sets", self.toolsets_panel,
                                         Qt.BottomDockWidgetArea, "dock_toolsets")
@@ -1003,8 +1019,7 @@ class MainWindow(QMainWindow):
         self.search_panel = SearchPanel(self)
         self.dock_search = self._dock("Search", self.search_panel,
                                       Qt.LeftDockWidgetArea, "dock_search")
-        self.reference_docks = [self.dock_markups,
-                                self.dock_toolsets, self.dock_bookmarks]
+        self.reference_docks = [self.dock_toolsets, self.dock_bookmarks]
         self._build_rails()
         self.resizeDocks([self.dock_pages, self.dock_properties], [220, 320],
                          Qt.Horizontal)
@@ -1017,15 +1032,46 @@ class MainWindow(QMainWindow):
         "dock_pages": ("Pages", "panel_pages"),
         "dock_bookmarks": ("Bookmarks", "panel_bookmarks"),
         "dock_toolsets": ("Tool sets", "panel_toolsets"),
-        "dock_markups": ("Markups", "panel_markups"),
         "dock_properties": ("Properties", "panel_properties"),
         "dock_search": ("Search", "panel_search"),
     }
     DEFAULT_SIDES = {
         "dock_pages": LEFT, "dock_bookmarks": LEFT, "dock_toolsets": LEFT,
-        "dock_markups": LEFT, "dock_search": LEFT,
+        "dock_search": LEFT,
         "dock_properties": RIGHT,
     }
+
+    # -- the markups list under the canvas ---------------------------------
+    def markups_list_open(self) -> bool:
+        sizes = self.bottom_split.sizes()
+        return len(sizes) > 1 and sizes[1] > 0
+
+    def show_markups_list(self, open_now: bool = True) -> None:
+        """Open the list at the height it last had, or close it."""
+        total = max(sum(self.bottom_split.sizes()), 400)
+        if open_now:
+            height = max(min(self._markups_height, total - 120), 120)
+            self.bottom_split.setSizes([total - height, height])
+            self.markups_panel.rebuild(self.document)
+        else:
+            if self.markups_list_open():
+                self._markups_height = self.bottom_split.sizes()[1]
+            self.bottom_split.setSizes([total, 0])
+        self._say_markups_list()
+        self.note_layout_change()
+
+    def _markups_list_moved(self, _position: int, _index: int) -> None:
+        if self.markups_list_open():
+            self._markups_height = self.bottom_split.sizes()[1]
+        self._say_markups_list()
+        self.note_layout_change()
+
+    def _say_markups_list(self) -> None:
+        action = getattr(self, "act_markups_list", None)
+        if action is not None and action.isChecked() != self.markups_list_open():
+            action.blockSignals(True)
+            action.setChecked(self.markups_list_open())
+            action.blockSignals(False)
 
     def _build_rails(self) -> None:
         self.panel_sides = load_sides(self.DEFAULT_SIDES)
@@ -1304,6 +1350,7 @@ class MainWindow(QMainWindow):
                        self.act_next_page):
             view_menu.addSeparator() if action is None else view_menu.addAction(action)
         view_menu.addSeparator()
+        view_menu.addAction(self.act_markups_list)
         view_menu.addAction(self.act_split_view)
         view_menu.addAction(self.act_separate_views)
         panels_menu = view_menu.addMenu("Panels")
@@ -2407,6 +2454,9 @@ class MainWindow(QMainWindow):
         settings.setValue("window/geometry", self.saveGeometry())
         settings.setValue("window/maximised", self.isMaximized())
         settings.setValue("window/state", self.saveState())
+        settings.setValue("window/markups_list",
+                          [self.bottom_split.sizes()[1] if self.markups_list_open() else 0,
+                           self._markups_height])
         settings.setValue("toolbars/locked", not self.toolbars[0].isMovable())
         if self.visible_tools is None:
             settings.remove("toolbars/tools")
@@ -2429,6 +2479,14 @@ class MainWindow(QMainWindow):
             self.restoreGeometry(geometry)
         if state is not None:
             self.restoreState(state)
+        stored = settings.value("window/markups_list")
+        try:
+            shown, height = (int(v) for v in stored) if stored else (0, 220)
+        except (TypeError, ValueError):
+            shown, height = 0, 220
+        self._markups_height = max(height, 120)
+        if shown > 0:
+            self.show_markups_list(True)
         if str(settings.value("window/maximised", "false")).lower() == "true":
             self.showMaximized()
         stored = settings.value("toolbars/tools", None)
@@ -5426,6 +5484,8 @@ class MainWindow(QMainWindow):
                                lambda: self.add_leader_to(item, "cloud"))
         cloud.setToolTip("A revision cloud round the area, joined to the note "
                          "by a plain line")
+        arrow.setIcon(icon("leader_arrow"))
+        cloud.setIcon(icon("leader_cloud"))
         which = item.leader_near(item.mapFromScene(scene_pos))
         if which is None and item.leaders:
             which = len(item.leaders) - 1
