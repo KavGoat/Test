@@ -220,6 +220,10 @@ def _sharpness_step(scale: float) -> float:
     return step
 
 
+# The edge and label of a viewport: a region of the sheet at its own scale.
+VIEWPORT_INK = QColor("#7048e8")
+
+
 class PageFrame(QGraphicsObject):
     """One page of the document, and everything drawn on it."""
 
@@ -428,6 +432,7 @@ class PageFrame(QGraphicsObject):
         if not self.print_mode:
             self._paint_grid(painter, rect)
             self._paint_margins(painter)
+            self._paint_viewports(painter)
         self._paint_running_text(painter)
         if not self.print_mode:
             # Last, so nothing drawn on the page can paint over its own edge.
@@ -438,6 +443,33 @@ class PageFrame(QGraphicsObject):
             painter.setBrush(Qt.NoBrush)
             painter.drawRect(rect)
             painter.restore()
+
+    def _paint_viewports(self, painter: QPainter) -> None:
+        """Each viewport's edge and its name and scale — on screen only."""
+        viewports = getattr(self.page, "viewports", None)
+        if not viewports:
+            return
+        painter.save()
+        pen = QPen(VIEWPORT_INK)
+        pen.setWidthF(0)
+        pen.setStyle(Qt.DashLine)
+        font = painter.font()
+        font.setPointSizeF(7.0)
+        painter.setFont(font)
+        for viewport in viewports:
+            area = QRectF(viewport.x, viewport.y, viewport.width, viewport.height)
+            painter.setPen(pen)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRect(area)
+            label = f"{viewport.name}  {viewport.scale.label}"
+            tag = painter.fontMetrics().boundingRect(label).adjusted(-3, -1, 3, 1)
+            tag.moveTopLeft(area.topLeft().toPoint())
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(VIEWPORT_INK)
+            painter.drawRect(QRectF(tag))
+            painter.setPen(QColor("#ffffff"))
+            painter.drawText(QRectF(tag), Qt.AlignCenter, label)
+        painter.restore()
 
     def _paint_shadow(self, painter: QPainter, rect: QRectF) -> None:
         """A soft edge under the sheet, so it reads as paper lying on a desk."""

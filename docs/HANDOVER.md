@@ -1,6 +1,21 @@
 # MarkForge — start here
 
-## Latest review: 2026-09-27
+## Latest review: 2026-09-28
+
+The user's add list from `BLUEBEAM_COMPARISON.md` is built (A1, A2, B3, B6,
+B8, C2, C4, C5, the Markups list) with the follow-ups; evidence in
+`COMPLETED_TASKS.md`. Things worth knowing:
+- The Markups list is not a dock: it is the second widget of
+  `MainWindow.bottom_split`, a vertical `QSplitter` under the canvas.
+- Viewports are page data (`Page.viewports`, `Page.scale_at`), not
+  markups. Measurements and sized shapes read their scale through
+  `scale_on(page)` (`base.scale_where`), never `page.scale` directly.
+- Combo boxes never take the wheel: `widgets.WheelBelongsToTheScroller`
+  is installed application-wide.
+- Hatch patterns live in `items/hatches.py`; `paint_visible` draws fill,
+  then hatch, then the outline.
+
+## Previous review: 2026-09-27
 
 At the user's request every earlier entry in `tasklist.md`, `tasklist.xlsx`,
 `COMPLETED_TASKS.md` and `UNADDRESSED_TASKS.md` was deleted; the registers

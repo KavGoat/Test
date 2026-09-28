@@ -99,6 +99,29 @@ class DocumentStructureCommand(QUndoCommand):
         self.restore(self.before)
 
 
+class ViewportsCommand(QUndoCommand):
+    """A page's viewports added, changed or removed."""
+
+    def __init__(self, page, before: list[dict], after: list[dict], text: str,
+                 changed: Callable[[object], None]):
+        super().__init__(text)
+        self.page = page
+        self.before = before
+        self.after = after
+        self.changed = changed
+
+    def _apply(self, state: list[dict]) -> None:
+        from ..core.document import Viewport
+        self.page.viewports = [Viewport.from_dict(v) for v in state]
+        self.changed(self.page)
+
+    def redo(self) -> None:
+        self._apply(self.after)
+
+    def undo(self) -> None:
+        self._apply(self.before)
+
+
 class SnapshotGuard:
     """Context manager that pushes a :class:`PageEditCommand` when work changes.
 

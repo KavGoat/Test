@@ -318,7 +318,7 @@ _SHORTCUT_GROUPS = {
     "flatten": "Markup", "forget_defaults": "Markup",
     "add_page": "Page", "crop_page": "Page", "extract_pages": "Page",
     "split_pages": "Page", "duplicate_page": "Page", "delete_page": "Page",
-    "page_setup": "Page", "scale": "Page", "header_footer": "Page",
+    "page_setup": "Page", "scale": "Page", "viewports": "Page", "header_footer": "Page",
     "bookmark": "Page", "contents": "Page", "doc_props": "Page",
     "renumber_counts": "Markup", "check_spelling": "Markup",
     "shortcuts": "Help", "sample": "Help",
@@ -694,6 +694,8 @@ class MainWindow(QMainWindow):
         self._act("page_setup", "Page setup…", self.page_setup, "", "page")
         self._act("scale", "Page scale…", self.calibrate_dialog,
                   "Ctrl+Shift+K", "calibrate")
+        self._act("viewports", "Viewports…", self.viewports_dialog, "", "viewport",
+                  tip="The regions of this page drawn at their own scale")
         self._act("doc_props", "Document properties…", lambda: self.document_properties())
         self._act("header_footer", "Header/footer…", self.edit_header_footer, "",
                   tip="Page numbers, the date, a title and a logo on every page")
@@ -1404,7 +1406,8 @@ class MainWindow(QMainWindow):
                        self.act_add_page, self.act_duplicate_page, self.act_delete_page,
                        None, self.act_crop_page, self.act_extract_pages,
                        self.act_split_pages,
-                       None, self.act_page_setup, self.act_scale, self.act_header_footer,
+                       None, self.act_page_setup, self.act_scale, self.act_viewports,
+                       self.act_header_footer,
                        None, self.act_doc_props):
             page_menu.addSeparator() if action is None else page_menu.addAction(action)
 
@@ -3191,6 +3194,83 @@ class MainWindow(QMainWindow):
 
     def calibrate_dialog(self) -> None:
         self.calibrate_scale(None)
+
+    # -- viewports ---------------------------------------------------------
+    def add_viewport(self, frame, region: QRectF, scale: Optional[PageScale] = None,
+                     name: str = "") -> bool:
+        """Make *region* of the page a viewport with a scale of its own."""
+        from ..core.document import Viewport
+        if frame is None:
+            return False
+        page = frame.page
+        region = QRectF(region).normalized().intersected(frame.page_rect())
+        if region.width() < 4 or region.height() < 4:
+            self.status_hint.setText("Viewport: drag the region drawn at its own scale")
+            return False
+        name = name or f"Viewport {len(page.viewports) + 1}"
+        if scale is None and not self.interactive_prompts:
+            scale = PageScale.from_dict(page.scale.to_dict())
+        if scale is None:
+            dialog = dialogs.ScaleDialog(page.scale, None, self, name=name)
+            if dialog.exec() != dialogs.QDialog.Accepted:
+                return False
+            scale = dialog.result_scale()
+            if scale is None:
+                return False
+            name = dialog.name.text().strip() or name
+        viewport = Viewport(name, region.x(), region.y(), region.width(),
+                            region.height(), scale)
+        self._change_viewports(page, page.viewports + [viewport], "Add viewport")
+        self.status_hint.setText(
+            f"{name} at {scale.label} — measurements inside it use that scale")
+        return True
+
+    def edit_viewport(self, page, viewport) -> bool:
+        """Rename a viewport or change its scale."""
+        dialog = dialogs.ScaleDialog(viewport.scale, None, self, name=viewport.name)
+        if dialog.exec() != dialogs.QDialog.Accepted:
+            return False
+        scale = dialog.result_scale()
+        if scale is None:
+            return False
+        from ..core.document import Viewport
+        changed = [Viewport(dialog.name.text().strip() or v.name, v.x, v.y, v.width,
+                            v.height, scale) if v is viewport else v
+                   for v in page.viewports]
+        self._change_viewports(page, changed, "Change viewport")
+        return True
+
+    def delete_viewport(self, page, viewport) -> None:
+        self._change_viewports(page, [v for v in page.viewports if v is not viewport],
+                               "Delete viewport")
+
+    def _change_viewports(self, page, viewports: list, text: str) -> None:
+        from .commands import ViewportsCommand
+        before = [v.to_dict() for v in page.viewports]
+        after = [v.to_dict() for v in viewports]
+        self.undo_stack.push(ViewportsCommand(page, before, after, text,
+                                              self._viewports_changed))
+
+    def _viewports_changed(self, page) -> None:
+        """Measurements re-read against the new regions, and the page redrawn."""
+        self.refresh_page_measurements(page)
+        if page.frame is not None:
+            page.frame.update()
+        self.refresh_lists()
+        self.refresh_selection()
+        self.mark_modified()
+
+    def viewports_dialog(self) -> None:
+        """Every viewport on this page: change one's scale, or delete it."""
+        page = self.current_page()
+        if not page.viewports:
+            QMessageBox.information(
+                self, "Viewports",
+                "This page has no viewports. Use the Viewport tool to drag a "
+                "region of the sheet drawn at its own scale.")
+            return
+        dialog = dialogs.ViewportsDialog(self, page)
+        dialog.exec()
 
     def start_calibrating(self) -> None:
         """Hand over to the calibrate tool: two clicks, then the length."""
@@ -6177,6 +6257,16 @@ class MainWindow(QMainWindow):
             menu.addSeparator()
             menu.addAction(self.act_page_setup)
             menu.addAction(self.act_scale)
+            frame = self.view.frame_at(scene_pos)
+            if frame is not None:
+                spot = frame.mapFromScene(scene_pos)
+                viewport = frame.page.viewport_at(spot.x(), spot.y())
+                if viewport is not None:
+                    page = frame.page
+                    menu.addAction(f"{viewport.name} scale…",
+                                   lambda: self.edit_viewport(page, viewport))
+                    menu.addAction("Delete viewport",
+                                   lambda: self.delete_viewport(page, viewport))
             menu.addAction(self.act_select_all)
         return menu
 

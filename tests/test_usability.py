@@ -9984,3 +9984,66 @@ def test_the_hatch_library_draws_every_pattern_behind_the_outline(window):
         # The outline is on top: its middle is outline blue, not hatch red.
         edge = image.pixelColor(240, 40)
         assert edge.blue() > 150 and edge.red() < 80, name
+
+
+# ---------------------------------------------------------------------------
+# viewports: regions of a sheet at a scale of their own
+# ---------------------------------------------------------------------------
+
+def _length_at(frame, x, y, span):
+    from markforge.items.measure import LENGTH
+    item = MeasureItem(LENGTH)
+    item.points = [QPointF(0, 0), QPointF(span, 0)]
+    frame.add_markup(item, QPointF(x, y))
+    item.refresh(page=frame.page)
+    return item
+
+
+def test_a_measurement_inside_a_viewport_uses_its_scale(window):
+    from markforge.core.document import MM_TO_PT, PageScale
+    page = scaled_page(window, 100)
+    frame = page.frame
+    assert window.add_viewport(frame, QRectF(50, 50, 200, 200),
+                               PageScale.from_ratio(20), "Detail A")
+    inside = _length_at(frame, 80, 100, 10 * MM_TO_PT)
+    outside = _length_at(frame, 300, 400, 10 * MM_TO_PT)
+    assert inside.value.to("mm").magnitude == pytest.approx(200, rel=1e-3)
+    assert outside.value.to("mm").magnitude == pytest.approx(1000, rel=1e-3)
+    assert inside.page_scale().label == "1:20"
+
+    window.undo_stack.undo()
+    assert page.viewports == []
+    assert inside.value.to("mm").magnitude == pytest.approx(1000, rel=1e-3)
+    window.undo_stack.redo()
+    assert inside.value.to("mm").magnitude == pytest.approx(200, rel=1e-3)
+
+
+def test_viewports_are_saved_changed_and_deleted(window):
+    from markforge.core.document import Page, PageScale
+    page = scaled_page(window, 100)
+    window.add_viewport(page.frame, QRectF(10, 20, 100, 60),
+                        PageScale.from_ratio(5), "Section")
+    again = Page.from_dict(page.to_dict())
+    assert [(v.name, v.x, v.y, v.width, v.height, v.scale.label)
+            for v in again.viewports] == [("Section", 10, 20, 100, 60, "1:5")]
+    assert again.scale_at(50, 50).label == "1:5"
+    assert again.scale_at(500, 500).label == "1:100"
+    window.delete_viewport(page, page.viewports[0])
+    assert page.viewports == []
+    window.undo_stack.undo()
+    assert page.viewports[0].name == "Section"
+
+
+def test_the_viewport_tool_asks_for_a_scale(window, monkeypatch):
+    from markforge.ui import dialogs
+    page = scaled_page(window, 100)
+    window.interactive_prompts = True
+    monkeypatch.setattr(dialogs.ScaleDialog, "exec", lambda self: (
+        self.ratio.setCurrentText("1:10"), self.name.setText("Stair"),
+        dialogs.QDialog.Accepted)[-1])
+    window.select_tool("viewport")
+    start = window.view.mapFromScene(page.frame.mapToScene(QPointF(100, 100)))
+    end = window.view.mapFromScene(page.frame.mapToScene(QPointF(250, 220)))
+    drag(window.view, start.x(), start.y(), end.x(), end.y())
+    assert [(v.name, v.scale.label) for v in page.viewports] == [("Stair", "1:10")]
+    assert not any(getattr(i, "kind", "") == "marquee" for i in page.frame.markups())

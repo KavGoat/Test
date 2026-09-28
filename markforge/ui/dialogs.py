@@ -148,13 +148,25 @@ class ScaleDialog(QDialog):
 
     PICK = QDialog.Accepted + 10        # "let me point at two things instead"
 
-    def __init__(self, scale: PageScale, measured_pt: Optional[float] = None, parent=None):
+    def __init__(self, scale: PageScale, measured_pt: Optional[float] = None, parent=None,
+                 name: Optional[str] = None):
         super().__init__(parent)
-        self.setWindowTitle("Page scale")
+        self.setWindowTitle("Page scale" if name is None else "Viewport")
         self.measured_pt = measured_pt
         layout = QVBoxLayout(self)
+        # A viewport is named and given a ratio; it has no calibration of its
+        # own to pick.
+        self.name = QLineEdit(name or "")
+        if name is not None:
+            named = QFormLayout()
+            self.name.setToolTip("What this region of the sheet is, e.g. Detail A")
+            named.addRow("Name", self.name)
+            layout.addLayout(named)
 
-        if measured_pt:
+        if name is not None:
+            self.known = QLineEdit()
+            self.known.hide()
+        elif measured_pt:
             box = QGroupBox("From the distance you drew")
             box.setToolTip("Clear this box to use the ratio below instead")
             form = QFormLayout(box)
@@ -181,7 +193,7 @@ class ScaleDialog(QDialog):
         self.ratio = QComboBox()
         self.ratio.setEditable(True)
         self.ratio.addItems(self.RATIOS)
-        self.ratio.setCurrentText(scale.label if scale.label in self.RATIOS else "1:100")
+        self.ratio.setCurrentText(scale.label if scale.label.startswith("1:") else "1:100")
         ratio_form.addRow("Ratio", self.ratio)
         layout.addWidget(ratio_box)
 
@@ -1439,3 +1451,56 @@ class LinkDialog(QDialog):
         self.item.target_y = self._y
         self.item.address = self.address.text().strip()
         self.item.update()
+
+
+class ViewportsDialog(QDialog):
+    """The viewports on one page: each one's name and scale, to change or delete."""
+
+    def __init__(self, window, page):
+        super().__init__(window)
+        self.setWindowTitle("Viewports")
+        self.window_ = window
+        self.page = page
+        layout = QVBoxLayout(self)
+        self.list = QListWidget()
+        self.list.itemDoubleClicked.connect(lambda _item: self.edit())
+        layout.addWidget(self.list)
+        row = QHBoxLayout()
+        edit = QPushButton("Edit…")
+        edit.setToolTip("Rename the viewport or change its scale")
+        edit.clicked.connect(self.edit)
+        delete = QPushButton("Delete")
+        delete.clicked.connect(self.delete)
+        close = QPushButton("Close")
+        close.clicked.connect(self.accept)
+        row.addWidget(edit)
+        row.addWidget(delete)
+        row.addStretch(1)
+        row.addWidget(close)
+        layout.addLayout(row)
+        self.fill()
+
+    def fill(self) -> None:
+        row = max(self.list.currentRow(), 0)
+        self.list.clear()
+        for viewport in self.page.viewports:
+            self.list.addItem(f"{viewport.name}  —  {viewport.scale.label}")
+        if self.list.count():
+            self.list.setCurrentRow(min(row, self.list.count() - 1))
+
+    def _chosen(self):
+        row = self.list.currentRow()
+        if 0 <= row < len(self.page.viewports):
+            return self.page.viewports[row]
+        return None
+
+    def edit(self) -> None:
+        viewport = self._chosen()
+        if viewport is not None and self.window_.edit_viewport(self.page, viewport):
+            self.fill()
+
+    def delete(self) -> None:
+        viewport = self._chosen()
+        if viewport is not None:
+            self.window_.delete_viewport(self.page, viewport)
+            self.fill()

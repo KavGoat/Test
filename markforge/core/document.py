@@ -179,6 +179,39 @@ class PageScale:
 
 
 @dataclass
+class Viewport:
+    """A region of a page drawn at its own scale.
+
+    A sheet often holds a plan at 1:100 with details beside it at 1:20;
+    anything measured inside a viewport is read at the viewport's scale and
+    everything else at the page's. The region is in page points.
+    """
+
+    name: str = "Viewport"
+    x: float = 0.0
+    y: float = 0.0
+    width: float = 0.0
+    height: float = 0.0
+    scale: PageScale = field(default_factory=PageScale)
+
+    def contains(self, x: float, y: float) -> bool:
+        return (self.x <= x <= self.x + self.width
+                and self.y <= y <= self.y + self.height)
+
+    def to_dict(self) -> dict:
+        return {"name": self.name, "x": self.x, "y": self.y, "width": self.width,
+                "height": self.height, "scale": self.scale.to_dict()}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Viewport":
+        return cls(name=str(data.get("name", "Viewport")),
+                   x=float(data.get("x", 0.0)), y=float(data.get("y", 0.0)),
+                   width=float(data.get("width", 0.0)),
+                   height=float(data.get("height", 0.0)),
+                   scale=PageScale.from_dict(data.get("scale", {})))
+
+
+@dataclass
 class Bookmark:
     """A named place in the document.
 
@@ -208,6 +241,8 @@ class Page:
         self.uid = uuid.uuid4().hex
         self.setup = setup or PageSetup.from_name("A4")
         self.scale = PageScale()
+        # Regions drawn at a scale of their own; see Viewport.
+        self.viewports: list[Viewport] = []
         self.label = label
         self.background_key: Optional[str] = None   # asset name of an imported PDF page
         # The original PDF is retained separately from the screen-resolution
@@ -253,6 +288,18 @@ class Page:
     def height_pt(self) -> float:
         return self.setup.height_pt
 
+    def viewport_at(self, x: float, y: float) -> Optional[Viewport]:
+        """The viewport a point on the page falls in; the last drawn wins."""
+        for viewport in reversed(self.viewports):
+            if viewport.contains(x, y):
+                return viewport
+        return None
+
+    def scale_at(self, x: float, y: float) -> PageScale:
+        """The scale that applies at a point: its viewport's, else the page's."""
+        viewport = self.viewport_at(x, y)
+        return viewport.scale if viewport is not None else self.scale
+
     def shows_a_grid(self, settings) -> bool:
         """Whether to rule this page. Its own answer beats the document's."""
         if self.grid is None:
@@ -281,6 +328,7 @@ class Page:
             "label": self.label,
             "setup": self.setup.to_dict(),
             "scale": self.scale.to_dict(),
+            "viewports": [viewport.to_dict() for viewport in self.viewports],
             "background_key": self.background_key,
             "pdf_key": self.pdf_key,
             "pdf_page_index": self.pdf_page_index,
@@ -300,6 +348,7 @@ class Page:
         page = cls(PageSetup.from_dict(data.get("setup", {})), data.get("label", ""))
         page.uid = data.get("uid", page.uid)
         page.scale = PageScale.from_dict(data.get("scale", {}))
+        page.viewports = [Viewport.from_dict(v) for v in (data.get("viewports") or [])]
         page.background_key = data.get("background_key")
         page.pdf_key = data.get("pdf_key")
         source_index = data.get("pdf_page_index")

@@ -409,9 +409,15 @@ class MeasureItem(MarkupItem):
             scene = self.scene()
             page = getattr(scene, "page", None) if scene is not None else None
         if page is not None:
-            return page.scale
+            return self.scale_on(page)
         from ..core.document import PageScale
         return PageScale()
+
+    def scale_on(self, page):
+        """The page's scale here — a viewport's, when the first point is in one."""
+        from .base import scale_where
+        anchor = self.points[0] if self.points else QPointF()
+        return scale_where(self, page, anchor)
 
     def raw_measure(self) -> tuple[str, float]:
         """Return (kind of quantity, value in page points or degrees)."""
@@ -448,7 +454,7 @@ class MeasureItem(MarkupItem):
         return "none", 0.0
 
     def refresh(self, workspace=None, page=None) -> None:
-        scale = page.scale if page is not None else self.page_scale()
+        scale = self.scale_on(page) if page is not None else self.page_scale()
         kind, raw = self.raw_measure()
         digits = max(scale.precision, 0)
         try:

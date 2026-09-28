@@ -167,6 +167,10 @@ TOOLS: list[Tool] = [
          factory=_rect("ellipse")),
     Tool("count", "Count", "count", CLICK, "Measure", "Shift+Alt+C",
          "Drop counting markers", factory=lambda: CountItem()),
+    Tool("viewport", "Viewport", "viewport", SNAPSHOT, "Measure", "",
+         "Drag a region of the sheet drawn at its own scale — a detail at "
+         "1:20 beside a plan at 1:100; measurements inside use it",
+         factory=_rect("marquee")),
     Tool("calibrate", "Calibrate", "calibrate", DRAG, "Measure", "",
          "Click each end of something you know the length of, then type that "
          "length — the page scale follows", max_points=2,

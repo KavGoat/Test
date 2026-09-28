@@ -145,12 +145,20 @@ class RectItem(MarkupItem):
 
     # -- real-world size ---------------------------------------------------
     def page_scale(self):
-        scene = self.scene()
-        page = getattr(scene, "page", None) if scene is not None else None
+        frame = self.parentItem()
+        page = getattr(frame, "page", None) if frame is not None else None
+        if page is None:
+            scene = self.scene()
+            page = getattr(scene, "page", None) if scene is not None else None
         if page is not None:
-            return page.scale
+            return self.scale_on(page)
         from ..core.document import PageScale
         return PageScale()
+
+    def scale_on(self, page):
+        """The page's scale at the middle of this shape — a viewport's there."""
+        from .base import scale_where
+        return scale_where(self, page, self._rect.normalized().center())
 
     def refresh(self, workspace=None, page=None) -> None:
         """Work out the size to write on the rectangle.
@@ -159,7 +167,7 @@ class RectItem(MarkupItem):
         paper size in millimetres, because a rectangle that says nothing at all
         is the one complaint everybody has about drawing one.
         """
-        scale = page.scale if page is not None else self.page_scale()
+        scale = self.scale_on(page) if page is not None else self.page_scale()
         rect = self._rect.normalized()
         # A rectangle and an ellipse are both drawn to a size somebody cares
         # about; a cloud or a highlight is drawn around something else.
@@ -188,7 +196,7 @@ class RectItem(MarkupItem):
 
     def set_real_size(self, width_text: str, height_text: str, page=None) -> bool:
         """Resize to an exact real-world width and height."""
-        scale = page.scale if page is not None else self.page_scale()
+        scale = self.scale_on(page) if page is not None else self.page_scale()
         width = parse_unit(width_text)
         height = parse_unit(height_text)
         if width is None or height is None:

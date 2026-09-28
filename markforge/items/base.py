@@ -266,6 +266,27 @@ class Style:
 ITEM_REGISTRY: dict[str, type] = {}
 
 
+def scale_where(item, page, local: QPointF):
+    """The scale that applies to *item* on *page*, read at *local*.
+
+    A page's viewports each carry a scale of their own; a markup measured
+    inside one is read at that scale, anything else at the page's.
+    """
+    if not getattr(page, "viewports", None):
+        return page.scale
+    where = local
+    try:
+        frame = getattr(page, "frame", None)
+        if (frame is not None and item.scene() is not None
+                and frame.scene() is item.scene()):
+            where = frame.mapFromScene(item.mapToScene(local))
+        else:
+            where = item.mapToParent(local)
+    except RuntimeError:
+        pass
+    return page.scale_at(where.x(), where.y())
+
+
 def register_item(cls):
     """Class decorator that makes an item type loadable from a saved file."""
     ITEM_REGISTRY[cls.TYPE] = cls

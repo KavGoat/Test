@@ -410,6 +410,14 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
             painter.drawLine(QPointF(x, 5), QPointF(x, 15))
         painter.drawLine(QPointF(17, 4), QPointF(19.5, 16))
         _glyph(painter, "3", MARKER, 7, True, QRectF(12, 12, 11, 11))
+    elif name == "viewport":
+        # A dashed region with a scale bar in it: part of a sheet at its own scale.
+        _pen(painter, INK, 1.3, Qt.DashLine)
+        painter.drawRect(QRectF(3.5, 4.5, 17, 15))
+        _pen(painter, WARM, 1.5)
+        painter.drawLine(QPointF(7, 15), QPointF(17, 15))
+        for x in (7, 12, 17):
+            painter.drawLine(QPointF(x, 15), QPointF(x, 11.5))
     elif name == "calibrate":
         _pen(painter, WARM, 1.5)
         painter.drawLine(QPointF(4, 16), QPointF(20, 16))

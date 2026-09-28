@@ -87,3 +87,57 @@ arrows step by 10 %). Drawing no longer spreads lines out past 4 000 lines:
 beyond that density the hatch is an even tint of its colour at the coverage
 the lines would give, so every scale typed is honoured.
 `test_hatch_scale_has_no_practical_limit`. Full suite: 959 passed.
+
+## 2026-09-28 — the add list from the Bluebeam comparison, and follow-ups
+
+- **A1 exact fractional font sizes:** text keeps its point size in the
+  document and is laid out with `FontPixelSize` plus a percentage letter
+  spacing that makes up the fraction, so 10.87 pt stays 10.87 pt
+  (`text.exact_sizes`). `test_btx.py` reference-overlap tests.
+- **A2 stamp artwork as linework:** tool-set stamps come across as SVG
+  linework (`btx._stamp_svg`, `base.paint_stamp_drawing`), sharp at any zoom.
+- **Markups list (in place of C7):** columns Page, Type, Subject, Colour,
+  Fill, Line, Width, Opacity, Font, Size, Value, Author, Date, Comment;
+  group by page/type/subject/colour/author; filter by right-clicking a
+  column header; multi-select to recolour, restyle, lock, hide or delete as
+  one undo step. It lives only under the drawing on a drag bar: drag up to
+  open, down to close, or View > Markups list (Alt+L); its height is
+  remembered. `test_markups_list_filters_sorts_and_changes_several_at_once`,
+  `test_the_markups_list_lives_under_the_drawing`.
+- **C2 search and replace:** Search panel (Ctrl+F, rail icon) finds words in
+  the PDF's own text and in markup text on every page, lists each hit, and
+  replaces in markups (one undo step).
+  `test_search_finds_drawing_and_markup_text_and_replaces_in_markups`,
+  `test_ctrl_f_opens_the_search_panel`.
+- **C4 crop / C5 extract and split:** Crop tool and Page > Crop page set the
+  PDF's CropBox (Undo restores); Page > Extract pages and Split pages save
+  pages with their markups. `test_crop_keeps_the_dragged_part_and_undo_restores_it`,
+  `test_extract_and_split_save_pages_with_their_markups`.
+- **B6 link tool:** a region that goes to a page, a view, a file or a web
+  address; a real PDF link on export.
+  `test_a_link_goes_to_a_page_and_is_a_real_link_in_the_pdf`.
+- **B8 hatch and line-style library:** 33 named hatches (brick, earth,
+  concrete, insulation, …) drawn as linework, and more line styles. Hatch is
+  drawn behind the outline. Line-style and hatch pickers are big dropdowns,
+  each pattern shown large with its name.
+  `test_the_hatch_library_draws_every_pattern_behind_the_outline`.
+- **B3 viewports:** the Viewport tool (Measure) drags a region of the sheet
+  and gives it a name and scale; measurements and rectangle sizes inside it
+  use that scale, the rest of the page its own. Shown on screen as a dashed
+  purple frame with its name and scale (not printed). Page > Viewports…
+  lists them to rename, rescale or delete; right-click inside one does the
+  same. Saved with the document; every change is undoable.
+  `test_a_measurement_inside_a_viewport_uses_its_scale`,
+  `test_viewports_are_saved_changed_and_deleted`,
+  `test_the_viewport_tool_asks_for_a_scale`.
+- **Rail reordering:** panel icons can be dragged up and down their rail as
+  well as across; the order is remembered.
+  `test_rail_icons_can_be_reordered_top_to_bottom`.
+- **No wheel on dropdowns:** a combo box never takes the scroll wheel
+  anywhere in the application; the wheel scrolls whatever it sits in.
+  `test_the_wheel_over_a_dropdown_scrolls_the_panel`.
+- **Icons:** the cloud callout icon shows a text box, leader and cloud; the
+  leader menu has separate arrow-leader and cloud-leader icons.
+
+Full suite: 971 passed, then the one failing viewport test fixed (it now turns on the
+prompts it checks) and re-run with the other viewport tests: 3 passed.

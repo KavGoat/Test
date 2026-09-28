@@ -2910,6 +2910,8 @@ class PageView(QGraphicsView):
                 self.window.whiteout_region(frame, region)
             elif tool.key == "crop":
                 self.window.crop_page_region(frame, region)
+            elif tool.key == "viewport":
+                self.window.add_viewport(frame, region)
             else:
                 self.window.take_snapshot(frame, region)
             return
@@ -3128,8 +3130,8 @@ class PageView(QGraphicsView):
         grid.setContentsMargins(5, 2, 5, 4)
         grid.setHorizontalSpacing(3)
         grid.setVerticalSpacing(0)
-        unit = self.page().scale.display_unit if self.page().scale.is_calibrated() \
-            else "mm"
+        scale = self._draft_scale()
+        unit = scale.display_unit if scale.is_calibrated() else "mm"
         ellipse = draft.kind == "ellipse"
         fields = []
         for column, (caption, suffix, tip) in enumerate((
@@ -3230,7 +3232,8 @@ class PageView(QGraphicsView):
         if page is None:
             return
         draft.refresh(page=page)
-        digits = max(page.scale.precision, 0) if page.scale.is_calibrated() else 2
+        scale = self._draft_scale()
+        digits = max(scale.precision, 0) if scale.is_calibrated() else 2
         for box, value, typed in ((self._size_width, draft.width_value, self._typed_w),
                                   (self._size_height, draft.height_value, self._typed_h)):
             if box is None or value is None or typed is not None:
@@ -3248,6 +3251,15 @@ class PageView(QGraphicsView):
             return f"{stripped} {unit}"
         return stripped
 
+    def _draft_scale(self):
+        """The scale the shape being drawn is measured at — its viewport's."""
+        page = self.page()
+        draft = self._draft
+        scale_on = getattr(draft, "scale_on", None)
+        if page is not None and callable(scale_on):
+            return scale_on(page)
+        return page.scale
+
     def _points_for(self, text: str) -> Optional[float]:
         """A typed length as page points, in the page's scale; None if unreadable."""
         from ..core.units import parse_unit
@@ -3256,9 +3268,10 @@ class PageView(QGraphicsView):
         quantity = parse_unit(self._size_with_default_unit(text, self._size_unit))
         if quantity is None or page is None:
             return None
+        scale = self._draft_scale()
         try:
-            if page.scale.is_calibrated():
-                points = float((quantity / page.scale.length(1.0))
+            if scale.is_calibrated():
+                points = float((quantity / scale.length(1.0))
                                .to("dimensionless").magnitude)
             else:
                 points = float(quantity.to("mm").magnitude) * MM_TO_PT
