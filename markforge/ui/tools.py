@@ -96,6 +96,9 @@ TOOLS: list[Tool] = [
          "rather than covering it", factory=_rect("highlight")),
     Tool("redact", "Redact", "redact", DRAG, "Draw", "",
          "Opaque black-out box", factory=_rect("redact")),
+    Tool("crop", "Crop", "snapshot", SNAPSHOT, "Navigate", "",
+         "Drag the part of the page to keep; the rest is cropped away, and "
+         "Undo brings it back", factory=_rect("marquee")),
     Tool("whiteout", "Whiteout", "eraser", SNAPSHOT, "Draw", "",
          "Drag a region to clear flattened PDF artwork; Undo restores it",
          factory=_rect("marquee")),

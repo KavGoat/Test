@@ -2904,6 +2904,8 @@ class PageView(QGraphicsView):
             self.finish_tool()
             if tool.key == "whiteout":
                 self.window.whiteout_region(frame, region)
+            elif tool.key == "crop":
+                self.window.crop_page_region(frame, region)
             else:
                 self.window.take_snapshot(frame, region)
             return

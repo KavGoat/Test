@@ -316,7 +316,8 @@ _SHORTCUT_GROUPS = {
     "group": "Markup", "ungroup": "Markup", "autosize": "Markup",
     "format_painter": "Markup", "hide": "Markup", "show_hidden": "Markup",
     "flatten": "Markup", "forget_defaults": "Markup",
-    "add_page": "Page", "duplicate_page": "Page", "delete_page": "Page",
+    "add_page": "Page", "crop_page": "Page", "extract_pages": "Page",
+    "split_pages": "Page", "duplicate_page": "Page", "delete_page": "Page",
     "page_setup": "Page", "scale": "Page", "header_footer": "Page",
     "bookmark": "Page", "contents": "Page", "doc_props": "Page",
     "renumber_counts": "Markup", "check_spelling": "Markup",
@@ -527,6 +528,12 @@ class MainWindow(QMainWindow):
                   tip="Open another document beside this one, in its own tab")
         self._act("new_window", "New window", self.open_new_window, "Ctrl+Shift+N",
                   tip="Open a second window with a document of its own")
+        self._act("crop_page", "Crop page", lambda: self.select_tool("crop"),
+                  tip="Drag the part of the page to keep; Undo restores the rest")
+        self._act("extract_pages", "Extract pages…", lambda: self.extract_pages(),
+                  tip="Save chosen pages, with their markups, as a new PDF")
+        self._act("split_pages", "Split pages…", lambda: self.split_into_files(),
+                  tip="Save the document as several PDFs of so many pages each")
         self._act("split_view", "Split view", self.toggle_split_view,
                   checkable=True,
                   tip="View this document beside another editable pane; "
@@ -1345,6 +1352,8 @@ class MainWindow(QMainWindow):
         page_menu.addSeparator()
         for action in (self.act_bookmark, None,
                        self.act_add_page, self.act_duplicate_page, self.act_delete_page,
+                       None, self.act_crop_page, self.act_extract_pages,
+                       self.act_split_pages,
                        None, self.act_page_setup, self.act_scale, self.act_header_footer,
                        None, self.act_doc_props):
             page_menu.addSeparator() if action is None else page_menu.addAction(action)
@@ -3817,6 +3826,148 @@ class MainWindow(QMainWindow):
         self.refresh_selection()
 
     SNAPSHOT_DPI = 300.0
+
+    def crop_page_region(self, frame, region: QRectF, every_page: bool = False) -> bool:
+        """Crop a page to *region*: the rest of the sheet is cut away.
+
+        The PDF's own CropBox is set, so the page is cropped for every viewer
+        and the original is still inside the file; markups keep their place on
+        the drawing. With *every_page*, the same box is cropped from every
+        page of the same size. One undo step.
+        """
+        if frame is None:
+            return False
+        region = QRectF(region).normalized().intersected(frame.page_rect())
+        if region.width() < 4 or region.height() < 4:
+            self.status_hint.setText("Crop: drag the part of the page to keep")
+            return False
+        target = frame.page
+        pages = [page for page in self.document.pages if page.frame is not None
+                 and (page is target or (every_page
+                      and abs(page.width_pt - target.width_pt) < 0.5
+                      and abs(page.height_pt - target.height_pt) < 0.5))]
+        changes = []
+        for page in pages:
+            source = None
+            if page.pdf_key and page.pdf_page_index is not None:
+                source = self._cropped_pdf(page, region)
+                if source is None:
+                    self.status_hint.setText("Crop failed: the page could not be read")
+                    return False
+            background = None
+            if page.background_key and not page.pdf_key:
+                background = self._crop_background(page, region)
+            changes.append((page, source, background))
+
+        def apply():
+            from ..core.document import PT_TO_MM
+            for page, source, background in changes:
+                frame_now = page.frame
+                if source is not None:
+                    page.pdf_key = self.document.add_asset(source, "pdf")
+                if background is not None:
+                    page.background_key = background[0]
+                if frame_now is not None:
+                    frame_now._background = None
+                    for item in list(frame_now.markups()):
+                        if item.from_drawing:
+                            frame_now.remove_markup(item)
+                        else:
+                            item.setPos(item.pos() - region.topLeft())
+                setup = page.setup
+                setup.size_name = "Custom"
+                setup.orientation = "portrait"
+                setup.width_mm = region.width() * PT_TO_MM
+                setup.height_mm = region.height() * PT_TO_MM
+                setup.margin_left = setup.margin_top = 0.0
+                setup.margin_right = setup.margin_bottom = 0.0
+        self._structural_change("Crop page" if len(changes) == 1 else "Crop pages",
+                                apply, preserve_view=True)
+        self.status_hint.setText(f"Cropped {len(changes)} page(s) — Undo restores them")
+        return True
+
+    def _cropped_pdf(self, page, region: QRectF):
+        """The page's source PDF with its CropBox set to *region*."""
+        import pymupdf
+        data = self.document.asset(page.pdf_key)
+        if not data:
+            return None
+        try:
+            with pymupdf.open(stream=data, filetype="pdf") as source:
+                pdf_page = source[int(page.pdf_page_index)]
+                sx = pdf_page.rect.width / max(page.width_pt, 1e-6)
+                sy = pdf_page.rect.height / max(page.height_pt, 1e-6)
+                shown = pymupdf.Rect(region.left() * sx, region.top() * sy,
+                                     region.right() * sx, region.bottom() * sy)
+                # Display coordinates back to the page's unrotated space, and
+                # from the old crop's corner to the media box's.
+                flat = shown * pdf_page.derotation_matrix
+                flat.normalize()
+                corner = pdf_page.cropbox.tl
+                pdf_page.set_cropbox(flat + (corner.x, corner.y, corner.x, corner.y))
+                return source.tobytes(garbage=3, deflate=True)
+        except Exception:                                   # noqa: BLE001
+            return None
+
+    def extract_pages(self, indices=None, path: str = "") -> str:
+        """Save the chosen pages, with their markups, as a new PDF."""
+        from PySide6.QtWidgets import QFileDialog, QInputDialog
+        total = len(self.document.pages)
+        if indices is None:
+            text, accepted = QInputDialog.getText(
+                self, "Extract pages", "Pages (e.g. 1-3, 7)",
+                text=str(self.current_index + 1))
+            if not accepted:
+                return ""
+            indices = pdfio.parse_page_range(text, total)
+        indices = [i for i in indices if 0 <= i < total]
+        if not indices:
+            return ""
+        if not path:
+            base = os.path.splitext(self.document.path or "document.pdf")[0]
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Extract pages", f"{base} extract.pdf", "PDF files (*.pdf)")
+            if not path:
+                return ""
+        self._save_pages_as(indices, path)
+        self.status_hint.setText(f"Saved {len(indices)} page(s) to {os.path.basename(path)}")
+        return path
+
+    def split_into_files(self, every: int = 0, folder: str = "") -> list[str]:
+        """Split the document into files of *every* pages each."""
+        from PySide6.QtWidgets import QFileDialog, QInputDialog
+        total = len(self.document.pages)
+        if every <= 0:
+            every, accepted = QInputDialog.getInt(
+                self, "Split document", "Pages in each file", 1, 1, max(total, 1))
+            if not accepted:
+                return []
+        if not folder:
+            folder = QFileDialog.getExistingDirectory(self, "Split document into")
+            if not folder:
+                return []
+        stem = os.path.splitext(os.path.basename(self.document.path or "document.pdf"))[0]
+        written = []
+        for number, start in enumerate(range(0, total, every), start=1):
+            chunk = list(range(start, min(start + every, total)))
+            path = os.path.join(folder, f"{stem} part {number}.pdf")
+            self._save_pages_as(chunk, path)
+            written.append(path)
+        self.status_hint.setText(f"Split into {len(written)} file(s)")
+        return written
+
+    def _save_pages_as(self, indices, path: str) -> None:
+        """Write only *indices* of this document to *path*, leaving it as it was."""
+        self.view.end_item_edit()
+        document = self.document
+        pages, kept_path, modified = document.pages, document.path, document.modified
+        document.pages = [pages[i] for i in indices]
+        try:
+            project_io.save_document(document, path)
+        finally:
+            document.pages = pages
+            document.path = kept_path
+            document.modified = modified
 
     def whiteout_region(self, frame, region):
         """Cut a region out of source artwork without covering live markups."""

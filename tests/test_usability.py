@@ -9852,3 +9852,70 @@ def test_ctrl_f_opens_the_search_panel(window):
     assert window.act_find_text.shortcut().toString() == "Ctrl+F"
     window.act_find_text.trigger()
     assert not window.dock_search.isHidden()
+
+
+def _a_two_page_drawing(window, tmp_path):
+    import pymupdf
+    from markforge.io import pdfio
+
+    source = pymupdf.open()
+    for number in range(3):
+        page = source.new_page(width=400, height=300)
+        page.insert_text((50, 60), f"SHEET {number + 1}", fontsize=12)
+        page.draw_line((300, 200), (380, 280), width=2)
+    path = tmp_path / "set.pdf"
+    source.save(path)
+    source.close()
+    window.document.pages = []
+    pdfio.import_pages(window.document, str(path), [0, 1, 2], at=0)
+    window.rebuild_scenes()
+    window.go_to_page(0)
+    return window.document.pages
+
+
+def test_crop_keeps_the_dragged_part_and_undo_restores_it(window, tmp_path):
+    import pymupdf
+
+    pages = _a_two_page_drawing(window, tmp_path)
+    frame = pages[0].frame
+    mark = RectItem("rect")
+    mark.set_local_rect(QRectF(0, 0, 20, 20))
+    frame.add_markup(mark, QPointF(320, 220))
+    width, height = pages[0].width_pt, pages[0].height_pt
+    assert window.crop_page_region(frame, QRectF(280, 180, 110, 110))
+    page = window.document.pages[0]
+    assert page.width_pt == pytest.approx(110, abs=0.2)
+    assert page.height_pt == pytest.approx(110, abs=0.2)
+    moved = [i for i in page.frame.markups() if isinstance(i, RectItem)][0]
+    assert moved.pos() == QPointF(40, 40), "the markup stays on the drawing"
+    with pymupdf.open(stream=window.document.asset(page.pdf_key), filetype="pdf") as pdf:
+        assert pdf[0].rect.width == pytest.approx(110 * 400 / width, abs=0.5)
+        assert "SHEET" not in pdf[0].get_text()
+    window.undo_stack.undo()
+    assert window.document.pages[0].width_pt == pytest.approx(width)
+    assert window.document.pages[0].height_pt == pytest.approx(height)
+
+
+def test_extract_and_split_save_pages_with_their_markups(window, tmp_path):
+    import pymupdf
+
+    pages = _a_two_page_drawing(window, tmp_path)
+    mark = RectItem("rect")
+    mark.set_local_rect(QRectF(0, 0, 30, 30))
+    pages[1].frame.add_markup(mark, QPointF(100, 100))
+    window.document.path = str(tmp_path / "set.pdf")
+    before = window.document.modified
+    out = window.extract_pages([1], str(tmp_path / "just two.pdf"))
+    with pymupdf.open(out) as pdf:
+        assert pdf.page_count == 1
+        assert "SHEET 2" in pdf[0].get_text()
+        assert list(pdf[0].annots()), "its markups go with it"
+    assert len(window.document.pages) == 3
+    assert window.document.path == str(tmp_path / "set.pdf")
+    assert window.document.modified == before
+    parts = window.split_into_files(2, str(tmp_path))
+    counts = []
+    for part in parts:
+        with pymupdf.open(part) as pdf:
+            counts.append(pdf.page_count)
+    assert counts == [2, 1]
