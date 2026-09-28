@@ -3827,6 +3827,47 @@ class MainWindow(QMainWindow):
 
     SNAPSHOT_DPI = 300.0
 
+    def edit_link(self, item) -> bool:
+        """Ask where a link goes. False when the question was cancelled."""
+        if not self.interactive_prompts:
+            return True
+        view_y = self.view.mapToScene(self.view.viewport().rect().topLeft())
+        frame = self.current_page().frame
+        top = frame.mapFromScene(view_y).y() if frame is not None else 0.0
+        dialog = dialogs.LinkDialog(item, len(self.document.pages),
+                                    (self.current_index, max(top, 0.0)), self)
+        if dialog.exec() != dialogs.QDialog.Accepted:
+            return False
+        self.view.begin_snapshot(self.view.involved_frames(item))
+        dialog.apply()
+        self.view.commit_snapshot("Edit link")
+        self.refresh_lists()
+        return True
+
+    def follow_link(self, item) -> None:
+        """Go where a link goes: a page, a view, a file or a web address."""
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        from ..items.link import FILE, PAGE, VIEW, WEB
+        if item.kind in (PAGE, VIEW):
+            if not 0 <= item.target_page < len(self.document.pages):
+                self.status_hint.setText("That link points at a page that is not here")
+                return
+            self.go_to_page(item.target_page)
+            if item.kind == VIEW:
+                frame = self.document.pages[item.target_page].frame
+                if frame is not None:
+                    point = frame.mapToScene(QPointF(frame.page.width_pt / 2,
+                                                     item.target_y))
+                    self.view.centerOn(point)
+            return
+        if not item.address:
+            self.status_hint.setText("This link has nowhere to go yet")
+            return
+        url = QUrl.fromUserInput(item.address) if item.kind == WEB \
+            else QUrl.fromLocalFile(item.address)
+        QDesktopServices.openUrl(url)
+
     def crop_page_region(self, frame, region: QRectF, every_page: bool = False) -> bool:
         """Crop a page to *region*: the rest of the sheet is cut away.
 
@@ -5992,6 +6033,9 @@ class MainWindow(QMainWindow):
                            menu: Optional[QMenu] = None) -> QMenu:
         menu = menu or QMenu(self)
         if item is not None:
+            if getattr(item, "TYPE", "") == "link":
+                menu.addAction("Follow link", lambda: self.follow_link(item))
+                menu.addAction("Edit link…", lambda: self.edit_link(item))
             if isinstance(item, _TextBase):
                 menu.addAction("Edit…", lambda: self.view.begin_item_edit(item))
             if isinstance(item, (ImageItem, SnapshotItem)):

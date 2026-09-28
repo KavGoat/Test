@@ -2503,6 +2503,10 @@ class PageView(QGraphicsView):
         if item is None:
             super().mouseDoubleClickEvent(event)
             return
+        if getattr(item, "TYPE", "") == "link":
+            self.window.follow_link(item)
+            event.accept()
+            return
         if isinstance(item, ContentsItem):
             row = item.row_at(item.mapFromScene(scene_pos))
             if row is not None:
@@ -2927,6 +2931,8 @@ class PageView(QGraphicsView):
         note_scale = False
         # A rectangle or ellipse is sized in the bar beside the corner while
         # it is drawn; nothing more is asked once it is down.
+        if getattr(draft, "TYPE", "") == "link":
+            self.window.edit_link(draft)
         if isinstance(draft, MeasureItem):
             if draft.kind != DIMENSION:
                 note_scale = True

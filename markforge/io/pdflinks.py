@@ -12,6 +12,7 @@ only if everything went in, and the caller carries on either way.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Optional
 
 import pymupdf
 
@@ -46,7 +47,10 @@ class Link:
 
     page: int
     rect: tuple[float, float, float, float]
-    where: Destination
+    where: Optional[Destination] = None
+    # A web address or a file instead of a place in this document.
+    uri: str = ""
+    file: str = ""
 
 
 def add_outline_and_links(path: str, outline: list, links: list) -> bool:
@@ -120,14 +124,23 @@ def _add_links(document, links: list) -> bool:
             page = document[link.page]
             height = page.rect.height
             left, bottom, right, top = link.rect
-            box = pymupdf.Rect(left, height - top, right, height - bottom)
-            page.insert_link({
-                "kind": pymupdf.LINK_GOTO,
-                "from": box.normalize(),
-                "page": max(0, min(int(link.where.page),
-                                   document.page_count - 1)),
-                "to": _landing(document, link.where.page, link.where.y),
-            })
+            box = pymupdf.Rect(left, height - top, right, height - bottom).normalize()
+            if link.uri:
+                page.insert_link({"kind": pymupdf.LINK_URI, "from": box,
+                                  "uri": link.uri})
+            elif link.file:
+                page.insert_link({"kind": pymupdf.LINK_LAUNCH, "from": box,
+                                  "file": link.file})
+            elif link.where is not None:
+                page.insert_link({
+                    "kind": pymupdf.LINK_GOTO,
+                    "from": box,
+                    "page": max(0, min(int(link.where.page),
+                                       document.page_count - 1)),
+                    "to": _landing(document, link.where.page, link.where.y),
+                })
+            else:
+                continue
             written = True
         except Exception:                              # noqa: BLE001
             engine.drain_messages()

@@ -47,6 +47,11 @@ def _poly(kind: str):
     return lambda: PolyItem(kind)
 
 
+def _link():
+    from ..items.link import LinkItem
+    return LinkItem()
+
+
 def _measure(kind: str):
     return lambda: MeasureItem(kind)
 
@@ -96,7 +101,11 @@ TOOLS: list[Tool] = [
          "rather than covering it", factory=_rect("highlight")),
     Tool("redact", "Redact", "redact", DRAG, "Draw", "",
          "Opaque black-out box", factory=_rect("redact")),
-    Tool("crop", "Crop", "snapshot", SNAPSHOT, "Navigate", "",
+    Tool("link", "Link", "link", DRAG, "Navigate", "",
+         "Drag a region that goes to a page, a view, a file or a web address "
+         "when clicked — a real link in the saved PDF",
+         factory=lambda: _link()),
+    Tool("crop", "Crop", "crop", SNAPSHOT, "Navigate", "",
          "Drag the part of the page to keep; the rest is cropped away, and "
          "Undo brings it back", factory=_rect("marquee")),
     Tool("whiteout", "Whiteout", "eraser", SNAPSHOT, "Draw", "",

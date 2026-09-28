@@ -108,6 +108,9 @@ def outline_and_links(document: Document, printed: list) -> tuple[list, list]:
             continue
         height = page.height_pt
         for item in page.frame.markups():
+            if getattr(item, "TYPE", "") == "link":
+                links.extend(_link_of(item, index, height, document, where))
+                continue
             rows = item.link_rows() if hasattr(item, "link_rows") else getattr(item, "rows", None)
             if not rows or not hasattr(item, "row_at"):
                 continue
@@ -123,6 +126,28 @@ def outline_and_links(document: Document, printed: list) -> tuple[list, list]:
                      on_page[1].x(), height - on_page[0].y()),
                     pdflinks.Destination(target_index, y)))
     return outline, links
+
+
+def _link_of(item, index: int, height: float, document, where: dict) -> list:
+    """A Link markup as the link annotation it becomes in the PDF."""
+    from . import pdflinks
+    from ..items.link import FILE, PAGE, VIEW, WEB
+
+    box = item.mapRectToParent(item.local_rect().normalized())
+    rect = (box.left(), height - box.bottom(), box.right(), height - box.top())
+    if item.kind in (PAGE, VIEW):
+        if not 0 <= item.target_page < len(document.pages):
+            return []
+        target = where.get(document.pages[item.target_page].uid)
+        if target is None:
+            return []
+        y = item.target_y if item.kind == VIEW else 0.0
+        return [pdflinks.Link(index, rect, pdflinks.Destination(target, y))]
+    if item.kind == WEB and item.address:
+        return [pdflinks.Link(index, rect, uri=item.address)]
+    if item.kind == FILE and item.address:
+        return [pdflinks.Link(index, rect, file=item.address)]
+    return []
 
 
 def _preserved_pdf_pages(document: Document, pages: list) -> set[str]:

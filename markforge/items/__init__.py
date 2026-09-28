@@ -8,6 +8,7 @@ the kind of bug that only shows up in the one place nobody looked.
 """
 from . import base           # noqa: F401  the registry itself
 from . import contents       # noqa: F401
+from . import link           # noqa: F401
 from . import measure        # noqa: F401
 from . import media          # noqa: F401
 from . import shapes         # noqa: F401

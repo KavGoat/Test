@@ -125,6 +125,15 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
         painter.drawPolygon(QPolygonF([QPointF(7, 4), QPointF(7, 18), QPointF(10.6, 14.6),
                                        QPointF(13, 19.5), QPointF(15, 18.6),
                                        QPointF(12.7, 13.8), QPointF(17, 13.2)]))
+    elif name == "link":
+        # Two links of a chain.
+        _pen(painter, INK, 1.6)
+        painter.drawRoundedRect(QRectF(3.5, 9.5, 10, 6), 3, 3)
+        painter.drawRoundedRect(QRectF(10.5, 8.5, 10, 6), 3, 3)
+    elif name == "crop":
+        _pen(painter, INK, 1.6)
+        painter.drawPolyline(QPolygonF([QPointF(7, 3), QPointF(7, 17), QPointF(21, 17)]))
+        painter.drawPolyline(QPolygonF([QPointF(3, 7), QPointF(17, 7), QPointF(17, 21)]))
     elif name == "snapshot":
         # A marquee with a copy lifted out of it — the same ink as the rest of
         # the toolbar, so no button stands out in a colour of its own.

@@ -1380,3 +1380,62 @@ class SpellingDialog(QDialog):
 
     def replacement(self) -> str:
         return self.edit.text().strip()
+
+
+class LinkDialog(QDialog):
+    """Where a link goes: a page, a view, a file or a web address."""
+
+    def __init__(self, item, pages: int, current_view: tuple, parent=None):
+        super().__init__(parent)
+        from ..items.link import FILE, PAGE, VIEW, WEB
+        self.setWindowTitle("Link")
+        self.item = item
+        self._view = current_view
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+        self.kind = QComboBox()
+        for key, label in ((PAGE, "Page"), (VIEW, "View"), (FILE, "File"), (WEB, "Web")):
+            self.kind.addItem(label, key)
+        self.kind.setCurrentIndex(max(self.kind.findData(item.kind), 0))
+        form.addRow("Go to", self.kind)
+        self.page = QSpinBox()
+        self.page.setRange(1, max(pages, 1))
+        self.page.setValue(item.target_page + 1)
+        form.addRow("Page", self.page)
+        self.here = QPushButton("Use current view")
+        self.here.setToolTip("The page and position the view is showing now")
+        self.here.clicked.connect(self._use_view)
+        form.addRow("", self.here)
+        self.address = QLineEdit(item.address)
+        self.address.setPlaceholderText("https://… or a file path")
+        form.addRow("Address", self.address)
+        browse = QPushButton("Browse…")
+        browse.clicked.connect(self._browse)
+        form.addRow("", browse)
+        layout.addLayout(form)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        self._y = item.target_y
+
+    def _use_view(self) -> None:
+        from ..items.link import VIEW
+        page, y = self._view
+        self.kind.setCurrentIndex(self.kind.findData(VIEW))
+        self.page.setValue(page + 1)
+        self._y = y
+
+    def _browse(self) -> None:
+        from ..items.link import FILE
+        path, _ = QFileDialog.getOpenFileName(self, "Link to file")
+        if path:
+            self.address.setText(path)
+            self.kind.setCurrentIndex(self.kind.findData(FILE))
+
+    def apply(self) -> None:
+        self.item.kind = self.kind.currentData()
+        self.item.target_page = self.page.value() - 1
+        self.item.target_y = self._y
+        self.item.address = self.address.text().strip()
+        self.item.update()

@@ -26,6 +26,8 @@ def capabilities(item, for_default: bool = False) -> set[str]:
     expose their optional drawn border in both selected-item and default
     controls; their raster pixels are unaffected by its colour.
     """
+    if getattr(item, "TYPE", "") == "link":
+        return {STROKE}           # only the colour of its on-screen outline
     if isinstance(item, SnapshotItem):
         # A snapshot is drawn linework, not a photo: it has an outline, that
         # outline defaults to none, and it is the user's to set — its colour,

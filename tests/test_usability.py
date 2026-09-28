@@ -9919,3 +9919,33 @@ def test_extract_and_split_save_pages_with_their_markups(window, tmp_path):
         with pymupdf.open(part) as pdf:
             counts.append(pdf.page_count)
     assert counts == [2, 1]
+
+
+def test_a_link_goes_to_a_page_and_is_a_real_link_in_the_pdf(window, tmp_path):
+    import pymupdf
+    from markforge.items.link import LinkItem, PAGE, WEB
+
+    pages = _a_two_page_drawing(window, tmp_path)
+    window.select_tool("link")
+    drag(window.view, 120, 120, 240, 160)
+    links = [i for i in window.view.scene().markups() if isinstance(i, LinkItem)]
+    assert len(links) == 1
+    link = links[0]
+    link.kind, link.target_page = PAGE, 2
+    window.follow_link(link)
+    assert window.current_index == 2
+    web = LinkItem()
+    web.kind, web.address = WEB, "https://example.com/spec"
+    pages[0].frame.add_markup(web, QPointF(50, 200))
+
+    saved = tmp_path / "linked.pdf"
+    from markforge.io import project
+    project.save_document(window.document, str(saved))
+    with pymupdf.open(saved) as pdf:
+        kinds = {(link["kind"], link.get("page", -1), link.get("uri", ""))
+                 for link in pdf[0].get_links()}
+        assert (pymupdf.LINK_GOTO, 2, "") in kinds
+        assert any(kind == pymupdf.LINK_URI and uri == "https://example.com/spec"
+                   for kind, _page, uri in kinds)
+        # Not drawn as a markup appearance: it is a link, nothing more.
+        assert all(annot.type[1] != "Square" for annot in pdf[0].annots())
