@@ -460,3 +460,19 @@ def test_preferences_and_shortcuts_live_under_settings(window):
     help_labels = [action.text() for action in menus["Help"].actions()]
     assert "Preferences…" not in edit
     assert "Shortcuts…" not in help_labels
+
+
+def test_rail_icons_can_be_reordered_top_to_bottom(window):
+    rail = window.left_rail
+    before = rail.order()
+    assert len(before) >= 3
+    last = before[-1]
+    window.move_panel_to_side(last, "left", 0)
+    assert rail.order()[0] == last
+    assert window.panel_sides[last] == "left"
+    from markforge.ui.rail import load_order
+    assert load_order()[0] == last
+    # And a drop between two icons lands between them.
+    first = rail.order()[0]
+    window.move_panel_to_side(first, "left", 2)
+    assert rail.order()[2] == first

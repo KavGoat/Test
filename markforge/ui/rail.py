@@ -71,7 +71,7 @@ class PanelRail(QWidget):
     """A column of panel icons down one edge of the window."""
 
     toggled = Signal(str, bool)          # panel name, wanted open
-    moved = Signal(str, str)             # panel name, side it was dropped on
+    moved = Signal(str, str, int)        # panel name, side dropped on, position
 
     def __init__(self, side: str, parent=None):
         super().__init__(parent)
@@ -87,6 +87,7 @@ class PanelRail(QWidget):
         self._layout = layout
         self.buttons: dict[str, RailButton] = {}
         self._highlight = False
+        self._insert_at: int | None = None
 
     def add(self, name: str, label: str, icon) -> RailButton:
         button = RailButton(name, label, icon, self)
@@ -103,6 +104,34 @@ class PanelRail(QWidget):
             button.setParent(None)
             button.deleteLater()
 
+    def order(self) -> list[str]:
+        """The panel names on this rail, top to bottom."""
+        names = []
+        for index in range(self._layout.count()):
+            widget = self._layout.itemAt(index).widget()
+            if isinstance(widget, RailButton):
+                names.append(widget.panel_name)
+        return names
+
+    def place_at(self, name: str, position: int) -> None:
+        """Move a button already on this rail to *position* (0 = top)."""
+        button = self.buttons.get(name)
+        if button is None:
+            return
+        self._layout.removeWidget(button)
+        count = len(self.buttons) - 1
+        position = count if position < 0 else min(position, count)
+        self._layout.insertWidget(position, button)
+
+    def _position_for(self, y: float, moving: str = "") -> int:
+        """Where a button dropped at height *y* goes, ignoring *moving* itself."""
+        names = [name for name in self.order() if name != moving]
+        for index, name in enumerate(names):
+            button = self.buttons[name]
+            if y < button.geometry().center().y():
+                return index
+        return len(names)
+
     def show_open(self, name: str, open_now: bool) -> None:
         button = self.buttons.get(name)
         if button is not None and button.isChecked() != open_now:
@@ -117,18 +146,29 @@ class PanelRail(QWidget):
             self._highlight = True
             self.update()
 
+    def dragMoveEvent(self, event) -> None:
+        if not event.mimeData().hasFormat(MIME):
+            return
+        event.acceptProposedAction()
+        name = bytes(event.mimeData().data(MIME)).decode("utf-8")
+        self._insert_at = self._position_for(event.position().y(), name)
+        self.update()
+
     def dragLeaveEvent(self, event) -> None:
         self._highlight = False
+        self._insert_at = None
         self.update()
 
     def dropEvent(self, event) -> None:
         self._highlight = False
+        self._insert_at = None
         self.update()
         if not event.mimeData().hasFormat(MIME):
             return
         name = bytes(event.mimeData().data(MIME)).decode("utf-8")
         event.acceptProposedAction()
-        self.moved.emit(name, self.side)
+        self.moved.emit(name, self.side,
+                        self._position_for(event.position().y(), name))
 
     def paintEvent(self, event) -> None:
         super().paintEvent(event)
@@ -139,6 +179,18 @@ class PanelRail(QWidget):
         pen.setWidthF(2.0)
         painter.setPen(pen)
         painter.drawRect(self.rect().adjusted(1, 1, -2, -2))
+        if self._insert_at is not None:
+            # Where the dragged icon will land, as a line between icons.
+            names = self.order()
+            if self._insert_at < len(names):
+                y = self.buttons[names[self._insert_at]].geometry().top() - 1
+            elif names:
+                y = self.buttons[names[-1]].geometry().bottom() + 2
+            else:
+                y = 8
+            pen.setWidthF(3.0)
+            painter.setPen(pen)
+            painter.drawLine(4, y, self.width() - 4, y)
 
 
 class RailBar(QToolBar):
@@ -174,3 +226,18 @@ def load_sides(default: dict[str, str]) -> dict[str, str]:
 
 def save_sides(sides: dict[str, str]) -> None:
     app_settings().setValue(SIDES_KEY, dict(sides))
+
+
+ORDER_KEY = "panels/order"
+
+
+def load_order() -> list[str]:
+    """The panels' order down the rails, as last arranged."""
+    stored = app_settings().value(ORDER_KEY, [])
+    if isinstance(stored, str):
+        stored = [stored]
+    return [str(name) for name in (stored or [])]
+
+
+def save_order(names: list[str]) -> None:
+    app_settings().setValue(ORDER_KEY, list(names))

@@ -43,8 +43,8 @@ from .icons import icon
 from .panels import (_hatch_icon, _line_style_icon, BookmarksPanel, MarkupsPanel, PagesPanel,
                      PropertiesPanel, ToolSetsPanel)
 from .docks import PanelDock, load_panel_state, save_panel_state
-from .rail import (AREAS, LEFT, RIGHT, PanelRail, RailBar, load_sides,
-                   save_sides)
+from .rail import (AREAS, LEFT, RIGHT, PanelRail, RailBar, load_order,
+                   load_sides, save_order, save_sides)
 from .scene import DocumentScene, detach
 from .shortcuts import COMMAND, INSERT, SYMBOL, TOOL, ShortcutManager
 from .stylecaps import (ARROW_SIZE, DASH, FILL, FILL_OPACITY, FONT, HATCH,
@@ -1015,7 +1015,9 @@ class MainWindow(QMainWindow):
         for rail in (self.left_rail, self.right_rail):
             rail.toggled.connect(self.show_panel)
             rail.moved.connect(self.move_panel_to_side)
-        for name in self.PANEL_ICONS:
+        stored = [name for name in load_order() if name in self.PANEL_ICONS]
+        ordered = stored + [name for name in self.PANEL_ICONS if name not in stored]
+        for name in ordered:
             self._place_panel(name, self.panel_sides.get(name, LEFT), open_now=False)
         # One panel open on each side to begin with, so the rails explain
         # themselves without anything having to be read.
@@ -1083,16 +1085,22 @@ class MainWindow(QMainWindow):
                 self.show_panel(visible[0], True)
         self.sync_rails()
 
-    def move_panel_to_side(self, name: str, side: str) -> None:
-        """Drag a panel's icon to the other rail and the panel goes with it."""
-        if self.panel_sides.get(name) == side:
-            return
-        dock = self.docks_by_name.get(name)
-        was_open = dock is not None and not dock.isHidden()
-        self._place_panel(name, side, open_now=False)
-        if was_open:
-            self.show_panel(name, True)
-        save_sides(self.panel_sides)
+    def move_panel_to_side(self, name: str, side: str, position: int = -1) -> None:
+        """Drag a panel's icon along its rail, or to the other rail.
+
+        Dropped on the other rail the panel goes with it; dropped on its own
+        rail it only changes place in the column.
+        """
+        rail = self.left_rail if side == LEFT else self.right_rail
+        if self.panel_sides.get(name) != side:
+            dock = self.docks_by_name.get(name)
+            was_open = dock is not None and not dock.isHidden()
+            self._place_panel(name, side, open_now=False)
+            if was_open:
+                self.show_panel(name, True)
+            save_sides(self.panel_sides)
+        rail.place_at(name, position)
+        save_order(self.left_rail.order() + self.right_rail.order())
         self.note_layout_change()
 
     def sync_rails(self) -> None:
