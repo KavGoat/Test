@@ -9753,3 +9753,53 @@ def test_hatch_scale_has_no_practical_limit(window):
         box.paint_visible(painter)       # neither hangs nor draws millions of lines
         painter.end()
     assert image.pixelColor(50, 50).name() == "#ffffff"   # one line, off-centre
+
+
+def test_markups_list_filters_sorts_and_changes_several_at_once(window):
+    panel = window.markups_panel
+    first = _a_rectangle(window, 100, 100, 160, 160)
+    second = _a_rectangle(window, 200, 100, 260, 160)
+    third = _a_rectangle(window, 300, 100, 360, 160)
+    first.style.stroke = second.style.stroke = "#e03131"
+    third.style.stroke = "#1971c2"
+    window.refresh_lists()
+    for column in ("Colour", "Fill", "Line", "Width", "Opacity", "Font", "Size"):
+        assert column in panel.COLUMNS
+
+    # A column filter keeps only the ticked values.
+    colour = panel.COLUMNS.index("Colour")
+    panel.set_column_filter(colour, {"#1971c2"})
+    assert len(panel._rows) == 1
+    menu = panel.filter_menu(colour)
+    assert "#e03131" in [a.text() for a in menu.actions()]
+    panel.set_column_filter(colour, None)
+    assert len(panel._rows) == 3
+
+    # Picking several rows picks those markups on the page.
+    rows = _rows_of_the_markups_list(window)
+    panel.tree.clearSelection()
+    for node in rows[:2]:
+        node.setSelected(True)
+    selected = {item.uid for item in window.view.scene().selectedItems()}
+    assert selected == {first.uid, second.uid}
+
+    # And one change reaches all of them, as one undo step.
+    panel.batch_style(lambda style: setattr(style, "stroke", "#2f9e44"), "Colour")
+    colours = sorted(i.style.stroke for i in window.view.frame().markups())
+    assert colours.count("#2f9e44") == 2
+    window.undo_stack.undo()
+    colours = sorted(i.style.stroke for i in window.view.frame().markups())
+    assert colours.count("#2f9e44") == 0
+
+    # Grouping by colour puts the matching markups under one heading.
+    panel.group_by.setCurrentIndex(panel.GROUPS.index("Colour"))
+    headings = [panel.tree.topLevelItem(i).text(0)
+                for i in range(panel.tree.topLevelItemCount())]
+    assert "#e03131" in headings and "#1971c2" in headings
+    panel.group_by.setCurrentIndex(0)
+
+    rows = _rows_of_the_markups_list(window)
+    panel.tree.clearSelection()
+    rows[0].setSelected(True)
+    panel.batch_delete()
+    assert len(window.view.frame().markups()) == 2

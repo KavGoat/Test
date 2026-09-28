@@ -542,16 +542,25 @@ class PagesPanel(QWidget):
 # ---------------------------------------------------------------------------
 
 class MarkupsPanel(QWidget):
-    """Every markup in the document, filterable and exportable — like a takeoff list.
+    """Every markup in the document as a list, the way Bluebeam's Markups list works.
 
-    Pick a row and the markup is picked on the page, and the other way round:
-    the list and the drawing are two views of one thing.
+    Columns for what a markup looks like as well as what it is — colour, fill,
+    line, width, opacity, font — so markups can be found by their look.
+    Each heading sorts, and its filter button narrows the list to chosen
+    values. Rows can be grouped by page, type, subject, colour or author.
+
+    Picking rows picks those markups on the page, several at once, and the
+    right-click menu changes all of them together: colour, fill, width, line
+    style, font size, opacity, lock, hide or delete.
     """
 
     markupActivated = Signal(int, str)
     markupPicked = Signal(int, str)
+    markupsPicked = Signal(list)          # [(page index, uid), ...]
 
-    COLUMNS = ["Page", "Type", "Subject", "Value", "Author", "Date", "Comment"]
+    COLUMNS = ["Page", "Type", "Subject", "Colour", "Fill", "Line", "Width",
+               "Opacity", "Font", "Size", "Value", "Author", "Date", "Comment"]
+    GROUPS = ["Page", "Type", "Subject", "Colour", "Author", "None"]
 
     def __init__(self, window):
         super().__init__()
@@ -566,11 +575,27 @@ class MarkupsPanel(QWidget):
         self.filter.setClearButtonEnabled(True)
         self.filter.textChanged.connect(lambda _: self.rebuild(self.window.document))
         top.addWidget(self.filter, 1)
+        layout.addLayout(top)
+        top = QHBoxLayout()
+        self.group_by = QComboBox()
+        self.group_by.setToolTip("Group the list by")
+        for name in self.GROUPS:
+            self.group_by.addItem(f"By {name.lower()}" if name != "None" else "No groups",
+                                  name)
+        self.group_by.currentIndexChanged.connect(
+            lambda _: self.rebuild(self.window.document))
+        top.addWidget(self.group_by)
+        self.clear_filters = QToolButton()
+        self.clear_filters.setText("All")
+        self.clear_filters.setToolTip("Clear every column filter")
+        self.clear_filters.clicked.connect(self._clear_column_filters)
+        top.addWidget(self.clear_filters)
         export = QToolButton()
         export.setText("CSV")
         export.setToolTip("Export the markups list to CSV")
         export.clicked.connect(self.export_csv)
         top.addWidget(export)
+        top.addStretch(1)
         layout.addLayout(top)
 
         self.tree = QTreeWidget()
@@ -579,20 +604,64 @@ class MarkupsPanel(QWidget):
         self.tree.setRootIsDecorated(True)
         self.tree.setAlternatingRowColors(True)
         self.tree.setUniformRowHeights(True)
+        self.tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.tree.itemDoubleClicked.connect(self._activate)
         self.tree.itemSelectionChanged.connect(self._picked)
-        self.tree.header().setSectionResizeMode(QHeaderView.Interactive)
+        self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._row_menu)
+        header = self.tree.header()
+        header.setSectionResizeMode(QHeaderView.Interactive)
+        header.setSectionsMovable(True)
+        header.setContextMenuPolicy(Qt.CustomContextMenu)
+        header.customContextMenuRequested.connect(
+            lambda point: self.filter_menu(header.logicalIndexAt(point),
+                                           header.mapToGlobal(point)))
         self.tree.setSortingEnabled(True)
         layout.addWidget(self.tree, 1)
+        # Values each column is narrowed to; a column not here shows all.
+        self.column_filters: dict[int, set] = {}
         # True while the list is being rebuilt or is following the canvas, so
         # that putting a selection into it does not send that selection
         # straight back out and fight whatever set it.
         self._echoing = False
+        self._items: dict = {}
 
         self.totals = QLabel("")
         self.totals.setWordWrap(True)
         self.totals.setStyleSheet("color:#4a5261; padding:2px;")
         layout.addWidget(self.totals)
+
+    # -- the rows ----------------------------------------------------------
+    @staticmethod
+    def row_for(index: int, item) -> list[str]:
+        style = item.style
+        text_like = hasattr(item, "doc")
+        return [str(index + 1), item.display_name(), item.subject,
+                style.stroke or "none", style.fill or "none",
+                style.line_style, f"{style.width:g}",
+                f"{round(style.opacity * 100):d}%",
+                style.font_family if text_like else "",
+                f"{style.font_size:g}" if text_like else "",
+                getattr(item, "value_text", ""), item.author,
+                item.modified[:10], item.summary()]
+
+    def _shown(self, row: list[str], needle: str) -> bool:
+        if needle and not any(needle in str(cell).lower() for cell in row):
+            return False
+        return all(row[column] in allowed
+                   for column, allowed in self.column_filters.items())
+
+    def all_rows(self, document) -> list:
+        """(page index, item, row) for every markup, before any filtering."""
+        found = []
+        for index, page in enumerate(document.pages):
+            if page.frame is None:
+                continue
+            for item in page.frame.ordered_markups():
+                if getattr(item, "from_drawing", False):
+                    continue
+                found.append((index, item, self.row_for(index, item)))
+        return found
 
     def rebuild(self, document) -> None:
         needle = self.filter.text().strip().lower()
@@ -600,41 +669,102 @@ class MarkupsPanel(QWidget):
         sorting = self.tree.isSortingEnabled()
         self.tree.setSortingEnabled(False)
         self.tree.clear()
+        self._items = {}
         rows = []
         empty = [""] * len(self.COLUMNS)
-        for index, page in enumerate(document.pages):
-            if page.frame is None:
+        grouping = self.group_by.currentData() or "Page"
+        column = self.COLUMNS.index(grouping) if grouping in self.COLUMNS else None
+        groups: dict = {}
+        order: list = []
+        if grouping == "Page":
+            for index, page in enumerate(document.pages):
+                if page.frame is not None:
+                    order.append(f"Page {index + 1}")
+        for index, item, row in self.all_rows(document):
+            if not self._shown(row, needle):
                 continue
-            page_node = QTreeWidgetItem([f"Page {index + 1}"] + empty[1:])
-            font = page_node.font(0)
+            node = QTreeWidgetItem(row)
+            node.setData(0, Qt.UserRole, (index, item.uid))
+            node.setIcon(1, icon(_icon_for(item), 16))
+            for place, colour in ((3, item.style.stroke), (4, item.style.fill)):
+                if colour:
+                    node.setIcon(place, _swatch(colour))
+            if item.locked:
+                node.setForeground(1, QColor("#8b93a1"))
+            self._items[(index, item.uid)] = item
+            if column is None:
+                self.tree.addTopLevelItem(node)
+            else:
+                key = f"Page {index + 1}" if grouping == "Page" else (row[column] or "—")
+                if key not in order:
+                    order.append(key)
+                groups.setdefault(key, []).append(node)
+            rows.append(row)
+        for key in order:
+            children = groups.get(key, [])
+            if not children and (needle or self.column_filters):
+                continue
+            parent = QTreeWidgetItem([key] + empty[1:])
+            font = parent.font(0)
             font.setBold(True)
-            page_node.setFont(0, font)
-            added = False
-            for item in page.frame.ordered_markups():
-                row = [str(index + 1), item.display_name(), item.subject,
-                       getattr(item, "value_text", ""), item.author,
-                       item.modified[:10], item.summary()]
-                if needle and not any(needle in str(cell).lower() for cell in row):
-                    continue
-                node = QTreeWidgetItem(row)
-                node.setData(0, Qt.UserRole, (index, item.uid))
-                node.setIcon(1, icon(_icon_for(item), 16))
-                if item.locked:
-                    node.setForeground(1, QColor("#8b93a1"))
-                page_node.addChild(node)
-                rows.append(row)
-                added = True
-            if added or not needle:
-                self.tree.addTopLevelItem(page_node)
-                page_node.setExpanded(True)
-        for column in range(len(self.COLUMNS)):
-            self.tree.resizeColumnToContents(column)
+            parent.setFont(0, font)
+            parent.setFlags(parent.flags() & ~Qt.ItemIsSelectable)
+            parent.addChildren(children)
+            self.tree.addTopLevelItem(parent)
+            parent.setExpanded(True)
+        for place in range(len(self.COLUMNS)):
+            self.tree.resizeColumnToContents(place)
         self.tree.setSortingEnabled(sorting)
         self._rows = rows
         self.totals.setText(self._totals_text(document))
         self._echoing = False
         self.follow_the_canvas()
 
+    # -- column filters ----------------------------------------------------
+    def filter_menu(self, column: int, where=None):
+        """A tick-list of the values in *column*; unticked ones are hidden."""
+        if column < 0:
+            return None
+        values = sorted({row[column] for _i, _m, row in
+                         self.all_rows(self.window.document)})
+        allowed = self.column_filters.get(column, set(values))
+        menu = QMenu(self)
+        menu.setTitle(f"Filter {self.COLUMNS[column]}")
+        every = menu.addAction("(All)")
+        every.triggered.connect(lambda: self.set_column_filter(column, None))
+        menu.addSeparator()
+        for value in values:
+            action = menu.addAction(value or "(blank)")
+            action.setCheckable(True)
+            action.setChecked(value in allowed)
+            if self.COLUMNS[column] in ("Colour", "Fill") and value.startswith("#"):
+                action.setIcon(_swatch(value))
+            action.toggled.connect(
+                lambda on, v=value: self._toggle_value(column, v, on, values))
+        if where is not None:
+            menu.popup(where)
+        return menu
+
+    def _toggle_value(self, column: int, value: str, on: bool, values) -> None:
+        allowed = set(self.column_filters.get(column, set(values)))
+        (allowed.add if on else allowed.discard)(value)
+        self.set_column_filter(column, None if allowed >= set(values) else allowed)
+
+    def set_column_filter(self, column: int, allowed) -> None:
+        if allowed is None:
+            self.column_filters.pop(column, None)
+        else:
+            self.column_filters[column] = set(allowed)
+        header = self.tree.headerItem()
+        name = self.COLUMNS[column]
+        header.setText(column, f"{name} ▾" if column in self.column_filters else name)
+        self.rebuild(self.window.document)
+
+    def _clear_column_filters(self) -> None:
+        for column in list(self.column_filters):
+            self.set_column_filter(column, None)
+
+    # -- totals ------------------------------------------------------------
     @staticmethod
     def _totals_text(document) -> str:
         """Group measurement values and count markers, the way a takeoff does."""
@@ -662,20 +792,32 @@ class MarkupsPanel(QWidget):
             parts.append(f"{subject}: {number}")
         return "  •  ".join(parts) if parts else "No measurements yet."
 
+    # -- selection ---------------------------------------------------------
+    def selected_keys(self) -> list:
+        keys = []
+        for node in self.tree.selectedItems():
+            data = node.data(0, Qt.UserRole)
+            if data:
+                keys.append(tuple(data))
+        return keys
+
+    def selected_markups(self) -> list:
+        return [self._items[key] for key in self.selected_keys() if key in self._items]
+
     def _activate(self, node: QTreeWidgetItem, _column: int) -> None:
         data = node.data(0, Qt.UserRole)
         if data:
             self.markupActivated.emit(data[0], data[1])
 
     def _picked(self) -> None:
-        """One click picks the markup on the page, as a row in a list should."""
+        """Picking rows picks those markups on the page — all of them."""
         if self._echoing:
             return
-        for node in self.tree.selectedItems():
-            data = node.data(0, Qt.UserRole)
-            if data:
-                self.markupPicked.emit(data[0], data[1])
-                return
+        keys = self.selected_keys()
+        if len(keys) == 1:
+            self.markupPicked.emit(*keys[0])
+        elif keys:
+            self.markupsPicked.emit(keys)
 
     def follow_the_canvas(self) -> None:
         """Pick out the rows for whatever is selected on the page.
@@ -689,16 +831,119 @@ class MarkupsPanel(QWidget):
         try:
             first = None
             for index in range(self.tree.topLevelItemCount()):
-                parent = self.tree.topLevelItem(index)
-                for child in range(parent.childCount()):
-                    node = parent.child(child)
+                top = self.tree.topLevelItem(index)
+                nodes = [top] + [top.child(c) for c in range(top.childCount())]
+                for node in nodes:
                     data = node.data(0, Qt.UserRole)
-                    chosen = bool(data) and data[1] in wanted
+                    if not data:
+                        continue
+                    chosen = data[1] in wanted
                     node.setSelected(chosen)
                     if chosen and first is None:
                         first = node
             if first is not None:
                 self.tree.scrollToItem(first)
+        finally:
+            self._echoing = False
+
+    # -- changing several at once -------------------------------------------
+    def _row_menu(self, point) -> QMenu:
+        menu = QMenu(self)
+        chosen = self.selected_markups()
+        if not chosen:
+            return menu
+        menu.addAction(f"{len(chosen)} selected").setEnabled(False)
+        menu.addAction("Colour…", lambda: self.batch_colour("stroke"))
+        menu.addAction("Fill…", lambda: self.batch_colour("fill"))
+        menu.addAction("No fill", lambda: self.batch_style(
+            lambda style: setattr(style, "fill", ""), "Fill"))
+        width = menu.addMenu("Width")
+        for value in (0.25, 0.5, 1.0, 1.5, 2.0, 3.0, 5.0):
+            width.addAction(f"{value:g} pt", lambda v=value: self.batch_style(
+                lambda style: setattr(style, "width", v), "Line width"))
+        lines = menu.addMenu("Line style")
+        for name in DASH_ARRAYS:
+            lines.addAction(name, lambda n=name: self.batch_style(
+                lambda style: (setattr(style, "line_style", n),
+                               setattr(style, "dash_array", ())), "Line style"))
+        size = menu.addMenu("Font size")
+        for value in (6, 8, 10, 12, 14, 18, 24):
+            size.addAction(f"{value} pt", lambda v=value: self.batch_style(
+                lambda style: setattr(style, "font_size", float(v)), "Font size"))
+        opacity = menu.addMenu("Opacity")
+        for value in (100, 75, 50, 25):
+            opacity.addAction(f"{value}%", lambda v=value: self.batch_style(
+                lambda style: setattr(style, "opacity", v / 100.0), "Opacity"))
+        menu.addSeparator()
+        menu.addAction("Lock / unlock", self.batch_lock)
+        menu.addAction("Hide", self.batch_hide)
+        menu.addAction("Delete", self.batch_delete)
+        if point is not None:
+            menu.popup(self.tree.viewport().mapToGlobal(point))
+        return menu
+
+    def batch_colour(self, field: str) -> None:
+        from PySide6.QtWidgets import QColorDialog
+        chosen = self.selected_markups()
+        if not chosen:
+            return
+        start = QColor(getattr(chosen[0].style, field) or "#e03131")
+        colour = QColorDialog.getColor(start, self, "Colour")
+        if colour.isValid():
+            self.batch_style(lambda style: setattr(style, field, colour.name()),
+                             "Colour" if field == "stroke" else "Fill")
+
+    def _change(self, description: str, change) -> None:
+        chosen = self.selected_markups()
+        if not chosen:
+            return
+        view = self.window.view
+        keys = self.selected_keys()
+        view.begin_snapshot(view.all_frames())
+        for item in chosen:
+            change(item)
+        view.commit_snapshot(f"{description} ({len(chosen)})")
+        self.window.refresh_lists()
+        self._reselect(keys)
+
+    def batch_style(self, mutate, description: str) -> None:
+        def change(item):
+            mutate(item.style)
+            if hasattr(item, "apply_style"):
+                item.apply_style()
+            item.touch()
+            item.update()
+        self._change(description, change)
+
+    def batch_lock(self) -> None:
+        chosen = self.selected_markups()
+        locking = not all(item.locked for item in chosen)
+
+        def change(item):
+            item.locked = locking
+            item.update()
+        self._change("Lock" if locking else "Unlock", change)
+
+    def batch_hide(self) -> None:
+        def change(item):
+            item.hidden = True
+            item.setSelected(False)
+            item.setVisible(False)
+        self._change("Hide", change)
+
+    def batch_delete(self) -> None:
+        from .scene import detach
+        self._change("Delete", detach)
+
+    def _reselect(self, keys) -> None:
+        wanted = {uid for _page, uid in keys}
+        self._echoing = True
+        try:
+            for index in range(self.tree.topLevelItemCount()):
+                top = self.tree.topLevelItem(index)
+                for node in [top] + [top.child(c) for c in range(top.childCount())]:
+                    data = node.data(0, Qt.UserRole)
+                    node.setSelected(bool(data) and data[1] in wanted)
         finally:
             self._echoing = False
 
@@ -713,6 +958,12 @@ class MarkupsPanel(QWidget):
             writer.writerow(self.COLUMNS)
             writer.writerows(getattr(self, "_rows", []))
         QMessageBox.information(self, "Export markups", f"Saved {path}")
+
+
+def _swatch(colour: str) -> QIcon:
+    pixmap = QPixmap(12, 12)
+    pixmap.fill(QColor(colour))
+    return QIcon(pixmap)
 
 
 def _icon_for(item) -> str:

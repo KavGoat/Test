@@ -1534,6 +1534,7 @@ class MainWindow(QMainWindow):
         self.pages_panel.pagesReordered.connect(self.move_page)
         self.markups_panel.markupActivated.connect(self.reveal_markup)
         self.markups_panel.markupPicked.connect(self.pick_markup)
+        self.markups_panel.markupsPicked.connect(self.pick_markups)
         self._connect_undo_stack(self.undo_stack)
 
     def _connect_undo_stack(self, stack) -> None:
@@ -4724,6 +4725,20 @@ class MainWindow(QMainWindow):
                 item.setSelected(True)
                 self.view.centerOn(item)
                 break
+        self.refresh_selection()
+
+    def pick_markups(self, keys: list) -> None:
+        """Select every markup picked in the markups list, on any page.
+
+        With several selected, the style toolbar and Properties change them
+        all together, as Bluebeam's list does.
+        """
+        wanted = {uid for _page, uid in keys}
+        scene = self.view.scene()
+        scene.clearSelection()
+        for item in scene.markups():
+            if item.uid in wanted:
+                item.setSelected(True)
         self.refresh_selection()
 
     def pick_markup(self, page_index: int, uid: str) -> None:
