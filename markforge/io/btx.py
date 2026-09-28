@@ -562,6 +562,11 @@ def markup_from(annotation: dict, resources: dict, name: str = "") -> Optional[d
             return dict(common, type="sketch", strokes=strokes,
                         rect=[0, 0, width, height],
                         source_box=[0, 0, width, height])
+        drawing = _stamp_svg(annotation, resources)
+        if drawing:
+            return dict(common, type="rect", kind="rect",
+                        rect=[0, 0, width, height], stamp_svg=drawing,
+                        their_picture_box=[0, 0, width, height])
         picture = _stamp_picture(annotation, resources)
         if picture:
             import base64
@@ -627,8 +632,8 @@ def _stamp_strokes(annotation: dict, resources: dict) -> list[dict]:
     return _flip_strokes(strokes, height)
 
 
-def _stamp_picture(annotation: dict, resources: dict) -> Optional[bytes]:
-    """A stamp whose drawing needs nested XObjects, rendered as PNG bytes.
+def _stamp_pdf(annotation: dict, resources: dict) -> Optional[bytes]:
+    """A stamp whose drawing needs nested XObjects, as a one-page PDF.
 
     A stamp like a title block calls other form XObjects through ``Do``
     operators, and those call more, thirty-six deep on the WSP block. The
@@ -701,15 +706,43 @@ def _stamp_picture(annotation: dict, resources: dict) -> Optional[bytes]:
     out += (b"trailer\n<< /Size %d /Root %d 0 R >>\nstartxref\n%d\n%%%%EOF\n"
             % (count, extra, start))
 
+    return bytes(out)
+
+
+def _stamp_picture(annotation: dict, resources: dict) -> Optional[bytes]:
+    """The stamp's drawing as PNG bytes — the fallback when SVG fails."""
+    assembled = _stamp_pdf(annotation, resources)
+    if not assembled:
+        return None
     try:
         import pymupdf
-        doc = pymupdf.open(stream=bytes(out), filetype="pdf")
+        doc = pymupdf.open(stream=assembled, filetype="pdf")
         pixmap = doc[0].get_pixmap(matrix=pymupdf.Matrix(6, 6), alpha=True)
         png = pixmap.tobytes("png")
         doc.close()
         return png
     except Exception:
         return None
+
+
+def _stamp_svg(annotation: dict, resources: dict) -> str:
+    """The stamp's drawing as SVG linework, letters as outlines; "" if none.
+
+    A title block's logo, labels and rules drawn as vectors stay sharp at
+    any zoom and print as lines, where a picture of them went soft.
+    """
+    assembled = _stamp_pdf(annotation, resources)
+    if not assembled:
+        return ""
+    try:
+        import pymupdf
+        from .pdfsnapshot import inline_glyphs
+        doc = pymupdf.open(stream=assembled, filetype="pdf")
+        svg = doc[0].get_svg_image(text_as_path=True)
+        doc.close()
+        return inline_glyphs(svg)
+    except Exception:
+        return ""
 
 
 def _flip_strokes(strokes: list[dict], height: float) -> list[dict]:

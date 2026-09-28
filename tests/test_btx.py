@@ -602,28 +602,6 @@ def test_a_section_marks_parts_are_assembled_not_scattered(qapp):
     assert reach < 30, f"the bar is {reach:.0f} points from any cut line"
 
 
-def test_a_stamp_with_nested_xobjects_renders_as_a_picture(qapp):
-    """The title block stamp has 36 nested XObjects via Do operators.
-
-    Before the picture path was added, the stamp was silently dropped because
-    read_content cannot follow Do invocations.  Now it comes through as a
-    rasterised picture that MuPDF renders from the assembled objects.
-    """
-    sketch = _sketch_tools()
-    stamp_tool = sketch.tools[14]
-    assert stamp_tool.name == "Titleblock"
-    payload = stamp_tool.payloads[0]
-    assert "stamp_picture" in payload, "stamp should carry a rasterised picture"
-    import base64
-    png = base64.b64decode(payload["stamp_picture"])
-    assert png[:8] == b"\x89PNG\r\n\x1a\n", "stamp_picture should be a PNG"
-    item = build_item(payload)
-    assert item._their_picture is not None
-    assert not item._their_picture.isNull()
-    assert item._their_picture.width() > 100
-    assert item.their_picture_box[2] > 500
-
-
 def test_every_tool_still_fits_in_a_sensible_box(qapp):
     """A part placed by the wrong rule shows up as a tool the size of a page."""
     for path in FILES:
@@ -649,7 +627,7 @@ REFERENCE_PAIRS = [      # tool index, xrefs on page 1, least overlap
     (1, [19, 21, 23, 25, 28], 0.9),                          # Elevation
     (8, [117, 119, 121, 123, 125, 127, 129, 132], 0.9),      # Section
     (13, [43, 45, 49, 51], 0.6),                             # Legend
-    (14, [53, 90, 93, 96, 99, 102, 105, 108, 111], 0.75),    # Titleblock
+    (14, [53, 90, 93, 96, 99, 102, 105, 108, 111], 0.85),    # Titleblock
 ]
 
 
@@ -746,3 +724,14 @@ def test_bluebeam_line_spacing_is_exact(qapp):
         block = block.next()
     gaps = [b - a for a, b in zip(blocks, blocks[1:])]
     assert all(gap == pytest.approx(12.495, abs=0.05) for gap in gaps)
+
+
+def test_a_title_block_stamp_comes_across_as_linework(qapp):
+    """Its logo, labels and rules are vectors, not a picture of them."""
+    tool = _sketch_tools().tools[14]
+    stamp = tool.payloads[0]
+    assert stamp.get("stamp_svg") and "<image" not in stamp["stamp_svg"]
+    assert not stamp.get("stamp_picture")
+    item = build_item(dict(stamp))
+    again = build_item(item.serialize())
+    assert again.stamp_svg == item.stamp_svg

@@ -488,6 +488,9 @@ class MarkupItem(QGraphicsObject):
         self.their_picture_asset = ""
         self.their_picture_box: tuple = ()
         self._stamp_picture_b64 = ""
+        # A stamp's drawing kept as SVG linework, drawn as vectors.
+        self.stamp_svg = ""
+        self._stamp_renderer = None
         # True while the item is being built from a payload. Laying text out
         # and fitting a box are changes as far as touch() is concerned, and
         # they all happen during loading — so a markup would stop being its
@@ -721,7 +724,9 @@ class MarkupItem(QGraphicsObject):
         """
         if self.still_theirs:
             return
-        if self._their_picture is not None:
+        if self.stamp_svg:
+            self.paint_stamp_drawing(painter)
+        elif self._their_picture is not None:
             self.paint_their_picture(painter)
         else:
             self.paint_content(painter)
@@ -731,6 +736,23 @@ class MarkupItem(QGraphicsObject):
     def hatch_region(self) -> Optional[QPainterPath]:
         """The area a hatch covers, in item coordinates; None for no hatch."""
         return None
+
+    def paint_stamp_drawing(self, painter: QPainter) -> None:
+        """Draw a stamp's kept SVG linework into its box, as vectors."""
+        if self._stamp_renderer is None:
+            from PySide6.QtCore import QByteArray
+            from PySide6.QtSvg import QSvgRenderer
+            self._stamp_renderer = QSvgRenderer(QByteArray(self.stamp_svg.encode()))
+        box = (QRectF(*self.their_picture_box) if self.their_picture_box
+               else self.local_rect())
+        if not self._stamp_renderer.isValid() or box.isEmpty():
+            return
+        painter.save()
+        painter.setOpacity(painter.opacity() * self.style.opacity)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(Qt.NoBrush)
+        self._stamp_renderer.render(painter, box)
+        painter.restore()
 
     def paint_their_picture(self, painter: QPainter) -> None:
         picture = self._their_picture
@@ -925,6 +947,7 @@ class MarkupItem(QGraphicsObject):
             "their_picture_asset": self.their_picture_asset,
             "their_picture_box": list(self.their_picture_box),
             "stamp_picture": self._stamp_picture_b64,
+            "stamp_svg": self.stamp_svg,
             "flatten_recoverable": self.flatten_recoverable,
             "locked_before_flatten": self.locked_before_flatten,
             "group": self.group,
@@ -964,6 +987,11 @@ class MarkupItem(QGraphicsObject):
         found = data.get("their_picture_box") or ()
         self.their_picture_box = tuple(float(v) for v in found) \
             if len(found) == 4 else ()
+        svg = data.get("stamp_svg", "")
+        if isinstance(svg, str) and svg:
+            from ..io.pdfsnapshot import inline_glyphs
+            self.stamp_svg = inline_glyphs(svg)
+            self._stamp_renderer = None
         b64 = data.get("stamp_picture", "")
         if isinstance(b64, str) and b64:
             self._stamp_picture_b64 = b64
