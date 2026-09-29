@@ -124,6 +124,22 @@ def derived_per_base(dims: tuple):
     return None
 
 
+def _d(**kw) -> tuple:
+    return tuple(kw.get(b, 0) for b in ("m", "kg", "s", "A", "K", "mol", "cd", "bit", "sr", "dB", "cur"))
+
+
+# Compound units SMath Cloud shows for the physical constants (observed:
+# 'h = 6.6261·10^-34 s J, 'R.m = 8.3145 J/(K mol), 'ε.0 = 8.8542·10^-12 F/m,
+# 'μ.0 = 1.2566·10^-6 m T/A, 'hildebrand = 2045.48 kg^(1/2)/(s m^(1/2))).
+OBSERVED_UNITS = {
+    _d(m=2, kg=1, s=-1): ([("s", 1), ("J", 1)], []),
+    _d(m=2, kg=1, s=-2, K=-1, mol=-1): ([("J", 1)], [("K", 1), ("mol", 1)]),
+    _d(m=-3, kg=-1, s=4, A=2): ([("F", 1)], [("m", 1)]),
+    _d(m=1, kg=1, s=-2, A=-2): ([("m", 1), ("T", 1)], [("A", 1)]),
+    _d(m=-0.5, kg=0.5, s=-1): ([("kg", 0.5)], [("s", 1), ("m", 0.5)]),
+}
+
+
 def base_unit_parts(dims: tuple) -> tuple[list, list]:
     """Split a dimension into numerator/denominator base-unit factors.
 

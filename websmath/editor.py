@@ -115,6 +115,9 @@ class MathEditor:
         self.node: Optional[tuple] = None
         self.is_defined = is_defined or (lambda name, nargs=None: False)
         self.plot_input = False  # a plot's input: no "=", no text conversion
+        # names the user picked as the worksheet variable although a unit has
+        # the same name (m:10 above; see WorksheetView._clash)
+        self.confirmed_words: set = set()
         self._undo: list[Snapshot] = []
         self._redo: list[Snapshot] = []
         self._fix_parents(self.root)
@@ -268,6 +271,12 @@ class MathEditor:
         if ch == " ":
             self._space()
             return
+        if ch == "." and self._number_has_dot():
+            return  # a second decimal point is ignored (2.5.3 -> 2.53)
+        if not _is_word_char(ch):
+            self._drop_empty_subscript()
+        if (ch in LETTERS and ch != "'" or ch == "(") and not self.in_unit and self._after_number():
+            self._insert_char("*")  # observed: 2x -> 2·x, 2( -> 2·(, 2e3 -> 2·e3
         if ch == '"' and self.root.is_empty() and not self.in_unit:
             self._to_text("")
             return
@@ -304,6 +313,33 @@ class MathEditor:
             return
         ch = OPERATOR_KEYS.get(ch, ch)
         self._insert_char(ch)
+
+    def _word_bounds(self) -> tuple:
+        r, p = self.row, self.pos
+        a = p
+        while a > 0 and _is_word_char(r.items[a - 1]):
+            a -= 1
+        return a, p
+
+    def _number_has_dot(self) -> bool:
+        a, p = self._word_bounds()
+        items = self.row.items[a:p]
+        return bool(items) and (items[0] in DIGITS or items[0] == ".") and "." in items
+
+    def _after_number(self) -> bool:
+        a, p = self._word_bounds()
+        items = self.row.items[a:p]
+        return bool(items) and (items[0] in DIGITS or items[0] == ".") and \
+            all(it in DIGITS or it == "." for it in items)
+
+    def _drop_empty_subscript(self) -> None:
+        """x. followed by an operator: the empty subscript is dropped (x+)."""
+        a, p = self._word_bounds()
+        items = self.row.items
+        if p - a >= 2 and items[p - 1] == "." and items[a] not in DIGITS \
+                and "." not in items[a:p - 1]:
+            del items[p - 1]
+            self.cursor = Cursor(self.row, p - 1)
 
     def _insert_char(self, ch: str) -> None:
         r, p = self.row, self.pos
@@ -523,8 +559,9 @@ class MathEditor:
     def _space(self) -> None:
         items = self.root.items
         if (not self.in_unit and not self.plot_input and items and self.selection is None
-                and all(isinstance(it, str) and it in IDENT_CHARS for it in items)
-                and items[0] not in DIGITS):
+                and all(isinstance(it, str) and it in IDENT_CHARS for it in items)):
+            # a lone name, number or subscripted name becomes text (observed:
+            # "q ", "2 ", "sin ", "x.1 "); anything with an operator does not
             self._to_text("".join(items) + " ")
             return
         self._grow_selection()
@@ -724,20 +761,51 @@ class MathEditor:
             b = p
             while b < n and _is_word_char(items[b]) and items[b] != "'":
                 b += 1
-            return a, b
+            return self._subscript_part(items, a, b, p)
         if p > 0 and (isinstance(items[p - 1], Box) or items[p - 1] == "!"):
             return self.operand_start(r, p), p
         if p < n and _is_word_char(items[p]):
             b = p + 1
             while b < n and _is_word_char(items[b]) and items[b] != "'":
                 b += 1
-            return p, b
+            return self._subscript_part(items, p, b, p)
         if p < n and isinstance(items[p], Box):
             b = p + 1
             while b < n and isinstance(items[b], (Pow, Index)):
                 b += 1
             return p, b
         return p, p
+
+    @staticmethod
+    def _subscript_part(items, a: int, b: int, p: int) -> tuple:
+        """A name with a subscript (x.1) is underlined part by part, as on
+        SMath Cloud: the subscript when the cursor is after the dot, else
+        the base.  Numbers keep their decimal point."""
+        head = a + 1 if items[a] == "'" else a
+        if head >= b or items[head] in DIGITS or items[head] == ".":
+            return a, b
+        try:
+            d = items.index(".", head, b)
+        except ValueError:
+            return a, b
+        return (d + 1, b) if p > d else (a, d)
+
+    def in_subscript(self) -> bool:
+        """True when the cursor sits in a name's subscript."""
+        r, a, _ = self.underline()
+        return a > 0 and r is self.row and r.items[a - 1] == "." and self.node is None \
+            and self._subscript_part(r.items, *self._whole_word(r, a - 1), self.pos)[0] == a
+
+    def _whole_word(self, r: Row, i: int) -> tuple:
+        a = i
+        while a > 0 and _is_word_char(r.items[a - 1]) and r.items[a - 1] != "'":
+            a -= 1
+        if a > 0 and r.items[a - 1] == "'":
+            a -= 1
+        b = i
+        while b < len(r.items) and _is_word_char(r.items[b]) and (r.items[b] != "'" or b == a):
+            b += 1
+        return a, b
 
     def underline(self) -> tuple:
         """(row, start, end) of what the cursor's underline covers."""

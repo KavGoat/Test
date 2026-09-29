@@ -59,7 +59,7 @@ def test_autocomplete_lists_units_first(app):
     v = WorksheetView()
     type_at(v, 18, 18, "si")
     labels = [v.suggestions.item(i).text() for i in range(v.suggestions.count())]
-    assert labels[:3] == ["'kpsi", "'ksi", "'psi"]
+    assert labels[:3] == ["kpsi", "ksi", "psi"]  # units listed without the apostrophe
     assert "sin" in labels and "sinh" in labels
 
 
@@ -179,3 +179,41 @@ def test_up_down_move_between_regions(app):
     assert v.focused_item is first
     press(v, Qt.Key_Down)
     assert v.focused_item.region.y == 72
+
+
+def test_variable_unit_clash_needs_a_choice(app):
+    v = WorksheetView()
+    type_at(v, 18, 18, "m:10")
+    press(v, Qt.Key_Return)
+    type_at(v, 18, 72, "m")
+    ed = v.focused_item.editor
+    press(v, 0, "=")  # blocked: m is a variable and a unit
+    assert ed.root.text() == "m" and v.suggestions.isVisible()
+    press(v, Qt.Key_Return)  # Enter too (nothing chosen with the arrows yet)
+    assert v.focused_item is not None and ed.root.text() == "m"
+    s = v.suggestions
+    s.setCurrentRow([i for i, e in enumerate(s.entries()) if e.name == "m"][0])
+    press(v, Qt.Key_Tab)
+    press(v, 0, "=")
+    assert display_text(v.focused_item.region.display) == "10"
+    # choosing the unit instead gives 'm
+    type_at(v, 18, 126, "m")
+    s.setCurrentRow([i for i, e in enumerate(s.entries()) if e.name == "'m"][0])
+    press(v, Qt.Key_Tab)
+    press(v, 0, "=")
+    assert display_text(v.focused_item.region.display) == "1 m"
+    # no clash: typed straight through
+    type_at(v, 18, 180, "q+1")
+    assert v.focused_item.editor.root.text() == "q+1"
+
+
+def test_suggestion_keys_follow_site(app):
+    v = WorksheetView()
+    type_at(v, 18, 18, "sq")
+    s = v.suggestions
+    assert s.currentItem().text() == "sqrt" and s.tooltip.isVisible()
+    press(v, Qt.Key_Return)  # Enter applies only after moving in the list
+    assert not s.isVisible() or v.focused_item.editor.root.text() == "sq"
+    type_at(v, 18, 72, "sq")
+    press(v, Qt.Key_Tab)  # Tab applies the highlighted entry
+    assert v.focused_item.editor.root.text().startswith("√")

@@ -38,6 +38,12 @@ MESSAGES = {
     "iterations": "Maximum number of iterations exceeded.",
     "interrupted": "Calculation interrupted: it took too long.",
     "recursion": "Recursion is too deep.",
+    "overflow": "Result is above max. allowed positive number.",  # observed: exp(1000), 10^400, 171!, cot(0)
+    "log_zero": "Logarithm of zero is not defined.",  # observed: ln(0)
+    "uncertainty": "Uncertainty.",  # observed: 0^0
+    "factorial": "Factorial is defined for real numbers and zero.",  # observed (sic): 3.5!
+    "round_range": "Coefficient of rounding should be in the range from 0 to 15 inclusive.",  # observed
+    "function_units": "Operation cannot be performed with units.",  # observed: sin(1'm)
 }
 
 

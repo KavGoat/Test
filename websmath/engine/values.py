@@ -180,6 +180,8 @@ def power(a, b):
     if not y.dimensionless:
         raise err("units_in_exponent")
     yv = y.value
+    if x.value == 0 and yv == 0:
+        raise err("uncertainty")  # observed: 0^0
     if x.value == 0 and (isinstance(yv, complex) or yv < 0):
         raise err("div_zero")
     try:
@@ -188,7 +190,9 @@ def power(a, b):
         else:
             v = x.value ** yv
     except OverflowError:
-        v = math.inf
+        raise err("overflow")  # observed: 10^400
+    if isinstance(v, float) and math.isinf(v) and not math.isinf(x.value if not isinstance(x.value, complex) else 0):
+        raise err("overflow")
     if not x.dimensionless and isinstance(yv, complex):
         raise err("must_be_real")
     dims = dims_scale(x.dims, yv.real if isinstance(yv, complex) else yv)

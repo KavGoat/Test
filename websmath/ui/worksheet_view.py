@@ -16,14 +16,17 @@ Behaviour replicated from SMath Cloud:
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Optional
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QKeyEvent, QPainter, QPen
-from PySide6.QtWidgets import QGraphicsScene, QGraphicsView, QListWidget, QListWidgetItem
+from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QIcon, QKeyEvent, QPainter, QPen
+from PySide6.QtWidgets import (QApplication, QGraphicsScene, QGraphicsView, QLabel, QListWidget,
+                               QListWidgetItem)
 
 from ..engine.catalog import FUNCTIONS, UNIT_CATALOG
 from ..engine.evaluator import BUILTIN_CONSTANTS
+from ..engine.units import is_unit
 from ..worksheet import Region, Worksheet
 from .layout import Style
 from .region_item import RegionItem
@@ -32,6 +35,10 @@ GRID = 9
 GRID_COLOR = QColor("#e8e8e8")
 CROSS_COLOR = QColor("#ff0000")
 KEYWORDS = ["break", "continue"]
+
+
+def _word_char(ch: str) -> bool:
+    return ch.isalnum() or ch in "._"
 
 
 def snap(v: float) -> float:
@@ -73,23 +80,81 @@ class WorksheetScene(QGraphicsScene):
 
 
 class SuggestionList(QListWidget):
-    """SMath's autocomplete list: white, black border, 12px, selected item
-    white on #9faab5."""
+    """SMath Cloud's autocomplete list (#region-suggestions): white, 1px black
+    border, 12px text, at least 90px wide and 90px high at most; each entry
+    has a 12x12 icon for function / unit / operand coloured by origin (core,
+    plugin, worksheet) and shows its name without the unit apostrophe; the
+    selected entry is white on #9faab5.  The selected entry's description
+    appears in a tooltip box to the right of the list."""
 
     def __init__(self, parent):
         super().__init__(parent)
         self.setWindowFlags(Qt.ToolTip)
         self.setFocusPolicy(Qt.NoFocus)
+        self.setIconSize(QSize(12, 12))
         self.setStyleSheet(
-            "QListWidget{background:#fff;border:1px solid #000;font-size:12px;}"
-            "QListWidget::item{padding:2px 2px 2px 17px;color:#000;}"
-            "QListWidget::item:selected{color:#fff;background:#9faab5;}")
+            "QListWidget{background:#fff;border:1px solid #000;font-size:12px;outline:0;}"
+            "QListWidget::item{padding:2px 2px 2px 3px;color:#000;border:0;}"
+            "QListWidget::item:selected{color:#fff;background:#9faab5;}"
+            "QListWidget::item:hover{color:#fff;background:#9faab5;}")
         self.setMinimumWidth(90)
         self.setMaximumHeight(92)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         self.start = 0
+        self.word = ""
+        self.activated = False  # the user moved through the list (Enter applies)
+        self.tooltip = QLabel(parent)
+        self.tooltip.setWindowFlags(Qt.ToolTip)
+        self.tooltip.setTextFormat(Qt.RichText)
+        self.tooltip.setWordWrap(True)
+        self.tooltip.setMaximumWidth(206)
+        self.tooltip.setStyleSheet("QLabel{background:#ffffe1;border:1px solid #000;font-size:12px;"
+                                   "padding:0 3px;margin:0;color:#000;}")
+        self.tooltip.hide()
+        self.currentRowChanged.connect(lambda _r: self.show_tooltip())
 
     def entries(self):
         return [self.item(i).data(Qt.UserRole) for i in range(self.count())]
+
+    def fill(self, entries, selected) -> None:
+        self.clear()
+        for e in entries:
+            it = QListWidgetItem(_origin_icon(e.kind, e.origin), e.text)
+            it.setData(Qt.UserRole, e)
+            self.addItem(it)
+        self.activated = False
+        self.setCurrentRow(-1 if selected is None else selected)
+        if selected is not None:
+            self.scrollToItem(self.item(selected), QListWidget.PositionAtTop)
+
+    def show_tooltip(self) -> None:
+        it = self.currentItem()
+        desc = it.data(Qt.UserRole).description if it is not None and self.isVisible() else ""
+        if not desc:
+            self.tooltip.hide()
+            return
+        self.tooltip.setText(desc)
+        self.tooltip.adjustSize()
+        self.tooltip.move(self.x() + self.width() + 2, self.y())
+        self.tooltip.show()
+
+    def hideEvent(self, e) -> None:
+        self.tooltip.hide()
+        super().hideEvent(e)
+
+
+_ICONS: dict = {}
+
+
+def _origin_icon(kind: str, origin: int) -> QIcon:
+    """The site's img-origin-<kind>-<origin> icons (copied from its CSS)."""
+    key = (kind, origin)
+    if key not in _ICONS:
+        from pathlib import Path
+
+        path = Path(__file__).with_name("icons") / f"origin-{kind}-{origin}.png"
+        _ICONS[key] = QIcon(str(path)) if path.exists() else QIcon()
+    return _ICONS[key]
 
 
 class WorksheetView(QGraphicsView):
@@ -116,7 +181,7 @@ class WorksheetView(QGraphicsView):
         self.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
         self.suggestions = SuggestionList(self)
         self.suggestions.hide()
-        self.suggestions.itemDoubleClicked.connect(lambda it: self._apply_suggestion(it))
+        self.suggestions.itemClicked.connect(lambda it: self._apply_suggestion(it))  # one click, as the site
         self.clipboard: list = []
         for r in self.worksheet.regions:
             self._add_item(r)
@@ -414,6 +479,8 @@ class WorksheetView(QGraphicsView):
 
     def _named_key(self, k: str) -> None:
         item = self.focused_item
+        if k in ("LEFT", "RIGHT", "UP", "DOWN") and self._block_for_clash(item):
+            return
         if item is None:
             step = {"LEFT": (-GRID, 0), "RIGHT": (GRID, 0), "UP": (0, -GRID), "DOWN": (0, GRID),
                     "BACK": (0, -GRID)}.get(k)
@@ -446,6 +513,8 @@ class WorksheetView(QGraphicsView):
                 return
             item = self.new_region(c.x(), c.y())
             self.focus_item(item)
+        if text and not _word_char(text[0]) and self._block_for_clash(item):
+            return  # m is a variable and a unit: pick one from the list first
         for ch in text:
             item.editor.key(ch)
         self._after_edit(item, typed=True)
@@ -462,6 +531,8 @@ class WorksheetView(QGraphicsView):
 
     def _tab(self, backwards: bool = False) -> None:
         """Tab moves focus to the next region in reading order (observed)."""
+        if self._block_for_clash(self.focused_item):
+            return
         order = [self.items[r.id] for r in self.worksheet.ordered() if r.id in self.items]
         if not order:
             return
@@ -475,6 +546,8 @@ class WorksheetView(QGraphicsView):
 
     def _enter(self, shift: bool) -> None:
         item = self.focused_item
+        if self._block_for_clash(item):
+            return
         if item is None:
             c = self.scene_.cross
             self.scene_.cross = QPointF(c.x(), c.y() + GRID)
@@ -516,46 +589,65 @@ class WorksheetView(QGraphicsView):
     def candidates(self, word: str, region: Region) -> list:
         return suggestion_list(word, self.worksheet._context_before(region).names())
 
-    def update_suggestions(self, item: RegionItem) -> None:
-        if not self.dynamic_assistance:
+    def entries_for(self, word: str, region: Region) -> list:
+        ctx = self.worksheet._context_before(region)
+        return suggestion_entries(word, ctx.names(), ctx.function_arities())
+
+    def update_suggestions(self, item: RegionItem, force: bool = False) -> None:
+        if not self.dynamic_assistance and not force:
             return
         start, word = item.editor.current_word()
-        if not word or word[0].isdigit():
+        if not word or word[0].isdigit() or word[0] == ".":
             self.hide_suggestions()
             return
-        cands = self.candidates(word, item.region)
-        if not cands:
+        entries = self.entries_for(word, item.region)
+        if not entries:
             self.hide_suggestions()
             return
+        clash = self._clash(item)
+        if clash is not None:
+            # make the two meanings of the name plain in the list
+            for e in entries:
+                if e.text == clash and e.origin == 3 and e.kind == "operand":
+                    e.description = f"<strong>{clash}</strong> - variable defined on this worksheet"
         s = self.suggestions
-        s.clear()
-        for label, kind in cands:
-            it = QListWidgetItem(label)
-            it.setData(Qt.UserRole, (label, kind))
-            s.addItem(it)
         s.start = start
+        s.word = word
+        s.fill(entries, selected_index(entries, word))
+        # the list opens under the cursor, 2px to the left (site: offsetLeft + x - 2)
         pos = self.mapFromScene(item.cursor_scene_pos())
-        s.move(self.mapToGlobal(pos))
-        s.resize(max(90, s.sizeHintForColumn(0) + 24), min(92, s.sizeHintForRow(0) * s.count() + 4))
-        s.setCurrentRow(-1)
+        s.move(self.mapToGlobal(pos) + QPoint(-2, 1))
+        rows = min(s.count(), 5)
+        s.resize(max(90, s.sizeHintForColumn(0) + 22), min(92, s.sizeHintForRow(0) * rows + 4))
         s.show()
+        s.show_tooltip()
 
     def hide_suggestions(self) -> None:
         self.suggestions.hide()
 
     def _suggestion_key(self, key) -> bool:
+        """Keys the open list takes (site suggestionsListKeyDown): Esc closes
+        it, Tab applies the selected entry, Enter only once the user has moved
+        through the list, Up/Down move (from nothing: Down -> first, Up -> last)."""
         s = self.suggestions
-        if key in (Qt.Key_Down, Qt.Key_Up):
-            row = s.currentRow() + (1 if key == Qt.Key_Down else -1)
-            s.setCurrentRow(max(0, min(s.count() - 1, row)))
+        if key == Qt.Key_Escape or s.count() < 1:
+            if self._clash(self.focused_item) and key != Qt.Key_Escape:
+                return True
+            self.hide_suggestions()
             return True
-        if key in (Qt.Key_Tab,) or (key in (Qt.Key_Return, Qt.Key_Enter) and s.currentRow() >= 0):
-            it = s.currentItem() or s.item(0)
-            if it is not None:
+        if key == Qt.Key_Tab or (key in (Qt.Key_Return, Qt.Key_Enter) and s.activated):
+            it = s.currentItem()
+            if it is not None and s.currentRow() >= 0:
                 self._apply_suggestion(it)
             return True
-        if key == Qt.Key_Escape:
-            self.hide_suggestions()
+        if key in (Qt.Key_Down, Qt.Key_Up):
+            row = s.currentRow()
+            if row < 0:
+                row = 0 if key == Qt.Key_Down else s.count() - 1
+            else:
+                row = max(0, min(s.count() - 1, row + (1 if key == Qt.Key_Down else -1)))
+            s.activated = True
+            s.setCurrentRow(row)
             return True
         return False
 
@@ -563,15 +655,52 @@ class WorksheetView(QGraphicsView):
         item = self.focused_item
         if item is None:
             return
-        label, kind = it.data(Qt.UserRole)
-        name = label.split(" (")[0]
-        if kind == "unit":
+        e = it.data(Qt.UserRole)
+        name = e.name.split(" ")[0]  # "sum (4)" inserts sum(
+        if e.kind == "unit":
             back = {v: k for k, v in SMATH_LABEL.items()}
             name = "'" + back.get(name[1:], name[1:])
+        elif e.origin == 3 and e.kind == "operand":
+            # the user picked the worksheet variable over a unit of the same name
+            item.editor.confirmed_words.add(name)
         start, _ = item.editor.current_word()
-        item.editor.replace_word(start, name, call=(kind == "function" and name not in KEYWORDS))
+        if e.kind == "function" and name in item.editor.STRUCTURE_WORDS:
+            # the site inserts "sqrt(" - which becomes the radical, as typed
+            item.editor.replace_word(start, name)
+            item.editor.key("(")
+        else:
+            item.editor.replace_word(start, name, call=(e.kind == "function" and name not in KEYWORDS))
         self.hide_suggestions()
         self._after_edit(item)
+
+    # -- variable / unit name clashes -----------------------------------------------------
+    def _clash(self, item: Optional[RegionItem]) -> Optional[str]:
+        """The name at the cursor when it is both a worksheet variable and a
+        unit (m:10 above, then m typed) and the user has not yet said which
+        one is meant.  SMath Cloud silently takes the variable; here the
+        choice has to be made in the list."""
+        if item is None or item.region.kind != "math" or item.editor.in_unit:
+            return None
+        _, word = item.editor.current_word()
+        if not word or word[0] in "'.0123456789" or word in item.editor.confirmed_words:
+            return None
+        if not is_unit(word):
+            return None
+        ctx = self.worksheet._context_before(item.region)
+        if word not in ctx.names():
+            return None
+        return word
+
+    def _block_for_clash(self, item: RegionItem) -> bool:
+        word = self._clash(item)
+        if word is None:
+            return False
+        if not self.suggestions.isVisible():
+            self.update_suggestions(item, force=True)
+        QApplication.beep()
+        self.status.emit(f"'{word}' is both a variable and a unit - choose which one from the list "
+                         "(Up/Down, then Tab or Enter).")
+        return True
 
     # -- clipboard / region commands ----------------------------------------------------------
     def _selected_items(self) -> list:
@@ -860,6 +989,50 @@ def smath_sort_key(label: str):
     return primary, ties
 
 
+@dataclass
+class Suggestion:
+    """One autocomplete entry, as SMath Cloud sends it."""
+
+    name: str  # what is inserted: 'm, sum (4), x
+    text: str  # what the list shows: m, sum (4), x
+    kind: str  # function / unit / operand (picks the icon)
+    origin: int  # 1 SMath core, 2 plugin, 3 this worksheet
+    args: int
+    description: str  # HTML shown in the tooltip ("" = no tooltip)
+
+
+def suggestion_entries(word: str, defined_names, user_functions=None) -> list:
+    """suggestion_list with each entry's icon kind, origin and description."""
+    from ..engine.suggest_meta import SUGGESTION_META
+
+    user_functions = user_functions or {}
+    out = []
+    for label, _kind in suggestion_list(word, defined_names):
+        meta = SUGGESTION_META.get(label)
+        if meta is not None and label not in user_functions:
+            origin, args, desc = meta
+        else:
+            origin, args, desc = 3, user_functions.get(label, 0), ""
+        kind = "function" if args > 0 else ("unit" if label.startswith("'") else "operand")
+        text = label[1:] if label.startswith("'") else label
+        out.append(Suggestion(label, text, kind, origin, args, desc))
+    return out
+
+
+def selected_index(entries: list, word: str) -> Optional[int]:
+    """The entry SMath Cloud highlights when the list opens: the first whose
+    name starts with the typed text (case-sensitive first, observed: M ->
+    MB, m -> m, q -> qq), else ignoring case (Si -> sign), else none."""
+    key = (lambda e: e.name) if word.startswith("'") else (lambda e: e.text)
+    for fold in (False, True):
+        w = word.lower() if fold else word
+        for k, e in enumerate(entries):
+            t = key(e).lower() if fold else key(e)
+            if t.startswith(w):
+                return k
+    return None
+
+
 def suggestion_list(word: str, defined_names) -> list:
     """The autocomplete list for a partial word (observed on SMath Cloud):
     case-insensitive substring matches; units (with their apostrophe) first,
@@ -885,7 +1058,7 @@ def suggestion_list(word: str, defined_names) -> list:
         if needle in c.lower():
             others.setdefault(c, "constant")
     for n in defined_names:
-        if needle in n.lower() and n != word and n not in others:
+        if needle in n.lower() and n not in others:
             others[n] = "variable"
     rest = sorted(others.items(), key=lambda x: smath_sort_key(x[0]))
     return units + rest

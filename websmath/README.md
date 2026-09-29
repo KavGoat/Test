@@ -80,7 +80,15 @@ QT_QPA_PLATFORM=offscreen python -m pytest websmath/tests -p no:faulthandler
   `Operation cannot be performed with units.`,
   `f(#) - function is not defined.`
 * **Autocomplete:** substring matches over units, functions, constants and
-  worksheet variables, units first, styled like the site.
+  worksheet variables, units first; the site's icons, highlighted entry,
+  description tooltips and keys (Tab applies, Enter after arrowing). A name
+  that is both a worksheet variable and a unit (`m` after `m:10`) must be
+  picked from the list before typing on.
+* **Subscripts** with `.` (`x.1`, `'g.e`), edited part by part as on the site;
+  `2x` becomes `2·x`; space turns only a lone word or number into text.
+* **Constants:** SMath's unit-library constants (`'g.e`, `'c`, `'h`, `'k`,
+  `'N.A`, `'R.m`, `'ε.0`, `'μ.0`, `'m.e`, ...) and `π e i ∞`, shown in the
+  site's units; **Insert > Constants...** lists them all in a table.
 * **Functions:** the site's catalogue, in these groups:
   * trigonometry and hyperbolics, logarithms, roots, factorial, `mod`,
     rounding;

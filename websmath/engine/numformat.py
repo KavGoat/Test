@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from decimal import ROUND_HALF_EVEN, ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_EVEN, ROUND_HALF_UP, Decimal, localcontext
 
 
 @dataclass
@@ -48,7 +48,9 @@ class FormattedNumber:
 def _round(x: float, places: int, fmt: NumberFormat) -> str:
     mode = ROUND_HALF_EVEN if fmt.half_even else ROUND_HALF_UP
     q = Decimal(1).scaleb(-places) if places > 0 else Decimal(1)
-    d = Decimal(repr(x)).quantize(q, rounding=mode)
+    with localcontext() as ctx:
+        ctx.prec = 400  # 170! has 307 digits before the point
+        d = Decimal(repr(x)).quantize(q, rounding=mode)
     s = format(d, "f")
     if not fmt.trailing_zeros and "." in s:
         s = s.rstrip("0").rstrip(".")

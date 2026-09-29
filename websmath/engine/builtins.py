@@ -54,7 +54,9 @@ def catalogue_names() -> list:
 # ---------------------------------------------------------------------------
 
 def _num(v):
-    q = need_dimless(v)
+    q = need_scalar(v)
+    if not q.dimensionless:
+        raise err("function_units")  # observed: sin(1'm)
     return q.value
 
 
@@ -70,14 +72,46 @@ def _cfun(f_real, f_complex, domain=None):
         if isinstance(v, Matrix):
             return Matrix(v.nrows, v.ncols, [run(x) for x in v.items])
         x = _num(v)
-        if isinstance(x, complex) or (domain is not None and not domain(x)):
-            return _out(f_complex(complex(x)))
         try:
-            return _out(f_real(x))
-        except (ValueError, OverflowError):
-            return _out(f_complex(complex(x)))
+            if isinstance(x, complex) or (domain is not None and not domain(x)):
+                r = f_complex(complex(x))
+            else:
+                try:
+                    r = f_real(x)
+                except ValueError:
+                    r = f_complex(complex(x))
+        except (OverflowError, ZeroDivisionError):
+            raise err("overflow")  # observed: exp(1000), cot(0)
+        if isinstance(r, complex) and (math.isinf(r.real) or math.isinf(r.imag)) or \
+                (not isinstance(r, complex) and math.isinf(r)):
+            raise err("overflow")
+        return _out(r)
 
     return run
+
+
+def _snap_zero(y: float) -> float:
+    """sin(π) and cos(π/2) show 0 on SMath Cloud, not 1.2246·10^-16."""
+    return 0.0 if abs(y) < 1e-15 else y
+
+
+def _no_log_zero(f):
+    def run(v):
+        if isinstance(v, Quantity) and v.value == 0:
+            raise err("log_zero")  # observed: ln(0)
+        return f(v)
+
+    return run
+
+
+# .NET's complex inverse sine/cosine (SMath: asin(2) = 1.5708-1.317i,
+# acos(2) = 1.317i; Python's cmath picks the other branch on the cut)
+def _net_asin(z: complex) -> complex:
+    return -1j * cmath.log(1j * z + cmath.sqrt(1 - z * z))
+
+
+def _net_acos(z: complex) -> complex:
+    return -1j * cmath.log(z + 1j * cmath.sqrt(1 - z * z))
 
 
 def _mat(v) -> Matrix:
@@ -99,8 +133,8 @@ def _real(v) -> float:
 for _n, _r, _c, _dom in [
     ("sin", math.sin, cmath.sin, None), ("cos", math.cos, cmath.cos, None),
     ("tan", math.tan, cmath.tan, None),
-    ("asin", math.asin, cmath.asin, lambda x: -1 <= x <= 1),
-    ("acos", math.acos, cmath.acos, lambda x: -1 <= x <= 1),
+    ("asin", math.asin, _net_asin, lambda x: -1 <= x <= 1),
+    ("acos", math.acos, _net_acos, lambda x: -1 <= x <= 1),
     ("sinh", math.sinh, cmath.sinh, None), ("cosh", math.cosh, cmath.cosh, None),
     ("tanh", math.tanh, cmath.tanh, None), ("asinh", math.asinh, cmath.asinh, None),
     ("acosh", math.acosh, cmath.acosh, lambda x: x >= 1),
@@ -109,7 +143,9 @@ for _n, _r, _c, _dom in [
     ("ln", math.log, cmath.log, lambda x: x > 0),
     ("log10", math.log10, cmath.log10, lambda x: x > 0),
 ]:
-    fn(_n)(_cfun(_r, _c, _dom))
+    if _n in ("sin", "cos"):
+        _r = (lambda f: lambda x: _snap_zero(f(x)))(_r)
+    fn(_n)(_no_log_zero(_cfun(_r, _c, _dom)) if _n in ("ln", "log10") else _cfun(_r, _c, _dom))
 
 
 fn("cot")(_cfun(lambda x: 1 / math.tan(x), lambda z: 1 / cmath.tan(z)))
@@ -155,6 +191,8 @@ def _nthroot(x, n):
 
 @fn("log", 2)
 def _log(x, b):
+    if _num(x) == 0:
+        raise err("log_zero")
     return _out(cmath.log(_num(x)) / cmath.log(_num(b))) if _num(x) <= 0 or _num(b) <= 0 else Q(math.log(_num(x), _num(b)))
 
 
@@ -195,6 +233,8 @@ def _round_half_away(x: float, n: int) -> float:
 @fn("round", 2)
 def _round2(v, n):
     k = need_int(n)
+    if not 0 <= k <= 15:
+        raise err("round_range")  # observed: round(12345.6789, -2)
     q = need_scalar(v)
     return Q(_round_half_away(q.real, k), q.dims)
 
@@ -217,7 +257,9 @@ def _mod(a, b):
         raise err("units_mismatch")
     if y.value == 0:
         raise err("div_zero")
-    return Q(x.real - y.real * math.floor(x.real / y.real), x.dims)
+    # the remainder takes the sign of the dividend (observed: mod(-7,3) = -1,
+    # mod(7,-3) = 1, mod(5.5,2) = 1.5)
+    return Q(math.fmod(x.real, y.real), x.dims)
 
 
 @fn("Gamma")

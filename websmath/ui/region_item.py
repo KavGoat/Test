@@ -344,6 +344,11 @@ class RegionItem(QGraphicsObject):
             x1 = x
         underline_y = uinfo.base + uinfo.desc + 0.5
         top = info.base - info.asc
+        if ed.in_subscript():
+            # in a subscript the bar and underline drop to the subscript's
+            # line (SMath Cloud: bar 11-24 instead of 4-19 at 10pt)
+            top += info.asc * 0.55
+            underline_y += info.asc * 0.4
         p.setPen(QPen(Qt.black, 1))
         if x1 > x0:
             p.drawLine(QPointF(x0, underline_y), QPointF(x1, underline_y))

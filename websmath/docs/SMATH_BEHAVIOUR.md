@@ -220,9 +220,12 @@ Observed with the cursor after the 3 of `1+2·3`:
 
 ## Text regions
 
-* In a math region holding **only a name** (`abc`, `x`, `x1`), pressing
+* In a math region holding **only a name or a number** (`abc`, `x`, `x1`,
+  `2`, `2.5`, `sin`, `x.1`, even a name that is defined above), pressing
   **space** converts the region to a **text region**. `abc` + space + `def`
-  gives the text "abc def".
+  gives the text "abc def", and `x.1` becomes the literal text "x.1".
+* Anywhere else space is never inserted: after an operator, `:` or `=`
+  (`q+1 `, `w: `, `q= `) it widens the selection instead.
 * `"` as the first key also starts a text region.
 * **Backspace never turns text back into maths**; it just deletes characters.
   **Undo** steps back one keystroke at a time, including the conversion itself.
@@ -329,6 +332,75 @@ result becomes ■. While the region is being edited, a tip appears under it
 * `Operation cannot be performed with units.`
 * `Fill in all empty elements.`
 * `Syntax is incorrect.`
+* `Logarithm of zero is not defined.` (`ln(0)`)
+* `Division by zero.` (`1/0`, and also `0/0`)
+* `Result is above max. allowed positive number.` (`exp(1000)`, `10^400`,
+  `171!`, `cot(0)`)
+* `Uncertainty.` (`0^0`)
+* `Factorial is defined for real numbers and zero.` (`3.5!`; the site's
+  wording)
+* `Coefficient of rounding should be in the range from 0 to 15 inclusive.`
+  (`round(12345.6789,-2)`)
+* `Operation cannot be performed with units.` also for `sin(1'm)`
+
+## Subscripts (`.`)
+
+* `x.1` draws x with subscript 1. The cursor and its underline move into the
+  subscript: the underline covers **only the subscript** while the cursor is
+  after the dot, and **only the base** before it. The cursor bar drops to the
+  subscript's line.
+* Backspace in `x.1` removes `1` and leaves an **empty subscript** (the
+  underline is then empty); a second Backspace removes the dot.
+* `x.` followed by an operator drops the empty subscript: `x.+1` is `x+1`.
+* Left through `ab.cd`: inside `cd`, to the start of the subscript, then to
+  the end of `ab` (underline switches to `ab`), then inside `ab`.
+* Inside a subscript a further dot is literal (`x.1.2`: subscript `1.2`).
+  In a number a second dot is ignored (`2.5.3` is `2.53`); `.5` is 0.5.
+* Units, constants and function names take subscripts too (`5'm.x`,
+  `'g.e`, `f.a(x)`); a power goes after the subscript (`x.1^2`).
+
+## Number then letter
+
+A letter or `(` typed straight after a number inserts a multiplication:
+`2x` is `2·x`, `2i` is `2·i`, `2(` is `2·(■)`, `3.5a` is `3.5·a`. There is no
+`e` notation: `2e3` is `2·e3`. `2'm` stays a number with a unit, and `x2` is a
+name.
+
+## Functions (results checked on the site)
+
+`sqrt(-1)` = i; `asin(2)` = 1.5708−1.317i and `acos(2)` = 1.317i (.NET branch
+cuts); `ln(-1)` = 3.1416i; `mod(-7,3)` = −1 and `mod(7,-3)` = 1 (the
+remainder takes the sign of the dividend); `round(2.5)`-style rounding is half
+away from zero; `floor/ceil/trunc(-2.5)` = −3/−2/−2; `sin(π)` and `cos(π/2)`
+are exactly 0 but `tan(π/2)` = 1.6331·10^16; `170!` = 7.2574·10^306;
+`perc(5,200)` = 10; `sin(1+2i)` = 3.1658+1.9596i. Typing `name(args)=` for a
+function that has no overload with that many arguments (`round(2.5)`,
+`log(0)`, `gcd(12,18)`, `max(1,5,3)`) turns `=` into `:=` (a definition).
+
+## Constants
+
+SMath's physical constants live in its unit library and are typed like units:
+`'c 'e 'g.e 'G.N 'h 'hildebrand 'k 'm.e 'm.n 'm.p 'N.A 'R.m 'u 'ε.0 'μ.0`,
+plus the operands `π e i ∞`. The site shows them as:
+`'g.e` = 9.8067 m/s², `'c` = 2.9979·10^8 m/s, `'h` = 6.6261·10^-34 s J,
+`'k` = 1.3807·10^-23 J/K, `'N.A` = 6.0221·10^23 1/mol, `'R.m` = 8.3145
+J/(K mol), `'ε.0` = 8.8542·10^-12 F/m, `'μ.0` = 1.2566·10^-6 m T/A, `'m.e`,
+`'m.p`, `'m.n`, `'u` in kg, `'e` = 1.6022·10^-19 C and `'hildebrand` =
+2045.48 kg^(1/2)/(s m^(1/2)). **`'G.N` is not evaluated on the site** (it shows
+`1 G.N`, like any unknown unit such as `'σ`); the replica gives it its
+library value, 6.6743·10^-11 m³/(kg s²). Insert > Constants... lists them all.
+
+## A variable with a unit's name
+
+After `m:10`, `m=` shows 10 and `m*2'm=` shows 20 m: **the variable wins over
+the unit**, and `'m` is still the metre. The autocomplete list for `m` shows
+both (unit m with the unit icon, highlighted; variable m with the worksheet
+icon). The replica keeps this but makes the choice explicit: while the name
+under the cursor is both a defined variable and a unit, keys that would finish
+the name (operators, `=`, `:`, Enter, arrows, Tab out) are refused and the list
+opens; pick the variable or the unit with Up/Down and Tab (or Enter, or a
+click). The unit becomes `'m`; the variable stays `m`. Names that are not both
+are typed as usual.
 
 ## Autocomplete
 
@@ -345,6 +417,25 @@ checked item for item against 18 lists read back from the site. The rules:
 * **Units differing only in case appear once:** a over A, pA over Pa, s over
   S, t over T, kn over kN, G over g, Mg over mg, MJ over mJ, pC over pc.
 * Arc minute and arc second are listed as `'\\0027\\` and `'\\0022\\`.
+* **What each entry shows** (from the site's own client code): the name
+  **without the unit apostrophe**, after a 12×12 icon chosen by kind
+  (function if it takes arguments, unit if it starts with `'`, operand
+  otherwise) and origin (1 SMath core, 2 plugin, 3 this worksheet). The
+  icons are copied from the site's stylesheet into `ui/icons/`. **Values of
+  variables are not shown.** The entry's description (the unit's name, or
+  the function's signature with the name in bold and arguments in blue) is
+  shown in a tooltip box to the right of the list: 12 px, InfoBackground,
+  black border, at most 200 px wide. Variables have no description, so no
+  tooltip. All descriptions are in `engine/suggest_meta.py`.
+* **Highlighted when the list opens:** the first entry whose name starts with
+  the typed text, case-sensitive first (`m` → unit m, `M` → MB, `q` → qq),
+  else ignoring case (`Si` → sign), else none. A name typed in full is still
+  listed (`qq` lists qq).
+* **Keys:** Esc closes; **Tab** applies the highlighted entry; **Enter**
+  applies it only once the list has been moved through with Up/Down; Up/Down
+  from nothing highlighted go to the last/first entry; one click applies an
+  entry. A function is inserted with its brackets (`sqrt` becomes the
+  radical).
 
 Matching is **substring, case-insensitive**:
 `k` offers `'stokes`, `'week`, `rank`, `stack`. It contains **units** (with their
@@ -353,9 +444,8 @@ apostrophe), built-in **functions** (overloads listed as `sum (1)`/`sum (4)`),
 **variables**. Units come first, then everything else, each group sorted
 alphabetically ignoring case.
 
-Styling: white background, black border, 12 px text, 90 px high with a
-scrollbar. The selected item is white on #9faab5. Up/Down moves, Tab or Enter
-picks, Esc closes. The full function and unit lists are in `engine/catalog.py`
+Styling: white background, black border, 12 px text, at least 90 px wide,
+90 px high at most, with a scrollbar. The selected item is white on #9faab5. The full function and unit lists are in `engine/catalog.py`
 (129 functions, 284 units).
 
 ## Styling of equations (`representation/settings.prop` and the SVG)

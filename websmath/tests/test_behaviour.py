@@ -466,3 +466,147 @@ def test_cross_product_and_approx():
     ws, (a, b, c) = sheet(["u", ":", "m", "a", "t", "(", "1", "RIGHT", "0", "RIGHT", "0", "RIGHT", "0"],
                           ["w", ":", "u"], "1≈1.00000000001=")
     assert result(c) == "1"
+
+
+# -- subscripts, typed with "." (observed on SMath Cloud) -----------------------------
+
+def _ed(keys):
+    from websmath.editor import MathEditor
+
+    e = MathEditor()
+    for k in keys if isinstance(keys, list) else list(keys):
+        e.key(k)
+    return e
+
+
+@pytest.mark.parametrize("typed,text", [
+    ("x.1", "x.1"),          # x with subscript 1
+    ("x.+1", "x+1"),         # an empty subscript is dropped by the operator
+    ("2.5.3", "2.53"),       # a second decimal point is ignored
+    ("x.1.2", "x.1.2"),      # inside a subscript a further dot is literal
+    ("x.1^2", "x.1^(2)"),    # the power goes after the subscript
+    ("f.a(x", "f.a(x)"),     # function names take subscripts too
+])
+def test_subscript_typing(typed, text):
+    assert _ed(typed).root.text() == text
+
+
+def test_subscript_backspace_and_underline():
+    e = _ed("x.1")
+    assert e.underline()[1:] == (2, 3) and e.in_subscript()  # only the subscript
+    e.key("BACK")
+    assert e.root.text() == "x." and e.underline()[1:] == (2, 2)  # empty subscript stays
+    e.key("BACK")
+    assert e.root.text() == "x" and e.underline()[1:] == (0, 1)
+
+
+def test_subscript_left_walks_parts():
+    # ab.cd: Left moves inside cd, to the start of the subscript, then to the
+    # end of ab (underline switches from cd to ab), then inside ab
+    e = _ed("ab.cd")
+    seen = []
+    for _ in range(4):
+        e.key("LEFT")
+        seen.append((e.pos, e.underline()[1:]))
+    assert seen == [(4, (3, 5)), (3, (3, 5)), (2, (0, 2)), (1, (0, 2))]
+
+
+@pytest.mark.parametrize("typed,kind", [
+    ("q ", "text"), ("2 ", "text"), ("sin ", "text"), ("x.1 ", "text"), ("2.5 ", "text"),
+    ("q+1 ", "math"), ("w: ", "math"), ("q=5 ", "math"),
+])
+def test_space_turns_lone_word_into_text(typed, kind):
+    # only a lone name / number (before any operator or "=") becomes text;
+    # elsewhere space never inserts a space, it widens the selection
+    e = _ed(typed)
+    assert e.kind == kind
+    if kind == "math":
+        assert " " not in e.root.text()
+
+
+@pytest.mark.parametrize("typed,text", [
+    ("2x", "2*x"), ("3.5a", "3.5*a"), ("2(", "2*()"), ("2e3", "2*e3"), ("x2", "x2"), ("2'm", "2'm"),
+])
+def test_number_then_letter_multiplies(typed, text):
+    assert _ed(typed).root.text() == text
+
+
+# -- functions: results and messages read off SMath Cloud ------------------------------
+
+@pytest.mark.parametrize("expr,shown,message", [
+    ("sqrt(-1)=", "i", None),
+    ("ln(0)=", None, "Logarithm of zero is not defined."),
+    ("1/0=", None, "Division by zero."),
+    ("asin(2)=", "1.5708-1.317·i", None),
+    ("acos(2)=", "1.317·i", None),
+    ("mod(-7,3)=", "-1", None),
+    ("mod(7,-3)=", "1", None),
+    ("mod(5.5,2)=", "1.5", None),
+    ("round(1.2345,2)=", "1.23", None),
+    ("round(12345.6789,-2)=", None, "Coefficient of rounding should be in the range from 0 to 15 inclusive."),
+    ("3.5!=", None, "Factorial is defined for real numbers and zero."),
+    ("20!=", "2.4329·10^18", None),
+    ("170!=", "7.2574·10^306", None),
+    ("171!=", None, "Result is above max. allowed positive number."),
+    ("sin(1'm)=", None, "Operation cannot be performed with units."),
+    ("sin(30'deg)=", "0.5", None),
+    ("cos(π/2)=", "0", None),
+    ("sin(π)=", "0", None),
+    ("tan(π/2)=", "1.6331·10^16", None),
+    ("cot(0)=", None, "Result is above max. allowed positive number."),
+    ("exp(1000)=", None, "Result is above max. allowed positive number."),
+    ("10^400=", None, "Result is above max. allowed positive number."),
+    ("0^0=", None, "Uncertainty."),
+    ("ln(-1)=", "3.1416·i", None),
+    ("floor(-2.5)=", "-3", None),
+    ("ceil(-2.5)=", "-2", None),
+    ("trunc(-2.5)=", "-2", None),
+    ("sign(0)=", "0", None),
+    ("nthroot(-8,3)=", "-2", None),
+    ("sin(1+2i)=", "3.1658+1.9596·i", None),
+    ("Re(3+4i)=", "3", None),
+    ("perc(5,200)=", "10", None),
+    ("log(8,2)=", "3", None),
+])
+def test_functions_match_smath(expr, shown, message):
+    _, (r,) = sheet(expr)
+    assert (result(r), error(r)) == (shown, message)
+
+
+# -- constants: SMath's unit-library constants, shown as the site shows them ----------------
+
+@pytest.mark.parametrize("expr,shown", [
+    ("'g.e=", "9.8067 m/s^2"),
+    ("'c=", "2.9979·10^8 m/s"),
+    ("'h=", "6.6261·10^-34 s J"),
+    ("'k=", "1.3807·10^-23 J/K"),
+    ("'N.A=", "6.0221·10^23 1/mol"),
+    ("'R.m=", "8.3145 J/K mol"),
+    ("'ε.0=", "8.8542·10^-12 F/m"),
+    ("'μ.0=", "1.2566·10^-6 m T/A"),
+    ("'m.e=", "9.1094·10^-31 kg"),
+    ("'m.p=", "1.6726·10^-27 kg"),
+    ("'m.n=", "1.6749·10^-27 kg"),
+    ("'u=", "1.6605·10^-27 kg"),
+    ("'e=", "1.6022·10^-19 C"),
+    ("'hildebrand=", "2045.48 kg^0.5/s m^0.5"),
+    ("π=", "3.1416"), ("e=", "2.7183"), ("i=", "i"), ("∞=", "∞"),
+])
+def test_constants_match_smath(expr, shown):
+    _, (r,) = sheet(expr)
+    assert result(r) == shown
+
+
+def test_constants_table_lists_every_constant():
+    from websmath.engine.constants import constants
+
+    typed = [c.typed for c in constants()]
+    assert typed[:4] == ["π", "e", "i", "∞"]
+    assert set(typed[4:]) == {"'c", "'e", "'g.e", "'G.N", "'h", "'hildebrand", "'k", "'m.e", "'m.n",
+                              "'m.p", "'N.A", "'R.m", "'u", "'ε.0", "'μ.0"}
+
+
+def test_variable_named_like_a_unit_wins():
+    # observed: after m:10, m= shows 10 and 'm stays the metre
+    _, (_, a, b) = sheet("m:10", "m=", "m*2'm=")
+    assert (result(a), result(b)) == ("10", "20 m")

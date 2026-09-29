@@ -81,6 +81,7 @@ class MainWindow(QMainWindow):
         self._act(i, "Matrix...", self._insert_matrix, "Ctrl+M")
         self._act(i, "Function...", self._insert_function, "Ctrl+E")
         self._act(i, "Unit...", self._insert_unit, "Ctrl+W")
+        self._act(i, "Constants...", self._show_constants)
         i.addSeparator()
         self._act(i, "Plot - 2D", self._insert_plot, "Ctrl+2")
         self._act(i, "Area", self._insert_area)
@@ -465,6 +466,38 @@ class MainWindow(QMainWindow):
         name = self._pick("Insert unit", entries)
         if name:
             self._type("'" + name)
+
+    def _show_constants(self) -> None:
+        """Table of every constant SMath defines; double-click inserts one."""
+        from PySide6.QtWidgets import QHeaderView, QTableWidget, QTableWidgetItem
+
+        from ..engine.constants import constants
+
+        rows = constants()
+        d = QDialog(self)
+        d.setWindowTitle("Constants")
+        lay = QVBoxLayout(d)
+        lay.addWidget(QLabel("Built-in operands are typed as shown; physical constants are typed "
+                             "with an apostrophe, like units ('g.e). Double-click to insert."))
+        t = QTableWidget(len(rows), 5)
+        t.setHorizontalHeaderLabels(["Type", "Symbol", "Value", "Unit", "Description"])
+        for k, c in enumerate(rows):
+            for j, text in enumerate((c.typed, c.symbol, c.value, c.unit, c.description)):
+                cell = QTableWidgetItem(text)
+                cell.setFlags(cell.flags() & ~Qt.ItemIsEditable)
+                t.setItem(k, j, cell)
+        t.verticalHeader().hide()
+        t.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        t.horizontalHeader().setStretchLastSection(True)
+        t.setSelectionBehavior(QTableWidget.SelectRows)
+        t.cellDoubleClicked.connect(lambda r, _c: (d.accept(), self._type(rows[r].typed)))
+        lay.addWidget(t)
+        box = QDialogButtonBox(QDialogButtonBox.Close)
+        box.rejected.connect(d.reject)
+        lay.addWidget(box)
+        d.resize(760, 560)
+        self._constants_dialog = d
+        d.exec()
 
     def _about(self) -> None:
         QMessageBox.about(self, "WebSMath", "WebSMath - a Python replica of the SMath Studio Cloud worksheet.")

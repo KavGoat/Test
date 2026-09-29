@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from .numformat import FormattedNumber, NumberFormat, format_real
-from .units import Quantity, base_unit_parts, derived_per_base, derived_unit_for
+from .units import OBSERVED_UNITS, Quantity, base_unit_parts, derived_per_base, derived_unit_for
 from .values import Matrix, String
 
 
@@ -58,6 +58,9 @@ def _unit_for(dims: tuple) -> Optional[DUnit]:
     d = derived_unit_for(dims)
     if d:
         return DUnit([(d, 1)], [])
+    seen = OBSERVED_UNITS.get(tuple(dims))
+    if seen:
+        return DUnit(list(seen[0]), list(seen[1]))
     # only when base units would need a squared (or worse) denominator:
     # kg/s² -> N/m, but m/s, kg/m, m/s² and m² stay in base units
     per = derived_per_base(dims) if any(d <= -2 for d in dims) else None

@@ -96,6 +96,12 @@ class Context:
             out |= self.parent.names()
         return out
 
+    def function_arities(self) -> dict:
+        """name -> argument count of the user functions visible here."""
+        out = self.parent.function_arities() if self.parent is not None else {}
+        out.update({n: k for n, k in self.funcs})
+        return out
+
 
 class DefinitionIndex:
     """Every definition in the worksheet, by name, in reading order.
@@ -197,6 +203,11 @@ class IndexedContext(Context):
 
     def names(self) -> set:
         return set(self.vars) | {n for n, _ in self.funcs} | self.index.names_before(self.key)
+
+    def function_arities(self) -> dict:
+        out = {n: k for (n, k), lst in self.index.funcs.items() if lst[0][0] < self.key}
+        out.update({n: k for n, k in self.funcs})
+        return out
 
     def assign(self, name: str, value) -> None:
         # a program assigning a worksheet variable redefines it here
@@ -322,7 +333,9 @@ class Evaluator:
             if n.op == "!":
                 x = need_real(v, n)
                 if x < 0 or x != int(x):
-                    return Q(math.gamma(x + 1))
+                    raise err("factorial", node=n)  # observed: 3.5!
+                if x > 170:
+                    raise err("overflow", node=n)  # observed: 171!
                 return Q(float(math.factorial(int(x))))
             if n.op == "¬":
                 return Q(0.0 if truth(v) else 1.0)
