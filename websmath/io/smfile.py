@@ -242,6 +242,13 @@ def loads(text: str) -> Worksheet:
 
 def _from_root(root) -> Worksheet:
     ws = Worksheet()
+    meta = root.find(f"{{{NS}}}settings/{{{NS}}}metadata[@lang='eng']")
+    if meta is None:
+        meta = root.find(f"{{{NS}}}settings/{{{NS}}}metadata")
+    if meta is not None:
+        for child in meta:
+            if child.text:
+                ws.metadata[_tag(child)] = child.text
     calc = root.find(f"{{{NS}}}settings/{{{NS}}}calculation")
     if calc is not None:
         p = calc.find(f"{{{NS}}}precision")
@@ -257,10 +264,21 @@ def _from_root(root) -> Worksheet:
     for reg in root.iter(f"{{{NS}}}region"):
         x = float(reg.get("left", "0"))
         y = float(reg.get("top", "0"))
+        before = len(ws.regions)
         math = reg.find(f"{{{NS}}}math")
         text = reg.findall(f"{{{NS}}}text")
         plot = reg.find(f"{{{NS}}}plot")
-        if plot is not None and plot.get("type", "2d") == "2d":
+        area = reg.find(f"{{{NS}}}area")
+        if area is not None:
+            if area.get("single") == "true":
+                ws.add_special("separator", y)
+            else:
+                nested = [float(c.get("top", "0")) + float(c.get("height", "24"))
+                          for c in reg.iter(f"{{{NS}}}region") if c is not reg]
+                height = float(area.get("height", "0")) or (max(nested) - y + 9 if nested else 90.0)
+                a = ws.add_special("area", y, height)
+                a.collapsed = area.get("collapsed") == "true"
+        elif plot is not None and plot.get("type", "2d") == "2d":
             _load_plot(ws, reg, plot, x, y)
         elif math is not None:
             inp = math.find(f"{{{NS}}}input")
@@ -282,7 +300,14 @@ def _from_root(root) -> Worksheet:
             paras = ["".join(p.itertext()) for p in chosen.findall(f"{{{NS}}}p")]
             ed = MathEditor()
             ed._to_text("\n".join(paras))
-            ws.add_region(x, y, ed)
+            region = ws.add_region(x, y, ed)
+            p0 = chosen.find(f"{{{NS}}}p")
+            if p0 is not None:
+                region.bold = p0.get("bold") == "true"
+                region.italic = p0.get("italic") == "true"
+                region.underline = p0.get("underline") == "true"
+        if len(ws.regions) > before:
+            _load_format(ws.regions[-1], reg)
     ws.calculate()
     return ws
 
@@ -292,8 +317,9 @@ def save_sm(ws: Worksheet, path) -> None:
         fh.write(dumps(ws).encode("utf-8"))
 
 
-def dumps(ws: Worksheet) -> str:
-    """The worksheet as .sm XML text."""
+def dumps(ws: Worksheet, calculate: bool = True) -> str:
+    """The worksheet as .sm XML text (calculate=False keeps the regions'
+    current results, e.g. when copying regions to the clipboard)."""
     ET.register_namespace("", NS)
     root = ET.Element(f"{{{NS}}}regions")
     settings = ET.SubElement(root, f"{{{NS}}}settings")
@@ -302,20 +328,36 @@ def dumps(ws: Worksheet) -> str:
     ET.SubElement(calc, f"{{{NS}}}exponentialThreshold").text = str(ws.format.threshold)
     ET.SubElement(calc, f"{{{NS}}}trailingZeros").text = "true" if ws.format.trailing_zeros else "false"
     ET.SubElement(calc, f"{{{NS}}}fractions").text = "decimal"
-    ws.calculate()
+    if ws.metadata:
+        meta = ET.SubElement(settings, f"{{{NS}}}metadata", {"lang": "eng"})
+        for key in ("title", "author", "description", "company", "keywords"):
+            if ws.metadata.get(key):
+                ET.SubElement(meta, f"{{{NS}}}{key}").text = ws.metadata[key]
+    if calculate:
+        ws.calculate()
     for k, r in enumerate(ws.ordered()):
-        attrs = {"id": str(k), "left": str(int(r.x)), "top": str(int(r.y)), "color": "#000000",
-                 "bgColor": "#ffffff", "fontSize": "10"}
+        attrs = {"id": str(k), "left": str(int(r.x)), "top": str(int(r.y)), "color": r.color,
+                 "bgColor": r.bg_color, "fontSize": f"{r.font_size:g}"}
+        if r.border:
+            attrs["border"] = "true"
         if not r.enabled:
             attrs["enabled"] = "false"
         reg = ET.SubElement(root, f"{{{NS}}}region", attrs)
         if r.kind == "plot":
             _save_plot(r, reg)
             continue
+        if r.special:
+            for k in ("left", "width", "height"):
+                reg.attrib.pop(k, None)
+            a = {"single": "true"} if r.special == "separator" else {
+                "collapsed": "true" if r.collapsed else "false", "height": f"{r.area_height:g}"}
+            ET.SubElement(reg, f"{{{NS}}}area", a)
+            continue
         if r.kind == "text":
             t = ET.SubElement(reg, f"{{{NS}}}text", {"lang": "eng"})
             for line in r.editor.text.split("\n"):
-                ET.SubElement(t, f"{{{NS}}}p").text = line
+                pattrs = {k: "true" for k in ("bold", "italic", "underline") if getattr(r, k)}
+                ET.SubElement(t, f"{{{NS}}}p", pattrs).text = line
             continue
         math = ET.SubElement(reg, f"{{{NS}}}math")
         inp = ET.SubElement(math, f"{{{NS}}}input")
@@ -409,3 +451,13 @@ def _save_plot(r, reg) -> None:
         e.text = "sys"
         els.append(e)
     inp.extend(els)
+
+
+def _load_format(region, reg) -> None:
+    region.color = reg.get("color", "#000000")
+    region.bg_color = reg.get("bgColor", "#ffffff")
+    region.border = reg.get("border", "false") == "true"
+    try:
+        region.font_size = float(reg.get("fontSize", "10"))
+    except ValueError:
+        pass

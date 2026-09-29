@@ -204,10 +204,26 @@ class IndexedContext(Context):
 
 
 class Evaluator:
+    # A region that runs longer than this is interrupted (a runaway while
+    # loop must not freeze the worksheet), like SMath's Interrupt processing.
+    TIME_LIMIT = 10.0
+
     def __init__(self):
         from . import builtins  # local import: builtins needs Evaluator types
 
         self.builtins = builtins
+        self.deadline = None
+
+    def start_clock(self) -> None:
+        import time
+
+        self.deadline = time.monotonic() + self.TIME_LIMIT
+
+    def check_time(self, node=None) -> None:
+        import time
+
+        if self.deadline is not None and time.monotonic() > self.deadline:
+            raise err("interrupted", node=node)
 
     # -- entry points ---------------------------------------------------------
     def define(self, node: A.Define, ctx: Context) -> None:

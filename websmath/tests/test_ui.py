@@ -92,3 +92,90 @@ def test_render_does_not_crash(app):
     v.focus_item(None)
     img = v.grab()
     assert not img.isNull()
+
+
+def test_copy_paste_regions(app):
+    v = WorksheetView()
+    type_at(v, 18, 18, "x:5")
+    press(v, Qt.Key_Return)
+    type_at(v, 18, 54, "x=")
+    press(v, Qt.Key_Return)
+    v.select_all()
+    v.copy()
+    v.scene_.cross = QPointF(18, 180)
+    v.paste()
+    assert len(v.items) == 4
+    pasted = sorted((it.region for it in v.items.values()), key=lambda r: r.y)[-1]
+    assert pasted.y > 150 and display_text(pasted.display) == "5"
+
+
+def test_copy_paste_inside_equation(app):
+    v = WorksheetView()
+    type_at(v, 18, 18, "1+2*3")
+    ed = v.focused_item.editor
+    ed.key(" ")  # select 2*3
+    v.copy()
+    ed.set_cursor(ed.root, len(ed.root))
+    press(v, 0, "+")
+    v.paste()
+    assert ed.root.text() == "1+2*3+2*3"
+
+
+def test_calculation_menu_commands(app):
+    v = WorksheetView()
+    type_at(v, 18, 18, "1+2*3")
+    ed = v.focused_item.editor
+    ed.key(" ")
+    v.calculate_selection()
+    assert ed.root.text() == "1+6"
+    type_at(v, 18, 60, "M")
+    v.determinant_selection()
+    assert v.focused_item.editor.root.text() == "det(M)"
+
+
+def test_format_and_areas(app, tmp_path):
+    from websmath.io.smfile import load_sm, save_sm
+
+    v = WorksheetView()
+    type_at(v, 18, 18, "abc ")  # text region
+    v.format_selection(toggle="bold", font_size=14.0, bg_color="#ffff80")
+    press(v, Qt.Key_Return)
+    v.insert_separator(90)
+    v.insert_area(120, 90)
+    type_at(v, 18, 153, "y:2")
+    press(v, Qt.Key_Return)
+    area = [it for it in v.items.values() if it.region.special == "area"][0]
+    inside = [it for it in v.items.values() if it.region.y == 153][0]
+    v.toggle_area(area)
+    assert not inside.isVisible()
+    v.toggle_area(area)
+    assert inside.isVisible()
+    path = tmp_path / "f.sm"
+    save_sm(v.worksheet, path)
+    ws = load_sm(path)
+    kinds = sorted(r.kind for r in ws.regions)
+    assert kinds == ["area", "math", "separator", "text"]
+    text = [r for r in ws.regions if r.kind == "text"][0]
+    assert text.bold and text.font_size == 14 and text.bg_color == "#ffff80"
+
+
+def test_export_pdf(app, tmp_path):
+    from PySide6.QtGui import QPdfWriter
+
+    v = WorksheetView()
+    type_at(v, 18, 18, "1/3=")
+    out = tmp_path / "sheet.pdf"
+    v.render_pages(QPdfWriter(str(out)))
+    assert out.stat().st_size > 500
+
+
+def test_up_down_move_between_regions(app):
+    v = WorksheetView()
+    type_at(v, 18, 18, "a:1")
+    press(v, Qt.Key_Return)
+    type_at(v, 18, 72, "b:2")
+    first = [it for it in v.items.values() if it.region.y == 18][0]
+    press(v, Qt.Key_Up)
+    assert v.focused_item is first
+    press(v, Qt.Key_Down)
+    assert v.focused_item.region.y == 72

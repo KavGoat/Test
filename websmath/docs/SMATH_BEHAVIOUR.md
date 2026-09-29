@@ -54,7 +54,7 @@ back. The catalogues are stored in `websmath/engine/catalog.py`.
   A region only sees definitions above it. Moving a line above the definition it
   uses turns it into an error: `x - not defined.`
 
-## Timing of evaluation
+## Timing of evaluation (and how the replica stays fast)
 
 * The region being edited is **re-evaluated on every keystroke**. `2+3=` shows
   `= 5` the moment `=` is typed, while the region is still being edited.
@@ -62,6 +62,15 @@ back. The catalogues are stored in `websmath/engine/catalog.py`.
 * Other regions are **not** recalculated while you type. Changing `q:=5` to
   `q7:=5` left `q = 5` below it unchanged until the definition lost focus. Then
   the whole sheet was recalculated, and `q =` became `q - not defined.`
+
+The replica keeps every definition in an index ordered by position, so
+"what is x here" is a binary search. When a region is left, only the regions
+below it that use a changed name (directly or through a function or another
+definition) are re-evaluated, and only regions whose result changed are
+redrawn. With 3000 regions, a keystroke takes about 7 ms and leaving a region
+that 1500 others depend on about 0.1 s. A region that runs for more than 10 s
+(a runaway `while`) is interrupted with an error instead of freezing the
+window.
 
 ## `=` means define or evaluate
 
@@ -107,6 +116,83 @@ gives `x7 = ■`, error `x7 - not defined.`
   for/while blocks come from the Programming toolbox.
 * Inside an if-block a comma moves from the condition to its value. A comma
   after a value adds an **else if** branch.
+
+## The cursor and the arrow keys
+
+Read back from the site's SVG, which draws the cursor as a vertical bar plus
+an underline:
+
+* **The underline covers the whole name or number** the cursor is in, not
+  just the part to its left. At the start of a name it underlines the name to
+  the right.
+* **Left/Right move one character at a time inside a name and jump over
+  operators.** From the start of `ef` in `ab+cd·ef`, Left goes straight to the
+  end of `cd`.
+* **The "whole sub-expression" state.** At the start of the first name of a
+  sub-expression, Left does not move. It extends the underline over the
+  whole sub-expression (`cd·ef`). The next Left leaves it (to the end of
+  `ab`). At the very start of the expression the whole expression is
+  underlined, and Left stays there. Right across an operator
+  (`ab` → `+` → `cd`) lands in the same state. Right from the state
+  returns to the plain cursor at the start of `cd`.
+  * Typing `/` in this state gives ■/(cd·ef), with the cursor in the empty
+    numerator. `^` gives ■^(cd·ef).
+  * An operator such as `+` is inserted in front of it.
+  * Letters are ignored.
+  * Backspace removes the operator before it.
+* **Boxes:**
+  * Left from the start of an exponent goes to the end of the base. Left from
+    the start of a function argument goes to the end of the function name.
+  * Left from the start of a denominator goes to the end of the numerator.
+  * Right at the end of a box leaves it, underlining the whole box (with the
+    function name).
+  * In a matrix, Right walks the cells row by row. An empty ■ has a stop
+    before it and one after it.
+* **Up/Down move to the previous/next region** in reading order, even from
+  inside a fraction. The cursor comes back where it was left in that region.
+
+## Calls drawn as structures
+
+A call is drawn by its name and number of arguments. Typing `while(` shows
+`while(■)`, but once the second argument exists it is the while-block. The
+toolbox inserts the complete forms (its buttons type `for(,,`, `while(,`,
+`sum(,,,`…):
+
+| Call | Drawn as |
+|---|---|
+| `for(i, r, body)` | `for i ∈ r` with the body indented |
+| `while(c, body)` | `while c` with the body indented |
+| `if(c, a, b)` | if / else block (appears as soon as `if(` is typed) |
+| `try(a, b)` | `try` / a / `on error` / b |
+| `line(…)` | vertical bar with one line per argument (`]` adds a line) |
+| `sum(e, i, a, b)`, `product(…)` | Σ / Π with `i = a` below and `b` above |
+| `int(e, x, a, b)` | ∫ with limits, then `e dx` |
+| `diff(e, x)` | d/dx e |
+| `log(x, b)` | log_b(x) |
+| `range(a, b)`, `range(a, b, s)` | [a..b], [a, s..b] |
+| `el(v, i)` | v with subscript i |
+| `sys(…)` | brace list |
+| `nthroot(x, n)` | ⁿ√x |
+| `a † b` | a × b (cross product, Ctrl+8) |
+| `≈`, `≉` | approximately (not) equal |
+
+## Toolbox and menus
+
+The toolbox sections are Arithmetic, Matrices, Boolean, Functions, Plot,
+Programming and the Greek letters, with the site's tooltips; the table above
+lists what their buttons type.
+
+The menus are:
+
+* **File:** New Worksheet, Upload (Ctrl+O), Save, Share, Download as, Print
+  (Ctrl+P), Properties.
+* **Edit:** Undo (Ctrl+Z), Redo (Ctrl+Y), Cut/Copy/Paste, Delete, Select all.
+* **View:** Grid, Dynamic assistance (autocomplete on/off).
+* **Insert:** Matrix (Ctrl+M), Function, Unit, Picture, Plot 2D/3D, Area,
+  Formula, Separator, CheckBox, ComboBox, Modeller, Text region.
+* **Calculation:** Solve, Calculate, Simplify, Invert, Differentiate,
+  Determinant, Auto calculation, Recalculate page (F9).
+* **Format toolbar:** font size, text colour, background colour, border.
 
 ## Typing over a selection
 
@@ -246,7 +332,21 @@ result becomes ■. While the region is being edited, a tip appears under it
 
 ## Autocomplete
 
-A list appears as soon as a name is typed. It is **substring, case-insensitive**:
+A list appears as soon as a name is typed. The replica's list has been
+checked item for item against 18 lists read back from the site. The rules:
+
+* **Worksheet variables and functions appear only if they are defined above**
+  the region being edited.
+* **Order:** units first, then everything else (functions, keywords,
+  `lastError`, variables) mixed. Each group uses .NET culture order: symbols
+  first (`\\ % ‰ ° ¤`), then digits, then letters ignoring case and accents
+  (`'Å` sorts with `a`), with Greek after Latin. On a tie, lower case comes
+  first.
+* **Units differing only in case appear once:** a over A, pA over Pa, s over
+  S, t over T, kn over kN, G over g, Mg over mg, MJ over mJ, pC over pc.
+* Arc minute and arc second are listed as `'\\0027\\` and `'\\0022\\`.
+
+Matching is **substring, case-insensitive**:
 `k` offers `'stokes`, `'week`, `rank`, `stack`. It contains **units** (with their
 apostrophe), built-in **functions** (overloads listed as `sum (1)`/`sum (4)`),
 **constants** `π e i ∞`, keywords `break continue`, and the worksheet's own

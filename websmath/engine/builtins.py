@@ -725,8 +725,8 @@ def _while(ev, n: A.Call, ctx):
         except ContinueLoop:
             pass
         guard += 1
-        if guard > 10_000_000:
-            raise err("iterations", node=n)
+        if guard % 1000 == 0:
+            ev.check_time(n)
     return result
 
 
@@ -741,7 +741,9 @@ def _for(ev, n: A.Call, ctx):
             raise err("syntax", node=var)
         values = ev.eval(rng, ctx)
         seq = values.items if isinstance(values, Matrix) else [values]
-        for v in seq:
+        for k, v in enumerate(seq):
+            if k % 1000 == 999:
+                ev.check_time(n)
             ctx.assign(var.name, v)
             try:
                 result = ev.eval(body, ctx)
@@ -763,8 +765,8 @@ def _for(ev, n: A.Call, ctx):
                 pass
             ev.eval(step, ctx)
             guard += 1
-            if guard > 10_000_000:
-                raise err("iterations", node=n)
+            if guard % 1000 == 0:
+                ev.check_time(n)
         return result
     raise err("args_count", node=n)
 

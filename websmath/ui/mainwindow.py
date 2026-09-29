@@ -46,31 +46,58 @@ class MainWindow(QMainWindow):
         return a
 
     def _menus(self) -> None:
+        """Menus as on SMath Cloud (File, Edit, View, Insert, Calculation, Help)."""
+        v = self.view
         mb = self.menuBar()
         f = mb.addMenu("File")
-        self._act(f, "New", self.new, "Ctrl+N")
+        self._act(f, "New Worksheet", self.new, "Ctrl+N")
         self._act(f, "Open...", self.open, "Ctrl+O")
+        f.addSeparator()
         self._act(f, "Save", self.save, "Ctrl+S")
         self._act(f, "Save as...", self.save_as, "Ctrl+Shift+S")
+        self._act(f, "Download as PDF...", self.export_pdf)
+        f.addSeparator()
+        self._act(f, "Print", self.print_sheet, "Ctrl+P")
+        f.addSeparator()
+        self._act(f, "Properties...", self.properties)
         f.addSeparator()
         self._act(f, "Exit", self.close)
         e = mb.addMenu("Edit")
-        self._act(e, "Undo", self.view.undo)
-        self._act(e, "Redo", self.view.redo)
+        self._act(e, "Undo", v.undo, "Ctrl+Z")
+        self._act(e, "Redo", v.redo, "Ctrl+Y")
         e.addSeparator()
-        self._act(e, "Select all", self.view.select_all)
-        self._act(e, "Delete regions", self._delete_selected)
-        v = mb.addMenu("View")
-        self._act(v, "Grid", self._toggle_grid, checkable=True, checked=True)
+        self._act(e, "Cut", v.cut, "Ctrl+X")
+        self._act(e, "Copy", v.copy, "Ctrl+C")
+        self._act(e, "Paste", v.paste, "Ctrl+V")
+        e.addSeparator()
+        self._act(e, "Delete", v.delete_selection)
+        e.addSeparator()
+        self._act(e, "Select all", v.select_all, "Ctrl+A")
+        vm = mb.addMenu("View")
+        self._act(vm, "Grid", self._toggle_grid, checkable=True, checked=True)
+        vm.addSeparator()
+        self._act(vm, "Dynamic assistance", self._toggle_assist, checkable=True, checked=True)
         i = mb.addMenu("Insert")
-        self._act(i, "Text region", self._insert_text, '"')
         self._act(i, "Matrix...", self._insert_matrix, "Ctrl+M")
-        self._act(i, "2D plot", self._insert_plot, "Ctrl+2")
         self._act(i, "Function...", self._insert_function, "Ctrl+E")
-        self._act(i, "Unit...", self._insert_unit, "Ctrl+U")
+        self._act(i, "Unit...", self._insert_unit, "Ctrl+W")
+        i.addSeparator()
+        self._act(i, "Plot - 2D", self._insert_plot, "Ctrl+2")
+        self._act(i, "Area", self._insert_area)
+        self._act(i, "Formula", self._insert_formula)
+        self._act(i, "Separator", self._insert_separator)
+        self._act(i, "Text region", self._insert_text)
         c = mb.addMenu("Calculation")
-        self._act(c, "Recalculate", lambda: self.view.recalculate(force=True), "F9")
+        self._act(c, "Solve", lambda: self._symbolic("Solve"))
+        self._act(c, "Calculate", v.calculate_selection)
+        self._act(c, "Simplify", lambda: self._symbolic("Simplify"))
+        self._act(c, "Invert", v.invert_selection)
+        self._act(c, "Differentiate", lambda: self._symbolic("Differentiate"))
+        self._act(c, "Determinant", v.determinant_selection)
+        c.addSeparator()
         self._act(c, "Auto calculation", self._toggle_auto, checkable=True, checked=True)
+        c.addSeparator()
+        self._act(c, "Recalculate page", lambda: v.recalculate(force=True), "F9")
         c.addSeparator()
         self._act(c, "Decimal places...", self._decimals)
         self._act(c, "Exponential threshold...", self._threshold)
@@ -78,6 +105,47 @@ class MainWindow(QMainWindow):
         self._act(c, "Trailing zeros", self._trailing, checkable=True, checked=False)
         h = mb.addMenu("Help")
         self._act(h, "About WebSMath", self._about)
+        self._format_toolbar()
+
+    def _format_toolbar(self) -> None:
+        """The editor toolbar's format controls: font size, colours, border,
+        bold/italic/underline (Ctrl+B/I/U), function and unit dialogs."""
+        from PySide6.QtWidgets import QComboBox
+
+        tb = self.addToolBar("Format")
+        tb.setMovable(False)
+        size = QComboBox()
+        size.addItems(["7", "8", "10", "12", "14", "16", "18", "20", "24", "28", "32", "36", "42", "48", "54", "72"])
+        size.setCurrentText("10")
+        size.setFocusPolicy(Qt.NoFocus)
+        size.activated.connect(lambda _: self.view.format_selection(font_size=float(size.currentText())))
+        tb.addWidget(size)
+        self._size_box = size
+        tb.addAction(self._mk("B", lambda: self.view.format_selection(toggle="bold"), "Ctrl+B", "Bold"))
+        tb.addAction(self._mk("I", lambda: self.view.format_selection(toggle="italic"), "Ctrl+I", "Italic"))
+        tb.addAction(self._mk("U", lambda: self.view.format_selection(toggle="underline"), "Ctrl+U", "Underline"))
+        tb.addAction(self._mk("A", lambda: self._pick_color("color"), None, "Text color"))
+        tb.addAction(self._mk("▦", lambda: self._pick_color("bg_color"), None, "Background color"))
+        tb.addAction(self._mk("□", lambda: self.view.format_selection(toggle="border"), None, "Border on/off"))
+        tb.addSeparator()
+        tb.addAction(self._mk("fx", self._insert_function, None, "Function"))
+        tb.addAction(self._mk("m", self._insert_unit, None, "Unit"))
+        tb.addAction(self._mk("⟳", lambda: self.view.recalculate(force=True), None, "Recalculate page"))
+
+    def _mk(self, text, slot, shortcut, tip):
+        a = QAction(text, self)
+        if shortcut:
+            a.setShortcut(QKeySequence(shortcut))
+        a.setToolTip(tip)
+        a.triggered.connect(slot)
+        return a
+
+    def _pick_color(self, attr: str) -> None:
+        from PySide6.QtWidgets import QColorDialog
+
+        c = QColorDialog.getColor(parent=self)
+        if c.isValid():
+            self.view.format_selection(**{attr: c.name()})
 
     def _toolbox(self) -> None:
         dock = QDockWidget("Toolbox", self)
@@ -226,6 +294,71 @@ class MainWindow(QMainWindow):
             self._title()
 
     # -- commands -------------------------------------------------------------------------------
+    def _toggle_assist(self, on: bool) -> None:
+        self.view.dynamic_assistance = on
+        if not on:
+            self.view.hide_suggestions()
+
+    def _insert_formula(self) -> None:
+        v = self.view
+        v.focus_item(None)
+        item = v.new_region(v.scene_.cross.x(), v.scene_.cross.y())
+        v.focus_item(item)
+        v.setFocus()
+
+    def _insert_separator(self) -> None:
+        v = self.view
+        v.focus_item(None)
+        v.insert_separator(v.scene_.cross.y())
+
+    def _insert_area(self) -> None:
+        v = self.view
+        v.focus_item(None)
+        v.insert_area(v.scene_.cross.y())
+
+    def _symbolic(self, what: str) -> None:
+        QMessageBox.information(self, what, f"{what} needs SMath's symbolic engine, which WebSMath does not replicate.")
+
+    def print_sheet(self) -> None:
+        from PySide6.QtPrintSupport import QPrintDialog, QPrinter
+
+        printer = QPrinter(QPrinter.HighResolution)
+        if QPrintDialog(printer, self).exec() == QDialog.Accepted:
+            self.view.render_pages(printer)
+
+    def export_pdf(self) -> None:
+        fn, _ = QFileDialog.getSaveFileName(self, "Download as PDF", "", "PDF (*.pdf)")
+        if fn:
+            from PySide6.QtGui import QPdfWriter
+
+            if not fn.endswith(".pdf"):
+                fn += ".pdf"
+            self.view.render_pages(QPdfWriter(fn))
+
+    def properties(self) -> None:
+        from PySide6.QtWidgets import QLineEdit, QPlainTextEdit
+
+        meta = self.view.worksheet.metadata
+        d = QDialog(self)
+        d.setWindowTitle("Properties")
+        form = QFormLayout(d)
+        fields = {}
+        for key in ("title", "author", "company", "keywords"):
+            w = QLineEdit(meta.get(key, ""))
+            form.addRow(key.capitalize(), w)
+            fields[key] = w
+        desc = QPlainTextEdit(meta.get("description", ""))
+        form.addRow("Description", desc)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(d.accept)
+        bb.rejected.connect(d.reject)
+        form.addRow(bb)
+        if d.exec() == QDialog.Accepted:
+            for k, w in fields.items():
+                meta[k] = w.text()
+            meta["description"] = desc.toPlainText()
+            self.setWindowModified(True)
+
     def _delete_selected(self) -> None:
         for it in list(self.view.selected):
             self.view.delete_region(it)

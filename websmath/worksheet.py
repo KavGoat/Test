@@ -48,6 +48,14 @@ class Region:
     plot: Optional[PlotState] = None  # set for 2-D plot regions
     curves: list = field(default_factory=list)  # parsed plot inputs
     plot_ctx: object = None  # definitions visible to the plot
+    # formatting (Format toolbar / region properties, as in SMath)
+    font_size: float = 10.0
+    bold: bool = False
+    italic: bool = False
+    underline: bool = False
+    color: str = "#000000"
+    bg_color: str = "#ffffff"
+    border: bool = False
     # bookkeeping for incremental recalculation
     defined_vars: dict = field(default_factory=dict)
     defined_funcs: dict = field(default_factory=dict)
@@ -57,8 +65,14 @@ class Region:
     def key(self):
         return (self.y, self.x, self.id)
 
+    special: Optional[str] = None  # "separator" or "area" (SMath area regions)
+    area_height: float = 0.0  # an area's extent below its top line
+    collapsed: bool = False
+
     @property
     def kind(self) -> str:
+        if self.special:
+            return self.special
         return "plot" if self.plot is not None else self.editor.kind
 
     def plot_rows(self) -> list:
@@ -85,6 +99,7 @@ class Worksheet:
         self._keys: dict = {}  # region id -> key it was indexed under
         self._order_cache = None
         self._order_keys: list = []
+        self.metadata: dict = {}  # title, author, description... (File > Properties)
 
     # -- regions ----------------------------------------------------------------
     def add_region(self, x: float, y: float, editor: Optional[MathEditor] = None) -> Region:
@@ -106,6 +121,13 @@ class Worksheet:
         ed.set_cursor(ed.root.items[0].rows[0], 0)
         r = self.add_region(x, y, ed)
         r.plot = PlotState()
+        return r
+
+    def add_special(self, kind: str, y: float, height: float = 0.0) -> Region:
+        """A separator line or an area (a band that can be collapsed)."""
+        r = self.add_region(0, y)
+        r.special = kind
+        r.area_height = height
         return r
 
     def remove_region(self, region: Region) -> None:
@@ -199,7 +221,11 @@ class Worksheet:
         if commit and r.id in self._keys:
             self.index.remove(self._keys.pop(r.id), r.defined_vars, r.defined_funcs)
         ctx = IndexedContext(self.index, r.key)
-        self._run(r, ctx, record=True)
+        self.evaluator.start_clock()
+        try:
+            self._run(r, ctx, record=True)
+        except RecursionError:
+            r.error = err("recursion")
         if commit:
             r.defined_vars, r.defined_funcs = dict(ctx.vars), dict(ctx.funcs)
             self.index.add(r.key, r.defined_vars, r.defined_funcs)

@@ -36,6 +36,8 @@ MESSAGES = {
     "units_in_exponent": "Operation cannot be performed with units.",  # observed
     "no_solution": "No solution found.",
     "iterations": "Maximum number of iterations exceeded.",
+    "interrupted": "Calculation interrupted: it took too long.",
+    "recursion": "Recursion is too deep.",
 }
 
 

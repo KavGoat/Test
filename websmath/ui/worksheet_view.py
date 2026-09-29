@@ -105,7 +105,9 @@ class WorksheetView(QGraphicsView):
         self.focused_item: Optional[RegionItem] = None
         self.selected: list[RegionItem] = []
         self._drag = None
-        self.plot_tool = "move"  # toolbox Plot: "move" (drag pans) or "scale" (drag zooms)
+        self.plot_tool = "move"
+        self.dynamic_assistance = True  # View > Dynamic assistance (autocomplete)
+        self._clip_items = None  # part of an equation copied with Ctrl+C  # toolbox Plot: "move" (drag pans) or "scale" (drag zooms)
         self.setRenderHint(QPainter.Antialiasing)
         self.setRenderHint(QPainter.TextAntialiasing)
         self.setAlignment(Qt.AlignLeft | Qt.AlignTop)
@@ -237,6 +239,9 @@ class WorksheetView(QGraphicsView):
             self.scene_.cross = QPointF(snap(pt.x()), snap(pt.y()))
             self._drag = ("rubber", pt)
             self.scene_.update()
+            return
+        if item.region.special == "area" and item.toggle_hit(item.mapFromScene(pt)):
+            self.toggle_area(item)
             return
         if item is self.focused_item and item.region.plot is not None and item.plot_rect().contains(item.mapFromScene(pt)):
             st = item.region.plot
@@ -512,6 +517,8 @@ class WorksheetView(QGraphicsView):
         return suggestion_list(word, self.worksheet._context_before(region).names())
 
     def update_suggestions(self, item: RegionItem) -> None:
+        if not self.dynamic_assistance:
+            return
         start, word = item.editor.current_word()
         if not word or word[0].isdigit():
             self.hide_suggestions()
@@ -567,6 +574,249 @@ class WorksheetView(QGraphicsView):
         self._after_edit(item)
 
     # -- clipboard / region commands ----------------------------------------------------------
+    def _selected_items(self) -> list:
+        if self.selected:
+            return list(self.selected)
+        if self.focused_item is not None and self.focused_item.editor.selection is None:
+            return [self.focused_item]
+        return []
+
+    def copy(self) -> None:
+        """Ctrl+C: the selected part of an equation, or whole regions."""
+        from PySide6.QtCore import QMimeData
+        from PySide6.QtWidgets import QApplication
+
+        from ..engine.model import to_text
+        from ..io.smfile import dumps
+        from ..worksheet import Worksheet
+
+        item = self.focused_item
+        mime = QMimeData()
+        if item is not None and item.region.kind == "math" and item.editor.selection:
+            r, a, b = item.editor.selection
+            self._clip_items = [it.copy() if hasattr(it, "copy") else it for it in r.items[a:b]]
+            part = r.__class__()
+            part.items = list(r.items[a:b])
+            mime.setText(to_text(part))
+            QApplication.clipboard().setMimeData(mime)
+            return
+        items = self._selected_items()
+        if not items:
+            return
+        self._clip_items = None
+        top = min(it.region.y for it in items)
+        left = min(it.region.x for it in items)
+        ws = Worksheet()
+        for it in items:
+            src = it.region
+            ws.regions.append(src)
+        xml = dumps(ws, calculate=False)
+        ws.regions.clear()
+        mime.setData("application/x-websmath", xml.encode("utf-8"))
+        mime.setData("application/x-websmath-origin", f"{left},{top}".encode())
+        mime.setText("\n".join(it.editor.text if it.region.kind == "text" else it.editor.root.text()
+                               for it in items))
+        QApplication.clipboard().setMimeData(mime)
+
+    def cut(self) -> None:
+        item = self.focused_item
+        self.copy()
+        if item is not None and item.region.kind == "math" and item.editor.selection:
+            item.editor._push_undo()
+            item.editor._apply_to_selection("BACK")
+            self._after_edit(item)
+            return
+        self.delete_selection()
+
+    def paste(self) -> None:
+        """Ctrl+V: into the equation being edited, or as regions at the cross."""
+        from PySide6.QtWidgets import QApplication
+
+        from ..io.smfile import loads
+
+        item = self.focused_item
+        mime = QApplication.clipboard().mimeData()
+        if item is not None and item.region.kind == "math" and self._clip_items:
+            ed = item.editor
+            ed._push_undo()
+            for it in self._clip_items:
+                ed.row.insert(ed.pos, it.copy() if hasattr(it, "copy") else it)
+                ed.cursor = type(ed.cursor)(ed.row, ed.pos + 1)
+            ed._fix_parents(ed.root)
+            self._after_edit(item)
+            return
+        if item is not None and item.region.kind in ("math", "text") and not mime.hasFormat("application/x-websmath"):
+            for ch in mime.text():
+                if ch != "\n":
+                    item.editor.key(ch)
+            self._after_edit(item)
+            return
+        if not mime.hasFormat("application/x-websmath"):
+            return
+        src = loads(bytes(mime.data("application/x-websmath")).decode("utf-8"))
+        ox, oy = (float(v) for v in bytes(mime.data("application/x-websmath-origin")).decode().split(","))
+        self.focus_item(None)
+        cx, cy = self.scene_.cross.x(), self.scene_.cross.y()
+        self.clear_selection()
+        for r in src.regions:
+            r.x, r.y = snap(r.x - ox + cx), snap(r.y - oy + cy)
+            r.editor.is_defined = lambda name, nargs=None, reg=r: self.worksheet.is_defined_before(reg, name, nargs)
+            self.worksheet.regions.append(r)
+            self.worksheet.invalidate_order()
+            it = self._add_item(r)
+            it.selected_region = True
+            self.selected.append(it)
+        self.recalculate()
+        self.modified.emit()
+
+    def delete_selection(self) -> None:
+        item = self.focused_item
+        if item is not None and item.editor.selection:
+            item.editor._push_undo()
+            item.editor._apply_to_selection("DELETE")
+            self._after_edit(item)
+            return
+        for it in list(self.selected):
+            self.delete_region(it)
+        self.selected = []
+        self.refresh()
+
+    # -- Calculation menu on the selected part of an equation ------------------------------
+    def _selection_or_operand(self):
+        item = self.focused_item
+        if item is None or item.region.kind != "math":
+            return None, None
+        ed = item.editor
+        if ed.selection is None:
+            r, a, b = ed.underline()
+            if a == b:
+                return item, None
+            ed.selection = (r, a, b)
+        return item, ed.selection
+
+    def invert_selection(self) -> None:
+        """Invert: the selection becomes (selection)^-1."""
+        item, sel = self._selection_or_operand()
+        if sel is None:
+            return
+        ed = item.editor
+        ed._push_undo()
+        ed._apply_to_selection("^")
+        ed.type("-1")
+        self._after_edit(item)
+
+    def determinant_selection(self) -> None:
+        """Determinant: the selection becomes det(selection), drawn |M|."""
+        from ..engine.model import Paren, Row
+
+        item, sel = self._selection_or_operand()
+        if sel is None:
+            return
+        ed = item.editor
+        ed._push_undo()
+        r, a, b = sel
+        inner = Row(r.items[a:b])
+        del r.items[a:b]
+        for k, ch in enumerate("det"):
+            r.insert(a + k, ch)
+        box = Paren(inner)
+        r.insert(a + 3, box)
+        ed._fix_parents(ed.root)
+        ed.selection = None
+        ed.set_cursor(r, a + 4)
+        self._after_edit(item)
+
+    def calculate_selection(self) -> None:
+        """Calculate: replace the selected part by its value."""
+        from ..engine.display import display_value, display_text, unit_text
+        from ..engine.errors import SMathError
+        from ..engine.model import Row
+        from ..engine.parser import ParseError, parse_row
+
+        item, sel = self._selection_or_operand()
+        if sel is None:
+            return
+        r, a, b = sel
+        part = Row()
+        part.items = list(r.items[a:b])
+        try:
+            value = self.worksheet.evaluator.eval(parse_row(part), self.worksheet._context_before(item.region))
+        except (SMathError, ParseError):
+            item.editor.selection = None
+            return
+        d = display_value(value, self.worksheet.format)
+        number = display_text(d).split(" ")[0].replace("·10^", "*10^")
+        unit = unit_text(getattr(d, "unit", None))
+        ed = item.editor
+        ed._push_undo()
+        del r.items[a:b]
+        ed.set_cursor(r, a)
+        ed.type(number + (("'" + _linear_unit(unit)) if unit else ""))
+        self._after_edit(item)
+
+    # -- formatting ------------------------------------------------------------------------------
+    def format_selection(self, toggle: str = None, **values) -> None:
+        """Apply formatting to the selected regions (or the one being edited)."""
+        items = list(self.selected) or ([self.focused_item] if self.focused_item else [])
+        for it in items:
+            reg = it.region
+            if toggle:
+                setattr(reg, toggle, not getattr(reg, toggle))
+            for k, v in values.items():
+                setattr(reg, k, v)
+            it.relayout()
+        if items:
+            self.modified.emit()
+
+    # -- separators and areas ----------------------------------------------------------------------
+    def insert_separator(self, y: float) -> None:
+        r = self.worksheet.add_special("separator", snap(y))
+        self._add_item(r)
+        self.scene_.cross = QPointF(self.scene_.cross.x(), snap(y) + 18)
+        self.scene_.update()
+
+    def insert_area(self, y: float, height: float = 90.0) -> None:
+        r = self.worksheet.add_special("area", snap(y), height)
+        self._add_item(r).setZValue(-1)
+        self.scene_.cross = QPointF(self.scene_.cross.x(), snap(y) + 18)
+        self.scene_.update()
+
+    def toggle_area(self, item: RegionItem) -> None:
+        """Collapse/expand an area: the regions inside are hidden (and still
+        evaluated, as in SMath)."""
+        reg = item.region
+        reg.collapsed = not reg.collapsed
+        top, bottom = reg.y, reg.y + reg.area_height
+        for it in self.items.values():
+            if it is not item and top < it.region.y < bottom:
+                it.setVisible(not reg.collapsed)
+        item.relayout()
+
+    # -- printing --------------------------------------------------------------------------------
+    def render_pages(self, device) -> None:
+        """Print or export the worksheet page by page (A4-width pages)."""
+        from PySide6.QtCore import QRectF
+        from PySide6.QtGui import QPainter
+
+        self.focus_item(None)
+        self.clear_selection()
+        grid = self.scene_.show_grid
+        self.scene_.show_grid = False
+        bounds = self.scene_.itemsBoundingRect()
+        page_w = max(bounds.right() + 20, 794.0)
+        page_h = page_w * 297 / 210
+        painter = QPainter(device)
+        target = QRectF(0, 0, device.width(), device.height())
+        y = 0.0
+        first = True
+        while y < bounds.bottom() + 1 or first:
+            if not first:
+                device.newPage()
+            self.scene_.render(painter, target, QRectF(0, y, page_w, page_h))
+            y += page_h
+            first = False
+        painter.end()
+        self.scene_.show_grid = grid
     def select_all(self) -> None:
         self.focus_item(None)
         self.clear_selection()

@@ -17,6 +17,7 @@ from ..engine.model import Row
 from ..worksheet import Region, Worksheet
 from .layout import LBox, Layouter, RowInfo, Style, absolute_rows
 
+PAGE_WIDTH = 760.0  # separators and areas run across the page
 PAD_X = 4.0  # text starts 4px into the region (SMath SVG)
 PAD_TOP = 4.0
 PAD_BOTTOM = 4.0
@@ -71,6 +72,14 @@ class RegionItem(QGraphicsObject):
 
     def relayout(self) -> None:
         self.prepareGeometryChange()
+        if self.style.size_pt != self.region.font_size:
+            self.style = Style(self.region.font_size)
+        if self.region.special:
+            h = 9.0 if self.region.special == "separator" or self.region.collapsed else self.region.area_height
+            self._size = (PAGE_WIDTH, max(9.0, h))
+            self._layout = None
+            self.update()
+            return
         if self.region.kind == "text":
             self._layout_text()
             return
@@ -216,8 +225,12 @@ class RegionItem(QGraphicsObject):
     def _text_font(self) -> QFont:
         from .layout import _family
 
+        reg = self.region
         f = QFont(_family(TEXT_FAMILIES))
-        f.setPointSizeF(10)
+        f.setPointSizeF(reg.font_size)
+        f.setBold(reg.bold)
+        f.setItalic(reg.italic)
+        f.setUnderline(reg.underline)
         return f
 
     def _layout_text(self) -> None:
@@ -233,8 +246,19 @@ class RegionItem(QGraphicsObject):
         p.setRenderHint(QPainter.Antialiasing, True)
         p.setRenderHint(QPainter.TextAntialiasing, True)
         r = self.frame_rect()
+        if self.region.special:
+            self._paint_special(p)
+            return
+        if self.region.bg_color.lower() != "#ffffff":
+            p.fillRect(r, QColor(self.region.bg_color))
+        if self.region.border:
+            p.setPen(QPen(Qt.black, 1))
+            p.drawRect(r.adjusted(0.5, 0.5, -0.5, -0.5))
+        if not self.region.enabled:
+            # evaluation disabled: SMath marks the region with a small square
+            p.fillRect(QRectF(r.right() - 5, r.top(), 5, 5), QColor("#808080"))
         if self.focused:
-            p.fillRect(r.adjusted(1, 1, -1, -1), Qt.white)
+            p.fillRect(r.adjusted(1, 1, -1, -1), QColor(self.region.bg_color))
             p.setPen(QPen(FRAME, 1))
             p.drawRect(r.adjusted(0.5, 0.5, -0.5, -0.5))
         if self.selected_region:
@@ -254,11 +278,33 @@ class RegionItem(QGraphicsObject):
             if self.region.error is not None or getattr(self, "_plot_error", None) is not None:
                 self._paint_error_tip(p)
 
+    def _paint_special(self, p: QPainter) -> None:
+        """Separator: one line across the page.  Area: a line at the top with
+        a collapse arrow and one at the bottom (one line when collapsed)."""
+        w, h = self._size
+        p.setPen(QPen(QColor("#808080") if not self.focused else Qt.black, 1))
+        p.drawLine(QPointF(0, 4.5), QPointF(w, 4.5))
+        if self.region.special == "area":
+            path_col = QColor("#404040")
+            p.setBrush(path_col)
+            from PySide6.QtGui import QPolygonF
+
+            if self.region.collapsed:
+                tri = [QPointF(1, 1), QPointF(7, 4.5), QPointF(1, 8)]
+            else:
+                tri = [QPointF(0, 1), QPointF(8, 1), QPointF(4, 8)]
+                p.drawLine(QPointF(0, h - 0.5), QPointF(w, h - 0.5))
+            p.drawPolygon(QPolygonF(tri))
+            p.setBrush(Qt.NoBrush)
+
+    def toggle_hit(self, pt: QPointF) -> bool:
+        return self.region.special == "area" and pt.x() < 10 and pt.y() < 10
+
     def _paint_text(self, p: QPainter) -> None:
         f = self._text_font()
         m = QFontMetricsF(f)
         p.setFont(f)
-        p.setPen(Qt.black)
+        p.setPen(QColor(self.region.color))
         y = PAD_TOP + m.ascent()
         lines = (self.editor.text or "").split("\n")
         for ln in lines:

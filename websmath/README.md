@@ -91,12 +91,39 @@ QT_QPA_PLATFORM=offscreen python -m pytest websmath/tests -p no:faulthandler
   * numeric `int`, `diff`, `solve`, `sum`/`product` over a range,
     interpolation, `polyroots`;
   * user-defined functions `f(x):=…`.
+* **Cursor and arrows** behave as on the site. The underline covers the
+  whole name; Left and Right jump over operators and step up to a whole
+  sub-expression. Up and Down move between regions.
+* **Structures by argument count:** `while(c,`, `for(i,r,`, `sum(e,i,a,`,
+  `int(`, `diff(`, `range(` and `try(` turn into their blocks (Σ, ∫, d/dx,
+  [a..b]…), and the toolbox inserts them directly.
+* **Menus as on SMath Cloud:**
+  * File: New, Open, Save, Download as PDF, Print, Properties.
+  * Edit: Undo/Redo, Cut/Copy/Paste for regions and for parts of equations,
+    Delete, Select all.
+  * View: Grid, Dynamic assistance.
+  * Insert: Matrix, Function, Unit, Plot, Area, Formula, Separator, Text.
+  * Calculation: Calculate, Invert and Determinant on the selection, Auto
+    calculation, Recalculate page.
+  * A Format toolbar with font size, bold, italic, underline, text and
+    background colour, and border.
+* **Speed:** definitions are indexed by position, and leaving a region
+  re-evaluates only what depends on it. A 3000-region worksheet types in about
+  7 ms per key, and runaway loops are interrupted after 10 s.
 * **Files:** opens and saves SMath `.sm` worksheets (RPN math, contract
   units, areas). `io.smfile.dumps`/`loads` give the same XML as a string for
   embedding.
 
-Not replicated: SMath's *symbolic* engine (symbolic differentiation,
-polynomials in an undefined variable), 3-D and polar plots, and pictures. Worksheets that need
+Not replicated:
+* SMath's *symbolic* engine: symbolic differentiation, Solve, Simplify,
+  `==`, polynomials in an undefined variable;
+* 3-D and polar plots;
+* pictures;
+* the CheckBox/ComboBox/Modeller plug-in regions and sharing.
+
+Python runs the evaluation on one core. Evaluating in parallel wouldn't help,
+because each region depends on the ones above it; the speed comes from only
+re-evaluating what changed. Worksheets that need
 them open, but those results show errors.
 
 ## Layout
