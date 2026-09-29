@@ -485,6 +485,12 @@ class PageView(QGraphicsView):
         if key != self.tool_key:
             self._pending_anchor = None
             self._pending_cloud = None
+        # With the Viewport tool out, every viewport already on the page is
+        # shown, so a new one can be drawn beside them rather than over them.
+        for frame in getattr(self.scene(), "frames", []) or []:
+            if frame.show_all_viewports != (key == "viewport"):
+                frame.show_all_viewports = key == "viewport"
+                frame.update()
         self.forget_snap()
         self.close_size_editor()
         if self._pending_arrow_leader is not None:
@@ -1331,10 +1337,25 @@ class PageView(QGraphicsView):
         item = self._editing_item
         return item.sceneBoundingRect() if item is not None else None
 
+    def click_into_viewport(self, scene_pos: QPointF) -> None:
+        """Show the frame of the viewport clicked into; hide every other.
+
+        Viewports are not markups and their frames would only clutter the
+        drawing, so one is shown while it is being worked in, as in Bluebeam.
+        """
+        scene = self.scene()
+        for frame in getattr(scene, "frames", []) or []:
+            spot = frame.mapFromScene(scene_pos)
+            inside = frame.page.viewport_at(spot.x(), spot.y()) \
+                if frame.page_rect().contains(spot) else None
+            frame.set_active_viewport(inside)
+
     def mousePressEvent(self, event: QMouseEvent) -> None:
         scene_pos = self.mapToScene(event.position().toPoint())
         self._press_scene = scene_pos
         self._press_view = event.position().toPoint()
+        if event.button() == Qt.LeftButton:
+            self.click_into_viewport(scene_pos)
 
         if (self._pending_arrow_leader is not None
                 and event.button() == Qt.LeftButton):
@@ -3260,8 +3281,11 @@ class PageView(QGraphicsView):
             return scale_on(page)
         return page.scale
 
-    def _points_for(self, text: str) -> Optional[float]:
-        """A typed length as page points, in the page's scale; None if unreadable."""
+    def _points_for(self, text: str, down: bool = False) -> Optional[float]:
+        """A typed length as page points, in the page's scale; None if unreadable.
+
+        *down* reads it at the page's Y scale, for a height.
+        """
         from ..core.units import parse_unit
 
         page = self.page()
@@ -3273,6 +3297,8 @@ class PageView(QGraphicsView):
             if scale.is_calibrated():
                 points = float((quantity / scale.length(1.0))
                                .to("dimensionless").magnitude)
+                if down:
+                    points /= getattr(scale, "y_factor", 1.0) or 1.0
             else:
                 points = float(quantity.to("mm").magnitude) * MM_TO_PT
         except Exception:                                  # noqa: BLE001
@@ -3288,7 +3314,8 @@ class PageView(QGraphicsView):
             except ValueError:
                 self._typed_rotation = None
         else:
-            points = self._points_for(text) if text else None
+            points = self._points_for(text, down=box is not self._size_width) \
+                if text else None
             if box is self._size_width:
                 self._typed_w = points
             else:
@@ -3298,7 +3325,7 @@ class PageView(QGraphicsView):
                     and box is self._size_width and points is not None
                     and not self._size_height.isModified()):
                 # One diameter typed is a circle until the other is given.
-                self._typed_h = points
+                self._typed_h = self._points_for(text, down=True)
         self._typed_size = any(value is not None for value in
                                (self._typed_w, self._typed_h, self._typed_rotation))
         if self._draft is not None:

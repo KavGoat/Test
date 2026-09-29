@@ -49,3 +49,14 @@ restarts with the report below. Completion status is user-owned.
 |  | Line style and hatch pickers must be big dropdowns where each pattern is easy to tell apart, with its name. |
 |  | The scroll wheel over a dropdown must not cycle through its values, anywhere: toolbar, Properties and every dialog. |
 |  | The Cloud+ (cloud callout) icon shows only a cloud; it must show a cloud with a callout. Add leader icons for adding an arrow leader and a cloud leader, not just an arrow or just a cloud. |
+
+## Requests reported 2026-09-29
+
+| Complete | Task |
+| --- | --- |
+|  | Add-leader menu icons must be the callout icons themselves (text box + leader + arrow for an arrow callout, text box + leader + cloud for a cloud callout), not just an arrow or just a cloud. |
+|  | A viewport's frame shows only while it has been clicked into; otherwise it is hidden. |
+|  | Page setup and scale panel that follows the current page: units, decimal places, scale, the viewports on the page (add, change, delete), page size and orientation (e.g. landscape), and separate X and Y scales. |
+|  | A Sketch Tools markup (e.g. section cut) placed in MarkForge and opened in another PDF editor does not look right. |
+|  | A cloud markup opened in another editor shows a drag box of the wrong size. |
+|  | Every markup type must export correctly to PDF and look and behave right in other editors. |

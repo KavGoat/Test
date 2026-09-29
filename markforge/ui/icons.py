@@ -248,23 +248,6 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
         painter.drawPolyline(QPolygonF([QPointF(12.5, 6), QPointF(9.5, 6),
                                         QPointF(8.5, 13)]))
         _cloud(painter, INK, QRectF(1.5, 13, 12, 8.5))
-    elif name in ("leader_arrow", "leader_cloud"):
-        # Adding a leader: the text box, the new leader, and a plus.
-        _pen(painter, INK, 1.3)
-        painter.drawRect(QRectF(12.5, 2.5, 9, 7))
-        painter.drawPolyline(QPolygonF([QPointF(12.5, 6), QPointF(9.5, 6),
-                                        QPointF(8.5, 13)]))
-        if name == "leader_cloud":
-            _cloud(painter, INK, QRectF(1.5, 13, 12, 8.5))
-        else:
-            painter.drawLine(QPointF(8.5, 13), QPointF(4, 20))
-            painter.setBrush(QBrush(QColor(INK)))
-            painter.drawPolygon(QPolygonF([QPointF(3.4, 21), QPointF(3.9, 16.6),
-                                           QPointF(7.3, 18.8)]))
-            painter.setBrush(Qt.NoBrush)
-        _pen(painter, ACCENT, 1.6)
-        painter.drawLine(QPointF(5, 1.5), QPointF(5, 8.5))
-        painter.drawLine(QPointF(1.5, 5), QPointF(8.5, 5))
     elif name == "note":
         _pen(painter, NOTE_EDGE, 1.2)
         painter.setBrush(QBrush(QColor(NOTE)))
@@ -468,6 +451,14 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
         _pen(painter, INK, 1.5)
         painter.drawEllipse(QRectF(4.5, 4.5, 11, 11))
         painter.drawLine(QPointF(13.8, 13.8), QPointF(19.5, 19.5))
+    elif name == "panel_page":
+        # A sheet with a scale bar across its foot: the page and its scale.
+        _pen(painter, INK, 1.3)
+        painter.drawRect(QRectF(5.5, 2, 13, 14.5))
+        _pen(painter, WARM, 1.4)
+        painter.drawLine(QPointF(3, 21.5), QPointF(21, 21.5))
+        for x in (3, 9, 15, 21):
+            painter.drawLine(QPointF(x, 21.5), QPointF(x, 18.5))
     elif name == "panel_properties":
         _pen(painter, INK, 1.3)
         painter.drawRect(QRectF(3.5, 4.5, 17, 15))

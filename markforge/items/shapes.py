@@ -181,7 +181,7 @@ class RectItem(MarkupItem):
             from ..core.document import MM_TO_PT
             if scale.is_calibrated():
                 self.width_value = convert(scale.length(rect.width()), scale.display_unit)
-                self.height_value = convert(scale.length(rect.height()), scale.display_unit)
+                self.height_value = convert(scale.height(rect.height()), scale.display_unit)
                 digits = max(scale.precision, 0)
             else:
                 self.width_value = Q_(rect.width() / MM_TO_PT, _MILLIMETRES)
@@ -205,7 +205,8 @@ class RectItem(MarkupItem):
             if scale.is_calibrated():
                 per_point = scale.length(1.0)
                 points_wide = float((width / per_point).to("dimensionless").magnitude)
-                points_high = float((height / per_point).to("dimensionless").magnitude)
+                points_high = float((height / per_point).to("dimensionless").magnitude) \
+                    / (getattr(scale, "y_factor", 1.0) or 1.0)
             else:
                 from ..core.document import MM_TO_PT
                 points_wide = float(width.to("mm").magnitude) * MM_TO_PT

@@ -245,6 +245,10 @@ class PageFrame(QGraphicsObject):
         self._logo: Optional[QPixmap] = None
         self._logo_key = ""
         self.print_mode = False
+        # The viewport last clicked into, whose frame is shown; and whether
+        # every viewport's frame is shown (while the Viewport tool is out).
+        self.active_viewport = None
+        self.show_all_viewports = False
         self._pdf_overlay = False
         self.setFlag(QGraphicsItem.ItemIsSelectable, False)
         self.setFlag(QGraphicsItem.ItemIsMovable, False)
@@ -444,9 +448,15 @@ class PageFrame(QGraphicsObject):
             painter.drawRect(rect)
             painter.restore()
 
+    def set_active_viewport(self, viewport) -> None:
+        if viewport is not self.active_viewport:
+            self.active_viewport = viewport
+            self.update()
+
     def _paint_viewports(self, painter: QPainter) -> None:
-        """Each viewport's edge and its name and scale — on screen only."""
-        viewports = getattr(self.page, "viewports", None)
+        """The edge, name and scale of the viewport clicked into — on screen only."""
+        viewports = [v for v in getattr(self.page, "viewports", None) or []
+                     if self.show_all_viewports or v is self.active_viewport]
         if not viewports:
             return
         painter.save()

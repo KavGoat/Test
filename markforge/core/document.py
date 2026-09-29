@@ -1,6 +1,7 @@
 """Document, page and scale model."""
 from __future__ import annotations
 
+import math
 import uuid
 from dataclasses import asdict, dataclass, field
 from typing import Any, Optional
@@ -113,18 +114,53 @@ class PageScale:
     display_unit: str = "m"
     area_unit: str = "m^2"
     calibrated: bool = False
+    # How much more one point measures down the page than across it: 1 is
+    # the same scale both ways; a sheet stretched to 1:100 across and 1:50
+    # down is 0.5. ``length_per_pt`` is always the across (X) scale.
+    y_factor: float = 1.0
 
     def __post_init__(self):
         if self.length_per_pt is None:
             self.length_per_pt = Q_(1.0 / MM_TO_PT, "mm")
 
     @classmethod
-    def from_ratio(cls, ratio: float, display_unit: str = "m") -> "PageScale":
-        """``ratio`` of 100 means 1:100 — one page mm is 100 real mm."""
-        scale = cls(label=f"1:{ratio:g}", display_unit=display_unit,
-                    calibrated=True)
+    def from_ratio(cls, ratio: float, display_unit: str = "m",
+                   y_ratio: Optional[float] = None) -> "PageScale":
+        """``ratio`` of 100 means 1:100 — one page mm is 100 real mm.
+
+        *y_ratio*, when given and different, is the scale down the page.
+        """
+        label = f"1:{ratio:g}"
+        y_factor = 1.0
+        if y_ratio and abs(y_ratio - ratio) > 1e-12 and ratio:
+            label = f"X 1:{ratio:g}, Y 1:{y_ratio:g}"
+            y_factor = y_ratio / ratio
+        scale = cls(label=label, display_unit=display_unit, calibrated=True,
+                    y_factor=y_factor)
         scale.length_per_pt = Q_(ratio * PT_TO_MM, "mm")
         return scale
+
+    def ratio(self) -> Optional[float]:
+        """The across (X) scale as a plain ratio: 100 for 1:100."""
+        try:
+            return float(self.length_per_pt.to("mm").magnitude) / PT_TO_MM
+        except Exception:                                  # noqa: BLE001
+            return None
+
+    def y_ratio(self) -> Optional[float]:
+        ratio = self.ratio()
+        return None if ratio is None else ratio * self.y_factor
+
+    def separate_y(self) -> bool:
+        return abs(self.y_factor - 1.0) > 1e-9
+
+    def length_xy(self, dx: float, dy: float):
+        """The real length of a step *dx* across and *dy* down the page."""
+        return self.length_per_pt * math.hypot(dx, dy * self.y_factor)
+
+    def height(self, points: float):
+        """A distance straight down the page, at the Y scale."""
+        return self.length_per_pt * (points * self.y_factor)
 
     @classmethod
     def from_calibration(cls, page_distance_pt: float, real_length_text: str,
@@ -143,7 +179,8 @@ class PageScale:
         return self.length_per_pt * points
 
     def area(self, square_points: float):
-        return (self.length_per_pt ** 2) * square_points
+        """An area measured on the page, at both scales."""
+        return (self.length_per_pt ** 2) * (square_points * self.y_factor)
 
     def is_calibrated(self) -> bool:
         return self.calibrated
@@ -158,6 +195,7 @@ class PageScale:
             "display_unit": self.display_unit,
             "area_unit": self.area_unit,
             "calibrated": self.calibrated,
+            "y_factor": self.y_factor,
         }
 
     @classmethod
@@ -170,7 +208,8 @@ class PageScale:
                     precision=int(data.get("precision", 2)),
                     display_unit=data.get("display_unit", "m"),
                     area_unit=data.get("area_unit", "m^2"),
-                    calibrated=bool(data.get("calibrated", label != "1:1")))
+                    calibrated=bool(data.get("calibrated", label != "1:1")),
+                    y_factor=float(data.get("y_factor", 1.0) or 1.0))
         try:
             scale.length_per_pt = Q_(float(data["magnitude"]), data["units"])
         except Exception:

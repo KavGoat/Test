@@ -10047,3 +10047,68 @@ def test_the_viewport_tool_asks_for_a_scale(window, monkeypatch):
     drag(window.view, start.x(), start.y(), end.x(), end.y())
     assert [(v.name, v.scale.label) for v in page.viewports] == [("Stair", "1:10")]
     assert not any(getattr(i, "kind", "") == "marquee" for i in page.frame.markups())
+
+
+def test_a_viewport_frame_shows_only_once_clicked_into(window):
+    from markforge.core.document import PageScale
+    page = scaled_page(window, 100)
+    frame = page.frame
+    window.add_viewport(frame, QRectF(50, 50, 200, 200), PageScale.from_ratio(20), "A")
+    window.view.click_into_viewport(frame.mapToScene(QPointF(400, 600)))
+    assert frame.active_viewport is None
+    window.view.click_into_viewport(frame.mapToScene(QPointF(100, 100)))
+    assert frame.active_viewport is page.viewports[0]
+    window.select_tool("viewport")
+    assert frame.show_all_viewports
+    window.select_tool("select")
+    assert not frame.show_all_viewports
+
+
+def test_separate_x_and_y_scales_measure_true(window):
+    from markforge.core.document import MM_TO_PT, PageScale
+    from markforge.items.measure import AREA
+    page = window.current_page()
+    window.set_page_scale(PageScale.from_ratio(100, y_ratio=50))
+    frame = page.frame
+    across = _length_at(frame, 100, 100, 10 * MM_TO_PT)
+    down = MeasureItem(across.kind)
+    down.points = [QPointF(0, 0), QPointF(0, 10 * MM_TO_PT)]
+    frame.add_markup(down, QPointF(100, 200))
+    down.refresh(page=page)
+    assert across.value.to("mm").magnitude == pytest.approx(1000, rel=1e-3)
+    assert down.value.to("mm").magnitude == pytest.approx(500, rel=1e-3)
+    square = MeasureItem(AREA)
+    side = 10 * MM_TO_PT
+    square.points = [QPointF(0, 0), QPointF(side, 0), QPointF(side, side), QPointF(0, side)]
+    frame.add_markup(square, QPointF(300, 300))
+    square.refresh(page=page)
+    assert square.value.to("m^2").magnitude == pytest.approx(1.0 * 0.5, rel=1e-3)
+    box = RectItem("rect")
+    box.set_local_rect(QRectF(0, 0, side, side))
+    frame.add_markup(box, QPointF(300, 500))
+    box.refresh(page=page)
+    assert box.width_value.to("mm").magnitude == pytest.approx(1000, rel=1e-3)
+    assert box.height_value.to("mm").magnitude == pytest.approx(500, rel=1e-3)
+    from markforge.core.document import Page
+    assert Page.from_dict(page.to_dict()).scale.y_factor == pytest.approx(0.5)
+
+
+def test_the_page_panel_follows_and_changes_the_page(window):
+    from markforge.core.document import LANDSCAPE
+    panel = window.page_panel
+    page = window.current_page()
+    panel.refresh()
+    panel.orientation.setCurrentIndex(1)
+    panel._paper_changed(panel.orientation)
+    assert window.current_page().setup.orientation == LANDSCAPE
+    panel.ratio.setCurrentText("1:200")
+    panel.separate_y.setChecked(True)
+    panel.y_ratio.setCurrentText("1:20")
+    panel._scale_changed()
+    scale = window.current_page().scale
+    assert scale.ratio() == pytest.approx(200) and scale.y_ratio() == pytest.approx(20)
+    panel.precision.setValue(4)
+    assert window.current_page().scale.precision == 4
+    window.undo_stack.undo()                       # the paper change
+    assert window.current_page().setup.orientation != LANDSCAPE
+    assert page is not None

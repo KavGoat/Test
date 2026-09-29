@@ -1021,6 +1021,10 @@ class MainWindow(QMainWindow):
         self.search_panel = SearchPanel(self)
         self.dock_search = self._dock("Search", self.search_panel,
                                       Qt.LeftDockWidgetArea, "dock_search")
+        from .pagepanel import PagePanel
+        self.page_panel = PagePanel(self)
+        self.dock_page = self._dock("Page setup", self.page_panel,
+                                    Qt.RightDockWidgetArea, "dock_page")
         self.reference_docks = [self.dock_toolsets, self.dock_bookmarks]
         self._build_rails()
         self.resizeDocks([self.dock_pages, self.dock_properties], [220, 320],
@@ -1036,11 +1040,12 @@ class MainWindow(QMainWindow):
         "dock_toolsets": ("Tool sets", "panel_toolsets"),
         "dock_properties": ("Properties", "panel_properties"),
         "dock_search": ("Search", "panel_search"),
+        "dock_page": ("Page setup", "panel_page"),
     }
     DEFAULT_SIDES = {
         "dock_pages": LEFT, "dock_bookmarks": LEFT, "dock_toolsets": LEFT,
         "dock_search": LEFT,
-        "dock_properties": RIGHT,
+        "dock_properties": RIGHT, "dock_page": RIGHT,
     }
 
     # -- the markups list under the canvas ---------------------------------
@@ -2729,6 +2734,22 @@ class MainWindow(QMainWindow):
         self._structural_change("Page setup", mutate)
         self.view.fit_page()
 
+    def set_page_setup(self, setup: PageSetup, all_pages: bool = False) -> None:
+        """Give the current page (or every page) this paper; one undo step."""
+        pages = self.document.pages if all_pages else [self.current_page()]
+        if all(page.setup.to_dict() == setup.to_dict() for page in pages):
+            return
+
+        def mutate():
+            for page in pages:
+                page.setup = PageSetup.from_dict(setup.to_dict())
+        self._structural_change("Page setup", mutate, preserve_view=True)
+
+    def set_page_scale(self, scale: PageScale) -> None:
+        """Give the current page this scale, units and decimal places."""
+        self.current_page().scale = scale
+        self.apply_scale_change()
+
     def insert_pdf(self, index: Optional[int] = None, before: bool = False) -> None:
         dialog = dialogs.PdfImportDialog(self, self.current_page().setup)
         if dialog.exec() != dialogs.QDialog.Accepted:
@@ -3221,6 +3242,8 @@ class MainWindow(QMainWindow):
         viewport = Viewport(name, region.x(), region.y(), region.width(),
                             region.height(), scale)
         self._change_viewports(page, page.viewports + [viewport], "Add viewport")
+        if page.frame is not None:
+            page.frame.set_active_viewport(page.viewports[-1])
         self.status_hint.setText(
             f"{name} at {scale.label} — measurements inside it use that scale")
         return True
@@ -3256,6 +3279,7 @@ class MainWindow(QMainWindow):
         self.refresh_page_measurements(page)
         if page.frame is not None:
             page.frame.update()
+        self.page_panel.refresh()
         self.refresh_lists()
         self.refresh_selection()
         self.mark_modified()
@@ -3397,6 +3421,9 @@ class MainWindow(QMainWindow):
             self.mark_modified()
 
     def refresh_scale_label(self) -> None:
+        panel = getattr(self, "page_panel", None)
+        if panel is not None:
+            panel.refresh()
         scale = self.current_page().scale
         self.status_scale.setText(f"Scale {scale.label}")
         self.status_scale.setToolTip(
@@ -5564,8 +5591,10 @@ class MainWindow(QMainWindow):
                                lambda: self.add_leader_to(item, "cloud"))
         cloud.setToolTip("A revision cloud round the area, joined to the note "
                          "by a plain line")
-        arrow.setIcon(icon("leader_arrow"))
-        cloud.setIcon(icon("leader_cloud"))
+        # The same pictures as the Callout and Cloud+ tools: what gets added
+        # is that kind of call-out's leader.
+        arrow.setIcon(icon("callout"))
+        cloud.setIcon(icon("cloud_callout"))
         which = item.leader_near(item.mapFromScene(scene_pos))
         if which is None and item.leaders:
             which = len(item.leaders) - 1

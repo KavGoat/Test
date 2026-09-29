@@ -626,7 +626,7 @@ def _measure_dictionary(annotation, item) -> None:
         "RD": ".",
         "RT": ",",
     }
-    annotation["Measure"] = {
+    measure = {
         "Type": Name("Measure"),
         "Subtype": Name("RL"),
         "R": str(scale.label),
@@ -634,6 +634,12 @@ def _measure_dictionary(annotation, item) -> None:
         "D": [dict(numbers)],
         "A": [dict(numbers)],
     }
+    y_factor = float(getattr(scale, "y_factor", 1.0) or 1.0)
+    if abs(y_factor - 1.0) > 1e-9:
+        # A different scale down the page: the PDF's own Y number format,
+        # given as a conversion from the X units.
+        measure["Y"] = [dict(numbers, C=y_factor)]
+    annotation["Measure"] = measure
 
 
 def _free_text(annotation, item, rect, place: "Placement") -> None:

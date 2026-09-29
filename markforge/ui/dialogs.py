@@ -193,8 +193,22 @@ class ScaleDialog(QDialog):
         self.ratio = QComboBox()
         self.ratio.setEditable(True)
         self.ratio.addItems(self.RATIOS)
-        self.ratio.setCurrentText(scale.label if scale.label.startswith("1:") else "1:100")
+        self.ratio.setCurrentText(ratio_text(scale.ratio()) if scale.is_calibrated()
+                                  else "1:100")
         ratio_form.addRow("Ratio", self.ratio)
+        # Some sheets are stretched: a section at 1:100 across and 1:50 down.
+        self.separate_y = QCheckBox("Separate Y scale")
+        self.separate_y.setToolTip("Use a different scale down the page than across it")
+        self.separate_y.setChecked(scale.is_calibrated() and scale.separate_y())
+        ratio_form.addRow("", self.separate_y)
+        self.y_ratio = QComboBox()
+        self.y_ratio.setEditable(True)
+        self.y_ratio.addItems(self.RATIOS)
+        self.y_ratio.setCurrentText(ratio_text(scale.y_ratio()) if scale.is_calibrated()
+                                    else "1:100")
+        self.y_ratio.setEnabled(self.separate_y.isChecked())
+        self.separate_y.toggled.connect(self.y_ratio.setEnabled)
+        ratio_form.addRow("Y ratio", self.y_ratio)
         layout.addWidget(ratio_box)
 
         units = QFormLayout()
@@ -221,17 +235,40 @@ class ScaleDialog(QDialog):
                 return None
             scale = PageScale.from_calibration(self.measured_pt, self.known.text())
         else:
-            text = self.ratio.currentText().strip()
-            try:
-                ratio = float(text.split(":")[-1])
-            except ValueError:
+            ratio = read_ratio(self.ratio.currentText())
+            y_ratio = read_ratio(self.y_ratio.currentText()) \
+                if self.separate_y.isChecked() else ratio
+            if ratio is None or y_ratio is None:
                 QMessageBox.warning(self, "Page scale", "Enter a ratio such as 1:100.")
                 return None
-            scale = PageScale.from_ratio(ratio)
+            scale = PageScale.from_ratio(ratio, y_ratio=y_ratio)
         scale.display_unit = self.length_unit.currentText() or "m"
         scale.area_unit = self.area_unit.currentText() or "m^2"
         scale.precision = self.precision.value()
         return scale
+
+
+def ratio_text(ratio: Optional[float]) -> str:
+    """100 as "1:100"; a calibrated scale's odd ratio kept to four figures."""
+    if not ratio:
+        return "1:1"
+    return f"1:{float(f'{ratio:.4g}'):g}"
+
+
+def read_ratio(text: str) -> Optional[float]:
+    """"1:100", "100" or "2:1" as the real-to-page ratio; None if unreadable."""
+    parts = (text or "").replace(" ", "").split(":")
+    try:
+        if len(parts) == 2:
+            page, real = float(parts[0]), float(parts[1])
+            ratio = real / page if page else None
+        elif len(parts) == 1:
+            ratio = float(parts[0])
+        else:
+            return None
+    except ValueError:
+        return None
+    return ratio if ratio and ratio > 0 else None
 
 
 class CalibrationLengthDialog(QDialog):

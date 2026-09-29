@@ -419,9 +419,18 @@ class MeasureItem(MarkupItem):
         anchor = self.points[0] if self.points else QPointF()
         return scale_where(self, page, anchor)
 
-    def raw_measure(self) -> tuple[str, float]:
-        """Return (kind of quantity, value in page points or degrees)."""
+    def raw_measure(self, stretch: float = 1.0) -> tuple[str, float]:
+        """Return (kind of quantity, value in page points or degrees).
+
+        *stretch* is the page's Y scale over its X scale: lengths and angles
+        are read with the drawing stretched down the page by it, so a sheet
+        at different scales across and down measures true. Areas are not
+        stretched here; ``PageScale.area`` allows for it.
+        """
         points = self.points
+        if abs(stretch - 1.0) > 1e-9 and self.kind not in (AREA, VOLUME):
+            points = [QPointF(p.x(), p.y() * stretch)
+                      for p in (self.mapToParent(q) for q in self.points)]
         if self.kind in (LENGTH, CALIBRATE, DIMENSION) and len(points) >= 2:
             return "length", _distance(points[0], points[1])
         if self.kind == POLYLENGTH and len(points) >= 2:
@@ -455,7 +464,7 @@ class MeasureItem(MarkupItem):
 
     def refresh(self, workspace=None, page=None) -> None:
         scale = self.scale_on(page) if page is not None else self.page_scale()
-        kind, raw = self.raw_measure()
+        kind, raw = self.raw_measure(getattr(scale, "y_factor", 1.0))
         digits = max(scale.precision, 0)
         try:
             if kind == "length":
