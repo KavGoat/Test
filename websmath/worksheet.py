@@ -19,9 +19,10 @@ from .engine.errors import SMathError, err
 from .engine.evaluator import Context, Evaluator
 from .engine.numformat import NumberFormat
 from .engine.parser import ParseError, parse_row
-from .engine.model import Row
+from .engine.model import Program, Row
 from .engine.units import Quantity, unit_offset
 from .engine.values import Matrix, Q, need_scalar
+from .plot import PlotState
 
 _ids = itertools.count(1)
 
@@ -38,10 +39,20 @@ class Region:
     error: Optional[SMathError] = None
     enabled: bool = True
     fmt: Optional[NumberFormat] = None  # per-region override
+    plot: Optional[PlotState] = None  # set for 2-D plot regions
+    curves: list = field(default_factory=list)  # parsed plot inputs
+    plot_ctx: object = None  # definitions visible to the plot
 
     @property
     def kind(self) -> str:
-        return self.editor.kind
+        return "plot" if self.plot is not None else self.editor.kind
+
+    def plot_rows(self) -> list:
+        """The plot's input expressions (one row per curve)."""
+        items = self.editor.root.items
+        if len(items) == 1 and isinstance(items[0], Program) and items[0].name == "sys":
+            return items[0].rows
+        return [self.editor.root]
 
     def expression_row(self) -> Row:
         r = Row()
@@ -63,6 +74,16 @@ class Worksheet:
         r.editor = editor or MathEditor()
         r.editor.is_defined = lambda name, nargs=None, reg=r: self.is_defined_before(reg, name, nargs)
         self.regions.append(r)
+        return r
+
+    def add_plot(self, x: float, y: float) -> Region:
+        """A new 2-D plot with an empty input (typing a comma adds curves)."""
+        ed = MathEditor(Row([Program("sys", Row())]))
+        ed.plot_input = True
+        MathEditor._fix_parents(ed.root)
+        ed.set_cursor(ed.root.items[0].rows[0], 0)
+        r = self.add_region(x, y, ed)
+        r.plot = PlotState()
         return r
 
     def remove_region(self, region: Region) -> None:
@@ -101,6 +122,10 @@ class Worksheet:
     def _run(self, r: Region, ctx: Context, record: bool) -> None:
         if record:
             r.value = r.display = r.error = None
+        if r.plot is not None:
+            if record and r.enabled:
+                self._run_plot(r, ctx)
+            return
         if r.kind != "math" or not r.enabled:
             return
         items = r.editor.expression_items()
@@ -135,6 +160,18 @@ class Worksheet:
         except SMathError as e:
             if record:
                 r.error = e
+
+    def _run_plot(self, r: Region, ctx: Context) -> None:
+        r.curves = []
+        r.plot_ctx = _snapshot(ctx)
+        for row in r.plot_rows():
+            if row.is_empty():
+                continue
+            try:
+                r.curves.append(parse_row(row))
+            except ParseError as e:
+                r.error = SMathError("Syntax is incorrect.", None)
+                r.error.src = e.src
 
     def _display(self, r: Region, value, ctx: Context):
         fmt = r.fmt or self.format
@@ -178,3 +215,17 @@ def _rebase(src, old: Row, new: Row):
     if src is not None and src[0] is old:
         return (new, src[1], src[2])
     return src
+
+
+def _snapshot(ctx: Context) -> Context:
+    """A frozen copy of what is defined at this point of the worksheet."""
+    chain = []
+    c = ctx
+    while c is not None:
+        chain.append(c)
+        c = c.parent
+    snap = Context()
+    for c in reversed(chain):
+        snap.vars.update(c.vars)
+        snap.funcs.update(c.funcs)
+    return snap

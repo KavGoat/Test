@@ -542,6 +542,20 @@ class Layouter:
             out = self._stack(lines)
             out.first_line = lines[0]
             return out
+        if b.name == "sys":
+            # a plot's list of curves: one per line, grouped by a left brace
+            rows = [self.row(r, scale) for r in b.rows]
+            if len(rows) == 1:
+                return rows[0]
+            inner = self._stack(rows)
+            inner.x = 8
+            path = QPainterPath()
+            top, bot = -inner.asc, inner.desc
+            mid = (top + bot) / 2
+            path.moveTo(6, top)
+            path.cubicTo(3, top, 4, mid - 2, 1, mid)
+            path.cubicTo(4, mid + 2, 3, bot, 6, bot)
+            return LPath(w=inner.w + 9, asc=inner.asc, desc=inner.desc, path=path, children=[inner])
         if b.name in ("while", "for"):
             head = self._kw_line(b.name, self.row(b.rows[0], scale), f)
             if b.name == "for" and len(b.rows) >= 3:

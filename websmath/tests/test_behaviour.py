@@ -208,7 +208,9 @@ def test_decimal_places_and_significant_figures():
     ("3'kN=", "3000 N"), ("2'kN*3'm=", "6000 J"), ("5'MPa=", "5·10^6 Pa"),
     ("9.81'kg*'m/'s^2=", "9.81 N"), ("60'deg=", "1.0472"), ("3/'s=", "3 Hz"),
     ("5'm/'s=", "5 m/s"), ("2'kg/'m=", "2 kg/m"), ("20'°C=", "293.15 K"), ("1'ft=", "0.3048 m"),
-    ("1'in*1'in=", "0.0006 m^2"), ("2'kN/'m=", "2000 m Pa"), ("100'kPa*2'm^2=", "2·10^5 N"),
+    ("1'in*1'in=", "0.0006 m^2"), ("2'kN/'m=", "2000 N/m"), ("100'kPa*2'm^2=", "2·10^5 N"),
+    ("25'kN/'m^3=", "25000 N/m^3"), ("100'W/'m^2=", "100 W/m^2"), ("3'J/'K=", "3 J/K"),
+    ("9.81'm/'s^2=", "9.81 m/s^2"),
 ])
 def test_unit_results(typed, shown):
     ws, (r,) = sheet(typed)
@@ -320,3 +322,26 @@ def test_only_edited_region_recalculates_until_left():
     assert result(b) == "5"  # unchanged until the region is left
     ws.calculate()
     assert error(b) == "q - not defined."
+
+
+# -- typing over a selection (observed on SMath Cloud with "1+2*3") -------------------------
+
+@pytest.mark.parametrize("spaces,op,expected", [
+    (1, "(", "1+(2*3)"), (2, "(", "(1+2*3)"), (3, "(", "1+(2*3)"),
+    (1, ")", "1+2*3"), (2, ")", "1+2*3"),
+    (1, "/", "1+(2*3)/()"), (2, "/", "(1+2*3)/()"),
+    (1, "^", "1+(2*3)^()"), (2, "^", "(1+2*3)^()"),
+    (1, "\\", "1+√(2*3)"), (2, "\\", "√(1+2*3)"),
+    (1, "-", "1+2*3-"), (2, "-", "1+2*3-"),
+    (1, "*", "1+2*3*"), (2, "*", "(1+2*3)*"),
+    (1, "+", "1+2*3+"), (2, "+", "1+2*3+"),
+    (1, "s", "1+2*3"),
+])
+def test_typing_over_selection(spaces, op, expected):
+    ws, (r,) = sheet(list("1+2*3") + [" "] * spaces + [op])
+    assert r.editor.root.text() == expected
+
+
+def test_bar_is_logical_or():
+    ws, (r,) = sheet("1|0=")
+    assert r.editor.root.text() == "1∨0=" and result(r) == "1"

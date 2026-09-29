@@ -95,23 +95,33 @@ def derived_unit_for(dims: tuple) -> str | None:
     return None
 
 
-def derived_with_base(dims: tuple):
-    """(base unit, derived unit) when dims = base¹ · derived, else None.
+# Derived units used to build "unit per length" style results, in order of
+# preference, and the divisors allowed with them.
+_READABLE = ["N", "J", "W", "Pa", "V", "C"]
 
-    Observed: 2 kN/m (kg/s²) is shown as "2000 m Pa" rather than kg/s² or
-    N/m - SMath combines a derived unit with one base unit to the first
-    power.  When several fit, the later entry in the derived list wins
-    (Pa over T for kg/s²).
+
+def derived_per_base(dims: tuple):
+    """(derived, [(base, power)]) for results that read naturally as a derived
+    unit over a base unit: N/m (force per length), N/m³ (unit weight),
+    W/m² (heat flux), J/K, W/m...  None when nothing reads well.
+
+    SMath itself shows kg/s² as "m Pa"; that is correct but nobody writes a
+    line load that way, so the replica prefers the engineering form.
+    Lengths are tried as divisors first (N/m before N/s).
     """
-    found = None
-    for name, d in DERIVED:
-        if name in _NOT_FOR_OUTPUT:
-            continue
-        rest = [a - b for a, b in zip(dims, d)]
-        nz = [(i, v) for i, v in enumerate(rest) if v != 0]
-        if len(nz) == 1 and nz[0][1] == 1:
-            found = (BASE[nz[0][0]], name)
-    return found
+    m, s, K = BASE.index("m"), BASE.index("s"), BASE.index("K")
+    passes = [[(m, -1), (m, -2), (m, -3)], [(s, -1), (K, -1)]]
+    lookup = dict(DERIVED)
+    for divisors in passes:
+        for name in _READABLE:
+            d = lookup[name]
+            rest = [a - b for a, b in zip(dims, d)]
+            for idx, p in divisors:
+                want = [0] * len(BASE)
+                want[idx] = p
+                if rest == want:
+                    return name, [(BASE[idx], -p)]
+    return None
 
 
 def base_unit_parts(dims: tuple) -> tuple[list, list]:

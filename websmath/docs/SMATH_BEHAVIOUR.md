@@ -108,6 +108,30 @@ gives `x7 = ■`, error `x7 - not defined.`
 * Inside an if-block a comma moves from the condition to its value. A comma
   after a value adds an **else if** branch.
 
+## Typing over a selection
+
+Selections are made with **space** (the web client has no Shift+arrow
+selection) or by dragging with the mouse inside the region being edited.
+Observed with the cursor after the 3 of `1+2·3`:
+
+* **Space cycles** between the sub-expressions that contain the cursor.
+  The first press selects `2·3`, the second the whole `1+2·3`, the third
+  `2·3` again. A lone name or number is not a level of its own.
+* The keys typed next:
+
+  | Key | Selection `2·3` | Selection `1+2·3` |
+  |---|---|---|
+  | `(` | 1+(2·3) | (1+2·3) |
+  | `)` | nothing | nothing |
+  | `/` | 1 + 2·3/■ | 1+2·3 / ■ (selection becomes the numerator) |
+  | `^` | 1+(2·3)^■ | (1+2·3)^■ |
+  | `\` | 1+√(2·3) | √(1+2·3) |
+  | `-`, `+` | 1+2·3−■ | 1+2·3−■ |
+  | `*` | 1+2·3·■ | (1+2·3)·■ (bracketed because · binds tighter) |
+  | a letter | nothing | nothing |
+
+* `|` is **logical OR** (∨) in SMath, not absolute value (use `abs(`).
+
 ## Text regions
 
 * In a math region holding **only a name** (`abc`, `x`, `x1`), pressing
@@ -173,7 +197,7 @@ the Calculation menu.
   | `sqrt(2'm)` | 1.4142 m^(1/2), with the power drawn as a fraction |
   | `20'°C` | 293.15 K |
   | `60'deg` | 1.0472 (angles are dimensionless) |
-  | `2'kN/'m` | **2000 m Pa**: when base units would need s² or worse in the denominator, SMath writes one base unit next to a derived unit |
+  | `2'kN/'m` | SMath shows **2000 m Pa** (one base unit next to a derived unit, when base units would need s² or worse in the denominator). **The replica deliberately shows 2000 N/m instead**, and similarly N/m³, W/m², J/K and W/m |
 
 * **Unit mismatch**: `L+3's=` gives **"Units don't match."**, with the whole
   `L + 3 s` outlined in red.
@@ -184,6 +208,28 @@ the Calculation menu.
   edited. Right-arrow at the end of the expression moves into it, and what you
   type there is parsed as maths, so units need the apostrophe (`cm` alone gives
   `cm - not defined.`). Double-clicking the unit of an answer opens it for editing.
+
+## 2-D plots
+
+Read from SMath's example worksheets (`.sm` plot regions) and from SMath
+Cloud's rendering of the MaclaurinSeries example:
+
+* The plot area is white with a black 1 px frame, **#d3d3d3 grid lines**
+  every unit, and **black axes** through the origin labelled `x` (right
+  end) and `y` (top).
+* Tick numbers are **#808080, 8 pt**: x values along the bottom edge (every
+  2 units at 20.5 px/unit) and y values along the left edge (every unit).
+* Curves are drawn in list order in **blue #0000ff, red #ff0000**, then
+  further colours.
+* The input sits **under** the plot: one expression, or several shown as a
+  list with a left brace (stored as `sys(e1, e2, …, n, 1)`). Each expression
+  is a function of `x`; a two-column matrix is drawn as connected points.
+* Files store `scale_x`/`scale_y` (1.6347 means 20.5 px per unit),
+  `transpose_x`/`transpose_y` (the origin's offset from the centre in pixels)
+  and `grid`/`axes` flags.
+* `@` inserts a plot. In the replica the wheel zooms (Ctrl for x only,
+  Shift for y only), dragging inside the plot pans, and the corner square
+  resizes.
 
 ## Errors
 

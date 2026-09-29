@@ -8,6 +8,8 @@ what the website does. The UI is a plain PySide6 window.
 
 ![WebSMath](docs/screenshot.png)
 
+![Plots](docs/plot.png)
+
 **How it was matched.** Every behaviour was read back from the live site with
 an automated driver; the method and all findings are in
 [docs/SMATH_BEHAVIOUR.md](docs/SMATH_BEHAVIOUR.md). The SMath Studio install
@@ -49,9 +51,18 @@ QT_QPA_PLATFORM=offscreen python -m pytest websmath/tests -p no:faulthandler
   * `[` makes an index, `.` a literal subscript, `|` an absolute value.
   * `if(`, `line(`, `mat(`, `sqrt(`, `nthroot(` and `abs(` become blocks,
     radicals and matrices.
-  * Space grows the selection.
+  * Space cycles the selection through the enclosing sub-expressions, and
+    dragging with the mouse selects too. With a selection, `(` brackets it,
+    `/` makes it a numerator, `^` raises it to a power, `\` puts it under a
+    root, and an operator continues after it (bracketing it when needed),
+    all as observed on the site.
   * Backspace unwraps structures.
   * Undo and redo work per keystroke.
+* **Plots:** `@` (or Insert ▸ 2D plot) inserts a 2-D plot drawn like
+  SMath's. Type a function of `x` under it, and a comma adds another curve;
+  a two-column matrix plots points. The wheel zooms (Ctrl: x only, Shift:
+  y only), dragging pans, the corner resizes. Plots load from and save to
+  `.sm`.
 * **Text regions:** space after a lone name turns the region into text, as
   does `"` as the first key. Backspace doesn't turn it back; undo does.
 * **Numbers:** 4 decimal places and exponential threshold 5 by default
@@ -59,7 +70,9 @@ QT_QPA_PLATFORM=offscreen python -m pytest websmath/tests -p no:faulthandler
   and trailing zeros are in the Calculation menu.
 * **Units:** typed with an apostrophe (`5'kN`, `'m/'s^2`), using SMath's own
   unit table (284 units and constants, SI prefixes, °C/°F offsets). Results
-  use SMath's derived units (N, J, Pa, W, Hz…). Type a unit after the result,
+  use SMath's derived units (N, J, Pa, W, Hz…). Where SMath would write an
+  odd mix such as `m Pa`, the replica uses the engineering form instead
+  (N/m, N/m³, W/m², J/K). Type a unit after the result,
   or double-click the answer, to convert it.
 * **Errors:** the offending part is outlined in red, and a yellow tip appears
   under the region being edited. Messages are SMath's own: `x - not defined.`,
@@ -83,7 +96,7 @@ QT_QPA_PLATFORM=offscreen python -m pytest websmath/tests -p no:faulthandler
   embedding.
 
 Not replicated: SMath's *symbolic* engine (symbolic differentiation,
-polynomials in an undefined variable), plots and pictures. Worksheets that need
+polynomials in an undefined variable), 3-D and polar plots, and pictures. Worksheets that need
 them open, but those results show errors.
 
 ## Layout

@@ -6,7 +6,7 @@ Observed SMath behaviour this reproduces (see docs/SMATH_BEHAVIOUR.md):
   moves into the denominator; everything typed next stays there
   (``1/7*1000`` is 1 over 7·1000).  ``2*3/4`` is 2·(3/4).
 * ``^`` opens an exponent, ``(`` a bracket, ``[`` an index, ``|`` an
-  absolute value.  Typing continues inside until the right arrow leaves;
+  absolute value (``|`` alone is logical OR).  Typing continues inside until the right arrow leaves;
   ``)`` does not close anything.  ``:`` inserts ``:=`` at the cursor.
 * ``=`` evaluates.  If what is left of it is a single name (or a call
   pattern ``f(x)``) that is not defined above, SMath turns it into ``:=``
@@ -29,8 +29,21 @@ IDENT_CHARS = LETTERS | DIGITS | {"."}
 OPERATOR_KEYS = {
     "+": "+", "-": "-", "*": "*", "<": "<", ">": ">", "!": "!",
     "≤": "≤", "≥": "≥", "≠": "≠", "≡": "≡", "∧": "∧", "∨": "∨", "¬": "¬",
-    "±": "±", "×": "*", "&": "∧",
+    "±": "±", "×": "*", "&": "∧", "|": "∨",
 }
+# precedence of operators typed after a selection
+BINARY_PREC = {"∨": 1, "⊕": 1, "∧": 2, "<": 3, ">": 3, "≤": 3, "≥": 3, "≠": 3, "≡": 3,
+               "+": 4, "-": 4, "±": 4, "*": 5}
+
+
+def _prec(node) -> int:
+    from .engine import ast as A
+
+    if isinstance(node, A.BinOp):
+        return BINARY_PREC.get(node.op, 6 if node.op in "/^" else 5)
+    if isinstance(node, A.Unary) and node.op in "-+":
+        return 4
+    return 9
 
 
 @dataclass
@@ -90,6 +103,7 @@ class MathEditor:
         self.in_unit = False
         self.selection: Optional[tuple] = None  # (row, start, end)
         self.is_defined = is_defined or (lambda name, nargs=None: False)
+        self.plot_input = False  # a plot's input: no "=", no text conversion
         self._undo: list[Snapshot] = []
         self._redo: list[Snapshot] = []
         self._fix_parents(self.root)
@@ -266,9 +280,6 @@ class MathEditor:
         if ch == "]":
             self._close(Index)
             return
-        if ch == "|":
-            self._insert_box(Abs(Row()), into=0)
-            return
         if ch == "\\":
             self._insert_box(Sqrt(Row()), into=0)
             return
@@ -404,7 +415,7 @@ class MathEditor:
         self._insert_char("≔")
 
     def _equals(self) -> None:
-        if self.in_unit:
+        if self.in_unit or self.plot_input:
             return
         if self.evaluate or "≔" in self.root.items:
             return
@@ -439,7 +450,7 @@ class MathEditor:
 
     def _space(self) -> None:
         items = self.root.items
-        if (not self.in_unit and items and self.selection is None
+        if (not self.in_unit and not self.plot_input and items and self.selection is None
                 and all(isinstance(it, str) and it in IDENT_CHARS for it in items)
                 and items[0] not in DIGITS):
             self._to_text("".join(items) + " ")
@@ -447,54 +458,83 @@ class MathEditor:
         self._grow_selection()
 
     # -- selection ------------------------------------------------------------
-    def _grow_selection(self) -> None:
-        if self.selection is None:
-            r, p = self.row, self.pos
-            a = self.operand_start(r, p)
-            if a == p:
-                if p < len(r):
-                    self.selection = (r, p, p + 1)
-                elif r.items:
-                    self.selection = (r, 0, len(r))
-                else:
-                    self._select_parent(r)
-                return
-            self.selection = (r, a, p)
-            return
-        r, a, b = self.selection
-        end = len(r) if r is not self.root else len(self.expression_items())
-        if (a, b) != (0, end):
-            self.selection = (r, 0, end)
-            return
-        self._select_parent(r)
+    def selection_levels(self) -> list:
+        """Spans (row, start, end) space cycles through, innermost first.
 
-    def _select_parent(self, r: Row) -> None:
-        if r.parent is None:
+        Observed on SMath Cloud with the cursor after the 3 of 1+2·3: the first
+        space selects 2·3, the second the whole expression, the third 2·3
+        again.  A single name or number is never a level of its own; when
+        the cursor is inside a box the box itself (and what contains it)
+        follow.
+        """
+        from .engine import ast as A
+        from .engine.parser import ParseError, Parser
+
+        levels = []
+        r, p = self.row, self.pos
+        while True:
+            if r is self.root:
+                items = self.expression_items()
+            else:
+                items = r.items
+            sub = Row()
+            sub.items = list(items)
+            spans = set()
+            try:
+                parser = Parser(sub)
+                node = parser.boolean() if parser.toks else None
+            except (ParseError, IndexError):
+                node = None
+            if node is not None:
+                for n in A.walk(node):
+                    if n.src is None or isinstance(n, (A.Num, A.Var, A.UnitRef, A.Placeholder, A.Str)):
+                        continue
+                    _, s0, s1 = n.src
+                    if s0 < p <= s1 or (s0 <= p < s1):
+                        spans.add((s0, s1))
+            if items:
+                spans.add((0, len(items)))
+            for s0, s1 in sorted(spans, key=lambda t: t[1] - t[0]):
+                if (r, s0, s1) not in levels:
+                    levels.append((r, s0, s1))
+            if r.parent is None:
+                break
+            box = r.parent
+            prow = box.parent_row
+            i = prow.items.index(box)
+            levels.append((prow, i, i + 1))
+            r, p = prow, i + 1
+        return levels
+
+    def _grow_selection(self) -> None:
+        levels = self.selection_levels()
+        if not levels:
             return
-        box = r.parent
-        prow = box.parent_row
-        i = prow.items.index(box)
-        a = self.operand_start(prow, i + 1)
-        self.selection = (prow, a, i + 1)
-        self.cursor = Cursor(prow, i + 1)
+        if self.selection in levels:
+            k = (levels.index(self.selection) + 1) % len(levels)
+        else:
+            k = 0
+        self.selection = levels[k]
 
     def _apply_to_selection(self, ch: str) -> None:
+        """What typing does with a selection (observed on SMath Cloud)."""
+        from .engine.parser import ParseError, parse_row
+
         r, a, b = self.selection
         self.selection = None
+        ch = OPERATOR_KEYS.get(ch, ch)
+        if ch == ")" or ch == "]":
+            return
         if ch == "/":
             self.cursor = Cursor(r, b)
             self.selection = (r, a, b)
             self._fraction()
             return
-        if ch in ("(", "^", "\\", "|"):
+        if ch in ("(", "\\", "^"):
             inner = Row(r.items[a:b])
             del r.items[a:b]
-            if ch == "(" or ch == "^":
-                box = Paren(inner)
-            elif ch == "\\":
-                box = Sqrt(inner)
-            else:
-                box = Abs(inner)
+            single = len(inner.items) == 1 and isinstance(inner.items[0], Box)
+            box = Sqrt(inner) if ch == "\\" else (inner.items[0] if (ch == "^" and single) else Paren(inner))
             r.insert(a, box)
             self._fix_parents(r, r.parent)
             self.cursor = Cursor(r, a + 1)
@@ -505,14 +545,27 @@ class MathEditor:
             del r.items[a:b]
             self.cursor = Cursor(r, a)
             return
-        if ch in OPERATOR_KEYS or ch in ("=", ":"):
+        if ch in BINARY_PREC:
+            # the selection becomes the left operand; bracket it when the new
+            # operator binds tighter: (1+2·3)·■ but 1+2·3+■
+            sel = Row(r.items[a:b])
+            try:
+                node = parse_row(sel)
+            except ParseError:
+                node = None
+            if node is not None and _prec(node) < BINARY_PREC[ch] and b - a > 1:
+                del r.items[a:b]
+                r.insert(a, Paren(sel))
+                self._fix_parents(r, r.parent)
+                b = a + 1
+            self.cursor = Cursor(r, b)
+            self._insert_char(ch)
+            return
+        if ch in ("=", ":"):
             self.cursor = Cursor(r, b)
             self._type(ch)
             return
-        # typing replaces the selection
-        del r.items[a:b]
-        self.cursor = Cursor(r, a)
-        self._type(ch)
+        # letters and digits leave the expression unchanged (observed)
 
     # -- deletion ---------------------------------------------------------------
     def _backspace(self) -> None:

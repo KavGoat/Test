@@ -133,6 +133,10 @@ class WorksheetView(QGraphicsView):
         item = self._add_item(region)
         return item
 
+    def new_plot(self, x: float, y: float) -> RegionItem:
+        region = self.worksheet.add_plot(snap(x), snap(y))
+        return self._add_item(region)
+
     def delete_region(self, item: RegionItem) -> None:
         if item is self.focused_item:
             self.focused_item = None
@@ -210,13 +214,32 @@ class WorksheetView(QGraphicsView):
             self._drag = ("rubber", pt)
             self.scene_.update()
             return
+        if item is self.focused_item and item.region.plot is not None and item.plot_rect().contains(item.mapFromScene(pt)):
+            st = item.region.plot
+            local = item.mapFromScene(pt)
+            if local.x() > st.width - 8 and local.y() > st.height - 8:
+                self._drag = ("resize", pt, item, (st.width, st.height))
+            else:
+                self._drag = ("pan", pt, item, (st.pan_x, st.pan_y))
+            return
         if item is self.focused_item:
+            # dragging inside the region being edited selects (as SMath Cloud)
             item.place_cursor(item.mapFromScene(pt))
             item.update()
-            self._drag = ("maybe-move", pt, item, item.pos())
+            hit = item.slot_at(item.mapFromScene(pt)) if item.region.kind == "math" else None
+            self._drag = ("select", pt, item, hit) if hit else None
+            return
+        local = item.mapFromScene(pt)
+        if item.region.plot is not None and item.plot_rect().contains(local):
+            self.focus_item(item)
+            st = item.region.plot
+            if local.x() > st.width - 8 and local.y() > st.height - 8:
+                self._drag = ("resize", pt, item, (st.width, st.height))
+            else:
+                self._drag = ("pan", pt, item, (st.pan_x, st.pan_y))
             return
         self.focus_item(item)
-        item.place_cursor(item.mapFromScene(pt))
+        item.place_cursor(local)
         item.update()
         self._drag = ("maybe-move", pt, item, item.pos())
 
@@ -228,6 +251,26 @@ class WorksheetView(QGraphicsView):
             _, start, item, orig = self._drag
             if (pt - start).manhattanLength() > 6 and e.buttons() & Qt.LeftButton:
                 self._drag = ("move", start, item, orig)
+        if self._drag[0] in ("pan", "resize"):
+            kind, start, item, orig = self._drag
+            d = pt - start
+            st = item.region.plot
+            if kind == "pan":
+                st.pan_x, st.pan_y = orig[0] + d.x(), orig[1] + d.y()
+            else:
+                st.width = max(60.0, snap(orig[0] + d.x()))
+                st.height = max(40.0, snap(orig[1] + d.y()))
+                item.relayout()
+            item.update()
+            return
+        if self._drag[0] == "select":
+            _, start, item, (row, k0) = self._drag
+            hit = item.slot_at(item.mapFromScene(pt))
+            if hit and hit[0] is row and hit[1] != k0:
+                item.editor.set_cursor(row, hit[1])
+                item.editor.selection = (row, min(k0, hit[1]), max(k0, hit[1]))
+                item.update()
+            return
         if self._drag[0] == "move":
             _, start, item, orig = self._drag
             d = pt - start
@@ -241,6 +284,23 @@ class WorksheetView(QGraphicsView):
                     it.selected_region = True
                     it.update()
                     self.selected.append(it)
+
+    def wheelEvent(self, e) -> None:
+        """Wheel over a plot zooms it (Ctrl: x only, Shift: y only)."""
+        pt = self.mapToScene(e.position().toPoint())
+        item = self._item_at(pt)
+        if item is not None and item.region.plot is not None:
+            local = item.mapFromScene(pt)
+            if item.plot_rect().contains(local):
+                steps = e.angleDelta().y() / 120.0
+                mods = e.modifiers()
+                only_x = bool(mods & Qt.ControlModifier)
+                only_y = bool(mods & Qt.ShiftModifier)
+                item.region.plot.zoom(1.1 ** steps, local.x(), local.y(), x=not only_y, y=not only_x)
+                item.update()
+                e.accept()
+                return
+        super().wheelEvent(e)
 
     def mouseReleaseEvent(self, e) -> None:
         if self._drag and self._drag[0] == "move":
@@ -334,6 +394,12 @@ class WorksheetView(QGraphicsView):
 
     def _key_to_region(self, text: str) -> None:
         item = self.focused_item
+        if item is None and text == "@":
+            # "@" inserts a 2-D plot, as in SMath
+            c = self.scene_.cross
+            item = self.new_plot(c.x(), c.y())
+            self.focus_item(item)
+            return
         if item is None:
             c = self.scene_.cross
             if text == " ":

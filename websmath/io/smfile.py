@@ -259,7 +259,10 @@ def _from_root(root) -> Worksheet:
         y = float(reg.get("top", "0"))
         math = reg.find(f"{{{NS}}}math")
         text = reg.findall(f"{{{NS}}}text")
-        if math is not None:
+        plot = reg.find(f"{{{NS}}}plot")
+        if plot is not None and plot.get("type", "2d") == "2d":
+            _load_plot(ws, reg, plot, x, y)
+        elif math is not None:
             inp = math.find(f"{{{NS}}}input")
             node = rpn_to_ast(list(inp)) if inp is not None else A.Placeholder()
             ed = MathEditor(Row(ast_to_items(node)))
@@ -306,6 +309,9 @@ def dumps(ws: Worksheet) -> str:
         if not r.enabled:
             attrs["enabled"] = "false"
         reg = ET.SubElement(root, f"{{{NS}}}region", attrs)
+        if r.kind == "plot":
+            _save_plot(r, reg)
+            continue
         if r.kind == "text":
             t = ET.SubElement(reg, f"{{{NS}}}text", {"lang": "eng"})
             for line in r.editor.text.split("\n"):
@@ -338,3 +344,68 @@ def dumps(ws: Worksheet) -> str:
     body = ET.tostring(root, encoding="unicode")
     return ('<?xml version="1.0" encoding="utf-8"?>\n'
             '<?application progid="SMath Studio Desktop" version="1.0"?>\n' + body)
+
+
+# ---------------------------------------------------------------------------
+# plots
+# ---------------------------------------------------------------------------
+
+def _load_plot(ws: Worksheet, reg, plot, x: float, y: float) -> None:
+    from ..plot import PX_PER_SCALE
+
+    region = ws.add_plot(x, y)
+    st = region.plot
+    st.width = max(60.0, float(reg.get("width", "309")) - 9)
+    st.height = max(40.0, float(reg.get("height", "207")) - 7)
+    st.ppu_x = float(plot.get("scale_x", "1.6347")) * PX_PER_SCALE
+    st.ppu_y = float(plot.get("scale_y", "1.6347")) * PX_PER_SCALE
+    st.pan_x = float(plot.get("transpose_x", "0"))
+    st.pan_y = float(plot.get("transpose_y", "0"))
+    st.grid = plot.get("grid", "true") != "false"
+    st.axes = plot.get("axes", "true") != "false"
+    inp = plot.find(f"{{{NS}}}input")
+    if inp is None or not len(inp):
+        return
+    node = rpn_to_ast(list(inp))
+    exprs = [node]
+    if isinstance(node, A.Call) and node.name == "sys" and len(node.args) >= 3:
+        exprs = node.args[:-2]
+    box = region.editor.root.items[0]
+    box.rows = [Row(ast_to_items(e)) for e in exprs]
+    MathEditor._fix_parents(region.editor.root)
+    region.editor.set_cursor(box.rows[-1], len(box.rows[-1]))
+
+
+def _save_plot(r, reg) -> None:
+    st = r.plot
+    reg.set("width", str(int(st.width + 9)))
+    reg.set("height", str(int(st.height + 7)))
+    attrs = {"type": "2d", "render": "lines", "scale_x": repr(st.scale_x), "scale_y": repr(st.scale_y),
+             "scale_z": repr(st.scale_x), "rotate_x": "0", "rotate_y": "0", "rotate_z": "0",
+             "transpose_x": repr(st.pan_x), "transpose_y": repr(st.pan_y), "transpose_z": "0"}
+    if not st.grid:
+        attrs["grid"] = "false"
+    if not st.axes:
+        attrs["axes"] = "false"
+    plot = ET.SubElement(reg, f"{{{NS}}}plot", attrs)
+    inp = ET.SubElement(plot, f"{{{NS}}}input")
+    nodes = []
+    for row in r.plot_rows():
+        try:
+            nodes.append(parse_row(row))
+        except Exception:
+            nodes.append(A.Placeholder())
+    els: list = []
+    if len(nodes) == 1:
+        ast_to_rpn(nodes[0], els)
+    else:
+        for n in nodes:
+            ast_to_rpn(n, els)
+        for v in (str(len(nodes)), "1"):
+            e = ET.Element(f"{{{NS}}}e", {"type": "operand"})
+            e.text = v
+            els.append(e)
+        e = ET.Element(f"{{{NS}}}e", {"type": "function", "preserve": "true", "args": str(len(nodes) + 2)})
+        e.text = "sys"
+        els.append(e)
+    inp.extend(els)

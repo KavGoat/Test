@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from .numformat import FormattedNumber, NumberFormat, format_real
-from .units import Quantity, base_unit_parts, derived_unit_for, derived_with_base
+from .units import Quantity, base_unit_parts, derived_per_base, derived_unit_for
 from .values import Matrix, String
 
 
@@ -59,10 +59,10 @@ def _unit_for(dims: tuple) -> Optional[DUnit]:
     if d:
         return DUnit([(d, 1)], [])
     # only when base units would need a squared (or worse) denominator:
-    # kg/s² -> m Pa, but m/s, kg/m and m² stay in base units (observed)
-    mixed = derived_with_base(dims) if any(d <= -2 for d in dims) else None
-    if mixed:
-        return DUnit([(mixed[0], 1), (mixed[1], 1)], [])
+    # kg/s² -> N/m, but m/s, kg/m, m/s² and m² stay in base units
+    per = derived_per_base(dims) if any(d <= -2 for d in dims) else None
+    if per:
+        return DUnit([(per[0], 1)], per[1])
     num, den = base_unit_parts(dims)
     return DUnit(num, den)
 

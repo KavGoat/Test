@@ -65,6 +65,7 @@ class MainWindow(QMainWindow):
         i = mb.addMenu("Insert")
         self._act(i, "Text region", self._insert_text, '"')
         self._act(i, "Matrix...", self._insert_matrix, "Ctrl+M")
+        self._act(i, "2D plot", self._insert_plot, "Ctrl+2")
         self._act(i, "Function...", self._insert_function, "Ctrl+E")
         self._act(i, "Unit...", self._insert_unit, "Ctrl+U")
         c = mb.addMenu("Calculation")
@@ -104,6 +105,7 @@ class MainWindow(QMainWindow):
                          ("while", lambda: self._program("while")), ("line", lambda: self._program("line")),
                          ("try", typed("try(")), ("break", typed("break")),
                          ("continue", typed("continue"))], 4), "Programming")
+        box.addItem(pad([("2D", self._insert_plot)], 4), "Plot")
         box.addItem(pad([(s, typed(s + "(")) for s in ["sin", "cos", "tan", "cot", "ln", "log", "exp",
                                                         "sqrt", "abs", "max", "min", "sum", "det",
                                                         "transpose", "el"]], 4), "Functions")
@@ -222,6 +224,13 @@ class MainWindow(QMainWindow):
         v = self.view
         item = v.new_region(v.scene_.cross.x(), v.scene_.cross.y(), text_region=True)
         v.focus_item(item)
+
+    def _insert_plot(self) -> None:
+        v = self.view
+        v.focus_item(None)
+        item = v.new_plot(v.scene_.cross.x(), v.scene_.cross.y())
+        v.focus_item(item)
+        v.setFocus()
 
     def _insert_matrix(self) -> None:
         d = QDialog(self)

@@ -55,7 +55,7 @@ class RegionItem(QGraphicsObject):
     def boundingRect(self) -> QRectF:
         w, h = self._size
         extra = 0.0
-        if self.focused and self.region.error is not None:
+        if self.focused and (self.region.error is not None or getattr(self, "_plot_error", None)):
             extra = 40.0
         return QRectF(-1, -1, max(w, 1) + 2 + (160 if extra else 0), h + 2 + extra)
 
@@ -73,6 +73,9 @@ class RegionItem(QGraphicsObject):
         self.prepareGeometryChange()
         if self.region.kind == "text":
             self._layout_text()
+            return
+        if self.region.plot is not None:
+            self._layout_plot()
             return
         err = self.region.error
         lay = Layouter(self.style, var_kind=self._var_kind, error_node=getattr(err, "node", None) or _src_node(err),
@@ -112,6 +115,101 @@ class RegionItem(QGraphicsObject):
         self._size = (whole.w + PAD_X * 2, h)
         self.update()
 
+    # -- plots -------------------------------------------------------------------------
+    def plot_rect(self) -> QRectF:
+        st = self.region.plot
+        return QRectF(0, 0, st.width, st.height)
+
+    def _layout_plot(self) -> None:
+        st = self.region.plot
+        err = self.region.error
+        lay = Layouter(self.style, var_kind=self._var_kind, error_node=getattr(err, "node", None) or _src_node(err),
+                       user_funcs=frozenset(n for n, _ in self.worksheet.context.funcs))
+        root = lay.row(self.editor.root)
+        base = st.height + 6 + max(root.asc, 11.4)
+        root.x, root.y = PAD_X, base
+        self._layout = root
+        self._rows = absolute_rows(root, lay.rows)
+        self._baseline = base
+        self._size = (max(st.width, root.w + 2 * PAD_X), max(base + root.desc + PAD_BOTTOM, st.height + MIN_H))
+        self._plot_cache = None
+        self.update()
+
+    def _plot_lines(self):
+        """Sampled curves, cached until the view or the worksheet changes."""
+        from ..plot import sample
+
+        st = self.region.plot
+        key = (st.width, st.height, st.ppu_x, st.ppu_y, st.pan_x, st.pan_y,
+               id(self.region.plot_ctx), tuple(id(c) for c in self.region.curves))
+        cache = getattr(self, "_plot_cache", None)
+        if cache is not None and cache[0] == key:
+            return cache[1]
+        curves = []
+        self._plot_error = None
+        for node in self.region.curves:
+            lines, e = sample(node, self.region.plot_ctx, self.worksheet.evaluator, st)
+            curves.append(lines)
+            if e is not None and self._plot_error is None:
+                self._plot_error = e
+        self._plot_cache = (key, curves)
+        return curves
+
+    def _paint_plot(self, p: QPainter) -> None:
+        from PySide6.QtGui import QPolygonF
+
+        from ..plot import CURVE_COLORS, GRID_COLOR, LABEL_COLOR, axis_layout
+
+        st = self.region.plot
+        rect = self.plot_rect()
+        p.save()
+        p.setRenderHint(QPainter.Antialiasing, False)
+        p.fillRect(rect, Qt.white)
+        p.setClipRect(rect.adjusted(1, 1, -1, -1))
+        ax = axis_layout(st)
+        ox, oy = st.origin
+        if st.grid:
+            p.setPen(QPen(QColor(GRID_COLOR), 1))
+            for v in ax["grid_x"]:
+                x = round(st.to_px(v, 0)[0]) + 0.5
+                p.drawLine(QPointF(x, 0), QPointF(x, st.height))
+            for v in ax["grid_y"]:
+                y = round(st.to_px(0, v)[1]) + 0.5
+                p.drawLine(QPointF(0, y), QPointF(st.width, y))
+        f = QFont(self._text_font())
+        f.setPointSizeF(8)
+        p.setFont(f)
+        p.setPen(QColor(LABEL_COLOR))
+        for v, label in ax["label_x"]:
+            x = round(st.to_px(v, 0)[0])
+            p.drawText(QPointF(x + 1, st.height - 2), label)
+        for v, label in ax["label_y"]:
+            y = round(st.to_px(0, v)[1])
+            p.drawText(QPointF(1, y + 10), label)
+        if st.axes:
+            p.setPen(QPen(Qt.black, 1))
+            p.drawLine(QPointF(0, round(oy) + 0.5), QPointF(st.width, round(oy) + 0.5))
+            p.drawLine(QPointF(round(ox) + 0.5, 0), QPointF(round(ox) + 0.5, st.height))
+            fa = QFont(self._text_font())
+            fa.setPointSizeF(10)
+            p.setFont(fa)
+            p.drawText(QPointF(st.width - 11, oy + 12), "x")
+            p.drawText(QPointF(ox + 1, 12), "y")
+        p.setRenderHint(QPainter.Antialiasing, True)
+        for k, lines in enumerate(self._plot_lines()):
+            p.setPen(QPen(QColor(CURVE_COLORS[k % len(CURVE_COLORS)]), 1))
+            for line in lines:
+                if len(line) > 1:
+                    p.drawPolyline(QPolygonF([QPointF(x, y) for x, y in line]))
+                elif line:
+                    p.drawEllipse(QPointF(*line[0]), 1.5, 1.5)
+        p.restore()
+        p.setPen(QPen(Qt.black, 1))
+        p.drawRect(rect.adjusted(0.5, 0.5, -0.5, -0.5))
+        if self.focused:
+            # resize handle in the corner
+            p.fillRect(QRectF(st.width - 5, st.height - 5, 5, 5), Qt.black)
+
     def _text_font(self) -> QFont:
         from .layout import _family
 
@@ -143,12 +241,14 @@ class RegionItem(QGraphicsObject):
         if self.region.kind == "text":
             self._paint_text(p)
             return
+        if self.region.plot is not None:
+            self._paint_plot(p)
         if self._layout is not None:
             self._layout.paint(p, self._layout.x, self._layout.y)
         if self.focused:
             self._paint_selection(p)
             self._paint_cursor(p)
-            if self.region.error is not None:
+            if self.region.error is not None or getattr(self, "_plot_error", None) is not None:
                 self._paint_error_tip(p)
 
     def _paint_text(self, p: QPainter) -> None:
@@ -206,7 +306,7 @@ class RegionItem(QGraphicsObject):
         p.fillRect(QRectF(x0, info.base - info.asc, x1 - x0, info.asc + info.desc), SELECTION)
 
     def _paint_error_tip(self, p: QPainter) -> None:
-        msg = self.region.error.message
+        msg = (self.region.error or self._plot_error).message
         f = QFont(self._text_font())
         f.setPixelSize(11)
         m = QFontMetricsF(f)
@@ -219,6 +319,25 @@ class RegionItem(QGraphicsObject):
         p.drawText(rect.adjusted(2, 1, -2, -1), Qt.AlignLeft | Qt.AlignVCenter, msg)
 
     # -- hit testing ----------------------------------------------------------------
+    def slot_at(self, pt: QPointF):
+        """(row, index) of the cursor position nearest pt, or None."""
+        best = None
+        for info in self._rows.values():
+            if not info.slots:
+                continue
+            top, bot = info.base - info.asc, info.base + info.desc
+            left, right = info.slots[0], info.slots[-1]
+            dy = 0 if top <= pt.y() <= bot else min(abs(pt.y() - top), abs(pt.y() - bot))
+            dx = 0 if left - 2 <= pt.x() <= right + 2 else min(abs(pt.x() - left), abs(pt.x() - right))
+            key = (dy + dx, (right - left) * (bot - top))
+            if best is None or key < best[0]:
+                best = (key, info)
+        if best is None:
+            return None
+        info = best[1]
+        k = min(range(len(info.slots)), key=lambda i: abs(info.slots[i] - pt.x()))
+        return info.row, k
+
     def place_cursor(self, pt: QPointF) -> None:
         """Put the editor cursor at the slot nearest a click (region coords)."""
         if self.region.kind == "text":
@@ -231,24 +350,9 @@ class RegionItem(QGraphicsObject):
                     col = k
             self.editor.text_pos = sum(len(l) + 1 for l in lines[:li]) + col
             return
-        best = None
-        for info in self._rows.values():
-            top, bot = info.base - info.asc, info.base + info.desc
-            if not info.slots:
-                continue
-            left, right = info.slots[0], info.slots[-1]
-            dy = 0 if top <= pt.y() <= bot else min(abs(pt.y() - top), abs(pt.y() - bot))
-            dx = 0 if left - 2 <= pt.x() <= right + 2 else min(abs(pt.x() - left), abs(pt.x() - right))
-            # prefer the innermost (smallest) row containing the point
-            area = (right - left) * (bot - top)
-            key = (dy + dx, area)
-            if best is None or key < best[0]:
-                best = (key, info)
-        if best is None:
-            return
-        info = best[1]
-        k = min(range(len(info.slots)), key=lambda i: abs(info.slots[i] - pt.x()))
-        self.editor.set_cursor(info.row, k)
+        hit = self.slot_at(pt)
+        if hit is not None:
+            self.editor.set_cursor(*hit)
 
     def cursor_scene_pos(self) -> QPointF:
         info = self._row_info(self.editor.row) if self.region.kind == "math" else None
