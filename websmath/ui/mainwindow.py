@@ -89,11 +89,10 @@ class MainWindow(QMainWindow):
         self._act(i, "Separator", self._insert_separator)
         self._act(i, "Text region", self._insert_text)
         c = mb.addMenu("Calculation")
-        self._act(c, "Solve", lambda: self._symbolic("Solve"))
+        self._act(c, "Solve", v.solve_selection)
         self._act(c, "Calculate", v.calculate_selection)
-        self._act(c, "Simplify", lambda: self._symbolic("Simplify"))
         self._act(c, "Invert", v.invert_selection)
-        self._act(c, "Differentiate", lambda: self._symbolic("Differentiate"))
+        self._act(c, "Differentiate", v.differentiate_selection)
         self._act(c, "Determinant", v.determinant_selection)
         c.addSeparator()
         self._act(c, "Auto calculation", self._toggle_auto, checkable=True, checked=True)
@@ -316,9 +315,6 @@ class MainWindow(QMainWindow):
         v = self.view
         v.focus_item(None)
         v.insert_area(v.scene_.cross.y())
-
-    def _symbolic(self, what: str) -> None:
-        QMessageBox.information(self, what, f"{what} needs SMath's symbolic engine, which WebSMath does not replicate.")
 
     def print_sheet(self) -> None:
         from PySide6.QtPrintSupport import QPrintDialog, QPrinter

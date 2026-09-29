@@ -610,3 +610,53 @@ def test_variable_named_like_a_unit_wins():
     # observed: after m:10, m= shows 10 and 'm stays the metre
     _, (_, a, b) = sheet("m:10", "m=", "m*2'm=")
     assert (result(a), result(b)) == ("10", "20 m")
+
+
+# -- symbolic differentiation and the functions completed from the catalogue --------------
+
+def _ev(text, *defs):
+    from websmath.engine.display import value_to_text
+    from websmath.engine.evaluator import Context, Evaluator
+    from websmath.engine.linear import parse_text
+    from websmath.engine.parser import parse_row
+
+    ev, ctx = Evaluator(), Context()
+    for d in defs:
+        ev.define(parse_row(parse_text(d)), ctx)
+    ev.start_clock()
+    return value_to_text(ev.eval(parse_row(parse_text(text)), ctx))
+
+
+@pytest.mark.parametrize("expr,shown", [
+    ("diff(x^3,x)", "3*x^(2)"),
+    ("diff(x^3,x,2)", "6*x"),
+    ("diff(a*x^2+b*x+c,x)", "2*a*x+b"),
+    ("diff(sin(x),x)", "cos(x)"),
+    ("diff(ln(x^2+1),x)", "2*(x)/(x^(2)+1)"),  # 2·x over x²+1
+    ("diff(e^x,x)", "e^(x)"),
+    ("diff(2^x,x)", "2^(x)*ln(2)"),
+])
+def test_diff_is_symbolic_when_variable_is_free(expr, shown):
+    assert _ev(expr) == shown
+
+
+def test_diff_evaluates_when_variable_has_value():
+    assert _ev("diff(x^3,x)", "x:=2") == "12"
+    assert _ev("diff(f(x),x)", "f(x):=x^2+3*x", "x:=1") == "5"
+
+
+@pytest.mark.parametrize("expr,defs,shown", [
+    ("Jacob(stack(x^2,x*y),stack(x,y))", ("x:=1", "y:=2"), "[2 0; 2 1]"),
+    ("roots(x^2-4,x)", ("x:=1",), "2"),
+    ("roots(stack(x+y-3,x-y-1),stack(x,y))", ("x:=0", "y:=0"), "[2; 1]"),
+    ("numden(3/4)", (), "[3; 4]"),
+    ("numden(0.75)", (), "[3; 4]"),
+    ("mixed(2,1,4)", (), "2.25"),
+    ("findrows(stack(augment(1,2),augment(3,4),augment(1,5)),1,1)", (), "[1 2; 1 5]"),
+    ('trace("a={0}",5)', (), '"a=5"'),
+    ('num2str(3.14159,"0.00")', (), '"3.14"'),
+    ('num2str(1234.5,"F1")', (), '"1234.5"'),
+    ("solve(x^2-4,x)", (), "[-2; 2]"),
+])
+def test_more_functions(expr, defs, shown):
+    assert _ev(expr, *defs) == shown

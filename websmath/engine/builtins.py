@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import cmath
+import re
 import math
 import random as _random
 import time as _time
@@ -711,6 +712,96 @@ def _num2str(a):
     return String(value_to_text(a))
 
 
+@fn("num2str", 2)
+def _num2str_fmt(a, f):
+    """num2str(x, "0.00"): .NET-style number formats - 0.00, #.##, F2, E3,
+    N2, P1 and 0.0E+00."""
+    fmt = f.text if isinstance(f, String) else ""
+    x = need_real(a)
+    m = re.fullmatch(r"([FfEeNnPp])(\d*)", fmt)
+    if m:
+        k = int(m.group(2) or 2)
+        c = m.group(1).upper()
+        if c == "F":
+            return String(f"{x:.{k}f}")
+        if c == "N":
+            return String(f"{x:,.{k}f}")
+        if c == "P":
+            return String(f"{x * 100:.{k}f} %")
+        s = f"{x:.{k}E}"
+        mant, e = s.split("E")
+        return String(f"{mant}E{int(e):+04d}")
+    if "E" in fmt.upper():
+        mant, _, ex = fmt.upper().partition("E")
+        k = len(mant.split(".")[1]) if "." in mant else 0
+        e = math.floor(math.log10(abs(x))) if x else 0
+        return String(f"{x / 10 ** e:.{k}f}E{e:+0{len(ex.lstrip('+-')) + 1}d}")
+    if "." in fmt:
+        whole, dec = fmt.split(".", 1)
+        req, opt = dec.count("0"), dec.count("#")
+        s = f"{x:.{req + opt}f}"
+        if opt:
+            head, tail = s.split(".")
+            tail = tail[:req] + tail[req:].rstrip("0")
+            s = head + ("." + tail if tail else "")
+        return String(s)
+    if fmt:
+        return String(f"{x:.0f}")
+    from .display import value_to_text
+
+    return String(value_to_text(a))
+
+
+@fn("mixed", 3)
+def _mixed(w, a, b):
+    """mixed(2, 1, 3) is the mixed number 2 1/3 = 7/3."""
+    x, y, z = need_scalar(w), need_scalar(a), need_scalar(b)
+    if z.value == 0:
+        raise err("div_zero")
+    frac = y.value / z.value
+    return Q(x.value - frac if x.real < 0 else x.value + frac)
+
+
+@fn("findrows", 3)
+def _findrows(m, value, col):
+    """The rows of m whose column col holds value (0 when there are none)."""
+    mat = _mat(m)
+    c = need_int(col) - 1
+    if not 0 <= c < mat.ncols:
+        raise err("index_range")
+    rows = [i for i in range(mat.nrows) if _equal(mat.get(i, c), value)]
+    if not rows:
+        return Q(0.0)
+    return Matrix(len(rows), mat.ncols, [mat.get(i, j) for i in rows for j in range(mat.ncols)])
+
+
+def _equal(a, b) -> bool:
+    if isinstance(a, String) or isinstance(b, String):
+        return isinstance(a, String) and isinstance(b, String) and a.text == b.text
+    return isinstance(a, Quantity) and isinstance(b, Quantity) and a.dims == b.dims and a.value == b.value
+
+
+@fn("Sleep")
+def _sleep(ms):
+    """Waits the given milliseconds (at most 10 s, the evaluation limit)."""
+    t = max(0.0, min(need_real(ms), 10000.0))
+    _time.sleep(t / 1000)
+    return Q(t)
+
+
+@fn("appVersion")
+def _app_version(v):
+    """The SMath Studio version this replica follows (the bundled desktop
+    SMath Studio is 1.3; SMath Cloud reports the same)."""
+    need_int(v)
+    return String("1.3.0.9126")
+
+
+@fn("description")
+def _description(v):
+    return String("")  # regions have no description text in the replica
+
+
 @fn("str2num")
 def _str2num(a):
     from .linear import parse_linear
@@ -871,10 +962,30 @@ def _with_var(ev, ctx, expr, var, x):
 
 
 def _diff(ev, n: A.Call, ctx):
+    """diff(f, x[, n]): symbolic when x has no value (diff(x^3,x) = 3·x²),
+    the derivative's value at x when it has one."""
+    from . import symbolic as S
+
     if len(n.args) not in (2, 3):
         raise err("args_count", node=n)
     expr, var = n.args[0], n.args[1]
+    if not isinstance(var, A.Var):
+        raise err("syntax", node=var)
     order = need_int(ev.eval(n.args[2], ctx)) if len(n.args) == 3 else 1
+    try:
+        d = S.derivative(S.expand(expr, ctx), var.name, order)
+    except S.NotSymbolic:
+        d = None
+    if ctx.lookup(var.name) is None or _is_lazy(ctx.lookup(var.name)):
+        if d is None:
+            raise err("cannot_evaluate", node=n)
+        try:
+            # everything else may be known: then the result is a number
+            return ev.eval(d, ctx)
+        except SMathError:
+            return S.Expr(d)
+    if d is not None:
+        return ev.eval(d, ctx)
     x0 = need_scalar(ev.eval(var, ctx))
     h = 1e-3 * max(1.0, abs(x0.real))
 
@@ -886,6 +997,154 @@ def _diff(ev, n: A.Call, ctx):
     val = d(order, x0.real)
     f0 = _with_var(ev, ctx, expr, var, x0)
     return _out(val, tuple(a - order * b for a, b in zip(f0.dims, x0.dims)))
+
+
+def _is_lazy(v) -> bool:
+    from .evaluator import Lazy
+
+    return isinstance(v, Lazy)
+
+
+def _jacob(ev, n: A.Call, ctx):
+    """Jacob(F, X): the matrix of dF_i/dX_j (symbolic where X has no value)."""
+    from . import symbolic as S
+
+    if len(n.args) != 2:
+        raise err("args_count", node=n)
+    fs, xs = _vector_nodes(n.args[0], ctx), _vector_nodes(n.args[1], ctx)
+    if not all(isinstance(x, A.Var) for x in xs):
+        raise err("syntax", node=n.args[1])
+    cells, symbolic = [], False
+    for f in fs:
+        fe = S.expand(f, ctx)
+        for x in xs:
+            try:
+                d = S.derivative(fe, x.name)
+            except S.NotSymbolic:
+                raise err("cannot_evaluate", node=n)
+            try:
+                cells.append(ev.eval(d, ctx))
+            except SMathError:
+                cells.append(d)
+                symbolic = True
+    if symbolic:
+        nodes = [c if isinstance(c, A.Node) else S.num(need_real(c)) for c in cells]
+        return S.Expr(A.MatrixLit(len(fs), len(xs), nodes))
+    return Matrix(len(fs), len(xs), cells)
+
+
+def _vector_nodes(node, ctx) -> list:
+    """The element expressions of a vector argument: a matrix literal,
+    stack(...), a plain list of one, or a variable holding a vector."""
+    if isinstance(node, A.Group):
+        return _vector_nodes(node.inner, ctx)
+    if isinstance(node, A.MatrixLit):
+        return list(node.cells)
+    if isinstance(node, A.Call) and node.name in ("stack", "sys"):
+        return list(node.args)
+    if isinstance(node, A.Var):
+        v = ctx.lookup(node.name)
+        if _is_lazy(v):
+            return _vector_nodes(v.node, ctx)
+    return [node]
+
+
+def _roots(ev, n: A.Call, ctx):
+    """roots(F, X[, X0]): Newton's method on the system F(X) = 0, starting
+    from the values X has (or X0)."""
+    from .evaluator import Context
+
+    if len(n.args) not in (2, 3):
+        raise err("args_count", node=n)
+    fs, xs = _vector_nodes(n.args[0], ctx), _vector_nodes(n.args[1], ctx)
+    if not all(isinstance(x, A.Var) for x in xs) or len(fs) != len(xs):
+        raise err("args_count", node=n)
+    if len(n.args) == 3:
+        g = ev.eval(n.args[2], ctx)
+        guess = [need_scalar(v) for v in (g.items if isinstance(g, Matrix) else [g])]
+    else:
+        guess = []
+        for x in xs:
+            v = ctx.lookup(x.name)
+            guess.append(need_scalar(ev.eval(x, ctx)) if v is not None and not _is_lazy(v) else Q(1.0))
+    dims = [q.dims for q in guess]
+    xv = [complex(q.value) if isinstance(q.value, complex) else float(q.value) for q in guess]
+
+    def F(vals):
+        local = Context(ctx)
+        for x, v, d in zip(xs, vals, dims):
+            local.vars[x.name] = Q(v, d)
+        return [need_scalar(ev.eval(f, local)).value for f in fs]
+
+    for _ in range(100):
+        ev.check_time(n)
+        f0 = F(xv)
+        if max(abs(v) for v in f0) < 1e-12:
+            break
+        k = len(xv)
+        J = []
+        for j in range(k):
+            h = 1e-7 * max(1.0, abs(xv[j]))
+            xp = list(xv)
+            xp[j] += h
+            fp = F(xp)
+            J.append([(fp[i] - f0[i]) / h for i in range(k)])
+        J = [[J[j][i] for j in range(k)] for i in range(k)]  # rows: equations
+        step = _linsolve(J, [-v for v in f0])
+        if step is None:
+            raise err("no_solution", node=n)
+        xv = [a + b for a, b in zip(xv, step)]
+    else:
+        raise err("no_solution", node=n)
+    if max(abs(v) for v in F(xv)) > 1e-6:
+        raise err("no_solution", node=n)
+    vals = [_out(v, d) for v, d in zip(xv, dims)]
+    return vals[0] if len(vals) == 1 else Matrix.column(vals)
+
+
+def _linsolve(a, b):
+    k = len(b)
+    m = [list(r) + [v] for r, v in zip(a, b)]
+    for c in range(k):
+        piv = max(range(c, k), key=lambda r: abs(m[r][c]))
+        if abs(m[piv][c]) < 1e-300:
+            return None
+        m[c], m[piv] = m[piv], m[c]
+        for r in range(k):
+            if r != c:
+                f = m[r][c] / m[c][c]
+                m[r] = [x - f * y for x, y in zip(m[r], m[c])]
+    return [m[i][k] / m[i][i] for i in range(k)]
+
+
+def _numden(ev, n: A.Call, ctx):
+    """numden(a/b) = [a; b]; a plain number is written as a fraction."""
+    from fractions import Fraction
+
+    if len(n.args) != 1:
+        raise err("args_count", node=n)
+    e = n.args[0]
+    while isinstance(e, A.Group):
+        e = e.inner
+    if isinstance(e, A.BinOp) and e.op == "/":
+        return Matrix.column([ev.eval(e.left, ctx), ev.eval(e.right, ctx)])
+    q = need_scalar(ev.eval(e, ctx))
+    fr = Fraction(q.real).limit_denominator(10 ** 9)
+    return Matrix.column([Q(float(fr.numerator), q.dims), Q(float(fr.denominator))])
+
+
+def _trace(ev, n: A.Call, ctx):
+    """trace(["text {0} {1}",] a, b...): the values as a string (SMath also
+    writes it to its output window)."""
+    from .display import value_to_text
+
+    vals = [ev.eval(a, ctx) for a in n.args]
+    if vals and isinstance(vals[0], String):
+        text = vals[0].text
+        for k, v in enumerate(vals[1:]):
+            text = text.replace("{%d}" % k, v.text if isinstance(v, String) else value_to_text(v))
+        return String(text)
+    return String(" ".join(v.text if isinstance(v, String) else value_to_text(v) for v in vals))
 
 
 def _int(ev, n: A.Call, ctx):
@@ -983,6 +1242,10 @@ SPECIAL = {
     "sum": _sum,
     "product": _product,
     "diff": _diff,
+    "Jacob": _jacob,
+    "roots": _roots,
+    "numden": _numden,
+    "trace": _trace,
     "int": _int,
     "solve": _solve,
     "IsDefined": _isdefined,

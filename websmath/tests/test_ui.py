@@ -345,3 +345,27 @@ def test_region_options_saved_in_sm(app, tmp_path):
     assert (r.fmt.decimals, r.fmt.trailing_zeros, r.fmt.fractions) == (2, True, "fraction")
     assert (r.optimization, r.ignore_units, r.show_input) == ("numeric", True, False)
     assert display_text(r.display) == "1/3"
+
+
+def test_calculation_differentiate_and_solve(app):
+    v = WorksheetView()
+    type_at(v, 18, 18, "f(x")
+    press(v, Qt.Key_Right)
+    for ch in ":x^3":
+        press(v, 0, ch)
+    press(v, Qt.Key_Right)
+    for ch in "+2*x":
+        press(v, 0, ch)
+    ed = v.focused_item.editor
+    assert ed.root.text() == "f(x)≔x^(3)+2*x"
+    v.differentiate_selection()  # cursor is on the last x
+    assert ed.root.text() == "f(x)≔3*x^(2)+2"
+    press(v, Qt.Key_Return)
+    type_at(v, 18, 90, "x^2")
+    press(v, Qt.Key_Right)
+    press(v, 0, "-")
+    press(v, 0, "9")
+    v.focused_item.editor.set_cursor(v.focused_item.editor.root, 1)  # on x
+    v.solve_selection()
+    below = max(v.items.values(), key=lambda it: it.region.y)
+    assert display_text(below.region.display) == "[-3; 3]"

@@ -135,6 +135,10 @@ def display_value(v, fmt: NumberFormat, scale: float = 1.0, show_unit: bool = Tr
         return DMatrix(v.nrows, v.ncols, [display_value(x, fmt, scale, show_unit) for x in v.items])
     if isinstance(v, String):
         return DString(v.text)
+    from .symbolic import Expr, to_row
+
+    if isinstance(v, Expr):
+        return DExpr(to_row(v.node))
     return DString(str(v))
 
 

@@ -987,6 +987,94 @@ class WorksheetView(QGraphicsView):
         ed.type(number + (("'" + _linear_unit(unit)) if unit else ""))
         self._after_edit(item)
 
+    # -- Calculation > Differentiate / Solve ----------------------------------------------------
+    def _variable_and_part(self):
+        """(item, variable name, row, start, end) for Differentiate / Solve:
+        the variable is the name the cursor is on; the expression is the
+        selection, or else the whole expression (the right side of a
+        definition, the part before "=" of an evaluation)."""
+        item = self.focused_item
+        if item is None or item.region.kind != "math":
+            return None
+        ed = item.editor
+        a, b = ed.token_span(ed.row, ed.pos)
+        word = "".join(x for x in ed.row.items[a:b] if isinstance(x, str))
+        if not word or not (word[0].isalpha()) or word.startswith("'"):
+            self.status.emit("Put the cursor on the variable first (e.g. on x in x^2+1).")
+            return None
+        if ed.selection is not None:
+            row, s0, s1 = ed.selection
+        else:
+            row = ed.root
+            items = row.items
+            n = len(ed.expression_items())
+            s0 = items.index("≔") + 1 if "≔" in items[:n] else 0
+            s1 = n
+        return item, word, row, s0, s1
+
+    def differentiate_selection(self) -> None:
+        """Replace the expression by its derivative with respect to the
+        variable under the cursor (SMath: Calculation > Differentiate)."""
+        from ..engine import symbolic as S
+        from ..engine.model import Row
+        from ..engine.parser import ParseError, parse_row
+        from ..io.smfile import ast_to_items
+
+        got = self._variable_and_part()
+        if got is None:
+            return
+        item, var, row, a, b = got
+        part = Row()
+        part.items = list(row.items[a:b])
+        try:
+            ctx = self.worksheet._context_before(item.region)
+            d = S.derivative(S.expand(parse_row(part), ctx), var)
+        except (ParseError, S.NotSymbolic):
+            self.status.emit("This expression cannot be differentiated.")
+            return
+        ed = item.editor
+        ed._push_undo()
+        new = ast_to_items(d)
+        row.items[a:b] = new
+        type(ed)._fix_parents(ed.root)
+        ed.selection = None
+        ed.node = None
+        ed.set_cursor(row, a + len(new))
+        self._after_edit(item)
+
+    def solve_selection(self) -> None:
+        """Solve the expression (= 0, or an equation with the bold equals)
+        for the variable under the cursor; the roots appear in a new region
+        below (SMath: Calculation > Solve)."""
+        from ..engine import ast as A
+        from ..engine.model import Row
+        from ..engine.parser import ParseError, parse_row
+        from ..io.smfile import ast_to_items
+
+        got = self._variable_and_part()
+        if got is None:
+            return
+        item, var, row, a, b = got
+        part = Row()
+        part.items = list(row.items[a:b])
+        try:
+            node = parse_row(part)
+        except ParseError:
+            self.status.emit("Syntax is incorrect.")
+            return
+        call = A.Call("solve", [node, A.Var(var)])
+        rect = item.mapRectToScene(item.frame_rect())
+        self.focus_item(None)
+        new = self.new_region(rect.left(), rect.bottom() + GRID)
+        ed = new.editor
+        ed.root.items = ast_to_items(call) + ["="]
+        type(ed)._fix_parents(ed.root)
+        ed.evaluate = True
+        ed.set_cursor(ed.root, len(ed.root.items) - 1)
+        self.focus_item(new)
+        self._after_edit(new)
+        self.focus_item(None)
+
     # -- formatting ------------------------------------------------------------------------------
     def format_selection(self, toggle: str = None, **values) -> None:
         """Apply formatting to the selected regions (or the one being edited)."""
