@@ -525,8 +525,16 @@ class _TextBase(MarkupItem):
         self.update()
 
     def text_rect(self) -> QRectF:
+        left, top, right, bottom = self.margins()
+        return self._rect.normalized().adjusted(left, top, -right, -bottom)
+
+    def margins(self) -> tuple:
+        """Left, top, right and bottom room round the words."""
+        given = tuple(self.style.text_margins or ())
+        if len(given) == 4:
+            return tuple(float(v) for v in given)
         pad = self.style.padding
-        return self._rect.normalized().adjusted(pad, pad, -pad, -pad)
+        return (pad, pad, pad, pad)
 
     def _fit_height(self) -> None:
         """Grow to hold what has been typed — and never shrink on its own.
@@ -537,7 +545,8 @@ class _TextBase(MarkupItem):
         really is wrong.
         """
         self.doc.setTextWidth(max(self.text_rect().width(), 8.0))
-        needed = self.doc.size().height() + 2 * self.style.padding
+        _left, top, _right, bottom = self.margins()
+        needed = self.doc.size().height() + top + bottom
         if needed > self._rect.height():
             self._rect.setHeight(needed)
 
@@ -872,7 +881,10 @@ class _TextBase(MarkupItem):
         pen = self.style.pen()
         pen.setMiterLimit(8.0)
         if not self.style.stroke or self.style.width <= 0:
-            pen = QPen(self.style.text_qcolor())
+            # No frame: the leader is still drawn, a point wide, in the
+            # frame's colour when it has one and the words' when not.
+            pen = QPen(QColor(self.style.stroke) if self.style.stroke
+                       else self.style.text_qcolor())
             pen.setWidthF(1.0)
         for leader in self.leaders:
             painter.setPen(pen)
@@ -1239,7 +1251,11 @@ class TextItem(_TextBase):
         painter.setBrush(self.style.brush())
         painter.setPen(self.style.pen() if self.style.stroke and self.style.width > 0
                        else QPen(Qt.NoPen))
-        if self.style.corner_radius > 0:
+        if self.style.text_shape == "circle":
+            # Bluebeam's circled text — a grid bubble, a detail number.
+            inset = max(self.style.width, 0.0) / 2.0
+            painter.drawEllipse(rect.adjusted(inset, inset, -inset, -inset))
+        elif self.style.corner_radius > 0:
             painter.drawRoundedRect(rect, self.style.corner_radius, self.style.corner_radius)
         else:
             painter.drawRect(rect)
@@ -1460,7 +1476,8 @@ class CalloutItem(_TextBase):
         self.paint_leader(painter)
         rect = self._rect.normalized()
         painter.setBrush(self.style.brush())
-        painter.setPen(self.style.pen())
+        painter.setPen(self.style.pen() if self.style.stroke and self.style.width > 0
+                       else QPen(Qt.NoPen))
         if self.shape_kind == "cloud":
             from .base import cloud_path
             painter.drawPath(cloud_path(self.cloud_polygon_of(rect),

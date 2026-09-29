@@ -442,6 +442,10 @@ class PolyItem(MarkupItem):
         # broken:  segment index -> True, for the break symbol.
         self.rounded: dict[int, float] = {}
         self.curved: dict[int, tuple[float, float]] = {}
+        # bezier:  segment index -> its two control points exactly, as
+        #          Bluebeam's /Curves gives them: a section's rounded root
+        #          is a cubic curve, and a quadratic bow is only near it.
+        self.bezier: dict[int, tuple[QPointF, QPointF]] = {}
         self.broken: dict[int, bool] = {}
         if kind == "arrow":
             self.style = Style(arrow_end="arrow", width=1.6)
@@ -483,8 +487,11 @@ class PolyItem(MarkupItem):
             return
         sx = rect.width() / old.width()
         sy = rect.height() / old.height()
-        self.points = [QPointF(rect.x() + (p.x() - old.x()) * sx,
-                               rect.y() + (p.y() - old.y()) * sy) for p in self.points]
+        def moved(p: QPointF) -> QPointF:
+            return QPointF(rect.x() + (p.x() - old.x()) * sx,
+                           rect.y() + (p.y() - old.y()) * sy)
+        self.points = [moved(p) for p in self.points]
+        self.bezier = {side: (moved(a), moved(b)) for side, (a, b) in self.bezier.items()}
 
     # -- corners, curves and breaks ----------------------------------------
     def corner_points(self) -> list[QPointF]:
@@ -629,7 +636,7 @@ class PolyItem(MarkupItem):
             if self.closed:
                 path.closeSubpath()
             return path
-        if not self.rounded and not self.curved and not self.broken:
+        if not self.rounded and not self.curved and not self.broken and not self.bezier:
             path.moveTo(self.points[0])
             for point in self.points[1:]:
                 path.lineTo(point)
@@ -653,7 +660,10 @@ class PolyItem(MarkupItem):
             start, end = self.segment_ends(index)
             leaves = self._corner_exit(index, start)
             arrives = self._corner_entry(index, end)
-            if self.is_curved(index):
+            if index in self.bezier:
+                first, second = self.bezier[index]
+                path.cubicTo(first, second, arrives)
+            elif self.is_curved(index):
                 apex = self.curve_apex(index)
                 control = QPointF(2 * apex.x() - (leaves.x() + arrives.x()) / 2,
                                   2 * apex.y() - (leaves.y() + arrives.y()) / 2)
@@ -798,7 +808,19 @@ class PolyItem(MarkupItem):
                     anchor = self.points[index - 1] if index else self.points[1]
                     local_pos = _constrain(anchor, local_pos)
                 self.prepareGeometryChange()
+                moved = QPointF(local_pos) - self.points[index]
                 self.points[index] = QPointF(local_pos)
+                # A curved side's handle at this corner goes with the corner.
+                if self.bezier:
+                    count = self.segment_count()
+                    after, before = index, (index - 1) % max(len(self.points), 1)
+                    if after in self.bezier and after < count:
+                        first, second = self.bezier[after]
+                        self.bezier[after] = (first + moved, second)
+                    if before in self.bezier and before < count and \
+                            (before + 1) % len(self.points) == index:
+                        first, second = self.bezier[before]
+                        self.bezier[before] = (first, second + moved)
                 self.touch()
                 self.geometryChanged.emit()
             return
@@ -861,6 +883,8 @@ class PolyItem(MarkupItem):
                         for vertex, radius in self.rounded.items()}
         self.curved = {(side if side < best_segment else side + 1): bow
                        for side, bow in self.curved.items() if side != best_segment}
+        self.bezier = {(side if side < best_segment else side + 1): pair
+                       for side, pair in self.bezier.items() if side != best_segment}
         self.broken = {(side if side < best_segment else side + 1): on
                        for side, on in self.broken.items() if side != best_segment}
         self.geometryChanged.emit()
@@ -882,6 +906,8 @@ class PolyItem(MarkupItem):
         merged = {index, before}
         self.curved = {(side if side < index else side - 1): bow
                        for side, bow in self.curved.items() if side not in merged}
+        self.bezier = {(side if side < index else side - 1): pair
+                       for side, pair in self.bezier.items() if side not in merged}
         self.broken = {(side if side < index else side - 1): on
                        for side, on in self.broken.items() if side not in merged}
         self.geometryChanged.emit()
@@ -1040,6 +1066,10 @@ class PolyItem(MarkupItem):
         if self.curved:
             data["curved"] = {str(k): [round(v[0], 3), round(v[1], 3)]
                               for k, v in self.curved.items()}
+        if self.bezier:
+            data["bezier"] = {str(k): [round(a.x(), 4), round(a.y(), 4),
+                                       round(b.x(), 4), round(b.y(), 4)]
+                              for k, (a, b) in self.bezier.items()}
         if self.broken:
             data["broken"] = sorted(self.broken)
             data["break_settings"] = {str(k): list(self.break_settings(k)) for k in self.broken}
@@ -1056,6 +1086,9 @@ class PolyItem(MarkupItem):
                         for k, v in (data.get("rounded") or {}).items()}
         self.curved = {int(k): (float(v[0]), float(v[1]))
                        for k, v in (data.get("curved") or {}).items()}
+        self.bezier = {int(k): (QPointF(float(v[0]), float(v[1])),
+                                QPointF(float(v[2]), float(v[3])))
+                       for k, v in (data.get("bezier") or {}).items() if len(v) >= 4}
         self.broken = {int(k): True for k in (data.get("broken") or [])}
         for key, value in (data.get("break_settings") or {}).items():
             if int(key) in self.broken and len(value) in (2, 3):

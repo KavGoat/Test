@@ -17,6 +17,8 @@ import os
 import tempfile
 from typing import Optional
 
+from PySide6.QtCore import QPointF
+
 from ..pdf import engine
 from ..pdf.objects import Name, Ref
 
@@ -114,7 +116,12 @@ def exportable(frame, page, preserved: bool) -> list:
     decision that it is part of the page now, and it is painted in.
     """
     items = []
-    for item in frame.ordered_markups():
+    # Stacking order, bottom first, as a PDF paints its annotations: reading
+    # order put a section mark's arrowhead over the white bubble meant to
+    # cover its base, because the arrowhead's top was the higher on the page.
+    stacked = sorted(enumerate(frame.markups()),
+                     key=lambda pair: (pair[1].zValue(), pair[0]))
+    for _order, item in stacked:
         if not item.printable:
             continue
         if item.flattened or item.from_drawing:
@@ -258,10 +265,39 @@ def markups_to_place(document, printed: list, carried=None) -> Appearances:
                 continue
             rect = item.mapRectToParent(item.boundingRect()).normalized()
             rect = rect.adjusted(-MARGIN, -MARGIN, MARGIN, MARGIN)
+            rect = _even_about_the_shape(item, rect)
             if rect.width() <= 0 or rect.height() <= 0:
                 continue
             appearances.add(index, item, rect)
     return appearances
+
+
+def _even_about_the_shape(item, rect):
+    """A square or circle's Rect, the same distance out from it on each side.
+
+    ``/RD`` says how far in from ``Rect`` the shape is, and readers do not
+    agree which of its four numbers is the top and which the bottom: MuPDF and
+    others take them in the file's own y-up order, the specification's words
+    say top first. Room kept under a rectangle for its size label made the
+    two differ by 26 pt, so an editor that read them the other way round put
+    the drag box that far off the shape. Kept even, the order cannot matter —
+    which is also how Bluebeam writes them.
+    """
+    if subtype_for(item) not in ("Square", "Circle"):
+        return rect
+    try:
+        shape = item.mapRectToParent(item.local_rect()).normalized()
+    except Exception:                                  # noqa: BLE001
+        return rect
+    # The narrowest side already holds the ink — border, scallops and margin;
+    # the room above for the turning handle is screen furniture.
+    across = max(min(shape.left() - rect.left(), rect.right() - shape.right()), 0.0)
+    down = max(min(shape.top() - rect.top(), rect.bottom() - shape.bottom()), 0.0)
+    if getattr(item, "show_size", False) and getattr(item, "size_text", ""):
+        # The size written under it is printed, so the box keeps room for it
+        # — on both sides, to stay even.
+        down = max(shape.top() - rect.top(), rect.bottom() - shape.bottom(), 0.0)
+    return shape.adjusted(-across, -down, across, down)
 
 
 def add_markups(path: str, document, printed: list, carried=None) -> bool:
@@ -338,6 +374,8 @@ def place_markups(target, scratch, appearances: Appearances,
     furniture — its links and its form fields — stays.
     """
     placed: dict[int, list[int]] = {}
+    groups = _groups_on_each_page(appearances.entries)
+    leaders: dict = {}
     for order, (index, item, rect) in enumerate(appearances.entries):
         if not 0 <= index < target.page_count:
             continue
@@ -347,8 +385,18 @@ def place_markups(target, scratch, appearances: Appearances,
             continue
         place = Placement.of_page(target[index])
         annotation = annotation_for(item, rect, place, Ref(form))
-        placed.setdefault(index, []).append(
-            engine.add_object(target, annotation))
+        members = groups.get((index, getattr(item, "group", "")))
+        if members:
+            leader = leaders.get((index, item.group))
+            if leader is None:
+                annotation["GroupNesting"] = _group_nesting(members)
+            else:
+                annotation["RT"] = Name("Group")
+                annotation["IRT"] = Ref(leader)
+        number = engine.add_object(target, annotation)
+        if members and (index, item.group) not in leaders:
+            leaders[(index, item.group)] = number
+        placed.setdefault(index, []).append(number)
 
     written = 0
     for index in range(target.page_count):
@@ -368,6 +416,41 @@ def place_markups(target, scratch, appearances: Appearances,
         engine.set_page_annotations(target, index, kept + ours)
         written += len(ours)
     return written
+
+
+def _groups_on_each_page(entries) -> dict:
+    """The grouped markups on each page, keyed by (page, outermost group)."""
+    groups: dict = {}
+    for index, item, _rect in entries:
+        name = getattr(item, "group", "")
+        if name:
+            groups.setdefault((index, name), []).append(item)
+    return {key: items for key, items in groups.items() if len(items) > 1}
+
+
+def _group_nesting(members: list) -> list:
+    """A group as Bluebeam writes it: its title, then its members by name.
+
+    The first markup leads the group and carries this; every other one points
+    at it with ``/IRT`` and says ``/RT /Group``. A group inside the group is a
+    list of its own, headed "Group" — a section mark's bubble and its cut line
+    are two, inside the one called "Section" — so the arrangement survives a
+    trip through Bluebeam and back.
+    """
+    title = next((m.group_title for m in members if getattr(m, "group_title", "")),
+                 "") or "Group"
+    tree: dict = {"members": [], "groups": {}}
+    for item in members:
+        node = tree
+        for step in tuple(getattr(item, "group_path", ()) or ())[1:]:
+            node = node["groups"].setdefault(step, {"members": [], "groups": {}})
+        node["members"].append(Name(item.uid))
+
+    def listed(node, head) -> list:
+        out = [head] + list(node["members"])
+        out += [listed(inner, "Group") for inner in node["groups"].values()]
+        return out
+    return listed(tree, title)
 
 
 def furniture(target, index: int) -> list[int]:
@@ -465,10 +548,44 @@ def annotation_for(item, rect, place, appearance=None) -> dict:
     width = float(getattr(item.style, "width", 0.0) or 0.0)
     if width > 0:
         annotation["BS"] = {"W": width}
+        dashes = []
+        try:
+            dashes = [float(step) * width for step in item.style.dashes()]
+        except Exception:                              # noqa: BLE001
+            dashes = []
+        if dashes:
+            annotation["BS"] = {"W": width, "S": Name("D"), "D": dashes}
+    _bluebeam_look(annotation, item)
     _add_the_geometry(annotation, item, rect, place)
     if appearance is not None:
         annotation["AP"] = {"N": appearance}
     return annotation
+
+
+def _bluebeam_look(annotation, item) -> None:
+    """The keys Bluebeam draws a markup from that PDF itself has no word for.
+
+    Bluebeam keeps a fill's own transparency apart from the line's
+    (/FillOpacity beside /CA), names its hatch and says how big it is drawn
+    (/PatternName, /PatternColor, /PatternScale), and blends a highlighter
+    with /BM. Other readers pass over them; Bluebeam draws with them, and
+    without them a pale fill came back solid and a hatch came back as none.
+    """
+    style = item.style
+    fill = _colour(getattr(style, "fill", ""))
+    if fill is not None:
+        try:
+            annotation["FillOpacity"] = float(style.fill_opacity)
+        except (TypeError, ValueError):
+            pass
+    if getattr(style, "hatched", lambda: False)():
+        annotation["PatternName"] = str(style.hatch or "Hatch")
+        ink = _colour(getattr(style, "hatch_color", "") or getattr(style, "stroke", ""))
+        if ink is not None:
+            annotation["PatternColor"] = ink
+        annotation["PatternScale"] = float(style.hatch_scale or 1.0)
+    if getattr(style, "blend", "") == "multiply":
+        annotation["BM"] = Name("Multiply")
 
 
 def _add_the_geometry(annotation, item, rect, place: "Placement") -> None:
@@ -499,10 +616,12 @@ def _add_the_geometry(annotation, item, rect, place: "Placement") -> None:
         # much smaller here. See markforge.io.btx.drawn_box, which is the
         # same rule from the other side.
         border = max(float(getattr(item.style, "width", 0.0) or 0.0), 0.0) / 2.0
+        # Left, bottom, right, top: the file's own y-up order, the one the
+        # editors that redraw a markup from its dictionary go by.
         annotation["RD"] = [max(shape.left() - rect.left() - border, 0.0),
-                            max(shape.top() - rect.top() - border, 0.0),
+                            max(rect.bottom() - shape.bottom() - border, 0.0),
                             max(rect.right() - shape.right() - border, 0.0),
-                            max(rect.bottom() - shape.bottom() - border, 0.0)]
+                            max(shape.top() - rect.top() - border, 0.0)]
         if kind == "cloud":
             _cloudy(annotation, item)
         return
@@ -519,8 +638,20 @@ def _add_the_geometry(annotation, item, rect, place: "Placement") -> None:
         if item.TYPE == "measure":
             _dimension(annotation, item)
         return
+    if subtype in ("Polygon", "PolyLine") and kind == "arc":
+        # An arc is one curved side: its two ends, and the curve between them
+        # in Bluebeam's own words, so an editor that redraws it bends it.
+        ends, curves = _arc_on_the_page(item, place)
+        if ends:
+            annotation["Vertices"] = ends
+            annotation["Curves"] = curves
+            _line_endings(annotation, item)
+            return
     if subtype in ("Polygon", "PolyLine"):
         annotation["Vertices"] = [value for point in points for value in point]
+        curves = _curves_on_the_page(item, place)
+        if curves:
+            annotation["Curves"] = curves
         _line_endings(annotation, item)
         if kind == "cloud":
             _cloudy(annotation, item)
@@ -646,6 +777,26 @@ def _free_text(annotation, item, rect, place: "Placement") -> None:
     """Words on the page, and the leader that points at what they are about."""
     if item.TYPE == "typewriter":
         annotation["IT"] = Name("FreeTextTypeWriter")
+    # A box without a border says so, as Bluebeam writes one: no border
+    # colour and a border width of nought. Left unsaid, an editor that
+    # redraws the markup from its dictionary gives it the default one-point
+    # frame it never had.
+    # Colours the way Bluebeam writes words on the page: /C is the
+    # background, the frame and leader take /DA's colour, the words /DS's,
+    # and /LEIC fills the arrowhead. A box without a frame says so, with a
+    # border of nought; left unsaid, an editor that redraws the markup gives
+    # it the one-point frame it never had.
+    width = float(getattr(item.style, "width", 0.0) or 0.0)
+    background = _colour(getattr(item.style, "fill", ""))
+    annotation["C"] = background if background is not None else []
+    annotation.pop("IC", None)
+    line = _colour(getattr(item.style, "stroke", ""))
+    if line is not None:
+        annotation["LEIC"] = line
+    if line is None or width <= 0:
+        annotation["BS"] = {"W": 0}
+    if getattr(item.style, "text_shape", "") == "circle":
+        annotation["Shape"] = Name("Circle")
     written = ""
     try:
         written = item.text()
@@ -654,7 +805,15 @@ def _free_text(annotation, item, rect, place: "Placement") -> None:
     if written:
         annotation["Contents"] = written
     annotation["Q"] = _justification(item)
-    colour = getattr(item.style, "text_color", "") or "#000000"
+    settings, rich = _rich_text_of(item)
+    if settings:
+        annotation["DS"] = settings
+    if rich:
+        annotation["RC"] = rich
+    # /DA's colour is the frame's and the leader's, as Bluebeam has it; the
+    # words' own colour is in /DS and /RC. Without a frame colour, the words'.
+    colour = getattr(item.style, "stroke", "") or \
+        getattr(item.style, "text_color", "") or "#000000"
     numbers = _colour(colour)
     if numbers is not None:
         annotation["DA"] = (f"{numbers[0]} {numbers[1]} {numbers[2]} rg "
@@ -670,10 +829,91 @@ def _free_text(annotation, item, rect, place: "Placement") -> None:
         box = item.mapRectToParent(item.local_rect()).normalized()
     except Exception:                                  # noqa: BLE001
         return
+    # Left, bottom, right, top, as for a square: see _add_the_geometry.
     annotation["RD"] = [max(box.left() - rect.left(), 0.0),
-                        max(box.top() - rect.top(), 0.0),
+                        max(rect.bottom() - box.bottom(), 0.0),
                         max(rect.right() - box.right(), 0.0),
-                        max(rect.bottom() - box.bottom(), 0.0)]
+                        max(box.top() - rect.top(), 0.0)]
+
+
+def _css_family(family: str) -> str:
+    family = (family or "Helvetica").strip()
+    return f"'{family}'" if " " in family else family
+
+
+def _rich_text_of(item) -> tuple[str, str]:
+    """The words' look as Bluebeam writes it: a default style and the runs.
+
+    ``/DS`` is the box's own setting — face, size, alignment both ways, the
+    margin and the colour; ``/RC`` is the words run by run, in the XHTML
+    subset PDF defines. An editor that redraws a text box draws it from
+    these, so without them every title came back as plain Helvetica at one
+    size, left-aligned at the top of its box.
+    """
+    from html import escape
+    from PySide6.QtGui import QTextFormat
+
+    style = item.style
+    size = float(getattr(style, "font_size", 10.0) or 10.0)
+    colour = getattr(style, "text_color", "") or "#000000"
+    align = {"center": "center", "right": "right"}.get(getattr(style, "align", ""), "left")
+    valign = {"middle": "middle", "bottom": "bottom"}.get(getattr(style, "valign", ""), "top")
+    # Bluebeam sets its words a point further in than the margin it states;
+    # the importer adds that point back, so it is taken off here.
+    margin = max(float(getattr(style, "padding", 4.0) or 0.0) - 1.0, 0.0)
+    weight = " bold" if getattr(style, "bold", False) else ""
+    slant = " italic" if getattr(style, "italic", False) else ""
+    settings = (f"font:{slant}{weight} {_css_family(style.font_family)} {size:g}pt; "
+                f"text-align:{align}; text-valign:{valign}; margin:{margin:g}pt; "
+                f"line-height:{size * 1.15:.1f}pt; color:{colour}")
+    if getattr(style, "underline", False):
+        settings += "; text-decoration:underline"
+    document = getattr(item, "doc", None)
+    if document is None:
+        return settings, ""
+    paragraphs = []
+    block = document.begin()
+    while block.isValid():
+        runs = []
+        pieces = block.begin()
+        while not pieces.atEnd():
+            fragment = pieces.fragment()
+            pieces += 1
+            if not fragment.isValid() or not fragment.text():
+                continue
+            look = fragment.charFormat()
+            said = []
+            # fontFamilies() crashes PySide 6.11 when it holds nothing; the
+            # font's own family is the same answer, safely.
+            family = look.font().family() if look.hasProperty(QTextFormat.FontFamilies) else ""
+            if family and family != style.font_family:
+                said.append(f"font-family:{_css_family(family)}")
+            point = look.fontPointSize()
+            if point and abs(point - size) > 1e-3:
+                said.append(f"font-size:{point:g}pt")
+            if look.fontWeight() >= 600 and not getattr(style, "bold", False):
+                said.append("font-weight:bold")
+            if look.fontItalic() and not getattr(style, "italic", False):
+                said.append("font-style:italic")
+            if look.fontUnderline() and not getattr(style, "underline", False):
+                said.append("text-decoration:underline")
+            if look.hasProperty(QTextFormat.ForegroundBrush):
+                shade = look.foreground().color().name()
+                if shade.lower() != colour.lower():
+                    said.append(f"color:{shade}")
+            text = escape(fragment.text().replace("\u2028", "\n")).replace("\n", "<br/>")
+            runs.append(f'<span style="{"; ".join(said)}">{text}</span>' if said else text)
+        placed = block.blockFormat().alignment()
+        from PySide6.QtCore import Qt
+        own = ("center" if placed & Qt.AlignHCenter else
+               "right" if placed & Qt.AlignRight else align)
+        paragraphs.append(f'<p style="text-align:{own}">{"".join(runs)}</p>')
+        block = block.next()
+    rich = ('<?xml version="1.0"?><body xmlns="http://www.w3.org/1999/xhtml" '
+            'xmlns:xfa="http://www.xfa.org/schema/xfa-data/1.0/" '
+            'xfa:APIVersion="Acrobat:11.0.0" xfa:spec="2.0.2" '
+            f'style="{escape(settings)}">{"".join(paragraphs)}</body>')
+    return settings, rich
 
 
 def _justification(item) -> int:
@@ -709,6 +949,34 @@ def _callout_line(item, place: "Placement") -> list:
     except Exception:                                  # noqa: BLE001
         return []
     return [place.point(point.x(), point.y()) for point in points]
+
+
+def _arc_on_the_page(item, place: "Placement"):
+    """An arc's two ends and its one cubic curve, in the file's coordinates."""
+    try:
+        path = item.build_path()
+    except Exception:                                  # noqa: BLE001
+        return [], []
+    if path.elementCount() < 4:
+        return [], []
+
+    def on_page(index):
+        element = path.elementAt(index)
+        where = item.mapToParent(QPointF(element.x, element.y))
+        return place.point(where.x(), where.y())
+    start, first, second, end = (on_page(i) for i in range(4))
+    return [*start, *end], [0, *first, *second]
+
+
+def _curves_on_the_page(item, place: "Placement") -> list:
+    """Curved sides as Bluebeam writes them: side, then two control points."""
+    out = []
+    for side, (first, second) in sorted((getattr(item, "bezier", None) or {}).items()):
+        out.append(int(side))
+        for control in (first, second):
+            on_page = item.mapToParent(control)
+            out.extend(place.point(on_page.x(), on_page.y()))
+    return out
 
 
 def _points_on_the_page(item, place: "Placement") -> list:

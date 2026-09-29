@@ -735,3 +735,102 @@ def test_a_title_block_stamp_comes_across_as_linework(qapp):
     item = build_item(dict(stamp))
     again = build_item(item.serialize())
     assert again.stamp_svg == item.stamp_svg
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-29: groups in groups, and Bluebeam's own keys
+# ---------------------------------------------------------------------------
+
+def _tool(file_name, pick):
+    made = btx.read(os.path.join(HERE, "btx", file_name))
+    return next(tool for tool in made.tools if pick(tool))
+
+
+def test_a_section_mark_is_a_group_holding_a_bubble_group_and_a_cut_line_group():
+    section = _sketch_tools().tools[6]
+    paths = [tuple(p["group_path"]) for p in section.payloads]
+    assert len({path[0] for path in paths}) == 1           # one outer group
+    inner = {path[1] for path in paths if len(path) > 1}
+    assert len(inner) == 2                                  # bubble and cut line
+    kinds = {path[1]: [] for path in paths}
+    for path, payload in zip(paths, section.payloads):
+        kinds[path[1]].append(payload.get("kind") or payload["type"])
+    assert sorted(len(v) for v in kinds.values()) == [2, 6]
+    assert {p["group_title"] for p in section.payloads} == {"Section"}
+
+
+def test_bluebeams_own_pdf_opens_with_its_groups_in_groups(qapp):
+    from collections import Counter
+    from markforge.io import pdfmarkups, pdfvector
+
+    source = pdfvector.PdfFile.open(os.path.join(HERE, "btx", "Document1.pdf"))
+    made = pdfmarkups.markups_of_page(source, 0)
+    sections = Counter(tuple(p["group_path"]) for p in made
+                       if p.get("group_title") == "Section")
+    assert sorted(sections.values()) == [2, 2, 6, 6]        # two section marks
+    assert {path[0] for path in sections} and all(len(p) == 2 for p in sections)
+
+
+def test_curved_sides_come_in_as_bluebeam_draws_them():
+    dhs = _tool("DHS Sections.btx", lambda t: t.name.startswith("DHS 200"))
+    shape = build_item(dict(dhs.payloads[0]))
+    assert len(shape.bezier) == 2
+    path = shape.build_path()
+    assert any(path.elementAt(i).type == path.elementAt(i).type.CurveToElement
+               for i in range(path.elementCount()))
+
+
+def test_a_bluebeam_line_style_keeps_its_dashes():
+    grid = _tool("Strucutures - General.btx", lambda t: t.name == "Centre Line")
+    style = grid.payloads[0]["style"]
+    width = style["width"]
+    assert [round(step * width, 3) for step in style["dash_array"]] == [32, 8, 8, 8]
+
+
+def test_a_bluebeam_hatch_is_drawn_from_its_own_tile():
+    slab = _tool("Structures - Steel.btx",
+                 lambda t: any(p.get("style", {}).get("hatch_tile") for p in t.payloads))
+    style = next(p["style"] for p in slab.payloads if p.get("style", {}).get("hatch_tile"))
+    assert style["hatch_scale"] == pytest.approx(0.6)
+    assert style["hatch_tile"]["step_x"] == pytest.approx(36)
+    assert style["hatch_color"] == "#969696"
+    item = build_item(dict(next(p for p in slab.payloads
+                                if p.get("style", {}).get("hatch_tile"))))
+    assert item.style.hatched()
+
+
+def test_a_comment_box_is_filled_with_c_and_framed_in_the_da_colour():
+    comment = _tool("Structures - Drawing Review.btx", lambda t: t.name == "Engineer Comment")
+    box = next(p for p in comment.payloads if p["type"] == "callout")
+    assert box["style"]["fill"] == "#00ffff"
+    assert box["style"]["fill_opacity"] == pytest.approx(0.2)
+    assert box["style"]["stroke"] == "#0080c0"
+    leader = box["leaders"][0]
+    assert leader["side"] == "left" and leader["reach"] == pytest.approx(15.8, abs=0.1)
+
+
+def test_circled_text_is_a_circle_with_its_words_inside():
+    grid = _tool("Strucutures - General.btx",
+                 lambda t: any(p.get("style", {}).get("text_shape") == "circle"
+                               for p in t.payloads))
+    bubble = next(p for p in grid.payloads
+                  if p.get("style", {}).get("text_shape") == "circle")
+    left, top, right, bottom = bubble["style"]["text_margins"]
+    assert left == pytest.approx(9.7066 + 4, abs=0.01)
+    assert top == pytest.approx(7.4409 + 4, abs=0.01)
+
+
+def test_a_rotated_stamp_whose_drawing_is_not_is_fitted_like_bluebeam():
+    rhs = btx.read(os.path.join(HERE, "btx", "Structural Steel RHS Sections - 110 @ A1.btx"))
+    payload = rhs.tools[47].payloads[0]
+    xs = [v for s in payload["strokes"] for c in s["path"] for v in c[1::2]]
+    ys = [v for s in payload["strokes"] for c in s["path"] for v in c[2::2]]
+    assert max(xs) - min(xs) < max(ys) - min(ys)        # standing up, like its neighbours
+
+
+def test_a_callouts_box_is_read_from_rd_in_bluebeams_order():
+    comment = _tool("Structures - Drawing Review.btx", lambda t: t.name == "Engineer Comment")
+    box = next(p for p in comment.payloads if p["type"] == "callout")
+    left, top, width, height = box["rect"]
+    knee_y = 39.82599 - 26.32611                          # /CL's knee, turned y-down
+    assert top + height / 2 == pytest.approx(knee_y, abs=0.05)

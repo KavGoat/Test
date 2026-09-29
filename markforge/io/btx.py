@@ -162,7 +162,9 @@ def drawn_box(box, inset, width: float) -> list[float]:
         except (TypeError, ValueError):
             edges = [0.0, 0.0, 0.0, 0.0]
     half = max(float(width or 0.0), 0.0) / 2.0
-    left, top, right, bottom = (edge + half for edge in edges)
+    # In the file's own order: left, bottom, right, top — y up the page, as
+    # MuPDF and the editors that rebuild a markup from its dictionary read it.
+    left, bottom, right, top = (edge + half for edge in edges)
     return [x + left, y + top,
             max(wide - left - right, 0.5), max(high - top - bottom, 0.5)]
 
@@ -192,11 +194,25 @@ def _style(annotation: dict) -> dict:
         # drawn rather than merely "dashed".
         "line_style": "dash" if (border.get("S") == "D" or dash) else "solid",
     }
+    # Dashes are kept in multiples of the line's width; a PDF gives them in
+    # points, so a half-point line's 3-point dashes are six widths long.
+    width = style["width"] if style["width"] > 0 else 1.0
     if isinstance(dash, list) and dash:
         steps = [float(step) for step in dash
                  if isinstance(step, (int, float)) and float(step) > 0]
         if steps:
-            style["dash_array"] = tuple(steps)
+            style["dash_array"] = tuple(step / width for step in steps)
+    # Bluebeam's own line types: /LineStyle [scaled? [start, dash, -gap, …]]
+    # with the name in /LineStyleName. Its border still says solid, so without
+    # this a "Medium Dash" hidden line came in as a continuous one.
+    own = annotation.get("LineStyle")
+    if isinstance(own, list) and len(own) >= 2 and isinstance(own[1], list):
+        pattern = [abs(float(v)) for v in own[1][1:]
+                   if isinstance(v, (int, float)) and float(v) != 0]
+        if pattern:
+            scaled = bool(own[0]) if isinstance(own[0], bool) else False
+            style["dash_array"] = tuple(v if scaled else v / width for v in pattern)
+            style["line_style"] = "dash"
     if annotation.get("BM") == "Multiply":
         style["blend"] = "multiply"
     ends = annotation.get("LE")
@@ -477,10 +493,143 @@ def _rich_text(annotation: dict) -> str:
 # ---------------------------------------------------------------------------
 
 def markup_from(annotation: dict, resources: dict, name: str = "") -> Optional[dict]:
+    """One annotation as a markup payload — with its hatch, when it has one."""
+    payload = _markup_from(annotation, resources, name)
+    if payload is not None:
+        _hatch_of(annotation, resources, payload)
+    return payload
+
+
+def _hatch_of(annotation: dict, resources: dict, payload: dict) -> None:
+    """Bluebeam's hatch: its name, colour, scale and the tile it is drawn from.
+
+    The tile is the pattern Bluebeam itself fills with — a PDF tiling
+    pattern of plain linework — so it is brought across as that linework and
+    drawn the same, rather than matched by name to a pattern that only looks
+    like it. Under it, /IC is still the fill.
+    """
+    pattern = annotation.get("PatternName")
+    if not isinstance(pattern, str) or not pattern:
+        return
+    style = dict(payload.get("style") or {})
+    style["hatch"] = pattern
+    style["hatch_color"] = colour(annotation.get("PatternColor")) or \
+        style.get("stroke") or "#000000"
+    try:
+        style["hatch_scale"] = float(annotation.get("PatternScale", 1.0) or 1.0)
+    except (TypeError, ValueError):
+        pass
+    tile = _pattern_tile(annotation.get("Pattern"), resources)
+    if tile:
+        style["hatch_tile"] = tile
+    payload["style"] = style
+
+
+def _pattern_tile(pointer, resources: dict) -> dict:
+    """A tiling pattern's cell: its size and its lines, y down the cell."""
+    match = POINTER.search(str(pointer or ""))
+    blob = resources.get(match.group(1)) if match else None
+    if not blob:
+        return {}
+    header = parse_dict(blob[:blob.find(b"stream")] or blob)
+    stream = _stream_of(blob)
+    if not stream:
+        return {}
+    try:
+        box = [float(v) for v in header.get("BBox", [0, 0, 0, 0])][:4]
+        step_x = float(header.get("XStep", box[2] - box[0]))
+        step_y = float(header.get("YStep", box[3] - box[1]))
+    except (TypeError, ValueError):
+        return {}
+    if step_x <= 0 or step_y <= 0:
+        return {}
+    strokes = read_content(stream)
+    strokes = _flip_strokes(strokes, box[3] + box[1])
+    return {"x": box[0], "y": box[1], "step_x": abs(step_x), "step_y": abs(step_y),
+            "strokes": strokes}
+
+
+def leader_entry(points: list, box: list, origin=(0.0, 0.0)) -> dict:
+    """A call-out's /CL as a leader: its tip, the side it leaves, its knee.
+
+    /CL runs tip, knee, end — the end on the box, the knee square out from
+    it. So the side is whichever edge the end sits on, and the reach is how
+    far the knee stands off it. Kept like that, the line bends where
+    Bluebeam bends it instead of where a default would put the knee.
+    *points* and *box* ([left, top, width, height]) share coordinates;
+    *origin* is taken off the tip for a markup placed at the box's corner.
+    """
+    tip = points[0]
+    entry = {"tip": [tip[0] - origin[0], tip[1] - origin[1]]}
+    if len(points) >= 3:
+        knee, end = points[1], points[2]
+        left, top, wide, high = box[:4]
+        distances = {"left": abs(end[0] - left), "right": abs(end[0] - (left + wide)),
+                     "top": abs(end[1] - top), "bottom": abs(end[1] - (top + high))}
+        side = min(distances, key=distances.get)
+        entry["side"] = side
+        entry["reach"] = max(((knee[0] - end[0]) ** 2 + (knee[1] - end[1]) ** 2) ** 0.5, 6.0)
+    return entry
+
+
+def free_text_colours(annotation: dict, border_width: Optional[float] = None) -> dict:
+    """A text box's colours, the way Bluebeam writes them.
+
+    For words on the page PDF turns the colour keys round: /C is the
+    background, not the border; the border and the leader take the colour
+    /DA paints in; /DS's color is the words'; and Bluebeam's /LEIC fills the
+    arrowhead. Reading /C as the border lost a comment box's pale fill and
+    drew a cyan frame round it instead. *border_width* is the /BS width when
+    the caller has already read it.
+    """
+    out: dict = {}
+    background = colour(annotation.get("C"))
+    out["fill"] = background
+    if background:
+        try:
+            out["fill_opacity"] = float(annotation.get("FillOpacity", 1.0) or 1.0)
+        except (TypeError, ValueError):
+            pass
+    painted = annotation.get("DA")
+    border = ""
+    if isinstance(painted, str):
+        found = re.search(r"([\d.]+(?:\s+[\d.]+){0,3})\s+(?:rg|g|k)\b", painted)
+        if found:
+            border = colour([float(v) for v in found.group(1).split()])
+    width = border_width
+    if width is None:
+        box = annotation.get("BS") if isinstance(annotation.get("BS"), dict) else {}
+        try:
+            width = float(box.get("W", 1.0))
+        except (TypeError, ValueError):
+            width = 1.0
+    # With no frame the colour still says what the leader is drawn in.
+    out["stroke"] = border if (width and width > 0) or annotation.get("CL") else ""
+    shape = annotation.get("Shape")
+    if str(shape or "") == "Circle":
+        out["text_shape"] = "circle"
+        inset = annotation.get("RD")
+        if isinstance(inset, list) and len(inset) >= 4:
+            # /RD is the square the words go in, inside the circle, and DS's
+            # margin is inside that (a point further, as everywhere).
+            said = annotation.get("DS") if isinstance(annotation.get("DS"), str) else ""
+            found = re.search(r"(?<!-)margin\s*:\s*([\d.]+)pt", said)
+            margin = (float(found.group(1)) + 1.0) if found else 4.0
+            try:
+                left, bottom, right, top = (float(v) + margin for v in inset[:4])
+                out["text_margins"] = (left, top, right, bottom)
+            except (TypeError, ValueError):
+                pass
+    return out
+
+
+def _markup_from(annotation: dict, resources: dict, name: str = "") -> Optional[dict]:
     """One PDF annotation as a MarkForge markup payload, or None if unknown."""
     subtype = str(annotation.get("Subtype", ""))
     x, y, width, height = _rect(annotation.get("Rect", []))
     style = _style(annotation)
+    if subtype == "FreeText":
+        style.update(free_text_colours(annotation))
     label = name or (annotation.get("Subj") if isinstance(annotation.get("Subj"), str) else "")
     common = {"x": 0.0, "y": 0.0, "style": style, "label": label,
               "subject": label}
@@ -519,13 +668,9 @@ def markup_from(annotation: dict, resources: dict, name: str = "") -> Optional[d
         kind = "polygon" if subtype == "Polygon" else "polyline"
         payload = dict(common, type="poly", kind=kind,
                        points=[flip(p) for p in points])
-        pattern = annotation.get("PatternName")
-        if isinstance(pattern, str) and pattern:
-            # A hatched section: the pattern is part of the look, so it goes
-            # on the style where it can be drawn, changed and kept.
-            payload["style"] = dict(style, hatch=pattern,
-                                    fill=colour(annotation.get("PatternColor"))
-                                    or style.get("fill", ""))
+        curves = _curves(annotation.get("Curves"), flip)
+        if curves:
+            payload["bezier"] = curves
         return payload
     if subtype == "Ink":
         strokes = annotation.get("InkList") or []
@@ -542,9 +687,13 @@ def markup_from(annotation: dict, resources: dict, name: str = "") -> Optional[d
         leader = _pairs(annotation.get("CL"))
         inset = annotation.get("RD") if isinstance(annotation.get("RD"), list) else None
         box = [0.0, 0.0, width, height]
-        if inset and len(inset) >= 4:
+        # Circled text is drawn round the whole of Rect; its /RD is only
+        # where the words sit inside the circle.
+        if inset and len(inset) >= 4 and str(annotation.get("Shape") or "") != "Circle":
             try:
-                left, top, right, bottom = [float(v) for v in inset[:4]]
+                # Left, bottom, right, top: y up the page. A callout's knee
+                # sits level with the middle of its box only read this way.
+                left, bottom, right, top = [float(v) for v in inset[:4]]
                 box = [left, top, max(width - left - right, 8.0),
                        max(height - top - bottom, 8.0)]
             except (TypeError, ValueError):
@@ -554,7 +703,8 @@ def markup_from(annotation: dict, resources: dict, name: str = "") -> Optional[d
         if set_out:
             made["html"] = set_out
         if leader:
-            return dict(made, type="callout", leader=[flip(leader[0])])
+            return dict(made, type="callout",
+                        leaders=[leader_entry([flip(p) for p in leader], box)])
         return dict(made, type="text")
     if subtype == "Stamp":
         strokes = _stamp_strokes(annotation, resources)
@@ -584,6 +734,25 @@ def markup_from(annotation: dict, resources: dict, name: str = "") -> Optional[d
 # ---------------------------------------------------------------------------
 # a stamp's drawing
 # ---------------------------------------------------------------------------
+
+def _curves(values, flip) -> dict:
+    """Bluebeam's /Curves: which sides are curves, and their control points.
+
+    Five numbers a side — its index, then the two control points of the cubic
+    curve that runs from that corner to the next — so a hollow section's
+    rounded corners are exactly the curves Bluebeam draws.
+    """
+    if not isinstance(values, list):
+        return {}
+    numbers = [v for v in values if isinstance(v, (int, float))]
+    out = {}
+    for at in range(0, len(numbers) - 4, 5):
+        side = int(numbers[at])
+        first = flip([float(numbers[at + 1]), float(numbers[at + 2])])
+        second = flip([float(numbers[at + 3]), float(numbers[at + 4])])
+        out[str(side)] = [first[0], first[1], second[0], second[1]]
+    return out
+
 
 def _stream_of(blob: bytes) -> bytes:
     """The content of a PDF stream object, decompressed if it needs to be."""
@@ -627,9 +796,52 @@ def _stamp_strokes(annotation: dict, resources: dict) -> list[dict]:
     x, y, width, height = _rect(annotation.get("Rect", []))
     strokes = read_content(stream, matrix=header.get("Matrix"),
                            box=header.get("BBox"))
+    strokes = _fitted(strokes, header, width, height)
     # Turn the drawing over, as with every other markup, and put it in the
     # annotation's own box rather than wherever on the page it was drawn.
     return _flip_strokes(strokes, height)
+
+
+def _fitted(strokes: list[dict], header: dict, width: float, height: float) -> list[dict]:
+    """The drawing laid into the annotation's box the way PDF lays it.
+
+    An appearance's BBox, carried through its Matrix, is stretched to fill
+    Rect — that is the rule every viewer, Bluebeam's included, draws by. It
+    is nothing at all for a drawing made to its box, which is nearly every
+    one. It matters for the odd tool whose file says it is turned a quarter
+    but whose drawing is not: a 150×100 RHS on the steel sheet came in lying
+    on its side, where Bluebeam shows it standing up like its neighbours.
+    """
+    try:
+        box = [float(v) for v in header.get("BBox")][:4]
+        matrix = _matrix(header.get("Matrix")) if header.get("Matrix") \
+            else (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+    except (TypeError, ValueError):
+        return strokes
+    if len(box) < 4:
+        return strokes
+    corners = [_apply(matrix, px, py) for px in (box[0], box[2]) for py in (box[1], box[3])]
+    left = min(c[0] for c in corners)
+    bottom = min(c[1] for c in corners)
+    wide = max(c[0] for c in corners) - left
+    high = max(c[1] for c in corners) - bottom
+    if wide <= 1e-6 or high <= 1e-6 or width <= 0 or height <= 0:
+        return strokes
+    across, down = width / wide, height / high
+    if abs(across - 1) < 1e-3 and abs(down - 1) < 1e-3 and abs(left) < 1e-3 \
+            and abs(bottom) < 1e-3:
+        return strokes
+    out = []
+    for stroke in strokes:
+        path = []
+        for command in stroke["path"]:
+            values = list(command[1:])
+            for index in range(0, len(values) - 1, 2):
+                values[index] = (values[index] - left) * across
+                values[index + 1] = (values[index + 1] - bottom) * down
+            path.append([command[0]] + values)
+        out.append(dict(stroke, path=path))
+    return out
 
 
 def _stamp_pdf(annotation: dict, resources: dict) -> Optional[bytes]:
@@ -1004,6 +1216,7 @@ def _tool_from(element, resources: dict) -> Optional[Tool]:
                 path = [outermost] + [step for step in path if step != outermost]
             payload["group_path"] = path
             payload["group"] = path[0]
+            payload["group_title"] = label or ""
     return Tool(name=label or "Tool", payloads=payloads)
 
 
@@ -1070,7 +1283,42 @@ def group_paths(annotations: list) -> dict[str, tuple]:
             chain.append(at)
             at = leader_of.get(at, "")
         paths[name] = tuple(reversed(chain))
+    # Groups inside a group can also be said in the leader's own list: a
+    # section mark's GroupNesting reads [Section [Group bubble parts…]
+    # [Group cut line parts…]], every part pointing at the one leader.
+    for annotation in annotations:
+        name = _own_name(annotation)
+        nesting = _nesting_of(annotation)
+        if not name or not nesting:
+            continue
+        base = paths.get(name, (name,))
+        for member, inner in _nested_members(nesting, name):
+            if inner:
+                paths[member] = base + inner
     return paths
+
+
+def _nesting_of(annotation: dict) -> list:
+    for key in ("GroupNesting", "TempGroupNesting"):
+        found = annotation.get(key)
+        if isinstance(found, list):
+            return found
+    return []
+
+
+def _nested_members(nesting: list, leader: str, inner: tuple = ()):
+    """Each name in a GroupNesting list, with the sub-groups it is inside.
+
+    The first entry of a list is its title; a list inside it is a group of
+    its own, named here after the leader and where it sits so that every
+    placement of the tool gets names of its own when it is copied.
+    """
+    for index, entry in enumerate(nesting[1:], start=1):
+        if isinstance(entry, list):
+            yield from _nested_members(entry, leader,
+                                       inner + (f"{leader}~{len(inner)}.{index}",))
+        elif isinstance(entry, str) and entry.strip():
+            yield str(entry), inner
 
 
 def _group_name(annotation: dict) -> str:

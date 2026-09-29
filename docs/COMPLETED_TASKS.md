@@ -141,3 +141,65 @@ the lines would give, so every scale typed is honoured.
 
 Full suite: 971 passed, then the one failing viewport test fixed (it now turns on the
 prompts it checks) and re-run with the other viewport tests: 3 passed.
+
+## 2026-09-29 — Page setup panel, viewports, export fidelity, Bluebeam import
+
+- **Leader icons:** Add arrow leader / Add cloud leader use the Callout and
+  Cloud+ tool icons.
+- **Viewports hidden until clicked into:** a viewport's frame shows only
+  while it has been clicked into, while it is picked in the Page setup panel,
+  or while the Viewport tool is out.
+  `test_a_viewport_frame_shows_only_once_clicked_into`.
+- **Page setup panel** (right rail): follows the current page — paper size,
+  orientation (e.g. landscape), custom size, apply to all pages; scale with
+  an optional separate Y scale, calibrate, length and area units, decimal
+  places; the page's viewports to add, edit or delete. Separate X/Y scales
+  are honoured by lengths, areas, angles and rectangle sizes, saved, and
+  written to the PDF measure dictionary (/Y). Page scale dialog has the same
+  option. `test_separate_x_and_y_scales_measure_true`,
+  `test_the_page_panel_follows_and_changes_the_page`.
+- **Cloud drag box in other editors:** `/RD` was lopsided (room for the
+  rotation handle) and written top-first; editors (MuPDF, Bluebeam — whose
+  own callouts confirm the order) read left, bottom, right, top. Square,
+  circle and cloud Rects are now even about the shape and `/RD` is written
+  and read in that order. `test_a_clouds_drag_box_in_another_editor_is_the_cloud`.
+- **Every markup exported and checked** in MarkForge, MuPDF, pdfium (Chrome
+  and Edge) and with its appearance rebuilt from its dictionary (what an
+  editor does on edit). All markup types and all Sketch Tools render
+  identically in MuPDF and pdfium. Fixed on the way: annotations written in
+  reading order instead of stacking order (a section arrowhead over its
+  bubble); borderless text boxes now say `/BS /W 0`; text boxes carry `/DS`
+  and `/RC` in Bluebeam's format; colours written as Bluebeam writes them
+  (/C fill, /DA frame, /LEIC arrowhead, /FillOpacity, /PatternName, /BM);
+  dashes in `/BS /D`; arcs as a curved PolyLine (`/Curves`). Rebuilt
+  rectangles, ellipses, text, callouts, highlights and Sketch Tools now match
+  at 0.92–1.00. `test_markups_go_out_in_the_order_they_are_stacked`,
+  `test_a_borderless_text_box_says_so_and_carries_its_rich_text`,
+  `test_an_arc_goes_out_curved_for_an_editor_that_redraws_it`.
+- **Groups within groups:** Bluebeam's `/GroupNesting` sub-group lists are
+  read from `.btx` files and from Bluebeam PDFs (a Section is one group
+  holding a bubble group and a cut-line group, titled "Section"), and written
+  back out the same way: leader with `/GroupNesting`, members `/RT /Group
+  /IRT`. `test_a_section_mark_is_a_group_holding_a_bubble_group_and_a_cut_line_group`,
+  `test_bluebeams_own_pdf_opens_with_its_groups_in_groups`,
+  `test_a_sketch_tool_goes_out_as_bluebeams_nested_group_and_comes_back`.
+- **One-to-one tool set import:** every tool in all 14 `.btx` files that
+  carries Bluebeam's own appearance (290) was rendered from that appearance
+  and compared with the import: all match (one RHS stamp turned a quarter
+  was fixed by fitting the appearance to its box as PDF does). For tools
+  Bluebeam draws from their settings, the import now reads `/Curves`
+  (curved sides), `/LineStyle` (Medium Dash, Grid Line), the hatch tile
+  itself (`/Pattern`, `/PatternScale`, `/PatternColor`), text-box colours
+  (/C fill, /DA frame), `/Shape /Circle` circled text, and the callout knee
+  from `/CL`. Tests in `tests/test_btx.py` (2026-09-29 section).
+- **Replace image like Word:** right-click an image → Replace image → From
+  file… / From clipboard (also in Properties). The new picture keeps its own
+  proportions, fitted into the old one's box from the same corner; one undo
+  step. `test_replacing_an_image_keeps_its_box_like_word`,
+  `test_an_image_offers_replace_on_its_right_click_menu`.
+
+Still different when another editor rebuilds a markup from its dictionary:
+cloud scallop size, note icons and measurement labels are drawn in that
+editor's own style; MuPDF ignores Bluebeam's `/Curves`, `/FillOpacity` and
+hatch keys (Bluebeam reads them). Not verified in Bluebeam itself — no copy
+here.

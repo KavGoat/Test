@@ -7283,7 +7283,10 @@ def test_a_dashed_line_from_a_toolset_comes_in_dashed(window):
 
     look = _style({"C": [0, 0, 0], "BS": {"W": 2.0, "S": "D", "D": [4, 3]}})
     assert look["line_style"] == "dash"
-    assert look["dash_array"] == (4.0, 3.0)
+    # PDF gives dashes in points; a style keeps them in line widths, so a
+    # two-point line's 4/3-point dashes are 2 and 1.5 widths — the same
+    # length on the page as the file draws them.
+    assert look["dash_array"] == (2.0, 1.5)
 
     plain = _style({"C": [0, 0, 0], "BS": {"W": 2.0}})
     assert plain["line_style"] == "solid"
@@ -10112,3 +10115,146 @@ def test_the_page_panel_follows_and_changes_the_page(window):
     window.undo_stack.undo()                       # the paper change
     assert window.current_page().setup.orientation != LANDSCAPE
     assert page is not None
+
+
+def test_replacing_an_image_keeps_its_box_like_word(window, tmp_path, monkeypatch):
+    """The new picture keeps its own shape, fitted into the old one's box."""
+    from PySide6.QtGui import QImage
+    from PySide6.QtWidgets import QApplication, QFileDialog
+    from markforge.items.media import ImageItem
+
+    first = str(tmp_path / "tall.png")
+    QImage(40, 80, QImage.Format_ARGB32).save(first)
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (first, ""))
+    window.select_tool("image")
+    drag(window.view, 100, 100, 300, 240)
+    image = next(i for i in markups(window) if isinstance(i, ImageItem))
+    before = image.local_rect()
+    corner = image.mapToParent(before.topLeft())
+
+    wide = QImage(200, 50, QImage.Format_ARGB32)
+    wide.fill(0xff3366cc)
+    QApplication.clipboard().setImage(wide)
+    assert window.clipboard_has_image()
+    assert window.replace_image(image, "clipboard")
+    after = image.local_rect()
+    assert after.width() / after.height() == pytest.approx(4.0, rel=1e-3)
+    assert after.width() == pytest.approx(min(before.width(), before.height() * 4), rel=1e-3)
+    assert after.width() <= before.width() + 1e-6 and after.height() <= before.height() + 1e-6
+    assert image.mapToParent(after.topLeft()) == corner
+    window.undo_stack.undo()
+    restored = next(i for i in markups(window) if isinstance(i, ImageItem))
+    assert restored.local_rect().height() == pytest.approx(before.height())
+
+
+def test_an_image_offers_replace_on_its_right_click_menu(window, tmp_path, monkeypatch):
+    from PySide6.QtGui import QImage
+    from PySide6.QtWidgets import QFileDialog
+    from markforge.items.media import ImageItem
+
+    path = str(tmp_path / "one.png")
+    QImage(60, 40, QImage.Format_ARGB32).save(path)
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (path, ""))
+    window.select_tool("image")
+    drag(window.view, 100, 100, 300, 240)
+    image = next(i for i in markups(window) if isinstance(i, ImageItem))
+    menu = window.build_context_menu(image, image.sceneBoundingRect().center())
+    swap = next(a.menu() for a in menu.actions() if a.text() == "Replace image")
+    assert [a.text() for a in swap.actions()] == ["From file…", "From clipboard"]
+
+
+# ---------------------------------------------------------------------------
+# export read back as another editor reads it
+# ---------------------------------------------------------------------------
+
+def _exported_annotations(window, tmp_path, name="out.pdf"):
+    import pymupdf
+    from markforge.io import export
+    path = str(tmp_path / name)
+    export.export_pdf(window.document, path)
+    return path, pymupdf.open(path)
+
+
+def test_a_clouds_drag_box_in_another_editor_is_the_cloud(window, tmp_path):
+    """Rect less /RD is the shape, read left, bottom, right, top."""
+    import re
+    frame = window.current_page().frame
+    cloud = RectItem("cloud")
+    cloud.set_local_rect(QRectF(0, 0, 200, 100))
+    frame.add_markup(cloud, QPointF(100, 200))
+    _path, pdf = _exported_annotations(window, tmp_path)
+    page = pdf[0]
+    annotation = next(page.annots())
+    numbers = [float(v) for v in re.search(
+        r"/RD\s*\[([^\]]*)\]", pdf.xref_object(annotation.xref)).group(1).split()]
+    rect = annotation.rect                                   # y down, MuPDF's
+    left, bottom, right, top = numbers
+    box = (rect.x0 + left, rect.y0 + top, rect.x1 - right, rect.y1 - bottom)
+    half = cloud.style.width / 2
+    assert box == pytest.approx((100 - half, 200 - half, 300 + half, 300 + half), abs=0.2)
+
+
+def test_a_sketch_tool_goes_out_as_bluebeams_nested_group_and_comes_back(window, tmp_path):
+    from collections import Counter
+    from markforge.io import btx, pdfmarkups, pdfvector
+    from markforge.items.base import build_item
+    import os
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    section = btx.read(os.path.join(here, "btx", "Structures - Sketch Tools.btx")).tools[6]
+    frame = window.current_page().frame
+    for payload in section.payloads:
+        item = build_item(dict(payload))
+        frame.add_markup(item, item.pos() + QPointF(200, 300))
+    path, pdf = _exported_annotations(window, tmp_path)
+    leaders = [a for a in pdf[0].annots() if "/GroupNesting" in pdf.xref_object(a.xref)]
+    assert len(leaders) == 1
+    nesting = pdf.xref_object(leaders[0].xref)
+    assert "(Section)" in nesting and nesting.count("(Group)") == 2
+    members = [a for a in pdf[0].annots() if "/RT /Group" in pdf.xref_object(a.xref)]
+    assert len(members) == len(section.payloads) - 1
+    back = pdfmarkups.markups_of_page(pdfvector.PdfFile.open(path), 0)
+    shape = Counter(tuple(p.get("group_path") or ()) for p in back)
+    assert sorted(shape.values()) == [2, 6]
+    assert {p.get("group_title") for p in back} == {"Section"}
+
+
+def test_a_borderless_text_box_says_so_and_carries_its_rich_text(window, tmp_path):
+    from markforge.items.text import TextItem
+    frame = window.current_page().frame
+    words = TextItem()
+    words.style.stroke = ""
+    words.style.fill = ""
+    words.set_text("Hello")
+    frame.add_markup(words, QPointF(100, 100))
+    _path, pdf = _exported_annotations(window, tmp_path)
+    said = pdf.xref_object(next(pdf[0].annots()).xref)
+    assert "/W 0" in said and "/C [ ]" in said, said
+    assert "/DS" in said and "/RC" in said and "Hello" in said
+
+
+def test_markups_go_out_in_the_order_they_are_stacked(window, tmp_path):
+    frame = window.current_page().frame
+    low = RectItem("rect")
+    low.set_local_rect(QRectF(0, 0, 50, 50))
+    frame.add_markup(low, QPointF(100, 300))
+    high = RectItem("ellipse")
+    high.set_local_rect(QRectF(0, 0, 50, 50))
+    frame.add_markup(high, QPointF(100, 100))               # higher on the page
+    high.setZValue(low.zValue() + 1)                         # but stacked on top
+    _path, pdf = _exported_annotations(window, tmp_path)
+    kinds = [a.type[1] for a in pdf[0].annots()]
+    assert kinds == ["Square", "Circle"]
+
+
+def test_an_arc_goes_out_curved_for_an_editor_that_redraws_it(window, tmp_path):
+    from markforge.io import pdfmarkups, pdfvector
+    from markforge.items.shapes import PolyItem
+    frame = window.current_page().frame
+    arc = PolyItem("arc")
+    arc.points = [QPointF(0, 0), QPointF(100, 60), QPointF(200, 0)]
+    frame.add_markup(arc, QPointF(100, 200))
+    path, pdf = _exported_annotations(window, tmp_path)
+    said = pdf.xref_object(next(pdf[0].annots()).xref)
+    assert "/Curves" in said and "/PolyLine" in said
+    back = pdfmarkups.markups_of_page(pdfvector.PdfFile.open(path), 0)
+    assert len(back) == 1 and back[0].get("bezier")

@@ -2112,9 +2112,17 @@ class PropertiesPanel(QScrollArea):
 
     def _add_image(self, item) -> None:
         form = self._group("Image")
-        replace = QPushButton("Replace image…")
-        replace.clicked.connect(lambda: self.window.replace_image(item))
-        form.addRow("", replace)
+        row = QHBoxLayout()
+        replace = QPushButton("Replace…")
+        replace.setToolTip("Replace the picture with one from a file, keeping "
+                           "its proportions inside this one's box")
+        replace.clicked.connect(lambda: self.window.replace_image(item, "file"))
+        pasted = QPushButton("From clipboard")
+        pasted.setToolTip("Replace the picture with the one on the clipboard")
+        pasted.clicked.connect(lambda: self.window.replace_image(item, "clipboard"))
+        row.addWidget(replace)
+        row.addWidget(pasted)
+        form.addRow("", row)
         keep = QCheckBox("Keep its proportions")
         keep.setChecked(item.keep_aspect)
         keep.toggled.connect(

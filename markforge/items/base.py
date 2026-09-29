@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import math
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from copy import deepcopy
 from datetime import datetime
 from typing import Optional
@@ -122,6 +122,9 @@ def paint_hatch(painter: QPainter, region: QPainterPath, style) -> None:
     from . import hatches
     ink = QColor(style.hatch_color or style.stroke or "#000000")
     ink.setAlphaF(max(0.0, min(1.0, style.opacity)))
+    if style.hatch_tile:
+        hatches.paint_tile(painter, region, style.hatch_tile, style.hatch_scale, ink)
+        return
     hatches.paint(painter, region, style.hatch, style.hatch_scale, ink)
 
 
@@ -173,6 +176,17 @@ class Style:
     # means the named line style decides, which is the usual case; a line
     # read out of a Bluebeam file brings its own.
     dash_array: tuple = ()
+    # A hatch drawn from a tile of its own rather than from the library: a
+    # Bluebeam pattern, brought across as the linework its cell holds.
+    # {"step_x", "step_y", "x", "y", "strokes"}; empty for a library hatch.
+    hatch_tile: dict = field(default_factory=dict)
+    # The outline of words in a box: "rect", or "circle" for Bluebeam's
+    # circled text.
+    text_shape: str = "rect"
+    # Where the words sit inside the box — left, top, right, bottom — when
+    # that is not the same all round: circled text sets its words in the
+    # square inside the circle. Empty means the padding, all round.
+    text_margins: tuple = ()
 
     def dashes(self) -> list:
         """The dashes this line is drawn with, in multiples of its width."""
@@ -206,7 +220,7 @@ class Style:
     def hatched(self) -> bool:
         """Whether a hatch pattern is drawn, rather than only a fill."""
         from . import hatches
-        return hatches.is_hatch(self.hatch)
+        return bool(self.hatch_tile) or hatches.is_hatch(self.hatch)
 
     def brush(self) -> QBrush:
         """The solid fill. A hatch is linework, drawn over it by paint_hatch."""
@@ -430,6 +444,9 @@ class MarkupItem(QGraphicsObject):
         # always the first step of this — and ungrouping peels one off, so
         # what is inside stays together.
         self.group_path: tuple = ()
+        # What the outermost group is called — "Section" for a section mark
+        # from a Bluebeam tool set — so it goes back out under that name.
+        self.group_title = ""
         # Holes taken out of this shape, each a ring of local points. A hole
         # belongs to the shape it came out of rather than being a markup of
         # its own, so moving the shape takes its holes with it. Any closed
@@ -928,6 +945,7 @@ class MarkupItem(QGraphicsObject):
             "locked_before_flatten": self.locked_before_flatten,
             "group": self.group,
             "group_path": list(self.group_path),
+            "group_title": self.group_title,
         }
 
     def serialize(self) -> dict:
@@ -945,6 +963,7 @@ class MarkupItem(QGraphicsObject):
         self.style = Style.from_dict(data.get("style", {}))
         self.set_group_path(data.get("group_path") or (),
                             str(data.get("group", "")))
+        self.group_title = str(data.get("group_title", "") or "")
         self.author = data.get("author", "")
         self.subject = data.get("subject", "")
         self.comment = data.get("comment", "")

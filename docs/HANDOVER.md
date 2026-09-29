@@ -1,6 +1,24 @@
 # MarkForge — start here
 
-## Latest review: 2026-09-28
+## Latest review: 2026-09-29
+
+Evidence in `COMPLETED_TASKS.md`. Things that will bite:
+- `/RD` is left, bottom, right, top (y up) — Bluebeam's own callouts prove
+  it. Read and write it that way (`btx.drawn_box`, `annotate`, `pdfmarkups`).
+- For FreeText, `/C` is the background, `/DA`'s colour is the frame and
+  leader, `/DS` color is the words (`btx.free_text_colours`).
+- Export writes annotations in stacking order (`annotate.exportable`).
+- Groups: `btx.group_paths` follows `/IRT` chains and the nested
+  `[ (Group) … ]` lists in `/GroupNesting`; `annotate._group_nesting`
+  writes them back.
+- Page setup panel: `ui/pagepanel.py`; separate Y scale is
+  `PageScale.y_factor`.
+- `QTextCharFormat.fontFamilies()` segfaults PySide 6.11 when empty.
+- Audit scripts used this round (not in the repo): export every tool and
+  compare MarkForge / MuPDF / pdfium / rebuilt renders; render every `.btx`
+  tool from Bluebeam's own appearance and compare with the import.
+
+## Previous review: 2026-09-28
 
 The user's add list from `BLUEBEAM_COMPARISON.md` is built (A1, A2, B3, B6,
 B8, C2, C4, C5, the Markups list) with the follow-ups; evidence in

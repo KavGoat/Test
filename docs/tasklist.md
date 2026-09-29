@@ -60,3 +60,6 @@ restarts with the report below. Completion status is user-owned.
 |  | A Sketch Tools markup (e.g. section cut) placed in MarkForge and opened in another PDF editor does not look right. |
 |  | A cloud markup opened in another editor shows a drag box of the wrong size. |
 |  | Every markup type must export correctly to PDF and look and behave right in other editors. |
+|  | Sketch Tools contain groups within groups. Import them as nested groups linked together the way Bluebeam does. |
+|  | Import of any Bluebeam tool set must be exactly one to one with Bluebeam; it currently is not. |
+|  | Right-click an image: Replace image from clipboard or from file. The new picture keeps its own aspect ratio and is sized from the existing image, exactly like Word. |

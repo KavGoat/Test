@@ -49,6 +49,7 @@ def markups_of_page(source, index: int, scale: float = 1.0,
     page = source.page(index)
     place = engine.to_display(page)
     found: list[dict] = []
+    grouping: list = []                       # (what it says of groups, payloads)
     for annotation in source.annotations_of(index):
         kind = str(source.resolve(annotation.get("Subtype")) or "")
         if kind in NOT_MARKUP:
@@ -58,6 +59,7 @@ def markups_of_page(source, index: int, scale: float = 1.0,
         except Exception:                              # noqa: BLE001
             made = None
         if made:
+            grouping.append((_group_facts(source, annotation), made))
             if keep_the_look:
                 _leave_it_to_the_file(annotation, made)
             if picture_of is not None:
@@ -67,7 +69,71 @@ def markups_of_page(source, index: int, scale: float = 1.0,
             found.extend(made)
         if len(found) >= MOST_MARKUPS:
             break
+    _regroup(grouping)
     return found
+
+
+def _group_facts(source, annotation: dict) -> dict:
+    """What an annotation says about the group it is in, as names.
+
+    Bluebeam leads a group with one annotation carrying ``/GroupNesting`` and
+    has every other point back at it with ``/IRT`` and ``/RT /Group``. An
+    ``/IRT`` without ``/RT /Group`` is a reply, not a group, and is left alone.
+    """
+    facts: dict = {}
+    name = _readable(source.resolve(annotation.get("NM")))
+    if name:
+        facts["NM"] = name
+    nesting = source.resolve(annotation.get("GroupNesting"))
+    if isinstance(nesting, list):
+        facts["GroupNesting"] = _plain(source, nesting)
+    if str(source.resolve(annotation.get("RT")) or "") == "Group":
+        leader = source.resolve(annotation.get("IRT"))
+        if isinstance(leader, dict):
+            said = _readable(source.resolve(leader.get("NM")))
+            if said:
+                facts["IRT"] = said
+    return facts
+
+
+def _plain(source, value):
+    """A GroupNesting list with every reference followed and names as text."""
+    value = source.resolve(value)
+    if isinstance(value, list):
+        return [_plain(source, entry) for entry in value]
+    return _readable(value) if not isinstance(value, str) else str(value)
+
+
+def _regroup(grouping: list) -> None:
+    """Put the markups back into the groups, and groups in groups, they came in."""
+    import uuid
+    from .btx import group_paths
+
+    facts = [each for each, _made in grouping if each.get("NM")]
+    if not any("GroupNesting" in each or "IRT" in each for each in facts):
+        return
+    paths = group_paths(facts)
+    titles = {}
+    for each in facts:
+        nesting = each.get("GroupNesting")
+        if nesting and isinstance(nesting[0], str):
+            titles[each["NM"]] = nesting[0]
+    # Fresh names, so the same sheet brought in twice is two sets of groups.
+    salt = uuid.uuid4().hex[:6]
+    sizes: dict = {}
+    for each, _made in grouping:
+        path = paths.get(each.get("NM", ""), ())
+        if path:
+            sizes[path[0]] = sizes.get(path[0], 0) + 1
+    for each, made in grouping:
+        path = paths.get(each.get("NM", ""), ())
+        if not path or sizes.get(path[0], 0) < 2:
+            continue
+        steps = [f"{step}-{salt}" for step in path]
+        for payload in made:
+            payload["group_path"] = steps
+            payload["group"] = steps[0]
+            payload["group_title"] = titles.get(path[0], "")
 
 
 #: How finely the file's own picture of a markup is kept, for the few that
@@ -180,8 +246,15 @@ def _one(source, annotation: dict, kind: str, place, scale: float,
                 return [_line("cloud", points, style, common)]
             if intent in ("PolygonDimension", "PolyLineDimension"):
                 return [_take_off(points, style, common, intent)]
-            return [_line("polyline" if kind == "PolyLine" else "polygon",
-                          points, style, common)]
+            made = _line("polyline" if kind == "PolyLine" else "polygon",
+                         points, style, common)
+            # Bluebeam's own curved sides, control points and all.
+            from .btx import _curves
+            curves = _curves(_numbers(source, annotation.get("Curves")) or None,
+                             lambda xy: _at(place, xy[0], xy[1], scale))
+            if curves:
+                made["bezier"] = curves
+            return [made]
     if kind == "Ink":
         return _ink(source, annotation, place, scale, style, common)
     if kind in ("Highlight", "StrikeOut", "Underline", "Squiggly"):
@@ -488,6 +561,16 @@ def _free_text(source, annotation: dict, box: list, style: dict, common: dict,
     is how every text box on a sheet arrives wearing a leader pointing at a
     corner of the page.
     """
+    # The box is Rect less /RD — left, bottom, right, top, y up the page.
+    # A call-out's Rect takes in its leader as well, and a box as big as
+    # that is a box twice the size its own file draws.
+    inset = _numbers(source, annotation.get("RD"))
+    circled = str(source.resolve(annotation.get("Shape")) or "") == "Circle"
+    if len(inset) == 4 and len(box) >= 4 and not circled:
+        left, bottom, right, top = (max(value, 0.0) * scale for value in inset)
+        wide, high = box[2] - left - right, box[3] - top - bottom
+        if wide > 1 and high > 1:
+            box = [box[0] + left, box[1] + top, wide, high]
     corners = _numbers(source, annotation.get("CL"))
     leader = [_at(place, corners[i], corners[i + 1], scale)
               for i in range(0, len(corners) - 1, 2)]
@@ -512,6 +595,11 @@ def _free_text(source, annotation: dict, box: list, style: dict, common: dict,
     # /DA last: it is the one PDF itself defines, so where the two disagree
     # about a colour or a size it is the one every reader goes by.
     setting.update(_how_the_words_are_set(source, annotation, scale))
+    # Background, frame and leader colour, and circled text, read as
+    # Bluebeam writes them: /C is the fill here, not the border.
+    from .btx import free_text_colours
+    width = setting.get("width")
+    setting.update(free_text_colours(said, border_width=width))
     payload["style"] = setting
     runs = _rich_text(said)
     if runs:
@@ -519,8 +607,8 @@ def _free_text(source, annotation: dict, box: list, style: dict, common: dict,
     if kind == "callout" and leader:
         # The leader's own end is where it points; the rest is worked out from
         # the box, the way every call-out here works out its hinge.
-        tip = leader[0]
-        payload["leaders"] = [{"tip": [tip[0] - box[0], tip[1] - box[1]]}]
+        from .btx import leader_entry
+        payload["leaders"] = [leader_entry(leader, box, (box[0], box[1]))]
     return payload
 
 
@@ -533,12 +621,15 @@ def _bluebeamish(source, annotation: dict) -> dict:
     twice and drifting apart.
     """
     out = {"Subtype": "FreeText"}
-    for key in ("DA", "DS", "RC", "Contents", "Q"):
+    for key in ("DA", "DS", "RC", "Contents", "Q", "Shape", "FillOpacity"):
         found = source.resolve(annotation.get(key))
         if isinstance(found, (str, bytes)):
             found = _readable(found)
         if found not in (None, ""):
             out[key] = found
+    for key in ("C", "CL"):
+        if annotation.get(key) is not None:
+            out[key] = _numbers(source, annotation.get(key))
     return out
 
 

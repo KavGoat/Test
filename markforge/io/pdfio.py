@@ -474,6 +474,9 @@ def _scaled_markups(payloads: list[dict], scale: float) -> list[dict]:
             entry["rect"] = [value * scale for value in entry["rect"]]
         if "points" in entry:
             entry["points"] = [[x * scale, y * scale] for x, y in entry["points"]]
+        if "bezier" in entry:
+            entry["bezier"] = {side: [value * scale for value in pair]
+                               for side, pair in entry["bezier"].items()}
         style = dict(entry.get("style") or {})
         if "width" in style:
             style["width"] = max(style["width"] * scale, 0.1)

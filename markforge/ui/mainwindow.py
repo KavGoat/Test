@@ -6,10 +6,10 @@ import json
 import os
 from typing import Optional
 
-from PySide6.QtCore import (QBuffer, QEvent, QIODevice, QMimeData, QModelIndex,
+from PySide6.QtCore import (QBuffer, QByteArray, QEvent, QIODevice, QMimeData, QModelIndex,
                             QPoint, QPointF, QRect, QRectF,
                             QSize, Qt, QTimer, Signal)
-from PySide6.QtGui import (QAction, QActionGroup, QColor, QCursor, QFont, QFontInfo, QImage,
+from PySide6.QtGui import (QAction, QActionGroup, QColor, QCursor, QFont, QFontInfo, QImage, QPixmap,
                            QKeySequence, QPainter, QTextBlockFormat,
                            QTextCharFormat, QTextCursor, QTransform, QUndoStack)
 from PySide6.QtPrintSupport import QPrintDialog, QPrintPreviewDialog, QPrinter
@@ -5131,12 +5131,89 @@ class MainWindow(QMainWindow):
                 break
         self.refresh_selection()
 
-    def replace_image(self, item) -> None:
-        """Put a different picture in an image already on the page."""
+    def replace_image(self, item, source: str = "file") -> bool:
+        """Put a different picture in an image already on the page, as Word does.
+
+        *source* is "file" or "clipboard". The new picture keeps its own
+        proportions and is fitted into the box the old one filled, from the
+        same top-left corner — so a portrait photo swapped for a landscape
+        one comes out as wide as the old one was, not stretched to its shape.
+        One undo step.
+        """
+        found = self._image_from_clipboard() if source == "clipboard" \
+            else self._image_from_a_file()
+        if found is None:
+            if source == "clipboard":
+                self.status_hint.setText("Replace image: there is no picture on the clipboard")
+            return False
+        data, suffix = found
+        pixmap = QPixmap()
+        if not pixmap.loadFromData(QByteArray(data)) or pixmap.isNull():
+            QMessageBox.warning(self, "Replace image", "That picture could not be read.")
+            return False
+        old = item.local_rect().normalized()
         self.view.begin_snapshot(self.view.involved_frames(item))
-        if self.load_image_into(item):
-            self.view.commit_snapshot("Replace image")
-            self.refresh_selection()
+        item.prepareGeometryChange()
+        item.asset_key = self.document.add_asset(data, suffix)
+        item.load_from_document(self.document)
+        fit = min(old.width() / max(pixmap.width(), 1),
+                  old.height() / max(pixmap.height(), 1))
+        item.set_local_rect(QRectF(old.left(), old.top(),
+                                   max(pixmap.width() * fit, 1.0),
+                                   max(pixmap.height() * fit, 1.0)))
+        item.touch()
+        item.update()
+        self.view.commit_snapshot("Replace image")
+        self.refresh_selection()
+        return True
+
+    def _image_from_a_file(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Replace image", "",
+            "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tif *.tiff);;All files (*)")
+        if not path:
+            return None
+        try:
+            with open(path, "rb") as handle:
+                data = handle.read()
+        except OSError as exc:
+            QMessageBox.critical(self, "Replace image", str(exc))
+            return None
+        return data, os.path.splitext(path)[1].lstrip(".").lower() or "png"
+
+    @staticmethod
+    def clipboard_has_image() -> bool:
+        mime = QApplication.clipboard().mimeData()
+        if mime is None:
+            return False
+        if mime.hasImage():
+            return True
+        return any(url.isLocalFile() and os.path.splitext(url.toLocalFile())[1].lower()
+                   in (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tif", ".tiff")
+                   for url in mime.urls())
+
+    def _image_from_clipboard(self):
+        """The picture on the clipboard as PNG bytes, or a copied image file."""
+        mime = QApplication.clipboard().mimeData()
+        if mime is None:
+            return None
+        for url in mime.urls():
+            if url.isLocalFile():
+                path = url.toLocalFile()
+                suffix = os.path.splitext(path)[1].lstrip(".").lower()
+                if suffix in ("png", "jpg", "jpeg", "bmp", "gif", "webp", "tif", "tiff"):
+                    try:
+                        with open(path, "rb") as handle:
+                            return handle.read(), suffix
+                    except OSError:
+                        pass
+        image = QApplication.clipboard().image()
+        if image.isNull():
+            return None
+        buffer = QBuffer()
+        buffer.open(QIODevice.WriteOnly)
+        image.save(buffer, "PNG")
+        return bytes(buffer.data()), "png"
 
     def load_image_into(self, item: ImageItem) -> bool:
         path, _ = QFileDialog.getOpenFileName(
@@ -6205,6 +6282,13 @@ class MainWindow(QMainWindow):
                            menu: Optional[QMenu] = None) -> QMenu:
         menu = menu or QMenu(self)
         if item is not None:
+            if isinstance(item, ImageItem) and not item.locked:
+                swap = menu.addMenu("Replace image")
+                swap.addAction("From file…", lambda: self.replace_image(item, "file"))
+                pasted = swap.addAction("From clipboard",
+                                        lambda: self.replace_image(item, "clipboard"))
+                pasted.setEnabled(self.clipboard_has_image())
+                menu.addSeparator()
             if getattr(item, "TYPE", "") == "link":
                 menu.addAction("Follow link", lambda: self.follow_link(item))
                 menu.addAction("Edit link…", lambda: self.edit_link(item))

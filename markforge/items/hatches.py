@@ -161,6 +161,84 @@ def paint(painter: QPainter, region: QPainterPath, name: str, scale: float,
     painter.restore()
 
 
+#: The most tiles drawn one by one before a tiled hatch becomes a tint.
+MOST_TILES = 6000
+
+_TILE_PATHS: dict = {}
+
+
+def _tile_path(tile: dict):
+    """A tile's lines as one path, and the widest line in it; cached."""
+    key = id(tile.get("strokes"))
+    found = _TILE_PATHS.get(key)
+    if found is not None and found[2] is tile.get("strokes"):
+        return found[0], found[1]
+    from PySide6.QtGui import QPainterPath
+    path = QPainterPath()
+    widest = 0.0
+    for stroke in tile.get("strokes") or []:
+        widest = max(widest, float(stroke.get("width", 0.0) or 0.0))
+        for command in stroke.get("path") or []:
+            op, values = command[0], [float(v) for v in command[1:]]
+            if op == "m" and len(values) >= 2:
+                path.moveTo(values[0], values[1])
+            elif op == "l" and len(values) >= 2:
+                path.lineTo(values[0], values[1])
+            elif op == "c" and len(values) >= 6:
+                path.cubicTo(values[0], values[1], values[2], values[3],
+                             values[4], values[5])
+            elif op == "h":
+                path.closeSubpath()
+    if len(_TILE_PATHS) > 64:
+        _TILE_PATHS.clear()
+    _TILE_PATHS[key] = (path, widest, tile.get("strokes"))
+    return path, widest
+
+
+def paint_tile(painter: QPainter, region: QPainterPath, tile: dict, scale: float,
+               ink: QColor) -> None:
+    """Fill *region* with copies of *tile*'s linework, *scale* times its size."""
+    if region is None or region.isEmpty():
+        return
+    step_x = float(tile.get("step_x", 0) or 0)
+    step_y = float(tile.get("step_y", 0) or 0)
+    if step_x <= 0 or step_y <= 0:
+        return
+    scale = max(float(scale or 1.0), 1e-12)
+    path, widest = _tile_path(tile)
+    box = region.boundingRect()
+    across, down = step_x * scale, step_y * scale
+    first_x = math.floor(box.left() / across)
+    first_y = math.floor(box.top() / down)
+    last_x = math.ceil(box.right() / across)
+    last_y = math.ceil(box.bottom() / down)
+    painter.save()
+    painter.setClipPath(region, Qt.IntersectClip)
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    if (last_x - first_x) * (last_y - first_y) > MOST_TILES:
+        tint = QColor(ink)
+        tint.setAlphaF(ink.alphaF() * 0.35)
+        painter.fillPath(region, tint)
+        painter.restore()
+        return
+    pen = QPen(ink, max(widest, 0.1))
+    pen.setCapStyle(Qt.FlatCap)
+    pen.setCosmetic(False)
+    painter.setPen(pen)
+    painter.setBrush(Qt.NoBrush)
+    origin_x = float(tile.get("x", 0.0) or 0.0)
+    origin_y = float(tile.get("y", 0.0) or 0.0)
+    for column in range(first_x, last_x + 1):
+        for row in range(first_y, last_y + 1):
+            painter.save()
+            painter.translate(column * across, row * down)
+            painter.scale(scale, scale)
+            painter.translate(-origin_x, -origin_y)
+            painter.drawPath(path)
+            painter.restore()
+    painter.restore()
+
+
 def _paint_families(painter, box, families, scale) -> bool:
     corners = [box.topLeft(), box.topRight(), box.bottomLeft(), box.bottomRight()]
     lines: list[QLineF] = []
