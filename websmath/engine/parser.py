@@ -153,7 +153,7 @@ class Parser:
         return self._bin(self.compare, ("∧",))
 
     def compare(self):
-        return self._bin(self.additive, ("<", ">", "≤", "≥", "≠", "≡"))
+        return self._bin(self.additive, ("<", ">", "≤", "≥", "≠", "≡", "≈", "≉"))
 
     def additive(self):
         return self._bin(self.multiplicative, ("+", "-", "±"))
@@ -162,9 +162,9 @@ class Parser:
         start = self.peek().start if self.peek() else 0
         left = self.unary()
         while True:
-            if self.at_op("*", "×", "/"):
+            if self.at_op("*", "×", "/", "†"):
                 op = self.take().value
-                op = "*" if op == "×" else op
+                op = {"×": "*"}.get(op, op)
                 right = self.unary() if not self._at_stop() else A.Placeholder(src=self.src(self._end(), self._end()))
                 left = A.BinOp(op, left, right, src=self.src(start, self._end()))
             elif self._implicit_follows(left):
@@ -214,7 +214,8 @@ class Parser:
 
     def primary(self):
         t = self.peek()
-        if t is None or t.kind == "sep" or (t.kind == "op" and t.value in ("=", "≔")):
+        if t is None or t.kind == "sep" or (t.kind == "op" and t.value in (
+                "=", "≔", "*", "/", "<", ">", "≤", "≥", "≠", "≡", "∧", "∨", "⊕", "†", "≈", "≉")):
             p = t.start if t else len(self.row)
             return A.Placeholder(src=self.src(p, p))
         self.take()

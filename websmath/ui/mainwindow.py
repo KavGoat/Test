@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QDockWidget, QFileDial
                                QMessageBox, QPushButton, QSpinBox, QToolBox, QVBoxLayout, QWidget)
 
 from ..engine.catalog import FUNCTIONS, UNIT_CATALOG
-from ..engine.model import Matrix, Program, Row
+from ..engine.model import Matrix
 from ..io.smfile import load_sm, save_sm
 from ..worksheet import Worksheet
 from .worksheet_view import WorksheetView
@@ -83,34 +83,74 @@ class MainWindow(QMainWindow):
         dock = QDockWidget("Toolbox", self)
         box = QToolBox()
 
-        def pad(buttons, cols=5):
+        def pad(buttons, cols=5, tips=False):
             w = QWidget()
             g = QGridLayout(w)
             g.setSpacing(2)
-            for k, (label, action) in enumerate(buttons):
+            g.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+            for k, entry in enumerate(buttons):
+                label, action = entry[0], entry[1]
                 b = QPushButton(label)
-                b.setFixedSize(34, 22)
+                if tips:
+                    b.setToolTip(entry[2])
+                b.setFixedSize(40, 22)
                 b.setFocusPolicy(Qt.NoFocus)
                 b.clicked.connect(action)
                 g.addWidget(b, k // cols, k % cols)
             return w
 
         typed = lambda s: (lambda: self._type(s))
-        box.addItem(pad([(s, typed(s)) for s in ["7", "8", "9", "+", "π", "4", "5", "6", "-", "∞",
-                                                  "1", "2", "3", "*", "i", "0", ".", "!", "/", "^",
-                                                  ":", "=", "(", "|", "\\"]]), "Arithmetic")
-        box.addItem(pad([(s, typed(s)) for s in ["≡", "≠", "<", ">", "≤", "≥", "¬", "∧", "∨", "⊕"]]),
-                    "Boolean")
-        box.addItem(pad([("if", lambda: self._program("if")), ("for", lambda: self._program("for")),
-                         ("while", lambda: self._program("while")), ("line", lambda: self._program("line")),
-                         ("try", typed("try(")), ("break", typed("break")),
-                         ("continue", typed("continue"))], 4), "Programming")
-        box.addItem(pad([("2D", self._insert_plot)], 4), "Plot")
-        box.addItem(pad([(s, typed(s + "(")) for s in ["sin", "cos", "tan", "cot", "ln", "log", "exp",
-                                                        "sqrt", "abs", "max", "min", "sum", "det",
-                                                        "transpose", "el"]], 4), "Functions")
-        box.addItem(pad([(g, typed(g)) for g in "αβγδεζηθικλμνξοπρστυφχψω"], 6), "Symbols (α-ω)")
-        box.setFixedWidth(6 * 36 + 12)
+        struct = lambda n: (lambda: self._program(n))
+        # the SMath Cloud toolbox, section by section (tooltips as on the site)
+        box.addItem(pad([
+            ("∞", typed("∞"), "Positive infinity"), ("±", typed("±"), "Operator 'plus/minus'"),
+            ("x²", typed("^"), "Raise to power (^)"), ("⌫", lambda: self._named("BACK"), "Backspace"),
+            ("+", typed("+"), "Addition (+)"), ("( )", typed("("), "Parenthesis"),
+            ("|x|", typed("abs("), "Absolute value"), ("−", typed("-"), "Subtraction (-)"),
+            ("√", typed("\\"), "Square root (\\)"), ("ⁿ√", struct("nthroot"), "Nth root (Ctrl+\\)"),
+            ("·", typed("*"), "Multiplication (*)"), ("/", typed("/"), "Division (/)"),
+            (":=", typed(":"), "Definition (:)"), ("=", typed("="), "Evaluate numerically ( = )"),
+            ("π", typed("π"), "π"), ("i", typed("i"), "Imaginary unit"),
+        ], tips=True), "Arithmetic")
+        box.addItem(pad([
+            ("[ ]", self._insert_matrix, "Matrix (Ctrl+M)"), ("|M|", typed("det("), "Determinant"),
+            ("Mᵀ", typed("transpose("), "Matrix transpose (Ctrl+1)"), ("×", typed("†"), "Cross product (Ctrl+8)"),
+            ("vec", typed("vectorize("), "Vectorize function"), ("a..b", struct("range"), "Range"),
+            ("a,b..", struct("range3"), "Range with second value"), ("v₁", typed("["), "Vector element ([)"),
+            ("alg", typed("alg("), "Algebraic addition to matrix"), ("min", typed("minor("), "Minor"),
+        ], tips=True), "Matrices")
+        box.addItem(pad([
+            ("≡", typed("≡"), "Boolean 'equal to' (Ctrl+=)"), ("≠", typed("≠"), "Boolean 'not equal to' (Ctrl+3)"),
+            ("<", typed("<"), "Boolean 'less than'"), (">", typed(">"), "Boolean 'greater than'"),
+            ("≤", typed("≤"), "Boolean 'less than or equal to' (Ctrl+9)"),
+            ("≥", typed("≥"), "Boolean 'greater than or equal to' (Ctrl+0)"),
+            ("≈", typed("≈"), "Boolean 'approximately equal'"), ("≉", typed("≉"), "Boolean 'approximately not equal'"),
+            ("∧", typed("&"), "Boolean 'and' (&)"), ("∨", typed("|"), "Boolean 'or' (|)"),
+            ("¬", typed("¬"), "Boolean 'not'"), ("⊕", typed("⊕"), "Boolean 'exclusive or (xor)'"),
+        ], tips=True), "Boolean")
+        box.addItem(pad([
+            ("log", typed("log(,"), "Logarithm"), ("sign", typed("sign("), "Algebraic sign"),
+            ("sin", typed("sin("), "Sine"), ("cos", typed("cos("), "Cosine"),
+            ("Σ", struct("sum"), "Summation"), ("Π", struct("product"), "Iterated product"),
+            ("ln", typed("ln("), "Natural logarithm"), ("arg", typed("arg("), "Principal argument"),
+            ("tan", typed("tan("), "Tangent"), ("cot", typed("cot("), "Cotangent"),
+            ("d/dx", struct("diff"), "Derivative"), ("∫", struct("int"), "Definite integral"),
+            ("exp", typed("exp("), "Exponent"), ("{", struct("sys"), "System of values or equations"),
+        ], cols=4, tips=True), "Functions")
+        box.addItem(pad([
+            ("2D", self._insert_plot, "Plot - 2D"), ("move", lambda: self._plot_tool("move"), "Move"),
+            ("zoom", lambda: self._plot_tool("scale"), "Scale"), ("pts", lambda: self._plot_render(True), "Graph by points"),
+            ("lines", lambda: self._plot_render(False), "Graph by lines"),
+            ("⟳", lambda: self.view.recalculate(force=True), "Refresh"),
+        ], cols=4, tips=True), "Plot")
+        box.addItem(pad([
+            ("if", struct("if"), "If statement"), ("for", struct("for"), "For loop"),
+            ("try", struct("try"), "Try/on error statement"), ("line", struct("line"), "Add line (])"),
+            ("while", struct("while"), "While loop"), ("cont", typed("continue"), "continue"),
+            ("brk", typed("break"), "break"),
+        ], cols=4, tips=True), "Programming")
+        box.addItem(pad([(g, typed(g), g) for g in "αβγδεζηθικλμνξοπρστυφχψω"], cols=6, tips=True), "Symbols (α-ω)")
+        box.setFixedWidth(5 * 42 + 16)
         dock.setWidget(box)
         dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetClosable)
         self.addDockWidget(Qt.RightDockWidgetArea, dock)
@@ -120,25 +160,28 @@ class MainWindow(QMainWindow):
         self.view._key_to_region(s)
 
     def _program(self, name: str) -> None:
-        """Insert a programming block from the toolbox (for/while/line/if)."""
+        """Insert a toolbox structure (for(,, while(, sum(,,, ...)."""
         v = self.view
         item = v.focused_item
-        if item is None:
+        if item is None or item.region.kind == "text":
             item = v.new_region(v.scene_.cross.x(), v.scene_.cross.y())
             v.focus_item(item)
-        ed = item.editor
-        ed._push_undo()
-        if name == "for":
-            box = Program("for", Row(), Row(), Row())
-        elif name == "while":
-            box = Program("while", Row(), Row())
-        elif name == "if":
-            box = Program("if", Row(), Row(), Row())
-        else:
-            box = Program("line", Row(), Row())
-        ed._insert_box(box, into=0)
+        item.editor.insert_structure(name)
         v._after_edit(item)
         v.setFocus()
+
+    def _named(self, key: str) -> None:
+        self.view.setFocus()
+        self.view._named_key(key)
+
+    def _plot_tool(self, tool: str) -> None:
+        self.view.plot_tool = tool
+
+    def _plot_render(self, points: bool) -> None:
+        item = self.view.focused_item
+        if item is not None and item.region.plot is not None:
+            item.region.plot.points = points
+            item.relayout()
 
     # -- file ------------------------------------------------------------------------------
     def _title(self) -> None:

@@ -35,6 +35,7 @@ class PlotState:
     pan_y: float = 0.0
     grid: bool = True
     axes: bool = True
+    points: bool = False  # "Graph by points" instead of lines
 
     # -- mapping ------------------------------------------------------------------
     @property

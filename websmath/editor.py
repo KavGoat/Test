@@ -31,9 +31,15 @@ OPERATOR_KEYS = {
     "≤": "≤", "≥": "≥", "≠": "≠", "≡": "≡", "∧": "∧", "∨": "∨", "¬": "¬",
     "±": "±", "×": "*", "&": "∧", "|": "∨",
 }
+# calls that become structures once they have this many arguments
+STRUCTURE_ARITY = {"for": 3, "while": 2, "try": 2, "sum": 4, "product": 4, "int": 4,
+                   "diff": 2, "range": 2, "el": 2}
+TOOLBOX_ROWS = {"for": 3, "while": 2, "try": 2, "sum": 4, "product": 4, "int": 4, "diff": 2,
+                "range": 2, "range3": 3, "sys": 2, "line": 2, "if": 3}
+NAMED_KEYS = {"LEFT", "RIGHT", "UP", "DOWN", "HOME", "END", "TAB", "ENTER", "BACK", "DELETE"}
 # precedence of operators typed after a selection
 BINARY_PREC = {"∨": 1, "⊕": 1, "∧": 2, "<": 3, ">": 3, "≤": 3, "≥": 3, "≠": 3, "≡": 3,
-               "+": 4, "-": 4, "±": 4, "*": 5}
+               "≈": 3, "≉": 3, "+": 4, "-": 4, "±": 4, "*": 5, "†": 5}
 
 
 def _prec(node) -> int:
@@ -102,6 +108,11 @@ class MathEditor:
         self.cursor = Cursor(self.root, len(self.root))
         self.in_unit = False
         self.selection: Optional[tuple] = None  # (row, start, end)
+        # SMath's "whole sub-expression" cursor state: the cursor sits at the
+        # start of a sub-expression and the underline covers all of it
+        # (reached with Left at the start of its first name, or Right across
+        # an operator).  Typing an operator there makes it the right operand.
+        self.node: Optional[tuple] = None
         self.is_defined = is_defined or (lambda name, nargs=None: False)
         self.plot_input = False  # a plot's input: no "=", no text conversion
         self._undo: list[Snapshot] = []
@@ -171,6 +182,7 @@ class MathEditor:
         self.cursor = Cursor(r, max(0, min(pos, len(r))))
         self.in_unit = self._root_of(r) is self.unit
         self.selection = None
+        self.node = None
 
     def _root_of(self, r: Row) -> Row:
         while r.parent is not None:
@@ -200,6 +212,13 @@ class MathEditor:
             handler()
             return
         self._push_undo()
+        if self.node is not None and k not in ("BACK", "DELETE"):
+            if self._type_at_node(k):
+                return
+        if self.node is not None and k == "BACK":
+            self._back_at_node()
+            return
+        self.node = None
         if k == "BACK":
             self._backspace()
         elif k == "DELETE":
@@ -331,6 +350,8 @@ class MathEditor:
         box = r.parent
         if box is None:
             return False
+        if isinstance(box, Paren) and self._call_to_structure(box):
+            return True
         k = box.rows.index(r)
         if isinstance(box, Program) and box.name == "if":
             # if(c1, v1, c2, v2, ..., else): a comma after a value adds an
@@ -358,6 +379,57 @@ class MathEditor:
         if isinstance(box, Matrix):
             return True  # commas are ignored inside matrix cells (observed)
         return False
+
+    def _call_to_structure(self, paren: Paren) -> bool:
+        """SMath draws some calls by their argument count: once the comma that
+        completes while(c, body), for(i, range, body), sum(e, i, a, b)...
+        is typed, the call becomes the block (the toolbox inserts the same)."""
+        prow = paren.parent_row
+        i = prow.items.index(paren)
+        j = i
+        while j > 0 and _is_word_char(prow.items[j - 1]):
+            j -= 1
+        name = "".join(prow.items[j:i])
+        arity = STRUCTURE_ARITY.get(name)
+        inner = paren.rows[0]
+        # the comma being typed completes the argument list?
+        if arity is None or self.row is not inner:
+            return False
+        commas = [k for k, it in enumerate(inner.items) if it in (",", ";")]
+        if len(commas) + 2 != arity or self.pos != len(inner):
+            return False
+        pieces, start = [], 0
+        for k in commas + [len(inner.items)]:
+            pieces.append(Row(inner.items[start:k]))
+            start = k + 1
+        pieces.append(Row())
+        del prow.items[j:i + 1]
+        if name == "el":
+            # el(v, i): the index is drawn as a subscript on v
+            base = pieces[0].items
+            prow.items[j:j] = base
+            box = Index(pieces[1])
+            prow.insert(j + len(base), box)
+            self._fix_parents(prow, prow.parent)
+            self.cursor = Cursor(box.rows[0], 0)
+            return True
+        box = Program(name, *pieces)
+        prow.insert(j, box)
+        self._fix_parents(prow, prow.parent)
+        self.cursor = Cursor(pieces[-1], 0)
+        return True
+
+    def insert_structure(self, name: str) -> None:
+        """Insert a toolbox structure: for(,,  while(,  sum(,,, ..."""
+        self._push_undo()
+        rows = TOOLBOX_ROWS.get(name, 2)
+        if name == "el":
+            self._insert_box(Index(Row()), into=0)
+            return
+        if name == "nthroot":
+            self._insert_box(Root(Row(), Row()), into=1)
+            return
+        self._insert_box(Program("range" if name == "range3" else name, *[Row() for _ in range(rows)]), into=0)
 
     def _close(self, kind) -> None:
         """")" and "]" are ignored: SMath Cloud keeps the cursor inside the
@@ -634,9 +706,89 @@ class MathEditor:
                 return
             r.pop(p)
 
+    # -- the SMath cursor: tokens, underline, sub-expression state -----------------
+    def _limit(self, r: Row) -> int:
+        return len(self.expression_items()) if r is self.root else len(r)
+
+    def token_span(self, r: Row, p: int) -> tuple:
+        """The name/number the cursor is in (or just before), as SMath
+        underlines it: the whole token, not just the part left of the cursor."""
+        items = r.items
+        n = self._limit(r)
+        if p > 0 and _is_word_char(items[p - 1]):
+            a = p
+            while a > 0 and _is_word_char(items[a - 1]) and items[a - 1] != "'":
+                a -= 1
+            if a > 0 and items[a - 1] == "'":
+                a -= 1
+            b = p
+            while b < n and _is_word_char(items[b]) and items[b] != "'":
+                b += 1
+            return a, b
+        if p > 0 and (isinstance(items[p - 1], Box) or items[p - 1] == "!"):
+            return self.operand_start(r, p), p
+        if p < n and _is_word_char(items[p]):
+            b = p + 1
+            while b < n and _is_word_char(items[b]) and items[b] != "'":
+                b += 1
+            return p, b
+        if p < n and isinstance(items[p], Box):
+            b = p + 1
+            while b < n and isinstance(items[b], (Pow, Index)):
+                b += 1
+            return p, b
+        return p, p
+
+    def underline(self) -> tuple:
+        """(row, start, end) of what the cursor's underline covers."""
+        if self.node is not None:
+            return self.node
+        a, b = self.token_span(self.row, self.pos)
+        return self.row, a, b
+
+    def _node_spans(self, r: Row) -> list:
+        from .engine import ast as A
+        from .engine.parser import ParseError, Parser
+
+        sub = Row()
+        sub.items = list(r.items[: self._limit(r)])
+        try:
+            parser = Parser(sub)
+            node = parser.boolean() if parser.toks else None
+        except (ParseError, IndexError):
+            return []
+        spans = []
+        for n in A.walk(node) if node is not None else ():
+            if n.src is not None and not isinstance(n, (A.Num, A.Var, A.UnitRef, A.Placeholder, A.Str)):
+                spans.append((n.src[1], n.src[2]))
+        return spans
+
+    def _bigger_node_at(self, r: Row, a: int, than: int):
+        """Smallest sub-expression starting at a that is longer than `than`."""
+        cands = [(s1 - s0, s1) for s0, s1 in self._node_spans(r) if s0 == a and s1 - s0 > than]
+        return min(cands)[1] if cands else None
+
     # -- movement ---------------------------------------------------------------
     def _left(self) -> None:
         self.selection = None
+        if self.node is not None:
+            r, a, b = self.node
+            end = self._bigger_node_at(r, a, b - a)
+            if end is not None:
+                self.node = (r, a, end)
+                return
+            if a == 0 and r.parent is None:
+                return  # at the very start it stays (observed)
+            self.node = None
+            self.cursor = Cursor(r, a)
+        else:
+            r, p = self.row, self.pos
+            ta, tb = self.token_span(r, p)
+            if ta == p and tb > p and (p == 0 or not _is_word_char(r.items[p - 1])):
+                end = self._bigger_node_at(r, p, tb - ta)
+                if end is not None:
+                    self.node = (r, p, end)
+                    return
         r, p = self.row, self.pos
         if p > 0:
             it = r.items[p - 1]
@@ -660,6 +812,10 @@ class MathEditor:
 
     def _right(self) -> None:
         self.selection = None
+        if self.node is not None:
+            # leaving the sub-expression state: back to the name at the cursor
+            self.node = None
+            return
         r, p = self.row, self.pos
         limit = len(self.expression_items()) if r is self.root else len(r)
         if p < limit:
@@ -668,6 +824,13 @@ class MathEditor:
                 self.cursor = Cursor(it.rows[0], 0)
             else:
                 self.cursor = Cursor(r, p + 1)
+                # across an operator onto a sub-expression: select it as a whole
+                if isinstance(it, str) and not _is_word_char(it) and it not in ",;":
+                    ta, tb = self.token_span(r, p + 1)
+                    if ta == p + 1 and tb > ta:
+                        end = self._bigger_node_at(r, p + 1, tb - ta)
+                        if end is not None:
+                            self.node = (r, p + 1, end)
             return
         if r.parent is not None:
             box = r.parent
@@ -679,6 +842,50 @@ class MathEditor:
                 self.cursor = Cursor(prow, prow.items.index(box) + 1)
         elif r is self.root and self.evaluate:
             self.set_cursor(self.unit, 0)
+
+    def _type_at_node(self, k: str) -> bool:
+        """Typing in the sub-expression state (observed with ab+cd·ef):
+        '/' gives ■/(cd·ef), an operator goes in front of it, letters are
+        ignored.  Returns False to fall through to normal typing."""
+        r, a, b = self.node
+        ch = OPERATOR_KEYS.get(k, k)
+        if k in NAMED_KEYS:
+            return False
+        if k == "/":
+            inner = Row(r.items[a:b])
+            del r.items[a:b]
+            frac = Frac(Row(), inner)
+            r.insert(a, frac)
+            self._fix_parents(r, r.parent)
+            self.node = None
+            self.cursor = Cursor(frac.rows[0], 0)
+            return True
+        if k == "(":
+            self.selection = (r, a, b)
+            self.node = None
+            self._apply_to_selection("(")
+            return True
+        if ch in BINARY_PREC:
+            r.insert(a, ch)
+            self.node = (r, a, b + 1)
+            self.cursor = Cursor(r, a)
+            return True
+        if len(k) == 1 and (k in IDENT_CHARS or k == "'"):
+            return True  # ignored, as on the site
+        self.node = None
+        return False
+
+    def _back_at_node(self) -> None:
+        """Backspace at the start of a sub-expression removes the operator
+        before it; the two operands stay separate (a product)."""
+        r, a, b = self.node
+        self.node = None
+        if a > 0 and isinstance(r.items[a - 1], str) and r.items[a - 1] in BINARY_PREC:
+            r.items[a - 1] = "*"
+            self.cursor = Cursor(r, a)
+        else:
+            self.cursor = Cursor(r, a)
+            self._backspace()
 
     def _up(self) -> None:
         r = self.row

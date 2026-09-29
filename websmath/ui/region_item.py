@@ -65,7 +65,7 @@ class RegionItem(QGraphicsObject):
 
     def _var_kind(self, name: str) -> str:
         """Built-in constants are bold unless the worksheet redefines them."""
-        if name in BUILTIN_CONSTANTS and not self.worksheet.context.has(name):
+        if name in BUILTIN_CONSTANTS and name not in self.worksheet.index.vars:
             return "builtin_const"
         return "user"
 
@@ -79,7 +79,7 @@ class RegionItem(QGraphicsObject):
             return
         err = self.region.error
         lay = Layouter(self.style, var_kind=self._var_kind, error_node=getattr(err, "node", None) or _src_node(err),
-                       user_funcs=frozenset(n for n, _ in self.worksheet.context.funcs))
+                       user_funcs=frozenset(n for n, _ in self.worksheet.index.funcs))
         root = lay.row(self.editor.root)
         parts = [root]
         self._result_unit_rect = None
@@ -124,7 +124,7 @@ class RegionItem(QGraphicsObject):
         st = self.region.plot
         err = self.region.error
         lay = Layouter(self.style, var_kind=self._var_kind, error_node=getattr(err, "node", None) or _src_node(err),
-                       user_funcs=frozenset(n for n, _ in self.worksheet.context.funcs))
+                       user_funcs=frozenset(n for n, _ in self.worksheet.index.funcs))
         root = lay.row(self.editor.root)
         base = st.height + 6 + max(root.asc, 11.4)
         root.x, root.y = PAD_X, base
@@ -199,7 +199,10 @@ class RegionItem(QGraphicsObject):
         for k, lines in enumerate(self._plot_lines()):
             p.setPen(QPen(QColor(CURVE_COLORS[k % len(CURVE_COLORS)]), 1))
             for line in lines:
-                if len(line) > 1:
+                if st.points:
+                    for x, y in line[:: max(1, len(line) // 60)]:
+                        p.drawEllipse(QPointF(x, y), 1.5, 1.5)
+                elif len(line) > 1:
                     p.drawPolyline(QPolygonF([QPointF(x, y) for x, y in line]))
                 elif line:
                     p.drawEllipse(QPointF(*line[0]), 1.5, 1.5)
@@ -275,23 +278,30 @@ class RegionItem(QGraphicsObject):
         return self._rows.get(id(row))
 
     def _paint_cursor(self, p: QPainter) -> None:
+        """SMath's cursor: a vertical bar at the insertion point and a line
+        under the whole name/number (or sub-expression) being edited."""
         ed = self.editor
         info = self._row_info(ed.row)
         if info is None:
             return
-        pos = min(ed.pos, len(info.slots) - 1)
-        x = info.slots[pos] if info.slots else info.x
-        start = ed.operand_start(ed.row, ed.pos) if ed.row.items else ed.pos
-        x0 = info.slots[min(start, len(info.slots) - 1)] if info.slots else x
+        n = len(info.slots) - 1
+        x = info.slots[min(ed.pos, n)] if info.slots else info.x
+        urow, ua, ub = ed.underline()
+        uinfo = self._row_info(urow) or info
+        if uinfo.slots:
+            x0, x1 = uinfo.slots[min(ua, len(uinfo.slots) - 1)], uinfo.slots[min(ub, len(uinfo.slots) - 1)]
+        else:
+            x0 = x1 = x
         if not ed.row.items:
-            # empty row: the cursor sits on the placeholder square
+            # empty row: the cursor sits after the placeholder square
             x0, x = info.x, info.x + 7
-        underline_y = info.base + info.desc + 0.5
+            x1 = x
+        underline_y = uinfo.base + uinfo.desc + 0.5
         top = info.base - info.asc
         p.setPen(QPen(Qt.black, 1))
-        if x0 < x:
-            p.drawLine(QPointF(x0, underline_y), QPointF(x, underline_y))
-        p.drawLine(QPointF(x, top), QPointF(x, underline_y))
+        if x1 > x0:
+            p.drawLine(QPointF(x0, underline_y), QPointF(x1, underline_y))
+        p.drawLine(QPointF(x, top), QPointF(x, max(underline_y, info.base + info.desc + 0.5)))
 
     def _paint_selection(self, p: QPainter) -> None:
         sel = self.editor.selection

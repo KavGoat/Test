@@ -27,7 +27,7 @@ STRING_RED = QColor("#a31515")
 ERROR_RED = QColor("#ff0000")
 ERROR_FILL = QColor(255, 0, 0, 40)
 
-OP_GLYPH = {"*": "·", "-": "−", "≔": "≔", "=": "=", "≡": "=", "∧": "∧", "∨": "∨",
+OP_GLYPH = {"*": "·", "-": "−", "†": "×", "≈": "≈", "≉": "≉", "≔": "≔", "=": "=", "≡": "=", "∧": "∧", "∨": "∨",
             "⊕": "⊕", "¬": "¬", "±": "±", "←": "←"}
 OP_PAD = 2.5
 
@@ -556,17 +556,107 @@ class Layouter:
             path.cubicTo(3, top, 4, mid - 2, 1, mid)
             path.cubicTo(4, mid + 2, 3, bot, 6, bot)
             return LPath(w=inner.w + 9, asc=inner.asc, desc=inner.desc, path=path, children=[inner])
-        if b.name in ("while", "for"):
-            head = self._kw_line(b.name, self.row(b.rows[0], scale), f)
-            if b.name == "for" and len(b.rows) >= 3:
-                rng = self.row(b.rows[1], scale)
-                eq = self.text(" ∈ ", self.style.font(scale, op=True))
-                head = self._hcat([head, eq, rng])
-            body = self._bracket_block([self.row(r, scale) for r in b.rows[-1:]], scale)
-            body.x = indent
-            return self._stack([head, body])
-        # line: vertical bar with rows stacked
-        return self._bracket_block([self.row(r, scale) for r in b.rows], scale)
+        rows = b.rows
+        if b.name == "for" and len(rows) == 3:
+            # for i ∈ range / body indented (as the site draws for(,,))
+            head = self._hcat([self._kw_line("for", self.row(rows[0], scale), f),
+                               self._op_text(" ∈ ", scale), self.row(rows[1], scale)])
+            return self._stack([head, self._indented(self.row(rows[2], scale), indent)])
+        if b.name == "while" and len(rows) == 2:
+            head = self._kw_line("while", self.row(rows[0], scale), f)
+            return self._stack([head, self._indented(self.row(rows[1], scale), indent)])
+        if b.name == "try" and len(rows) == 2:
+            return self._stack([self._kw_line("try", None, f), self._indented(self.row(rows[0], scale), indent),
+                                self._kw_line("on error", None, f),
+                                self._indented(self.row(rows[1], scale), indent)])
+        if b.name in ("sum", "product") and len(rows) == 4:
+            return self._big_operator("∑" if b.name == "sum" else "∏", rows, scale)
+        if b.name == "int" and len(rows) == 4:
+            return self._integral(rows, scale)
+        if b.name == "diff" and len(rows) in (2, 3):
+            return self._derivative(rows, scale)
+        if b.name == "range" and len(rows) in (2, 3):
+            # [a..b] and [a, second..b]
+            parts = [self.text("[", f), self.row(rows[0], scale)]
+            if len(rows) == 3:
+                parts += [self.text(", ", f), self.row(rows[2], scale)]
+            parts += [self.text("..", f), self.row(rows[1], scale), self.text("]", f)]
+            return self._hcat(parts)
+        if b.name == "line":
+            return self._bracket_block([self.row(r, scale) for r in rows], scale)
+        # any other arity: shown as a call
+        parts = [self.text(b.name, f), LBox(w=3)]
+        inner = []
+        for k, r in enumerate(rows):
+            if k:
+                inner.append(self.text(", ", f))
+            inner.append(self.row(r, scale))
+        return self._hcat(parts + [self.fence(self._hcat(inner), "(", ")", scale)])
+
+    def _op_text(self, s: str, scale: float) -> LBox:
+        return self.text(s, self.style.font(scale, op=True))
+
+    def _big_operator(self, glyph: str, rows, scale: float) -> LBox:
+        """Σ / Π with the upper limit above, "i = a" below and the term right."""
+        body = self.row(rows[0], scale)
+        top = self.row(rows[3], scale * 0.8)
+        low = self._hcat([self.row(rows[1], scale * 0.8), self._op_text("=", scale * 0.8),
+                          self.row(rows[2], scale * 0.8)])
+        sym = self.text(glyph, self.style.font(scale * 2.0, op=True))
+        w = max(sym.w, top.w, low.w)
+        ax = self.axis(scale)
+        sym.x = (w - sym.w) / 2
+        sym.y = ax + (sym.asc - sym.desc) / 2 - ax * 0.2
+        top.x = (w - top.w) / 2
+        top.y = sym.y - sym.asc - top.desc - 1
+        low.x = (w - low.w) / 2
+        low.y = sym.y + sym.desc + low.asc + 1
+        body.x = w + 3
+        return LBox(w=body.x + body.w, asc=max(-(top.y - top.asc), body.asc),
+                    desc=max(low.y + low.desc, body.desc), children=[sym, top, low, body])
+
+    def _integral(self, rows, scale: float) -> LBox:
+        body = self.row(rows[0], scale)
+        var = self.row(rows[1], scale)
+        a = self.row(rows[2], scale * 0.8)
+        b = self.row(rows[3], scale * 0.8)
+        sym = self.text("∫", self.style.font(scale * 2.2, op=True))
+        sym.y = (sym.asc - sym.desc) / 2 - self.axis(scale) * 0.3
+        b.x = sym.w - 2
+        b.y = sym.y - sym.asc + b.asc * 0.6
+        a.x = sym.w * 0.35
+        a.y = sym.y + sym.desc + a.asc * 0.4
+        body.x = sym.w + max(a.w, b.w) * 0.6 + 3
+        d = self.text(" d", self.style.font(scale))
+        d.x = body.x + body.w
+        var.x = d.x + d.w
+        return LBox(w=var.x + var.w, asc=max(-(b.y - b.asc), body.asc, sym.asc - sym.y),
+                    desc=max(a.y + a.desc, body.desc), children=[sym, b, a, body, d, var])
+
+    def _derivative(self, rows, scale: float) -> LBox:
+        """d/dx f  (and dⁿ/dxⁿ f for the three-argument form)."""
+        f = self.style.font(scale)
+        num = [self.text("d", f)]
+        den = [self.text("d", f), self.row(rows[1], scale)]
+        if len(rows) == 3:
+            n1 = self.row(rows[2], scale * 0.8)
+            n1.y = -self.metrics(f).ascent() * 0.5
+            num.append(n1)
+            n2 = self.text("", f)
+            den.append(n2)
+        numb, denb = self._hcat(num), self._hcat(den)
+        w = max(numb.w, denb.w) + 2
+        ax = self.axis(scale)
+        numb.x, numb.y = (w - numb.w) / 2 + 1, -ax - 2 - numb.desc
+        denb.x, denb.y = (w - denb.w) / 2 + 1, -ax + 2 + denb.asc
+        path = QPainterPath()
+        path.moveTo(1, -ax)
+        path.lineTo(w + 1, -ax)
+        frac = LPath(w=w + 2, asc=ax + 2 + numb.h, desc=-ax + 2 + denb.h, path=path, children=[numb, denb])
+        body = self.row(rows[0], scale)
+        body.x = frac.w + 2
+        return LBox(w=body.x + body.w, asc=max(frac.asc, body.asc), desc=max(frac.desc, body.desc),
+                    children=[frac, body])
 
     def _kw_line(self, kw: str, content: Optional[LBox], f: QFont) -> LBox:
         t = self.text(kw, f)

@@ -18,6 +18,7 @@ def plot_sheet(*keys_per_curve, defs=()):
         r = ws.add_region(18, 9 + 36 * k)
         for key in d:
             r.editor.key(key)
+        ws.update_after_edit(r)
     p = ws.add_plot(18, 200)
     for n, keys in enumerate(keys_per_curve):
         if n:

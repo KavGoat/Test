@@ -105,6 +105,7 @@ class WorksheetView(QGraphicsView):
         self.focused_item: Optional[RegionItem] = None
         self.selected: list[RegionItem] = []
         self._drag = None
+        self.plot_tool = "move"  # toolbox Plot: "move" (drag pans) or "scale" (drag zooms)
         self.setRenderHint(QPainter.Antialiasing)
         self.setRenderHint(QPainter.TextAntialiasing)
         self.setAlignment(Qt.AlignLeft | Qt.AlignTop)
@@ -141,6 +142,7 @@ class WorksheetView(QGraphicsView):
         if item is self.focused_item:
             self.focused_item = None
         self.worksheet.remove_region(item.region)
+        self.worksheet.region_removed(item.region)
         self.scene_.removeItem(item)
         self.items.pop(item.region.id, None)
 
@@ -155,12 +157,28 @@ class WorksheetView(QGraphicsView):
         self.recalculate()
 
     def recalculate(self, force: bool = False) -> None:
+        """Recalculate the whole page (F9, loading, settings) and redraw it."""
         if self.worksheet.auto_calculation or force:
             self.worksheet.calculate()
+        self.worksheet.take_changed()
         for it in self.items.values():
             it.relayout()
         self._grow_scene()
         self.scene_.update()
+
+    def refresh(self) -> None:
+        """Redraw only the regions whose results changed."""
+        for rid in self.worksheet.take_changed():
+            it = self.items.get(rid)
+            if it is not None:
+                it.relayout()
+        self._grow_scene()
+
+    def update_after(self, item: RegionItem) -> None:
+        """A region was left (or moved): bring what depends on it up to date."""
+        if self.worksheet.auto_calculation:
+            self.worksheet.update_after_edit(item.region)
+        self.refresh()
 
     def _grow_scene(self) -> None:
         r = self.scene_.itemsBoundingRect()
@@ -181,12 +199,15 @@ class WorksheetView(QGraphicsView):
                     old.region.kind == "text" and not old.editor.text.strip()):
                 self.delete_region(old)
             else:
+                self.update_after(old)
                 old.relayout()
         self.focused_item = item
         if item is not None:
             item.focused = True
+            item.relayout()
         self.hide_suggestions()
-        self.recalculate()
+        self.refresh()
+        self.scene_.update()
 
     def clear_selection(self) -> None:
         for it in self.selected:
@@ -196,6 +217,9 @@ class WorksheetView(QGraphicsView):
 
     # -- mouse -------------------------------------------------------------------------
     def _item_at(self, scene_pt: QPointF) -> Optional[RegionItem]:
+        for it in self.scene_.items(scene_pt):
+            if isinstance(it, RegionItem) and it.frame_rect().contains(it.mapFromScene(scene_pt)):
+                return it
         for it in self.items.values():
             if it.frame_rect().contains(it.mapFromScene(scene_pt)):
                 return it
@@ -220,7 +244,7 @@ class WorksheetView(QGraphicsView):
             if local.x() > st.width - 8 and local.y() > st.height - 8:
                 self._drag = ("resize", pt, item, (st.width, st.height))
             else:
-                self._drag = ("pan", pt, item, (st.pan_x, st.pan_y))
+                self._drag = ("pan", pt, item, (st.pan_x, st.pan_y, st.ppu_x, st.ppu_y))
             return
         if item is self.focused_item:
             # dragging inside the region being edited selects (as SMath Cloud)
@@ -236,7 +260,7 @@ class WorksheetView(QGraphicsView):
             if local.x() > st.width - 8 and local.y() > st.height - 8:
                 self._drag = ("resize", pt, item, (st.width, st.height))
             else:
-                self._drag = ("pan", pt, item, (st.pan_x, st.pan_y))
+                self._drag = ("pan", pt, item, (st.pan_x, st.pan_y, st.ppu_x, st.ppu_y))
             return
         self.focus_item(item)
         item.place_cursor(local)
@@ -255,7 +279,11 @@ class WorksheetView(QGraphicsView):
             kind, start, item, orig = self._drag
             d = pt - start
             st = item.region.plot
-            if kind == "pan":
+            if kind == "pan" and self.plot_tool == "scale":
+                # the Scale tool: drag up/right to zoom in
+                f = 1.01 ** (d.x() - d.y())
+                st.ppu_x, st.ppu_y = orig[2] * f, orig[3] * f
+            elif kind == "pan":
                 st.pan_x, st.pan_y = orig[0] + d.x(), orig[1] + d.y()
             else:
                 st.width = max(60.0, snap(orig[0] + d.x()))
@@ -306,7 +334,7 @@ class WorksheetView(QGraphicsView):
         if self._drag and self._drag[0] == "move":
             item = self._drag[2]
             item.region.x, item.region.y = item.pos().x(), item.pos().y()
-            self.recalculate()
+            self.update_after(item)
             self.modified.emit()
         self._drag = None
 
@@ -329,7 +357,7 @@ class WorksheetView(QGraphicsView):
             ed.set_cursor(ed.unit, len(ed.unit))
             if len(ed.unit):
                 ed.selection = (ed.unit, 0, len(ed.unit))
-            self.recalculate()
+            self._after_edit(item)
 
     # -- keyboard ----------------------------------------------------------------------
     def focusNextPrevChild(self, next: bool) -> bool:
@@ -354,7 +382,7 @@ class WorksheetView(QGraphicsView):
             for it in list(self.selected):
                 self.delete_region(it)
             self.selected = []
-            self.recalculate()
+            self.refresh()
             return
         named = {
             Qt.Key_Left: "LEFT", Qt.Key_Right: "RIGHT", Qt.Key_Up: "UP", Qt.Key_Down: "DOWN",
@@ -389,6 +417,11 @@ class WorksheetView(QGraphicsView):
                 self.scene_.cross = QPointF(max(0, c.x() + step[0]), max(0, c.y() + step[1]))
                 self.scene_.update()
             return
+        if k in ("UP", "DOWN") and item.region.kind != "text":
+            # Up/Down move to the previous/next region; its cursor is where it
+            # was left (observed on SMath Cloud, also from inside fractions)
+            self._step_region(-1 if k == "UP" else 1)
+            return
         item.editor.key(k)
         self._after_edit(item, typed=k in ("BACK", "DELETE"))
 
@@ -411,6 +444,16 @@ class WorksheetView(QGraphicsView):
         for ch in text:
             item.editor.key(ch)
         self._after_edit(item, typed=True)
+
+    def _step_region(self, step: int) -> None:
+        order = [self.items[r.id] for r in self.worksheet.ordered() if r.id in self.items]
+        cur = self.focused_item
+        if cur not in order:
+            return
+        k = order.index(cur) + step
+        if 0 <= k < len(order):
+            self.focus_item(order[k])
+            order[k].update()
 
     def _tab(self, backwards: bool = False) -> None:
         """Tab moves focus to the next region in reading order (observed)."""
@@ -439,7 +482,6 @@ class WorksheetView(QGraphicsView):
         r = item.mapRectToScene(item.frame_rect())
         self.focus_item(None)
         self.scene_.cross = QPointF(snap(r.left()), snap(r.bottom() + 5))
-        self.recalculate()
 
     def _after_edit(self, item: RegionItem, typed: bool = False) -> None:
         # only the region being edited follows the keystrokes; the rest of the
@@ -458,39 +500,16 @@ class WorksheetView(QGraphicsView):
     def undo(self) -> None:
         item = self.focused_item
         if item is not None and item.editor.undo():
-            item.relayout()
-            self.recalculate()
+            self._after_edit(item)
 
     def redo(self) -> None:
         item = self.focused_item
         if item is not None and item.editor.redo():
-            self.recalculate()
+            self._after_edit(item)
 
     # -- autocomplete ---------------------------------------------------------------------
     def candidates(self, word: str, region: Region) -> list:
-        """Substring, case-insensitive; units (with ') first, each group
-        alphabetical ignoring case - as SMath Cloud lists them."""
-        w = word.lower()
-        unit_mode = w.startswith("'")
-        needle = w[1:] if unit_mode else w
-        units = [("'" + u, "unit") for u in UNIT_CATALOG if needle in u.lower()]
-        units.sort(key=lambda x: x[0].lower())
-        others = []
-        seen = set()
-        for name, nargs, cat, desc in FUNCTIONS:
-            label = name if sum(1 for f in FUNCTIONS if f[0] == name) == 1 else f"{name} ({nargs})"
-            if needle in name.lower() and label not in seen:
-                seen.add(label)
-                others.append((label, "function"))
-        for c in list(BUILTIN_CONSTANTS) + KEYWORDS:
-            if needle in c.lower():
-                others.append((c, "constant"))
-        ctx = self.worksheet._context_before(region)
-        for n in sorted(ctx.names()):
-            if needle in n.lower() and n not in seen and n != word:
-                others.append((n, "variable"))
-        others.sort(key=lambda x: x[0].lower())
-        return units + others
+        return suggestion_list(word, self.worksheet._context_before(region).names())
 
     def update_suggestions(self, item: RegionItem) -> None:
         start, word = item.editor.current_word()
@@ -539,10 +558,13 @@ class WorksheetView(QGraphicsView):
             return
         label, kind = it.data(Qt.UserRole)
         name = label.split(" (")[0]
+        if kind == "unit":
+            back = {v: k for k, v in SMATH_LABEL.items()}
+            name = "'" + back.get(name[1:], name[1:])
         start, _ = item.editor.current_word()
         item.editor.replace_word(start, name, call=(kind == "function" and name not in KEYWORDS))
         self.hide_suggestions()
-        self.recalculate()
+        self._after_edit(item)
 
     # -- clipboard / region commands ----------------------------------------------------------
     def select_all(self) -> None:
@@ -552,6 +574,71 @@ class WorksheetView(QGraphicsView):
             it.selected_region = True
             it.update()
             self.selected.append(it)
+
+
+# spellings SMath Cloud leaves out of the list when another unit differs only
+# in case (observed; gauss G is kept over gram g; H by analogy)
+CASE_HIDDEN_UNITS = {"A", "C", "g", "H", "K", "S", "T", "mg", "mJ", "mN", "mW", "mohm", "mΩ",
+                     "Pa", "kN", "mS", "pc", "pS", "μS"}
+
+
+# arc minute/second are listed under SMath's escaped names
+SMATH_LABEL = {"'": "\\0027\\", '"': "\\0022\\"}
+
+
+_SYMBOL_ORDER = "\\%‰°¤∞"
+
+
+def smath_sort_key(label: str):
+    """Order SMath Cloud lists suggestions in (.NET culture sorting): symbols
+    first (\\ % ‰ ° ¤), then digits, then letters ignoring case and accents
+    (Å with a), Greek after Latin; ties: lower case, then unaccented first."""
+    import unicodedata
+
+    primary, ties = [], []
+    for ch in label.lstrip("'"):
+        base = unicodedata.normalize("NFD", ch)[0]
+        if ch.isalpha():
+            primary.append((3, base.lower()))
+        elif ch.isdigit():
+            primary.append((2, ch))
+        elif ch in _SYMBOL_ORDER:
+            primary.append((1, str(_SYMBOL_ORDER.index(ch))))
+        else:
+            primary.append((0, ch))
+        ties.append((base != ch, not ch.islower()))
+    return primary, ties
+
+
+def suggestion_list(word: str, defined_names) -> list:
+    """The autocomplete list for a partial word (observed on SMath Cloud):
+    case-insensitive substring matches; units (with their apostrophe) first,
+    then functions (overloads listed as "sum (1)", "sum (4)"), constants,
+    keywords, lastError and the worksheet's names defined above - each
+    group sorted as SMath sorts."""
+    w = word.lower()
+    needle = w[1:] if w.startswith("'") else w
+    # units differing only in case are listed once; which spelling SMath
+    # keeps was read off its lists (a over A, pA over Pa, Mg over mg, ...)
+    units = sorted((("'" + SMATH_LABEL.get(u, u), "unit") for u in UNIT_CATALOG
+                    if needle in u.lower() and u not in CASE_HIDDEN_UNITS),
+                   key=lambda x: smath_sort_key(x[0]))
+    others = {}
+    counts = {}
+    for name, nargs, _, _ in FUNCTIONS:
+        counts[name] = counts.get(name, 0) + 1
+    for name, nargs, _, _ in FUNCTIONS:
+        if needle in name.lower():
+            label = name if counts[name] == 1 else f"{name} ({nargs})"
+            others.setdefault(label, "function")
+    for c in list(BUILTIN_CONSTANTS) + KEYWORDS + ["lastError"]:
+        if needle in c.lower():
+            others.setdefault(c, "constant")
+    for n in defined_names:
+        if needle in n.lower() and n != word and n not in others:
+            others[n] = "variable"
+    rest = sorted(others.items(), key=lambda x: smath_sort_key(x[0]))
+    return units + rest
 
 
 def _linear_unit(u: str) -> str:

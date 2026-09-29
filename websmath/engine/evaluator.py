@@ -7,6 +7,7 @@ only fails when a value is actually required.
 """
 from __future__ import annotations
 
+import bisect
 import math
 from dataclasses import dataclass
 from typing import Optional
@@ -14,12 +15,12 @@ from typing import Optional
 from . import ast as A
 from .errors import SMathError, err
 from .units import is_unit, unit_offset, unit_quantity
+from .values import (Matrix, Q, String, add, compare, cross, div, mul, need_int, need_real, neg,
+                     power, sub, truth)
 
 
 def unit_offset_of(name: str) -> float:
     return unit_offset(name) if is_unit(name) else 0.0
-from .values import (Matrix, Q, String, add, compare, div, mul, need_int, need_real, neg,
-                     power, sub, truth)
 
 
 @dataclass
@@ -58,58 +59,148 @@ class Context:
         self.vars: dict = {}
         self.funcs: dict = {}  # (name, nargs) -> UserFunction
 
+    # Each level asks its parent through these methods, so a parent that is
+    # an IndexedContext answers from the worksheet's definition index.
     def lookup(self, name: str):
-        c = self
-        while c is not None:
-            if name in c.vars:
-                return c.vars[name]
-            c = c.parent
-        return None
+        if name in self.vars:
+            return self.vars[name]
+        return self.parent.lookup(name) if self.parent is not None else None
 
     def has(self, name: str) -> bool:
-        c = self
-        while c is not None:
-            if name in c.vars:
-                return True
-            c = c.parent
-        return False
+        if name in self.vars:
+            return True
+        return self.parent.has(name) if self.parent is not None else False
 
     def assign(self, name: str, value) -> None:
         """Assign in the scope that already owns the name, else locally."""
-        c = self
-        while c is not None:
-            if name in c.vars:
-                c.vars[name] = value
-                return
-            c = c.parent
-        self.vars[name] = value
+        if name in self.vars or self.parent is None or not self.parent.has(name):
+            self.vars[name] = value
+        else:
+            self.parent.assign(name, value)
 
     def function(self, name: str, nargs: int):
-        c = self
-        while c is not None:
-            f = c.funcs.get((name, nargs))
-            if f is not None:
-                return f
-            c = c.parent
-        return None
+        f = self.funcs.get((name, nargs))
+        if f is not None:
+            return f
+        return self.parent.function(name, nargs) if self.parent is not None else None
 
     def any_function(self, name: str):
-        c = self
-        while c is not None:
-            for (n, k), f in c.funcs.items():
-                if n == name:
-                    return f
-            c = c.parent
+        for (n, k), f in self.funcs.items():
+            if n == name:
+                return f
+        return self.parent.any_function(name) if self.parent is not None else None
+
+    def names(self) -> set:
+        out = set(self.vars) | {n for n, _ in self.funcs}
+        if self.parent is not None:
+            out |= self.parent.names()
+        return out
+
+
+class DefinitionIndex:
+    """Every definition in the worksheet, by name, in reading order.
+
+    Looking up "the value of x as seen at this point of the page" is a
+    binary search instead of re-running everything above, which keeps
+    typing and autocomplete instant on worksheets with thousands of regions.
+    Keys are the regions' reading-order keys (y, x, id).
+    """
+
+    def __init__(self):
+        self.vars: dict = {}  # name -> [(key, value)] sorted by key
+        self.funcs: dict = {}  # (name, nargs) -> [(key, UserFunction)]
+
+    def clear(self) -> None:
+        self.vars.clear()
+        self.funcs.clear()
+
+    @staticmethod
+    def _put(table: dict, name, key, value) -> None:
+        lst = table.setdefault(name, [])
+        i = bisect.bisect_left(lst, key, key=lambda e: e[0])
+        if i < len(lst) and lst[i][0] == key:
+            lst[i] = (key, value)
+        else:
+            lst.insert(i, (key, value))
+
+    @staticmethod
+    def _drop(table: dict, name, key) -> None:
+        lst = table.get(name)
+        if not lst:
+            return
+        i = bisect.bisect_left(lst, key, key=lambda e: e[0])
+        if i < len(lst) and lst[i][0] == key:
+            del lst[i]
+            if not lst:
+                del table[name]
+
+    @staticmethod
+    def _before(table: dict, name, key):
+        lst = table.get(name)
+        if not lst:
+            return None
+        i = bisect.bisect_left(lst, key, key=lambda e: e[0])
+        return lst[i - 1][1] if i else None
+
+    def add(self, key, variables: dict, functions: dict) -> None:
+        for n, v in variables.items():
+            self._put(self.vars, n, key, v)
+        for n, f in functions.items():
+            self._put(self.funcs, n, key, f)
+
+    def remove(self, key, variables, functions) -> None:
+        for n in variables:
+            self._drop(self.vars, n, key)
+        for n in functions:
+            self._drop(self.funcs, n, key)
+
+    def var_before(self, name: str, key):
+        return self._before(self.vars, name, key)
+
+    def func_before(self, name: str, nargs: int, key):
+        return self._before(self.funcs, (name, nargs), key)
+
+    def names_before(self, key) -> set:
+        out = {n for n, lst in self.vars.items() if lst[0][0] < key}
+        out |= {n for (n, _), lst in self.funcs.items() if lst[0][0] < key}
+        return out
+
+
+class IndexedContext(Context):
+    """What one region sees: its own definitions over the index at its key."""
+
+    def __init__(self, index: DefinitionIndex, key):
+        super().__init__(None)
+        self.index = index
+        self.key = key
+
+    def lookup(self, name: str):
+        if name in self.vars:
+            return self.vars[name]
+        return self.index.var_before(name, self.key)
+
+    def has(self, name: str) -> bool:
+        return name in self.vars or self.index.var_before(name, self.key) is not None
+
+    def function(self, name: str, nargs: int):
+        f = self.funcs.get((name, nargs))
+        return f if f is not None else self.index.func_before(name, nargs, self.key)
+
+    def any_function(self, name: str):
+        for (n, k), f in self.funcs.items():
+            if n == name:
+                return f
+        for (n, k), lst in self.index.funcs.items():
+            if n == name and lst[0][0] < self.key:
+                return lst[0][1]
         return None
 
     def names(self) -> set:
-        out = set()
-        c = self
-        while c is not None:
-            out |= set(c.vars)
-            out |= {n for n, _ in c.funcs}
-            c = c.parent
-        return out
+        return set(self.vars) | {n for n, _ in self.funcs} | self.index.names_before(self.key)
+
+    def assign(self, name: str, value) -> None:
+        # a program assigning a worksheet variable redefines it here
+        self.vars[name] = value
 
 
 class Evaluator:
@@ -248,8 +339,10 @@ class Evaluator:
                 return div(a, b)
             if op == "^":
                 return power(a, b)
-            if op in ("<", ">", "≤", "≥", "≠", "≡"):
+            if op in ("<", ">", "≤", "≥", "≠", "≡", "≈", "≉"):
                 return compare(op, a, b)
+            if op == "†":
+                return cross(a, b)
             if op == "±":
                 return Matrix.column([add(a, b), sub(a, b)])
         except SMathError as e:

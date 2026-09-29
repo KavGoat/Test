@@ -254,6 +254,10 @@ def compare(op: str, a, b):
     if x.dims != y.dims and op not in ("≡", "≠"):
         raise err("units_mismatch")
     xv, yv = x.value, y.value
+    if op in ("≈", "≉"):
+        # approximately equal: equal to 1e-10 relative (SMath "≈")
+        close = x.dims == y.dims and abs(complex(xv) - complex(yv)) <= 1e-10 * max(1.0, abs(complex(xv)), abs(complex(yv)))
+        return Q(1.0 if close == (op == "≈") else 0.0)
     if op in ("≡",):
         return Q(1.0 if (xv == yv and x.dims == y.dims) else 0.0)
     if op == "≠":
@@ -262,3 +266,17 @@ def compare(op: str, a, b):
         raise err("must_be_real")
     r = {"<": xv < yv, ">": xv > yv, "≤": xv <= yv, "≥": xv >= yv}[op]
     return Q(1.0 if r else 0.0)
+
+
+def cross(a, b):
+    """Cross product of two 3-vectors (SMath's × operator, Ctrl+8)."""
+    if not (isinstance(a, Matrix) and isinstance(b, Matrix) and len(a.items) == 3 and len(b.items) == 3):
+        raise err("matrix_size")
+    x, y = a.items, b.items
+
+    def m(p, q):
+        return Q(p.value * q.value, dims_add(p.dims, q.dims))
+
+    return Matrix.column([sub(m(x[1], y[2]), m(x[2], y[1])),
+                          sub(m(x[2], y[0]), m(x[0], y[2])),
+                          sub(m(x[0], y[1]), m(x[1], y[0]))])

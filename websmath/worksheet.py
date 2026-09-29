@@ -2,12 +2,18 @@
 
 SMath evaluates regions top to bottom (then left to right); a region only
 sees definitions from regions before it, so moving a line above the
-definition it uses makes it fail with "x - not defined.".  Evaluation runs
-after every edit (auto calculation), which is why a result appears the moment
-``=`` is typed.
+definition it uses makes it fail with "x - not defined.".
+
+Recalculation follows SMath Cloud: the region being edited is re-evaluated on
+every keystroke; when it is left, the worksheet is brought up to date.  To
+stay instant on worksheets with thousands of regions, definitions live in a
+:class:`DefinitionIndex` keyed by reading order, every region remembers the
+names it uses and defines, and leaving a region re-evaluates only the regions
+below it that depend (directly or through other definitions) on what changed.
 """
 from __future__ import annotations
 
+import bisect
 import itertools
 from dataclasses import dataclass, field
 from typing import Optional
@@ -16,7 +22,7 @@ from .editor import MathEditor
 from .engine import ast as A
 from .engine.display import display_value
 from .engine.errors import SMathError, err
-from .engine.evaluator import Context, Evaluator
+from .engine.evaluator import Context, DefinitionIndex, Evaluator, IndexedContext
 from .engine.numformat import NumberFormat
 from .engine.parser import ParseError, parse_row
 from .engine.model import Program, Row
@@ -27,7 +33,7 @@ from .plot import PlotState
 _ids = itertools.count(1)
 
 
-@dataclass
+@dataclass(eq=False)
 class Region:
     x: float
     y: float
@@ -42,6 +48,14 @@ class Region:
     plot: Optional[PlotState] = None  # set for 2-D plot regions
     curves: list = field(default_factory=list)  # parsed plot inputs
     plot_ctx: object = None  # definitions visible to the plot
+    # bookkeeping for incremental recalculation
+    defined_vars: dict = field(default_factory=dict)
+    defined_funcs: dict = field(default_factory=dict)
+    uses: frozenset = frozenset()
+
+    @property
+    def key(self):
+        return (self.y, self.x, self.id)
 
     @property
     def kind(self) -> str:
@@ -66,7 +80,11 @@ class Worksheet:
         self.format = NumberFormat()
         self.auto_calculation = True
         self.evaluator = Evaluator()
-        self.context = Context()
+        self.index = DefinitionIndex()
+        self.changed: set = set()  # ids of regions whose shown result changed
+        self._keys: dict = {}  # region id -> key it was indexed under
+        self._order_cache = None
+        self._order_keys: list = []
 
     # -- regions ----------------------------------------------------------------
     def add_region(self, x: float, y: float, editor: Optional[MathEditor] = None) -> Region:
@@ -74,6 +92,10 @@ class Worksheet:
         r.editor = editor or MathEditor()
         r.editor.is_defined = lambda name, nargs=None, reg=r: self.is_defined_before(reg, name, nargs)
         self.regions.append(r)
+        if self._order_cache is not None:
+            i = bisect.bisect_left(self._order_keys, r.key)
+            self._order_cache.insert(i, r)
+            self._order_keys.insert(i, r.key)
         return r
 
     def add_plot(self, x: float, y: float) -> Region:
@@ -88,36 +110,106 @@ class Worksheet:
 
     def remove_region(self, region: Region) -> None:
         self.regions.remove(region)
+        self._order_cache = None
 
     def ordered(self) -> list[Region]:
-        return sorted(self.regions, key=lambda r: (r.y, r.x))
+        """Regions in reading order (cached; rebuilt after moves/removals)."""
+        if self._order_cache is None:
+            self._order_cache = sorted(self.regions, key=lambda r: r.key)
+            self._order_keys = [r.key for r in self._order_cache]
+        return self._order_cache
+
+    def invalidate_order(self) -> None:
+        self._order_cache = None
 
     # -- definitions visible to a region -----------------------------------------
     def is_defined_before(self, region: Region, name: str, nargs=None) -> bool:
         from .engine import builtins
         from .engine.evaluator import BUILTIN_CONSTANTS
 
-        ctx = self._context_before(region)
+        key = region.key
         if nargs is None:
-            return ctx.has(name) or name in BUILTIN_CONSTANTS
-        if ctx.function(name, nargs) is not None:
+            return self.index.var_before(name, key) is not None or name in BUILTIN_CONSTANTS
+        if self.index.func_before(name, nargs, key) is not None:
             return True
         return builtins.has_overload(name, nargs)
 
     def _context_before(self, region: Region) -> Context:
-        ctx = Context()
-        for r in self.ordered():
-            if r is region:
-                break
-            self._run(r, ctx, record=False)
-        return ctx
+        return IndexedContext(self.index, region.key)
+
+    @property
+    def context(self) -> Context:
+        """Everything defined anywhere on the page (for styling)."""
+        return IndexedContext(self.index, (float("inf"),))
 
     # -- calculation ----------------------------------------------------------------
     def calculate(self) -> None:
-        ctx = Context()
+        """Recalculate the whole page from scratch (F9, loading, moving regions)."""
+        self.index.clear()
+        self._keys.clear()
+        self.invalidate_order()
         for r in self.ordered():
-            self._run(r, ctx, record=True)
-        self.context = ctx
+            self._evaluate(r, commit=True)
+
+    def calculate_region(self, region: Region) -> None:
+        """Re-evaluate one region against what is defined above it.
+
+        Observed on SMath Cloud: while a region is being edited only that
+        region is recalculated (its result follows every keystroke); the rest
+        of the worksheet is recalculated when the region loses focus.
+        """
+        self._evaluate(region, commit=False)
+
+    def update_after_edit(self, region: Region) -> None:
+        """Bring the page up to date after a region was edited and left.
+
+        Only regions after it that use a name whose definition changed are
+        re-evaluated; a region that is re-evaluated passes on the names it
+        defines, so chains of definitions update in one pass.
+        """
+        # a moved region changes the reading order: recalculate everything
+        if self._keys.get(region.id) not in (None, region.key) or region not in self.regions:
+            self.calculate()
+            return
+        before = set(region.defined_vars) | {n for n, _ in region.defined_funcs}
+        self._evaluate(region, commit=True)
+        changed = before | set(region.defined_vars) | {n for n, _ in region.defined_funcs}
+        self._propagate(region.key, changed)
+
+    def region_removed(self, region: Region) -> None:
+        key = self._keys.pop(region.id, None)
+        if key is None:
+            return
+        self.index.remove(key, region.defined_vars, region.defined_funcs)
+        changed = set(region.defined_vars) | {n for n, _ in region.defined_funcs}
+        self._propagate(key, changed)
+
+    def _propagate(self, key, changed: set) -> None:
+        if not changed:
+            return
+        order = self.ordered()
+        start = bisect.bisect_right(self._order_keys, key)
+        for r in order[start:]:
+            if r.uses & changed:
+                self._evaluate(r, commit=True)
+                changed |= set(r.defined_vars) | {n for n, _ in r.defined_funcs}
+
+    def _evaluate(self, r: Region, commit: bool) -> None:
+        before = (_shown(r.display), r.error.message if r.error else None)
+        if commit and r.id in self._keys:
+            self.index.remove(self._keys.pop(r.id), r.defined_vars, r.defined_funcs)
+        ctx = IndexedContext(self.index, r.key)
+        self._run(r, ctx, record=True)
+        if commit:
+            r.defined_vars, r.defined_funcs = dict(ctx.vars), dict(ctx.funcs)
+            self.index.add(r.key, r.defined_vars, r.defined_funcs)
+            self._keys[r.id] = r.key
+        if (_shown(r.display), r.error.message if r.error else None) != before or r.plot is not None:
+            self.changed.add(r.id)
+
+    def take_changed(self) -> set:
+        out, self.changed = self.changed, set()
+        return out
 
     def _run(self, r: Region, ctx: Context, record: bool) -> None:
         if record:
@@ -127,9 +219,11 @@ class Worksheet:
                 self._run_plot(r, ctx)
             return
         if r.kind != "math" or not r.enabled:
+            r.uses = frozenset()
             return
         items = r.editor.expression_items()
         if not items:
+            r.uses = frozenset()
             return
         expr_row = r.expression_row()
         try:
@@ -138,12 +232,14 @@ class Worksheet:
             if record:
                 r.error = SMathError("Syntax is incorrect.", None)
                 r.error.src = _rebase(e.src, expr_row, r.editor.root)
+            r.uses = frozenset(_row_names(expr_row))
             return
         # the expression row is a copy of the root's items: point error
         # locations back at the editor's own row so they can be drawn
         for n in A.walk(node):
             if n.src is not None:
                 n.src = _rebase(n.src, expr_row, r.editor.root)
+        r.uses = frozenset(_used_names(node) | _row_names(r.editor.unit))
         try:
             if isinstance(node, A.Define):
                 self.evaluator.define(node, ctx)
@@ -163,15 +259,19 @@ class Worksheet:
 
     def _run_plot(self, r: Region, ctx: Context) -> None:
         r.curves = []
-        r.plot_ctx = _snapshot(ctx)
+        r.plot_ctx = ctx
+        uses = set()
         for row in r.plot_rows():
             if row.is_empty():
                 continue
             try:
-                r.curves.append(parse_row(row))
+                node = parse_row(row)
+                r.curves.append(node)
+                uses |= _used_names(node)
             except ParseError as e:
                 r.error = SMathError("Syntax is incorrect.", None)
                 r.error.src = e.src
+        r.uses = frozenset(uses)
 
     def _display(self, r: Region, value, ctx: Context):
         fmt = r.fmt or self.format
@@ -196,16 +296,6 @@ class Worksheet:
             return display_value(Matrix(q.nrows, q.ncols, [Q((x.value - offset) / uval.value) for x in q.items]), fmt)
         return display_value(value, fmt)
 
-    def calculate_region(self, region: Region) -> None:
-        """Re-evaluate one region against what is defined above it.
-
-        Observed on SMath Cloud: while a region is being edited only that
-        region is recalculated (its result follows every keystroke); the rest
-        of the worksheet is recalculated when the region loses focus.
-        """
-        ctx = self._context_before(region)
-        self._run(region, ctx, record=True)
-
     def recalc_if_auto(self) -> None:
         if self.auto_calculation:
             self.calculate()
@@ -217,15 +307,33 @@ def _rebase(src, old: Row, new: Row):
     return src
 
 
-def _snapshot(ctx: Context) -> Context:
-    """A frozen copy of what is defined at this point of the worksheet."""
-    chain = []
-    c = ctx
-    while c is not None:
-        chain.append(c)
-        c = c.parent
-    snap = Context()
-    for c in reversed(chain):
-        snap.vars.update(c.vars)
-        snap.funcs.update(c.funcs)
-    return snap
+def _shown(display):
+    return repr(display) if display is not None else None
+
+
+def _used_names(node) -> set:
+    """Names an expression refers to (variables and functions)."""
+    out = set()
+    for n in A.walk(node):
+        if isinstance(n, A.Var):
+            out.add(n.name)
+        elif isinstance(n, A.Call):
+            out.add(n.name)
+    return out
+
+
+def _row_names(r: Row) -> set:
+    """Identifiers in a row (used when it does not parse)."""
+    from .engine.model import walk_rows
+
+    out = set()
+    for row in walk_rows(r):
+        word = []
+        for it in row.items + [" "]:
+            if isinstance(it, str) and (it.isalnum() or it in "._" or it in "αβγδεζηθικλμνξοπρστυφχψωΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩ"):
+                word.append(it)
+            else:
+                if word and not word[0].isdigit():
+                    out.add("".join(word))
+                word = []
+    return out

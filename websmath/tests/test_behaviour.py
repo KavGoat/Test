@@ -24,6 +24,7 @@ def sheet(*lines):
         keys = line if isinstance(line, list) else list(line)
         for key in keys:
             r.editor.key(key)
+        ws.update_after_edit(r)  # the region is left, as a user moves on
         regions.append(r)
     ws.calculate()
     return ws, regions
@@ -345,3 +346,123 @@ def test_typing_over_selection(spaces, op, expected):
 def test_bar_is_logical_or():
     ws, (r,) = sheet("1|0=")
     assert r.editor.root.text() == "1∨0=" and result(r) == "1"
+
+
+# -- the cursor, as observed with the arrow keys on SMath Cloud -------------------------------
+
+def _cursor(ed):
+    """(pos, underline start, underline end, sub-expression state?) in the root row."""
+    r, a, b = ed.underline()
+    return ed.pos, a, b, ed.node is not None
+
+
+def test_arrows_through_names_and_operators():
+    # "ab+cd*ef": items a b + c d * e f  (positions 0..8)
+    ws, (r,) = sheet("ab+cd*ef")
+    ed = r.editor
+    seen = [_cursor(ed)]
+    for _ in range(9):
+        ed.key("LEFT")
+        seen.append(_cursor(ed))
+    assert seen == [
+        (8, 6, 8, False),  # end of ef, ef underlined
+        (7, 6, 8, False),  # between e and f
+        (6, 6, 8, False),  # start of ef
+        (5, 3, 5, False),  # jumped over * to the end of cd
+        (4, 3, 5, False),
+        (3, 3, 5, False),  # start of cd
+        (3, 3, 8, True),   # the whole cd·ef underlined
+        (2, 0, 2, False),  # end of ab
+        (1, 0, 2, False),
+        (0, 0, 2, False),
+    ]
+    ed.key("LEFT")
+    assert _cursor(ed) == (0, 0, 8, True)  # whole expression
+    ed.key("LEFT")
+    assert _cursor(ed) == (0, 0, 8, True)  # stays
+    ws, (r,) = sheet("ab+cd*ef")
+    ed = r.editor
+    ed.set_cursor(ed.root, 2)
+    ed.key("RIGHT")
+    assert _cursor(ed) == (3, 3, 8, True)  # across + onto cd·ef as a whole
+    ed.key("RIGHT")
+    assert _cursor(ed) == (3, 3, 5, False)
+    ed.key("RIGHT")
+    assert _cursor(ed) == (4, 3, 5, False)
+
+
+@pytest.mark.parametrize("key,expected", [
+    ("/", "ab+()/(cd*ef)"),   # ■/(cd·ef), cursor in the numerator
+    ("x", "ab+cd*ef"),        # ignored
+    ("+", "ab++cd*ef"),
+])
+def test_typing_at_whole_subexpression(key, expected):
+    ws, (r,) = sheet(list("ab+cd*ef") + ["LEFT"] * 6)
+    assert r.editor.node is not None
+    r.editor.key(key)
+    assert r.editor.root.text() == expected
+
+
+def test_power_and_function_navigation():
+    ws, (r,) = sheet("a^23")
+    ed = r.editor
+    for _ in range(3):
+        ed.key("LEFT")
+    assert ed.row is ed.root and ed.pos == 1  # left from the exponent: end of the base
+    ws, (r,) = sheet("sin(ab")
+    ed = r.editor
+    for _ in range(3):
+        ed.key("LEFT")
+    assert ed.row is ed.root and ed.pos == 3  # end of the function name
+
+
+# -- calls that become structures once complete (as SMath draws them) -------------------------
+
+def test_while_becomes_block_when_complete():
+    ws, (a, b, c) = sheet("n:1", list("while(n<100,") + list("n:n*2"), "n=")
+    prog = b.editor.root.items[0]
+    assert prog.name == "while" and len(prog.rows) == 2
+    assert result(c) == "128"
+
+
+def test_sum_and_range_structures():
+    ws, (a, b) = sheet(list("sum(i^2") + ["RIGHT"] + list(",i,1,4="), list("sum(range(1,4") + ["RIGHT", "RIGHT", "="])
+    assert a.editor.root.items[0].name == "sum" and result(a) == "30"
+    assert result(b) == "10"
+
+
+@pytest.mark.parametrize("name,fill,shown", [
+    ("sum", ["k", "k", "1", "10"], "55"),
+    ("product", ["k", "k", "1", "5"], "120"),
+    ("int", ["x", "x", "0", "2"], "2"),
+    ("range", ["1", "3"], "[1; 2; 3]"),
+    ("for", ["i", "range(1,3", "s:s+i"], None),
+])
+def test_toolbox_structures(name, fill, shown):
+    ws = Worksheet()
+    s0 = ws.add_region(18, 0)
+    s0.editor.type("s:0")
+    ws.update_after_edit(s0)
+    r = ws.add_region(18, 40)
+    r.editor.insert_structure(name)
+    box = r.editor.root.items[0]
+    for row, text in zip(box.rows, fill):
+        r.editor.set_cursor(row, 0)
+        r.editor.type(text)
+    r.editor.set_cursor(r.editor.root, len(r.editor.root))
+    if shown is not None:
+        r.editor.key("=")
+    ws.update_after_edit(r)
+    if shown is not None:
+        assert result(r) == shown
+    else:
+        t = ws.add_region(18, 80)
+        t.editor.type("s=")
+        ws.calculate()
+        assert result(t) == "6"
+
+
+def test_cross_product_and_approx():
+    ws, (a, b, c) = sheet(["u", ":", "m", "a", "t", "(", "1", "RIGHT", "0", "RIGHT", "0", "RIGHT", "0"],
+                          ["w", ":", "u"], "1≈1.00000000001=")
+    assert result(c) == "1"
