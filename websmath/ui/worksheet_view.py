@@ -180,6 +180,7 @@ class WorksheetView(QGraphicsView):
         self.setFocusPolicy(Qt.StrongFocus)
         self.setDragMode(QGraphicsView.NoDrag)
         self.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
+        self.viewport().setMouseTracking(True)  # move cursor over region frames
         self.suggestions = SuggestionList(self)
         self.suggestions.hide()
         self.suggestions.itemClicked.connect(lambda it: self._apply_suggestion(it))  # one click, as the site
@@ -284,6 +285,37 @@ class WorksheetView(QGraphicsView):
         self.selected = []
 
     # -- mouse -------------------------------------------------------------------------
+    MOVE_EDGE = 4.0  # px band along a region's frame that drags the region
+
+    def _on_handle(self, item: RegionItem, scene_pt: QPointF) -> bool:
+        """True on the frame band of a region (SMath shows its move cursor
+        there): dragging from it moves the region, even while it is being
+        edited.  Areas and separators are dragged anywhere."""
+        if item.region.special:
+            return True
+        local = item.mapFromScene(scene_pt)
+        r = item.frame_rect()
+        e = self.MOVE_EDGE
+        if item.region.plot is not None and item.plot_rect().contains(local):
+            return False
+        return (local.x() < e or local.y() < e or local.x() > r.width() - e or local.y() > r.height() - e)
+
+    def _move_cursor(self):
+        from pathlib import Path
+
+        from PySide6.QtGui import QCursor, QPixmap
+
+        if not hasattr(self, "_move_cur"):
+            pm = QPixmap(str(Path(__file__).with_name("icons") / "move.cur"))
+            self._move_cur = QCursor(pm) if not pm.isNull() else QCursor(Qt.SizeAllCursor)
+        return self._move_cur
+
+    def _start_move(self, item: RegionItem, pt: QPointF) -> None:
+        # a region that is part of a selection drags the whole selection
+        group = list(self.selected) if item in self.selected else [item]
+        self._drag = ("move", pt, item, item.pos(), [(it, it.pos()) for it in group])
+        self.viewport().setCursor(self._move_cursor())
+
     def _item_at(self, scene_pt: QPointF) -> Optional[RegionItem]:
         for it in self.scene_.items(scene_pt):
             if isinstance(it, RegionItem) and it.frame_rect().contains(it.mapFromScene(scene_pt)):
@@ -296,6 +328,10 @@ class WorksheetView(QGraphicsView):
     def mousePressEvent(self, e) -> None:
         pt = self.mapToScene(e.position().toPoint())
         item = self._item_at(pt)
+        if (e.button() == Qt.LeftButton and item is not None and
+                (self._on_handle(item, pt) or (item in self.selected and item is not self.focused_item))):
+            self._start_move(item, pt)
+            return
         self.clear_selection()
         if e.button() == Qt.RightButton:
             # the site focuses the region under the mouse, then shows the menu
@@ -341,16 +377,21 @@ class WorksheetView(QGraphicsView):
         self.focus_item(item)
         item.place_cursor(local)
         item.update()
-        self._drag = ("maybe-move", pt, item, item.pos())
+        self._drag = ("maybe-move", pt, item, item.pos())  # becomes a move after 6 px
 
     def mouseMoveEvent(self, e) -> None:
-        if not self._drag:
-            return
         pt = self.mapToScene(e.position().toPoint())
+        if not self._drag:
+            item = self._item_at(pt)
+            if item is not None and self._on_handle(item, pt):
+                self.viewport().setCursor(self._move_cursor())
+            else:
+                self.viewport().unsetCursor()
+            return
         if self._drag[0] == "maybe-move":
             _, start, item, orig = self._drag
             if (pt - start).manhattanLength() > 6 and e.buttons() & Qt.LeftButton:
-                self._drag = ("move", start, item, orig)
+                self._start_move(item, start)
         if self._drag[0] in ("pan", "resize"):
             kind, start, item, orig = self._drag
             d = pt - start
@@ -376,9 +417,11 @@ class WorksheetView(QGraphicsView):
                 item.update()
             return
         if self._drag[0] == "move":
-            _, start, item, orig = self._drag
+            _, start, item, orig, group = self._drag
             d = pt - start
-            item.setPos(snap(orig.x() + d.x()), snap(orig.y() + d.y()))
+            dx, dy = snap(orig.x() + d.x()) - orig.x(), snap(orig.y() + d.y()) - orig.y()
+            for it, o in group:
+                it.setPos(max(0.0, o.x() + dx), max(0.0, o.y() + dy))
         elif self._drag[0] == "rubber":
             start = self._drag[1]
             rect = QRectF(start, pt).normalized()
@@ -408,10 +451,20 @@ class WorksheetView(QGraphicsView):
 
     def mouseReleaseEvent(self, e) -> None:
         if self._drag and self._drag[0] == "move":
-            item = self._drag[2]
-            item.region.x, item.region.y = item.pos().x(), item.pos().y()
-            self.update_after(item)
-            self.modified.emit()
+            group = self._drag[4]
+            moved = False
+            for it, o in group:
+                if it.pos() != o:
+                    it.region.x, it.region.y = it.pos().x(), it.pos().y()
+                    moved = True
+            if moved:
+                # reading order may have changed: recalculate like SMath
+                self.worksheet.invalidate_order()
+                self.recalculate()
+                self.modified.emit()
+            elif len(group) == 1 and group[0][0] is not self.focused_item and not group[0][0].region.special:
+                self.focus_item(group[0][0])  # a click on the frame focuses
+            self.viewport().unsetCursor()
         self._drag = None
 
     def mouseDoubleClickEvent(self, e) -> None:

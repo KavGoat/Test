@@ -369,3 +369,41 @@ def test_calculation_differentiate_and_solve(app):
     v.solve_selection()
     below = max(v.items.values(), key=lambda it: it.region.y)
     assert display_text(below.region.display) == "[-3; 3]"
+
+
+def _mouse(v, kind, scene_pt, buttons=Qt.LeftButton):
+    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtGui import QMouseEvent
+
+    vp = QPointF(v.mapFromScene(scene_pt))
+    t = {"press": QEvent.MouseButtonPress, "move": QEvent.MouseMove, "release": QEvent.MouseButtonRelease}[kind]
+    ev = QMouseEvent(t, vp, v.viewport().mapToGlobal(vp.toPoint()), Qt.LeftButton,
+                     buttons if kind != "release" else Qt.NoButton, Qt.NoModifier)
+    {"press": v.mousePressEvent, "move": v.mouseMoveEvent, "release": v.mouseReleaseEvent}[kind](ev)
+
+
+def test_drag_region_by_its_frame_while_editing(app):
+    v = WorksheetView()
+    type_at(v, 18, 18, "x:5")
+    item = v.focused_item  # being edited: dragging inside would select
+    edge = item.mapToScene(QPointF(1, item.frame_rect().height() / 2))
+    _mouse(v, "press", edge)
+    _mouse(v, "move", edge + QPointF(90, 45))
+    _mouse(v, "release", edge + QPointF(90, 45))
+    assert (item.region.x, item.region.y) == (108, 63)
+    assert item.editor.selection is None
+
+
+def test_drag_unfocused_region_anywhere_and_group(app):
+    v = WorksheetView()
+    type_at(v, 18, 18, "a:1")
+    press(v, Qt.Key_Return)
+    type_at(v, 18, 72, "b:2")
+    press(v, Qt.Key_Return)
+    v.select_all()
+    first = [it for it in v.items.values() if it.region.y == 18][0]
+    mid = first.mapToScene(first.frame_rect().center())
+    _mouse(v, "press", mid)
+    _mouse(v, "move", mid + QPointF(0, 90))
+    _mouse(v, "release", mid + QPointF(0, 90))
+    assert sorted(it.region.y for it in v.items.values()) == [108, 162]
