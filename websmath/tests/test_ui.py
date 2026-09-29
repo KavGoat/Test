@@ -407,3 +407,23 @@ def test_drag_unfocused_region_anywhere_and_group(app):
     _mouse(v, "move", mid + QPointF(0, 90))
     _mouse(v, "release", mid + QPointF(0, 90))
     assert sorted(it.region.y for it in v.items.values()) == [108, 162]
+
+
+def test_desktop_main_window(app):
+    from websmath.ui.mainwindow import MainWindow
+
+    w = MainWindow()
+    menus = [a.text().replace("&", "") for a in w.menuBar().actions()]
+    assert menus == ["File", "Edit", "View", "Insert", "Calculation", "Tools", "Pages", "Help"]
+    calc = [a for a in w.menuBar().actions() if a.text() == "&Calculation"][0].menu()
+    titles = [a.text() for a in calc.actions() if a.text()]
+    assert "Simplify" not in titles and "Differentiate" in titles and "Solve" in titles
+    assert [s.title for s in w.panel.sections][:6] == ["Arithmetic", "Matrices", "Boolean", "Functions",
+                                                       "Plot", "Programming"]
+    assert "Constants" in [s.title for s in w.panel.sections]
+    # pages: a second worksheet in the same window
+    first = w.view
+    second = w.new_page()
+    assert w.view is second and first is not second and len(w.mdi.subWindowList()) == 2
+    assert first.scene_.page_mode == "pages"
+    w.close()

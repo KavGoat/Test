@@ -46,31 +46,81 @@ def snap(v: float) -> float:
     return round(v / GRID) * GRID
 
 
+# Desktop SMath shows the worksheet as A4 pages (View > Pages view): white
+# sheets on the grey window background, the grid only on paper.  Page size in
+# worksheet pixels (96 dpi); printing uses the same pages.
+PAGE_W = 794.0
+PAGE_H = 1123.0
+PAGE_GAP = 14.0  # grey band drawn across each page boundary
+DESK_GREY = QColor("#ababab")  # Windows "application workspace"
+
+
 class WorksheetScene(QGraphicsScene):
     def __init__(self, worksheet: Worksheet, parent=None):
         super().__init__(parent)
         self.worksheet = worksheet
         self.cross = QPointF(18, 18)
         self.show_grid = True
-        self.setSceneRect(0, 0, 2000, 3000)
+        self.page_mode = "pages"  # "pages", "bounds" (printing bounds) or "none"
+        self.printing = False
+        self.setSceneRect(0, 0, PAGE_W + 40, PAGE_H * 3)
+
+    def page_count(self) -> int:
+        bottom = max((it.sceneBoundingRect().bottom() for it in self.items()), default=0.0)
+        return max(1, int(bottom // PAGE_H) + 1)
 
     def drawBackground(self, p: QPainter, rect: QRectF) -> None:
-        p.fillRect(rect, Qt.white)
-        if not self.show_grid:
+        if self.printing or self.page_mode == "none":
+            p.fillRect(rect, Qt.white)
+            if self.show_grid and not self.printing:
+                self._grid(p, rect)
             return
+        if self.page_mode == "bounds":
+            p.fillRect(rect, Qt.white)
+            if self.show_grid:
+                self._grid(p, rect)
+            # printing bounds: dashed lines where pages end
+            pen = QPen(QColor("#808080"), 1, Qt.DashLine)
+            p.setPen(pen)
+            p.drawLine(QPointF(PAGE_W + 0.5, rect.top()), QPointF(PAGE_W + 0.5, rect.bottom()))
+            k = int(rect.top() // PAGE_H)
+            while k * PAGE_H <= rect.bottom():
+                if k > 0:
+                    p.drawLine(QPointF(rect.left(), k * PAGE_H + 0.5), QPointF(rect.right(), k * PAGE_H + 0.5))
+                k += 1
+            return
+        # pages view
+        p.fillRect(rect, DESK_GREY)
+        k = max(0, int(rect.top() // PAGE_H))
+        while k * PAGE_H <= rect.bottom():
+            top = k * PAGE_H + (PAGE_GAP / 2 if k else 0)
+            bottom = (k + 1) * PAGE_H - PAGE_GAP / 2
+            page = QRectF(0, top, PAGE_W, bottom - top)
+            p.fillRect(page.translated(3, 3), QColor("#7a7a7a"))  # shadow
+            p.fillRect(page, Qt.white)
+            if self.show_grid:
+                p.save()
+                p.setClipRect(page.intersected(rect))
+                self._grid(p, page.intersected(rect))
+                p.restore()
+            p.setPen(QPen(QColor("#6d6d6d"), 1))
+            p.drawRect(page.adjusted(-0.5, -0.5, 0.5, 0.5))
+            k += 1
+
+    def _grid(self, p: QPainter, rect: QRectF) -> None:
         p.setPen(QPen(GRID_COLOR, 1))
-        x0 = int(rect.left() // GRID) * GRID
-        y0 = int(rect.top() // GRID) * GRID
-        x = x0
+        x = int(rect.left() // GRID) * GRID
         while x < rect.right():
             p.drawLine(QPointF(x + 0.5, rect.top()), QPointF(x + 0.5, rect.bottom()))
             x += GRID
-        y = y0
+        y = int(rect.top() // GRID) * GRID
         while y < rect.bottom():
             p.drawLine(QPointF(rect.left(), y + 0.5), QPointF(rect.right(), y + 0.5))
             y += GRID
 
     def drawForeground(self, p: QPainter, rect: QRectF) -> None:
+        if self.printing:
+            return
         view = self.views()[0] if self.views() else None
         if view is not None and getattr(view, "focused_item", None) is not None:
             return
@@ -161,6 +211,8 @@ def _origin_icon(kind: str, origin: int) -> QIcon:
 class WorksheetView(QGraphicsView):
     status = Signal(str)
     modified = Signal()
+    pages_changed = Signal(int, int)  # page in view, page count
+    zoom_changed = Signal(float)
 
     def __init__(self, worksheet: Optional[Worksheet] = None, parent=None):
         self.worksheet = worksheet or Worksheet()
@@ -181,6 +233,7 @@ class WorksheetView(QGraphicsView):
         self.setDragMode(QGraphicsView.NoDrag)
         self.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
         self.viewport().setMouseTracking(True)  # move cursor over region frames
+        self.verticalScrollBar().valueChanged.connect(self._scrolled)
         self.suggestions = SuggestionList(self)
         self.suggestions.hide()
         self.suggestions.itemClicked.connect(lambda it: self._apply_suggestion(it))  # one click, as the site
@@ -188,6 +241,11 @@ class WorksheetView(QGraphicsView):
         for r in self.worksheet.regions:
             self._add_item(r)
         self.recalculate()
+        self._grow_scene()
+        self._to_top()
+        from PySide6.QtCore import QTimer
+
+        QTimer.singleShot(0, self._to_top)  # again once the window has its size
 
     # -- region management ---------------------------------------------------------
     def _add_item(self, region: Region) -> RegionItem:
@@ -198,6 +256,7 @@ class WorksheetView(QGraphicsView):
 
     def new_region(self, x: float, y: float, text_region: bool = False) -> RegionItem:
         region = self.worksheet.add_region(snap(x), snap(y))
+        region.font_size = getattr(self, "default_font_size", 10.0)  # Tools > Options
         if text_region:
             region.editor._to_text("")
         item = self._add_item(region)
@@ -250,10 +309,47 @@ class WorksheetView(QGraphicsView):
         self.refresh()
 
     def _grow_scene(self) -> None:
-        r = self.scene_.itemsBoundingRect()
-        w = max(2000, r.right() + 400)
-        h = max(3000, r.bottom() + 600)
-        self.scene_.setSceneRect(0, 0, w, h)
+        """Whole pages: one more page appears when content nears the end of
+        the last one (as the desktop's Pages view)."""
+        import math
+
+        r = self.scene_.itemsBoundingRect() if self.items else QRectF()
+        pages = max(1, math.ceil((max(r.bottom(), self.scene_.cross.y()) + 200) / PAGE_H))
+        w = max(PAGE_W + 40, r.right() + 40)
+        self.scene_.setSceneRect(0, 0, w, pages * PAGE_H + (20 if self.scene_.page_mode == "pages" else 0))
+        self.pages_changed.emit(self.page_at_view(), pages)
+
+    zoom = 1.0
+
+    def set_zoom(self, factor: float) -> None:
+        """View zoom (status bar, Ctrl+wheel), 10% to 400%."""
+        self.zoom = min(4.0, max(0.1, factor))
+        self.resetTransform()
+        self.scale(self.zoom, self.zoom)
+        self.zoom_changed.emit(self.zoom)
+
+    def set_page_mode(self, mode: str) -> None:
+        self.scene_.page_mode = mode
+        self._grow_scene()
+        self.scene_.update()
+
+    def _to_top(self) -> None:
+        """A page opens at its top-left corner."""
+        try:
+            self.verticalScrollBar().setValue(self.verticalScrollBar().minimum())
+            self.horizontalScrollBar().setValue(self.horizontalScrollBar().minimum())
+        except RuntimeError:
+            pass
+
+    def _scrolled(self, _value=None) -> None:
+        try:
+            self.pages_changed.emit(self.page_at_view(), self.scene_.page_count())
+        except RuntimeError:
+            pass  # the window is closing
+
+    def page_at_view(self) -> int:
+        top = self.mapToScene(self.viewport().rect().center()).y()
+        return max(1, int(top // PAGE_H) + 1)
 
     # -- focus -------------------------------------------------------------------------
     def focus_item(self, item: Optional[RegionItem]) -> None:
@@ -433,8 +529,13 @@ class WorksheetView(QGraphicsView):
                     self.selected.append(it)
 
     def wheelEvent(self, e) -> None:
-        """Wheel over a plot zooms it (Ctrl: x only, Shift: y only)."""
+        """Wheel over a plot zooms it (Ctrl: x only, Shift: y only); Ctrl+wheel
+        elsewhere zooms the view, as on the desktop."""
         pt = self.mapToScene(e.position().toPoint())
+        if e.modifiers() & Qt.ControlModifier and (self._item_at(pt) is None or self._item_at(pt).region.plot is None):
+            self.set_zoom(self.zoom * (1.1 if e.angleDelta().y() > 0 else 1 / 1.1))
+            e.accept()
+            return
         item = self._item_at(pt)
         if item is not None and item.region.plot is not None:
             local = item.mapFromScene(pt)
@@ -1176,9 +1277,10 @@ class WorksheetView(QGraphicsView):
         self.clear_selection()
         grid = self.scene_.show_grid
         self.scene_.show_grid = False
+        self.scene_.printing = True
         bounds = self.scene_.itemsBoundingRect()
-        page_w = max(bounds.right() + 20, 794.0)
-        page_h = page_w * 297 / 210
+        page_w = max(bounds.right() + 20, PAGE_W)
+        page_h = page_w * PAGE_H / PAGE_W  # the pages shown in Pages view
         painter = QPainter(device)
         target = QRectF(0, 0, device.width(), device.height())
         y = 0.0
@@ -1191,6 +1293,7 @@ class WorksheetView(QGraphicsView):
             first = False
         painter.end()
         self.scene_.show_grid = grid
+        self.scene_.printing = False
     def select_all(self) -> None:
         self.focus_item(None)
         self.clear_selection()

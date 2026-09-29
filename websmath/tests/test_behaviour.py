@@ -660,3 +660,9 @@ def test_diff_evaluates_when_variable_has_value():
 ])
 def test_more_functions(expr, defs, shown):
     assert _ev(expr, *defs) == shown
+
+
+def test_range_index_assigns_every_element():
+    # SMath example GravitationAcceleration.sm: result[k,2]:=f(data[k,2]) with k a range
+    assert _ev("v", "v:=stack(1,2,3)", "k:=range(1,3)", "w[k]:=v[k]^2", "v:=w") == "[1; 4; 9]"
+    assert _ev("m[k]", "m:=stack(5,6,7)", "k:=range(2,3)") == "[6; 7]"

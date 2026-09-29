@@ -260,9 +260,40 @@ class Evaluator:
                 params.append(a.name)
             ctx.funcs[(target.name, len(params))] = UserFunction(target.name, params, node.value)
         elif isinstance(target, A.IndexOp) and isinstance(target.base, A.Var):
+            ranged = self._vector_indices(target, ctx)
+            if ranged:
+                # SMath: result[k,2]:=f(data[k,2]) with k:=range(1,9) assigns
+                # every element, k taking each value of the range in turn
+                from .values import Matrix as _M
+
+                n = len(next(iter(ranged.values())).items)
+                if any(len(v.items) != n for v in ranged.values()):
+                    raise err("matrix_size", node=target)
+                for t in range(n):
+                    self.check_time(target)
+                    local = Context(ctx)
+                    for name, vec in ranged.items():
+                        local.vars[name] = vec.items[t]
+                    self._assign_element(target, self.eval(node.value, local), local)
+                    if target.base.name in local.vars:  # created here: keep it
+                        ctx.assign(target.base.name, local.vars.pop(target.base.name))
+                return
             self._assign_element(target, self.eval(node.value, ctx), ctx)
         else:
             raise err("syntax", node=target)
+
+    def _vector_indices(self, target: A.IndexOp, ctx) -> dict:
+        """Index names that currently hold a vector (a range)."""
+        out = {}
+        for i in target.indices:
+            if isinstance(i, A.Var):
+                try:
+                    v = self.eval(i, ctx)
+                except SMathError:
+                    continue
+                if isinstance(v, Matrix) and (v.ncols == 1 or v.nrows == 1) and len(v.items) > 1:
+                    out[i.name] = v
+        return out
 
     def _assign_element(self, target: A.IndexOp, value, ctx: Context) -> None:
         name = target.base.name
@@ -385,7 +416,20 @@ class Evaluator:
 
     def _IndexOp(self, n: A.IndexOp, ctx):
         base = self.eval(n.base, ctx)
-        idx = [need_int(self.eval(i, ctx), i) for i in n.indices]
+        vals = [self.eval(i, ctx) for i in n.indices]
+        if any(isinstance(v, Matrix) and len(v.items) > 1 for v in vals):
+            # data[k,2] with k a range: the elements, as a column
+            seqs = [v.items if isinstance(v, Matrix) else [v] for v in vals]
+            n_out = max(len(q) for q in seqs)
+            out = []
+            for t in range(n_out):
+                sub = [q[t] if len(q) > 1 else q[0] for q in seqs]
+                out.append(self._index_value(base, [need_int(x, n) for x in sub], n))
+            return Matrix.column(out)
+        idx = [need_int(v, i) for v, i in zip(vals, n.indices)]
+        return self._index_value(base, idx, n)
+
+    def _index_value(self, base, idx, n):
         if isinstance(base, Matrix):
             try:
                 if len(idx) == 1:

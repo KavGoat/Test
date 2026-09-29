@@ -19,7 +19,7 @@ def parse_text(text: str):
     as written (unlike typing, where ")" is ignored): "stack(augment(1,2),
     augment(3,4))", "x^(1/2)", "f(x):=x^3".  "^" takes the next number, name
     or bracket as its exponent."""
-    from .model import Paren, Pow, Row
+    from .model import Index, Paren, Pow, Row
 
     text = text.replace(":=", "≔").replace(":", "≔")
     pos = 0
@@ -46,6 +46,10 @@ def parse_text(text: str):
                 pos += 1
                 box = Paren(row(")"))
                 _attach(r, box)
+                continue
+            if ch == "[":
+                pos += 1
+                _attach(r, Index(row("]")))
                 continue
             if ch == "^":
                 pos += 1
