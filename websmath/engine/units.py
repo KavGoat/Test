@@ -11,7 +11,12 @@ import cmath
 import math
 from dataclasses import dataclass
 
+from .catalog import UNIT_CATALOG
+from .extra_units import install as _install_prefixed
 from .unitdata import BASE, DERIVED, INFO, UNITS
+
+# hPa, daN, mbar, kWh... which SMath's library lacks (see extra_units)
+_install_prefixed(UNITS, INFO, UNIT_CATALOG)
 
 NDIM = len(BASE)
 NODIM: tuple = tuple([0] * NDIM)

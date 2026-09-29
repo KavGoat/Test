@@ -31,8 +31,19 @@ def test_suggestions_match_smath(group, prefix):
     row = list(DATA[group]["lists"]).index(prefix) if group == "with_defs" else 20
     here = ws.add_region(400, 9 + 36 * row)
     got = [label for label, _ in suggestion_list(prefix, ws._context_before(here).names())]
-    # the replica also lists the units the site hides behind a case variant
-    assert [x for x in got if x[1:] not in SITE_HIDDEN_UNITS or not x.startswith("'")] == DATA[group]["lists"][prefix]
+    # the replica also lists the units the site hides behind a case variant,
+    # and SI-prefixed units SMath's library lacks (hPa, daN, kWh...)
+    from websmath.engine.extra_units import ADDED
+
+    extra = SITE_HIDDEN_UNITS | set(ADDED)
+    assert [x for x in got if not x.startswith("'") or x[1:] not in extra] == DATA[group]["lists"][prefix]
+
+
+@pytest.mark.parametrize("word,unit", [("kn", "'kN"), ("mn", "'mN"), ("mpa", "'MPa"), ("kpa", "'kPa"),
+                                       ("hpa", "'hPa"), ("dan", "'daN"), ("kwh", "'kWh"), ("mbar", "'mbar"),
+                                       ("pa", "'Pa"), ("gpa", "'GPa")])
+def test_every_unit_is_offered(word, unit):
+    assert unit in [label for label, _ in suggestion_list(word, [])]
 
 
 def test_case_variant_units_are_listed():
@@ -66,7 +77,7 @@ def test_entries_carry_icon_kind_origin_and_description():
 
 @pytest.mark.parametrize("prefix,defs,selected", [
     ("m", ["m:10"], "'m"),       # the unit is highlighted, the variable is listed too
-    ("M", ["m:10"], "'MB"),      # case-sensitive start first
+    ("M", ["m:10"], "'MA"),      # case-sensitive start first (site: MB; MA is added here)
     ("Si", [], "sign"),          # else ignoring case
     ("co", [], "col"),
     ("sq", [], "sqrt"),
