@@ -202,6 +202,46 @@ def cloud_cursor() -> QCursor:
     return _CLOUD_CURSOR
 
 
+def _with_a_halo(pixmap: QPixmap) -> QPixmap:
+    """The drawing with a thin white edge round it, to read over dark ink."""
+    white = QPixmap(pixmap.size())
+    white.fill(Qt.transparent)
+    tint = QPainter(white)
+    tint.drawPixmap(0, 0, pixmap)
+    tint.setCompositionMode(QPainter.CompositionMode_SourceIn)
+    tint.fillRect(white.rect(), QColor("#ffffff"))
+    tint.end()
+    out = QPixmap(pixmap.size())
+    out.fill(Qt.transparent)
+    painter = QPainter(out)
+    for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, 1), (-1, 1), (1, -1)):
+        painter.drawPixmap(dx, dy, white)
+    painter.drawPixmap(0, 0, pixmap)
+    painter.end()
+    return out
+
+
+_ARROW_LEADER_CURSOR = None
+
+
+def arrow_leader_cursor() -> QCursor:
+    """The Callout drawing as the pointer, its arrowhead the point clicked.
+
+    Adding an arrow leader is saying where the arrow points, so the tip of
+    the drawn arrow is the pointer's hot spot — not a crosshair off to one
+    side with the arrow pointing somewhere else.
+    """
+    global _ARROW_LEADER_CURSOR
+    if _ARROW_LEADER_CURSOR is None:
+        from . import icons
+
+        size = 32
+        pixmap = _with_a_halo(icons.cursor_pixmap("callout", size))
+        # The icon's arrowhead ends at (4, 20.5) of 24.
+        _ARROW_LEADER_CURSOR = QCursor(pixmap, round(4 * size / 24), round(20.5 * size / 24))
+    return _ARROW_LEADER_CURSOR
+
+
 _CLOUD_CALLOUT_CURSOR = None
 
 
@@ -216,7 +256,7 @@ def cloud_callout_cursor() -> QCursor:
     if _CLOUD_CALLOUT_CURSOR is None:
         from . import icons
 
-        pixmap = icons.cursor_pixmap("cloud_callout", 32)
+        pixmap = _with_a_halo(icons.cursor_pixmap("cloud_callout", 32))
         # The icon's cloud sits at (1.5–13.5, 13–21.5) of 24: its middle.
         _CLOUD_CALLOUT_CURSOR = QCursor(pixmap, round(7.5 * 32 / 24), round(17.2 * 32 / 24))
     return _CLOUD_CALLOUT_CURSOR
@@ -543,8 +583,8 @@ class PageView(QGraphicsView):
         self._pending_arrow_leader = item
         self._mode = "idle"
         # A new leader for a call-out: the pointer is the call-out, arrow and
-        # all, not a bare arrow.
-        self.setCursor(drawing_cursor("callout"))
+        # all, not a bare arrow — and the arrow's tip is where it will point.
+        self.setCursor(arrow_leader_cursor())
         self.statusMessage.emit(
             "Click what the arrow should point at · Esc to cancel")
         self.viewport().update()
@@ -2342,7 +2382,7 @@ class PageView(QGraphicsView):
             self.setCursor(format_painter_cursor())
             return
         if self._pending_arrow_leader is not None:
-            self.setCursor(drawing_cursor("callout"))
+            self.setCursor(arrow_leader_cursor())
             return
         if self._pending_cloud_leader is not None:
             self.setCursor(cloud_callout_cursor())

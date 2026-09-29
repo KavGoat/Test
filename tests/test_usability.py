@@ -10474,13 +10474,13 @@ def test_every_cloud_has_a_cloud_size(window):
 def test_adding_a_leader_carries_the_callouts_own_picture(window):
     """Not a bare arrow or a bare cloud: the call-out being added to."""
     from markforge.items.text import CalloutItem
-    from markforge.ui.view import cloud_callout_cursor, drawing_cursor
+    from markforge.ui.view import arrow_leader_cursor, cloud_callout_cursor
     frame = window.current_page().frame
     note = CalloutItem()
     frame.add_markup(note, QPointF(200, 200))
     window.view.begin_arrow_leader(note)
     assert (window.view.cursor().pixmap().cacheKey()
-            == drawing_cursor("callout").pixmap().cacheKey())
+            == arrow_leader_cursor().pixmap().cacheKey())
     window.view.cancel_arrow_leader()
     window.view.begin_cloud_leader(note)
     assert (window.view.cursor().pixmap().cacheKey()

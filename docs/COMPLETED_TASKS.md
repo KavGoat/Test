@@ -280,9 +280,11 @@ Differences that remain, and why:
   cloud, cloud callout and cloud leader.
   `test_a_thicker_line_keeps_its_dash_spacing_and_spacing_scales_it`,
   `test_every_cloud_has_a_cloud_size`.
-- **Add-leader icons:** the pointer while adding a leader was a bare arrow or
-  a bare cloud; it is now the Callout drawing (arrow leader) or the Cloud+
-  drawing (cloud leader), as is the Cloud+ tool's own pointer.
+- **Add-leader icons (the pointer, as the user confirmed):** the pointer
+  while adding a leader was a bare arrow or a bare cloud. It is now the
+  Callout drawing with its arrowhead as the exact click point (arrow leader)
+  or the Cloud+ drawing centred on its cloud (cloud leader, and the Cloud+
+  tool), each with a thin white edge so it reads over dark linework.
   `test_adding_a_leader_carries_the_callouts_own_picture`.
 - **Shift/Ctrl on a shape's outline:** a click still adds or removes a point,
   curves a side or rounds a corner; pressed and dragged it is a Shift-drag
