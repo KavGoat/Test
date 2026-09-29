@@ -7,7 +7,7 @@ import re
 from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, QTimer, Qt, Signal
 from PySide6.QtGui import (QBrush, QColor, QFont, QFontInfo, QIcon, QKeySequence,
                            QPainter, QPen, QPixmap)
-from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox,
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox,
                                QDoubleSpinBox, QInputDialog, QMessageBox,
                                QFontComboBox, QFormLayout, QGroupBox, QHBoxLayout,
                                QHeaderView, QLabel, QLineEdit, QListView, QListWidget,
@@ -224,6 +224,13 @@ class PagesPanel(QWidget):
         self.list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.list.customContextMenuRequested.connect(self._context_menu)
         self.list.installEventFilter(self)
+        self._hover_row = None
+        self.list.setMouseTracking(True)
+        self.list.viewport().setMouseTracking(True)
+        self.list.viewport().installEventFilter(self)
+        # A copied page arriving on the clipboard shows its bar at once, and
+        # one going away takes the bar with it.
+        QApplication.clipboard().dataChanged.connect(self._clipboard_changed)
         # A PDF or an image dragged onto the strip goes in where the line is.
         self.list.setAcceptDrops(True)
         self.list.viewport().setAcceptDrops(True)
@@ -374,15 +381,70 @@ class PagesPanel(QWidget):
                           lambda: self.list.set_external_drop_row(None))
 
     def eventFilter(self, watched, event):
-        """Ctrl+C and Ctrl+V on the thumbnails copy and paste whole pages."""
-        if watched is self.list and event.type() == QEvent.KeyPress:
-            if event.matches(QKeySequence.Copy):
-                self.window.copy_page(self.list.currentRow())
+        """Ctrl+C and Ctrl+V on the thumbnails copy and paste whole pages.
+
+        The window's own Copy and Paste are shortcuts, and a shortcut takes the
+        key before the list ever sees it — so the list claims those two keys
+        first (ShortcutOverride), and they reach it as keys.
+
+        While a page is on the clipboard the pointer carries an insertion bar
+        over the thumbnails, as Bluebeam's does: it says where Ctrl+V will put
+        the page.
+        """
+        if watched is self.list and event.type() in (QEvent.ShortcutOverride,
+                                                     QEvent.KeyPress):
+            copy = event.matches(QKeySequence.Copy)
+            paste = event.matches(QKeySequence.Paste)
+            if copy or paste:
+                if event.type() == QEvent.ShortcutOverride:
+                    event.accept()
+                    return True
+                if copy:
+                    self.window.copy_page(self.list.currentRow())
+                else:
+                    self.paste_pages_here()
                 return True
-            if event.matches(QKeySequence.Paste):
-                self.window.paste_page(self.list.currentRow())
-                return True
+        if watched is self.list.viewport():
+            kind = event.type()
+            if kind == QEvent.MouseMove:
+                self._hover_row = self.drop_row(event.position().toPoint())
+                self.list.set_external_drop_row(
+                    self._hover_row if self._a_page_is_waiting() else None)
+            elif kind == QEvent.Leave:
+                self._hover_row = None
+                self.list.set_external_drop_row(None)
         return super().eventFilter(watched, event)
+
+    def _clipboard_changed(self) -> None:
+        try:
+            waiting = self._a_page_is_waiting()
+        except RuntimeError:
+            return
+        if not waiting:
+            self.list.set_external_drop_row(None)
+        elif self._hover_row is not None:
+            self.list.set_external_drop_row(self._hover_row)
+
+    def _a_page_is_waiting(self) -> bool:
+        text = QApplication.clipboard().text() or ""
+        return text.startswith('{"markforge_page"') and \
+            self.window.page_on_the_clipboard() is not None
+
+    def paste_row(self) -> int:
+        """Where a pasted page goes: under the insertion bar, else after the
+        page picked out."""
+        hovered = getattr(self, "_hover_row", None)
+        if hovered is not None:
+            return max(0, min(int(hovered), self.list.count()))
+        return max(self.list.currentRow(), 0) + 1
+
+    def paste_pages_here(self) -> None:
+        row = self.paste_row()
+        self.list.set_external_drop_row(None)
+        if row >= self.list.count():
+            self.window.paste_page(self.list.count() - 1)
+        else:
+            self.window.paste_page(row, before=True)
 
     def _context_menu(self, point) -> None:
         """Right-click a thumbnail for everything you can do to that page."""
@@ -1635,6 +1697,10 @@ class PropertiesPanel(QScrollArea):
                 self._add_cloud(first)
             elif isinstance(first, PolyItem) and first.kind == "cloud":
                 self._add_cloud(first)
+            elif isinstance(first, CalloutItem) and (
+                    getattr(first, "shape_kind", "") == "cloud"
+                    or any(leader.clouds() for leader in getattr(first, "leaders", []))):
+                self._add_cloud(first)
         if len(self._items) == 1:
             self._add_geometry(first)
             if isinstance(first, PolyItem) and first.broken:
@@ -1815,6 +1881,19 @@ class PropertiesPanel(QScrollArea):
                                setattr(i.style, "dash_array", ())),
                     "Line style"))
             form.addRow("Style", line_style)
+            spacing = QDoubleSpinBox()
+            spacing.setObjectName("dashSpacing")
+            spacing.setRange(0.1, 50.0)
+            spacing.setDecimals(2)
+            spacing.setSingleStep(0.25)
+            spacing.setPrefix("× ")
+            spacing.setValue(first.style.dash_scale)
+            spacing.setToolTip("How long the dashes, dots and gaps are — the "
+                               "line's thickness does not change them")
+            spacing.valueChanged.connect(
+                lambda value: self._slide(
+                    lambda i: setattr(i.style, "dash_scale", value), "Dash spacing"))
+            form.addRow("Spacing", spacing)
 
         # A hatch over the fill: how a section reads as concrete or as steel,
         # and what a Bluebeam tool set full of sections needs to come in with.
@@ -2134,14 +2213,23 @@ class PropertiesPanel(QScrollArea):
         form.addRow("", colours)
 
     def _add_cloud(self, first) -> None:
+        """How big a cloud's scallops are — a setting of its own, not the line's."""
         form = self._group("Cloud")
         radius = QDoubleSpinBox()
-        radius.setRange(2.0, 60.0)
-        radius.setValue(first.cloud_radius)
+        radius.setObjectName("cloudSize")
+        radius.setRange(1.5, 200.0)
+        radius.setDecimals(1)
+        radius.setValue(float(getattr(first, "cloud_radius", 9.0)))
         radius.setSuffix(" pt")
+        radius.setToolTip("How big each scallop of the cloud is")
+
+        def resize(item, value):
+            if hasattr(item, "cloud_radius"):
+                item.prepareGeometryChange()
+                item.cloud_radius = value
         radius.valueChanged.connect(
-            lambda value: self._slide(lambda i: setattr(i, "cloud_radius", value), "Cloud size"))
-        form.addRow("Arc size", radius)
+            lambda value: self._slide(lambda i: resize(i, value), "Cloud size"))
+        form.addRow("Cloud size", radius)
 
 
 

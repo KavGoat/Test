@@ -202,6 +202,26 @@ def cloud_cursor() -> QCursor:
     return _CLOUD_CURSOR
 
 
+_CLOUD_CALLOUT_CURSOR = None
+
+
+def cloud_callout_cursor() -> QCursor:
+    """The Cloud+ drawing — note, leader and cloud — as the pointer.
+
+    What is being drawn is a cloud with a note on it, so the pointer says so
+    rather than showing a bare cloud. The hot spot is the middle of its
+    cloud, where the cloud is drawn round.
+    """
+    global _CLOUD_CALLOUT_CURSOR
+    if _CLOUD_CALLOUT_CURSOR is None:
+        from . import icons
+
+        pixmap = icons.cursor_pixmap("cloud_callout", 32)
+        # The icon's cloud sits at (1.5–13.5, 13–21.5) of 24: its middle.
+        _CLOUD_CALLOUT_CURSOR = QCursor(pixmap, round(7.5 * 32 / 24), round(17.2 * 32 / 24))
+    return _CLOUD_CALLOUT_CURSOR
+
+
 def _already_bracketed(text: str) -> bool:
     """Whether the whole of *text* is inside one pair of brackets.
 
@@ -522,7 +542,9 @@ class PageView(QGraphicsView):
             self.toolFinished.emit("select")
         self._pending_arrow_leader = item
         self._mode = "idle"
-        self.setCursor(drawing_cursor("arrow"))
+        # A new leader for a call-out: the pointer is the call-out, arrow and
+        # all, not a bare arrow.
+        self.setCursor(drawing_cursor("callout"))
         self.statusMessage.emit(
             "Click what the arrow should point at · Esc to cancel")
         self.viewport().update()
@@ -543,10 +565,10 @@ class PageView(QGraphicsView):
         self._pending_cloud_leader = item
         self._mode = "idle"
         self._marquee = []
-        # A plain crosshair says "put a point somewhere", which is not what is
-        # being asked for: what comes next is a cloud drawn round a region, so
-        # the pointer carries a cloud for as long as that is what a drag does.
-        self.setCursor(cloud_cursor())
+        # What comes next is a cloud drawn round a region, joined to the note:
+        # the pointer is the Cloud+ drawing for as long as that is what a
+        # drag does.
+        self.setCursor(cloud_callout_cursor())
         self.statusMessage.emit(
             "Drag around the area for the cloud leader · Esc to cancel")
         self.viewport().update()
@@ -566,9 +588,10 @@ class PageView(QGraphicsView):
             return QCursor(Qt.ArrowCursor)
         if tool.key == "pan":
             return QCursor(Qt.OpenHandCursor)
+        if tool.key == "cloud_callout":
+            # Cloud+ is a cloud with a note on it, and says so.
+            return cloud_callout_cursor()
         if tool.mode in (CLOUDY, CLOUD):
-            # Cloud and Cloud+ start by drawing a cloud round something, the
-            # same gesture as adding a cloud leader, so they carry its cursor.
             return cloud_cursor()
         # Every other tool — callouts, click-placed notes and stamps, the
         # snapshot region — is a precise crosshair carrying its own icon.
@@ -1449,6 +1472,14 @@ class PageView(QGraphicsView):
                 self.window.paint_format_onto(target)
                 event.accept()
                 return
+            # On bare paper, a drag round several markups paints them all;
+            # the selection is left as it was.
+            self._mode = "rubber"
+            self._paint_by_box = True
+            self._marquee = [QPointF(scene_pos), QPointF(scene_pos)]
+            self.viewport().update()
+            event.accept()
+            return
 
         if self._pending_stamp is not None and event.button() == Qt.LeftButton:
             if self.place_pending_stamp(scene_pos):
@@ -1534,10 +1565,21 @@ class PageView(QGraphicsView):
         # one of its sides. This comes before both the handles and the
         # selection, because with a key held it is the only thing the click
         # can have meant.
-        if self.reshape_at(scene_pos, event.modifiers()):
-            self._mode = "idle"
-            event.accept()
-            return
+        # Only a click reshapes. Pressed and dragged, the same keys mean what
+        # they mean for any drag — Shift keeps it straight, Ctrl copies — so
+        # what the click would do is kept until the button comes up.
+        self._pending_reshape = None
+        target = self.shaping_target(scene_pos, event.modifiers())
+        if target is not None:
+            if self.markup_at(scene_pos) is target[0]:
+                self._pending_reshape = (QPointF(scene_pos), event.modifiers())
+            else:
+                # Not on the shape itself — off a curve's old chord, say — so
+                # nothing is there to drag: the click can only mean this.
+                self.reshape_at(scene_pos, event.modifiers())
+                self._mode = "idle"
+                event.accept()
+                return
 
         # 5. a resize handle on an already-selected item
         for item in self.scene().selectedItems():
@@ -1630,7 +1672,10 @@ class PageView(QGraphicsView):
                 return
 
         self._mode = "move"
+        # Bluebeam's rule: Ctrl held when the drag *starts* makes it a copy.
+        # Ctrl pressed once a move is under way turns snapping off instead.
         self._copy_on_move = control
+        self._ctrl_from_the_press = control
         self._copied = False
         self._move_items = [(other, other.pos()) for other in self.scene().selectedItems()
                             if isinstance(other, MarkupItem) and self.editable(other)]
@@ -1638,6 +1683,22 @@ class PageView(QGraphicsView):
             other.uid: deepcopy(other.serialize()) for other, _ in self._move_items}
         self.begin_snapshot(self.all_frames())
         event.accept()
+
+    def rescale_where_they_landed(self, items: list) -> None:
+        """Read each moved measurement at the scale where it was dropped.
+
+        A measurement finished inside a viewport is at the viewport's scale;
+        dragged out of it, the page's — and the number on it changes as it
+        crosses, the way Bluebeam's does.
+        """
+        for item in items:
+            refresh = getattr(item, "refresh", None)
+            if not callable(refresh) or not (isinstance(item, MeasureItem)
+                                             or getattr(item, "kind", "") in ("rect", "ellipse")):
+                continue
+            page = self.page_of(item)
+            if page is not None:
+                refresh(page=page)
 
     def settle_pages(self, items: list) -> None:
         """Hand each dragged markup to the page it was dropped on.
@@ -1835,16 +1896,18 @@ class PageView(QGraphicsView):
         if self._mode == "move":
             delta = scene_pos - self._press_scene
             control = bool(event.modifiers() & Qt.ControlModifier)
-            if control:
-                # Ctrl is the copy modifier regardless of whether it arrived
-                # before the press or after Shift/movement had already begun.
-                self._copy_on_move = True
+            if not control:
+                self._ctrl_from_the_press = False
             if self._copy_on_move and not self._copied and not self._is_a_click(scene_pos):
                 self._leave_copies_behind()
             if event.modifiers() & Qt.ShiftModifier:
+                # Shift locks the move to straight lines: across, down or at
+                # forty-five degrees.
                 held = self.constrain(QPointF(0, 0), delta)
                 delta = QPointF(held.x(), held.y())
-            free = False
+            # Ctrl pressed during the move lets it go anywhere, unsnapped. The
+            # Ctrl that started a copy is still that copy's, until let go.
+            free = control and not getattr(self, "_ctrl_from_the_press", False)
             if free:
                 self._snap_marker = None
             else:
@@ -2279,10 +2342,10 @@ class PageView(QGraphicsView):
             self.setCursor(format_painter_cursor())
             return
         if self._pending_arrow_leader is not None:
-            self.setCursor(drawing_cursor("arrow"))
+            self.setCursor(drawing_cursor("callout"))
             return
         if self._pending_cloud_leader is not None:
-            self.setCursor(cloud_cursor())
+            self.setCursor(cloud_callout_cursor())
             return
         grouped = self._selected_group()
         if grouped is not None:
@@ -2378,6 +2441,17 @@ class PageView(QGraphicsView):
             event.accept()
             return
 
+        if self._mode == "rubber" and getattr(self, "_paint_by_box", False):
+            self._paint_by_box = False
+            caught = [] if self._is_a_click(scene_pos) else self.caught_by_marquee()
+            self._marquee = []
+            self._mode = "idle"
+            self.viewport().update()
+            if caught:
+                self.window.paint_format_onto_all(caught)
+            event.accept()
+            return
+
         if self._mode == "rubber":
             if self._is_a_click(scene_pos):
                 # A click on bare paper only clears the selection, which the
@@ -2404,6 +2478,27 @@ class PageView(QGraphicsView):
             event.accept()
             return
 
+        pending = getattr(self, "_pending_reshape", None)
+        self._pending_reshape = None
+        if pending is not None and self._mode in ("move", "resize") \
+                and self._is_a_click(scene_pos):
+            # Clicked, not dragged: put everything back as it was pressed and
+            # do the reshaping the click asked for.
+            if self._mode == "move":
+                for item, origin in self._move_items:
+                    item.setPos(origin)          # a click's jitter is not a move
+            self._mode = "idle"
+            self._snap_marker = None
+            self._handle_item = None
+            self._shift_click_selection = None
+            self._copy_on_move = False
+            self._copied = False
+            self.commit_snapshot("Move markup")  # nothing changed: records nothing
+            self.reshape_at(*pending)
+            self.selectionChanged.emit()
+            event.accept()
+            return
+
         if self._mode == "move":
             self._mode = "idle"
             self._snap_marker = None
@@ -2414,6 +2509,7 @@ class PageView(QGraphicsView):
                 self.selectionChanged.emit()
             self._shift_click_selection = None
             self.settle_pages([item for item, _ in self._move_items])
+            self.rescale_where_they_landed([item for item, _ in self._move_items])
             self.commit_snapshot("Copy markup" if self._copied else "Move markup")
             self._copy_on_move = False
             self._copied = False
@@ -2439,7 +2535,7 @@ class PageView(QGraphicsView):
             item = self._handle_item
             self._handle_item = None
             if item is not None:
-                item.refresh(page=self.page())
+                item.refresh(page=self.page_of(item) or self.page())
             self.commit_snapshot("Resize markup")
             self.selectionChanged.emit()
             self._update_hover_cursor(scene_pos, event.modifiers())
@@ -3831,18 +3927,16 @@ class PageView(QGraphicsView):
         self._marquee.append(QPointF(scene_pos))
         self.viewport().update()
 
-    def select_in_marquee(self) -> None:
-        """Select what the marquee caught, then put it away."""
+    def caught_by_marquee(self) -> list:
+        """The markups the marquee takes: wholly inside, or crossed when
+        dragged right to left."""
         polygon = self.marquee_polygon()
         crossing = self.marquee_crosses()
-        self._marquee = []
-        self._mode = "idle"
-        self.viewport().update()
         if polygon.size() < 3:
-            self.selectionChanged.emit()
-            return
+            return []
         area = polygon.boundingRect()
         scene = self.scene()
+        found = []
         for item in scene.items(area) if scene is not None else []:
             if not isinstance(item, MarkupItem) or not self.editable(item):
                 continue
@@ -3854,8 +3948,18 @@ class PageView(QGraphicsView):
                              for corner in (box.topLeft(), box.topRight(),
                                             box.bottomRight(), box.bottomLeft()))
             if caught:
-                for member in self.group_of(item):
-                    member.setSelected(True)
+                found.append(item)
+        return found
+
+    def select_in_marquee(self) -> None:
+        """Select what the marquee caught, then put it away."""
+        caught = self.caught_by_marquee()
+        self._marquee = []
+        self._mode = "idle"
+        self.viewport().update()
+        for item in caught:
+            for member in self.group_of(item):
+                member.setSelected(True)
         self.selectionChanged.emit()
 
     @staticmethod

@@ -418,7 +418,7 @@ def source_paths(document, page, region):
             item.fill_alpha = float(entry.get("fill_opacity") if entry.get("fill_opacity") is not None else 1.0) * opacity
             dash = re.search(r"\[([^]]*)\]", str(entry.get("dashes", "")))
             if dash and width:
-                item.style.dash_array = tuple(float(n) * max(sx, sy) / width
+                item.style.dash_array = tuple(float(n) * max(sx, sy)
                                              for n in dash[1].split())
             item.commands, item._path = commands, path
             item.even_odd = entry.get("even_odd", False)

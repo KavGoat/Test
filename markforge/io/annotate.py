@@ -824,7 +824,7 @@ def annotation_for(item, rect, place, appearance=None) -> dict:
         annotation["BS"] = {"W": width}
         dashes = []
         try:
-            dashes = [float(step) * width for step in item.style.dashes()]
+            dashes = [float(step) for step in item.style.dashes()]
         except Exception:                              # noqa: BLE001
             dashes = []
         if dashes:

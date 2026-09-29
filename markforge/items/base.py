@@ -28,9 +28,10 @@ LINE_STYLES = {
     "dashdotdot": Qt.DashDotDotLine,
 }
 
-# The dashes each named line type is drawn with, in multiples of the line
-# width — which is how PDF writes them, so a line type read out of a Bluebeam
-# file and one chosen from the list are the same thing.
+# The dashes each named line type is drawn with, in points — as PDF writes
+# them. A line's thickness does not change them: a heavy dashed line has the
+# same dashes as a light one, the way Bluebeam draws it. Style.dash_scale
+# stretches or tightens them.
 DASH_ARRAYS = {
     "solid": [],
     "dash": [4.0, 2.0],
@@ -176,6 +177,9 @@ class Style:
     # means the named line style decides, which is the usual case; a line
     # read out of a Bluebeam file brings its own.
     dash_array: tuple = ()
+    # How far apart the dashes and dots of the line type are: 1 is as the
+    # type defines them, 2 twice as long and twice as far apart.
+    dash_scale: float = 1.0
     # A hatch drawn from a tile of its own rather than from the library: a
     # Bluebeam pattern, brought across as the linework its cell holds.
     # {"step_x", "step_y", "x", "y", "strokes"}; empty for a library hatch.
@@ -189,17 +193,22 @@ class Style:
     text_margins: tuple = ()
 
     def dashes(self) -> list:
-        """The dashes this line is drawn with, in multiples of its width."""
+        """The dashes this line is drawn with, in points, spacing applied."""
+        scale = max(float(self.dash_scale or 1.0), 0.01)
         if self.dash_array:
-            return [float(step) for step in self.dash_array if float(step) > 0]
-        return list(DASH_ARRAYS.get(self.line_style, []))
+            steps = [float(step) for step in self.dash_array if float(step) > 0]
+        else:
+            steps = list(DASH_ARRAYS.get(self.line_style, []))
+        return [step * scale for step in steps]
 
     def pen(self, scale: float = 1.0) -> QPen:
         colour = QColor(self.stroke or "#000000")
         colour.setAlphaF(max(0.0, min(1.0, self.opacity)))
         pen = QPen(colour)
         pen.setWidthF(max(self.width * scale, 0.01))
-        dashes = self.dashes()
+        # Qt counts dashes in line widths; ours are points, so they are
+        # divided through — which is what keeps thickness out of the spacing.
+        dashes = [step / max(self.width, 0.01) for step in self.dashes()]
         if dashes:
             # A dash pattern of its own beats the named style, and a round cap
             # would fill the gaps back in on a dotted line.

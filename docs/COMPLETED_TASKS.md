@@ -256,3 +256,45 @@ Differences that remain, and why:
   /Rotation, /Curves, /FillOpacity and /Pattern, which Bluebeam reads.
 - Thick borders: MuPDF centres a rebuilt square's border on Rect less /RD,
   Bluebeam keeps it inside; the export follows Bluebeam's own files.
+
+## 2026-09-30
+
+- **Measurements across a viewport's edge:** when a move or resize finishes,
+  each measurement and sized shape is read again at the scale where it
+  landed — the viewport's inside it, the page's outside.
+  `test_a_measurement_dragged_into_a_viewport_takes_its_scale`.
+- **Move and copy modifiers as Bluebeam's:** a drag is a copy only when Ctrl
+  is held as it starts; Ctrl pressed during a move turns snapping off; Shift
+  locks the move to straight lines. (Replaces the old rule that Ctrl
+  mid-move made a copy.) `test_ctrl_taken_hold_of_mid_move_lets_go_of_the_grid_and_copies_nothing`,
+  `test_shift_then_ctrl_mid_move_stays_a_constrained_move`.
+- **Pages panel Ctrl+C / Ctrl+V:** the window's own Copy/Paste shortcuts took
+  the keys first; the page list now claims them. With a page on the
+  clipboard, hovering the thumbnails shows the blue insertion bar where Ctrl+V
+  will put it; the bar goes when the clipboard changes.
+  `test_ctrl_c_and_ctrl_v_in_the_pages_panel_copy_and_paste_pages`,
+  `test_a_page_on_the_clipboard_shows_an_insertion_bar_where_it_will_go`.
+- **Line spacing and cloud size:** dashes are now kept in points, so a line's
+  thickness no longer changes them; a Spacing setting (Properties and the
+  style toolbar) scales dashes and dots. Cloud size is offered for every
+  cloud, cloud callout and cloud leader.
+  `test_a_thicker_line_keeps_its_dash_spacing_and_spacing_scales_it`,
+  `test_every_cloud_has_a_cloud_size`.
+- **Add-leader icons:** the pointer while adding a leader was a bare arrow or
+  a bare cloud; it is now the Callout drawing (arrow leader) or the Cloud+
+  drawing (cloud leader), as is the Cloud+ tool's own pointer.
+  `test_adding_a_leader_carries_the_callouts_own_picture`.
+- **Shift/Ctrl on a shape's outline:** a click still adds or removes a point,
+  curves a side or rounds a corner; pressed and dragged it is a Shift-drag
+  (straight move) or Ctrl-drag (copy) instead.
+  `test_shift_or_ctrl_dragging_a_shape_moves_or_copies_it_instead_of_reshaping`.
+- **Format painter as Bluebeam's:** picks up every appearance property the
+  source has (colour, fill, both opacities, width, line type and spacing,
+  hatch, line endings, the whole font, cloud size, corner radius) and paints
+  onto each markup only what it can show — never size, words or values. It
+  stays in hand across clicks; dragging a box paints everything inside in one
+  undo step; Esc or the button puts it down.
+  `test_the_format_painter_carries_the_whole_look_like_bluebeams`,
+  `test_dragging_round_markups_paints_them_all_in_one_step`.
+
+Full suite: 1012 passed.

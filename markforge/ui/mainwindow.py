@@ -879,6 +879,19 @@ class MainWindow(QMainWindow):
             self.dash_combo.addItem(_line_style_icon(name, "#212529", 1), name)
         self.dash_combo.currentTextChanged.connect(self._style_dash)
         self._style_widgets[DASH].append(style_bar.addWidget(self.dash_combo))
+        # How far apart the dashes are — the line's thickness does not say.
+        self.dash_scale_spin = QDoubleSpinBox()
+        self.dash_scale_spin.setObjectName("dashSpacing")
+        self.dash_scale_spin.setRange(0.1, 50.0)
+        self.dash_scale_spin.setDecimals(2)
+        self.dash_scale_spin.setSingleStep(0.25)
+        self.dash_scale_spin.setValue(self.default_style.dash_scale)
+        self.dash_scale_spin.setPrefix("× ")
+        self.dash_scale_spin.setToolTip("Dash spacing: how long the dashes and "
+                                        "gaps are, whatever the thickness")
+        self.dash_scale_spin.valueChanged.connect(lambda value: self._style_change(
+            DASH, lambda style: setattr(style, "dash_scale", value), "Dash spacing"))
+        self._style_widgets[DASH].append(style_bar.addWidget(self.dash_scale_spin))
         self._style_widgets[FONT].append(style_bar.addWidget(QLabel(" Text ")))
         self.font_family_combo = QFontComboBox()
         self.font_family_combo.setMaximumWidth(145)
@@ -3632,6 +3645,7 @@ class MainWindow(QMainWindow):
                     (self.arrow_start_combo, active.style.arrow_start, "setCurrentText"),
                     (self.arrow_end_combo, active.style.arrow_end, "setCurrentText"),
                     (self.dash_combo, active.style.line_style, "setCurrentText"),
+                    (self.dash_scale_spin, active.style.dash_scale, "setValue"),
                     (self.font_spin, active.style.font_size, "setValue"),
                     (self.font_family_combo, QFont(QFontInfo(active.style.font()).family()),
                      "setCurrentFont"),
@@ -5385,7 +5399,34 @@ class MainWindow(QMainWindow):
     # It is held until it is used or Esc is pressed, and the status bar says so
     # the whole time, because an invisible mode that changes what clicking does
     # is the kind of thing that ruins an afternoon.
+    # Which style fields each kind of appearance control stands for: what a
+    # markup can show is what it can be painted with, and nothing more.
+    PAINTED_FIELDS = {
+        "stroke": ("stroke",),
+        "fill": ("fill",),
+        "width": ("width",),
+        "dash": ("line_style", "dash_array", "dash_scale"),
+        "hatch": ("hatch", "hatch_scale", "hatch_color", "hatch_tile"),
+        "opacity": ("opacity",),
+        "fill_opacity": ("fill_opacity",),
+        "font": ("font_family", "font_size", "bold", "italic", "underline",
+                 "text_color", "align", "valign"),
+        "arrow_size": ("arrow_size", "arrow_start", "arrow_end"),
+    }
+
     def format_painter(self) -> None:
+        """Pick up the selected markup's look — or put the painter down.
+
+        As Bluebeam's: every appearance property is picked up — colour, fill,
+        both opacities, line width, line type and its spacing, hatch, line
+        endings, the whole of the font and the cloud's size — and none of its
+        size, its words or what it measures. It stays in hand, clicked onto
+        one markup after another or dragged round several, until Esc or the
+        button is pressed again.
+        """
+        from copy import deepcopy
+        from .stylecaps import capabilities
+
         items = self.selected_items()
         if self._held_style is not None:
             self.put_the_format_painter_down()
@@ -5394,24 +5435,26 @@ class MainWindow(QMainWindow):
             self.status_hint.setText("Pick the markup whose look you want first")
             return
         source = items[0]
-        style = source.style
         self._held_style = {
             "source_type": source.TYPE,
-            "style": {key: getattr(style, key) for key in
-                      ("stroke", "fill", "width")},
+            "source_name": source.display_name().lower(),
+            "style": deepcopy(source.style.to_dict()),
+            "controls": set(capabilities(source)),
+            "cloud_radius": getattr(source, "cloud_radius", None)
+            if self._is_clouded(source) else None,
+            "corner_radius": source.style.corner_radius,
         }
-        if isinstance(source, CalloutItem):
-            self._held_style["callout"] = {
-                key: getattr(style, key) for key in
-                ("arrow_start", "arrow_end", "font_family", "font_size",
-                 "arrow_size", "bold", "italic", "underline", "text_color",
-                 "align", "valign")
-            }
         from .view import format_painter_cursor
         self.view.setCursor(format_painter_cursor())
         self.status_hint.setText(
-            f"Format painter: click what should look like this "
-            f"{items[0].display_name().lower()} · Esc to put it down")
+            f"Format painter: click, or drag round, what should look like this "
+            f"{self._held_style['source_name']} · Esc to put it down")
+
+    @staticmethod
+    def _is_clouded(item) -> bool:
+        return (getattr(item, "kind", "") == "cloud"
+                or getattr(item, "shape_kind", "") == "cloud"
+                or bool(getattr(item, "clouds_a_region", lambda: False)()))
 
     def put_the_format_painter_down(self) -> None:
         """Drop the held look, if one is held. Escape's business."""
@@ -5425,32 +5468,50 @@ class MainWindow(QMainWindow):
 
     def paint_format_onto(self, item) -> bool:
         """Give *item* the look the format painter is holding."""
-        if self._held_style is None or item is None:
-            return False
-        if isinstance(item, ImageItem):
-            self.status_hint.setText("Format painter: image content has no markup style")
-            return False
-        self.view.begin_snapshot(self.view.involved_frames(item))
-        linework = isinstance(item, (RectItem, PolyItem, MeasureItem, _TextBase))
-        fillable = isinstance(item, (RectItem, _TextBase))
-        held = self._held_style["style"]
-        if linework:
-            item.style.stroke = held["stroke"]
-            item.style.width = held["width"]
-        if fillable:
-            item.style.fill = held["fill"]
-        if (self._held_style.get("source_type") == CalloutItem.TYPE
-                and isinstance(item, CalloutItem)):
-            for key, value in self._held_style.get("callout", {}).items():
-                setattr(item.style, key, value)
-            item.apply_style()
-        item.touch()
-        item.update()
+        return self.paint_format_onto_all([item]) > 0
+
+    def paint_format_onto_all(self, items) -> int:
+        """Give every one of *items* the held look, as one undo step."""
+        from .stylecaps import capabilities
+
+        held = self._held_style
+        items = [item for item in items if item is not None]
+        if held is None or not items:
+            return 0
+        self.view.begin_snapshot(self.view.involved_frames(*items))
+        painted = 0
+        for item in items:
+            controls = held["controls"] & set(capabilities(item))
+            if not controls:
+                continue
+            for control in controls:
+                for field_name in self.PAINTED_FIELDS.get(control, ()):
+                    if field_name in held["style"]:
+                        value = held["style"][field_name]
+                        if isinstance(value, (list, dict)):
+                            from copy import deepcopy
+                            value = deepcopy(value)
+                        if field_name == "dash_array":
+                            value = tuple(value)
+                        setattr(item.style, field_name, value)
+            if held.get("cloud_radius") and self._is_clouded(item) \
+                    and hasattr(item, "cloud_radius"):
+                item.prepareGeometryChange()
+                item.cloud_radius = held["cloud_radius"]
+            if getattr(item, "kind", "") == "rect" and held["source_type"] == item.TYPE:
+                item.style.corner_radius = held["corner_radius"]
+            if hasattr(item, "apply_style"):
+                item.apply_style()
+            item.touch()
+            item.update()
+            painted += 1
         self.view.commit_snapshot("Format painter")
         self.refresh_selection()
         from .view import format_painter_cursor
         self.view.setCursor(format_painter_cursor())
-        return True
+        if not painted:
+            self.status_hint.setText("Format painter: that markup has none of those properties")
+        return painted
 
     def hide_selection(self) -> None:
         """Take the selected markups off the page without deleting them."""

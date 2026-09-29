@@ -194,14 +194,13 @@ def _style(annotation: dict) -> dict:
         # drawn rather than merely "dashed".
         "line_style": "dash" if (border.get("S") == "D" or dash) else "solid",
     }
-    # Dashes are kept in multiples of the line's width; a PDF gives them in
-    # points, so a half-point line's 3-point dashes are six widths long.
+    # Dashes are kept in points, as a PDF gives them.
     width = style["width"] if style["width"] > 0 else 1.0
     if isinstance(dash, list) and dash:
         steps = [float(step) for step in dash
                  if isinstance(step, (int, float)) and float(step) > 0]
         if steps:
-            style["dash_array"] = tuple(step / width for step in steps)
+            style["dash_array"] = tuple(steps)
     # Bluebeam's own line types: /LineStyle [scaled? [start, dash, -gap, …]]
     # with the name in /LineStyleName. Its border still says solid, so without
     # this a "Medium Dash" hidden line came in as a continuous one.
@@ -211,7 +210,8 @@ def _style(annotation: dict) -> dict:
                    if isinstance(v, (int, float)) and float(v) != 0]
         if pattern:
             scaled = bool(own[0]) if isinstance(own[0], bool) else False
-            style["dash_array"] = tuple(v if scaled else v / width for v in pattern)
+            # Scaled with the line: Bluebeam's lengths are in widths then.
+            style["dash_array"] = tuple(v * width if scaled else v for v in pattern)
             style["line_style"] = "dash"
     if annotation.get("BM") == "Multiply":
         style["blend"] = "multiply"

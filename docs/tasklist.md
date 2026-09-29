@@ -64,3 +64,15 @@ restarts with the report below. Completion status is user-owned.
 |  | Import of any Bluebeam tool set must be exactly one to one with Bluebeam; it currently is not. |
 |  | Right-click an image: Replace image from clipboard or from file. The new picture keeps its own aspect ratio and is sized from the existing image, exactly like Word. |
 |  | Fix the margin bugs and every other export issue found, for every markup type throughout the app: anything added in MarkForge must appear exactly the same in another editor. |
+
+## Requests reported 2026-09-30
+
+| Complete | Task |
+| --- | --- |
+|  | Dragging a measurement into or out of a viewport changes its scale automatically: finished inside the viewport it uses the viewport's scale, otherwise the page's. |
+|  | Move and copy modifiers like Bluebeam: only copy if Ctrl is held before the drag starts; during a move, Ctrl turns snapping off and Shift locks the move to straight lines. |
+|  | Pages panel: Ctrl+C and Ctrl+V copy and paste pages; with a page on the clipboard, hovering shows an insertion bar where it will go, exactly like Bluebeam. |
+|  | Cloud size property for clouds, and a spacing (scale) property for line types that scales dot and dash spacing; line thickness must not change the spacing (it currently does). |
+|  | The add-leader icons are still wrong; fix them. |
+|  | Adding a curve or control point with Shift+click or Ctrl+click must not happen when the item is dragged afterwards; that is a Shift-drag or Ctrl-drag instead. |
+|  | Format painter must behave exactly like Bluebeam's. |

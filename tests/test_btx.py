@@ -783,8 +783,7 @@ def test_curved_sides_come_in_as_bluebeam_draws_them():
 def test_a_bluebeam_line_style_keeps_its_dashes():
     grid = _tool("Strucutures - General.btx", lambda t: t.name == "Centre Line")
     style = grid.payloads[0]["style"]
-    width = style["width"]
-    assert [round(step * width, 3) for step in style["dash_array"]] == [32, 8, 8, 8]
+    assert [round(step, 3) for step in style["dash_array"]] == [32, 8, 8, 8]
 
 
 def test_a_bluebeam_hatch_is_drawn_from_its_own_tile():

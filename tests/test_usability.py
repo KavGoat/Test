@@ -2633,18 +2633,21 @@ def test_a_copy_can_be_undone_in_one_go(window):
     assert len(markups(window)) == 1
 
 
-def test_ctrl_taken_hold_of_mid_move_switches_to_a_snapped_copy(window):
+def test_ctrl_taken_hold_of_mid_move_lets_go_of_the_grid_and_copies_nothing(window):
+    """Bluebeam: Ctrl only copies when it is held as the drag starts. Pressed
+    once the move is under way, it lets the markup off the grid instead."""
     from PySide6.QtCore import QEvent
     from PySide6.QtWidgets import QApplication
 
     window.document.settings.snap_to_grid = True
+    window.document.settings.snap_to_items = False
+    window.document.settings.snap_to_alignment = False
     window.document.settings.grid_mm = 10.0
     window.select_tool("rect")
     drag(window.view, 100, 100, 200, 160)
     window.select_tool("select")
     box = markups(window)[0]
     box.setSelected(True)
-    origin = QPointF(box.pos())
 
     centre = box.mapToScene(box.local_rect().center())
     QApplication.sendEvent(window.view.viewport(),
@@ -2652,25 +2655,22 @@ def test_ctrl_taken_hold_of_mid_move_switches_to_a_snapped_copy(window):
     QApplication.sendEvent(window.view.viewport(), _mouse(
         window.view, QEvent.MouseMove, centre.x() + 15, centre.y() + 8,
         Qt.NoButton, Qt.LeftButton))
-    assert len(markups(window)) == 1
+    step = 10.0 * MM_TO_PT
+    snapped = box.pos()
+    assert abs(round(snapped.x() / step) * step - snapped.x()) < 0.01
     QApplication.sendEvent(window.view.viewport(), _mouse(
         window.view, QEvent.MouseMove, centre.x() + 33, centre.y() + 17,
         Qt.NoButton, Qt.LeftButton, Qt.ControlModifier))
-    assert len(markups(window)) == 2
+    free = box.pos()
     QApplication.sendEvent(window.view.viewport(), _mouse(
-        window.view, QEvent.MouseMove, centre.x() + 33, centre.y() + 17,
-        Qt.NoButton, Qt.LeftButton, Qt.NoModifier))
-    on_grid = box.pos()
-    QApplication.sendEvent(window.view.viewport(), _mouse(
-        window.view, QEvent.MouseButtonRelease, centre.x() + 33, centre.y() + 17))
+        window.view, QEvent.MouseButtonRelease, centre.x() + 33, centre.y() + 17,
+        modifiers=Qt.ControlModifier))
 
-    step = 10.0 * MM_TO_PT
-    assert abs(round(on_grid.x() / step) * step - on_grid.x()) < 0.01
-    assert len(markups(window)) == 2
-    assert any(item.pos() == origin for item in markups(window))
+    assert len(markups(window)) == 1
+    assert abs(round(free.x() / step) * step - free.x()) > 0.01   # off the grid
 
 
-def test_shift_first_then_ctrl_duplicates_and_keeps_the_move_constrained(window):
+def test_shift_then_ctrl_mid_move_stays_a_constrained_move(window):
     import math
 
     window.document.settings.snap_to_grid = False
@@ -2698,12 +2698,10 @@ def test_shift_first_then_ctrl_duplicates_and_keeps_the_move_constrained(window)
         window.view, QEvent.MouseButtonRelease, centre.x() + 100,
         centre.y() + 38, modifiers=Qt.ControlModifier | Qt.ShiftModifier))
 
-    assert len(markups(window)) == 2
-    moved = next(item for item in markups(window) if item is box)
-    delta = moved.pos() - origin
+    assert len(markups(window)) == 1                     # moved, not copied
+    delta = box.pos() - origin
     angle = abs(math.degrees(math.atan2(delta.y(), delta.x())))
     assert min(abs(angle - expected) for expected in (0, 45, 90)) < 0.5
-    assert any(item is not box and item.pos() == origin for item in markups(window))
 
 
 def test_shift_can_be_added_and_removed_while_a_move_is_in_progress(window):
@@ -7269,9 +7267,11 @@ def test_a_line_type_is_drawn_with_its_own_dashes(window):
 
     assert Style(line_style="solid").dashes() == []
     assert Style(line_style="centre").dashes() == [10.0, 2.5, 2.0, 2.5]
-    pen = Style(line_style="hidden").pen()
+    hidden = Style(line_style="hidden")
+    pen = hidden.pen()
     assert pen.style() == QtNS.CustomDashLine
-    assert pen.dashPattern() == [3.0, 2.0]
+    # Qt counts in line widths; the dashes themselves are points.
+    assert [v * hidden.width for v in pen.dashPattern()] == pytest.approx([3.0, 2.0])
     # A pattern of its own beats the named one.
     own = Style(line_style="solid", dash_array=(6.0, 1.0))
     assert own.dashes() == [6.0, 1.0]
@@ -7283,10 +7283,9 @@ def test_a_dashed_line_from_a_toolset_comes_in_dashed(window):
 
     look = _style({"C": [0, 0, 0], "BS": {"W": 2.0, "S": "D", "D": [4, 3]}})
     assert look["line_style"] == "dash"
-    # PDF gives dashes in points; a style keeps them in line widths, so a
-    # two-point line's 4/3-point dashes are 2 and 1.5 widths — the same
-    # length on the page as the file draws them.
-    assert look["dash_array"] == (2.0, 1.5)
+    # Dashes are kept in points, as PDF gives them: the line's thickness
+    # does not change them.
+    assert look["dash_array"] == (4.0, 3.0)
 
     plain = _style({"C": [0, 0, 0], "BS": {"W": 2.0}})
     assert plain["line_style"] == "solid"
@@ -10395,3 +10394,198 @@ def test_arrowheads_go_out_filled_and_a_freehand_arrow_keeps_them(window, tmp_pa
     said = pdf.xref_object(annotation.xref)
     assert annotation.type[1] == "PolyLine" and "/ClosedArrow" in said and "/IC" in said
     assert len(annotation.vertices) == 3                  # the pause is not a corner
+
+
+def test_a_measurement_dragged_into_a_viewport_takes_its_scale(window):
+    from markforge.core.document import MM_TO_PT, PageScale
+    page = scaled_page(window, 100)
+    frame = page.frame
+    window.add_viewport(frame, QRectF(40, 40, 200, 200), PageScale.from_ratio(20), "A")
+    length = _length_at(frame, 300, 500, 10 * MM_TO_PT)
+    assert length.value.to("mm").magnitude == pytest.approx(1000, rel=1e-3)
+    window.select_tool("select")
+    window.view.scene().clearSelection()
+    length.setSelected(True)
+
+    def drag_by(item, dx, dy):
+        start = item.mapToScene(item.points[0] + (item.points[1] - item.points[0]) / 5)
+        end = start + QPointF(dx, dy)
+        drag(window.view, start.x(), start.y(), end.x(), end.y())
+
+    frame_origin = frame.mapToScene(QPointF(0, 0))
+    drag_by(length, -220, -400)                      # into the viewport
+    assert page.viewport_at(length.pos().x() + 5, length.pos().y())
+    assert length.value.to("mm").magnitude == pytest.approx(200, rel=1e-2)
+    drag_by(length, 220, 400)                        # and out again
+    assert length.value.to("mm").magnitude == pytest.approx(1000, rel=1e-2)
+    assert frame_origin == frame.mapToScene(QPointF(0, 0))
+
+
+def test_shift_or_ctrl_dragging_a_shape_moves_or_copies_it_instead_of_reshaping(window):
+    shape = _polygon(window)
+    count = len(shape.points)
+    start, end = shape.segment_ends(0)
+    middle = shape.mapToScene((start + end) / 2)
+    origin = QPointF(shape.pos())
+    drag(window.view, middle.x(), middle.y(), middle.x() + 60, middle.y(),
+         modifiers=Qt.ShiftModifier)
+    assert len(shape.points) == count                # no point added
+    assert shape.pos() != origin                     # it was moved
+    drag(window.view, middle.x() + 60, middle.y(), middle.x() + 60, middle.y() + 80,
+         modifiers=Qt.ControlModifier)
+    assert not shape.is_curved(0)                    # not bent
+    assert len([i for i in markups(window) if isinstance(i, PolyItem)]) == 2   # copied
+    window.view.scene().clearSelection()
+    shape.setSelected(True)
+    start, end = shape.segment_ends(0)
+    here = shape.mapToScene((start + end) / 2)
+    click(window.view, here.x(), here.y(), modifiers=Qt.ShiftModifier)
+    assert len(shape.points) == count + 1            # a click still adds one
+
+
+
+def test_a_thicker_line_keeps_its_dash_spacing_and_spacing_scales_it(window):
+    from markforge.items.base import Style
+    thin = Style(stroke="#000000", width=1.0, line_style="dash")
+    thick = Style(stroke="#000000", width=4.0, line_style="dash")
+    assert thin.dashes() == thick.dashes()
+    # Qt counts in widths, so the pen's own pattern shrinks as the line grows.
+    assert [v * 4.0 for v in thick.pen().dashPattern()] == pytest.approx(
+        thin.pen().dashPattern())
+    wide = Style(stroke="#000000", width=1.0, line_style="dash", dash_scale=2.0)
+    assert wide.dashes() == [v * 2 for v in thin.dashes()]
+
+
+def test_every_cloud_has_a_cloud_size(window):
+    from PySide6.QtWidgets import QDoubleSpinBox
+    frame = window.current_page().frame
+    cloud = RectItem("cloud")
+    cloud.set_local_rect(QRectF(0, 0, 120, 60))
+    frame.add_markup(cloud, QPointF(100, 100))
+    window.view.scene().clearSelection()
+    cloud.setSelected(True)
+    window.refresh_selection()
+    size = window.properties_panel.findChild(QDoubleSpinBox, "cloudSize")
+    assert size is not None
+    size.setValue(20.0)
+    assert cloud.cloud_radius == 20.0
+
+
+def test_adding_a_leader_carries_the_callouts_own_picture(window):
+    """Not a bare arrow or a bare cloud: the call-out being added to."""
+    from markforge.items.text import CalloutItem
+    from markforge.ui.view import cloud_callout_cursor, drawing_cursor
+    frame = window.current_page().frame
+    note = CalloutItem()
+    frame.add_markup(note, QPointF(200, 200))
+    window.view.begin_arrow_leader(note)
+    assert (window.view.cursor().pixmap().cacheKey()
+            == drawing_cursor("callout").pixmap().cacheKey())
+    window.view.cancel_arrow_leader()
+    window.view.begin_cloud_leader(note)
+    assert (window.view.cursor().pixmap().cacheKey()
+            == cloud_callout_cursor().pixmap().cacheKey())
+    window.view.cancel_cloud_leader()
+    window.select_tool("cloud_callout")
+    assert (window.view.cursor().pixmap().cacheKey()
+            == cloud_callout_cursor().pixmap().cacheKey())
+
+
+def test_the_format_painter_carries_the_whole_look_like_bluebeams(window):
+    from markforge.items.text import TextItem
+    frame = window.current_page().frame
+    source = RectItem("cloud")
+    source.set_local_rect(QRectF(0, 0, 100, 60))
+    source.style.stroke, source.style.fill = "#aa0000", "#00aa00"
+    source.style.width, source.style.opacity = 3.0, 0.6
+    source.style.line_style, source.style.dash_scale = "dash", 2.0
+    source.style.hatch = "brick"
+    source.cloud_radius = 20.0
+    frame.add_markup(source, QPointF(50, 50))
+    other_cloud = RectItem("cloud")
+    other_cloud.set_local_rect(QRectF(0, 0, 80, 50))
+    frame.add_markup(other_cloud, QPointF(300, 50))
+    words = TextItem()
+    words.set_text("keep me")
+    frame.add_markup(words, QPointF(300, 300))
+    size_before = QRectF(other_cloud.local_rect())
+
+    window.view.scene().clearSelection()
+    source.setSelected(True)
+    window.format_painter()
+    assert window.holding_a_format()
+    assert window.paint_format_onto(other_cloud)
+    assert window.holding_a_format()                    # stays in hand
+    style = other_cloud.style
+    assert (style.stroke, style.fill, style.width, style.opacity) == \
+        ("#aa0000", "#00aa00", 3.0, 0.6)
+    assert (style.line_style, style.dash_scale, style.hatch) == ("dash", 2.0, "brick")
+    assert other_cloud.cloud_radius == 20.0
+    assert other_cloud.local_rect() == size_before       # never the size
+    assert window.paint_format_onto(words)               # a second markup
+    assert words.style.stroke == "#aa0000" and words.text() == "keep me"
+    window.put_the_format_painter_down()
+    assert not window.holding_a_format()
+
+
+def test_dragging_round_markups_paints_them_all_in_one_step(window):
+    frame = window.current_page().frame
+    source = RectItem("rect")
+    source.set_local_rect(QRectF(0, 0, 40, 40))
+    source.style.stroke = "#aa0000"
+    frame.add_markup(source, QPointF(40, 40))
+    targets = []
+    for x in (200, 260):
+        box = RectItem("rect")
+        box.set_local_rect(QRectF(0, 0, 30, 30))
+        frame.add_markup(box, QPointF(x, 200))
+        targets.append(box)
+    window.view.scene().clearSelection()
+    source.setSelected(True)
+    window.format_painter()
+    corner = frame.mapToScene(QPointF(180, 180))
+    far = frame.mapToScene(QPointF(320, 260))
+    drag(window.view, corner.x(), corner.y(), far.x(), far.y())
+    assert all(box.style.stroke == "#aa0000" for box in targets)
+    assert window.holding_a_format()
+    window.undo_stack.undo()
+    red = [box for box in markups(window) if box.style.stroke == "#aa0000"]
+    assert len(red) == 1                                  # only the source again
+
+
+def test_ctrl_c_and_ctrl_v_in_the_pages_panel_copy_and_paste_pages(window):
+    from PySide6.QtCore import QEvent
+    from PySide6.QtGui import QKeyEvent
+    window.add_page()
+    window.add_page()
+    assert len(window.document.pages) == 3
+    panel = window.pages_panel
+    panel.list.setFocus()
+    panel.list.setCurrentRow(0)
+    for key in (Qt.Key_C, Qt.Key_V):
+        for kind in (QEvent.ShortcutOverride, QEvent.KeyPress):
+            event = QKeyEvent(kind, key, Qt.ControlModifier)
+            QApplication.sendEvent(panel.list, event)
+    assert len(window.document.pages) == 4
+    assert window.current_index == 1                 # after the page picked out
+
+
+def test_a_page_on_the_clipboard_shows_an_insertion_bar_where_it_will_go(window):
+    from PySide6.QtCore import QEvent, QPoint, QPointF
+    from PySide6.QtGui import QMouseEvent
+    window.add_page()
+    window.add_page()
+    panel = window.pages_panel
+    window.copy_page(0)
+    last = panel.list.visualItemRect(panel.list.item(2))
+    where = QPointF(last.right() - 2, last.center().y())
+    move = QMouseEvent(QEvent.MouseMove, where, where, Qt.NoButton, Qt.NoButton,
+                       Qt.NoModifier)
+    QApplication.sendEvent(panel.list.viewport(), move)
+    assert panel.list.external_drop_row == 3          # after the last page
+    panel.paste_pages_here()
+    assert len(window.document.pages) == 4
+    assert window.current_index == 3
+    QApplication.clipboard().setText("something else")
+    QApplication.processEvents()
+    assert panel.list.external_drop_row is None
