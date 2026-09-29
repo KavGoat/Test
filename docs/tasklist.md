@@ -63,3 +63,4 @@ restarts with the report below. Completion status is user-owned.
 |  | Sketch Tools contain groups within groups. Import them as nested groups linked together the way Bluebeam does. |
 |  | Import of any Bluebeam tool set must be exactly one to one with Bluebeam; it currently is not. |
 |  | Right-click an image: Replace image from clipboard or from file. The new picture keeps its own aspect ratio and is sized from the existing image, exactly like Word. |
+|  | Fix the margin bugs and every other export issue found, for every markup type throughout the app: anything added in MarkForge must appear exactly the same in another editor. |

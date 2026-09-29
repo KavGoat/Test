@@ -14,6 +14,11 @@ Evidence in `COMPLETED_TASKS.md`. Things that will bite:
 - Page setup panel: `ui/pagepanel.py`; separate Y scale is
   `PageScale.y_factor`.
 - `QTextCharFormat.fontFamilies()` segfaults PySide 6.11 when empty.
+- Page coordinates: never use PyMuPDF's `transformation_matrix` directly —
+  `engine.to_pdf`/`to_display` build it from the crop box (MuPDF's drops
+  the crop offset on turned pages). Appearances on turned pages carry the
+  turn in their /Matrix (`Placement.turn_the_appearance`), except notes,
+  which stay upright and pinned (`_pin_the_note`).
 - Audit scripts used this round (not in the repo): export every tool and
   compare MarkForge / MuPDF / pdfium / rebuilt renders; render every `.btx`
   tool from Bluebeam's own appearance and compare with the import.

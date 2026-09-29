@@ -3275,9 +3275,12 @@ class PageView(QGraphicsView):
     def _draft_scale(self):
         """The scale the shape being drawn is measured at — its viewport's."""
         page = self.page()
+        if page is None:
+            from ..core.document import PageScale
+            return PageScale()
         draft = self._draft
         scale_on = getattr(draft, "scale_on", None)
-        if page is not None and callable(scale_on):
+        if callable(scale_on):
             return scale_on(page)
         return page.scale
 

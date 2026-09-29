@@ -546,7 +546,7 @@ def _pattern_tile(pointer, resources: dict) -> dict:
     strokes = read_content(stream)
     strokes = _flip_strokes(strokes, box[3] + box[1])
     return {"x": box[0], "y": box[1], "step_x": abs(step_x), "step_y": abs(step_y),
-            "strokes": strokes}
+            "box": box, "strokes": strokes}
 
 
 def leader_entry(points: list, box: list, origin=(0.0, 0.0)) -> dict:

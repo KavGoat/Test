@@ -203,3 +203,56 @@ cloud scallop size, note icons and measurement labels are drawn in that
 editor's own style; MuPDF ignores Bluebeam's `/Curves`, `/FillOpacity` and
 hatch keys (Bluebeam reads them). Not verified in Bluebeam itself — no copy
 here.
+
+## 2026-09-29 (later) — every markup, every look, every kind of page
+
+A sweep exported every drawing tool in six looks (plain, faded, heavy dashed
+with arrowheads, filled, hatched, turned) on six kinds of page (blank, PDF,
+PDF cropped, PDF turned 90°, 180°, and 270° cropped), and compared each with
+MuPDF, pdfium and the markup rebuilt from its dictionary. Fixed:
+
+- **Markups on turned PDF pages were squashed** in every viewer: the
+  appearance was fitted into the turned Rect without being turned. Each
+  appearance now carries the page's turn in its /Matrix.
+- **Markups on cropped PDF pages were placed off by the crop**, on export and
+  when a PDF was opened: MuPDF's `transformation_matrix` was used the wrong
+  way round, and on turned pages it drops the crop's offset altogether. The
+  mapping is now built from the page's crop box (verified against rendered
+  positions in all four turns, with and without a crop, and with a media box
+  not at 0,0).
+- **/RD** is computed in the file's own space, so it is right on turned pages.
+- **Turned rectangles, ellipses, clouds and highlights, and rounded
+  rectangles** go out as a polygon of their exact outline (a PDF square
+  cannot turn or round its corners); turned text carries Bluebeam's
+  /Rotation.
+- **Hatches** go out with the hatch itself as a PDF tiling pattern in
+  /Pattern (Bluebeam's own tile for imported hatches, the library linework
+  otherwise); checked by painting the pattern and comparing with MarkForge.
+- **Cloud scallop joints** are round everywhere; the screen drew miter
+  spikes that no export showed.
+- **Freehand lines with arrowheads** go out as a polyline (ink cannot carry
+  line endings); arrowheads are written filled (/IC) as they are drawn.
+- **Notes on turned pages** vanished in MuPDF: PDF keeps a note's icon
+  upright and pins it by its top-left corner. Notes there are now written
+  upright, pinned at their corner, with the no-rotate flag.
+
+Tests: `test_markups_on_a_turned_or_cropped_sheet_export_where_they_are`,
+`test_an_annotation_on_a_cropped_sheet_opens_where_it_is_drawn`,
+`test_a_turned_rectangle_goes_out_as_its_outline`,
+`test_a_hatch_goes_out_as_a_pattern_the_editor_can_draw`,
+`test_a_note_on_a_turned_sheet_shows_where_it_was_put`,
+`test_arrowheads_go_out_filled_and_a_freehand_arrow_keeps_them`.
+After the fixes every tool shows in MuPDF and pdfium where and as MarkForge
+draws it (97–100 % of its ink in place) on every page kind. Full suite: 1003
+passed.
+
+Differences that remain, and why:
+- A dashed curve's dashes can sit a fraction differently in another viewer:
+  each viewer measures dashes along a curve its own way. Straight dashed
+  lines match exactly.
+- When an editor redraws a markup from its dictionary (not when it shows
+  it): arrowhead size, cloud scallop size and note icons follow that
+  editor's own style — PDF has no key for them; MuPDF ignores Bluebeam's
+  /Rotation, /Curves, /FillOpacity and /Pattern, which Bluebeam reads.
+- Thick borders: MuPDF centres a rebuilt square's border on Rect less /RD,
+  Bluebeam keeps it inside; the export follows Bluebeam's own files.

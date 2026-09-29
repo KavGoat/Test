@@ -10258,3 +10258,140 @@ def test_an_arc_goes_out_curved_for_an_editor_that_redraws_it(window, tmp_path):
     assert "/Curves" in said and "/PolyLine" in said
     back = pdfmarkups.markups_of_page(pdfvector.PdfFile.open(path), 0)
     assert len(back) == 1 and back[0].get("bezier")
+
+
+def _page_from_a_pdf(window, tmp_path, rotation=0, crop=0):
+    import pymupdf
+    from markforge.io import pdfio
+    path = str(tmp_path / f"sheet_{rotation}_{crop}.pdf")
+    made = pymupdf.open()
+    sheet = made.new_page(width=600, height=420)
+    sheet.draw_rect(pymupdf.Rect(20, 20, 580, 400), color=(0.8, 0.8, 0.8), width=0.5)
+    if crop:
+        sheet.set_cropbox(pymupdf.Rect(crop, crop, 600, 420))
+    sheet.set_rotation(rotation)
+    made.save(path)
+
+    def mutate():
+        pdfio.import_pages(window.document, path, [0], pdfio.FIT_ORIGINAL, 150, at=0)
+        del window.document.pages[1:]
+    window._structural_change("Insert", mutate)
+    window.go_to_page(0)
+    return window.current_page().frame
+
+
+def _ink_where_the_markup_is(window, frame, path, item, zoom=3.0):
+    """Share of MarkForge's own ink for *item* that MuPDF puts in the same place."""
+    import numpy as np
+    import pymupdf
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QImage, QPainter
+    r = frame.page_rect()
+    image = QImage(int(round(r.width() * zoom)), int(round(r.height() * zoom)),
+                   QImage.Format_RGB32)
+    image.fill(Qt.white)
+    painter = QPainter(image)
+    frame.render_page(painter, QRectF(0, 0, image.width(), image.height()), for_print=True)
+    painter.end()
+    ours = np.frombuffer(image.constBits(), np.uint8).reshape(
+        image.height(), image.bytesPerLine() // 4, 4)[:, :image.width(), :3].min(axis=2) < 150
+    pixmap = pymupdf.open(path)[0].get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), alpha=False)
+    theirs = np.frombuffer(pixmap.samples, np.uint8).reshape(
+        pixmap.height, pixmap.width, 3).min(axis=2) < 150
+    box = item.mapRectToParent(item.boundingRect())
+    y0, y1 = int(box.top() * zoom), int(box.bottom() * zoom)
+    x0, x1 = int(box.left() * zoom), int(box.right() * zoom)
+    a, b = ours[y0:y1, x0:x1], theirs[y0:y1, x0:x1]
+    grown = b.copy()
+    for dy in (-2, -1, 0, 1, 2):
+        for dx in (-2, -1, 0, 1, 2):
+            grown |= np.roll(np.roll(b, dy, 0), dx, 1)
+    return (a & grown).sum() / max(a.sum(), 1)
+
+
+@pytest.mark.parametrize("rotation, crop", [(0, 30), (90, 0), (180, 0), (270, 30)])
+def test_markups_on_a_turned_or_cropped_sheet_export_where_they_are(window, tmp_path,
+                                                                     rotation, crop):
+    frame = _page_from_a_pdf(window, tmp_path, rotation, crop)
+    box = RectItem("rect")
+    box.set_local_rect(QRectF(0, 0, 150, 80))
+    box.style.width = 2.0
+    frame.add_markup(box, QPointF(60, 70))
+    path, _pdf = _exported_annotations(window, tmp_path, f"out_{rotation}_{crop}.pdf")
+    assert _ink_where_the_markup_is(window, frame, path, box) > 0.97
+
+
+def test_a_turned_rectangle_goes_out_as_its_outline(window, tmp_path):
+    frame = window.current_page().frame
+    box = RectItem("rect")
+    box.set_local_rect(QRectF(0, 0, 150, 80))
+    frame.add_markup(box, QPointF(100, 100))
+    box.set_item_rotation(30, zero_snap=0)
+    _path, pdf = _exported_annotations(window, tmp_path)
+    page = pdf[0]
+    annotation = next(page.annots())
+    assert annotation.type[1] == "Polygon"
+    assert len(annotation.vertices) == 4
+
+
+def test_a_hatch_goes_out_as_a_pattern_the_editor_can_draw(window, tmp_path):
+    frame = window.current_page().frame
+    box = RectItem("rect")
+    box.set_local_rect(QRectF(0, 0, 150, 80))
+    box.style.hatch = "brick"
+    box.style.hatch_color = "#aa0000"
+    frame.add_markup(box, QPointF(100, 100))
+    _path, pdf = _exported_annotations(window, tmp_path)
+    said = pdf.xref_object(next(pdf[0].annots()).xref)
+    assert "/PatternName (brick)" in said and "/Pattern " in said
+    import re
+    number = int(re.search(r"/Pattern (\d+) 0 R", said).group(1))
+    assert "/PatternType 1" in pdf.xref_object(number)
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 270])
+def test_an_annotation_on_a_cropped_sheet_opens_where_it_is_drawn(tmp_path, rotation):
+    import pymupdf
+    from markforge.io import pdfmarkups, pdfvector
+    path = str(tmp_path / "marked.pdf")
+    made = pymupdf.open()
+    sheet = made.new_page(width=600, height=420)
+    sheet.set_cropbox(pymupdf.Rect(40, 30, 600, 420))
+    sheet.set_rotation(rotation)
+    shown = pymupdf.Rect(100, 120, 220, 180)                 # as the reader sees it
+    square = sheet.add_rect_annot(shown * sheet.derotation_matrix)
+    square.set_border(width=0)
+    square.update()
+    made.save(path)
+    payload = pdfmarkups.markups_of_page(pdfvector.PdfFile.open(path), 0)[0]
+    left = payload["x"] + payload["rect"][0]
+    top = payload["y"] + payload["rect"][1]
+    assert (left, top) == pytest.approx((100, 120), abs=0.6)
+
+
+@pytest.mark.parametrize("rotation", [90, 270])
+def test_a_note_on_a_turned_sheet_shows_where_it_was_put(window, tmp_path, rotation):
+    from markforge.items.text import NoteItem
+    frame = _page_from_a_pdf(window, tmp_path, rotation, 30 if rotation == 270 else 0)
+    note = NoteItem()
+    frame.add_markup(note, QPointF(120, 90))
+    path, pdf = _exported_annotations(window, tmp_path, f"note_{rotation}.pdf")
+    assert _ink_where_the_markup_is(window, frame, path, note) > 0.97
+    page = pdf[0]
+    annotation = next(page.annots())
+    assert annotation.flags & 16                          # does not turn with the page
+
+
+def test_arrowheads_go_out_filled_and_a_freehand_arrow_keeps_them(window, tmp_path):
+    from markforge.items.shapes import PolyItem
+    frame = window.current_page().frame
+    stroke = PolyItem("ink")
+    stroke.points = [QPointF(0, 0), QPointF(40, 10), QPointF(40.1, 10.1), QPointF(90, 30)]
+    stroke.style.arrow_end = "arrow"
+    frame.add_markup(stroke, QPointF(100, 100))
+    _path, pdf = _exported_annotations(window, tmp_path)
+    page = pdf[0]
+    annotation = next(page.annots())
+    said = pdf.xref_object(annotation.xref)
+    assert annotation.type[1] == "PolyLine" and "/ClosedArrow" in said and "/IC" in said
+    assert len(annotation.vertices) == 3                  # the pause is not a corner

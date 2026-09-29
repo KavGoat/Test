@@ -11,7 +11,7 @@ from PySide6.QtGui import QFontMetricsF
 
 from ..core.units import format_quantity, parse_unit, ureg
 from .base import (HANDLE_SCREEN_PX, HANDLE_SIZE, MarkupItem, Style,
-                   arrow_path, cloud_path, register_item)
+                   arrow_path, cloud_path, register_item, round_the_joins)
 
 # Page refreshes construct two lengths per rectangle. The registry is shared
 # and fixed; parse this unit once rather than scanning unit names per length.
@@ -305,6 +305,7 @@ class RectItem(MarkupItem):
                 filled.closeSubpath()
                 painter.fillPath(filled, self.style.brush())
             painter.setBrush(Qt.NoBrush)
+            round_the_joins(painter)
             painter.drawPath(path)
         elif self.style.corner_radius > 0:
             painter.drawRoundedRect(rect, self.style.corner_radius, self.style.corner_radius)
@@ -944,6 +945,8 @@ class PolyItem(MarkupItem):
             self._paint_arrows(painter)
             return
         painter.setPen(self.style.pen())
+        if self.kind == "cloud":
+            round_the_joins(painter)
         painter.setBrush(Qt.NoBrush)
         painter.drawPath(path)
         self.paint_cutouts(painter)

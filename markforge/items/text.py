@@ -898,9 +898,12 @@ class _TextBase(MarkupItem):
             if leader.clouds():
                 # The cloud is what points at the thing, so there is no head
                 # on the line: it only says which note goes with which cloud.
-                from .base import cloud_path
+                from .base import cloud_path, round_the_joins
+                painter.save()
+                round_the_joins(painter)
                 painter.drawPath(cloud_path(QPolygonF(list(leader.cloud)),
                                             self.cloud_radius_of(leader)))
+                painter.restore()
                 continue
             if self.style.arrow_end != "none":
                 angle = math.atan2(tip.y() - elbow.y(), tip.x() - elbow.x())
@@ -1479,7 +1482,8 @@ class CalloutItem(_TextBase):
         painter.setPen(self.style.pen() if self.style.stroke and self.style.width > 0
                        else QPen(Qt.NoPen))
         if self.shape_kind == "cloud":
-            from .base import cloud_path
+            from .base import cloud_path, round_the_joins
+            round_the_joins(painter)
             painter.drawPath(cloud_path(self.cloud_polygon_of(rect),
                                         self.cloud_radius))
         else:

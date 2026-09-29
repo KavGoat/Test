@@ -18,9 +18,10 @@ MuPDF gives three matrices for this and the names are worth keeping straight:
 
 * ``page.rotation_matrix`` turns unrotated page space into display space.
 * ``page.derotation_matrix`` turns display space back into unrotated space.
-* ``page.transformation_matrix`` turns unrotated page space into *PDF* space,
-  which is the one measured from the bottom-left corner upwards — where an
-  annotation's ``/Rect`` and a line's ``/L`` actually live.
+* ``page.transformation_matrix`` is meant to turn *PDF* space — measured
+  from the bottom-left corner upwards, where an annotation's ``/Rect`` and a
+  line's ``/L`` live — into unrotated page space. It drops the crop's offset
+  on a turned page, so :func:`_file_to_page` builds it from the crop box.
 
 So :func:`to_pdf` is display space to the file's own space, and
 :func:`to_display` is the way back. Nothing above this module should be
@@ -197,14 +198,72 @@ def page_rotation(document: "pymupdf.Document", index: int) -> int:
         return 0
 
 
+def _inherited_box(page: "pymupdf.Page", key: str):
+    """A page's /CropBox or /MediaBox as the file says it, parents included."""
+    document = page.parent
+    number = page.xref
+    for _depth in range(32):
+        try:
+            kind, value = document.xref_get_key(number, key)
+        except Exception:                              # noqa: BLE001
+            return None
+        if kind == "array":
+            try:
+                return [float(v) for v in value.strip("[]").split()][:4]
+            except ValueError:
+                return None
+        if kind == "xref":
+            try:
+                text = document.xref_object(int(value.split()[0]))
+                return [float(v) for v in text.strip().strip("[]").split()][:4]
+            except Exception:                          # noqa: BLE001
+                return None
+        kind, parent = document.xref_get_key(number, "Parent")
+        if kind != "xref":
+            return None
+        number = int(parent.split()[0])
+    return None
+
+
+def _file_to_page(page: "pymupdf.Page") -> "pymupdf.Matrix":
+    """The file's own space to MuPDF's unrotated page space.
+
+    MuPDF's ``transformation_matrix`` should be this, and is on an upright
+    page; on a turned page it drops the crop's offset, which put every
+    markup on a cropped, turned sheet the width of the crop away from where
+    it was drawn. So it is worked out here from the visible box itself: the
+    crop box, clipped to the media box, its top-left the page's origin.
+    """
+    try:
+        media = _inherited_box(page, "MediaBox")
+        crop = _inherited_box(page, "CropBox") or media
+    except Exception:                                  # noqa: BLE001
+        media = crop = None
+    if not crop or len(crop) < 4:
+        return pymupdf.Matrix(page.transformation_matrix)
+    left, bottom, right, top = min(crop[0], crop[2]), min(crop[1], crop[3]), \
+        max(crop[0], crop[2]), max(crop[1], crop[3])
+    if media and len(media) >= 4:
+        left = max(left, min(media[0], media[2]))
+        top = min(top, max(media[1], media[3]))
+    return pymupdf.Matrix(1, 0, 0, -1, -left, top)
+
+
 def to_pdf(page: "pymupdf.Page") -> "pymupdf.Matrix":
-    """Display points to the file's own space, where /Rect and /L are kept."""
-    return page.derotation_matrix * page.transformation_matrix
+    """Display points to the file's own space, where /Rect and /L are kept.
+
+    ``transformation_matrix`` takes the file's space *to* MuPDF's, so it is
+    its inverse that goes back. The two only differ on a page whose crop
+    starts away from the left edge of its media — and there the old way put
+    every markup twice the crop's width to the side, in the export and on
+    the way back in.
+    """
+    return page.derotation_matrix * ~_file_to_page(page)
 
 
 def to_display(page: "pymupdf.Page") -> "pymupdf.Matrix":
     """The file's own space back to display points."""
-    return ~pymupdf.Matrix(page.transformation_matrix) * page.rotation_matrix
+    return _file_to_page(page) * page.rotation_matrix
 
 
 def display_point(page: "pymupdf.Page", x: float, y: float) -> tuple[float, float]:

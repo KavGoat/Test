@@ -1089,6 +1089,20 @@ def arrow_path(tip: QPointF, direction: float, size: float, kind: str) -> QPaint
     return path
 
 
+def round_the_joins(painter: QPainter) -> None:
+    """Draw what comes next with round joins — for a cloud's scallops.
+
+    Where one scallop meets the next the line turns back on itself, and a
+    mitred join there throws a spike inward. How far the spike reaches
+    depends on the renderer's miter limit, so the screen drew spikes the
+    exported PDF did not: the same cloud, looking different in two places.
+    Round joins look the same everywhere, and are how a cloud is drawn.
+    """
+    pen = painter.pen()
+    pen.setJoinStyle(Qt.RoundJoin)
+    painter.setPen(pen)
+
+
 def cloud_path(polygon: QPolygonF, radius: float, closed: bool = True) -> QPainterPath:
     """Convert a polyline into a Bluebeam-style revision cloud."""
     path = QPainterPath()

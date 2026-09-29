@@ -60,6 +60,67 @@ LINE_ENDINGS = {
 }
 
 
+def _turn_of(item) -> float:
+    """How far a markup is turned on its page, in degrees, 0 when square."""
+    try:
+        one = item.mapToParent(QPointF(0, 0))
+        two = item.mapToParent(QPointF(1, 0))
+    except Exception:                                  # noqa: BLE001
+        return 0.0
+    import math
+    angle = math.degrees(math.atan2(two.y() - one.y(), two.x() - one.x()))
+    return 0.0 if abs(angle) < 0.01 or abs(abs(angle) - 360) < 0.01 else angle
+
+
+def _needs_its_outline(item) -> bool:
+    """Whether a box-shaped markup can only be said exactly as a polygon.
+
+    A PDF square or circle is upright and square-cornered: nothing in the
+    specification turns it or rounds its corners, so an editor that redraws
+    one from its dictionary stands a turned rectangle back up and squares off
+    a rounded one. Its outline, written as a polygon, is drawn the same by
+    every reader.
+    """
+    kind = getattr(item, "kind", "")
+    if kind not in ("rect", "ellipse", "cloud", "highlight", "redact"):
+        return False
+    if abs(_turn_of(item)) > 0.01:
+        return True
+    return kind in ("rect", "highlight", "redact") and \
+        float(getattr(item.style, "corner_radius", 0.0) or 0.0) > 0
+
+
+def _outline_on_the_page(item, place: "Placement") -> list:
+    """A box-shaped markup's outline, in the file's coordinates.
+
+    A cloud's is its four corners — the scallops are its border effect; an
+    ellipse's and a rounded corner's are the curve followed closely enough
+    that no reader can tell it from the curve.
+    """
+    from PySide6.QtGui import QPainterPath, QPolygonF
+    rect = item.local_rect().normalized()
+    kind = getattr(item, "kind", "")
+    if kind == "cloud" or (kind != "ellipse"
+                           and not float(getattr(item.style, "corner_radius", 0) or 0)):
+        corners = [rect.topLeft(), rect.topRight(), rect.bottomRight(), rect.bottomLeft()]
+    else:
+        path = QPainterPath()
+        if kind == "ellipse":
+            path.addEllipse(rect)
+        else:
+            radius = float(item.style.corner_radius)
+            path.addRoundedRect(rect, radius, radius)
+        polygons = path.toSubpathPolygons()
+        corners = list(polygons[0]) if polygons else []
+        if len(corners) > 1 and corners[0] == corners[-1]:
+            corners = corners[:-1]
+    placed = []
+    for corner in corners:
+        on_page = item.mapToParent(corner)
+        placed.extend(place.point(on_page.x(), on_page.y()))
+    return placed
+
+
 def subtype_for(item) -> str:
     """The PDF annotation this markup is.
 
@@ -70,12 +131,19 @@ def subtype_for(item) -> str:
     """
     kind = getattr(item, "kind", "")
     if item.TYPE == "rect":
+        if _needs_its_outline(item):
+            return "Polygon"
         if kind == "ellipse":
             return "Circle"
         # A cloud is a square with a cloudy border, not a different shape.
         return "Square"
     if item.TYPE == "poly":
         if kind in ("ink", "highlighter"):
+            # Ink has no line endings in PDF: a freehand line with an arrow
+            # on it goes as a polyline through the same points, which has.
+            if any(getattr(item.style, end, "none") not in ("", "none")
+                   for end in ("arrow_start", "arrow_end")):
+                return "PolyLine"
             return "Ink"
         if kind in ("polygon", "cloud"):
             return "Polygon"
@@ -138,6 +206,10 @@ class Appearances:
     def __init__(self):
         self.path: Optional[str] = None
         self.entries: list = []            # (page index, item, rect on the page)
+        # The hatch of each hatched markup, on a page of its own in a second
+        # scratch file: it goes into the export as the markup's /Pattern.
+        self.hatch_path: Optional[str] = None
+        self.hatch_pages: dict = {}        # entry order -> page in hatch_path
         # Per page, the annotations of the file being written that a markup is
         # still exactly — the ones to leave where they are rather than redraw.
         self.theirs: dict = {}
@@ -195,7 +267,66 @@ class Appearances:
                 painter.end()
         del writer
         self.path = path
+        self._draw_the_hatches()
         return path
+
+    def _draw_the_hatches(self) -> None:
+        """Each hatched markup's hatch alone, over the markup's own box.
+
+        An editor that redraws a hatched markup from its dictionary draws the
+        hatch from the pattern the annotation names; given the linework
+        itself, it has nothing to guess. A Bluebeam hatch brought in from a
+        tool set already has its own tile and goes back out as that.
+        """
+        from PySide6.QtCore import QMarginsF, QSizeF
+        from PySide6.QtGui import QPageLayout, QPageSize, QPainter, QPdfWriter
+        from ..items.base import paint_hatch
+
+        wanted = [(order, item, rect) for order, (_i, item, rect) in enumerate(self.entries)
+                  if _hatched_from_the_library(item)]
+        if not wanted:
+            return
+        handle, path = tempfile.mkstemp(suffix=".pdf")
+        os.close(handle)
+        writer = QPdfWriter(path)
+        writer.setResolution(int(APPEARANCE_DPI))
+        painter = QPainter()
+        started = False
+        try:
+            for page, (order, item, rect) in enumerate(wanted):
+                layout = QPageLayout()
+                layout.setPageSize(QPageSize(QSizeF(rect.width(), rect.height()),
+                                             QPageSize.Point, "hatch",
+                                             QPageSize.ExactMatch))
+                layout.setOrientation(QPageLayout.Portrait)
+                layout.setMode(QPageLayout.FullPageMode)
+                layout.setMargins(QMarginsF(0, 0, 0, 0))
+                writer.setPageLayout(layout)
+                if not started:
+                    if not painter.begin(writer):
+                        return
+                    started = True
+                else:
+                    writer.newPage()
+                painter.setRenderHint(QPainter.Antialiasing, True)
+                painter.save()
+                across = max(painter.device().width(), 1) / max(rect.width(), 1e-6)
+                down = max(painter.device().height(), 1) / max(rect.height(), 1e-6)
+                painter.scale(across, down)
+                painter.translate(-rect.left(), -rect.top())
+                frame = item.parentItem()
+                placed = item.sceneTransform()
+                if frame is not None:
+                    placed = placed * frame.sceneTransform().inverted()[0]
+                painter.setTransform(placed, True)
+                paint_hatch(painter, item.hatch_region(), item.style)
+                painter.restore()
+                self.hatch_pages[order] = page
+        finally:
+            if started:
+                painter.end()
+        del writer
+        self.hatch_path = path
 
     def discard(self) -> None:
         """Get rid of the scratch file — and never mind if it will not go.
@@ -208,13 +339,15 @@ class Appearances:
         work. Nothing here raises. What could not go now is tried again on the
         way out of the program.
         """
-        path, self.path = self.path, None
-        if not path:
-            return
-        try:
-            os.remove(path)
-        except OSError:
-            _sweep_up_later(path)
+        for attribute in ("path", "hatch_path"):
+            path = getattr(self, attribute)
+            setattr(self, attribute, None)
+            if not path:
+                continue
+            try:
+                os.remove(path)
+            except OSError:
+                _sweep_up_later(path)
 
 
 _LEFTOVERS: list = []
@@ -384,7 +517,15 @@ def place_markups(target, scratch, appearances: Appearances,
         if form is None:
             continue
         place = Placement.of_page(target[index])
+        upright_note = subtype_for(item) == "Text" and place.turns()
+        if not upright_note:
+            place.turn_the_appearance(target, form)
         annotation = annotation_for(item, rect, place, Ref(form))
+        if upright_note:
+            _pin_the_note(annotation, rect, place)
+        pattern = _hatch_pattern(target, appearances, order, item, rect, place)
+        if pattern:
+            annotation["Pattern"] = Ref(pattern)
         members = groups.get((index, getattr(item, "group", "")))
         if members:
             leader = leaders.get((index, item.group))
@@ -416,6 +557,104 @@ def place_markups(target, scratch, appearances: Appearances,
         engine.set_page_annotations(target, index, kept + ours)
         written += len(ours)
     return written
+
+
+def _pin_the_note(annotation: dict, rect, place: "Placement") -> None:
+    """A note on a turned page: its icon upright, pinned by its corner.
+
+    PDF has a note's icon stay upright however the page is turned, pivoting
+    on the top-left corner of its Rect — MuPDF and Acrobat draw it so. So on
+    a turned page the icon is left unturned, the Rect is put so that its
+    top-left corner lands on the icon's top-left corner on screen, and the
+    flag that says so is set for any reader that needs telling.
+    """
+    corner = place.point(rect.left(), rect.top())
+    annotation["Rect"] = [corner[0], corner[1] - rect.height(),
+                          corner[0] + rect.width(), corner[1]]
+    annotation["F"] = 4 | 16                         # printed, does not rotate
+
+
+def _hatched_from_the_library(item) -> bool:
+    style = getattr(item, "style", None)
+    if style is None or getattr(style, "hatch_tile", None):
+        return False
+    try:
+        return bool(style.hatched()) and item.hatch_region() is not None
+    except Exception:                                  # noqa: BLE001
+        return False
+
+
+def _hatch_pattern(target, appearances, order: int, item, rect,
+                   place: "Placement") -> int:
+    """The markup's hatch as a PDF tiling pattern, or 0 if it has none.
+
+    Bluebeam keeps a hatch's own drawing with the markup, in /Pattern: a
+    tiling pattern of plain linework. A hatch that came from Bluebeam goes
+    back as the very tile it came with, at its scale; one from the library
+    goes as the linework drawn over the markup's box, one tile that covers
+    it, placed exactly where the appearance puts it.
+    """
+    style = getattr(item, "style", None)
+    tile = getattr(style, "hatch_tile", None) if style is not None else None
+    try:
+        if tile:
+            return _tile_pattern(target, tile, float(style.hatch_scale or 1.0),
+                                 getattr(style, "hatch_color", "") or "#000000")
+        page = appearances.hatch_pages.get(order)
+        if page is None or not appearances.hatch_path:
+            return 0
+        scratch = engine.open_path(appearances.hatch_path)
+        try:
+            form = engine.form_from_page(target, scratch, page, rect.width(), rect.height())
+        finally:
+            engine.close(scratch)
+        if not form:
+            return 0
+        place.turn_the_appearance(target, form)
+        # Pattern space onto the page: the same turn as the appearance, with
+        # its box's corner put on the corner of the annotation's Rect.
+        matrix = place.appearance_matrix()
+        corners = [(0.0, 0.0), (rect.width(), 0.0), (0.0, rect.height()),
+                   (rect.width(), rect.height())]
+        moved = [(matrix[0] * x + matrix[2] * y, matrix[1] * x + matrix[3] * y)
+                 for x, y in corners]
+        placed = place.rect(rect)
+        shift = (placed[0] - min(p[0] for p in moved), placed[1] - min(p[1] for p in moved))
+        dictionary = {
+            "Type": Name("Pattern"), "PatternType": 1, "PaintType": 1, "TilingType": 1,
+            "BBox": [0, 0, rect.width(), rect.height()],
+            "XStep": rect.width(), "YStep": rect.height(),
+            "Matrix": [matrix[0], matrix[1], matrix[2], matrix[3], shift[0], shift[1]],
+            "Resources": {"XObject": {"H": Ref(form)}},
+        }
+        return engine.add_stream(target, dictionary, b"/H Do")
+    except Exception:                                  # noqa: BLE001
+        return 0
+
+
+def _tile_pattern(target, tile: dict, scale: float, ink: str) -> int:
+    """A Bluebeam hatch's own tile, written back as the pattern it came as."""
+    box = tile.get("box") or [tile.get("x", 0.0), tile.get("y", 0.0),
+                              tile.get("x", 0.0) + tile["step_x"],
+                              tile.get("y", 0.0) + tile["step_y"]]
+    turn_over = float(box[3]) + float(box[1])
+    colour = _colour(ink) or [0, 0, 0]
+    out = [f"{colour[0]:.4g} {colour[1]:.4g} {colour[2]:.4g} RG"]
+    for stroke in tile.get("strokes") or []:
+        out.append(f"{float(stroke.get('width', 0.5) or 0.5):.4g} w")
+        for command in stroke.get("path") or []:
+            op, values = command[0], [float(v) for v in command[1:]]
+            for at in range(1, len(values), 2):
+                values[at] = turn_over - values[at]
+            out.append(" ".join(f"{v:.4f}" for v in values) + f" {op}")
+        out.append("S")
+    dictionary = {
+        "Type": Name("Pattern"), "PatternType": 1, "PaintType": 1, "TilingType": 1,
+        "BBox": [float(v) for v in box], "XStep": float(tile["step_x"]),
+        "YStep": float(tile["step_y"]),
+        "Matrix": [scale, 0, 0, scale, 0, 0], "Resources": {},
+    }
+    return engine.add_stream(target, dictionary, "\n".join(out).encode("latin-1"))
 
 
 def _groups_on_each_page(entries) -> dict:
@@ -501,6 +740,41 @@ class Placement:
         if self._matrix is None:
             return float(x), self._height - float(y)
         return engine.pdf_point_with(self._matrix, x, y)
+
+    def turns(self) -> bool:
+        """Whether the page is turned, so its appearances need turning too."""
+        values = self.appearance_matrix()
+        return not all(abs(v - w) < 1e-9 for v, w in zip(values, (1.0, 0.0, 0.0, 1.0)))
+
+    def appearance_matrix(self) -> list:
+        """The linear part of an appearance's /Matrix on this page."""
+        matrix = self._matrix
+        if matrix is None:
+            return [1.0, 0.0, 0.0, 1.0]
+        return [matrix.a, matrix.b, -matrix.c, -matrix.d]
+
+    def turn_the_appearance(self, document, form: int) -> None:
+        """Give an appearance drawn upright the page's own turn.
+
+        A markup is drawn the way it looks on screen. On a page the file says
+        is turned, the file's own space is turned under that, and a reader
+        fits an appearance's box into Rect *without* turning it — so a
+        rectangle on a quarter-turned sheet came out squashed into the shape
+        of its own Rect, lines thickened on two sides. The appearance's
+        /Matrix carries the turn instead: the screen's flip, then the page's
+        placement, which on an upright page is nothing at all.
+        """
+        matrix = self._matrix
+        if matrix is None:
+            return
+        values = [matrix.a, matrix.b, -matrix.c, -matrix.d]
+        if all(abs(v - w) < 1e-9 for v, w in zip(values, (1.0, 0.0, 0.0, 1.0))):
+            return
+        text = " ".join(f"{v:.6g}" for v in values)
+        try:
+            document.xref_set_key(form, "Matrix", f"[{text} 0 0]")
+        except Exception:                              # noqa: BLE001
+            pass
 
     def rect(self, rect) -> list[float]:
         """A QRectF in display points, as the annotation's own /Rect."""
@@ -604,6 +878,11 @@ def _add_the_geometry(annotation, item, rect, place: "Placement") -> None:
     """
     subtype = str(annotation.get("Subtype"))
     kind = getattr(item, "kind", "")
+    if item.TYPE == "rect" and subtype == "Polygon":
+        annotation["Vertices"] = _outline_on_the_page(item, place)
+        if kind == "cloud":
+            _cloudy(annotation, item)
+        return
     if subtype in ("Square", "Circle"):
         try:
             shape = item.mapRectToParent(item.local_rect()).normalized()
@@ -618,10 +897,8 @@ def _add_the_geometry(annotation, item, rect, place: "Placement") -> None:
         border = max(float(getattr(item.style, "width", 0.0) or 0.0), 0.0) / 2.0
         # Left, bottom, right, top: the file's own y-up order, the one the
         # editors that redraw a markup from its dictionary go by.
-        annotation["RD"] = [max(shape.left() - rect.left() - border, 0.0),
-                            max(rect.bottom() - shape.bottom() - border, 0.0),
-                            max(rect.right() - shape.right() - border, 0.0),
-                            max(shape.top() - rect.top() - border, 0.0)]
+        annotation["RD"] = _difference(place, rect,
+                                       shape.adjusted(-border, -border, border, border))
         if kind == "cloud":
             _cloudy(annotation, item)
         return
@@ -662,6 +939,20 @@ def _add_the_geometry(annotation, item, rect, place: "Placement") -> None:
         annotation["InkList"] = [[value for point in points for value in point]]
 
 
+def _difference(place: "Placement", outer, inner) -> list:
+    """/RD: how far *inner* sits inside *outer*, in the file's own space.
+
+    Left, bottom, right, top, y up the page — the order Bluebeam's callouts
+    show and MuPDF reads. Worked out after both boxes are placed in the file,
+    so on a page turned a quarter the gap above the shape on screen is
+    written as the gap to the side of it in the file, where it really is.
+    """
+    out = place.rect(outer)
+    within = place.rect(inner)
+    return [max(within[0] - out[0], 0.0), max(within[1] - out[1], 0.0),
+            max(out[2] - within[2], 0.0), max(out[3] - within[3], 0.0)]
+
+
 def _cloudy(annotation, item) -> None:
     """A cloud is a border effect, not a shape drawn to look like one."""
     # How pronounced the scallops are. Ours are drawn to a radius; the PDF
@@ -682,6 +973,12 @@ def _line_endings(annotation, item) -> None:
     if start == "None" and end == "None":
         return
     annotation["LE"] = [Name(start), Name(end)]
+    # Heads are drawn filled with the line's own colour here; /IC is what a
+    # reader fills them with, and left unsaid they are redrawn hollow.
+    if str(annotation.get("Subtype")) in ("Line", "PolyLine"):
+        ink = _colour(getattr(item.style, "stroke", ""))
+        if ink is not None:
+            annotation["IC"] = ink
 
 
 def _dimension(annotation, item) -> None:
@@ -829,11 +1126,17 @@ def _free_text(annotation, item, rect, place: "Placement") -> None:
         box = item.mapRectToParent(item.local_rect()).normalized()
     except Exception:                                  # noqa: BLE001
         return
+    turn = _turn_of(item)
+    if abs(turn) > 0.01:
+        # Words turned on the page: Bluebeam says how far in /Rotation,
+        # degrees clockwise, with the appearance already drawn turned — as
+        # its own turned stamps and labels are. The box inside Rect is then
+        # not upright, so /RD, which can only describe an upright one, is
+        # left out rather than written wrong.
+        annotation["Rotation"] = round(turn % 360.0, 3)
+        return
     # Left, bottom, right, top, as for a square: see _add_the_geometry.
-    annotation["RD"] = [max(box.left() - rect.left(), 0.0),
-                        max(rect.bottom() - box.bottom(), 0.0),
-                        max(rect.right() - box.right(), 0.0),
-                        max(box.top() - rect.top(), 0.0)]
+    annotation["RD"] = _difference(place, rect, box)
 
 
 def _css_family(family: str) -> str:
@@ -987,7 +1290,13 @@ def _points_on_the_page(item, place: "Placement") -> list:
     placed = []
     for corner in corners:
         on_page = item.mapToParent(corner)
-        placed.append(place.point(on_page.x(), on_page.y()))
+        point = place.point(on_page.x(), on_page.y())
+        # A hand-drawn line repeats itself where the pen paused; two points a
+        # hair apart turn an arrowhead whichever way rounding points it.
+        if placed and getattr(item, "kind", "") in ("ink", "highlighter") and \
+                abs(point[0] - placed[-1][0]) + abs(point[1] - placed[-1][1]) < 0.5:
+            continue
+        placed.append(point)
     return placed
 
 
