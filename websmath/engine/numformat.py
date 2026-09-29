@@ -27,7 +27,12 @@ class NumberFormat:
     threshold: int = 5
     trailing_zeros: bool = False
     significant: bool = False
-    half_even: bool = False  # SMath's "Rounding: half to even" option
+    # SMath's "Rounding" option: "Half to even" is the default (observed:
+    # checked in the right-click menu). Like SMath, the binary value itself
+    # is rounded, so 2.00025 (really 2.000249999...) shows 2.0002.
+    half_even: bool = True
+    fractions: str = "decimal"  # "decimal", "fraction" or "auto" (right-click > Fractions)
+    mixed: bool = False  # "Use mixed numbers": 7/3 -> 2 1/3
 
 
 @dataclass(frozen=True)
@@ -50,7 +55,7 @@ def _round(x: float, places: int, fmt: NumberFormat) -> str:
     q = Decimal(1).scaleb(-places) if places > 0 else Decimal(1)
     with localcontext() as ctx:
         ctx.prec = 400  # 170! has 307 digits before the point
-        d = Decimal(repr(x)).quantize(q, rounding=mode)
+        d = Decimal(x).quantize(q, rounding=mode)
     s = format(d, "f")
     if not fmt.trailing_zeros and "." in s:
         s = s.rstrip("0").rstrip(".")

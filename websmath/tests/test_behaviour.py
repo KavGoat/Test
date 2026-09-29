@@ -576,7 +576,7 @@ def test_functions_match_smath(expr, shown, message):
 # -- constants: SMath's unit-library constants, shown as the site shows them ----------------
 
 @pytest.mark.parametrize("expr,shown", [
-    ("'g.e=", "9.8067 m/s^2"),
+    ("'g.e=", "9.8066 m/s^2"),
     ("'c=", "2.9979·10^8 m/s"),
     ("'h=", "6.6261·10^-34 s J"),
     ("'k=", "1.3807·10^-23 J/K"),

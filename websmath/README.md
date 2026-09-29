@@ -86,6 +86,11 @@ QT_QPA_PLATFORM=offscreen python -m pytest websmath/tests -p no:faulthandler
   picked from the list before typing on.
 * **Subscripts** with `.` (`x.1`, `'g.e`), edited part by part as on the site;
   `2x` becomes `2·x`; space turns only a lone word or number into text.
+* **Right-click menu** on an equation as on the site: Display input data,
+  Go to definition, Disable evaluation, Ignore units, Optimization, Decimal
+  places (with trailing zeros and significant figures mode), Exponential
+  threshold, Fractions (fraction, auto, mixed numbers) and Rounding - per
+  region, saved in the .sm file.
 * **Constants:** SMath's unit-library constants (`'g.e`, `'c`, `'h`, `'k`,
   `'N.A`, `'R.m`, `'ε.0`, `'μ.0`, `'m.e`, ...) and `π e i ∞`, shown in the
   site's units; **Insert > Constants...** lists them all in a table.

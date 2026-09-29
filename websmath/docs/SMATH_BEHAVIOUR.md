@@ -382,13 +382,52 @@ function that has no overload with that many arguments (`round(2.5)`,
 SMath's physical constants live in its unit library and are typed like units:
 `'c 'e 'g.e 'G.N 'h 'hildebrand 'k 'm.e 'm.n 'm.p 'N.A 'R.m 'u 'ε.0 'μ.0`,
 plus the operands `π e i ∞`. The site shows them as:
-`'g.e` = 9.8067 m/s², `'c` = 2.9979·10^8 m/s, `'h` = 6.6261·10^-34 s J,
+`'g.e` = 9.8066 m/s² (9.80665 is stored as 9.806649999…), `'c` = 2.9979·10^8 m/s, `'h` = 6.6261·10^-34 s J,
 `'k` = 1.3807·10^-23 J/K, `'N.A` = 6.0221·10^23 1/mol, `'R.m` = 8.3145
 J/(K mol), `'ε.0` = 8.8542·10^-12 F/m, `'μ.0` = 1.2566·10^-6 m T/A, `'m.e`,
 `'m.p`, `'m.n`, `'u` in kg, `'e` = 1.6022·10^-19 C and `'hildebrand` =
 2045.48 kg^(1/2)/(s m^(1/2)). **`'G.N` is not evaluated on the site** (it shows
 `1 G.N`, like any unknown unit such as `'σ`); the replica gives it its
 library value, 6.6743·10^-11 m³/(kg s²). Insert > Constants... lists them all.
+
+## Right-click menu
+
+Read from the site (`GET /srv/{sheet}/contextmenu`). Everywhere: Cut
+(Ctrl+X), Copy (Ctrl+C), Paste (Ctrl+V) | Delete (Del) | Select all (Ctrl+A).
+On a math region, then: **Display input data** (checked) | Go to definition,
+Show description, Disable evaluation | Ignore units | **Optimization**
+(Symbolic, Numeric, None; Numeric is checked for `x=`, Symbolic for `x:`),
+**Decimal places** (Trailing zeros | Significant figures mode | 0-15),
+**Exponential threshold** (0-15), **Fractions** (Decimal, Fraction, Auto,
+Default | Use mixed numbers, greyed while Decimal), **Rounding** (Half to
+even, Away from zero). The worksheet's value is marked `*` (`4 *`, `5 *`).
+The settings belong to the one region. Effects seen on the site:
+
+| Region | Option | Shows |
+|---|---|---|
+| `1/3=` | Decimal places 2 | 0.33 |
+| `1234.5678=` | Significant figures mode | 1235 |
+| `0.012345=` | Significant figures mode | 0.01235 |
+| `1.5=` | Trailing zeros | 1.5000 |
+| `12345=` | Exponential threshold 2 | 1.2345·10^4 |
+| `1.23*10^9=` | Exponential threshold 15 | 1230000000 |
+| `1/(3+1/4)=` | Fraction | 4/13 |
+| `0.75=` | Auto | 3/4 |
+| `7/3=` | Fraction + mixed numbers | 2 1/3 |
+| `2+3=` | Display input data off | 5 (only the result) |
+| `5'm+2=` / `5'm*2'kg=` | Ignore units | 7 / 10 |
+| `2+3=` | Optimization None | 2+3 |
+| `2.00025=` | (default rounding) | 2.0002 |
+
+**Rounding** is half to even by default and works on the binary value: 2.00025
+is stored as 2.000249999… and shows 2.0002, and 9.80665 ('g.e) shows 9.8066.
+Only exact binary ties (0.125 to 2 places) depend on the option: 0.12 to even,
+0.13 away from zero. The replica saves the options on `<math>` as SMath does
+(`decimalPlaces`, `significantDigitsMode`, `trailingZeros`, `optimize`: 0
+none, 1 symbolic, 2 numeric). "Show description" is shown but greyed out;
+"Symbolic" is numeric here (there is no symbolic engine). A text region's
+menu (language, line spacing, alignment, automatic replacement) is not
+copied.
 
 ## A variable with a unit's name
 
@@ -414,8 +453,11 @@ checked item for item against 18 lists read back from the site. The rules:
   first (`\\ % ‰ ° ¤`), then digits, then letters ignoring case and accents
   (`'Å` sorts with `a`), with Greek after Latin. On a tie, lower case comes
   first.
-* **Units differing only in case appear once:** a over A, pA over Pa, s over
-  S, t over T, kn over kN, G over g, Mg over mg, MJ over mJ, pC over pc.
+* **Units differing only in case appear once on the site:** a over A, pA
+  over Pa, s over S, t over T, kn over kN, G over g, Mg over mg, MJ over mJ,
+  pC over pc. The hidden spellings still work when typed. **The replica
+  lists both** (kn, then kN), because hiding kN and Pa from engineers is
+  unhelpful.
 * Arc minute and arc second are listed as `'\\0027\\` and `'\\0022\\`.
 * **What each entry shows** (from the site's own client code): the name
   **without the unit apostrophe**, after a 12×12 icon chosen by kind

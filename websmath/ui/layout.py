@@ -14,7 +14,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen
 
 from ..engine import builtins
-from ..engine.display import DComplex, DMatrix, DNum, DQuantity, DString, DUnit
+from ..engine.display import DComplex, DExpr, DFrac, DMatrix, DNum, DQuantity, DString, DUnit
 from ..engine.model import (DIGITS, LETTERS, Abs, Box, Frac, Index, Matrix, Paren, Pow,
                             Program, Root, Row, Sqrt)
 
@@ -729,6 +729,8 @@ class Layouter:
             return m
         if isinstance(d, DString):
             return self.text(f'"{d.text}"', self.style.font(scale), STRING_RED)
+        if isinstance(d, DExpr):
+            return self.row(d.row, scale, register=False)
         return self.placeholder(scale)
 
     def number(self, fn, scale: float, show_sign=True) -> LBox:
@@ -753,6 +755,8 @@ class Layouter:
     def number_value(self, v, scale: float) -> LBox:
         if isinstance(v, DNum):
             return self.number(v.num, scale)
+        if isinstance(v, DFrac):
+            return self.fraction_value(v, scale)
         if isinstance(v, DComplex):
             parts = []
             if v.re is not None:
@@ -772,6 +776,28 @@ class Layouter:
             parts.append(self.text("i", self.style.font(scale, bold=True)))
             return self._hcat(parts)
         return self.placeholder(scale)
+
+    def fraction_value(self, v: DFrac, scale: float) -> LBox:
+        """A result in fraction form: 4 over 13, or 2 and 1 over 3 (mixed)."""
+        f = self.style.font(scale)
+        num, den = self.text(str(v.num), f), self.text(str(v.den), f)
+        w = max(num.w, den.w) + 4
+        ax = self.axis(scale)
+        num.x, den.x = (w - num.w) / 2 + 1, (w - den.w) / 2 + 1
+        num.y = -ax - 2 - num.desc
+        den.y = -ax + 2 + den.asc
+        path = QPainterPath()
+        path.moveTo(1, -ax)
+        path.lineTo(w + 1, -ax)
+        bar = LPath(w=w + 2, asc=ax + 2 + num.h, desc=-ax + 2 + den.h, path=path, children=[num, den])
+        parts = []
+        if v.negative:
+            parts.append(self.text("−", self.style.font(scale, op=True)))
+        if v.whole:
+            parts.append(self.text(str(v.whole), f))
+            parts.append(self.hspace(2))
+        parts.append(bar)
+        return self._hcat(parts)
 
     def _unit_power(self, p: float, base: LBox, s: float) -> LBox:
         """Exponent of a unit; non-integers are drawn as a small fraction (m^(1/2))."""

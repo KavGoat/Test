@@ -12,7 +12,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from websmath.ui.worksheet_view import suggestion_list  # noqa: E402
+from websmath.ui.worksheet_view import SITE_HIDDEN_UNITS, suggestion_list  # noqa: E402
 from websmath.worksheet import Worksheet  # noqa: E402
 
 DATA = json.loads((Path(__file__).parent / "data" / "smath_suggestions.json").read_text(encoding="utf-8"))
@@ -31,7 +31,14 @@ def test_suggestions_match_smath(group, prefix):
     row = list(DATA[group]["lists"]).index(prefix) if group == "with_defs" else 20
     here = ws.add_region(400, 9 + 36 * row)
     got = [label for label, _ in suggestion_list(prefix, ws._context_before(here).names())]
-    assert got == DATA[group]["lists"][prefix]
+    # the replica also lists the units the site hides behind a case variant
+    assert [x for x in got if x[1:] not in SITE_HIDDEN_UNITS or not x.startswith("'")] == DATA[group]["lists"][prefix]
+
+
+def test_case_variant_units_are_listed():
+    labels = [label for label, _ in suggestion_list("kn", [])]
+    assert labels.index("'kn") < labels.index("'kN")
+    assert "'Pa" in [label for label, _ in suggestion_list("pa", [])]
 
 
 def _entries(prefix, defs=()):

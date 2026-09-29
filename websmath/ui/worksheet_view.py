@@ -16,13 +16,14 @@ Behaviour replicated from SMath Cloud:
 """
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 from typing import Optional
 
 from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QKeyEvent, QPainter, QPen
 from PySide6.QtWidgets import (QApplication, QGraphicsScene, QGraphicsView, QLabel, QListWidget,
-                               QListWidgetItem)
+                               QListWidgetItem, QMenu)
 
 from ..engine.catalog import FUNCTIONS, UNIT_CATALOG
 from ..engine.evaluator import BUILTIN_CONSTANTS
@@ -297,7 +298,12 @@ class WorksheetView(QGraphicsView):
         item = self._item_at(pt)
         self.clear_selection()
         if e.button() == Qt.RightButton:
-            super().mousePressEvent(e)
+            # the site focuses the region under the mouse, then shows the menu
+            if item is not None and item is not self.focused_item and item.region.kind in ("math", "text"):
+                self.focus_item(item)
+            elif item is None:
+                self.focus_item(None)
+            self.show_context_menu(item, e.globalPosition().toPoint())
             return
         if item is None:
             self.focus_item(None)
@@ -673,6 +679,104 @@ class WorksheetView(QGraphicsView):
         self.hide_suggestions()
         self._after_edit(item)
 
+    # -- right-click menu (SMath Cloud's, item for item) ---------------------------------
+    def context_menu(self, item: Optional[RegionItem]) -> QMenu:
+        """The menu SMath Cloud shows (GET .../contextmenu): Cut, Copy, Paste,
+        Delete, Select all for everything, and for a math region Display
+        input data, Go to definition, Show description, Disable evaluation,
+        Ignore units, Optimization, Decimal places, Exponential threshold,
+        Fractions and Rounding.  The worksheet default is marked with *."""
+        m = QMenu(self)
+        m.addAction("Cut", self.cut).setShortcut("Ctrl+X")
+        m.addAction("Copy", self.copy).setShortcut("Ctrl+C")
+        m.addAction("Paste", self.paste).setShortcut("Ctrl+V")
+        m.addSeparator()
+        m.addAction("Delete", self.delete_selection).setShortcut("Del")
+        m.addSeparator()
+        m.addAction("Select all", self.select_all).setShortcut("Ctrl+A")
+        if item is None or item.region.kind != "math":
+            return m
+        r = item.region
+        fmt = r.fmt or self.worksheet.format
+        base = self.worksheet.format
+
+        def check(menu, title, on, slot, enabled=True):
+            a = menu.addAction(title)
+            a.setCheckable(True)
+            a.setChecked(on)
+            a.setEnabled(enabled)
+            a.triggered.connect(lambda _=False: (slot(), self._region_option_changed(item)))
+            return a
+
+        m.addSeparator()
+        check(m, "Display input data", r.show_input, lambda: setattr(r, "show_input", not r.show_input))
+        m.addSeparator()
+        m.addAction("Go to definition", lambda: self.go_to_definition(item))
+        a = m.addAction("Show description")
+        a.setEnabled(False)  # region descriptions are not supported yet
+        check(m, "Disable evaluation", not r.enabled, lambda: setattr(r, "enabled", not r.enabled))
+        m.addSeparator()
+        check(m, "Ignore units", r.ignore_units, lambda: setattr(r, "ignore_units", not r.ignore_units))
+        m.addSeparator()
+        opt = m.addMenu("Optimization")
+        current = r.optimization or ("numeric" if item.editor.evaluate else "symbolic")
+        for key, title in (("symbolic", "Symbolic"), ("numeric", "Numeric"), ("none", "None")):
+            check(opt, title, current == key, lambda k=key: setattr(r, "optimization", k))
+
+        def set_fmt(**kw):
+            f = dataclasses.replace(r.fmt or self.worksheet.format, **kw)
+            r.fmt = None if f == self.worksheet.format else f
+
+        dp = m.addMenu("Decimal places")
+        check(dp, "Trailing zeros", fmt.trailing_zeros, lambda: set_fmt(trailing_zeros=not fmt.trailing_zeros))
+        dp.addSeparator()
+        check(dp, "Significant figures mode", fmt.significant, lambda: set_fmt(significant=not fmt.significant))
+        dp.addSeparator()
+        for n in range(16):
+            check(dp, f"{n} *" if n == base.decimals else str(n), fmt.decimals == n,
+                  lambda n=n: set_fmt(decimals=n))
+        et = m.addMenu("Exponential threshold")
+        for n in range(16):
+            check(et, f"{n} *" if n == base.threshold else str(n), fmt.threshold == n,
+                  lambda n=n: set_fmt(threshold=n))
+        fr = m.addMenu("Fractions")
+        for key, title in (("decimal", "Decimal"), ("fraction", "Fraction"), ("auto", "Auto")):
+            check(fr, title, fmt.fractions == key, lambda k=key: set_fmt(fractions=k))
+        check(fr, "Default", r.fmt is None, lambda: setattr(r, "fmt", None))
+        fr.addSeparator()
+        check(fr, "Use mixed numbers", fmt.mixed, lambda: set_fmt(mixed=not fmt.mixed),
+              enabled=fmt.fractions != "decimal")
+        rd = m.addMenu("Rounding")
+        check(rd, "Half to even", fmt.half_even, lambda: set_fmt(half_even=True))
+        check(rd, "Away from zero", not fmt.half_even, lambda: set_fmt(half_even=False))
+        return m
+
+    def show_context_menu(self, item: Optional[RegionItem], global_pos) -> None:
+        self.hide_suggestions()
+        self.context_menu(item).exec(global_pos)
+
+    def _region_option_changed(self, item: RegionItem) -> None:
+        # options change what the region shows and, for Disable evaluation or
+        # Ignore units, what it defines: recalculate like leaving the region
+        self.worksheet.update_after_edit(item.region)
+        self.refresh()
+        self.modified.emit()
+
+    def go_to_definition(self, item: RegionItem) -> None:
+        """Focus the region that defines the name at the cursor (or the first
+        name the region uses)."""
+        _, word = item.editor.current_word()
+        names = [word] if word else sorted(item.region.uses)
+        for name in names:
+            for other in sorted(self.worksheet.regions, key=lambda r: r.key, reverse=True):
+                if other.key < item.region.key and (name in other.defined_vars or
+                                                    any(n == name for n, _ in other.defined_funcs)):
+                    target = self.items.get(other.id)
+                    if target is not None:
+                        self.focus_item(target)
+                        self.ensureVisible(target.mapRectToScene(target.frame_rect()), 20, 20)
+                        return
+
     # -- variable / unit name clashes -----------------------------------------------------
     def _clash(self, item: Optional[RegionItem]) -> Optional[str]:
         """The name at the cursor when it is both a worksheet variable and a
@@ -955,9 +1059,11 @@ class WorksheetView(QGraphicsView):
             self.selected.append(it)
 
 
-# spellings SMath Cloud leaves out of the list when another unit differs only
-# in case (observed; gauss G is kept over gram g; H by analogy)
-CASE_HIDDEN_UNITS = {"A", "C", "g", "H", "K", "S", "T", "mg", "mJ", "mN", "mW", "mohm", "mΩ",
+# Spellings SMath Cloud leaves out of its list when another unit differs only
+# in case (observed: kN is hidden behind the knot kn, Pa behind pa, A behind
+# are a...).  They still work when typed, so the replica lists them anyway -
+# an engineer looking for kN or Pa must find it.  Kept for the site tests.
+SITE_HIDDEN_UNITS = {"A", "C", "g", "H", "K", "S", "T", "mg", "mJ", "mN", "mW", "mohm", "mΩ",
                      "Pa", "kN", "mS", "pc", "pS", "μS"}
 
 
@@ -1011,6 +1117,9 @@ def suggestion_entries(word: str, defined_names, user_functions=None) -> list:
         meta = SUGGESTION_META.get(label)
         if meta is not None and label not in user_functions:
             origin, args, desc = meta
+        elif label.startswith("'"):
+            # a unit the site hides (kN, Pa...): its title from the catalogue
+            origin, args, desc = 1, 0, UNIT_CATALOG.get(label[1:], ("", ""))[1]
         else:
             origin, args, desc = 3, user_functions.get(label, 0), ""
         kind = "function" if args > 0 else ("unit" if label.startswith("'") else "operand")
@@ -1041,10 +1150,10 @@ def suggestion_list(word: str, defined_names) -> list:
     group sorted as SMath sorts."""
     w = word.lower()
     needle = w[1:] if w.startswith("'") else w
-    # units differing only in case are listed once; which spelling SMath
-    # keeps was read off its lists (a over A, pA over Pa, Mg over mg, ...)
+    # every unit is listed, also those SMath Cloud hides behind a case
+    # variant (kN behind kn, Pa behind pa; see SITE_HIDDEN_UNITS)
     units = sorted((("'" + SMATH_LABEL.get(u, u), "unit") for u in UNIT_CATALOG
-                    if needle in u.lower() and u not in CASE_HIDDEN_UNITS),
+                    if needle in u.lower()),
                    key=lambda x: smath_sort_key(x[0]))
     others = {}
     counts = {}

@@ -20,7 +20,7 @@ from typing import Optional
 
 from .editor import MathEditor
 from .engine import ast as A
-from .engine.display import display_value
+from .engine.display import DExpr, display_value
 from .engine.errors import SMathError, err
 from .engine.evaluator import Context, DefinitionIndex, Evaluator, IndexedContext
 from .engine.numformat import NumberFormat
@@ -43,8 +43,14 @@ class Region:
     value: object = None  # evaluated value (for "=" regions)
     display: object = None  # display structure of the result
     error: Optional[SMathError] = None
-    enabled: bool = True
-    fmt: Optional[NumberFormat] = None  # per-region override
+    enabled: bool = True  # right-click > Disable evaluation (unchecked)
+    fmt: Optional[NumberFormat] = None  # per-region override (right-click menu)
+    # right-click menu options of a math region (SMath Cloud)
+    show_input: bool = True  # "Display input data": off shows only the result
+    ignore_units: bool = False  # "Ignore units"
+    # "symbolic", "numeric" or "none"; "" = SMath's default (numeric for an
+    # evaluation, symbolic for a definition)
+    optimization: str = ""
     plot: Optional[PlotState] = None  # set for 2-D plot regions
     curves: list = field(default_factory=list)  # parsed plot inputs
     plot_ctx: object = None  # definitions visible to the plot
@@ -266,6 +272,7 @@ class Worksheet:
             if n.src is not None:
                 n.src = _rebase(n.src, expr_row, r.editor.root)
         r.uses = frozenset(_used_names(node) | _row_names(r.editor.unit))
+        self.evaluator.ignore_units = r.ignore_units
         try:
             if isinstance(node, A.Define):
                 self.evaluator.define(node, ctx)
@@ -275,6 +282,11 @@ class Worksheet:
                 if record and not isinstance(node, A.Placeholder):
                     self.evaluator.eval(node, ctx)
                 return
+            if r.optimization == "none":
+                # no evaluation: the input is shown again after "="
+                if record:
+                    r.display = DExpr(expr_row)
+                return
             value = self.evaluator.eval(node, ctx)
             if record:
                 r.value = value
@@ -282,6 +294,8 @@ class Worksheet:
         except SMathError as e:
             if record:
                 r.error = e
+        finally:
+            self.evaluator.ignore_units = False
 
     def _run_plot(self, r: Region, ctx: Context) -> None:
         r.curves = []

@@ -111,6 +111,11 @@ class RegionItem(QGraphicsObject):
                     ph2 = lay.placeholder()
                     ph2.x = ph.x + ph.w + 3
                     parts.append(ph2)
+        if (not self.region.show_input and not self.focused and self.editor.evaluate
+                and self.region.display is not None and len(parts) > 1):
+            # right-click > Display input data off: only the result is shown
+            parts = parts[1:]
+            parts[0].x = 0
         whole = LBox(children=parts)
         whole.w = max(p.x + p.w for p in parts)
         whole.asc = max(p.asc for p in parts)

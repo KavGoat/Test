@@ -295,6 +295,7 @@ def _from_root(root) -> Worksheet:
             ed.set_cursor(ed.root, len(ed.expression_items()))
             region = ws.add_region(x, y, ed)
             region.enabled = reg.get("enabled", "true") != "false"
+            _load_math_options(region, math, ws)
         elif text:
             chosen = next((t for t in text if t.get("lang") == "eng"), text[-1])
             paras = ["".join(p.itertext()) for p in chosen.findall(f"{{{NS}}}p")]
@@ -359,7 +360,7 @@ def dumps(ws: Worksheet, calculate: bool = True) -> str:
                 pattrs = {k: "true" for k in ("bold", "italic", "underline") if getattr(r, k)}
                 ET.SubElement(t, f"{{{NS}}}p", pattrs).text = line
             continue
-        math = ET.SubElement(reg, f"{{{NS}}}math")
+        math = ET.SubElement(reg, f"{{{NS}}}math", _math_options(r, ws))
         inp = ET.SubElement(math, f"{{{NS}}}input")
         try:
             node = parse_row(r.expression_row())
@@ -451,6 +452,67 @@ def _save_plot(r, reg) -> None:
         e.text = "sys"
         els.append(e)
     inp.extend(els)
+
+
+_OPTIMIZE = {"none": "0", "symbolic": "1", "numeric": "2"}
+
+
+def _math_options(r, ws) -> dict:
+    """Right-click menu settings of a math region, as SMath writes them on
+    <math> (decimalPlaces="5" significantDigitsMode="true" trailingZeros="true"
+    optimize="2" were read from SMath's own files; the rest follow suit)."""
+    out = {}
+    if r.optimization:
+        out["optimize"] = _OPTIMIZE[r.optimization]
+    f, base = r.fmt, ws.format
+    if f is not None:
+        if f.decimals != base.decimals:
+            out["decimalPlaces"] = str(f.decimals)
+        if f.significant != base.significant:
+            out["significantDigitsMode"] = "true" if f.significant else "false"
+        if f.trailing_zeros != base.trailing_zeros:
+            out["trailingZeros"] = "true" if f.trailing_zeros else "false"
+        if f.threshold != base.threshold:
+            out["exponentialThreshold"] = str(f.threshold)
+        if f.fractions != base.fractions:
+            out["fractions"] = f.fractions
+        if f.mixed:
+            out["mixedNumbers"] = "true"
+        if f.half_even != base.half_even:
+            out["roundingMode"] = "halfToEven" if f.half_even else "awayFromZero"
+    if not r.show_input:
+        out["displayInput"] = "false"
+    if r.ignore_units:
+        out["ignoreUnits"] = "true"
+    return out
+
+
+def _load_math_options(region, math, ws) -> None:
+    import dataclasses
+
+    g = math.get
+    opt = {v: k for k, v in _OPTIMIZE.items()}.get(g("optimize", ""))
+    if opt:
+        region.optimization = opt
+    kw = {}
+    if g("decimalPlaces"):
+        kw["decimals"] = int(g("decimalPlaces"))
+    if g("significantDigitsMode"):
+        kw["significant"] = g("significantDigitsMode") == "true"
+    if g("trailingZeros"):
+        kw["trailing_zeros"] = g("trailingZeros") == "true"
+    if g("exponentialThreshold"):
+        kw["threshold"] = int(g("exponentialThreshold"))
+    if g("fractions"):
+        kw["fractions"] = g("fractions")
+    if g("mixedNumbers"):
+        kw["mixed"] = g("mixedNumbers") == "true"
+    if g("roundingMode"):
+        kw["half_even"] = g("roundingMode") == "halfToEven"
+    if kw:
+        region.fmt = dataclasses.replace(ws.format, **kw)
+    region.show_input = g("displayInput", "true") != "false"
+    region.ignore_units = g("ignoreUnits") == "true"
 
 
 def _load_format(region, reg) -> None:

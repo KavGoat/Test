@@ -217,3 +217,131 @@ def test_suggestion_keys_follow_site(app):
     type_at(v, 18, 72, "sq")
     press(v, Qt.Key_Tab)  # Tab applies the highlighted entry
     assert v.focused_item.editor.root.text().startswith("√")
+
+
+# -- right-click menu: SMath Cloud's items, with the effects seen on the site ------------
+
+def _menu_titles(menu):
+    out = []
+    for a in menu.actions():
+        if a.isSeparator():
+            out.append("-")
+        elif a.menu():
+            out.append((a.text(), _menu_titles(a.menu())))
+        else:
+            out.append(a.text())
+    return out
+
+
+def _trigger(menu, *path):
+    for title in path[:-1]:
+        menu = next(a.menu() for a in menu.actions() if a.text() == title)
+    next(a for a in menu.actions() if a.text() == path[-1]).trigger()
+
+
+def test_context_menu_items_match_site(app):
+    v = WorksheetView()
+    type_at(v, 18, 18, "1/3=")
+    t = _menu_titles(v.context_menu(v.focused_item))
+    top = [x if isinstance(x, str) else x[0] for x in t]
+    assert top == ["Cut", "Copy", "Paste", "-", "Delete", "-", "Select all", "-", "Display input data", "-",
+                   "Go to definition", "Show description", "Disable evaluation", "-", "Ignore units", "-",
+                   "Optimization", "Decimal places", "Exponential threshold", "Fractions", "Rounding"]
+    sub = dict(x for x in t if not isinstance(x, str))
+    assert sub["Optimization"] == ["Symbolic", "Numeric", "None"]
+    assert sub["Decimal places"][:4] == ["Trailing zeros", "-", "Significant figures mode", "-"]
+    assert sub["Decimal places"][4:] == [str(n) if n != 4 else "4 *" for n in range(16)]
+    assert sub["Exponential threshold"] == [str(n) if n != 5 else "5 *" for n in range(16)]
+    assert sub["Fractions"] == ["Decimal", "Fraction", "Auto", "Default", "-", "Use mixed numbers"]
+    assert sub["Rounding"] == ["Half to even", "Away from zero"]
+    # outside a region only the editing items
+    v.focus_item(None)
+    assert _menu_titles(v.context_menu(None)) == ["Cut", "Copy", "Paste", "-", "Delete", "-", "Select all"]
+
+
+@pytest.mark.parametrize("typed,path,shown", [
+    ("1/3=", ("Decimal places", "2"), "0.33"),
+    ("2/3=", ("Decimal places", "0"), "1"),
+    ("1234.5678=", ("Decimal places", "Significant figures mode"), "1235"),
+    ("0.012345=", ("Decimal places", "Significant figures mode"), "0.01235"),
+    ("1.5=", ("Decimal places", "Trailing zeros"), "1.5000"),
+    ("12345=", ("Exponential threshold", "2"), "1.2345·10^4"),
+    ("1.23*10^9=", ("Exponential threshold", "15"), "1230000000"),
+    ("0.75=", ("Fractions", "Auto"), "3/4"),
+    ("2+3=", ("Optimization", "None"), "2+3"),
+    ("5'm+2=", ("Ignore units",), "7"),
+    ("5'm*2'kg=", ("Ignore units",), "10"),
+])
+def test_context_menu_options_match_site(app, typed, path, shown):
+    v = WorksheetView()
+    type_at(v, 18, 18, typed)
+    item = v.focused_item
+    _trigger(v.context_menu(item), *path)
+    assert display_text(item.region.display) == shown
+
+
+def test_context_menu_fractions_and_mixed(app):
+    v = WorksheetView()
+    type_at(v, 18, 18, "7/3=")
+    item = v.focused_item
+    _trigger(v.context_menu(item), "Fractions", "Fraction")
+    assert display_text(item.region.display) == "7/3"
+    _trigger(v.context_menu(item), "Fractions", "Use mixed numbers")
+    assert display_text(item.region.display) == "2 1/3"
+    _trigger(v.context_menu(item), "Fractions", "Default")
+    assert display_text(item.region.display) == "2.3333"
+
+
+def test_default_rounding_is_half_to_even_on_the_binary_value(app):
+    # observed: 2.00025 = 2.0002 (the double is 2.000249999...), g.e = 9.8066
+    v = WorksheetView()
+    type_at(v, 18, 18, "2.00025=")
+    assert display_text(v.focused_item.region.display) == "2.0002"
+    type_at(v, 18, 72, "0.125=")
+    item = v.focused_item
+    _trigger(v.context_menu(item), "Decimal places", "2")
+    assert display_text(item.region.display) == "0.12"  # a true tie: to even
+    _trigger(v.context_menu(item), "Rounding", "Away from zero")
+    assert display_text(item.region.display) == "0.13"
+
+
+def test_display_input_and_disable_evaluation(app):
+    v = WorksheetView()
+    type_at(v, 18, 18, "x:2")
+    press(v, Qt.Key_Return)
+    type_at(v, 18, 72, "x+3=")
+    use = v.focused_item
+    _trigger(v.context_menu(use), "Display input data")
+    assert not use.region.show_input
+    press(v, Qt.Key_Return)
+    wide = use.frame_rect().width()
+    v.focus_item(use)
+    assert use.frame_rect().width() > wide  # the input shows again while editing
+    press(v, Qt.Key_Return)
+    top = [it for it in v.items.values() if it.region.y == 18][0]
+    v.focus_item(top)
+    _trigger(v.context_menu(top), "Disable evaluation")
+    assert not top.region.enabled
+    assert use.region.error is not None and use.region.error.message == "x - not defined."
+    v.focus_item(use)
+    _trigger(v.context_menu(use), "Go to definition")
+    assert v.focused_item is use  # x is no longer defined anywhere
+
+
+def test_region_options_saved_in_sm(app, tmp_path):
+    from websmath.io.smfile import load_sm, save_sm
+
+    v = WorksheetView()
+    type_at(v, 18, 18, "1/3=")
+    item = v.focused_item
+    for path in (("Decimal places", "2"), ("Decimal places", "Trailing zeros"), ("Fractions", "Fraction"),
+                 ("Optimization", "Numeric"), ("Ignore units",), ("Display input data",)):
+        _trigger(v.context_menu(item), *path)
+    f = tmp_path / "opts.sm"
+    save_sm(v.worksheet, f)
+    text = f.read_text(encoding="utf-8")
+    assert 'decimalPlaces="2"' in text and 'optimize="2"' in text
+    r = load_sm(f).regions[0]
+    assert (r.fmt.decimals, r.fmt.trailing_zeros, r.fmt.fractions) == (2, True, "fraction")
+    assert (r.optimization, r.ignore_units, r.show_input) == ("numeric", True, False)
+    assert display_text(r.display) == "1/3"

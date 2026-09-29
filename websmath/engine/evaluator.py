@@ -218,6 +218,8 @@ class Evaluator:
     # A region that runs longer than this is interrupted (a runaway while
     # loop must not freeze the worksheet), like SMath's Interrupt processing.
     TIME_LIMIT = 10.0
+    # right-click > Ignore units on the region being evaluated
+    ignore_units = False
 
     def __init__(self):
         from . import builtins  # local import: builtins needs Evaluator types
@@ -303,6 +305,9 @@ class Evaluator:
         if not is_unit(n.name):
             raise err("not_defined", "'" + n.name, node=n)
         q = unit_quantity(n.name)
+        if self.ignore_units:
+            # right-click > Ignore units (observed: 5'm+2 = 7, 5'm*2'kg = 10)
+            return Q(q.value)
         return q
 
     def _Var(self, n: A.Var, ctx):

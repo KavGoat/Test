@@ -21,6 +21,17 @@ class DNum:
 
 
 @dataclass
+class DFrac:
+    """A result shown as a fraction (right-click > Fractions > Fraction):
+    1/(3+1/4) = 4/13; with mixed numbers 7/3 = 2 1/3."""
+
+    negative: bool
+    whole: Optional[int]
+    num: int
+    den: int
+
+
+@dataclass
 class DComplex:
     re: Optional[FormattedNumber]
     im: FormattedNumber  # coefficient of i (sign in .negative)
@@ -45,6 +56,14 @@ class DMatrix:
     nrows: int
     ncols: int
     cells: list
+
+
+@dataclass
+class DExpr:
+    """Right-click > Optimization > None: the expression is shown as typed
+    instead of its value (observed: 2+3 = 2+3)."""
+
+    row: object  # model Row
 
 
 @dataclass
@@ -78,9 +97,30 @@ def display_quantity(q: Quantity, fmt: NumberFormat, scale: float = 1.0,
         im = format_real(v.imag, fmt)
         body = DComplex(re, im)
     else:
-        body = DNum(format_real(v.real if isinstance(v, complex) else v, fmt))
+        x = v.real if isinstance(v, complex) else v
+        body = _as_fraction(x, fmt) or DNum(format_real(x, fmt))
     unit = _unit_for(q.dims) if show_unit else None
     return DQuantity(body, unit)
+
+
+def _as_fraction(x: float, fmt: NumberFormat) -> Optional[DFrac]:
+    """The fraction to show for x, or None to show it as a decimal.
+    "Fraction" writes any value that is (very nearly) rational; "Auto" only
+    simple ones (observed: 0.75 -> 3/4)."""
+    import math
+    from fractions import Fraction
+
+    if fmt.fractions == "decimal" or not math.isfinite(x) or x == int(x):
+        return None
+    limit = 10 ** 6 if fmt.fractions == "fraction" else 1000
+    fr = Fraction(x).limit_denominator(limit)
+    if abs(float(fr) - x) > 1e-12 * max(1.0, abs(x)):
+        return None
+    n, d = abs(fr.numerator), fr.denominator
+    whole = None
+    if fmt.mixed and n > d:
+        whole, n = divmod(n, d)
+    return DFrac(fr < 0, whole, n, d)
 
 
 def _visible(x: float, fmt: NumberFormat) -> bool:
@@ -114,6 +154,9 @@ def display_text(d) -> str:
     if isinstance(d, DQuantity):
         if isinstance(d.value, DNum):
             s = d.value.num.plain()
+        elif isinstance(d.value, DFrac):
+            f = d.value
+            s = ("-" if f.negative else "") + (f"{f.whole} " if f.whole else "") + f"{f.num}/{f.den}"
         else:
             re = d.value.re.plain() if d.value.re else ""
             im = d.value.im
@@ -130,6 +173,8 @@ def display_text(d) -> str:
         return "[" + "; ".join(rows) + "]"
     if isinstance(d, DString):
         return f'"{d.text}"'
+    if isinstance(d, DExpr):
+        return d.row.text()
     return str(d)
 
 
