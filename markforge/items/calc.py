@@ -107,6 +107,7 @@ class CalcItem(MarkupItem):
         _connect(self._sheet, frame.scene())
         x, y = self.reading_position()
         self.region = self._sheet.add(self._data, frame.page.uid, x, y)
+        self._preview = None
         # The size is about to change: Qt's index of where items are has to be
         # told first, or clicks on the rest of the equation find nothing.
         self.prepareGeometryChange()
@@ -229,9 +230,33 @@ class CalcItem(MarkupItem):
         self.update()
 
     def _frame_px(self) -> QRectF:
-        if self._view is None:
+        view = self._view or self._preview_view()
+        if view is None:
             return QRectF(0, 0, 20, 24)
-        return self._view.frame_rect()
+        return view.frame_rect()
+
+    def _preview_view(self):
+        """Off any page (a tool held from a tool set, before it is put down):
+        WebSMath's drawing of what it says, as typed and not yet calculated —
+        it calculates once it is down, where it lands."""
+        if self.region is not None:
+            return None
+        cached = getattr(self, "_preview", None)
+        if cached is not None:
+            return cached
+        try:
+            from ..calc.record import add_region_from_data
+            from ..calc.ui.layout import Style as MathStyle
+            from ..calc.worksheet import Worksheet
+            scratch = Worksheet()
+            region = add_region_from_data(scratch, 0, 0, self._data)
+            region.pending = True
+            view = _PageRegionView(region, scratch, MathStyle(region.font_size))
+            view.relayout()
+        except Exception:                       # noqa: BLE001  (a preview only)
+            view = None
+        self._preview = view
+        return view
 
     def local_rect(self) -> QRectF:
         r = self._frame_px()
@@ -254,7 +279,8 @@ class CalcItem(MarkupItem):
         return path
 
     def paint_visible(self, painter: QPainter) -> None:
-        if self._view is None:
+        view = self._view or self._preview_view()
+        if view is None:
             return
         painter.save()
         painter.scale(PT_PER_PX, PT_PER_PX)
@@ -262,7 +288,7 @@ class CalcItem(MarkupItem):
         picture = QPicture()
         if device is None or (device.logicalDpiX() == picture.logicalDpiX()
                               and device.logicalDpiY() == picture.logicalDpiY()):
-            self._view.paint(painter, None)
+            view.paint(painter, None)
         else:
             # SMath's layout sizes its fonts in points, and Qt turns points
             # into pixels by the device's resolution: drawn straight onto a
@@ -272,7 +298,7 @@ class CalcItem(MarkupItem):
             # drawing — text still text — is scaled as one, exactly.
             recorder = QPainter(picture)
             recorder.setRenderHints(painter.renderHints())
-            self._view.paint(recorder, None)
+            view.paint(recorder, None)
             recorder.end()
             painter.scale(picture.logicalDpiX() / device.logicalDpiX(),
                           picture.logicalDpiY() / device.logicalDpiY())
@@ -318,6 +344,7 @@ class CalcItem(MarkupItem):
     def deserialize(self, data: dict) -> None:
         self.load_base(data)
         self._data = dict(data.get("calc") or EMPTY)
+        self._preview = None
 
     def summary(self) -> str:
         return self.text()
@@ -512,3 +539,305 @@ def default_calc_text_style():
     from .base import Style
     return Style(stroke="", fill="", fill_opacity=0.0, width=0.0, text_color="#000000",
                  font_family="Arial", font_size=10.0, padding=2.0)
+
+
+# -- Calculation blocks (phase 7) ----------------------------------------------------
+
+def unturned_px(frame, x: float, y: float, turns: int) -> tuple:
+    """A point on a page turned *turns* quarter turns clockwise since it was
+    written, back where it was on the page as written, in SMath pixels."""
+    width, height = frame.page.width_pt, frame.page.height_pt
+    for _ in range(turns):
+        # undo one clockwise turn: (x, y) -> (y, width - x)
+        x, y = y, width - x
+        width, height = height, width
+    return x * PX_PER_PT, y * PX_PER_PT
+
+
+def default_block_style():
+    """A block's frame: a thin grey line, no fill."""
+    from .base import Style
+    return Style(stroke="#8c8c8c", fill="", fill_opacity=0.0, width=0.75)
+
+
+@register_item
+class CalcBlockItem(MarkupItem):
+    """A calculation block: a markup of its own that holds equations.
+
+    The equations whose top-left is inside it are its members: they calculate
+    exactly as any other equation does, and move, copy and delete with the
+    block. With Self-contained on, what they define stays inside the block —
+    the block still reads everything defined above it, but nothing after it
+    sees its names (the same design check twice on one sheet, with the same
+    names). Like an equation it is page drawing, never an annotation, and it
+    always prints.
+    """
+
+    TYPE = "calc_block"
+    NAME = "Calculation block"
+    ROTATABLE = False
+    IS_CALC = True
+    region = None                       # it is not an equation itself
+    _turn_while_editing = None
+    focused = False
+    warning = ""
+
+    def __init__(self, rect: Optional[QRectF] = None):
+        super().__init__()
+        self._rect = QRectF(rect) if rect else QRectF(0, 0, 36 * GRID_PX * PT_PER_PX,
+                                                      12 * GRID_PX * PT_PER_PX)
+        self.self_contained = False
+        self.style = default_block_style()
+        self._sheet = None
+        # Behind the equations in it, so a click on one finds the equation.
+        self.setZValue(-1)
+
+    # -- where it is --------------------------------------------------------------
+    def _page_frame(self):
+        frame = self.parentItem()
+        return frame if frame is not None and hasattr(frame, "page") \
+            and hasattr(frame, "document") else None
+
+    def page_turns(self) -> int:
+        return int(round(self.rotation() / 90.0)) % 4
+
+    def reading_rect_px(self, frame=None) -> tuple:
+        """(left, top, right, bottom) on its page as written, in SMath pixels."""
+        frame = frame or self._page_frame()
+        r = self._rect.normalized()
+        corners = [self.mapToParent(p) for p in (r.topLeft(), r.topRight(),
+                                                 r.bottomRight(), r.bottomLeft())]
+        points = [unturned_px(frame, c.x(), c.y(), self.page_turns()) for c in corners]
+        xs, ys = [p[0] for p in points], [p[1] for p in points]
+        return min(xs), min(ys), max(xs), max(ys)
+
+    def _tell_the_sheet(self) -> None:
+        frame = self._page_frame()
+        if frame is None or self.scene() is None:
+            self._leave_the_sheet()
+            return
+        if self._sheet is None:
+            self._sheet = sheet_for(frame.document)
+            _connect(self._sheet, frame.scene())
+        self._sheet.set_block(self.uid, frame.page.uid, self.reading_rect_px(frame),
+                              self.self_contained)
+
+    def _leave_the_sheet(self) -> None:
+        if self._sheet is not None:
+            self._sheet.remove_block(self.uid)
+            self._sheet = None
+
+    def itemChange(self, change, value):
+        result = super().itemChange(change, value)
+        if change in (QGraphicsItem.ItemParentHasChanged, QGraphicsItem.ItemSceneHasChanged,
+                      QGraphicsItem.ItemPositionHasChanged,
+                      QGraphicsItem.ItemRotationHasChanged):
+            self._tell_the_sheet()
+        return result
+
+    def set_self_contained(self, on: bool) -> None:
+        self.self_contained = bool(on)
+        self.touch()
+        self.update()
+        self._tell_the_sheet()
+
+    def members(self) -> list:
+        """The equations and Calculation text whose top-left is inside it."""
+        frame = self._page_frame()
+        if frame is None:
+            return []
+        box = self.mapRectToParent(self._rect.normalized())
+        found = []
+        for item in frame.markups():
+            if item is self or not isinstance(item, (CalcItem, CalcTextItem)):
+                continue
+            if box.contains(item.pos()):
+                found.append(item)
+        return found
+
+    # -- geometry and drawing ------------------------------------------------------
+    def local_rect(self) -> QRectF:
+        return QRectF(self._rect)
+
+    def set_local_rect(self, rect: QRectF) -> None:
+        self.prepareGeometryChange()
+        self._rect = QRectF(rect).normalized()
+        self.update()
+        self._tell_the_sheet()
+
+    def relayout(self) -> None:
+        self.update()
+
+    def shape(self):
+        """Its frame only: a click inside it is a click on the page (to type
+        an equation there), not on the block."""
+        from PySide6.QtGui import QPainterPath
+        rect = self._rect.normalized()
+        grow = 4.0
+        path = QPainterPath()
+        path.addRect(rect.adjusted(-grow, -grow, grow, grow))
+        if rect.width() > 2 * grow and rect.height() > 2 * grow:
+            inner = QPainterPath()
+            inner.addRect(rect.adjusted(grow, grow, -grow, -grow))
+            path = path.subtracted(inner)
+        return path
+
+    def paint_content(self, painter: QPainter) -> None:
+        rect = self._rect.normalized()
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(self.style.pen() if self.style.stroke else QPen(Qt.NoPen))
+        painter.setBrush(self.style.brush())
+        painter.drawRect(rect)
+
+    def paint(self, painter: QPainter, option, widget=None) -> None:
+        super().paint(painter, option, widget)
+        frame = self._page_frame()
+        if not self.self_contained or getattr(frame, "print_mode", False):
+            return
+        # On the screen only: say it keeps its names to itself.
+        painter.save()
+        font = painter.font()
+        font.setPointSizeF(6.5)
+        painter.setFont(font)
+        painter.setPen(QColor("#8c8c8c"))
+        rect = self._rect.normalized()
+        painter.drawText(QRectF(rect.left(), rect.top() - 10, rect.width(), 10),
+                         Qt.AlignRight | Qt.AlignBottom, "Self-contained")
+        painter.restore()
+
+    def boundingRect(self) -> QRectF:
+        return super().boundingRect().united(
+            self._rect.normalized().adjusted(0, -11, 0, 0))
+
+    def summary(self) -> str:
+        return "Self-contained" if self.self_contained else ""
+
+    # -- the record ---------------------------------------------------------------------
+    def serialize(self) -> dict:
+        data = self.base_dict()
+        data["rect"] = [self._rect.x(), self._rect.y(), self._rect.width(), self._rect.height()]
+        data["self_contained"] = self.self_contained
+        return data
+
+    def deserialize(self, data: dict) -> None:
+        self._rect = QRectF(*data.get("rect", [0, 0, 100, 60]))
+        self.self_contained = bool(data.get("self_contained", False))
+        self.load_base(data)
+
+
+def with_block_members(items: list) -> list:
+    """*items*, and the members of every calculation block among them (a
+    block moves, copies and deletes with what is in it)."""
+    out = list(items)
+    seen = {id(i) for i in out}
+    for item in items:
+        if isinstance(item, CalcBlockItem):
+            for member in item.members():
+                if id(member) not in seen:
+                    seen.add(id(member))
+                    out.append(member)
+    return out
+
+
+# -- a measurement as a variable (decision 24) -------------------------------------------
+
+import re as _re  # noqa: E402
+
+NAME_PATTERN = _re.compile(r"^[^\W\d_][\w.]*$")
+
+
+def valid_variable_name(name: str) -> bool:
+    """A name SMath would take as a variable: a letter first, then letters,
+    digits, _ or . (a subscript)."""
+    return bool(NAME_PATTERN.match(name or ""))
+
+
+def _plain_number(value: float) -> str:
+    """A number as typed digits: never 1e-05, which SMath would read as e."""
+    from decimal import Decimal
+    text = format(Decimal(repr(float(value))), "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def measured_keys(name: str, quantity) -> Optional[str]:
+    """The keystrokes that define *name* as *quantity* in SMath: the value in
+    the measurement's own unit (6250 mm stays 6250'mm), an angle in degrees."""
+    from ..core.units import unit_text
+
+    if quantity is None:
+        return None
+    unit = unit_text(quantity.units, plain=False)
+    if unit == "deg":
+        unit = "°"
+    number = _plain_number(quantity.magnitude)
+    return f"{name}:{number}" + (f"'{unit}" if unit else "")
+
+
+class MeasureVariable:
+    """The region a named measurement defines its variable with.
+
+    It is an ordinary region of the document's worksheet — typed as SMath
+    would type ``L:6250'mm`` — at the top-left of the measurement's box, so it
+    is read in the same order an equation there would be. It has no equation
+    item on the page: the measurement is what the reader sees.
+    """
+
+    def __init__(self, measure):
+        self.measure = measure
+        self.region = None
+        self._sheet = None
+        self._keys = None
+
+    def _frame(self):
+        frame = self.measure.parentItem()
+        return frame if frame is not None and hasattr(frame, "page") \
+            and hasattr(frame, "document") else None
+
+    def _position(self, frame) -> tuple:
+        measure = self.measure
+        box = measure.mapRectToParent(measure.local_rect().normalized())
+        turns = int(round(measure.rotation() / 90.0)) % 4
+        return unturned_px(frame, box.left(), box.top(), turns) if turns \
+            else (box.left() * PX_PER_PT, box.top() * PX_PER_PT)
+
+    def sync(self) -> None:
+        measure = self.measure
+        frame = self._frame()
+        keys = None
+        if measure.variable and valid_variable_name(measure.variable) \
+                and frame is not None and measure.scene() is not None:
+            keys = measured_keys(measure.variable, measure.value)
+        if keys is None:
+            self.drop()
+            return
+        x, y = self._position(frame)
+        if self.region is not None and keys == self._keys:
+            self._sheet.move(self.region, frame.page.uid, x, y)
+            return
+        self.drop()
+        self._sheet = sheet_for(frame.document)
+        _connect(self._sheet, frame.scene())
+        self.region = self._sheet.add(_typed_region_data(keys), frame.page.uid, x, y)
+        self.region.calcforge_source = "Measurement"
+        self._keys = keys
+
+    def drop(self) -> None:
+        if self.region is not None and self._sheet is not None:
+            self._sheet.remove(self.region)
+        self.region = None
+        self._keys = None
+
+
+def _typed_region_data(keys: str) -> dict:
+    """A region's record, as typing *keys* into SMath's editor makes it."""
+    from ..calc.editor import MathEditor
+    from ..calc.worksheet import Worksheet
+
+    scratch = Worksheet()
+    editor = MathEditor()
+    region = scratch.add_region(0, 0, editor)
+    for key in keys:
+        editor.key(key)
+    return region_to_data(region)

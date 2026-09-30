@@ -227,6 +227,15 @@ def entry_for_many(items: list, label: str = "") -> ToolEntry:
 GROUP = "__group__"     # what a multi-markup entry's payload calls itself
 
 
+def entry_for_block(block, label: str = "") -> ToolEntry:
+    """A calculation block and the equations in it, as one tool. They come
+    back down as they are on the page, but not grouped: a block holds its
+    equations itself, and each is still clicked into on its own."""
+    entry = entry_for_many([block] + block.members(), label or describe(block))
+    entry.payload["ungrouped"] = True
+    return entry
+
+
 # ---------------------------------------------------------------------------
 # bringing a Bluebeam tool set in
 # ---------------------------------------------------------------------------

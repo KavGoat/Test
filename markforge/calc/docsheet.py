@@ -46,8 +46,14 @@ class DocumentSheet:
         self._moved: set = set()
         # Told which regions' shown results changed, so their items redraw.
         self.on_changed: Optional[Callable[[set], None]] = None
+        # Also told after every calculation (the Variables panel).
+        self.listeners: list[Callable[[], None]] = []
         # Asked to call settle() soon (the UI posts it to the event loop).
         self.request_settle: Optional[Callable[[], None]] = None
+        # Calculation blocks (items/calc.py CalcBlockItem): block uid ->
+        # (page uid, (left, top, right, bottom) in reading pixels, self-contained)
+        self.blocks: dict[str, tuple] = {}
+        self._blocks_dirty = False
 
     def adopt_format(self) -> None:
         """Show results as the document says (its settings' calc_format)."""
@@ -93,6 +99,7 @@ class DocumentSheet:
         self.worksheet.remove_region(region)
         self._page_of.pop(region.id, None)
         self._local.pop(region.id, None)
+        self.worksheet.scope_of.pop(region.id, None)
         if self._batch:
             self._dirty = True
             return
@@ -126,7 +133,7 @@ class DocumentSheet:
         if self._pages_moved():
             self._moved.clear()
             return
-        if not self._moved:
+        if not self._moved and not self._blocks_dirty:
             return
         self._moved.clear()
         # the reading order changed: everything, as the worksheet itself does
@@ -146,6 +153,9 @@ class DocumentSheet:
             self._dirty = True
             return
         if self._pages_moved():
+            return
+        if self._apply_scopes():
+            self.recalculate()            # it went into or out of a self-contained block
             return
         if self.worksheet.auto_calculation:
             # a changed key is a moved region; the worksheet then recalculates
@@ -177,6 +187,8 @@ class DocumentSheet:
         """Everything, in reading order (F9, loading, pages moved)."""
         self._moved.clear()
         self._order_seen = tuple(page.uid for page in self.document.pages)
+        self._blocks_dirty = False
+        self._apply_scopes()
         if self.worksheet.auto_calculation or force:
             self.worksheet.calculate()
         self._report()
@@ -185,6 +197,8 @@ class DocumentSheet:
         changed = self.worksheet.take_changed()
         if self.on_changed is not None:
             self.on_changed(changed)
+        for listener in list(self.listeners):
+            listener()
 
     @contextmanager
     def batch(self):
@@ -199,6 +213,62 @@ class DocumentSheet:
                 self._dirty = False
                 self._moved.clear()
                 self.recalculate()
+
+    # -- calculation blocks ------------------------------------------------------------
+    def set_block(self, uid: str, page_uid: Optional[str], rect_px: tuple,
+                  self_contained: bool) -> None:
+        """A calculation block is here (or has moved, been resized or had
+        Self-contained turned on or off)."""
+        said = (page_uid, tuple(float(v) for v in rect_px), bool(self_contained))
+        if self.blocks.get(uid) == said:
+            return
+        self.blocks[uid] = said
+        self._block_changed()
+
+    def remove_block(self, uid: str) -> None:
+        if self.blocks.pop(uid, None) is not None:
+            self._block_changed()
+
+    def _block_changed(self) -> None:
+        self._blocks_dirty = True
+        if self._batch:
+            self._dirty = True
+        elif self.request_settle is not None:
+            self.request_settle()
+        else:
+            self.settle()
+
+    def block_of(self, region: Region, contained_only: bool = False) -> Optional[str]:
+        """The block a region is inside (the smallest, when blocks overlap;
+        only self-contained ones if asked): a region is inside when its
+        top-left is."""
+        page = self._page_of.get(region.id)
+        at = self._local.get(region.id)
+        if page is None or at is None:
+            return None
+        x, y = at
+        best, area = None, None
+        for uid, (block_page, (left, top, right, bottom), contained) in self.blocks.items():
+            if contained_only and not contained:
+                continue
+            if block_page == page and left <= x < right and top <= y < bottom:
+                size = (right - left) * (bottom - top)
+                if area is None or size < area:
+                    best, area = uid, size
+        return best
+
+    def _scopes(self) -> dict:
+        if not any(on for (_p, _r, on) in self.blocks.values()):
+            return {}
+        scopes = {}
+        for region in self.worksheet.regions:
+            block = self.block_of(region, contained_only=True)
+            if block is not None:
+                scopes[region.id] = block
+        return scopes
+
+    def _apply_scopes(self) -> bool:
+        return self.worksheet.set_scopes(self._scopes())
 
     # -- asking ------------------------------------------------------------------------
     def region_by_id(self, region_id: int) -> Optional[Region]:

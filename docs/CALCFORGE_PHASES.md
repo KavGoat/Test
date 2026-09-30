@@ -497,3 +497,75 @@ paste back live.
 - (Not a difference, but worth knowing: a page-number format is SMath's —
   an offset plus zero-padding — so `{page:0000}` shows page 1 as 0001 and
   `{page:0001}` shows it as 0002, exactly as SMath's Insert › Field does.)
+
+## Phase 7 — blocks, tool sets, Variables panel, measurement variables
+
+**What changed**
+
+- **Calculation block** — a markup type of its own (Calculation toolbar and
+  menu › Block). It wraps the selected equations, or starts empty at the red
+  cross. The equations and Calculation text whose top-left is inside it are
+  its members: they calculate exactly as they did, and move (drag or arrow
+  keys), copy, duplicate and delete with the block. It is picked by its thin
+  frame only, so a click inside still starts an equation there. Like an
+  equation it is page drawing when saved, never an annotation, and always
+  prints.
+- **Self-contained** (decision 10), on the block's right-click menu and in
+  Properties: what the block's equations define stays inside it. The block
+  still reads everything defined above it; after it, the names mean what
+  they meant before it. Editing above the block updates inside it; moving an
+  equation in or out recalculates. The screen shows "Self-contained" over
+  the block (never printed). Done at the worksheet with a scoped index per
+  block (`Worksheet.scope_of`, `ScopedContext`); a sheet with no
+  self-contained block calculates exactly as before.
+- **Tool sets and My Tools** (decision 23): an equation kept in a set shows
+  its own drawing on its row and while held, then calculates where it is put
+  down, on SMath's grid, as if typed there. A block is kept with its
+  equations as one tool and comes back with them (not as a markup group).
+- **Variables panel** on the rail (decision 21): every name defined, in
+  reading order, with value, unit, page ("· block" when inside a
+  self-contained one) and its error in red; functions listed as `f(·)`. A
+  filter box finds a name; clicking a row goes to the equation (or
+  measurement) and selects it. It follows each calculation.
+- **Measurement variables** (decision 24): Properties › Variable, or
+  right-click › Variable name…. The measurement defines the name as SMath
+  would if you typed it (`L_b:0.03528'm`, in the measurement's own unit, to
+  full precision) at the top-left of its box, so equations below it see it
+  and equations above don't. It follows the measurement live — stretch it
+  and the results change; move it below an equation and that equation loses
+  it. Its label reads "L_b = 0.04 m". Deleting it says which names are no
+  longer defined (and asks first). The name is saved with it.
+- **SMath areas are gone from the app** (promised in phase 6):
+  `Worksheet.add_special` moved into the test-only `.sm` reader, which
+  still reads SMath's example files. The region fields remain only because
+  WebSMath's drawing code, kept byte for byte, reads them.
+
+**Tests**
+
+- `tests/calc/test_block_scope.py` (5): Self-contained at the worksheet —
+  shared without it; reads above, keeps its own; editing above updates
+  inside; two blocks don't see each other; moving out recalculates.
+- `tests/test_calc_blocks.py` (11), through the window: Block wraps the
+  selection; right-click and Properties toggle Self-contained with undo;
+  editing above; drag and arrow keys move members; a click inside starts an
+  equation; delete and undo; duplicate; saved as page drawing (not an
+  annotation) and reopened with its setting; snapshot as line work.
+- `tests/test_calc_toolsets.py` (3): an equation's row picture and held
+  size; placed below/above its definition; a block tool.
+- `tests/test_variables_panel.py` (6): on the rail; value, unit, page,
+  function, red error; follows edits; block marker; click goes to it;
+  filter.
+- `tests/test_measure_variables.py` (7): exact values below it, undefined
+  above; live when stretched; moved below an equation; Properties field and
+  a rejected name; in the Variables panel; delete message and undo; saved.
+- No test removed.
+
+**Different from SMath**
+
+- No SMath areas: calculation blocks instead. They can't be collapsed, and
+  Self-contained is new (SMath has nothing like it).
+- Blocks inside blocks: an equation belongs to the innermost
+  self-contained block only, and doesn't also read the outer block's names.
+- A variable whose name is also a unit (`a` is the are) asks which one is
+  meant when typed, exactly as SMath does — the Variables panel lists it
+  either way.

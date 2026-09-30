@@ -2380,6 +2380,17 @@ class PropertiesPanel(QScrollArea):
                                i.refresh(page=self.window.current_page())), "Depth"))
             form.addRow("Depth", depth)
 
+        if len(self._items) == 1 and item.kind != "calibrate":
+            variable = QLineEdit(item.variable)
+            variable.setObjectName("measureVariable")
+            variable.setPlaceholderText("a name, e.g. L_beam")
+            variable.setToolTip("Give it a name and the calculations can use it: it is "
+                                "defined at the top-left of the measurement, and follows "
+                                "it as it changes")
+            variable.editingFinished.connect(
+                lambda: self.window.set_measure_variable(item, variable.text()))
+            form.addRow("Variable", variable)
+
         words = QLineEdit(item.custom_label)
         words.setPlaceholderText(item.measured_text or "the measured value")
         words.setToolTip("What this says on the drawing. Leave it empty and it "
@@ -2530,6 +2541,16 @@ class PropertiesPanel(QScrollArea):
         locked.toggled.connect(
             lambda on: self._apply(lambda i: i.set_locked(on), "Lock"))
         form.addRow("", locked)
+
+        if all(getattr(i, "TYPE", "") == "calc_block" for i in self._items):
+            contained = QCheckBox("Self-contained")
+            contained.setObjectName("blockSelfContained")
+            contained.setToolTip("What the equations in the block define stays inside it; "
+                                 "the block still reads everything defined above it")
+            contained.setChecked(first.self_contained)
+            contained.toggled.connect(
+                lambda on: self._apply(lambda i: i.set_self_contained(on), "Self-contained"))
+            form.addRow("", contained)
 
         if not getattr(first, "IS_CALC", False):
             # an equation always prints (decision 17)

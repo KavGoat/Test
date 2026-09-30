@@ -77,6 +77,9 @@ class Region:
     def key(self):
         return (self.y, self.x, self.id)
 
+    # SMath's separators, areas and pictures: CalcForge makes none of them
+    # (MarkForge's lines and images, and calculation blocks, instead); kept
+    # because WebSMath's drawing code, byte for byte, reads them.
     special: Optional[str] = None  # "separator", "area" or "picture"
     image: bytes = b""  # picture regions: the encoded image (PNG/JPEG)
     image_format: str = "png"
@@ -116,6 +119,13 @@ class Worksheet:
         self.auto_calculation = True
         self.evaluator = Evaluator()
         self.index = DefinitionIndex()
+        # Calculation blocks with Self-contained on (CalcForge decision 10):
+        # region id -> the block it is inside. What such a region defines goes
+        # into its block's own index, seen only inside that block; the block
+        # still sees everything defined above it.
+        self.scope_of: dict = {}
+        self._scoped: dict = {}             # block -> DefinitionIndex
+        self._scope_indexed: dict = {}      # region id -> block it was indexed in
         self.changed: set = set()  # ids of regions whose shown result changed
         self._keys: dict = {}  # region id -> key it was indexed under
         self._order_cache = None
@@ -143,13 +153,6 @@ class Worksheet:
         r.plot = PlotState()
         return r
 
-    def add_special(self, kind: str, y: float, height: float = 0.0) -> Region:
-        """A separator line or an area (a band that can be collapsed)."""
-        r = self.add_region(0, y)
-        r.special = kind
-        r.area_height = height
-        return r
-
     def remove_region(self, region: Region) -> None:
         self.regions.remove(region)
         self._order_cache = None
@@ -169,15 +172,33 @@ class Worksheet:
         from .engine import builtins
         from .engine.evaluator import BUILTIN_CONSTANTS
 
-        key = region.key
+        ctx = self._context_before(region)
         if nargs is None:
-            return self.index.var_before(name, key) is not None or name in BUILTIN_CONSTANTS
-        if self.index.func_before(name, nargs, key) is not None:
+            return ctx.has(name) or name in BUILTIN_CONSTANTS
+        if ctx.function(name, nargs) is not None:
             return True
         return builtins.has_overload(name, nargs)
 
     def _context_before(self, region: Region) -> Context:
+        scope = self.scope_of.get(region.id)
+        if scope is not None:
+            return ScopedContext(self.index, region.key, self._scoped.get(scope))
         return IndexedContext(self.index, region.key)
+
+    # -- calculation blocks (Self-contained) -----------------------------------------
+    def _index_for(self, scope) -> DefinitionIndex:
+        if scope is None:
+            return self.index
+        return self._scoped.setdefault(scope, DefinitionIndex())
+
+    def set_scopes(self, scopes: dict) -> bool:
+        """Which self-contained block each region is inside (region id ->
+        block). Says whether anything changed; the caller recalculates."""
+        scopes = {rid: scope for rid, scope in scopes.items() if scope is not None}
+        if scopes == self.scope_of:
+            return False
+        self.scope_of = scopes
+        return True
 
     @property
     def context(self) -> Context:
@@ -188,6 +209,8 @@ class Worksheet:
     def calculate(self) -> None:
         """Recalculate the whole page from scratch (F9, loading, moving regions)."""
         self.index.clear()
+        self._scoped.clear()
+        self._scope_indexed.clear()
         self._keys.clear()
         self.invalidate_order()
         for r in self.ordered():
@@ -219,6 +242,10 @@ class Worksheet:
         if self._keys.get(region.id) not in (None, region.key) or region not in self.regions:
             self.calculate()
             return
+        if region.id in self._keys and \
+                self.scope_of.get(region.id) != self._scope_indexed.get(region.id):
+            self.calculate()              # moved into or out of a self-contained block
+            return
         before = set(region.defined_vars) | {n for n, _ in region.defined_funcs}
         self._evaluate(region, commit=True)
         changed = before | set(region.defined_vars) | {n for n, _ in region.defined_funcs}
@@ -228,7 +255,8 @@ class Worksheet:
         key = self._keys.pop(region.id, None)
         if key is None:
             return
-        self.index.remove(key, region.defined_vars, region.defined_funcs)
+        self._index_for(self._scope_indexed.pop(region.id, None)).remove(
+            key, region.defined_vars, region.defined_funcs)
         changed = set(region.defined_vars) | {n for n, _ in region.defined_funcs}
         self._propagate(key, changed)
 
@@ -260,8 +288,9 @@ class Worksheet:
         r.pending = False
         before = (_shown(r.display), r.error.message if r.error else None)
         if commit and r.id in self._keys:
-            self.index.remove(self._keys.pop(r.id), r.defined_vars, r.defined_funcs)
-        ctx = IndexedContext(self.index, r.key)
+            self._index_for(self._scope_indexed.pop(r.id, None)).remove(
+                self._keys.pop(r.id), r.defined_vars, r.defined_funcs)
+        ctx = self._context_before(r)
         self.evaluator.start_clock()
         try:
             self._run(r, ctx, record=True)
@@ -276,8 +305,11 @@ class Worksheet:
             r.error = err("cannot_evaluate")
         if commit:
             r.defined_vars, r.defined_funcs = dict(ctx.vars), dict(ctx.funcs)
-            self.index.add(r.key, r.defined_vars, r.defined_funcs)
+            scope = self.scope_of.get(r.id)
+            self._index_for(scope).add(r.key, r.defined_vars, r.defined_funcs)
             self._keys[r.id] = r.key
+            if scope is not None:
+                self._scope_indexed[r.id] = scope
         if (_shown(r.display), r.error.message if r.error else None) != before or r.plot is not None:
             self.changed.add(r.id)
 
@@ -542,3 +574,59 @@ def _row_names(r: Row) -> set:
                     out.add("".join(word))
                 word = []
     return out
+
+
+class ScopedContext(IndexedContext):
+    """What a region inside a self-contained calculation block sees: the
+    worksheet's definitions above it and its own block's, whichever of the
+    two is the more recent in reading order (CalcForge decision 10)."""
+
+    def __init__(self, index: DefinitionIndex, key, own: Optional[DefinitionIndex]):
+        super().__init__(index, key)
+        self.own = own if own is not None else DefinitionIndex()
+
+    @staticmethod
+    def _last(lst, key):
+        if not lst:
+            return None
+        i = bisect.bisect_left(lst, key, key=lambda e: e[0])
+        return lst[i - 1] if i else None
+
+    def _latest(self, table: str, name):
+        mine = self._last(getattr(self.own, table).get(name), self.key)
+        theirs = self._last(getattr(self.index, table).get(name), self.key)
+        if mine is None:
+            return theirs[1] if theirs is not None else None
+        if theirs is None or mine[0] > theirs[0]:
+            return mine[1]
+        return theirs[1]
+
+    def lookup(self, name: str):
+        if name in self.vars:
+            return self.vars[name]
+        return self._latest("vars", name)
+
+    def has(self, name: str) -> bool:
+        return name in self.vars or self._latest("vars", name) is not None
+
+    def function(self, name: str, nargs: int):
+        f = self.funcs.get((name, nargs))
+        return f if f is not None else self._latest("funcs", (name, nargs))
+
+    def any_function(self, name: str):
+        for (n, k), f in self.funcs.items():
+            if n == name:
+                return f
+        for table in (self.own.funcs, self.index.funcs):
+            for (n, k), lst in table.items():
+                if n == name and lst[0][0] < self.key:
+                    return lst[0][1]
+        return None
+
+    def names(self) -> set:
+        return super().names() | self.own.names_before(self.key)
+
+    def function_arities(self) -> dict:
+        out = {n: k for (n, k), lst in self.own.funcs.items() if lst[0][0] < self.key}
+        out.update(super().function_arities())
+        return out

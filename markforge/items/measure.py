@@ -114,6 +114,10 @@ class MeasureItem(MarkupItem):
             self.style.arrow_end = "none"
         if kind == DIMENSION:
             self.subject = "Dimension"
+        # A variable name (decision 24): the measurement then defines it for
+        # the calculations, live, as an equation at the top-left of its box.
+        self.variable = ""
+        self._variable_link = None
 
     # -- identity ----------------------------------------------------------
     def display_name(self) -> str:
@@ -483,9 +487,47 @@ class MeasureItem(MarkupItem):
             quantity = None
         self.value = quantity
         measured = format_quantity(quantity, digits, "fixed") if quantity is not None else ""
-        self.value_text = self.custom_label or measured
         self.measured_text = measured
+        named = f"{self.variable} = {measured}" if self.variable and measured else measured
+        self.value_text = self.custom_label or named
         self.update()
+        self.sync_variable()
+
+    # -- a measurement as a variable (decision 24) -------------------------------
+    def sync_variable(self) -> None:
+        """Keep the variable it defines in step with its value and place."""
+        from .calc import MeasureVariable
+
+        if self._variable_link is None:
+            if not self.variable:
+                return
+            self._variable_link = MeasureVariable(self)
+        self._variable_link.sync()
+
+    @property
+    def variable_region(self):
+        link = self._variable_link
+        return link.region if link is not None else None
+
+    @property
+    def variable_region_id(self):
+        region = self.variable_region
+        return region.id if region is not None else None
+
+    def set_variable(self, name: str) -> None:
+        self.variable = name.strip()
+        self.touch()
+        self.refresh()
+
+    def itemChange(self, change, value):
+        result = super().itemChange(change, value)
+        from PySide6.QtWidgets import QGraphicsItem
+        if change in (QGraphicsItem.ItemParentHasChanged, QGraphicsItem.ItemSceneHasChanged,
+                      QGraphicsItem.ItemPositionHasChanged,
+                      QGraphicsItem.ItemRotationHasChanged) \
+                and self._variable_link is not None:
+            self._variable_link.sync()
+        return result
 
     # -- painting ----------------------------------------------------------
     def paint_content(self, painter: QPainter) -> None:
@@ -690,6 +732,8 @@ class MeasureItem(MarkupItem):
             "show_label": self.show_label,
             "cutouts": self.cutouts_as_data(),
         })
+        if self.variable:
+            data["variable"] = self.variable
         return data
 
     def deserialize(self, data: dict) -> None:
@@ -703,6 +747,7 @@ class MeasureItem(MarkupItem):
         self.custom_label = data.get("custom_label", "")
         self.witness_reach = float(data.get("witness_reach", 0.0) or 0.0)
         self.show_label = bool(data.get("show_label", True))
+        self.variable = str(data.get("variable", "") or "")
         self.cutouts_from_data(data)
         self.load_base(data)
         self.refresh()

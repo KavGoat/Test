@@ -43,7 +43,12 @@ def undefined_without(document, going: list) -> list:
     """The names the equations in *going* define that nothing left defines —
     the variables that become undefined when they are removed."""
     sheet = sheet_for(document)
-    going_ids = {item.region.id for item in going if getattr(item, "region", None) is not None}
+    going_ids = set()
+    for item in going:
+        # an equation, or a measurement that defines a variable (decision 24)
+        region = getattr(item, "region", None) or getattr(item, "variable_region", None)
+        if region is not None:
+            going_ids.add(region.id)
     lost, kept = set(), set()
     for region in sheet.worksheet.regions:
         names = set(region.defined_vars) | {name for name, _ in region.defined_funcs}

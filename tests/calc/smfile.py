@@ -261,12 +261,12 @@ def _load_regions(ws, group) -> None:
                 r.pic_h = float(reg.get("height", "0") or 0)
         elif area is not None:
             if area.get("single") == "true":
-                ws.add_special("separator", y)
+                _add_special(ws, "separator", y)
             else:
                 nested = [float(c.get("top", "0")) + float(c.get("height", "24"))
                           for c in reg.iter(f"{{{NS}}}region") if c is not reg]
                 height = float(area.get("height", "0")) or (max(nested) - y + 9 if nested else 90.0)
-                a = ws.add_special("area", y, height)
+                a = _add_special(ws, "area", y, height)
                 a.collapsed = area.get("collapsed") == "true"
         elif plot is not None and plot.get("type", "2d") == "2d":
             _load_plot(ws, reg, plot, x, y)
@@ -754,3 +754,14 @@ def _load_format(region, reg) -> None:
         region.font_family = reg.get("fontFamily", "")
     except ValueError:
         pass
+
+
+def _add_special(ws, kind: str, y: float, height: float = 0.0):
+    """A separator line or an area, as SMath's files hold them. CalcForge has
+    neither (calculation blocks replace areas); they are read here only so
+    SMath's example files load, and the fields exist only because WebSMath's
+    drawing code, kept byte for byte, reads them."""
+    r = ws.add_region(0, y)
+    r.special = kind
+    r.area_height = height
+    return r

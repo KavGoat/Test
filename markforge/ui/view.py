@@ -1755,7 +1755,9 @@ class PageView(QGraphicsView):
         self._copy_on_move = control
         self._ctrl_from_the_press = control
         self._copied = False
-        self._move_items = [(other, other.pos()) for other in self.scene().selectedItems()
+        from ..items.calc import with_block_members
+        self._move_items = [(other, other.pos()) for other in
+                            with_block_members(self.scene().selectedItems())
                             if isinstance(other, MarkupItem) and self.editable(other)]
         self._move_original_data = {
             other.uid: deepcopy(other.serialize()) for other, _ in self._move_items}
@@ -2909,7 +2911,8 @@ class PageView(QGraphicsView):
         for data in payloads:
             for step in (data.get("group_path") or []):
                 renamed.setdefault(str(step), os.urandom(6).hex())
-        group_name = os.urandom(6).hex() if len(payloads) > 1 else ""
+        group_name = os.urandom(6).hex() if len(payloads) > 1 \
+            and not entry.payload.get("ungrouped") else ""
         self.begin_snapshot([frame])
         self.scene().clearSelection()
         placed = []
@@ -2932,6 +2935,7 @@ class PageView(QGraphicsView):
             frame.add_markup(item)
             item.setSelected(True)
             placed.append(item)
+        self._onto_the_calc_grid(placed)
         self.commit_snapshot(f"Place {entry.label}")
         self.selectionChanged.emit()
         self._pending_stamp = None
@@ -2940,6 +2944,26 @@ class PageView(QGraphicsView):
                                 else f"{entry.label} placed — {len(placed)} markups")
         self.viewport().update()
         return bool(placed)
+
+    def _onto_the_calc_grid(self, placed: list) -> None:
+        """Equations, Calculation text and blocks put down from a tool set
+        land on SMath's grid, as if typed there; the first one's step moves
+        the rest with it, so what was kept together stays in step."""
+        from ..items.calc import CalcBlockItem
+        from .calcedit import snap
+        lead = next((i for i in placed if isinstance(i, (CalcItem, CalcTextItem, CalcBlockItem))),
+                    None)
+        if lead is None:
+            return
+        where = lead.pos()
+        step = QPointF(snap(where.x()) - where.x(), snap(where.y()) - where.y())
+        for item in placed:
+            if isinstance(item, (CalcItem, CalcTextItem, CalcBlockItem)):
+                item.setPos(item.pos() + step)
+        sheet_for_items = [i for i in placed if isinstance(i, CalcItem)]
+        if sheet_for_items:
+            from ..calc.docsheet import sheet_for
+            sheet_for(self.document()).settle()
 
     def _pending_origin(self, frame, scene_pos: QPointF) -> QPointF:
         """Offset an exact tool-set item from its bottom-left pointer anchor."""
@@ -4590,9 +4614,10 @@ class PageView(QGraphicsView):
             step = 1.0 if modifiers & Qt.ShiftModifier else 0.25 * MM_TO_PT * 4
             delta = {Qt.Key_Left: QPointF(-step, 0), Qt.Key_Right: QPointF(step, 0),
                      Qt.Key_Up: QPointF(0, -step), Qt.Key_Down: QPointF(0, step)}[key]
-            items = [i for i in self.scene().selectedItems()
+            from ..items.calc import CalcBlockItem, with_block_members
+            items = [i for i in with_block_members(self.scene().selectedItems())
                      if isinstance(i, MarkupItem) and self.editable(i)]
-            if any(isinstance(i, (CalcItem, CalcTextItem)) for i in items):
+            if any(isinstance(i, (CalcItem, CalcTextItem, CalcBlockItem)) for i in items):
                 # equations and Calculation text live on SMath's grid: a nudge
                 # is one grid step
                 from .calcedit import GRID_PT

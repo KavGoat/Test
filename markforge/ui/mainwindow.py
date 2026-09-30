@@ -665,6 +665,10 @@ class MainWindow(QMainWindow):
                   tip="Insert a matrix into the equation, or start one")
         self._act("insert_plot", "Plot", self.insert_plot,
                   tip="A 2-D plot at the red cross or the pointer (@ in Calc mode)")
+        self._act("insert_block", "Block", self.insert_block,
+                  tip="A calculation block round the selected equations, or at the red "
+                      "cross: its equations move, copy and delete with it, and it can "
+                      "keep what they define to itself (Self-contained)")
         self._act("insert_calc_text", "Calc text", self.insert_calc_text,
                   tip="Calculation text: words among the equations, on their grid "
                       "(\" in Calc mode)")
@@ -1104,7 +1108,8 @@ class MainWindow(QMainWindow):
         for key, name in (("calculate", "recalc"), ("auto_calc", "calc_auto"),
                           (None, None), ("insert_plot", "calc_plot"),
                           ("insert_matrix", "calc_matrix"),
-                          ("insert_calc_text", "calc_text"), (None, None),
+                          ("insert_calc_text", "calc_text"), ("insert_block", "calc_block"),
+                          (None, None),
                           ("prog_if", "prog_if"), ("prog_for", "prog_for"),
                           ("prog_while", "prog_while"), ("prog_line", "prog_line")):
             if key is None:
@@ -1156,6 +1161,10 @@ class MainWindow(QMainWindow):
         self.maths_panel = MathsPanel(self)
         self.dock_maths = self._dock("Maths", self.maths_panel,
                                      Qt.RightDockWidgetArea, "dock_maths")
+        from .variablespanel import VariablesPanel
+        self.variables_panel = VariablesPanel(self)
+        self.dock_variables = self._dock("Variables", self.variables_panel,
+                                         Qt.RightDockWidgetArea, "dock_variables")
         self.reference_docks = [self.dock_toolsets, self.dock_bookmarks]
         self._build_rails()
         self.resizeDocks([self.dock_pages, self.dock_properties], [220, 320],
@@ -1173,11 +1182,13 @@ class MainWindow(QMainWindow):
         "dock_search": ("Search", "panel_search"),
         "dock_page": ("Page setup", "panel_page"),
         "dock_maths": ("Maths", "panel_maths"),
+        "dock_variables": ("Variables", "panel_variables"),
     }
     DEFAULT_SIDES = {
         "dock_pages": LEFT, "dock_bookmarks": LEFT, "dock_toolsets": LEFT,
         "dock_search": LEFT,
         "dock_properties": RIGHT, "dock_page": RIGHT, "dock_maths": RIGHT,
+        "dock_variables": RIGHT,
     }
 
     # -- the markups list under the canvas ---------------------------------
@@ -1582,7 +1593,8 @@ class MainWindow(QMainWindow):
         calc_menu = bar.addMenu("&Calculation")
         for action in (self.act_calc_mode, None, self.act_calculate, self.act_auto_calc,
                        None, self.act_insert_plot, self.act_insert_matrix,
-                       self.act_insert_calc_text, self.act_insert_function,
+                       self.act_insert_calc_text, self.act_insert_block,
+                       self.act_insert_function,
                        self.act_constants, None):
             calc_menu.addSeparator() if action is None else calc_menu.addAction(action)
         calc_menu.addAction(self.act_insert_operator)
@@ -4035,6 +4047,82 @@ class MainWindow(QMainWindow):
         if frame is not None:
             calc.start_calc_text(frame, point)
 
+    def insert_block(self) -> None:
+        """A calculation block round the selected equations (on the page of the
+        first), or a new empty one at the red cross or under the pointer."""
+        from ..items.calc import CalcBlockItem, CalcItem, CalcTextItem
+        from .calcedit import GRID_PT, snap
+
+        calc = self.view.calc
+        calc.leave()
+        chosen = [i for i in self.selected_items()
+                  if isinstance(i, (CalcItem, CalcTextItem)) and i.parentItem() is not None]
+        if chosen:
+            frame = chosen[0].parentItem()
+            chosen = [i for i in chosen if i.parentItem() is frame]
+            box = QRectF()
+            for item in chosen:
+                box = box.united(item.mapRectToParent(item.local_rect()))
+            left, top = snap(box.left() - GRID_PT), snap(box.top() - GRID_PT)
+            right = snap(box.right() + 2 * GRID_PT)
+            bottom = snap(box.bottom() + 2 * GRID_PT)
+        else:
+            frame, point = calc._where_typing_starts()
+            if frame is None:
+                return
+            left, top = snap(point.x()), snap(point.y())
+            right, bottom = left + 36 * GRID_PT, top + 12 * GRID_PT
+        block = CalcBlockItem(QRectF(0, 0, right - left, bottom - top))
+        block.author = self.document.settings.default_author or self.document.author
+        self.view.begin_snapshot([frame])
+        frame.add_markup(block, QPointF(left, top))
+        self.view.scene().clearSelection()
+        block.setSelected(True)
+        self.view.commit_snapshot("Add calculation block")
+        calc.clear_cross()
+        self.refresh_selection()
+
+    def set_measure_variable(self, item, name: str) -> bool:
+        """Name a measurement's value for the calculations (decision 24), or
+        take the name away with an empty one. One undo step."""
+        from ..items.calc import valid_variable_name
+
+        name = (name or "").strip()
+        if name == item.variable:
+            return True
+        if name and not valid_variable_name(name):
+            self.status_hint.setText(
+                f"“{name}” is not a variable name: start with a letter, then letters, "
+                "digits, _ or .")
+            self.refresh_selection()
+            return False
+        self.view.begin_snapshot(self.view.involved_frames(item))
+        item.set_variable(name)
+        from ..calc.docsheet import sheet_for
+        sheet_for(self.document).settle()
+        self.view.commit_snapshot("Variable name" if name else "Remove variable name")
+        self.refresh_selection()
+        return True
+
+    def ask_measure_variable(self, item) -> None:
+        name, accepted = QInputDialog.getText(
+            self, "Variable name", "Name this measurement for the calculations "
+            "(empty for none):", text=item.variable)
+        if accepted:
+            self.set_measure_variable(item, name)
+
+    def set_block_self_contained(self, blocks: list, on: bool) -> None:
+        blocks = [b for b in blocks if not b.locked and b.self_contained != bool(on)]
+        if not blocks:
+            return
+        self.view.begin_snapshot(self.view.involved_frames(*blocks))
+        for block in blocks:
+            block.set_self_contained(on)
+        from ..calc.docsheet import sheet_for
+        sheet_for(self.document).settle()
+        self.view.commit_snapshot("Self-contained" if on else "Not self-contained")
+        self.refresh_selection()
+
     # -- the Maths panel (decision 19) --------------------------------------------
     def maths_type(self, text: str) -> None:
         """A Maths panel button: typed into the equation, as its key would be."""
@@ -4137,7 +4225,8 @@ class MainWindow(QMainWindow):
         equations selected (decision 6: MarkForge's keys reach equations)."""
         calc = self.view.calc
         items = [calc.item] if calc.editing() else [
-            i for i in self.selected_items() if getattr(i, "IS_CALC", False) and not i.locked]
+            i for i in self.selected_items() if getattr(i, "IS_CALC", False) and not i.locked
+            and getattr(i, "region", None) is not None]
         if not items:
             return False
         if not calc.editing():
@@ -4485,13 +4574,32 @@ class MainWindow(QMainWindow):
     def delete_selection(self) -> None:
         if self.view.editing_item() is not None:
             return                      # Delete belongs to the text being edited
-        items = [item for item in self.selected_items() if self.view.editable(item)]
+        from ..items.calc import with_block_members
+        items = [item for item in with_block_members(self.selected_items())
+                 if self.view.editable(item)]
         if not items:
             return
+        # A measurement that defines a variable: say what stops being defined
+        # (decision 24).
+        lost = []
+        if any(getattr(item, "variable_region", None) is not None for item in items):
+            from .calcedit import undefined_without
+            lost = undefined_without(self.document, items)
+            if lost and self.interactive_prompts:
+                asked = (", ".join(lost) + (" is" if len(lost) == 1 else " are")
+                         + " defined by what is being deleted, and will no longer be "
+                         "defined. Delete anyway?")
+                if QMessageBox.question(self, "Delete", asked) != QMessageBox.Yes:
+                    return
         self.view.begin_snapshot()
         for item in items:
             detach(item)
         self.view.commit_snapshot("Delete markup")
+        if lost:
+            self.status_hint.setText(", ".join(lost) + (" is" if len(lost) == 1 else " are")
+                                     + " no longer defined")
+            self.refresh_selection()
+            return
         self.refresh_selection()
 
     SNAPSHOT_DPI = 300.0
@@ -5112,6 +5220,11 @@ class MainWindow(QMainWindow):
         if not items:
             self.status_hint.setText("Select something on the page to keep")
             return
+        # A calculation block is kept with the equations in it, as one tool.
+        from ..items.calc import CalcBlockItem
+        blocks = [one for one in items if isinstance(one, CalcBlockItem)]
+        held = {id(m) for block in blocks for m in block.members()}
+        items = [one for one in items if id(one) not in held]
         groups = toolsets.load_toolsets()
         names = [group.name for group in groups]
         chosen, accepted = QInputDialog.getItem(
@@ -5129,6 +5242,9 @@ class MainWindow(QMainWindow):
             else:
                 loose.append(one)
         for one in loose:
+            if isinstance(one, CalcBlockItem) and one.members():
+                group.entries.append(toolsets.entry_for_block(one))
+                continue
             group.entries.append(toolsets.entry_for(one, toolsets.COPY))
         for members in families.values():
             group.entries.append(toolsets.entry_for_many(members))
@@ -5366,7 +5482,8 @@ class MainWindow(QMainWindow):
             # clipboard now — otherwise the next paste puts the old ones back.
             self._clipboard = []
             return
-        items = self.selected_items()
+        from ..items.calc import with_block_members
+        items = with_block_members(self.selected_items())
         if not items:
             return
         self._clipboard = [item.serialize() for item in items]
@@ -5509,7 +5626,8 @@ class MainWindow(QMainWindow):
         self.refresh_selection()
 
     def duplicate_selection(self) -> None:
-        items = self.selected_items()
+        from ..items.calc import with_block_members
+        items = with_block_members(self.selected_items())
         if not items:
             return
         self.view.begin_snapshot()
@@ -5912,6 +6030,7 @@ class MainWindow(QMainWindow):
     def refresh_lists(self) -> None:
         self.markups_panel.rebuild(self.document)
         self.bookmarks_panel.rebuild(self.document)
+        self.variables_panel.watch(self.document)
 
     # ==================================================================
     # bookmarks
@@ -6969,6 +7088,14 @@ class MainWindow(QMainWindow):
                 and getattr(item, "region", None) is not None:
             from . import calcmenu
             calcmenu.fill(self, menu, item)
+        if item is not None and getattr(item, "TYPE", "") == "calc_block":
+            contained = menu.addAction("Self-contained")
+            contained.setCheckable(True)
+            contained.setChecked(item.self_contained)
+            contained.setEnabled(not item.locked)
+            contained.setToolTip("What the equations in the block define stays inside it")
+            contained.triggered.connect(lambda on: self.set_block_self_contained([item], on))
+            menu.addSeparator()
         if item is not None:
             if isinstance(item, ImageItem) and not item.locked:
                 swap = menu.addMenu("Replace image")
@@ -7008,6 +7135,8 @@ class MainWindow(QMainWindow):
                 straight.toggled.connect(
                     lambda on, i=item: self.set_label_angle(i, None if on else 0.0))
                 menu.addAction("Page scale…", self.calibrate_dialog)
+                if item.kind != "calibrate":
+                    menu.addAction("Variable name…", lambda i=item: self.ask_measure_variable(i))
             if hasattr(item, "size_to_text"):
                 menu.addAction(self.act_autosize)
             menu.addSeparator()

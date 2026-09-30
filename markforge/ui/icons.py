@@ -590,12 +590,25 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
             for y in (5, 19):
                 painter.drawPoint(QPointF(x - 1, y))
         _glyph(painter, "Tt", INK, 11)
+    elif name == "calc_block":
+        # a frame holding two lines of equations
+        _pen(painter, INK, 1.2)
+        painter.drawRect(QRectF(3, 3.5, 18, 17))
+        _pen(painter, ACCENT, 1.4)
+        painter.drawLine(QPointF(6.5, 9), QPointF(15, 9))
+        painter.drawLine(QPointF(6.5, 15), QPointF(17.5, 15))
     elif name in ("prog_if", "prog_for", "prog_while", "prog_line"):
         word = name[5:]
         _pen(painter, ACCENT, 1.3)
         painter.drawLine(QPointF(3, 4), QPointF(3, 20))
         _glyph(painter, word if len(word) <= 3 else word[:2], INK,
                9 if len(word) <= 3 else 8.5, rect=QRectF(3, 0, 21, 24))
+    elif name == "panel_variables":
+        # the Variables panel: x = beside list lines
+        _glyph(painter, "x=", INK, 9, rect=QRectF(0, 0, 24, 11))
+        _pen(painter, ACCENT, 1.4)
+        for y in (14, 18, 22):
+            painter.drawLine(QPointF(4, y), QPointF(20, y))
     elif name == "panel_maths":
         # the Maths panel: an equals sign under x squared
         _glyph(painter, "x²", INK, 10, rect=QRectF(0, 0, 24, 16))
