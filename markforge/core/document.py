@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import math
 import uuid
+import re
 from dataclasses import asdict, dataclass, field
 from typing import Any, Optional
 
@@ -514,6 +515,15 @@ class Document:
         self.author = ""
         self.subject = ""
         self.project = ""
+        # SMath's File > Properties, merged with MarkForge's (decision 28).
+        # Title, author, subject and keywords also go into the PDF's own
+        # properties; all of them can be header/footer fields.
+        self.company = ""
+        self.description = ""
+        self.keywords = ""
+        # As SMath: a document gets an id once, and each save is a revision.
+        self.doc_id = ""
+        self.revision = 0
         self.settings = DocumentSettings()
         self.pages: list[Page] = [Page()]
         self.bookmarks: list[Bookmark] = []
@@ -613,6 +623,11 @@ class Document:
             "author": self.author,
             "subject": self.subject,
             "project": self.project,
+            "company": self.company,
+            "description": self.description,
+            "keywords": self.keywords,
+            "doc_id": self.doc_id,
+            "revision": self.revision,
             "settings": self.settings.to_dict(),
             "bookmarks": [mark.to_dict() for mark in self.bookmarks],
             "pages": [page.to_dict() for page in self.pages],
@@ -624,6 +639,14 @@ class Document:
         self.author = data.get("author", "")
         self.subject = data.get("subject", "")
         self.project = data.get("project", "")
+        self.company = data.get("company", "")
+        self.description = data.get("description", "")
+        self.keywords = data.get("keywords", "")
+        self.doc_id = data.get("doc_id", "")
+        try:
+            self.revision = int(data.get("revision", 0) or 0)
+        except (TypeError, ValueError):
+            self.revision = 0
         self.settings = DocumentSettings.from_dict(data.get("settings", {}))
         self.bookmarks = [Bookmark.from_dict(mark) for mark in data.get("bookmarks", [])]
         self.pages = [Page.from_dict(page) for page in data.get("pages", [])] or [Page()]
@@ -663,23 +686,52 @@ class Document:
         return mark
 
     def field_values(self, page_index: int) -> dict[str, str]:
-        """Values available to header/footer templates."""
+        """Values available to header/footer templates, without formats."""
+        import os
         from datetime import datetime
 
+        now = datetime.now()
         return {
             "title": self.title,
             "author": self.author,
             "subject": self.subject,
             "project": self.project,
+            "company": self.company,
+            "description": self.description,
+            "keywords": self.keywords,
+            "revision": str(self.revision) if self.revision else "",
+            "id": self.doc_id,
             "page": str(page_index + 1),
             "pages": str(len(self.pages)),
-            "date": datetime.now().strftime("%Y-%m-%d"),
-            "time": datetime.now().strftime("%H:%M"),
+            "date": now.strftime("%Y-%m-%d"),
+            "time": now.strftime("%H:%M"),
             "file": self.path or "",
+            "filename": os.path.basename(self.path) if self.path else "",
         }
 
-    def expand_fields(self, template: str, page_index: int) -> str:
-        text = template or ""
-        for key, value in self.field_values(page_index).items():
-            text = text.replace("{" + key + "}", value)
-        return text
+    # A field, with SMath's format after a colon: {page:0001}, {page:-1},
+    # {date:DD.MM.YYYY}, {time:HH:mm} (SMath's Insert > Field dialog).
+    FIELD = re.compile(r"\{([a-z]+)(?::([^{}]*))?\}")
+
+    def expand_fields(self, template: str, page_index: int,
+                      now=None) -> str:
+        from datetime import datetime
+
+        from ..calc.page import date_text, number_field
+
+        values = self.field_values(page_index)
+        now = now or datetime.now()
+
+        def one(match):
+            name, fmt = match.group(1), match.group(2)
+            if name not in values:
+                return match.group(0)
+            if fmt is None:
+                return values[name]
+            if name in ("page", "pages"):
+                n = page_index + 1 if name == "page" else len(self.pages)
+                return number_field(n, fmt)
+            if name in ("date", "time"):
+                return date_text(fmt, now)
+            return values[name]
+        return self.FIELD.sub(one, template or "")

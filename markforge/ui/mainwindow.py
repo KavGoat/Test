@@ -668,6 +668,22 @@ class MainWindow(QMainWindow):
         self._act("insert_calc_text", "Calc text", self.insert_calc_text,
                   tip="Calculation text: words among the equations, on their grid "
                       "(\" in Calc mode)")
+        # WebSMath's Calculation menu, on the selected part of an equation (or
+        # the operand at the cursor)
+        from . import calcedit as _calcedit
+        for key, label, command, tip in (
+                ("solve", "Solve", _calcedit.solve_selection,
+                 "Solve for the variable under the cursor; the roots go below"),
+                ("calculate_selection", "Calculate selection", _calcedit.calculate_selection,
+                 "Replace the selected part of the equation by its value"),
+                ("invert", "Invert", _calcedit.invert_selection,
+                 "The selected part to the power −1"),
+                ("determinant", "Determinant", _calcedit.determinant_selection,
+                 "det() round the selected part")):
+            self._act(key, label, lambda _checked=False, run=command: run(self.view.calc),
+                      tip=tip)
+        self._act("insert_operator", "Operator…", self.insert_operator,
+                  tip="Every operator, by group; the chosen one goes into the equation")
         for name, label, tip in (
                 ("if", "If", "if … else: a condition, in a program block"),
                 ("for", "For", "for: a loop over a range, in a program block"),
@@ -1569,6 +1585,10 @@ class MainWindow(QMainWindow):
                        self.act_insert_calc_text, self.act_insert_function,
                        self.act_constants, None):
             calc_menu.addSeparator() if action is None else calc_menu.addAction(action)
+        calc_menu.addAction(self.act_insert_operator)
+        on_selection = calc_menu.addMenu("Selection")
+        for key in ("solve", "calculate_selection", "invert", "determinant"):
+            on_selection.addAction(getattr(self, f"act_{key}"))
         program_menu = calc_menu.addMenu("Program")
         for name in ("if", "for", "while", "line"):
             program_menu.addAction(getattr(self, f"act_prog_{name}"))
@@ -2221,6 +2241,12 @@ class MainWindow(QMainWindow):
         if not self.document.path:
             return self.save_document_as()
         self._recalculate_for_saving()
+        # As SMath: a document gets an id once, and each save is a revision
+        # (decision 28; the {revision} and {id} header/footer fields).
+        import uuid
+        if not self.document.doc_id:
+            self.document.doc_id = str(uuid.uuid4())
+        self.document.revision += 1
         try:
             note = project_io.save_document(self.document, self.document.path)
         except Exception as exc:  # noqa: BLE001
@@ -4026,6 +4052,13 @@ class MainWindow(QMainWindow):
     def insert_structure(self, name: str) -> None:
         self.insert_program(name)
 
+    def insert_operator(self) -> None:
+        """Insert > Operator (WebSMath's): the operators by group."""
+        from . import calcdialogs, calcedit
+        how = calcdialogs.operator_to_insert(self)
+        if how:
+            calcedit.insert_operator(self.view.calc, how)
+
     def insert_unit(self) -> None:
         """Every unit SMath knows; the one picked goes in as 'unit."""
         from ..calc.engine.catalog import UNIT_CATALOG
@@ -5324,6 +5357,9 @@ class MainWindow(QMainWindow):
             + (f" — {inside} of them are still grouped inside" if inside else ""))
 
     def copy_selection(self) -> None:
+        from . import calcedit
+        if calcedit.clipboard(self.view.calc, "copy"):
+            return
         if self.view.text_clipboard("copy"):
             self._clipboard = []
             return
@@ -5384,6 +5420,9 @@ class MainWindow(QMainWindow):
         return image
 
     def cut_selection(self) -> None:
+        from . import calcedit
+        if calcedit.clipboard(self.view.calc, "cut"):
+            return
         if self.view.text_clipboard("cut"):
             self._clipboard = []
             return
@@ -5391,6 +5430,9 @@ class MainWindow(QMainWindow):
         self.delete_selection()
 
     def paste_items(self) -> None:
+        from . import calcedit
+        if calcedit.clipboard(self.view.calc, "paste"):
+            return
         if self.view.text_clipboard("paste"):
             return
         payload = self._clipboard

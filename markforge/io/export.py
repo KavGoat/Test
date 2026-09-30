@@ -242,8 +242,8 @@ def _merge_preserved_pdf_pages(document: Document, path: str, pages: list,
         # page cannot be written while that page is still to be made.
         for offset, source, index, key in carry_over:
             _carry_the_links(output[offset], source, index, key, landed)
-        output.set_metadata({"title": document.title or "",
-                             "creator": "MarkForge", "producer": "MarkForge"})
+        from .pdfbase import pdf_properties
+        output.set_metadata(pdf_properties(document))
         # Closes both: the overlay is open on the file being replaced, and
         # Windows will not rename over a file anything still holds.
         engine.save_as(output, path, also=(overlay,))
@@ -304,8 +304,8 @@ def _stamp_onto_the_source(document, path: str, rendered_pages: list,
             sheet = output[offset]
             _clear_their_markups(sheet, page)
             sheet.show_pdf_page(sheet.rect, overlay, offset, overlay=True)
-        output.set_metadata({"title": document.title or "",
-                             "creator": "MarkForge", "producer": "MarkForge"})
+        from .pdfbase import pdf_properties
+        output.set_metadata(pdf_properties(document))
         engine.save_as(output, path, also=(overlay,))
         output = overlay = None
     finally:
@@ -445,6 +445,30 @@ def export_pdf(document: Document, path: str, pages: Optional[list] = None,
         pdflinks.add_outline_and_links(path, outline, links)
     except Exception:                              # noqa: BLE001
         pass
+    _stamp_the_properties(path, document)
+
+
+def _stamp_the_properties(path: str, document: Document) -> None:
+    """Title, author, subject and keywords into the exported PDF's own
+    properties (decision 28), whichever way it was written."""
+    from ..pdf import engine
+    from .pdfbase import pdf_properties
+
+    try:
+        output = engine.open_path(path)
+    except Exception:                              # noqa: BLE001
+        return
+    try:
+        wanted = pdf_properties(document)
+        if all((output.metadata or {}).get(k, "") == v for k, v in wanted.items()):
+            return
+        output.set_metadata(wanted)
+        engine.save_as(output, path)
+        output = None
+    except Exception:                              # noqa: BLE001
+        engine.drain_messages()
+    finally:
+        engine.close(output)
 
 
 def _paint_the_markups_after_all(document: Document, path: str, printed: list,

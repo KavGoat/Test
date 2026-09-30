@@ -266,6 +266,9 @@ markforge/
                      TYPING); a key clashes only where scopes overlap
                      (scopes_overlap). SMATH_KEYS is the SMath section.
     mathspanel.py    the Maths rail panel (WebSMath's side panel sections)
+    calcedit.py (end) WebSMath's selection commands (Solve, Calculate
+                     selection, Invert, Determinant), Insert > Operator and
+                     copy/paste of part of an equation
     calcmenu.py      an equation's settings: right-click › Equation, plot
                      settings; calcmenu.change() is the one undoable way
                      to change regions' settings
@@ -351,8 +354,13 @@ tests and WebSMath's, which live in `tests/calc/`) and
 `python -m markforge.calc.tools.mutation_check` (14 of 14 caught). The
 `.sm` reader in `tests/calc/smfile.py` is test-only: it lets the tests
 check answers against SMath's own example files; the app has no `.sm`
-support. `tests/calc/legacy_ui/` is WebSMath's old window, kept only
-until its tests are ported to the CalcForge window.
+support; it also keeps SMath's page model (paper, header/footer layers),
+which the app no longer has. WebSMath's old window is gone (phase 6): its
+tests drive the CalcForge window (`tests/calc/test_calcforge_window.py`),
+and `tests/calc/test_same_drawing.py` holds the SHA-256 of WebSMath's
+drawing code — `calc/ui/layout.py` and `calc/ui/region_item.py` must stay
+byte for byte WebSMath's. (That is also why `Region` keeps the inert
+picture/field attributes that code reads.)
 
 ```bash
 # the whole suite (about 800 tests, four minutes — run it in background)

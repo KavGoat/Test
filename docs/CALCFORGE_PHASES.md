@@ -409,3 +409,90 @@ paste back live.
 - Font and colour are on the Equation menu; SMath has them on its Format
   toolbar.
 - Replace in Search never changes an equation.
+
+## Phase 6 — header/footer and file properties
+
+**What changed**
+
+- **SMath's fields in MarkForge's header and footer** (decision 27): the six
+  slots, logo and page ranges as before, and every field of SMath's Insert
+  › Field — `{company}`, `{description}`, `{keywords}`, `{revision}`,
+  `{id}`, `{filename}` beside MarkForge's `{title}`, `{project}`,
+  `{author}`, `{subject}`, `{page}`, `{pages}`, `{date}`, `{time}`,
+  `{file}` — with SMath's formats after a colon: `{date:DD.MM.YYYY}`,
+  `{time:hh:mm tt}`, `{page:0000}` (SMath's own offset-and-pad rule),
+  `{page:-1}`. An "Insert field…" button puts one into the slot you were
+  typing in.
+- **One File › Properties** (decision 28): title, project, author, subject
+  (MarkForge) and company, keywords, description, revision (SMath) in one
+  tab. Title, author, subject and keywords also go into the PDF's own
+  properties — on save, on a signed file's appended save, and on Export
+  PDF. The rest stay in CalcForge's record. As in SMath, a document gets
+  an id on its first save and every save is a new revision (recovery copies
+  aren't).
+- **SMath's page extras removed** (the Separator/Picture/Background
+  clarification): SMath's page model — paper, margins, background picture,
+  header and footer layers of regions — is gone from the app; MarkForge's
+  page setup, images and Header/Footer dialog are what CalcForge has.
+  `calc/page.py` keeps only SMath's field functions. The test-only `.sm`
+  reader keeps its own copy of the page model, since SMath's example files
+  carry one. (Areas stay until phase 7, where calculation blocks replace
+  them.)
+- **WebSMath's old window removed** (`tests/calc/legacy_ui/`). Things only
+  it could do came across first: WebSMath's Calculation menu on the
+  selected part of an equation (Solve, Calculate selection, Invert,
+  Determinant — CalcForge's Calculation › Selection), Insert › Operator
+  (Calculation › Operator…), and copying and pasting part of an equation.
+
+**Tests**
+
+- `tests/test_properties_fields.py` (9): fields and SMath's formats, the
+  header printing its fields in the saved PDF, id and revision through
+  saves, the PDF's own properties (read back with pypdf and MuPDF), the
+  merged dialog and Insert field.
+- `tests/calc/test_same_drawing.py` no longer needs WebSMath's window: it
+  checks the drawing code's SHA-256 against WebSMath's commit, the
+  equations and results the same keystrokes made in WebSMath's window
+  (recorded before it went), and that a CalcForge page draws WebSMath's
+  drawing pixel for pixel.
+
+**Tests removed with withdrawn features, by name**
+
+- `tests/calc/test_ui.py` (WebSMath's window). Ported to the CalcForge
+  window in `tests/calc/test_calcforge_window.py`, same keystrokes and
+  checks: `test_copy_paste_regions`, `test_copy_paste_inside_equation`,
+  `test_calculation_menu_commands`, `test_context_menu_items_match_site`,
+  `test_context_menu_options_match_site` (all 11 cases),
+  `test_context_menu_fractions_and_mixed`,
+  `test_default_rounding_is_half_to_even_on_the_binary_value`,
+  `test_display_input_and_disable_evaluation`, `test_calculation_solve`,
+  and `test_side_panel_symbols_are_visible_and_insert` (as
+  `test_side_panel_symbols_insert`). Removed: `test_format_and_areas`
+  (separators, SMath text regions and `.sm` saving are withdrawn; areas
+  come back as calculation blocks in phase 7) and
+  `test_text_region_selection` (SMath text regions are replaced by
+  Calculation text, which is MarkForge's text box).
+- `tests/calc/test_files_and_operators.py::test_insert_operator_list_and_formula`
+  — ported to the CalcForge window.
+- `tests/calc/test_page_model.py` (SMath's page model).
+  `test_definition_with_equals_shows_its_value` (maths) moved to
+  `tests/calc/test_smfiles.py`; `test_fields`,
+  `test_field_formats_as_smaths_insert_field_dialog` and
+  `test_identity_is_kept_and_each_save_is_a_revision` ported to
+  `tests/test_properties_fields.py`. Removed with the page model:
+  `test_page_model_header_pictures_and_rich_text_load`,
+  `test_save_round_trip_keeps_everything`,
+  `test_pages_follow_the_file_and_print_like_smath`,
+  `test_pictures_are_selected_not_typed_into`,
+  `test_edit_header_layer_insert_field_and_leave`,
+  `test_page_text_only_without_layers`, `test_background_sizes`,
+  `test_page_dialogs_apply`.
+- No maths, units, recalculation or editor test was removed.
+
+**Different from SMath**
+
+- Header and footer are MarkForge's six text slots with a logo, not layers
+  of regions: a title-block picture goes in as a logo, or as an image
+  markup.
+- `{page:0000}` shows page 1 as 0001 — SMath's rule is the format is an
+  offset plus padding, so its `0001` shows 0002; CalcForge follows SMath.

@@ -1,20 +1,49 @@
 """Equations look exactly as WebSMath draws them (the user's instruction:
 the visuals are WebSMath's code, one to one).
 
-The same keystrokes typed into WebSMath's own window and into CalcForge give
-pixel-identical drawings — of the region itself, and through the page item
-that puts it on a CalcForge page (at 4/3 zoom one SMath pixel is one pixel).
+Three things together say so, now that WebSMath's own window is gone
+(phase 6):
+
+- the drawing code *is* WebSMath's: ``calc/ui/layout.py`` and
+  ``calc/ui/region_item.py`` are byte for byte the files at WebSMath's commit
+  8b340fa (their SHA-256 is below);
+- the same keystrokes typed into CalcForge make the same equations, with the
+  same results, as they did in WebSMath's window (recorded from it before it
+  was removed);
+- what a CalcForge page draws is WebSMath's drawing, pixel for pixel: the
+  region drawn by that code directly, and through the page item that puts it
+  on a page (at 4/3 zoom one SMath pixel is one pixel).
 """
 from __future__ import annotations
+
+import hashlib
+from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QImage, QPainter
 
 import tests.calc.test_calcforge_window as cw
-from tests.calc.legacy_ui.worksheet_view import WorksheetView
-from tests.calc.test_ui import press, type_at
+from markforge.calc.engine.display import display_text
 
 LINES = ["M:12.5'kN", "b:300'mm", "M/b=", "sqrt(M/(2'kN=", "x^2+1/3=", "if(1>0,2", "mat("]
+
+# What WebSMath's own window made of LINES (text, shown result), recorded
+# from it on 2026-09-30 before it was removed.
+WEBSMATH_MADE = [
+    ("M≔12.5'kN", None),
+    ("b≔300'mm", None),
+    ("(M)/(b)=", "41.6667 kN/m"),
+    ("√((M)/((2'kN)))=", "2.5"),
+    ("x^(2+(1)/(3))=", None),
+    ("if{1>0;2;}", None),
+    ("mat(,,,,2,2)", None),
+]
+
+# SHA-256 of WebSMath's drawing code at commit 8b340fa (websmath/ui/...).
+WEBSMATH_CODE = {
+    "layout.py": "ffd273dde2cf3330cca11f409e4e887bc66e5663e02f2b450983900a00e18e73",
+    "region_item.py": "8dad912a72a928ffb607253f468722d0672c9fc67f31d2c02a5be7de65024a8f",
+}
 
 
 def _render(paint, rect, scale):
@@ -34,26 +63,29 @@ def _difference(a: QImage, b: QImage) -> int:
                for x in range(a.width()) for y in range(a.height()))
 
 
+def test_the_drawing_code_is_websmaths_byte_for_byte():
+    folder = Path(__file__).resolve().parents[2] / "markforge" / "calc" / "ui"
+    for name, digest in WEBSMATH_CODE.items():
+        assert hashlib.sha256((folder / name).read_bytes()).hexdigest() == digest, \
+            f"calc/ui/{name} is no longer WebSMath's drawing code, one to one"
+
+
 def test_equations_are_drawn_pixel_for_pixel_as_websmath_draws_them(window):
     ours = cw.Sheet(window)
-    theirs = WorksheetView()
     y = 18
     for keys in LINES:
-        type_at(theirs, 18, y, keys)
-        press(theirs, Qt.Key_Return)
         ours.type_at(18, y, keys)
         ours.press(Qt.Key_Return)
         y += 54
-    theirs.focus_item(None)
     ours.calc.leave()
-    assert len(theirs.items) == len(ours.items) == len(LINES)
-    for region_item in theirs.items.values():
-        item = ours.at_y(region_item.region.y)
-        assert item.text() == region_item.region.editor.root.text()
-        reference = _render(lambda p: region_item.paint(p, None), region_item.frame_rect(), 1.0)
-        drawn = _render(lambda p: item._view.paint(p, None), item._view.frame_rect(), 1.0)
-        assert _difference(reference, drawn) == 0, item.text()
-        # and through the page item, at the zoom where 1 SMath pixel = 1 pixel
+    assert len(ours.items) == len(LINES)
+    made = sorted(ours.items.values(), key=lambda item: item.region.y)
+    for item, (text, shown) in zip(made, WEBSMATH_MADE):
+        assert item.text() == text
+        assert (display_text(item.region.display) if item.region.display is not None
+                else None) == shown, text
+        # WebSMath's drawing of the region, and the same through the page item
+        reference = _render(lambda p: item._view.paint(p, None), item._view.frame_rect(), 1.0)
         rect = item.local_rect()
         on_page = _render(item.paint_visible, rect, 4.0 / 3.0)
         on_page = on_page.copy(0, 0, reference.width(), reference.height())

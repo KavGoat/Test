@@ -19,6 +19,53 @@ from markforge.calc.editor import MathEditor
 from markforge.calc.engine import ast as A
 from markforge.calc.engine.display import display_text
 from markforge.calc.page import is_field
+from dataclasses import dataclass, field as _field
+
+# SMath's page model, which CalcForge does not have (phase 6: MarkForge's page
+# setup and header/footer replace it). SMath's example files carry one, so the
+# test-only reader keeps it, on the worksheet it reads, to write it back.
+DPI = 96.0
+
+
+def from_hundredths(v: float) -> float:
+    return float(v) * DPI / 100.0
+
+
+def to_hundredths(v: float) -> int:
+    return int(round(v * 100.0 / DPI))
+
+
+@dataclass
+class PageSetup:
+    paper_w: float = 794.0  # A4 at 96 dpi
+    paper_h: float = 1123.0
+    margin_l: float = 37.0
+    margin_r: float = 37.0
+    margin_t: float = 37.0
+    margin_b: float = 37.0
+    paper_id: str = "9"
+    orientation: str = "Portrait"
+    background: bytes = b""
+    background_full_page: bool = False
+    background_size: str = "stretch"
+    print_grid: bool = False
+    print_background: bool = True
+    header: list = _field(default_factory=list)
+    footer: list = _field(default_factory=list)
+    header_text: str = ""
+    footer_text: str = ""
+    header_attrs: dict = _field(default_factory=dict)
+    footer_attrs: dict = _field(default_factory=dict)
+    page_model_attrs: dict = _field(default_factory=dict)
+
+
+def _sheet_parts(ws):
+    """The page model and metadata the reader keeps on a worksheet."""
+    if not hasattr(ws, "page"):
+        ws.page = PageSetup()
+    if not hasattr(ws, "metadata"):
+        ws.metadata = {}
+    return ws
 from markforge.calc.engine.model import Abs, Frac, Index, Matrix, Paren, Pow, Program, Root, Row, Sqrt
 from markforge.calc.engine.parser import parse_row
 from markforge.calc.worksheet import Worksheet
@@ -150,7 +197,7 @@ def loads(text: str) -> Worksheet:
 
 
 def _from_root(root) -> Worksheet:
-    ws = Worksheet()
+    ws = _sheet_parts(Worksheet())
     meta = root.find(f"{{{NS}}}settings/{{{NS}}}metadata[@lang='eng']")
     if meta is None:
         meta = root.find(f"{{{NS}}}settings/{{{NS}}}metadata")
@@ -182,7 +229,7 @@ def _from_root(root) -> Worksheet:
         _load_regions(ws, group)
     for kind in ("header", "footer"):
         for group in (g for g in layers if g.get("type") == kind):
-            layer = Worksheet()
+            layer = _sheet_parts(Worksheet())
             layer.metadata = ws.metadata
             _load_regions(layer, group)
             getattr(ws.page, kind).extend(layer.regions)
@@ -338,7 +385,6 @@ def _rich_lines(text_el) -> list:
 
 
 def _load_page_model(ws, root) -> None:
-    from markforge.calc.page import from_hundredths
 
     pm = root.find(f"{{{NS}}}settings/{{{NS}}}pageModel")
     if pm is None:
@@ -379,6 +425,7 @@ def save_sm(ws: Worksheet, path) -> None:
     import uuid
 
     # as SMath Studio: a worksheet gets an id once, and each save is a new revision
+    _sheet_parts(ws)
     ws.metadata.setdefault("_id", str(uuid.uuid4()))
     try:
         ws.metadata["_revision"] = str(int(ws.metadata.get("_revision", "0")) + 1)
@@ -393,6 +440,7 @@ def dumps(ws: Worksheet, calculate: bool = True) -> str:
     current results, e.g. when copying regions to the clipboard).  The layout
     is SMath Studio's: <worksheet> with <settings> (calculation, metadata,
     page model) and <regions type="content">, plus the header/footer layers."""
+    _sheet_parts(ws)
     ET.register_namespace("", NS)
     root = ET.Element(f"{{{NS}}}worksheet")
     settings = ET.SubElement(root, f"{{{NS}}}settings", {"ppi": "96"})
@@ -432,7 +480,6 @@ def dumps(ws: Worksheet, calculate: bool = True) -> str:
 def _save_page_model(ws, settings) -> None:
     import base64
 
-    from markforge.calc.page import to_hundredths
 
     page = ws.page
     attrs = dict(page.page_model_attrs) or {"active": "false", "viewMode": "2", "printGrid": "false",

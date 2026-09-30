@@ -124,6 +124,12 @@ def save(document, path: str, original: bytes, appearance: bool = True) -> int:
                                         target)
             engine.embed(target, pdfbase.RECORD_ENTRY,
                          pdfbase.record_bytes(document, facts))
+            try:
+                kept = {key: value for key, value in (target.metadata or {}).items()
+                        if key in ("creationDate", "modDate", "trapped") and value}
+                target.set_metadata(dict(kept, **pdfbase.pdf_properties(document)))
+            except Exception:                          # noqa: BLE001
+                engine.drain_messages()
             if not engine.save_incremental(target, temporary):
                 # A repaired file has no original bytes worth keeping — there
                 # is nothing to append to that a reader would follow — so it

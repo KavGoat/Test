@@ -495,3 +495,200 @@ def test_shift_wheel_scrolls_sideways(v):
                      Qt.ShiftModifier, Qt.NoScrollPhase, False)
     QApplication.sendEvent(v.view.viewport(), ev)
     assert bar.value() > before
+
+
+# -- ported in phase 6, when WebSMath's own window went (tests/calc/test_ui.py) ------------
+#
+# The same keystrokes and checks. WebSMath's right-click menu is CalcForge's
+# Equation submenu; its Calculation menu is CalcForge's Calculation › Selection;
+# its side panel is the Maths panel.
+
+def _menu_titles(menu):
+    out = []
+    for a in menu.actions():
+        if a.isSeparator():
+            out.append("-")
+        elif a.menu():
+            out.append((a.text(), _menu_titles(a.menu())))
+        else:
+            out.append(a.text())
+    return out
+
+
+def _equation_menu(v, item):
+    menu = v.window.build_context_menu(item, centre(item))
+    return next(a.menu() for a in menu.actions() if a.menu() is not None
+                and a.text() == "Equation")
+
+
+def _trigger(menu, *path):
+    for title in path[:-1]:
+        menu = next(a.menu() for a in menu.actions() if a.text() == title)
+    next(a for a in menu.actions() if a.text() == path[-1]).trigger()
+
+
+def test_copy_paste_regions(v):
+    v.type_at(18, 18, "x:5")
+    v.press(Qt.Key_Return)
+    v.type_at(18, 54, "x=")
+    v.press(Qt.Key_Return)
+    v.calc.leave()
+    v.window.select_all_equations()
+    v.window.copy_selection()
+    v.window._clipboard = []               # from the clipboard, as another window would
+    v.calc.place_cross(v.frame, v.frame.mapFromScene(v.scene_point(18, 180)))
+    v.window.paste_items()
+    assert len(v.items) == 4
+    pasted = sorted((it.region for it in v.items.values()), key=lambda r: r.y)[-1]
+    assert display_text(pasted.display) == "5"
+
+
+def test_copy_paste_inside_equation(v):
+    v.type_at(18, 18, "1+2*3")
+    ed = v.focused_item.region.editor
+    ed.key(" ")  # select 2*3
+    v.window.copy_selection()
+    ed.set_cursor(ed.root, len(ed.root))
+    v.press(0, "+")
+    v.window.paste_items()
+    assert ed.root.text() == "1+2*3+2*3"
+
+
+def test_calculation_menu_commands(v):
+    v.type_at(18, 18, "1+2*3")
+    ed = v.focused_item.region.editor
+    ed.key(" ")
+    v.window.act_calculate_selection.trigger()
+    assert ed.root.text() == "1+6"
+    v.type_at(18, 60, "M")
+    v.window.act_determinant.trigger()
+    assert v.focused_item.region.editor.root.text() == "det(M)"
+    v.window.act_invert.trigger()
+    assert "^" in v.focused_item.region.editor.root.text()
+
+
+def test_context_menu_items_match_site(v):
+    v.type_at(18, 18, "1/3=")
+    item = v.focused_item
+    v.calc.leave()
+    t = _menu_titles(_equation_menu(v, item))
+    top = [x if isinstance(x, str) else x[0] for x in t]
+    # SMath Cloud's items for a math region (Cut … Select all are CalcForge's own,
+    # on the menu the Equation submenu sits in); Font … Border are decision 20's
+    assert top[:top.index("Rounding") + 1] == [
+        "Display input data", "-", "Go to definition", "Show description",
+        "Disable evaluation", "-", "Ignore units", "-", "Optimization",
+        "Decimal places", "Exponential threshold", "Fractions", "Rounding"]
+    sub = dict(x for x in t if not isinstance(x, str))
+    assert sub["Optimization"] == ["Symbolic", "Numeric", "None"]
+    assert sub["Decimal places"][:4] == ["Trailing zeros", "-", "Significant figures mode", "-"]
+    assert sub["Decimal places"][4:] == [str(n) if n != 4 else "4 *" for n in range(16)]
+    assert sub["Exponential threshold"] == [str(n) if n != 5 else "5 *" for n in range(16)]
+    assert sub["Fractions"] == ["Decimal", "Fraction", "Auto", "Default", "-", "Use mixed numbers"]
+    assert sub["Rounding"] == ["Half to even", "Away from zero"]
+
+
+@pytest.mark.parametrize("typed,path,shown", [
+    ("1/3=", ("Decimal places", "2"), "0.33"),
+    ("2/3=", ("Decimal places", "0"), "1"),
+    ("1234.5678=", ("Decimal places", "Significant figures mode"), "1235"),
+    ("0.012345=", ("Decimal places", "Significant figures mode"), "0.01235"),
+    ("1.5=", ("Decimal places", "Trailing zeros"), "1.5000"),
+    ("12345=", ("Exponential threshold", "2"), "1.2345·10^4"),
+    ("1.23*10^9=", ("Exponential threshold", "15"), "1230000000"),
+    ("0.75=", ("Fractions", "Auto"), "3/4"),
+    ("2+3=", ("Optimization", "None"), "2+3"),
+    ("5'm+2=", ("Ignore units",), "7"),
+    ("5'm*2'kg=", ("Ignore units",), "10"),
+])
+def test_context_menu_options_match_site(v, typed, path, shown):
+    v.type_at(18, 18, typed)
+    item = v.focused_item
+    v.calc.leave()
+    _trigger(_equation_menu(v, item), *path)
+    assert display_text(item.region.display) == shown
+
+
+def test_context_menu_fractions_and_mixed(v):
+    v.type_at(18, 18, "7/3=")
+    item = v.focused_item
+    v.calc.leave()
+    _trigger(_equation_menu(v, item), "Fractions", "Fraction")
+    assert display_text(item.region.display) == "7/3"
+    _trigger(_equation_menu(v, item), "Fractions", "Use mixed numbers")
+    assert display_text(item.region.display) == "2 1/3"
+    _trigger(_equation_menu(v, item), "Fractions", "Default")
+    assert display_text(item.region.display) == "2.3333"
+
+
+def test_default_rounding_is_half_to_even_on_the_binary_value(v):
+    # observed: 2.00025 = 2.0002 (the double is 2.000249999...), g.e = 9.8066
+    v.type_at(18, 18, "2.00025=")
+    first = v.focused_item
+    v.press(Qt.Key_Return)
+    assert display_text(first.region.display) == "2.0002"
+    v.type_at(18, 72, "0.125=")
+    item = v.focused_item
+    v.calc.leave()
+    _trigger(_equation_menu(v, item), "Decimal places", "2")
+    assert display_text(item.region.display) == "0.12"  # a true tie: to even
+    _trigger(_equation_menu(v, item), "Rounding", "Away from zero")
+    assert display_text(item.region.display) == "0.13"
+
+
+def test_display_input_and_disable_evaluation(v):
+    v.type_at(18, 18, "x:2")
+    v.press(Qt.Key_Return)
+    v.type_at(18, 72, "x+3=")
+    use = v.focused_item
+    v.calc.leave()
+    wide = use._view.frame_rect().width()
+    _trigger(_equation_menu(v, use), "Display input data")
+    assert not use.region.show_input
+    assert use._view.frame_rect().width() < wide       # only the result shows
+    v.focus_item(use)
+    assert use._view.frame_rect().width() >= wide      # the input shows again while editing
+    v.calc.leave()
+    top = [it for it in v.items.values() if it.region.y == 18][0]
+    _trigger(_equation_menu(v, top), "Disable evaluation")
+    assert not top.region.enabled
+    assert use.region.error is not None and use.region.error.message == "x - not defined."
+    v.focus_item(use)
+    _trigger(_equation_menu(v, use), "Go to definition")
+    assert v.focused_item is use  # x is no longer defined anywhere
+
+
+def test_calculation_solve(v):
+    v.type_at(18, 90, "x^2")
+    v.press(Qt.Key_Right)
+    v.press(0, "-")
+    v.press(0, "9")
+    v.focused_item.region.editor.set_cursor(v.focused_item.region.editor.root, 1)  # on x
+    v.window.act_solve.trigger()
+    below = max(v.items.values(), key=lambda it: it.region.y)
+    assert display_text(below.region.display) == "[-3; 3]"
+
+
+def test_side_panel_symbols_insert(v):
+    from markforge.ui import calcdialogs  # noqa: F401
+    v.window.show_panel("dock_maths", True)
+    v.type_at(18, 18, "a+")
+    sqrt = v.window.maths_panel.section("Arithmetic").button("√")
+    QTest.mouseClick(sqrt, Qt.LeftButton)
+    assert "√" in v.focused_item.region.editor.root.text()
+
+
+def test_insert_operator_list_and_formula(v):
+    """Ported from test_files_and_operators.py: WebSMath's Insert > Operator."""
+    from markforge.ui import calcdialogs
+    from markforge.ui.calcedit import OPERATORS
+    kinds = {g for g, *_ in OPERATORS}
+    assert {"Arithmetic", "Boolean", "Calculus", "Matrix and vector", "Definitions"} <= kinds
+    v.type_at(18, 18, "2")
+    try:
+        calcdialogs.ANSWERS["Insert operator"] = "+"
+        v.window.insert_operator()
+    finally:
+        calcdialogs.ANSWERS.clear()
+    v.press(0, "3")
+    assert v.focused_item.region.editor.root.text() == "2+3"

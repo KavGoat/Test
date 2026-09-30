@@ -912,3 +912,220 @@ class CalcEditing:
             f"'{word}' is both a variable and a unit - choose which one from the list "
             "(Up/Down, then Tab or Enter).")
         return True
+
+
+# -- WebSMath's commands on the selected part of an equation ---------------------------------
+#
+# Its Calculation menu (Solve, Calculate, Invert, Determinant), its Insert >
+# Operator list, and copying and pasting part of an equation — ported from its
+# worksheet_view.py and mainwindow.py (phase 6, with its window's tests).
+
+# Insert > Operator: WebSMath's list, by group.
+OPERATORS = [
+    ("Arithmetic", "+", "Addition", "+"), ("Arithmetic", "−", "Subtraction", "-"),
+    ("Arithmetic", "·", "Multiplication", "*"), ("Arithmetic", "/", "Division", "/"),
+    ("Arithmetic", "xʸ", "Power", "^"), ("Arithmetic", "√", "Square root", "\\"),
+    ("Arithmetic", "ⁿ√", "N-th root", ("struct", "nthroot")), ("Arithmetic", "!", "Factorial", "!"),
+    ("Arithmetic", "±", "Plus/minus", "±"), ("Arithmetic", "|x|", "Absolute value", "abs("),
+    ("Definitions", "≔", "Definition", ":"), ("Definitions", "=", "Numeric evaluation", "="),
+    ("Boolean", "=", "Boolean equality", "≡"), ("Boolean", "<", "Less than", "<"),
+    ("Boolean", ">", "Greater than", ">"), ("Boolean", "≤", "Less than or equal", "≤"),
+    ("Boolean", "≥", "Greater than or equal", "≥"), ("Boolean", "≠", "Not equal", "≠"),
+    ("Boolean", "¬", "Not", "¬"), ("Boolean", "∧", "And", "&"), ("Boolean", "∨", "Or", "|"),
+    ("Boolean", "⊕", "Exclusive or", "⊕"),
+    ("Matrix and vector", "vᵢ", "Element", "["), ("Matrix and vector", "a..b", "Range", ("struct", "range")),
+    ("Matrix and vector", "×", "Cross product", "†"), ("Matrix and vector", "Mᵀ", "Transpose", "transpose("),
+    ("Matrix and vector", "|M|", "Determinant", "det("),
+    ("Calculus", "Σ", "Summation", ("struct", "sum")), ("Calculus", "Π", "Product", ("struct", "product")),
+    ("Calculus", "∫", "Definite integral", ("struct", "int")), ("Calculus", "d/dx", "Derivative", ("struct", "diff")),
+]
+
+
+def _selection_or_operand(calc):
+    item = calc.item
+    if not calc.editing() or item.region is None or item.region.kind != "math":
+        return None, None
+    ed = item.region.editor
+    if ed.selection is None:
+        r, a, b = ed.underline()
+        if a == b:
+            return item, None
+        ed.selection = (r, a, b)
+    return item, ed.selection
+
+
+def invert_selection(calc) -> None:
+    """Invert: the selection becomes (selection)^-1."""
+    item, sel = _selection_or_operand(calc)
+    if sel is None:
+        return
+    ed = item.region.editor
+    ed._push_undo()
+    ed._apply_to_selection("^")
+    ed.type("-1")
+    calc._after_edit(item)
+
+
+def determinant_selection(calc) -> None:
+    """Determinant: the selection becomes det(selection), drawn |M|."""
+    from ..calc.engine.model import Paren, Row
+
+    item, sel = _selection_or_operand(calc)
+    if sel is None:
+        return
+    ed = item.region.editor
+    ed._push_undo()
+    r, a, b = sel
+    inner = Row(r.items[a:b])
+    del r.items[a:b]
+    for k, ch in enumerate("det"):
+        r.insert(a + k, ch)
+    r.insert(a + 3, Paren(inner))
+    ed._fix_parents(ed.root)
+    ed.selection = None
+    ed.set_cursor(r, a + 4)
+    calc._after_edit(item)
+
+
+def calculate_selection(calc) -> None:
+    """Calculate: replace the selected part by its value."""
+    from ..calc.docsheet import sheet_for
+    from ..calc.engine.display import display_text, display_value, unit_text
+    from ..calc.engine.errors import SMathError
+    from ..calc.engine.model import Row
+    from ..calc.engine.parser import ParseError, parse_row
+    from ..calc.ui.suggest import _linear_unit
+
+    item, sel = _selection_or_operand(calc)
+    if sel is None:
+        return
+    worksheet = sheet_for(calc.window.document).worksheet
+    r, a, b = sel
+    part = Row()
+    part.items = list(r.items[a:b])
+    try:
+        value = worksheet.evaluator.eval(parse_row(part), worksheet._context_before(item.region))
+    except (SMathError, ParseError):
+        item.region.editor.selection = None
+        return
+    d = display_value(value, worksheet.format)
+    number = display_text(d).split(" ")[0].replace("·10^", "*10^")
+    unit = unit_text(getattr(d, "unit", None))
+    ed = item.region.editor
+    ed._push_undo()
+    del r.items[a:b]
+    ed.set_cursor(r, a)
+    ed.type(number + (("'" + _linear_unit(unit)) if unit else ""))
+    calc._after_edit(item)
+
+
+def _variable_and_part(calc):
+    """(item, variable name, row, start, end) for Solve: the variable is the
+    name the cursor is on; the expression is the selection, or else the whole
+    expression (the right side of a definition, the part before "=")."""
+    item = calc.item
+    if not calc.editing() or item.region is None or item.region.kind != "math":
+        return None
+    ed = item.region.editor
+    a, b = ed.token_span(ed.row, ed.pos)
+    word = "".join(x for x in ed.row.items[a:b] if isinstance(x, str))
+    if not word or not (word[0].isalpha()) or word.startswith("'"):
+        calc.window.status_hint.setText(
+            "Put the cursor on the variable first (e.g. on x in x^2+1).")
+        return None
+    if ed.selection is not None:
+        row, s0, s1 = ed.selection
+    else:
+        row = ed.root
+        items = row.items
+        n = len(ed.expression_items())
+        s0 = items.index("≔") + 1 if "≔" in items[:n] else 0
+        s1 = n
+    return item, word, row, s0, s1
+
+
+def solve_selection(calc) -> None:
+    """Solve for the variable under the cursor; the roots appear in a new
+    equation below (SMath: Calculation > Solve)."""
+    from ..calc.astitems import ast_to_items
+    from ..calc.engine import ast as A
+    from ..calc.engine.model import Row
+    from ..calc.engine.parser import ParseError, parse_row
+
+    got = _variable_and_part(calc)
+    if got is None:
+        return
+    item, var, row, a, b = got
+    part = Row()
+    part.items = list(row.items[a:b])
+    try:
+        node = parse_row(part)
+    except ParseError:
+        calc.window.status_hint.setText("Syntax is incorrect.")
+        return
+    call = A.Call("solve", [node, A.Var(var)])
+    frame = item.parentItem()
+    below = QPointF(item.pos().x(), item.pos().y() + item.local_rect().height() + GRID_PT)
+    new = calc.start(frame, below)
+    ed = new.region.editor
+    ed.root.items = ast_to_items(call) + ["="]
+    type(ed)._fix_parents(ed.root)
+    ed.evaluate = True
+    ed.set_cursor(ed.root, len(ed.root.items) - 1)
+    calc._after_edit(new)
+    calc.leave()                          # the roots show straight away, as in SMath
+
+
+def insert_operator(calc, how) -> None:
+    """One of Insert > Operator's entries, into the equation."""
+    window = calc.window
+    if isinstance(how, (tuple, list)):
+        window.insert_program(how[1])
+    elif how:
+        window.maths_type(how)
+
+
+def clipboard(calc, action: str) -> bool:
+    """Copy, cut or paste part of the equation being typed (WebSMath's
+    copy/paste inside an equation). False when there is nothing of the
+    equation's to do it to, so the window does its own."""
+    from ..calc.engine.model import to_text
+
+    item = calc.item
+    if not calc.editing() or item.region is None or item.region.kind != "math":
+        return False
+    ed = item.region.editor
+    board = QApplication.clipboard()
+    if action in ("copy", "cut"):
+        if not ed.selection:
+            return False
+        r, a, b = ed.selection
+        calc._clip_items = [it.copy() if hasattr(it, "copy") else it for it in r.items[a:b]]
+        part = r.__class__()
+        part.items = list(r.items[a:b])
+        calc._clip_text = to_text(part)
+        board.setText(calc._clip_text)
+        if action == "cut":
+            ed._push_undo()
+            ed._apply_to_selection("DELETE")
+            calc._after_edit(item)
+        return True
+    ours = getattr(calc, "_clip_items", None)
+    if ours and board.text() == getattr(calc, "_clip_text", None):
+        ed._push_undo()
+        if ed.selection:                   # pasting replaces the selection
+            ed._apply_to_selection("DELETE")
+        for it in ours:
+            ed.row.insert(ed.pos, it.copy() if hasattr(it, "copy") else it)
+            ed.cursor = type(ed.cursor)(ed.row, ed.pos + 1)
+        ed._fix_parents(ed.root)
+        calc._after_edit(item)
+        return True
+    text = board.text()
+    if text and not text.lstrip().startswith("{"):
+        for ch in text:
+            if ch != "\n":
+                ed.key(ch)
+        calc._after_edit(item)
+        return True
+    return False

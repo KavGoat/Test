@@ -1,62 +1,19 @@
-"""Page setup of a worksheet (SMath's <pageModel>): paper, margins, the
-background image, and the header/footer layers drawn on every page.
+"""SMath's fields — ``\\[TITLE]\\``, ``\\[PAGENUM[0]]\\``, ``\\[DATE[…]]\\`` — and
+their formats (SMath Studio's Insert > Field dialog).
 
-SMath stores sizes in hundredths of an inch; here everything is in worksheet
-pixels (96 dpi).  The header and footer layers are ordinary regions (a
-picture of a company title block, text, and math regions holding *fields*
-such as ``\\[TITLE]\\`` or ``\\[PAGENUM[0]]\\``) placed relative to the page's
-top edge (header) or bottom margin (footer) and the left margin.
+CalcForge writes them into MarkForge's running header and footer as
+``{title}``, ``{page:0001}``, ``{date:DD.MM.YYYY}`` (core/document.py uses
+:func:`number_field` and :func:`date_text`). SMath's page model — paper,
+margins, background picture, header and footer layers of regions — is not
+here: MarkForge's page setup, header/footer and images replace it (phase 6).
+The field functions stay, too, because WebSMath's drawing code
+(ui/region_item.py, byte for byte) imports :func:`field_text`.
 """
 from __future__ import annotations
 
 import datetime
 import re
-from dataclasses import dataclass, field
 from typing import Optional
-
-DPI = 96.0
-
-
-def from_hundredths(v: float) -> float:
-    return float(v) * DPI / 100.0
-
-
-def to_hundredths(v: float) -> int:
-    return int(round(v * 100.0 / DPI))
-
-
-@dataclass
-class PageSetup:
-    paper_w: float = 794.0  # A4 at 96 dpi
-    paper_h: float = 1123.0
-    margin_l: float = 37.0
-    margin_r: float = 37.0
-    margin_t: float = 37.0
-    margin_b: float = 37.0
-    paper_id: str = "9"
-    orientation: str = "Portrait"
-    background: bytes = b""  # PNG/JPEG drawn on every page
-    background_full_page: bool = False  # False: stretched over the printable area
-    background_size: str = "stretch"
-    print_grid: bool = False
-    print_background: bool = True
-    header: list = field(default_factory=list)  # Regions of the header layer
-    footer: list = field(default_factory=list)
-    # SMath's legacy header/footer strings (kept for saving)
-    header_text: str = ""
-    footer_text: str = ""
-    header_attrs: dict = field(default_factory=dict)
-    footer_attrs: dict = field(default_factory=dict)
-    page_model_attrs: dict = field(default_factory=dict)
-
-    @property
-    def printable_w(self) -> float:
-        return self.paper_w - self.margin_l - self.margin_r
-
-    @property
-    def printable_h(self) -> float:
-        return self.paper_h - self.margin_t - self.margin_b
-
 
 # -- fields: \[NAME[args]]\ --------------------------------------------------------------
 FIELD_RE = re.compile(r"^\\\[(?P<name>[A-Z]+)(?:\[(?P<arg>.*)\])?\]\\$", re.S)
@@ -69,6 +26,11 @@ def is_field(text: str) -> bool:
 def _unescape(s: str) -> str:
     # SMath writes special characters in field arguments as \XXXX\ (hex)
     return re.sub(r"\\([0-9A-Fa-f]{4})\\", lambda m: chr(int(m.group(1), 16)), s)
+
+
+def date_text(fmt: str, now: datetime.datetime) -> str:
+    """A date or time in SMath's format (DD.MM.YYYY, HH:mm …)."""
+    return _date(fmt, now)
 
 
 def _date(fmt: str, now: datetime.datetime) -> str:

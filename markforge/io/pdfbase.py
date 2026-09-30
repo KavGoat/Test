@@ -215,9 +215,7 @@ def _assemble(document, path: str, appearance: bool = True) -> None:
             pdflinks._add_links(output, links)
         facts = _file_facts(document, sources, carried, layers, output)
         engine.embed(output, RECORD_ENTRY, record_bytes(document, facts))
-        output.set_metadata({"title": document.title or "",
-                             "creator": "CalcForge",
-                             "producer": "CalcForge"})
+        output.set_metadata(pdf_properties(document))
         engine.save_as(output, path, also=tuple(opened))
         output = None
         opened = []
@@ -261,6 +259,15 @@ def _one_source_whole(document):
     finally:
         engine.close(source)
     return key, wanted
+
+
+def pdf_properties(document) -> dict:
+    """The PDF's standard properties (decision 28): title, author, subject and
+    keywords, which any reader shows in its File > Properties. The rest of
+    the document's properties stay in CalcForge's record."""
+    return {"title": document.title or "", "author": document.author or "",
+            "subject": document.subject or "", "keywords": document.keywords or "",
+            "creator": "CalcForge", "producer": "CalcForge"}
 
 
 def _file_facts(document, sources: dict, carried: set, layers: dict,

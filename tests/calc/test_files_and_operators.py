@@ -54,16 +54,3 @@ def app():
     return QApplication.instance() or QApplication([])
 
 
-def test_insert_operator_list_and_formula(app):
-    from tests.calc.legacy_ui.mainwindow import MainWindow
-
-    w = MainWindow()
-    kinds = {g for g, *_ in MainWindow.OPERATORS}
-    assert {"Arithmetic", "Boolean", "Calculus", "Matrix and vector", "Definitions"} <= kinds
-    w.insert_formula()
-    assert w.view.focused_item is not None and w.view.focused_item.region.kind == "math"
-    w._type("2")
-    w._type("+")
-    w._type("3")
-    assert w.view.focused_item.editor.root.text() == "2+3"
-    w.close()

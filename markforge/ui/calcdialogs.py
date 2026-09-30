@@ -128,3 +128,39 @@ def show_double_check(parent, rep) -> None:
     bb.rejected.connect(d.reject)
     lay.addWidget(bb)
     d.exec()
+
+
+def operator_to_insert(parent):
+    """Insert > Operator: WebSMath's tree of operators by group; Insert (or a
+    double-click) says which. Returns what to type, or ("struct", name)."""
+    from PySide6.QtWidgets import QTreeWidget, QTreeWidgetItem
+
+    from .calcedit import OPERATORS
+
+    if "Insert operator" in ANSWERS:
+        return ANSWERS["Insert operator"]
+    d = QDialog(parent)
+    d.setWindowTitle("Insert Operator")
+    d.resize(360, 420)
+    lay = QVBoxLayout(d)
+    tree = QTreeWidget()
+    tree.setHeaderLabels(["Operator", "Description"])
+    groups = {}
+    for g, sym, desc, how in OPERATORS:
+        node = groups.get(g)
+        if node is None:
+            node = groups[g] = QTreeWidgetItem(tree, [g])
+            node.setExpanded(True)
+        leaf = QTreeWidgetItem(node, [sym, desc])
+        leaf.setData(0, Qt.UserRole, how)
+    tree.resizeColumnToContents(0)
+    lay.addWidget(tree)
+    bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+    bb.button(QDialogButtonBox.Ok).setText("Insert")
+    bb.accepted.connect(d.accept)
+    bb.rejected.connect(d.reject)
+    lay.addWidget(bb)
+    tree.itemDoubleClicked.connect(lambda it, _c: it.data(0, Qt.UserRole) and d.accept())
+    if d.exec() == QDialog.Accepted and tree.currentItem() is not None:
+        return tree.currentItem().data(0, Qt.UserRole)
+    return None

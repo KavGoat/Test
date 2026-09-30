@@ -7,7 +7,8 @@ from typing import Optional
 
 from PySide6.QtCore import QKeyCombination, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QKeySequence, QPixmap
-from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox,
+from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QMenu,
+                               QPlainTextEdit,
                                QDialog,
                                QDialogButtonBox, QDoubleSpinBox, QFileDialog,
                                QFormLayout, QGroupBox, QHBoxLayout, QHeaderView,
@@ -566,6 +567,21 @@ def _colour_chip(colour: QColor):
     return QIcon(pixmap)
 
 
+# Insert field…: MarkForge's fields and SMath's (its Insert > Field dialog, with
+# its formats), as header/footer tokens.
+FIELD_CHOICES = [
+    ("Title", "{title}"), ("Project", "{project}"), ("Author", "{author}"),
+    ("Company", "{company}"), ("Subject", "{subject}"), ("Keywords", "{keywords}"),
+    ("Description", "{description}"), ("Revision", "{revision}"),
+    ("Document id", "{id}"), ("File name", "{filename}"),
+    ("Page number", "{page}"), ("Page number, 0001", "{page:0000}"),
+    ("Number of pages", "{pages}"), ("Page n of m", "Page {page} of {pages}"),
+    ("Date, DD.MM.YYYY", "{date:DD.MM.YYYY}"), ("Date, DD/MM/YYYY", "{date:DD/MM/YYYY}"),
+    ("Date, YYYY-MM-DD", "{date:YYYY-MM-DD}"), ("Date, DD MMMM YYYY", "{date:DD MMMM YYYY}"),
+    ("Time, HH:mm", "{time:HH:mm}"), ("Time, hh:mm tt", "{time:hh:mm tt}"),
+]
+
+
 class DocumentPropertiesDialog(QDialog):
     """Title block information, running headers and markup defaults."""
 
@@ -585,10 +601,36 @@ class DocumentPropertiesDialog(QDialog):
         self.author = QLineEdit(document.author)
         self.subject = QLineEdit(document.subject)
         self.project = QLineEdit(document.project)
+        # MarkForge's and SMath's properties in one place (decision 28).
+        self.company = QLineEdit(document.company)
+        self.keywords = QLineEdit(document.keywords)
+        self.keywords.setToolTip("Also the PDF's own Keywords, which any reader shows")
+        self.description = QPlainTextEdit(document.description)
+        self.description.setObjectName("propertiesDescription")
+        self.description.setMaximumHeight(90)
+        for edit, tip in ((self.title, "Also the PDF's own Title"),
+                          (self.author, "Also the PDF's own Author"),
+                          (self.subject, "Also the PDF's own Subject")):
+            edit.setToolTip(tip)
         info_form.addRow("Title", self.title)
         info_form.addRow("Project", self.project)
         info_form.addRow("Author", self.author)
+        info_form.addRow("Company", self.company)
         info_form.addRow("Subject", self.subject)
+        info_form.addRow("Keywords", self.keywords)
+        info_form.addRow("Description", self.description)
+        revision = QLabel(str(document.revision) if document.revision else "not saved yet")
+        revision.setObjectName("propertiesRevision")
+        revision.setToolTip("Goes up by one every time the document is saved, as in SMath")
+        info_form.addRow("Revision", revision)
+        ident = QLabel(document.doc_id or "given on the first save")
+        ident.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        info_form.addRow("Document id", ident)
+        note = QLabel("Title, author, subject and keywords also go into the PDF's own "
+                      "properties. Every one of these can be a header or footer field.")
+        note.setWordWrap(True)
+        note.setStyleSheet("color:#5a6270;")
+        info_form.addRow(note)
         tabs.addTab(info, "Information")
 
         running = QWidget()
@@ -616,11 +658,25 @@ class DocumentPropertiesDialog(QDialog):
             edit = QLineEdit(value)
             running_form.addRow(label, edit)
             self.footer_fields.append(edit)
-        hint = QLabel("Fields: {title} {project} {author} {subject} {page} {pages} "
-                      "{date} {time} {file}")
+        hint = QLabel("Fields: {title} {project} {author} {company} {subject} {keywords} "
+                      "{description} {revision} {id} {page} {pages} {date} {time} {file} "
+                      "{filename}. SMath's formats go after a colon: {date:DD.MM.YYYY}, "
+                      "{time:HH:mm}, {page:0001}, {page:-1}.")
         hint.setWordWrap(True)
         hint.setStyleSheet("color:#5a6270;")
         running_form.addRow(hint)
+        # SMath's Insert > Field, into whichever slot was typed in last
+        self._slot = self.header_fields[1]
+        for edit in self.header_fields + self.footer_fields:
+            edit.installEventFilter(self)
+        insert_field = QPushButton("Insert field…")
+        insert_field.setObjectName("insertField")
+        insert_field.setToolTip("SMath's fields, with their formats, into the slot typed in last")
+        field_menu = QMenu(insert_field)
+        for label, token in FIELD_CHOICES:
+            field_menu.addAction(label, lambda t=token: self.insert_field(t))
+        insert_field.setMenu(field_menu)
+        running_form.addRow("", insert_field)
 
         sections = QGroupBox("Sections")
         sections_layout = QVBoxLayout(sections)
@@ -714,6 +770,17 @@ class DocumentPropertiesDialog(QDialog):
 
         layout.addWidget(_buttons(self))
 
+    def eventFilter(self, watched, event) -> bool:
+        from PySide6.QtCore import QEvent
+        if event.type() == QEvent.FocusIn and isinstance(watched, QLineEdit):
+            self._slot = watched
+        return super().eventFilter(watched, event)
+
+    def insert_field(self, token: str) -> None:
+        """Put *token* into the header/footer slot typed in last, at its caret."""
+        self._slot.insert(token)
+        self._slot.setFocus()
+
     def show_tab(self, name: str) -> None:
         """Open on a named tab, so a menu entry can go straight to it."""
         for index in range(self.tabs.count()):
@@ -800,6 +867,9 @@ class DocumentPropertiesDialog(QDialog):
         document.author = self.author.text()
         document.subject = self.subject.text()
         document.project = self.project.text()
+        document.company = self.company.text()
+        document.keywords = self.keywords.text()
+        document.description = self.description.toPlainText()
         settings = document.settings
         settings.show_header = self.show_header.isChecked()
         settings.show_footer = self.show_footer.isChecked()

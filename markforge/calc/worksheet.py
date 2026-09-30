@@ -120,10 +120,6 @@ class Worksheet:
         self._keys: dict = {}  # region id -> key it was indexed under
         self._order_cache = None
         self._order_keys: list = []
-        self.metadata: dict = {}  # title, author, description... (File > Properties)
-        from .page import PageSetup
-
-        self.page = PageSetup()  # paper, margins, background, header/footer layers
 
     # -- regions ----------------------------------------------------------------
     def add_region(self, x: float, y: float, editor: Optional[MathEditor] = None) -> Region:
