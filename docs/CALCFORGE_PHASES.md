@@ -494,5 +494,6 @@ paste back live.
 - Header and footer are MarkForge's six text slots with a logo, not layers
   of regions: a title-block picture goes in as a logo, or as an image
   markup.
-- `{page:0000}` shows page 1 as 0001 — SMath's rule is the format is an
-  offset plus padding, so its `0001` shows 0002; CalcForge follows SMath.
+- (Not a difference, but worth knowing: a page-number format is SMath's —
+  an offset plus zero-padding — so `{page:0000}` shows page 1 as 0001 and
+  `{page:0001}` shows it as 0002, exactly as SMath's Insert › Field does.)
