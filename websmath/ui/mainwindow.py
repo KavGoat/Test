@@ -306,6 +306,7 @@ class MainWindow(QMainWindow):
         self._act(i, "Function...", self._insert_function, "Ctrl+E", icon_name="funct")
         self._act(i, "Unit...", self._insert_unit, "Ctrl+W", icon_name="funnel1")
         self._act(i, "Constants...", self._show_constants, "Ctrl+K", icon_name="handbook")
+        self._act(i, "Operator...", self.insert_operator)
         self._act(i, "Field...", self.insert_field)
         i.addSeparator()
         self._act(i, "Background...", self.background)
@@ -319,6 +320,7 @@ class MainWindow(QMainWindow):
         pl = i.addMenu("Plot")
         self._act(pl, "2D", self._insert_plot, "@")
         i.addSeparator()
+        self._act(i, "Formula", self.insert_formula, "Alt++")
         self._act(i, "Text region", self._insert_text, '"')
         self._act(i, "Area", self._insert_area)
         self._act(i, "Separator", self._insert_separator)
@@ -930,6 +932,68 @@ class MainWindow(QMainWindow):
                               getattr(v.scene_.worksheet, "filename", ""), self.properties, self)
         if d.exec() == QDialog.Accepted:
             v.insert_field(d.code())
+
+    # SMath's Insert > Operator list: (group, symbol, description, how it is inserted)
+    OPERATORS = [
+        ("Arithmetic", "+", "Addition", "+"), ("Arithmetic", "−", "Subtraction", "-"),
+        ("Arithmetic", "·", "Multiplication", "*"), ("Arithmetic", "/", "Division", "/"),
+        ("Arithmetic", "xʸ", "Power", "^"), ("Arithmetic", "√", "Square root", "\\"),
+        ("Arithmetic", "ⁿ√", "N-th root", ("struct", "nthroot")), ("Arithmetic", "!", "Factorial", "!"),
+        ("Arithmetic", "±", "Plus/minus", "±"), ("Arithmetic", "|x|", "Absolute value", "abs("),
+        ("Definitions", "≔", "Definition", ":"), ("Definitions", "=", "Numeric evaluation", "="),
+        ("Boolean", "=", "Boolean equality", "≡"), ("Boolean", "<", "Less than", "<"),
+        ("Boolean", ">", "Greater than", ">"), ("Boolean", "≤", "Less than or equal", "≤"),
+        ("Boolean", "≥", "Greater than or equal", "≥"), ("Boolean", "≠", "Not equal", "≠"),
+        ("Boolean", "¬", "Not", "¬"), ("Boolean", "∧", "And", "&"), ("Boolean", "∨", "Or", "|"),
+        ("Boolean", "⊕", "Exclusive or", "⊕"),
+        ("Matrix and vector", "vᵢ", "Element", "["), ("Matrix and vector", "a..b", "Range", ("struct", "range")),
+        ("Matrix and vector", "×", "Cross product", "†"), ("Matrix and vector", "Mᵀ", "Transpose", "transpose("),
+        ("Matrix and vector", "|M|", "Determinant", "det("),
+        ("Calculus", "Σ", "Summation", ("struct", "sum")), ("Calculus", "Π", "Product", ("struct", "product")),
+        ("Calculus", "∫", "Definite integral", ("struct", "int")), ("Calculus", "d/dx", "Derivative", ("struct", "diff")),
+    ]
+
+    def insert_operator(self) -> None:
+        """Insert > Operator: the operators by group; Insert (or a double-click)
+        puts the chosen one at the cursor."""
+        from PySide6.QtWidgets import QTreeWidget, QTreeWidgetItem
+
+        d = QDialog(self)
+        d.setWindowTitle("Insert Operator")
+        d.resize(360, 420)
+        lay = QVBoxLayout(d)
+        tree = QTreeWidget()
+        tree.setHeaderLabels(["Operator", "Description"])
+        groups = {}
+        for g, sym, desc, how in self.OPERATORS:
+            parent = groups.get(g)
+            if parent is None:
+                parent = groups[g] = QTreeWidgetItem(tree, [g])
+                parent.setExpanded(True)
+            it = QTreeWidgetItem(parent, [sym, desc])
+            it.setData(0, Qt.UserRole, how)
+        tree.resizeColumnToContents(0)
+        lay.addWidget(tree)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.button(QDialogButtonBox.Ok).setText("Insert")
+        bb.accepted.connect(d.accept)
+        bb.rejected.connect(d.reject)
+        lay.addWidget(bb)
+        tree.itemDoubleClicked.connect(lambda it, _c: it.data(0, Qt.UserRole) and d.accept())
+        if d.exec() == QDialog.Accepted and tree.currentItem() is not None:
+            how = tree.currentItem().data(0, Qt.UserRole)
+            if isinstance(how, (tuple, list)):
+                self._program(how[1])
+            elif how:
+                self._type(how)
+
+    def insert_formula(self) -> None:
+        """Insert > Formula (Alt++): a new math region at the red cross."""
+        v = self.view
+        v.focus_item(None)
+        item = v.new_region(v.scene_.cross.x(), v.scene_.cross.y())
+        v.focus_item(item)
+        v.setFocus()
 
     def insert_picture(self) -> None:
         fn, _ = QFileDialog.getOpenFileName(self, "Select image", "", "Images (*.png *.jpg *.jpeg *.bmp *.gif)")

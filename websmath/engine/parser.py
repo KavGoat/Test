@@ -246,8 +246,11 @@ def split_args(r: Row) -> list[A.Node]:
     """Split a row on top-level separators and parse each piece."""
     pieces: list[tuple[int, int]] = []
     start = 0
+    quoted = False
     for i, it in enumerate(r.items):
-        if isinstance(it, str) and it in ",;":
+        if it == '"':
+            quoted = not quoted  # a separator inside a string is text: importData("f", ",")
+        elif not quoted and isinstance(it, str) and it in ",;":
             pieces.append((start, i))
             start = i + 1
     pieces.append((start, len(r.items)))

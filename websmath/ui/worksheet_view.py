@@ -706,7 +706,7 @@ class WorksheetView(QGraphicsView):
 
     # -- focus -------------------------------------------------------------------------
     def focus_item(self, item: Optional[RegionItem]) -> None:
-        if item is not None and (item.region.special == "picture" or item.region.field_code):
+        if item is not None and (item.region.special in ("picture", "plugin") or item.region.field_code):
             # a picture or a field has nothing to type into: it is selected instead
             self.focus_item(None)
             self.clear_selection()

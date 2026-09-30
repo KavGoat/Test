@@ -15,7 +15,7 @@ from .units import NODIM
 from .values import Matrix, Q, need_scalar
 
 # not in SMath's core list (nor SMath Cloud's autocomplete); listed here so they complete
-PLUGIN_FUNCTIONS = {"eigenvals", "eigenvecs", "fft", "ifft", "delta"}
+PLUGIN_FUNCTIONS = {"eigenvals", "eigenvecs", "fft", "ifft", "delta", "exportData.CSV"}
 
 FUNCTIONS.extend([
     ("eigenvals", 1, "Matrix and vector",

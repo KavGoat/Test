@@ -74,7 +74,7 @@ class RegionItem(QGraphicsObject):
         self.prepareGeometryChange()
         if self.style.size_pt != self.region.font_size:
             self.style = Style(self.region.font_size)
-        if self.region.special == "picture":
+        if self.region.special in ("picture", "plugin"):
             self._size = (max(4.0, self.region.pic_w), max(4.0, self.region.pic_h))
             self._layout = None
             self.update()
@@ -267,6 +267,22 @@ class RegionItem(QGraphicsObject):
         r = self.frame_rect()
         if self.region.special == "picture":
             self._paint_picture(p)
+            return
+        if self.region.special == "plugin":
+            # a region this app cannot show (a plug-in region, a 3-D plot):
+            # a grey box saying what it is; it is kept and saved unchanged
+            w, h = self._size
+            p.fillRect(QRectF(0, 0, w, h), QColor("#f2f2f2"))
+            p.setPen(QPen(QColor("#a0a0a0"), 1, Qt.DashLine))
+            p.drawRect(QRectF(0.5, 0.5, w - 1, h - 1))
+            p.setPen(QColor("#707070"))
+            f = QFont(self._text_font())
+            f.setPointSizeF(8)
+            p.setFont(f)
+            p.drawText(QRectF(4, 2, w - 8, h - 4), Qt.AlignCenter | Qt.TextWordWrap,
+                       f"{self.region.plugin_name} region (kept unchanged)")
+            if self.selected_region:
+                p.fillRect(QRectF(0, 0, w, h), SELECTION)
             return
         if self.region.special:
             self._paint_special(p)

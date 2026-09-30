@@ -354,7 +354,21 @@ def _load_regions(ws, group) -> None:
             region = ws.add_region(x, y, ed)
             region.enabled = reg.get("enabled", "true") != "false"
             _load_math_options(region, math, ws)
-        elif text:
+        elif not text:
+            # a region this app does not display (a plug-in region, a 3-D
+            # plot...): kept exactly as it is and saved back unchanged
+            import copy
+
+            kinds = [_tag(c) for c in reg]
+            if kinds:
+                r = ws.add_region(x, y)
+                r.special = "plugin"
+                r.raw_xml = copy.deepcopy(reg)
+                r.pic_w = float(reg.get("width", "0") or 0) or 160.0
+                r.pic_h = float(reg.get("height", "0") or 0) or 40.0
+                plot_el = reg.find(f"{{{NS}}}plot")
+                r.plugin_name = (f"{plot_el.get('type', '')} plot" if plot_el is not None else kinds[0])
+        else:
             chosen = next((t for t in text if t.get("lang") == "eng"), text[-1])
             lines = _rich_lines(chosen)
             ed = MathEditor()
@@ -615,6 +629,15 @@ def _save_text(r, reg) -> None:
 
 
 def _save_region(ws, parent, r, k) -> None:
+    if r.special == "plugin" and r.raw_xml is not None:
+        import copy
+
+        el = copy.deepcopy(r.raw_xml)
+        el.set("id", str(k))
+        el.set("left", str(int(r.x)))
+        el.set("top", str(int(r.y)))
+        parent.append(el)
+        return
     attrs = {"id": str(k), "left": str(int(r.x)), "top": str(int(r.y)), "color": r.color}
     if r.special == "picture":
         import base64

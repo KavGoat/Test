@@ -13,6 +13,8 @@ below it that depend (directly or through other definitions) on what changed.
 """
 from __future__ import annotations
 
+import os
+
 import bisect
 import itertools
 from dataclasses import dataclass, field
@@ -75,7 +77,7 @@ class Region:
     def key(self):
         return (self.y, self.x, self.id)
 
-    special: Optional[str] = None  # "separator", "area" or "picture"
+    special: Optional[str] = None  # "separator", "area", "picture" or "plugin"
     image: bytes = b""  # picture regions: the encoded image (PNG/JPEG)
     image_format: str = "png"
     pic_w: float = 0.0  # picture regions: size shown on the page
@@ -84,6 +86,8 @@ class Region:
     # (SMath's rich text: <p style>, <span style>, <br/>); empty = the region's own style
     line_runs: list = field(default_factory=list)
     text_width: float = 0.0  # text regions with a fixed width wrap their lines
+    raw_xml: object = None  # "plugin" regions: the region's XML, saved back unchanged
+    plugin_name: str = ""
     field_code: str = ""  # header/footer math regions holding a field (\[TITLE]\ ...)
     area_height: float = 0.0  # an area's extent below its top line
     collapsed: bool = False
@@ -254,6 +258,10 @@ class Worksheet:
                 changed |= _changed_names(old_vars, old_funcs, r.defined_vars, r.defined_funcs)
 
     def _evaluate(self, r: Region, commit: bool) -> None:
+        from .engine import files
+
+        # importData / exportData: relative names are relative to the worksheet's folder
+        files.base_dir = os.path.dirname(getattr(self, "filename", "") or "")
         r.pending = False
         before = (_shown(r.display), r.error.message if r.error else None)
         if commit and r.id in self._keys:
