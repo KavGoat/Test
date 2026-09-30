@@ -166,6 +166,7 @@ class MainWindow(QMainWindow):
         v.status.connect(lambda text, v=v: self._status_text(text, v))
         v.pages_changed.connect(lambda cur, n, v=v: self._page_label(cur, n, v))
         v.zoom_changed.connect(lambda z, v=v: self._zoom_shown(z, v))
+        v.checked.connect(lambda rep, v=v: self._check_shown(rep, v))
         sub = self.mdi.addSubWindow(v)
         sub.setWindowIcon(icon("document"))
         sub.setAttribute(Qt.WA_DeleteOnClose)
@@ -325,6 +326,9 @@ class MainWindow(QMainWindow):
         self._act(c, "Interrupt processing", lambda: None, "Pause", icon_name="stop", enabled=False)
 
         t = mb.addMenu("&Tools")
+        self._act(t, "Double-check results...", self.double_check, "Ctrl+Shift+D")
+        self._act(t, "Automatic double-check", self._toggle_check, checkable=True, checked=True)
+        t.addSeparator()
         self._act(t, "Options...", self.options, icon_name="configure")
 
         self._pages_menu = mb.addMenu("&Pages")
@@ -426,6 +430,10 @@ class MainWindow(QMainWindow):
         self._state_lbl = QLabel("Ready")
         sb.addWidget(self._page_lbl)
         sb.addWidget(self._state_lbl, 1)
+        self._check_lbl = QLabel("")
+        self._check_lbl.setToolTip("Every result is recalculated independently after each change "
+                                   "(Tools > Double-check results)")
+        sb.addWidget(self._check_lbl)
         mode = QToolButton()
         mode.setIcon(icon("view_pages"))
         mode.setAutoRaise(True)
@@ -464,6 +472,46 @@ class MainWindow(QMainWindow):
 
     def _status_text(self, text: str, v=None) -> None:
         self._state_lbl.setText(text or "Ready")
+
+    def _check_shown(self, rep, v=None) -> None:
+        if v is not None and v is not self.view:
+            return
+        self._check_lbl.setText(("✔ " if rep.ok else "⚠ ") + rep.summary())
+        self._check_lbl.setStyleSheet("color:#207020;" if rep.ok else "color:#c05000;font-weight:bold;")
+
+    def _toggle_check(self, on: bool) -> None:
+        for sub in self.mdi.subWindowList():
+            sub.widget().double_check_enabled = on
+        if not on:
+            self._check_lbl.setText("")
+
+    def double_check(self) -> None:
+        """Tools > Double-check results: recalculate everything independently
+        and list any result that disagrees."""
+        from PySide6.QtWidgets import QTableWidget, QTableWidgetItem
+
+        rep = self.view.run_double_check()
+        if rep is None:
+            return
+        d = QDialog(self)
+        d.setWindowTitle("Double-check")
+        lay = QVBoxLayout(d)
+        lay.addWidget(QLabel(
+            rep.summary() + "\n\nEvery result was recalculated independently (exact fractions, separate unit "
+            "arithmetic) and the shown number and unit were read back. Results using programs, matrices "
+            "or solvers are not checked."))
+        if rep.mismatches:
+            t = QTableWidget(len(rep.mismatches), 3)
+            t.setHorizontalHeaderLabels(["Region", "Double-check", "Shown"])
+            for k, (r, what, exp, got) in enumerate(rep.mismatches):
+                for j, text in enumerate((r.editor.root.text(), str(getattr(exp, "x", exp)), str(got))):
+                    t.setItem(k, j, QTableWidgetItem(text))
+            lay.addWidget(t)
+        bb = QDialogButtonBox(QDialogButtonBox.Close)
+        bb.rejected.connect(d.reject)
+        lay.addWidget(bb)
+        self._check_dialog = d
+        d.exec()
 
     # -- side panel ------------------------------------------------------------------------------
     def _side_panel(self) -> None:

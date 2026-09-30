@@ -211,6 +211,7 @@ def _origin_icon(kind: str, origin: int) -> QIcon:
 
 
 class WorksheetView(QGraphicsView):
+    checked = Signal(object)  # Report of the last double-check
     status = Signal(str)
     modified = Signal()
     pages_changed = Signal(int, int)  # page in view, page count
@@ -303,6 +304,40 @@ class WorksheetView(QGraphicsView):
             if it is not None:
                 it.relayout()
         self._grow_scene()
+        self.schedule_double_check()
+
+    # -- double-check ----------------------------------------------------------------------
+    double_check_enabled = True
+
+    def schedule_double_check(self) -> None:
+        """Run the independent double-check once typing pauses (0.4 s)."""
+        if not self.double_check_enabled:
+            return
+        from PySide6.QtCore import QTimer
+
+        if not hasattr(self, "_check_timer"):
+            self._check_timer = QTimer(self)
+            self._check_timer.setSingleShot(True)
+            self._check_timer.timeout.connect(self.run_double_check)
+        self._check_timer.start(400)
+
+    def run_double_check(self):
+        from ..engine.verify import double_check
+
+        try:
+            rep = double_check(self.worksheet)
+        except Exception as e:  # the check must never break the page
+            self.status.emit(f"Double-check could not run: {e}")
+            return None
+        bad = {r.id for r, *_ in rep.mismatches}
+        for it in self.items.values():
+            flag = it.region.id in bad
+            if getattr(it.region, "check_failed", False) != flag:
+                it.region.check_failed = flag
+                it.update()
+        self.last_check = rep
+        self.checked.emit(rep)
+        return rep
 
     def update_after(self, item: RegionItem) -> None:
         """A region was left (or moved): bring what depends on it up to date."""

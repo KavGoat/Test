@@ -390,6 +390,17 @@ J/(K mol), `'ε.0` = 8.8542·10^-12 F/m, `'μ.0` = 1.2566·10^-6 m T/A, `'m.e`,
 `1 G.N`, like any unknown unit such as `'σ`); the replica gives it its
 library value, 6.6743·10^-11 m³/(kg s²). Insert > Constants... lists them all.
 
+## Errors while typing, and the unit box
+
+* A region without `=` or `:=` shows **no error**: `test`, `x+1` and the
+  partial `100kg*g.e` stay clean until `=` is typed (observed). The
+  replica still runs such regions (a `for` loop in one assigns variables).
+* After `=` the result is followed by a small box for the desired unit
+  (SMath's placeholder is the glyph "H" of its SMath Equations font: 5×7 px,
+  on the baseline, 1 px after the unit). A matching unit converts the
+  result (980.665 N → 0.9807 kN); a unit that does not match stays at the
+  end and SMath fills in what is missing (980.665 m/s² kg).
+
 ## Right-click menu
 
 Read from the site (`GET /srv/{sheet}/contextmenu`). Everywhere: Cut

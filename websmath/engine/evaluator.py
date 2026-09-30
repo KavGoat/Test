@@ -341,7 +341,14 @@ class Evaluator:
             return Q(q.value)
         return q
 
+    # names read while evaluating the current region (set by the worksheet):
+    # the region's real dependencies, including those reached through
+    # definitions kept symbolically and through function bodies
+    reads = None
+
     def _Var(self, n: A.Var, ctx):
+        if self.reads is not None:
+            self.reads.add(n.name)
         v = ctx.lookup(n.name)
         if v is None:
             if n.name in BUILTIN_CONSTANTS:
@@ -462,6 +469,8 @@ class Evaluator:
 
     def _Call(self, n: A.Call, ctx):
         name = n.name
+        if self.reads is not None:
+            self.reads.add(name)
         # user-defined functions win over built-ins with the same arity
         f = ctx.function(name, len(n.args))
         if f is not None:

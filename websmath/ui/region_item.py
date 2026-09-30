@@ -259,6 +259,12 @@ class RegionItem(QGraphicsObject):
         if self.region.border:
             p.setPen(QPen(Qt.black, 1))
             p.drawRect(r.adjusted(0.5, 0.5, -0.5, -0.5))
+        if getattr(self.region, "check_failed", False):
+            # the independent double-check disagrees with this result
+            p.save()
+            p.setPen(QPen(QColor("#ff8c00"), 2, Qt.DashLine))
+            p.drawRect(r.adjusted(0, 0, -1, -1))
+            p.restore()
         if not self.region.enabled:
             # evaluation disabled: SMath marks the region with a small square
             p.fillRect(QRectF(r.right() - 5, r.top(), 5, 5), QColor("#808080"))

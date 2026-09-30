@@ -86,6 +86,21 @@ QT_QPA_PLATFORM=offscreen python -m pytest websmath/tests -p no:faulthandler
   picked from the list before typing on.
 * **Subscripts** with `.` (`x.1`, `'g.e`), edited part by part as on the site;
   `2x` becomes `2·x`; space turns only a lone word or number into text.
+* **Engineering units by default:** 12.5 kN, 250 MPa, 20 kPa, 5 kN/m,
+  6 kN m, 6.6667·10^7 mm^4 (Tools > Options > Engineering units; off gives
+  SMath's N, Pa, J, m^4). A unit typed in a result's box converts it; if it
+  does not match, the missing units are filled in (980.665 m/s² kg).
+* **Fast, dependency-only recalculation:** editing a line re-evaluates only
+  the regions that use what changed, and stops as soon as values stop
+  changing (a:=2.1→2.2 leaves round(a) at 2, so nothing after it runs).
+  Dependencies include names reached through functions and symbolic
+  definitions. A randomised test checks, after every random edit, move and
+  delete, that the result equals a full recalculation.
+* **Double-check:** after each change every result is recalculated by a
+  second, independent calculator (exact fractions, its own unit arithmetic)
+  and the shown number and unit are read back. The status bar shows "✔ N
+  results agree"; a disagreeing result gets an orange outline (Tools >
+  Double-check results).
 * **Right-click menu** on an equation as on the site: Display input data,
   Go to definition, Disable evaluation, Ignore units, Optimization, Decimal
   places (with trailing zeros and significant figures mode), Exponential

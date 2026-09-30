@@ -66,6 +66,7 @@ class Region:
     defined_vars: dict = field(default_factory=dict)
     defined_funcs: dict = field(default_factory=dict)
     uses: frozenset = frozenset()
+    dynamic: bool = False  # uses eval/str2num...: depends on anything
 
     @property
     def key(self):
@@ -213,14 +214,23 @@ class Worksheet:
         self._propagate(key, changed)
 
     def _propagate(self, key, changed: set) -> None:
+        """Re-evaluate, in reading order, only the regions after `key` that
+        use a changed name.  A re-evaluated region passes on only the names
+        whose value really changed (a:=2.1 -> 2.2 leaves r:=round(a) at 2,
+        so nothing after r is touched); function definitions always count as
+        changed, since a function reads outside names each time it is called.
+        Regions whose dependencies cannot be seen (eval, str2num...) are
+        re-evaluated on any change."""
         if not changed:
             return
+        changed = set(changed)
         order = self.ordered()
         start = bisect.bisect_right(self._order_keys, key)
         for r in order[start:]:
-            if r.uses & changed:
+            if r.dynamic or r.uses & changed:
+                old_vars, old_funcs = r.defined_vars, r.defined_funcs
                 self._evaluate(r, commit=True)
-                changed |= set(r.defined_vars) | {n for n, _ in r.defined_funcs}
+                changed |= _changed_names(old_vars, old_funcs, r.defined_vars, r.defined_funcs)
 
     def _evaluate(self, r: Region, commit: bool) -> None:
         before = (_shown(r.display), r.error.message if r.error else None)
@@ -272,7 +282,9 @@ class Worksheet:
             if n.src is not None:
                 n.src = _rebase(n.src, expr_row, r.editor.root)
         r.uses = frozenset(_used_names(node) | _row_names(r.editor.unit))
+        r.dynamic = any(isinstance(n, A.Call) and n.name in DYNAMIC_CALLS for n in A.walk(node))
         self.evaluator.ignore_units = r.ignore_units
+        reads = self.evaluator.reads = set()
         try:
             if isinstance(node, A.Define):
                 self.evaluator.define(node, ctx)
@@ -302,6 +314,10 @@ class Worksheet:
                 r.error = e
         finally:
             self.evaluator.ignore_units = False
+            self.evaluator.reads = None
+            # names reached while evaluating (a symbolic definition's names, a
+            # called function's outside names) are dependencies too
+            r.uses = r.uses | reads
 
     def _run_plot(self, r: Region, ctx: Context) -> None:
         r.curves = []
@@ -364,6 +380,30 @@ def _rebase(src, old: Row, new: Row):
 
 def _shown(display):
     return repr(display) if display is not None else None
+
+
+# calls whose dependencies are not visible in the expression
+DYNAMIC_CALLS = {"eval", "str2num", "IsDefined", "Clear", "rfile", "importData"}
+
+
+def _same_value(a, b) -> bool:
+    from .engine.evaluator import Lazy
+
+    if isinstance(a, Lazy) or isinstance(b, Lazy) or type(a) is not type(b):
+        return False
+    if isinstance(a, Quantity):
+        return a.dims == b.dims and (a.value == b.value or (a.value != a.value and b.value != b.value))
+    if isinstance(a, Matrix):
+        return (a.nrows, a.ncols) == (b.nrows, b.ncols) and all(_same_value(x, y) for x, y in zip(a.items, b.items))
+    return a == b
+
+
+def _changed_names(old_vars, old_funcs, new_vars, new_funcs) -> set:
+    out = {n for n, _ in old_funcs} | {n for n, _ in new_funcs}
+    for n in set(old_vars) | set(new_vars):
+        if n not in old_vars or n not in new_vars or not _same_value(old_vars[n], new_vars[n]):
+            out.add(n)
+    return out
 
 
 def _used_names(node) -> set:
