@@ -214,8 +214,67 @@ def test_decimal_places_and_significant_figures():
     ("9.81'm/'s^2=", "9.81 m/s^2"),
 ])
 def test_unit_results(typed, shown):
+    # SMath's own units (engineering units switched off, Tools > Options)
+    ws = Worksheet()
+    ws.format.engineering = False
+    r = ws.add_region(18, 9)
+    for key in typed:
+        r.editor.key(key)
+    ws.update_after_edit(r)
+    assert result(r) == shown
+
+
+@pytest.mark.parametrize("typed,shown", [
+    ("3'kN=", "3 kN"),
+    ("12500'N=", "12.5 kN"),
+    ("5'MPa=", "5 MPa"),
+    ("20'kN/'m^2=", "20 kPa"),
+    ("2'kN/'m=", "2 kN/m"),
+    ("25'kN/'m^3=", "25 kN/m^3"),
+    ("2'kN*3'm=", "6 kN m"),
+    ("1'in*1'in=", "645.16 mm^2"),
+    ("100'kPa*2'm^2=", "200 kN"),
+    ("0.5'N=", "0.5 N"),
+    ("1500'W=", "1.5 kW"),
+])
+def test_engineering_units_by_default(typed, shown):
     ws, (r,) = sheet(typed)
     assert result(r) == shown
+
+
+def test_second_moment_of_area_in_mm4():
+    _, (r,) = sheet(["1", "0", "0", "'", "m", "m", "*", "(", "2", "0", "0", "'", "m", "m", "RIGHT", "RIGHT",
+                     "^", "3", "RIGHT", "/", "1", "2", "="])
+    assert result(r) == "6.6667·10^7 mm^4"
+
+
+def test_unit_box_fills_missing_units():
+    """980.665 N with kg typed in the unit box: SMath keeps kg at the end and
+    fills in m/s² itself; kN converts."""
+    ws = Worksheet()
+    r = ws.add_region(18, 9)
+    ed = r.editor
+    for k in ["1", "0", "0", "'", "k", "g", "*", "'", "g", ".", "e", "RIGHT", "="]:
+        ed.key(k)
+    ws.update_after_edit(r)
+    assert result(r) == "980.665 N"
+    ed.set_cursor(ed.unit, 0)
+    ed.type("'kN")
+    ws.update_after_edit(r)
+    assert result(r) == "0.9807"
+    ed.unit.items.clear()
+    ed.set_cursor(ed.unit, 0)
+    ed.type("'kg")
+    ws.update_after_edit(r)
+    assert (result(r), error(r)) == ("980.665 m/s^2", None)  # shown as 980.665 m/s² kg
+
+
+def test_bare_expression_shows_no_error():
+    # observed: "test" and "x+1" on a blank sheet are error-free until "=" is typed
+    _, (a, b) = sheet("test", "x+1")
+    assert (error(a), error(b)) == (None, None)
+    _, (c,) = sheet("test+1=")
+    assert error(c) == "test - not defined."  # the error appears with "="
 
 
 def test_cubic_metres_stay_base_units():

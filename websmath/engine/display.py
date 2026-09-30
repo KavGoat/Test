@@ -89,8 +89,52 @@ def _unit_for(dims: tuple) -> Optional[DUnit]:
     return DUnit(num, den)
 
 
+# Units that take an engineering prefix chosen by size (kN, MPa, kN/m...)
+_ENG_PREFIX = {
+    "N": [("", 1.0), ("k", 1e3), ("M", 1e6), ("G", 1e9)],
+    "Pa": [("", 1.0), ("k", 1e3), ("M", 1e6), ("G", 1e9)],
+    "J": [("", 1.0), ("k", 1e3), ("M", 1e6), ("G", 1e9)],
+    "W": [("", 1.0), ("k", 1e3), ("M", 1e6), ("G", 1e9)],
+}
+
+
+def engineering_unit(unit: Optional[DUnit], magnitude: float):
+    """(unit, divisor) in the form engineers write: a prefix that keeps the
+    number between 1 and 1000 for N, Pa, J, W (12.5 kN, 250 MPa, 5 kN/m,
+    20 kPa) and mm², mm³, mm⁴ for small section properties."""
+    if unit is None or magnitude == 0:
+        return unit, 1.0
+    num, den = unit.num, unit.den
+    if num == [("J", 1)] and not den:
+        # force x length: a moment, written kN·m (energy and moment share
+        # the dimension; structural work needs the moment form)
+        best = ("", 1.0)
+        for pre, f in _ENG_PREFIX["N"]:
+            if magnitude / f >= 1 - 1e-12:
+                best = (pre, f)
+        return DUnit([(best[0] + "N", 1), ("m", 1)], []), best[1]
+    if len(num) == 1 and num[0][1] == 1 and num[0][0] in _ENG_PREFIX:
+        name = num[0][0]
+        best = ("", 1.0)
+        for pre, f in _ENG_PREFIX[name]:
+            if magnitude / f >= 1 - 1e-12:
+                best = (pre, f)
+        if best[0]:
+            return DUnit([(best[0] + name, 1)], list(den)), best[1]
+        return unit, 1.0
+    if not den and len(num) == 1 and num[0][0] == "m" and num[0][1] in (2, 3, 4):
+        n = num[0][1]
+        limit = {2: 1e-2, 3: 1e-3, 4: 1.0}[n]
+        if magnitude < limit:
+            return DUnit([("mm", n)], []), 1e-3 ** n
+    return unit, 1.0
+
+
 def display_quantity(q: Quantity, fmt: NumberFormat, scale: float = 1.0,
                      show_unit: bool = True) -> DQuantity:
+    unit = _unit_for(q.dims) if show_unit else None
+    if show_unit and scale == 1.0 and getattr(fmt, "engineering", False):
+        unit, scale = engineering_unit(unit, abs(q.value))
     v = q.value / scale if scale != 1.0 else q.value
     if isinstance(v, complex) and v.imag != 0:
         re = format_real(v.real, fmt) if _visible(v.real, fmt) else None
@@ -99,7 +143,6 @@ def display_quantity(q: Quantity, fmt: NumberFormat, scale: float = 1.0,
     else:
         x = v.real if isinstance(v, complex) else v
         body = _as_fraction(x, fmt) or DNum(format_real(x, fmt))
-    unit = _unit_for(q.dims) if show_unit else None
     return DQuantity(body, unit)
 
 

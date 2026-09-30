@@ -278,9 +278,15 @@ class Worksheet:
                 self.evaluator.define(node, ctx)
                 return
             if not r.editor.evaluate:
-                # a bare expression is still evaluated (errors are shown)
+                # a bare expression (no "=" or ":=") runs - a for loop in it
+                # still assigns - but shows no error: observed, "test", "x+1"
+                # and "100kg*g.e" while typing are error-free on SMath Cloud
+                # until "=" is typed
                 if record and not isinstance(node, A.Placeholder):
-                    self.evaluator.eval(node, ctx)
+                    try:
+                        self.evaluator.eval(node, ctx)
+                    except SMathError:
+                        pass
                 return
             if r.optimization == "none":
                 # no evaluation: the input is shown again after "="
@@ -327,12 +333,21 @@ class Worksheet:
             offset = unit_offset(unode.name)
         if isinstance(q, Quantity):
             if q.dims != uval.dims:
-                raise err("units_mismatch", node=unode)
+                if offset:
+                    raise err("units_mismatch", node=unode)
+                # SMath keeps the unit typed in the box at the end and fills
+                # the gap with the units still needed: 980.665 N with kg in
+                # the box shows 9.8066 m/s² kg
+                rest = tuple(a - b for a, b in zip(q.dims, uval.dims))
+                return display_value(Q(q.value / uval.value, rest), fmt)
             shown = Q((q.value - offset) / uval.value)
             return display_value(shown, fmt)
         if isinstance(q, Matrix):
             if any(x.dims != uval.dims for x in q.items):
-                raise err("units_mismatch", node=unode)
+                if offset:
+                    raise err("units_mismatch", node=unode)
+                return display_value(Matrix(q.nrows, q.ncols, [
+                    Q(x.value / uval.value, tuple(a - b for a, b in zip(x.dims, uval.dims))) for x in q.items]), fmt)
             return display_value(Matrix(q.nrows, q.ncols, [Q((x.value - offset) / uval.value) for x in q.items]), fmt)
         return display_value(value, fmt)
 

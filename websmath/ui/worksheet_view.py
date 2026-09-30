@@ -142,10 +142,12 @@ class SuggestionList(QListWidget):
         super().__init__(parent)
         self.setWindowFlags(Qt.ToolTip)
         self.setFocusPolicy(Qt.NoFocus)
-        self.setIconSize(QSize(12, 12))
+        self.setIconSize(QSize(11, 11))
+        self.setSpacing(0)
+        self.setUniformItemSizes(True)
         self.setStyleSheet(
-            "QListWidget{background:#fff;border:1px solid #000;font-size:12px;outline:0;}"
-            "QListWidget::item{padding:2px 2px 2px 3px;color:#000;border:0;}"
+            "QListWidget{background:#fff;border:1px solid #000;font-size:11px;outline:0;}"
+            "QListWidget::item{padding:0px 2px 0px 2px;margin:0;color:#000;border:0;height:14px;}"
             "QListWidget::item:selected{color:#fff;background:#9faab5;}"
             "QListWidget::item:hover{color:#fff;background:#9faab5;}")
         self.setMinimumWidth(90)
@@ -777,8 +779,9 @@ class WorksheetView(QGraphicsView):
         # the list opens under the cursor, 2px to the left (site: offsetLeft + x - 2)
         pos = self.mapFromScene(item.cursor_scene_pos())
         s.move(self.mapToGlobal(pos) + QPoint(-2, 1))
-        rows = min(s.count(), 5)
-        s.resize(max(90, s.sizeHintForColumn(0) + 22), min(92, s.sizeHintForRow(0) * rows + 4))
+        rows = min(s.count(), 8)
+        s.setMaximumHeight(16 * 8 + 4)
+        s.resize(max(90, s.sizeHintForColumn(0) + 22), s.sizeHintForRow(0) * rows + 4)
         s.show()
         s.show_tooltip()
 
@@ -1386,6 +1389,17 @@ def selected_index(entries: list, word: str) -> Optional[int]:
     return None
 
 
+# False: variables, units, constants, functions (asked for); True: SMath Cloud's order
+SMATH_ORDER = False
+
+
+def _is_constant_unit(label: str) -> bool:
+    from ..engine.unitdata import INFO
+
+    name = label[1:] if label.startswith("'") else label
+    return INFO.get(name, ("",))[0] == "constant"
+
+
 def suggestion_list(word: str, defined_names) -> list:
     """The autocomplete list for a partial word (observed on SMath Cloud):
     case-insensitive substring matches; units (with their apostrophe) first,
@@ -1413,8 +1427,20 @@ def suggestion_list(word: str, defined_names) -> list:
     for n in defined_names:
         if needle in n.lower() and n not in others:
             others[n] = "variable"
-    rest = sorted(others.items(), key=lambda x: smath_sort_key(x[0]))
-    return units + rest
+    # order asked for: the worksheet's own names first, then units, then
+    # constants, then functions and keywords (SMath Cloud: units first, the
+    # rest mixed; see SMATH_ORDER)
+    if SMATH_ORDER:
+        rest = sorted(others.items(), key=lambda x: smath_sort_key(x[0]))
+        return units + rest
+    variables = sorted(((k, v) for k, v in others.items() if v == "variable"), key=lambda x: smath_sort_key(x[0]))
+    consts = sorted(((k, v) for k, v in others.items() if v == "constant" and k not in KEYWORDS),
+                    key=lambda x: smath_sort_key(x[0]))
+    unit_consts = [u for u in units if _is_constant_unit(u[0])]
+    plain_units = [u for u in units if not _is_constant_unit(u[0])]
+    funcs = sorted(((k, v) for k, v in others.items() if v == "function" or k in KEYWORDS),
+                   key=lambda x: smath_sort_key(x[0]))
+    return variables + plain_units + consts + unit_consts + funcs
 
 
 def _linear_unit(u: str) -> str:

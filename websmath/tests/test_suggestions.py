@@ -19,8 +19,15 @@ DATA = json.loads((Path(__file__).parent / "data" / "smath_suggestions.json").re
 CASES = [(group, pf) for group in DATA for pf in DATA[group]["lists"]]
 
 
+@pytest.fixture
+def smath_order(monkeypatch):
+    import websmath.ui.worksheet_view as wv
+
+    monkeypatch.setattr(wv, "SMATH_ORDER", True)
+
+
 @pytest.mark.parametrize("group,prefix", CASES)
-def test_suggestions_match_smath(group, prefix):
+def test_suggestions_match_smath(group, prefix, smath_order):
     ws = Worksheet()
     for k, d in enumerate(DATA[group]["defs"]):
         r = ws.add_region(18, 9 + 36 * k)
@@ -86,7 +93,7 @@ def test_entries_carry_icon_kind_origin_and_description():
     ("q", ["qq:1"], "qq"),
     ("x", ["x:1"], "x"),
 ])
-def test_initial_selection_matches_smath(prefix, defs, selected):
+def test_initial_selection_matches_smath(prefix, defs, selected, smath_order):
     from websmath.ui.worksheet_view import selected_index
 
     es = _entries(prefix, defs)
@@ -94,3 +101,12 @@ def test_initial_selection_matches_smath(prefix, defs, selected):
     assert es[k].name == selected
     if prefix == "m":
         assert [(e.name, e.origin) for e in es if e.text == "m"] == [("'m", 1), ("m", 3)]
+
+
+def test_default_order_variables_units_constants_functions():
+    es = [e.name for e in _entries("m", ["m:10", "mass:5"])]
+    assert es[:2] == ["m", "mass"]                           # the worksheet's names
+    last_unit = es.index("'μm")
+    assert all(n.startswith("'") for n in es[2:last_unit + 1])  # then units
+    assert es.index("'m.e") > last_unit                      # then constants
+    assert es.index("matrix") > es.index("'m.e")             # then functions

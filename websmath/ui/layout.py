@@ -109,9 +109,14 @@ class LRect(LBox):
 
     color: QColor = None
     error: bool = False
+    box: tuple = None  # (left bearing, width, height) of SMath's glyph
 
     def paint(self, p, ox, oy):
-        r = QRectF(ox + 1, oy - self.asc + 1, self.w - 2, self.h - 1)
+        if self.box is not None:
+            left, w, h = self.box
+            r = QRectF(ox + left, oy + 0.6 - h, w, h)
+        else:
+            r = QRectF(ox + 1, oy - self.asc + 1, self.w - 2, self.h - 1)
         if self.error:
             p.save()
             p.setPen(QPen(ERROR_RED, 1))
@@ -119,6 +124,23 @@ class LRect(LBox):
             p.drawRoundedRect(QRectF(ox - 1, oy - self.asc - 2, self.w + 2, self.h + 4), 3, 3)
             p.restore()
         p.fillRect(r, ERROR_RED if self.error else (self.color or BLACK))
+
+
+_SMATH_FAMILY = None
+
+
+def _smath_equations_family() -> str:
+    """Register SMath's own equation font (extracted from SMath.Drawing.dll)."""
+    global _SMATH_FAMILY
+    if _SMATH_FAMILY is None:
+        from pathlib import Path
+
+        from PySide6.QtGui import QFontDatabase
+
+        fid = QFontDatabase.addApplicationFont(str(Path(__file__).with_name("icons") / "SMathEquations.ttf"))
+        fams = QFontDatabase.applicationFontFamilies(fid) if fid >= 0 else []
+        _SMATH_FAMILY = fams[0] if fams else "Sans Serif"
+    return _SMATH_FAMILY
 
 
 @dataclass
@@ -170,9 +192,15 @@ class Layouter:
                      color=color, error=error)
 
     def placeholder(self, scale=1.0, error=False) -> LRect:
-        m = self.metrics(self.style.font(scale))
-        h = m.ascent() * 0.62
-        return LRect(w=m.horizontalAdvance("0") * 0.62 + 2, asc=h, desc=1, error=error)
+        """SMath's empty-slot box: the glyph "H" of its SMath Equations font
+        (5x7 px at 10 pt, 3 px left bearing, 10.8 px advance, on the
+        baseline) - drawn as a rectangle of the glyph's exact size."""
+        f = QFont(_smath_equations_family())
+        f.setPointSizeF(self.style.font(scale).pointSizeF())
+        m = QFontMetricsF(f)
+        r = m.tightBoundingRect("H")
+        return LRect(w=m.horizontalAdvance("H") - 2, asc=-r.top(), desc=0.6, error=error,
+                     box=(r.left(), r.width(), r.height()))
 
     def hspace(self, w: float) -> LBox:
         return LBox(w=w)
@@ -710,6 +738,9 @@ class Layouter:
             parts = [self.number_value(d.value, scale)]
             if unit_box is not None:
                 sp = self.hspace(self.metrics(self.style.font(scale)).horizontalAdvance(" ") * 0.5)
+                if d.unit is not None:
+                    # the units filled in automatically, before the typed one
+                    parts += [sp, self.unit(d.unit, scale)]
                 parts += [sp, unit_box]
             elif d.unit is not None:
                 sp = self.hspace(self.metrics(self.style.font(scale)).horizontalAdvance(" ") * 0.5)

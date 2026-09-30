@@ -33,6 +33,9 @@ class NumberFormat:
     half_even: bool = True
     fractions: str = "decimal"  # "decimal", "fraction" or "auto" (right-click > Fractions)
     mixed: bool = False  # "Use mixed numbers": 7/3 -> 2 1/3
+    # engineering output units: 12500 N -> 12.5 kN, 2.5e8 Pa -> 250 MPa,
+    # 6.667e-5 m^4 -> 6.6667e7 mm^4 (not SMath's own behaviour; Tools > Options)
+    engineering: bool = True
 
 
 @dataclass(frozen=True)

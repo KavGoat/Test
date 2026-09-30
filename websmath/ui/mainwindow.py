@@ -619,6 +619,9 @@ class MainWindow(QMainWindow):
         rnd.setCurrentIndex(0 if f.half_even else 1)
         auto = QCheckBox()
         auto.setChecked(v.worksheet.auto_calculation)
+        eng = QCheckBox()
+        eng.setChecked(f.engineering)
+        eng.setToolTip("kN, kPa/MPa, kN/m, kN·m, mm⁴ chosen by size (off: SMath's N, Pa, J, m⁴)")
         form.addRow("Decimal places", dec)
         form.addRow("Significant figures mode", sig)
         form.addRow("Trailing zeros", tz)
@@ -626,6 +629,7 @@ class MainWindow(QMainWindow):
         form.addRow("Fractions", frac)
         form.addRow("Rounding", rnd)
         form.addRow("Auto calculation", auto)
+        form.addRow("Engineering units", eng)
         tabs.addTab(calc, "Calculation")
         ui = QWidget()
         form2 = QFormLayout(ui)
@@ -652,6 +656,7 @@ class MainWindow(QMainWindow):
         f.significant, f.trailing_zeros = sig.isChecked(), tz.isChecked()
         f.fractions = ["decimal", "fraction", "auto"][frac.currentIndex()]
         f.half_even = rnd.currentIndex() == 0
+        f.engineering = eng.isChecked()
         v.worksheet.auto_calculation = auto.isChecked()
         v.scene_.show_grid = grid.isChecked()
         v.dynamic_assistance = assist.isChecked()
