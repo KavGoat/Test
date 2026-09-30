@@ -555,6 +555,53 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
         painter.drawArc(QRectF(5, 5, 14, 14), 30 * 16, 280 * 16)
         painter.setBrush(QBrush(QColor(ACCENT)))
         painter.drawPolygon(QPolygonF([QPointF(19, 4), QPointF(20, 11), QPointF(14, 9)]))
+    # -- calculations (CalcForge) --------------------------------------------
+    elif name == "calc_auto":
+        # recalculate, with an A in it: it happens on its own
+        _pen(painter, ACCENT, 1.5)
+        painter.drawArc(QRectF(3, 3, 18, 18), 40 * 16, 290 * 16)
+        painter.setBrush(QBrush(QColor(ACCENT)))
+        painter.drawPolygon(QPolygonF([QPointF(20, 2.5), QPointF(21, 10), QPointF(14.5, 7.5)]))
+        _glyph(painter, "A", INK, 8.5)
+    elif name == "calc_plot":
+        _pen(painter, INK, 1.2)
+        painter.drawLine(QPointF(3, 12), QPointF(21, 12))
+        painter.drawLine(QPointF(12, 3), QPointF(12, 21))
+        _pen(painter, ACCENT, 1.6)
+        path = QPainterPath(QPointF(3, 12))
+        for step in range(1, 37):
+            x = 3 + step * 0.5
+            path.lineTo(QPointF(x, 12 - 6 * math.sin((x - 3) / 18 * 2 * math.pi)))
+        painter.drawPath(path)
+    elif name == "calc_matrix":
+        _pen(painter, INK, 1.4)
+        painter.drawPolyline(QPolygonF([QPointF(7, 3.5), QPointF(4, 3.5),
+                                        QPointF(4, 20.5), QPointF(7, 20.5)]))
+        painter.drawPolyline(QPolygonF([QPointF(17, 3.5), QPointF(20, 3.5),
+                                        QPointF(20, 20.5), QPointF(17, 20.5)]))
+        painter.setBrush(QBrush(QColor(INK)))
+        for x in (9, 15):
+            for y in (8, 16):
+                painter.drawEllipse(QPointF(x, y), 1.4, 1.4)
+    elif name == "calc_text":
+        # words on the calc grid
+        _pen(painter, FAINT, 1.0)
+        for x in (4, 10, 16, 22):
+            for y in (5, 19):
+                painter.drawPoint(QPointF(x - 1, y))
+        _glyph(painter, "Tt", INK, 11)
+    elif name in ("prog_if", "prog_for", "prog_while", "prog_line"):
+        word = name[5:]
+        _pen(painter, ACCENT, 1.3)
+        painter.drawLine(QPointF(3, 4), QPointF(3, 20))
+        _glyph(painter, word if len(word) <= 3 else word[:2], INK,
+               9 if len(word) <= 3 else 8.5, rect=QRectF(3, 0, 21, 24))
+    elif name == "panel_maths":
+        # the Maths panel: an equals sign under x squared
+        _glyph(painter, "x²", INK, 10, rect=QRectF(0, 0, 24, 16))
+        _pen(painter, ACCENT, 1.5)
+        painter.drawLine(QPointF(6, 17), QPointF(18, 17))
+        painter.drawLine(QPointF(6, 20.5), QPointF(18, 20.5))
     else:
         _glyph(painter, name[:2].upper(), INK, 8)
 

@@ -137,8 +137,10 @@ class SearchPanel(QWidget):
             self.results.resizeColumnToContents(column)
         self.results.blockSignals(False)
         drawing = sum(1 for hit in self.hits if hit["kind"] == DRAWING)
+        maths = sum(1 for hit in self.hits if hit.get("field") in EQUATION_FIELDS)
         self.summary.setText(f"{len(self.hits)} found — {drawing} in the drawing, "
-                             f"{len(self.hits) - drawing} in markups")
+                             f"{len(self.hits) - drawing - maths} in markups"
+                             + (f", {maths} in equations" if maths else ""))
         self._mark_all()
 
     def _mark_all(self, current=None) -> None:
@@ -179,10 +181,14 @@ class SearchPanel(QWidget):
         if hit is None or hit["kind"] != MARKUP:
             self.summary.setText("Only words in markups can be replaced")
             return 0
+        if hit["field"] in EQUATION_FIELDS:
+            self.summary.setText("An equation is changed by typing into it")
+            return 0
         return self._replace([hit])
 
     def replace_all(self) -> int:
-        return self._replace([hit for hit in self.hits if hit["kind"] == MARKUP])
+        return self._replace([hit for hit in self.hits if hit["kind"] == MARKUP
+                              and hit["field"] not in EQUATION_FIELDS])
 
     def _replace(self, hits) -> int:
         if not hits:
@@ -215,9 +221,28 @@ class SearchPanel(QWidget):
         return changed
 
 
+# Where an equation's words are: read-only — an equation is changed by
+# typing into it, not by Replace.
+EQUATION_FIELDS = ("equation", "result")
+
+
 def _searchable(item) -> list[tuple[str, str]]:
-    """The words on a markup that can be searched, by where they are kept."""
+    """The words on a markup that can be searched, by where they are kept.
+
+    An equation is searched as it was typed (``M:`` rather than SMath's
+    ``M≔``, so a variable's definition is found by typing it) and by the
+    result it shows (phase 5: Search finds variable names and equation text).
+    """
     fields = []
+    region = getattr(item, "region", None)
+    if getattr(item, "IS_CALC", False) and region is not None:
+        from ..calc.engine.display import display_text
+        fields.append(("equation", item.text().replace("≔", ":")))
+        if region.display is not None:
+            shown = display_text(region.display)
+            if shown and shown != "None":
+                fields.append(("result", shown))
+        return fields
     if hasattr(item, "doc") and isinstance(item.doc, QTextDocument):
         fields.append(("text", item.doc.toPlainText()))
     for field in ("subject", "comment", "label"):

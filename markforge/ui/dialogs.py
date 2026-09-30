@@ -1364,6 +1364,39 @@ class PreferencesDialog(QDialog):
         form.addRow("Dictionary", self.dictionary)
         layout.addWidget(writing)
 
+        # SMath's Tools > Options: how results are shown unless an equation
+        # says otherwise, and how a new equation is written.
+        calcs = QGroupBox("Calculations")
+        form = QFormLayout(calcs)
+        self.result_decimals = QSpinBox()
+        self.result_decimals.setObjectName("resultDecimals")
+        self.result_decimals.setRange(0, 15)
+        self.result_decimals.setValue(int(prefs.result_decimals))
+        form.addRow("Decimals", self.result_decimals)
+        self.result_threshold = QSpinBox()
+        self.result_threshold.setRange(0, 15)
+        self.result_threshold.setValue(int(prefs.result_threshold))
+        self.result_threshold.setToolTip("Longer numbers are shown with a power of ten")
+        form.addRow("Threshold", self.result_threshold)
+        self.result_trailing = QCheckBox("Trailing zeros")
+        self.result_trailing.setChecked(bool(prefs.result_trailing_zeros))
+        form.addRow("", self.result_trailing)
+        self.result_fractions = QComboBox()
+        for key, title in (("decimal", "Decimal"), ("fraction", "Fraction"), ("auto", "Auto")):
+            self.result_fractions.addItem(title, key)
+        self.result_fractions.setCurrentIndex(
+            max(self.result_fractions.findData(prefs.result_fractions), 0))
+        form.addRow("Fractions", self.result_fractions)
+        self.equation_size = QDoubleSpinBox()
+        self.equation_size.setRange(4, 72)
+        self.equation_size.setSuffix(" pt")
+        self.equation_size.setValue(float(prefs.equation_font_size))
+        form.addRow("Equation size", self.equation_size)
+        from .widgets import ColorButton
+        self.equation_colour = ColorButton(prefs.equation_colour, label="Equation colour")
+        form.addRow("Equation colour", self.equation_colour)
+        layout.addWidget(calcs)
+
         layout.addStretch(1)
         layout.addWidget(_buttons(self))
 
@@ -1377,7 +1410,14 @@ class PreferencesDialog(QDialog):
             snap_while_drawing=self.snapping.isChecked(),
             autosize_text=self.autosize.isChecked(),
             insertion_point=self.insertion.isChecked(),
-            recover_flattened=self.recover_flattened.isChecked())
+            recover_flattened=self.recover_flattened.isChecked(),
+            page_thumbnails=getattr(self.prefs, "page_thumbnails", 1.0),
+            result_decimals=self.result_decimals.value(),
+            result_threshold=self.result_threshold.value(),
+            result_trailing_zeros=self.result_trailing.isChecked(),
+            result_fractions=self.result_fractions.currentData(),
+            equation_font_size=self.equation_size.value(),
+            equation_colour=self.equation_colour.color() or "#000000")
 
 
 class SpellingDialog(QDialog):

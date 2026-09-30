@@ -53,6 +53,31 @@ class Preferences:
     """How big the pictures in the page list are, as a multiple of their
     ordinary size. Ctrl and the wheel over the list changes it."""
 
+    # -- calculations (decision 20 / phase 5): SMath's Tools > Options ------------
+    result_decimals: int = 4
+    """Decimal places a result is shown with, unless an equation says otherwise."""
+
+    result_threshold: int = 5
+    """Exponential threshold: longer numbers are shown with a power of ten."""
+
+    result_trailing_zeros: bool = False
+    """Whether 2.5 is shown as 2.5000 at four decimals."""
+
+    result_fractions: str = "decimal"
+    """decimal, fraction or auto."""
+
+    equation_font_size: float = 10.0
+    """The size a new equation is written at, in points."""
+
+    equation_colour: str = "#000000"
+    """The colour a new equation is written in."""
+
+    def result_format(self) -> dict:
+        """The number format these say, as a document keeps it."""
+        return {"decimals": int(self.result_decimals), "threshold": int(self.result_threshold),
+                "trailing_zeros": bool(self.result_trailing_zeros),
+                "fractions": str(self.result_fractions)}
+
     def wheel_zooms(self) -> bool:
         return self.wheel == WHEEL_ZOOM
 
@@ -88,6 +113,11 @@ def load() -> Preferences:
         default = getattr(prefs, field.name)
         if isinstance(default, bool):
             setattr(prefs, field.name, _as_bool(stored, default))
+        elif isinstance(default, int):
+            try:
+                setattr(prefs, field.name, int(stored))
+            except (TypeError, ValueError):
+                pass
         elif isinstance(default, float):
             # QSettings hands back whatever it wrote, and on some platforms
             # that is the string of it. A number that will not parse is a

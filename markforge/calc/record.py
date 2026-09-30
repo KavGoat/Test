@@ -160,3 +160,43 @@ def defined_names(payloads) -> set:
     for region in worksheet.regions:
         names |= set(region.defined_vars) | {name for name, _ in region.defined_funcs}
     return names
+
+
+_SUPERSCRIPT = str.maketrans("0123456789-", "⁰¹²³⁴⁵⁶⁷⁸⁹⁻")
+
+
+def plain_units(text: str) -> str:
+    """Units written as plain text reads them (the kN·m, m² answer):
+    powers as superscripts, units multiplied with a middle dot."""
+    import re
+
+    text = re.sub(r"\^\(?(-?\d+)\)?", lambda m: m.group(1).translate(_SUPERSCRIPT), text)
+    # a space or * between two unit words is a multiplication
+    text = re.sub(r"(?<=[A-Za-zΩμ°²³⁴⁻¹⁰⁵⁶⁷⁸⁹])[ *](?=[A-Za-zΩμ°])", "·", text)
+    return text
+
+
+def plain_text(region) -> str:
+    """An equation as plain text, for pasting into other programs: what was
+    typed, readably ("Mu := 45.2 kN·m"), and for an evaluation its shown
+    result ("Mu = 54 kN·m")."""
+    import re
+
+    from .engine.display import display_text
+    from .engine.model import to_text
+
+    if region.kind != "math" or region.editor is None:
+        return getattr(region.editor, "text", "") if region.editor is not None else ""
+    source = to_text(region.editor.root)
+    # (x)/(y) and the like around a single name or number read without them
+    for _ in range(4):
+        source = re.sub(r"\(([\w.']+)\)", r"\1", source)
+    source = re.sub(r"(?<=[\d)])'", " ", source).replace("'", "")
+    source = source.replace("≔", " := ").replace("*", "·")
+    shown = display_text(region.display) if region.display is not None else ""
+    if source.rstrip().endswith("=") and shown and shown != "None":
+        return f"{source.rstrip()[:-1].rstrip()} = {plain_units(shown)}"
+    parts = source.split(" := ", 1)
+    if len(parts) == 2:
+        return f"{parts[0]} := {plain_units(parts[1])}"
+    return plain_units(source)

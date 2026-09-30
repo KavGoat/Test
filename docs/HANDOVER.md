@@ -265,6 +265,10 @@ markforge/
                      binding has a scope (ALWAYS, CALC, MARKUP, EQUATION,
                      TYPING); a key clashes only where scopes overlap
                      (scopes_overlap). SMATH_KEYS is the SMath section.
+    mathspanel.py    the Maths rail panel (WebSMath's side panel sections)
+    calcmenu.py      an equation's settings: right-click › Equation, plot
+                     settings; calcmenu.change() is the one undoable way
+                     to change regions' settings
     calcdialogs.py   WebSMath's matrix/function/constants/double-check
                      dialogs (ANSWERS lets tests answer them)
     theme.py (markforge/theme.py) light and dark stylesheets

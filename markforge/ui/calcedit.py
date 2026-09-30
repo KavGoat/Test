@@ -67,6 +67,11 @@ def names_left_behind(document, kept: list) -> list:
     return sorted((used & there) - here)
 
 
+def snap_px(value: float) -> float:
+    """To SMath's grid, in its 96-dpi pixels (a plot's size is kept in them)."""
+    return round(value / GRID_PX) * GRID_PX
+
+
 def _word_char(ch: str) -> bool:
     return ch.isalnum() or ch in "_."
 
@@ -86,6 +91,10 @@ class CalcEditing:
         self._select_drag = None                    # (row, first slot) while dragging a selection
         self._overflow: list = []                   # equations past the bottom of their page
         self._pressed_on: Optional[tuple] = None    # (item, scene point) of a click on an equation
+        # What dragging does in a plot that has been double-clicked into
+        # (the Maths panel's Plot section): "move" pans, "scale" zooms.
+        self.plot_tool = "move"
+        self._plot_drag = None                     # (kind, scene start, item, what it was)
 
     # -- state ---------------------------------------------------------------------
     @property
@@ -177,7 +186,10 @@ class CalcEditing:
         item.setRotation(frame.page.turn)
         frame.add_markup(item, QPointF(snap(page_point.x()), snap(page_point.y())))
         region = item.region
-        region.font_size = getattr(self, "default_font_size", 10.0)
+        from . import preferences
+        prefs = preferences.current()
+        region.font_size = float(prefs.equation_font_size)
+        region.color = prefs.equation_colour or "#000000"
         self.item = item
         item.focused = True
         item.show_upright(self._view_turn())
@@ -325,6 +337,8 @@ class CalcEditing:
                 item.setSelected(True)
             self._pressed_on = None
             return False
+        if item is not None and item is self.item and self._start_plot_drag(item, scene_pos):
+            return True
         if item is not None and item is self.item:
             if event.modifiers() & Qt.ShiftModifier:
                 self._shift_click(item, scene_pos)
@@ -356,7 +370,69 @@ class CalcEditing:
         return (point.x() < e or point.y() < e or point.x() > frame.width() - e
                 or point.y() > frame.height() - e)
 
+    # -- a plot that has been double-clicked into (SMath's behaviour) -------------
+    #
+    # Until then a plot is a markup like any other: the wheel scrolls the page
+    # and dragging moves it. Double-clicked into (or just made), dragging inside
+    # it pans the graph — or zooms it, with the Maths panel's Scale tool — its
+    # corner resizes it, and the wheel zooms it (Ctrl: x only, Shift: y only),
+    # until a click outside or Esc. WebSMath's worksheet_view, one to one.
+    def _in_plot(self, item, scene_pos: QPointF) -> bool:
+        view = getattr(item, "_view", None)
+        return bool(item is not None and item.region is not None
+                    and item.region.plot is not None and view is not None
+                    and view.plot_rect().contains(self._region_point(item, scene_pos)))
+
+    def _start_plot_drag(self, item, scene_pos: QPointF) -> bool:
+        if not self._in_plot(item, scene_pos):
+            return False
+        state = item.region.plot
+        local = self._region_point(item, scene_pos)
+        if local.x() > state.width - 8 and local.y() > state.height - 8:
+            self._plot_drag = ("resize", QPointF(scene_pos), item, (state.width, state.height))
+        else:
+            self._plot_drag = ("pan", QPointF(scene_pos), item,
+                               (state.pan_x, state.pan_y, state.ppu_x, state.ppu_y))
+        return True
+
+    def _drag_the_plot(self, scene_pos: QPointF) -> None:
+        kind, start, item, orig = self._plot_drag
+        moved = (scene_pos - start) * PX_PER_PT
+        state = item.region.plot
+        if kind == "pan" and self.plot_tool == "scale":
+            factor = 1.01 ** (moved.x() - moved.y())      # up and right zooms in
+            state.ppu_x, state.ppu_y = orig[2] * factor, orig[3] * factor
+        elif kind == "pan":
+            state.pan_x, state.pan_y = orig[0] + moved.x(), orig[1] + moved.y()
+        else:
+            state.width = max(60.0, snap_px(orig[0] + moved.x()))
+            state.height = max(40.0, snap_px(orig[1] + moved.y()))
+        item._view._plot_cache = None
+        item.relayout()
+        item.update()
+
+    def wheel(self, event, scene_pos: QPointF) -> bool:
+        """The wheel over a plot that has been double-clicked into zooms it."""
+        item = self.item
+        if not self.editing() or not self._in_plot(item, scene_pos):
+            return False
+        steps = event.angleDelta().y() / 120.0
+        if not steps:
+            return False
+        local = self._region_point(item, scene_pos)
+        mods = event.modifiers()
+        only_x = bool(mods & Qt.ControlModifier)
+        only_y = bool(mods & Qt.ShiftModifier)
+        item.region.plot.zoom(1.1 ** steps, local.x(), local.y(), x=not only_y, y=not only_x)
+        item._view._plot_cache = None
+        item.update()
+        event.accept()
+        return True
+
     def mouse_move(self, event, scene_pos: QPointF) -> bool:
+        if self._plot_drag is not None:
+            self._drag_the_plot(scene_pos)
+            return True
         if self._select_drag is None or self.item is None:
             return False
         row, first = self._select_drag
@@ -371,6 +447,9 @@ class CalcEditing:
     def mouse_release(self, event, scene_pos: QPointF) -> bool:
         """After the canvas has had the release: a click (not a drag) on an
         equation puts the cursor in it."""
+        if self._plot_drag is not None:
+            self._plot_drag = None
+            return True
         if self._select_drag is not None:
             self._select_drag = None
             return True
@@ -385,6 +464,8 @@ class CalcEditing:
             return False
         if not self.view.editable(item):
             return False
+        if item.region is not None and item.region.plot is not None:
+            return False          # a plot is double-clicked into; one click picks it up
         self.focus(item, scene_pos)
         return True
 

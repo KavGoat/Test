@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (QApplication, QCompleter, QGraphicsProxyWidget,
 
 from ..core.document import MM_TO_PT
 from ..core.units import parse_unit
-from ..items.calc import CalcItem
+from ..items.calc import CalcItem, CalcTextItem
 from ..items.base import (HANDLE_CURSORS, HANDLE_SCREEN_PX, HANDLE_SIZE,
                           MarkupItem, build_item, cloud_path,
                           cursor_for_handle, rename_groups)
@@ -875,6 +875,8 @@ class PageView(QGraphicsView):
         scrolling still scrolls smoothly however the wheel is set, and Ctrl
         inverts that too.
         """
+        if self.calc.wheel(event, self.mapToScene(event.position().toPoint())):
+            return
         pixels = event.pixelDelta()
         notches = event.angleDelta().y()
         if event.modifiers() & Qt.ShiftModifier:
@@ -1798,6 +1800,11 @@ class PageView(QGraphicsView):
             if isinstance(item, CalcItem):
                 item.snap_to_grid()
                 self.calc.note_overflow(item)
+            elif isinstance(item, CalcTextItem):
+                # Calculation text sits on the equations' grid (decision 22)
+                from .calcedit import snap
+                where = item.pos()
+                item.setPos(QPointF(snap(where.x()), snap(where.y())))
 
 
     def _add_poly_point(self, event: QMouseEvent, point: QPointF, tool: Tool) -> None:
@@ -4585,8 +4592,9 @@ class PageView(QGraphicsView):
                      Qt.Key_Up: QPointF(0, -step), Qt.Key_Down: QPointF(0, step)}[key]
             items = [i for i in self.scene().selectedItems()
                      if isinstance(i, MarkupItem) and self.editable(i)]
-            if any(isinstance(i, CalcItem) for i in items):
-                # equations live on SMath's grid: a nudge is one grid step
+            if any(isinstance(i, (CalcItem, CalcTextItem)) for i in items):
+                # equations and Calculation text live on SMath's grid: a nudge
+                # is one grid step
                 from .calcedit import GRID_PT
                 delta = QPointF(math.copysign(GRID_PT, delta.x()) if delta.x() else 0.0,
                                 math.copysign(GRID_PT, delta.y()) if delta.y() else 0.0)

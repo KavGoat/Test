@@ -61,6 +61,42 @@ ORGANISATION = "MarkForge"
 CLIPBOARD_TAG = "application/x-markforge-items"
 
 
+def _our_clipboard() -> Optional[dict]:
+    """CalcForge's own copy on the clipboard, decoded, or None.
+
+    Under its own type since phase 5, beside plain text and a picture for
+    other programs; as JSON in the text before then, which is still read.
+    """
+    mime = QApplication.clipboard().mimeData()
+    if mime is None:
+        return None
+    raw = ""
+    if mime.hasFormat(CLIPBOARD_TAG):
+        raw = bytes(mime.data(CLIPBOARD_TAG)).decode("utf-8", "replace")
+    elif (mime.text() or "").strip().startswith("{"):
+        raw = mime.text()
+    if not raw:
+        return None
+    try:
+        decoded = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+    return decoded if isinstance(decoded, dict) and CLIPBOARD_TAG in decoded else None
+
+
+def _plain_text_of(item) -> str:
+    """A copied markup as plain text: an equation as it reads
+    ("Mu = 54 kN·m"), words as they are, anything else by what it is."""
+    region = getattr(item, "region", None)
+    if getattr(item, "IS_CALC", False) and region is not None:
+        from ..calc.record import plain_text
+        return plain_text(region)
+    doc = getattr(item, "doc", None)
+    if doc is not None and hasattr(doc, "toPlainText"):
+        return doc.toPlainText()
+    return item.summary() if hasattr(item, "summary") else ""
+
+
 def _command_id(method: str) -> str:
     """Binding id for a command method, e.g. fit_page -> fit_page."""
     return {"fit_page": "fit_page", "fit_width": "fit_width",
@@ -627,6 +663,19 @@ class MainWindow(QMainWindow):
         self.act_auto_calc.setChecked(True)
         self._act("insert_matrix", "Matrix", self.insert_matrix, "Ctrl+M",
                   tip="Insert a matrix into the equation, or start one")
+        self._act("insert_plot", "Plot", self.insert_plot,
+                  tip="A 2-D plot at the red cross or the pointer (@ in Calc mode)")
+        self._act("insert_calc_text", "Calc text", self.insert_calc_text,
+                  tip="Calculation text: words among the equations, on their grid "
+                      "(\" in Calc mode)")
+        for name, label, tip in (
+                ("if", "If", "if … else: a condition, in a program block"),
+                ("for", "For", "for: a loop over a range, in a program block"),
+                ("while", "While", "while: a loop while a condition holds"),
+                ("line", "Line", "Add a line to a program block (] in an equation)")):
+            self._act(f"prog_{name}", label,
+                      lambda _checked=False, which=name: self.insert_program(which),
+                      tip=tip)
         # Keys inside an equation only (the SMath section of the shortcut
         # manager): on the menu without a window shortcut, since outside an
         # equation Ctrl+E is Export PDF and Ctrl+Shift+D is Multiple.
@@ -849,6 +898,7 @@ class MainWindow(QMainWindow):
         tool_bar.addSeparator()
         tool_bar.addAction(self.act_sticky)
         self._add_toolbar(tool_bar)
+        self._add_toolbar(self._calculation_bar())
         self.addToolBarBreak()
 
         style_bar = QToolBar("Style")
@@ -1027,6 +1077,29 @@ class MainWindow(QMainWindow):
         self._add_toolbar(style_bar)
         self._refresh_style_controls()
 
+    def _calculation_bar(self) -> QToolBar:
+        """Decision 18: MarkForge's toolbars, and a condensed Calculation
+        section beside the tools. Result format, font, size and colours are
+        not here: their defaults are in Preferences, and each equation's own
+        are on its right-click menu and in Properties."""
+        bar = QToolBar("Calculation")
+        bar.setObjectName("toolbar_calculation")
+        bar.setIconSize(QSize(22, 22))
+        for key, name in (("calculate", "recalc"), ("auto_calc", "calc_auto"),
+                          (None, None), ("insert_plot", "calc_plot"),
+                          ("insert_matrix", "calc_matrix"),
+                          ("insert_calc_text", "calc_text"), (None, None),
+                          ("prog_if", "prog_if"), ("prog_for", "prog_for"),
+                          ("prog_while", "prog_while"), ("prog_line", "prog_line")):
+            if key is None:
+                bar.addSeparator()
+                continue
+            action = getattr(self, f"act_{key}")
+            self.give_icon(action, name)
+            bar.addAction(action)
+        self.calculation_bar = bar
+        return bar
+
     def _dock(self, title: str, widget: QWidget, area: Qt.DockWidgetArea,
               name: str) -> PanelDock:
         dock = PanelDock(title, widget, name, self)
@@ -1063,6 +1136,10 @@ class MainWindow(QMainWindow):
         self.page_panel = PagePanel(self)
         self.dock_page = self._dock("Page setup", self.page_panel,
                                     Qt.RightDockWidgetArea, "dock_page")
+        from .mathspanel import MathsPanel
+        self.maths_panel = MathsPanel(self)
+        self.dock_maths = self._dock("Maths", self.maths_panel,
+                                     Qt.RightDockWidgetArea, "dock_maths")
         self.reference_docks = [self.dock_toolsets, self.dock_bookmarks]
         self._build_rails()
         self.resizeDocks([self.dock_pages, self.dock_properties], [220, 320],
@@ -1079,11 +1156,12 @@ class MainWindow(QMainWindow):
         "dock_properties": ("Properties", "panel_properties"),
         "dock_search": ("Search", "panel_search"),
         "dock_page": ("Page setup", "panel_page"),
+        "dock_maths": ("Maths", "panel_maths"),
     }
     DEFAULT_SIDES = {
         "dock_pages": LEFT, "dock_bookmarks": LEFT, "dock_toolsets": LEFT,
         "dock_search": LEFT,
-        "dock_properties": RIGHT, "dock_page": RIGHT,
+        "dock_properties": RIGHT, "dock_page": RIGHT, "dock_maths": RIGHT,
     }
 
     # -- the markups list under the canvas ---------------------------------
@@ -1487,9 +1565,15 @@ class MainWindow(QMainWindow):
 
         calc_menu = bar.addMenu("&Calculation")
         for action in (self.act_calc_mode, None, self.act_calculate, self.act_auto_calc,
-                       None, self.act_insert_matrix, self.act_insert_function,
-                       self.act_constants, None, self.act_double_check):
+                       None, self.act_insert_plot, self.act_insert_matrix,
+                       self.act_insert_calc_text, self.act_insert_function,
+                       self.act_constants, None):
             calc_menu.addSeparator() if action is None else calc_menu.addAction(action)
+        program_menu = calc_menu.addMenu("Program")
+        for name in ("if", "for", "while", "line"):
+            program_menu.addAction(getattr(self, f"act_prog_{name}"))
+        calc_menu.addSeparator()
+        calc_menu.addAction(self.act_double_check)
 
         settings_menu = bar.addMenu("&Settings")
         settings_menu.addAction(self.act_preferences)
@@ -2001,6 +2085,7 @@ class MainWindow(QMainWindow):
         frame the first time it was built — so rebuilding after inserting a
         page would have quietly emptied every page in the document.
         """
+        self._adopt_calc_defaults(self.document)
         if self.scene is None or self.scene.document is not self.document:
             self.scene = DocumentScene(self.document)
             self.scene.itemsChanged.connect(self.refresh_lists)
@@ -3907,6 +3992,71 @@ class MainWindow(QMainWindow):
         self.view.calc._after_edit(item)
         self.view.setFocus()
 
+    def insert_plot(self) -> None:
+        """A 2-D plot at the red cross, or under the pointer (SMath's @)."""
+        calc = self.view.calc
+        calc.leave()
+        frame, point = calc._where_typing_starts()
+        if frame is not None:
+            calc.start_plot(frame, point)
+            self.view.setFocus()
+
+    def insert_calc_text(self) -> None:
+        """Calculation text at the red cross, or under the pointer."""
+        calc = self.view.calc
+        calc.leave()
+        frame, point = calc._where_typing_starts()
+        if frame is not None:
+            calc.start_calc_text(frame, point)
+
+    # -- the Maths panel (decision 19) --------------------------------------------
+    def maths_type(self, text: str) -> None:
+        """A Maths panel button: typed into the equation, as its key would be."""
+        item = self._into_an_equation()
+        if item is None:
+            return
+        self.view.calc._type(item, text)
+        self.view.setFocus()
+
+    def maths_key(self, name: str) -> None:
+        if self.view.calc.editing():
+            self.view.calc._named_key(name)
+            self.view.setFocus()
+
+    def insert_structure(self, name: str) -> None:
+        self.insert_program(name)
+
+    def insert_unit(self) -> None:
+        """Every unit SMath knows; the one picked goes in as 'unit."""
+        from ..calc.engine.catalog import UNIT_CATALOG
+        from . import calcdialogs
+        entries = sorted(((n, f"{t} ({c})") for n, (c, t) in UNIT_CATALOG.items()),
+                         key=lambda x: x[0].lower())
+        name = calcdialogs.pick(self, "Insert unit", entries)
+        if name:
+            self.maths_type("'" + name)
+
+    def plot_tool(self, tool: str) -> None:
+        """What dragging does in a plot that has been double-clicked into."""
+        self.view.calc.plot_tool = tool
+
+    def plot_render(self, points: bool) -> None:
+        item = self.view.calc.item
+        if item is not None and item.region is not None and item.region.plot is not None:
+            item.region.plot.points = bool(points)
+            item.relayout()
+            item.update()
+
+    def insert_program(self, name: str) -> None:
+        """A program block — if, for, while — or another line in one, into
+        the equation being typed or a new one (SMath's Programming panel)."""
+        item = self._into_an_equation()
+        if item is None:
+            return
+        item.region.editor.insert_structure(name)
+        self.view.calc._after_edit(item)
+        self.view.setFocus()
+
     def insert_function(self) -> None:
         from . import calcdialogs
         name = calcdialogs.function_to_insert(self)
@@ -4653,7 +4803,8 @@ class MainWindow(QMainWindow):
 
         self._clipboard = payload
         mime = QMimeData()
-        mime.setText(json.dumps({CLIPBOARD_TAG: payload, "assets": assets}))
+        mime.setData(CLIPBOARD_TAG, json.dumps({CLIPBOARD_TAG: payload,
+                                                "assets": assets}).encode("utf-8"))
         # For everything outside this application, which cannot read a
         # recording: rasterise this same filtered picture at printing
         # resolution. Rendering the page again here would put its background
@@ -4681,9 +4832,8 @@ class MainWindow(QMainWindow):
         mime = QApplication.clipboard().mimeData()
         if mime is None or not mime.hasImage():
             return False
-        text = (mime.text() or "").strip()
-        if text.startswith("{") and CLIPBOARD_TAG in text:
-            return False               # our own snapshot, with its items
+        if _our_clipboard() is not None:
+            return False               # our own copy, with its items
         return True
 
     def paste_picture_from_clipboard(self) -> bool:
@@ -4997,17 +5147,22 @@ class MainWindow(QMainWindow):
     def clipboard_payload(self) -> list:
         """What was copied, from here or from another window of this."""
         payload = self._clipboard
-        text = QApplication.clipboard().text()
-        if not payload and text.strip().startswith("{"):
-            try:
-                decoded = json.loads(text)
+        if not payload:
+            decoded = _our_clipboard()
+            if decoded:
                 payload = decoded.get(CLIPBOARD_TAG) or []
-                for key, encoded in (decoded.get("assets") or {}).items():
-                    if not self.document.asset(key):
-                        self.document.put_asset(key, base64.b64decode(encoded))
-            except (ValueError, TypeError):
-                payload = []
+                self._take_clipboard_assets(decoded)
         return payload
+
+    def _take_clipboard_assets(self, decoded: dict) -> None:
+        """A snapshot carries its images with it, so it can be pasted into a
+        document that has never seen them."""
+        try:
+            for key, encoded in (decoded.get("assets") or {}).items():
+                if not self.document.asset(key):
+                    self.document.put_asset(key, base64.b64decode(encoded))
+        except (ValueError, TypeError):
+            pass
 
     def paste_in_place(self) -> None:
         """Put what was copied back exactly where it was, as Bluebeam does.
@@ -5179,8 +5334,54 @@ class MainWindow(QMainWindow):
         if not items:
             return
         self._clipboard = [item.serialize() for item in items]
-        QApplication.clipboard().setText(json.dumps({CLIPBOARD_TAG: self._clipboard}))
+        # Three things at once (decision 26): CalcForge's own copy under its own
+        # type, which pastes live here and in another window of it; plain text
+        # for anything that takes text ("Mu = 54 kN·m"); and a picture for
+        # anything that takes pictures.
+        mime = QMimeData()
+        mime.setData(CLIPBOARD_TAG, json.dumps({CLIPBOARD_TAG: self._clipboard}).encode("utf-8"))
+        words = [line for line in (_plain_text_of(item) for item in items) if line]
+        if words:
+            mime.setText("\n".join(words))
+        picture = self._picture_of(items)
+        if picture is not None and not picture.isNull():
+            mime.setImageData(picture)
+        QApplication.clipboard().setMimeData(mime)
         self.status_hint.setText(f"Copied {len(items)} markup(s)")
+
+    def _picture_of(self, items) -> Optional[QImage]:
+        """The copied markups as a picture, at print resolution, on white."""
+        frames: dict = {}
+        for item in items:
+            frame = item.parentItem()
+            if frame is not None and hasattr(frame, "paint_items"):
+                frames.setdefault(id(frame), (frame, []))[1].append(item)
+        if not frames:
+            return None
+        frame, chosen = next(iter(frames.values()))
+        box = QRectF()
+        for item in chosen:
+            box = box.united(item.mapRectToParent(item.boundingRect()))
+        if box.isEmpty():
+            return None
+        scale = min(300 / 72.0, (16_000_000 / max(box.width() * box.height(), 1.0)) ** 0.5)
+        image = QImage(max(round(box.width() * scale), 1),
+                       max(round(box.height() * scale), 1), QImage.Format_ARGB32)
+        image.fill(Qt.white)
+        painter = QPainter(image)
+        painter.scale(scale, scale)
+        previous = frame.print_mode
+        frame.print_mode = True           # no selection handles in the picture
+        try:
+            for item in chosen:
+                item._handles_visible = False
+            frame.paint_items(painter, chosen, box)
+        finally:
+            frame.print_mode = previous
+            for item in chosen:
+                item._handles_visible = True
+            painter.end()
+        return image
 
     def cut_selection(self) -> None:
         if self.view.text_clipboard("cut"):
@@ -5193,25 +5394,16 @@ class MainWindow(QMainWindow):
         if self.view.text_clipboard("paste"):
             return
         payload = self._clipboard
-        text = QApplication.clipboard().text()
         # A picture copied in another program is what the person wants pasted,
         # not whatever this window happened to copy last. Only the clipboard
         # knows what is really on it, so it is asked first.
         if self._clipboard_is_a_foreign_picture():
             if self.paste_picture_from_clipboard():
                 return
-        if text.strip().startswith("{"):
-            try:
-                decoded = json.loads(text)
-                if CLIPBOARD_TAG in decoded:
-                    payload = decoded[CLIPBOARD_TAG]
-                    # A snapshot carries its images with it, so it can be
-                    # pasted into a document that has never seen them.
-                    for key, encoded in (decoded.get("assets") or {}).items():
-                        if not self.document.asset(key):
-                            self.document.put_asset(key, base64.b64decode(encoded))
-            except (ValueError, TypeError):
-                pass
+        decoded = _our_clipboard()
+        if decoded and CLIPBOARD_TAG in decoded:
+            payload = decoded[CLIPBOARD_TAG]
+            self._take_clipboard_assets(decoded)
         if not payload:
             return
         self._paste_payload(payload)
@@ -6234,12 +6426,40 @@ class MainWindow(QMainWindow):
         """The settings that stay the same whatever document is open."""
         from . import preferences as prefs_module
 
+        before = prefs_module.current().result_format()
         dialog = dialogs.PreferencesDialog(prefs_module.current(), self)
         if dialog.exec() != dialogs.QDialog.Accepted:
             return
-        prefs_module.apply(dialog.result_preferences())
+        self.apply_preferences(dialog.result_preferences(), before)
+
+    def apply_preferences(self, prefs, before: Optional[dict] = None) -> None:
+        """Adopt *prefs*. A changed result format is this document's too
+        (SMath's Tools > Options is the worksheet's), and new documents'."""
+        from . import preferences as prefs_module
+
+        prefs_module.apply(prefs)
+        if before is not None and prefs.result_format() != before:
+            from ..calc.docsheet import sheet_for
+            self.document.settings.calc_format = dict(
+                self.document.settings.calc_format or {}, **prefs.result_format())
+            sheet = sheet_for(self.document)
+            sheet.adopt_format()
+            sheet.recalculate(force=True)
+            self.mark_modified()
         self.view.viewport().update()
         self.status_hint.setText("Preferences saved")
+
+    @staticmethod
+    def _adopt_calc_defaults(document) -> None:
+        """A document that has not said how to show results takes
+        Preferences' way (a new one, or a PDF opened for the first time)."""
+        if getattr(document.settings, "calc_format", None):
+            return
+        from . import preferences as prefs_module
+        document.settings.calc_format = prefs_module.current().result_format()
+        sheet = getattr(document, "_calc_sheet", None)
+        if sheet is not None:
+            sheet.adopt_format()
 
     def toggle_bold(self) -> bool:
         """Embolden the words. Says whether it found any.
@@ -6703,6 +6923,10 @@ class MainWindow(QMainWindow):
     def build_context_menu(self, item, scene_pos: QPointF,
                            menu: Optional[QMenu] = None) -> QMenu:
         menu = menu or QMenu(self)
+        if item is not None and getattr(item, "IS_CALC", False) \
+                and getattr(item, "region", None) is not None:
+            from . import calcmenu
+            calcmenu.fill(self, menu, item)
         if item is not None:
             if isinstance(item, ImageItem) and not item.locked:
                 swap = menu.addMenu("Replace image")

@@ -1651,6 +1651,9 @@ class PropertiesPanel(QScrollArea):
         heading.setFont(font)
         self.layout.addWidget(heading)
 
+        if all(getattr(i, "IS_CALC", False) and getattr(i, "region", None) is not None
+               for i in self._items):
+            self._add_equation(first)
         appearance = common_capabilities(self._items)
         if appearance - {"font"}:
             self._add_appearance(first, appearance)
@@ -1768,6 +1771,120 @@ class PropertiesPanel(QScrollArea):
     def _slide(self, setter, description: str) -> None:
         """A change from a slider or a spin box: part of one continuous run."""
         self._apply(setter, description, coalesce=True)
+
+    def _add_equation(self, first) -> None:
+        """Decision 20: an equation's settings, as on its right-click menu."""
+        from ..calc.docsheet import sheet_for
+        from . import calcmenu
+
+        items = list(self._items)
+        region = first.region
+
+        def change(description, apply):
+            if not self._building:
+                calcmenu.change(self.window, items, description, apply, refresh=False)
+
+        if region.plot is not None:
+            form = self._group("Plot")
+            for title, attr in (("Grid", "grid"), ("Axes", "axes"), ("Graph by points", "points")):
+                box = QCheckBox(title)
+                box.setChecked(getattr(region.plot, attr))
+                box.toggled.connect(lambda on, a=attr, t=title: change(
+                    t, lambda r: setattr(r.plot, a, on)))
+                form.addRow("", box)
+            more = QPushButton("Plot settings…")
+            more.clicked.connect(lambda: calcmenu.plot_settings(self.window, first))
+            form.addRow("", more)
+            return
+        if region.kind != "math":
+            return
+        import dataclasses
+        worksheet = sheet_for(self.window.document).worksheet
+        fmt = region.fmt or worksheet.format
+
+        def set_fmt(**changes):
+            def apply(r):
+                made = dataclasses.replace(r.fmt or worksheet.format, **changes)
+                r.fmt = None if made == worksheet.format else made
+            return apply
+
+        form = self._group("Result")
+        decimals = QSpinBox()
+        decimals.setObjectName("equationDecimals")
+        decimals.setRange(0, 15)
+        decimals.setValue(fmt.decimals)
+        decimals.valueChanged.connect(lambda n: change(
+            f"Decimal places: {n}", set_fmt(decimals=n)))
+        form.addRow("Decimals", decimals)
+        threshold = QSpinBox()
+        threshold.setObjectName("equationThreshold")
+        threshold.setRange(0, 15)
+        threshold.setValue(fmt.threshold)
+        threshold.setToolTip("Exponential threshold: longer numbers are shown with a "
+                             "power of ten")
+        threshold.valueChanged.connect(lambda n: change(
+            f"Exponential threshold: {n}", set_fmt(threshold=n)))
+        form.addRow("Threshold", threshold)
+        fractions = QComboBox()
+        fractions.setObjectName("equationFractions")
+        for key, title in (("decimal", "Decimal"), ("fraction", "Fraction"), ("auto", "Auto")):
+            fractions.addItem(title, key)
+        fractions.setCurrentIndex(max(fractions.findData(fmt.fractions), 0))
+        fractions.currentIndexChanged.connect(lambda _i: change(
+            "Fractions", set_fmt(fractions=fractions.currentData())))
+        form.addRow("Fractions", fractions)
+        for title, attr in (("Trailing zeros", "trailing_zeros"),
+                            ("Significant figures", "significant")):
+            box = QCheckBox(title)
+            box.setChecked(getattr(fmt, attr))
+            box.toggled.connect(lambda on, a=attr, t=title: change(t, set_fmt(**{a: on})))
+            form.addRow("", box)
+        rounding = QComboBox()
+        rounding.addItem("Half to even", True)
+        rounding.addItem("Away from zero", False)
+        rounding.setCurrentIndex(0 if fmt.half_even else 1)
+        rounding.currentIndexChanged.connect(lambda _i: change(
+            "Rounding", set_fmt(half_even=rounding.currentData())))
+        form.addRow("Rounding", rounding)
+        default = QPushButton("Document default")
+        default.setToolTip("Show the result as Preferences says, like the rest")
+        default.clicked.connect(lambda: change("Result format: default",
+                                               lambda r: setattr(r, "fmt", None)))
+        form.addRow("", default)
+
+        form = self._group("Equation")
+        size = QDoubleSpinBox()
+        size.setObjectName("equationFontSize")
+        size.setRange(4, 72)
+        size.setSuffix(" pt")
+        size.setValue(region.font_size)
+        size.valueChanged.connect(lambda value: change(
+            "Font size", lambda r: setattr(r, "font_size", float(value))))
+        form.addRow("Size", size)
+        colour = ColorButton(region.color, label="Colour")
+        colour.colorChanged.connect(lambda value: change(
+            "Colour", lambda r: setattr(r, "color", value or "#000000")))
+        form.addRow("Colour", colour)
+        background = ColorButton(region.bg_color, label="Background")
+        background.colorChanged.connect(lambda value: change(
+            "Background", lambda r: setattr(r, "bg_color", value or "#ffffff")))
+        form.addRow("Background", background)
+        for title, attr, on in (("Bold", "bold", region.bold),
+                                ("Italic", "italic", region.italic),
+                                ("Underline", "underline", region.underline),
+                                ("Border", "border", region.border),
+                                ("Display input data", "show_input", region.show_input),
+                                ("Ignore units", "ignore_units", region.ignore_units)):
+            box = QCheckBox(title)
+            box.setChecked(on)
+            box.toggled.connect(lambda value, a=attr, t=title: change(
+                t, lambda r: setattr(r, a, value)))
+            form.addRow("", box)
+        disabled = QCheckBox("Disable evaluation")
+        disabled.setChecked(not region.enabled)
+        disabled.toggled.connect(lambda value: change(
+            "Disable evaluation", lambda r: setattr(r, "enabled", not value)))
+        form.addRow("", disabled)
 
     def _add_geometry(self, item) -> None:
         """Where it is, how big it is and which way it is turned — as numbers.

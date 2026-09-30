@@ -425,6 +425,12 @@ class Page:
 class DocumentSettings:
     """Document-wide preferences."""
 
+    # How results are shown unless an equation says otherwise — SMath's
+    # worksheet format (decimals, threshold, trailing_zeros, fractions…). It
+    # travels with the document so it reads the same anywhere; a new document
+    # takes Preferences' (ui/preferences.py). Empty: not yet decided.
+    calc_format: dict = field(default_factory=dict)
+
     show_grid: bool = False
     snap_to_grid: bool = False
     # Pick up the corners, centres and ends of what is already drawn.

@@ -344,3 +344,68 @@ when the equation it was taken of does.
 **Different from Bluebeam:** a snapshot's contents come through as one
 drawing, not as separate markups; its colours can be changed as a whole, as
 before, but not markup by markup.
+
+## Phase 5 — toolbar, panels and properties
+
+**What changed**
+
+- **Calculation toolbar** beside the tools (decision 18): Calculate (F9),
+  Auto-calc, Plot, Matrix, Calc text, If, For, While, Line. Each has a
+  drawn icon in MarkForge's style and a tooltip. The Calculation menu has
+  the same, plus a Program submenu. (The calculation block button waits for
+  phase 7, where blocks are built.)
+- **Maths panel on the rail** (decision 19): WebSMath's side panel one to
+  one — Arithmetic, Matrices, Boolean, Functions, Plot, Programming,
+  Constants — plus Units (common units and "All units…"). Sections fold
+  away. Every button types into the equation, or starts one at the red
+  cross, as its key would. Pinnable and floatable like every panel.
+- **Equation settings** (decision 20):
+  - Right-click › Equation: SMath's menu item for item (Display input
+    data, Go to definition, Disable evaluation, Ignore units, Optimization,
+    Decimal places, Exponential threshold, Fractions, Rounding) plus Font,
+    Colour, Background and Border. For a plot: Plot settings, Grid, Axes,
+    Graph by points.
+  - The Properties panel has the same as Result and Equation sections.
+  - A setting changes every selected equation, as one undo step, and is
+    saved with the file.
+- **Defaults in Preferences** › Calculations: decimals, threshold,
+  trailing zeros, fractions, and the size and colour new equations are
+  written in. The number format is also saved in the document, so a file
+  shows its results the same on every machine; a new document takes
+  Preferences'.
+- **Plot mouse** (SMath's, once double-clicked into): until then a plot is
+  a markup — one click picks it up, dragging moves it, the wheel scrolls
+  the page. Double-clicked into (or just made): dragging inside pans the
+  graph (or zooms it with the Maths panel's Scale tool), the corner resizes
+  it, the wheel zooms it (Ctrl: x only, Shift: y only), until a click
+  outside or Esc.
+- **Calculation text** snaps to the equations' grid when moved or nudged,
+  and is spell-checked like any text (live, and in the F7 check); equations
+  are not.
+- **Search** finds equations by what was typed (`Mu:` finds the
+  definition) and by the result they show. Replace never changes an
+  equation.
+- **Copying out** (decision 26): a copy now puts three things on the
+  clipboard — plain text ("Mu = 40.5 kN·m", "sp := 6 m"), a picture at
+  print resolution, and CalcForge's own copy under its own clipboard type,
+  which pastes as live equations here and in another CalcForge window.
+  Other markups copy as their words, or what they are. (Before, pasting
+  into another program gave CalcForge's internal data as text.)
+- **Found and fixed:** Go to definition didn't work with the cursor after a
+  number (WebSMath's gap too). Preferences didn't keep the page-thumbnail
+  size through a save of the dialog.
+
+**Tests** — `tests/test_calc_panels.py` (35), all through the real window:
+toolbar buttons clicked, Maths panel buttons clicked, right-click menu
+actions and undo, the Properties panel, Preferences (and that a document's
+format travels with it), plot pan/zoom/axis-zoom/resize/click vs
+double-click, Calculation text grid and spelling, Search, copy out and
+paste back live.
+
+**Different from SMath**
+
+- The Maths panel has a Units section; SMath desktop's unit list is a
+  dialog (Ctrl+W, left out as asked).
+- Font and colour are on the Equation menu; SMath has them on its Format
+  toolbar.
+- Replace in Search never changes an equation.

@@ -37,6 +37,7 @@ class DocumentSheet:
     def __init__(self, document):
         self.document = document
         self.worksheet = Worksheet()
+        self.adopt_format()
         self._page_of: dict[int, str] = {}          # region id -> page uid
         self._local: dict[int, tuple] = {}          # region id -> (x_px, y_px) on its page
         self._order_seen: tuple = ()
@@ -47,6 +48,16 @@ class DocumentSheet:
         self.on_changed: Optional[Callable[[set], None]] = None
         # Asked to call settle() soon (the UI posts it to the event loop).
         self.request_settle: Optional[Callable[[], None]] = None
+
+    def adopt_format(self) -> None:
+        """Show results as the document says (its settings' calc_format)."""
+        import dataclasses
+
+        from .engine.numformat import NumberFormat
+
+        said = dict(getattr(self.document.settings, "calc_format", {}) or {})
+        known = {f.name for f in dataclasses.fields(NumberFormat)}
+        self.worksheet.format = NumberFormat(**{k: v for k, v in said.items() if k in known})
 
     # -- where things are ----------------------------------------------------
     def _page_orders(self) -> dict[str, int]:
