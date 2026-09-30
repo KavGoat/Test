@@ -427,3 +427,38 @@ def test_desktop_main_window(app):
     assert w.view is second and first is not second and len(w.mdi.subWindowList()) == 2
     assert first.scene_.page_mode == "pages"
     w.close()
+
+
+def test_desired_unit_box(app):
+    """While an evaluation is edited a black box for the desired unit always
+    follows the result's automatic unit; only the box can be edited, a unit
+    gets into it from the list (Tab), and when it matches the automatic unit
+    disappears."""
+    v = WorksheetView()
+    type_at(v, 18, 18, "test:5'kN")
+    press(v, Qt.Key_Return)
+    type_at(v, 18, 72, "test=")
+    it = v.focused_item
+    assert it._result_unit_rect is not None            # the box is there
+    assert display_text(it.region.display) == "5 kN"    # automatic unit
+    v.mouseDoubleClickEvent(None)                       # the automatic unit is not editable
+    assert it.editor.unit.is_empty()
+    box = it._result_unit_rect.translated(it._layout.x, it._baseline)
+    it.place_cursor(box.center())
+    assert it.editor.in_unit
+    press(v, 0, "N")
+    names = [v.suggestions.item(i).data(Qt.UserRole).kind for i in range(v.suggestions.count())]
+    assert set(names) == {"unit"}                       # units only in the box
+    press(v, 0, "k")                                    # half typed: nothing changes
+    assert display_text(it.region.display) == "5 kN"
+    press(v, Qt.Key_Backspace)
+    press(v, Qt.Key_Tab)                                # N from the list
+    assert it.editor.unit.text() == "'N" and display_text(it.region.display) == "5000"
+    press(v, Qt.Key_Return)
+    assert it._result_unit_rect is not None             # 'N stays shown
+    other = [x for x in v.items.values() if x.region.y == 18][0]
+    v.focus_item(other)
+    type_at(v, 18, 126, "test=")
+    press(v, Qt.Key_Return)
+    last = max(v.items.values(), key=lambda x: x.region.y)
+    assert last._result_unit_rect is None               # no box when not editing

@@ -606,25 +606,9 @@ class WorksheetView(QGraphicsView):
         self._drag = None
 
     def mouseDoubleClickEvent(self, e) -> None:
-        pt = self.mapToScene(e.position().toPoint())
-        item = self._item_at(pt)
-        if item is None or item.region.kind != "math":
-            return
-        local = item.mapFromScene(pt)
-        if item.result_unit_hit(local):
-            # double-click on the answer: edit its unit (the whole unit selected)
-            ed = item.editor
-            if ed.unit.is_empty() and item.region.display is not None:
-                from ..engine.display import unit_text
-
-                u = unit_text(getattr(item.region.display, "unit", None))
-                if u:
-                    ed.set_cursor(ed.unit, 0)
-                    ed.type("'" + _linear_unit(u))
-            ed.set_cursor(ed.unit, len(ed.unit))
-            if len(ed.unit):
-                ed.selection = (ed.unit, 0, len(ed.unit))
-            self._after_edit(item)
+        # the automatic unit of a result is SMath's own and cannot be edited;
+        # only the desired-unit box can (a single click puts the cursor in it)
+        return
 
     # -- keyboard ----------------------------------------------------------------------
     def focusNextPrevChild(self, next: bool) -> bool:
@@ -798,6 +782,9 @@ class WorksheetView(QGraphicsView):
             self.hide_suggestions()
             return
         entries = self.entries_for(word, item.region)
+        if item.editor.in_unit:
+            # in the desired-unit box every word is a unit
+            entries = [e for e in entries if e.kind == "unit" and not _is_constant_unit(e.name)]
         if not entries:
             self.hide_suggestions()
             return

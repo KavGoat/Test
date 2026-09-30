@@ -93,24 +93,26 @@ class RegionItem(QGraphicsObject):
         parts = [root]
         self._result_unit_rect = None
         if self.editor.evaluate:
+            # result = number, SMath's automatic unit (it only bridges what the
+            # desired unit leaves out; not editable), then the desired-unit box:
+            # what was typed there, or while editing an empty black box
             unit_row = self.editor.unit
-            unit_box = lay.row(unit_row) if (not unit_row.is_empty() or (self.focused and self.editor.in_unit)) else None
             if self.region.display is not None:
-                res = lay.result(self.region.display, 1.0, unit_box=unit_box,
-                                 show_placeholder=self.focused and unit_box is None and _no_unit(self.region.display))
-                res.x = root.w + 1
-                parts.append(res)
+                res = lay.result(self.region.display, 1.0)
             else:
-                ph = lay.placeholder()
-                ph.x = root.w + 2
-                parts.append(ph)
-                if unit_box is not None:
-                    unit_box.x = ph.x + ph.w + 3
-                    parts.append(unit_box)
-                elif self.focused:
-                    ph2 = lay.placeholder()
-                    ph2.x = ph.x + ph.w + 3
-                    parts.append(ph2)
+                res = lay.placeholder()
+            res.x = root.w + (1 if self.region.display is not None else 2)
+            parts.append(res)
+            box = None
+            if not unit_row.is_empty() or (self.focused and self.editor.in_unit):
+                box = lay.row(unit_row)
+            elif self.focused:
+                box = lay.placeholder()
+            if box is not None:
+                gap = 3 if (self.region.display is None or getattr(self.region.display, "unit", None) is None) else 3
+                box.x = res.x + res.w + gap
+                parts.append(box)
+                self._result_unit_rect = QRectF(box.x - 2, -max(box.asc, 12), box.w + 6, max(box.asc, 12) + box.desc + 4)
         if (not self.region.show_input and not self.focused and self.editor.evaluate
                 and self.region.display is not None and len(parts) > 1):
             # right-click > Display input data off: only the result is shown
@@ -422,6 +424,10 @@ class RegionItem(QGraphicsObject):
                     col = k
             self.editor.text_pos = sum(len(l) + 1 for l in lines[:li]) + col
             return
+        if self.result_unit_hit(pt) and self.editor.unit.is_empty():
+            # a click on the black box starts the desired unit
+            self.editor.set_cursor(self.editor.unit, 0)
+            return
         hit = self.slot_at(pt)
         if hit is not None:
             self.editor.set_cursor(*hit)
@@ -434,13 +440,12 @@ class RegionItem(QGraphicsObject):
         return self.mapToScene(QPointF(info.slots[pos] if info.slots else info.x, info.base + info.desc + 2))
 
     def result_unit_hit(self, pt: QPointF) -> bool:
-        """True when a click lands on the result part (after the = sign)."""
-        if not self.editor.evaluate or self._layout is None:
+        """True when a click lands on the desired-unit box (the only part of
+        a result that can be edited)."""
+        if not self.editor.evaluate or self._layout is None or self._result_unit_rect is None:
             return False
-        root_info = self._row_info(self.editor.root)
-        if root_info is None or not root_info.slots:
-            return False
-        return pt.x() > root_info.slots[-1]
+        r = self._result_unit_rect.translated(self._layout.x, self._baseline)
+        return r.contains(pt)
 
 
 def _no_unit(d) -> bool:

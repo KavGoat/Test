@@ -180,6 +180,8 @@ class Worksheet:
         for r in self.ordered():
             self._evaluate(r, commit=True)
 
+    _live = False  # evaluating the region being typed (see _display)
+
     def calculate_region(self, region: Region) -> None:
         """Re-evaluate one region against what is defined above it.
 
@@ -187,7 +189,11 @@ class Worksheet:
         region is recalculated (its result follows every keystroke); the rest
         of the worksheet is recalculated when the region loses focus.
         """
-        self._evaluate(region, commit=False)
+        self._live = True
+        try:
+            self._evaluate(region, commit=False)
+        finally:
+            self._live = False
 
     def update_after_edit(self, region: Region) -> None:
         """Bring the page up to date after a region was edited and left.
@@ -340,8 +346,17 @@ class Worksheet:
         unit_row = r.editor.unit
         if unit_row.is_empty():
             return display_value(value, fmt)
-        unode = parse_row(unit_row)
-        uval = need_scalar(self.evaluator.eval(unode, ctx))
+        try:
+            unode = parse_row(unit_row)
+            uval = need_scalar(self.evaluator.eval(unode, ctx))
+        except (SMathError, ParseError):
+            if self._live:
+                # a unit still being typed ("k" of kN): show the result as if
+                # the box were empty, not a stray conversion.  As on SMath
+                # Cloud a unit gets into the box from the list (Tab), which
+                # inserts 'kN; a plain word stays a name ("cm - not defined.")
+                return display_value(value, fmt)
+            raise
         q = value
         # non-linear temperature units (°C, °F): subtract the offset
         offset = 0.0
