@@ -485,6 +485,9 @@ class Layouter:
         return out
 
     def fence(self, inner: LBox, left: str, right: str, scale: float) -> LBox:
+        line_h = self.metrics(self.style.font(scale)).height()
+        if inner.h > line_h * 1.15 and left in "([{" and right in ")]}":
+            return self._drawn_fence(inner, left, right)
         h = max(inner.h, self.metrics(self.style.font(scale)).height() * 0.9)
         fs = self.style.font(scale)
         fs.setPointSizeF(fs.pointSizeF() * max(1.0, h / (self.metrics(fs).height() * 0.9)))
@@ -498,6 +501,42 @@ class Layouter:
         rt.x = inner.x + inner.w + 1
         return LBox(w=rt.x + rt.w, asc=max(inner.asc, lt.asc - lt.y), desc=max(inner.desc, lt.desc + lt.y),
                     children=[lt, inner, rt])
+
+    def _drawn_fence(self, inner: LBox, left: str, right: str) -> LBox:
+        """Brackets taller than a line, drawn as thin strokes the way SMath
+        Studio draws them (a scaled font glyph turns heavy and bold)."""
+        top, bot = -inner.asc - 1, inner.desc + 1
+        h = bot - top
+        w = min(7.0, 3.0 + h * 0.05)
+        path = QPainterPath()
+
+        def side(x0, sign, ch):
+            # x0: outer edge; sign +1 opens to the right (left bracket)
+            xi = x0 + sign * w  # inner edge
+            mid = (top + bot) / 2
+            if ch in "()":
+                path.moveTo(xi, top)
+                path.cubicTo(x0, top + h * 0.2, x0, bot - h * 0.2, xi, bot)
+            elif ch in "[]":
+                path.moveTo(xi, top)
+                path.lineTo(x0 + sign * 1, top)
+                path.lineTo(x0 + sign * 1, bot)
+                path.lineTo(xi, bot)
+            else:  # braces
+                xm = x0 + sign * w / 2
+                path.moveTo(xi, top)
+                path.cubicTo(xm, top, xm, top, xm, top + 3)
+                path.lineTo(xm, mid - 3)
+                path.cubicTo(xm, mid, xm, mid, x0, mid)
+                path.cubicTo(xm, mid, xm, mid, xm, mid + 3)
+                path.lineTo(xm, bot - 3)
+                path.cubicTo(xm, bot, xm, bot, xi, bot)
+
+        side(0.5, 1, left)
+        inner.x = w + 2
+        right_x = inner.x + inner.w + 2 + w
+        side(right_x - 0.5, -1, right)
+        return LPath(w=right_x, asc=inner.asc + 1, desc=inner.desc + 1, path=path, width=1.1, children=[inner])
 
     def bars(self, inner: LBox, scale: float) -> LBox:
         path = QPainterPath()
@@ -611,6 +650,12 @@ class Layouter:
             head = self._hcat([self._kw_line("for", self.row(rows[0], scale), f),
                                self._op_text(" ∈ ", scale), self.row(rows[1], scale)])
             return self._stack([head, self._indented(self.row(rows[2], scale), indent)])
+        if b.name == "for" and len(rows) == 4:
+            # for init, condition, step / body indented (SMath Studio desktop)
+            comma = self.text(", ", f)
+            head = self._hcat([self._kw_line("for", self.row(rows[0], scale), f), comma,
+                               self.row(rows[1], scale), self.text(", ", f), self.row(rows[2], scale)])
+            return self._stack([head, self._indented(self.row(rows[3], scale), indent)])
         if b.name == "while" and len(rows) == 2:
             head = self._kw_line("while", self.row(rows[0], scale), f)
             return self._stack([head, self._indented(self.row(rows[1], scale), indent)])

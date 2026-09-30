@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QKeySequence
+from PySide6.QtGui import QAction, QActionGroup, QColor, QFont, QIcon, QKeySequence
 from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QDockWidget, QFileDialog, QFormLayout, QFrame,
                                QGridLayout, QHBoxLayout, QInputDialog, QLabel, QListWidget, QMainWindow, QMdiArea,
                                QMessageBox, QPushButton, QScrollArea, QSpinBox, QToolButton, QVBoxLayout,
@@ -368,6 +368,15 @@ class MainWindow(QMainWindow):
         btn("undo", "Undo (Ctrl+Z)", self._v("undo"))
         btn("redo", "Redo (Ctrl+Y)", self._v("redo"))
         tb.addSeparator()
+        from PySide6.QtWidgets import QFontComboBox
+
+        fam = QFontComboBox()
+        fam.setCurrentFont(QFont("Arial"))
+        fam.setFixedWidth(150)
+        fam.setFocusPolicy(Qt.ClickFocus)
+        fam.activated.connect(lambda _: self.view.format_selection(font_family=fam.currentFont().family()))
+        tb.addWidget(fam)
+        self._family_box = fam
         size = QComboBox()
         size.setEditable(True)
         size.addItems(["7", "8", "9", "10", "11", "12", "14", "16", "18", "20", "22", "24", "26", "28", "36", "48", "72"])
@@ -377,6 +386,9 @@ class MainWindow(QMainWindow):
         size.activated.connect(lambda _: self.view.format_selection(font_size=float(size.currentText())))
         tb.addWidget(size)
         self._size_box = size
+        btn("bold", "Bold (Ctrl+B)", lambda: self.view.format_selection(toggle="bold"))
+        btn("italic", "Italic (Ctrl+I)", lambda: self.view.format_selection(toggle="italic"))
+        btn("underline", "Underline (Ctrl+U)", lambda: self.view.format_selection(toggle="underline"))
         tb.addSeparator()
         btn("textcolor", "Text color", lambda: self._pick_color("color"))
         btn("bgcolor", "Background color", lambda: self._pick_color("bg_color"))
@@ -618,7 +630,7 @@ class MainWindow(QMainWindow):
                 it.region.x = first.region.x
             else:
                 it.region.y = first.region.y
-            it.setPos(it.region.x, it.region.y)
+            v.place(it)
         v.worksheet.invalidate_order()
         v.recalculate()
         v.modified.emit()

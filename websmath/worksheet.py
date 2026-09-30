@@ -56,6 +56,7 @@ class Region:
     plot_ctx: object = None  # definitions visible to the plot
     # formatting (Format toolbar / region properties, as in SMath)
     font_size: float = 10.0
+    font_family: str = ""  # text regions (toolbar font box); "" = default
     bold: bool = False
     italic: bool = False
     underline: bool = False

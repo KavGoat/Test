@@ -17,7 +17,7 @@ from ..engine.model import Row
 from ..worksheet import Region, Worksheet
 from .layout import LBox, Layouter, RowInfo, Style, absolute_rows
 
-PAGE_WIDTH = 760.0  # separators and areas run across the page
+PAGE_WIDTH = 720.0  # separators and areas run across the printable width
 PAD_X = 4.0  # text starts 4px into the region (SMath SVG)
 PAD_TOP = 4.0
 PAD_BOTTOM = 4.0
@@ -235,7 +235,7 @@ class RegionItem(QGraphicsObject):
         from .layout import _family
 
         reg = self.region
-        f = QFont(_family(TEXT_FAMILIES))
+        f = QFont(reg.font_family or _family(TEXT_FAMILIES))
         f.setPointSizeF(reg.font_size)
         f.setBold(reg.bold)
         f.setItalic(reg.italic)

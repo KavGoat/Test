@@ -168,6 +168,15 @@ def _call_items(n: A.Call) -> list:
                 return [Matrix(r, c, [_row(x) for x in cells])]
         except (AttributeError, ValueError):
             pass
+    if name == "line" and len(args) >= 3:
+        # SMath stores a line block as line(s1, ..., sn, n, 1): the last two
+        # operands are its size, not statements (shown or evaluated they
+        # made the block's value 1 and drew "1 1" under the statements)
+        try:
+            if int(args[-2].text) == len(args) - 2 and int(args[-1].text) == 1:
+                args = args[:-2]
+        except (AttributeError, ValueError):
+            pass
     if name in ("if", "line", "while", "for") and args:
         return [Program(name, *[_row(a) for a in args])]
     return _chars(name) + [Paren(Row(_join_args(args)))]
@@ -210,6 +219,13 @@ def ast_to_rpn(n: A.Node, out: list) -> None:
         ast_to_rpn(n.right, out)
         op = {"∧": "&", "∨": "|"}.get(n.op, n.op)
         e("operator", op, args=2)
+    elif isinstance(n, A.Call) and n.name == "line":
+        # SMath's form: the statements, then the block's size (n rows, 1 column)
+        for a in n.args:
+            ast_to_rpn(a, out)
+        e("operand", str(len(n.args)))
+        e("operand", "1")
+        e("function", "line", args=len(n.args) + 2)
     elif isinstance(n, A.Call):
         for a in n.args:
             ast_to_rpn(a, out)
@@ -339,6 +355,8 @@ def dumps(ws: Worksheet, calculate: bool = True) -> str:
     for k, r in enumerate(ws.ordered()):
         attrs = {"id": str(k), "left": str(int(r.x)), "top": str(int(r.y)), "color": r.color,
                  "bgColor": r.bg_color, "fontSize": f"{r.font_size:g}"}
+        if r.font_family:
+            attrs["fontFamily"] = r.font_family
         if r.border:
             attrs["border"] = "true"
         if not r.enabled:
@@ -521,5 +539,6 @@ def _load_format(region, reg) -> None:
     region.border = reg.get("border", "false") == "true"
     try:
         region.font_size = float(reg.get("fontSize", "10"))
+        region.font_family = reg.get("fontFamily", "")
     except ValueError:
         pass

@@ -751,3 +751,87 @@ def test_side_panel_symbols_are_visible_and_insert(app):
     QTest.mouseClick(sqrt, Qt.LeftButton)
     assert "√" in v.focused_item.editor.root.text()
     w.close()
+
+
+# -- desktop Pages view: margins, gaps, coordinates -------------------------------------
+def test_page_coordinates_round_trip(app):
+    from websmath.ui.worksheet_view import CONTENT_H, PAGE_MARGIN, PAGE_STEP
+
+    v = WorksheetView()
+    sc = v.scene_
+    assert sc.page_mode == "pages"
+    for x, y in [(0, 0), (18, 18), (100, CONTENT_H - 1), (50, CONTENT_H), (7, 2 * CONTENT_H + 300)]:
+        p = sc.to_scene(x, y)
+        back = sc.to_sheet(p)
+        assert abs(back.x() - x) < 1e-9 and abs(back.y() - y) < 1e-9
+    # the first row of page 2 is drawn below page 2's top margin
+    p = sc.to_scene(0, CONTENT_H)
+    assert p.y() == PAGE_STEP + PAGE_MARGIN and p.x() == PAGE_MARGIN
+    # a click in the gap between pages belongs to the next page's first row
+    gap = sc.to_sheet(QPointF(100, PAGE_STEP - 5))
+    assert gap.y() == CONTENT_H
+
+
+def test_region_on_second_page_and_drag_across_break(app):
+    from websmath.ui.worksheet_view import CONTENT_H, PAGE_MARGIN, PAGE_STEP
+
+    v = WorksheetView()
+    type_at(v, 18, CONTENT_H + 27, "x:1")
+    item = v.focused_item
+    press(v, Qt.Key_Return)
+    assert item.region.y >= CONTENT_H
+    assert item.pos().y() == PAGE_STEP + PAGE_MARGIN + (item.region.y - CONTENT_H)
+    # drag it up by its frame onto page 1
+    start = item.mapToScene(QPointF(1, 5))
+    _mouse(v, "press", start)
+    _mouse(v, "move", start - QPointF(0, 100))
+    _mouse(v, "release", start - QPointF(0, 100))
+    assert item.region.y < CONTENT_H  # moved onto page 1 in worksheet coordinates
+    assert item.pos() == v.scene_.to_scene(item.region.x, item.region.y)
+
+
+def test_view_modes_keep_worksheet_positions(app):
+    v = WorksheetView()
+    type_at(v, 36, 45, "y:2")
+    item = v.focused_item
+    press(v, Qt.Key_Return)
+    for mode in ("none", "bounds", "pages"):
+        v.set_page_mode(mode)
+        assert (item.region.x, item.region.y) == (36, 45)
+        assert item.pos() == v.scene_.to_scene(36, 45)
+    v.set_page_mode("none")
+    assert item.pos() == QPointF(36, 45)
+
+
+def test_shift_wheel_scrolls_sideways(app):
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QWheelEvent
+
+    v = WorksheetView()
+    v.resize(300, 300)
+    v.show()
+    type_at(v, 1400, 18, "w:1")  # far right: the sheet is wider than the window
+    press(v, Qt.Key_Return)
+    bar = v.horizontalScrollBar()
+    bar.setValue(0)
+    ev = QWheelEvent(QPointF(50, 50), QPointF(50, 50), QPoint(0, 0), QPoint(0, -120), Qt.NoButton,
+                     Qt.ShiftModifier, Qt.NoScrollPhase, False)
+    v.wheelEvent(ev)
+    assert bar.value() > 0
+
+
+def test_line_block_sizes_round_trip():
+    from websmath.io.smfile import dumps, loads
+
+    import pathlib
+
+    beam = pathlib.Path(__file__).resolve().parents[2] / "smath" / "SMath Studio" / "examples" / "Beam.sm"
+    if not beam.exists():
+        pytest.skip("SMath examples not present")
+    from websmath.io.smfile import load_sm
+
+    ws = load_sm(beam)
+    texts = [r.editor.root.text() for r in ws.ordered() if r.kind == "math"]
+    assert not any(";1;1}" in t or ";3;1}" in t for t in texts)  # the size operands are not statements
+    again = loads(dumps(ws))
+    assert [r.editor.root.text() for r in again.ordered() if r.kind == "math"] == texts

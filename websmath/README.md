@@ -150,6 +150,16 @@ Correctness proofs (numbers and units):
     calculation, Recalculate page.
   * A Format toolbar with font size, bold, italic, underline, text and
     background colour, and border.
+* **Pages as in SMath Studio desktop (View > Pages):**
+  * A4 sheets with a grey border on a blue-grey desk, 20 px apart.
+  * 37 px margins that stay white, and the grid only in the printable area.
+  * Worksheet positions flow from one page's printable area into the next,
+    so a region on page 2 sits below that page's top margin.
+  * Content wider than the page lies on the desk: scroll left/right, or
+    Shift+wheel.
+  * Ctrl+wheel zooms around the mouse, and Print prints exactly these pages.
+  * View > Printing bounds shows one continuous sheet with dashed page edges;
+    View > None shows a plain grid.
 * **Speed:** definitions are indexed by position, and leaving a region
   re-evaluates only what depends on it. A 3000-region worksheet types in about
   7 ms per key, and runaway loops are interrupted after 10 s.

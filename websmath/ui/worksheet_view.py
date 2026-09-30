@@ -46,13 +46,26 @@ def snap(v: float) -> float:
     return round(v / GRID) * GRID
 
 
-# Desktop SMath shows the worksheet as A4 pages (View > Pages view): white
-# sheets on the grey window background, the grid only on paper.  Page size in
-# worksheet pixels (96 dpi); printing uses the same pages.
+# Desktop SMath's Pages view (checked against screenshots of SMath Studio
+# 0.99/1.x): A4 sheets (827 x 1169 hundredths of an inch = 794 x 1123 px at
+# 96 dpi) with a 1 px #808080 border, stacked with a 20 px gap on a light
+# blue-grey desk (#e7e9f0).  Each sheet has 39/100 in (37 px) margins; the
+# printable area inside them has a faint #ebebeb frame and holds the grid,
+# the margins stay plain white.  Worksheet coordinates run continuously
+# through the printable areas: page k shows worksheet y from k*CONTENT_H to
+# (k+1)*CONTENT_H, so on screen a region sits below its page's top margin.
+# What lies right of the printable width is drawn on the desk (no page).
 PAGE_W = 794.0
 PAGE_H = 1123.0
-PAGE_GAP = 14.0  # grey band drawn across each page boundary
-DESK_GREY = QColor("#ababab")  # Windows "application workspace"
+PAGE_MARGIN = 37.0
+PAGE_GAP = 20.0
+PAGE_STEP = PAGE_H + PAGE_GAP
+CONTENT_W = PAGE_W - 2 * PAGE_MARGIN  # 720
+CONTENT_H = PAGE_H - 2 * PAGE_MARGIN  # 1049
+DESK = QColor("#e7e9f0")
+PAGE_BORDER = QColor("#808080")
+PRINTABLE_BORDER = QColor("#ebebeb")
+DESK_PAD = 10.0  # desk shown left of and above the first page
 
 
 class WorksheetScene(QGraphicsScene):
@@ -66,9 +79,31 @@ class WorksheetScene(QGraphicsScene):
         self.rubber: Optional[QRectF] = None  # the selection box being dragged
         self.setSceneRect(0, 0, PAGE_W + 40, PAGE_H * 3)
 
+    # -- worksheet <-> scene coordinates ----------------------------------------------
+    def to_scene(self, x: float, y: float) -> QPointF:
+        """Where worksheet point (x, y) is drawn."""
+        if self.page_mode != "pages":
+            return QPointF(x, y)
+        k = max(0, int(y // CONTENT_H))
+        return QPointF(x + PAGE_MARGIN, y - k * CONTENT_H + k * PAGE_STEP + PAGE_MARGIN)
+
+    def to_sheet(self, pt: QPointF) -> QPointF:
+        """The worksheet point under scene point pt (margins and gaps belong
+        to the nearest printable area)."""
+        if self.page_mode != "pages":
+            return QPointF(pt)
+        k = max(0, int(pt.y() // PAGE_STEP))
+        if pt.y() >= k * PAGE_STEP + PAGE_H:
+            k += 1  # the gap below a page leads into the next one
+        local = min(max(pt.y() - k * PAGE_STEP - PAGE_MARGIN, 0.0), CONTENT_H - 0.01)
+        return QPointF(pt.x() - PAGE_MARGIN, k * CONTENT_H + local)
+
     def page_count(self) -> int:
-        bottom = max((it.sceneBoundingRect().bottom() for it in self.items()), default=0.0)
-        return max(1, int(bottom // PAGE_H) + 1)
+        from .region_item import RegionItem
+
+        bottom = max((it.region.y + it.frame_rect().height() for it in self.items() if isinstance(it, RegionItem)),
+                     default=0.0)
+        return max(1, int(bottom // CONTENT_H) + 1)
 
     def drawBackground(self, p: QPainter, rect: QRectF) -> None:
         if self.printing or self.page_mode == "none":
@@ -83,34 +118,36 @@ class WorksheetScene(QGraphicsScene):
             # printing bounds: dashed lines where pages end
             pen = QPen(QColor("#808080"), 1, Qt.DashLine)
             p.setPen(pen)
-            p.drawLine(QPointF(PAGE_W + 0.5, rect.top()), QPointF(PAGE_W + 0.5, rect.bottom()))
-            k = int(rect.top() // PAGE_H)
-            while k * PAGE_H <= rect.bottom():
+            p.drawLine(QPointF(CONTENT_W + 0.5, rect.top()), QPointF(CONTENT_W + 0.5, rect.bottom()))
+            k = max(0, int(rect.top() // CONTENT_H))
+            while k * CONTENT_H <= rect.bottom():
                 if k > 0:
-                    p.drawLine(QPointF(rect.left(), k * PAGE_H + 0.5), QPointF(rect.right(), k * PAGE_H + 0.5))
+                    p.drawLine(QPointF(rect.left(), k * CONTENT_H + 0.5), QPointF(rect.right(), k * CONTENT_H + 0.5))
                 k += 1
             return
         # pages view
-        p.fillRect(rect, DESK_GREY)
-        k = max(0, int(rect.top() // PAGE_H))
-        while k * PAGE_H <= rect.bottom():
-            top = k * PAGE_H + (PAGE_GAP / 2 if k else 0)
-            bottom = (k + 1) * PAGE_H - PAGE_GAP / 2
-            page = QRectF(0, top, PAGE_W, bottom - top)
-            p.fillRect(page.translated(3, 3), QColor("#7a7a7a"))  # shadow
-            p.fillRect(page, Qt.white)
-            if self.show_grid:
-                p.save()
-                p.setClipRect(page.intersected(rect))
-                self._grid(p, page.intersected(rect))
-                p.restore()
-            p.setPen(QPen(QColor("#6d6d6d"), 1))
-            p.drawRect(page.adjusted(-0.5, -0.5, 0.5, 0.5))
+        p.fillRect(rect, DESK)
+        k = max(0, int(rect.top() // PAGE_STEP))
+        while k * PAGE_STEP <= rect.bottom():
+            page = QRectF(0, k * PAGE_STEP, PAGE_W, PAGE_H)
             k += 1
+            if not page.intersects(rect):
+                continue
+            p.fillRect(page, Qt.white)
+            area = page.adjusted(PAGE_MARGIN, PAGE_MARGIN, -PAGE_MARGIN, -PAGE_MARGIN)
+            if self.show_grid:
+                # grid lines at worksheet multiples of GRID: the page's first
+                # worksheet row is (k-1)*CONTENT_H
+                off = ((k - 1) * CONTENT_H) % GRID
+                self._grid(p, area.intersected(rect), QPointF(area.left(), area.top() - off))
+            p.setPen(QPen(PRINTABLE_BORDER, 1))
+            p.drawRect(area.adjusted(-0.5, -0.5, 0.5, 0.5))
+            p.setPen(QPen(PAGE_BORDER, 1))
+            p.drawRect(page.adjusted(-0.5, -0.5, 0.5, 0.5))
 
     _grid_brush = None
 
-    def _grid(self, p: QPainter, rect: QRectF) -> None:
+    def _grid(self, p: QPainter, rect: QRectF, origin: QPointF = QPointF(0, 0)) -> None:
         """The 9 px grid, filled from one tile (much faster than lines)."""
         if WorksheetScene._grid_brush is None:
             from PySide6.QtGui import QBrush, QPixmap
@@ -123,7 +160,12 @@ class WorksheetScene(QGraphicsScene):
             tp.drawLine(0, 0, 0, GRID - 1)
             tp.end()
             WorksheetScene._grid_brush = QBrush(tile)
+        if rect.isEmpty():
+            return
+        p.save()
+        p.setBrushOrigin(origin)
         p.fillRect(rect, WorksheetScene._grid_brush)
+        p.restore()
 
     def drawForeground(self, p: QPainter, rect: QRectF) -> None:
         if self.printing:
@@ -140,7 +182,7 @@ class WorksheetScene(QGraphicsScene):
         view = self.views()[0] if self.views() else None
         if view is not None and getattr(view, "focused_item", None) is not None:
             return
-        c = self.cross
+        c = self.to_scene(self.cross.x(), self.cross.y())
         p.setPen(QPen(CROSS_COLOR, 1))
         p.drawLine(QPointF(c.x() - 4, c.y() + 0.5), QPointF(c.x() + 5, c.y() + 0.5))
         p.drawLine(QPointF(c.x() + 0.5, c.y() - 4), QPointF(c.x() + 0.5, c.y() + 5))
@@ -247,7 +289,7 @@ class WorksheetView(QGraphicsView):
         self._clip_items = None  # part of an equation copied with Ctrl+C  # toolbox Plot: "move" (drag pans) or "scale" (drag zooms)
         self.setRenderHint(QPainter.Antialiasing)
         self.setRenderHint(QPainter.TextAntialiasing)
-        self.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        self.setAlignment(Qt.AlignHCenter | Qt.AlignTop)  # Pages view: the page column is centred
         self.setFocusPolicy(Qt.StrongFocus)
         self.setDragMode(QGraphicsView.NoDrag)
         # repaint only what changed (each region item knows its bounds; the red
@@ -275,7 +317,15 @@ class WorksheetView(QGraphicsView):
         item.setCacheMode(QGraphicsItem.DeviceCoordinateCache)
         self.scene_.addItem(item)
         self.items[region.id] = item
+        self.place(item)
         return item
+
+    def place(self, item: RegionItem) -> None:
+        """Put a region where its worksheet position is drawn (on its page)."""
+        item.setPos(self.scene_.to_scene(item.region.x, item.region.y))
+
+    def to_sheet(self, scene_pt: QPointF) -> QPointF:
+        return self.scene_.to_sheet(scene_pt)
 
     def new_region(self, x: float, y: float, text_region: bool = False) -> RegionItem:
         region = self.worksheet.add_region(snap(x), snap(y))
@@ -372,18 +422,30 @@ class WorksheetView(QGraphicsView):
 
         # the content's extent: a full scan only when regions came or went,
         # otherwise the region being edited can only push it further out
+        # (in worksheet coordinates)
         n = len(self.items)
+
+        def extent(it):
+            fr = it.frame_rect()
+            return it.region.x + fr.width(), it.region.y + fr.height()
+
         if getattr(self, "_extent_n", -1) != n or self.focused_item is None:
-            r = self.scene_.itemsBoundingRect() if self.items else QRectF()
-            self._extent = (r.right(), r.bottom())
+            ex = [extent(it) for it in self.items.values()]
+            self._extent = (max((e[0] for e in ex), default=0.0), max((e[1] for e in ex), default=0.0))
             self._extent_n = n
         else:
-            fr = self.focused_item.sceneBoundingRect()
-            self._extent = (max(self._extent[0], fr.right()), max(self._extent[1], fr.bottom()))
+            fx, fy = extent(self.focused_item)
+            self._extent = (max(self._extent[0], fx), max(self._extent[1], fy))
         right, bottom = self._extent
-        pages = max(1, math.ceil((max(bottom, self.scene_.cross.y()) + 200) / PAGE_H))
-        w = max(PAGE_W + 40, right + 40)
-        rect = QRectF(0, 0, w, pages * PAGE_H + (20 if self.scene_.page_mode == "pages" else 0))
+        bottom = max(bottom, self.scene_.cross.y())
+        if self.scene_.page_mode == "pages":
+            # whole pages: another page once the content reaches the last one
+            pages = max(1, math.ceil((bottom + 1) / CONTENT_H))
+            w = max(PAGE_W, right + PAGE_MARGIN + 40)
+            rect = QRectF(-DESK_PAD, -DESK_PAD, w + 2 * DESK_PAD, pages * PAGE_STEP + DESK_PAD)
+        else:
+            pages = max(1, math.ceil((bottom + 200) / CONTENT_H))
+            rect = QRectF(0, 0, max(CONTENT_W + 40, right + 40), pages * CONTENT_H)
         if rect != self.scene_.sceneRect():
             self.scene_.setSceneRect(rect)
             self.pages_changed.emit(self.page_at_view(), pages)
@@ -399,6 +461,9 @@ class WorksheetView(QGraphicsView):
 
     def set_page_mode(self, mode: str) -> None:
         self.scene_.page_mode = mode
+        for it in self.items.values():
+            self.place(it)
+        self.setAlignment((Qt.AlignHCenter if mode == "pages" else Qt.AlignLeft) | Qt.AlignTop)
         self._grow_scene()
         self.scene_.update()
 
@@ -418,7 +483,9 @@ class WorksheetView(QGraphicsView):
 
     def page_at_view(self) -> int:
         top = self.mapToScene(self.viewport().rect().center()).y()
-        return max(1, int(top // PAGE_H) + 1)
+        if self.scene_.page_mode == "pages":
+            return max(1, int(top // PAGE_STEP) + 1)
+        return max(1, int(top // CONTENT_H) + 1)
 
     # -- focus -------------------------------------------------------------------------
     def focus_item(self, item: Optional[RegionItem]) -> None:
@@ -481,7 +548,9 @@ class WorksheetView(QGraphicsView):
     def _start_move(self, item: RegionItem, pt: QPointF) -> None:
         # a region that is part of a selection drags the whole selection
         group = list(self.selected) if item in self.selected else [item]
-        self._drag = ("move", pt, item, item.pos(), [(it, it.pos()) for it in group])
+        self._drag = ("move", pt, item, item.pos(), [(it, QPointF(it.region.x, it.region.y)) for it in group])
+        for it, o in self._drag[4]:
+            it._sheet_pos = o
         self.viewport().setCursor(self._move_cursor())
 
     def _item_at(self, scene_pt: QPointF) -> Optional[RegionItem]:
@@ -511,7 +580,8 @@ class WorksheetView(QGraphicsView):
             return
         if item is None:
             self.focus_item(None)
-            self.scene_.cross = QPointF(snap(pt.x()), snap(pt.y()))
+            sp = self.to_sheet(pt)
+            self.scene_.cross = QPointF(max(0.0, snap(sp.x())), max(0.0, snap(sp.y())))
             self._drag = ("rubber", pt)
             self.scene_.update()
             return
@@ -590,10 +660,13 @@ class WorksheetView(QGraphicsView):
             return
         if self._drag[0] == "move":
             _, start, item, orig, group = self._drag
-            d = pt - start
-            dx, dy = snap(orig.x() + d.x()) - orig.x(), snap(orig.y() + d.y()) - orig.y()
+            # moved in worksheet coordinates (a drag can cross a page break)
+            d = self.to_sheet(pt) - self.to_sheet(start)
+            lead = next(o for it, o in group if it is item)
+            dx, dy = snap(lead.x() + d.x()) - lead.x(), snap(lead.y() + d.y()) - lead.y()
             for it, o in group:
-                it.setPos(max(0.0, o.x() + dx), max(0.0, o.y() + dy))
+                it._sheet_pos = QPointF(max(0.0, o.x() + dx), max(0.0, o.y() + dy))
+                it.setPos(self.scene_.to_scene(it._sheet_pos.x(), it._sheet_pos.y()))
         elif self._drag[0] == "rubber":
             start = self._drag[1]
             rect = QRectF(start, pt).normalized()
@@ -612,7 +685,13 @@ class WorksheetView(QGraphicsView):
         elsewhere zooms the view, as on the desktop."""
         pt = self.mapToScene(e.position().toPoint())
         if e.modifiers() & Qt.ControlModifier and (self._item_at(pt) is None or self._item_at(pt).region.plot is None):
+            # zoom around the point under the mouse
+            before = pt
             self.set_zoom(self.zoom * (1.1 if e.angleDelta().y() > 0 else 1 / 1.1))
+            after = self.mapToScene(e.position().toPoint())
+            d = (after - before) * self.zoom
+            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - int(d.x()))
+            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - int(d.y()))
             e.accept()
             return
         item = self._item_at(pt)
@@ -627,6 +706,12 @@ class WorksheetView(QGraphicsView):
                 item.update()
                 e.accept()
                 return
+        if e.modifiers() & Qt.ShiftModifier and e.angleDelta().x() == 0:
+            # Shift+wheel scrolls sideways (pages wider than the window)
+            bar = self.horizontalScrollBar()
+            bar.setValue(bar.value() - e.angleDelta().y())
+            e.accept()
+            return
         super().wheelEvent(e)
 
     def mouseReleaseEvent(self, e) -> None:
@@ -634,8 +719,9 @@ class WorksheetView(QGraphicsView):
             group = self._drag[4]
             moved = False
             for it, o in group:
-                if it.pos() != o:
-                    it.region.x, it.region.y = it.pos().x(), it.pos().y()
+                new = getattr(it, "_sheet_pos", o)
+                if new != o:
+                    it.region.x, it.region.y = new.x(), new.y()
                     moved = True
             if moved:
                 # reading order may have changed: recalculate like SMath
@@ -792,9 +878,9 @@ class WorksheetView(QGraphicsView):
             item.editor.key("ENTER")
             self._after_edit(item)
             return
-        r = item.mapRectToScene(item.frame_rect())
+        reg, h = item.region, item.frame_rect().height()
         self.focus_item(None)
-        self.scene_.cross = QPointF(snap(r.left()), snap(r.bottom() + 5))
+        self.scene_.cross = QPointF(snap(reg.x), snap(reg.y + h + 5))
 
     def _after_edit(self, item: RegionItem, typed: bool = False) -> None:
         # as SMath Studio desktop: while a region is being edited its result is
@@ -1344,9 +1430,9 @@ class WorksheetView(QGraphicsView):
             self.status.emit("Syntax is incorrect.")
             return
         call = A.Call("solve", [node, A.Var(var)])
-        rect = item.mapRectToScene(item.frame_rect())
+        reg, h = item.region, item.frame_rect().height()
         self.focus_item(None)
-        new = self.new_region(rect.left(), rect.bottom() + GRID)
+        new = self.new_region(reg.x, reg.y + h + GRID)
         ed = new.editor
         ed.root.items = ast_to_items(call) + ["="]
         type(ed)._fix_parents(ed.root)
@@ -1405,20 +1491,17 @@ class WorksheetView(QGraphicsView):
         grid = self.scene_.show_grid
         self.scene_.show_grid = False
         self.scene_.printing = True
-        bounds = self.scene_.itemsBoundingRect()
-        page_w = max(bounds.right() + 20, PAGE_W)
-        page_h = page_w * PAGE_H / PAGE_W  # the pages shown in Pages view
+        mode = self.scene_.page_mode
+        self.set_page_mode("pages")  # print exactly the pages of Pages view
+        pages = self.scene_.page_count()
         painter = QPainter(device)
         target = QRectF(0, 0, device.width(), device.height())
-        y = 0.0
-        first = True
-        while y < bounds.bottom() + 1 or first:
-            if not first:
+        for k in range(pages):
+            if k:
                 device.newPage()
-            self.scene_.render(painter, target, QRectF(0, y, page_w, page_h))
-            y += page_h
-            first = False
+            self.scene_.render(painter, target, QRectF(0, k * PAGE_STEP, PAGE_W, PAGE_H))
         painter.end()
+        self.set_page_mode(mode)
         self.scene_.show_grid = grid
         self.scene_.printing = False
     def select_all(self) -> None:
