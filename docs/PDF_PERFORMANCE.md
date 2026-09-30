@@ -33,7 +33,7 @@ not a display frame-rate measurement.
   parsing or rasterisation. This follows [PyMuPDF's multiprocessing
   guidance](https://pymupdf.readthedocs.io/en/latest/recipes-multiprocessing.html).
 - Default concurrency is up to four workers, retaining CPU capacity for the
-  application/OS. `MARKFORGE_PDF_WORKERS=1` through `8` overrides it, capped at
+  application/OS. `CALCFORGE_PDF_WORKERS=1` through `8` overrides it, capped at
   available CPU count. Invalid values fall back safely.
 - Each source is written once to a private temporary directory and opened by
   the workers. Tile requests do not resend PDF bytes. Retained source files

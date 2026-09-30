@@ -115,7 +115,7 @@ benchmark measured 35× faster undo/redo and 1.8× faster pointer snapping.
 PDF rendering now uses `io/pdfrender.py` worker processes coordinated by
 `io/pdftiles.py`. Do not move MuPDF rendering back into Python threads.
 Sources are shared through private files; pixels use fixed shared buffers.
-The default is up to four processes (override `MARKFORGE_PDF_WORKERS=1..8`).
+The default is up to four processes (override `CALCFORGE_PDF_WORKERS=1..8`).
 See `PDF_PERFORMANCE.md` for timings, cache bounds and reproducible benchmarks.
 Latest full suite: 920 passed, no skips; native stress: seed 131, 1,000 rounds,
 4 pages, 71 markups, no failures.
@@ -123,7 +123,7 @@ Escape recovery now handles inline panel editors and stale scene mouse grabs
 (`tests/test_escape_recovery.py`). Use `QWidget.window(widget)` in the event
 filter: `PageView.window` is an owner attribute, not QWidget's window method.
 The real-PDF tests include `btx/Document1.pdf`; optional additional files use
-`MARKFORGE_PDF_CORPUS`. Old audit statements moved to `TASK_AUDIT_HISTORY.md`.
+`CALCFORGE_PDF_CORPUS`. Old audit statements moved to `TASK_AUDIT_HISTORY.md`.
 The current outstanding file separates verification from external blockers.
 
 Read the **Current review** sections of `COMPLETED_TASKS.md` and

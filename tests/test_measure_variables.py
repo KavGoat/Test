@@ -4,6 +4,7 @@ deleting it says which names stop being defined. Driven through the real
 window."""
 from __future__ import annotations
 
+import pytest
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtWidgets import QLineEdit
 
@@ -123,3 +124,70 @@ def test_the_name_is_saved_with_it(v, tmp_path):
     assert "not defined" not in shown(use)
     measures = [i for i in v.window.view.scene().items() if isinstance(i, MeasureItem)]
     assert [m.variable for m in measures] == ["L_b"]
+
+
+# -- it follows every way a measurement's value can change -----------------------------
+
+def _value_mm(item):
+    return float(shown(item).split()[0])
+
+
+def test_dragging_an_end_point_updates_the_calculation(v):
+    from calcforge.core.document import PageScale
+    from tests.test_usability import drag
+    v.window.current_page().scale = PageScale.from_ratio(100)
+    v.window.apply_scale_change()
+    measure = a_length(v, 150, 300, 250, 300)            # 100 pt at 1:100
+    v.window.set_measure_variable(measure, "L_b")
+    use = type_line(v, 400, "L_b=")
+    before = shown(use)
+    v.window.select_tool("select")
+    v.view.scene().clearSelection()
+    measure.setSelected(True)
+    end = measure.mapToScene(measure.points[1])
+    drag(v.view, end.x(), end.y(), end.x() + 100, end.y())    # twice as long
+    settle(v.window)
+    assert measure.points[1].x() > 190, "the end point moved"
+    assert shown(use) != before
+    # the calculation shows exactly what the measurement now measures (the
+    # end point lands where snapping puts it, so not quite twice as long)
+    assert float(shown(use).split()[0]) == pytest.approx(
+        measure.value.to("m").magnitude, abs=5e-5)
+    assert float(shown(use).split()[0]) > 1.9 * float(before.split()[0])
+
+
+def test_changing_the_page_scale_updates_the_calculation(v):
+    from calcforge.core.document import PageScale
+    v.window.current_page().scale = PageScale.from_ratio(100)
+    v.window.apply_scale_change()
+    measure = a_length(v)
+    v.window.set_measure_variable(measure, "L_b")
+    use = type_line(v, 400, "L_b=")
+    first = float(shown(use).split()[0])
+    v.window.current_page().scale = PageScale.from_ratio(200)
+    v.window.apply_scale_change()                   # what the Page setup panel calls
+    settle(v.window)
+    assert float(shown(use).split()[0]) == pytest.approx(first * 2, rel=1e-3)
+
+
+def test_dragging_it_into_a_viewport_takes_the_viewports_scale(v):
+    from PySide6.QtCore import QRectF
+
+    from calcforge.core.document import PageScale
+    from tests.test_usability import drag
+    page = v.window.current_page()
+    page.scale = PageScale.from_ratio(100)
+    v.window.apply_scale_change()
+    v.window.add_viewport(v.frame, QRectF(300, 40, 250, 200), PageScale.from_ratio(20), "A")
+    measure = a_length(v, 150, 300, 250, 300)
+    v.window.set_measure_variable(measure, "L_b")
+    use = type_line(v, 400, "L_b=")
+    at_1_100 = float(shown(use).split()[0])
+    v.window.select_tool("select")
+    v.view.scene().clearSelection()
+    measure.setSelected(True)
+    grab = measure.mapToScene(measure.points[0] + (measure.points[1] - measure.points[0]) / 5)
+    drag(v.view, grab.x(), grab.y(), grab.x() + 200, grab.y() - 200)   # into the viewport
+    settle(v.window)
+    assert page.viewport_at(measure.pos().x() + 5, measure.pos().y())
+    assert float(shown(use).split()[0]) == pytest.approx(at_1_100 / 5, rel=1e-2)
