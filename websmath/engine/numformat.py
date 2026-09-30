@@ -55,14 +55,14 @@ class FormattedNumber:
 
 def _round(x, places: int, fmt: NumberFormat) -> str:
     mode = ROUND_HALF_EVEN if fmt.half_even else ROUND_HALF_UP
-    q = Decimal(1).scaleb(-places) if places > 0 else Decimal(1)
+    q = Decimal(1).scaleb(-places)
     with localcontext() as ctx:
         ctx.prec = 400  # 170! has 307 digits before the point
         d = Decimal(x).quantize(q, rounding=mode)
     s = format(d, "f")
     if not fmt.trailing_zeros and "." in s:
         s = s.rstrip("0").rstrip(".")
-    elif fmt.trailing_zeros and places > 0 and "." not in s:
+    elif fmt.trailing_zeros and places > 0 and "." not in s:  # (places <= 0: none after the point)
         s += "." + "0" * places
     return s
 
@@ -85,7 +85,8 @@ def format_real(x: float, fmt: NumberFormat | None = None) -> FormattedNumber:
     exp = da.adjusted()
     # rounding can carry into the next decade (99999.99 -> 100000)
     if fmt.significant:
-        places = max(fmt.decimals - 1 - exp, 0)
+        # n significant digits, also left of the point (10311.4 -> 10310)
+        places = fmt.decimals - 1 - exp
     else:
         places = fmt.decimals
     fixed = _round(da, places, fmt)

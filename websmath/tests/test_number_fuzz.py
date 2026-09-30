@@ -109,3 +109,35 @@ def test_number_display_matches_reference(decimals, threshold):
         x = rng.choice([rng.uniform(-1e3, 1e3), 10 ** rng.uniform(-12, 12) * rng.choice([1, -1]),
                         rng.randint(-99999, 99999) / 8, round(rng.uniform(0, 10), 5)])
         assert format_real(x, fmt).plain() == _reference(x, fmt), x
+
+
+def _reference_sig(x: float, n: int, thr: int) -> str:
+    """Significant-figures mode: n significant digits (also left of the
+    point), exponential form outside the threshold; exact decimals."""
+    d = Decimal(x)
+    neg = d < 0
+    d = abs(d)
+    if d == 0:
+        return "0"
+    exp = d.adjusted()
+    q = d.quantize(Decimal(1).scaleb(exp - n + 1), rounding=ROUND_HALF_EVEN)
+    if q.adjusted() != exp:
+        exp = q.adjusted()
+        q = d.quantize(Decimal(1).scaleb(exp - n + 1), rounding=ROUND_HALF_EVEN)
+    if exp >= thr or exp <= -thr:
+        m = q.scaleb(-exp)
+        s = format(m.quantize(Decimal(1).scaleb(-(n - 1))), "f").rstrip("0").rstrip(".")
+        return ("-" if neg else "") + s + f"·10^{exp}"
+    s = format(q, "f")
+    if "." in s:
+        s = s.rstrip("0").rstrip(".")
+    return ("-" if neg else "") + s
+
+
+@pytest.mark.parametrize("n,thr", [(4, 5), (3, 5), (6, 8), (2, 3)])
+def test_significant_figures_match_reference(n, thr):
+    fmt = NumberFormat(decimals=n, threshold=thr, significant=True, engineering=False)
+    rng = random.Random(n * 10 + thr)
+    for _ in range(3000):
+        x = rng.choice([rng.uniform(-1e4, 1e4), 10 ** rng.uniform(-9, 9), rng.randint(1, 99999) / 8])
+        assert format_real(x, fmt).plain() == _reference_sig(x, n, thr), x
