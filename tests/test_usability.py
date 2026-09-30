@@ -2642,7 +2642,6 @@ def test_ctrl_taken_hold_of_mid_move_lets_go_of_the_grid_and_copies_nothing(wind
     window.document.settings.snap_to_grid = True
     window.document.settings.snap_to_items = False
     window.document.settings.snap_to_alignment = False
-    window.document.settings.grid_mm = 10.0
     window.select_tool("rect")
     drag(window.view, 100, 100, 200, 160)
     window.select_tool("select")
@@ -2655,7 +2654,7 @@ def test_ctrl_taken_hold_of_mid_move_lets_go_of_the_grid_and_copies_nothing(wind
     QApplication.sendEvent(window.view.viewport(), _mouse(
         window.view, QEvent.MouseMove, centre.x() + 15, centre.y() + 8,
         Qt.NoButton, Qt.LeftButton))
-    step = 10.0 * MM_TO_PT
+    step = 9 * 0.75            # SMath's grid: 9 px, 6.75 pt
     snapped = box.pos()
     assert abs(round(snapped.x() / step) * step - snapped.x()) < 0.01
     QApplication.sendEvent(window.view.viewport(), _mouse(
@@ -4273,7 +4272,6 @@ def test_freehand_is_still_freehand_without_shift(window):
 def test_freehand_snaps_only_its_start_and_end(window, tool):
     settings = _quiet_snapping(window)
     settings.snap_to_grid = True
-    settings.grid_mm = 5.0
     view = window.view
     window.select_tool(tool)
     points = [(103.0, 107.0), (151.0, 139.0),
@@ -4288,7 +4286,7 @@ def test_freehand_snaps_only_its_start_and_end(window, tool):
 
     stroke = markups(window)[-1]
     scene_points = [stroke.mapToScene(point) for point in stroke.points]
-    step = settings.grid_mm * MM_TO_PT
+    step = 9 * 0.75            # SMath's grid: 9 px, 6.75 pt
 
     def on_grid(point):
         return (point.x() == pytest.approx(round(point.x() / step) * step)
@@ -6416,7 +6414,6 @@ def test_holding_ctrl_lets_go_of_the_grid_while_drawing(window):
     from PySide6.QtGui import QKeyEvent
 
     window.document.settings.snap_to_grid = True
-    window.document.settings.grid_mm = 5.0
     awkward = QPointF(103.7, 147.3)
 
     # snapping_off_now() reads the live modifier state on purpose, so that a
@@ -9116,7 +9113,6 @@ def test_the_grid_switch_actually_stops_grid_snapping(window):
     from PySide6.QtCore import QPointF
 
     settings = window.document.settings
-    settings.grid_mm = 5.0
     settings.snap_to_items = False
     settings.snap_to_content = False
     settings.snap_to_alignment = False

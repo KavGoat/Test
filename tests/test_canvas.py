@@ -172,9 +172,8 @@ def test_a_page_saves_only_what_is_on_it(window):
 def test_the_grid_belongs_to_the_page_not_the_canvas(window):
     """A snapped point lands on the page's own grid, whatever page it is."""
     window.document.settings.snap_to_grid = True
-    window.document.settings.grid_mm = 5.0
     window.add_page()
-    step = 5.0 * 72.0 / 25.4
+    step = 9 * 0.75            # SMath's grid: 9 px, 6.75 pt
     for index in range(2):
         frame = window.document.pages[index].frame
         rough = frame.mapToScene(QPointF(step * 3 + 2.0, step * 4 + 2.0))

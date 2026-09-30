@@ -85,8 +85,8 @@ def detach(item: MarkupItem) -> None:
 
 
 MARGIN_PEN = QColor(120, 160, 220, 120)
-GRID_PEN = QColor(180, 195, 210, 110)
-GRID_PEN_MAJOR = QColor(150, 170, 195, 150)
+GRID_DOT = QColor("#a8a8a8")
+GRID_PX = 9.0                 # SMath's grid, in its 96-dpi pixels
 
 
 def _painted_scale(painter) -> float:
@@ -498,30 +498,49 @@ class PageFrame(QGraphicsObject):
         painter.restore()
 
     def _paint_grid(self, painter: QPainter, page_rect: QRectF) -> None:
+        """SMath's grid: a dot every 9 px (6.75 pt), over the page (decision 12).
+
+        One grid for everything — equations, Calculation text and markups all
+        snap to it. It is a guide, never ink: it is not painted when the page
+        is printed or saved. Too far out to tell the dots apart it is left off
+        rather than turning the page grey.
+        """
+        from ..calc.docsheet import PT_PER_PX
         settings = self.document.settings
         if not self.page.shows_a_grid(settings):
             return
-        step = max(settings.grid_mm, 1.0) * MM_TO_PT
+        step = GRID_PX * PT_PER_PX
+        transform = painter.worldTransform()
+        on_screen = step * max(abs(transform.m11()) + abs(transform.m12()), 1e-9)
+        if on_screen < 4.0:
+            return
+        area = self.grid_area().intersected(page_rect)
+        seen = transform.inverted()[0].mapRect(QRectF(painter.viewport())) \
+            if painter.device() is not None else area
+        area = area.intersected(seen) if not seen.isEmpty() else area
+        if area.isEmpty():
+            return
         painter.save()
-        minor = QPen(GRID_PEN)
-        minor.setWidthF(0.3)
-        major = QPen(GRID_PEN_MAJOR)
-        major.setWidthF(0.6)
-        index = 0
-        x = 0.0
-        while x <= page_rect.right():
-            painter.setPen(major if index % 5 == 0 else minor)
-            painter.drawLine(QPointF(x, page_rect.top()), QPointF(x, page_rect.bottom()))
-            x += step
-            index += 1
-        index = 0
-        y = 0.0
-        while y <= page_rect.bottom():
-            painter.setPen(major if index % 5 == 0 else minor)
-            painter.drawLine(QPointF(page_rect.left(), y), QPointF(page_rect.right(), y))
+        pen = QPen(GRID_DOT)
+        pen.setWidthF(1.0 if on_screen >= 7 else 0.0)
+        pen.setCosmetic(True)
+        painter.setPen(pen)
+        first_x = math.ceil(area.left() / step) * step
+        first_y = math.ceil(area.top() / step) * step
+        dots = []
+        y = first_y
+        while y <= area.bottom():
+            x = first_x
+            while x <= area.right():
+                dots.append(QPointF(x, y))
+                x += step
             y += step
-            index += 1
+        painter.drawPoints(dots)
         painter.restore()
+
+    def grid_area(self) -> QRectF:
+        """Where the grid is drawn: the whole sheet (margins come in later)."""
+        return self.page_rect()
 
     def _paint_margins(self, painter: QPainter) -> None:
         if not self.document.settings.show_margins:

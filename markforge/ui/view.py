@@ -943,7 +943,8 @@ class PageView(QGraphicsView):
             return point
         if not (settings.snap_to_grid or force):
             return point
-        step = max(settings.grid_mm, 0.5) * MM_TO_PT
+        from .calcedit import GRID_PT          # SMath's grid: one for everything
+        step = GRID_PT
         return QPointF(round(point.x() / step) * step, round(point.y() / step) * step)
 
     def snap_scene(self, scene_pos: QPointF, frame=None, ignore=()) -> QPointF:

@@ -25,6 +25,7 @@ from ..calc.record import region_text, region_to_data
 from .base import MarkupItem, register_item
 
 EMPTY = {"root": []}
+GRID_PX = 9.0                   # SMath's grid, in its 96-dpi pixels
 
 
 @register_item
@@ -106,6 +107,10 @@ class CalcItem(MarkupItem):
                          self.pos().x() * PX_PER_PT, self.pos().y() * PX_PER_PT)
 
     def itemChange(self, change, value):
+        if change == QGraphicsItem.ItemPositionChange and isinstance(value, QPointF):
+            # SMath keeps every region on its grid, wherever it is dragged to
+            step = GRID_PX * PT_PER_PX
+            value = QPointF(round(value.x() / step) * step, round(value.y() / step) * step)
         result = super().itemChange(change, value)
         if change == QGraphicsItem.ItemParentHasChanged:
             if self._page_frame() is None:

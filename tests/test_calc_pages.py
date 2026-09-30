@@ -113,3 +113,26 @@ def test_deleting_a_page_takes_its_equations_out_of_the_calculation(window, monk
     window.delete_page(0)
     use = next(i for i in window.document.pages[0].frame.markups() if isinstance(i, CalcItem))
     assert shown(use).startswith("error")
+
+
+def test_an_equation_always_lands_on_smaths_grid(window):
+    item = put(window, 0, 60, 100, "g:1")
+    item.setPos(QPointF(61.3, 103.9))
+    step = 6.75
+    for v in (item.pos().x(), item.pos().y()):
+        assert abs(v / step - round(v / step)) < 1e-9
+
+
+def test_the_grid_is_dotted_and_never_printed(window):
+    from PySide6.QtCore import QRectF
+    page = window.document.pages[0]
+    frame = page.frame
+    page.grid = False
+    plain = frame.render_image(dpi=72, for_print=True)
+    page.grid = True
+    printed = frame.render_image(dpi=72, for_print=True)
+    assert plain == printed, "the grid is a guide, not ink"
+    screen = frame.render_image(dpi=72, for_print=False)
+    greys = sum(1 for x in range(100, 200) for y in range(100, 200)
+                if screen.pixelColor(x, y).name() != "#ffffff")
+    assert greys > 50, "dots every 6.75 pt on screen"

@@ -54,11 +54,12 @@ def source_bytes(document) -> Optional[bytes]:
             return None
         if not page.printable or page.background_opacity != 1.0:
             return None
-        # Anything painted onto the sheet — a grid, a running header, a markup
+        # Anything painted onto the sheet — a running header, a markup
         # somebody flattened into the page — has to be painted, and painting
         # means writing the page again. Then this is not an update to a file;
-        # it is a new file, and pdfbase assembles it.
-        if page.shows_a_grid(settings) or page.shows_a_header(settings, index) \
+        # it is a new file, and pdfbase assembles it. (The grid is a guide on
+        # the screen and is never painted.)
+        if page.shows_a_header(settings, index) \
                 or page.shows_a_footer(settings, index):
             return None
         if page.frame is not None and any(item.flattened

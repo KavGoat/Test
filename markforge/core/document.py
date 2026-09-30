@@ -426,7 +426,6 @@ class DocumentSettings:
     # beam, directly under a column line. A separate switch, off by default,
     # because a busy sheet offers a guide almost everywhere.
     snap_to_pdf_alignment: bool = False
-    grid_mm: float = 5.0
     show_margins: bool = True
     header_left: str = ""
     header_center: str = ""
