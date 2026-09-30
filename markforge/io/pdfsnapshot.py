@@ -46,6 +46,13 @@ class PdfPathItem(MarkupItem):
         self.clips = []
         self.even_odd = False
         self.fill_alpha = None
+        # The PDF's own line ends and corners (0 butt/miter, 1 round, 2
+        # square/bevel): a PDF miter that overshoots its limit becomes a bevel,
+        # where Qt's plain miter draws a clipped spike — which made a line
+        # drawn there and back come out longer than the drawing's.
+        self.cap = 0
+        self.join = 0
+        self.miter_limit = 10.0
         self._path = QPainterPath()
 
     def local_rect(self):
@@ -56,7 +63,14 @@ class PdfPathItem(MarkupItem):
         painter.save()
         for commands, even_odd in self.clips:
             painter.setClipPath(path_from(commands, even_odd), Qt.IntersectClip)
-        painter.setPen(self.style.pen() if self.style.stroke else Qt.NoPen)
+        if self.style.stroke:
+            pen = self.style.pen()
+            pen.setCapStyle({1: Qt.RoundCap, 2: Qt.SquareCap}.get(self.cap, Qt.FlatCap))
+            pen.setJoinStyle({1: Qt.RoundJoin, 2: Qt.BevelJoin}.get(self.join, Qt.SvgMiterJoin))
+            pen.setMiterLimit(self.miter_limit)
+            painter.setPen(pen)
+        else:
+            painter.setPen(Qt.NoPen)
         brush = self.style.brush()
         if self.fill_alpha is not None:
             colour = brush.color()
@@ -69,7 +83,8 @@ class PdfPathItem(MarkupItem):
     def serialize(self):
         data = self.base_dict()
         data.update(commands=self.commands, clips=self.clips, even_odd=self.even_odd,
-                    fill_alpha=self.fill_alpha)
+                    fill_alpha=self.fill_alpha, cap=self.cap, join=self.join,
+                    miter_limit=self.miter_limit)
         return data
 
     def deserialize(self, data):
@@ -78,6 +93,9 @@ class PdfPathItem(MarkupItem):
         self.commands = data.get("commands", [])
         self.clips = data.get("clips", [])
         self.even_odd = data.get("even_odd", False)
+        self.cap = int(data.get("cap", 0) or 0)
+        self.join = int(data.get("join", 0) or 0)
+        self.miter_limit = float(data.get("miter_limit", 10.0) or 10.0)
         self._path = path_from(self.commands, self.even_odd)
 
 
@@ -422,7 +440,99 @@ def source_paths(document, page, region):
                                              for n in dash[1].split())
             item.commands, item._path = commands, path
             item.even_odd = entry.get("even_odd", False)
+            caps = entry.get("lineCap") or (0,)
+            item.cap = int(caps[0] if isinstance(caps, (tuple, list)) else caps or 0)
+            item.join = int(entry.get("lineJoin") or 0)
             item.clips = [clip for _, clip, _ in contexts if clip is not None]
             item.setZValue(-1000000 + order)
             result.append(item)
     return result
+
+
+def drawn_over(frame, region) -> "PdfSvgItem | None":
+    """Everything CalcForge draws over the page inside *region*, as line work.
+
+    What a snapshot takes is what can be seen in the box (2026-09-30): every
+    markup whole or in part, typed words, equations, plots, Calculation text,
+    the running header and footer, a picture page's picture. It is drawn once,
+    exactly as the page draws it, into a PDF, and read back as vector line
+    work with the letters as outlines and photos as their own pixels. It is not
+    live: it is the drawing as it stood, which is why nothing in it can come
+    out different from what was on screen — a measurement away from its
+    page's scale, a markup away from the file it was drawn from.
+
+    The page's own PDF content is not in it: that comes from the file itself
+    (:func:`source_paths`), sharper than any redrawing of it.
+    """
+    from PySide6.QtCore import QMarginsF, QSizeF
+    from PySide6.QtGui import QPageLayout, QPageSize, QPainter, QPdfWriter
+
+    box = QRectF(region).normalized().intersected(frame.page_rect())
+    scene = frame.scene()
+    if box.width() < 1 or box.height() < 1 or scene is None:
+        return None
+    page = frame.page
+    on_a_pdf = bool(page.pdf_key and page.pdf_page_index is not None)
+    data = QByteArray()
+    buffer = QBuffer(data)
+    buffer.open(QIODevice.WriteOnly)
+    writer = QPdfWriter(buffer)
+    writer.setResolution(96)
+    writer.setPageLayout(QPageLayout(QPageSize(QSizeF(box.width(), box.height()),
+                                               QPageSize.Point),
+                                     QPageLayout.Portrait, QMarginsF(0, 0, 0, 0)))
+    painter = QPainter(writer)
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    painter.setRenderHint(QPainter.TextAntialiasing, True)
+    painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+    previous = frame.print_mode, frame._pdf_overlay
+    hidden, chrome, handles, cached = [], [], [], []
+    try:
+        frame.print_mode = True
+        frame._pdf_overlay = on_a_pdf          # the file's own drawing comes from the file
+        for item in frame.markups():
+            if hasattr(item, "set_chrome") and item.show_chrome:
+                chrome.append(item)
+                item.set_chrome(False)
+            if item._handles_visible:
+                handles.append(item)
+                item._handles_visible = False
+            if item.cacheMode() != item.CacheMode.NoCache:
+                cached.append((item, item.cacheMode()))
+                item.setCacheMode(item.CacheMode.NoCache)
+            # line work read out of the PDF duplicates the file's own drawing
+            if on_a_pdf and item.from_drawing and item.isVisible():
+                hidden.append(item)
+                item.setVisible(False)
+        source = frame.mapRectToScene(box)
+        target = QRectF(0, 0, writer.width(), writer.height())
+        scene.render(painter, target, source, Qt.IgnoreAspectRatio)
+    finally:
+        painter.end()
+        buffer.close()
+        frame.print_mode, frame._pdf_overlay = previous
+        for item in hidden:
+            item.setVisible(True)
+        for item in chrome:
+            item.set_chrome(True)
+        for item in handles:
+            item._handles_visible = True
+            item.update()
+        for item, mode in cached:
+            item.setCacheMode(mode)
+    try:
+        with pymupdf.open("pdf", bytes(data)) as drawn:
+            if not drawn.page_count:
+                return None
+            sheet = drawn[0]
+            if not sheet.get_drawings() and not sheet.get_text("text").strip() \
+                    and not sheet.get_image_info():
+                return None                    # nothing drawn over the page here
+            svg = sheet.get_svg_image(text_as_path=True)
+    except Exception:                                  # noqa: BLE001
+        return None
+    item = PdfSvgItem()
+    item.svg = inline_glyphs(svg)
+    item._rect = QRectF(0, 0, box.width(), box.height())
+    item.setPos(box.topLeft())
+    return item

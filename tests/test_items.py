@@ -210,15 +210,19 @@ def test_a_snapshots_colours_can_be_changed(window):
     window.paste_items()
     snapshot = [i for i in frame.markups() if isinstance(i, SnapshotItem)][0]
 
+    # What was seen, kept as line work (2026-09-30): the three lines are
+    # paths in it, each with its own colour, and each can be changed.
     source = snapshot.source_markups()
-    assert [item.style.stroke for item in source] \
-        == ["#000000", "#0a0a0a", "#c92a2a"]
+    (drawing,) = source
+    svg = drawing.svg.lower()
+    assert "#000000" in svg and "#0a0a0a" in svg and "#c92a2a" in svg
     assert recolour.swap_line_colour(source, QColor("#000000"),
-                                     QColor("#1971c2"), 40) == 2
+                                     QColor("#1971c2"), 40) >= 2
     picture = snapshot.redraw_from(source)
     assert not picture.isNull(), "still a recording, so still sharp at any size"
-    assert [payload["style"]["stroke"] for payload in snapshot.source_items] \
-        == ["#1971c2", "#1971c2", "#c92a2a"]
+    kept = snapshot.source_items[0]["svg"].lower()
+    assert "#1971c2" in kept and "#c92a2a" in kept
+    assert "#000000" not in kept and "#0a0a0a" not in kept
 
 
 def test_a_snapshot_and_a_photo_have_a_line_type_of_their_own(window):

@@ -4630,10 +4630,6 @@ class MainWindow(QMainWindow):
         # change colour — which is the one thing a redline snapshot is for.
         kept = []
         for item in taken:
-            if getattr(item, "IS_CALC", False):
-                # an equation is copied as line work (decision 16)
-                from ..items.calc import CalcDrawingItem
-                item = CalcDrawingItem.of(item)
             recorded = item.serialize()
             recorded["x"] = recorded.get("x", 0.0) - region.left()
             recorded["y"] = recorded.get("y", 0.0) - region.top()

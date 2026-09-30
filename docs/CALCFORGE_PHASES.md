@@ -305,3 +305,42 @@ again; and a page must look the same in CalcForge and in any other reader.
   rewritten by another program (pypdf).
 - A test plants a wrong colour and a wrong position and checks the comparison
   catches both, so the check can't pass by being blind.
+
+### Snapshot tool made bulletproof (2026-09-30)
+
+Asked for: whatever can be seen in the box is taken, like a screenshot, but
+as line work wherever possible (always, unless there's an image); equations,
+plots and Calculation text included; not live. Reported: a title block's
+lines came through but not its words.
+
+**What changed**
+
+- **Cause of the missing words:** the snapshot skipped every text-type
+  markup (text boxes, callouts, typewriter text — and so Calculation text)
+  unless it was selected, an old MarkForge rule. Gone: whatever is visible
+  in the box is taken.
+- **How a snapshot is made now:** the page's own PDF drawing is read from the
+  file as before (curves, clips, words as outlines, photos as their pixels),
+  and everything drawn over it — markups whole or in part, words, equations,
+  plots, Calculation text, header and footer, a picture page's picture — is
+  drawn once exactly as the page draws it and kept as one piece of vector
+  line work, letters as outlines. It used to rebuild copies of the markups,
+  which could draw differently away from their page (a measurement without
+  the page's scale, a Bluebeam markup without the file that draws it).
+  Colours can still be changed.
+- **Found and fixed:** PDF line ends and corners weren't carried into
+  snapshots, so a PDF miter that becomes a bevel came out as a spike (a line
+  drawn there and back came out longer); a selected snapshot could print or
+  export with its dashed selection box, drawn from its cached picture.
+
+**Tests** — `tests/test_snapshot_fidelity.py` (7): each snapshots a region,
+pastes it at the same place on a blank page and compares the two pages as
+CalcForge draws them (and, saved, as MuPDF and pdfium draw them): every kind
+of markup, equations, Calculation text, a plot, a snapshot of a snapshot, a
+title block (the PDF's own words and typed-on ones), a real Bluebeam sheet,
+a turned drawing, a box running off the page; and a snapshot doesn't change
+when the equation it was taken of does.
+
+**Different from Bluebeam:** a snapshot's contents come through as one
+drawing, not as separate markups; its colours can be changed as a whole, as
+before, but not markup by markup.

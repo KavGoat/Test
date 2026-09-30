@@ -912,12 +912,19 @@ class PageFrame(QGraphicsObject):
         hidden_handles = [item for item in self.markups() if item._handles_visible]
         chrome: list = []
         hidden: list = []
+        cached: list = []
         try:
             for item in self.markups():
                 if hasattr(item, "set_chrome") and item.show_chrome:
                     chrome.append(item)
                     item.set_chrome(False)
                 item._handles_visible = False
+                # A cached item would be drawn from its cached picture, which
+                # has its selection handles in it (a selected snapshot printed
+                # with its dashed box round it).
+                if item.cacheMode() != QGraphicsItem.NoCache:
+                    cached.append((item, item.cacheMode()))
+                    item.setCacheMode(QGraphicsItem.NoCache)
             hidden = [item for item in self.markups()
                       if (layer == "calc" and not getattr(item, "IS_CALC", False))
                       or (layer == "sheet" and getattr(item, "IS_CALC", False))
@@ -944,6 +951,8 @@ class PageFrame(QGraphicsObject):
             for item in hidden_handles:
                 item._handles_visible = True
                 item.update()
+            for item, mode in cached:
+                item.setCacheMode(mode)
             self.print_mode = previous
             self._pdf_overlay = previous_overlay
             self._items_only = False
@@ -964,22 +973,26 @@ class PageFrame(QGraphicsObject):
         return self.render_items_picture(self.picture_items(box), box)
 
     def picture_items(self, region: QRectF) -> list:
-        """Which markups a snapshot of *region* takes with it.
+        """What a snapshot of *region* takes: whatever can be seen in it.
 
-        Kept separate from the recording because a snapshot keeps them as well
-        as the recording: a list of drawing commands can be replayed but not
-        asked anything, so changing a snapshot's colours later means having
-        what it was taken of.
+        Not live, and not a rebuilt copy of the markups: the page's own PDF
+        drawing, read from the file (curves, clips, letters as outlines,
+        photos as their pixels), and everything drawn over it — markups
+        whole or in part, typed words, equations, plots, Calculation text,
+        the header and footer — as the line work it was drawn as
+        (``pdfsnapshot.drawn_over``). What goes in is exactly what was on the
+        page, which is what makes a snapshot of a title block bring its words
+        as well as its lines. They are kept beside the recording so the
+        snapshot's colours can still be changed.
         """
-        from ..items.text import _TextBase
+        from ..io.pdfsnapshot import drawn_over, source_paths
 
-        from ..io.pdfsnapshot import source_paths
-        source = source_paths(self.document, self.page, region)
-        return source + [item for item in self.markups()
-                if item.isVisible()
-                and not (self.page.pdf_key and item.from_drawing)
-                and item.mapRectToParent(item.boundingRect()).intersects(region)
-                and (not isinstance(item, _TextBase) or item.isSelected())]
+        taken = list(source_paths(self.document, self.page, region))
+        over = drawn_over(self, region)
+        if over is not None:
+            over.setZValue(1_000_000)
+            taken.append(over)
+        return taken
 
     def sheet_region(self, region: QRectF, scale: float = 4.0):
         """The sheet itself under *region*, as pixels, or None if there is none.

@@ -501,6 +501,13 @@ signature no longer applies. Object numbers belong to the file they are in,
 so anything brought across from the scratch appearance PDF goes through
 `copy_into`, which renumbers as it copies.
 
+**Snapshots (`ui/scene.py` `picture_items`, `io/pdfsnapshot.py`).** A
+snapshot is the page's PDF drawing read from the file (`source_paths`) plus
+one `PdfSvgItem` of everything drawn over it (`drawn_over`: the frame
+rendered into a 96-dpi PDF and read back as SVG with text as outlines). Don't
+go back to rebuilding copies of the markups: they draw differently away from
+their page. `tests/test_snapshot_fidelity.py` compares every case.
+
 **Leaders (`markforge/items/text.py`).** A `_Leader` stores `tip`, `side`,
 `reach`, `kind` and `cloud`. The hinge is *never stored* — it is computed every
 time from the side and the reach, which is what keeps it perpendicular and

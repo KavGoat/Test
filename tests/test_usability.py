@@ -3152,8 +3152,9 @@ def test_a_snapshot_takes_the_drawing_underneath_with_it(window, tmp_path, monke
     painter.drawPicture(0, 0, recorded)
     painter.end()
     assert replay.pixelColor(55, 35).alpha() > 0       # imported vector linework
-    # Paper and page backgrounds are deliberately excluded from snapshots.
-    assert replay.pixelColor(10, 10).alpha() == 0
+    # What can be seen is what is taken (2026-09-30): a picture page's
+    # picture too — the one place a snapshot holds pixels.
+    assert replay.pixelColor(10, 10).alpha() > 0
 
     window.paste_items()
     pasted = [i for i in markups(window) if isinstance(i, SnapshotItem)]
@@ -3162,13 +3163,11 @@ def test_a_snapshot_takes_the_drawing_underneath_with_it(window, tmp_path, monke
     assert pasted[0].local_rect().width() == pytest.approx(120, abs=1)
 
 
-def test_snapshot_skips_unselected_typing(window, monkeypatch):
-    """A snapshot of a corner of the drawing takes the drawing, not the notes.
-
-    Somebody's writing over that corner is theirs, and copying the detail is
-    not a request for it — unless they picked the words out first, which says
-    they meant to take those too.
-    """
+def test_snapshot_takes_the_typing_it_can_see(window, monkeypatch):
+    """A snapshot takes whatever can be seen in the box (2026-09-30): the
+    words over the drawing too, selected or not. (It used to leave typing out
+    unless it was selected, which is how a title block's words went missing
+    while its lines came through.)"""
     from PySide6.QtGui import QImage
 
     words = _words(window, "design note", at=(90, 190))
@@ -3185,13 +3184,7 @@ def test_snapshot_skips_unselected_typing(window, monkeypatch):
 
     window.select_tool("snapshot")
     drag(window.view, 60, 80, 360, 370)
-    assert painted == ["markup"]
-
-    words.setSelected(True)
-    painted.clear()
-    window.select_tool("snapshot")
-    drag(window.view, 60, 80, 360, 370)
-    assert painted == ["text", "markup"]
+    assert sorted(painted) == ["markup", "text"]
 
 
 def test_a_snapshot_scaled_up_is_still_drawn_from_its_lines(window):

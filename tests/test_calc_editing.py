@@ -323,8 +323,9 @@ def test_a_snapshot_copies_an_equation_as_line_work(window):
     hover(window.view, q.x(), q.y())
     window.paste_items()
     shot = next(i for i in window.view.scene().items() if isinstance(i, SnapshotItem))
-    assert [s["type"] for s in shot.source_items] == ["calc_drawing"]
-    assert "<path" in shot.source_items[0]["stamp_svg"]
+    # what was seen, as line work (2026-09-30): one drawing, not a live equation
+    assert [s["type"] for s in shot.source_items] == ["pdf_svg"]
+    assert "<path" in shot.source_items[0]["svg"]
     assert len(sheet_for(window.document).worksheet.regions) == regions
     image = window.document.pages[0].frame.render_image(dpi=72, for_print=True)
     box = shot.mapRectToScene(shot.local_rect())
