@@ -472,3 +472,70 @@ def test_desired_unit_box(app):
     press(v, Qt.Key_Return)
     last = max(v.items.values(), key=lambda x: x.region.y)
     assert last._result_unit_rect is None               # no box when not editing
+
+
+def _unit_region(app, keys=("5'kN*2=",)):
+    v = WorksheetView()
+    type_at(v, 18, 18, keys[0])
+    return v, v.focused_item
+
+
+def test_delete_works_in_the_unit_box(app):
+    v, item = _unit_region(app)
+    press(v, Qt.Key_Right)  # into the unit box
+    for ch in "'kN":
+        press(v, 0, ch)
+    press(v, Qt.Key_Tab)  # apply the suggestion
+    ed = item.editor
+    assert ed.in_unit and ed.unit.text() == "'kN"
+    press(v, Qt.Key_Left)
+    press(v, Qt.Key_Delete)  # k|N -> k
+    assert ed.unit.text() == "'k"
+    press(v, Qt.Key_Left)
+    assert ed.pos == 0  # |'k: no invisible stop between ' and k
+    press(v, Qt.Key_Delete)  # the visible k goes, and the marker with it
+    assert ed.unit.text() == ""
+    for ch in "'kN":
+        press(v, 0, ch)
+    press(v, Qt.Key_Tab)
+    press(v, Qt.Key_Home)
+    item.editor.set_cursor(ed.unit, 0)
+    press(v, Qt.Key_Delete)  # |'kN -> 'N (still a unit), not the variable kN
+    assert ed.unit.text() == "'N"
+
+
+def test_click_into_empty_unit_box_shows_the_cursor(app):
+    v, item = _unit_region(app)
+    v.show()
+    r = item._result_unit_rect.translated(item._layout.x, item._baseline)
+    item.place_cursor(r.center())
+    ed = item.editor
+    assert ed.in_unit and item._row_info(ed.row) is not None
+
+
+def test_cursor_is_always_drawable_fuzz(app):
+    import random
+
+    keys = [Qt.Key_Left, Qt.Key_Right, Qt.Key_Home, Qt.Key_End, Qt.Key_Backspace, Qt.Key_Delete, Qt.Key_Tab,
+            "'", "k", "N", "m", "/", "s", "^", "2"]
+    for seed in range(150):
+        rng = random.Random(seed)
+        v, item = _unit_region(app, (rng.choice(["5'kN*2=", "3'm/2's=", "(2'm)^2=", "12="]),))
+        for step in range(30):
+            k = rng.choice(keys)
+            if rng.random() < 0.15 and item._result_unit_rect is not None:
+                item.place_cursor(item._result_unit_rect.translated(item._layout.x, item._baseline).center())
+            elif isinstance(k, str):
+                press(v, 0, k)
+            else:
+                press(v, k)
+            if v.focused_item is not item:
+                break
+            ed = item.editor
+            assert item._row_info(ed.row) is not None, (seed, step)
+            if k in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Home, Qt.Key_End, Qt.Key_Tab, Qt.Key_Backspace):
+                # a key that moves the cursor never leaves it on the hidden marker slot
+                items = ed.row.items
+                p = ed.pos
+                assert not (0 < p < len(items) and items[p - 1] == "'" and items[p] not in ("'",)
+                            and isinstance(items[p], str) and items[p].isalpha()), (seed, step, ed.row.text(), p)

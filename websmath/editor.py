@@ -62,6 +62,15 @@ def _is_word_char(it) -> bool:
     return isinstance(it, str) and (it in IDENT_CHARS or it == "'")
 
 
+def _inside_unit_marker(r: Row, q: int) -> bool:
+    """True between a unit's ' marker and its name ('|kN).  The marker is not
+    drawn, so that slot looks exactly like the one before it (|'kN): the
+    cursor never stops there while moving, and Delete in front of the marker
+    deletes the first visible letter."""
+    items = r.items
+    return 0 < q < len(items) and items[q - 1] == "'" and _is_word_char(items[q]) and items[q] != "'"
+
+
 def _row_path(r: Row) -> list:
     """Path of (item index, child row index) pairs from the root to r."""
     path = []
@@ -192,7 +201,10 @@ class MathEditor:
         return self.cursor.pos
 
     def set_cursor(self, r: Row, pos: int) -> None:
-        self.cursor = Cursor(r, max(0, min(pos, len(r))))
+        pos = max(0, min(pos, len(r)))
+        if _inside_unit_marker(r, pos):
+            pos -= 1
+        self.cursor = Cursor(r, pos)
         self.in_unit = self._root_of(r) is self.unit
         self.selection = None
         self.node = None
@@ -281,6 +293,12 @@ class MathEditor:
         if ch == " ":
             self._space()
             return
+        r, p = self.row, self.pos
+        if (ch in IDENT_CHARS and ch != "'" and _inside_unit_marker(r, p + 1)
+                and (p == 0 or not _is_word_char(r.items[p - 1]))):
+            # |'kN looks like '|kN: a letter typed there goes into the unit's
+            # name ('MkN), an operator stays in front of the unit
+            self.cursor = Cursor(r, p + 1)
         if ch == "." and self._number_has_dot():
             return  # a second decimal point is ignored (2.5.3 -> 2.53)
         if not _is_word_char(ch):
@@ -709,7 +727,7 @@ class MathEditor:
                 self.cursor = Cursor(r, p - 1)
                 return
             r.pop(p - 1)
-            self.cursor = Cursor(r, p - 1)
+            self.cursor = Cursor(r, p - 2 if _inside_unit_marker(r, p - 1) else p - 1)
             return
         # at the start of a row inside a box
         if r.parent is None:
@@ -750,6 +768,13 @@ class MathEditor:
             if it == "=" and r is self.root:
                 del r.items[p:]
                 self.evaluate = False
+                return
+            if _inside_unit_marker(r, p + 1):
+                # |'kN: delete the k (the marker is invisible); the marker
+                # goes too once no name is left after it
+                r.pop(p + 1)
+                if not (p + 1 < len(r) and _is_word_char(r.items[p + 1]) and r.items[p + 1] != "'"):
+                    r.pop(p)
                 return
             r.pop(p)
 
@@ -874,7 +899,7 @@ class MathEditor:
                 last = it.rows[-1]
                 self.cursor = Cursor(last, len(last))
             else:
-                self.cursor = Cursor(r, p - 1)
+                self.cursor = Cursor(r, p - 2 if _inside_unit_marker(r, p - 1) else p - 1)
             return
         if r.parent is not None:
             box = r.parent
@@ -901,7 +926,7 @@ class MathEditor:
             if isinstance(it, Box):
                 self.cursor = Cursor(it.rows[0], 0)
             else:
-                self.cursor = Cursor(r, p + 1)
+                self.cursor = Cursor(r, p + 2 if _inside_unit_marker(r, p + 1) else p + 1)
                 # across an operator onto a sub-expression: select it as a whole
                 if isinstance(it, str) and not _is_word_char(it) and it not in ",;":
                     ta, tb = self.token_span(r, p + 1)

@@ -851,7 +851,7 @@ class WorksheetView(QGraphicsView):
             if self._clash(self.focused_item) and key != Qt.Key_Escape:
                 return True
             self.hide_suggestions()
-            return True
+            return key == Qt.Key_Escape  # anything else (Delete, arrows...) still acts
         if key == Qt.Key_Tab or (key in (Qt.Key_Return, Qt.Key_Enter) and s.activated):
             it = s.currentItem()
             if it is not None and s.currentRow() >= 0:

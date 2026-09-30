@@ -427,13 +427,19 @@ class RegionItem(QGraphicsObject):
                     col = k
             self.editor.text_pos = sum(len(l) + 1 for l in lines[:li]) + col
             return
+        before = (self.editor.in_unit, self.editor.row)
         if self.result_unit_hit(pt) and self.editor.unit.is_empty():
             # a click on the black box starts the desired unit
             self.editor.set_cursor(self.editor.unit, 0)
-            return
-        hit = self.slot_at(pt)
-        if hit is not None:
-            self.editor.set_cursor(*hit)
+        else:
+            hit = self.slot_at(pt)
+            if hit is not None:
+                self.editor.set_cursor(*hit)
+        if (self.editor.in_unit, self.editor.row) != before:
+            # entering/leaving the unit box changes what is laid out (the
+            # empty box becomes an editable row): without this the cursor's
+            # row is not on screen and no cursor is drawn
+            self.relayout()
 
     def cursor_scene_pos(self) -> QPointF:
         info = self._row_info(self.editor.row) if self.region.kind == "math" else None
