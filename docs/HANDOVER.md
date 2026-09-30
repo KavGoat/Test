@@ -1,4 +1,10 @@
-# MarkForge — start here
+# CalcForge (formerly MarkForge) — start here
+
+## 2026-09-30: CalcForge
+
+MarkForge and WebSMath are being combined into **CalcForge**. Calculations
+are a wanted feature again: see "Calculations are back" in §1. The plan is
+`docs/CALCFORGE_PLAN.md`.
 
 ## Latest review: 2026-09-29
 
@@ -43,8 +49,7 @@ B8, C2, C4, C5, the Markups list) with the follow-ups; evidence in
 At the user's request every earlier entry in `tasklist.md`, `tasklist.xlsx`,
 `COMPLETED_TASKS.md` and `UNADDRESSED_TASKS.md` was deleted; the registers
 restart with the 2026-09-27 report. The "nothing is ever deleted" rule in §4
-still applies from here on. Work is on branch
-`claude/markforge-mupdf-pdf-handling-vpyj1t`.
+still applies from here on. (Branch: see the top of this file.)
 Evidence for this round is in `COMPLETED_TASKS.md`; open follow-up (the Revit
 red cross needs the user's file) is in `UNADDRESSED_TASKS.md`.
 
@@ -143,9 +148,10 @@ the product context, code map, validation approach and task-tracking rules
 needed to work safely without re-reading earlier chat.
 
 - Repository: `KavGoat/Test`
-- Branch: **`claude/markforge-mupdf-pdf-handling-vpyj1t`** — all work goes
-  here, whatever branch a session starts on. Never push to another branch
-  without being asked.
+- Branch: **`claude/admiring-archimedes-i371m1`** (CalcForge) — all work goes
+  here. The MarkForge branch `claude/markforge-mupdf-pdf-handling-vpyj1t` and
+  the WebSMath branch `claude/zealous-clarke-8yiu03` are read-only sources:
+  never push to them. Never push to another branch without being asked.
 - The living task list: **`docs/tasklist.md`** — read it, work from it, keep it
   updated. `docs/tasklist.xlsx` is the user's companion status sheet: column A
   is blank for open work and `1` for user-confirmed completion. Rules for both
@@ -167,12 +173,17 @@ markups are appended after them as real PDF annotations. What a PDF has no word
 for rides along inside the same file as an embedded record. Everything about
 that is in §2 under `pdf/` and `io/`.
 
-**It used to be more than this.** Until 2026-09-07 it also did unit-aware
-calculations, spreadsheets and plots, and the file format was `.cfx`. All of
-that has been withdrawn by the user, along with markup review states, replies
-and layers. If you find a reference to any of it, it is a leftover — take it
-out. `docs/tasklist.md` has a **Withdrawn** section recording what went and
-which instruction withdrew it; do not build any of it back.
+**Calculations are back — standing instruction, 2026-09-30.** Until
+2026-09-07 this app did unit-aware calculations, and they were then withdrawn
+(with spreadsheets, the `.cfx` format, review states, replies and layers).
+**On 2026-09-30 the user overrode that withdrawal on purpose:** calculations
+return as WebSMath, the SMath Studio replica from branch
+`claude/zealous-clarke-8yiu03`, and the app becomes **CalcForge**. Equations,
+plots, matrices, program blocks, calculation blocks and Calculation text are
+wanted features. Never remove them and never treat them as leftovers.
+Spreadsheets, `.cfx`, review states, replies and layers stay withdrawn.
+`docs/tasklist.md` records this at the top and in its **Withdrawn** section,
+and `docs/CALCFORGE_PLAN.md` is the build plan.
 
 ### Who the user is, and how they work
 
@@ -410,7 +421,7 @@ in a state somebody else could pick up from, because they may have to.
 
 - Commit and push **continuously** — every completed piece of work, not at the
   end. The container is ephemeral; unpushed work is lost work.
-- `git push -u origin claude/markforge-mupdf-pdf-handling-vpyj1t`
+- `git push -u origin claude/admiring-archimedes-i371m1`
 - Commit messages: a short title, then prose explaining **what was wrong and
   why the new behaviour is right**. The user reads them. Look at the recent log
   for the register.

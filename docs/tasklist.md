@@ -3,6 +3,27 @@
 Previous entries were deleted at the user's request on 2026-09-27; the register
 restarts with the report below. Completion status is user-owned.
 
+## Standing instruction: calculations are back (2026-09-30)
+
+Calculations were withdrawn on 2026-09-07, and the handover used to say never
+to build them back. **The user overrode that on 2026-09-30, on purpose:**
+calculations return as WebSMath (the SMath Studio replica), and the app becomes
+**CalcForge**. Calculations, equations, plots, matrices, program blocks,
+calculation blocks and Calculation text are wanted features. No future session
+may remove them or treat them as leftovers. Work is on branch
+`claude/admiring-archimedes-i371m1`; the MarkForge branch
+(`claude/markforge-mupdf-pdf-handling-vpyj1t`) and the WebSMath branch
+(`claude/zealous-clarke-8yiu03`) are read-only sources.
+
+## Withdrawn
+
+| Withdrawn | Instruction that withdrew it |
+| --- | --- |
+| ~~`.sm` files: opening, importing and saving SMath worksheets in CalcForge~~ | 2026-09-30: "No `.sm` files at all. Old `.sm` files are opened in the standalone WebSMath app." |
+| ~~SMath's Ctrl+G (Greek) and the units-list key (Ctrl+W)~~ | 2026-09-30: "aren't needed". |
+| ~~Pint as MarkForge's unit system~~ | 2026-09-30: "One unit system: SMath's … Pint is removed." |
+| ~~Calculations withdrawn (2026-09-07)~~ | 2026-09-30: overridden; see the standing instruction above. |
+
 ## Requests reported 2026-09-27
 
 | Complete | Task |
@@ -76,3 +97,46 @@ restarts with the report below. Completion status is user-owned.
 |  | The add-leader icons are still wrong; fix them. |
 |  | Adding a curve or control point with Shift+click or Ctrl+click must not happen when the item is dragged afterwards; that is a Shift-drag or Ctrl-drag instead. |
 |  | Format painter must behave exactly like Bluebeam's. |
+
+## Requests reported 2026-09-30 — CalcForge (MarkForge + WebSMath)
+
+| Complete | Task |
+| --- | --- |
+|  | Build CalcForge: MarkForge (PDF markup) combined with WebSMath (SMath Studio replica, branch `claude/zealous-clarke-8yiu03`, folder `websmath/`, commit 8b340fa). New branch from the MarkForge branch; never push to the MarkForge or WebSMath branches. |
+|  | Numbers and units must never be wrong: WebSMath's 766 tests, proof tests and mutation check (14 of 14 planted bugs caught) and all MarkForge tests pass in CalcForge. WebSMath's `engine` moves over unchanged except where a decision says otherwise. |
+|  | Look: MarkForge's window (toolbars, panels, dark theme, icons, one- or two-word labels with tooltips). Equations look exactly like SMath (fonts, blue units, red errors); the page stays white in dark mode. |
+|  | One undo history for everything: Ctrl+Z undoes the last action, equation edit or markup move. |
+|  | Keep WebSMath's fast recalculation: editing one equation recalculates only what depends on it. |
+|  | Validate every interactive change through the real CalcForge window. |
+|  | 1. One unit system, SMath's. Scales, calibration and measurements move from Pint to WebSMath's units engine; Pint removed. All measurement and scale tests still pass; unit names and formatting match everywhere. |
+|  | 2. No `.sm` files at all: CalcForge doesn't open, import or save them. |
+|  | 3. The document is a PDF. On every save, recalculate, then flatten calc content (equations, plots, matrices, program blocks, calculation blocks) into the page as vector PDF content: embedded-font selectable text, vector fraction bars, roots, brackets and plots, SMath's colours. The flattened layer is its own content stream tagged as CalcForge's, drawn over the untouched page content. The editable source is saved in the embedded record beside MarkForge's. On reopen, remove the tagged layer and rebuild live equations from the record. Tagged layer changed elsewhere: warn, the record wins. Pages deleted or reordered elsewhere: equations follow their pages; equations on deleted pages are removed with a warning naming the variables that became undefined. Record missing: open as a plain PDF and warn the calc can't be edited. Other editors can't move, edit or delete calc content and it never shows in their Markups list; markups stay normal annotations. |
+|  | 4. Saving is clean unless signed: every save writes a fresh, compact file so the file never grows. A digitally signed PDF is appended to instead (incremental save) so the signature stays valid, with the reason in the status bar, and the calc layer is still swapped correctly. Test that repeated saves don't grow the file. |
+|  | 5. Two modes, Calc and Markup, shown in the status bar. Calc mode behaves like SMath: typing on empty page space starts an equation, `"` starts Calculation text, and every MarkForge single-key or letter shortcut is off (tool keys, 1–9 My Tools keys); new markups are placed only from toolbar, menu or panel buttons. Markup mode is MarkForge as today: `"` makes a normal text box, a new equation starts only with the start key (`'` by default) at the pointer, plots and matrices are placed by clicking. Everything on the page stays editable in both modes. Inside an equation `'` still means "unit follows". Mode toggle, equation start key and both `"` actions are ordinary bindings in the shortcut manager, with clash checking. |
+|  | 6. Keyboard clashes: inside an equation or text SMath's key wins; elsewhere MarkForge's (Ctrl+0, Ctrl+1, Ctrl+E, Ctrl+Shift+D, Ctrl+A). Ctrl+B, I and U are MarkForge's text formatting keys and extend to equations. Add an SMath section to the shortcut manager listing every calculation shortcut. Report any other clash. |
+|  | 7. File > New gives one blank A4 portrait page in Markup mode. |
+|  | 8. Equations can go on any page, including drawing pages (e.g. a check calc on an A1 sheet). |
+|  | 9. Variables reach the whole document. Evaluation runs like SMath: page 1 top-left to bottom-right, then page 2, and so on; reordering pages changes the order. |
+|  | 10. Calculation blocks replace SMath areas. Not collapsible. Right-click › "Self-contained" (off by default): reads values from above, its own definitions stay inside it. |
+|  | 11. MarkForge's fixed pages. Placing or pushing an equation past the last page adds a blank page automatically; equations never straddle two pages. |
+|  | 12. One grid, matching SMath's dotted grid and spacing. Equations, Calculation text and markups snap to it. |
+|  | 13. Clicking empty space: Calc mode places SMath's red + cursor; Markup mode behaves as MarkForge. Clicking an existing item selects or edits it in both modes. |
+|  | 14. Equations and markups select together, group (Ctrl+G), align and snap to each other; grouping never changes calculation order. Box select uses MarkForge's rule (drag right: wholly inside; drag left: touching). Arrow keys nudge a selected equation when not typing in it, and move the text cursor when typing. |
+|  | 15. Rotating a page turns equations with it, like callouts: horizontal while edited, turned back afterwards. |
+|  | 16. A snapshot copies equations as line work. Raise recolour, redaction or flatten if equations need special handling. |
+|  | 17. Lock (Ctrl+L) works on equations. Hide and leave-out-of-print don't apply to equations. |
+|  | 18. Keep MarkForge's toolbars and add a condensed "Calculation" section: calculate (F9), auto-calc, insert plot, insert matrix, Calculation text, calculation block, program blocks (if, for, while, line). Result format, font, size and colours are not on the toolbar: defaults in Preferences, per item by right-click. |
+|  | 19. SMath's Arithmetic, Matrices, Functions, Programming, Graph and Units panels become one "Maths" panel on the side rail, pinnable and floatable. |
+|  | 20. Equation settings (decimals, format, font, colour, disable evaluation, units) are in SMath's right-click menu and in MarkForge's Properties panel. |
+|  | 21. Variables panel on the rail: every variable with value, unit, page and any error; click a row to jump to it. The Markups list stays markups-only. |
+|  | 22. Calculation text replaces SMath text regions: a MarkForge text box underneath but its own type with its own default style (plain by default), saved as an annotation (not flattened), keeps border and fill, snaps to the calc grid, can go in tool sets as a copy or as a tool (properties mode), no callout leader, no effect on calculations. |
+|  | 23. Tool sets and My Tools can hold equations and calculation blocks. Placing one shows a preview, then behaves exactly as if typed there (uses variables above; each line shows its own error). Properties mode stays for single markups and Calculation text only. |
+|  | 24. A measure markup can be given a variable name in its properties; its value and unit feed the calcs live, evaluated at its position on the page. |
+|  | 25. The Search panel finds variable names and text in equations; Calculation text gets spell checking. |
+|  | 26. Copied equations paste into other programs as a picture plus plain text (e.g. "M = 45.2 kN·m"); inside CalcForge they paste as live equations. |
+|  | 27. Header and footer: MarkForge's six slots, logo and page ranges, extended with SMath's extra fields. |
+|  | 28. One merged File properties dialog: title, author, subject, project (MarkForge) and company, description, keywords, revision (SMath). Title, author, subject and keywords also go to the PDF's standard properties; the rest stay in CalcForge and can be header/footer fields. |
+|  | 29. Rename everything to CalcForge: window title, README, code folder (`markforge/` → `calcforge/`), launch command, settings name. |
+|  | 30. On first start, copy the MarkForge settings (shortcuts, tool sets, My Tools, toolbar layout, dark mode, markup defaults) into CalcForge once. |
+|  | Later phase (plan only, don't build yet): live values in Calculation text, e.g. "The design moment is M = 45.2 kN·m", updating when the calc changes. |
+|  | How to work: research both codebases; find every further clash and ask about each (multiple choice, up to four at a time, recommendation first, no guessing); write a phased plan to `docs/`; build one phase at a time, running all tests and the mutation check before every push and checking each change in the real window; test saved PDFs by reading text back, rendering and comparing with the screen, and by opening them as another reader would; log every request here; remove withdrawn things completely; commit with clear messages, push only to the CalcForge branch, no PR unless asked; after each phase report what changed, what was tested, and what behaves differently from SMath or Bluebeam. |
