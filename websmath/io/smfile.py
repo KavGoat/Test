@@ -266,6 +266,12 @@ def _from_root(root) -> Worksheet:
         for child in meta:
             if child.text:
                 ws.metadata[_tag(child)] = child.text
+    ident = root.find(f"{{{NS}}}settings/{{{NS}}}identity")
+    if ident is not None:
+        for key in ("id", "revision"):
+            el = ident.find(f"{{{NS}}}{key}")
+            if el is not None and el.text:
+                ws.metadata["_" + key] = el.text.strip()
     calc = root.find(f"{{{NS}}}settings/{{{NS}}}calculation")
     if calc is not None:
         p = calc.find(f"{{{NS}}}precision")
@@ -475,6 +481,14 @@ def _load_page_model(ws, root) -> None:
 
 
 def save_sm(ws: Worksheet, path) -> None:
+    import uuid
+
+    # as SMath Studio: a worksheet gets an id once, and each save is a new revision
+    ws.metadata.setdefault("_id", str(uuid.uuid4()))
+    try:
+        ws.metadata["_revision"] = str(int(ws.metadata.get("_revision", "0")) + 1)
+    except ValueError:
+        ws.metadata["_revision"] = "1"
     with open(path, "wb") as fh:
         fh.write(dumps(ws).encode("utf-8"))
 
@@ -487,7 +501,11 @@ def dumps(ws: Worksheet, calculate: bool = True) -> str:
     ET.register_namespace("", NS)
     root = ET.Element(f"{{{NS}}}worksheet")
     settings = ET.SubElement(root, f"{{{NS}}}settings", {"ppi": "96"})
-    if ws.metadata:
+    if ws.metadata.get("_id"):
+        ident = ET.SubElement(settings, f"{{{NS}}}identity")
+        ET.SubElement(ident, f"{{{NS}}}id").text = ws.metadata["_id"]
+        ET.SubElement(ident, f"{{{NS}}}revision").text = ws.metadata.get("_revision", "1")
+    if any(v for k, v in ws.metadata.items() if not k.startswith("_")):
         meta = ET.SubElement(settings, f"{{{NS}}}metadata", {"lang": "eng"})
         for key in ("title", "author", "description", "company", "keywords"):
             if ws.metadata.get(key):

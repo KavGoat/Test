@@ -107,6 +107,23 @@ class PageGeometry:
                    page.margin_t / s, page.margin_b / s, PAGE_GAP, s)
 
 
+def background_rect(target: QRectF, img, mode: str) -> QRectF:
+    """Where a background image goes in `target`: Stretch fills it, Fit keeps
+    the proportions inside it, Fill keeps them and covers it (clipped),
+    Original is the image's own size, centred."""
+    iw, ih = max(1, img.width()), max(1, img.height())
+    if mode == "stretch":
+        return QRectF(target)
+    if mode in ("fit", "fill"):
+        k = (min if mode == "fit" else max)(target.width() / iw, target.height() / ih)
+        w, h = iw * k, ih * k
+    else:
+        w, h = iw, ih
+    r = QRectF(0, 0, w, h)
+    r.moveCenter(target.center())
+    return r
+
+
 class WorksheetScene(QGraphicsScene):
     def __init__(self, worksheet: Worksheet, parent=None):
         super().__init__(parent)
@@ -121,8 +138,20 @@ class WorksheetScene(QGraphicsScene):
         self.setSceneRect(0, 0, PAGE_W + 40, PAGE_H * 3)
 
     # -- worksheet <-> scene coordinates ----------------------------------------------
+    layer: Optional[str] = None  # "header"/"footer" while that layer is edited
+
+    def layer_origin(self, kind: str, page: int = 0) -> QPointF:
+        """Top-left of a header (page top, left margin) or footer (bottom
+        margin) layer on a page, in scene coordinates."""
+        g = self.geo
+        top = page * g.STEP
+        return QPointF(g.ML, top if kind == "header" else top + g.H - g.MB)
+
     def to_scene(self, x: float, y: float) -> QPointF:
         """Where worksheet point (x, y) is drawn."""
+        if self.layer:
+            o = self.layer_origin(self.layer)
+            return QPointF(o.x() + x, o.y() + y)
         if self.page_mode != "pages":
             return QPointF(x, y)
         g = self.geo
@@ -132,6 +161,9 @@ class WorksheetScene(QGraphicsScene):
     def to_sheet(self, pt: QPointF) -> QPointF:
         """The worksheet point under scene point pt (margins and gaps belong
         to the nearest printable area)."""
+        if self.layer:
+            o = self.layer_origin(self.layer)
+            return QPointF(pt.x() - o.x(), pt.y() - o.y())
         if self.page_mode != "pages":
             return QPointF(pt)
         g = self.geo
@@ -192,9 +224,14 @@ class WorksheetScene(QGraphicsScene):
                 p.drawRect(area.adjusted(-0.5, -0.5, 0.5, 0.5))
             # the page background (a frame, a letterhead) lies over the grid
             self._paint_background(p, page, area)
-            self._paint_layer(p, self.worksheet.page.header, QPointF(page.left() + g.ML, page.top()), k, count)
-            self._paint_layer(p, self.worksheet.page.footer, QPointF(page.left() + g.ML, page.bottom() - g.MB),
-                              k, count)
+            setup = self.worksheet.page
+            for kind in ("header", "footer"):
+                if self.layer == kind and k == 1:
+                    continue  # being edited: its regions are on the page as items
+                self._paint_layer(p, getattr(setup, kind), self.layer_origin(kind, k - 1), k, count)
+            if not setup.header and not setup.footer:
+                # SMath's Page Setup header/footer lines (files without header/footer layers)
+                self._paint_page_text(p, page, setup, k, count)
             if not self.printing:
                 p.setPen(QPen(PAGE_BORDER, 1))
                 p.drawRect(page.adjusted(-0.5, -0.5, 0.5, 0.5))
@@ -218,12 +255,38 @@ class WorksheetScene(QGraphicsScene):
         if img.isNull():
             return
         target = page if setup.background_full_page else area
-        if setup.background_size == "stretch":
-            p.drawImage(target, img)
-        else:  # centred at its own size
-            r = QRectF(0, 0, img.width(), img.height())
-            r.moveCenter(target.center())
-            p.drawImage(r, img)
+        p.save()
+        p.setClipRect(target)
+        p.drawImage(background_rect(target, img, setup.background_size), img)
+        p.restore()
+
+    def _paint_page_text(self, p: QPainter, page: QRectF, setup, k: int, count: int) -> None:
+        import re as _re
+
+        from PySide6.QtGui import QFont, QFontMetricsF
+
+        from ..page import field_text
+        from .region_item import TEXT_FAMILIES
+        from .layout import _family
+
+        g = self.geo
+        for kind in ("header", "footer"):
+            text = getattr(setup, f"{kind}_text")
+            if not text:
+                continue
+            attrs = getattr(setup, f"{kind}_attrs") or {}
+            text = _re.sub(r"&\[([A-Z]+)(?:\[([^\]]*)\])?\]", lambda m: field_text(
+                "\\[" + m.group(1) + (f"[{m.group(2)}]" if m.group(2) else "") + "]\\", self.worksheet.metadata,
+                k, count, getattr(self.worksheet, "filename", "")), text)
+            f = QFont(_family(TEXT_FAMILIES))
+            f.setPointSizeF(8)
+            m = QFontMetricsF(f)
+            p.setFont(f)
+            p.setPen(QColor(attrs.get("color", "#a9a9a9")))
+            band = QRectF(page.left() + g.ML, page.top(), g.CW, g.MT) if kind == "header" else \
+                QRectF(page.left() + g.ML, page.bottom() - g.MB, g.CW, g.MB)
+            align = {"Left": Qt.AlignLeft, "Right": Qt.AlignRight}.get(attrs.get("alignment", "Center"), Qt.AlignHCenter)
+            p.drawText(band, align | Qt.AlignVCenter, text)
 
     def _paint_layer(self, p: QPainter, regions: list, origin: QPointF, page: int, count: int) -> None:
         """The header (or footer) regions of one page: pictures, text, and
@@ -261,7 +324,8 @@ class WorksheetScene(QGraphicsScene):
             p.setFont(f)
             p.setPen(QColor(r.color or "#000000"))
             for i, line in enumerate(text.split("\n")):
-                p.drawText(QPointF(x + PAD_X, y + PAD_TOP + m.ascent() + i * m.lineSpacing()), line)
+                p.drawText(QPointF(x + PAD_X + (1 if r.field_code else 0), y + PAD_TOP + m.ascent()
+                                   + i * m.lineSpacing()), line)
 
     _grid_brush = None
 
@@ -297,6 +361,28 @@ class WorksheetScene(QGraphicsScene):
             p.setPen(pen)
             p.drawRect(self.rubber.adjusted(0.5, 0.5, -0.5, -0.5))
             p.restore()
+        if self.layer:
+            # the edited layer's boundary and its tag, as SMath Studio
+            g = self.geo
+            y = g.MT if self.layer == "header" else g.H - g.MB
+            pen = QPen(QColor("#808080"), 1, Qt.DashLine)
+            pen.setCosmetic(True)
+            p.setPen(pen)
+            p.drawLine(QPointF(0, y + 0.5), QPointF(g.W, y + 0.5))
+            from PySide6.QtGui import QFont, QFontMetricsF
+
+            f = QFont()
+            f.setPixelSize(11)
+            fm = QFontMetricsF(f)
+            label = "Header" if self.layer == "header" else "Footer"
+            w, h = fm.horizontalAdvance(label) + 12, fm.height() + 6
+            tag = QRectF(g.W - g.MR - w, y + 3 if self.layer == "header" else y - h - 3, w, h)
+            p.fillRect(tag, Qt.white)
+            p.setPen(QPen(QColor("#808080"), 1))
+            p.drawRect(tag.adjusted(0.5, 0.5, -0.5, -0.5))
+            p.setFont(f)
+            p.setPen(Qt.black)
+            p.drawText(tag, Qt.AlignCenter, label)
         view = self.views()[0] if self.views() else None
         if view is not None and getattr(view, "focused_item", None) is not None:
             return
@@ -541,6 +627,8 @@ class WorksheetView(QGraphicsView):
         # the content's extent: a full scan only when regions came or went,
         # otherwise the region being edited can only push it further out
         # (in worksheet coordinates)
+        if self.scene_.layer:
+            return  # the page layout belongs to the content, not the edited layer
         n = len(self.items)
 
         def extent(it):
@@ -618,8 +706,8 @@ class WorksheetView(QGraphicsView):
 
     # -- focus -------------------------------------------------------------------------
     def focus_item(self, item: Optional[RegionItem]) -> None:
-        if item is not None and item.region.special == "picture":
-            # a picture has nothing to type into: it is selected instead
+        if item is not None and (item.region.special == "picture" or item.region.field_code):
+            # a picture or a field has nothing to type into: it is selected instead
             self.focus_item(None)
             self.clear_selection()
             item.selected_region = True
@@ -875,8 +963,125 @@ class WorksheetView(QGraphicsView):
 
     def mouseDoubleClickEvent(self, e) -> None:
         # the automatic unit of a result is SMath's own and cannot be edited;
-        # only the desired-unit box can (a single click puts the cursor in it)
-        return
+        # only the desired-unit box can (a single click puts the cursor in it).
+        # A double-click in a page's top or bottom margin edits the header or
+        # footer (SMath Studio); one on the page body goes back to the content.
+        if e is None or self.scene_.page_mode != "pages":
+            return
+        pt = self.mapToScene(e.position().toPoint())
+        g = self.scene_.geo
+        local = pt.y() - int(pt.y() // g.STEP) * g.STEP
+        zone = "header" if local < g.MT else ("footer" if g.H - g.MB < local <= g.H else None)
+        if self.scene_.layer and zone != self.scene_.layer:
+            self.leave_layer()
+        elif zone and not self.scene_.layer and self._item_at(pt) is None:
+            self.edit_layer(zone)
+
+    # -- header / footer layers (Insert > Header and Footer) ----------------------------------
+    layer_changed = Signal(object)
+
+    def edit_layer(self, kind: str) -> None:
+        """Edit the header or footer: its regions come onto the first page
+        as ordinary regions (typed, moved, deleted as usual) and the content
+        is dimmed until the layer is left."""
+        if self.scene_.layer == kind:
+            return
+        self.leave_layer()
+        if self.scene_.page_mode != "pages":
+            self.set_page_mode("pages")
+        self.focus_item(None)
+        self.clear_selection()
+        content = self.worksheet
+        layer = Worksheet()
+        layer.regions = getattr(content.page, kind)
+        layer.metadata = content.metadata
+        layer.page = content.page
+        for r in layer.regions:
+            r.editor.is_defined = lambda name, nargs=None, reg=r: layer.is_defined_before(reg, name, nargs)
+        self._content = (content, self.items, self.scene_.cross)
+        for it in self.items.values():
+            it.setOpacity(0.35)
+            it.setAcceptedMouseButtons(Qt.NoButton)
+        self.worksheet = layer
+        self.items = {}
+        self.scene_.layer = kind
+        self.scene_.cross = QPointF(18, 18)
+        for r in layer.regions:
+            self._add_item(r)
+        self.recalculate()
+        self.scene_.update()
+        o = self.scene_.layer_origin(kind)
+        self.ensureVisible(QRectF(o.x(), o.y(), 10, 10), 20, 60)
+        self.layer_changed.emit(kind)
+
+    def leave_layer(self) -> None:
+        if not self.scene_.layer:
+            return
+        self.focus_item(None)
+        self.clear_selection()
+        for it in self.items.values():
+            self.scene_.removeItem(it)
+        content, items, cross = self._content
+        self.worksheet, self.items = content, items
+        self.scene_.layer = None
+        self.scene_.cross = cross
+        for it in self.items.values():
+            it.setOpacity(1.0)
+            it.setAcceptedMouseButtons(Qt.AllButtons)
+        self.modified.emit()
+        self._grow_scene()
+        self.scene_.update()
+        self.layer_changed.emit(None)
+
+    def refresh_fields(self) -> None:
+        """Redraw what shows metadata (fields, header/footer) after File > Properties."""
+        for it in self.items.values():
+            if it.region.field_code:
+                it.relayout()
+        self.scene_.update()
+
+    def page_setup_changed(self) -> None:
+        """Paper, margins or background changed: pages and positions follow."""
+        self.scene_.geo = PageGeometry()  # forces a fresh layout
+        self._extent_n = -1
+        self._grow_scene()
+        for it in self.items.values():
+            self.place(it)
+        self.scene_.update()
+
+    def insert_picture(self, data: bytes, fmt: str = "png") -> None:
+        """Insert > Picture > From file: a picture region at the red cross,
+        at the image's own size (at most the printable width)."""
+        from PySide6.QtGui import QImage
+
+        img = QImage()
+        img.loadFromData(data)
+        if img.isNull():
+            return
+        c = self.scene_.cross
+        self.focus_item(None)
+        r = self.worksheet.add_region(snap(c.x()), snap(c.y()))
+        r.special = "picture"
+        r.image, r.image_format = data, ("jpg" if fmt in ("jpg", "jpeg") else fmt)
+        k = min(1.0, self.scene_.geo.CW / max(1, img.width()))
+        r.pic_w, r.pic_h = round(img.width() * k), round(img.height() * k)
+        self._add_item(r)
+        self.scene_.cross = QPointF(c.x(), snap(c.y() + r.pic_h + GRID))
+        self.modified.emit()
+        self._grow_scene()
+
+    def insert_field(self, code: str) -> None:
+        """Insert > Field: a field region at the red cross (header, footer
+        or content)."""
+        c = self.scene_.cross
+        self.focus_item(None)
+        r = self.worksheet.add_region(snap(c.x()), snap(c.y()))
+        r.field_code = code
+        r.font_size = getattr(self, "default_font_size", 10.0)
+        self._add_item(r)
+        self.scene_.cross = QPointF(c.x(), c.y() + 2 * GRID)
+        self.modified.emit()
+        self.scene_.update()
 
     # -- keyboard ----------------------------------------------------------------------
     def focusNextPrevChild(self, next: bool) -> bool:
@@ -924,6 +1129,9 @@ class WorksheetView(QGraphicsView):
             self._tab(backwards=key == Qt.Key_Backtab)
             return
         if key == Qt.Key_Escape:
+            if self.scene_.layer and self.focused_item is None and not self.suggestions.isVisible():
+                self.leave_layer()  # Esc leaves header/footer editing
+                return
             self.hide_suggestions()
             return
         if named:
@@ -1623,6 +1831,7 @@ class WorksheetView(QGraphicsView):
         from PySide6.QtCore import QRectF
         from PySide6.QtGui import QPainter
 
+        self.leave_layer()
         self.focus_item(None)
         self.clear_selection()
         grid = self.scene_.show_grid

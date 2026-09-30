@@ -172,6 +172,22 @@ Correctness proofs (numbers and units):
   * **Rich text** (bold/underlined runs, line breaks, fixed-width wrapping)
     loads and saves in SMath's `<content><p><span style>` form.
   * `x := expression =` defines x and shows its value.
+* **SMath's page dialogs:**
+  * File > Page Setup: paper size, orientation, margins in millimetres, and
+    header/footer text lines. The text lines print only in files without
+    header/footer layers, as observed.
+  * File > Properties: title, author, company, keywords and description (the
+    fields' values), plus file info and read-only.
+  * Insert > Field: SMath's field list, with Command, Format (page offset,
+    zero padding, date formats) and Example.
+  * Insert > Background: no background or an image; Fit, Stretch, Fill or
+    Original; full page; print background.
+  * Insert > Header and Footer > Header / Footer, or a double-click in a
+    page's top or bottom margin, edits that layer on the page. The content is
+    dimmed and a Header/Footer tag is shown. Esc or a double-click on the
+    page body leaves.
+  * Insert > Picture > From file.
+  * The worksheet id is kept, and each save increases its revision.
 * **Speed:** definitions are indexed by position, and leaving a region
   re-evaluates only what depends on it. A 3000-region worksheet types in about
   7 ms per key, and runaway loops are interrupted after 10 s.

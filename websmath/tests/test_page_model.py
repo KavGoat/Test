@@ -196,3 +196,109 @@ def test_pictures_are_selected_not_typed_into(app):
     pic = next(it for it in v.items.values() if it.region.special == "picture")
     v.focus_item(pic)
     assert v.focused_item is None and pic in v.selected
+
+
+# -- SMath's page dialogs and header/footer editing ---------------------------------------------
+def test_field_formats_as_smaths_insert_field_dialog():
+    from websmath.page import make_field, number_field
+
+    # observed in SMath's Insert Field dialog (Number of pages, 1 page): Format -> Example
+    assert [number_field(1, f) for f in ("-1", "22", "-5", "0001")] == ["0", "23", "-4", "0002"]
+    assert make_field("DATE", "DD.MM.YYYY") == "\\[DATE[DD\\002E\\MM\\002E\\YYYY]]\\"
+    assert make_field("PAGENUM", "0") == "\\[PAGENUM[0]]\\" and make_field("TITLE") == "\\[TITLE]\\"
+
+
+def test_identity_is_kept_and_each_save_is_a_revision(tmp_path):
+    from websmath.io.smfile import load_sm, save_sm
+
+    ws = loads(_sheet())
+    assert "_id" not in ws.metadata
+    save_sm(ws, tmp_path / "a.sm")
+    first = load_sm(tmp_path / "a.sm").metadata
+    assert first["_id"] and first["_revision"] == "1"
+    ws2 = load_sm(tmp_path / "a.sm")
+    save_sm(ws2, tmp_path / "a.sm")
+    again = load_sm(tmp_path / "a.sm").metadata
+    assert again["_id"] == first["_id"] and again["_revision"] == "2"
+
+
+def test_edit_header_layer_insert_field_and_leave(app):
+    from websmath.ui.worksheet_view import WorksheetView
+
+    ws = loads(_sheet())
+    v = WorksheetView(ws)
+    content_items = dict(v.items)
+    v.edit_layer("header")
+    assert v.scene_.layer == "header" and v.worksheet is not ws
+    assert {it.region.id for it in v.items.values()} == {r.id for r in ws.page.header}
+    assert all(it.opacity() < 1 for it in content_items.values())
+    v.scene_.cross.setX(300)
+    v.insert_field("\\[TITLE]\\")
+    assert ws.page.header[-1].field_code == "\\[TITLE]\\"  # added to the header layer, not the content
+    assert v.items[ws.page.header[-1].id].field_value() == "Issue 1"
+    v.leave_layer()
+    assert v.worksheet is ws and v.items == content_items and v.scene_.layer is None
+    assert all(it.opacity() == 1 for it in content_items.values())
+    assert "\\[TITLE]\\" in dumps(ws)
+
+
+def test_page_text_only_without_layers(app):
+    from websmath.ui.worksheet_view import WorksheetView
+
+    ws = loads(_sheet())
+    ws.page.footer_text = "&[PAGENUM] / &[COUNT]"
+    v = WorksheetView(ws)
+    calls = []
+    v.scene_._paint_page_text = lambda *a: calls.append(a)
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QImage, QPainter
+
+    img = QImage(200, 200, QImage.Format_RGB32)
+    p = QPainter(img)
+    v.scene_.drawBackground(p, QRectF(0, 0, 800, 800))
+    assert not calls  # the file has a header layer: SMath prints the layers, not these lines
+    ws.page.header.clear()
+    v.scene_.drawBackground(p, QRectF(0, 0, 800, 800))
+    p.end()
+    assert calls
+
+
+def test_background_sizes(app):
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QImage
+
+    from websmath.ui.worksheet_view import background_rect
+
+    img = QImage(100, 50, QImage.Format_RGB32)
+    t = QRectF(0, 0, 200, 200)
+    assert background_rect(t, img, "stretch") == t
+    assert background_rect(t, img, "fit") == QRectF(0, 50, 200, 100)
+    assert background_rect(t, img, "fill") == QRectF(-100, 0, 400, 200)
+    assert background_rect(t, img, "original") == QRectF(50, 75, 100, 50)
+
+
+def test_page_dialogs_apply(app, tmp_path):
+    from websmath.ui.page_dialogs import (BackgroundDialog, FilePropertiesDialog, InsertFieldDialog,
+                                          PageSetupDialog)
+
+    ws = loads(_sheet())
+    d = PageSetupDialog(ws.page)
+    assert d.top.text() == "29,72" and d.size.currentText() == "A4"
+    d.landscape.setChecked(True)
+    d.left.setText("20")
+    d.footer.setText("&[PAGENUM]")
+    d.apply()
+    assert ws.page.orientation == "Landscape" and ws.page.paper_w > ws.page.paper_h
+    assert abs(ws.page.margin_l - 20 * 96 / 25.4) < 1e-6 and ws.page.footer_text == "&[PAGENUM]"
+    p = FilePropertiesDialog(ws.metadata, None)
+    p.fields["company"].setText("WSP")
+    p.apply()
+    assert ws.metadata["company"] == "WSP"
+    f = InsertFieldDialog(ws.metadata, 8)
+    f.list.setCurrentRow(6)  # Current page index
+    f.format.setEditText("0001")
+    assert f.command.text() == "PAGENUM" and f.example.text() == "0002" and f.code() == "\\[PAGENUM[0001]]\\"
+    b = BackgroundDialog(ws.page)
+    b.none.setChecked(True)
+    b.apply()
+    assert ws.page.background == b""

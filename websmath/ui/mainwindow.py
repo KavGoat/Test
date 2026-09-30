@@ -167,6 +167,7 @@ class MainWindow(QMainWindow):
         v.pages_changed.connect(lambda cur, n, v=v: self._page_label(cur, n, v))
         v.zoom_changed.connect(lambda z, v=v: self._zoom_shown(z, v))
         v.checked.connect(lambda rep, v=v: self._check_shown(rep, v))
+        v.layer_changed.connect(lambda kind, v=v: self._layer_shown(kind, v))
         sub = self.mdi.addSubWindow(v)
         sub.setWindowIcon(icon("document"))
         sub.setAttribute(Qt.WA_DeleteOnClose)
@@ -256,6 +257,7 @@ class MainWindow(QMainWindow):
         self._act(exp, "PDF document...", self.export_pdf)
         f.addSeparator()
         self._act(f, "Print Preview", self.print_preview)
+        self._act(f, "Page Setup...", self.page_setup)
         self._act(f, "Print...", self.print_sheet, "Ctrl+P", icon_name="fileprint")
         f.addSeparator()
         self._act(f, "Properties...", self.properties)
@@ -304,6 +306,15 @@ class MainWindow(QMainWindow):
         self._act(i, "Function...", self._insert_function, "Ctrl+E", icon_name="funct")
         self._act(i, "Unit...", self._insert_unit, "Ctrl+W", icon_name="funnel1")
         self._act(i, "Constants...", self._show_constants, "Ctrl+K", icon_name="handbook")
+        self._act(i, "Field...", self.insert_field)
+        i.addSeparator()
+        self._act(i, "Background...", self.background)
+        hf = i.addMenu("Header and Footer")
+        self._header_act = self._act(hf, "Header", lambda on: self._layer("header", on), checkable=True)
+        self._footer_act = self._act(hf, "Footer", lambda on: self._layer("footer", on), checkable=True)
+        self._act(hf, "Make different", lambda: None, enabled=False)
+        pic = i.addMenu("Picture")
+        self._act(pic, "From file...", self.insert_picture)
         i.addSeparator()
         pl = i.addMenu("Plot")
         self._act(pl, "2D", self._insert_plot, "@")
@@ -785,6 +796,7 @@ class MainWindow(QMainWindow):
         else:
             v = self.new_page(ws)
         v.path = Path(fn)
+        ws.filename = str(Path(fn).resolve())
         v.dirty = False
         self._set_sub_title(v)
         self._remember(fn)
@@ -794,6 +806,8 @@ class MainWindow(QMainWindow):
         if v.path is None:
             self.save_as()
             return
+        v.leave_layer()
+        v.worksheet.filename = str(Path(v.path).resolve())
         save_sm(v.worksheet, v.path)
         v.dirty = False
         self._set_sub_title(v)
@@ -874,28 +888,65 @@ class MainWindow(QMainWindow):
             self.view.render_pages(QPdfWriter(fn))
 
     def properties(self) -> None:
-        from PySide6.QtWidgets import QLineEdit, QPlainTextEdit
+        """File > Properties: Summary (Title, Author, Company, Keywords,
+        Description) and File info - what the header fields show."""
+        from .page_dialogs import FilePropertiesDialog
 
-        meta = self.view.worksheet.metadata
-        d = QDialog(self)
-        d.setWindowTitle("Properties")
-        form = QFormLayout(d)
-        fields = {}
-        for key in ("title", "author", "company", "keywords"):
-            w = QLineEdit(meta.get(key, ""))
-            form.addRow(key.capitalize(), w)
-            fields[key] = w
-        desc = QPlainTextEdit(meta.get("description", ""))
-        form.addRow("Description", desc)
-        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        bb.accepted.connect(d.accept)
-        bb.rejected.connect(d.reject)
-        form.addRow(bb)
+        v = self.view
+        v.leave_layer()
+        d = FilePropertiesDialog(v.worksheet.metadata, v.path, self)
         if d.exec() == QDialog.Accepted:
-            for k, w in fields.items():
-                meta[k] = w.text()
-            meta["description"] = desc.toPlainText()
-            self._mark_modified(self.view)
+            d.apply()
+            self._mark_modified(v)
+            v.refresh_fields()
+
+    def page_setup(self) -> None:
+        from .page_dialogs import PageSetupDialog
+
+        v = self.view
+        v.leave_layer()
+        d = PageSetupDialog(v.worksheet.page, self)
+        if d.exec() == QDialog.Accepted:
+            d.apply()
+            self._mark_modified(v)
+            v.page_setup_changed()
+
+    def background(self) -> None:
+        from .page_dialogs import BackgroundDialog
+
+        v = self.view
+        d = BackgroundDialog(v.scene_.worksheet.page, self)
+        if d.exec() == QDialog.Accepted:
+            d.apply()
+            v.scene_._images.clear()
+            self._mark_modified(v)
+            v.page_setup_changed()
+
+    def insert_field(self) -> None:
+        from .page_dialogs import InsertFieldDialog
+
+        v = self.view
+        d = InsertFieldDialog(v.scene_.worksheet.metadata, v.scene_.page_count(),
+                              getattr(v.scene_.worksheet, "filename", ""), self.properties, self)
+        if d.exec() == QDialog.Accepted:
+            v.insert_field(d.code())
+
+    def insert_picture(self) -> None:
+        fn, _ = QFileDialog.getOpenFileName(self, "Select image", "", "Images (*.png *.jpg *.jpeg *.bmp *.gif)")
+        if fn:
+            self.view.insert_picture(Path(fn).read_bytes(), Path(fn).suffix.lstrip(".").lower() or "png")
+
+    def _layer(self, kind: str, on: bool) -> None:
+        v = self.view
+        if on:
+            v.edit_layer(kind)
+        else:
+            v.leave_layer()
+
+    def _layer_shown(self, kind, v) -> None:
+        if v is self.view:
+            self._header_act.setChecked(kind == "header")
+            self._footer_act.setChecked(kind == "footer")
 
     def _delete_selected(self) -> None:
         for it in list(self.view.selected):

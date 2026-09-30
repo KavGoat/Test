@@ -85,6 +85,9 @@ class RegionItem(QGraphicsObject):
             self._layout = None
             self.update()
             return
+        if self.region.field_code:
+            self._layout_field()
+            return
         if self.region.kind == "text":
             self._layout_text()
             return
@@ -290,6 +293,9 @@ class RegionItem(QGraphicsObject):
             p.fillRect(r, SELECTION)
             p.setPen(QPen(SELECTION_BORDER, 1))
             p.drawRect(r.adjusted(0.5, 0.5, -0.5, -0.5))
+        if self.region.field_code:
+            self._paint_field(p)
+            return
         if self.region.kind == "text":
             self._paint_text(p)
             return
@@ -341,6 +347,39 @@ class RegionItem(QGraphicsObject):
 
     def toggle_hit(self, pt: QPointF) -> bool:
         return self.region.special == "area" and pt.x() < 10 and pt.y() < 10
+
+    # -- fields (Insert > Field): \\[PAGENUM[0]]\\, \\[TITLE]\\ ... --------------------------------
+    def field_value(self) -> str:
+        from ..page import field_text
+
+        sc = self.scene()
+        page, count, fname = 1, 1, ""
+        if sc is not None and hasattr(sc, "geo"):
+            count = sc.page_count()
+            fname = getattr(sc.worksheet, "filename", "")
+            if not sc.layer and sc.page_mode == "pages":
+                page = int(self.region.y // sc.geo.CH) + 1
+        return field_text(self.region.field_code, self.worksheet.metadata, page, count, fname)
+
+    def _field_font(self) -> QFont:
+        from .layout import MONO_FAMILIES, _family
+
+        f = QFont(_family(MONO_FAMILIES))
+        f.setPointSizeF(self.region.font_size)
+        return f
+
+    def _layout_field(self) -> None:
+        m = QFontMetricsF(self._field_font())
+        text = self.field_value() or " "
+        self._size = (m.horizontalAdvance(text) + 2 * PAD_X + 2, max(MIN_H, m.height() + 2 * PAD_TOP))
+        self._layout = None
+        self.update()
+
+    def _paint_field(self, p: QPainter) -> None:
+        f = self._field_font()
+        p.setFont(f)
+        p.setPen(QColor(self.region.color))
+        p.drawText(QPointF(PAD_X + 1, PAD_TOP + QFontMetricsF(f).ascent()), self.field_value())
 
     # -- text regions: styled runs, wrapping --------------------------------------------
     def _run_font(self, st: Optional[dict]) -> QFont:
