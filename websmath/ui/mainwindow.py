@@ -1055,7 +1055,7 @@ class MainWindow(QMainWindow):
         item = v.new_region(v.scene_.cross.x(), v.scene_.cross.y(), text_region=True)
         v.focus_item(item)
 
-    def _insert_plot(self) -> None:
+    def _insert_plot(self, kind: str = "2d") -> None:
         v = self.view
         v.focus_item(None)
         item = v.new_plot(v.scene_.cross.x(), v.scene_.cross.y())

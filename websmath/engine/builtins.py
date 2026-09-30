@@ -1285,5 +1285,5 @@ SPECIAL = {
 }
 
 
-from . import extra_functions  # noqa: E402,F401  (plugin functions: eigenvals, fft, delta...)
+from . import extra_functions  # noqa: E402,F401  (symbolic: lim, expand, factor, solve)
 from . import files  # noqa: E402,F401  (importData, exportData.CSV)

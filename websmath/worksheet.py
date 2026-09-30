@@ -77,7 +77,7 @@ class Region:
     def key(self):
         return (self.y, self.x, self.id)
 
-    special: Optional[str] = None  # "separator", "area", "picture" or "plugin"
+    special: Optional[str] = None  # "separator", "area" or "picture"
     image: bytes = b""  # picture regions: the encoded image (PNG/JPEG)
     image_format: str = "png"
     pic_w: float = 0.0  # picture regions: size shown on the page
@@ -87,8 +87,6 @@ class Region:
     line_runs: list = field(default_factory=list)
     text_width: float = 0.0  # text regions with a fixed width wrap their lines
     symbolic_eval: bool = False  # "→" (symbolic evaluation) rather than "="
-    raw_xml: object = None  # "plugin" regions: the region's XML, saved back unchanged
-    plugin_name: str = ""
     field_code: str = ""  # header/footer math regions holding a field (\[TITLE]\ ...)
     area_height: float = 0.0  # an area's extent below its top line
     collapsed: bool = False

@@ -706,7 +706,7 @@ class WorksheetView(QGraphicsView):
 
     # -- focus -------------------------------------------------------------------------
     def focus_item(self, item: Optional[RegionItem]) -> None:
-        if item is not None and (item.region.special in ("picture", "plugin") or item.region.field_code):
+        if item is not None and (item.region.special == "picture" or item.region.field_code):
             # a picture or a field has nothing to type into: it is selected instead
             self.focus_item(None)
             self.clear_selection()
@@ -1377,6 +1377,22 @@ class WorksheetView(QGraphicsView):
         m.addAction("Delete", self.delete_selection).setShortcut("Del")
         m.addSeparator()
         m.addAction("Select all", self.select_all).setShortcut("Ctrl+A")
+        if item is not None and item.region.plot is not None:
+            st = item.region.plot
+            m.addSeparator()
+            m.addAction("Plot settings...", lambda: self.plot_settings(item))
+
+            def toggle(attr):
+                setattr(st, attr, not getattr(st, attr))
+                item._plot_cache = None
+                item.update()
+                self.modified.emit()
+
+            for title, attr in (("Grid", "grid"), ("Axes", "axes"), ("Graph by points", "points")):
+                a = m.addAction(title, lambda attr=attr: toggle(attr))
+                a.setCheckable(True)
+                a.setChecked(getattr(st, attr))
+            return m
         if item is None or item.region.kind != "math":
             return m
         r = item.region
@@ -1433,6 +1449,47 @@ class WorksheetView(QGraphicsView):
         check(rd, "Half to even", fmt.half_even, lambda: set_fmt(half_even=True))
         check(rd, "Away from zero", not fmt.half_even, lambda: set_fmt(half_even=False))
         return m
+
+    def plot_settings(self, item: RegionItem) -> None:
+        """The plot's shown ranges, grid, axes and lines/points."""
+        from PySide6.QtWidgets import QCheckBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QRadioButton
+
+        from ..plot import fit_ranges
+
+        st = item.region.plot
+        d = QDialog(self)
+        d.setWindowTitle("Plot settings")
+        form = QFormLayout(d)
+        (x0, x1), (y0, y1) = st.x_range(), st.y_range()
+        boxes = []
+        for label, v in (("x from", x0), ("x to", x1), ("y from", y0), ("y to", y1)):
+            b = QDoubleSpinBox()
+            b.setDecimals(4)
+            b.setRange(-1e9, 1e9)
+            b.setValue(v)
+            form.addRow(label + ":", b)
+            boxes.append(b)
+        grid, axes = QCheckBox("Grid"), QCheckBox("Axes")
+        grid.setChecked(st.grid)
+        axes.setChecked(st.axes)
+        lines, points = QRadioButton("Lines"), QRadioButton("Points")
+        (points if st.points else lines).setChecked(True)
+        for w in (grid, axes, lines, points):
+            form.addRow(w)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(d.accept)
+        bb.rejected.connect(d.reject)
+        form.addRow(bb)
+        if d.exec() != QDialog.Accepted:
+            return
+        try:
+            fit_ranges(st, *(b.value() for b in boxes))
+        except ValueError:
+            self.status.emit("The range is empty: 'to' must be larger than 'from'.")
+        st.grid, st.axes, st.points = grid.isChecked(), axes.isChecked(), points.isChecked()
+        item._plot_cache = None
+        item.update()
+        self.modified.emit()
 
     def show_context_menu(self, item: Optional[RegionItem], global_pos) -> None:
         self.hide_suggestions()

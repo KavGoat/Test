@@ -92,3 +92,43 @@ def test_smath_example_plot_loads():
     assert len(plots) == 1
     assert [r.text() for r in plots[0].plot_rows()] == ["f(x)", "fmc(x)"]
     assert plots[0].plot.ppu_x == pytest.approx(20.5, rel=0.01)
+
+
+def test_styled_points_matrix_as_smath():
+    """SMath's styled points: rows of (x, y, "marker or text", size px, "colour")."""
+    from websmath.engine.values import Matrix, Q, String
+    from websmath.plot import PlotState, marks
+
+    st = PlotState()
+    m = Matrix(2, 5, [Q(1.0), Q(2.0), String("o"), Q(8.0), String("Red"),
+                      Q(-1.0), Q(0.0), String("F1"), Q(10.0), String("Green")])
+    got = marks(m, st)
+    assert [(t, s, c) for _x, _y, t, s, c in got] == [("o", 8.0, "Red"), ("F1", 10.0, "Green")]
+    assert got[0][:2] == st.to_px(1.0, 2.0)
+    assert marks(Matrix(1, 2, [Q(1.0), Q(2.0)]), st) == []  # plain points are lines, not marks
+
+
+def test_fit_ranges():
+    from websmath.plot import PlotState, fit_ranges
+
+    st = PlotState()
+    fit_ranges(st, -2.0, 8.0, -1.0, 4.0)
+    assert st.x_range() == pytest.approx((-2.0, 8.0)) and st.y_range() == pytest.approx((-1.0, 4.0))
+    with pytest.raises(ValueError):
+        fit_ranges(st, 1.0, 1.0, 0.0, 1.0)
+
+
+def test_sys_of_point_sets_is_split_into_parts():
+    """Beam.sm plots sys(points, points, ..., styled marks): each part is drawn."""
+    from websmath.engine.values import Matrix, Q, String
+    from websmath.plot import PlotState, marks, parts, point_lines
+
+    st = PlotState()
+    a = Matrix(2, 2, [Q(0.0), Q(0.0), Q(1.0), Q(1.0)])
+    m = Matrix(1, 5, [Q(1.0), Q(2.0), String("A"), Q(10.0), String("Red")])
+    both = Matrix(2, 1, [a, m])
+    got = parts(both)
+    assert got == [a, m]
+    assert point_lines(got[0], st) == [[st.to_px(0.0, 0.0), st.to_px(1.0, 1.0)]]
+    assert point_lines(got[1], st) is None and len(marks(got[1], st)) == 1
+    assert parts(a) == [a]

@@ -1,6 +1,6 @@
-"""Data files: importData (SMath core, 1 to 9 arguments) and exportData.CSV
-(SMath's data exchange plugin).  Relative file names are relative to the
-worksheet's folder, as in SMath; the worksheet sets ``base_dir``."""
+"""Data files: importData (SMath core, 1 to 9 arguments).  Relative file
+names are relative to the worksheet's folder, as in SMath; the worksheet
+sets ``base_dir``."""
 from __future__ import annotations
 
 import csv
@@ -9,20 +9,11 @@ import os
 import re
 
 from .builtins import fn
-from .catalog import FUNCTIONS
 from .errors import SMathError
 from .values import Matrix, Q, String, need_scalar
 
 base_dir = ""  # folder of the worksheet being calculated ("" = current folder)
 
-FUNCTIONS.extend([
-    ("exportData.CSV", 2, "Strings, Files",
-     'exportData.CSV("1:matrix", "2:fileName") — Writes the matrix to a CSV file (comma separated, "." as '
-     "decimal symbol). Returns 1 if successful."),
-    ("exportData.CSV", 4, "Strings, Files",
-     'exportData.CSV("1:matrix", "2:fileName", "3:delimiter", "4:delimiter") — Writes the matrix to a CSV file '
-     'with the given decimal symbol ("3:delimiter") and column separator ("4:delimiter"). Returns 1 if successful.'),
-])
 
 
 def _path(name) -> str:
@@ -111,45 +102,3 @@ def _import(*args):
     coldelim = _text_arg(a[3], "")
     return import_data(_path(a[0]), decimal, argsep, coldelim, _int_arg(a[4], None), _int_arg(a[5], None),
                        _int_arg(a[6], None), _int_arg(a[7], None))
-
-
-def _fmt(v, decimal: str) -> str:
-    if isinstance(v, String):
-        return v.text
-    q = need_scalar(v)
-    x = q.value
-    if isinstance(x, complex):
-        if x.imag == 0:
-            x = x.real
-        else:
-            return str(x).replace(".", decimal) if decimal != "." else str(x)
-    s = repr(float(x))
-    if s.endswith(".0"):
-        s = s[:-2]
-    return s.replace(".", decimal) if decimal != "." else s
-
-
-def export_csv(m, path: str, decimal: str = ".", sep: str = ",") -> None:
-    mm = m if isinstance(m, Matrix) else Matrix(1, 1, [m])
-    with open(path, "w", newline="", encoding="utf-8") as fh:
-        w = csv.writer(fh, delimiter=sep)
-        for i in range(mm.nrows):
-            w.writerow([_fmt(mm.get(i, j), decimal) for j in range(mm.ncols)])
-
-
-@fn("exportData.CSV", 2)
-def _export2(m, name):
-    try:
-        export_csv(m, _path(name))
-    except OSError:
-        return Q(0.0)
-    return Q(1.0)
-
-
-@fn("exportData.CSV", 4)
-def _export4(m, name, dec, sep):
-    try:
-        export_csv(m, _path(name), _text_arg(dec, "."), _text_arg(sep, ","))
-    except OSError:
-        return Q(0.0)
-    return Q(1.0)

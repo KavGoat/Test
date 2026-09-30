@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from ..engine.errors import SMathError
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPen
 from PySide6.QtWidgets import QGraphicsObject
 
@@ -74,7 +75,7 @@ class RegionItem(QGraphicsObject):
         self.prepareGeometryChange()
         if self.style.size_pt != self.region.font_size:
             self.style = Style(self.region.font_size)
-        if self.region.special in ("picture", "plugin"):
+        if self.region.special == "picture":
             self._size = (max(4.0, self.region.pic_w), max(4.0, self.region.pic_h))
             self._layout = None
             self.update()
@@ -166,7 +167,7 @@ class RegionItem(QGraphicsObject):
 
     def _plot_lines(self):
         """Sampled curves, cached until the view or the worksheet changes."""
-        from ..plot import sample
+        from ..plot import marks, parts, point_lines, sample
 
         st = self.region.plot
         key = (st.width, st.height, st.ppu_x, st.ppu_y, st.pan_x, st.pan_y,
@@ -176,11 +177,23 @@ class RegionItem(QGraphicsObject):
             return cache[1]
         curves = []
         self._plot_error = None
+        self._plot_marks = []
         for node in self.region.curves:
+            try:
+                value = self.worksheet.evaluator.eval(node, self.region.plot_ctx)
+            except SMathError:
+                value = None
+            pieces = parts(value)
+            if len(pieces) > 1:  # sys(...) of point sets: each is its own curve
+                for piece in pieces:
+                    curves.append(point_lines(piece, st) or [])
+                    self._plot_marks.extend(marks(piece, st))
+                continue
             lines, e = sample(node, self.region.plot_ctx, self.worksheet.evaluator, st)
             curves.append(lines)
             if e is not None and self._plot_error is None:
                 self._plot_error = e
+            self._plot_marks.extend(marks(value, st))
         self._plot_cache = (key, curves)
         return curves
 
@@ -209,10 +222,11 @@ class RegionItem(QGraphicsObject):
         f.setPointSizeF(8)
         p.setFont(f)
         p.setPen(QColor(LABEL_COLOR))
-        for v, label in ax["label_x"]:
+        # SMath's grid switch hides the scale numbers along with the lines
+        for v, label in ax["label_x"] if st.grid else ():
             x = round(st.to_px(v, 0)[0])
             p.drawText(QPointF(x + 1, st.height - 2), label)
-        for v, label in ax["label_y"]:
+        for v, label in ax["label_y"] if st.grid else ():
             y = round(st.to_px(0, v)[1])
             p.drawText(QPointF(1, y + 10), label)
         if st.axes:
@@ -235,12 +249,42 @@ class RegionItem(QGraphicsObject):
                     p.drawPolyline(QPolygonF([QPointF(x, y) for x, y in line]))
                 elif line:
                     p.drawEllipse(QPointF(*line[0]), 1.5, 1.5)
+        self._paint_marks(p)
         p.restore()
         p.setPen(QPen(Qt.black, 1))
         p.drawRect(rect.adjusted(0.5, 0.5, -0.5, -0.5))
         if self.focused:
             # resize handle in the corner
             p.fillRect(QRectF(st.width - 5, st.height - 5, 5, 5), Qt.black)
+
+    def _paint_marks(self, p: QPainter) -> None:
+        """SMath's styled points: markers x * . o, or text, in a named colour."""
+        for px, py, text, size, colour in getattr(self, "_plot_marks", []):
+            c = QColor(colour.lower())
+            if not c.isValid():
+                c = QColor(Qt.black)
+            h = size / 2
+            p.setPen(QPen(c, 1))
+            if text == "o":
+                p.setBrush(Qt.NoBrush)
+                p.drawEllipse(QPointF(px, py), h, h)
+            elif text == ".":
+                p.setBrush(c)
+                p.drawEllipse(QPointF(px, py), max(1.0, h / 2), max(1.0, h / 2))
+                p.setBrush(Qt.NoBrush)
+            elif text == "x":
+                p.drawLine(QPointF(px - h, py - h), QPointF(px + h, py + h))
+                p.drawLine(QPointF(px - h, py + h), QPointF(px + h, py - h))
+            elif text == "*":
+                p.drawLine(QPointF(px - h, py), QPointF(px + h, py))
+                p.drawLine(QPointF(px, py - h), QPointF(px, py + h))
+                p.drawLine(QPointF(px - h * 0.7, py - h * 0.7), QPointF(px + h * 0.7, py + h * 0.7))
+                p.drawLine(QPointF(px - h * 0.7, py + h * 0.7), QPointF(px + h * 0.7, py - h * 0.7))
+            elif text:
+                f = QFont(self._text_font())
+                f.setPixelSize(max(4, int(round(size))))
+                p.setFont(f)
+                p.drawText(QPointF(px, py), text)
 
     def _text_font(self) -> QFont:
         from .layout import _family
@@ -270,22 +314,6 @@ class RegionItem(QGraphicsObject):
         r = self.frame_rect()
         if self.region.special == "picture":
             self._paint_picture(p)
-            return
-        if self.region.special == "plugin":
-            # a region this app cannot show (a plug-in region, a 3-D plot):
-            # a grey box saying what it is; it is kept and saved unchanged
-            w, h = self._size
-            p.fillRect(QRectF(0, 0, w, h), QColor("#f2f2f2"))
-            p.setPen(QPen(QColor("#a0a0a0"), 1, Qt.DashLine))
-            p.drawRect(QRectF(0.5, 0.5, w - 1, h - 1))
-            p.setPen(QColor("#707070"))
-            f = QFont(self._text_font())
-            f.setPointSizeF(8)
-            p.setFont(f)
-            p.drawText(QRectF(4, 2, w - 8, h - 4), Qt.AlignCenter | Qt.TextWordWrap,
-                       f"{self.region.plugin_name} region (kept unchanged)")
-            if self.selected_region:
-                p.fillRect(QRectF(0, 0, w, h), SELECTION)
             return
         if self.region.special:
             self._paint_special(p)

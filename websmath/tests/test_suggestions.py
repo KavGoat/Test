@@ -42,10 +42,10 @@ def test_suggestions_match_smath(group, prefix, smath_order):
     # and SI-prefixed units SMath's library lacks (hPa, daN, kWh...)
     from websmath.engine.extra_units import ADDED
 
-    from websmath.engine.extra_functions import PLUGIN_FUNCTIONS
+    from websmath.engine.extra_functions import EXTRA_FUNCTIONS
 
     extra = SITE_HIDDEN_UNITS | set(ADDED)
-    got = [x for x in got if x.split(" ")[0] not in PLUGIN_FUNCTIONS]  # the desktop's plugin functions
+    got = [x for x in got if x.split(" ")[0] not in EXTRA_FUNCTIONS]  # symbolic lim/expand/factor
     assert [x for x in got if not x.startswith("'") or x[1:] not in extra] == DATA[group]["lists"][prefix]
 
 

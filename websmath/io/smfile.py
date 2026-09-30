@@ -356,21 +356,7 @@ def _load_regions(ws, group) -> None:
             res = math.find(f"{{{NS}}}result")
             region.symbolic_eval = res is not None and res.get("action") == "symbolic"
             _load_math_options(region, math, ws)
-        elif not text:
-            # a region this app does not display (a plug-in region, a 3-D
-            # plot...): kept exactly as it is and saved back unchanged
-            import copy
-
-            kinds = [_tag(c) for c in reg]
-            if kinds:
-                r = ws.add_region(x, y)
-                r.special = "plugin"
-                r.raw_xml = copy.deepcopy(reg)
-                r.pic_w = float(reg.get("width", "0") or 0) or 160.0
-                r.pic_h = float(reg.get("height", "0") or 0) or 40.0
-                plot_el = reg.find(f"{{{NS}}}plot")
-                r.plugin_name = (f"{plot_el.get('type', '')} plot" if plot_el is not None else kinds[0])
-        else:
+        elif text:
             chosen = next((t for t in text if t.get("lang") == "eng"), text[-1])
             lines = _rich_lines(chosen)
             ed = MathEditor()
@@ -631,15 +617,6 @@ def _save_text(r, reg) -> None:
 
 
 def _save_region(ws, parent, r, k) -> None:
-    if r.special == "plugin" and r.raw_xml is not None:
-        import copy
-
-        el = copy.deepcopy(r.raw_xml)
-        el.set("id", str(k))
-        el.set("left", str(int(r.x)))
-        el.set("top", str(int(r.y)))
-        parent.append(el)
-        return
     attrs = {"id": str(k), "left": str(int(r.x)), "top": str(int(r.y)), "color": r.color}
     if r.special == "picture":
         import base64
@@ -725,6 +702,7 @@ def _load_plot(ws: Worksheet, reg, plot, x: float, y: float) -> None:
     st.pan_y = float(plot.get("transpose_y", "0"))
     st.grid = plot.get("grid", "true") != "false"
     st.axes = plot.get("axes", "true") != "false"
+    st.points = plot.get("render", "lines") == "points"
     inp = plot.find(f"{{{NS}}}input")
     if inp is None or not len(inp):
         return
@@ -742,7 +720,8 @@ def _save_plot(r, reg) -> None:
     st = r.plot
     reg.set("width", str(int(st.width + 9)))
     reg.set("height", str(int(st.height + 7)))
-    attrs = {"type": "2d", "render": "lines", "scale_x": repr(st.scale_x), "scale_y": repr(st.scale_y),
+    attrs = {"type": "2d", "render": "points" if st.points else "lines",
+             "scale_x": repr(st.scale_x), "scale_y": repr(st.scale_y),
              "scale_z": repr(st.scale_x), "rotate_x": "0", "rotate_y": "0", "rotate_z": "0",
              "transpose_x": repr(st.pan_x), "transpose_y": repr(st.pan_y), "transpose_z": "0"}
     if not st.grid:

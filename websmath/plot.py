@@ -121,6 +121,66 @@ def axis_layout(state: PlotState) -> dict:
     }
 
 
+def fit_ranges(state: PlotState, x0: float, x1: float, y0: float, y1: float) -> None:
+    """Show exactly x0..x1 across and y0..y1 up (Plot settings)."""
+    if not (x1 > x0 and y1 > y0):
+        raise ValueError("empty range")
+    state.ppu_x = state.width / (x1 - x0)
+    state.ppu_y = state.height / (y1 - y0)
+    state.pan_x = -x0 * state.ppu_x - state.width / 2
+    state.pan_y = y1 * state.ppu_y - state.height / 2
+
+
+# SMath's styled points (a matrix of 5 or more columns): x, y, "marker or text",
+# size in pixels, "colour".  The markers are x, *, . and o; any other text is
+# written at the point.  Colours are .NET colour names ("Red", "Green"...).
+MARKERS = {"x", "*", ".", "o"}
+
+
+def marks(value, state: PlotState) -> list:
+    """(px, py, text, size, colour) for each row of a styled-points matrix,
+    or [] when the value is not one."""
+    from .engine.values import String
+
+    if not isinstance(value, Matrix) or value.ncols < 5:
+        return []
+    out = []
+    for i in range(value.nrows):
+        x, y = _scalar(value.get(i, 0)), _scalar(value.get(i, 1))
+        if x is None or y is None:
+            continue
+        t = value.get(i, 2)
+        text = t.text if isinstance(t, String) else (f"{_scalar(t):g}" if _scalar(t) is not None else "")
+        size = _scalar(value.get(i, 3)) or 5.0
+        c = value.get(i, 4)
+        colour = c.text if isinstance(c, String) else "Black"
+        out.append((*state.to_px(x, y), text, max(1.0, float(size)), colour))
+    return out
+
+
+def parts(value) -> list:
+    """The plots inside a sys(...) or a matrix of matrices (SMath draws each
+    one), or [value] itself."""
+    if isinstance(value, Matrix) and value.items and all(isinstance(x, Matrix) for x in value.items):
+        out = []
+        for x in value.items:
+            out.extend(parts(x))
+        return out
+    return [value]
+
+
+def point_lines(value, state: PlotState):
+    """The polyline of a two-column matrix of points, or None."""
+    if isinstance(value, Matrix) and value.ncols == 2 and value.nrows >= 1:
+        pts = []
+        for i in range(value.nrows):
+            x, y = _scalar(value.get(i, 0)), _scalar(value.get(i, 1))
+            if x is not None and y is not None:
+                pts.append(state.to_px(x, y))
+        return [pts]
+    return None
+
+
 def _scalar(v):
     if isinstance(v, Quantity):
         return v.real if not isinstance(v.value, complex) or v.value.imag == 0 else None
@@ -143,13 +203,13 @@ def sample(node, ctx, evaluator, state: PlotState, var: str = "x"):
         const = evaluator.eval(node, ctx)
     except SMathError:
         const = None
-    if isinstance(const, Matrix) and const.ncols == 2 and const.nrows >= 1:
-        pts = []
-        for i in range(const.nrows):
-            x, y = _scalar(const.get(i, 0)), _scalar(const.get(i, 1))
-            if x is not None and y is not None:
-                pts.append(state.to_px(x, y))
-        return [pts], None
+    if isinstance(const, Matrix) and const.ncols >= 5:
+        return [], None  # styled points: drawn by marks()
+    if isinstance(const, Matrix) and len(parts(const)) > 1:
+        return [], None  # several plots: drawn part by part (see parts())
+    pts = point_lines(const, state)
+    if pts is not None:
+        return pts, None
 
     local = Context(ctx)
     lines, cur = [], []
@@ -191,3 +251,4 @@ def sample(node, ctx, evaluator, state: PlotState, var: str = "x"):
     if not any(len(l) > 1 for l in lines) and first_error is not None:
         return [], first_error
     return lines, None
+

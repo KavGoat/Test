@@ -20,7 +20,7 @@ results SMath saved in those example files.
 ## Run
 
 ```bash
-python -m pip install -r websmath/requirements.txt   # PySide6, numpy, sympy
+python -m pip install -r websmath/requirements.txt   # PySide6, sympy
 python -m websmath                     # or: python -m websmath file.sm
 ```
 
@@ -207,20 +207,26 @@ Correctness proofs (numbers and units):
   symbol. Against the symbolic answers stored in SMath's own examples, every
   result either matches exactly or is an error.
 
-Plug-in functions: `eigenvals`, `eigenvecs`, `fft`, `ifft`, `delta`, and
-`importData` / `exportData.CSV`.
+`importData(file, …)` reads CSV/text data files (paths relative to the
+worksheet's folder, as in SMath).
+
+**2-D plots:** functions of x, two-column point matrices, `sys(…)` lists of
+point sets (each drawn), and SMath's styled points: rows of
+(x, y, "marker or text", size, "colour"), with markers x * . o. Right-click
+a plot for Plot settings (ranges), Grid, Axes and Graph by points. With the
+grid off, the scale numbers are hidden too, as in SMath.
 
 Not replicated:
+* SMath plug-ins of any kind: plug-in functions (eigenvals, fft…) and
+  plug-in regions (CheckBox, ComboBox, Modeller…) are not supported, and
+  plug-in regions are skipped when a file is opened (re-saving drops them);
 * matrices of formulas built element by element in programs (SMath's
   symbolic `m[j,k] := diff(f, x[k])` with x undefined): these show an error;
-* 3-D plots;
-* plug-in regions (CheckBox, ComboBox, Modeller…): shown as a grey box and
-  saved back unchanged.
+* 3-D and polar plots (not loaded).
 
 Python runs the evaluation on one core. Evaluating in parallel wouldn't help,
 because each region depends on the ones above it; the speed comes from only
-re-evaluating what changed. Worksheets that need
-them open, but those results show errors.
+re-evaluating what changed.
 
 ## Layout
 
