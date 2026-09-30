@@ -232,6 +232,11 @@ markforge/
     editor.py, worksheet.py, plot.py, page.py, astitems.py
     ui/layout.py, ui/region_item.py   SMath's typesetting and drawing
     tools/mutation_check.py           plants 14 bugs; all must be caught
+    docsheet.py      one worksheet per document; pages folded into the
+                     reading order; moves settled at the end of a gesture
+    record.py        an equation's source as JSON (what the PDF record keeps)
+    ui/wrap.py       too-wide equations broken onto more lines (display only)
+    ui/suggest.py    SMath's autocomplete list (moved from WebSMath's window)
   core/        no Qt beyond QPointF-style value types
     document.py      Document, Page, PageSetup, PageScale, assets
     units.py         scales and measurements on SMath's unit table and the
@@ -244,10 +249,14 @@ markforge/
                      and _Leader — the leader model (see §5)
     shapes.py        RectItem, PolyItem — corners, arcs, break symbols
     measure.py       MeasureItem and CountItem: length, area, dimension, count
+    calc.py          CalcItem: an equation on a page (IS_CALC); its area,
+                     grid snap, turned pages; CalcDrawingItem (line work)
     media.py, snapshot.py, contents.py
   ui/
     mainwindow.py    MainWindow: menus, commands, panels, page commands
     view.py          PageView: the canvas — every mouse and key gesture
+    calcedit.py      CalcEditing (view.calc): Calc/Markup mode, red cross,
+                     SMath's keys, typing equations, pushing to next page
     scene.py         DocumentScene, PageFrame: pages stacked down one canvas
     panels.py        the docked panels; toolsets.py, rail.py, docks.py
     dialogs.py       every dialog

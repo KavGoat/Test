@@ -2709,6 +2709,14 @@ class PageView(QGraphicsView):
             self.select_in_marquee()
             event.accept()
             return
+        # An equation: the cursor goes where it was double-clicked, as a
+        # single click puts it (SMath's automatic unit is not editable).
+        if event.button() == Qt.LeftButton:
+            equation = self.calc.calc_item_at(scene_pos)
+            if equation is not None and self.editable(equation):
+                self.calc.focus(equation, scene_pos)
+                event.accept()
+                return
         # Already editing this text: let the editor select a word.
         rect = self.editing_rect()
         if rect is not None and rect.contains(scene_pos):

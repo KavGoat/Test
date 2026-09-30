@@ -39,6 +39,18 @@ def snap(value: float) -> float:
     return round(value / GRID_PT) * GRID_PT
 
 
+def undefined_without(document, going: list) -> list:
+    """The names the equations in *going* define that nothing left defines —
+    the variables that become undefined when they are removed."""
+    sheet = sheet_for(document)
+    going_ids = {item.region.id for item in going if getattr(item, "region", None) is not None}
+    lost, kept = set(), set()
+    for region in sheet.worksheet.regions:
+        names = set(region.defined_vars) | {name for name, _ in region.defined_funcs}
+        (lost if region.id in going_ids else kept).update(names)
+    return sorted(lost - kept)
+
+
 def _word_char(ch: str) -> bool:
     return ch.isalnum() or ch in "_."
 
@@ -93,22 +105,24 @@ class CalcEditing:
         return QRectF(centre.x() - GRID_PT, centre.y() - GRID_PT, 2 * GRID_PT, 2 * GRID_PT)
 
     def draw_cross(self, painter: QPainter) -> None:
-        """SMath's red + where the next equation starts (Calc mode only)."""
+        """SMath's red + where the next equation starts (Calc mode only).
+
+        WebSMath's own drawing, line for line (its WorksheetScene.drawForeground),
+        in SMath pixels scaled onto the page.
+        """
         if self.cross is None or self.editing() or not self.calc_mode():
             return
         frame, point = self.cross
         if frame.scene() is None:
             self.cross = None
             return
-        centre = frame.mapToScene(point)
-        half = GRID_PT * 0.75
+        c = frame.mapToScene(point)
         painter.save()
-        pen = QPen(CROSS)
-        pen.setWidthF(1.0)
-        pen.setCosmetic(True)
-        painter.setPen(pen)
-        painter.drawLine(QPointF(centre.x() - half, centre.y()), QPointF(centre.x() + half, centre.y()))
-        painter.drawLine(QPointF(centre.x(), centre.y() - half), QPointF(centre.x(), centre.y() + half))
+        painter.translate(c)
+        painter.scale(PT_PER_PX, PT_PER_PX)
+        painter.setPen(QPen(CROSS, 1))
+        painter.drawLine(QPointF(-4, 0.5), QPointF(5, 0.5))
+        painter.drawLine(QPointF(0.5, -4), QPointF(0.5, 5))
         painter.restore()
 
     # -- focus -----------------------------------------------------------------------
@@ -288,6 +302,13 @@ class CalcEditing:
             self.leave()
             return False
         item = self.calc_item_at(scene_pos)
+        if item is not None and item is self.item and self._on_frame(item, scene_pos):
+            # SMath: the frame of the equation being edited picks it up to move
+            self.leave()
+            if item.scene() is not None:
+                item.setSelected(True)
+            self._pressed_on = None
+            return False
         if item is not None and item is self.item:
             if event.modifiers() & Qt.ShiftModifier:
                 self._shift_click(item, scene_pos)
@@ -307,6 +328,17 @@ class CalcEditing:
             if frame is not None:
                 self.place_cross(frame, frame.mapFromScene(scene_pos))
         return False
+
+    MOVE_EDGE_PX = 4.0          # SMath's band along the frame that drags the region
+
+    def _on_frame(self, item: CalcItem, scene_pos: QPointF) -> bool:
+        point = self._region_point(item, scene_pos)
+        frame = item._view.frame_rect() if item._view is not None else QRectF()
+        e = self.MOVE_EDGE_PX
+        if item.region is not None and item.region.plot is not None:
+            return False
+        return (point.x() < e or point.y() < e or point.x() > frame.width() - e
+                or point.y() > frame.height() - e)
 
     def mouse_move(self, event, scene_pos: QPointF) -> bool:
         if self._select_drag is None or self.item is None:
@@ -515,9 +547,7 @@ class CalcEditing:
             return
         k = order.index(self.item) if self.item in order else -1
         nxt = order[(k + (-1 if backwards else 1)) % len(order)]
-        if nxt is self.item:
-            return
-        self.focus(nxt)
+        self.focus(nxt)                       # itself, when it is the only one
         editor = nxt.region.editor
         if nxt.region.kind == "math":
             editor.set_cursor(editor.root, len(editor.expression_items()))

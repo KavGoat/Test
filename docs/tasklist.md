@@ -163,3 +163,4 @@ may remove them or treat them as leftovers. Work is on branch
 |  | A lone word followed by a space turns into Calculation text, as in SMath; undo turns it back. |
 |  | Measurement labels keep the page's decimal places (trailing zeros included), written by SMath's number formatter. |
 |  | WebSMath's 766 tests are ported and run green in phase 1. As a withdrawn feature goes, its tests go with it, listed by name in the phase report. Tests of WebSMath's window are rewritten to drive the CalcForge window. No maths, units, recalculation or editor test is removed. |
+|  | 2026-09-30: The equations' visuals must be WebSMath's code, copied one to one — no redrawn look. (Drawing code `calc/ui/layout.py` and `calc/ui/region_item.py` is byte-identical to WebSMath; the red cross and the selected look are WebSMath's own drawing; `tests/calc/test_same_drawing.py` checks CalcForge draws every equation pixel for pixel as WebSMath's window does.) |

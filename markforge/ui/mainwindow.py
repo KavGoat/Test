@@ -2559,6 +2559,16 @@ class MainWindow(QMainWindow):
             self.view.verticalScrollBar().setValue(scroll[1])
         self.update_title()
 
+    def warn_undefined(self, names: list, why: str) -> None:
+        """Say which variables have just become undefined, and why."""
+        if not names:
+            return
+        text = f"{why}: {', '.join(names)} " + ("is" if len(names) == 1 else "are") + \
+            " no longer defined."
+        self.status_hint.setText(text)
+        if self.interactive_prompts:
+            QMessageBox.warning(self, "Variables undefined", text)
+
     def record_structure_change(self, before: dict, description: str) -> None:
         """One undo step from *before* to how the document is now, for a
         change already made (equations moved on to new pages, say)."""
@@ -2728,6 +2738,12 @@ class MainWindow(QMainWindow):
                  else f"Delete these {len(going)} pages?")
         if QMessageBox.question(self, "Delete page", asked) != QMessageBox.Yes:
             return
+        from .calcedit import undefined_without
+        going_equations = [item for which in going
+                           for item in (self.document.pages[which].frame.markups()
+                                        if self.document.pages[which].frame else [])
+                           if getattr(item, "IS_CALC", False)]
+        lost = undefined_without(self.document, going_equations)
 
         def mutate():
             # Backwards, so each removal leaves the ones still to go where
@@ -2737,6 +2753,7 @@ class MainWindow(QMainWindow):
             self.current_index = max(0, going[0] - 1)
         self._structural_change("Delete page" if len(going) == 1
                                 else f"Delete {len(going)} pages", mutate)
+        self.warn_undefined(lost, "Page deleted")
 
     def move_page(self, source: int, target: int, count: int = 1) -> None:
         """Move a page, or a run of them, to start at *target*."""
@@ -4108,8 +4125,14 @@ class MainWindow(QMainWindow):
                 background = self._crop_background(page, region)
             changes.append((page, source, background))
 
+        from .calcedit import undefined_without
+        kept = QRectF(0, 0, region.width(), region.height())
+        off_the_page = []
+        cropped_names: list = []
+
         def apply():
             from ..core.document import PT_TO_MM
+            off_the_page.clear()
             for page, source, background in changes:
                 frame_now = page.frame
                 if source is not None:
@@ -4123,6 +4146,18 @@ class MainWindow(QMainWindow):
                             frame_now.remove_markup(item)
                         else:
                             item.setPos(item.pos() - region.topLeft())
+                        if getattr(item, "IS_CALC", False) and item.scene() is not None:
+                            box = item.mapRectToParent(item.local_rect())
+                            if not box.intersects(kept):
+                                off_the_page.append(item)
+                            elif not kept.contains(box):
+                                item.warning = "Partly cropped off the page"
+                                item.update()
+                    lost = [i for i in off_the_page if i.parentItem() is frame_now]
+                    if lost:
+                        cropped_names.extend(undefined_without(self.document, lost))
+                        for item in lost:
+                            frame_now.remove_markup(item)
                 setup = page.setup
                 setup.size_name = "Custom"
                 setup.orientation = "portrait"
@@ -4133,6 +4168,8 @@ class MainWindow(QMainWindow):
         self._structural_change("Crop page" if len(changes) == 1 else "Crop pages",
                                 apply, preserve_view=True)
         self.status_hint.setText(f"Cropped {len(changes)} page(s) — Undo restores them")
+        self.warn_undefined(sorted(set(cropped_names)),
+                            f"Cropped {len(changes)} page(s) — Undo restores them. Cropped off")
         return True
 
     def _cropped_pdf(self, page, region: QRectF):
@@ -5576,7 +5613,10 @@ class MainWindow(QMainWindow):
 
     def flatten_selection(self) -> None:
         """Make selected items part of the page, using the recovery preference."""
-        items = [i for i in self.selected_items() if isinstance(i, MarkupItem)]
+        # Equations are already written into the page on every save
+        # (decision 3); flattening one would only stop it calculating.
+        items = [i for i in self.selected_items() if isinstance(i, MarkupItem)
+                 and not getattr(i, "IS_CALC", False)]
         if not items:
             return
         from . import preferences
@@ -5626,6 +5666,7 @@ class MainWindow(QMainWindow):
                  for item in page.frame.markups()
                  if not item.flattened
                  and not item.from_drawing
+                 and not getattr(item, "IS_CALC", False)
                  and self._flatten_class(item) in chosen]
         if not items:
             self.status_hint.setText("Nothing matched those flatten choices")
@@ -6533,6 +6574,7 @@ class MainWindow(QMainWindow):
             return
 
         removed = 0
+        self._redacted_names = []
         by_page: dict[int, list] = {}
         for index, page, item in targets:
             by_page.setdefault(index, []).append((page, item))
@@ -6545,6 +6587,10 @@ class MainWindow(QMainWindow):
         self.undo_stack.clear()          # the pixels are gone; undo would lie
         self.status_hint.setText(
             f"Applied {len(targets)} redaction(s); removed {removed} covered markup(s)")
+        if self._redacted_names:
+            names = sorted(set(self._redacted_names))
+            self.warn_undefined(names, f"Applied {len(targets)} redaction(s); "
+                                       f"removed {removed} covered markup(s). Redacted")
 
     def _burn_into_background(self, page, boxes: list) -> None:
         """Paint the boxes into the page's background image, destroying it."""
@@ -6582,11 +6628,26 @@ class MainWindow(QMainWindow):
         if frame is None:
             return 0
         removed = 0
+        from .calcedit import undefined_without
+        covered = []
         for other in list(frame.markups()):
             if other in items:
                 continue
             rect = other.sceneBoundingRect()
+            if getattr(other, "IS_CALC", False):
+                rect = other.mapRectToScene(other.local_rect())
+                if any(box.contains(rect) for box in boxes):
+                    covered.append(other)
+                elif any(box.intersects(rect) for box in boxes):
+                    other.warning = "Partly under a redaction"
+                    other.update()
+                continue
             if any(box.contains(rect) for box in boxes):
+                frame.remove_markup(other)
+                removed += 1
+        if covered:
+            self._redacted_names += undefined_without(self.document, covered)
+            for other in covered:
                 frame.remove_markup(other)
                 removed += 1
         for item in items:

@@ -71,6 +71,9 @@ class CalcItem(MarkupItem):
         self._sheet = None
         self.focused = False
         self._turn_while_editing = None   # its rotation, while shown upright to type in
+        # Why it wants looking at (partly under a redaction, partly cropped
+        # off): an orange outline on the screen, never printed.
+        self.warning = ""
 
     # -- the region ----------------------------------------------------------
     def source(self) -> dict:
@@ -81,6 +84,11 @@ class CalcItem(MarkupItem):
 
     def text(self) -> str:
         return region_text(self.source()) or ""
+
+    @property
+    def editor(self):
+        """The equation editor, while it is on a page."""
+        return self.region.editor if self.region is not None else None
 
     def _page_frame(self):
         frame = self.parentItem()
@@ -125,6 +133,7 @@ class CalcItem(MarkupItem):
         frame = self._page_frame()
         if self.region is None or frame is None:
             return
+        self.warning = ""
         self._sheet.move(self.region, frame.page.uid, *self.reading_position())
 
     # -- turned pages (decision 15) ------------------------------------------------
@@ -257,25 +266,22 @@ class CalcItem(MarkupItem):
         return bool(self._view is not None and self._view.too_wide)
 
     def paint(self, painter: QPainter, option, widget=None) -> None:
-        self.paint_visible(painter)
         frame = self._page_frame()
-        if getattr(frame, "print_mode", False):
+        printing = bool(getattr(frame, "print_mode", False))
+        if self._view is not None:
+            # selected, it looks as a selected region does in WebSMath: its
+            # own drawing (RegionItem.selected_region), not a MarkForge frame
+            self._view.selected_region = self.isSelected() and not self.focused and not printing
+        self.paint_visible(painter)
+        if self._view is not None:
+            self._view.selected_region = False
+        if printing:
             return
-        if self.too_wide:
+        if self.too_wide or self.warning:
             painter.save()
             pen = QPen(QColor("#ff8c00"))
             pen.setCosmetic(True)
             pen.setWidthF(1.5)
-            painter.setPen(pen)
-            painter.setBrush(Qt.NoBrush)
-            painter.drawRect(self.local_rect())
-            painter.restore()
-        if self.isSelected() and not self.focused:
-            painter.save()
-            pen = QPen(QColor("#1971c2"))
-            pen.setCosmetic(True)
-            pen.setWidthF(1.0)
-            pen.setStyle(Qt.DashLine)
             painter.setPen(pen)
             painter.setBrush(Qt.NoBrush)
             painter.drawRect(self.local_rect())

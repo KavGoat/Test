@@ -82,3 +82,20 @@ def test_save_and_reload_round_trip(tmp_path):
     assert before == after
     vals = [r.display for r in again.ordered() if r.editor.evaluate]
     assert all(v is not None for v in vals)
+
+
+def test_line_block_sizes_round_trip():
+    from tests.calc.smfile import dumps, loads
+
+    import pathlib
+
+    beam = pathlib.Path(__file__).resolve().parents[2] / "SMath Studio" / "examples" / "Beam.sm"
+    if not beam.exists():
+        pytest.skip("SMath examples not present")
+    from tests.calc.smfile import load_sm
+
+    ws = load_sm(beam)
+    texts = [r.editor.root.text() for r in ws.ordered() if r.kind == "math"]
+    assert not any(";1;1}" in t or ";3;1}" in t for t in texts)  # the size operands are not statements
+    again = loads(dumps(ws))
+    assert [r.editor.root.text() for r in again.ordered() if r.kind == "math"] == texts

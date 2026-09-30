@@ -63,7 +63,7 @@ def test_case_variant_units_are_listed():
 
 
 def _entries(prefix, defs=()):
-    from tests.calc.legacy_ui.worksheet_view import suggestion_entries
+    from markforge.calc.ui.suggest import suggestion_entries
 
     ws = Worksheet()
     for k, d in enumerate(defs):
@@ -97,7 +97,7 @@ def test_entries_carry_icon_kind_origin_and_description():
     ("x", ["x:1"], "x"),
 ])
 def test_initial_selection_matches_smath(prefix, defs, selected, smath_order):
-    from tests.calc.legacy_ui.worksheet_view import selected_index
+    from markforge.calc.ui.suggest import selected_index
 
     es = _entries(prefix, defs)
     k = selected_index(es, prefix)

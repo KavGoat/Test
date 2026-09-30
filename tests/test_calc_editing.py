@@ -8,7 +8,7 @@ document (the brief).
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtTest import QTest
 import pytest
 
@@ -415,3 +415,69 @@ def test_hide_leaves_equations_alone(window):
     window.hide_selection()
     assert define.isVisible() and not define.hidden
     assert not box.isVisible()
+
+
+def _redact(window, x0, y0, x1, y1, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: QMessageBox.Yes)
+    window.select_tool("redact")
+    a, b = at(window, x0, y0), at(window, x1, y1)
+    drag(window.view, a.x(), a.y(), b.x(), b.y())
+    window.select_tool("select")
+    window.apply_redactions()
+
+
+def test_redaction_removes_a_covered_equation_and_names_what_went(window, monkeypatch):
+    (define, use), _box = _two_equations_and_a_box(window)
+    press_key(window.view, Qt.Key_Escape)
+    r = define.mapRectToParent(define.local_rect())
+    _redact(window, r.left() - 4, r.top() - 3, r.right() + 4, r.bottom() + 1, monkeypatch)
+    assert define.scene() is None
+    assert "s1" in window.status_hint.text() and "no longer defined" in window.status_hint.text()
+    assert shown(use).startswith("error")
+
+
+def test_redaction_partly_over_an_equation_flags_it(window, monkeypatch):
+    (define, use), _box = _two_equations_and_a_box(window)
+    press_key(window.view, Qt.Key_Escape)
+    r = define.mapRectToParent(define.local_rect())
+    _redact(window, r.left() - 4, r.top() - 3, r.center().x(), r.bottom() + 1, monkeypatch)
+    assert define.scene() is not None and define.warning
+
+
+def test_crop_removes_equations_it_cuts_away_and_undo_brings_them_back(window):
+    (define, use), _box = _two_equations_and_a_box(window)
+    press_key(window.view, Qt.Key_Escape)
+    frame = window.document.pages[0].frame
+    r = use.mapRectToParent(use.local_rect())
+    kept = QRectF(r.left() - 30, r.top() + 0.5, 400, 400)     # the define is above it
+    window.crop_page_region(frame, kept)
+    remaining = equations(window)
+    assert len(remaining) == 1 and "s1+1" in remaining[0].text()
+    assert remaining[0].warning, "partly cropped off: flagged"
+    assert "s1" in window.status_hint.text()
+    window.undo_something()
+    assert len(equations(window)) == 2
+
+
+def test_flatten_leaves_equations_alone(window):
+    (define, use), box = _two_equations_and_a_box(window)
+    press_key(window.view, Qt.Key_Escape)
+    for item in (define, box):
+        item.setSelected(True)
+    window.interactive_prompts = False
+    window.flatten_selection()
+    assert box.flattened and not define.flattened
+
+
+def test_deleting_a_page_names_the_variables_that_went(window, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
+    calc_mode(window)
+    window.add_page()
+    frame = window.document.pages[0].frame
+    p = frame.mapToScene(QPointF(100, 120))
+    click(window.view, p.x(), p.y())
+    type_line(window, "gone:1")
+    window.delete_page(0)
+    assert "gone" in window.status_hint.text()

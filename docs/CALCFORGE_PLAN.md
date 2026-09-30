@@ -172,6 +172,9 @@ don't grow the file" guards it.
   that became undefined.
 - Port `test_ui.py` and the other window tests onto the CalcForge window.
 
+**Before WebSMath's old window is deleted** (end of phase 6), `tests/calc/test_same_drawing.py`
+compares against reference images saved from that window, so the one-to-one check outlives it.
+
 ### Phase 3 — modes and shortcuts
 
 - Calc and Markup modes, shown in the status bar, with a toggle binding.
