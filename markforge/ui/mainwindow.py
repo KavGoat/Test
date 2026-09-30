@@ -2559,6 +2559,15 @@ class MainWindow(QMainWindow):
             self.view.verticalScrollBar().setValue(scroll[1])
         self.update_title()
 
+    def record_structure_change(self, before: dict, description: str) -> None:
+        """One undo step from *before* to how the document is now, for a
+        change already made (equations moved on to new pages, say)."""
+        after = self._structure_snapshot()
+        self.undo_stack.push(DocumentStructureCommand(
+            before, after, description,
+            lambda snapshot: self._restore_structure(snapshot, True)))
+        self.mark_modified()
+
     def _structural_change(self, description: str, mutate,
                            preserve_view: bool = False) -> None:
         before = self._structure_snapshot()
@@ -2883,6 +2892,7 @@ class MainWindow(QMainWindow):
             # markup on it and leave the paper exactly as it was.
             setup.orientation = (PORTRAIT if setup.orientation == LANDSCAPE
                                  else LANDSCAPE)
+            page.turn = (page.turn + (90 if clockwise else -90)) % 360
             if clockwise:
                 (setup.margin_left, setup.margin_top,
                  setup.margin_right, setup.margin_bottom) = (

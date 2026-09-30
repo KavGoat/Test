@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (QApplication, QCompleter, QGraphicsProxyWidget,
 
 from ..core.document import MM_TO_PT
 from ..core.units import parse_unit
+from ..items.calc import CalcItem
 from ..items.base import (HANDLE_CURSORS, HANDLE_SCREEN_PX, HANDLE_SIZE,
                           MarkupItem, build_item, cloud_path,
                           cursor_for_handle, rename_groups)
@@ -521,6 +522,30 @@ class PageView(QGraphicsView):
         # Equations moved by the gesture are calculated now it is over.
         from ..calc.docsheet import sheet_for
         sheet_for(self.window.document).settle()
+        # An equation left past the bottom of its page goes to the next one
+        # (decision 11) — in the same undo step as what put it there.
+        overflow = self.calc.take_overflow()
+        if overflow:
+            # One undo step for the lot. Pages may be added, and a page
+            # added or restored rebuilds the page frames, so this is recorded
+            # as a change to the document's structure — from how the pages
+            # were when the gesture began to how they are once the equations
+            # have gone on — rather than as page edits that would be left
+            # pointing at frames that no longer exist.
+            before = self.window._structure_snapshot()
+            by_uid = {entry["uid"]: entry for entry in before["pages"]}
+            for frame, items in (self._snapshot or []):
+                entry = by_uid.get(frame.page.uid)
+                if entry is not None:
+                    entry["items"] = items
+            self._snapshot = []
+            self.calc.push_to_next_pages(overflow)
+            self.window.record_structure_change(before, text)
+            self.documentEdited.emit()
+            return
+        self._commit_snapshot(text, coalesce)
+
+    def _commit_snapshot(self, text: str, coalesce: bool) -> None:
         if not self._snapshot:
             return
         changed = []
@@ -1769,6 +1794,10 @@ class PageView(QGraphicsView):
             item.setParentItem(frame)
             item.setPos(frame.mapFromScene(position))
             item.refresh(page=frame.page)
+        for item in items:
+            if isinstance(item, CalcItem):
+                item.snap_to_grid()
+                self.calc.note_overflow(item)
 
 
     def _add_poly_point(self, event: QMouseEvent, point: QPointF, tool: Tool) -> None:

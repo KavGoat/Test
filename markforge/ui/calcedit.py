@@ -25,7 +25,7 @@ from ..calc.docsheet import PT_PER_PX, PX_PER_PT, sheet_for
 from ..calc.engine.units import is_unit
 from ..calc.ui.suggest import (KEYWORDS, SMATH_LABEL, SuggestionList, _selection_key_name,
                                selected_index, suggestion_entries, unit_box_entries)
-from ..items.calc import CalcItem
+from ..items.calc import CalcItem, calc_area, created_here  # noqa: F401
 
 # SMath's worksheet grid: 9 px, which is 6.75 pt on the page.
 GRID_PX = 9.0
@@ -56,6 +56,7 @@ class CalcEditing:
         self.suggestions.itemClicked.connect(self._apply_suggestion)
         self.dynamic_assistance = True
         self._select_drag = None                    # (row, first slot) while dragging a selection
+        self._overflow: list = []                   # equations past the bottom of their page
         self._pressed_on: Optional[tuple] = None    # (item, scene point) of a click on an equation
 
     # -- state ---------------------------------------------------------------------
@@ -125,6 +126,7 @@ class CalcEditing:
         view.scene().clearSelection()
         self.item = item
         item.focused = True
+        item.show_upright(self._view_turn())
         item.relayout()
         if scene_pos is not None:
             self._place_cursor(item, scene_pos)
@@ -141,11 +143,14 @@ class CalcEditing:
         view.begin_snapshot([frame])
         view.scene().clearSelection()
         item = CalcItem()
+        # written on a turned page, it is turned with the page (decision 15)
+        item.setRotation(frame.page.turn)
         frame.add_markup(item, QPointF(snap(page_point.x()), snap(page_point.y())))
         region = item.region
         region.font_size = getattr(self, "default_font_size", 10.0)
         self.item = item
         item.focused = True
+        item.show_upright(self._view_turn())
         item.relayout()
         self.clear_cross()
         view.setFocus(Qt.OtherFocusReason)
@@ -187,26 +192,84 @@ class CalcEditing:
             view.commit_snapshot("Edit equation")
             return
         item.focused = False
+        item.leave_upright()
         item.region.editor.selection = None
         frame = item.parentItem()
         region = item.region
         empty = (region.plot is None and (
             (region.editor.kind == "math" and region.editor.root.is_empty()) or
             (region.editor.kind == "text" and not region.editor.text.strip())))
-        below = None
-        if cross_below:
-            rect = item.local_rect()
-            below = (frame, QPointF(item.pos().x(), item.pos().y() + rect.height() + 5 * PT_PER_PX))
         if empty:
             frame.remove_markup(item)
         else:
             region.pending = False
             sheet_for(frame.document).edited(region)
             item.relayout()
+            self.note_overflow(item)
         view.commit_snapshot("Edit equation")
-        if below is not None:
-            self.place_cross(*below)
+        if cross_below and item.scene() is not None:
+            # under the equation, wherever it ended up (it may have gone on
+            # to the next page)
+            rect = item.local_rect()
+            self.place_cross(item.parentItem(), QPointF(
+                item.pos().x(), item.pos().y() + rect.height() + 5 * PT_PER_PX))
         view.documentEdited.emit()
+
+    def _view_turn(self) -> float:
+        return float(getattr(self.view.scene(), "reading_turn", 0) or 0)
+
+    # -- no equation on two pages (decision 11) -------------------------------------------
+    def note_overflow(self, item: CalcItem) -> None:
+        """Remember *item* if it runs past the bottom of its page's area; it is
+        moved when the gesture is committed (view.commit_snapshot)."""
+        frame = item.parentItem()
+        if frame is None or not hasattr(frame, "page"):
+            return
+        area = calc_area(frame)
+        top = item.pos().y()
+        bottom = top + item.local_rect().height()
+        if bottom <= area.bottom() + 1e-6 or top <= area.top() + 1e-6:
+            return                     # fits — or is taller than a whole page
+        if item not in self._overflow:
+            self._overflow.append(item)
+
+    def take_overflow(self) -> list:
+        items = [i for i in self._overflow if i.scene() is not None]
+        self._overflow = []
+        return items
+
+    def push_to_next_pages(self, items: list) -> None:
+        """Each equation past the bottom of its page goes to the top of the
+        next one, at the same distance across; past the last page, a blank
+        page is added for it. Called inside the gesture's undo step."""
+        window = self.window
+        view = self.view
+        for item in items:
+            frame = item.parentItem()
+            pages = window.document.pages
+            index = pages.index(frame.page)
+            if index == len(pages) - 1:
+                self._add_a_page_at_the_end()
+                pages = window.document.pages
+            target = pages[index + 1].frame
+            x = item.pos().x()
+            item.setParentItem(target)
+            area = calc_area(target)
+            item.setPos(QPointF(min(max(x, area.left()), area.right() - GRID_PT), snap(area.top() + GRID_PT)))
+        sheet_for(window.document).settle()
+
+    def _add_a_page_at_the_end(self) -> None:
+        """A blank page: the last page's size when CalcForge made it, else A4."""
+        from ..core.document import PageSetup
+
+        window = self.window
+        last = window.document.pages[-1]
+        setup = PageSetup.from_dict(last.setup.to_dict()) if created_here(last) \
+            else PageSetup.from_name("A4")
+
+        page = window.document.add_page(len(window.document.pages))
+        page.setup = setup
+        window.rebuild_scenes()
 
     # -- mouse -----------------------------------------------------------------------
     def calc_item_at(self, scene_pos: QPointF) -> Optional[CalcItem]:

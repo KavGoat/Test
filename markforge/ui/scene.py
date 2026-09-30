@@ -539,8 +539,10 @@ class PageFrame(QGraphicsObject):
         painter.restore()
 
     def grid_area(self) -> QRectF:
-        """Where the grid is drawn: the whole sheet (margins come in later)."""
-        return self.page_rect()
+        """Where the grid is drawn: where equations go (inside the margins of
+        a page CalcForge made, as SMath does; the whole of a drawing)."""
+        from .calcedit import calc_area
+        return calc_area(self)
 
     def _paint_margins(self, painter: QPainter) -> None:
         if not self.document.settings.show_margins:

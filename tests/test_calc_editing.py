@@ -177,3 +177,128 @@ def test_tab_and_up_down_step_through_the_reading_order(window):
     assert window.view.calc.item is third
     press_key(window.view, Qt.Key_Up)
     assert window.view.calc.item is second
+
+
+def test_an_equation_past_the_bottom_goes_to_a_new_page(window):
+    """Decision 11: never on two pages; past the last page a page is added."""
+    from markforge.ui.calcedit import calc_area
+    calc_mode(window)
+    frame = window.document.pages[0].frame
+    area = calc_area(frame)
+    p = at(window, 100, area.bottom() - 8)
+    click(window.view, p.x(), p.y())
+    type_line(window, "h:1")
+    assert len(window.document.pages) == 2
+    (item,) = equations(window)
+    assert item.parentItem().page is window.document.pages[1]
+    assert item.pos().y() <= calc_area(item.parentItem()).top() + 2 * 6.75
+    assert window.view.calc.cross[0] is item.parentItem(), "the cross follows it"
+    window.undo_something()
+    assert len(window.document.pages) == 1 and equations(window) == [], "one undo step"
+
+
+def test_the_margins_of_a_page_calcforge_made(window):
+    from markforge.ui.calcedit import calc_area
+    frame = window.document.pages[0].frame
+    area = calc_area(frame)
+    assert area.left() > 0 and area.top() > 0
+    assert area.right() < frame.page_rect().right()
+
+
+def test_redo_brings_the_page_and_the_equation_back(window):
+    from markforge.ui.calcedit import calc_area
+    calc_mode(window)
+    area = calc_area(window.document.pages[0].frame)
+    p = at(window, 100, area.bottom() - 8)
+    click(window.view, p.x(), p.y())
+    type_line(window, "h:1")
+    window.undo_something()
+    window.redo_something()
+    assert len(window.document.pages) == 2
+    (item,) = equations(window)
+    assert item.parentItem().page is window.document.pages[1]
+
+
+def test_an_equation_dragged_across_the_page_bottom_goes_onto_the_next_page(window):
+    from markforge.ui.calcedit import calc_area
+    calc_mode(window)
+    window.add_page()
+    p = at(window, 100, 200)
+    click(window.view, p.x(), p.y())
+    type_line(window, "k:1")
+    (item,) = equations(window)
+    area = calc_area(window.document.pages[0].frame)
+    start = item.mapToScene(item.local_rect().center())
+    drop = at(window, 100 + item.local_rect().width() / 2, area.bottom() - 3)
+    drag(window.view, start.x(), start.y(), drop.x(), drop.y())
+    assert item.parentItem().page is window.document.pages[1] or \
+        equations(window)[0].parentItem().page is window.document.pages[1]
+
+
+def test_a_too_wide_equation_breaks_before_an_operator_and_still_calculates(window):
+    from markforge.items.calc import calc_area
+    calc_mode(window)
+    area = calc_area(window.document.pages[0].frame)
+    p = at(window, area.right() - 200, 150)
+    click(window.view, p.x(), p.y())
+    type_line(window, "tot:" + "+".join(str(n) for n in range(100, 125)))
+    type_line(window, "tot=")
+    long, check = equations(window)
+    assert shown(check) == str(sum(range(100, 125)))
+    one_line = 24 * 0.75
+    assert long.local_rect().height() > 2 * one_line, "broken onto more lines"
+    assert long.pos().x() + long.local_rect().width() <= area.right() + 1e-6
+    assert not long.too_wide
+    # while it is being typed into, it is one line again
+    p = end_of(long)
+    click(window.view, p.x(), p.y())
+    assert long.local_rect().height() < 2 * one_line
+    press_key(window.view, Qt.Key_Escape)
+
+
+def test_an_equation_that_cannot_be_broken_is_marked_too_wide(window):
+    from markforge.items.calc import calc_area
+    calc_mode(window)
+    area = calc_area(window.document.pages[0].frame)
+    p = at(window, area.right() - 60, 150)
+    click(window.view, p.x(), p.y())
+    type_line(window, "averyveryverylongname:1")
+    (item,) = equations(window)
+    assert item.too_wide
+    image = window.document.pages[0].frame.render_image(dpi=72, for_print=True)
+    assert not any(image.pixelColor(x, y).name() == "#ff8c00"
+                   for x in range(0, image.width(), 2) for y in range(140, 170)), "never printed"
+
+
+def test_rotating_a_page_turns_its_equations_but_never_changes_a_result(window):
+    """Decision 15, and reading order follows the page's own direction."""
+    calc_mode(window)
+    p = at(window, 100, 120)
+    click(window.view, p.x(), p.y())
+    type_line(window, "m1:2")
+    p = at(window, 300, 300)
+    click(window.view, p.x(), p.y())
+    type_line(window, "m1*3=")
+    before = [(i.region.x, i.region.y) for i in equations(window)]
+    window.rotate_page(0, clockwise=True)
+    from markforge.calc.docsheet import sheet_for
+    sheet_for(window.document).settle()
+    items = equations(window)
+    assert all(i.rotation() % 360 == 90 for i in items)
+    use = next(i for i in items if "*" in i.text())
+    assert shown(use) == "6"
+    assert sorted((i.region.x, i.region.y) for i in items) == sorted(before)
+    # typed into, it reads upright; left, it turns back
+    p = end_of(use)
+    click(window.view, p.x(), p.y())
+    assert window.view.calc.item is use
+    assert use.sceneTransform().m12() == 0 and use.sceneTransform().m11() > 0
+    press_key(window.view, Qt.Key_Escape)
+    assert use.rotation() % 360 == 90
+    # a new one written on the turned page turns with it
+    frame = window.document.pages[0].frame
+    q = frame.mapToScene(QPointF(200, 60))
+    click(window.view, q.x(), q.y())
+    type_line(window, "m2:1")
+    new = next(i for i in equations(window) if "m2" in i.text())
+    assert new.rotation() % 360 == 90

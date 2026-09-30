@@ -116,11 +116,15 @@ def test_deleting_a_page_takes_its_equations_out_of_the_calculation(window, monk
 
 
 def test_an_equation_always_lands_on_smaths_grid(window):
-    item = put(window, 0, 60, 100, "g:1")
-    item.setPos(QPointF(61.3, 103.9))
+    """Dropped anywhere, it is put on the grid, as SMath does with regions."""
+    from tests.test_usability import drag
+    item = put(window, 0, 60.75, 101.25, "g:1")
+    start = item.mapToScene(item.local_rect().center())
+    drag(window.view, start.x(), start.y(), start.x() + 13.3, start.y() + 22.9)
     step = 6.75
     for v in (item.pos().x(), item.pos().y()):
         assert abs(v / step - round(v / step)) < 1e-9
+    assert item.pos() != QPointF(60.75, 101.25)
 
 
 def test_the_grid_is_dotted_and_never_printed(window):

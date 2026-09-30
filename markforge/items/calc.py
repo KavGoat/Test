@@ -22,7 +22,29 @@ from PySide6.QtWidgets import QGraphicsItem
 
 from ..calc.docsheet import PT_PER_PX, PX_PER_PT, sheet_for
 from ..calc.record import region_text, region_to_data
+from ..calc.ui.region_item import PAD_X, RegionItem
+from ..calc.ui.wrap import wrap
 from .base import MarkupItem, register_item
+
+def created_here(page) -> bool:
+    """A page CalcForge made (File > New, an added or automatic page), rather
+    than one that came in from a PDF or an image."""
+    return page.pdf_key is None and page.background_key is None
+
+
+def calc_area(frame) -> QRectF:
+    """Where equations go on a page, and where the grid is drawn.
+
+    On a page CalcForge made, the printable area inside its margins, as in
+    SMath; on a drawing that came in from a PDF, the whole sheet — a check
+    calc beside the title block is a thing people do.
+    """
+    page = frame.page
+    if created_here(page):
+        left, top, width, height = page.setup.content_rect_pt
+        return QRectF(left, top, width, height)
+    return frame.page_rect()
+
 
 EMPTY = {"root": []}
 GRID_PX = 9.0                   # SMath's grid, in its 96-dpi pixels
@@ -48,6 +70,7 @@ class CalcItem(MarkupItem):
         self._view = None               # WebSMath's drawing of the region
         self._sheet = None
         self.focused = False
+        self._turn_while_editing = None   # its rotation, while shown upright to type in
 
     # -- the region ----------------------------------------------------------
     def source(self) -> dict:
@@ -69,16 +92,15 @@ class CalcItem(MarkupItem):
         if frame is None or self.region is not None:
             return
         from ..calc.ui.layout import Style as MathStyle
-        from ..calc.ui.region_item import RegionItem
 
         self._sheet = sheet_for(frame.document)
         _connect(self._sheet, frame.scene())
-        x, y = self.pos().x() * PX_PER_PT, self.pos().y() * PX_PER_PT
+        x, y = self.reading_position()
         self.region = self._sheet.add(self._data, frame.page.uid, x, y)
         # The size is about to change: Qt's index of where items are has to be
         # told first, or clicks on the rest of the equation find nothing.
         self.prepareGeometryChange()
-        self._view = RegionItem(self.region, self._sheet.worksheet, MathStyle(self.region.font_size))
+        self._view = _PageRegionView(self.region, self._sheet.worksheet, MathStyle(self.region.font_size))
         self._sheet_items()[self.region.id] = self
         self.relayout()
 
@@ -103,14 +125,69 @@ class CalcItem(MarkupItem):
         frame = self._page_frame()
         if self.region is None or frame is None:
             return
-        self._sheet.move(self.region, frame.page.uid,
-                         self.pos().x() * PX_PER_PT, self.pos().y() * PX_PER_PT)
+        self._sheet.move(self.region, frame.page.uid, *self.reading_position())
+
+    # -- turned pages (decision 15) ------------------------------------------------
+    def page_turns(self) -> int:
+        """How many quarter turns clockwise its page has had since it was
+        written. An equation is never turned on its own, so its rotation says."""
+        rotation = self._turn_while_editing if self._turn_while_editing is not None \
+            else self.rotation()
+        return int(round(rotation / 90.0)) % 4
+
+    def reading_position(self) -> tuple:
+        """Where it is for the reading order, in SMath pixels: its place on
+        the page as the page was when it was written. Rotate page moves every
+        item round the sheet; turning that back means rotating a page never
+        changes a result (the answer to "which way is top-left")."""
+        x, y = self.pos().x(), self.pos().y()
+        frame = self._page_frame()
+        if frame is not None:
+            width, height = frame.page.width_pt, frame.page.height_pt
+            for _ in range(self.page_turns()):
+                # undo one clockwise turn: (x, y) -> (y, width - x)
+                x, y = y, width - x
+                width, height = height, width
+        return x * PX_PER_PT, y * PX_PER_PT
+
+    def snap_to_grid(self) -> None:
+        """Onto SMath's grid, as regions always are once dropped — the grid of
+        the page as it was written, so a turned page keeps its equations where
+        they were."""
+        frame = self._page_frame()
+        if frame is None:
+            return
+        step = GRID_PX
+        x, y = self.reading_position()
+        sx, sy = round(x / step) * step, round(y / step) * step
+        if (sx, sy) == (x, y):
+            return
+        # turn the snapped point forward again: (x, y) -> (height - y, x) per turn
+        width, height = frame.page.width_pt, frame.page.height_pt
+        turns = self.page_turns()
+        if turns % 2:
+            width, height = height, width          # the page as it was written
+        px, py = sx * PT_PER_PX, sy * PT_PER_PX
+        for _ in range(turns):
+            px, py = height - py, px
+            width, height = height, width
+        self.setPos(QPointF(px, py))
+
+    def show_upright(self, view_turn: float = 0.0) -> None:
+        """While it is typed into it reads the right way up, whatever the page
+        and the view have been turned to; leave_upright turns it back."""
+        if self._turn_while_editing is None:
+            self._turn_while_editing = self.rotation()
+        self.setTransformOriginPoint(QPointF(0, 0))
+        self.setRotation(-view_turn)
+
+    def leave_upright(self) -> None:
+        if self._turn_while_editing is None:
+            return
+        turn, self._turn_while_editing = self._turn_while_editing, None
+        self.setRotation(turn)
 
     def itemChange(self, change, value):
-        if change == QGraphicsItem.ItemPositionChange and isinstance(value, QPointF):
-            # SMath keeps every region on its grid, wherever it is dragged to
-            step = GRID_PX * PT_PER_PX
-            value = QPointF(round(value.x() / step) * step, round(value.y() / step) * step)
         result = super().itemChange(change, value)
         if change == QGraphicsItem.ItemParentHasChanged:
             if self._page_frame() is None:
@@ -121,8 +198,10 @@ class CalcItem(MarkupItem):
                 self._moved()           # onto another page
         elif change == QGraphicsItem.ItemSceneHasChanged and self.scene() is None:
             self._detach()
-        elif change == QGraphicsItem.ItemPositionHasChanged:
-            self._moved()
+        elif change in (QGraphicsItem.ItemPositionHasChanged,
+                        QGraphicsItem.ItemRotationHasChanged):
+            if self._turn_while_editing is None or change == QGraphicsItem.ItemPositionHasChanged:
+                self._moved()
         return result
 
     # -- geometry and drawing ---------------------------------------------------
@@ -130,6 +209,10 @@ class CalcItem(MarkupItem):
         self.prepareGeometryChange()
         if self._view is not None:
             self._view.focused = self.focused
+            frame = self._page_frame()
+            if frame is not None:
+                room = calc_area(frame).right() - self.pos().x()
+                self._view.max_width = max(room, 0.0) * PX_PER_PT
             self._view.relayout()
         self.geometryChanged.emit()
         self.update()
@@ -167,11 +250,26 @@ class CalcItem(MarkupItem):
         self._view.paint(painter, None)
         painter.restore()
 
+    @property
+    def too_wide(self) -> bool:
+        """Wider than its page even broken onto more lines: it will not print
+        in full (shown with an orange outline, never printed)."""
+        return bool(self._view is not None and self._view.too_wide)
+
     def paint(self, painter: QPainter, option, widget=None) -> None:
         self.paint_visible(painter)
         frame = self._page_frame()
         if getattr(frame, "print_mode", False):
             return
+        if self.too_wide:
+            painter.save()
+            pen = QPen(QColor("#ff8c00"))
+            pen.setCosmetic(True)
+            pen.setWidthF(1.5)
+            painter.setPen(pen)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRect(self.local_rect())
+            painter.restore()
         if self.isSelected() and not self.focused:
             painter.save()
             pen = QPen(QColor("#1971c2"))
@@ -186,6 +284,8 @@ class CalcItem(MarkupItem):
     # -- the record --------------------------------------------------------------
     def serialize(self) -> dict:
         data = self.base_dict()
+        if self._turn_while_editing is not None:
+            data["rotation"] = self._turn_while_editing
         data["calc"] = self.source()
         return data
 
@@ -230,3 +330,29 @@ def _connect(sheet, scene) -> None:
         QTimer.singleShot(0, run)
 
     sheet.request_settle = request
+
+
+class _PageRegionView(RegionItem):
+    """WebSMath's drawing of a region, broken onto more lines when it is too
+    wide for its page and not being typed into (calc/ui/wrap.py)."""
+
+    max_width = 0.0
+    too_wide = False
+
+    def relayout(self) -> None:
+        super().relayout()
+        self.too_wide = False
+        if self.focused or not self.max_width or self._size[0] <= self.max_width + 1e-6:
+            return
+        region = self.region
+        if region.kind == "math" and region.plot is None and self._layout is not None \
+                and region.show_input:
+            broken = wrap(self._layout, self.editor.root, self.max_width, PAD_X)
+            if broken is not None:
+                self._layout = broken
+                from ..calc.ui.region_item import MIN_H, PAD_BOTTOM
+                height = max(MIN_H, self._baseline + broken.desc + PAD_BOTTOM)
+                self._size = (broken.w + 2 * PAD_X, height)
+                self.update()
+                return
+        self.too_wide = True

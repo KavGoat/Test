@@ -315,6 +315,11 @@ class Page:
         self.header: Optional[bool] = None
         self.footer: Optional[bool] = None
         self.printable: bool = True
+        # Quarter turns clockwise given to the page by Rotate page, in
+        # degrees. Equations turn with it and are read in the page's own
+        # direction (items/calc.py), so a new one written on a turned page is
+        # born turned too.
+        self.turn: int = 0
         self.frame = None                           # set by the UI layer
         self._pending_items: list[dict] = []
 
@@ -379,6 +384,7 @@ class Page:
             "header": self.header,
             "footer": self.footer,
             "printable": self.printable,
+            "turn": self.turn,
             "items": items,
         }
 
@@ -401,6 +407,7 @@ class Page:
             said = data.get(which)
             setattr(page, which, None if said is None else bool(said))
         page.printable = bool(data.get("printable", True))
+        page.turn = int(data.get("turn", 0) or 0) % 360
         page._pending_items = data.get("items", [])
         return page
 
