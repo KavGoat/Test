@@ -62,7 +62,7 @@ def source_bytes(document) -> Optional[bytes]:
         if page.shows_a_header(settings, index) \
                 or page.shows_a_footer(settings, index):
             return None
-        if page.frame is not None and any(item.flattened
+        if page.frame is not None and any(item.flattened or getattr(item, "IS_CALC", False)
                                           for item in page.frame.markups()):
             return None
     try:

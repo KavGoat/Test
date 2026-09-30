@@ -194,6 +194,8 @@ def exportable(frame, page, preserved: bool) -> list:
             continue
         if item.flattened or item.from_drawing:
             continue
+        if getattr(item, "IS_CALC", False):
+            continue                   # drawn into the page, never an annotation
         if getattr(item, "TYPE", "") == "link":
             continue                   # written as a /Link annotation instead
         items.append(item)

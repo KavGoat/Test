@@ -4575,6 +4575,11 @@ class PageView(QGraphicsView):
                      Qt.Key_Up: QPointF(0, -step), Qt.Key_Down: QPointF(0, step)}[key]
             items = [i for i in self.scene().selectedItems()
                      if isinstance(i, MarkupItem) and self.editable(i)]
+            if any(isinstance(i, CalcItem) for i in items):
+                # equations live on SMath's grid: a nudge is one grid step
+                from .calcedit import GRID_PT
+                delta = QPointF(math.copysign(GRID_PT, delta.x()) if delta.x() else 0.0,
+                                math.copysign(GRID_PT, delta.y()) if delta.y() else 0.0)
             if items:
                 self.begin_snapshot(self.all_frames())
                 for item in items:

@@ -356,3 +356,89 @@ class _PageRegionView(RegionItem):
                 self.update()
                 return
         self.too_wide = True
+
+
+# -- an equation as line work (a snapshot's copy of it, decision 16) ------------
+
+def line_work_svg(item: "CalcItem") -> str:
+    """The equation as vector line work: drawn into a PDF, then read back by
+    MuPDF as SVG with the letters as outlines — the same route a snapshot of
+    a PDF's own text takes (io/pdfsnapshot.py)."""
+    import pymupdf
+    from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QMarginsF, QSizeF
+    from PySide6.QtGui import QPageLayout, QPageSize, QPdfWriter
+
+    from ..io.pdfsnapshot import inline_glyphs
+
+    rect = item.local_rect()
+    data = QByteArray()
+    buffer = QBuffer(data)
+    buffer.open(QIODevice.WriteOnly)
+    writer = QPdfWriter(buffer)
+    writer.setResolution(72)
+    writer.setPageLayout(QPageLayout(QPageSize(QSizeF(rect.width(), rect.height()), QPageSize.Point),
+                                     QPageLayout.Portrait, QMarginsF(0, 0, 0, 0)))
+    painter = QPainter(writer)
+    painter.translate(-rect.topLeft())
+    focused, item.focused = item.focused, False
+    try:
+        if focused:
+            item.relayout()
+        item.paint_visible(painter)
+    finally:
+        item.focused = focused
+        if focused:
+            item.relayout()
+        painter.end()
+        buffer.close()
+    document = pymupdf.open("pdf", bytes(data))
+    try:
+        return inline_glyphs(document[0].get_svg_image(text_as_path=True))
+    finally:
+        document.close()
+
+
+@register_item
+class CalcDrawingItem(MarkupItem):
+    """An equation as it was drawn, kept as line work — what a snapshot holds
+    of an equation it was taken over. It no longer calculates."""
+
+    TYPE = "calc_drawing"
+    NAME = "Equation drawing"
+    RESIZABLE = False
+    ROTATABLE = True
+
+    def __init__(self, rect: Optional[QRectF] = None):
+        super().__init__()
+        self._rect = QRectF(rect) if rect else QRectF(0, 0, 10, 10)
+
+    @classmethod
+    def of(cls, item: CalcItem) -> "CalcDrawingItem":
+        drawing = cls(item.local_rect())
+        drawing.stamp_svg = line_work_svg(item)
+        drawing.their_picture_box = tuple(item.local_rect().getRect())
+        drawing.setPos(item.pos())
+        drawing.setTransform(item.transform())
+        drawing.setTransformOriginPoint(item.transformOriginPoint())
+        drawing.setRotation(item._turn_while_editing if item._turn_while_editing is not None
+                            else item.rotation())
+        return drawing
+
+    def local_rect(self) -> QRectF:
+        return QRectF(self._rect)
+
+    def set_local_rect(self, rect: QRectF) -> None:
+        self.prepareGeometryChange()
+        self._rect = QRectF(rect)
+
+    def paint_content(self, painter: QPainter) -> None:
+        pass                                    # it is all in its line work
+
+    def serialize(self) -> dict:
+        data = self.base_dict()
+        data["rect"] = [self._rect.x(), self._rect.y(), self._rect.width(), self._rect.height()]
+        return data
+
+    def deserialize(self, data: dict) -> None:
+        self._rect = QRectF(*data.get("rect", [0, 0, 10, 10]))
+        self.load_base(data)

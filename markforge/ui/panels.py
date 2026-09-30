@@ -716,6 +716,8 @@ class MarkupsPanel(QWidget):
             for item in page.frame.ordered_markups():
                 if getattr(item, "from_drawing", False):
                     continue
+                if getattr(item, "IS_CALC", False):
+                    continue           # the Markups list is markups only (decision 21)
                 found.append((index, item, self.row_for(index, item)))
         return found
 
@@ -2412,9 +2414,11 @@ class PropertiesPanel(QScrollArea):
             lambda on: self._apply(lambda i: i.set_locked(on), "Lock"))
         form.addRow("", locked)
 
-        printable = QCheckBox("Print")
-        printable.setToolTip("Include this markup when the page is printed")
-        printable.setChecked(first.printable)
-        printable.toggled.connect(
-            lambda on: self._apply(lambda i: setattr(i, "printable", on), "Print flag"))
-        form.addRow("", printable)
+        if not getattr(first, "IS_CALC", False):
+            # an equation always prints (decision 17)
+            printable = QCheckBox("Print")
+            printable.setToolTip("Include this markup when the page is printed")
+            printable.setChecked(first.printable)
+            printable.toggled.connect(
+                lambda on: self._apply(lambda i: setattr(i, "printable", on), "Print flag"))
+            form.addRow("", printable)

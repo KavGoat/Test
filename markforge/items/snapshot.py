@@ -106,6 +106,11 @@ class SnapshotItem(MarkupItem):
         box = QRectF(box).normalized()
         kept = []
         for item in items:
+            if getattr(item, "IS_CALC", False):
+                # an equation is copied as line work, like everything else a
+                # snapshot copies (decision 16): it stops calculating here
+                from .calc import CalcDrawingItem
+                item = CalcDrawingItem.of(item)
             payload = item.serialize()
             payload["x"] = payload.get("x", 0.0) - box.left()
             payload["y"] = payload.get("y", 0.0) - box.top()

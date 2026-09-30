@@ -909,7 +909,9 @@ class PageFrame(QGraphicsObject):
                 item._handles_visible = False
             hidden = [item for item in self.markups()
                       if (without_markups and not item.flattened
-                          and not item.from_drawing)
+                          and not item.from_drawing
+                          # equations are page drawing, not annotations
+                          and not getattr(item, "IS_CALC", False))
                       or (for_print and (not item.printable
                                          or (pdf_overlay and item.from_drawing)))]
             for item in hidden:

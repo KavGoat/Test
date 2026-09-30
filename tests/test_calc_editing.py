@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtTest import QTest
+import pytest
 
 from markforge.calc.engine.display import display_text
 from markforge.items.calc import CalcItem
@@ -302,3 +303,115 @@ def test_rotating_a_page_turns_its_equations_but_never_changes_a_result(window):
     type_line(window, "m2:1")
     new = next(i for i in equations(window) if "m2" in i.text())
     assert new.rotation() % 360 == 90
+
+
+def test_a_snapshot_copies_an_equation_as_line_work(window):
+    """Decision 16: the copy is drawing, not another live equation."""
+    from markforge.calc.docsheet import sheet_for
+    from markforge.items.snapshot import SnapshotItem
+    from tests.test_usability import hover
+    calc_mode(window)
+    p = at(window, 100, 120)
+    click(window.view, p.x(), p.y())
+    type_line(window, "sn:12.5'kN")
+    regions = len(sheet_for(window.document).worksheet.regions)
+    window.select_tool("snapshot")
+    a, b = at(window, 80, 100), at(window, 260, 160)
+    drag(window.view, a.x(), a.y(), b.x(), b.y())
+    window.select_tool("select")
+    q = at(window, 100, 400)
+    hover(window.view, q.x(), q.y())
+    window.paste_items()
+    shot = next(i for i in window.view.scene().items() if isinstance(i, SnapshotItem))
+    assert [s["type"] for s in shot.source_items] == ["calc_drawing"]
+    assert "<path" in shot.source_items[0]["stamp_svg"]
+    assert len(sheet_for(window.document).worksheet.regions) == regions
+    image = window.document.pages[0].frame.render_image(dpi=72, for_print=True)
+    box = shot.mapRectToScene(shot.local_rect())
+    ink = [image.pixelColor(x, y) for x in range(int(box.left()), int(box.right()))
+           for y in range(int(box.top()), int(box.bottom()))]
+    assert any(c.blue() > 150 and c.red() < 100 for c in ink), "SMath's blue unit, as drawn"
+
+
+def _two_equations_and_a_box(window):
+    calc_mode(window)
+    p = at(window, 100, 120)
+    click(window.view, p.x(), p.y())
+    type_line(window, "s1:1")
+    type_line(window, "s1+1=")
+    window.select_tool("rect")
+    a, b = at(window, 300, 110), at(window, 360, 150)
+    drag(window.view, a.x(), a.y(), b.x(), b.y())
+    window.select_tool("select")
+    from markforge.items.shapes import RectItem
+    box = next(i for i in window.view.scene().items() if isinstance(i, RectItem))
+    return equations(window), box
+
+
+def test_equations_and_markups_are_box_selected_together(window):
+    """Decision 14: dragging right selects what is wholly inside."""
+    (define, use), box = _two_equations_and_a_box(window)
+    press_key(window.view, Qt.Key_Escape)
+    a, b = at(window, 80, 100), at(window, 380, 170)
+    drag(window.view, a.x(), a.y(), b.x(), b.y())
+    assert define.isSelected() and use.isSelected() and box.isSelected()
+
+
+def test_grouping_and_aligning_keep_the_calculation(window):
+    (define, use), box = _two_equations_and_a_box(window)
+    press_key(window.view, Qt.Key_Escape)
+    for item in (define, use, box):
+        item.setSelected(True)
+    window.group_selection()
+    assert define.group and define.group == use.group == box.group
+    assert shown(use) == "2"
+    window.align_items("left")
+    from markforge.calc.docsheet import sheet_for
+    sheet_for(window.document).settle()
+    assert shown(use) == "2", "same order: define is still above use"
+
+
+def test_arrow_keys_nudge_a_selected_equation_by_a_grid_step(window):
+    (define, use), _box = _two_equations_and_a_box(window)
+    press_key(window.view, Qt.Key_Escape)
+    window.view.scene().clearSelection()
+    define.setSelected(True)
+    x = define.pos().x()
+    press_key(window.view, Qt.Key_Right)
+    assert define.pos().x() == pytest.approx(x + 6.75)
+
+
+def test_a_locked_equation_is_neither_moved_nor_opened(window):
+    (define, use), _box = _two_equations_and_a_box(window)
+    press_key(window.view, Qt.Key_Escape)
+    window.view.scene().clearSelection()
+    define.setSelected(True)
+    window.toggle_lock()
+    assert define.locked
+    p = end_of(define)
+    click(window.view, p.x(), p.y())
+    assert window.view.calc.item is None
+
+
+def test_equations_stay_out_of_the_markups_list_and_the_annotations(window, tmp_path):
+    (define, use), box = _two_equations_and_a_box(window)
+    press_key(window.view, Qt.Key_Escape)
+    rows = window.markups_panel.all_rows(window.document)
+    assert [item for _i, item, _r in rows] == [box]
+    from tests.test_output import _pdf
+    printed = _pdf(window.document, tmp_path)
+    assert [str(m["/Subtype"]) for m in printed.markups()] == ["/Square"]
+    import pymupdf
+    with pymupdf.open(printed.path) as document:
+        words = document[0].get_text()
+    assert "s1+1=2" in words.replace(" ", ""), "the equation and its result are on the page"
+
+
+def test_hide_leaves_equations_alone(window):
+    (define, use), box = _two_equations_and_a_box(window)
+    press_key(window.view, Qt.Key_Escape)
+    for item in (define, box):
+        item.setSelected(True)
+    window.hide_selection()
+    assert define.isVisible() and not define.hidden
+    assert not box.isVisible()
