@@ -140,3 +140,26 @@ may remove them or treat them as leftovers. Work is on branch
 |  | 30. On first start, copy the MarkForge settings (shortcuts, tool sets, My Tools, toolbar layout, dark mode, markup defaults) into CalcForge once. |
 |  | Later phase (plan only, don't build yet): live values in Calculation text, e.g. "The design moment is M = 45.2 kN·m", updating when the calc changes. |
 |  | How to work: research both codebases; find every further clash and ask about each (multiple choice, up to four at a time, recommendation first, no guessing); write a phased plan to `docs/`; build one phase at a time, running all tests and the mutation check before every push and checking each change in the real window; test saved PDFs by reading text back, rendering and comparing with the screen, and by opening them as another reader would; log every request here; remove withdrawn things completely; commit with clear messages, push only to the CalcForge branch, no PR unless asked; after each phase report what changed, what was tested, and what behaves differently from SMath or Bluebeam. |
+
+## Clarifications to the CalcForge brief (2026-09-30, answers to the clash questions)
+
+| Complete | Task |
+| --- | --- |
+|  | WebSMath's tests that check answers against SMath's own example `.sm` files keep running through a test-only `.sm` reader in the tests folder. The app itself has no `.sm` code, menu or file filter. |
+|  | MarkForge's tests of the old incremental save are rewritten to the new rule: page content unaltered, a fresh file that doesn't grow, and a signed file appended to with its signature bytes intact. |
+|  | Units in plain text (measurement labels, Variables panel, status bar, copied text) are written with a middle dot and superscripts: kN·m, m². |
+|  | Units SMath lacks or spells differently use SMath's names: °C, °F, K, yr, hr; pcf, klf and plf are given as lbf/ft³, kip/ft and lbf/ft. SMath's unit table is unchanged. |
+|  | One grid, SMath's: dotted, 9 px spacing, never printed. MarkForge's grid spacing and grid printing are removed; one Show grid switch (Ctrl+') plus per-page on/off. |
+|  | Margins: on pages CalcForge creates, SMath's margins apply (grid inside only; pushing past the bottom margin moves to the next page). On imported PDF pages equations go anywhere and push at the sheet's bottom edge. |
+|  | A too-wide equation breaks automatically onto more lines, before an operator (+, −, ·, =) or between a function's arguments, with later lines indented under the first operand. Display only; the maths is unchanged. Where no break fits, it runs past the edge with an orange outline and a warning that it won't print in full. |
+|  | Reading order on a rotated page follows the page's own, unrotated direction; rotating a page never changes a result. |
+|  | Recolour and Whiteout never touch equations. Redaction deletes an equation it fully covers (warning names variables that became undefined); partly covered ones are left and flagged. Flatten skips equations. |
+|  | Extract and Split pages carry their pages' equations live in the new file's record, warning of variables defined on pages left behind. Insert PDF brings a CalcForge file's equations in live, in reading order. |
+|  | Crop removes equations wholly outside the kept area, with the undefined-variables warning; partly outside ones are kept and flagged; Undo restores. |
+|  | Plots: the wheel scrolls and dragging moves the plot, until it's double-clicked into; then the wheel zooms (Ctrl: x only, Shift: y only) and dragging pans, until a click outside or Esc. |
+|  | Calc mode turns off every tool key, with or without Shift or Alt; Ctrl commands stay. |
+|  | MarkForge's symbol keys (Ctrl+Alt+P π, Ctrl+Alt+, ≤, Ctrl+Alt+R √, Ctrl+Alt+F φ…) work inside equations with their maths meaning. |
+|  | SMath's Separator, Picture regions, Page background and margin double-click for header/footer are removed in favour of MarkForge's line, image and Header/Footer dialog. |
+|  | A lone word followed by a space turns into Calculation text, as in SMath; undo turns it back. |
+|  | Measurement labels keep the page's decimal places (trailing zeros included), written by SMath's number formatter. |
+|  | WebSMath's 766 tests are ported and run green in phase 1. As a withdrawn feature goes, its tests go with it, listed by name in the phase report. Tests of WebSMath's window are rewritten to drive the CalcForge window. No maths, units, recalculation or editor test is removed. |
