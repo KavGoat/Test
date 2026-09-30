@@ -67,6 +67,7 @@ class Region:
     defined_funcs: dict = field(default_factory=dict)
     uses: frozenset = frozenset()
     dynamic: bool = False  # uses eval/str2num...: depends on anything
+    pending: bool = False  # edited since last calculated (result shows the box)
 
     @property
     def key(self):
@@ -239,6 +240,7 @@ class Worksheet:
                 changed |= _changed_names(old_vars, old_funcs, r.defined_vars, r.defined_funcs)
 
     def _evaluate(self, r: Region, commit: bool) -> None:
+        r.pending = False
         before = (_shown(r.display), r.error.message if r.error else None)
         if commit and r.id in self._keys:
             self.index.remove(self._keys.pop(r.id), r.defined_vars, r.defined_funcs)

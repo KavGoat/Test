@@ -743,10 +743,15 @@ class WorksheetView(QGraphicsView):
         self.scene_.cross = QPointF(snap(r.left()), snap(r.bottom() + 5))
 
     def _after_edit(self, item: RegionItem, typed: bool = False) -> None:
-        # only the region being edited follows the keystrokes; the rest of the
-        # worksheet is recalculated when the region is left (as SMath Cloud)
-        if self.worksheet.auto_calculation:
-            self.worksheet.calculate_region(item.region)
+        # as SMath Studio desktop: while a region is being edited its result is
+        # not recalculated - it shows the empty box until the region is left,
+        # then it and whatever depends on it are brought up to date.  Plots
+        # follow their input live.
+        if item.region.plot is not None:
+            if self.worksheet.auto_calculation:
+                self.worksheet.calculate_region(item.region)
+        else:
+            item.region.pending = True
         item.relayout()
         self._grow_scene()
         self.modified.emit()
@@ -781,10 +786,12 @@ class WorksheetView(QGraphicsView):
         if not word or word[0].isdigit() or word[0] == ".":
             self.hide_suggestions()
             return
-        entries = self.entries_for(word, item.region)
         if item.editor.in_unit:
-            # in the desired-unit box every word is a unit
-            entries = [e for e in entries if e.kind == "unit" and not _is_constant_unit(e.name)]
+            # the desired-unit box lists units (and unit constants) that start
+            # with what was typed, as SMath Studio desktop: k, K, kA, kat...
+            entries = unit_box_entries(word)
+        else:
+            entries = self.entries_for(word, item.region)
         if not entries:
             self.hide_suggestions()
             return
@@ -1394,6 +1401,37 @@ def suggestion_entries(word: str, defined_names, user_functions=None) -> list:
         kind = "function" if args > 0 else ("unit" if label.startswith("'") else "operand")
         text = label[1:] if label.startswith("'") else label
         out.append(Suggestion(label, text, kind, origin, args, desc))
+    return out
+
+
+def unit_value_text(name: str) -> str:
+    """'k -> "k = 1.380650424·10^-23 kg m^2/K s^2" (SI base units)."""
+    from ..engine.display import DUnit, display_text, display_value, unit_text
+    from ..engine.numformat import NumberFormat
+    from ..engine.units import base_unit_parts, unit_quantity
+
+    q = unit_quantity(name)
+    num = display_text(display_value(q, NumberFormat(decimals=10, engineering=False), show_unit=False))
+    u = unit_text(DUnit(*base_unit_parts(q.dims))) if any(q.dims) else ""
+    return f"{name} = {num} {u}".rstrip()
+
+
+def unit_box_entries(word: str) -> list:
+    """Entries for the desired-unit box: every unit whose name starts with the
+    typed text (any case), in SMath's order, each described by its name,
+    category and value in SI units."""
+    import html
+
+    w = word[1:] if word.startswith("'") else word
+    names = [u for u in UNIT_CATALOG if u.lower().startswith(w.lower())]
+    names.sort(key=lambda u: smath_sort_key("'" + u))
+    out = []
+    for u in names:
+        category, title = UNIT_CATALOG.get(u, ("", u))
+        desc = (f"{html.escape(title)} ({html.escape(category)})<br>"
+                f"<span style='font-family:Courier New'>{html.escape(unit_value_text(u))}</span>")
+        label = "'" + SMATH_LABEL.get(u, u)
+        out.append(Suggestion(label, label[1:], "unit", 1, 0, desc))
     return out
 
 

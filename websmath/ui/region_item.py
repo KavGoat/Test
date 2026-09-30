@@ -86,7 +86,8 @@ class RegionItem(QGraphicsObject):
         if self.region.plot is not None:
             self._layout_plot()
             return
-        err = self.region.error
+        pending = self.region.pending
+        err = None if pending else self.region.error
         lay = Layouter(self.style, var_kind=self._var_kind, error_node=getattr(err, "node", None) or _src_node(err),
                        user_funcs=frozenset(n for n, _ in self.worksheet.index.funcs))
         root = lay.row(self.editor.root)
@@ -97,11 +98,12 @@ class RegionItem(QGraphicsObject):
             # desired unit leaves out; not editable), then the desired-unit box:
             # what was typed there, or while editing an empty black box
             unit_row = self.editor.unit
-            if self.region.display is not None:
-                res = lay.result(self.region.display, 1.0)
+            shown = None if pending else self.region.display
+            if shown is not None:
+                res = lay.result(shown, 1.0)
             else:
                 res = lay.placeholder()
-            res.x = root.w + (1 if self.region.display is not None else 2)
+            res.x = root.w + (1 if shown is not None else 2)
             parts.append(res)
             box = None
             if not unit_row.is_empty() or (self.focused and self.editor.in_unit):
@@ -109,7 +111,7 @@ class RegionItem(QGraphicsObject):
             elif self.focused:
                 box = lay.placeholder()
             if box is not None:
-                gap = 3 if (self.region.display is None or getattr(self.region.display, "unit", None) is None) else 3
+                gap = 3
                 box.x = res.x + res.w + gap
                 parts.append(box)
                 self._result_unit_rect = QRectF(box.x - 2, -max(box.asc, 12), box.w + 6, max(box.asc, 12) + box.desc + 4)
@@ -288,7 +290,8 @@ class RegionItem(QGraphicsObject):
         if self.focused:
             self._paint_selection(p)
             self._paint_cursor(p)
-            if self.region.error is not None or getattr(self, "_plot_error", None) is not None:
+            if (self.region.error is not None and not self.region.pending) or \
+                    getattr(self, "_plot_error", None) is not None:
                 self._paint_error_tip(p)
 
     def _paint_special(self, p: QPainter) -> None:
