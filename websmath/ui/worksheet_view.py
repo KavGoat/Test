@@ -22,7 +22,7 @@ from typing import Optional
 
 from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QKeyEvent, QPainter, QPen
-from PySide6.QtWidgets import (QApplication, QGraphicsScene, QGraphicsView, QLabel, QListWidget,
+from PySide6.QtWidgets import (QApplication, QGraphicsItem, QGraphicsScene, QGraphicsView, QLabel, QListWidget,
                                QListWidgetItem, QMenu)
 
 from ..engine.catalog import FUNCTIONS, UNIT_CATALOG
@@ -107,16 +107,22 @@ class WorksheetScene(QGraphicsScene):
             p.drawRect(page.adjusted(-0.5, -0.5, 0.5, 0.5))
             k += 1
 
+    _grid_brush = None
+
     def _grid(self, p: QPainter, rect: QRectF) -> None:
-        p.setPen(QPen(GRID_COLOR, 1))
-        x = int(rect.left() // GRID) * GRID
-        while x < rect.right():
-            p.drawLine(QPointF(x + 0.5, rect.top()), QPointF(x + 0.5, rect.bottom()))
-            x += GRID
-        y = int(rect.top() // GRID) * GRID
-        while y < rect.bottom():
-            p.drawLine(QPointF(rect.left(), y + 0.5), QPointF(rect.right(), y + 0.5))
-            y += GRID
+        """The 9 px grid, filled from one tile (much faster than lines)."""
+        if WorksheetScene._grid_brush is None:
+            from PySide6.QtGui import QBrush, QPixmap
+
+            tile = QPixmap(GRID, GRID)
+            tile.fill(Qt.white)
+            tp = QPainter(tile)
+            tp.setPen(QPen(GRID_COLOR, 1))
+            tp.drawLine(0, 0, GRID - 1, 0)
+            tp.drawLine(0, 0, 0, GRID - 1)
+            tp.end()
+            WorksheetScene._grid_brush = QBrush(tile)
+        p.fillRect(rect, WorksheetScene._grid_brush)
 
     def drawForeground(self, p: QPainter, rect: QRectF) -> None:
         if self.printing:
@@ -234,7 +240,9 @@ class WorksheetView(QGraphicsView):
         self.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         self.setFocusPolicy(Qt.StrongFocus)
         self.setDragMode(QGraphicsView.NoDrag)
-        self.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
+        # repaint only what changed (each region item knows its bounds; the red
+        # cross asks for a full update when it moves)
+        self.setViewportUpdateMode(QGraphicsView.SmartViewportUpdate)
         self.viewport().setMouseTracking(True)  # move cursor over region frames
         self.verticalScrollBar().valueChanged.connect(self._scrolled)
         self.suggestions = SuggestionList(self)
@@ -253,6 +261,8 @@ class WorksheetView(QGraphicsView):
     # -- region management ---------------------------------------------------------
     def _add_item(self, region: Region) -> RegionItem:
         item = RegionItem(region, self.worksheet, self.style_)
+        # regions not being edited are painted once and reused until they change
+        item.setCacheMode(QGraphicsItem.DeviceCoordinateCache)
         self.scene_.addItem(item)
         self.items[region.id] = item
         return item
@@ -350,11 +360,23 @@ class WorksheetView(QGraphicsView):
         the last one (as the desktop's Pages view)."""
         import math
 
-        r = self.scene_.itemsBoundingRect() if self.items else QRectF()
-        pages = max(1, math.ceil((max(r.bottom(), self.scene_.cross.y()) + 200) / PAGE_H))
-        w = max(PAGE_W + 40, r.right() + 40)
-        self.scene_.setSceneRect(0, 0, w, pages * PAGE_H + (20 if self.scene_.page_mode == "pages" else 0))
-        self.pages_changed.emit(self.page_at_view(), pages)
+        # the content's extent: a full scan only when regions came or went,
+        # otherwise the region being edited can only push it further out
+        n = len(self.items)
+        if getattr(self, "_extent_n", -1) != n or self.focused_item is None:
+            r = self.scene_.itemsBoundingRect() if self.items else QRectF()
+            self._extent = (r.right(), r.bottom())
+            self._extent_n = n
+        else:
+            fr = self.focused_item.sceneBoundingRect()
+            self._extent = (max(self._extent[0], fr.right()), max(self._extent[1], fr.bottom()))
+        right, bottom = self._extent
+        pages = max(1, math.ceil((max(bottom, self.scene_.cross.y()) + 200) / PAGE_H))
+        w = max(PAGE_W + 40, right + 40)
+        rect = QRectF(0, 0, w, pages * PAGE_H + (20 if self.scene_.page_mode == "pages" else 0))
+        if rect != self.scene_.sceneRect():
+            self.scene_.setSceneRect(rect)
+            self.pages_changed.emit(self.page_at_view(), pages)
 
     zoom = 1.0
 
@@ -404,7 +426,10 @@ class WorksheetView(QGraphicsView):
                 self.update_after(old)
                 old.relayout()
         self.focused_item = item
+        if old is not None and old.scene() is not None:
+            old.setCacheMode(QGraphicsItem.DeviceCoordinateCache)
         if item is not None:
+            item.setCacheMode(QGraphicsItem.NoCache)  # repainted on every keystroke
             item.focused = True
             item.relayout()
         self.hide_suggestions()
@@ -1460,46 +1485,61 @@ def _is_constant_unit(label: str) -> bool:
     return INFO.get(name, ("",))[0] == "constant"
 
 
+_UNITS_SORTED = None
+
+
+def _sorted_units() -> list:
+    """[(label, lower-case name)] of every unit in SMath's order (sorted once)."""
+    global _UNITS_SORTED
+    if _UNITS_SORTED is None or len(_UNITS_SORTED) != len(UNIT_CATALOG):
+        _UNITS_SORTED = sorted((("'" + SMATH_LABEL.get(u, u), u.lower()) for u in UNIT_CATALOG),
+                               key=lambda x: smath_sort_key(x[0]))
+    return _UNITS_SORTED
+
+
+_CATALOG_SORTED = None
+
+
+def _sorted_catalog() -> list:
+    """[(label, kind, lower-case name)] of functions, constants and keywords
+    in SMath's order, built once (overloads listed as "sum (1)", "sum (4)")."""
+    global _CATALOG_SORTED
+    if _CATALOG_SORTED is None:
+        counts, entries = {}, {}
+        for name, nargs, _, _ in FUNCTIONS:
+            counts[name] = counts.get(name, 0) + 1
+        for name, nargs, _, _ in FUNCTIONS:
+            entries.setdefault(name if counts[name] == 1 else f"{name} ({nargs})", ("function", name.lower()))
+        for c in list(BUILTIN_CONSTANTS) + KEYWORDS + ["lastError"]:
+            entries.setdefault(c, ("constant", c.lower()))
+        _CATALOG_SORTED = sorted(((k, kind, low) for k, (kind, low) in entries.items()),
+                                 key=lambda x: smath_sort_key(x[0]))
+    return _CATALOG_SORTED
+
+
 def suggestion_list(word: str, defined_names) -> list:
-    """The autocomplete list for a partial word (observed on SMath Cloud):
-    case-insensitive substring matches; units (with their apostrophe) first,
-    then functions (overloads listed as "sum (1)", "sum (4)"), constants,
-    keywords, lastError and the worksheet's names defined above - each
-    group sorted as SMath sorts."""
+    """The autocomplete list for a partial word: case-insensitive substring
+    matches over units, functions, constants, keywords, lastError and the
+    worksheet's names defined above.  Order: the worksheet's names, units,
+    constants, unit constants, functions and keywords (SMATH_ORDER: SMath
+    Cloud's own order - units first, the rest mixed).  Catalogues are sorted
+    once, so a keystroke only filters them."""
     w = word.lower()
     needle = w[1:] if w.startswith("'") else w
     # every unit is listed, also those SMath Cloud hides behind a case
     # variant (kN behind kn, Pa behind pa; see SITE_HIDDEN_UNITS)
-    units = sorted((("'" + SMATH_LABEL.get(u, u), "unit") for u in UNIT_CATALOG
-                    if needle in u.lower()),
-                   key=lambda x: smath_sort_key(x[0]))
-    others = {}
-    counts = {}
-    for name, nargs, _, _ in FUNCTIONS:
-        counts[name] = counts.get(name, 0) + 1
-    for name, nargs, _, _ in FUNCTIONS:
-        if needle in name.lower():
-            label = name if counts[name] == 1 else f"{name} ({nargs})"
-            others.setdefault(label, "function")
-    for c in list(BUILTIN_CONSTANTS) + KEYWORDS + ["lastError"]:
-        if needle in c.lower():
-            others.setdefault(c, "constant")
-    for n in defined_names:
-        if needle in n.lower() and n not in others:
-            others[n] = "variable"
-    # order asked for: the worksheet's own names first, then units, then
-    # constants, then functions and keywords (SMath Cloud: units first, the
-    # rest mixed; see SMATH_ORDER)
+    units = [(label, "unit") for label, low in _sorted_units() if needle in low]
+    catalog = [(k, kind) for k, kind, low in _sorted_catalog() if needle in low]
+    known = {k for k, _ in catalog}
+    variables = sorted(((n, "variable") for n in defined_names if needle in n.lower() and n not in known),
+                       key=lambda x: smath_sort_key(x[0]))
     if SMATH_ORDER:
-        rest = sorted(others.items(), key=lambda x: smath_sort_key(x[0]))
+        rest = sorted(catalog + variables, key=lambda x: smath_sort_key(x[0]))
         return units + rest
-    variables = sorted(((k, v) for k, v in others.items() if v == "variable"), key=lambda x: smath_sort_key(x[0]))
-    consts = sorted(((k, v) for k, v in others.items() if v == "constant" and k not in KEYWORDS),
-                    key=lambda x: smath_sort_key(x[0]))
+    consts = [(k, v) for k, v in catalog if v == "constant" and k not in KEYWORDS]
+    funcs = [(k, v) for k, v in catalog if v == "function" or k in KEYWORDS]
     unit_consts = [u for u in units if _is_constant_unit(u[0])]
     plain_units = [u for u in units if not _is_constant_unit(u[0])]
-    funcs = sorted(((k, v) for k, v in others.items() if v == "function" or k in KEYWORDS),
-                   key=lambda x: smath_sort_key(x[0]))
     return variables + plain_units + consts + unit_consts + funcs
 
 
