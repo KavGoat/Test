@@ -1038,16 +1038,23 @@ def _measure_dictionary(annotation, item) -> None:
         calibrated = calibrated()
     if not calibrated:
         return
+    # /C converts page points into /U, so it has to be the length of one point
+    # in the display unit itself — not in whatever unit the scale is kept in,
+    # which made another reader measure a 1:50 sheet a thousand times long.
+    # An area's /C converts the square of the /X unit into the area unit.
+    from ..core.units import convert, format_unit, parse_unit
     try:
         unit = str(scale.display_unit)
-        per_point = float(scale.length(1.0).magnitude)
+        per_point = float(convert(scale.length(1.0), unit).magnitude)
+        area_unit = str(getattr(scale, "area_unit", "") or unit + "^2")
+        per_square = float(convert(parse_unit(f"1 {unit}") ** 2, area_unit).magnitude)
     except Exception:                                  # noqa: BLE001
         return
     if not per_point:
         return
     numbers = {
         "Type": Name("NumberFormat"),
-        "U": unit,
+        "U": format_unit(unit),
         "C": per_point,
         "D": 100,
         "F": Name("D"),
@@ -1059,8 +1066,8 @@ def _measure_dictionary(annotation, item) -> None:
         "Subtype": Name("RL"),
         "R": str(scale.label),
         "X": [numbers],
-        "D": [dict(numbers)],
-        "A": [dict(numbers)],
+        "D": [dict(numbers, C=1.0)],
+        "A": [dict(numbers, U=format_unit(area_unit), C=per_square)],
     }
     y_factor = float(getattr(scale, "y_factor", 1.0) or 1.0)
     if abs(y_factor - 1.0) > 1e-9:

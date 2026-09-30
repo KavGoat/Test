@@ -5093,7 +5093,7 @@ class MainWindow(QMainWindow):
             return 0.0
         try:
             quantity = parse_unit(text)
-        except Exception:  # noqa: BLE001 - pint raises for unknown unit names
+        except Exception:  # noqa: BLE001 - a length in the wrong dimension raises
             quantity = None
         if quantity is None:
             raise ValueError(f"Could not read “{text}” as a distance.")

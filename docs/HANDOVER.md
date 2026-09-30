@@ -226,9 +226,16 @@ markforge/
     writer.py        serialize(), and incremental_update() — the important one
     annotations.py   the annotation model: border effects, callout lines,
                      measure dictionaries, line endings
+  calc/        the calculation engine — WebSMath, the SMath Studio replica
+    engine/          Qt-free maths, moved over unchanged (only symbolic.py's
+                     import of ast_to_items now points at ../astitems.py)
+    editor.py, worksheet.py, plot.py, page.py, astitems.py
+    ui/layout.py, ui/region_item.py   SMath's typesetting and drawing
+    tools/mutation_check.py           plants 14 bugs; all must be caught
   core/        no Qt beyond QPointF-style value types
     document.py      Document, Page, PageSetup, PageScale, assets
-    units.py         pint registry, unit ladders, formatting, UNIT_MENU
+    units.py         scales and measurements on SMath's unit table and the
+                     engine's number formatter (Pint is gone), UNIT_MENU
     typography.py    page fonts sized in pixels, not points (see below)
     spelling.py      New Zealand English, checked against a packed word list
   items/       every markup, all deriving from MarkupItem (items/base.py)
@@ -303,6 +310,14 @@ docs/          this file, tasklist.md, interface.md, backlog.md,
 ---
 
 ## 3. How to verify work
+
+**The CalcForge gate, before every push:** the whole suite (MarkForge's
+tests and WebSMath's, which live in `tests/calc/`) and
+`python -m markforge.calc.tools.mutation_check` (14 of 14 caught). The
+`.sm` reader in `tests/calc/smfile.py` is test-only: it lets the tests
+check answers against SMath's own example files; the app has no `.sm`
+support. `tests/calc/legacy_ui/` is WebSMath's old window, kept only
+until its tests are ported to the CalcForge window.
 
 ```bash
 # the whole suite (about 800 tests, four minutes — run it in background)

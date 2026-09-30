@@ -29,6 +29,8 @@ composing matrices of its own.
 """
 from __future__ import annotations
 
+import math
+
 import os
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -536,8 +538,17 @@ def _real(value: float) -> bytes:
     """A number, written the way a PDF wants it: no exponent, no trailing zeros."""
     if value != value or value in (float("inf"), float("-inf")):
         return b"0"
-    text = f"{value:.6f}".rstrip("0").rstrip(".")
-    return (text or "0").encode("ascii")
+    # Six decimals is plenty for a coordinate, but a small factor — a scale's
+    # /C of 0.0000353 m per point — kept only three significant figures that
+    # way, and a measurement read by another editor came out 0.8 % wrong. So
+    # small numbers keep ten significant figures (a PDF has no exponent form).
+    places = 6
+    if value and abs(value) < 1.0:
+        places = min(max(6, 9 - math.floor(math.log10(abs(value)))), 20)
+    text = f"{value:.{places}f}".rstrip("0").rstrip(".")
+    if text in ("-0", ""):
+        text = "0"
+    return text.encode("ascii")
 
 
 def _escaped_name(text: str) -> bytes:

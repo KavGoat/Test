@@ -9,13 +9,12 @@ from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPolygon
 
 from PySide6.QtGui import QFontMetricsF
 
-from ..core.units import format_quantity, parse_unit, ureg
+from ..core.units import Unit, format_quantity, parse_unit
 from .base import (HANDLE_SCREEN_PX, HANDLE_SIZE, MarkupItem, Style,
                    arrow_path, cloud_path, register_item, round_the_joins)
 
-# Page refreshes construct two lengths per rectangle. The registry is shared
-# and fixed; parse this unit once rather than scanning unit names per length.
-_MILLIMETRES = ureg.Unit("mm")
+# Page refreshes construct two lengths per rectangle; the unit is built once.
+_MILLIMETRES = Unit((("mm", 1),))
 
 
 def _smooth_path(points: list[QPointF], tension: float = 0.42) -> QPainterPath:

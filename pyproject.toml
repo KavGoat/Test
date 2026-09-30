@@ -11,15 +11,15 @@ requires-python = ">=3.10"
 license = { text = "MIT" }
 dependencies = [
     "PySide6>=6.6",
-    "pint>=0.23",
     "pymupdf>=1.24",
     "numpy>=1.24",
+    "sympy>=1.12",
 ]
 
 [project.optional-dependencies]
 # pypdf is here to check what MarkForge writes with a reader that is
 # not the one that wrote it. Nothing in the application uses it.
-dev = ["pytest>=7.4", "pypdf>=6.14,<7"]
+dev = ["pytest>=7.4", "pypdf>=6.14,<7", "hypothesis>=6"]
 
 [project.gui-scripts]
 markforge = "markforge.app:main"
@@ -28,4 +28,4 @@ markforge = "markforge.app:main"
 include = ["markforge*"]
 
 [tool.setuptools.package-data]
-markforge = ["py.typed", "data/*.txt.gz"]
+markforge = ["py.typed", "data/*.txt.gz", "calc/ui/icons/*"]

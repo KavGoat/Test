@@ -142,6 +142,37 @@ def test_a_measurement_prints_the_dimension_it_reads(window, tmp_path):
     assert "2.4" in _pdf(window.document, tmp_path).text()
 
 
+def test_the_scale_another_reader_measures_with_is_the_scale_shown(window, tmp_path):
+    """/C in a /Measure dictionary converts page points into the /U unit.
+
+    It was the length of one point in the unit the scale happened to be kept
+    in (millimetres) while /U named the display unit (metres), so Bluebeam
+    measured a 1:50 drawing a thousand times too long.
+    """
+    import math
+    from markforge.core.document import PageScale
+    from markforge.core.units import parse_unit
+    window.current_page().scale = PageScale.from_ratio(50)
+    window.select_tool("measure_length")
+    _drag(window, 100, 400, 236, 400)
+    window.view.end_item_edit()
+    shown = window.current_page().frame.markups()[-1].value
+    marks = [m for m in _pdf(window.document, tmp_path).markups() if "/Measure" in m]
+    assert len(marks) == 1
+    measure = marks[0]["/Measure"]
+    # PDF 1.7, table 262: /X converts points to its unit; /D and /A convert
+    # from the /X unit (squared, for /A) to their own.
+    x0, y0, x1, y1 = (float(v) for v in marks[0]["/L"])
+    in_x = math.hypot(x1 - x0, y1 - y0) * float(measure["/X"][0]["/C"])
+    for key, read in (("/X", in_x), ("/D", in_x * float(measure["/D"][0]["/C"]))):
+        expected = shown.to(parse_unit(str(measure[key][0]["/U"])).units).magnitude
+        assert read == pytest.approx(expected, rel=1e-6), key
+    area = measure["/A"][0]
+    one_square = parse_unit(f"1 {measure['/X'][0]['/U']}") ** 2
+    assert one_square.to(parse_unit(str(area["/U"])).units).magnitude == \
+        pytest.approx(float(area["/C"]), rel=1e-9)
+
+
 def test_the_print_path_survives_a_second_run(window, tmp_path):
     """QPrinter refuses layout changes mid-job; this is the crash that found."""
     from PySide6.QtPrintSupport import QPrinter

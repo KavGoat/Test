@@ -1,568 +1,564 @@
-"""Unit registry and quantity formatting for MarkForge.
+"""Quantities for scales, sizes and measurements, in SMath's unit system.
 
-A measurement, a page scale and a rectangle's size are all lengths and areas
-with units on them, and they have to be comparable: a scale set in 1:100 and a
-line measured in metres meet in the same registry. This module owns the single
-shared one, and the formatting that puts a number on a drawing.
+There is one unit system in CalcForge and it is SMath's (decision 1): the unit
+table the calculation engine uses (``calc/engine/unitdata.py``, generated from
+SMath Studio's own Units.xml) and the engine's number formatter. A scale set at
+1:100, a line measured in metres and a variable in an equation all meet in the
+same table, so a measurement that feeds a calculation cannot be converted one
+way here and another way there.
+
+This module keeps the small interface the markup code has always used —
+``Q_``, ``parse_unit``, ``convert``, ``format_quantity`` — and builds it on the
+engine. A :class:`Quantity` is a value in SI base units with a dimension
+vector, exactly as the engine holds it, plus the unit it is being shown in.
+
+Units are written the way SMath writes them: ``mm``, ``kN``, ``°C``, ``hr``
+(``h`` is Planck's constant in SMath's table). As plain text they read with a
+middle dot and superscripts — ``kN·m``, ``m²`` — which is how an equation
+draws them.
 """
 from __future__ import annotations
 
 import math
+import re
 from typing import Any, Optional
 
-import pint
+# Importing the engine's units module installs the prefixed units SMath's own
+# library lacks (hPa, daN, kWh…), so the table below is the engine's table.
+from ..calc.engine import units as _engine_units
+from ..calc.engine.numformat import NumberFormat, format_real
+from ..calc.engine.unitdata import BASE, UNITS
 
-# ---------------------------------------------------------------------------
-# Registry
-# ---------------------------------------------------------------------------
+NDIM = len(BASE)
+NODIM = tuple([0] * NDIM)
+_LENGTH = tuple(1 if name == "m" else 0 for name in BASE)
 
-ureg = pint.UnitRegistry(autoconvert_offset_to_baseunit=False)
-try:                                    # pint >= 0.24
-    ureg.formatter.default_format = "~P"
-except AttributeError:                  # pragma: no cover - older pint
-    ureg.default_format = "~P"
-Quantity = ureg.Quantity
-Q_ = ureg.Quantity
-
-# Extra engineering units that pint does not ship (or ships under a name that
-# structural / civil engineers do not use).  Each line is applied defensively so
-# that a future pint release adding one of them cannot break start-up.
-_EXTRA_DEFINITIONS = [
-    "kip = 1000 * force_pound = kip = kips",
-    "ksi = kip / inch ** 2",
-    "psf = force_pound / foot ** 2",
-    "pcf = force_pound / foot ** 3",
-    "kcf = kip / foot ** 3",
-    "klf = kip / foot",
-    "plf = force_pound / foot",
-    "tonf_metric = 1000 * kilogram_force = tonne_force",
-    "MPa = 1e6 * pascal",
-    "GPa = 1e9 * pascal",
-    "kPa = 1000 * pascal",
-    "kN = 1000 * newton",
-    "MN = 1e6 * newton",
-    "kNm = kilonewton * meter",
-    # Found by reading SMath's own unit catalogue (SMath Studio/entries/
-    # Units.xml) against this registry: fourteen of its units were not
-    # understood here, and these are the ones an engineer actually reaches
-    # for. The rest were a joke unit, a chemistry one, and casing the
-    # completion list already corrects.
-    "ksf = kip / foot ** 2",
-    "tonf = 2000 * force_pound = ton_force",
-    "lbm = pound",
-    "rev = 2 * pi * radian = revolution",
-    "rph = revolution / hour",
-]
-
-for _definition in _EXTRA_DEFINITIONS:
-    try:
-        ureg.define(_definition)
-    except Exception:  # already defined, or shadows a prefix expansion
-        pass
-
-
-def dimensionless(value: Any) -> bool:
-    """True when *value* carries no physical dimension."""
-    if isinstance(value, Quantity):
-        return value.dimensionless
-    return True
-
-
-def magnitude(value: Any) -> Any:
-    """Strip units, converting to base units first when necessary."""
-    if isinstance(value, Quantity):
-        if value.dimensionless:
-            return value.to_base_units().magnitude
-        return value.magnitude
-    return value
-
-
-def as_float(value: Any) -> float:
-    """Coerce *value* to a bare float, raising a friendly error if impossible."""
-    if isinstance(value, Quantity):
-        if not value.dimensionless:
-            raise pint.DimensionalityError(value.units, ureg.dimensionless)
-        value = value.to_base_units().magnitude
-    if isinstance(value, bool):
-        return 1.0 if value else 0.0
-    return float(value)
-
-
-_UNIT_NAME_CACHE: dict[str, bool] = {}
-
-# pint claims several Greek words as obscure units — sigma is the Stefan-
-# Boltzmann constant, gamma a magnetic flux unit, mu and nu atomic masses,
-# alpha and zeta dimensionless constants.  An engineer writing sigma means a
-# stress, so these names are never treated as units: silently binding an
-# undefined stress to a radiation constant is far worse than not knowing the
-# unit at all.  psi is left alone because pounds per square inch is what people
-# actually mean by it.
-SHADOWED_UNITS = {"sigma", "gamma", "mu", "nu", "alpha", "zeta", "beta", "eta",
-                  "tau", "phi", "chi", "omega", "theta", "rho", "lamda"}
-
-
-def a_bare_name_could_be_a_unit(name: str) -> bool:
-    """Whether an undefined name standing on its own may be read as a unit.
-
-    A unit is written after a number — ``300 MPa``, ``6 m`` — and that is read
-    as a unit wherever it appears. A name standing on its own is a variable:
-    ``b*d^2/6`` is a section modulus, and reading ``b`` as a barn and ``d`` as
-    a day gives an answer in MPa·b·d², which is the kind of wrong that gets
-    printed and signed. So a single letter on its own is never a unit, and
-    neither is a two-letter name that reads as an engineer's shorthand.
-
-    Longer names are left alone: somebody who writes ``kN`` on its own means
-    the unit, and there is no dimension anybody calls ``kN``.
-    """
-    return len(name) > 1 and name not in _TWO_LETTER_VARIABLES
-
-
-# Two-letter names that are units to pint and dimensions to an engineer.
-_TWO_LETTER_VARIABLES = {
-    "bd",   # not becquerel·day
-    "As",   # area of steel, not arsenic-second
-    "Ag",   # gross area, not silver
-    "Ac",   # area of concrete
-    "Av",   # shear area
-    "Ix", "Iy", "Iz",
-    "Zx", "Zy",   # section moduli — "Zy" is not zetta-year
-    "Sx", "Sy",
-    "kd", "ku", "kt", "kl",   # the k factors of NZS 3404 and AS 1720
-    "ha",   # depth, not hectare, when it stands alone in a formula
+# Documents saved by MarkForge wrote scales with Pint's unit names. They still
+# open: each old name reads as the SMath unit it always meant.
+_OLD_NAMES = {
+    "millimeter": "mm", "centimeter": "cm", "meter": "m", "kilometer": "km",
+    "inch": "in", "foot": "ft", "yard": "yd", "mile": "mi",
+    "micrometer": "μm", "nanometer": "nm",
+    "degree": "deg", "radian": "rad", "gradian": "grad",
+    "hour": "hr", "minute": "min", "second": "s", "day": "day", "year": "yr",
+    "degC": "°C", "degF": "°F", "kelvin": "K", "degree_Celsius": "°C",
+    "degree_Fahrenheit": "°F",
+    "liter": "L", "litre": "L", "gallon": "gal",
+    "gram": "g", "kilogram": "kg", "tonne": "tonne", "pound": "lb",
+    "newton": "N", "kilonewton": "kN", "pascal": "Pa",
+    "hectare": "ha", "dimensionless": "",
 }
 
 
-def is_unit_name(name: str) -> bool:
-    """True when *name* is a unit in the registry (cached; used for italics)."""
-    if name in SHADOWED_UNITS:
-        return False
-    known = _UNIT_NAME_CACHE.get(name)
-    if known is None:
+class DimensionalityError(ValueError):
+    """Two quantities that cannot be converted into each other."""
+
+
+def _dims_mul(a: tuple, b: tuple, k: float = 1) -> tuple:
+    return tuple(_clean(x + k * y) for x, y in zip(a, b))
+
+
+def _clean(x: float):
+    r = round(x)
+    return int(r) if abs(x - r) < 1e-9 else x
+
+
+# ---------------------------------------------------------------------------
+# Units
+# ---------------------------------------------------------------------------
+
+class Unit:
+    """A unit expression: named units with powers, e.g. kN·m or kN/m².
+
+    ``parts`` keeps the names in the order they were written, which is the
+    order they are shown in: the force before the lever arm, as an engineer
+    writes a moment.
+    """
+
+    __slots__ = ("parts",)
+
+    def __init__(self, parts=()):
+        merged: list = []
+        for name, power in parts:
+            for i, (have, p) in enumerate(merged):
+                if have == name:
+                    merged[i] = (have, _clean(p + power))
+                    break
+            else:
+                merged.append((name, _clean(power)))
+        self.parts = tuple((n, p) for n, p in merged if p != 0)
+
+    # -- what the unit is
+    @property
+    def factor(self) -> float:
+        f = 1.0
+        for name, power in self.parts:
+            f *= float(UNITS[name][0]) ** power
+        return f
+
+    @property
+    def dims(self) -> tuple:
+        d = NODIM
+        for name, power in self.parts:
+            d = _dims_mul(d, tuple(UNITS[name][1]), power)
+        return d
+
+    @property
+    def offset(self) -> float:
+        """°C and °F are a shift as well as a size — but only on their own."""
+        if len(self.parts) == 1 and self.parts[0][1] == 1:
+            return float(UNITS[self.parts[0][0]][2])
+        return 0.0
+
+    def __mul__(self, other: "Unit") -> "Unit":
+        return Unit(self.parts + other.parts)
+
+    def __truediv__(self, other: "Unit") -> "Unit":
+        return Unit(self.parts + tuple((n, -p) for n, p in other.parts))
+
+    def __pow__(self, power) -> "Unit":
+        return Unit(tuple((n, p * power) for n, p in self.parts))
+
+    def __eq__(self, other) -> bool:
+        return isinstance(other, Unit) and self.parts == other.parts
+
+    def __hash__(self) -> int:
+        return hash(self.parts)
+
+    def __str__(self) -> str:
+        """The unit as it is stored: ``kN*m``, ``m^2``, ``kN/m^2``."""
+        return unit_text(self, plain=False)
+
+    def __repr__(self) -> str:
+        return f"Unit({str(self)!r})"
+
+
+_SUPERSCRIPT = str.maketrans("0123456789-.", "⁰¹²³⁴⁵⁶⁷⁸⁹⁻·")
+
+
+def _power_text(power, plain: bool) -> str:
+    if power == 1:
+        return ""
+    text = f"{power:g}"
+    if plain:
+        return text.translate(_SUPERSCRIPT)
+    return "^" + text
+
+
+def unit_text(unit: Optional[Unit], plain: bool = True) -> str:
+    """``kN·m``, ``kN/m²`` (plain) or ``kN*m``, ``kN/m^2`` (stored)."""
+    if unit is None or not unit.parts:
+        return ""
+    join = "·" if plain else "*"
+    num = [n + _power_text(p, plain) for n, p in unit.parts if p > 0]
+    den = [n + _power_text(-p, plain) for n, p in unit.parts if p < 0]
+    text = join.join(num) or "1"
+    if den:
+        text += "/" + (den[0] if len(den) == 1 else "(" + join.join(den) + ")")
+    return text
+
+
+def format_unit(unit) -> str:
+    """A unit as it is written on a drawing: ``kN·m``, ``m²``."""
+    if isinstance(unit, Unit):
+        return unit_text(unit)
+    parsed = _parse_unit_expression(str(unit or ""))
+    return unit_text(parsed) if parsed is not None else str(unit or "")
+
+
+# -- reading unit text -------------------------------------------------------
+
+_TOKEN = re.compile(r"\s*(?:(?P<num>\d+(?:\.\d*)?(?:[eE][-+]?\d+)?|\.\d+(?:[eE][-+]?\d+)?)"
+                    r"|(?P<pow>\*\*|\^)|(?P<sup>[⁰¹²³⁴⁵⁶⁷⁸⁹⁻]+)"
+                    r"|(?P<op>[*/·×()])|(?P<minus>-)"
+                    r"|(?P<name>[^\s\d*/·×()^\-⁰¹²³⁴⁵⁶⁷⁸⁹⁻]+))")
+_FROM_SUPERSCRIPT = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹⁻", "0123456789-")
+
+
+def _unit_named(name: str) -> Optional[Unit]:
+    if name in UNITS:
+        return Unit(((name, 1),))
+    old = _OLD_NAMES.get(name)
+    if old is not None:
+        return Unit(((old, 1),)) if old else Unit()
+    # Pint wrote products such as "millimeter ** 2"; plural and spelled-out
+    # forms of the old names are read the same way.
+    if name.endswith("s") and _OLD_NAMES.get(name[:-1]):
+        return Unit(((_OLD_NAMES[name[:-1]], 1),))
+    return None
+
+
+class _Reader:
+    """A tiny recursive-descent reader for ``5 kN/m^2``, ``m²``, ``kN*m``."""
+
+    def __init__(self, text: str):
+        self.tokens = []
+        pos = 0
+        text = text.strip()
+        while pos < len(text):
+            m = _TOKEN.match(text, pos)
+            if not m or m.end() == pos:
+                raise ValueError(text)
+            kind = m.lastgroup
+            self.tokens.append((kind, m.group(kind)))
+            pos = m.end()
+        self.i = 0
+
+    def peek(self):
+        return self.tokens[self.i] if self.i < len(self.tokens) else (None, None)
+
+    def take(self):
+        token = self.peek()
+        self.i += 1
+        return token
+
+    def done(self) -> bool:
+        return self.i >= len(self.tokens)
+
+    # number? unit-product
+    def quantity(self):
+        value = 1.0
+        kind, text = self.peek()
+        negative = False
+        if kind == "minus":
+            self.take()
+            negative = True
+            kind, text = self.peek()
+        if kind == "num":
+            self.take()
+            value = float(text)
+        elif negative:
+            raise ValueError("minus without a number")
+        if negative:
+            value = -value
+        unit = Unit()
+        if not self.done():
+            unit = self.product()
+        if not self.done():
+            raise ValueError("trailing text")
+        return value, unit
+
+    def product(self) -> Unit:
+        unit = self.power()
+        while not self.done():
+            kind, text = self.peek()
+            if kind == "op" and text in "*·×":
+                self.take()
+                unit = unit * self.power()
+            elif kind == "op" and text == "/":
+                self.take()
+                unit = unit / self.power()
+            elif kind in ("name",) or (kind == "op" and text == "("):
+                unit = unit * self.power()       # "kN m" is kN·m
+            else:
+                break
+        return unit
+
+    def power(self) -> Unit:
+        unit = self.atom()
+        kind, text = self.peek()
+        if kind == "pow":
+            self.take()
+            sign = 1
+            if self.peek()[0] == "minus":
+                self.take()
+                sign = -1
+            kind, text = self.take()
+            if kind != "num":
+                raise ValueError("power without a number")
+            unit = unit ** (sign * float(text))
+        elif kind == "sup":
+            self.take()
+            unit = unit ** float(text.translate(_FROM_SUPERSCRIPT))
+        return unit
+
+    def atom(self) -> Unit:
+        kind, text = self.take()
+        if kind == "op" and text == "(":
+            unit = self.product()
+            if self.take() != ("op", ")"):
+                raise ValueError("unclosed bracket")
+            return unit
+        if kind == "num" and text == "1":
+            return Unit()                          # "1/s"
+        if kind != "name":
+            raise ValueError("expected a unit")
+        unit = _unit_named(text)
+        if unit is None:
+            raise ValueError(f"unknown unit {text}")
+        return unit
+
+
+def _parse_unit_expression(text: str) -> Optional[Unit]:
+    try:
+        reader = _Reader(text)
+        if reader.done():
+            return Unit()
+        value, unit = reader.quantity()
+    except (ValueError, IndexError, TypeError):
+        return None
+    return unit if value == 1.0 else None
+
+
+# ---------------------------------------------------------------------------
+# Quantities
+# ---------------------------------------------------------------------------
+
+class Quantity:
+    """A magnitude in a unit, held as the engine holds it: SI value + dims.
+
+    ``magnitude`` is the number in ``units``; ``si`` is the same amount in SI
+    base units, which is what every conversion goes through.
+    """
+
+    __slots__ = ("magnitude", "units")
+
+    def __init__(self, magnitude, units=None):
+        if isinstance(units, str):
+            parsed = _parse_unit_expression(units)
+            if parsed is None:
+                raise DimensionalityError(f"unknown unit {units!r}")
+            units = parsed
+        self.magnitude = magnitude
+        self.units = units if isinstance(units, Unit) else Unit()
+
+    # -- what it is
+    @property
+    def si(self) -> float:
+        return self.magnitude * self.units.factor + self.units.offset
+
+    @property
+    def dims(self) -> tuple:
+        return self.units.dims
+
+    @property
+    def dimensionless(self) -> bool:
+        return all(d == 0 for d in self.dims)
+
+    def check(self, dimension: str) -> bool:
+        """``check("[length]")``, as the size and calibration boxes ask it."""
+        wanted = {"[length]": _LENGTH, "[area]": tuple(2 * x for x in _LENGTH),
+                  "[volume]": tuple(3 * x for x in _LENGTH)}.get(dimension)
+        return wanted is not None and self.dims == wanted
+
+    def engine_quantity(self):
+        """The same amount as the calculation engine's own value."""
+        return _engine_units.Quantity(self.si, self.dims)
+
+    # -- conversion
+    def to(self, target) -> "Quantity":
+        if isinstance(target, str):
+            unit = _parse_unit_expression(target)
+            if unit is None:
+                raise DimensionalityError(f"unknown unit {target!r}")
+        else:
+            unit = target
+        if unit.dims != self.dims:
+            raise DimensionalityError(
+                f"cannot convert {unit_text(self.units)} to {unit_text(unit)}")
+        return Quantity((self.si - unit.offset) / unit.factor, unit)
+
+    def to_reduced_units(self) -> "Quantity":
+        """One unit per dimension: m²·mm reads as m³, the first unit written."""
+        kept: list = []
+        for name, power in self.units.parts:
+            dims = tuple(UNITS[name][1])
+            for i, (other, other_power) in enumerate(kept):
+                if tuple(UNITS[other][1]) == dims:
+                    kept[i] = (other, other_power + power)
+                    break
+            else:
+                kept.append((name, power))
+        return self.to(Unit(tuple(kept)))
+
+    # -- arithmetic
+    def _other(self, other) -> "Quantity":
+        return other if isinstance(other, Quantity) else Quantity(other)
+
+    def __mul__(self, other):
+        if isinstance(other, Quantity):
+            return Quantity(self.magnitude * other.magnitude, self.units * other.units)
+        return Quantity(self.magnitude * other, self.units)
+
+    __rmul__ = __mul__
+
+    def __truediv__(self, other):
+        if isinstance(other, Quantity):
+            return Quantity(self.magnitude / other.magnitude, self.units / other.units)
+        return Quantity(self.magnitude / other, self.units)
+
+    def __rtruediv__(self, other):
+        return Quantity(other / self.magnitude, Unit() / self.units)
+
+    def __pow__(self, power):
+        return Quantity(self.magnitude ** power, self.units ** power)
+
+    def __add__(self, other):
+        other = self._other(other).to(self.units)
+        return Quantity(self.magnitude + other.magnitude, self.units)
+
+    __radd__ = __add__
+
+    def __sub__(self, other):
+        other = self._other(other).to(self.units)
+        return Quantity(self.magnitude - other.magnitude, self.units)
+
+    def __neg__(self):
+        return Quantity(-self.magnitude, self.units)
+
+    def __abs__(self):
+        return Quantity(abs(self.magnitude), self.units)
+
+    def __float__(self) -> float:
+        if not self.dimensionless:
+            raise DimensionalityError(f"{self} has units")
+        return float(self.si)
+
+    def _compare(self, other) -> float:
+        other = self._other(other)
+        if other.dims != self.dims:
+            raise DimensionalityError("cannot compare")
+        return self.si - other.si
+
+    def __lt__(self, other):
+        return self._compare(other) < 0
+
+    def __le__(self, other):
+        return self._compare(other) <= 0
+
+    def __gt__(self, other):
+        return self._compare(other) > 0
+
+    def __ge__(self, other):
+        return self._compare(other) >= 0
+
+    def __eq__(self, other):
         try:
-            ureg.Unit(name)
-            known = True
-        except Exception:
-            known = False
-        _UNIT_NAME_CACHE[name] = known
-    return known
+            return self._compare(other) == 0
+        except (DimensionalityError, TypeError, ValueError):
+            return False
+
+    __hash__ = None
+
+    def __str__(self) -> str:
+        return format_quantity(self)
+
+    def __repr__(self) -> str:
+        return f"Quantity({self.magnitude!r}, {str(self.units)!r})"
 
 
-def parse_unit(text: str):
-    """A unit expression such as ``kN/m^2``, or None when it is not one.
+Q_ = Quantity
 
-    None is what every caller here already reads as "that is not a length":
-    an empty box, and now also a box holding something the registry has never
-    heard of. It used to let pint's own error out instead, so typing an exact
-    size of "10 lc" raised out of the middle of a Qt slot rather than being
-    refused — and an exception raised inside a Qt override is not an error
-    message, it is a crash a few events later.
+
+def parse_unit(text: str) -> Optional[Quantity]:
+    """``5 m``, ``kN/m^2``, ``1.5m`` — or None when it is not one.
+
+    None is what every caller reads as "that is not a length": an empty box,
+    and a box holding something the unit table has never heard of. It must
+    never raise: an exception raised inside a Qt slot is not an error message,
+    it is a crash a few events later.
     """
     text = (text or "").strip()
     if not text:
         return None
-    text = text.replace("^", "**").replace("·", "*").replace("×", "*")
     try:
-        return ureg.parse_expression(text)
-    except Exception:                                  # noqa: BLE001
-        # pint raises several kinds for text that is not a unit — an undefined
-        # name, a tokenising failure, a bare operator — and they all mean the
-        # same thing here.
+        reader = _Reader(text)
+        value, unit = reader.quantity()
+    except (ValueError, IndexError, TypeError):
         return None
+    return Quantity(value, unit)
 
 
-def simplify_units(value: Any) -> Any:
-    """Collapse a quantity whose units cancel out into a plain number.
-
-    ``6 m / 200 mm`` is 30, not "0.03 m/mm", and a utilisation ratio built from
-    ``kN·m/(mm³·MPa)`` is a bare number — that is what an engineer expects to
-    read.  Angles are left alone: ``30 deg`` is dimensionless to pint but very
-    much not a plain number, so single-unit quantities (deg, rad, %) are never
-    touched, and only composite units are reduced.
-    """
-    if not isinstance(value, Quantity):
-        return value
-    try:
-        if not value.dimensionless:
-            return value
-        if len(value.units._units) <= 1:
-            return value
-        return value.to_reduced_units()
-    except Exception:
-        return value
-
-
-def convert(value: Any, unit_text: str):
-    """Convert *value* to *unit_text*.  Accepts prefactors, e.g. ``1e3*mm``."""
-    target = parse_unit(unit_text)
+def convert(value: Any, unit_text_: str):
+    """*value* in the unit *unit_text_*; a prefactor such as ``1e3*mm`` works."""
+    target = parse_unit(unit_text_)
     if target is None:
         return value
     if not isinstance(value, Quantity):
-        value = Q_(value, "dimensionless")
-    if isinstance(target, Quantity):
-        # e.g. "kN" parses to Quantity(1.0, kilonewton).  Dividing by it and
-        # multiplying back is what makes a prefactor such as "1e3*mm" work.
-        try:
-            return (value / target).to("dimensionless") * target
-        except pint.OffsetUnitCalculusError:
-            # °C to K is a shift, not a ratio, so it cannot be divided out.
-            return value.to(target.units)
-    return value.to(target)
+        value = Quantity(value)
+    converted = value.to(target.units)
+    if target.magnitude != 1.0:
+        converted = Quantity(converted.magnitude / target.magnitude, target.units)
+    return converted
 
 
 # ---------------------------------------------------------------------------
-# Number formatting
+# Number formatting — the engine's formatter, so a label and an equation
+# round exactly alike.
 # ---------------------------------------------------------------------------
 
 AUTO = "auto"
 FIXED = "fixed"
-SCIENTIFIC = "scientific"
-ENGINEERING = "engineering"
 
-_SUPERSCRIPT = str.maketrans("0123456789-+", "⁰¹²³⁴⁵⁶⁷⁸⁹⁻⁺")
-
-
-def _strip_zeros(text: str) -> str:
-    if "." in text and "e" not in text and "E" not in text:
-        text = text.rstrip("0").rstrip(".")
-    return text or "0"
+# A measurement label is written with the page's decimal places and never
+# switches to powers of ten for an ordinary drawing dimension.
+_LABEL_THRESHOLD = 15
 
 
-def format_number(value: Any, digits: int = 4, mode: str = AUTO,
-                  thousands: bool = False) -> str:
-    """Format a scalar using engineering-friendly rules."""
+def _number_format(digits: int, mode: str) -> NumberFormat:
+    if mode == FIXED:
+        return NumberFormat(decimals=max(int(digits), 0), threshold=_LABEL_THRESHOLD,
+                            trailing_zeros=True)
+    return NumberFormat(decimals=max(int(digits), 0))
+
+
+def format_number(value: Any, digits: int = 4, mode: str = AUTO) -> str:
+    """A number as SMath writes it (``·10⁵`` for a large one)."""
     if value is None:
         return ""
     if isinstance(value, bool):
         return "true" if value else "false"
-    if isinstance(value, complex):
-        re_part = format_number(value.real, digits, mode)
-        im_part = format_number(abs(value.imag), digits, mode)
-        sign = "-" if value.imag < 0 else "+"
-        return f"{re_part} {sign} {im_part}i"
     try:
-        value = float(value)
+        x = float(value)
     except (TypeError, ValueError):
         return str(value)
-
-    if math.isnan(value):
+    if math.isnan(x):
         return "NaN"
-    if math.isinf(value):
-        return "∞" if value > 0 else "-∞"
-    if value == 0:
-        return "0"
-
-    if mode == FIXED:
-        text = f"{value:,.{digits}f}" if thousands else f"{value:.{digits}f}"
-        return text
-
-    if mode == SCIENTIFIC:
-        mant, exp = f"{value:.{digits}e}".split("e")
-        return f"{_strip_zeros(mant)}·10{str(int(exp)).translate(_SUPERSCRIPT)}"
-
-    if mode == ENGINEERING:
-        exp = int(math.floor(math.log10(abs(value))))
-        exp -= exp % 3
-        mant = value / (10 ** exp)
-        mant_digits = max(digits - 1 - int(math.floor(math.log10(abs(mant)))), 0)
-        mant_text = _strip_zeros(f"{mant:.{mant_digits}f}")
-        if exp == 0:
-            return mant_text
-        return f"{mant_text}·10{str(exp).translate(_SUPERSCRIPT)}"
-
-    # AUTO: significant digits, falling back to scientific for extremes.
-    exponent = math.floor(math.log10(abs(value)))
-    if exponent < -5 or exponent >= digits + 6:
-        return format_number(value, digits, SCIENTIFIC)
-    decimals = max(digits - 1 - int(exponent), 0)
-    text = f"{value:,.{decimals}f}" if thousands else f"{value:.{decimals}f}"
-    return _strip_zeros(text)
-
-
-# pint orders a product's symbols alphabetically, which puts the lever arm in
-# front of the force.  Engineers write the force first.
-_UNIT_TEXT_FIXES = {
-    "m·N": "N·m", "mm·N": "N·mm", "cm·N": "N·cm", "km·N": "N·km",
-    "m·lbf": "lbf·m", "ft·lbf": "lbf·ft", "in·lbf": "lbf·in",
-    "m·kip": "kip·m", "ft·kip": "kip·ft",
-}
-
-
-def format_unit(unit) -> str:
-    """Render a pint unit the way an engineer writes it."""
-    if unit is None:
-        return ""
-    try:
-        text = f"{unit:~P}"
-    except Exception:
-        text = str(unit)
-    text = text.replace(" ** ", "^").replace("**", "^").strip()
-    return _UNIT_TEXT_FIXES.get(text, text)
+    if math.isinf(x):
+        return "∞" if x > 0 else "-∞"
+    shown = format_real(x, _number_format(digits, mode))
+    text = ("-" if shown.negative else "") + shown.mantissa
+    if shown.exponent is not None:
+        text += "·10" + str(shown.exponent).translate(_SUPERSCRIPT)
+    return text
 
 
 def format_quantity(value: Any, digits: int = 4, mode: str = AUTO,
-                    unit: Optional[str] = None, thousands: bool = False,
-                    auto_unit: bool = False) -> str:
-    """Format anything the engine can produce into display text.
-
-    With *auto_unit* and no explicit *unit*, the result is shown in the unit an
-    engineer would write it in — kN, kPa, kN/m, mm or m as the magnitude asks.
-    """
-    import numpy as np
-
+                    unit: Optional[str] = None) -> str:
+    """A value as it is written on a drawing: ``2.40 m``, ``12.5 m²``."""
     if value is None:
         return ""
     if isinstance(value, str):
         return value
-    if isinstance(value, Quantity) and unit:
-        try:
-            value = convert(value, unit)
-        except Exception:
-            pass
-    elif auto_unit:
-        value = apply_preferred_unit(value)
-
     if isinstance(value, Quantity):
-        mag = value.magnitude
-        unit_text = format_unit(value.units)
-        if isinstance(mag, np.ndarray):
-            body = format_matrix(mag, digits, mode)
-            return f"{body} {unit_text}".strip()
-        body = format_number(mag, digits, mode, thousands)
-        if not unit_text or unit_text == "dimensionless":
-            return body
-        return f"{body} {unit_text}"
-
-    if isinstance(value, np.ndarray):
-        return format_matrix(value, digits, mode)
-    if isinstance(value, (list, tuple)):
-        return "(" + ", ".join(format_quantity(v, digits, mode) for v in value) + ")"
-    return format_number(value, digits, mode, thousands)
-
-
-def format_matrix(array, digits: int = 4, mode: str = AUTO) -> str:
-    """Bracketed row/column rendering for numpy arrays."""
-    import numpy as np
-
-    array = np.atleast_1d(array)
-    if array.ndim == 1:
-        cells = ", ".join(format_number(v, digits, mode) for v in array)
-        return f"[{cells}]"
-    rows = []
-    for row in array:
-        rows.append(", ".join(format_number(v, digits, mode) for v in row))
-    return "[" + "; ".join(rows) + "]"
-
-
-# ---------------------------------------------------------------------------
-# Automatic display units
-# ---------------------------------------------------------------------------
-
-# Ladders of units an engineer would actually write, smallest first.  A result
-# is shown in the largest unit that still leaves a magnitude of at least one, so
-# 300 mm stays millimetres, 6000 mm becomes 6 m and 780 000 N becomes 780 kN.
-UNIT_LADDERS: list[tuple[dict, list[str]]] = [
-    ({"[length]": 1}, ["mm", "m", "km"]),
-    ({"[length]": 2}, ["mm**2", "m**2"]),
-    ({"[length]": 3}, ["mm**3", "m**3"]),
-    ({"[mass]": 1}, ["g", "kg", "tonne"]),
-    ({"[mass]": 1, "[length]": 1, "[time]": -2}, ["N", "kN", "MN"]),
-    ({"[mass]": 1, "[length]": -1, "[time]": -2}, ["Pa", "kPa", "MPa", "GPa"]),
-    ({"[mass]": 1, "[time]": -2}, ["N/m", "kN/m", "MN/m"]),
-    ({"[mass]": 1, "[length]": -2, "[time]": -2}, ["N/m**3", "kN/m**3"]),
-    ({"[mass]": 1, "[length]": -3}, ["kg/m**3"]),
-    ({"[mass]": 1, "[length]": 2, "[time]": -3}, ["W", "kW", "MW"]),
-    ({"[time]": -1}, ["Hz", "kHz", "MHz"]),
-]
-
-# A moment and an energy share a dimension; tell them apart by what was written.
-MOMENT_LADDER = ["N*m", "kN*m", "MN*m"]
-ENERGY_LADDER = ["J", "kJ", "MJ"]
-_MOMENT_DIMENSION = {"[mass]": 1, "[length]": 2, "[time]": -2}
-
-# Anything written in these is left exactly as the author wrote it.
-_NON_SI = {
-    "inch", "foot", "yard", "mile", "thou", "mil", "pound", "force_pound",
-    "kip", "ksi", "psi", "psf", "pcf", "kcf", "klf", "plf", "ounce", "slug",
-    "gallon", "quart", "pint", "fluid_ounce", "acre", "British_thermal_unit",
-    "horsepower", "degree_Fahrenheit", "degree_Rankine", "short_ton", "long_ton",
-}
-
-# Units that carry meaning of their own and must never be auto-converted.
-_KEEP_AS_WRITTEN = {"degree", "radian", "gradian", "percent", "turn", "count",
-                    "dimensionless"}
-
-# Above this, a magnitude has too many digits to read comfortably.
-_TOO_MANY_DIGITS = 1e6
-
-
-def _dimension_key(quantity) -> dict:
-    return {str(name): int(power) for name, power in quantity.dimensionality.items()}
-
-
-def _unit_names(quantity) -> set[str]:
-    return {str(name) for name in quantity.units._units}
-
-
-_FORCE_DIMENSION = {"[mass]": 1, "[length]": 1, "[time]": -2}
-_ENERGY_DIMENSION = {"[mass]": 1, "[length]": 2, "[time]": -2}
-_POWER_DIMENSION = {"[mass]": 1, "[length]": 2, "[time]": -3}
-_DIMENSION_CACHE: dict[str, dict] = {}
-
-
-def _unit_dimension(name: str) -> dict:
-    """The dimensionality of a single unit symbol, cached."""
-    known = _DIMENSION_CACHE.get(name)
-    if known is None:
-        try:
-            known = {str(k): int(v) for k, v in ureg.Unit(name).dimensionality.items()}
-        except Exception:
-            known = {}
-        _DIMENSION_CACHE[name] = known
-    return known
-
-
-def _is_force_unit(name: str) -> bool:
-    """True when *name* on its own is a force — 'kN' as well as 'newton'."""
-    return _unit_dimension(name) == _FORCE_DIMENSION
-
-
-def _is_energy_unit(name: str) -> bool:
-    """True for J, kJ, kWh and friends — a unit that names energy outright."""
-    return _unit_dimension(name) in (_ENERGY_DIMENSION, _POWER_DIMENSION)
-
-
-def preferred_unit(value: Any) -> Optional[str]:
-    """The unit this quantity reads best in, or None to leave it alone."""
-    if not isinstance(value, Quantity):
-        return None
-    try:
-        names = _unit_names(value)
-        if names & _NON_SI or not names:
-            return None
-        # Inverse trigonometry hands back radians; engineers read degrees.  An
-        # angle the author wrote themselves is left exactly as written.
-        if names == {"radian"}:
-            return "deg"
-        if names & _KEEP_AS_WRITTEN:
-            return None
-        magnitude = value.magnitude
-        if isinstance(magnitude, (list, tuple)) or hasattr(magnitude, "shape"):
-            return None
-        if magnitude == 0 or not math.isfinite(float(magnitude)):
-            return None
-
-        dimension = _dimension_key(value)
-        if dimension == _MOMENT_DIMENSION:
-            # A moment and an energy share a dimension.  Only something written
-            # in an energy or power unit is an energy; everything else — a force
-            # times a lever arm, or a stress times a section modulus — is a
-            # moment, which is what this dimension almost always means here.
-            written_as_energy = any(_is_energy_unit(name) for name in names)
-            ladder = ENERGY_LADDER if written_as_energy else MOMENT_LADDER
-        else:
-            ladder = None
-            for candidate, units in UNIT_LADDERS:
-                if dimension == candidate:
-                    ladder = units
-                    break
-        if not ladder:
-            return None
-
-        # Largest unit that still leaves a magnitude of at least one …
-        chosen_index = 0
-        for index, unit in enumerate(ladder):
+        if unit:
             try:
-                if abs(float(value.to(unit).magnitude)) >= 1.0:
-                    chosen_index = index
-                else:
-                    break
-            except Exception:
-                break
-        # … but area and volume ladders step by a factor of a million, so that
-        # rule alone would render half a cubic metre as 500 000 000 mm³.  When
-        # the number is still unreadably long, move up one more rung.
-        try:
-            magnitude_here = abs(float(value.to(ladder[chosen_index]).magnitude))
-            if magnitude_here >= _TOO_MANY_DIGITS and chosen_index + 1 < len(ladder):
-                chosen_index += 1
-        except Exception:
-            pass
-        return ladder[chosen_index]
-    except Exception:
-        return None
+                value = convert(value, unit)
+            except DimensionalityError:
+                pass
+        body = format_number(value.magnitude, digits, mode)
+        text = unit_text(value.units)
+        return f"{body} {text}" if text else body
+    return format_number(value, digits, mode)
 
 
-def reads_well(value: Any) -> bool:
-    """True when a magnitude already sits in the comfortable 1–1000 range."""
-    try:
-        magnitude = abs(float(value.magnitude if isinstance(value, Quantity) else value))
-    except (TypeError, ValueError):
-        return True
-    return 1.0 <= magnitude < 1000.0
-
-
-def normalise_for_display(value: Any, is_input: bool = False) -> Any:
-    """Put a value in the unit it reads best in.
-
-    A value the author typed out in full keeps the unit they chose unless
-    another one genuinely reads better — 7200 mm becomes 7.2 m, but 1470 cm³
-    stays as it was written rather than turning into 0.00147 m³.
-    """
-    if is_input and not reads_better(value, preferred_unit(value)):
-        return value
-    return apply_preferred_unit(value)
-
-
-# The one rewrite an input is worth: a length that has grown out of millimetres.
-# An engineer writing 1500 kN means kN, and 1470 cm³ means cm³ — but 7200 mm is
-# 7.2 m to everybody.
-_INPUT_LADDER_DIMENSION = {"[length]": 1}
-
-
-def reads_better(value: Any, unit: Optional[str]) -> bool:
-    """True when showing *value* in *unit* improves on the unit that was typed.
-
-    Only used for values the author wrote out themselves. Rewriting what
-    somebody typed has to earn its place: it is limited to lengths, where
-    stepping between mm, m and km is what everyone expects, and the new unit
-    has to read well where the old one does not.
-    """
-    if unit is None or reads_well(value):
-        return False
-    try:
-        if _dimension_key(value) != _INPUT_LADDER_DIMENSION:
-            return False
-        return reads_well(value.to(unit))
-    except Exception:
-        return False
-
-
-def apply_preferred_unit(value: Any) -> Any:
-    """Convert *value* into the unit it reads best in, when there is one."""
-    unit = preferred_unit(value)
-    if unit is None:
-        return value
-    try:
-        return value.to(unit)
-    except Exception:
-        return value
-
-
-# Units offered in the UI drop-downs, grouped by quantity kind.
+# Units offered in the drop-downs, grouped by kind, in SMath's names. Pint's
+# pcf, klf and plf are not in SMath's table; they are the same units written
+# out (lbf/ft³, kip/ft, lbf/ft).
 UNIT_MENU = {
-    "Length": ["mm", "cm", "m", "km", "in", "ft", "yd", "mile"],
+    "Length": ["mm", "cm", "m", "km", "in", "ft", "yd", "mi"],
     "Area": ["mm^2", "cm^2", "m^2", "in^2", "ft^2", "ha", "acre"],
     "Volume": ["mm^3", "cm^3", "m^3", "L", "in^3", "ft^3", "gal"],
     "Mass": ["g", "kg", "tonne", "lb", "oz", "slug"],
     "Force": ["N", "kN", "MN", "kgf", "lbf", "kip"],
     "Moment": ["N*m", "kN*m", "lbf*ft", "kip*ft"],
     "Stress": ["Pa", "kPa", "MPa", "GPa", "psi", "ksi", "psf"],
-    "Line load": ["N/m", "kN/m", "plf", "klf"],
+    "Line load": ["N/m", "kN/m", "lbf/ft", "kip/ft"],
     "Area load": ["Pa", "kPa", "psf", "kN/m^2"],
-    "Density": ["kg/m^3", "kN/m^3", "pcf"],
+    "Density": ["kg/m^3", "kN/m^3", "lbf/ft^3"],
     "Angle": ["deg", "rad", "grad"],
-    "Time": ["s", "min", "hr", "day", "year"],
-    "Temperature": ["degC", "degF", "kelvin"],
+    "Time": ["s", "min", "hr", "day", "yr"],
+    "Temperature": ["°C", "°F", "K"],
     "Energy": ["J", "kJ", "MJ", "kWh", "BTU"],
     "Power": ["W", "kW", "MW", "hp"],
     "Frequency": ["Hz", "kHz", "rpm"],

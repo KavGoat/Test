@@ -97,7 +97,7 @@ class PageScale:
     """Drawing scale used by the measurement tools.
 
     ``length_per_pt`` is the real-world length represented by one point on the
-    page, stored as a pint quantity so measurements come out unit-aware.
+    page, stored as a quantity in SMath's units (core/units.py).
 
     ``calibrated`` says whether a scale was chosen, and it is a separate thing
     from what the scale turned out to be. It used to be read back off the

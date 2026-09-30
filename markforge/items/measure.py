@@ -476,7 +476,7 @@ class MeasureItem(MarkupItem):
                     if depth is not None:
                         quantity = (quantity * depth).to_reduced_units()
             elif kind == "angle":
-                quantity = Q_(raw, "degree")
+                quantity = Q_(raw, "deg")
             else:
                 quantity = None
         except Exception:
