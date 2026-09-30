@@ -342,7 +342,10 @@ def _load_regions(ws, group) -> None:
                 continue
             node = rpn_to_ast(list(inp)) if inp is not None else A.Placeholder()
             ed = MathEditor(Row(ast_to_items(node)))
-            if math.find(f"{{{NS}}}result") is not None:
+            res = math.find(f"{{{NS}}}result")
+            # SMath's → (symbolic evaluation) is not replicated: such a region
+            # opens as its expression alone (symbolic(...) does the work here)
+            if res is not None and res.get("action") != "symbolic":
                 ed.root.append("=")
                 ed.evaluate = True
                 contract = math.find(f"{{{NS}}}contract")
@@ -353,8 +356,6 @@ def _load_regions(ws, group) -> None:
             ed.set_cursor(ed.root, len(ed.expression_items()))
             region = ws.add_region(x, y, ed)
             region.enabled = reg.get("enabled", "true") != "false"
-            res = math.find(f"{{{NS}}}result")
-            region.symbolic_eval = res is not None and res.get("action") == "symbolic"
             _load_math_options(region, math, ws)
         elif text:
             chosen = next((t for t in text if t.get("lang") == "eng"), text[-1])
@@ -671,14 +672,6 @@ def _save_region(ws, parent, r, k) -> None:
             except Exception:
                 pass
             c.extend(cels)
-        if r.symbolic_eval:
-            res = ET.SubElement(math, f"{{{NS}}}result", {"action": "symbolic"})
-            node = getattr(r.value, "node", None)
-            if node is not None:
-                rels: list = []
-                ast_to_rpn(node, rels)
-                res.extend(rels)
-            return
         res = ET.SubElement(math, f"{{{NS}}}result", {"action": "numeric"})
         if r.display is not None:
             txt = display_text(r.display).split(" ")[0].replace("·10^", "E")

@@ -979,8 +979,9 @@ def _undefined_names(node, ctx, var: str) -> set:
 
 
 def _diff(ev, n: A.Call, ctx):
-    """diff(f, x[, n]): symbolic when x has no value (diff(x^3,x) = 3·x²),
-    the derivative's value at x when it has one."""
+    """diff(f, x[, n]): the derivative's value at x (x needs a value, as
+    everywhere outside symbolic(...)).  The derivative is taken exactly on
+    the expression when it can be, otherwise by finite differences."""
     from . import symbolic as S
 
     if len(n.args) not in (2, 3):
@@ -1006,13 +1007,8 @@ def _diff(ev, n: A.Call, ctx):
         if lost:
             raise err("not_defined", sorted(lost)[0], node=n)
     if ctx.lookup(var.name) is None or _is_lazy(ctx.lookup(var.name)):
-        if d is None:
-            raise err("cannot_evaluate", node=n)
-        try:
-            # everything else may be known: then the result is a number
-            return ev.eval(d, ctx)
-        except SMathError:
-            return S.Expr(d)
+        # formulas only come from symbolic(...)
+        raise err("not_defined", var.name, node=var)
     if d is not None:
         return ev.eval(d, ctx)
     x0 = need_scalar(ev.eval(var, ctx))
@@ -1035,7 +1031,7 @@ def _is_lazy(v) -> bool:
 
 
 def _jacob(ev, n: A.Call, ctx):
-    """Jacob(F, X): the matrix of dF_i/dX_j (symbolic where X has no value)."""
+    """Jacob(F, X): the matrix of dF_i/dX_j at the values of X."""
     from . import symbolic as S
 
     if len(n.args) != 2:
@@ -1043,7 +1039,7 @@ def _jacob(ev, n: A.Call, ctx):
     fs, xs = _vector_nodes(n.args[0], ctx), _vector_nodes(n.args[1], ctx)
     if not all(isinstance(x, A.Var) for x in xs):
         raise err("syntax", node=n.args[1])
-    cells, symbolic = [], False
+    cells = []
     for f in fs:
         fe = S.expand(f, ctx)
         for x in xs:
@@ -1051,14 +1047,7 @@ def _jacob(ev, n: A.Call, ctx):
                 d = S.derivative(fe, x.name)
             except S.NotSymbolic:
                 raise err("cannot_evaluate", node=n)
-            try:
-                cells.append(ev.eval(d, ctx))
-            except SMathError:
-                cells.append(d)
-                symbolic = True
-    if symbolic:
-        nodes = [c if isinstance(c, A.Node) else S.num(need_real(c)) for c in cells]
-        return S.Expr(A.MatrixLit(len(fs), len(xs), nodes))
+            cells.append(ev.eval(d, ctx))  # a letter without a value: "not defined"
     return Matrix(len(fs), len(xs), cells)
 
 
@@ -1285,5 +1274,5 @@ SPECIAL = {
 }
 
 
-from . import extra_functions  # noqa: E402,F401  (symbolic: lim, expand, factor, solve)
-from . import files  # noqa: E402,F401  (importData, exportData.CSV)
+from . import extra_functions  # noqa: E402,F401  (symbolic(...))
+from . import files  # noqa: E402,F401  (importData)

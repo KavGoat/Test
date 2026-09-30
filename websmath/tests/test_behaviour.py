@@ -693,12 +693,17 @@ def _ev(text, *defs):
     ("diff(x^3,x,2)", "6*x"),
     ("diff(a*x^2+b*x+c,x)", "2*a*x+b"),
     ("diff(sin(x),x)", "cos(x)"),
-    ("diff(ln(x^2+1),x)", "2*(x)/(x^(2)+1)"),  # 2·x over x²+1
+    ("diff(ln(x^2+1),x)", "(2*x)/(x^(2)+1)"),  # 2·x over x²+1
     ("diff(e^x,x)", "e^(x)"),
     ("diff(2^x,x)", "2^(x)*ln(2)"),
 ])
-def test_diff_is_symbolic_when_variable_is_free(expr, shown):
-    assert _ev(expr) == shown
+def test_diff_formula_only_through_symbolic(expr, shown):
+    # outside symbolic(...) the worksheet is numeric: x needs a value
+    from websmath.engine.errors import SMathError
+
+    with pytest.raises(SMathError, match="x - not defined"):
+        _ev(expr)
+    assert _ev(f"symbolic({expr})") == shown
 
 
 def test_diff_evaluates_when_variable_has_value():

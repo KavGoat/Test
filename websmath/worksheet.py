@@ -86,7 +86,6 @@ class Region:
     # (SMath's rich text: <p style>, <span style>, <br/>); empty = the region's own style
     line_runs: list = field(default_factory=list)
     text_width: float = 0.0  # text regions with a fixed width wrap their lines
-    symbolic_eval: bool = False  # "→" (symbolic evaluation) rather than "="
     field_code: str = ""  # header/footer math regions holding a field (\[TITLE]\ ...)
     area_height: float = 0.0  # an area's extent below its top line
     collapsed: bool = False
@@ -324,8 +323,6 @@ class Worksheet:
         if r.kind != "math" or not r.enabled:
             r.uses = frozenset()
             return
-        if not r.editor.evaluate:
-            r.symbolic_eval = False  # the → went with its evaluation sign
         ed = r.editor
         # the parsed expression is kept while the region is unchanged: the key
         # is the full text of the equation and its unit box, so any change -
@@ -394,19 +391,6 @@ class Worksheet:
                     if record:
                         r.value = value
                         r.display = self._display(r, value, ctx)
-                return
-            if r.editor.evaluate and r.symbolic_eval:
-                # → : SMath's symbolic evaluation (SymPy), never a guess
-                from .engine import sym
-                from .engine.symbolic import Expr, NotSymbolic, to_row
-
-                try:
-                    out = sym.symbolic_value(node, ctx)
-                except NotSymbolic:
-                    raise SMathError("This expression cannot be evaluated symbolically.", None) from None
-                if record:
-                    r.value = Expr(out)
-                    r.display = DExpr(to_row(out))
                 return
             if not r.editor.evaluate:
                 # a bare expression (no "=" or ":=") runs - a for loop in it

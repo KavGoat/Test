@@ -1033,15 +1033,6 @@ class WorksheetView(QGraphicsView):
         self.scene_.update()
         self.layer_changed.emit(None)
 
-    def symbolic_evaluation(self) -> None:
-        """→ : evaluate the region being edited symbolically (SMath's Ctrl+.)."""
-        item = self.focused_item
-        if item is None or item.region.kind != "math" or item.region.plot is not None:
-            return
-        if item.editor.symbolic_equals():
-            item.region.symbolic_eval = True
-            self._after_edit(item)
-
     def refresh_fields(self) -> None:
         """Redraw what shows metadata (fields, header/footer) after File > Properties."""
         for it in self.items.values():
@@ -1104,9 +1095,6 @@ class WorksheetView(QGraphicsView):
             return
         if ctrl and key in (Qt.Key_Z, Qt.Key_Y):
             self.undo() if key == Qt.Key_Z else self.redo()
-            return
-        if ctrl and key == Qt.Key_Period:
-            self.symbolic_evaluation()  # → (SMath: Ctrl+.)
             return
         if ctrl and key == Qt.Key_Equal:
             self._key_to_region("≡")
@@ -1792,36 +1780,6 @@ class WorksheetView(QGraphicsView):
             s0 = items.index("≔") + 1 if "≔" in items[:n] else 0
             s1 = n
         return item, word, row, s0, s1
-
-    def differentiate_selection(self) -> None:
-        """Replace the expression by its derivative with respect to the
-        variable under the cursor (SMath: Calculation > Differentiate)."""
-        from ..engine import symbolic as S
-        from ..engine.model import Row
-        from ..engine.parser import ParseError, parse_row
-        from ..io.smfile import ast_to_items
-
-        got = self._variable_and_part()
-        if got is None:
-            return
-        item, var, row, a, b = got
-        part = Row()
-        part.items = list(row.items[a:b])
-        try:
-            ctx = self.worksheet._context_before(item.region)
-            d = S.derivative(S.expand(parse_row(part), ctx), var)
-        except (ParseError, S.NotSymbolic):
-            self.status.emit("This expression cannot be differentiated.")
-            return
-        ed = item.editor
-        ed._push_undo()
-        new = ast_to_items(d)
-        row.items[a:b] = new
-        type(ed)._fix_parents(ed.root)
-        ed.selection = None
-        ed.node = None
-        ed.set_cursor(row, a + len(new))
-        self._after_edit(item)
 
     def solve_selection(self) -> None:
         """Solve the expression (= 0, or an equation with the bold equals)

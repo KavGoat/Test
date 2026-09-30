@@ -195,17 +195,26 @@ Correctness proofs (numbers and units):
   units, areas). `io.smfile.dumps`/`loads` give the same XML as a string for
   embedding.
 
-**Symbolic results (with SymPy):**
-* `→` (Ctrl+. or the side panel) evaluates symbolically: `(x²−1)/(x−1) → x+1`.
-  Defined values are used, and undefined names stay symbols.
-* `expand()`, `factor()`, and `solve()` with formulas when the equation has
-  other unknowns (`solve(a·x+b, x) = −b/a`). Numeric solves are unchanged.
-* `lim()` is exact. It errors when there is no limit (one-sided limits
-  differ, or oscillation).
-* A symbolic answer is never guessed. A name the worksheet defines above
-  without a value (a failed or partial definition) is not taken as a free
-  symbol. Against the symbolic answers stored in SMath's own examples, every
-  result either matches exactly or is an error.
+**Symbolic: only through `symbolic(…)` (SymPy).** Everywhere else the
+worksheet is numeric: `diff(x^3, x) =` needs x to have a value, as does
+`Jacob`. Inside `symbolic(…)`:
+* letters without a value stay letters; defined values, user functions and
+  definitions are used: `symbolic((x²−1)/(x−1)) = x+1`;
+* `diff`, `int` (indefinite, or with limits), `sum`, `product`, `solve` and
+  `lim` give formulas: `symbolic(diff(x³, x)) = 3·x²`,
+  `symbolic(solve(a·x+b, x)) = −b/a`, `symbolic(sum(i, i, 1, n)) = n·(n+1)/2`;
+* `symbolic(expr, "expand")` multiplies out, `symbolic(expr, "factor")`
+  factorises;
+* with no letters left, the answer is the number, with its units;
+* nothing is guessed: no limit, no closed form, or an answer that needs a
+  function the worksheet doesn't have is an error. A name defined above
+  without a value (a failed definition) is never taken as a free letter.
+  Against the → answers stored in SMath's own examples, every `symbolic()`
+  result matches or is an error.
+
+The → arrow (Ctrl+.), `lim`, `expand`, `factor` and Calculation >
+Differentiate are gone. A → region in an SMath file opens as its expression
+alone. The panel's → button types `symbolic(`.
 
 `importData(file, …)` reads CSV/text data files (paths relative to the
 worksheet's folder, as in SMath).
@@ -220,8 +229,7 @@ Not replicated:
 * SMath plug-ins of any kind: plug-in functions (eigenvals, fft…) and
   plug-in regions (CheckBox, ComboBox, Modeller…) are not supported, and
   plug-in regions are skipped when a file is opened (re-saving drops them);
-* matrices of formulas built element by element in programs (SMath's
-  symbolic `m[j,k] := diff(f, x[k])` with x undefined): these show an error;
+* SMath's → symbolic evaluation (use `symbolic(…)`);
 * 3-D and polar plots (not loaded).
 
 Python runs the evaluation on one core. Evaluating in parallel wouldn't help,

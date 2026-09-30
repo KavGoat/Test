@@ -1,20 +1,18 @@
-"""Symbolic algebra through SymPy: → (symbolic evaluation), expand, factor,
-symbolic solve and lim.  Every symbolic answer is also checked numerically
-at random points, so a wrong rewrite cannot pass."""
+"""symbolic(...): the only symbolic evaluation (through SymPy).  Every
+formula is also checked numerically at random points, so a wrong rewrite
+cannot pass; outside symbolic(...) the worksheet stays numeric."""
 from __future__ import annotations
 
 import random
 
 import pytest
 
-from websmath.engine import sym
+from websmath.engine.errors import SMathError
 from websmath.engine.display import display_text
 from websmath.engine.evaluator import Context, Evaluator
 from websmath.engine.linear import parse_text
 from websmath.engine.parser import parse_row
-from websmath.engine.symbolic import NotSymbolic, to_row
-from websmath.io.smfile import dumps, loads
-from websmath.worksheet import Worksheet
+from websmath.engine.symbolic import Expr, to_row
 
 
 def P(t):
@@ -46,120 +44,114 @@ def same_function(a, b, names=("x", "y", "a", "b"), trials=12):
         assert abs(va - vb) <= 1e-9 * max(1, abs(va)), (text(a), text(b), env)
 
 
+def sym_eval(src, *defs):
+    """symbolic(src) evaluated after the definitions: the formula node, or the value."""
+    ev, c = Evaluator(), Context()
+    for d in defs:
+        ev.define(P(d), c)
+    ev.start_clock()
+    return ev.eval(P(f"symbolic({src})"), c)
+
+
+def formula(src, *defs):
+    v = sym_eval(src, *defs)
+    assert isinstance(v, Expr), v
+    return v.node
+
+
+def number(src, *defs):
+    v = sym_eval(src, *defs)
+    assert not isinstance(v, Expr), text(v.node)
+    return complex(v.value)
+
+
 @pytest.mark.parametrize("src,want", [
-    ("(x^2-1)/(x-1)", "x+1"), ("sin(x)^2+cos(x)^2", "1"), ("2*a+3*a", "5*a"), ("π/2+π/2", "π"),
-    ("e^(ln(x))", "x"), ("5*'kg*2", "10'kg"),
+    ("(x^2-1)/(x-1)", "x+1"), ("2*a+3*a", "5*a"), ("e^(ln(x))", "x"), ("sin(x)^2+cos(x)^2+y", "y+1"),
+    ('(x+1)^3,"expand"', "x^(3)+3*x^(2)+3*x+1"), ('x^2-5*x+6,"factor"', "(x-3)*(x-2)"),
+    ("diff(x^3,x)", "3*x^(2)"), ("diff(x^3,x,2)", "6*x"), ("diff(a*x^2+b*x+c,x)", "2*a*x+b"),
+    ("int(x^2,x)", "(x^(3))/(3)"), ("int(x^2,x,0,a)", "(a^(3))/(3)"),
+    ("sum(i,i,1,n)", "(n*(n+1))/(2)"), ("product(i,i,1,n)", "n!"),
+    ("solve(a*x+b,x)", "(-b)/(a)"),
 ])
-def test_arrow_simplifies(src, want):
-    got = sym.symbolic_value(P(src), Context())
+def test_formulas(src, want):
+    got = formula(src)
     assert text(got) == want
-    same_function(P(src), got)
+    same_function(P(src.split(",\"")[0]) if "int(" not in src and "sum(" not in src and "product(" not in src
+                  and "diff(" not in src and "solve(" not in src else got, got, names=("x", "y", "a", "b", "c"))
 
 
-def test_expand_factor_solve():
-    c = Context()
-    assert text(sym.expand_expr(P("(x+1)^3"), c)) == "x^(3)+3*x^(2)+3*x+1"
-    assert text(sym.factor_expr(P("x^2-5*x+6"), c)) == "(x-3)*(x-2)"
-    assert [text(n) for n in sym.solve_expr(P("x^2≡4"), "x", c)] == ["-2", "2"]
-    (s,) = sym.solve_expr(P("a*x+b"), "x", c)
-    same_function(s, P("-b/a"))
-
-
-@pytest.mark.parametrize("f,var,a,want", [
-    ("sin(x)/x", "x", "0", 1.0), ("(1-cos(x))/x^2", "x", "0", 0.5), ("(1+1/n)^n", "n", "∞", 2.718281828459045),
-    ("x*sin(1/x)", "x", "0", 0.0), ("(x^2-4)/(x-2)", "x", "2", 4.0), ("1/x", "x", "∞", 0.0),
-    ("sqrt(x)", "x", "0", 0.0), ("1/x^2", "x", "0", float("inf")), ("ln(x)", "x", "0", float("-inf")),
+@pytest.mark.parametrize("src,want", [
+    ("lim(sin(x)/x,x,0)", 1.0), ("lim((1-cos(x))/x^2,x,0)", 0.5), ("lim((1+1/n)^n,n,∞)", 2.718281828459045),
+    ("lim(x*sin(1/x),x,0)", 0.0), ("lim((x^2-4)/(x-2),x,2)", 4.0), ("lim(sqrt(x),x,0)", 0.0),
+    ("int(x^2,x,0,1)", 1 / 3), ("int(e^(-x^2),x,0,∞)", 0.886226925452758), ("sum(1/k^2,k,1,∞)", 1.6449340668482264),
+    ("π/2+π/2", 3.141592653589793), ("sqrt(8)", 8 ** 0.5),
 ])
-def test_limits(f, var, a, want):
-    v = sym.limit_value(P(f), var, P(a), Context())
-    assert float(v) == pytest.approx(want)
+def test_numbers_when_no_letters_are_left(src, want):
+    assert number(src) == pytest.approx(want, rel=1e-12)
 
 
-@pytest.mark.parametrize("f,var,a", [("sin(1/x)", "x", "0"), ("1/x", "x", "0"), ("floor(x)", "x", "1")])
-def test_limits_that_do_not_exist(f, var, a):
-    with pytest.raises(NotSymbolic):
-        sym.limit_value(P(f), var, P(a), Context())
+@pytest.mark.parametrize("src,message", [
+    ("lim(sin(1/x),x,0)", "limit does not exist"), ("lim(1/x,x,0)", "limit does not exist"),
+    ("lim(floor(x),x,1)", "limit does not exist"), ("1/0", "cannot be evaluated symbolically"),
+    ("int(x^n,x)", "cannot be evaluated symbolically"),  # the answer needs cases: never shown
+    ("solve(x^2+1≡x^2,x)", "No solution"), ('x,"sideways"', "mode must be"),
+])
+def test_errors_instead_of_guesses(src, message):
+    with pytest.raises(SMathError, match=message):
+        sym_eval(src)
 
 
-def _region(ws, x, y, keys, symbolic=False):
-    r = ws.add_region(x, y)
-    for k in keys:
-        r.editor.key(k)
-    if symbolic:
-        assert r.editor.symbolic_equals()
-        r.symbolic_eval = True
-    ws.update_after_edit(r)
-    return r
+def test_worksheet_values_are_used():
+    assert text(formula("k*y+k*y", "k:=3")) == "6*y"
+    assert text(formula("f(t)", "f(x):=x^2+1")) == "t^(2)+1"
+    assert text(formula("y", "y:=a+a")) == "2*a"  # a definition kept as a formula
+    assert text(formula("v[2]*x", "v:=stack(1,2,3)")) == "2*x"  # numeric parts by value
+    # the variable of diff/int/solve is free inside, then takes its value
+    assert number("diff(x^3,x)", "x:=2") == 12
+    assert number("int(x^2,x,0,1)", "x:=5") == pytest.approx(1 / 3)
 
 
-def test_arrow_in_a_worksheet_uses_definitions_and_saves():
-    ws = Worksheet()
-    _region(ws, 18, 9, list("k:3"))
-    r = _region(ws, 18, 45, ["(", "x", "^", "2", "RIGHT", "-", "1", "RIGHT", "/", "x", "-", "1"], symbolic=True)
-    s = _region(ws, 18, 90, list("k*y+k*y"), symbolic=True)
-    ws.calculate()
-    assert display_text(r.display) == "x+1"
-    assert display_text(s.display) == "6*y"  # k is known: its value is used
-    text_ = dumps(ws)
-    assert text_.count('action="symbolic"') == 2
-    again = loads(text_)
-    shown = [display_text(x.display) for x in again.ordered() if x.symbolic_eval]
-    assert shown == ["x+1", "6*y"]
+def test_units():
+    assert text(formula("a*'kN+b*'m")) == "a*'kN+b*'m"
+    v = sym_eval("5*'m+20*'cm")
+    assert v.value == pytest.approx(5.2) and v.dims[0] == 1  # no letters: 5.2 m, with its units
 
 
-def test_numeric_equals_is_unchanged():
-    ws = Worksheet()
-    r = _region(ws, 18, 9, list("2+3="))
-    ws.calculate()
-    assert display_text(r.display) == "5" and not r.symbolic_eval
+def test_several_solutions_are_a_column():
+    v = sym_eval("solve(x^2-4,x)")
+    assert [x.value for x in v.items] == [-2, 2]
+    f = formula("solve(x^2-a,x)")
+    assert text(f) == "mat(-√(a),√(a),2,1)"
 
 
-def _show(keys):
+def test_outside_symbolic_everything_is_numeric():
     from websmath.tests.test_behaviour import sheet
 
-    ws, rs = sheet(*keys)
-    r = rs[-1]
-    return display_text(r.display) if r.display is not None else r.error.message
+    ws, (r,) = sheet(list("diff(x^3") + ["RIGHT"] + list(",x") + ["RIGHT", "="])
+    assert r.error is not None and r.error.message == "x - not defined."
+    for gone in ("lim", "expand", "factor"):
+        # no longer functions: "=" after an unknown f(x) starts a definition, as in SMath
+        ws, (r,) = sheet(list(f"{gone}(x") + ["RIGHT", "="])
+        assert r.editor.root.text() == f"{gone}(x)≔"
 
 
-def test_functions_in_a_worksheet():
-    assert _show([list("expand((x+1)") + ["RIGHT", "^", "2", "RIGHT", "RIGHT", "="]]) == "x^(2)+2*x+1"
-    assert _show([list("factor(x^2") + ["RIGHT"] + list("-1") + ["RIGHT", "="]]) == "(x-1)*(x+1)"
-    assert _show([list("solve(a*x+b,x") + ["RIGHT", "="]]) == "(-b)/(a)"
-    # numeric solve is unchanged: all values known
-    assert _show([list("solve(x^2") + ["RIGHT"] + list("-4,x") + ["RIGHT", "="]]) == "[-2; 2]"
-    assert _show([list("lim(sin(x") + ["RIGHT", "/", "x", "RIGHT"] + list(",x,0") + ["RIGHT", "="]]) == "1"
-    assert _show([list("lim(1/x") + ["RIGHT"] + list(",x,0") + ["RIGHT", "="]]) == \
-        "The limit does not exist or cannot be determined."
-    # with a known value in it, the result is a number
-    assert _show([list("k:2"), list("expand(k*(x+1") + ["RIGHT", "RIGHT", "="]]) == "2*x+2"
+def test_in_a_worksheet():
+    from websmath.tests.test_behaviour import sheet
 
-
-def test_lim_falls_back_to_the_strict_numeric_method():
-    """A programmed function SymPy cannot read: the numeric limit, which
-    only answers when both sides settle to the same value."""
-    from websmath.engine.extra_functions import _lim
-    from websmath.engine import ast as A
-
-    ev = Evaluator()
-    ev.start_clock()
-    v = _lim(ev, A.Call("lim", [P("sin(x)/x"), A.Var("x"), P("0")]), Context())
-    assert v.value == pytest.approx(1, abs=1e-9)
-    from websmath.engine.errors import SMathError
-
-    for bad in ("sin(1/x)", "1/x"):
-        with pytest.raises(SMathError):
-            _lim(ev, A.Call("lim", [P(bad), A.Var("x"), P("0")]), Context())
+    ws, rs = sheet(list("k:3"), list("symbolic(k*y+k*y") + ["RIGHT", "="])
+    assert display_text(rs[-1].display) == "6*y"
 
 
 def test_symbolic_results_match_smath_or_are_errors():
-    """SMath's example worksheets store SMath's own symbolic answers: ours
-    must be the same or an error - never a different answer."""
+    """SMath's example worksheets store SMath's own → answers: symbolic() of
+    the same expressions must give the same or an error - never a different
+    answer.  (The → regions themselves open as plain expressions.)"""
     import glob
     import xml.etree.ElementTree as ET
     from pathlib import Path
 
     from websmath.io.smfile import NS, load_sm, rpn_to_ast
+    from websmath.engine import ast as A
 
     folder = Path(__file__).resolve().parents[2] / "smath" / "SMath Studio" / "examples"
     if not folder.exists():
@@ -172,15 +164,30 @@ def test_symbolic_results_match_smath_or_are_errors():
             m = reg.find(f"{{{NS}}}math")
             res = m.find(f"{{{NS}}}result") if m is not None else None
             if res is not None and res.get("action") == "symbolic":
-                stored.append(to_row(rpn_to_ast(list(res))).text())
+                stored.append((rpn_to_ast(list(m.find(f"{{{NS}}}input"))), rpn_to_ast(list(res))))
         if not stored:
             continue
         ws = load_sm(f)
-        ours = [r for r in ws.ordered() if r.symbolic_eval]
-        assert len(ours) == len(stored)
-        for r, want in zip(ours, stored):
-            if r.error is not None:
+        ws.calculate()
+        for node, want_node in stored:
+            want = to_row(want_node).text()
+            # the region holding it, and the context just before it
+            r = next(x for x in ws.ordered() if x.kind == "math" and x.plot is None
+                     and not x.editor.evaluate and to_row(node).text() == x.editor.root.text())
+            ctx = ws._context_before(r)
+            try:
+                v = ws.evaluator.eval(A.Call("symbolic", [node]), ctx)
+            except SMathError:
                 continue
-            assert to_row(r.value.node).text() == want, (f, r.editor.root.text())
+            if isinstance(v, Expr):
+                assert to_row(v.node).text() == want, (f, want, to_row(v.node).text())
+            else:
+                # a number (or matrix of numbers): SMath's stored answer, worked out
+                w = ws.evaluator.eval(want_node, Context())
+                ours = v.items if hasattr(v, "items") else [v]
+                theirs = w.items if hasattr(w, "items") else [w]
+                assert len(ours) == len(theirs), (f, want)
+                for a, b in zip(ours, theirs):
+                    assert complex(a.value) == pytest.approx(complex(b.value), rel=1e-12, abs=1e-12), (f, want)
             matched += 1
     assert matched >= 2

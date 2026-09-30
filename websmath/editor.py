@@ -624,20 +624,6 @@ class MathEditor:
         self.unit = Row()
         # the cursor stays where it was (observed)
 
-    def symbolic_equals(self) -> bool:
-        """→ (Ctrl+.): symbolic evaluation of the region.  Unlike "=", a lone
-        undefined name is evaluated too (it is a symbol).  False when the
-        region already ends in an evaluation or is a definition."""
-        if self.in_unit or self.plot_input or self.kind != "math":
-            return False
-        if self.evaluate or "≔" in self.root.items or self.root.is_empty():
-            return False
-        self._push_undo()
-        self.root.append("=")
-        self.evaluate = True
-        self.unit = Row()
-        return True
-
     def _definable_head(self):
         """(name, nargs) if the root is a lone name or name(args...)."""
         items = self.root.items

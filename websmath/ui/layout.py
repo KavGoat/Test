@@ -196,7 +196,6 @@ class Layouter:
         self.var_kind = var_kind or (lambda name: "user")
         self.error_src = getattr(error_node, "src", None) if error_node is not None else None
         self.user_funcs = user_funcs
-        self.eval_glyph = None  # "→" for a symbolic evaluation
         self.rows: list[tuple[Row, LBox, list]] = []  # (row, box, slot offsets)
 
     # -- fonts / metrics ------------------------------------------------------
@@ -313,8 +312,6 @@ class Layouter:
                 continue
             unary = prev_kind in (None, "op", "sep") and it in "-+¬±"
             glyph = OP_GLYPH.get(it, it)
-            if it == "=" and self.eval_glyph:
-                glyph = self.eval_glyph
             if it == "≔":
                 glyph = ":="
             bold = it == "≡"

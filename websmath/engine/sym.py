@@ -1,5 +1,6 @@
-"""The bridge to SymPy for symbolic results: → (symbolic evaluation),
-expand(), factor(), symbolic solve() and lim().
+"""The bridge to SymPy behind symbolic(): the only place the worksheet
+evaluates symbolically.  Inside symbolic(...), diff, int, sum, product,
+solve and lim give formulas; everywhere else the worksheet is numeric.
 
 Worksheet expressions are translated to SymPy and back.  Numbers are taken
 exactly (1.35 is 27/20), user functions and symbolic definitions are
@@ -18,6 +19,10 @@ from .symbolic import NotSymbolic
 
 class NoLimit(NotSymbolic):
     """The limit does not exist (one-sided limits differ, oscillation)."""
+
+
+class NoSolution(NotSymbolic):
+    """solve found no solution."""
 
 _sp = None
 
@@ -53,6 +58,9 @@ def _funcs():
 
 
 _BACK = {"log": "ln", "Abs": "abs", "ceiling": "ceil", "gamma": "Gamma", "re": "Re", "im": "Im"}
+_WORKSHEET_FUNCS = {"sin", "cos", "tan", "cot", "sec", "csc", "asin", "acos", "atan", "acot", "sinh", "cosh",
+                    "tanh", "coth", "asinh", "acosh", "atanh", "exp", "ln", "sqrt", "abs", "sign", "floor",
+                    "ceil", "Gamma", "Re", "Im"}
 
 
 def _num(text: str):
@@ -94,26 +102,143 @@ def _real_number(v: float, sp):
     return sp.Float(repr(v), 17)
 
 
-def to_sympy(n: A.Node, ctx=None):
-    """A worksheet expression as a SymPy expression."""
+def to_sympy(n: A.Node, ctx=None, ev=None):
+    """A worksheet expression as a SymPy expression.  With an evaluator, a
+    part SymPy cannot read (an index v[2], a programmed function...) is
+    used by its numeric value when it holds no free letters."""
     from . import symbolic as S
 
     sp = sympy()
     if ctx is not None:
         n = S.expand(n, ctx)
-    return _to(n, ctx, sp)
+    return _Tr(ctx, ev, sp).to(n)
 
 
-def _to(n, ctx, sp):
+def _free_names(n: A.Node, ctx, bound) -> set:
+    from .evaluator import BUILTIN_CONSTANTS
+
+    out = set()
+    for m in A.walk(n):
+        if isinstance(m, A.Var) and m.name not in BUILTIN_CONSTANTS:
+            if m.name in bound or ctx is None or ctx.lookup(m.name) is None:
+                out.add(m.name)
+    return out
+
+
+def _value(v, sp):
+    """A computed worksheet value as SymPy."""
+    from .units import Quantity
+    from .values import Matrix
+
+    if isinstance(v, Quantity):
+        return _quantity(v)
+    if isinstance(v, Matrix):
+        return sp.Matrix(v.nrows, v.ncols, [_value(x, sp) for x in v.items])
+    raise NotSymbolic(type(v).__name__)
+
+
+class _Tr:
+    """Translation to SymPy.  ``bound`` holds the variables of the diff,
+    int, sum, product, lim and solve being translated: inside them the
+    letter is free even when the worksheet gives it a value."""
+
+    def __init__(self, ctx, ev, sp):
+        self.ctx, self.ev, self.sp = ctx, ev, sp
+        self.bound: set = set()
+
+    def to(self, n):
+        try:
+            return _to(n, self.ctx, self.sp, self)
+        except (NoLimit, NoSolution):
+            raise
+        except NotSymbolic:
+            # a numeric part (v[2], a programmed function) with no free
+            # letters: its value is exact enough to use
+            if self.ev is None or isinstance(n, (A.Num, A.Var, A.UnitRef)) or _free_names(n, self.ctx, self.bound):
+                raise
+            from .errors import SMathError
+
+            try:
+                return _value(self.ev.eval(n, self.ctx), self.sp)
+            except SMathError:
+                raise NotSymbolic("cannot evaluate") from None
+
+    def var(self, node) -> object:
+        if not isinstance(node, A.Var):
+            raise NotSymbolic("variable expected")
+        return self.sp.Symbol(node.name)
+
+    def with_bound(self, name, node):
+        added = name not in self.bound
+        self.bound.add(name)
+        try:
+            return self.to(node)
+        finally:
+            if added:
+                self.bound.discard(name)
+
+    def call(self, n: A.Call):
+        """diff, int, sum, product, lim and solve, symbolically."""
+        sp = self.sp
+        name, args = n.name, n.args
+        if name == "diff" and len(args) in (2, 3):
+            x = self.var(args[1])
+            order = int(self.to(args[2])) if len(args) == 3 else 1
+            if order < 1:
+                raise NotSymbolic("order")
+            return sp.diff(self.with_bound(x.name, args[0]), x, order)
+        if name == "int" and len(args) in (2, 4):
+            x = self.var(args[1])
+            f = self.with_bound(x.name, args[0])
+            if len(args) == 2:
+                r = sp.integrate(f, x)
+            else:
+                r = sp.integrate(f, (x, self.to(args[2]), self.to(args[3])))
+            if r.has(sp.Integral):
+                raise NotSymbolic("integral not found")
+            return r
+        if name in ("sum", "product") and len(args) == 4:
+            i = self.var(args[1])
+            f = self.with_bound(i.name, args[0])
+            lims = (i, self.to(args[2]), self.to(args[3]))
+            r = sp.summation(f, lims) if name == "sum" else sp.product(f, lims)
+            if r.has(sp.Sum) or r.has(sp.Product):
+                r = r.doit()
+            if r.has(sp.Sum) or r.has(sp.Product):
+                raise NotSymbolic("no closed form")
+            return r
+        if name == "lim" and len(args) == 3:
+            x = self.var(args[1])
+            return _limit(self.with_bound(x.name, args[0]), x, self.to(args[2]), sp)
+        if name == "solve" and len(args) == 2:
+            x = self.var(args[1])
+            e = self.with_bound(x.name, args[0])
+            if isinstance(e, sp.Equality):
+                e = e.lhs - e.rhs
+            try:
+                sols = sp.solve(e, x)
+            except (NotImplementedError, ValueError, TypeError) as ex:
+                raise NotSymbolic(str(ex)) from None
+            if not sols:
+                raise NoSolution("no solution")
+            return sols[0] if len(sols) == 1 else sp.Matrix(sols)
+        return None
+
+
+def _to(n, ctx, sp, tr=None):
     from .evaluator import BUILTIN_CONSTANTS, Lazy
     from .symbolic import Expr
     from .units import Quantity
     from .values import Matrix
 
+    if tr is None:
+        tr = _Tr(ctx, None, sp)
+    if tr.bound and isinstance(n, A.Var) and n.name in tr.bound:
+        return sp.Symbol(n.name)
     if isinstance(n, A.Num):
         return _num(n.text)
     if isinstance(n, A.Group):
-        return _to(n.inner, ctx, sp)
+        return tr.to(n.inner)
     if isinstance(n, A.UnitRef):
         return sp.Symbol("'" + n.name, positive=True)
     if isinstance(n, A.Var):
@@ -124,9 +249,9 @@ def _to(n, ctx, sp):
         if isinstance(v, Quantity):
             return _quantity(v)
         if isinstance(v, Expr):
-            return _to(v.node, ctx, sp)
+            return tr.to(v.node)
         if isinstance(v, Lazy):
-            return _to(v.node, ctx, sp)
+            return tr.to(v.node)
         if isinstance(v, Matrix):
             return sp.Matrix(v.nrows, v.ncols, [_quantity(x) for x in v.items])
         if v is not None:
@@ -135,7 +260,7 @@ def _to(n, ctx, sp):
             raise NotSymbolic(f"{n.name} is defined above but has no value")
         return sp.Symbol(n.name)
     if isinstance(n, A.Unary):
-        a = _to(n.arg, ctx, sp)
+        a = tr.to(n.arg)
         if n.op == "-":
             return -a
         if n.op == "+":
@@ -144,7 +269,7 @@ def _to(n, ctx, sp):
             return sp.factorial(a)
         raise NotSymbolic(n.op)
     if isinstance(n, A.BinOp):
-        a, b = _to(n.left, ctx, sp), _to(n.right, ctx, sp)
+        a, b = tr.to(n.left), tr.to(n.right)
         op = n.op
         if op == "+":
             return a + b
@@ -163,7 +288,10 @@ def _to(n, ctx, sp):
             return rel(a, b)
         raise NotSymbolic(op)
     if isinstance(n, A.Call):
-        args = [_to(x, ctx, sp) for x in n.args]
+        special = tr.call(n)
+        if special is not None:
+            return special
+        args = [tr.to(x) for x in n.args]
         f = _funcs().get(n.name)
         if f is not None and len(args) == 1:
             return f(args[0])
@@ -175,7 +303,7 @@ def _to(n, ctx, sp):
             return (sp.Max if n.name == "max" else sp.Min)(*args)
         raise NotSymbolic(n.name)
     if isinstance(n, A.MatrixLit):
-        return sp.Matrix(n.nrows, n.ncols, [_to(c, ctx, sp) for c in n.cells])
+        return sp.Matrix(n.nrows, n.ncols, [tr.to(c) for c in n.cells])
     raise NotSymbolic(type(n).__name__)
 
 
@@ -201,6 +329,11 @@ def _number(e, sp) -> A.Node:
     f = float(e)
     text = f"{abs(f):.15g}"
     return A.Unary("-", A.Num(text)) if f < 0 else A.Num(text)
+
+
+def _is_unit(f) -> bool:
+    base = f.as_base_exp()[0]
+    return bool(base.is_Symbol and base.name.startswith("'"))
 
 
 def _wrap(n: A.Node, need: bool) -> A.Node:
@@ -243,7 +376,8 @@ def _from(e, sp) -> A.Node:
         c, rest = e.as_coeff_Mul()
         if c.is_Number and c < 0:
             return A.Unary("-", _wrap(_from(-e, sp), (-e).is_Add))
-        factors = e.as_ordered_factors()
+        # units after the rest, as they are written: a·kN, not kN·a
+        factors = sorted(e.as_ordered_factors(), key=lambda f: _is_unit(f))
         out = None
         for f in factors:
             node = _wrap(_from(f, sp), f.is_Add)
@@ -257,55 +391,35 @@ def _from(e, sp) -> A.Node:
             return A.BinOp("/", A.Num("1"), _from(base ** -ex, sp))
         b = _wrap(_from(base, sp), not (base.is_Symbol or (base.is_Integer and base > 0) or base.is_Function))
         return A.BinOp("^", b, _from(ex, sp))
+    if isinstance(e, sp.exp):
+        arg = e.args[0]
+        return A.BinOp("^", A.Var("e"), _from(arg, sp))  # e^x, as SMath writes it
     if isinstance(e, sp.log) and len(e.args) == 1:
         return A.Call("ln", [_from(e.args[0], sp)])
-    if e.is_Function:
-        name = type(e).__name__
-        return A.Call(_BACK.get(name, name), [_from(a, sp) for a in e.args])
     if isinstance(e, sp.factorial):
-        return A.Unary("!", _wrap(_from(e.args[0], sp), True))
+        arg = e.args[0]
+        return A.Unary("!", _wrap(_from(arg, sp), not (arg.is_Symbol or (arg.is_Integer and arg >= 0))))
+    if isinstance(e, (sp.Max, sp.Min)):
+        return A.Call("max" if isinstance(e, sp.Max) else "min", [_from(a, sp) for a in e.args])
+    if e.is_Function:
+        # only functions the worksheet has: an answer in terms of anything
+        # else (Piecewise, erf, LambertW...) is not shown
+        name = type(e).__name__
+        name = _BACK.get(name, name)
+        if name not in _WORKSHEET_FUNCS:
+            raise NotSymbolic(name)
+        return A.Call(name, [_from(a, sp) for a in e.args])
     raise NotSymbolic(str(e))
 
 
 # -- operations ------------------------------------------------------------------------------
 
-def symbolic_value(n: A.Node, ctx):
-    """→: the expression simplified symbolically (numbers when everything is
-    known).  Returns a worksheet expression node."""
-    sp = sympy()
-    e = to_sympy(n, ctx)
-    e = sp.simplify(e) if not isinstance(e, sp.MatrixBase) else e.applyfunc(sp.simplify)
-    return from_sympy(e)
+MODES = ("simplify", "expand", "factor")
 
 
-def expand_expr(n: A.Node, ctx) -> A.Node:
-    sp = sympy()
-    return from_sympy(sp.expand(to_sympy(n, ctx)))
-
-
-def factor_expr(n: A.Node, ctx) -> A.Node:
-    sp = sympy()
-    return from_sympy(sp.factor(to_sympy(n, ctx)))
-
-
-def solve_expr(eq: A.Node, var: str, ctx) -> list:
-    """Exact solutions of eq (an equation a≡b, or an expression = 0) for var."""
-    sp = sympy()
-    e = to_sympy(eq, ctx)
-    x = sp.Symbol(var)
-    if isinstance(e, sp.Equality):
-        e = e.lhs - e.rhs
-    sols = sp.solve(e, x)
-    return [from_sympy(s) for s in sols]
-
-
-def limit_value(n: A.Node, var: str, point: A.Node, ctx):
-    """The limit, exactly: a SymPy number/expression, or NotSymbolic when it
-    does not exist or SymPy cannot decide."""
-    sp = sympy()
-    e = to_sympy(n, ctx)
-    x = sp.Symbol(var)
-    a = to_sympy(point, ctx)
+def _limit(e, x, a, sp):
+    """The limit, exactly; NoLimit when it does not exist, NotSymbolic when
+    SymPy cannot decide."""
     try:
         if a in (sp.oo, -sp.oo):
             v = sp.limit(e, x, a)
@@ -326,3 +440,32 @@ def limit_value(n: A.Node, var: str, point: A.Node, ctx):
     if v.has(sp.Limit):
         raise NotSymbolic("undecided")
     return v
+
+
+def symbolic(n: A.Node, ctx, ev=None, mode: str = "simplify"):
+    """symbolic(expr[, mode]): the expression worked out symbolically, as a
+    SymPy expression (a Matrix for several solutions or a matrix)."""
+    sp = sympy()
+    if mode not in MODES:
+        raise NotSymbolic("mode")
+    e = to_sympy(n, ctx, ev)
+    if ctx is not None:
+        # the variable of a diff/int/solve left in the answer takes its
+        # worksheet value when it has one (x:=2: diff(x^2,x) -> 4)
+        tr = _Tr(ctx, ev, sp)
+        subs = {}
+        for s in e.free_symbols:
+            if not s.name.startswith("'") and ctx.lookup(s.name) is not None:
+                subs[s] = tr.to(A.Var(s.name))
+        if subs:
+            e = e.subs(subs)
+    how = {"simplify": sp.simplify, "expand": sp.expand, "factor": sp.factor}[mode]
+    e = e.applyfunc(how) if isinstance(e, sp.MatrixBase) else how(e)
+    if e.has(sp.zoo) or e.has(sp.nan):
+        raise NotSymbolic("undefined")
+    return e
+
+
+def is_formula(e) -> bool:
+    """True when a symbolic result still holds letters (not only units)."""
+    return any(not s.name.startswith("'") for s in e.free_symbols)

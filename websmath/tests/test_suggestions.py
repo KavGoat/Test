@@ -45,7 +45,7 @@ def test_suggestions_match_smath(group, prefix, smath_order):
     from websmath.engine.extra_functions import EXTRA_FUNCTIONS
 
     extra = SITE_HIDDEN_UNITS | set(ADDED)
-    got = [x for x in got if x.split(" ")[0] not in EXTRA_FUNCTIONS]  # symbolic lim/expand/factor
+    got = [x for x in got if x.split(" ")[0] not in EXTRA_FUNCTIONS]  # symbolic() is not an SMath function
     assert [x for x in got if not x.startswith("'") or x[1:] not in extra] == DATA[group]["lists"][prefix]
 
 

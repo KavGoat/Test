@@ -357,20 +357,8 @@ def test_region_options_saved_in_sm(app, tmp_path):
     assert display_text(r.display) == "1/3"
 
 
-def test_calculation_differentiate_and_solve(app):
+def test_calculation_solve(app):
     v = WorksheetView()
-    type_at(v, 18, 18, "f(x")
-    press(v, Qt.Key_Right)
-    for ch in ":x^3":
-        press(v, 0, ch)
-    press(v, Qt.Key_Right)
-    for ch in "+2*x":
-        press(v, 0, ch)
-    ed = v.focused_item.editor
-    assert ed.root.text() == "f(x)≔x^(3)+2*x"
-    v.differentiate_selection()  # cursor is on the last x
-    assert ed.root.text() == "f(x)≔3*x^(2)+2"
-    press(v, Qt.Key_Return)
     type_at(v, 18, 90, "x^2")
     press(v, Qt.Key_Right)
     press(v, 0, "-")
@@ -427,7 +415,7 @@ def test_desktop_main_window(app):
     assert menus == ["File", "Edit", "View", "Insert", "Calculation", "Tools", "Pages", "Help"]
     calc = [a for a in w.menuBar().actions() if a.text() == "&Calculation"][0].menu()
     titles = [a.text() for a in calc.actions() if a.text()]
-    assert "Simplify" not in titles and "Differentiate" in titles and "Solve" in titles
+    assert "Simplify" not in titles and "Differentiate" not in titles and "Solve" in titles
     assert [s.title for s in w.panel.sections][:6] == ["Arithmetic", "Matrices", "Boolean", "Functions",
                                                        "Plot", "Programming"]
     assert "Constants" in [s.title for s in w.panel.sections]

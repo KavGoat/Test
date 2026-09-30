@@ -328,7 +328,6 @@ class MainWindow(QMainWindow):
         c = mb.addMenu("&Calculation")
         self._act(c, "Solve", self._v("solve_selection"))
         self._act(c, "Calculate", self._v("calculate_selection"))
-        self._act(c, "Differentiate", self._v("differentiate_selection"))
         self._act(c, "Invert", self._v("invert_selection"))
         self._act(c, "Determinant", self._v("determinant_selection"))
         c.addSeparator()
@@ -555,7 +554,7 @@ class MainWindow(QMainWindow):
                 ("ⁿ√", struct("nthroot"), "N-th root (Ctrl+\\)"),
                 ("1", typed("1"), "1"), ("2", typed("2"), "2"), ("3", typed("3"), "3"),
                 ("×", typed("*"), "Multiplication (*)"), (",", typed(","), "Arguments separator"),
-                ("→", lambda: self.view.symbolic_evaluation(), "Symbolic evaluation (Ctrl+.)"),
+                ("→", typed("symbolic("), "Symbolic evaluation: symbolic(…)"),
                 (".", typed("."), "Decimal symbol"), ("0", typed("0"), "0"), ("!", typed("!"), "Factorial (!)"),
                 ("/", typed("/"), "Division (/)"), ("≔", typed(":"), "Definition (:)"),
                 ("=", typed("="), "Numeric evaluation (=)"),
