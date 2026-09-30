@@ -161,7 +161,7 @@ def _check_shown(r, e: Expr, unit_box: str = ""):
         dims = _dmul(dims, bd)
     # the unit shown (plus the box) has exactly the dimensions of the answer
     assert dims == {k: v for k, v in e.dims.items() if v}, (text, dims, e.dims)
-    exact = e.value / mpmath.mpf(factor)
+    exact = e.value / _exact(factor)
     # the shown number is the exact value correctly rounded: within half a
     # unit of its last shown digit (plus float noise, 1e-12 relative)
     num = text.split(" ")[0]

@@ -1254,3 +1254,6 @@ SPECIAL = {
     "Clear": _clear,
     "sys": _sys,
 }
+
+
+from . import extra_functions  # noqa: E402,F401  (plugin functions: eigenvals, fft, delta...)

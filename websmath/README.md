@@ -20,7 +20,7 @@ results SMath saved in those example files.
 ## Run
 
 ```bash
-python -m pip install PySide6          # numpy/pytest only for development
+python -m pip install -r websmath/requirements.txt   # PySide6, numpy, sympy
 python -m websmath                     # or: python -m websmath file.sm
 ```
 
