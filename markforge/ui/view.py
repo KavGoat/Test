@@ -316,6 +316,9 @@ class PageView(QGraphicsView):
     def __init__(self, window):
         super().__init__()
         self.window = window
+        # Equations: the one being typed into, the red cross, SMath's keys.
+        from .calcedit import CalcEditing
+        self.calc = CalcEditing(self)
         self.tool_key = "select"
         self.sticky_tool = False
         self.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing |
@@ -515,6 +518,9 @@ class PageView(QGraphicsView):
         added up again, the panels showing what is actually selected — rather
         than each gesture having to remember to ask for it.
         """
+        # Equations moved by the gesture are calculated now it is over.
+        from ..calc.docsheet import sheet_for
+        sheet_for(self.window.document).settle()
         if not self._snapshot:
             return
         changed = []
@@ -1420,6 +1426,10 @@ class PageView(QGraphicsView):
         if event.button() == Qt.LeftButton:
             self.click_into_viewport(scene_pos)
 
+        if self.calc.mouse_press(event, scene_pos):
+            event.accept()
+            return
+
         if (self._pending_arrow_leader is not None
                 and event.button() == Qt.LeftButton):
             item, self._pending_arrow_leader = self._pending_arrow_leader, None
@@ -1895,6 +1905,9 @@ class PageView(QGraphicsView):
         scene_pos = self.mapToScene(event.position().toPoint())
         self._last_scene_pos = scene_pos
         self.cursorMoved.emit(scene_pos)
+        if self.calc.mouse_move(event, scene_pos):
+            event.accept()
+            return
         if event.buttons() == Qt.NoButton and self._mode in self.HELD_MODES:
             self._release_stale_mode()
         if (self._pending_anchor is not None or self._pending_stamp is not None
@@ -2030,6 +2043,11 @@ class PageView(QGraphicsView):
         """
         undone = []
         self.forget_snap()
+        if self.calc.editing():
+            self.calc.leave()
+            undone.append("the equation")
+        if self.calc.cross is not None:
+            self.calc.clear_cross()
         if self.clear_pending_tool():
             undone.append("the held tool")
         if self._pending_anchor is not None:
@@ -2441,6 +2459,16 @@ class PageView(QGraphicsView):
             self.setCursor(Qt.SizeAllCursor)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        scene_pos = self.mapToScene(event.position().toPoint())
+        if self.calc._select_drag is not None:
+            self.calc.mouse_release(event, scene_pos)
+            event.accept()
+            return
+        self._mouse_release(event)
+        # A click (not a drag) on an equation puts the cursor in it.
+        self.calc.mouse_release(event, scene_pos)
+
+    def _mouse_release(self, event: QMouseEvent) -> None:
         scene_pos = self.mapToScene(event.position().toPoint())
         self.forget_snap()
         self.viewport().update()
@@ -3539,7 +3567,8 @@ class PageView(QGraphicsView):
         sentence rather than a request to change tool.
         """
         return (self._editing_item is not None
-                or self._label_editor is not None)
+                or self._label_editor is not None
+                or self.calc.editing())
 
 
     def begin_item_edit(self, item) -> None:
@@ -3809,6 +3838,7 @@ class PageView(QGraphicsView):
             else:
                 self._draw_marquee(painter)
         self._draw_group_boxes(painter)
+        self.calc.draw_cross(painter)
         if self._pending_stamp is not None:
             self._draw_pending_preview(painter)
         else:
@@ -4357,7 +4387,7 @@ class PageView(QGraphicsView):
         """
         if event.type() == QEvent.KeyPress and event.key() in (Qt.Key_Tab,
                                                                Qt.Key_Backtab):
-            if self._editing_item is not None:
+            if self._editing_item is not None or self.calc.editing():
                 event.accept()
                 self.keyPressEvent(event)
                 if event.isAccepted():
@@ -4396,6 +4426,12 @@ class PageView(QGraphicsView):
         if key in (Qt.Key_Control, Qt.Key_Shift) and self.tool_key == "select":
             # What the pointer would do has just changed under it.
             self._update_hover_cursor(self._last_scene_pos)
+
+        # An equation being typed into takes SMath's keys; on bare paper in
+        # Calc mode, typing starts one (calcedit.py).
+        if self.calc.key_press(event):
+            event.accept()
+            return
 
         # While words are being typed every key belongs to them — arrows move
         # the caret, not the markup — apart from Escape, which finishes it.

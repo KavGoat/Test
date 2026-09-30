@@ -12,7 +12,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from tests.calc.legacy_ui.worksheet_view import SITE_HIDDEN_UNITS, suggestion_list  # noqa: E402
+from markforge.calc.ui.suggest import SITE_HIDDEN_UNITS, suggestion_list  # noqa: E402
 from markforge.calc.worksheet import Worksheet  # noqa: E402
 
 DATA = json.loads((Path(__file__).parent / "data" / "smath_suggestions.json").read_text(encoding="utf-8"))
@@ -21,9 +21,9 @@ CASES = [(group, pf) for group in DATA for pf in DATA[group]["lists"]]
 
 @pytest.fixture
 def smath_order(monkeypatch):
-    import tests.calc.legacy_ui.worksheet_view as wv
+    import markforge.calc.ui.suggest as suggest
 
-    monkeypatch.setattr(wv, "SMATH_ORDER", True)
+    monkeypatch.setattr(suggest, "SMATH_ORDER", True)
 
 
 @pytest.mark.parametrize("group,prefix", CASES)

@@ -3681,6 +3681,15 @@ class MainWindow(QMainWindow):
 
     def undo_something(self) -> None:
         """Take back the typing first, then the document change under it."""
+        calc = self.view.calc
+        if calc.editing():
+            # One history (the brief): the keystrokes of the equation being
+            # typed first, then — once it is back to how it was opened — the
+            # document's own steps.
+            if calc.undo():
+                self._refresh_undo_actions()
+                return
+            calc.leave()
         document = self._open_editor_document()
         if document is not None and document.isUndoAvailable():
             document.undo()
@@ -3689,6 +3698,9 @@ class MainWindow(QMainWindow):
         self._refresh_undo_actions()
 
     def redo_something(self) -> None:
+        if self.view.calc.editing() and self.view.calc.redo():
+            self._refresh_undo_actions()
+            return
         document = self._open_editor_document()
         if document is not None and document.isRedoAvailable():
             document.redo()

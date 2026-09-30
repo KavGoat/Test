@@ -74,6 +74,9 @@ class CalcItem(MarkupItem):
         _connect(self._sheet, frame.scene())
         x, y = self.pos().x() * PX_PER_PT, self.pos().y() * PX_PER_PT
         self.region = self._sheet.add(self._data, frame.page.uid, x, y)
+        # The size is about to change: Qt's index of where items are has to be
+        # told first, or clicks on the rest of the equation find nothing.
+        self.prepareGeometryChange()
         self._view = RegionItem(self.region, self._sheet.worksheet, MathStyle(self.region.font_size))
         self._sheet_items()[self.region.id] = self
         self.relayout()
@@ -84,6 +87,7 @@ class CalcItem(MarkupItem):
         self._data = region_to_data(self.region)
         self._sheet_items().pop(self.region.id, None)
         self._sheet.remove(self.region)
+        self.prepareGeometryChange()
         self.region = None
         self._view = None
         self._sheet = None
@@ -205,3 +209,19 @@ def _connect(sheet, scene) -> None:
                 item.relayout()
 
     sheet.on_changed = changed
+
+    # Moves are calculated once the gesture is over (docsheet.settle); a
+    # move made any other way is settled on the next turn of the event loop.
+    from PySide6.QtCore import QTimer
+
+    def request() -> None:
+        if getattr(sheet, "_settle_posted", False):
+            return
+        sheet._settle_posted = True
+
+        def run() -> None:
+            sheet._settle_posted = False
+            sheet.settle()
+        QTimer.singleShot(0, run)
+
+    sheet.request_settle = request

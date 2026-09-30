@@ -42,8 +42,11 @@ class DocumentSheet:
         self._order_seen: tuple = ()
         self._batch = 0
         self._dirty = False
+        self._moved: set = set()
         # Told which regions' shown results changed, so their items redraw.
         self.on_changed: Optional[Callable[[set], None]] = None
+        # Asked to call settle() soon (the UI posts it to the event loop).
+        self.request_settle: Optional[Callable[[], None]] = None
 
     # -- where things are ----------------------------------------------------
     def _page_orders(self) -> dict[str, int]:
@@ -87,17 +90,43 @@ class DocumentSheet:
         self._report()
 
     def move(self, region: Region, page_uid: str, x_px: float, y_px: float) -> None:
-        """A region was put somewhere else (dragged, nudged, or its page moved)."""
+        """A region was put somewhere else (dragged, nudged, or onto another page).
+
+        Only noted: a drag moves an equation on every mouse move, and SMath
+        recalculates when it is let go, not all the way across the page. The
+        calculation happens in :meth:`settle` — at the end of the gesture, or
+        on the next turn of the event loop for a move made any other way.
+        """
         if (self._page_of.get(region.id), self._local.get(region.id)) == \
                 (page_uid, (float(x_px), float(y_px))):
             return
         self._page_of[region.id] = page_uid
         self._local[region.id] = (float(x_px), float(y_px))
         self._place(region, self._page_orders())
-        self._settle_region(region)
+        self._moved.add(region.id)
+        if self.request_settle is not None:
+            self.request_settle()
+
+    def settle(self) -> None:
+        """Bring the calculation up to date with every move since the last time."""
+        if self._batch:
+            self._dirty = True
+            return
+        if self._pages_moved():
+            self._moved.clear()
+            return
+        if not self._moved:
+            return
+        self._moved.clear()
+        # the reading order changed: everything, as the worksheet itself does
+        # for a moved region (worksheet.update_after_edit)
+        self.worksheet.invalidate_order()
+        self.recalculate()
 
     def edited(self, region: Region) -> None:
         """A region was left after editing: bring what depends on it up to date."""
+        if self._moved:
+            self.settle()
         self._settle_region(region)
 
     # -- calculating -------------------------------------------------------------
@@ -135,6 +164,7 @@ class DocumentSheet:
 
     def recalculate(self, force: bool = False) -> None:
         """Everything, in reading order (F9, loading, pages moved)."""
+        self._moved.clear()
         self._order_seen = tuple(page.uid for page in self.document.pages)
         if self.worksheet.auto_calculation or force:
             self.worksheet.calculate()
@@ -156,6 +186,7 @@ class DocumentSheet:
             self._batch -= 1
             if not self._batch and self._dirty:
                 self._dirty = False
+                self._moved.clear()
                 self.recalculate()
 
     # -- asking ------------------------------------------------------------------------

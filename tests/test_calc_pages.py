@@ -52,6 +52,7 @@ def test_reading_order_is_top_to_bottom_then_the_next_page(window):
     define = put(window, 0, 60, 100, "a:2")
     assert shown(use) == "2"
     define.setPos(QPointF(60, 400))                 # moved below its use
+    sheet_for(window.document).settle()             # as the end of a drag does
     assert shown(use).startswith("error")
 
 
