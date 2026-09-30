@@ -12,6 +12,7 @@ import xml.etree.ElementTree as ET
 from ..editor import MathEditor
 from ..engine import ast as A
 from ..engine.display import display_text
+from ..page import is_field
 from ..engine.model import Abs, Frac, Index, Matrix, Paren, Pow, Program, Root, Row, Sqrt
 from ..engine.parser import parse_row
 from ..worksheet import Worksheet
@@ -276,8 +277,24 @@ def _from_root(root) -> Worksheet:
         tz = calc.find(f"{{{NS}}}trailingZeros")
         if tz is not None and tz.text:
             ws.format.trailing_zeros = tz.text.strip().lower() == "true"
+    _load_page_model(ws, root)
+    layers = root.findall(f"{{{NS}}}regions")
+    content = [g for g in layers if g.get("type", "content") == "content"] or [root]
+    for group in content:
+        _load_regions(ws, group)
+    for kind in ("header", "footer"):
+        for group in (g for g in layers if g.get("type") == kind):
+            layer = Worksheet()
+            layer.metadata = ws.metadata
+            _load_regions(layer, group)
+            getattr(ws.page, kind).extend(layer.regions)
+    ws.calculate()
+    return ws
+
+
+def _load_regions(ws, group) -> None:
     # area regions nest their contents; evaluation order is by position anyway
-    for reg in root.iter(f"{{{NS}}}region"):
+    for reg in group.iter(f"{{{NS}}}region"):
         x = float(reg.get("left", "0"))
         y = float(reg.get("top", "0"))
         before = len(ws.regions)
@@ -285,7 +302,19 @@ def _from_root(root) -> Worksheet:
         text = reg.findall(f"{{{NS}}}text")
         plot = reg.find(f"{{{NS}}}plot")
         area = reg.find(f"{{{NS}}}area")
-        if area is not None:
+        picture = reg.find(f"{{{NS}}}picture")
+        if picture is not None:
+            raw = picture.find(f"{{{NS}}}raw")
+            if raw is not None and raw.text:
+                import base64
+
+                r = ws.add_region(x, y)
+                r.special = "picture"
+                r.image = base64.b64decode(raw.text)
+                r.image_format = raw.get("format", "png")
+                r.pic_w = float(reg.get("width", "0") or 0)
+                r.pic_h = float(reg.get("height", "0") or 0)
+        elif area is not None:
             if area.get("single") == "true":
                 ws.add_special("separator", y)
             else:
@@ -298,6 +327,13 @@ def _from_root(root) -> Worksheet:
             _load_plot(ws, reg, plot, x, y)
         elif math is not None:
             inp = math.find(f"{{{NS}}}input")
+            ops = list(inp) if inp is not None else []
+            if len(ops) == 1 and is_field(ops[0].text or ""):
+                # a header/footer field such as \[TITLE]\ or \[PAGENUM[0]]\
+                region = ws.add_region(x, y)
+                region.field_code = ops[0].text
+                _load_format(region, reg)
+                continue
             node = rpn_to_ast(list(inp)) if inp is not None else A.Placeholder()
             ed = MathEditor(Row(ast_to_items(node)))
             if math.find(f"{{{NS}}}result") is not None:
@@ -314,19 +350,128 @@ def _from_root(root) -> Worksheet:
             _load_math_options(region, math, ws)
         elif text:
             chosen = next((t for t in text if t.get("lang") == "eng"), text[-1])
-            paras = ["".join(p.itertext()) for p in chosen.findall(f"{{{NS}}}p")]
+            lines = _rich_lines(chosen)
             ed = MathEditor()
-            ed._to_text("\n".join(paras))
+            ed._to_text("\n".join("".join(t for t, _ in runs) for runs in lines))
             region = ws.add_region(x, y, ed)
-            p0 = chosen.find(f"{{{NS}}}p")
-            if p0 is not None:
-                region.bold = p0.get("bold") == "true"
-                region.italic = p0.get("italic") == "true"
-                region.underline = p0.get("underline") == "true"
+            styles = [st for runs in lines for _, st in runs]
+            if styles and all(st == styles[0] for st in styles):
+                # one style for the whole region
+                region.bold = styles[0].get("bold", False)
+                region.italic = styles[0].get("italic", False)
+                region.underline = styles[0].get("underline", False)
+            else:
+                region.line_runs = lines
+            region.text_width = float(chosen.get("width", "0") or 0)
+            _load_format(region, reg)
+            if chosen.get("fontFamily"):
+                region.font_family = chosen.get("fontFamily")
+            if chosen.get("fontSize"):
+                region.font_size = float(chosen.get("fontSize"))
+            continue
         if len(ws.regions) > before:
             _load_format(ws.regions[-1], reg)
-    ws.calculate()
-    return ws
+
+
+_STYLE_KEYS = {"font-weight": ("bold", "bold"), "font-style": ("italic", "italic"),
+               "text-decoration": ("underline", "underline")}
+
+
+def _css(style: str, base: dict) -> dict:
+    out = dict(base)
+    for part in (style or "").split(";"):
+        if ":" not in part:
+            continue
+        k, v = (t.strip().lower() for t in part.split(":", 1))
+        if k in _STYLE_KEYS:
+            name, on = _STYLE_KEYS[k]
+            out[name] = on in v
+    return out
+
+
+def _rich_lines(text_el) -> list:
+    """SMath text as lines of styled runs: <content><p style><span style>..<br/>
+    (0.99+) or the older <p bold="true">..</p>.  Whitespace from the XML's
+    indentation collapses as in HTML."""
+    import re as _re
+
+    paras = text_el.findall(f"{{{NS}}}content/{{{NS}}}p") or text_el.findall(f"{{{NS}}}p")
+    lines: list = []
+    for p in paras:
+        base = {"bold": p.get("bold") == "true", "italic": p.get("italic") == "true",
+                "underline": p.get("underline") == "true"}
+        base = _css(p.get("style", ""), base)
+        cur: list = []
+
+        def add(t, st):
+            t = _re.sub(r"\s+", " ", t or "")
+            if t:
+                cur.append([t, st])
+
+        def walk(el, st):
+            nonlocal cur
+            add(el.text, st)
+            for c in el:
+                tag = _tag(c)
+                if tag == "br":
+                    lines.append(cur)
+                    cur = []
+                else:
+                    walk(c, _css(c.get("style", ""), st))
+                add(c.tail, st)
+
+        walk(p, base)
+        lines.append(cur)
+    # trim the spaces the indentation left at line ends, drop empty runs
+    out = []
+    for runs in lines:
+        while runs and not runs[0][0].lstrip():
+            runs.pop(0)
+        while runs and not runs[-1][0].rstrip():
+            runs.pop()
+        if runs:
+            runs[0][0] = runs[0][0].lstrip()
+            runs[-1][0] = runs[-1][0].rstrip()
+        out.append([(t, st) for t, st in runs if t])
+    return out or [[]]
+
+
+def _load_page_model(ws, root) -> None:
+    from ..page import from_hundredths
+
+    pm = root.find(f"{{{NS}}}settings/{{{NS}}}pageModel")
+    if pm is None:
+        return
+    page = ws.page
+    page.page_model_attrs = dict(pm.attrib)
+    page.print_grid = pm.get("printGrid") == "true"
+    page.print_background = pm.get("printBackgroundImages", "true") != "false"
+    paper = pm.find(f"{{{NS}}}paper")
+    if paper is not None:
+        page.paper_id = paper.get("id", page.paper_id)
+        page.orientation = paper.get("orientation", page.orientation)
+        w, h = from_hundredths(paper.get("width", "827")), from_hundredths(paper.get("height", "1169"))
+        if page.orientation.lower() == "landscape" and w < h:
+            w, h = h, w
+        page.paper_w, page.paper_h = w, h
+    m = pm.find(f"{{{NS}}}margins")
+    if m is not None:
+        page.margin_l = from_hundredths(m.get("left", "39"))
+        page.margin_r = from_hundredths(m.get("right", "39"))
+        page.margin_t = from_hundredths(m.get("top", "39"))
+        page.margin_b = from_hundredths(m.get("bottom", "39"))
+    for kind in ("header", "footer"):
+        el = pm.find(f"{{{NS}}}{kind}")
+        if el is not None:
+            setattr(page, f"{kind}_text", el.text or "")
+            setattr(page, f"{kind}_attrs", dict(el.attrib))
+    img = pm.find(f"{{{NS}}}backgrounds/{{{NS}}}image")
+    if img is not None and img.text:
+        import base64
+
+        page.background = base64.b64decode(img.text)
+        page.background_full_page = img.get("fullPage") == "true"
+        page.background_size = img.get("size", "stretch")
 
 
 def save_sm(ws: Worksheet, path) -> None:
@@ -336,75 +481,180 @@ def save_sm(ws: Worksheet, path) -> None:
 
 def dumps(ws: Worksheet, calculate: bool = True) -> str:
     """The worksheet as .sm XML text (calculate=False keeps the regions'
-    current results, e.g. when copying regions to the clipboard)."""
+    current results, e.g. when copying regions to the clipboard).  The layout
+    is SMath Studio's: <worksheet> with <settings> (calculation, metadata,
+    page model) and <regions type="content">, plus the header/footer layers."""
     ET.register_namespace("", NS)
-    root = ET.Element(f"{{{NS}}}regions")
-    settings = ET.SubElement(root, f"{{{NS}}}settings")
-    calc = ET.SubElement(settings, f"{{{NS}}}calculation")
-    ET.SubElement(calc, f"{{{NS}}}precision").text = str(ws.format.decimals)
-    ET.SubElement(calc, f"{{{NS}}}exponentialThreshold").text = str(ws.format.threshold)
-    ET.SubElement(calc, f"{{{NS}}}trailingZeros").text = "true" if ws.format.trailing_zeros else "false"
-    ET.SubElement(calc, f"{{{NS}}}fractions").text = "decimal"
+    root = ET.Element(f"{{{NS}}}worksheet")
+    settings = ET.SubElement(root, f"{{{NS}}}settings", {"ppi": "96"})
     if ws.metadata:
         meta = ET.SubElement(settings, f"{{{NS}}}metadata", {"lang": "eng"})
         for key in ("title", "author", "description", "company", "keywords"):
             if ws.metadata.get(key):
                 ET.SubElement(meta, f"{{{NS}}}{key}").text = ws.metadata[key]
+    calc = ET.SubElement(settings, f"{{{NS}}}calculation")
+    ET.SubElement(calc, f"{{{NS}}}precision").text = str(ws.format.decimals)
+    ET.SubElement(calc, f"{{{NS}}}exponentialThreshold").text = str(ws.format.threshold)
+    ET.SubElement(calc, f"{{{NS}}}trailingZeros").text = "true" if ws.format.trailing_zeros else "false"
+    ET.SubElement(calc, f"{{{NS}}}fractions").text = "decimal"
+    _save_page_model(ws, settings)
     if calculate:
         ws.calculate()
+    content = ET.SubElement(root, f"{{{NS}}}regions", {"type": "content"})
     for k, r in enumerate(ws.ordered()):
-        attrs = {"id": str(k), "left": str(int(r.x)), "top": str(int(r.y)), "color": r.color,
-                 "bgColor": r.bg_color, "fontSize": f"{r.font_size:g}"}
-        if r.font_family:
-            attrs["fontFamily"] = r.font_family
-        if r.border:
-            attrs["border"] = "true"
-        if not r.enabled:
-            attrs["enabled"] = "false"
-        reg = ET.SubElement(root, f"{{{NS}}}region", attrs)
-        if r.kind == "plot":
-            _save_plot(r, reg)
-            continue
-        if r.special:
-            for k in ("left", "width", "height"):
-                reg.attrib.pop(k, None)
-            a = {"single": "true"} if r.special == "separator" else {
-                "collapsed": "true" if r.collapsed else "false", "height": f"{r.area_height:g}"}
-            ET.SubElement(reg, f"{{{NS}}}area", a)
-            continue
-        if r.kind == "text":
-            t = ET.SubElement(reg, f"{{{NS}}}text", {"lang": "eng"})
-            for line in r.editor.text.split("\n"):
-                pattrs = {k: "true" for k in ("bold", "italic", "underline") if getattr(r, k)}
-                ET.SubElement(t, f"{{{NS}}}p", pattrs).text = line
-            continue
-        math = ET.SubElement(reg, f"{{{NS}}}math", _math_options(r, ws))
-        inp = ET.SubElement(math, f"{{{NS}}}input")
-        try:
-            node = parse_row(r.expression_row())
-        except Exception:
-            node = A.Placeholder()
-        els: list = []
-        ast_to_rpn(node, els)
-        inp.extend(els)
-        if r.editor.evaluate:
-            if not r.editor.unit.is_empty():
-                c = ET.SubElement(math, f"{{{NS}}}contract")
-                cels: list = []
-                try:
-                    ast_to_rpn(parse_row(r.editor.unit), cels)
-                except Exception:
-                    pass
-                c.extend(cels)
-            res = ET.SubElement(math, f"{{{NS}}}result", {"action": "numeric"})
-            if r.display is not None:
-                txt = display_text(r.display).split(" ")[0].replace("·10^", "E")
-                ET.SubElement(res, f"{{{NS}}}e", {"type": "operand"}).text = txt
+        _save_region(ws, content, r, k)
+    for kind in ("header", "footer"):
+        layer = getattr(ws.page, kind)
+        if layer:
+            group = ET.SubElement(root, f"{{{NS}}}regions", {"type": kind})
+            for k, r in enumerate(layer):
+                _save_region(ws, group, r, k)
     tree = ET.ElementTree(root)
     ET.indent(tree)
     body = ET.tostring(root, encoding="unicode")
     return ('<?xml version="1.0" encoding="utf-8"?>\n'
-            '<?application progid="SMath Studio Desktop" version="1.0"?>\n' + body)
+            '<?application progid="SMath Studio Desktop" version="0.99.7822.147"?>\n' + body)
+
+
+def _save_page_model(ws, settings) -> None:
+    import base64
+
+    from ..page import to_hundredths
+
+    page = ws.page
+    attrs = dict(page.page_model_attrs) or {"active": "false", "viewMode": "2", "printGrid": "false",
+                                            "printAreas": "true", "simpleEqualsOnly": "false",
+                                            "printBackgroundImages": "true"}
+    attrs["printGrid"] = "true" if page.print_grid else "false"
+    attrs["printBackgroundImages"] = "true" if page.print_background else "false"
+    pm = ET.SubElement(settings, f"{{{NS}}}pageModel", attrs)
+    w, h = page.paper_w, page.paper_h
+    if page.orientation.lower() == "landscape":
+        w, h = h, w
+    ET.SubElement(pm, f"{{{NS}}}paper", {"id": page.paper_id, "orientation": page.orientation,
+                                         "width": str(to_hundredths(w)), "height": str(to_hundredths(h))})
+    ET.SubElement(pm, f"{{{NS}}}margins", {"left": str(to_hundredths(page.margin_l)),
+                                           "right": str(to_hundredths(page.margin_r)),
+                                           "top": str(to_hundredths(page.margin_t)),
+                                           "bottom": str(to_hundredths(page.margin_b))})
+    for kind in ("header", "footer"):
+        el = ET.SubElement(pm, f"{{{NS}}}{kind}", getattr(page, f"{kind}_attrs") or
+                           {"alignment": "Center", "color": "#a9a9a9"})
+        el.text = getattr(page, f"{kind}_text") or None
+    if page.background:
+        bg = ET.SubElement(pm, f"{{{NS}}}backgrounds")
+        ET.SubElement(bg, f"{{{NS}}}image", {"fullPage": "true" if page.background_full_page else "false",
+                                             "size": page.background_size}).text = \
+            base64.b64encode(page.background).decode("ascii")
+
+
+def _css_of(st: dict) -> str:
+    parts = []
+    if st.get("bold"):
+        parts.append("font-weight: bold;")
+    if st.get("italic"):
+        parts.append("font-style: italic;")
+    if st.get("underline"):
+        parts.append("text-decoration: underline;")
+    return " ".join(parts)
+
+
+def _save_text(r, reg) -> None:
+    attrs = {"lang": "eng"}
+    if r.text_width:
+        attrs["width"] = f"{r.text_width:g}"
+    if r.font_family:
+        attrs["fontFamily"] = r.font_family
+    attrs["fontSize"] = f"{r.font_size:g}"
+    t = ET.SubElement(reg, f"{{{NS}}}text", attrs)
+    content = ET.SubElement(t, f"{{{NS}}}content")
+    own = {"bold": r.bold, "italic": r.italic, "underline": r.underline}
+    p = ET.SubElement(content, f"{{{NS}}}p")
+    if _css_of(own):
+        p.set("style", _css_of(own))
+    last = None  # element whose tail takes the next plain text
+
+    def put(text, style):
+        nonlocal last
+        if style and _css_of(style) and style != own:
+            span = ET.SubElement(p, f"{{{NS}}}span", {"style": _css_of(style)})
+            span.text = text
+            last = span
+        elif last is None:
+            p.text = (p.text or "") + text
+        else:
+            last.tail = (last.tail or "") + text
+
+    lines = r.editor.text.split("\n")
+    for i, line in enumerate(lines):
+        if i:
+            last = ET.SubElement(p, f"{{{NS}}}br")
+        runs = r.line_runs[i] if i < len(r.line_runs) else None
+        if runs is None or "".join(t for t, _ in runs) != line:
+            runs = [(line, None)]
+        for text, style in runs:
+            put(text, style)
+
+
+def _save_region(ws, parent, r, k) -> None:
+    attrs = {"id": str(k), "left": str(int(r.x)), "top": str(int(r.y)), "color": r.color}
+    if r.special == "picture":
+        import base64
+
+        attrs.update(width=str(int(r.pic_w)), height=str(int(r.pic_h)))
+        reg = ET.SubElement(parent, f"{{{NS}}}region", attrs)
+        pic = ET.SubElement(reg, f"{{{NS}}}picture")
+        ET.SubElement(pic, f"{{{NS}}}raw", {"format": r.image_format, "encoding": "base64"}).text = \
+            base64.b64encode(r.image).decode("ascii")
+        return
+    attrs.update(bgColor=r.bg_color, fontSize=f"{r.font_size:g}")
+    if r.font_family and r.kind != "text":
+        attrs["fontFamily"] = r.font_family
+    if r.border:
+        attrs["border"] = "true"
+    if not r.enabled:
+        attrs["enabled"] = "false"
+    reg = ET.SubElement(parent, f"{{{NS}}}region", attrs)
+    if r.field_code:
+        math = ET.SubElement(reg, f"{{{NS}}}math")
+        inp = ET.SubElement(math, f"{{{NS}}}input")
+        ET.SubElement(inp, f"{{{NS}}}e", {"type": "operand"}).text = r.field_code
+        return
+    if r.kind == "plot":
+        _save_plot(r, reg)
+        return
+    if r.special:
+        for key in ("left", "width", "height"):
+            reg.attrib.pop(key, None)
+        a = {"single": "true"} if r.special == "separator" else {
+            "collapsed": "true" if r.collapsed else "false", "height": f"{r.area_height:g}"}
+        ET.SubElement(reg, f"{{{NS}}}area", a)
+        return
+    if r.kind == "text":
+        _save_text(r, reg)
+        return
+    math = ET.SubElement(reg, f"{{{NS}}}math", _math_options(r, ws))
+    inp = ET.SubElement(math, f"{{{NS}}}input")
+    try:
+        node = parse_row(r.expression_row())
+    except Exception:
+        node = A.Placeholder()
+    els: list = []
+    ast_to_rpn(node, els)
+    inp.extend(els)
+    if r.editor.evaluate:
+        if not r.editor.unit.is_empty():
+            c = ET.SubElement(math, f"{{{NS}}}contract")
+            cels: list = []
+            try:
+                ast_to_rpn(parse_row(r.editor.unit), cels)
+            except Exception:
+                pass
+            c.extend(cels)
+        res = ET.SubElement(math, f"{{{NS}}}result", {"action": "numeric"})
+        if r.display is not None:
+            txt = display_text(r.display).split(" ")[0].replace("·10^", "E")
+            ET.SubElement(res, f"{{{NS}}}e", {"type": "operand"}).text = txt
 
 
 # ---------------------------------------------------------------------------

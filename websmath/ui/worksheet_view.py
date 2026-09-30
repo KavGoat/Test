@@ -68,6 +68,45 @@ PRINTABLE_BORDER = QColor("#ebebeb")
 DESK_PAD = 10.0  # desk shown left of and above the first page
 
 
+@dataclass
+class PageGeometry:
+    """A worksheet's pages in worksheet units.  ``scale`` is SMath's print
+    scale: when the widest region is wider than the printable area the
+    printout is shrunk to fit it (observed on a 0.99 printout: a 749 px
+    title block in a 720 px printable width printed at 96.2 %), so a page
+    holds 1/scale more of the worksheet; the page is drawn that much larger
+    here so screen and paper break at the same places."""
+
+    W: float = PAGE_W
+    H: float = PAGE_H
+    ML: float = PAGE_MARGIN
+    MR: float = PAGE_MARGIN
+    MT: float = PAGE_MARGIN
+    MB: float = PAGE_MARGIN
+    GAP: float = PAGE_GAP
+    scale: float = 1.0
+
+    @property
+    def STEP(self) -> float:
+        return self.H + self.GAP
+
+    @property
+    def CW(self) -> float:
+        return self.W - self.ML - self.MR
+
+    @property
+    def CH(self) -> float:
+        return self.H - self.MT - self.MB
+
+    @classmethod
+    def of(cls, page, widest: float = 0.0) -> "PageGeometry":
+        s = 1.0
+        if widest > page.printable_w > 0:
+            s = page.printable_w / widest
+        return cls(page.paper_w / s, page.paper_h / s, page.margin_l / s, page.margin_r / s,
+                   page.margin_t / s, page.margin_b / s, PAGE_GAP, s)
+
+
 class WorksheetScene(QGraphicsScene):
     def __init__(self, worksheet: Worksheet, parent=None):
         super().__init__(parent)
@@ -77,6 +116,8 @@ class WorksheetScene(QGraphicsScene):
         self.page_mode = "pages"  # "pages", "bounds" (printing bounds) or "none"
         self.printing = False
         self.rubber: Optional[QRectF] = None  # the selection box being dragged
+        self.geo = PageGeometry.of(worksheet.page)
+        self._images: dict = {}  # decoded background/header pictures
         self.setSceneRect(0, 0, PAGE_W + 40, PAGE_H * 3)
 
     # -- worksheet <-> scene coordinates ----------------------------------------------
@@ -84,29 +125,31 @@ class WorksheetScene(QGraphicsScene):
         """Where worksheet point (x, y) is drawn."""
         if self.page_mode != "pages":
             return QPointF(x, y)
-        k = max(0, int(y // CONTENT_H))
-        return QPointF(x + PAGE_MARGIN, y - k * CONTENT_H + k * PAGE_STEP + PAGE_MARGIN)
+        g = self.geo
+        k = max(0, int(y // g.CH))
+        return QPointF(x + g.ML, y - k * g.CH + k * g.STEP + g.MT)
 
     def to_sheet(self, pt: QPointF) -> QPointF:
         """The worksheet point under scene point pt (margins and gaps belong
         to the nearest printable area)."""
         if self.page_mode != "pages":
             return QPointF(pt)
-        k = max(0, int(pt.y() // PAGE_STEP))
-        if pt.y() >= k * PAGE_STEP + PAGE_H:
+        g = self.geo
+        k = max(0, int(pt.y() // g.STEP))
+        if pt.y() >= k * g.STEP + g.H:
             k += 1  # the gap below a page leads into the next one
-        local = min(max(pt.y() - k * PAGE_STEP - PAGE_MARGIN, 0.0), CONTENT_H - 0.01)
-        return QPointF(pt.x() - PAGE_MARGIN, k * CONTENT_H + local)
+        local = min(max(pt.y() - k * g.STEP - g.MT, 0.0), g.CH - 0.01)
+        return QPointF(pt.x() - g.ML, k * g.CH + local)
 
     def page_count(self) -> int:
         from .region_item import RegionItem
 
         bottom = max((it.region.y + it.frame_rect().height() for it in self.items() if isinstance(it, RegionItem)),
                      default=0.0)
-        return max(1, int(bottom // CONTENT_H) + 1)
+        return max(1, int(bottom // self.geo.CH) + 1)
 
     def drawBackground(self, p: QPainter, rect: QRectF) -> None:
-        if self.printing or self.page_mode == "none":
+        if self.page_mode == "none" or (self.printing and self.page_mode != "pages"):
             p.fillRect(rect, Qt.white)
             if self.show_grid and not self.printing:
                 self._grid(p, rect)
@@ -118,32 +161,107 @@ class WorksheetScene(QGraphicsScene):
             # printing bounds: dashed lines where pages end
             pen = QPen(QColor("#808080"), 1, Qt.DashLine)
             p.setPen(pen)
-            p.drawLine(QPointF(CONTENT_W + 0.5, rect.top()), QPointF(CONTENT_W + 0.5, rect.bottom()))
-            k = max(0, int(rect.top() // CONTENT_H))
-            while k * CONTENT_H <= rect.bottom():
+            g = self.geo
+            p.drawLine(QPointF(g.CW + 0.5, rect.top()), QPointF(g.CW + 0.5, rect.bottom()))
+            k = max(0, int(rect.top() // g.CH))
+            while k * g.CH <= rect.bottom():
                 if k > 0:
-                    p.drawLine(QPointF(rect.left(), k * CONTENT_H + 0.5), QPointF(rect.right(), k * CONTENT_H + 0.5))
+                    p.drawLine(QPointF(rect.left(), k * g.CH + 0.5), QPointF(rect.right(), k * g.CH + 0.5))
                 k += 1
             return
         # pages view
-        p.fillRect(rect, DESK)
-        k = max(0, int(rect.top() // PAGE_STEP))
-        while k * PAGE_STEP <= rect.bottom():
-            page = QRectF(0, k * PAGE_STEP, PAGE_W, PAGE_H)
+        g = self.geo
+        if not self.printing:
+            p.fillRect(rect, DESK)
+        count = self.page_count()
+        k = max(0, int(rect.top() // g.STEP))
+        while k * g.STEP <= rect.bottom():
+            page = QRectF(0, k * g.STEP, g.W, g.H)
             k += 1
             if not page.intersects(rect):
                 continue
             p.fillRect(page, Qt.white)
-            area = page.adjusted(PAGE_MARGIN, PAGE_MARGIN, -PAGE_MARGIN, -PAGE_MARGIN)
-            if self.show_grid:
+            area = page.adjusted(g.ML, g.MT, -g.MR, -g.MB)
+            if self.show_grid and not self.printing:
                 # grid lines at worksheet multiples of GRID: the page's first
-                # worksheet row is (k-1)*CONTENT_H
-                off = ((k - 1) * CONTENT_H) % GRID
+                # worksheet row is (k-1)*CH
+                off = ((k - 1) * g.CH) % GRID
                 self._grid(p, area.intersected(rect), QPointF(area.left(), area.top() - off))
-            p.setPen(QPen(PRINTABLE_BORDER, 1))
-            p.drawRect(area.adjusted(-0.5, -0.5, 0.5, 0.5))
-            p.setPen(QPen(PAGE_BORDER, 1))
-            p.drawRect(page.adjusted(-0.5, -0.5, 0.5, 0.5))
+            if not self.printing and not self.worksheet.page.background:
+                p.setPen(QPen(PRINTABLE_BORDER, 1))
+                p.drawRect(area.adjusted(-0.5, -0.5, 0.5, 0.5))
+            # the page background (a frame, a letterhead) lies over the grid
+            self._paint_background(p, page, area)
+            self._paint_layer(p, self.worksheet.page.header, QPointF(page.left() + g.ML, page.top()), k, count)
+            self._paint_layer(p, self.worksheet.page.footer, QPointF(page.left() + g.ML, page.bottom() - g.MB),
+                              k, count)
+            if not self.printing:
+                p.setPen(QPen(PAGE_BORDER, 1))
+                p.drawRect(page.adjusted(-0.5, -0.5, 0.5, 0.5))
+
+    # -- page decoration: background image, header/footer layers ------------------------------
+    def _image(self, key, data: bytes):
+        from PySide6.QtGui import QImage
+
+        img = self._images.get(key)
+        if img is None:
+            img = QImage()
+            img.loadFromData(data)
+            self._images[key] = img
+        return img
+
+    def _paint_background(self, p: QPainter, page: QRectF, area: QRectF) -> None:
+        setup = self.worksheet.page
+        if not setup.background or (self.printing and not setup.print_background):
+            return
+        img = self._image(("bg", id(setup.background)), setup.background)
+        if img.isNull():
+            return
+        target = page if setup.background_full_page else area
+        if setup.background_size == "stretch":
+            p.drawImage(target, img)
+        else:  # centred at its own size
+            r = QRectF(0, 0, img.width(), img.height())
+            r.moveCenter(target.center())
+            p.drawImage(r, img)
+
+    def _paint_layer(self, p: QPainter, regions: list, origin: QPointF, page: int, count: int) -> None:
+        """The header (or footer) regions of one page: pictures, text, and
+        fields filled in for this page (page number, count, title...)."""
+        if not regions:
+            return
+        from PySide6.QtGui import QFont, QFontMetricsF
+
+        from ..page import field_text
+        from .layout import MONO_FAMILIES, _family
+        from .region_item import PAD_TOP, PAD_X, TEXT_FAMILIES
+
+        for r in regions:
+            x, y = origin.x() + r.x, origin.y() + r.y
+            if r.special == "picture":
+                img = self._image(("pic", id(r.image)), r.image)
+                if not img.isNull():
+                    from .region_item import draw_image
+
+                    draw_image(p, QRectF(x, y, r.pic_w or img.width(), r.pic_h or img.height()), img,
+                               self._images.setdefault(("scaled", id(r.image)), {}))
+                continue
+            if r.field_code:
+                text = field_text(r.field_code, self.worksheet.metadata, page, count,
+                                  getattr(self.worksheet, "filename", ""))
+                f = QFont(_family(MONO_FAMILIES))
+            elif r.kind == "text":
+                text = r.editor.text
+                f = QFont(r.font_family or _family(TEXT_FAMILIES))
+            else:
+                text = r.editor.root.text()
+                f = QFont(_family(MONO_FAMILIES))
+            f.setPointSizeF(r.font_size)
+            m = QFontMetricsF(f)
+            p.setFont(f)
+            p.setPen(QColor(r.color or "#000000"))
+            for i, line in enumerate(text.split("\n")):
+                p.drawText(QPointF(x + PAD_X, y + PAD_TOP + m.ascent() + i * m.lineSpacing()), line)
 
     _grid_brush = None
 
@@ -153,7 +271,7 @@ class WorksheetScene(QGraphicsScene):
             from PySide6.QtGui import QBrush, QPixmap
 
             tile = QPixmap(GRID, GRID)
-            tile.fill(Qt.white)
+            tile.fill(Qt.transparent)  # only the lines: a page background shows through
             tp = QPainter(tile)
             tp.setPen(QPen(GRID_COLOR, 1))
             tp.drawLine(0, 0, GRID - 1, 0)
@@ -438,14 +556,25 @@ class WorksheetView(QGraphicsView):
             self._extent = (max(self._extent[0], fx), max(self._extent[1], fy))
         right, bottom = self._extent
         bottom = max(bottom, self.scene_.cross.y())
+        # SMath's print scale follows the widest region (header layer included)
+        head = [r.x + (r.pic_w if r.special == "picture" else 0) for r in
+                self.worksheet.page.header + self.worksheet.page.footer]
+        geo = PageGeometry.of(self.worksheet.page, max([right] + head))
+        if geo != self.scene_.geo:
+            self.scene_.geo = geo
+            for it in self.items.values():
+                self.place(it)
+            self.scene_.update()
         if self.scene_.page_mode == "pages":
             # whole pages: another page once the content reaches the last one
-            pages = max(1, math.ceil((bottom + 1) / CONTENT_H))
-            w = max(PAGE_W, right + PAGE_MARGIN + 40)
-            rect = QRectF(-DESK_PAD, -DESK_PAD, w + 2 * DESK_PAD, pages * PAGE_STEP + DESK_PAD)
+            g = self.scene_.geo
+            pages = max(1, math.ceil((bottom + 1) / g.CH))
+            w = max(g.W, right + g.ML + 40)
+            rect = QRectF(-DESK_PAD, -DESK_PAD, w + 2 * DESK_PAD, pages * g.STEP + DESK_PAD)
         else:
-            pages = max(1, math.ceil((bottom + 200) / CONTENT_H))
-            rect = QRectF(0, 0, max(CONTENT_W + 40, right + 40), pages * CONTENT_H)
+            g = self.scene_.geo
+            pages = max(1, math.ceil((bottom + 200) / g.CH))
+            rect = QRectF(0, 0, max(g.CW + 40, right + 40), pages * g.CH)
         if rect != self.scene_.sceneRect():
             self.scene_.setSceneRect(rect)
             self.pages_changed.emit(self.page_at_view(), pages)
@@ -484,11 +613,19 @@ class WorksheetView(QGraphicsView):
     def page_at_view(self) -> int:
         top = self.mapToScene(self.viewport().rect().center()).y()
         if self.scene_.page_mode == "pages":
-            return max(1, int(top // PAGE_STEP) + 1)
-        return max(1, int(top // CONTENT_H) + 1)
+            return max(1, int(top // self.scene_.geo.STEP) + 1)
+        return max(1, int(top // self.scene_.geo.CH) + 1)
 
     # -- focus -------------------------------------------------------------------------
     def focus_item(self, item: Optional[RegionItem]) -> None:
+        if item is not None and item.region.special == "picture":
+            # a picture has nothing to type into: it is selected instead
+            self.focus_item(None)
+            self.clear_selection()
+            item.selected_region = True
+            item.update()
+            self.selected.append(item)
+            return
         if self.focused_item is item:
             return
         old = self.focused_item
@@ -1499,7 +1636,8 @@ class WorksheetView(QGraphicsView):
         for k in range(pages):
             if k:
                 device.newPage()
-            self.scene_.render(painter, target, QRectF(0, k * PAGE_STEP, PAGE_W, PAGE_H))
+            g = self.scene_.geo
+            self.scene_.render(painter, target, QRectF(0, k * g.STEP, g.W, g.H))
         painter.end()
         self.set_page_mode(mode)
         self.scene_.show_grid = grid

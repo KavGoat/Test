@@ -300,8 +300,12 @@ class Layouter:
                 i += 1
                 prev_kind = "sep"
                 continue
-            # a product of two units is written with a space, not a dot (kg m)
-            if it == "*" and prev_unit and i + 1 < n and items[i + 1] == "'":
+            # multiplying by a unit is written with a space, not a dot: kg m,
+            # 50 kg/m, Mass g_e (SMath Studio desktop; a product with a plain
+            # number or variable keeps its dot)
+            nxt = items[i + 1] if i + 1 < n else None
+            unit_next = nxt == "'" or (isinstance(nxt, Frac) and nxt.rows[0].items[:1] == ["'"])
+            if it == "*" and unit_next:
                 pieces.append((i, i + 1, self.hspace(self.metrics(self.style.font(scale)).horizontalAdvance(" ") * 0.6)))
                 prev_kind = "op"
                 i += 1

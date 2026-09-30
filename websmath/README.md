@@ -160,6 +160,18 @@ Correctness proofs (numbers and units):
   * Ctrl+wheel zooms around the mouse, and Print prints exactly these pages.
   * View > Printing bounds shows one continuous sheet with dashed page edges;
     View > None shows a plain grid.
+* **Page setup read from the file (SMath 0.99 `<pageModel>`):**
+  * Paper size and margins, and a page background (such as a frame or a
+    letterhead) stretched over the printable area.
+  * The **header layer**: a company title block plus fields (`\[TITLE]\`,
+    `\[KEYWORDS]\`, `\[AUTHOR]\`, `\[PAGENUM[0]]\`, `\[COUNT[0]]\`,
+    `\[DATE[DD.MM.YYYY]]\`), filled in on every page.
+  * Printing is scaled to fit the widest region, as SMath does, and the
+    screen breaks pages at the same places.
+  * **Pictures** load, are drawn at their size, and are saved.
+  * **Rich text** (bold/underlined runs, line breaks, fixed-width wrapping)
+    loads and saves in SMath's `<content><p><span style>` form.
+  * `x := expression =` defines x and shows its value.
 * **Speed:** definitions are indexed by position, and leaving a region
   re-evaluates only what depends on it. A 3000-region worksheet types in about
   7 ms per key, and runaway loops are interrupted after 10 s.
@@ -171,7 +183,6 @@ Not replicated:
 * SMath's *symbolic* engine: symbolic differentiation, Solve, Simplify,
   `==`, polynomials in an undefined variable;
 * 3-D and polar plots;
-* pictures;
 * the CheckBox/ComboBox/Modeller plug-in regions and sharing.
 
 Python runs the evaluation on one core. Evaluating in parallel wouldn't help,

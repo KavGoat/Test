@@ -75,7 +75,16 @@ class Region:
     def key(self):
         return (self.y, self.x, self.id)
 
-    special: Optional[str] = None  # "separator" or "area" (SMath area regions)
+    special: Optional[str] = None  # "separator", "area" or "picture"
+    image: bytes = b""  # picture regions: the encoded image (PNG/JPEG)
+    image_format: str = "png"
+    pic_w: float = 0.0  # picture regions: size shown on the page
+    pic_h: float = 0.0
+    # text regions: formatting per line, as runs [(text, {"bold":..,"italic":..,"underline":..})]
+    # (SMath's rich text: <p style>, <span style>, <br/>); empty = the region's own style
+    line_runs: list = field(default_factory=list)
+    text_width: float = 0.0  # text regions with a fixed width wrap their lines
+    field_code: str = ""  # header/footer math regions holding a field (\[TITLE]\ ...)
     area_height: float = 0.0  # an area's extent below its top line
     collapsed: bool = False
 
@@ -110,6 +119,9 @@ class Worksheet:
         self._order_cache = None
         self._order_keys: list = []
         self.metadata: dict = {}  # title, author, description... (File > Properties)
+        from .page import PageSetup
+
+        self.page = PageSetup()  # paper, margins, background, header/footer layers
 
     # -- regions ----------------------------------------------------------------
     def add_region(self, x: float, y: float, editor: Optional[MathEditor] = None) -> Region:
@@ -341,6 +353,13 @@ class Worksheet:
         try:
             if isinstance(node, A.Define):
                 self.evaluator.define(node, ctx)
+                if r.editor.evaluate and isinstance(node.target, A.Var) and r.optimization != "none":
+                    # x := expression = value: SMath Studio desktop defines
+                    # and shows the value in one region
+                    value = self.evaluator.eval(A.Var(node.target.name), ctx)
+                    if record:
+                        r.value = value
+                        r.display = self._display(r, value, ctx)
                 return
             if not r.editor.evaluate:
                 # a bare expression (no "=" or ":=") runs - a for loop in it

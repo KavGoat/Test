@@ -74,6 +74,11 @@ class RegionItem(QGraphicsObject):
         self.prepareGeometryChange()
         if self.style.size_pt != self.region.font_size:
             self.style = Style(self.region.font_size)
+        if self.region.special == "picture":
+            self._size = (max(4.0, self.region.pic_w), max(4.0, self.region.pic_h))
+            self._layout = None
+            self.update()
+            return
         if self.region.special:
             h = 9.0 if self.region.special == "separator" or self.region.collapsed else self.region.area_height
             self._size = (PAGE_WIDTH, max(9.0, h))
@@ -244,8 +249,10 @@ class RegionItem(QGraphicsObject):
 
     def _layout_text(self) -> None:
         m = QFontMetricsF(self._text_font())
-        lines = (self.editor.text or "").split("\n")
-        w = max(m.horizontalAdvance(ln) for ln in lines) if lines else 0
+        lines = self._text_lines()
+        w = max((lw for _s, _c, lw in lines), default=0)
+        if self.region.text_width:
+            w = max(w, self.region.text_width - 2 * PAD_X - 2)
         self._size = (max(w + 2 * PAD_X + 2, 12), max(MIN_H, len(lines) * m.lineSpacing() + 2 * PAD_TOP))
         self._layout = None
         self.update()
@@ -255,6 +262,9 @@ class RegionItem(QGraphicsObject):
         p.setRenderHint(QPainter.Antialiasing, True)
         p.setRenderHint(QPainter.TextAntialiasing, True)
         r = self.frame_rect()
+        if self.region.special == "picture":
+            self._paint_picture(p)
+            return
         if self.region.special:
             self._paint_special(p)
             return
@@ -294,6 +304,22 @@ class RegionItem(QGraphicsObject):
                     getattr(self, "_plot_error", None) is not None:
                 self._paint_error_tip(p)
 
+    def _paint_picture(self, p: QPainter) -> None:
+        from PySide6.QtGui import QImage
+
+        img = getattr(self, "_img", None)
+        if img is None:
+            img = self._img = QImage()
+            img.loadFromData(self.region.image)
+        w, h = self._size
+        if not img.isNull():
+            draw_image(p, QRectF(0, 0, w, h), img, self.__dict__.setdefault("_scaled", {}))
+        if self.focused or self.selected_region:
+            p.setPen(QPen(FRAME, 1))
+            p.drawRect(QRectF(0.5, 0.5, w - 1, h - 1))
+            if self.selected_region:
+                p.fillRect(QRectF(0, 0, w, h), SELECTION)
+
     def _paint_special(self, p: QPainter) -> None:
         """Separator: one line across the page.  Area: a line at the top with
         a collapse arrow and one at the bottom (one line when collapsed)."""
@@ -316,39 +342,114 @@ class RegionItem(QGraphicsObject):
     def toggle_hit(self, pt: QPointF) -> bool:
         return self.region.special == "area" and pt.x() < 10 and pt.y() < 10
 
-    def _paint_text(self, p: QPainter) -> None:
+    # -- text regions: styled runs, wrapping --------------------------------------------
+    def _run_font(self, st: Optional[dict]) -> QFont:
         f = self._text_font()
-        m = QFontMetricsF(f)
-        p.setFont(f)
-        p.setPen(QColor(self.region.color))
-        y = PAD_TOP + m.ascent()
-        lines = (self.editor.text or "").split("\n")
-        for ln in lines:
-            p.drawText(QPointF(PAD_X + 1, y), ln)
-            y += m.lineSpacing()
+        if st:
+            f.setBold(st.get("bold", False))
+            f.setItalic(st.get("italic", False))
+            f.setUnderline(st.get("underline", False))
+        return f
+
+    def _text_lines(self) -> list:
+        """Visual lines of a text region: [(start, [(chunk, style)], width)],
+        ``start`` being the index of the line's first character in the text.
+        Lines carry SMath's rich-text runs; a fixed-width region wraps at
+        spaces."""
+        text = self.editor.text or ""
+        runs_by_line = self.region.line_runs
+        wrap = self.region.text_width - 2 * PAD_X - 2 if self.region.text_width else 0.0
+        out = []
+        start = 0
+        for i, line in enumerate(text.split("\n")):
+            runs = runs_by_line[i] if i < len(runs_by_line) else None
+            if runs is None or "".join(t for t, _ in runs) != line:
+                runs = [(line, None)]  # edited since loading: the region's own style
+            styled = []  # (char, style) for wrapping
+            for t, st in runs:
+                styled.extend((c, st) for c in t)
+            pieces = self._wrap(styled, wrap) if wrap > 0 else [styled]
+            off = start
+            for piece in pieces:
+                chunks = []
+                for c, st in piece:
+                    if chunks and chunks[-1][1] is st:
+                        chunks[-1][0] += c
+                    else:
+                        chunks.append([c, st])
+                chunks = [(c, st) for c, st in chunks]
+                out.append((off, chunks, self._chunks_width(chunks)))
+                off += len(piece)
+            start += len(line) + 1
+        return out
+
+    def _chunks_width(self, chunks) -> float:
+        return sum(QFontMetricsF(self._run_font(st)).horizontalAdvance(t) for t, st in chunks)
+
+    def _wrap(self, styled: list, width: float) -> list:
+        lines, cur = [], []
+        last_space = -1
+        for c, st in styled:
+            cur.append((c, st))
+            if c == " ":
+                last_space = len(cur)
+            if self._chunks_width([(ch, s_) for ch, s_ in cur]) > width and len(cur) > 1:
+                cut = last_space if last_space > 0 else len(cur) - 1
+                lines.append(cur[:cut])
+                cur = cur[cut:]
+                last_space = -1
+        lines.append(cur)
+        return lines
+
+    def _text_x(self, chunks, k: int) -> float:
+        """x of the k-th character of a visual line."""
+        x = PAD_X + 1
+        for t, st in chunks:
+            m = QFontMetricsF(self._run_font(st))
+            if k <= len(t):
+                return x + m.horizontalAdvance(t[:k])
+            x += m.horizontalAdvance(t)
+            k -= len(t)
+        return x
+
+    def _paint_text(self, p: QPainter) -> None:
+        m = QFontMetricsF(self._text_font())
+        ls = m.lineSpacing()
+        lines = self._text_lines()
         sel = self.editor.text_selection() if self.focused else None
-        if sel:
-            # highlight the selected text, line by line
-            a, b = sel
-            start = 0
-            for li, ln in enumerate(lines):
-                end = start + len(ln)
-                lo, hi = max(a, start), min(b, end)
-                if lo < hi or (lo == hi and a <= end < b):
-                    x0 = PAD_X + 1 + m.horizontalAdvance(ln[: lo - start])
-                    x1 = PAD_X + 1 + m.horizontalAdvance(ln[: hi - start]) + (4 if b > end else 0)
-                    top = PAD_TOP + li * m.lineSpacing()
-                    p.fillRect(QRectF(x0, top, x1 - x0, m.height()), SELECTION)
-                start = end + 1
+        for li, (start, chunks, _w) in enumerate(lines):
+            top = PAD_TOP + li * ls
+            n = sum(len(t) for t, _ in chunks)
+            if sel and sel[0] < start + n + 1 and sel[1] > start:
+                x0 = self._text_x(chunks, max(0, sel[0] - start))
+                x1 = self._text_x(chunks, min(n, sel[1] - start)) + (4 if sel[1] > start + n else 0)
+                p.fillRect(QRectF(x0, top, x1 - x0, m.height()), SELECTION)
+            x = PAD_X + 1
+            p.setPen(QColor(self.region.color))
+            for t, st in chunks:
+                f = self._run_font(st)
+                p.setFont(f)
+                p.drawText(QPointF(x, top + m.ascent()), t)
+                x += QFontMetricsF(f).horizontalAdvance(t)
         if self.focused:
-            pos = self.editor.text_pos
-            before = self.editor.text[:pos]
-            li = before.count("\n")
-            col = before.split("\n")[-1]
-            x = PAD_X + 1 + m.horizontalAdvance(col)
-            top = PAD_TOP + li * m.lineSpacing()
+            li, k = self._text_line_of(self.editor.text_pos, lines)
+            start, chunks, _w = lines[li]
+            x = self._text_x(chunks, k)
+            top = PAD_TOP + li * ls
             p.setPen(QPen(Qt.black, 1.5))
             p.drawLine(QPointF(x, top + 1), QPointF(x, top + m.height()))
+
+    @staticmethod
+    def _text_line_of(pos: int, lines) -> tuple:
+        """(visual line, column) of a text position."""
+        best = (0, 0)
+        for li, (start, chunks, _w) in enumerate(lines):
+            n = sum(len(t) for t, _ in chunks)
+            if start <= pos <= start + n:
+                best = (li, pos - start)
+                if pos < start + n:
+                    break
+        return best
 
     def _row_info(self, row: Row) -> Optional[RowInfo]:
         return self._rows.get(id(row))
@@ -433,13 +534,15 @@ class RegionItem(QGraphicsObject):
         """Put the editor cursor at the slot nearest a click (region coords)."""
         if self.region.kind == "text":
             f = QFontMetricsF(self._text_font())
-            lines = self.editor.text.split("\n")
+            lines = self._text_lines()
             li = max(0, min(len(lines) - 1, int((pt.y() - PAD_TOP) // f.lineSpacing())))
+            start, chunks, _w = lines[li]
+            n = sum(len(t) for t, _ in chunks)
             col = 0
-            for k in range(len(lines[li]) + 1):
-                if f.horizontalAdvance(lines[li][:k]) + PAD_X + 1 <= pt.x() + 3:
+            for k in range(n + 1):
+                if self._text_x(chunks, k) <= pt.x() + 3:
                     col = k
-            self.editor.text_pos = sum(len(l) + 1 for l in lines[:li]) + col
+            self.editor.text_pos = start + col
             return
         before = (self.editor.in_unit, self.editor.row)
         if self.result_unit_hit(pt) and self.editor.unit.is_empty():
@@ -469,6 +572,27 @@ class RegionItem(QGraphicsObject):
             return False
         r = self._result_unit_rect.translated(self._layout.x, self._baseline)
         return r.contains(pt)
+
+
+def draw_image(p: QPainter, rect: QRectF, img, cache: dict) -> None:
+    """Draw a picture shrunk with proper area averaging to the size it has on
+    the device (a bilinear shrink turns thin coloured lines dark)."""
+    from PySide6.QtCore import QSize
+
+    t = p.worldTransform()
+    dw = max(1, round(rect.width() * (t.m11() ** 2 + t.m12() ** 2) ** 0.5))
+    dh = max(1, round(rect.height() * (t.m21() ** 2 + t.m22() ** 2) ** 0.5))
+    if dw >= img.width() and dh >= img.height():
+        p.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        p.drawImage(rect, img)
+        return
+    key = (dw, dh)
+    small = cache.get(key)
+    if small is None:
+        if len(cache) > 4:
+            cache.clear()
+        small = cache[key] = img.scaled(QSize(dw, dh), Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+    p.drawImage(rect, small)
 
 
 def _no_unit(d) -> bool:
