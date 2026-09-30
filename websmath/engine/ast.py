@@ -91,11 +91,17 @@ class Evaluate(Node):
 
 
 def walk(n: Node):
-    yield n
-    for v in n.__dict__.values():
-        if isinstance(v, Node):
-            yield from walk(v)
-        elif isinstance(v, list):
-            for x in v:
-                if isinstance(x, Node):
-                    yield from walk(x)
+    """Every node of the tree, parents before children (iterative: much
+    faster than nested generators on deep expressions)."""
+    stack = [n]
+    pop, push = stack.pop, stack.append
+    while stack:
+        n = pop()
+        yield n
+        kids = []
+        for v in n.__dict__.values():
+            if isinstance(v, Node):
+                kids.append(v)
+            elif isinstance(v, list):
+                kids.extend(x for x in v if isinstance(x, Node))
+        stack.extend(reversed(kids))

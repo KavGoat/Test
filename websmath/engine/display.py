@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from .numformat import FormattedNumber, NumberFormat, format_real
+from .unitdata import UNITS
 from .units import OBSERVED_UNITS, Quantity, base_unit_parts, derived_per_base, derived_unit_for
 from .values import Matrix, String
 
@@ -98,6 +99,18 @@ _ENG_PREFIX = {
 }
 
 
+def unit_factor(u: Optional[DUnit]) -> float:
+    """Size of a displayed unit in SI base units."""
+    if u is None:
+        return 1.0
+    f = 1.0
+    for name, p in u.num:
+        f *= UNITS[name][0] ** p
+    for name, p in u.den:
+        f /= UNITS[name][0] ** p
+    return f
+
+
 def engineering_unit(unit: Optional[DUnit], magnitude: float):
     """(unit, divisor) in the form engineers write: a prefix that keeps the
     number between 1 and 1000 for N, Pa, J, W (12.5 kN, 250 MPa, 5 kN/m,
@@ -133,8 +146,13 @@ def engineering_unit(unit: Optional[DUnit], magnitude: float):
 def display_quantity(q: Quantity, fmt: NumberFormat, scale: float = 1.0,
                      show_unit: bool = True) -> DQuantity:
     unit = _unit_for(q.dims) if show_unit else None
-    if show_unit and scale == 1.0 and getattr(fmt, "engineering", False):
-        unit, scale = engineering_unit(unit, abs(q.value))
+    if show_unit and scale == 1.0:
+        if getattr(fmt, "engineering", False):
+            unit, _ = engineering_unit(unit, abs(q.value))
+        # the number shown is always the value in exactly the unit shown:
+        # divide by that unit's real factor (kN 1000, R 0.01, ...), never
+        # assume a chosen unit is coherent
+        scale = unit_factor(unit)
     v = q.value / scale if scale != 1.0 else q.value
     if isinstance(v, complex) and v.imag != 0:
         re = format_real(v.real, fmt) if _visible(v.real, fmt) else None

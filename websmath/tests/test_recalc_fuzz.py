@@ -16,7 +16,10 @@ import pytest
 from websmath.engine.display import display_text
 from websmath.worksheet import Worksheet
 
-UNITS = ["", "'kN", "'m", "'mm", "'kPa", "'s"]
+UNITS = ["", "'kN", "'m", "'mm", "'kPa", "'s", "'N", "'Pa"]
+# units of size 1: swapping one for another keeps the number and changes
+# only the unit, which the recalculation must still pass on
+UNIT_SWAPS = ["", "'m", "'s", "'N", "'Pa", "'kg"]
 
 
 def _template(rng: random.Random, i: int, names: list, funcs: list) -> list:
@@ -103,7 +106,12 @@ def test_incremental_equals_full_recalculation(seed):
     for step in range(25):
         action = rng.random()
         r = rng.choice(regions)
-        if action < 0.6:
+        text = r.editor.root.text()
+        if action < 0.15 and text.startswith("v") and "≔" in text and text.split("≔")[1].isdigit():
+            # same number, different unit: v3:5 -> v3:5'm
+            _type(r, list(text.replace("≔", ":")) + list(rng.choice(UNIT_SWAPS)))
+            ws.update_after_edit(r)
+        elif action < 0.6:
             i = regions.index(r)
             _type(r, _template(rng, i, names, funcs))
             ws.update_after_edit(r)
@@ -116,3 +124,20 @@ def test_incremental_equals_full_recalculation(seed):
             ws.region_removed(r)
             regions.remove(r)
         assert _results(ws) == _fresh_results(ws), f"seed {seed}, step {step}"
+
+
+def test_unit_change_alone_is_passed_on():
+    ws = Worksheet()
+    a = ws.add_region(18, 9)
+    _type(a, list("x:5"))
+    ws.update_after_edit(a)
+    b = ws.add_region(18, 36)
+    _type(b, list("y:x*2"))
+    ws.update_after_edit(b)
+    c = ws.add_region(18, 63)
+    _type(c, list("y="))
+    ws.update_after_edit(c)
+    for unit, shown in (("'m", "10 m"), ("'s", "10 s"), ("'N", "10 N"), ("", "10")):
+        _type(a, list("x:5" + unit))
+        ws.update_after_edit(a)
+        assert display_text(c.display) == shown

@@ -143,6 +143,7 @@ class MathEditor:
                         _row_path(self.cursor.row), self.cursor.pos, self.text_pos)
 
     def _restore(self, s: Snapshot) -> None:
+        self.version += 1
         self.kind = s.kind
         self.root = s.root
         self.unit = s.unit
@@ -159,7 +160,12 @@ class MathEditor:
         self.selection = None
         self.node = None
 
+    # bumped by every change: the worksheet keeps a region's parsed
+    # expression until its editor's version moves on
+    version = 0
+
     def _push_undo(self) -> None:
+        self.version += 1
         self._undo.append(self._snapshot())
         self._redo.clear()
 

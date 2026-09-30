@@ -7,6 +7,8 @@ otherwise a product of base units.
 """
 from __future__ import annotations
 
+from functools import lru_cache
+
 import cmath
 import math
 from dataclasses import dataclass
@@ -22,14 +24,17 @@ NDIM = len(BASE)
 NODIM: tuple = tuple([0] * NDIM)
 
 
+@lru_cache(maxsize=4096)
 def dims_add(a: tuple, b: tuple) -> tuple:
     return tuple(_clean(x + y) for x, y in zip(a, b))
 
 
+@lru_cache(maxsize=4096)
 def dims_sub(a: tuple, b: tuple) -> tuple:
     return tuple(_clean(x - y) for x, y in zip(a, b))
 
 
+@lru_cache(maxsize=4096)
 def dims_scale(a: tuple, p: float) -> tuple:
     return tuple(_clean(x * p) for x in a)
 
@@ -88,8 +93,10 @@ def unit_offset(name: str) -> float:
     return UNITS[name][2]
 
 
-# Derived units never chosen automatically for output (2 m³ stays m³).
-_NOT_FOR_OUTPUT = {"L"}
+# Derived units never chosen automatically for output.  Observed on SMath
+# Cloud: 'L = 0.001 m³, 'P = 0.1 s Pa, 'St = 0.0001 s Gy, 'Oe = 79.5775 A/m,
+# 'D = 3.3356·10^-30 m C (but 'R = 1 R).
+_NOT_FOR_OUTPUT = {"L", "P", "St", "Oe", "D"}
 
 
 def derived_unit_for(dims: tuple) -> str | None:
@@ -137,6 +144,8 @@ def _d(**kw) -> tuple:
 # 'h = 6.6261·10^-34 s J, 'R.m = 8.3145 J/(K mol), 'ε.0 = 8.8542·10^-12 F/m,
 # 'μ.0 = 1.2566·10^-6 m T/A, 'hildebrand = 2045.48 kg^(1/2)/(s m^(1/2))).
 OBSERVED_UNITS = {
+    _d(m=-1, kg=1, s=-1): ([("s", 1), ("Pa", 1)], []),  # 1'Pa*'s = 1 s Pa, 'P = 0.1 s Pa
+    _d(m=2, s=-1): ([("s", 1), ("Gy", 1)], []),  # 'St = 0.0001 s Gy
     _d(m=2, kg=1, s=-1): ([("s", 1), ("J", 1)], []),
     _d(m=2, kg=1, s=-2, K=-1, mol=-1): ([("J", 1)], [("K", 1), ("mol", 1)]),
     _d(m=-3, kg=-1, s=4, A=2): ([("F", 1)], [("m", 1)]),

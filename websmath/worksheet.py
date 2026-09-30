@@ -68,6 +68,7 @@ class Region:
     uses: frozenset = frozenset()
     dynamic: bool = False  # uses eval/str2num...: depends on anything
     pending: bool = False  # edited since last calculated (result shows the box)
+    _parsed: object = field(default=None, repr=False)  # (signature, node, uses, dynamic)
 
     @property
     def key(self):
@@ -278,11 +279,30 @@ class Worksheet:
         if r.kind != "math" or not r.enabled:
             r.uses = frozenset()
             return
+        ed = r.editor
+        # the parsed expression is kept while the region is unchanged: the key
+        # is the full text of the equation and its unit box, so any change -
+        # typed, pasted, or made to the rows directly - means a fresh parse
+        sig = (ed.root.text(), ed.unit.text(), ed.evaluate)
+        cached = r._parsed if r._parsed is not None and r._parsed[0] == sig else None
+        if cached is not None:
+            node, r.uses, r.dynamic = cached[1], cached[2], cached[3]
+        else:
+            node = self._parse_region(r)
+            if node is None:
+                return
+            r._parsed = (sig, node, r.uses, r.dynamic)
+        self._run_node(r, node, ctx, record)
+
+    def _parse_region(self, r: Region):
+        """Parse a region's expression (None and a syntax error if it does not
+        parse), recording the names it uses."""
         items = r.editor.expression_items()
         if not items:
             r.uses = frozenset()
-            return
+            return None
         expr_row = r.expression_row()
+        record = True
         try:
             node = parse_row(expr_row)
         except ParseError as e:
@@ -293,11 +313,28 @@ class Worksheet:
             return
         # the expression row is a copy of the root's items: point error
         # locations back at the editor's own row so they can be drawn
+        # one pass: rebase error locations, collect the names used, and spot
+        # calls whose dependencies cannot be seen
+        root = r.editor.root
+        names, dynamic = set(), False
         for n in A.walk(node):
-            if n.src is not None:
-                n.src = _rebase(n.src, expr_row, r.editor.root)
-        r.uses = frozenset(_used_names(node) | _row_names(r.editor.unit))
-        r.dynamic = any(isinstance(n, A.Call) and n.name in DYNAMIC_CALLS for n in A.walk(node))
+            src = n.src
+            if src is not None and src[0] is expr_row:
+                n.src = (root, src[1], src[2])
+            t = type(n)
+            if t is A.Var:
+                names.add(n.name)
+            elif t is A.Call:
+                names.add(n.name)
+                if n.name in DYNAMIC_CALLS:
+                    dynamic = True
+        if not r.editor.unit.is_empty():
+            names |= _row_names(r.editor.unit)
+        r.uses = frozenset(names)
+        r.dynamic = dynamic
+        return node
+
+    def _run_node(self, r: Region, node, ctx: Context, record: bool) -> None:
         self.evaluator.ignore_units = r.ignore_units
         reads = self.evaluator.reads = set()
         try:
@@ -318,7 +355,7 @@ class Worksheet:
             if r.optimization == "none":
                 # no evaluation: the input is shown again after "="
                 if record:
-                    r.display = DExpr(expr_row)
+                    r.display = DExpr(r.expression_row())
                 return
             value = self.evaluator.eval(node, ctx)
             if record:

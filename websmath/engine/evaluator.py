@@ -7,6 +7,8 @@ only fails when a value is actually required.
 """
 from __future__ import annotations
 
+import weakref
+
 import bisect
 import math
 from dataclasses import dataclass
@@ -504,8 +506,15 @@ class Evaluator:
         return self.eval(f.body, local)
 
 
+_PLACEHOLDER_SEEN: "weakref.WeakKeyDictionary[A.Node, bool]" = weakref.WeakKeyDictionary()
+
+
 def _has_placeholder(n: A.Node) -> bool:
-    return any(isinstance(x, A.Placeholder) for x in A.walk(n))
+    # parsed trees are cached and never changed, so the answer is too
+    seen = _PLACEHOLDER_SEEN.get(n)
+    if seen is None:
+        seen = _PLACEHOLDER_SEEN[n] = any(isinstance(x, A.Placeholder) for x in A.walk(n))
+    return seen
 
 
 def _is_not_defined(e: SMathError) -> bool:

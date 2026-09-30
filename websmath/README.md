@@ -30,6 +30,21 @@ On a headless machine set `QT_QPA_PLATFORM=offscreen`. Tests:
 QT_QPA_PLATFORM=offscreen python -m pytest websmath/tests -p no:faulthandler
 ```
 
+Correctness proofs (numbers and units):
+
+* `tests/test_proof_end_to_end.py` types random calculations with units key
+  by key into the editor and reads back the number and unit shown on screen;
+  they must equal the exact answer (60-digit reference computed from the
+  generated calculation, not by the app) correctly rounded, with exactly the
+  right dimensions, also after a unit is typed in the result's box.
+  `PROOF_EXAMPLES=5000` runs a larger batch.
+* `tests/test_proof_units.py` checks every unit factor against the NIST/SI
+  definitions, every SI prefix, derived-unit coherence, and that every unit
+  in the table is shown as a result with exactly its own size.
+* `python -m websmath.tools.mutation_check` plants 14 realistic bugs (wrong
+  unit factor, lost dimension, rounding mode, missed recalculation...) in a
+  copy of the code and confirms the tests catch every one.
+
 ## What it does
 
 * **Worksheet:** a 9 px grid with a red-cross insertion point. Type anywhere to
