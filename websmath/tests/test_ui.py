@@ -539,3 +539,171 @@ def test_cursor_is_always_drawable_fuzz(app):
                 p = ed.pos
                 assert not (0 < p < len(items) and items[p - 1] == "'" and items[p] not in ("'",)
                             and isinstance(items[p], str) and items[p].isalpha()), (seed, step, ed.row.text(), p)
+
+
+# -- through the real window: menu shortcuts see the keys first ----------------------
+@pytest.fixture
+def win(app):
+    from websmath.ui.mainwindow import MainWindow
+
+    w = MainWindow()
+    w.show()
+    w.activateWindow()
+    yield w
+    w.close()
+
+
+def _keys(w, *seq, mods=Qt.NoModifier):
+    from PySide6.QtTest import QTest
+
+    target = w.view.viewport()
+    w.view.setFocus()
+    for k in seq:
+        if isinstance(k, str):
+            for ch in k:
+                QTest.keyClicks(target, ch)
+        else:
+            QTest.keyClick(target, k, mods)
+    app = QtWidgets.QApplication.instance()
+    app.processEvents()
+
+
+def test_delete_key_deletes_right_of_the_cursor(win):
+    v = win.view
+    type_at(v, 18, 18, "123+45")
+    ed = v.focused_item.editor
+    ed.set_cursor(ed.root, 1)
+    _keys(win, Qt.Key_Delete)
+    assert ed.root.text() == "13+45"
+    _keys(win, Qt.Key_End)
+    ed.set_cursor(ed.root, 0)
+    _keys(win, Qt.Key_Delete)
+    assert ed.root.text() == "3+45"
+
+
+def test_delete_key_in_the_unit_box_through_the_window(win):
+    v = win.view
+    type_at(v, 18, 18, "5'kN*2=")
+    item = v.focused_item
+    ed = item.editor
+    press(v, Qt.Key_Right)
+    for ch in "'N":
+        press(v, 0, ch)
+    press(v, Qt.Key_Tab)
+    assert ed.unit.text() == "'N"
+    _keys(win, Qt.Key_Left)  # |N, as in the photo
+    _keys(win, Qt.Key_Delete)
+    assert ed.unit.text() == ""
+
+
+def test_shift_arrows_select_like_a_word_processor(win):
+    v = win.view
+    type_at(v, 18, 18, "12+345")
+    ed = v.focused_item.editor
+    _keys(win, Qt.Key_Left, mods=Qt.ShiftModifier)
+    _keys(win, Qt.Key_Left, mods=Qt.ShiftModifier)
+    assert ed.selection[1:] == (4, 6)
+    _keys(win, Qt.Key_Right, mods=Qt.ShiftModifier)  # shrinks back from the anchor
+    assert ed.selection[1:] == (5, 6)
+    _keys(win, Qt.Key_Home, mods=Qt.ShiftModifier)
+    assert ed.selection[1:] == (0, 6)
+    _keys(win, Qt.Key_Left)  # a plain arrow collapses to the start
+    assert ed.selection is None and ed.pos == 0
+    _keys(win, Qt.Key_End, mods=Qt.ShiftModifier)
+    press(v, 0, "7")  # typing replaces the selection
+    assert ed.root.text() == "7"
+
+
+def test_word_jumps_and_word_selection(win):
+    import sys
+
+    word = Qt.AltModifier if sys.platform == "darwin" else Qt.ControlModifier
+    v = win.view
+    type_at(v, 18, 18, "abc+def*12")
+    ed = v.focused_item.editor
+    _keys(win, Qt.Key_Left, mods=word)
+    assert ed.pos == 8  # before 12
+    _keys(win, Qt.Key_Left, mods=word)
+    assert ed.pos == 4  # before def
+    _keys(win, Qt.Key_Right, mods=word | Qt.ShiftModifier)
+    assert ed.selection[1:] == (4, 7)  # def
+    _keys(win, Qt.Key_Delete)
+    assert ed.root.text() == "abc+*12"
+
+
+def test_shift_selection_grows_out_of_a_box(win):
+    v = win.view
+    type_at(v, 18, 18, "1+2/3")
+    ed = v.focused_item.editor
+    assert ed.row is not ed.root  # in the denominator
+    for _ in range(2):
+        _keys(win, Qt.Key_Left, mods=Qt.ShiftModifier)
+    r, a, b = ed.selection
+    assert r is ed.root and b - a == 1  # the whole fraction
+
+
+def test_text_region_selection(win):
+    v = win.view
+    type_at(v, 18, 18, '"hello world')
+    item = v.focused_item
+    ed = item.editor
+    assert ed.kind == "text"
+    import sys
+
+    word = Qt.AltModifier if sys.platform == "darwin" else Qt.ControlModifier
+    _keys(win, Qt.Key_Left, mods=word | Qt.ShiftModifier)
+    assert ed.text_selection() == (6, 11)
+    press(v, 0, "X")
+    assert ed.text == "hello X"
+    _keys(win, Qt.Key_Home, mods=Qt.ShiftModifier)
+    _keys(win, Qt.Key_Delete)
+    assert ed.text == ""
+    item.update()
+
+
+def test_placeholder_is_centred_on_the_equals_sign(app):
+    from PySide6.QtGui import QPainterPath
+
+    from websmath.ui.layout import Layouter, Style
+
+    lay = Layouter(Style(10))
+    ph = lay.placeholder()
+    _l, _w, h, bottom = ph.box
+    path = QPainterPath()
+    path.addText(0, 0, lay.style.font(1.0, op=True), "=")
+    b = path.boundingRect()
+    assert abs((bottom + h / 2) - (-(b.top() + b.bottom()) / 2)) < 0.3
+
+
+def test_selection_keys_fuzz(win):
+    import random
+
+    v = win.view
+    keys = [Qt.Key_Left, Qt.Key_Right, Qt.Key_Home, Qt.Key_End, Qt.Key_Delete, Qt.Key_Backspace, "7", "x", "+", "/", "^"]
+    mods = [Qt.NoModifier, Qt.ShiftModifier, Qt.ControlModifier, Qt.AltModifier,
+            Qt.ShiftModifier | Qt.ControlModifier, Qt.ShiftModifier | Qt.AltModifier]
+    for seed in range(60):
+        rng = random.Random(seed)
+        start = rng.choice(["12+345=", "5'kN*2=", "1+2/3", '"hello world', "(a+b)^2"])
+        type_at(v, 18, 18 + 54 * seed, start)
+        item = v.focused_item
+        for _ in range(25):
+            k = rng.choice(keys)
+            if isinstance(k, str):
+                press(v, 0, k)
+            else:
+                _keys(win, k, mods=rng.choice(mods))
+            if v.focused_item is not item:
+                break
+            ed = item.editor
+            if ed.kind == "text":
+                sel = ed.text_selection()
+                assert 0 <= ed.text_pos <= len(ed.text)
+                assert sel is None or 0 <= sel[0] < sel[1] <= len(ed.text)
+            else:
+                assert 0 <= ed.pos <= len(ed.row.items)
+                if ed.selection:
+                    r, a, b = ed.selection
+                    assert 0 <= a < b <= len(r.items) and r is ed.row, (seed, ed.root.text())
+                assert item._row_info(ed.row) is not None
+        press(v, Qt.Key_Return)

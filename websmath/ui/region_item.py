@@ -326,6 +326,20 @@ class RegionItem(QGraphicsObject):
         for ln in lines:
             p.drawText(QPointF(PAD_X + 1, y), ln)
             y += m.lineSpacing()
+        sel = self.editor.text_selection() if self.focused else None
+        if sel:
+            # highlight the selected text, line by line
+            a, b = sel
+            start = 0
+            for li, ln in enumerate(lines):
+                end = start + len(ln)
+                lo, hi = max(a, start), min(b, end)
+                if lo < hi or (lo == hi and a <= end < b):
+                    x0 = PAD_X + 1 + m.horizontalAdvance(ln[: lo - start])
+                    x1 = PAD_X + 1 + m.horizontalAdvance(ln[: hi - start]) + (4 if b > end else 0)
+                    top = PAD_TOP + li * m.lineSpacing()
+                    p.fillRect(QRectF(x0, top, x1 - x0, m.height()), SELECTION)
+                start = end + 1
         if self.focused:
             pos = self.editor.text_pos
             before = self.editor.text[:pos]

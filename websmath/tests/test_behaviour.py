@@ -395,7 +395,9 @@ def test_only_edited_region_recalculates_until_left():
     (1, "-", "1+2*3-"), (2, "-", "1+2*3-"),
     (1, "*", "1+2*3*"), (2, "*", "(1+2*3)*"),
     (1, "+", "1+2*3+"), (2, "+", "1+2*3+"),
-    (1, "s", "1+2*3"),
+    # SMath ignores a letter typed over a selection; the replica replaces
+    # the selection, as a word processor does (asked for by the user)
+    (1, "s", "1+s"),
 ])
 def test_typing_over_selection(spaces, op, expected):
     ws, (r,) = sheet(list("1+2*3") + [" "] * spaces + [op])

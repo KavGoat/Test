@@ -516,6 +516,10 @@ class WorksheetView(QGraphicsView):
             else:
                 self._drag = ("pan", pt, item, (st.pan_x, st.pan_y, st.ppu_x, st.ppu_y))
             return
+        if item is self.focused_item and e.modifiers() & Qt.ShiftModifier and item.region.kind in ("math", "text"):
+            # Shift+click extends the selection to the click, as in a word processor
+            self._shift_click(item, item.mapFromScene(pt))
+            return
         if item is self.focused_item:
             # dragging inside the region being edited selects (as SMath Cloud)
             item.place_cursor(item.mapFromScene(pt))
@@ -660,6 +664,15 @@ class WorksheetView(QGraphicsView):
             self.selected = []
             self.refresh()
             return
+        if key in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Home, Qt.Key_End) and self.focused_item is not None:
+            name = _selection_key_name(key, mods)
+            if name is not None:
+                item = self.focused_item
+                if self._block_for_clash(item):
+                    return
+                item.editor.key(name)
+                self._after_edit(item)
+                return
         named = {
             Qt.Key_Left: "LEFT", Qt.Key_Right: "RIGHT", Qt.Key_Up: "UP", Qt.Key_Down: "DOWN",
             Qt.Key_Home: "HOME", Qt.Key_End: "END", Qt.Key_Backspace: "BACK",
@@ -1036,6 +1049,12 @@ class WorksheetView(QGraphicsView):
 
         item = self.focused_item
         mime = QMimeData()
+        if item is not None and item.region.kind == "text" and item.editor.text_selection():
+            a, b = item.editor.text_selection()
+            self._clip_items = None
+            mime.setText(item.editor.text[a:b])
+            QApplication.clipboard().setMimeData(mime)
+            return
         if item is not None and item.region.kind == "math" and item.editor.selection:
             r, a, b = item.editor.selection
             self._clip_items = [it.copy() if hasattr(it, "copy") else it for it in r.items[a:b]]
@@ -1065,6 +1084,10 @@ class WorksheetView(QGraphicsView):
     def cut(self) -> None:
         item = self.focused_item
         self.copy()
+        if item is not None and item.region.kind == "text" and item.editor.text_selection():
+            item.editor.key("DELETE")
+            self._after_edit(item)
+            return
         if item is not None and item.region.kind == "math" and item.editor.selection:
             item.editor._push_undo()
             item.editor._apply_to_selection("BACK")
@@ -1083,6 +1106,8 @@ class WorksheetView(QGraphicsView):
         if item is not None and item.region.kind == "math" and self._clip_items:
             ed = item.editor
             ed._push_undo()
+            if ed.selection:  # pasting replaces the selection
+                ed._apply_to_selection("DELETE")
             for it in self._clip_items:
                 ed.row.insert(ed.pos, it.copy() if hasattr(it, "copy") else it)
                 ed.cursor = type(ed.cursor)(ed.row, ed.pos + 1)
@@ -1113,8 +1138,37 @@ class WorksheetView(QGraphicsView):
         self.recalculate()
         self.modified.emit()
 
+    def _shift_click(self, item, local) -> None:
+        ed = item.editor
+        if item.region.kind == "text":
+            anchor = ed.text_pos if ed.text_anchor is None else ed.text_anchor
+            item.place_cursor(local)
+            ed.text_anchor = anchor if anchor != ed.text_pos else None
+        else:
+            hit = item.slot_at(local)
+            if hit is None:
+                return
+            r, k = hit
+            sel = ed.selection
+            if sel and sel[0] is r and ed.pos in (sel[1], sel[2]):
+                anchor = sel[1] if ed.pos == sel[2] else sel[2]
+            elif ed.row is r:
+                anchor = ed.pos
+            else:
+                item.place_cursor(local)
+                item.relayout()
+                return
+            ed.cursor = type(ed.cursor)(r, k)
+            ed.selection = (r, min(anchor, k), max(anchor, k)) if anchor != k else None
+        item.update()
+
     def delete_selection(self) -> None:
         item = self.focused_item
+        if item is not None and not self.selected:
+            # the Edit menu's Delete (the Del key) while an equation or text is
+            # being edited: delete in it, right of the cursor
+            self._named_key("DELETE")
+            return
         if item is not None and item.editor.selection:
             item.editor._push_undo()
             item.editor._apply_to_selection("DELETE")
@@ -1458,6 +1512,25 @@ def unit_box_entries(word: str) -> list:
         label = "'" + SMATH_LABEL.get(u, u)
         out.append(Suggestion(label, label[1:], "unit", 1, 0, desc))
     return out
+
+
+def _selection_key_name(key, mods) -> Optional[str]:
+    """Editor key for Shift/Ctrl (Option/Cmd on a Mac) + arrow, Home, End:
+    SHIFT+LEFT, WORD+RIGHT, SHIFT+WORD+LEFT, ...  None for plain keys."""
+    import sys
+
+    mac = sys.platform == "darwin"
+    shift = bool(mods & Qt.ShiftModifier)
+    word = bool(mods & (Qt.AltModifier if mac else Qt.ControlModifier))
+    base = {Qt.Key_Left: "LEFT", Qt.Key_Right: "RIGHT", Qt.Key_Home: "HOME", Qt.Key_End: "END"}[key]
+    if mac and mods & Qt.ControlModifier and base in ("LEFT", "RIGHT"):
+        base = "HOME" if base == "LEFT" else "END"  # Cmd+arrow: start/end of the line
+        word = False
+    if word and base in ("HOME", "END"):
+        word = False  # Ctrl+Home/End: start/end
+    if not shift and not word:
+        return None if base in ("LEFT", "RIGHT") and not (mac and mods & Qt.ControlModifier) else base
+    return ("SHIFT+" if shift else "") + ("WORD+" if word else "") + base
 
 
 def selected_index(entries: list, word: str) -> Optional[int]:

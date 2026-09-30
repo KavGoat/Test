@@ -113,8 +113,8 @@ class LRect(LBox):
 
     def paint(self, p, ox, oy):
         if self.box is not None:
-            left, w, h = self.box
-            r = QRectF(ox + left, oy + 0.6 - h, w, h)
+            left, w, h, bottom = self.box
+            r = QRectF(ox + left, oy - bottom - h, w, h)
         else:
             r = QRectF(ox + 1, oy - self.asc + 1, self.w - 2, self.h - 1)
         if self.error:
@@ -124,6 +124,23 @@ class LRect(LBox):
             p.drawRoundedRect(QRectF(ox - 1, oy - self.asc - 2, self.w + 2, self.h + 4), 3, 3)
             p.restore()
         p.fillRect(r, ERROR_RED if self.error else (self.color or BLACK))
+
+
+_EQ_MID: dict = {}
+
+
+def _equals_middle(font: QFont) -> float:
+    """Height above the baseline of the middle of the = sign, from the glyph
+    outline (font metrics' tight rectangles are not reliable for it)."""
+    key = (font.family(), font.pointSizeF(), font.pixelSize())
+    if key not in _EQ_MID:
+        from PySide6.QtGui import QPainterPath
+
+        path = QPainterPath()
+        path.addText(0, 0, font, "=")
+        b = path.boundingRect()
+        _EQ_MID[key] = -(b.top() + b.bottom()) / 2 if not b.isEmpty() else font.pointSizeF() * 0.3
+    return _EQ_MID[key]
 
 
 _SMATH_FAMILY = None
@@ -199,8 +216,12 @@ class Layouter:
         f.setPointSizeF(self.style.font(scale).pointSizeF())
         m = QFontMetricsF(f)
         r = m.tightBoundingRect("H")
-        return LRect(w=m.horizontalAdvance("H") - 2, asc=-r.top(), desc=0.6, error=error,
-                     box=(r.left(), r.width(), r.height()))
+        # centred on the middle of the = sign (as SMath Studio draws it), not
+        # sitting on the baseline, which left it lower than the = beside it
+        mid = _equals_middle(self.style.font(scale, op=True))  # height of the = sign's middle
+        bottom = mid - r.height() / 2  # of the box, above the baseline
+        return LRect(w=m.horizontalAdvance("H") - 2, asc=bottom + r.height(), desc=max(0.6, -bottom), error=error,
+                     box=(r.left(), r.width(), r.height(), bottom))
 
     def hspace(self, w: float) -> LBox:
         return LBox(w=w)

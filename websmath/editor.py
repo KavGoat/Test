@@ -116,6 +116,7 @@ class MathEditor:
         self.unit = Row()  # unit placeholder after the result
         self.text = ""  # when kind == "text"
         self.text_pos = 0
+        self.text_anchor: Optional[int] = None  # other end of a text selection
         self.cursor = Cursor(self.root, len(self.root))
         self.in_unit = False
         self.selection: Optional[tuple] = None  # (row, start, end)
@@ -166,6 +167,7 @@ class MathEditor:
             r = self.root
         self.cursor = Cursor(r, min(s.pos, len(r)))
         self.text_pos = min(s.text_pos, len(self.text))
+        self.text_anchor = None
         self.selection = None
         self.node = None
 
@@ -226,8 +228,14 @@ class MathEditor:
         """Apply one keystroke. Named keys: LEFT RIGHT UP DOWN HOME END BACK
         DELETE TAB ENTER; everything else is a typed character."""
         if self.kind == "text":
+            if k.startswith(("SHIFT+", "WORD+")) or k in ("LEFT", "RIGHT", "HOME", "END"):
+                self._text_move(k)
+                return
             self._push_undo()
             self._text_key(k)
+            return
+        if k.startswith(("SHIFT+", "WORD+")):
+            self._select_or_jump(k)
             return
         handler = {
             "LEFT": self._left, "RIGHT": self._right, "UP": self._up, "DOWN": self._down,
@@ -256,7 +264,58 @@ class MathEditor:
             self.key(ch)
 
     # -- text regions -----------------------------------------------------------
+    def text_selection(self) -> Optional[tuple]:
+        """(start, end) of the selected text in a text region, or None."""
+        a = self.text_anchor
+        if a is None or a == self.text_pos:
+            return None
+        return min(a, self.text_pos), max(a, self.text_pos)
+
+    def _text_move(self, k: str) -> None:
+        """Cursor movement in a text region, word-processor style: Shift
+        extends the selection from where it started, WORD+ jumps by words,
+        a plain arrow collapses a selection to its left/right end."""
+        shift = k.startswith("SHIFT+")
+        word = "WORD+" in k
+        base = k.split("+")[-1]
+        sel = self.text_selection()
+        if shift:
+            if self.text_anchor is None:
+                self.text_anchor = self.text_pos
+        else:
+            self.text_anchor = None
+            if sel and base in ("LEFT", "RIGHT") and not word:
+                self.text_pos = sel[0] if base == "LEFT" else sel[1]
+                return
+        t, p = self.text, self.text_pos
+        if word and base == "LEFT":
+            while p > 0 and not t[p - 1].isalnum():
+                p -= 1
+            while p > 0 and t[p - 1].isalnum():
+                p -= 1
+            self.text_pos = p
+        elif word and base == "RIGHT":
+            while p < len(t) and not t[p].isalnum():
+                p += 1
+            while p < len(t) and t[p].isalnum():
+                p += 1
+            self.text_pos = p
+        else:
+            self._text_key(base)
+        if self.text_anchor == self.text_pos:
+            self.text_anchor = None
+
     def _text_key(self, k: str) -> None:
+        sel = None
+        if k not in ("LEFT", "RIGHT", "HOME", "END", "UP", "DOWN"):
+            sel = self.text_selection()
+            self.text_anchor = None
+        if sel and k in ("BACK", "DELETE", "ENTER") or sel and len(k) == 1:
+            # typing replaces the selection, Backspace/Delete remove it
+            self.text = self.text[: sel[0]] + self.text[sel[1]:]
+            self.text_pos = sel[0]
+            if k in ("BACK", "DELETE"):
+                return
         p = self.text_pos
         if k == "BACK":
             if p > 0:
@@ -594,6 +653,72 @@ class MathEditor:
             return
         self._grow_selection()
 
+    # -- word-processor selection with the keyboard ---------------------------------
+    def _word_left(self, r: Row, p: int) -> int:
+        items = r.items
+        while p > 0 and not _is_word_char(items[p - 1]):
+            p -= 1
+        while p > 0 and _is_word_char(items[p - 1]):
+            p -= 1
+        return p
+
+    def _word_right(self, r: Row, p: int) -> int:
+        items, n = r.items, self._limit(r)
+        while p < n and not _is_word_char(items[p]):
+            p += 1
+        while p < n and _is_word_char(items[p]):
+            p += 1
+        return p
+
+    def _select_or_jump(self, k: str) -> None:
+        """SHIFT+LEFT/RIGHT/HOME/END extend the selection from its anchor one
+        item (a whole name part, a fraction, a bracket...) at a time, as in a
+        word processor; WORD+LEFT/RIGHT jump a whole name or number, and with
+        SHIFT+ select it.  Past the start/end of a box's row the selection
+        takes in the whole box."""
+        shift = k.startswith("SHIFT+")
+        word = "WORD+" in k
+        base = k.split("+")[-1]
+        self.node = None
+        r, p = self.row, self.pos
+        sel = self.selection
+        if not shift:
+            if sel:
+                self.cursor = Cursor(sel[0], sel[1] if base == "LEFT" else sel[2])
+                r, p = self.row, self.pos
+            self.selection = None
+            if word:
+                self.cursor = Cursor(r, self._word_left(r, p) if base == "LEFT" else self._word_right(r, p))
+            else:
+                self.key(base)
+            return
+        if sel and sel[0] is r and p in (sel[1], sel[2]):
+            anchor = sel[1] if p == sel[2] else sel[2]
+        else:
+            anchor = p
+        limit = self._limit(r)
+        if word:
+            q = self._word_left(r, p) if base == "LEFT" else self._word_right(r, p)
+        elif base == "LEFT":
+            q = p - 2 if _inside_unit_marker(r, p - 1) else p - 1
+        elif base == "RIGHT":
+            q = p + 2 if _inside_unit_marker(r, p + 1) else p + 1
+        elif base == "HOME":
+            q = 0
+        else:
+            q = limit
+        if q < 0 or q > limit:
+            if r.parent is None:
+                q = max(0, min(q, limit))
+            else:
+                box = r.parent
+                prow = box.parent_row
+                i = prow.items.index(box)
+                r = prow
+                anchor, q = (i + 1, i) if q < 0 else (i, i + 1)
+        self.cursor = Cursor(r, q)
+        self.selection = (r, min(anchor, q), max(anchor, q)) if anchor != q else None
+
     # -- selection ------------------------------------------------------------
     def selection_levels(self) -> list:
         """Spans (row, start, end) space cycles through, innermost first.
@@ -702,7 +827,12 @@ class MathEditor:
             self.cursor = Cursor(r, b)
             self._type(ch)
             return
-        # letters and digits leave the expression unchanged (observed)
+        # letters and digits replace the selection, as in a word processor
+        # (SMath itself ignores them)
+        if isinstance(ch, str) and len(ch) == 1 and (ch in IDENT_CHARS or ch in ".\'"):
+            del r.items[a:b]
+            self.cursor = Cursor(r, a)
+            self._type(ch)
 
     # -- deletion ---------------------------------------------------------------
     def _backspace(self) -> None:
@@ -873,7 +1003,13 @@ class MathEditor:
 
     # -- movement ---------------------------------------------------------------
     def _left(self) -> None:
-        self.selection = None
+        if self.selection:
+            # as in a word processor: Left goes to the selection's start
+            r, a, _b = self.selection
+            self.selection = None
+            self.node = None
+            self.cursor = Cursor(r, a)
+            return
         if self.node is not None:
             r, a, b = self.node
             end = self._bigger_node_at(r, a, b - a)
@@ -914,7 +1050,12 @@ class MathEditor:
             self.set_cursor(self.root, len(self.expression_items()))
 
     def _right(self) -> None:
-        self.selection = None
+        if self.selection:
+            r, _a, b = self.selection
+            self.selection = None
+            self.node = None
+            self.cursor = Cursor(r, b)
+            return
         if self.node is not None:
             # leaving the sub-expression state: back to the name at the cursor
             self.node = None

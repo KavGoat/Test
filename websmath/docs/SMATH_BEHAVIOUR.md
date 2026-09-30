@@ -216,6 +216,14 @@ Observed with the cursor after the 3 of `1+2·3`:
   | `*` | 1+2·3·■ | (1+2·3)·■ (bracketed because · binds tighter) |
   | a letter | nothing | nothing |
 
+  **The replica departs from this on purpose:** a letter or digit typed over
+  a selection replaces it, and selections also work the word-processor way:
+  Shift+Left/Right/Home/End extend from the anchor (past the edge of a box
+  the whole box is taken in), Ctrl+Left/Right (Option on a Mac) jump by name
+  or number and with Shift select it, Cmd+Left/Right on a Mac go to the
+  start/end, a plain arrow collapses the selection to its start/end, and
+  Shift+click extends it.  Text regions select the same way.
+
 * `|` is **logical OR** (∨) in SMath, not absolute value (use `abs(`).
 
 ## Text regions
