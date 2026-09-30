@@ -11,11 +11,11 @@ from decimal import ROUND_HALF_EVEN, Decimal
 
 import pytest
 
-from markforge.calc.engine import ast as A
-from markforge.calc.engine.evaluator import Context, Evaluator
-from markforge.calc.engine.numformat import NumberFormat, format_real
-from markforge.calc.engine.units import Quantity
-from markforge.calc.engine.verify import Checker, Fail, Unchecked, _dims_of
+from calcforge.calc.engine import ast as A
+from calcforge.calc.engine.evaluator import Context, Evaluator
+from calcforge.calc.engine.numformat import NumberFormat, format_real
+from calcforge.calc.engine.units import Quantity
+from calcforge.calc.engine.verify import Checker, Fail, Unchecked, _dims_of
 
 UNITS = ["m", "mm", "kN", "N", "kPa", "MPa", "s", "kg", "kN", "GPa", "cm", "t"]
 
@@ -57,7 +57,7 @@ def test_engine_and_double_check_agree(block):
             got = ev.eval(node, Context())
             ok_got = isinstance(got, Quantity)
         except Exception as e:  # noqa: BLE001 - an SMathError is an error, anything else a bug
-            from markforge.calc.engine.errors import SMathError
+            from calcforge.calc.engine.errors import SMathError
 
             assert isinstance(e, SMathError), (seed, repr(e))
             ok_got = False

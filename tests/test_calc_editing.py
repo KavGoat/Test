@@ -12,8 +12,8 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtTest import QTest
 import pytest
 
-from markforge.calc.engine.display import display_text
-from markforge.items.calc import CalcItem
+from calcforge.calc.engine.display import display_text
+from calcforge.items.calc import CalcItem
 from tests.test_usability import click, drag, press_key, type_text
 
 
@@ -74,7 +74,7 @@ def test_the_cross_and_equations_sit_on_smaths_grid(window):
         assert abs(v / 6.75 - round(v / 6.75)) < 1e-9
 
 
-def test_markup_mode_leaves_letters_to_markforge(window):
+def test_markup_mode_leaves_letters_to_calcforge(window):
     p = at(window, 100, 120)
     click(window.view, p.x(), p.y())
     type_text(window.view, "x")
@@ -182,7 +182,7 @@ def test_tab_and_up_down_step_through_the_reading_order(window):
 
 def test_an_equation_past_the_bottom_goes_to_a_new_page(window):
     """Decision 11: never on two pages; past the last page a page is added."""
-    from markforge.ui.calcedit import calc_area
+    from calcforge.ui.calcedit import calc_area
     calc_mode(window)
     frame = window.document.pages[0].frame
     area = calc_area(frame)
@@ -199,7 +199,7 @@ def test_an_equation_past_the_bottom_goes_to_a_new_page(window):
 
 
 def test_the_margins_of_a_page_calcforge_made(window):
-    from markforge.ui.calcedit import calc_area
+    from calcforge.ui.calcedit import calc_area
     frame = window.document.pages[0].frame
     area = calc_area(frame)
     assert area.left() > 0 and area.top() > 0
@@ -207,7 +207,7 @@ def test_the_margins_of_a_page_calcforge_made(window):
 
 
 def test_redo_brings_the_page_and_the_equation_back(window):
-    from markforge.ui.calcedit import calc_area
+    from calcforge.ui.calcedit import calc_area
     calc_mode(window)
     area = calc_area(window.document.pages[0].frame)
     p = at(window, 100, area.bottom() - 8)
@@ -221,7 +221,7 @@ def test_redo_brings_the_page_and_the_equation_back(window):
 
 
 def test_an_equation_dragged_across_the_page_bottom_goes_onto_the_next_page(window):
-    from markforge.ui.calcedit import calc_area
+    from calcforge.ui.calcedit import calc_area
     calc_mode(window)
     window.add_page()
     p = at(window, 100, 200)
@@ -237,7 +237,7 @@ def test_an_equation_dragged_across_the_page_bottom_goes_onto_the_next_page(wind
 
 
 def test_a_too_wide_equation_breaks_before_an_operator_and_still_calculates(window):
-    from markforge.items.calc import calc_area
+    from calcforge.items.calc import calc_area
     calc_mode(window)
     area = calc_area(window.document.pages[0].frame)
     p = at(window, area.right() - 200, 150)
@@ -258,7 +258,7 @@ def test_a_too_wide_equation_breaks_before_an_operator_and_still_calculates(wind
 
 
 def test_an_equation_that_cannot_be_broken_is_marked_too_wide(window):
-    from markforge.items.calc import calc_area
+    from calcforge.items.calc import calc_area
     calc_mode(window)
     area = calc_area(window.document.pages[0].frame)
     p = at(window, area.right() - 60, 150)
@@ -282,7 +282,7 @@ def test_rotating_a_page_turns_its_equations_but_never_changes_a_result(window):
     type_line(window, "m1*3=")
     before = [(i.region.x, i.region.y) for i in equations(window)]
     window.rotate_page(0, clockwise=True)
-    from markforge.calc.docsheet import sheet_for
+    from calcforge.calc.docsheet import sheet_for
     sheet_for(window.document).settle()
     items = equations(window)
     assert all(i.rotation() % 360 == 90 for i in items)
@@ -307,8 +307,8 @@ def test_rotating_a_page_turns_its_equations_but_never_changes_a_result(window):
 
 def test_a_snapshot_copies_an_equation_as_line_work(window):
     """Decision 16: the copy is drawing, not another live equation."""
-    from markforge.calc.docsheet import sheet_for
-    from markforge.items.snapshot import SnapshotItem
+    from calcforge.calc.docsheet import sheet_for
+    from calcforge.items.snapshot import SnapshotItem
     from tests.test_usability import hover
     calc_mode(window)
     p = at(window, 100, 120)
@@ -344,7 +344,7 @@ def _two_equations_and_a_box(window):
     a, b = at(window, 300, 110), at(window, 360, 150)
     drag(window.view, a.x(), a.y(), b.x(), b.y())
     window.select_tool("select")
-    from markforge.items.shapes import RectItem
+    from calcforge.items.shapes import RectItem
     box = next(i for i in window.view.scene().items() if isinstance(i, RectItem))
     return equations(window), box
 
@@ -367,7 +367,7 @@ def test_grouping_and_aligning_keep_the_calculation(window):
     assert define.group and define.group == use.group == box.group
     assert shown(use) == "2"
     window.align_items("left")
-    from markforge.calc.docsheet import sheet_for
+    from calcforge.calc.docsheet import sheet_for
     sheet_for(window.document).settle()
     assert shown(use) == "2", "same order: define is still above use"
 

@@ -3,9 +3,9 @@ worksheet: a block reads everything defined above it, and what it defines
 stays inside it."""
 from __future__ import annotations
 
-from markforge.calc.editor import MathEditor
-from markforge.calc.engine.display import display_text
-from markforge.calc.worksheet import Worksheet
+from calcforge.calc.editor import MathEditor
+from calcforge.calc.engine.display import display_text
+from calcforge.calc.worksheet import Worksheet
 
 
 def region(ws, y, text, x=0):

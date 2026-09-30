@@ -2,9 +2,21 @@
 
 ## 2026-09-30: CalcForge
 
-MarkForge and WebSMath are being combined into **CalcForge**. Calculations
-are a wanted feature again: see "Calculations are back" in §1. The plan is
-`docs/CALCFORGE_PLAN.md`.
+MarkForge and WebSMath are combined into **CalcForge**: all eight phases of
+`docs/CALCFORGE_PLAN.md` are built, and what each changed, with its tests
+and its differences from SMath and Bluebeam, is in `docs/CALCFORGE_PHASES.md`.
+Calculations are a wanted feature again: see "Calculations are back" in §1.
+
+- The package is `calcforge/` (it was `calcforge/`); run `python main.py`
+  or the `calcforge` command. Environment overrides are `CALCFORGE_*`.
+- Settings are `QSettings("CalcForge", "CalcForge")`. On first start
+  `settings.migrate_from_markforge` copies MarkForge's shortcuts, tool sets
+  (My Tools included), toolbar/panel/window layout, theme and markup
+  defaults across once, and marks `migration/from_markforge` done. Tests
+  point both stores at the sandbox (`CALCFORGE_SETTINGS_FILE`,
+  `CALCFORGE_MARKFORGE_SETTINGS_FILE`).
+- The file format didn't change with the name: the record is still
+  `markups.json.zip`, so files saved by MarkForge open in CalcForge.
 
 ## Latest review: 2026-09-29
 
@@ -161,7 +173,7 @@ needed to work safely without re-reading earlier chat.
 
 ## 1. What the app is
 
-MarkForge is a PySide6 (Qt 6) desktop **PDF markup editor** for a New Zealand
+CalcForge (MarkForge until phase 8) is a PySide6 (Qt 6) desktop **PDF markup editor** for a New Zealand
 structural engineer. Open somebody's drawing, mark it up, save it back. It does
 Bluebeam Revu's job: the full annotation tool set, scaled measurement and
 take-off, tool sets with `.btx` import, and pages read as one continuous scroll.
@@ -213,19 +225,12 @@ and `docs/CALCFORGE_PLAN.md` is the build plan.
 ## 2. How the code is laid out
 
 ```
-markforge/
-  pdf/         a PDF reader and writer of its own, written from the
-               specification rather than wrapped round somebody else's
-    objects.py       the eight object kinds: Name, Ref, Stream, and the rest
-    lexer.py         the syntax: dictionaries, arrays, strings, streams
-    filters.py       Flate, LZW, ASCIIHex, ASCII85, RunLength; PNG and TIFF
-                     predictors
-    storage.py       ObjectStorage: every object by number, and resolve()
-    reader.py        cross-reference tables and streams, object streams, and
-                     recovery by scanning when the table is wrong
-    writer.py        serialize(), and incremental_update() — the important one
-    annotations.py   the annotation model: border effects, callout lines,
-                     measure dictionaries, line endings
+calcforge/
+  pdf/         the PDF layer, and it is MuPDF (PyMuPDF): nothing in it
+               imports Qt
+    engine.py        opening, page geometry (to_pdf / to_display), drawing,
+                     objects, line work, annotations, attachments, saving
+    objects.py       the vocabulary a markup's annotation is described in
   calc/        the calculation engine — WebSMath, the SMath Studio replica
     engine/          Qt-free maths, moved over unchanged (only symbolic.py's
                      import of ast_to_items now points at ../astitems.py)
@@ -250,7 +255,10 @@ markforge/
     shapes.py        RectItem, PolyItem — corners, arcs, break symbols
     measure.py       MeasureItem and CountItem: length, area, dimension, count
     calc.py          CalcItem: an equation on a page (IS_CALC); its area,
-                     grid snap, turned pages; CalcDrawingItem (line work)
+                     grid snap, turned pages; CalcDrawingItem (line work);
+                     CalcTextItem; CalcBlockItem (a calculation block, its
+                     members, Self-contained); MeasureVariable (a named
+                     measurement's region)
     media.py, snapshot.py, contents.py
   ui/
     mainwindow.py    MainWindow: menus, commands, panels, page commands
@@ -266,6 +274,7 @@ markforge/
                      TYPING); a key clashes only where scopes overlap
                      (scopes_overlap). SMATH_KEYS is the SMath section.
     mathspanel.py    the Maths rail panel (WebSMath's side panel sections)
+    variablespanel.py  the Variables rail panel
     calcedit.py (end) WebSMath's selection commands (Solve, Calculate
                      selection, Invert, Determinant), Insert > Operator and
                      copy/paste of part of an equation
@@ -274,7 +283,8 @@ markforge/
                      to change regions' settings
     calcdialogs.py   WebSMath's matrix/function/constants/double-check
                      dialogs (ANSWERS lets tests answer them)
-    theme.py (markforge/theme.py) light and dark stylesheets
+    theme.py (calcforge/theme.py) light and dark stylesheets
+  settings.py  QSettings store, and the one-time MarkForge migration
   io/          pdfbase (what a saved document is: a fresh file every save,
                and reopening it), calclayer (CalcForge's tagged sheet and calc
                layers, taking them off, signatures), pdfsave (appending to a
@@ -298,7 +308,8 @@ docs/          this file, tasklist.md, interface.md, backlog.md,
   keep pointing the way they scroll.
 - **Undo is a snapshot stack.** `view.begin_snapshot(frames)` … change …
   `view.commit_snapshot("Label")`. One gesture is one step.
-- **Settings** are `QSettings("MarkForge", "MarkForge")`. The suite sandboxes
+- **Settings** are `QSettings("CalcForge", "CalcForge")` (MarkForge's are
+  read once, on first start, by `settings.migrate_from_markforge`). The suite sandboxes
   them by pointing `XDG_CONFIG_HOME` and its neighbours at a temporary folder,
   at the top of `tests/conftest.py` and **not in a fixture**, because Qt works
   out those locations once and keeps the answer. Do not call `sync()` to "fix"
@@ -327,7 +338,7 @@ docs/          this file, tasklist.md, interface.md, backlog.md,
   (`io/pdfsave.py`, `Document.signed_source`). What decides how a file opens
   is what it holds, never what it is called: `project.carries_a_document(path)`.
 - **A markup is a real annotation.** `io/annotate.py` builds each one in the
-  PDF's own vocabulary — the plain dictionaries and names of `markforge/pdf`,
+  PDF's own vocabulary — the plain dictionaries and names of `calcforge/pdf`,
   not any library's object types — so the same description can be appended by
   the incremental writer or handed to pypdf when a document is assembled. A
   cloud is a `/Square` or `/Polygon` with a `/BE` cloudy border; a callout is a
@@ -351,7 +362,7 @@ docs/          this file, tasklist.md, interface.md, backlog.md,
 
 **The CalcForge gate, before every push:** the whole suite (MarkForge's
 tests and WebSMath's, which live in `tests/calc/`) and
-`python -m markforge.calc.tools.mutation_check` (14 of 14 caught). The
+`python -m calcforge.calc.tools.mutation_check` (14 of 14 caught). The
 `.sm` reader in `tests/calc/smfile.py` is test-only: it lets the tests
 check answers against SMath's own example files; the app has no `.sm`
 support; it also keeps SMath's page model (paper, header/footer layers),
@@ -520,7 +531,7 @@ rendered into a 96-dpi PDF and read back as SVG with text as outlines). Don't
 go back to rebuilding copies of the markups: they draw differently away from
 their page. `tests/test_snapshot_fidelity.py` compares every case.
 
-**Leaders (`markforge/items/text.py`).** A `_Leader` stores `tip`, `side`,
+**Leaders (`calcforge/items/text.py`).** A `_Leader` stores `tip`, `side`,
 `reach`, `kind` and `cloud`. The hinge is *never stored* — it is computed every
 time from the side and the reach, which is what keeps it perpendicular and
 automatic. A leader is either an `arrow` (ends in a head) or a `cloud` (ends at

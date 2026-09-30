@@ -4,10 +4,10 @@ import pymupdf
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QImage, QPainter
 
-from markforge.io import pdfio, project
-from markforge.items.base import build_item
-from markforge.items.shapes import PolyItem
-from markforge.items.snapshot import SnapshotItem
+from calcforge.io import pdfio, project
+from calcforge.items.base import build_item
+from calcforge.items.shapes import PolyItem
+from calcforge.items.snapshot import SnapshotItem
 from tests.test_usability import drag, click, press_key
 
 
@@ -60,10 +60,10 @@ def test_pdf_snapshot_repeated_capture_paste_and_reopen(window, tmp_path):
     with pymupdf.open(saved) as pdf:
         assert list(pdf[0].annots()), "snapshots remain PDF annotations"
         assert not pdf[0].get_images(full=True), "vector snapshots must not become page bitmaps"
-    from markforge.core.document import Document
+    from calcforge.core.document import Document
     reopened = Document()
     project.load_document(reopened, str(saved))
-    from markforge.ui.scene import DocumentScene
+    from calcforge.ui.scene import DocumentScene
     scene = DocumentScene(reopened)
     for page in reopened.pages:
         page.frame = scene.add_frame(page)
@@ -73,7 +73,7 @@ def test_pdf_snapshot_repeated_capture_paste_and_reopen(window, tmp_path):
 
 
 def test_pdf_snapshot_recolours_curves_without_losing_source(window, tmp_path):
-    from markforge.io.recolour import colourise_lines
+    from calcforge.io.recolour import colourise_lines
     frame = import_drawing(window, tmp_path)
     window.take_snapshot(frame, QRectF(20, 20, 180, 160))
     item = build_item(window._clipboard[0])
@@ -118,7 +118,7 @@ def test_whiteout_preserves_outside_vectors_and_undo(window, tmp_path):
 
 
 def test_hatch_scale_controls_and_undo(window):
-    from markforge.items.shapes import RectItem
+    from calcforge.items.shapes import RectItem
     from PySide6.QtWidgets import QDoubleSpinBox
     item = RectItem()
     item.style.fill, item.style.hatch = "#000000", "cross"
@@ -127,7 +127,7 @@ def test_hatch_scale_controls_and_undo(window):
     window.refresh_selection()
     window.hatch_scale_spin.setValue(2.5)
     assert item.style.hatch_scale == 2.5
-    from markforge.items.base import HATCH_CELL
+    from calcforge.items.base import HATCH_CELL
     assert item.style.hatch_spacing() == pytest.approx(2.5 * HATCH_CELL)
     prop = window.properties_panel.findChild(QDoubleSpinBox, "hatchScale")
     assert prop.value() == 2.5
@@ -140,8 +140,8 @@ def test_hatch_scale_controls_and_undo(window):
 
 
 def test_line_snaps_to_callout_edge_between_handles(window):
-    from markforge.items.text import CalloutItem
-    from markforge.items.shapes import PolyItem
+    from calcforge.items.text import CalloutItem
+    from calcforge.items.shapes import PolyItem
     frame = window.view.frame()
     box = CalloutItem("Note")
     box.set_local_rect(QRectF(0, 0, 150, 150))
@@ -189,7 +189,7 @@ def test_tab_drag_preview_and_return_to_existing_window(window):
 
 
 def test_two_pdf_views_do_not_cancel_each_others_resolution(qapp):
-    from markforge.io.pdftiles import TileCache
+    from calcforge.io.pdftiles import TileCache
     from PySide6.QtWidgets import QWidget
     cache = TileCache()
     cache._ask = lambda key, *a, **kw: cache._waiting.add(key)
@@ -203,7 +203,7 @@ def test_two_pdf_views_do_not_cancel_each_others_resolution(qapp):
 
 
 def test_pdf_thumbnail_cache_has_a_memory_ceiling(qapp, monkeypatch):
-    from markforge.io import pdftiles
+    from calcforge.io import pdftiles
     cache = pdftiles.TileCache()
     monkeypatch.setattr(pdftiles, "SHEET_CACHE_BYTES", 40000)
     image = QImage(100, 100, QImage.Format_ARGB32)
@@ -216,7 +216,7 @@ def test_pdf_thumbnail_cache_has_a_memory_ceiling(qapp, monkeypatch):
 
 
 def test_snap_only_expands_geometry_near_pointer(window, monkeypatch):
-    from markforge.items.shapes import PolyItem
+    from calcforge.items.shapes import PolyItem
     frame = window.view.frame()
     for row in range(100):
         item = PolyItem("polyline")
@@ -242,7 +242,7 @@ def test_whiteout_is_also_absent_from_pdf_snapshot(window, tmp_path):
 
 
 def test_format_painter_stays_armed_until_escape(window):
-    from markforge.items.shapes import RectItem
+    from calcforge.items.shapes import RectItem
     frame = window.view.frame()
     made = []
     for x in (100, 300, 500):
@@ -273,7 +273,7 @@ def test_format_painter_stops_when_another_tool_is_chosen(window):
 
 def test_multiple_has_a_working_shortcut(window, monkeypatch, qapp):
     from PySide6.QtTest import QTest
-    from markforge.ui import dialogs
+    from calcforge.ui import dialogs
     from tests.test_usability import _a_rectangle, _show_for_shortcut
     item = _a_rectangle(window)
     window.select_tool("select")
@@ -291,7 +291,7 @@ def test_wheel_scrolls_the_canvas_in_small_steps(window):
     from PySide6.QtGui import QWheelEvent
     from PySide6.QtCore import QPoint
     from PySide6.QtWidgets import QApplication
-    from markforge.ui import preferences
+    from calcforge.ui import preferences
     window.show()
     preferences.current().wheel_mode = "scroll"
     window.view.scroll_mode = "continuous"
@@ -336,8 +336,8 @@ def test_snapshot_failure_can_be_followed_by_a_fresh_capture(window, tmp_path, m
 
 
 def test_snapshot_recolour_undo_does_not_change_other_copies(window, tmp_path, monkeypatch):
-    from markforge.ui import dialogs
-    from markforge.io.recolour import colourise_lines
+    from calcforge.ui import dialogs
+    from calcforge.io.recolour import colourise_lines
     frame = import_drawing(window, tmp_path)
     window.take_snapshot(frame, QRectF(20, 20, 180, 160))
     window.paste_items()
@@ -358,7 +358,7 @@ def test_snapshot_recolour_undo_does_not_change_other_copies(window, tmp_path, m
 
 def test_snapshot_includes_pdf_font_outlines_and_scan_without_paper(window, tmp_path):
     from PySide6.QtCore import QBuffer, QIODevice
-    from markforge.io.recolour import swap_line_colour
+    from calcforge.io.recolour import swap_line_colour
     pdf = pymupdf.open()
     page = pdf.new_page(width=200, height=150)
     page.draw_rect(page.rect, fill=(.8, .9, 1), color=None)
@@ -414,7 +414,7 @@ def test_whiteout_removes_geometry_instead_of_hiding_it(window, tmp_path, rotati
         assert pix.pixel(int(box.x0 + box.width/2), int(box.y0 + box.height/2))[:3] == (255, 255, 255)
         # Removing all PDF clipping operations must not resurrect erased ink.
         drawings = edited.get_drawings()
-        from markforge.io.pdfsnapshot import _commands, path_from
+        from calcforge.io.pdfsnapshot import _commands, path_from
         for drawing in drawings:
             shape = path_from(_commands(drawing, edited.rotation_matrix), drawing.get('even_odd', False))
             assert not shape.contains(QPointF(box.x0 + box.width/2, box.y0 + box.height/2))
@@ -585,8 +585,8 @@ def test_exported_text_snapshot_matches_its_source_in_another_viewer(window, tmp
 def test_zoomed_out_hairlines_are_not_faded():
     """Hairlines rasterise a pixel wide, and tiles are never much finer than
     the screen, so a zoomed-out sheet is not a pale wash."""
-    from markforge.io import pdftiles
-    from markforge.pdf import engine
+    from calcforge.io import pdftiles
+    from calcforge.pdf import engine
 
     assert pymupdf.TOOLS.show_aa_level()["graphics_min_line_width"] >= 1.0
     for zoom in (0.13, 0.3, 0.45, 0.7, 1.0, 1.6, 3.1):
@@ -606,8 +606,8 @@ def test_page_tiles_land_on_whole_pixels_without_resampling(qapp):
     """A tile at a fractional position used to be smoothed, so page lines
     looked softer than a pasted snapshot of the same lines."""
     from PySide6.QtGui import QPixmap
-    from markforge.io import pdftiles
-    from markforge.ui.scene import _draw_on_the_pixel_grid
+    from calcforge.io import pdftiles
+    from calcforge.ui.scene import _draw_on_the_pixel_grid
 
     assert pdftiles.zoom_step(0.6234) == pytest.approx(0.6234)
     tile = QImage(50, 50, QImage.Format_RGB32)

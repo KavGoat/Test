@@ -13,8 +13,8 @@ import random
 
 import pytest
 
-from markforge.calc.engine.display import display_text
-from markforge.calc.worksheet import Worksheet
+from calcforge.calc.engine.display import display_text
+from calcforge.calc.worksheet import Worksheet
 
 UNITS = ["", "'kN", "'m", "'mm", "'kPa", "'s", "'N", "'Pa"]
 # units of size 1: swapping one for another keeps the number and changes

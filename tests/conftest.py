@@ -12,14 +12,17 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # out those locations once and keeps the answer. Without it the suite reads and
 # writes the real ones, so a test that saves an arrangement leaves it behind
 # for the next run — and for whoever is using the application on this machine.
-_SANDBOX = tempfile.mkdtemp(prefix="markforge-tests-")
+_SANDBOX = tempfile.mkdtemp(prefix="calcforge-tests-")
 for _variable in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME",
                   "XDG_STATE_HOME"):
     os.environ[_variable] = os.path.join(_SANDBOX, _variable.lower())
     os.makedirs(os.environ[_variable], exist_ok=True)
 
-os.environ["MARKFORGE_SETTINGS_FILE"] = os.path.join(_SANDBOX,
-                                                     "markforge-tests.ini")
+os.environ["CALCFORGE_SETTINGS_FILE"] = os.path.join(_SANDBOX,
+                                                     "calcforge-tests.ini")
+# ...and never MarkForge's real settings either (the first-start migration).
+os.environ["CALCFORGE_MARKFORGE_SETTINGS_FILE"] = os.path.join(_SANDBOX,
+                                                               "markforge-absent.ini")
 
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
@@ -34,7 +37,7 @@ def settings_sandbox(tmp_path_factory):
     later test — and the developer's own copy of the app — starts with.
     """
     folder = os.environ["XDG_CONFIG_HOME"]
-    from markforge.settings import app_settings
+    from calcforge.settings import app_settings
 
     written = app_settings().fileName()
     assert written.startswith(_SANDBOX), (
@@ -81,7 +84,7 @@ def fresh_settings(settings_sandbox):
     A test that rebinds a key or moves a panel saves it, and the next window
     would open with that arrangement. Each test gets a clean slate instead.
     """
-    from markforge.settings import app_settings
+    from calcforge.settings import app_settings
 
     settings = app_settings()
     settings.clear()
@@ -93,7 +96,7 @@ def fresh_settings(settings_sandbox):
 
 @pytest.fixture(scope="session")
 def qapp(settings_sandbox):
-    from markforge.app import build_application
+    from calcforge.app import build_application
     from PySide6.QtWidgets import QApplication
     application = QApplication.instance() or build_application([])
     yield application
@@ -105,7 +108,7 @@ def qapp(settings_sandbox):
 
 @pytest.fixture
 def window(qapp):
-    from markforge.ui.mainwindow import MainWindow
+    from calcforge.ui.mainwindow import MainWindow
 
     main = MainWindow()
     # Nothing in the suite may block on a modal "save your changes?" dialog.

@@ -3,7 +3,7 @@ from PySide6.QtCore import QPointF, Qt
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QGroupBox,
                                QLineEdit, QPlainTextEdit, QPushButton, QSpinBox)
 from tests.test_usability import click, double_click, drag, hover, markups, press_key
-from markforge.ui.tools import TOOLS
+from calcforge.ui.tools import TOOLS
 
 
 def make(window, key):
@@ -34,7 +34,7 @@ def make(window, key):
 
 
 def test_audit(window):
-    from markforge.ui import tools as tool_module
+    from calcforge.ui import tools as tool_module
     lines = []
     for tool in TOOLS:
         if tool.mode == "none" and tool.key != "snapshot":

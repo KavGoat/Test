@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 
 from tests.calc.smfile import dumps, load_sm, loads
-from markforge.calc.plot import PlotState, axis_layout, sample
-from markforge.calc.worksheet import Worksheet
+from calcforge.calc.plot import PlotState, axis_layout, sample
+from calcforge.calc.worksheet import Worksheet
 
 EXAMPLES = Path(__file__).resolve().parents[2] / "SMath Studio" / "examples"
 
@@ -96,8 +96,8 @@ def test_smath_example_plot_loads():
 
 def test_styled_points_matrix_as_smath():
     """SMath's styled points: rows of (x, y, "marker or text", size px, "colour")."""
-    from markforge.calc.engine.values import Matrix, Q, String
-    from markforge.calc.plot import PlotState, marks
+    from calcforge.calc.engine.values import Matrix, Q, String
+    from calcforge.calc.plot import PlotState, marks
 
     st = PlotState()
     m = Matrix(2, 5, [Q(1.0), Q(2.0), String("o"), Q(8.0), String("Red"),
@@ -109,7 +109,7 @@ def test_styled_points_matrix_as_smath():
 
 
 def test_fit_ranges():
-    from markforge.calc.plot import PlotState, fit_ranges
+    from calcforge.calc.plot import PlotState, fit_ranges
 
     st = PlotState()
     fit_ranges(st, -2.0, 8.0, -1.0, 4.0)
@@ -120,8 +120,8 @@ def test_fit_ranges():
 
 def test_sys_of_point_sets_is_split_into_parts():
     """Beam.sm plots sys(points, points, ..., styled marks): each part is drawn."""
-    from markforge.calc.engine.values import Matrix, Q, String
-    from markforge.calc.plot import PlotState, marks, parts, point_lines
+    from calcforge.calc.engine.values import Matrix, Q, String
+    from calcforge.calc.plot import PlotState, marks, parts, point_lines
 
     st = PlotState()
     a = Matrix(2, 2, [Q(0.0), Q(0.0), Q(1.0), Q(1.0)])

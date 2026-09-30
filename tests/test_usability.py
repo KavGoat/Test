@@ -11,11 +11,11 @@ from PySide6.QtCore import (QEvent, QKeyCombination, QPoint, QPointF,
 from PySide6.QtGui import QColor, QContextMenuEvent, QKeyEvent, QMouseEvent
 from PySide6.QtWidgets import QApplication, QLabel
 
-from markforge.core.document import MM_TO_PT
-from markforge.items.measure import DIMENSION, MeasureItem
-from markforge.items.shapes import PolyItem, RectItem
-from markforge.items.snapshot import SnapshotItem
-from markforge.items.text import CalloutItem, TextItem
+from calcforge.core.document import MM_TO_PT
+from calcforge.items.measure import DIMENSION, MeasureItem
+from calcforge.items.shapes import PolyItem, RectItem
+from calcforge.items.snapshot import SnapshotItem
+from calcforge.items.text import CalloutItem, TextItem
 
 
 # ---------------------------------------------------------------------------
@@ -233,7 +233,7 @@ def test_a_count_marker_shows_its_whole_number_at_any_size(window):
     rectangle and clipped away entirely.
     """
     from PySide6.QtGui import QFontMetricsF
-    from markforge.items.measure import CountItem
+    from calcforge.items.measure import CountItem
 
     window.select_tool("count")
     for x in (150, 200, 250):
@@ -255,7 +255,7 @@ def test_a_count_marker_shows_its_whole_number_at_any_size(window):
 
 def test_escape_puts_the_count_tool_down_at_once(window):
     """One press, and nothing of the count session is left behind."""
-    from markforge.items.measure import CountItem
+    from calcforge.items.measure import CountItem
 
     window.select_tool("count")
     for x in (150, 200):
@@ -285,8 +285,8 @@ def test_a_snapshot_is_borderless_when_it_comes_back(window):
     the red line every drawn markup starts with onto it. The default was right
     all along and was being thrown away on the way back in.
     """
-    from markforge.items.base import build_item
-    from markforge.items.snapshot import SnapshotItem
+    from calcforge.items.base import build_item
+    from calcforge.items.snapshot import SnapshotItem
 
     payload = {"type": "snapshot", "asset": "k", "x": 0.0, "y": 0.0,
                "rect": [0, 0, 120, 80], "source_rect": [0, 0, 120, 80],
@@ -309,7 +309,7 @@ def test_the_size_entry_stays_upright_whichever_way_the_page_is_turned(window):
     A tooltip belongs to the screen, not to the paper.
     """
     from PySide6.QtWidgets import QGraphicsItem
-    from markforge.core.document import PageScale
+    from calcforge.core.document import PageScale
 
     window.current_page().scale = PageScale.from_ratio(50)
     for turn in (0, 90, 180, 270):
@@ -329,7 +329,7 @@ def test_the_size_entry_stays_upright_whichever_way_the_page_is_turned(window):
 
 def test_every_arrow_moves_the_insertion_point(window):
     """Left and Right used to do nothing, which is half a caret."""
-    from markforge.ui import preferences
+    from calcforge.ui import preferences
 
     prefs = preferences.current()
     was = prefs.insertion_point
@@ -362,7 +362,7 @@ def test_flattened_markup_lets_the_pointer_through_to_what_is_behind(window):
     It was already unselectable, but it went on answering "what is under the
     pointer", so it stood in front of whatever was being reached for.
     """
-    from markforge.items.shapes import RectItem
+    from calcforge.items.shapes import RectItem
 
     window.select_tool("rect")
     drag(window.view, 120, 120, 320, 260)          # behind
@@ -434,7 +434,7 @@ def test_two_documents_open_in_tabs_without_reaching_into_each_other(window):
 
 def test_a_second_window_keeps_its_own_document(window):
     """The other half of the same idea: a window with a document of its own."""
-    from markforge.ui.mainwindow import MainWindow
+    from calcforge.ui.mainwindow import MainWindow
 
     second = window.open_new_window()
     second.confirm_discard = lambda: True
@@ -481,7 +481,7 @@ def test_a_tab_can_open_a_second_view_of_the_same_document(window):
 
 
 def test_a_document_tab_can_be_torn_into_a_window(window):
-    from markforge.ui.mainwindow import MainWindow
+    from calcforge.ui.mainwindow import MainWindow
     from PySide6.QtTest import QTest
 
     first = window.document
@@ -570,7 +570,7 @@ def test_every_label_the_user_reads_is_one_or_two_words(window, qapp):
     """
     from PySide6.QtWidgets import QCheckBox, QPushButton
     from tests.probe_audit import make
-    from markforge.ui.tools import TOOLS
+    from calcforge.ui.tools import TOOLS
 
     def words(text):
         return len(text.replace("&", "").replace("…", "").split())
@@ -637,7 +637,7 @@ def test_one_idea_has_one_name_in_the_properties_panel(window):
     """
     import re
 
-    source = open("markforge/ui/panels.py", encoding="utf-8").read()
+    source = open("calcforge/ui/panels.py", encoding="utf-8").read()
     labels = re.findall(r'form\.addRow\("([^"]+)"', source)
     assert labels, "the properties panel lays its rows out with addRow"
 
@@ -687,7 +687,7 @@ def test_undo_takes_back_the_typing_before_the_markup_itself(window):
 
 def _a_note_on_the_page(window):
     """A plain text box with words in it, on the first page."""
-    from markforge.items.text import TextItem
+    from calcforge.items.text import TextItem
 
     note = TextItem("check this bolt", QRectF(0, 0, 140, 44))
     window.document.pages[0].frame.add_markup(note, QPointF(200, 200))
@@ -713,7 +713,7 @@ def test_a_new_arrow_leader_is_placed_where_it_is_pointed(window):
     the note and leaving it to be dragged there makes every leader two
     gestures, the first of them wrong.
     """
-    from markforge.items.text import CalloutItem
+    from calcforge.items.text import CalloutItem
 
     note = _a_note_on_the_page(window)
     window.add_leader_to(note, "arrow")
@@ -798,7 +798,7 @@ def test_placing_a_cloud_leader_shows_a_cloud_on_the_pointer(window):
     And nothing provisional is drawn before the cloud itself: the preview only
     appears once a region is being dragged out.
     """
-    from markforge.items.text import CalloutItem
+    from calcforge.items.text import CalloutItem
 
     window.select_tool("callout")
     click(window.view, 200, 200)
@@ -823,8 +823,8 @@ def test_placing_a_cloud_leader_shows_a_cloud_on_the_pointer(window):
 
 def test_a_snapshot_has_a_border_that_starts_at_none_and_can_be_set(window):
     """It had no colour control anywhere, and a red frame it could not lose."""
-    from markforge.items.snapshot import SnapshotItem
-    from markforge.ui.stylecaps import STROKE, WIDTH, capabilities
+    from calcforge.items.snapshot import SnapshotItem
+    from calcforge.ui.stylecaps import STROKE, WIDTH, capabilities
 
     shot = SnapshotItem()
     assert shot.style.stroke == "" and shot.style.width == 0.0, \
@@ -839,8 +839,8 @@ def test_a_snapshot_has_a_border_that_starts_at_none_and_can_be_set(window):
 
 def test_a_photos_optional_border_is_offered_and_starts_disabled(window):
     """Selected images and tool defaults both expose the optional border."""
-    from markforge.items.media import ImageItem
-    from markforge.ui.stylecaps import DASH, OPACITY, STROKE, WIDTH, capabilities
+    from calcforge.items.media import ImageItem
+    from calcforge.ui.stylecaps import DASH, OPACITY, STROKE, WIDTH, capabilities
 
     photo = ImageItem()
     assert capabilities(photo) == {OPACITY, STROKE, WIDTH, DASH}
@@ -856,8 +856,8 @@ def test_a_cut_out_belongs_to_any_closed_shape(window):
     get drawn round things with holes in them, so all of them take one now,
     and it is saved with the shape it came out of.
     """
-    from markforge.core.document import PageScale
-    from markforge.items.shapes import PolyItem, RectItem
+    from calcforge.core.document import PageScale
+    from calcforge.items.shapes import PolyItem, RectItem
 
     window.current_page().scale = PageScale.from_ratio(50)
     for tool, expected_ring in (("rect", 4), ("ellipse", 48)):
@@ -891,7 +891,7 @@ def test_a_cut_out_belongs_to_any_closed_shape(window):
 
 def test_an_open_polyline_is_not_offered_as_somewhere_to_put_a_hole(window):
     """A shape that encloses nothing cannot own a hole."""
-    from markforge.items.shapes import PolyItem
+    from calcforge.items.shapes import PolyItem
 
     window.select_tool("polyline")
     for x, y in ((120, 500), (300, 500), (300, 600)):
@@ -910,8 +910,8 @@ def test_the_size_entry_rides_the_corner_and_says_the_size(window):
     So it neither followed the shape as it grew nor said how big the shape
     currently was: the only way to learn a size was to type one.
     """
-    from markforge.core.document import PageScale
-    from markforge.items.shapes import RectItem
+    from calcforge.core.document import PageScale
+    from calcforge.items.shapes import RectItem
 
     window.current_page().scale = PageScale.from_ratio(50)
     window.select_tool("rect")
@@ -1001,7 +1001,7 @@ def test_the_modifier_tools_are_reachable_from_their_actions(window):
 
 def test_active_drawing_gestures_carry_their_tool_on_the_cursor(window):
     """A line, shape and added leader should not all look like one crosshair."""
-    from markforge.items.text import CalloutItem
+    from calcforge.items.text import CalloutItem
 
     cursors = []
     for key in ("line", "rect", "ellipse"):
@@ -1059,7 +1059,7 @@ def test_escape_abandons_a_half_drawn_callout(window):
 # ---------------------------------------------------------------------------
 
 def scaled_page(window, ratio=50):
-    from markforge.core.document import PageScale
+    from calcforge.core.document import PageScale
     window.current_page().scale = PageScale.from_ratio(ratio)
     return window.current_page()
 
@@ -1084,8 +1084,8 @@ def test_a_page_set_to_a_real_one_to_one_is_not_an_unscaled_page(window):
     full size looked exactly like a page nobody had calibrated: every
     scale-dependent markup went on asking for a scale the page already had.
     """
-    from markforge.core.document import PageScale
-    from markforge.io import project as project_io
+    from calcforge.core.document import PageScale
+    from calcforge.io import project as project_io
 
     page = window.current_page()
     assert not page.scale.is_calibrated(), "a fresh page has no scale"
@@ -1188,7 +1188,7 @@ def test_a_dimension_carries_its_own_text(window):
 
 def test_no_size_dialog_pops_up_once_a_rectangle_is_placed(window, monkeypatch):
     """The size bar while drawing is the only size entry, as in Bluebeam."""
-    from markforge.ui import dialogs
+    from calcforge.ui import dialogs
     asked = []
     monkeypatch.setattr(dialogs.RectangleSizeDialog, "exec",
                         lambda self: asked.append(True) or dialogs.QDialog.Rejected)
@@ -1209,7 +1209,7 @@ def test_a_rectangle_knows_its_paper_size_without_a_scale(window):
 
 
 def test_an_exact_size_can_be_asked_for_from_the_right_click_menu(window, monkeypatch):
-    from markforge.ui import dialogs
+    from calcforge.ui import dialogs
     window.select_tool("rect")
     drag(window.view, 100, 100, 200, 180)
     window.select_tool("select")
@@ -1243,7 +1243,7 @@ def test_a_scale_turns_the_paper_size_into_a_real_one(window):
 # ---------------------------------------------------------------------------
 
 def test_duplicate_along_an_offset(window, monkeypatch):
-    from markforge.ui import dialogs
+    from calcforge.ui import dialogs
     scaled_page(window)
     window.select_tool("rect")
     drag(window.view, 100, 100, 160, 160)
@@ -1263,7 +1263,7 @@ def test_duplicate_along_an_offset(window, monkeypatch):
 
 
 def test_move_by_an_offset_leaves_no_copies(window, monkeypatch):
-    from markforge.ui import dialogs
+    from calcforge.ui import dialogs
     scaled_page(window)
     window.select_tool("rect")
     drag(window.view, 100, 100, 160, 160)
@@ -1283,7 +1283,7 @@ def test_move_by_an_offset_leaves_no_copies(window, monkeypatch):
 def test_repeat_along_an_axis_is_a_rebindable_shortcut(window, monkeypatch, qapp):
     from PySide6.QtGui import QKeySequence
     from PySide6.QtTest import QTest
-    from markforge.ui import dialogs
+    from calcforge.ui import dialogs
 
     window.select_tool("rect")
     drag(window.view, 100, 100, 160, 160)
@@ -1307,7 +1307,7 @@ def test_repeat_along_an_axis_is_a_rebindable_shortcut(window, monkeypatch, qapp
 
 
 def test_offsets_are_paper_distances_without_a_scale(window):
-    from markforge.core.document import MM_TO_PT
+    from calcforge.core.document import MM_TO_PT
     page = window.current_page()
     assert window.distance_in_points("25 mm", page) == pytest.approx(25 * MM_TO_PT)
     assert window.distance_in_points("0", page) == 0.0
@@ -1353,8 +1353,8 @@ def test_no_menu_mnemonic_shadows_a_tool_chord(window):
 
 def test_changing_the_page_scale_updates_the_takeoff_list(window, monkeypatch):
     """A rectangle's size is in the markups list, so it has to be rebuilt."""
-    from markforge.core.document import PageScale
-    from markforge.ui import dialogs
+    from calcforge.core.document import PageScale
+    from calcforge.ui import dialogs
 
     window.select_tool("rect")
     drag(window.view, 100, 100, 236, 168)
@@ -1391,7 +1391,7 @@ def test_the_scene_does_not_index_items_it_keeps_reshaping(window):
 
 def test_a_markup_is_removed_from_the_page_it_is_actually_on(window):
     """A markup always leaves the page it is on, not the one being looked at."""
-    from markforge.ui.scene import detach
+    from calcforge.ui.scene import detach
 
     window.select_tool("rect")
     drag(window.view, 100, 100, 200, 200)
@@ -1408,7 +1408,7 @@ def test_a_markup_is_removed_from_the_page_it_is_actually_on(window):
 
 
 def test_a_note_can_be_placed_without_a_dialog_getting_in_the_way(window):
-    from markforge.items.text import NoteItem
+    from calcforge.items.text import NoteItem
 
     window.select_tool("note")               # interactive_prompts is off here
     click(window.view, 200, 200)
@@ -1419,7 +1419,7 @@ def test_a_note_can_be_placed_without_a_dialog_getting_in_the_way(window):
 
 def test_double_clicking_a_note_opens_what_it_says(window, monkeypatch):
     from PySide6.QtWidgets import QInputDialog
-    from markforge.items.text import NoteItem
+    from calcforge.items.text import NoteItem
 
     window.select_tool("note")
     click(window.view, 200, 200)
@@ -1435,7 +1435,7 @@ def test_double_clicking_a_note_opens_what_it_says(window, monkeypatch):
 
 def test_cancelling_the_note_dialog_leaves_it_as_it_was(window, monkeypatch):
     from PySide6.QtWidgets import QInputDialog
-    from markforge.items.text import NoteItem
+    from calcforge.items.text import NoteItem
 
     window.select_tool("note")
     click(window.view, 200, 200)
@@ -1667,7 +1667,7 @@ def test_the_view_follows_a_markup_nudged_off_the_bottom_of_it(window):
 
 
 def test_the_insertion_point_is_drawn_as_a_small_crosshair(window):
-    from markforge.ui import preferences
+    from calcforge.ui import preferences
 
     prefs = preferences.current()
     was = prefs.insertion_point
@@ -1696,7 +1696,7 @@ def test_the_insertion_point_is_drawn_as_a_small_crosshair(window):
 def test_the_optional_insertion_point_is_visible_and_escape_clears_it(window):
     from PySide6.QtCore import QRectF
     from PySide6.QtGui import QImage, QPainter
-    from markforge.ui import preferences
+    from calcforge.ui import preferences
 
     prefs = preferences.current()
     was = prefs.insertion_point
@@ -1724,7 +1724,7 @@ def test_the_optional_insertion_point_is_visible_and_escape_clears_it(window):
 
 def test_preferences_exposes_the_optional_insertion_point(window, qapp):
     from PySide6.QtTest import QTest
-    from markforge.ui import dialogs, preferences
+    from calcforge.ui import dialogs, preferences
 
     window.show()
     qapp.processEvents()
@@ -1742,7 +1742,7 @@ def test_preferences_exposes_the_optional_insertion_point(window, qapp):
 
 def test_preferences_exposes_recoverable_flattening(window, qapp):
     from PySide6.QtTest import QTest
-    from markforge.ui import dialogs, preferences
+    from calcforge.ui import dialogs, preferences
 
     dialog = dialogs.PreferencesDialog(preferences.current(), window)
     dialog.show()
@@ -1801,7 +1801,7 @@ def test_current_page_commands_are_reachable_from_the_menu_bar(window, qapp):
 
 
 def test_every_tool_and_application_action_is_reachable_from_the_menu_bar(window):
-    from markforge.ui.tools import TOOLS
+    from calcforge.ui.tools import TOOLS
 
     all_actions = set()
 
@@ -2024,7 +2024,7 @@ def test_an_ellipse_can_be_set_out_to_an_exact_size(window):
 # ---------------------------------------------------------------------------
 
 def test_the_scale_dialog_offers_picking_two_points_from_a_standing_start(window):
-    from markforge.ui import dialogs
+    from calcforge.ui import dialogs
 
     from PySide6.QtWidgets import QPushButton
 
@@ -2050,7 +2050,7 @@ def test_calibration_has_a_visible_rebindable_shortcut(window):
 @pytest.mark.parametrize("entered", ["10mm", "10 mm"])
 def test_the_calibration_length_prompt_accepts_joined_or_spaced_units(
         window, entered):
-    from markforge.ui import dialogs
+    from calcforge.ui import dialogs
 
     dialog = dialogs.CalibrationLengthDialog(200.0, window)
     try:
@@ -2063,7 +2063,7 @@ def test_the_calibration_length_prompt_accepts_joined_or_spaced_units(
 
 def test_the_calibration_length_prompt_rejects_incompatible_units(
         window, monkeypatch):
-    from markforge.ui import dialogs
+    from calcforge.ui import dialogs
     warned = []
     monkeypatch.setattr(dialogs.QMessageBox, "warning",
                         lambda *args: warned.append(args))
@@ -2079,7 +2079,7 @@ def test_the_calibration_length_prompt_rejects_incompatible_units(
 
 
 def test_choosing_to_pick_points_starts_the_calibrate_tool(window, monkeypatch):
-    from markforge.ui import dialogs
+    from calcforge.ui import dialogs
 
     monkeypatch.setattr(dialogs.ScaleDialog, "exec",
                         lambda self: dialogs.ScaleDialog.PICK)
@@ -2092,7 +2092,7 @@ def test_choosing_to_pick_points_starts_the_calibrate_tool(window, monkeypatch):
                                    "measure_area"])
 def test_the_first_scaled_tool_click_prompts_before_drawing(
         window, monkeypatch, tool):
-    from markforge.core.document import PageScale
+    from calcforge.core.document import PageScale
 
     asked = []
 
@@ -2122,7 +2122,7 @@ def test_cancelling_the_first_scale_prompt_does_not_create_a_markup(
 
 
 def test_two_clicks_and_a_length_set_the_scale(window, monkeypatch):
-    from markforge.ui import dialogs
+    from calcforge.ui import dialogs
 
     asked = {}
 
@@ -2144,7 +2144,7 @@ def test_two_clicks_and_a_length_set_the_scale(window, monkeypatch):
 
 
 def test_a_calibration_line_is_not_left_on_the_page(window, monkeypatch):
-    from markforge.ui import dialogs
+    from calcforge.ui import dialogs
     monkeypatch.setattr(dialogs.CalibrationLengthDialog, "exec",
                         lambda self: dialogs.QDialog.Rejected)
     window.select_tool("calibrate")
@@ -2233,7 +2233,7 @@ def test_turning_a_page_turns_what_is_drawn_on_it(window):
 
 def test_turning_a_page_turns_its_background_sheet(window, tmp_path, monkeypatch):
     from PySide6.QtGui import QImage
-    from markforge.io import pdfio
+    from calcforge.io import pdfio
 
     document = window.document
     photo = QImage(200, 100, QImage.Format_ARGB32)
@@ -2451,8 +2451,8 @@ def test_changing_a_pages_colours_changes_its_line_work_too(window):
     """
     from PySide6.QtCore import QPointF
     from PySide6.QtGui import QColor
-    from markforge.io import recolour
-    from markforge.items.shapes import PolyItem
+    from calcforge.io import recolour
+    from calcforge.items.shapes import PolyItem
 
     lines = []
     for colour in ("#000000", "#0a0a0a", "#c92a2a"):
@@ -2473,7 +2473,7 @@ def test_changing_a_pages_colours_changes_its_line_work_too(window):
 def test_colourise_keeps_the_light_and_shade(window):
     """Bluebeam's Colorize: one colour, still readable, paper still paper."""
     from PySide6.QtGui import QColor, QImage
-    from markforge.io import recolour
+    from calcforge.io import recolour
 
     image = QImage(4, 1, QImage.Format_ARGB32)
     for x, level in enumerate((0, 80, 180, 255)):
@@ -2492,7 +2492,7 @@ def test_colourise_keeps_the_light_and_shade(window):
 def test_a_colour_can_be_made_transparent_within_a_tolerance(window):
     """Near enough to the picked colour counts, which is what tolerance is for."""
     from PySide6.QtGui import QColor, QImage
-    from markforge.io import recolour
+    from calcforge.io import recolour
 
     image = QImage(3, 1, QImage.Format_ARGB32)
     image.setPixelColor(0, 0, QColor(255, 255, 255))     # the colour picked
@@ -2814,7 +2814,7 @@ def test_a_cloud_callout_clouds_the_thing_and_notes_it(window):
     """Bluebeam's: a cloud round what the comment is about, and the note beside
     it — and the two are one markup, not a cloud and a text box that happen to
     be grouped."""
-    from markforge.items.shapes import RectItem
+    from calcforge.items.shapes import RectItem
 
     window.select_tool("cloud_callout")
     drag(window.view, 160, 260, 300, 340)        # the cloud goes round it
@@ -2883,7 +2883,7 @@ def test_a_cloud_callout_can_be_drawn_corner_by_corner(window):
 
 
 def test_escape_gets_out_of_a_half_drawn_cloud_callout(window):
-    from markforge.items.shapes import RectItem
+    from calcforge.items.shapes import RectItem
 
     window.select_tool("cloud_callout")
     drag(window.view, 160, 260, 300, 340)
@@ -2946,7 +2946,7 @@ def test_the_hinge_can_be_moved_to_another_side(window):
 
 def test_the_leader_never_runs_across_its_own_words(window):
     """Whatever the hinge is dragged to, the line stays off the text box."""
-    from markforge.items.text import _crosses
+    from calcforge.items.text import _crosses
 
     call = _callout(window)
     box = call.local_rect().normalized()
@@ -2970,7 +2970,7 @@ def test_a_plain_callout_is_still_a_box(window):
 
 
 def test_a_cloud_callout_survives_a_round_trip(window):
-    from markforge.items.base import build_item
+    from calcforge.items.base import build_item
 
     window.select_tool("cloud_callout")
     drag(window.view, 160, 260, 300, 340)
@@ -2986,7 +2986,7 @@ def test_a_cloud_callout_survives_a_round_trip(window):
 
 
 def test_the_highlight_goes_over_whatever_is_under_it(window):
-    from markforge.items.shapes import RectItem
+    from calcforge.items.shapes import RectItem
 
     window.select_tool("highlight")
     drag(window.view, 100, 100, 300, 140)
@@ -2997,7 +2997,7 @@ def test_the_highlight_goes_over_whatever_is_under_it(window):
 
 
 def test_the_highlight_and_the_cloud_callout_are_on_keys(window):
-    from markforge.ui.tools import TOOL_MAP
+    from calcforge.ui.tools import TOOL_MAP
     assert TOOL_MAP["highlight"].shortcut == "J"
     assert TOOL_MAP["cloud_callout"].shortcut == "Shift+Q"
     assert not window.shortcuts.conflicts()
@@ -3077,7 +3077,7 @@ def test_a_picture_copied_elsewhere_beats_the_last_snapshot(window):
     """What is on the clipboard is what gets pasted."""
     from PySide6.QtGui import QImage
     from PySide6.QtWidgets import QApplication
-    from markforge.items.media import ImageItem
+    from calcforge.items.media import ImageItem
 
     window.select_tool("rect")
     drag(window.view, 100, 100, 220, 180)
@@ -3119,7 +3119,7 @@ def test_a_snapshot_of_no_region_at_all_says_so(window):
 
 def test_a_snapshot_takes_the_drawing_underneath_with_it(window, tmp_path, monkeypatch):
     from PySide6.QtGui import QImage, QPainter, QPicture
-    from markforge.io import pdfio
+    from calcforge.io import pdfio
 
     photo = QImage(400, 300, QImage.Format_ARGB32)
     photo.fill(0xFF3366AA)
@@ -3239,7 +3239,7 @@ def test_a_snapshot_puts_a_picture_on_the_clipboard_for_other_apps(window):
 
 
 def test_the_snapshot_tool_is_on_g(window):
-    from markforge.ui.tools import TOOL_MAP
+    from calcforge.ui.tools import TOOL_MAP
     assert TOOL_MAP["snapshot"].shortcut == "G"
     assert not window.shortcuts.conflicts()
 
@@ -3251,7 +3251,7 @@ def test_the_snapshot_tool_is_on_g(window):
 def _sheet_page(window, tmp_path, colour=0xFF000000):
     """A page whose background is a white sheet with one dark line."""
     from PySide6.QtGui import QColor, QImage
-    from markforge.io import pdfio
+    from calcforge.io import pdfio
 
     image = QImage(60, 40, QImage.Format_ARGB32)
     image.fill(QColor("white"))
@@ -3266,7 +3266,7 @@ def _sheet_page(window, tmp_path, colour=0xFF000000):
 
 def test_the_lines_of_a_page_can_be_pushed_to_another_colour(window, tmp_path, monkeypatch):
     from PySide6.QtGui import QColor, QImage
-    from markforge.ui import dialogs
+    from calcforge.ui import dialogs
 
     page = _sheet_page(window, tmp_path)
     before = page.background_key
@@ -3288,7 +3288,7 @@ def test_the_lines_of_a_page_can_be_pushed_to_another_colour(window, tmp_path, m
 
 def test_one_colour_can_be_swapped_for_another(window, tmp_path, monkeypatch):
     from PySide6.QtGui import QColor, QImage
-    from markforge.ui import dialogs
+    from calcforge.ui import dialogs
 
     page = _sheet_page(window, tmp_path)
 
@@ -3309,7 +3309,7 @@ def test_one_colour_can_be_swapped_for_another(window, tmp_path, monkeypatch):
 
 def test_recolouring_a_page_can_be_undone(window, tmp_path, monkeypatch):
     from PySide6.QtGui import QColor
-    from markforge.ui import dialogs
+    from calcforge.ui import dialogs
 
     page = _sheet_page(window, tmp_path)
     before = page.background_key
@@ -3333,7 +3333,7 @@ def test_a_blank_page_says_there_is_nothing_to_recolour(window, monkeypatch):
 def test_image_colour_dialog_offers_greyscale_and_transparency(window):
     from PySide6.QtGui import QColor, QImage, qAlpha, qBlue, qGreen, qRed
     from PySide6.QtTest import QTest
-    from markforge.ui.dialogs import RecolourDialog
+    from calcforge.ui.dialogs import RecolourDialog
 
     image = QImage(2, 1, QImage.Format_ARGB32)
     image.setPixelColor(0, 0, QColor("#ff0000"))
@@ -3444,7 +3444,7 @@ def test_a_group_moves_as_one(window):
 
 
 def test_a_group_scales_as_one_and_shift_releases_its_ratio(window):
-    from markforge.items.base import build_item
+    from calcforge.items.base import build_item
 
     first, second = _two_boxes(window)
     first.setSelected(True)
@@ -3525,8 +3525,8 @@ def test_grouping_can_be_undone(window):
 
 
 def test_a_group_is_saved_with_the_document(window, tmp_path):
-    from markforge.core.document import Document
-    from markforge.io import project as project_io
+    from calcforge.core.document import Document
+    from calcforge.io import project as project_io
 
     first, second = _two_boxes(window)
     first.setSelected(True)
@@ -3591,7 +3591,7 @@ def test_a_default_belongs_to_that_kind_of_markup_only(window):
 
 
 def test_a_default_is_remembered_between_sessions(window):
-    from markforge.ui.mainwindow import MainWindow
+    from calcforge.ui.mainwindow import MainWindow
 
     window.select_tool("rect")
     drag(window.view, 100, 100, 200, 160)
@@ -3626,7 +3626,7 @@ def test_a_default_can_be_forgotten(window):
 
 
 def test_a_default_never_carries_the_contents_across(window):
-    from markforge.ui import toolsets
+    from calcforge.ui import toolsets
 
     block = _words(window, "300 kerb", at=(90, 500))
     window.set_as_default(block)
@@ -3650,7 +3650,7 @@ def test_the_properties_panel_offers_it(window):
 
 def test_the_style_toolbar_sets_the_selected_markup_as_default(window, qapp):
     from PySide6.QtTest import QTest
-    from markforge.ui import toolsets
+    from calcforge.ui import toolsets
 
     window.show()
     qapp.processEvents()
@@ -3689,7 +3689,7 @@ def test_a_markup_can_be_saved_to_a_tool_set_from_its_context_menu(window):
 
 def _kept(window, item, into="My Tools", monkeypatch=None):
     """Put an item into a tool set without the dialog."""
-    from markforge.ui import toolsets
+    from calcforge.ui import toolsets
 
     groups = toolsets.load_toolsets()
     group = next(g for g in groups if g.name == into)
@@ -3700,7 +3700,7 @@ def _kept(window, item, into="My Tools", monkeypatch=None):
 
 
 def test_my_tools_is_always_there(window):
-    from markforge.ui import toolsets
+    from calcforge.ui import toolsets
 
     assert [g.name for g in toolsets.load_toolsets()][0] == toolsets.MY_TOOLS
     tree = window.toolsets_panel.tree
@@ -3727,7 +3727,7 @@ def test_a_kept_markup_comes_back_exactly_as_it_was(window):
 
 
 def test_a_tool_in_properties_mode_draws_a_new_one(window):
-    from markforge.ui import toolsets
+    from calcforge.ui import toolsets
 
     window.select_tool("text")
     drag(window.view, 100, 100, 300, 140)
@@ -3765,7 +3765,7 @@ def test_escape_puts_a_held_tool_back(window):
 
 def test_tool_sets_can_be_made_renamed_and_deleted(window, monkeypatch):
     from PySide6.QtWidgets import QInputDialog, QMessageBox
-    from markforge.ui import toolsets
+    from calcforge.ui import toolsets
 
     panel = window.toolsets_panel
     monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("Steel details", True))
@@ -3784,7 +3784,7 @@ def test_tool_sets_can_be_made_renamed_and_deleted(window, monkeypatch):
 
 def test_my_tools_cannot_be_renamed_or_deleted(window, monkeypatch):
     from PySide6.QtWidgets import QMessageBox
-    from markforge.ui import toolsets
+    from calcforge.ui import toolsets
 
     monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
@@ -3793,7 +3793,7 @@ def test_my_tools_cannot_be_renamed_or_deleted(window, monkeypatch):
 
 
 def test_a_tool_can_be_switched_between_the_two_modes(window):
-    from markforge.ui import toolsets
+    from calcforge.ui import toolsets
 
     window.select_tool("rect")
     drag(window.view, 100, 100, 200, 160)
@@ -3817,7 +3817,7 @@ def test_tools_can_be_reordered_and_removed(window):
     _kept(window, markups(window)[0])
     _kept(window, markups(window)[1])
 
-    from markforge.ui import toolsets
+    from calcforge.ui import toolsets
 
     panel = window.toolsets_panel
     panel.select_entry(toolsets.MY_TOOLS, 1)
@@ -3830,7 +3830,7 @@ def test_tools_can_be_reordered_and_removed(window):
 
 
 def test_tool_sets_are_remembered_between_sessions(window):
-    from markforge.ui.mainwindow import MainWindow
+    from calcforge.ui.mainwindow import MainWindow
 
     window.select_tool("rect")
     drag(window.view, 100, 100, 200, 160)
@@ -3969,7 +3969,7 @@ def test_a_selected_group_draws_one_box_round_the_lot(window):
 
 
 def test_a_group_goes_into_a_tool_set_as_one_thing(window):
-    from markforge.ui import toolsets
+    from calcforge.ui import toolsets
 
     first, second = _two_boxes(window)
     first.setSelected(True)
@@ -3983,7 +3983,7 @@ def test_a_group_goes_into_a_tool_set_as_one_thing(window):
 
 
 def test_placing_a_group_puts_every_member_down_grouped(window):
-    from markforge.ui import toolsets
+    from calcforge.ui import toolsets
 
     first, second = _two_boxes(window)
     first.setSelected(True)
@@ -4006,7 +4006,7 @@ def test_placing_a_group_puts_every_member_down_grouped(window):
 
 def test_what_is_about_to_be_placed_is_shown_first(window):
     from PySide6.QtGui import QImage, QPainter
-    from markforge.ui import toolsets
+    from calcforge.ui import toolsets
 
     window.select_tool("rect")
     drag(window.view, 100, 100, 220, 180)
@@ -4059,7 +4059,7 @@ def test_a_kept_cloud_uses_its_bottom_left_as_the_anchor(window):
 
 
 def test_a_toolset_group_uses_its_combined_bottom_left_as_the_anchor(window):
-    from markforge.ui import toolsets
+    from calcforge.ui import toolsets
 
     _quiet_snapping(window)
     first, second = _two_boxes(window)
@@ -4081,7 +4081,7 @@ def test_a_toolset_group_uses_its_combined_bottom_left_as_the_anchor(window):
 
 def test_a_click_placed_image_hangs_from_the_pointers_bottom_left(
         window, monkeypatch):
-    from markforge.items.media import ImageItem
+    from calcforge.items.media import ImageItem
 
     _quiet_snapping(window)
 
@@ -4539,7 +4539,7 @@ def _panel_groups(window, item):
 
 def test_a_contents_block_can_be_changed_afterwards(window):
     from PySide6.QtWidgets import QCheckBox, QLineEdit
-    from markforge.items.contents import ContentsItem
+    from calcforge.items.contents import ContentsItem
 
     window.select_tool("contents")
     drag(window.view, 60, 500, 360, 640)
@@ -4560,7 +4560,7 @@ def test_a_contents_block_can_be_changed_afterwards(window):
 
 def test_a_note_can_be_rewritten_in_the_panel(window):
     from PySide6.QtWidgets import QPlainTextEdit
-    from markforge.items.text import NoteItem
+    from calcforge.items.text import NoteItem
 
     window.select_tool("note")
     click(window.view, 200, 200)
@@ -4591,7 +4591,7 @@ def test_a_measurement_says_what_you_type_in_the_panel(window):
 def test_an_image_can_be_swapped_for_another(window, tmp_path, monkeypatch):
     from PySide6.QtGui import QImage
     from PySide6.QtWidgets import QFileDialog
-    from markforge.items.media import ImageItem
+    from calcforge.items.media import ImageItem
 
     first = str(tmp_path / "one.png")
     QImage(60, 40, QImage.Format_ARGB32).save(first)
@@ -4615,7 +4615,7 @@ def test_an_image_can_be_swapped_for_another(window, tmp_path, monkeypatch):
 def test_a_raster_image_offers_its_frame_but_no_fill_style_controls(window, tmp_path):
     from PySide6.QtGui import QImage
     from PySide6.QtWidgets import QFileDialog, QGroupBox
-    from markforge.items.media import ImageItem
+    from calcforge.items.media import ImageItem
 
     path = str(tmp_path / "photo.png")
     QImage(60, 40, QImage.Format_ARGB32).save(path)
@@ -4643,7 +4643,7 @@ def test_a_raster_image_offers_its_frame_but_no_fill_style_controls(window, tmp_
 
 
 def test_an_image_keeps_its_aspect_ratio_unless_shift_releases_it(window):
-    from markforge.items.media import ImageItem
+    from calcforge.items.media import ImageItem
 
     image = ImageItem(rect=QRectF(0, 0, 200, 100))
     window.view.frame().add_markup(image, QPointF(100, 100))
@@ -4677,7 +4677,7 @@ def test_the_stamp_wording_is_only_shown_for_the_stamp(window):
 
 
 def test_count_stays_armed_and_numbers_each_click_until_escape(window):
-    from markforge.items.measure import CountItem
+    from calcforge.items.measure import CountItem
 
     window.select_tool("count")
     click(window.view, 120, 160)
@@ -4717,7 +4717,7 @@ def test_dragging_a_slider_is_one_undo_step(window):
 
 
 def test_a_pause_starts_a_new_undo_step(window):
-    from markforge.ui import commands
+    from calcforge.ui import commands
 
     window.select_tool("rect")
     drag(window.view, 80, 80, 220, 180)
@@ -4795,7 +4795,7 @@ def test_ctrl_b_while_typing_belongs_to_the_text(window):
 # ---------------------------------------------------------------------------
 
 def test_a_callout_takes_two_clicks_and_no_dragging(window):
-    from markforge.items.text import CalloutItem
+    from calcforge.items.text import CalloutItem
 
     window.select_tool("callout")
     click(window.view, 400, 420)                 # what it points at
@@ -4849,7 +4849,7 @@ def test_misspelt_words_are_underlined_only_while_typing(window):
     box.set_text("the colour of teh beam")
     assert box._speller is not None
 
-    from markforge.items.text import MISSPELT
+    from calcforge.items.text import MISSPELT
 
     formats = box.doc.findBlockByNumber(0).layout().formats()
     squiggles = [f for f in formats if f.format.property(MISSPELT)]
@@ -4863,7 +4863,7 @@ def test_misspelt_words_are_underlined_only_while_typing(window):
 
 def test_spellcheck_knows_requests_and_offers_a_correction(window):
     from PySide6.QtTest import QTest
-    from markforge.core.spelling import shared
+    from calcforge.core.spelling import shared
 
     assert shared().knows("requests")
     assert not shared().knows("reqeusts")
@@ -4899,7 +4899,7 @@ def test_spellcheck_knows_requests_and_offers_a_correction(window):
 
 def test_shift_and_the_space_bar_asks_for_a_text_box(window):
     """Shift+Space follows the same conversion rule as an ordinary space."""
-    from markforge.items.text import TextItem
+    from calcforge.items.text import TextItem
 
     window.select_tool("select")
     press_key(window.view, Qt.Key_unknown, '"')
@@ -4922,7 +4922,7 @@ def test_a_lone_word_left_behind_becomes_a_note_after_all(window):
     Nothing can put that space there by typing any more, so this is for text
     that arrived some other way — pasted in, or built from something else.
     """
-    from markforge.items.text import TextItem
+    from calcforge.items.text import TextItem
 
     window.select_tool("select")
     press_key(window.view, Qt.Key_unknown, '"')
@@ -4935,8 +4935,8 @@ def test_a_lone_word_left_behind_becomes_a_note_after_all(window):
 
 
 def test_a_tool_set_entry_is_drawn_as_what_it_is(window):
-    from markforge.ui import toolsets
-    from markforge.ui.panels import entry_thumbnail
+    from calcforge.ui import toolsets
+    from calcforge.ui.panels import entry_thumbnail
 
     window.select_tool("rect")
     drag(window.view, 100, 100, 260, 180)
@@ -4955,7 +4955,7 @@ def test_a_tool_set_entry_is_drawn_as_what_it_is(window):
 
 def test_drawing_again_is_greyed_out_for_a_calculation(window):
     """A calculation is nothing without its lines, so there is nothing to draw."""
-    from markforge.ui import toolsets
+    from calcforge.ui import toolsets
 
     panel = window.toolsets_panel
     panel.select_set(toolsets.MY_TOOLS)
@@ -4972,7 +4972,7 @@ def test_drawing_again_is_greyed_out_for_a_calculation(window):
 
 
 def test_tools_can_be_dragged_into_the_order_you_want(window):
-    from markforge.ui import toolsets
+    from calcforge.ui import toolsets
 
     panel = window.toolsets_panel
     panel.select_set(toolsets.MY_TOOLS)
@@ -5015,7 +5015,7 @@ def test_a_click_placed_tool_shows_itself_before_it_lands(window):
 
 def test_the_snapshot_marquee_looks_like_the_selection_marquee(window):
     """The same gesture meaning the same thing, drawn the same way."""
-    from markforge.items.shapes import RectItem
+    from calcforge.items.shapes import RectItem
 
     marquee = RectItem("marquee")
     assert marquee.style.line_style == "dash"
@@ -5035,7 +5035,7 @@ def test_a_line_being_drawn_catches_on_what_is_already_there(window):
 
 
 def test_snapping_can_be_turned_off(window):
-    from markforge.ui import preferences
+    from calcforge.ui import preferences
 
     prefs = preferences.current()
     was = prefs.snap_while_drawing
@@ -5092,7 +5092,7 @@ def test_a_locked_markup_says_so_with_the_pointer(window):
 
 def test_every_vertex_of_a_polyline_gets_the_same_pointer(window):
     from PySide6.QtCore import Qt
-    from markforge.items.base import cursor_for_handle
+    from calcforge.items.base import cursor_for_handle
 
     assert cursor_for_handle("v0") == Qt.PointingHandCursor
     assert cursor_for_handle("v7") == Qt.PointingHandCursor
@@ -5153,7 +5153,7 @@ def test_finishing_a_rectangle_resize_recomputes_the_cursor(window):
 def test_a_callout_is_asked_only_about_the_end_that_points(window):
     """Which arrow head goes on the end joined to the box is not a question."""
     from PySide6.QtWidgets import QComboBox
-    from markforge.items.text import CalloutItem
+    from calcforge.items.text import CalloutItem
 
     window.select_tool("callout")
     click(window.view, 400, 400)
@@ -5173,7 +5173,7 @@ def test_a_callout_is_asked_only_about_the_end_that_points(window):
 
 def test_a_callout_can_be_turned_into_a_cloud_afterwards(window):
     from PySide6.QtWidgets import QComboBox
-    from markforge.items.text import CalloutItem
+    from calcforge.items.text import CalloutItem
 
     window.select_tool("callout")
     click(window.view, 400, 400)
@@ -5196,7 +5196,7 @@ def test_a_callout_can_be_turned_into_a_cloud_afterwards(window):
 
 def test_the_markup_menu_omits_typewriter_but_keeps_the_other_tools(window):
     """Typewriter is retired without disturbing the remaining markup tools."""
-    from markforge.ui.tools import TOOL_MAP
+    from calcforge.ui.tools import TOOL_MAP
 
     wanted = {"eraser": "Shift+E", "arc": "Shift+C",
               "flag": "Shift+F", "highlighter": "H", "polyline": "N",
@@ -5214,8 +5214,8 @@ def test_the_markup_menu_omits_typewriter_but_keeps_the_other_tools(window):
 
 
 def test_an_old_typewriter_item_still_loads_without_exposing_its_tool(window):
-    from markforge.items.base import build_item
-    from markforge.items.text import TypewriterItem
+    from calcforge.items.base import build_item
+    from calcforge.items.text import TypewriterItem
 
     item = build_item(TypewriterItem("Old note").serialize())
     assert isinstance(item, TypewriterItem)
@@ -5252,7 +5252,7 @@ def test_an_arc_has_an_editable_bend_control_point(window):
 
 
 def test_a_flag_is_pinned_where_it_is_clicked(window):
-    from markforge.items.text import FlagItem
+    from calcforge.items.text import FlagItem
 
     window.select_tool("flag")
     click(window.view, 300, 220)
@@ -5284,7 +5284,7 @@ def test_the_eraser_rubs_out_ink_and_leaves_shapes_alone(window):
 
 def _area_measurement(window):
     """An area measured round a rectangle of the page."""
-    from markforge.items.measure import MeasureItem
+    from calcforge.items.measure import MeasureItem
 
     window.select_tool("measure_area")
     for point in [(100, 100), (400, 100), (400, 300), (100, 300)]:
@@ -5438,7 +5438,7 @@ def test_hidden_markups_go_away_and_come_back(window):
 
 
 def test_a_hidden_markup_is_still_hidden_after_a_save(window):
-    from markforge.items.base import build_item
+    from calcforge.items.base import build_item
 
     rect = _a_rectangle(window)
     rect.setSelected(True)
@@ -5459,7 +5459,7 @@ def test_flattening_takes_a_markup_out_of_reach(window):
 
 
 def test_flattening_survives_a_save(window):
-    from markforge.items.base import build_item
+    from calcforge.items.base import build_item
 
     rect = _a_rectangle(window)
     rect.setSelected(True)
@@ -5470,7 +5470,7 @@ def test_flattening_survives_a_save(window):
 
 
 def test_recover_restores_a_recoverably_flattened_item(window):
-    from markforge.ui import preferences
+    from calcforge.ui import preferences
 
     rect = _a_rectangle(window)
     rect.setSelected(True)
@@ -5491,7 +5491,7 @@ def test_recover_restores_a_recoverably_flattened_item(window):
 
 
 def test_irreversible_flattening_keeps_only_a_vector_recording(window):
-    from markforge.ui import preferences
+    from calcforge.ui import preferences
 
     rect = _a_rectangle(window)
     rect.setSelected(True)
@@ -5519,7 +5519,7 @@ def test_irreversible_flattening_keeps_only_a_vector_recording(window):
 
 
 def test_document_flattening_uses_the_classes_chosen(window, monkeypatch):
-    from markforge.ui import dialogs, preferences
+    from calcforge.ui import dialogs, preferences
 
     rect = _a_rectangle(window)
     window.view._last_scene_pos = QPointF(90, 300)
@@ -5552,7 +5552,7 @@ def test_document_flattening_uses_the_classes_chosen(window, monkeypatch):
 
 
 def test_flatten_dialog_class_choices_follow_real_clicks(window):
-    from markforge.ui.dialogs import FlattenDialog
+    from calcforge.ui.dialogs import FlattenDialog
 
     dialog = FlattenDialog(True, window)
     assert dialog.chosen() == {"markups"}
@@ -5636,7 +5636,7 @@ def test_the_menu_offers_a_leader_on_a_text_box_and_removal_on_a_callout(window)
 
 
 def test_a_text_boxs_leader_is_still_there_after_a_save(window):
-    from markforge.items.base import build_item
+    from calcforge.items.base import build_item
 
     window.select_tool("text")
     drag(window.view, 200, 200, 340, 250)
@@ -5738,7 +5738,7 @@ def test_a_pasted_snapshot_holds_its_drawing(window):
 def test_a_picture_pasted_from_elsewhere_holds_its_picture(window):
     from PySide6.QtGui import QImage
     from PySide6.QtWidgets import QApplication
-    from markforge.items.media import ImageItem
+    from calcforge.items.media import ImageItem
 
     foreign = QImage(120, 80, QImage.Format_ARGB32)
     foreign.fill(0xFF2F9E44)
@@ -5759,10 +5759,10 @@ def test_a_picture_pasted_from_elsewhere_holds_its_picture(window):
 def test_a_pasted_picture_is_still_there_after_a_save(window, tmp_path):
     from PySide6.QtGui import QImage
     from PySide6.QtWidgets import QApplication
-    from markforge.core.document import Document
-    from markforge.io import project as project_io
-    from markforge.items.base import build_item
-    from markforge.items.media import ImageItem
+    from calcforge.core.document import Document
+    from calcforge.io import project as project_io
+    from calcforge.items.base import build_item
+    from calcforge.items.media import ImageItem
 
     foreign = QImage(90, 60, QImage.Format_ARGB32)
     foreign.fill(0xFF1971C2)
@@ -5849,7 +5849,7 @@ def _btx(name):
 
 
 def test_importing_a_bluebeam_tool_set_fills_the_tool_chest(window):
-    from markforge.ui import toolsets
+    from calcforge.ui import toolsets
 
     assert window.import_toolset(_btx("Structures - Timber.btx"))
     names = [group.name for group in toolsets.load_toolsets()]
@@ -5869,7 +5869,7 @@ def test_importing_a_bluebeam_tool_set_fills_the_tool_chest(window):
 
 
 def test_an_imported_tool_can_be_put_on_the_page(window):
-    from markforge.items.shapes import PolyItem, RectItem
+    from calcforge.items.shapes import PolyItem, RectItem
 
     window.import_toolset(_btx("Structures - Timber.btx"))
     panel = window.toolsets_panel
@@ -5891,7 +5891,7 @@ def test_an_imported_tool_can_be_put_on_the_page(window):
 
 
 def test_an_imported_steel_section_draws_as_a_drawing(window):
-    from markforge.items.shapes import SketchItem
+    from calcforge.items.shapes import SketchItem
 
     window.import_toolset(_btx("Structural Steel UC Sections - 1-10 @ A1.btx"))
     panel = window.toolsets_panel
@@ -5906,7 +5906,7 @@ def test_an_imported_steel_section_draws_as_a_drawing(window):
 
 
 def test_importing_the_same_set_twice_does_not_lose_the_first(window):
-    from markforge.ui import toolsets
+    from calcforge.ui import toolsets
 
     window.import_toolset(_btx("Structures - Timber.btx"))
     window.import_toolset(_btx("Structures - Timber.btx"))
@@ -5917,7 +5917,7 @@ def test_importing_the_same_set_twice_does_not_lose_the_first(window):
 
 def test_a_file_that_is_not_a_tool_set_is_refused_politely(window, tmp_path, monkeypatch):
     from PySide6.QtWidgets import QMessageBox
-    from markforge.ui import toolsets
+    from calcforge.ui import toolsets
 
     path = tmp_path / "nope.btx"
     path.write_bytes(b"this is not xml")
@@ -5932,7 +5932,7 @@ def test_a_file_that_is_not_a_tool_set_is_refused_politely(window, tmp_path, mon
 # ---------------------------------------------------------------------------
 
 def test_every_tool_set_is_showing_at_once(window):
-    from markforge.ui import toolsets
+    from calcforge.ui import toolsets
 
     window.import_toolset(_btx("Structures - Timber.btx"))
     window.import_toolset(_btx("Structures - Welds.btx"))
@@ -5962,7 +5962,7 @@ def test_a_tool_set_can_be_rolled_up_and_stays_rolled_up(window):
 
 
 def test_clicking_a_tool_picks_it_up(window):
-    from markforge.items.shapes import RectItem
+    from calcforge.items.shapes import RectItem
 
     window.select_tool("rect")
     drag(window.view, 100, 100, 200, 160)
@@ -5995,7 +5995,7 @@ def test_clicking_a_set_heading_picks_nothing_up(window):
 
 
 def test_the_tool_chests_right_click_menu_carries_everything(window):
-    from markforge.ui import toolsets
+    from calcforge.ui import toolsets
 
     window.select_tool("rect")
     drag(window.view, 100, 100, 200, 160)
@@ -6100,7 +6100,7 @@ def test_the_wheel_over_a_dropdown_scrolls_the_panel(window):
     # Not even once it has been clicked into: a dropdown never cycles under
     # the wheel. A clicked-into number box still takes it.
     from PySide6.QtWidgets import QSpinBox
-    from markforge.ui.widgets import WheelBelongsToTheScroller
+    from calcforge.ui.widgets import WheelBelongsToTheScroller
 
     kept = WheelBelongsToTheScroller()
     combo.hasFocus = lambda: True              # focus needs an active window
@@ -6281,7 +6281,7 @@ def test_underscore_and_caret_set_scripts_in_a_text_box(window):
 
 def test_an_underscore_and_a_caret_read_as_a_script(window):
     """"A_g" and "m^2" are written that way and set that way."""
-    from markforge.core.typography import script_runs
+    from calcforge.core.typography import script_runs
 
     assert script_runs("A_g") == [("A", ""), ("g", "sub")]
     assert script_runs("m^2") == [("m", ""), ("2", "super")]
@@ -6743,7 +6743,7 @@ def test_a_rectangle_can_become_a_polygon_to_be_reshaped(window):
 
 
 def test_a_reshaped_outline_survives_a_round_trip(window):
-    from markforge.items.base import build_item
+    from calcforge.items.base import build_item
 
     shape = _polygon(window)
     shape.round_corner(1)
@@ -6767,7 +6767,7 @@ def test_reshaping_can_be_undone(window):
 
 def test_every_drawing_tool_is_on_the_insert_menu(window):
     """Not only on the toolbar: findable by reading, as a menu bar is for."""
-    from markforge.ui.tools import NONE, tools_in
+    from calcforge.ui.tools import NONE, tools_in
 
     insert = None
     for entry in window.menuBar().actions():
@@ -6824,7 +6824,7 @@ def test_paste_page_is_greyed_out_with_nothing_to_paste(window):
 
 def test_the_format_painter_carries_a_paint_roller(window):
     """The requested roller is a distinct drawn icon, not a letter or box."""
-    from markforge.ui.icons import icon
+    from calcforge.ui.icons import icon
 
     assert not window.act_format_painter.icon().isNull()
     assert not icon("format_painter").isNull()
@@ -6856,7 +6856,7 @@ def test_a_right_click_finishes_the_cloud_before_placing_its_callout(window):
 
 
 def test_cloud_and_cloud_plus_are_named_where_the_drawing_choice_is_explained():
-    from markforge.ui.tools import TOOL_MAP
+    from calcforge.ui.tools import TOOL_MAP
 
     for key in ("cloud", "cloud_callout"):
         hint = TOOL_MAP[key].hint
@@ -6939,7 +6939,7 @@ def test_a_grid_belongs_to_the_page_it_is_on(window):
 
 def test_an_inserted_pdf_page_comes_in_without_a_grid(window, tmp_path):
     from PySide6.QtGui import QImage
-    from markforge.io import pdfio
+    from calcforge.io import pdfio
 
     window.document.settings.show_grid = True
     photo = QImage(400, 300, QImage.Format_ARGB32)
@@ -6967,7 +6967,7 @@ def test_the_page_grid_is_on_the_page_menu_and_undoes(window):
 
 
 def test_a_page_grid_survives_saving(window):
-    from markforge.core.document import Page
+    from calcforge.core.document import Page
 
     window.set_page_grid(0, True)
     again = Page.from_dict(window.document.pages[0].to_dict())
@@ -6986,7 +6986,7 @@ def test_a_page_grid_survives_saving(window):
 def test_the_footer_stays_on_the_paper_when_there_is_no_margin(window, tmp_path):
     """An imported page has no margins, and the footer used to fall off it."""
     from PySide6.QtGui import QImage
-    from markforge.io import pdfio
+    from calcforge.io import pdfio
 
     window.document.settings.show_footer = True
     photo = QImage(600, 400, QImage.Format_ARGB32)
@@ -7077,7 +7077,7 @@ def test_a_plain_wheel_over_the_pages_still_scrolls_them(window):
 
 def test_the_size_of_the_pages_in_the_panel_is_remembered(window):
     """It is a choice about reading, so it belongs to the person, not the file."""
-    from markforge.ui import preferences
+    from calcforge.ui import preferences
 
     window.pages_panel.set_thumbnail_scale(1.6)
     assert preferences.current().page_thumbnails == pytest.approx(1.6)
@@ -7203,7 +7203,7 @@ def test_a_hatched_fill_is_not_a_flat_one(window):
     drawn as real lines so it stays sharp at any scale."""
     from PySide6.QtCore import Qt as QtNS
     from PySide6.QtGui import QImage, QPainter
-    from markforge.items.base import Style
+    from calcforge.items.base import Style
 
     plain = Style(fill="#888888")
     assert plain.brush().style() == QtNS.SolidPattern
@@ -7239,7 +7239,7 @@ def test_a_hatched_fill_is_not_a_flat_one(window):
 
 def test_bluebeams_spellings_of_a_hatch_all_land(window):
     from PySide6.QtCore import Qt as QtNS
-    from markforge.items.base import hatch_named
+    from calcforge.items.base import hatch_named
 
     assert hatch_named("Hatch-DiagonalUp") == QtNS.BDiagPattern
     assert hatch_named("diagonal down") == QtNS.FDiagPattern
@@ -7253,7 +7253,7 @@ def test_bluebeams_spellings_of_a_hatch_all_land(window):
 
 def test_a_line_type_is_drawn_with_its_own_dashes(window):
     from PySide6.QtCore import Qt as QtNS
-    from markforge.items.base import Style
+    from calcforge.items.base import Style
 
     assert Style(line_style="solid").dashes() == []
     assert Style(line_style="centre").dashes() == [10.0, 2.5, 2.0, 2.5]
@@ -7269,7 +7269,7 @@ def test_a_line_type_is_drawn_with_its_own_dashes(window):
 
 def test_a_dashed_line_from_a_toolset_comes_in_dashed(window):
     """It used to be written to a field no markup has, and came in solid."""
-    from markforge.io.btx import _style
+    from calcforge.io.btx import _style
 
     look = _style({"C": [0, 0, 0], "BS": {"W": 2.0, "S": "D", "D": [4, 3]}})
     assert look["line_style"] == "dash"
@@ -7391,7 +7391,7 @@ def test_dimension_text_size_is_editable_in_properties(window):
 
 def test_an_image_offers_border_style_but_not_hatch(window):
     """A photograph has an optional border and no painted hatch."""
-    from markforge.items.media import ImageItem
+    from calcforge.items.media import ImageItem
     from PySide6.QtWidgets import QComboBox
 
     image = ImageItem(rect=QRectF(0, 0, 120, 80))
@@ -7404,7 +7404,7 @@ def test_an_image_offers_border_style_but_not_hatch(window):
 
 
 def test_style_toolbar_tracks_real_selection_and_the_active_tool(window):
-    from markforge.ui.stylecaps import DASH, FILL, FONT, STROKE, WIDTH
+    from calcforge.ui.stylecaps import DASH, FILL, FONT, STROKE, WIDTH
 
     window.view.escape_everything()
     window.select_tool("line")
@@ -7497,7 +7497,7 @@ def test_the_snap_dropdown_toggles_a_target_through_qt(window):
 
 def test_the_bar_follows_the_page_it_is_on(window, tmp_path):
     from PySide6.QtGui import QImage
-    from markforge.io import pdfio
+    from calcforge.io import pdfio
 
     photo = QImage(1200, 800, QImage.Format_ARGB32)
     photo.fill(0xFFFFFFFF)
@@ -7586,8 +7586,8 @@ def test_the_number_knows_where_it_is(window):
 def test_a_dimensions_value_holds_still_while_its_text_is_turned(window, tmp_path):
     """It used to be worked out against whatever page the view was on."""
     from PySide6.QtGui import QImage
-    from markforge.core.document import PageScale
-    from markforge.io import pdfio
+    from calcforge.core.document import PageScale
+    from calcforge.io import pdfio
 
     # Two pages at different scales, and a dimension on the second.
     photo = QImage(400, 300, QImage.Format_ARGB32)
@@ -7620,7 +7620,7 @@ def test_a_dimensions_value_holds_still_while_its_text_is_turned(window, tmp_pat
 
 def _a_pdf_with_lines(window, tmp_path):
     """Export a page with known geometry, so it can be read back in."""
-    from markforge.io import export as export_io
+    from calcforge.io import export as export_io
 
     window.select_tool("rect")
     drag(window.view, 120, 150, 300, 260)
@@ -7646,8 +7646,8 @@ def test_opening_a_pdf_shows_the_pdf_and_makes_nothing(window, tmp_path):
     what opened was never quite the file, and a drawing set took a quarter of
     a minute and fifty megabytes to get there.
     """
-    from markforge.core.document import Document
-    from markforge.io import pdfio
+    from calcforge.core.document import Document
+    from calcforge.io import pdfio
 
     path = _a_pdf_with_lines(window, tmp_path)
     fresh = Document()
@@ -7664,7 +7664,7 @@ def test_opening_a_pdf_shows_the_pdf_and_makes_nothing(window, tmp_path):
 
 def test_a_pdf_page_still_draws_when_no_picture_of_it_was_kept(window, tmp_path):
     """No stored sheet, so the first paint has to come from the file."""
-    from markforge.io import pdfio
+    from calcforge.io import pdfio
 
     path = _a_pdf_with_lines(window, tmp_path)
     window.open_path(path)
@@ -7755,7 +7755,7 @@ def test_the_markups_on_a_page_are_there_to_be_worked_with(window, tmp_path):
 def test_an_inserted_pdf_brings_somebody_elses_markups_back_as_markups(
         window, tmp_path):
     """A cloud is a cloud, not sixty loose segments and not a picture."""
-    from markforge.io import pdfio
+    from calcforge.io import pdfio
 
     path = _a_pdf_with_lines(window, tmp_path)
     found = pdfio.markups(path, [0])
@@ -7773,8 +7773,8 @@ def test_an_inserted_pdf_brings_somebody_elses_markups_back_as_markups(
 
 def test_the_lines_come_in_knowing_they_are_the_pages_own(window, tmp_path):
     """The page's own drawing is the page's; a markup is somebody's."""
-    from markforge.core.document import Document
-    from markforge.io import pdfio
+    from calcforge.core.document import Document
+    from calcforge.io import pdfio
 
     path = _a_pdf_with_lines(window, tmp_path)
     fresh = Document()
@@ -7791,8 +7791,8 @@ def test_the_lines_come_in_knowing_they_are_the_pages_own(window, tmp_path):
 
 
 def test_the_lines_can_be_left_out_and_the_markups_read(window, tmp_path):
-    from markforge.core.document import Document
-    from markforge.io import pdfio
+    from calcforge.core.document import Document
+    from calcforge.io import pdfio
 
     path = _a_pdf_with_lines(window, tmp_path)
     fresh = Document()
@@ -7805,7 +7805,7 @@ def test_the_lines_can_be_left_out_and_the_markups_read(window, tmp_path):
 
 
 def test_a_file_that_cannot_be_read_that_way_still_comes_in(window, tmp_path):
-    from markforge.io import pdfio
+    from calcforge.io import pdfio
 
     broken = tmp_path / "not-really.pdf"
     broken.write_bytes(b"%PDF-1.4\nnothing to see here\n")
@@ -7813,7 +7813,7 @@ def test_a_file_that_cannot_be_read_that_way_still_comes_in(window, tmp_path):
 
 
 def test_a_curve_comes_across_as_something_to_measure(window):
-    from markforge.io import pdfio
+    from calcforge.io import pdfio
 
     run = pdfio._runs([["m", 0.0, 0.0], ["c", 0.0, 10.0, 10.0, 10.0, 10.0, 0.0]])
     assert len(run) == 1
@@ -7823,7 +7823,7 @@ def test_a_curve_comes_across_as_something_to_measure(window):
 
 
 def test_a_closed_path_comes_back_closed(window):
-    from markforge.io import pdfio
+    from calcforge.io import pdfio
 
     run = pdfio._runs([["m", 0.0, 0.0], ["l", 10.0, 0.0], ["l", 10.0, 10.0], ["z"]])
     assert run[0][0] == run[0][-1]
@@ -7836,7 +7836,7 @@ def test_a_closed_path_comes_back_closed(window):
 def test_the_properties_panel_says_where_it_is_and_how_big(window):
     """Typed, not nudged: a detail that starts exactly 40 mm in."""
     from PySide6.QtWidgets import QDoubleSpinBox, QGroupBox
-    from markforge.core.document import MM_TO_PT, PT_TO_MM
+    from calcforge.core.document import MM_TO_PT, PT_TO_MM
 
     window.select_tool("rect")
     drag(window.view, 120, 150, 320, 250)
@@ -7861,7 +7861,7 @@ def test_the_properties_panel_says_where_it_is_and_how_big(window):
 
 def test_typing_a_number_moves_and_resizes_it(window):
     from PySide6.QtWidgets import QDoubleSpinBox, QGroupBox
-    from markforge.core.document import MM_TO_PT
+    from calcforge.core.document import MM_TO_PT
 
     window.select_tool("rect")
     drag(window.view, 120, 150, 320, 250)
@@ -8012,7 +8012,7 @@ def test_moving_the_box_works_the_hinge_out_again(window):
 
 
 def test_a_leader_survives_a_round_trip_with_its_side_and_reach(window):
-    from markforge.items.base import build_item
+    from calcforge.items.base import build_item
 
     call = _callout(window)
     window.view.end_item_edit()
@@ -8031,7 +8031,7 @@ def test_a_leader_survives_a_round_trip_with_its_side_and_reach(window):
 
 def test_a_document_written_before_this_still_opens(window):
     """A leader saved as a free elbow comes back as a sensible one."""
-    from markforge.items.base import build_item
+    from calcforge.items.base import build_item
 
     older = {"type": "callout", "x": 0, "y": 0, "rect": [0, 0, 160, 60],
              "text": "note", "uid": "old",
@@ -8328,7 +8328,7 @@ def test_the_snapped_live_preview_is_the_geometry_that_gets_committed(window):
 
 def test_the_drawing_underneath_offers_corners_but_no_guides(window):
     """A PDF's line work is full of lines; every one would be a guide."""
-    from markforge.items.shapes import PolyItem as Poly
+    from calcforge.items.shapes import PolyItem as Poly
 
     settings = _quiet_snapping(window)
     settings.snap_to_content = True
@@ -8354,7 +8354,7 @@ def test_the_drawing_underneath_offers_corners_but_no_guides(window):
 
 
 def test_snapping_to_the_drawing_can_be_turned_off_on_its_own(window):
-    from markforge.items.shapes import PolyItem as Poly
+    from calcforge.items.shapes import PolyItem as Poly
 
     settings = _quiet_snapping(window)
     settings.snap_to_items = True
@@ -8668,7 +8668,7 @@ def test_the_vertical_bar_still_runs_through_every_page_when_turned(window):
 def test_saving_settles_the_markup_being_typed(window):
     """What is on the page when it is saved is what gets saved."""
     import tempfile, os
-    from markforge.io import project as project_io
+    from calcforge.io import project as project_io
 
     _open_words(window, "300 kerb")
     path = os.path.join(tempfile.mkdtemp(), "sheet.pdf")
@@ -8676,7 +8676,7 @@ def test_saving_settles_the_markup_being_typed(window):
     assert window.save_document()
     assert not window.view.is_editing(), "the markup was settled first"
 
-    from markforge.core.document import Document
+    from calcforge.core.document import Document
     reopened = Document()
     project_io.load_document(reopened, path)
     written = [i.get("html", "") or i.get("text", "") for page in reopened.pages
@@ -8811,8 +8811,8 @@ def test_the_style_toolbar_and_the_properties_panel_agree(window):
     you were allowed to change.
     """
     from tests.probe_audit import make
-    from markforge.ui.stylecaps import capabilities
-    from markforge.ui.tools import TOOLS
+    from calcforge.ui.stylecaps import capabilities
+    from calcforge.ui.tools import TOOLS
 
     disagreed = []
     for tool in TOOLS:
@@ -8992,8 +8992,8 @@ def test_order_moves_a_markup_in_front_of_and_behind_the_others(window):
 def _the_pages_own_line(window, at=(60, 200)):
     """A piece of line work that came in on the page, where an import puts it."""
     from PySide6.QtCore import QPointF
-    from markforge.io.pdfio import DRAWING_Z
-    from markforge.items.shapes import PolyItem
+    from calcforge.io.pdfio import DRAWING_Z
+    from calcforge.items.shapes import PolyItem
 
     line = PolyItem("polyline", [QPointF(0, 0), QPointF(300, 0)])
     line.from_drawing = True
@@ -9031,8 +9031,8 @@ def test_a_new_markup_lands_on_top_of_the_ones_already_there(window):
 
 def test_the_pages_own_line_work_is_not_dragged_about(window, tmp_path):
     """It is the drawing, not a markup on it: worth pointing at, not moving."""
-    from markforge.core.document import Document
-    from markforge.io import pdfio
+    from calcforge.core.document import Document
+    from calcforge.io import pdfio
 
     path = _a_pdf_with_lines(window, tmp_path)
     fresh = Document()
@@ -9124,7 +9124,7 @@ def test_the_grid_switch_actually_stops_grid_snapping(window):
 
 def test_property_mode_is_greyed_out_for_what_cannot_use_it(window):
     """An image has nothing worth drawing again without its contents."""
-    from markforge.ui import toolsets
+    from calcforge.ui import toolsets
 
     window.select_tool("rect")
     drag(window.view, 100, 100, 200, 160)
@@ -9195,7 +9195,7 @@ def test_turning_the_view_leaves_the_scrollbars_the_way_they_scroll(window, qapp
 
 def test_the_page_scale_is_shown_beside_the_page_in_the_panel(window):
     """Asked for so a scaled sheet can be told from an unscaled one at a glance."""
-    from markforge.core.document import PageScale
+    from calcforge.core.document import PageScale
 
     window.add_page()
     window.document.pages[1].scale = PageScale.from_ratio(50)
@@ -9260,7 +9260,7 @@ def test_a_rectangle_takes_a_point_in_or_out_and_becomes_a_polygon(window):
     the report asks for, arrived at by doing the thing rather than by choosing
     a command called "convert".
     """
-    from markforge.items.shapes import PolyItem, RectItem
+    from calcforge.items.shapes import PolyItem, RectItem
 
     box = _a_rectangle(window, 120, 120, 320, 240)
     window.select_tool("select")
@@ -9291,7 +9291,7 @@ def test_a_size_typed_in_a_unit_nobody_knows_is_refused_not_raised(window):
     parse_unit already reads None as "that is not a length"; only pint's own
     error was getting past them.
     """
-    from markforge.core.units import parse_unit
+    from calcforge.core.units import parse_unit
 
     assert parse_unit("10 mm") is not None
     assert parse_unit("10 lc") is None, "an unknown unit is not a length"
@@ -9552,7 +9552,7 @@ def test_split_view_action_turns_the_split_off(window):
 
 
 def test_check_spelling_walks_every_text_markup(window, monkeypatch):
-    from markforge.ui import dialogs
+    from calcforge.ui import dialogs
 
     window.select_tool("text")
     drag(window.view, 100, 100, 320, 150)
@@ -9578,7 +9578,7 @@ def test_check_spelling_walks_every_text_markup(window, monkeypatch):
 
 
 def test_format_painter_keeps_the_brush_over_markups(window):
-    from markforge.ui.view import format_painter_cursor
+    from calcforge.ui.view import format_painter_cursor
 
     _a_rectangle(window)
     window.format_painter()
@@ -9595,8 +9595,8 @@ def test_format_painter_keeps_the_brush_over_markups(window):
 def test_size_bar_matches_bluebeam_width_tab_height_enter(window, qapp):
     """Width, Height and Rotation beside the corner; type, Tab, Enter."""
     from PySide6.QtTest import QTest
-    from markforge.core.document import MM_TO_PT
-    from markforge.items.shapes import RectItem
+    from calcforge.core.document import MM_TO_PT
+    from calcforge.items.shapes import RectItem
 
     window.show()
     window.select_tool("rect")
@@ -9630,14 +9630,14 @@ def test_size_bar_matches_bluebeam_width_tab_height_enter(window, qapp):
 
 
 def test_old_hatches_keep_their_look_when_loaded(window):
-    from markforge.items.base import Style
+    from calcforge.items.base import Style
 
     old = Style.from_dict({"fill": "#2f9e44", "hatch": "cross"})
     assert old.hatch_color == "#2f9e44" and old.fill == ""
 
 
 def test_changing_the_scale_unit_updates_existing_dimensions(window):
-    from markforge.core.document import PageScale
+    from calcforge.core.document import PageScale
 
     window.current_page().scale = PageScale.from_ratio(100, "m")
     window.apply_scale_change()
@@ -9652,8 +9652,8 @@ def test_changing_the_scale_unit_updates_existing_dimensions(window):
 
 
 def test_a_diameter_reports_what_was_drawn_across_the_circle(window):
-    from markforge.core.document import PageScale
-    from markforge.items.measure import DIAMETER
+    from calcforge.core.document import PageScale
+    from calcforge.items.measure import DIAMETER
 
     window.current_page().scale = PageScale.from_ratio(1, "mm")
     item = MeasureItem(DIAMETER)
@@ -9667,7 +9667,7 @@ def test_a_diameter_reports_what_was_drawn_across_the_circle(window):
 
 def test_align_to_pdf_lines_up_with_the_drawing(window, tmp_path):
     import pymupdf
-    from markforge.io import pdfio
+    from calcforge.io import pdfio
 
     source = pymupdf.open()
     page = source.new_page(width=400, height=300)
@@ -9690,7 +9690,7 @@ def test_align_to_pdf_lines_up_with_the_drawing(window, tmp_path):
 
 
 def test_every_drawing_tool_has_a_drawing_cursor(window):
-    from markforge.ui.view import cloud_cursor, drawing_cursor
+    from calcforge.ui.view import cloud_cursor, drawing_cursor
 
     for key in ("callout", "cloud_callout", "cloud", "note", "snapshot", "rect"):
         window.select_tool(key)
@@ -9703,7 +9703,7 @@ def test_every_drawing_tool_has_a_drawing_cursor(window):
 
 
 def test_the_snapshot_marquee_is_not_the_last_rectangle_drawn(window):
-    from markforge.items.shapes import RectItem
+    from calcforge.items.shapes import RectItem
 
     window.select_tool("rect")
     drag(window.view, 100, 100, 200, 180)
@@ -9724,7 +9724,7 @@ def test_the_snapshot_marquee_is_not_the_last_rectangle_drawn(window):
 
 def test_hatch_scale_has_no_practical_limit(window):
     from PySide6.QtGui import QImage, QPainter
-    from markforge.ui.widgets import UnboundedSpin
+    from calcforge.ui.widgets import UnboundedSpin
 
     spin = window.hatch_scale_spin
     assert isinstance(spin, UnboundedSpin)
@@ -9803,7 +9803,7 @@ def test_markups_list_filters_sorts_and_changes_several_at_once(window):
 
 def test_search_finds_drawing_and_markup_text_and_replaces_in_markups(window, tmp_path):
     import pymupdf
-    from markforge.io import pdfio
+    from calcforge.io import pdfio
 
     source = pymupdf.open()
     page = source.new_page(width=400, height=300)
@@ -9852,7 +9852,7 @@ def test_ctrl_f_opens_the_search_panel(window):
 
 def _a_two_page_drawing(window, tmp_path):
     import pymupdf
-    from markforge.io import pdfio
+    from calcforge.io import pdfio
 
     source = pymupdf.open()
     for number in range(3):
@@ -9919,7 +9919,7 @@ def test_extract_and_split_save_pages_with_their_markups(window, tmp_path):
 
 def test_a_link_goes_to_a_page_and_is_a_real_link_in_the_pdf(window, tmp_path):
     import pymupdf
-    from markforge.items.link import LinkItem, PAGE, WEB
+    from calcforge.items.link import LinkItem, PAGE, WEB
 
     pages = _a_two_page_drawing(window, tmp_path)
     window.select_tool("link")
@@ -9935,7 +9935,7 @@ def test_a_link_goes_to_a_page_and_is_a_real_link_in_the_pdf(window, tmp_path):
     pages[0].frame.add_markup(web, QPointF(50, 200))
 
     saved = tmp_path / "linked.pdf"
-    from markforge.io import project
+    from calcforge.io import project
     project.save_document(window.document, str(saved))
     with pymupdf.open(saved) as pdf:
         kinds = {(link["kind"], link.get("page", -1), link.get("uri", ""))
@@ -9949,8 +9949,8 @@ def test_a_link_goes_to_a_page_and_is_a_real_link_in_the_pdf(window, tmp_path):
 
 def test_the_hatch_library_draws_every_pattern_behind_the_outline(window):
     from PySide6.QtGui import QImage, QPainter
-    from markforge.items import hatches
-    from markforge.items.base import Style
+    from calcforge.items import hatches
+    from calcforge.items.base import Style
 
     assert len(hatches.NAMES) >= 30
     assert hatches.key_for("Hatch-Concrete") == "concrete"
@@ -9982,7 +9982,7 @@ def test_the_hatch_library_draws_every_pattern_behind_the_outline(window):
 # ---------------------------------------------------------------------------
 
 def _length_at(frame, x, y, span):
-    from markforge.items.measure import LENGTH
+    from calcforge.items.measure import LENGTH
     item = MeasureItem(LENGTH)
     item.points = [QPointF(0, 0), QPointF(span, 0)]
     frame.add_markup(item, QPointF(x, y))
@@ -9991,7 +9991,7 @@ def _length_at(frame, x, y, span):
 
 
 def test_a_measurement_inside_a_viewport_uses_its_scale(window):
-    from markforge.core.document import MM_TO_PT, PageScale
+    from calcforge.core.document import MM_TO_PT, PageScale
     page = scaled_page(window, 100)
     frame = page.frame
     assert window.add_viewport(frame, QRectF(50, 50, 200, 200),
@@ -10010,7 +10010,7 @@ def test_a_measurement_inside_a_viewport_uses_its_scale(window):
 
 
 def test_viewports_are_saved_changed_and_deleted(window):
-    from markforge.core.document import Page, PageScale
+    from calcforge.core.document import Page, PageScale
     page = scaled_page(window, 100)
     window.add_viewport(page.frame, QRectF(10, 20, 100, 60),
                         PageScale.from_ratio(5), "Section")
@@ -10026,7 +10026,7 @@ def test_viewports_are_saved_changed_and_deleted(window):
 
 
 def test_the_viewport_tool_asks_for_a_scale(window, monkeypatch):
-    from markforge.ui import dialogs
+    from calcforge.ui import dialogs
     page = scaled_page(window, 100)
     window.interactive_prompts = True
     monkeypatch.setattr(dialogs.ScaleDialog, "exec", lambda self: (
@@ -10041,7 +10041,7 @@ def test_the_viewport_tool_asks_for_a_scale(window, monkeypatch):
 
 
 def test_a_viewport_frame_shows_only_once_clicked_into(window):
-    from markforge.core.document import PageScale
+    from calcforge.core.document import PageScale
     page = scaled_page(window, 100)
     frame = page.frame
     window.add_viewport(frame, QRectF(50, 50, 200, 200), PageScale.from_ratio(20), "A")
@@ -10056,8 +10056,8 @@ def test_a_viewport_frame_shows_only_once_clicked_into(window):
 
 
 def test_separate_x_and_y_scales_measure_true(window):
-    from markforge.core.document import MM_TO_PT, PageScale
-    from markforge.items.measure import AREA
+    from calcforge.core.document import MM_TO_PT, PageScale
+    from calcforge.items.measure import AREA
     page = window.current_page()
     window.set_page_scale(PageScale.from_ratio(100, y_ratio=50))
     frame = page.frame
@@ -10080,12 +10080,12 @@ def test_separate_x_and_y_scales_measure_true(window):
     box.refresh(page=page)
     assert box.width_value.to("mm").magnitude == pytest.approx(1000, rel=1e-3)
     assert box.height_value.to("mm").magnitude == pytest.approx(500, rel=1e-3)
-    from markforge.core.document import Page
+    from calcforge.core.document import Page
     assert Page.from_dict(page.to_dict()).scale.y_factor == pytest.approx(0.5)
 
 
 def test_the_page_panel_follows_and_changes_the_page(window):
-    from markforge.core.document import LANDSCAPE
+    from calcforge.core.document import LANDSCAPE
     panel = window.page_panel
     page = window.current_page()
     panel.refresh()
@@ -10109,7 +10109,7 @@ def test_replacing_an_image_keeps_its_box_like_word(window, tmp_path, monkeypatc
     """The new picture keeps its own shape, fitted into the old one's box."""
     from PySide6.QtGui import QImage
     from PySide6.QtWidgets import QApplication, QFileDialog
-    from markforge.items.media import ImageItem
+    from calcforge.items.media import ImageItem
 
     first = str(tmp_path / "tall.png")
     QImage(40, 80, QImage.Format_ARGB32).save(first)
@@ -10138,7 +10138,7 @@ def test_replacing_an_image_keeps_its_box_like_word(window, tmp_path, monkeypatc
 def test_an_image_offers_replace_on_its_right_click_menu(window, tmp_path, monkeypatch):
     from PySide6.QtGui import QImage
     from PySide6.QtWidgets import QFileDialog
-    from markforge.items.media import ImageItem
+    from calcforge.items.media import ImageItem
 
     path = str(tmp_path / "one.png")
     QImage(60, 40, QImage.Format_ARGB32).save(path)
@@ -10157,7 +10157,7 @@ def test_an_image_offers_replace_on_its_right_click_menu(window, tmp_path, monke
 
 def _exported_annotations(window, tmp_path, name="out.pdf"):
     import pymupdf
-    from markforge.io import export
+    from calcforge.io import export
     path = str(tmp_path / name)
     export.export_pdf(window.document, path)
     return path, pymupdf.open(path)
@@ -10184,8 +10184,8 @@ def test_a_clouds_drag_box_in_another_editor_is_the_cloud(window, tmp_path):
 
 def test_a_sketch_tool_goes_out_as_bluebeams_nested_group_and_comes_back(window, tmp_path):
     from collections import Counter
-    from markforge.io import btx, pdfmarkups, pdfvector
-    from markforge.items.base import build_item
+    from calcforge.io import btx, pdfmarkups, pdfvector
+    from calcforge.items.base import build_item
     import os
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     section = btx.read(os.path.join(here, "btx", "Structures - Sketch Tools.btx")).tools[6]
@@ -10207,7 +10207,7 @@ def test_a_sketch_tool_goes_out_as_bluebeams_nested_group_and_comes_back(window,
 
 
 def test_a_borderless_text_box_says_so_and_carries_its_rich_text(window, tmp_path):
-    from markforge.items.text import TextItem
+    from calcforge.items.text import TextItem
     frame = window.current_page().frame
     words = TextItem()
     words.style.stroke = ""
@@ -10235,8 +10235,8 @@ def test_markups_go_out_in_the_order_they_are_stacked(window, tmp_path):
 
 
 def test_an_arc_goes_out_curved_for_an_editor_that_redraws_it(window, tmp_path):
-    from markforge.io import pdfmarkups, pdfvector
-    from markforge.items.shapes import PolyItem
+    from calcforge.io import pdfmarkups, pdfvector
+    from calcforge.items.shapes import PolyItem
     frame = window.current_page().frame
     arc = PolyItem("arc")
     arc.points = [QPointF(0, 0), QPointF(100, 60), QPointF(200, 0)]
@@ -10250,7 +10250,7 @@ def test_an_arc_goes_out_curved_for_an_editor_that_redraws_it(window, tmp_path):
 
 def _page_from_a_pdf(window, tmp_path, rotation=0, crop=0):
     import pymupdf
-    from markforge.io import pdfio
+    from calcforge.io import pdfio
     path = str(tmp_path / f"sheet_{rotation}_{crop}.pdf")
     made = pymupdf.open()
     sheet = made.new_page(width=600, height=420)
@@ -10340,7 +10340,7 @@ def test_a_hatch_goes_out_as_a_pattern_the_editor_can_draw(window, tmp_path):
 @pytest.mark.parametrize("rotation", [0, 90, 270])
 def test_an_annotation_on_a_cropped_sheet_opens_where_it_is_drawn(tmp_path, rotation):
     import pymupdf
-    from markforge.io import pdfmarkups, pdfvector
+    from calcforge.io import pdfmarkups, pdfvector
     path = str(tmp_path / "marked.pdf")
     made = pymupdf.open()
     sheet = made.new_page(width=600, height=420)
@@ -10359,7 +10359,7 @@ def test_an_annotation_on_a_cropped_sheet_opens_where_it_is_drawn(tmp_path, rota
 
 @pytest.mark.parametrize("rotation", [90, 270])
 def test_a_note_on_a_turned_sheet_shows_where_it_was_put(window, tmp_path, rotation):
-    from markforge.items.text import NoteItem
+    from calcforge.items.text import NoteItem
     frame = _page_from_a_pdf(window, tmp_path, rotation, 30 if rotation == 270 else 0)
     note = NoteItem()
     frame.add_markup(note, QPointF(120, 90))
@@ -10371,7 +10371,7 @@ def test_a_note_on_a_turned_sheet_shows_where_it_was_put(window, tmp_path, rotat
 
 
 def test_arrowheads_go_out_filled_and_a_freehand_arrow_keeps_them(window, tmp_path):
-    from markforge.items.shapes import PolyItem
+    from calcforge.items.shapes import PolyItem
     frame = window.current_page().frame
     stroke = PolyItem("ink")
     stroke.points = [QPointF(0, 0), QPointF(40, 10), QPointF(40.1, 10.1), QPointF(90, 30)]
@@ -10386,7 +10386,7 @@ def test_arrowheads_go_out_filled_and_a_freehand_arrow_keeps_them(window, tmp_pa
 
 
 def test_a_measurement_dragged_into_a_viewport_takes_its_scale(window):
-    from markforge.core.document import MM_TO_PT, PageScale
+    from calcforge.core.document import MM_TO_PT, PageScale
     page = scaled_page(window, 100)
     frame = page.frame
     window.add_viewport(frame, QRectF(40, 40, 200, 200), PageScale.from_ratio(20), "A")
@@ -10434,7 +10434,7 @@ def test_shift_or_ctrl_dragging_a_shape_moves_or_copies_it_instead_of_reshaping(
 
 
 def test_a_thicker_line_keeps_its_dash_spacing_and_spacing_scales_it(window):
-    from markforge.items.base import Style
+    from calcforge.items.base import Style
     thin = Style(stroke="#000000", width=1.0, line_style="dash")
     thick = Style(stroke="#000000", width=4.0, line_style="dash")
     assert thin.dashes() == thick.dashes()
@@ -10462,8 +10462,8 @@ def test_every_cloud_has_a_cloud_size(window):
 
 def test_adding_a_leader_carries_the_callouts_own_picture(window):
     """Not a bare arrow or a bare cloud: the call-out being added to."""
-    from markforge.items.text import CalloutItem
-    from markforge.ui.view import arrow_leader_cursor, cloud_callout_cursor
+    from calcforge.items.text import CalloutItem
+    from calcforge.ui.view import arrow_leader_cursor, cloud_callout_cursor
     frame = window.current_page().frame
     note = CalloutItem()
     frame.add_markup(note, QPointF(200, 200))
@@ -10481,7 +10481,7 @@ def test_adding_a_leader_carries_the_callouts_own_picture(window):
 
 
 def test_the_format_painter_carries_the_whole_look_like_bluebeams(window):
-    from markforge.items.text import TextItem
+    from calcforge.items.text import TextItem
     frame = window.current_page().frame
     source = RectItem("cloud")
     source.set_local_rect(QRectF(0, 0, 100, 60))

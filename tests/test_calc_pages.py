@@ -7,12 +7,12 @@ from __future__ import annotations
 
 from PySide6.QtCore import QPointF
 
-from markforge.calc.docsheet import sheet_for
-from markforge.calc.editor import MathEditor
-from markforge.calc.engine.display import display_text
-from markforge.calc.record import region_to_data
-from markforge.calc.worksheet import Worksheet
-from markforge.items.calc import CalcItem
+from calcforge.calc.docsheet import sheet_for
+from calcforge.calc.editor import MathEditor
+from calcforge.calc.engine.display import display_text
+from calcforge.calc.record import region_to_data
+from calcforge.calc.worksheet import Worksheet
+from calcforge.items.calc import CalcItem
 
 
 def typed(keys: str) -> dict:

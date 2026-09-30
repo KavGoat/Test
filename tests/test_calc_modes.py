@@ -10,10 +10,10 @@ import pytest
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtTest import QTest
 
-from markforge.calc.engine.display import display_text
-from markforge.items.calc import CalcItem, CalcTextItem
-from markforge.items.text import TextItem
-from markforge.ui import calcdialogs
+from calcforge.calc.engine.display import display_text
+from calcforge.items.calc import CalcItem, CalcTextItem
+from calcforge.items.text import TextItem
+from calcforge.ui import calcdialogs
 from tests.test_usability import click, hover, press_key
 
 
@@ -118,7 +118,7 @@ def test_calc_mode_number_keys_are_numbers_not_my_tools(win):
     assert win.view.calc.item is not None and win.view.calc.item.text() == "1"
 
 
-def test_markup_mode_keeps_markforges_tool_keys(win):
+def test_markup_mode_keeps_calcforges_tool_keys(win):
     p = at(win, 100, 120)
     click(win.view, p.x(), p.y())
     typed(win, "r")
@@ -263,7 +263,7 @@ def test_symbol_keys_type_their_maths_meaning_in_an_equation(win):
 
 
 def test_smath_keys_can_be_rebound(win):
-    from markforge.ui import dialogs
+    from calcforge.ui import dialogs
     dialog = dialogs.ShortcutManagerDialog(win.shortcuts, win)
     dialog.editors["smath.at_least"].setText("Ctrl+Shift+0")
     dialog.apply()
@@ -275,8 +275,8 @@ def test_smath_keys_can_be_rebound(win):
 
 
 def test_the_shortcut_manager_has_an_smath_section_and_checks_clashes_by_where(win):
-    from markforge.ui import dialogs
-    from markforge.ui.shortcuts import BY_ID
+    from calcforge.ui import dialogs
+    from calcforge.ui.shortcuts import BY_ID
     dialog = dialogs.ShortcutManagerDialog(win.shortcuts, win)
     smath = [b for b in win.shortcuts.bindings() if b.category == "SMath"]
     assert {"smath.at_least", "smath.transpose", "smath.insert_function", "command.calc_mode",

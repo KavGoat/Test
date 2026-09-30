@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import pytest
 
-from markforge.calc.engine.display import display_text
-from markforge.calc.engine.model import Frac
-from markforge.calc.worksheet import Worksheet
+from calcforge.calc.engine.display import display_text
+from calcforge.calc.engine.model import Frac
+from calcforge.calc.worksheet import Worksheet
 
 
 def sheet(*lines):
@@ -532,7 +532,7 @@ def test_cross_product_and_approx():
 # -- subscripts, typed with "." (observed on SMath Cloud) -----------------------------
 
 def _ed(keys):
-    from markforge.calc.editor import MathEditor
+    from calcforge.calc.editor import MathEditor
 
     e = MathEditor()
     for k in keys if isinstance(keys, list) else list(keys):
@@ -659,7 +659,7 @@ def test_constants_match_smath(expr, shown):
 
 
 def test_constants_table_lists_every_constant():
-    from markforge.calc.engine.constants import constants
+    from calcforge.calc.engine.constants import constants
 
     typed = [c.typed for c in constants()]
     assert typed[:4] == ["π", "e", "i", "∞"]
@@ -676,10 +676,10 @@ def test_variable_named_like_a_unit_wins():
 # -- symbolic differentiation and the functions completed from the catalogue --------------
 
 def _ev(text, *defs):
-    from markforge.calc.engine.display import value_to_text
-    from markforge.calc.engine.evaluator import Context, Evaluator
-    from markforge.calc.engine.linear import parse_text
-    from markforge.calc.engine.parser import parse_row
+    from calcforge.calc.engine.display import value_to_text
+    from calcforge.calc.engine.evaluator import Context, Evaluator
+    from calcforge.calc.engine.linear import parse_text
+    from calcforge.calc.engine.parser import parse_row
 
     ev, ctx = Evaluator(), Context()
     for d in defs:
@@ -699,7 +699,7 @@ def _ev(text, *defs):
 ])
 def test_diff_formula_only_through_symbolic(expr, shown):
     # outside symbolic(...) the worksheet is numeric: x needs a value
-    from markforge.calc.engine.errors import SMathError
+    from calcforge.calc.engine.errors import SMathError
 
     with pytest.raises(SMathError, match="x - not defined"):
         _ev(expr)

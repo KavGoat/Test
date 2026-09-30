@@ -4,8 +4,8 @@ from __future__ import annotations
 import random
 import time
 
-from markforge.calc.engine.display import display_text
-from markforge.calc.worksheet import Worksheet
+from calcforge.calc.engine.display import display_text
+from calcforge.calc.worksheet import Worksheet
 
 
 def shown(ws):

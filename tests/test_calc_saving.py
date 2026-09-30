@@ -14,10 +14,10 @@ import pymupdf
 import pytest
 from PySide6.QtCore import QPointF, QRectF, Qt
 
-from markforge.calc.engine.display import display_text
-from markforge.io import calclayer, pdfbase
-from markforge.io import project as project_io
-from markforge.items.calc import CalcItem
+from calcforge.calc.engine.display import display_text
+from calcforge.io import calclayer, pdfbase
+from calcforge.io import project as project_io
+from calcforge.items.calc import CalcItem
 from tests.test_calc_modes import at, into_calc_mode, typed
 from tests.test_usability import click, press_key
 
@@ -103,7 +103,7 @@ def test_equations_are_saved_as_real_text_in_a_tagged_layer(win, tmp_path):
 
 def test_another_reader_can_move_the_markups_but_not_the_equations(win, tmp_path):
     from pypdf import PdfReader
-    from markforge.items.shapes import RectItem
+    from calcforge.items.shapes import RectItem
 
     write_lines(win, ["a:1.5"])
     box = RectItem()
@@ -160,7 +160,7 @@ def test_an_exported_page_looks_like_the_screen_at_any_resolution(win, tmp_path)
     """Export and print draw at the device's resolution; SMath's fonts are in
     points, so without care they come out bigger than the layout (a third too
     big at 200 dpi, running into each other at 300)."""
-    from markforge.io import export as export_io
+    from calcforge.io import export as export_io
 
     write_lines(win, ["P1:4.5*2", "P1=", "Q1:P1^2+sqrt(P1)", "Q1="])
     for resolution in (150, 300, 600):
@@ -182,7 +182,7 @@ def test_reopening_rebuilds_live_equations_and_takes_the_layer_off(win, tmp_path
     assert win.document.open_warnings == []
     # the page underneath is the page without CalcForge's drawing on it
     page = win.document.pages[0]
-    from markforge.items.calc import created_here
+    from calcforge.items.calc import created_here
     assert created_here(page), "a page written here stays a page written here (SMath's margins)"
     for data in win.document.assets.values():
         if data[:4] == b"%PDF":
@@ -221,7 +221,7 @@ def test_a_drawing_with_equations_reopens_on_its_own_page(win, tmp_path):
 
 
 def test_repeated_saves_do_not_grow_the_file(win, tmp_path):
-    from markforge.items.shapes import RectItem
+    from calcforge.items.shapes import RectItem
 
     source = str(tmp_path / "drawing.pdf")
     a_drawing(source, pages=2)

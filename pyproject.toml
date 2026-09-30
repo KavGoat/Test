@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "markforge"
+name = "calcforge"
 version = "1.0.0"
-description = "A drawing-review markup editor: every markup a real PDF annotation"
+description = "PDF markup and live SMath-style calculations on engineering drawings"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -17,17 +17,17 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# pypdf is here to check what MarkForge writes with a reader that is
+# pypdf is here to check what CalcForge writes with a reader that is
 # not the one that wrote it; pyHanko signs a test PDF and checks the
 # signature still holds after CalcForge saves it. Nothing in the application
 # uses either.
 dev = ["pytest>=7.4", "pypdf>=6.14,<7", "hypothesis>=6", "pyhanko>=0.20"]
 
 [project.gui-scripts]
-markforge = "markforge.app:main"
+calcforge = "calcforge.app:main"
 
 [tool.setuptools.packages.find]
-include = ["markforge*"]
+include = ["calcforge*"]
 
 [tool.setuptools.package-data]
-markforge = ["py.typed", "data/*.txt.gz", "calc/ui/icons/*"]
+calcforge = ["py.typed", "data/*.txt.gz", "calc/ui/icons/*"]

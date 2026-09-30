@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Launch MarkForge."""
+"""Launch CalcForge."""
 import sys
 
 if __name__ == "__main__":
     import multiprocessing
     multiprocessing.freeze_support()
-    from markforge.app import main
+    from calcforge.app import main
     sys.exit(main())

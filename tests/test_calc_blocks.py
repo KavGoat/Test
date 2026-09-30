@@ -10,9 +10,9 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 import tests.calc.test_calcforge_window as cw
-from markforge.calc.docsheet import PT_PER_PX, sheet_for
-from markforge.calc.engine.display import display_text
-from markforge.items.calc import CalcBlockItem, CalcItem
+from calcforge.calc.docsheet import PT_PER_PX, sheet_for
+from calcforge.calc.engine.display import display_text
+from calcforge.items.calc import CalcBlockItem, CalcItem
 from tests.test_usability import drag
 
 
@@ -206,7 +206,7 @@ def test_a_block_saves_as_page_drawing_and_comes_back(v, tmp_path):
 
 
 def test_a_snapshot_takes_the_block_as_line_work(v):
-    from markforge.items.calc import CalcDrawingItem
+    from calcforge.items.calc import CalcDrawingItem
     block, outside, inside, after = two_checks(v)
     drawing = CalcDrawingItem.of(block)
     assert "<path" in drawing.stamp_svg or "<rect" in drawing.stamp_svg

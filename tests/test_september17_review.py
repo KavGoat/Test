@@ -6,15 +6,15 @@ from PySide6.QtGui import QFontInfo, QImage, QPainter
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QDoubleSpinBox, QFontComboBox, QSlider, QSpinBox
 
-from markforge.items.shapes import PolyItem, RectItem
-from markforge.items.base import build_item
-from markforge.items.snapshot import SnapshotItem
-from markforge.items.contents import ContentsItem
-from markforge.items.measure import CountItem
-from markforge.items.shapes import SketchItem
-from markforge.items.text import FlagItem, StampItem, TextItem
-from markforge.ui.stylecaps import DASH, FONT, HATCH, OPACITY, capabilities
-from markforge.io import export, project
+from calcforge.items.shapes import PolyItem, RectItem
+from calcforge.items.base import build_item
+from calcforge.items.snapshot import SnapshotItem
+from calcforge.items.contents import ContentsItem
+from calcforge.items.measure import CountItem
+from calcforge.items.shapes import SketchItem
+from calcforge.items.text import FlagItem, StampItem, TextItem
+from calcforge.ui.stylecaps import DASH, FONT, HATCH, OPACITY, capabilities
+from calcforge.io import export, project
 from tests.test_usability import click, hover, drag, press_key, type_text
 
 
@@ -53,7 +53,7 @@ def test_pdf_content_snaps_without_vector_import(window, tmp_path):
 
 
 def test_pdf_snap_reaches_vectors_after_the_import_limit(window, tmp_path, monkeypatch):
-    from markforge.io import pdfio
+    from calcforge.io import pdfio
 
     source = pymupdf.open()
     page = source.new_page(width=400, height=300)
@@ -126,7 +126,7 @@ def test_second_line_point_snaps_to_alignment_and_clears_guides(window, qapp):
                for rect in paints.rects), "the old guide must be erased end to end"
     hover(window.view, 102, 340)
     import os
-    folder = os.environ.get("MARKFORGE_REVIEW_IMAGES")
+    folder = os.environ.get("CALCFORGE_REVIEW_IMAGES")
     if folder:
         os.makedirs(folder, exist_ok=True)
         qapp.processEvents()
@@ -287,7 +287,7 @@ def test_contents_links_survive_save_and_export_without_prior_paint(window, tmp_
 
 
 def test_add_pages_accepts_count_and_paper_size_in_one_undo(window, monkeypatch):
-    from markforge.ui import dialogs
+    from calcforge.ui import dialogs
     window.interactive_prompts = True
     def choose(dialog):
         dialog.count.setValue(3)
@@ -342,7 +342,7 @@ def test_break_controls_persist(window, qapp):
          height_handle.x(), height_handle.y() + 6)
     assert item.break_settings(0)[1] > 20
     import os
-    folder = os.environ.get("MARKFORGE_REVIEW_IMAGES")
+    folder = os.environ.get("CALCFORGE_REVIEW_IMAGES")
     if folder:
         window.show()
         qapp.processEvents()
@@ -355,7 +355,7 @@ def test_window_fits_standard_display_and_capture(window, qapp):
     qapp.processEvents()
     assert window.minimumSizeHint().width() <= 1280
     import os
-    folder = os.environ.get("MARKFORGE_REVIEW_IMAGES")
+    folder = os.environ.get("CALCFORGE_REVIEW_IMAGES")
     if folder:
         os.makedirs(folder, exist_ok=True)
         window.grab().save(os.path.join(folder, "arrow-toolbar.png"))

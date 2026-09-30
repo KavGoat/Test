@@ -6,9 +6,9 @@ import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
 
-from markforge.calc.engine.display import display_text
-from markforge.items.calc import CalcItem, CalcTextItem
-from markforge.ui import calcdialogs
+from calcforge.calc.engine.display import display_text
+from calcforge.items.calc import CalcItem, CalcTextItem
+from calcforge.ui import calcdialogs
 from tests.test_calc_modes import at, into_calc_mode, typed
 from tests.test_usability import click, press_key
 
@@ -241,7 +241,7 @@ def test_a_setting_applies_to_every_selected_equation(win):
 
 
 def test_font_colour_and_they_survive_saving(win, tmp_path):
-    from markforge.ui import calcmenu
+    from calcforge.ui import calcmenu
     from tests.test_calc_saving import reopen, save_to
     item = an_equation(win, "f8:12")
     menu_action(right_click(win, item), "Equation", "Font", "14 pt").trigger()
@@ -268,7 +268,7 @@ def test_go_to_definition(win):
 
 
 def test_plot_settings_from_the_menu(win):
-    from markforge.ui import calcmenu
+    from calcforge.ui import calcmenu
     into_calc_mode(win, 100, 150)
     QTest.mouseClick(toolbar_button(win, "Plot"), Qt.LeftButton)
     typed(win, "x")
@@ -309,7 +309,7 @@ def test_equation_settings_in_the_properties_panel(win):
 
 @pytest.fixture
 def prefs():
-    from markforge.ui import preferences
+    from calcforge.ui import preferences
     kept = preferences.current()
     yield preferences
     preferences.apply(kept)
@@ -356,7 +356,7 @@ def test_a_documents_result_format_travels_with_it(win, prefs, tmp_path):
 
 def test_the_preferences_dialog_has_the_calculation_defaults(win, prefs):
     from PySide6.QtWidgets import QSpinBox
-    from markforge.ui import dialogs
+    from calcforge.ui import dialogs
     dialog = dialogs.PreferencesDialog(prefs.current(), win)
     spin = dialog.findChild(QSpinBox, "resultDecimals")
     spin.setValue(3)
@@ -386,7 +386,7 @@ def a_plot(window):
 
 def inside(plot, fx=0.5, fy=0.5):
     """A scene point inside the plot's graph."""
-    from markforge.calc.docsheet import PT_PER_PX
+    from calcforge.calc.docsheet import PT_PER_PX
     rect = plot._view.plot_rect()
     x = (rect.left() + rect.width() * fx) * PT_PER_PX
     y = (rect.top() + rect.height() * fy) * PT_PER_PX
@@ -483,7 +483,7 @@ def test_calculation_text_is_spell_checked(win):
     QTest.mouseClick(toolbar_button(win, "Calc text"), Qt.LeftButton)
     typed(win, "The beem is fine")
     press_key(win.view, Qt.Key_Escape)
-    from markforge.core.spelling import shared
+    from calcforge.core.spelling import shared
     if not shared().ready():
         pytest.skip("no dictionary here")
     words = [w for _item, _s, _l, w in win.spelling_mistakes()]
@@ -492,7 +492,7 @@ def test_calculation_text_is_spell_checked(win):
 
 def test_calculation_text_lands_on_the_grid_when_moved(win):
     from tests.test_usability import drag
-    from markforge.ui.calcedit import GRID_PT
+    from calcforge.ui.calcedit import GRID_PT
     into_calc_mode(win)
     QTest.mouseClick(toolbar_button(win, "Calc text"), Qt.LeftButton)
     typed(win, "Note")
@@ -536,7 +536,7 @@ def test_copied_equations_are_text_and_a_picture_outside_and_live_inside(win):
 
 
 def test_plain_text_of_equations():
-    from markforge.calc.record import plain_units
+    from calcforge.calc.record import plain_units
     assert plain_units("54 kN m") == "54 kN·m"
     assert plain_units("12.25 m^2") == "12.25 m²"
     assert plain_units("9.81 m s^-2") == "9.81 m·s⁻²"

@@ -11,8 +11,8 @@ import pytest
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtTest import QTest
 
-from markforge.items.shapes import RectItem
-from markforge.ui.scene import PAGE_GAP, DocumentScene, PageFrame
+from calcforge.items.shapes import RectItem
+from calcforge.ui.scene import PAGE_GAP, DocumentScene, PageFrame
 
 from tests.test_usability import click, drag, markups, on_page, only
 
@@ -187,7 +187,7 @@ def test_the_grid_belongs_to_the_page_not_the_canvas(window):
 # ---------------------------------------------------------------------------
 
 def test_the_desk_is_a_different_colour_from_the_paper(window):
-    from markforge.theme import CANVAS, LIGHT
+    from calcforge.theme import CANVAS, LIGHT
 
     desk = window.view.scene().backgroundBrush().color()
     assert desk.name() == CANVAS[LIGHT]
@@ -289,7 +289,7 @@ def test_a_page_corner_can_be_centred_and_remains_under_zoom_cursor(window, qapp
 
 
 def test_the_wheel_can_be_set_to_scroll_instead(window):
-    from markforge.ui import preferences
+    from calcforge.ui import preferences
 
     _three_pages(window)
     prefs = preferences.current()
@@ -348,7 +348,7 @@ def test_ctrl_does_the_opposite_of_whatever_the_wheel_is_set_to(window):
     scrolling off rather than swapping it, so there was no way to scroll with
     the wheel at all once zoom was chosen.
     """
-    from markforge.ui import preferences
+    from calcforge.ui import preferences
 
     _three_pages(window)
     prefs = preferences.current()
@@ -442,7 +442,7 @@ def test_ctrl_page_down_goes_to_the_next_page(window):
 
 
 def test_zoom_stays_within_its_limits(window):
-    from markforge.ui.view import MAX_ZOOM, MIN_ZOOM
+    from calcforge.ui.view import MAX_ZOOM, MIN_ZOOM
 
     for _ in range(60):
         window.view.zoom_in()
@@ -475,7 +475,7 @@ def test_actual_size_is_one_to_one(window):
 
 def test_the_insertion_point_is_off_by_default(window):
     """Ordinary pointer placement remains the shipped behavior."""
-    from markforge.ui import preferences
+    from calcforge.ui import preferences
 
     assert not preferences.current().insertion_point
     assert window.view._insertion_point is None

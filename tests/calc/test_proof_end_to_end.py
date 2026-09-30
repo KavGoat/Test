@@ -23,10 +23,10 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from markforge.calc.engine.display import DNum, DQuantity, display_text
-from markforge.calc.engine.unitdata import BASE, UNITS
-from markforge.calc.engine.verify import parse_shown, parse_unit_text
-from markforge.calc.worksheet import Worksheet
+from calcforge.calc.engine.display import DNum, DQuantity, display_text
+from calcforge.calc.engine.unitdata import BASE, UNITS
+from calcforge.calc.engine.verify import parse_shown, parse_unit_text
+from calcforge.calc.worksheet import Worksheet
 
 mpmath.mp.dps = 60
 N_EXAMPLES = int(os.environ.get("PROOF_EXAMPLES", "300"))

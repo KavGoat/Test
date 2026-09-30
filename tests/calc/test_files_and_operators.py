@@ -5,9 +5,9 @@ import os
 
 import pytest
 
-from markforge.calc.engine.display import display_text
+from calcforge.calc.engine.display import display_text
 from tests.calc.smfile import dumps, loads
-from markforge.calc.worksheet import Worksheet
+from calcforge.calc.worksheet import Worksheet
 
 
 def _type(ws, x, y, text):

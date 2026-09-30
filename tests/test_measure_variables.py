@@ -7,8 +7,8 @@ from __future__ import annotations
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtWidgets import QLineEdit
 
-from markforge.calc.docsheet import PT_PER_PX
-from markforge.items.measure import LENGTH, MeasureItem
+from calcforge.calc.docsheet import PT_PER_PX
+from calcforge.items.measure import LENGTH, MeasureItem
 from tests.test_calc_blocks import equations, settle, shown, v  # noqa: F401
 
 

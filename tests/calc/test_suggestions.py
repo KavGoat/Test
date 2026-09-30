@@ -12,8 +12,8 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from markforge.calc.ui.suggest import SITE_HIDDEN_UNITS, suggestion_list  # noqa: E402
-from markforge.calc.worksheet import Worksheet  # noqa: E402
+from calcforge.calc.ui.suggest import SITE_HIDDEN_UNITS, suggestion_list  # noqa: E402
+from calcforge.calc.worksheet import Worksheet  # noqa: E402
 
 DATA = json.loads((Path(__file__).parent / "data" / "smath_suggestions.json").read_text(encoding="utf-8"))
 CASES = [(group, pf) for group in DATA for pf in DATA[group]["lists"]]
@@ -21,7 +21,7 @@ CASES = [(group, pf) for group in DATA for pf in DATA[group]["lists"]]
 
 @pytest.fixture
 def smath_order(monkeypatch):
-    import markforge.calc.ui.suggest as suggest
+    import calcforge.calc.ui.suggest as suggest
 
     monkeypatch.setattr(suggest, "SMATH_ORDER", True)
 
@@ -40,9 +40,9 @@ def test_suggestions_match_smath(group, prefix, smath_order):
     got = [label for label, _ in suggestion_list(prefix, ws._context_before(here).names())]
     # the replica also lists the units the site hides behind a case variant,
     # and SI-prefixed units SMath's library lacks (hPa, daN, kWh...)
-    from markforge.calc.engine.extra_units import ADDED
+    from calcforge.calc.engine.extra_units import ADDED
 
-    from markforge.calc.engine.extra_functions import EXTRA_FUNCTIONS
+    from calcforge.calc.engine.extra_functions import EXTRA_FUNCTIONS
 
     extra = SITE_HIDDEN_UNITS | set(ADDED)
     got = [x for x in got if x.split(" ")[0] not in EXTRA_FUNCTIONS]  # symbolic() is not an SMath function
@@ -63,7 +63,7 @@ def test_case_variant_units_are_listed():
 
 
 def _entries(prefix, defs=()):
-    from markforge.calc.ui.suggest import suggestion_entries
+    from calcforge.calc.ui.suggest import suggestion_entries
 
     ws = Worksheet()
     for k, d in enumerate(defs):
@@ -97,7 +97,7 @@ def test_entries_carry_icon_kind_origin_and_description():
     ("x", ["x:1"], "x"),
 ])
 def test_initial_selection_matches_smath(prefix, defs, selected, smath_order):
-    from markforge.calc.ui.suggest import selected_index
+    from calcforge.calc.ui.suggest import selected_index
 
     es = _entries(prefix, defs)
     k = selected_index(es, prefix)

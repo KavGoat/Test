@@ -10,11 +10,11 @@ from fractions import Fraction
 
 import pytest
 
-from markforge.calc.engine.evaluator import Context, Evaluator
-from markforge.calc.engine.extra_units import ADDED
-from markforge.calc.engine.linear import parse_text
-from markforge.calc.engine.parser import parse_row
-from markforge.calc.engine.unitdata import BASE, UNITS
+from calcforge.calc.engine.evaluator import Context, Evaluator
+from calcforge.calc.engine.extra_units import ADDED
+from calcforge.calc.engine.linear import parse_text
+from calcforge.calc.engine.parser import parse_row
+from calcforge.calc.engine.unitdata import BASE, UNITS
 
 # SI base unit exponents: m kg s A K mol cd
 def D(m=0, kg=0, s=0, A=0, K=0, mol=0, cd=0):
@@ -139,8 +139,8 @@ def test_every_unit_is_a_positive_finite_factor_with_integer_or_half_dims():
 
 
 def _shown_back(q, fmt):
-    from markforge.calc.engine.display import display_quantity, display_text
-    from markforge.calc.engine.verify import parse_shown, parse_unit_text
+    from calcforge.calc.engine.display import display_quantity, display_text
+    from calcforge.calc.engine.verify import parse_shown, parse_unit_text
 
     text = display_text(display_quantity(q, fmt))
     x, unit = parse_shown(text)
@@ -153,9 +153,9 @@ def test_every_unit_displays_its_own_size(engineering):
     """Every unit in the table, shown as a result ('u =), reads back as
     exactly that unit: the shown number times the shown unit is the unit's
     size, with the same dimensions (this is what caught 'P = 0.1 P)."""
-    from markforge.calc.engine.numformat import NumberFormat
-    from markforge.calc.engine.units import Quantity
-    from markforge.calc.engine.verify import _dims_of
+    from calcforge.calc.engine.numformat import NumberFormat
+    from calcforge.calc.engine.units import Quantity
+    from calcforge.calc.engine.verify import _dims_of
 
     fmt = NumberFormat()
     fmt.engineering = engineering

@@ -8,8 +8,8 @@ import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDockWidget, QToolBar
 
-from markforge.ui.docks import PanelDock
-from markforge.settings import app_settings
+from calcforge.ui.docks import PanelDock
+from calcforge.settings import app_settings
 
 
 def panels(window):
@@ -105,7 +105,7 @@ def test_a_toolbar_can_be_hidden_and_brought_back(window):
 
 
 def test_choosing_which_tools_are_on_the_toolbar(window, monkeypatch):
-    from markforge.ui import dialogs
+    from calcforge.ui import dialogs
 
     monkeypatch.setattr(dialogs.ToolbarDialog, "exec",
                         lambda self: dialogs.QDialog.Accepted)
@@ -122,8 +122,8 @@ def test_choosing_which_tools_are_on_the_toolbar(window, monkeypatch):
 
 
 def test_the_toolbar_dialog_lists_every_tool(window):
-    from markforge.ui import dialogs
-    from markforge.ui.tools import TOOLS
+    from calcforge.ui import dialogs
+    from calcforge.ui.tools import TOOLS
 
     dialog = dialogs.ToolbarDialog(TOOLS, {t.key for t in TOOLS}, window)
     assert set(dialog.boxes) == {tool.key for tool in TOOLS}
@@ -164,7 +164,7 @@ def test_resetting_the_layout_puts_everything_back(window):
 
 def test_the_dark_theme_reaches_the_palette_as_well_as_the_stylesheet(window, qapp):
     from PySide6.QtGui import QPalette
-    from markforge.theme import DARK, LIGHT, tokens
+    from calcforge.theme import DARK, LIGHT, tokens
 
     window.toggle_theme(True)
     palette = qapp.palette()
@@ -179,7 +179,7 @@ def test_the_dark_theme_reaches_the_palette_as_well_as_the_stylesheet(window, qa
 
 
 def test_icons_are_redrawn_for_the_theme(window):
-    from markforge.ui import icons
+    from calcforge.ui import icons
 
     window.toggle_theme(True)
     dark_ink = icons.INK
@@ -245,7 +245,7 @@ def test_a_toolbar_has_a_grip_to_pick_it_up_by(window):
 
 def test_a_rebound_key_is_saved_the_moment_it_changes(window):
     """A rebinding that only survives a clean quit does not survive a crash."""
-    from markforge.ui.shortcuts import ShortcutManager
+    from calcforge.ui.shortcuts import ShortcutManager
 
     window.shortcuts.set_sequence("tool.rect", "y")
     fresh = ShortcutManager()           # as if the application had restarted
@@ -253,8 +253,8 @@ def test_a_rebound_key_is_saved_the_moment_it_changes(window):
 
 
 def test_the_theme_is_remembered(window):
-    from markforge.app import current_theme
-    from markforge.theme import DARK, LIGHT
+    from calcforge.app import current_theme
+    from calcforge.theme import DARK, LIGHT
 
     window.toggle_theme(True)
     assert current_theme() == DARK
@@ -289,7 +289,7 @@ def test_a_direct_layout_save_consumes_the_pending_timer(window):
 
 def test_the_lookup_panels_are_each_behind_their_own_icon(window):
     """No stack of tabs along the bottom: every panel has an icon on a rail."""
-    from markforge.ui.rail import LEFT, RIGHT
+    from calcforge.ui.rail import LEFT, RIGHT
 
     for dock in window.reference_docks:
         name = dock.objectName()
@@ -470,7 +470,7 @@ def test_rail_icons_can_be_reordered_top_to_bottom(window):
     window.move_panel_to_side(last, "left", 0)
     assert rail.order()[0] == last
     assert window.panel_sides[last] == "left"
-    from markforge.ui.rail import load_order
+    from calcforge.ui.rail import load_order
     assert load_order()[0] == last
     # And a drop between two icons lands between them.
     first = rail.order()[0]

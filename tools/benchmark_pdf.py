@@ -66,10 +66,10 @@ def mixed_pdf():
 def measure(application, data, width, height, processes, rounds, legacy=None, tile=1024, page_index=0):
     from PySide6.QtCore import QTimer, Qt
     from PySide6.QtGui import QImage
-    from markforge.io import pdftiles
+    from calcforge.io import pdftiles
     module = pdftiles
     if legacy:
-        name = 'markforge.io._benchmark_legacy'
+        name = 'calcforge.io._benchmark_legacy'
         spec = importlib.util.spec_from_file_location(name, legacy)
         module = importlib.util.module_from_spec(spec)
         sys.modules[name] = module
@@ -141,7 +141,7 @@ def main():
     args = parser.parse_args()
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     from PySide6.QtWidgets import QApplication
-    from markforge.pdf import engine
+    from calcforge.pdf import engine
     application = QApplication([])
     data = Path(args.pdf).read_bytes() if args.pdf else (mixed_pdf() if args.fixture == 'mixed' else synthetic_pdf())
     document = engine.open_bytes(data)

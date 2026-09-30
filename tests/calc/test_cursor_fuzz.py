@@ -7,8 +7,8 @@ import random
 
 import pytest
 
-from markforge.calc.editor import MathEditor
-from markforge.calc.engine.model import Box
+from calcforge.calc.editor import MathEditor
+from calcforge.calc.engine.model import Box
 KEYS = list("0123456789xyab+-*/^(),'") + ["RIGHT","RIGHT","'kN","sqrt(","mat(","if(","sin("]
 def state(ed):
     return (id(ed.row), ed.pos, ed.node and (id(ed.node[0]), ed.node[1], ed.node[2]))

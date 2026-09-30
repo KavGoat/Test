@@ -1,28 +1,31 @@
-# MarkForge
+# CalcForge
 
-A PDF markup editor for drawing review, on Windows, macOS and Linux. Open a
-drawing, mark it up, save it back — as a PDF that anybody can open, with every
-markup a real PDF annotation the next person can pick up and move.
+A PDF markup editor for drawing review with SMath Studio's calculations on the
+page, on Windows, macOS and Linux. Open a drawing, mark it up, write the check
+calc beside it — equations that calculate as SMath does, across every page —
+and save it back as a PDF that anybody can open.
 
-It is Bluebeam's job, done in the open:
+It is MarkForge (the markup editor) and WebSMath (an SMath Studio replica)
+made one program:
 
-| You would normally use… | MarkForge gives you |
+| You would normally use… | CalcForge gives you |
 |---|---|
 | Bluebeam Revu | The full markup tool set, scaled measurement, takeoff, tool sets |
+| SMath Studio | Equations, units, plots, matrices and programs typed as in SMath, calculated live in reading order across the whole document |
 | A PDF reader | Pages read as one scroll, at any zoom, sharp because they are re-rendered rather than magnified |
-| Anything that has to open it afterwards | An ordinary PDF — the drawing untouched, the markups standard annotations |
+| Anything that has to open it afterwards | An ordinary PDF — markups as standard annotations, calculations as page drawing |
 
-There is no proprietary file format. **The document is a PDF.** Open a drawing,
-mark it up and save, and what is written is an *incremental update*: the file
-that came in is preserved byte for byte and the markups are appended after it,
-so a signature over the original still covers the original. What MarkForge
-knows about a markup that PDF has no word for rides along inside the same file
-as an embedded record — so a round trip through MarkForge loses nothing, and a
-round trip through anything else loses only what that program never understood.
+There is no proprietary file format. **The document is a PDF.** Markups are
+real PDF annotations the next person can pick up and move; equations are
+written into the page as vector drawing and real text, so every reader shows
+them exactly as CalcForge does, and nobody can change them elsewhere. What
+CalcForge knows that PDF has no word for — every equation's source, a
+markup's tool-set origin, the page's scale — rides along inside the same file
+as an embedded record, so a round trip through CalcForge loses nothing.
 
-Assemble a document out of several files, or paint something into a page, and
-it is written afresh instead: that is not an addition to one file, and it says
-so rather than pretending.
+If you used MarkForge, CalcForge takes your shortcuts, tool sets and My
+Tools, toolbar and panel layout, dark mode and markup defaults across the
+first time it starts.
 
 ---
 
@@ -36,19 +39,19 @@ python main.py                    # or: python main.py drawing.pdf
 ```
 
 Python 3.10 or newer. Everything else comes from `requirements.txt`
-(PySide6, Pint, PyMuPDF) — no system libraries beyond a normal desktop.
+(PySide6, PyMuPDF, NumPy, SymPy) — no system libraries beyond a normal desktop.
 
 Install it as a command instead, if you prefer:
 
 ```bash
 python -m pip install .
-markforge                         # or: markforge drawing.pdf
+calcforge                         # or: calcforge drawing.pdf
 ```
 
 On a headless machine (CI, a container) run with `QT_QPA_PLATFORM=offscreen`.
 
 PDF tiles render in separate processes, using up to four CPU cores by default.
-Set `MARKFORGE_PDF_WORKERS` to a value from `1` to `8` before launching to adjust
+Set `CALCFORGE_PDF_WORKERS` to a value from `1` to `8` before launching to adjust
 concurrency. Cached views reuse their existing pixels. See
 [PDF performance](docs/PDF_PERFORMANCE.md) for measurements, memory bounds and
 commands to benchmark your own drawings.
@@ -265,16 +268,19 @@ it, or swaps one colour for another.
 
 ## What a saved file is
 
-A PDF. Not a PDF-shaped container, and not a PDF with a copy of the drawing
-inside it — the file you opened, plus an appended update.
+A PDF. Not a PDF-shaped container — the drawing's pages, the markups as
+annotations, the calculations as page drawing, and the record.
 
-- **The source page is untouched.** When the document is that PDF and the
-  markups on it, its bytes are the same bytes: the update is appended after
-  them. Nothing is re-encoded, re-compressed or re-rendered, so a signature
-  still verifies, an embedded font stays embedded and a CAD export keeps
-  whatever it was doing. (Assemble pages from several files, dim a drawing,
-  flatten a markup into the sheet or turn on a running footer, and the page
-  has to be painted — then the file is built rather than added to.)
+- **Every save is a fresh, compact file.** The pages that came in are copied
+  across as they are — their content is never re-encoded or re-rendered —
+  and repeated saves don't make the file grow. A **signed** PDF is the one
+  exception: it is appended to, so the signature over the original still
+  verifies.
+- **Calculations are page content**, in a tagged layer of their own:
+  equations as real text in an embedded font, plots and blocks as vector
+  drawing. Every reader shows them; none can edit them. Opening the file in
+  CalcForge takes the layer off and rebuilds it from the record, so what was
+  typed stays editable.
 - **Every markup is a real annotation.** A cloud is a `/Square` or `/Polygon`
   with a `/BE` cloudy border; a callout is a `/FreeText` with a `/CL` callout
   line and the right `/IT` intent; a measurement is a `/Line`, `/Polygon` or
@@ -285,7 +291,7 @@ inside it — the file you opened, plus an appended update.
   is opened, including in readers that would not otherwise know how to draw it.
 - **What PDF has no word for is not thrown away.** A markup's tool-set origin,
   its cut-outs, its group, the page's scale: these ride along as an embedded
-  record in the same file, so MarkForge reads back exactly what it wrote while
+  record in the same file, so CalcForge reads back exactly what it wrote while
   everything else reads back a perfectly ordinary annotation.
 
 ---
@@ -353,16 +359,20 @@ The mouse and canvas gestures are on the second tab of the same window.
 ## Layout of the code
 
 ```
-markforge/
+calcforge/
+  calc/        SMath: the engine (parser, evaluator, units, symbolic), the
+               equation editor, the worksheet and plots, and WebSMath's
+               drawing code (calc/ui, kept byte for byte)
   pdf/         the PDF layer: what a PDF is made of, and MuPDF — opening,
                drawing, reading objects, writing annotations, saving
   core/        document and page model, units and formatting, typography,
                spelling
   items/       everything that can sit on a page: shapes, text, stamps,
-               images, snapshots, measurements, counts
+               images, snapshots, measurements, counts, equations and
+               calculation blocks
   ui/          the scene and canvas, tools, key bindings, dock panels,
                dialogs, main window
-  io/          opening and saving PDFs, the incremental update, annotation
+  io/          opening and saving PDFs, the calculation layers, the signed-file update, annotation
                writing, Bluebeam tool sets, vector import, links, recolouring,
                export
 btx/           the real Bluebeam tool sets the importer is tested against
@@ -378,22 +388,20 @@ saves — either whole or as an incremental update that leaves every original
 byte where it was. Nothing in it imports Qt, which is the same split PDF4QT
 keeps between its rendering library and its applications: above that line a
 page is a rectangle of points with markups on it, below it a page is objects
-and streams. `pdf/objects.py` is the small part that is MarkForge's own — the
+and streams. `pdf/objects.py` is the small part that is CalcForge's own — the
 vocabulary a markup's annotation is described in, so that description is
 written once and does not belong to whichever library writes it out.
 
-MarkForge used to carry its own reader and writer — a lexer, the stream
+MarkForge, which CalcForge grew out of, used to carry its own reader and writer — a lexer, the stream
 filters, a cross-reference reader that could fall back to scanning. It was
 correct on the files it had been shown and it was never going to be correct on
 the ones it had not: a drawing set is full of files written by CAD packages
 that treat the specification as a suggestion. MuPDF has had thirty years of
 those fixes, and getting them for free is worth more than owning the code.
 
-`io/pdfsave.py` is what saving goes through. It decides whether this document
-is an addition to one file, and when it is, appends the annotations, the pages
-that now point at them and the record — leaving the drawing that came in byte
-for byte as its author wrote it, so a signature over it still verifies. That is
-what makes "save" a promise rather than a re-export.
+`io/pdfsave.py` is what saving goes through: a fresh compact file every time,
+with the calculations drawn into tagged layers (`io/calclayer.py`) — or, for a
+signed PDF, an appended update that leaves every signed byte where it was.
 
 **Coordinates.** Everything above `pdf/` works in *display points*: points with
 the page's own `/Rotate` already applied, origin top-left, y down — the page as
@@ -417,6 +425,7 @@ units and lets the painter's transform scale it like any other geometry.
 
 ```bash
 python -m pytest
+python -m calcforge.calc.tools.mutation_check     # 14 planted bugs, all caught
 ```
 
 Runs headless (the suite forces `QT_QPA_PLATFORM=offscreen`) and drives the
@@ -435,6 +444,10 @@ the PDF that comes out at the end.
 | `test_usability.py` | Real pointer and keyboard sequences through the viewport |
 | `test_walkthrough.py` | A whole review, start to finish, the way somebody would do it |
 | `test_output.py` | Exported PDFs, read back and measured |
+| `calc/` | SMath's maths, units, editor and recalculation (WebSMath's 766 tests and more), and the mutation check |
+| `test_calc_*.py` | Equations on pages, the Calculation toolbar and Maths panel, blocks, tool sets, saving |
+| `test_roundtrip.py`, `fidelity.py` | A save opened elsewhere, edited and reopened; CalcForge, MuPDF and pdfium drawing the same page |
+| `test_settings_migration.py` | MarkForge's settings taken across once |
 
 `docs/what-matters.md` is the brief all of this is written against — what
 somebody reviewing a drawing needs, and what this tool does not claim.

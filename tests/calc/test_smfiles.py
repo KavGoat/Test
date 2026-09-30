@@ -6,13 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from markforge.calc.engine.values import Matrix
+from calcforge.calc.engine.values import Matrix
 import base64
 
-from markforge.calc.engine.display import display_text
+from calcforge.calc.engine.display import display_text
 from tests.calc.smfile import NS, load_sm, loads, rpn_to_ast, save_sm
-from markforge.calc.engine.evaluator import Context, Evaluator
-from markforge.calc.engine.units import Quantity
+from calcforge.calc.engine.evaluator import Context, Evaluator
+from calcforge.calc.engine.units import Quantity
 
 EXAMPLES = Path(__file__).resolve().parents[2] / "SMath Studio" / "examples"
 # worksheets whose results need SMath's symbolic engine (not replicated)
@@ -63,7 +63,7 @@ def test_example_results_match_smath(path: Path):
         shown = r.value
         if not r.editor.unit.is_empty():
             # the file stores the value in the contract unit
-            from markforge.calc.engine.parser import parse_row
+            from calcforge.calc.engine.parser import parse_row
             u = Evaluator().eval(parse_row(r.editor.unit), Context())
             shown = Quantity(r.value.value / u.value) if isinstance(r.value, Quantity) else r.value
         if isinstance(shown, Quantity):

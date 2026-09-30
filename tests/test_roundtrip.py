@@ -22,13 +22,13 @@ import pytest
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QImage, QLinearGradient, QPainter
 
-from markforge.core.document import PageScale
-from markforge.items.calc import CalcItem, CalcTextItem
-from markforge.items.measure import CountItem, MeasureItem
-from markforge.items.media import ImageItem
-from markforge.items.shapes import PolyItem, RectItem, SketchItem
-from markforge.items.snapshot import SnapshotItem
-from markforge.items.text import (CalloutItem, FlagItem, NoteItem, StampItem, TextItem,
+from calcforge.core.document import PageScale
+from calcforge.items.calc import CalcItem, CalcTextItem
+from calcforge.items.measure import CountItem, MeasureItem
+from calcforge.items.media import ImageItem
+from calcforge.items.shapes import PolyItem, RectItem, SketchItem
+from calcforge.items.snapshot import SnapshotItem
+from calcforge.items.text import (CalloutItem, FlagItem, NoteItem, StampItem, TextItem,
                                   TypewriterItem)
 from tests import fidelity
 from tests.test_calc_modes import typed
@@ -529,7 +529,7 @@ def test_the_comparison_catches_a_wrong_colour_or_place(win, tmp_path):
 
 def test_an_exported_pdf_looks_the_same_as_calcforge(win, tmp_path):
     """Export PDF (not Save) goes through its own path: the same promise."""
-    from markforge.io import export as export_io
+    from calcforge.io import export as export_io
 
     regions = every_kind(win)
     more = the_second_page(win)

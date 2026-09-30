@@ -1,8 +1,8 @@
 """Avoid intermediate panel rebuilds while retaining complete edit history."""
 from PySide6.QtCore import QPointF, QRectF, Qt
-from markforge.items.shapes import RectItem
+from calcforge.items.shapes import RectItem
 from tests.test_usability import press_key, hover
-from markforge.items.base import Style
+from calcforge.items.base import Style
 from dataclasses import asdict
 
 

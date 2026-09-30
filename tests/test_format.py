@@ -11,8 +11,8 @@ import pytest
 from PySide6.QtCore import QPointF
 from PySide6.QtPdf import QPdfDocument
 
-from markforge.core.document import Document
-from markforge.io import pdfbase, project as project_io
+from calcforge.core.document import Document
+from calcforge.io import pdfbase, project as project_io
 
 
 def _readable_pdf(path: str) -> QPdfDocument:
@@ -38,9 +38,9 @@ def test_a_saved_document_is_a_pdf_any_reader_can_open(window, tmp_path):
 
 
 def test_a_saved_document_comes_back_exactly(window, tmp_path):
-    from markforge.items.shapes import RectItem
+    from calcforge.items.shapes import RectItem
 
-    from markforge.items.text import NoteItem
+    from calcforge.items.text import NoteItem
 
     window.document.title = "Portal frame"
     frame = window.document.pages[0].frame
@@ -58,7 +58,7 @@ def test_a_saved_document_comes_back_exactly(window, tmp_path):
 
 def test_an_imported_page_keeps_the_source_pdfs_own_page(window, tmp_path):
     """Not a picture of the drawing — the drawing."""
-    from markforge.io import pdfio
+    from calcforge.io import pdfio
 
     source = str(tmp_path / "drawing.pdf")
     _a_pdf_with_line_work(source)
@@ -157,7 +157,7 @@ def _page_content(path: str, index: int = 0, strip: bool = False) -> bytes:
     with CalcForge's tagged layers taken off first when *strip*."""
     import pymupdf
 
-    from markforge.io import calclayer
+    from calcforge.io import calclayer
 
     document = pymupdf.open(path)
     try:
@@ -179,7 +179,7 @@ def test_saving_a_marked_up_drawing_leaves_the_drawing_s_own_content_alone(
     (Only a signed file is appended to: test_calc_saving.py.)
     """
     from PySide6.QtCore import QRectF
-    from markforge.items.shapes import RectItem
+    from calcforge.items.shapes import RectItem
 
     source = str(tmp_path / "drawing.pdf")
     _a_pdf_with_line_work(source)
@@ -209,7 +209,7 @@ def test_an_updated_drawing_still_reads_as_a_pdf_everywhere(window, tmp_path):
     from PySide6.QtCore import QRectF
     from pypdf import PdfReader
 
-    from markforge.items.shapes import RectItem
+    from calcforge.items.shapes import RectItem
 
     source = str(tmp_path / "drawing.pdf")
     _a_pdf_with_line_work(source)
@@ -257,7 +257,7 @@ def test_a_page_the_update_cannot_describe_is_assembled_instead(window, tmp_path
     page; anything that changes the page itself has to be painted, and then
     the file is written afresh. It still has to be a correct PDF either way.
     """
-    from markforge.io import pdfsave
+    from calcforge.io import pdfsave
 
     source = str(tmp_path / "drawing.pdf")
     _a_pdf_with_line_work(source)
@@ -283,7 +283,7 @@ def test_what_is_drawn_on_the_page_is_in_the_saved_pdf(window, tmp_path):
     from PySide6.QtCore import QRectF, QSize, Qt
     from PySide6.QtPdf import QPdfDocumentRenderOptions
 
-    from markforge.items.shapes import RectItem
+    from calcforge.items.shapes import RectItem
 
     before = str(tmp_path / "before.pdf")
     project_io.save_document(window.document, before)
@@ -322,8 +322,8 @@ def test_an_imported_pdf_brings_in_the_markups_somebody_else_made(window, tmp_pa
     of the page as well, so nothing that was drawn on it goes missing.
     """
     from PySide6.QtCore import QRectF
-    from markforge.io import export as export_io, pdfio
-    from markforge.items.shapes import RectItem
+    from calcforge.io import export as export_io, pdfio
+    from calcforge.items.shapes import RectItem
 
     drawn = RectItem()
     drawn.set_local_rect(QRectF(0, 0, 180, 110))
@@ -414,7 +414,7 @@ def test_opening_a_drawing_set_brings_its_index_with_it(window, tmp_path):
 
 
 def test_an_index_can_be_left_behind_when_pages_are_brought_in(window, tmp_path):
-    from markforge.io import pdfio
+    from calcforge.io import pdfio
 
     source = str(tmp_path / "set.pdf")
     _a_pdf_with_an_outline(source)
@@ -425,7 +425,7 @@ def test_an_index_can_be_left_behind_when_pages_are_brought_in(window, tmp_path)
 
 def test_only_the_sheets_that_came_in_keep_their_bookmarks(window, tmp_path):
     """A bookmark to a sheet nobody imported would go to the wrong one."""
-    from markforge.io import pdfio
+    from calcforge.io import pdfio
 
     source = str(tmp_path / "set.pdf")
     _a_pdf_with_an_outline(source)
@@ -620,8 +620,8 @@ def test_a_shape_is_written_where_every_reader_will_draw_it(window, tmp_path):
     instead of touching it.
     """
     from PySide6.QtCore import QRectF
-    from markforge.io import export as export_io, pdfio
-    from markforge.items.shapes import RectItem
+    from calcforge.io import export as export_io, pdfio
+    from calcforge.items.shapes import RectItem
 
     for width in (0.5, 1.0, 4.0):
         drawn = RectItem()
@@ -718,7 +718,7 @@ def test_exporting_a_drawing_nobody_has_changed_gives_back_the_drawing(
     """
     import numpy as np
     import pymupdf
-    from markforge.io import export as export_io
+    from calcforge.io import export as export_io
 
     path = str(tmp_path / "exported.pdf")
     window.open_path(REFERENCE)
@@ -818,7 +818,7 @@ def test_a_markup_moved_on_somebody_else_s_drawing_saves_where_it_was_put(
 
     assert window.save_document()
     assert not os.path.exists(source + ".tmp"), "nothing left lying beside it"
-    assert not os.path.exists(source + ".markforge-part")
+    assert not os.path.exists(source + ".calcforge-part")
 
     document = pymupdf.open(source)
     try:
@@ -835,7 +835,7 @@ def test_a_damaged_drawing_opens_and_says_that_it_was_repaired(window, tmp_path)
     correct refusal — and it is still worth saying so once, because saving a
     repaired file writes it whole rather than adding to the bytes that came in.
     """
-    from markforge.io import pdfio
+    from calcforge.io import pdfio
 
     broken = str(tmp_path / "broken.pdf")
     with open(broken, "wb") as handle:
@@ -872,7 +872,7 @@ def test_saving_a_repaired_drawing_writes_a_file_that_is_sound(window, tmp_path)
     """
     from pypdf import PdfReader
     from PySide6.QtCore import QRectF
-    from markforge.items.shapes import RectItem
+    from calcforge.items.shapes import RectItem
 
     broken = str(tmp_path / "broken.pdf")
     with open(broken, "wb") as handle:
@@ -909,7 +909,7 @@ def test_a_turned_page_comes_in_as_the_sheet_it_is_drawn_as(window, tmp_path,
     the line work, somebody's markups — lands a quarter turn away from where
     it is drawn.
     """
-    from markforge.io import pdfio
+    from calcforge.io import pdfio
 
     source = str(tmp_path / "turned.pdf")
     _a_turned_pdf(source, 90)
@@ -947,7 +947,7 @@ def test_a_turned_page_is_still_turned_after_it_is_saved(window, tmp_path):
     """
     import pymupdf
     from PySide6.QtCore import QRectF
-    from markforge.items.shapes import RectItem
+    from calcforge.items.shapes import RectItem
 
     source = str(tmp_path / "turned.pdf")
     _a_turned_pdf(source, 90)
@@ -994,8 +994,8 @@ def test_a_markup_on_a_turned_page_is_saved_where_it_was_put(window, tmp_path):
     a save that only flips puts the markup on the wrong edge of the paper.
     """
     from PySide6.QtCore import QRectF
-    from markforge.io import pdfio
-    from markforge.items.shapes import RectItem
+    from calcforge.io import pdfio
+    from calcforge.items.shapes import RectItem
 
     source = str(tmp_path / "turned.pdf")
     _a_turned_pdf(source, 90)
@@ -1023,7 +1023,7 @@ def test_a_markup_on_a_turned_page_is_saved_where_it_was_put(window, tmp_path):
 def test_saving_leaves_the_markups_movable_in_another_editor(window, tmp_path):
     """Saved, not exported: the same file, and the same live markups."""
     from PySide6.QtCore import QRectF
-    from markforge.items.shapes import RectItem
+    from calcforge.items.shapes import RectItem
 
     drawn = RectItem()
     drawn.set_local_rect(QRectF(0, 0, 180, 110))
@@ -1046,8 +1046,8 @@ def test_a_marked_up_drawing_opens_as_markups_that_can_be_worked_with(
         window, tmp_path):
     """What somebody else drew is theirs to click on, not a picture of it."""
     from PySide6.QtCore import QRectF
-    from markforge.items.shapes import PolyItem, RectItem
-    from markforge.io import export as export_io
+    from calcforge.items.shapes import PolyItem, RectItem
+    from calcforge.io import export as export_io
 
     frame = window.document.pages[0].frame
     box = RectItem()
@@ -1098,7 +1098,7 @@ def test_a_page_from_a_pdf_gets_sharper_as_it_is_zoomed_into(window, tmp_path):
     from PySide6.QtCore import QRectF
     from PySide6.QtGui import QImage, QPainter
     from PySide6.QtWidgets import QStyleOptionGraphicsItem
-    from markforge.io import export as export_io
+    from calcforge.io import export as export_io
 
     source = str(tmp_path / "drawing.pdf")
     export_io.export_pdf(window.document, source)
@@ -1108,7 +1108,7 @@ def test_a_page_from_a_pdf_gets_sharper_as_it_is_zoomed_into(window, tmp_path):
 
     import time
     from PySide6.QtWidgets import QApplication
-    from markforge.io import pdftiles
+    from calcforge.io import pdftiles
 
     whole = frame.page_rect()
 
@@ -1161,10 +1161,10 @@ def test_a_page_from_a_pdf_gets_sharper_as_it_is_zoomed_into(window, tmp_path):
 def _marked_up_page(window):
     """One of each markup a PDF has a real annotation for."""
     from PySide6.QtCore import QRectF
-    from markforge.core.document import PageScale
-    from markforge.items.measure import AREA, DIMENSION, MeasureItem
-    from markforge.items.shapes import PolyItem, RectItem
-    from markforge.items.text import CalloutItem, TypewriterItem
+    from calcforge.core.document import PageScale
+    from calcforge.items.measure import AREA, DIMENSION, MeasureItem
+    from calcforge.items.shapes import PolyItem, RectItem
+    from calcforge.items.text import CalloutItem, TypewriterItem
 
     page = window.document.pages[0]
     page.scale = PageScale.from_ratio(100)
@@ -1196,7 +1196,7 @@ def _annotations(path: str) -> list:
 
 def test_a_cloud_goes_out_as_a_cloud_not_a_drawing_of_one(window, tmp_path):
     """A PDF says a cloud with a border effect; it does not draw one."""
-    from markforge.io import export as export_io
+    from calcforge.io import export as export_io
 
     _marked_up_page(window)
     path = str(tmp_path / "clouds.pdf")
@@ -1211,7 +1211,7 @@ def test_a_cloud_goes_out_as_a_cloud_not_a_drawing_of_one(window, tmp_path):
 
 def test_a_call_out_goes_out_with_its_leader(window, tmp_path):
     """Free text with a callout line — the three-point form, knee and all."""
-    from markforge.io import export as export_io
+    from calcforge.io import export as export_io
 
     _marked_up_page(window)
     path = str(tmp_path / "callout.pdf")
@@ -1228,7 +1228,7 @@ def test_a_call_out_goes_out_with_its_leader(window, tmp_path):
 
 def test_a_dimension_goes_out_as_a_dimension(window, tmp_path):
     """Every part of it already had a name in the specification."""
-    from markforge.io import export as export_io
+    from calcforge.io import export as export_io
 
     _marked_up_page(window)
     path = str(tmp_path / "dimension.pdf")
@@ -1249,7 +1249,7 @@ def test_a_dimension_goes_out_as_a_dimension(window, tmp_path):
 
 def test_a_take_off_carries_the_scale_it_was_measured_against(window, tmp_path):
     """Otherwise the number means nothing in anybody else's reader."""
-    from markforge.io import export as export_io
+    from calcforge.io import export as export_io
 
     _marked_up_page(window)
     path = str(tmp_path / "area.pdf")
@@ -1265,7 +1265,7 @@ def test_a_take_off_carries_the_scale_it_was_measured_against(window, tmp_path):
 
 def test_every_markup_comes_back_as_what_it_went_out_as(window, tmp_path):
     """The round trip: out as a real annotation, in as the same markup."""
-    from markforge.io import export as export_io
+    from calcforge.io import export as export_io
 
     _marked_up_page(window)
     path = str(tmp_path / "round.pdf")
@@ -1293,7 +1293,7 @@ def test_every_markup_comes_back_as_what_it_went_out_as(window, tmp_path):
 
 
 def test_an_arrow_keeps_its_head(window, tmp_path):
-    from markforge.io import export as export_io
+    from calcforge.io import export as export_io
 
     _marked_up_page(window)
     path = str(tmp_path / "arrow.pdf")

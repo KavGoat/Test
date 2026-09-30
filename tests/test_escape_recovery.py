@@ -4,7 +4,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QTreeWidget, QTreeWidgetItem, QLineEdit, QDialog
 
 from tests.test_usability import click, press_key
-from markforge.items.shapes import RectItem
+from calcforge.items.shapes import RectItem
 
 
 def test_escape_from_inline_panel_editor_cancels_callout(window, qapp):

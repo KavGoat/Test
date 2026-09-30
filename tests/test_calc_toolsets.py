@@ -7,10 +7,10 @@ import pytest
 from PySide6.QtCore import QPointF
 from PySide6.QtGui import QColor
 
-from markforge.calc.docsheet import PT_PER_PX
-from markforge.items.calc import CalcBlockItem, CalcItem
-from markforge.ui import toolsets
-from markforge.ui.panels import entry_thumbnail
+from calcforge.calc.docsheet import PT_PER_PX
+from calcforge.items.calc import CalcBlockItem, CalcItem
+from calcforge.ui import toolsets
+from calcforge.ui.panels import entry_thumbnail
 from tests.test_calc_blocks import blocks, equations, settle, shown, two_checks, v  # noqa: F401
 from tests.test_usability import click
 

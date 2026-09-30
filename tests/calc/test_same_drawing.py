@@ -23,7 +23,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QImage, QPainter
 
 import tests.calc.test_calcforge_window as cw
-from markforge.calc.engine.display import display_text
+from calcforge.calc.engine.display import display_text
 
 LINES = ["M:12.5'kN", "b:300'mm", "M/b=", "sqrt(M/(2'kN=", "x^2+1/3=", "if(1>0,2", "mat("]
 
@@ -64,7 +64,7 @@ def _difference(a: QImage, b: QImage) -> int:
 
 
 def test_the_drawing_code_is_websmaths_byte_for_byte():
-    folder = Path(__file__).resolve().parents[2] / "markforge" / "calc" / "ui"
+    folder = Path(__file__).resolve().parents[2] / "calcforge" / "calc" / "ui"
     for name, digest in WEBSMATH_CODE.items():
         assert hashlib.sha256((folder / name).read_bytes()).hexdigest() == digest, \
             f"calc/ui/{name} is no longer WebSMath's drawing code, one to one"

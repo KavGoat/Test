@@ -23,8 +23,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 faulthandler.enable()
 
 # A random editing session must never read or overwrite the user's preferences.
-_sandbox = tempfile.mkdtemp(prefix="markforge-fuzz-")
-os.environ["MARKFORGE_SETTINGS_FILE"] = os.path.join(_sandbox, "settings.ini")
+_sandbox = tempfile.mkdtemp(prefix="calcforge-fuzz-")
+os.environ["CALCFORGE_SETTINGS_FILE"] = os.path.join(_sandbox, "settings.ini")
+os.environ["CALCFORGE_MARKFORGE_SETTINGS_FILE"] = os.path.join(_sandbox, "markforge-absent.ini")
 for _name in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME"):
     os.environ[_name] = os.path.join(_sandbox, _name.lower())
     os.makedirs(os.environ[_name], exist_ok=True)
@@ -34,9 +35,9 @@ from PySide6.QtGui import QKeyEvent, QMouseEvent
 from PySide6.QtWidgets import QApplication
 from PySide6.QtTest import QTest
 
-from markforge.app import build_application
-from markforge.ui.mainwindow import MainWindow
-from markforge.ui.tools import TOOLS
+from calcforge.app import build_application
+from calcforge.ui.mainwindow import MainWindow
+from calcforge.ui.tools import TOOLS
 
 def main():
     SEED = int(sys.argv[1]) if len(sys.argv) > 1 else 1
@@ -263,7 +264,7 @@ def main():
 
     @guard("scale")
     def do_scale():
-        from markforge.core.document import PageScale
+        from calcforge.core.document import PageScale
         win.current_page().scale = (PageScale.from_ratio(rng.choice([20, 50, 100, 200]))
                                     if rng.random() < 0.7 else PageScale())
         win.apply_scale_change()
@@ -274,8 +275,8 @@ def main():
         """Write the document out and read it back: it must be the same document."""
         import tempfile
 
-        from markforge.core.document import Document
-        from markforge.io import project as project_io
+        from calcforge.core.document import Document
+        from calcforge.io import project as project_io
 
         view.end_item_edit()
         path = os.path.join(tempfile.gettempdir(), f"session_fuzz_save_{SEED}.pdf")
@@ -290,7 +291,7 @@ def main():
     @guard("toolset")
     def do_toolset():
         """Keep things in tool sets, take them out again, and put them down."""
-        from markforge.ui import toolsets
+        from calcforge.ui import toolsets
 
         what = rng.random()
         items = [i for i in view.scene().markups()]
@@ -370,10 +371,10 @@ def main():
         view.end_item_edit()
         import tempfile
 
-        from markforge.io import export as export_io
+        from calcforge.io import export as export_io
         path = os.path.join(tempfile.gettempdir(), f"session_fuzz_{SEED}.pdf")
         export_io.export_pdf(win.document, path)
-        from markforge.pdf import engine
+        from calcforge.pdf import engine
         doc = engine.open_path(path)
         try:
             assert doc.page_count == len(win.document.pages), (

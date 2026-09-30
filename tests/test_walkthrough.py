@@ -11,8 +11,8 @@ import pytest
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtWidgets import QApplication
 
-from markforge.core.document import Document
-from markforge.io import project as project_io
+from calcforge.core.document import Document
+from calcforge.io import project as project_io
 
 from tests.test_usability import (click, double_click, drag, hover, markups,
                                   press_key, type_text)

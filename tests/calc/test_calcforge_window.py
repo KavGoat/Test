@@ -16,9 +16,9 @@ from PySide6.QtGui import QKeyEvent, QWheelEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
-from markforge.calc.docsheet import PT_PER_PX, sheet_for
-from markforge.calc.engine.display import display_text
-from markforge.items.calc import CalcItem
+from calcforge.calc.docsheet import PT_PER_PX, sheet_for
+from calcforge.calc.engine.display import display_text
+from calcforge.items.calc import CalcItem
 from tests.test_usability import click, drag
 
 
@@ -157,7 +157,7 @@ def test_render_does_not_crash(v):
 
 
 def test_export_pdf(v, tmp_path):
-    from markforge.io import export as export_io
+    from calcforge.io import export as export_io
     v.type_at(18, 18, "1/3=")
     v.press(Qt.Key_Return)
     out = tmp_path / "sheet.pdf"
@@ -411,7 +411,7 @@ def test_shift_selection_grows_out_of_a_box(v):
 def test_placeholder_is_centred_on_the_equals_sign():
     from PySide6.QtGui import QPainterPath
 
-    from markforge.calc.ui.layout import Layouter, Style
+    from calcforge.calc.ui.layout import Layouter, Style
 
     lay = Layouter(Style(10))
     ph = lay.placeholder()
@@ -670,7 +670,7 @@ def test_calculation_solve(v):
 
 
 def test_side_panel_symbols_insert(v):
-    from markforge.ui import calcdialogs  # noqa: F401
+    from calcforge.ui import calcdialogs  # noqa: F401
     v.window.show_panel("dock_maths", True)
     v.type_at(18, 18, "a+")
     sqrt = v.window.maths_panel.section("Arithmetic").button("√")
@@ -680,8 +680,8 @@ def test_side_panel_symbols_insert(v):
 
 def test_insert_operator_list_and_formula(v):
     """Ported from test_files_and_operators.py: WebSMath's Insert > Operator."""
-    from markforge.ui import calcdialogs
-    from markforge.ui.calcedit import OPERATORS
+    from calcforge.ui import calcdialogs
+    from calcforge.ui.calcedit import OPERATORS
     kinds = {g for g, *_ in OPERATORS}
     assert {"Arithmetic", "Boolean", "Calculus", "Matrix and vector", "Definitions"} <= kinds
     v.type_at(18, 18, "2")

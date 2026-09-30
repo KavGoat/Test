@@ -12,12 +12,12 @@ from pathlib import Path
 
 import pytest
 
-from markforge.calc.engine.display import display_text
-from markforge.calc.engine.numformat import NumberFormat
-from markforge.calc.editor import MathEditor
-from markforge.calc.record import (add_region_from_data, editor_from_data, region_text,
+from calcforge.calc.engine.display import display_text
+from calcforge.calc.engine.numformat import NumberFormat
+from calcforge.calc.editor import MathEditor
+from calcforge.calc.record import (add_region_from_data, editor_from_data, region_text,
                                    region_to_data, row_from_data, row_to_data)
-from markforge.calc.worksheet import Worksheet
+from calcforge.calc.worksheet import Worksheet
 from tests.calc.smfile import load_sm
 from tests.calc.test_editor_fuzz import KEYS
 

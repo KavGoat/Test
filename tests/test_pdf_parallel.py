@@ -8,9 +8,9 @@ import pytest
 from PySide6.QtCore import QRectF, Qt, QTimer
 from PySide6.QtGui import QImage
 
-from markforge.io import pdftiles, pdfrender
-from markforge.io.pdfio import to_image
-from markforge.pdf import engine
+from calcforge.io import pdftiles, pdfrender
+from calcforge.io.pdfio import to_image
+from calcforge.pdf import engine
 
 
 def source_pdf(rotation=0):

@@ -6,9 +6,9 @@ from PySide6.QtCore import QEvent, QPointF, Qt
 from PySide6.QtGui import QFontMetricsF, QKeyEvent, QMouseEvent
 from PySide6.QtWidgets import QApplication
 
-from markforge.items.measure import CountItem, MeasureItem
-from markforge.items.text import TextItem
-from markforge.ui.tools import DRAG, FREE, POLY, TOOLS
+from calcforge.items.measure import CountItem, MeasureItem
+from calcforge.items.text import TextItem
+from calcforge.ui.tools import DRAG, FREE, POLY, TOOLS
 
 # ---------------------------------------------------------------------------
 # event helpers
@@ -237,7 +237,7 @@ def test_nudge_with_arrow_keys(window):
 # ---------------------------------------------------------------------------
 
 def test_measurement_follows_the_page_scale(window):
-    from markforge.core.document import PageScale
+    from calcforge.core.document import PageScale
     window.current_page().scale = PageScale.from_ratio(100)
     window.select_tool("measure_length")
     drag(window.view, 100, 400, 300, 400)
@@ -267,8 +267,8 @@ def test_page_setup_defaults_to_a4(window):
 
 
 def test_a_page_excluded_from_print_is_grey_and_is_not_exported(window, tmp_path):
-    from markforge.core.document import Document
-    from markforge.io import export as export_io, pdfio, project as project_io
+    from calcforge.core.document import Document
+    from calcforge.io import export as export_io, pdfio, project as project_io
 
     window.add_page()
     window.add_page()
@@ -324,7 +324,7 @@ def test_context_menu_is_built_for_both_targets(window):
 
 
 def test_page_scale_change_updates_measurements(window):
-    from markforge.core.document import PageScale
+    from calcforge.core.document import PageScale
     window.current_page().scale = PageScale.from_ratio(100)
     window.select_tool("measure_length")
     drag(window.view, 100, 400, 300, 400)
@@ -415,7 +415,7 @@ def test_renumber_counts_closes_gaps(window):
         press(window.view, x, 400)
         release(window.view, x, 400)
     window.select_tool("select")
-    from markforge.items.measure import CountItem
+    from calcforge.items.measure import CountItem
     counts = sorted([i for i in markups(window) if isinstance(i, CountItem)],
                     key=lambda i: i.pos().x())
     assert [c.index for c in counts] == [1, 2, 3]
@@ -445,7 +445,7 @@ def test_renumber_counts_closes_gaps(window):
 def test_applying_redactions_destroys_what_is_underneath(window, monkeypatch, tmp_path):
     from PySide6.QtGui import QImage
     from PySide6.QtWidgets import QMessageBox
-    from markforge.items.shapes import RectItem
+    from calcforge.items.shapes import RectItem
 
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: QMessageBox.Yes)
 
@@ -502,7 +502,7 @@ def test_applying_redactions_with_none_present_explains_itself(window, monkeypat
 def test_autosave_writes_and_clears_a_recovery_copy(window, tmp_path):
     import os
     path = str(tmp_path / "doc.pdf")
-    from markforge.io import project as project_io
+    from calcforge.io import project as project_io
     project_io.save_document(window.document, path)
     window.document.path = path
 
@@ -529,7 +529,7 @@ def test_autosave_does_nothing_when_there_is_nothing_to_save(window):
 
 def test_dark_theme_switches_the_chrome_but_not_the_paper(window):
     from PySide6.QtWidgets import QApplication
-    from markforge.theme import CANVAS, DARK, LIGHT, tokens
+    from calcforge.theme import CANVAS, DARK, LIGHT, tokens
 
     window.toggle_theme(True)
     assert tokens(DARK)["chrome"] in QApplication.instance().styleSheet()
@@ -574,7 +574,7 @@ def test_the_desk_behind_the_paper_is_actually_painted(window):
     """Overriding drawBackground loses Qt's own fill unless it is put back."""
     from PySide6.QtGui import QImage, QPainter
     from PySide6.QtCore import QRectF
-    from markforge.theme import CANVAS, LIGHT
+    from calcforge.theme import CANVAS, LIGHT
 
     frame = window.current_page().frame
     scene = frame.scene()
@@ -594,7 +594,7 @@ def test_the_desk_behind_the_paper_is_actually_painted(window):
 
 def test_every_markup_tool_is_reachable_from_the_toolbar(window):
     """A tool nobody can click is a tool that does not exist."""
-    from markforge.ui.tools import TOOLS
+    from calcforge.ui.tools import TOOLS
 
     from PySide6.QtWidgets import QToolBar
 
@@ -636,7 +636,7 @@ def test_adding_a_page_keeps_every_other_page(window):
 
 
 def test_deleting_a_page_keeps_every_other_page(window, monkeypatch):
-    from markforge.ui import mainwindow as mw
+    from calcforge.ui import mainwindow as mw
 
     _fill_three_pages(window)
     monkeypatch.setattr(mw.QMessageBox, "question",
@@ -668,7 +668,7 @@ def _press_into(editor, key, modifiers=Qt.NoModifier, text=""):
 
 
 def test_the_manager_lists_every_binding_including_the_chords(window):
-    from markforge.ui import dialogs
+    from calcforge.ui import dialogs
 
     dialog = dialogs.ShortcutManagerDialog(window.shortcuts, window)
     ids = set(dialog.editors)
@@ -680,7 +680,7 @@ def test_the_manager_lists_every_binding_including_the_chords(window):
 
 
 def test_pressing_keys_records_them(window):
-    from markforge.ui import dialogs
+    from calcforge.ui import dialogs
 
     dialog = dialogs.ShortcutManagerDialog(window.shortcuts, window)
     editor = dialog.editors["tool.measure_dimension"]
@@ -694,7 +694,7 @@ def test_pressing_keys_records_them(window):
 
 
 def test_backspace_clears_and_escape_puts_it_back(window):
-    from markforge.ui import dialogs
+    from calcforge.ui import dialogs
 
     dialog = dialogs.ShortcutManagerDialog(window.shortcuts, window)
     editor = dialog.editors["tool.cloud"]
@@ -708,7 +708,7 @@ def test_backspace_clears_and_escape_puts_it_back(window):
 
 
 def test_a_clash_is_flagged(window):
-    from markforge.ui import dialogs
+    from calcforge.ui import dialogs
 
     dialog = dialogs.ShortcutManagerDialog(window.shortcuts, window)
     dialog.editors["tool.cloud"].setText("R")        # already the rectangle
@@ -722,8 +722,8 @@ def test_a_clash_is_flagged(window):
 
 
 def test_a_changed_shortcut_reaches_the_action_and_the_canvas(window):
-    from markforge.ui import dialogs
-    from markforge.ui.tools import TOOL_MAP
+    from calcforge.ui import dialogs
+    from calcforge.ui.tools import TOOL_MAP
 
     dialog = dialogs.ShortcutManagerDialog(window.shortcuts, window)
     dialog.editors["tool.measure_dimension"].setText("Ctrl+Shift+Y")
@@ -744,7 +744,7 @@ def test_a_changed_shortcut_reaches_the_action_and_the_canvas(window):
 
 
 def test_reset_all_puts_the_defaults_back(window):
-    from markforge.ui import dialogs
+    from calcforge.ui import dialogs
 
     dialog = dialogs.ShortcutManagerDialog(window.shortcuts, window)
     dialog.editors["tool.rect"].setText("z")
@@ -755,7 +755,7 @@ def test_reset_all_puts_the_defaults_back(window):
 
 
 def test_the_filter_narrows_the_list(window):
-    from markforge.ui import dialogs
+    from calcforge.ui import dialogs
 
     dialog = dialogs.ShortcutManagerDialog(window.shortcuts, window)
     dialog.filter.setText("dimension")
@@ -768,7 +768,7 @@ def test_the_filter_narrows_the_list(window):
 
 
 def test_a_rebound_chord_is_still_silent_while_typing(window):
-    from markforge.ui import dialogs
+    from calcforge.ui import dialogs
     from tests.test_usability import drag as ui_drag, swallowed
 
     dialog = dialogs.ShortcutManagerDialog(window.shortcuts, window)
@@ -783,7 +783,7 @@ def test_a_rebound_chord_is_still_silent_while_typing(window):
 
 
 def test_the_manager_refuses_to_save_a_key_bound_twice(window, monkeypatch):
-    from markforge.ui import dialogs
+    from calcforge.ui import dialogs
 
     warned = []
     monkeypatch.setattr(dialogs.QMessageBox, "warning",
@@ -806,7 +806,7 @@ def test_the_manager_refuses_to_save_a_key_bound_twice(window, monkeypatch):
 def test_choosing_a_logo_puts_it_in_the_document(window, tmp_path, monkeypatch):
     from PySide6.QtGui import QImage
     from PySide6.QtWidgets import QFileDialog
-    from markforge.ui import dialogs
+    from calcforge.ui import dialogs
 
     path = str(tmp_path / "practice.png")
     QImage(80, 40, QImage.Format_ARGB32).save(path)
@@ -827,7 +827,7 @@ def test_choosing_a_logo_puts_it_in_the_document(window, tmp_path, monkeypatch):
 
 
 def test_removing_the_logo_takes_it_off_every_page(window):
-    from markforge.ui import dialogs
+    from calcforge.ui import dialogs
 
     window.document.settings.logo_key = window.document.add_asset(b"not-an-image", "png")
     dialog = dialogs.DocumentPropertiesDialog(window.document)
@@ -838,7 +838,7 @@ def test_removing_the_logo_takes_it_off_every_page(window):
 
 
 def test_the_header_and_footer_have_a_menu_entry_of_their_own(window):
-    from markforge.ui import dialogs
+    from calcforge.ui import dialogs
 
     assert window.act_header_footer.text() == "Header/footer…"
     dialog = dialogs.DocumentPropertiesDialog(window.document)
@@ -848,7 +848,7 @@ def test_the_header_and_footer_have_a_menu_entry_of_their_own(window):
 
 
 def test_the_header_footer_manager_accepts_page_sections(window):
-    from markforge.ui import dialogs
+    from calcforge.ui import dialogs
 
     window.add_page()
     dialog = dialogs.DocumentPropertiesDialog(window.document)
@@ -924,7 +924,7 @@ def _ink(image) -> int:
 
 
 def _import_pdf(window, monkeypatch, path, indices=(0,)):
-    from markforge.ui import dialogs
+    from calcforge.ui import dialogs
     monkeypatch.setattr(dialogs.PdfImportDialog, "exec",
                         lambda self: dialogs.QDialog.Accepted)
     monkeypatch.setattr(dialogs.PdfImportDialog, "selection",
@@ -960,10 +960,10 @@ def test_an_inserted_pdf_page_carries_the_drawing(window, tmp_path, monkeypatch)
 def test_pdf_review_snapshot_survives_edit_save_reopen_and_export(
         window, tmp_path, monkeypatch):
     from pypdf import PdfReader
-    from markforge.core.document import Document
-    from markforge.io import export as export_io, project as project_io
-    from markforge.items.shapes import PolyItem
-    from markforge.items.snapshot import SnapshotItem
+    from calcforge.core.document import Document
+    from calcforge.io import export as export_io, project as project_io
+    from calcforge.items.shapes import PolyItem
+    from calcforge.items.snapshot import SnapshotItem
 
     path = _drawing_pdf(str(tmp_path / "review.pdf"))
     _open_pdf(window, monkeypatch, path)
@@ -1005,8 +1005,8 @@ def test_pdf_review_snapshot_survives_edit_save_reopen_and_export(
 
 
 def test_an_inserted_pdf_page_survives_saving_and_reopening(window, tmp_path, monkeypatch):
-    from markforge.core.document import Document
-    from markforge.io import project as project_io
+    from calcforge.core.document import Document
+    from calcforge.io import project as project_io
 
     path = _drawing_pdf(str(tmp_path / "plan.pdf"))
     _import_pdf(window, monkeypatch, path)
@@ -1028,7 +1028,7 @@ def test_an_inserted_pdf_page_survives_saving_and_reopening(window, tmp_path, mo
 
 
 def test_an_inserted_pdf_page_prints(window, tmp_path, monkeypatch):
-    from markforge.io import export as export_io, pdfio
+    from calcforge.io import export as export_io, pdfio
 
     path = _drawing_pdf(str(tmp_path / "plan.pdf"))
     _import_pdf(window, monkeypatch, path)
@@ -1047,7 +1047,7 @@ def test_an_inserted_pdf_page_prints(window, tmp_path, monkeypatch):
 def test_an_inserted_pdf_keeps_selectable_text_when_exported(
         window, tmp_path, monkeypatch):
     from pypdf import PdfReader
-    from markforge.io import export as export_io
+    from calcforge.io import export as export_io
 
     path = _text_pdf(str(tmp_path / "notes.pdf"))
     _import_pdf(window, monkeypatch, path)
@@ -1070,7 +1070,7 @@ def test_undoing_an_insert_and_redoing_it_keeps_the_drawing(window, tmp_path, mo
 
 def test_a_huge_sheet_is_rendered_smaller_rather_than_coming_out_blank(window):
     """An A0 at 300 dpi is 140 megapixels; Qt will not allocate that."""
-    from markforge.io.pdfio import MAX_PIXELS, PdfPageInfo, PdfSource
+    from calcforge.io.pdfio import MAX_PIXELS, PdfPageInfo, PdfSource
 
     a0 = PdfPageInfo(0, 2384.0, 3370.0)
     scale = PdfSource._scale_for(a0, 300.0)
@@ -1082,7 +1082,7 @@ def test_a_huge_sheet_is_rendered_smaller_rather_than_coming_out_blank(window):
 
 def test_a_page_that_renders_but_cannot_be_stored_is_reported(window, tmp_path, monkeypatch):
     """An empty asset used to mean a blank page and no explanation."""
-    from markforge.io import pdfio
+    from calcforge.io import pdfio
 
     path = _drawing_pdf(str(tmp_path / "plan.pdf"))
     monkeypatch.setattr("PySide6.QtGui.QImage.save",
@@ -1097,7 +1097,7 @@ def test_a_page_that_renders_but_cannot_be_stored_is_reported(window, tmp_path, 
 
 def test_the_import_dialog_previews_the_page_it_will_bring_in(window, tmp_path, monkeypatch):
     from PySide6.QtWidgets import QFileDialog
-    from markforge.ui import dialogs
+    from calcforge.ui import dialogs
 
     path = _drawing_pdf(str(tmp_path / "plan.pdf"))
     monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (path, ""))
@@ -1119,7 +1119,7 @@ def test_the_import_dialog_previews_the_page_it_will_bring_in(window, tmp_path, 
 
 def test_preferences_survive_being_saved_and_read_back(qapp, tmp_path, monkeypatch):
     from PySide6.QtCore import QSettings
-    from markforge.ui import preferences
+    from calcforge.ui import preferences
 
     monkeypatch.setattr(QSettings, "setValue", QSettings.setValue)
     prefs = preferences.Preferences(wheel=preferences.WHEEL_SCROLL,
@@ -1145,8 +1145,8 @@ def test_the_import_dialog_does_not_ask_for_a_resolution(window):
     the imported pages should be.
     """
     from PySide6.QtWidgets import QLabel
-    from markforge.ui import dialogs
-    from markforge.io import pdfio
+    from calcforge.ui import dialogs
+    from calcforge.io import pdfio
 
     dialog = dialogs.PdfImportDialog(window)
     try:

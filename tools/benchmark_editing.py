@@ -15,15 +15,16 @@ import tempfile
 import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-_sandbox = tempfile.TemporaryDirectory(prefix="markforge-edit-benchmark-")
-os.environ['MARKFORGE_SETTINGS_FILE'] = str(Path(_sandbox.name) / 'settings.ini')
+_sandbox = tempfile.TemporaryDirectory(prefix="calcforge-edit-benchmark-")
+os.environ['CALCFORGE_SETTINGS_FILE'] = str(Path(_sandbox.name) / 'settings.ini')
+os.environ['CALCFORGE_MARKFORGE_SETTINGS_FILE'] = str(Path(_sandbox.name) / 'markforge-absent.ini')
 
 from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, QSignalBlocker
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtTest import QTest
-from markforge.app import build_application
-from markforge.items.shapes import RectItem
-from markforge.ui.mainwindow import MainWindow
+from calcforge.app import build_application
+from calcforge.items.shapes import RectItem
+from calcforge.ui.mainwindow import MainWindow
 
 
 def main():

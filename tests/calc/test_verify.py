@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from markforge.calc.engine.display import DNum, display_value
-from markforge.calc.engine.numformat import format_real
-from markforge.calc.engine.units import Quantity
-from markforge.calc.engine.verify import double_check
+from calcforge.calc.engine.display import DNum, display_value
+from calcforge.calc.engine.numformat import format_real
+from calcforge.calc.engine.units import Quantity
+from calcforge.calc.engine.verify import double_check
 from tests.calc.test_behaviour import sheet
 
 BEAM = ["F:12.5'kN", "L:4'm", "M:F*L/4", "M=", "b:300'mm", "h:500'mm", "I:b*h^3/12", "I=",

@@ -569,3 +569,40 @@ paste back live.
 - A variable whose name is also a unit (`a` is the are) asks which one is
   meant when typed, exactly as SMath does — the Variables panel lists it
   either way.
+
+## Phase 8 — rename and settings migration
+
+**What changed**
+
+- **`markforge/` is now `calcforge/`**, with every import, the `calcforge`
+  launch command, the `pyproject` name and description, the window title,
+  About box, PDF Creator, printer document name and messages, the
+  clipboard and drag types (`application/x-calcforge-…`), temporary-file
+  names and the environment overrides (`CALCFORGE_SETTINGS_FILE`,
+  `CALCFORGE_PDF_WORKERS`, …). Comments that say where something came from
+  ("MarkForge's grid") still say MarkForge.
+- **Settings** are CalcForge's own (`QSettings("CalcForge", "CalcForge")`).
+  On first start, before anything reads them, MarkForge's are copied across
+  once: shortcuts, tool sets (My Tools is one), toolbar, panel and window
+  layout, dark mode, markup defaults. Anything CalcForge already has wins,
+  and nothing else comes across (not the spelling dictionary, preferences
+  or recent files). `migration/from_markforge` records that it happened.
+- **Files are unchanged.** The record is still `markups.json.zip`, so a PDF
+  saved by MarkForge opens in CalcForge exactly as before.
+- **README and HANDOVER** describe CalcForge: the calculations, what a
+  saved file is now (fresh compact saves, calculations as a tagged page
+  layer, signed files appended to), the `calc/` package and the new
+  modules.
+
+**Tests**
+
+- `tests/test_settings_migration.py` (6): exactly the six kinds of setting
+  come across; once only; CalcForge's own kept; no MarkForge settings is
+  fine; a new window starts with the migrated shortcut, dark theme and My
+  Tools; the names are CalcForge's.
+- The suite points both settings stores at its sandbox, so no run reads
+  anybody's real MarkForge settings.
+- No test removed. The WebSMath drawing code's SHA-256 still matches: the
+  rename didn't touch it.
+
+**Different from SMath and Bluebeam** — nothing new in this phase.

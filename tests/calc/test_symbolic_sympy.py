@@ -7,12 +7,12 @@ import random
 
 import pytest
 
-from markforge.calc.engine.errors import SMathError
-from markforge.calc.engine.display import display_text
-from markforge.calc.engine.evaluator import Context, Evaluator
-from markforge.calc.engine.linear import parse_text
-from markforge.calc.engine.parser import parse_row
-from markforge.calc.engine.symbolic import Expr, to_row
+from calcforge.calc.engine.errors import SMathError
+from calcforge.calc.engine.display import display_text
+from calcforge.calc.engine.evaluator import Context, Evaluator
+from calcforge.calc.engine.linear import parse_text
+from calcforge.calc.engine.parser import parse_row
+from calcforge.calc.engine.symbolic import Expr, to_row
 
 
 def P(t):
@@ -151,7 +151,7 @@ def test_symbolic_results_match_smath_or_are_errors():
     from pathlib import Path
 
     from tests.calc.smfile import NS, load_sm, rpn_to_ast
-    from markforge.calc.engine import ast as A
+    from calcforge.calc.engine import ast as A
 
     folder = Path(__file__).resolve().parents[2] / "SMath Studio" / "examples"
     if not folder.exists():

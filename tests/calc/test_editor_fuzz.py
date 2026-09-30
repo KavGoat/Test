@@ -13,11 +13,11 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 QtWidgets = pytest.importorskip("PySide6.QtWidgets")
 
-from markforge.calc.editor import MathEditor
-from markforge.calc.engine.model import Box, Row
-from markforge.calc.engine.parser import ParseError, parse_row
-from markforge.calc.worksheet import Worksheet
-from markforge.calc.ui.layout import Layouter, Style
+from calcforge.calc.editor import MathEditor
+from calcforge.calc.engine.model import Box, Row
+from calcforge.calc.engine.parser import ParseError, parse_row
+from calcforge.calc.worksheet import Worksheet
+from calcforge.calc.ui.layout import Layouter, Style
 KEYS = list("0123456789xyab+-*/^()[],.:='\" !") + ["LEFT","RIGHT","UP","DOWN","HOME","END","BACK","DELETE","TAB","BACK","LEFT"] + ["'kN","'m","sin(","sqrt(","if(","mat("]
 def rows_of(r):
     yield r
@@ -41,8 +41,8 @@ import logging  # noqa: E402
 class _Boom(logging.Handler):
     def emit(self, record):
         raise RuntimeError("caught crash: " + record.getMessage() + " " + str(record.exc_info[1] if record.exc_info else ""))
-logging.getLogger("markforge.calc").addHandler(_Boom())
-logging.getLogger("markforge.calc").propagate = False
+logging.getLogger("calcforge.calc").addHandler(_Boom())
+logging.getLogger("calcforge.calc").propagate = False
 def run(seed):
     rng = random.Random(seed)
     ed = MathEditor()

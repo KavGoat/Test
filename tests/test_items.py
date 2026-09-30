@@ -3,12 +3,12 @@ import pytest
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QImage, QPainter
 
-from markforge.core.document import Document, PageScale
-from markforge.items.base import ITEM_REGISTRY, build_item
-from markforge.items.measure import CountItem, MeasureItem
-from markforge.items.media import ImageItem
-from markforge.items.shapes import PolyItem, RectItem
-from markforge.items.text import CalloutItem, NoteItem, StampItem, TextItem
+from calcforge.core.document import Document, PageScale
+from calcforge.items.base import ITEM_REGISTRY, build_item
+from calcforge.items.measure import CountItem, MeasureItem
+from calcforge.items.media import ImageItem
+from calcforge.items.shapes import PolyItem, RectItem
+from calcforge.items.text import CalloutItem, NoteItem, StampItem, TextItem
 
 
 def make_all(qapp):
@@ -125,7 +125,7 @@ def test_a_highlighter_stroke_is_one_even_band(qapp):
     """Drawn back over itself, a highlighter must not darken or leave holes."""
     from PySide6.QtCore import QPointF
     from PySide6.QtGui import QImage, QPainter
-    from markforge.items.shapes import PolyItem
+    from calcforge.items.shapes import PolyItem
 
     item = PolyItem(kind="highlighter")
     item.points = [QPointF(40, 100), QPointF(160, 100), QPointF(100, 100),
@@ -146,7 +146,7 @@ def test_a_highlighter_stroke_is_one_even_band(qapp):
 def test_a_dimensions_value_carries_a_control_dot(qapp):
     """Not a corner of a box — a control point sitting on the number."""
     from PySide6.QtCore import QPointF
-    from markforge.items.measure import DIMENSION, LENGTH, AREA, MeasureItem
+    from calcforge.items.measure import DIMENSION, LENGTH, AREA, MeasureItem
 
     for kind in (DIMENSION, LENGTH):
         item = MeasureItem(kind, [QPointF(0, 0), QPointF(200, 0)])
@@ -196,9 +196,9 @@ def test_a_snapshots_colours_can_be_changed(window):
     from PySide6.QtCore import QPointF, QRectF
     from PySide6.QtGui import QColor
 
-    from markforge.io import recolour
-    from markforge.items.shapes import PolyItem
-    from markforge.items.snapshot import SnapshotItem
+    from calcforge.io import recolour
+    from calcforge.items.shapes import PolyItem
+    from calcforge.items.snapshot import SnapshotItem
 
     frame = window.document.pages[0].frame
     for index, colour in enumerate(("#000000", "#0a0a0a", "#c92a2a")):
@@ -227,9 +227,9 @@ def test_a_snapshots_colours_can_be_changed(window):
 
 def test_a_snapshot_and_a_photo_have_a_line_type_of_their_own(window):
     """Neither is drawn with the toolbar's pen, so each remembers its own."""
-    from markforge.ui import toolsets
-    from markforge.items.media import ImageItem
-    from markforge.items.snapshot import SnapshotItem
+    from calcforge.ui import toolsets
+    from calcforge.items.media import ImageItem
+    from calcforge.items.snapshot import SnapshotItem
 
     for key, kind in (("snapshot", SnapshotItem), ("image", ImageItem)):
         window.select_tool(key)

@@ -7,8 +7,8 @@ page count and the actual text on the page.
 import pytest
 from PySide6.QtPdf import QPdfDocument
 
-from markforge.core.document import LANDSCAPE
-from markforge.io import export as export_io
+from calcforge.core.document import LANDSCAPE
+from calcforge.io import export as export_io
 
 A4_W, A4_H = 595.276, 841.89          # points, ISO 216
 TOLERANCE = 1.5                       # Qt rounds the media box to 1/20 pt
@@ -134,7 +134,7 @@ def test_markup_text_reaches_the_page(window, tmp_path):
 
 
 def test_a_measurement_prints_the_dimension_it_reads(window, tmp_path):
-    from markforge.core.document import PageScale
+    from calcforge.core.document import PageScale
     window.current_page().scale = PageScale.from_ratio(50)
     window.select_tool("measure_length")
     _drag(window, 100, 400, 236, 400)
@@ -150,8 +150,8 @@ def test_the_scale_another_reader_measures_with_is_the_scale_shown(window, tmp_p
     measured a 1:50 drawing a thousand times too long.
     """
     import math
-    from markforge.core.document import PageScale
-    from markforge.core.units import parse_unit
+    from calcforge.core.document import PageScale
+    from calcforge.core.units import parse_unit
     window.current_page().scale = PageScale.from_ratio(50)
     window.select_tool("measure_length")
     _drag(window, 100, 400, 236, 400)
@@ -296,7 +296,7 @@ def test_a_logo_in_the_footer_prints_at_the_bottom(window):
 
 
 def test_the_logo_height_is_what_was_asked_for(window):
-    from markforge.core.document import MM_TO_PT
+    from calcforge.core.document import MM_TO_PT
 
     settings = window.document.settings
     settings.logo_key = _logo(window.document)
@@ -347,8 +347,8 @@ def test_header_text_steps_aside_for_the_logo(window):
 
 
 def test_the_logo_and_its_place_are_saved_with_the_document(window, tmp_path):
-    from markforge.core.document import Document
-    from markforge.io import project as project_io
+    from calcforge.core.document import Document
+    from calcforge.io import project as project_io
 
     settings = window.document.settings
     settings.logo_key = _logo(window.document)
@@ -420,7 +420,7 @@ def test_an_exported_drawing_keeps_the_index_and_links_it_came_with(
     or the links that were on it. Both have to be carried over deliberately, or
     a two-hundred-page set comes out of the export with no way round it.
     """
-    from markforge.io import pdfio
+    from calcforge.io import pdfio
 
     source = str(tmp_path / "set.pdf")
     _a_pdf_with_an_index(source)
@@ -595,7 +595,7 @@ def test_a_contents_line_is_a_working_link_in_the_exported_pdf(window, tmp_path)
     The outline was held; the links were not, so the block could have exported
     as a list of page numbers nobody could click.
     """
-    from markforge.items.contents import ContentsItem
+    from calcforge.items.contents import ContentsItem
 
     window.add_page()
     window.add_page()

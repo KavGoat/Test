@@ -16,15 +16,15 @@ from pathlib import Path
 import pymupdf
 import pytest
 
-from markforge.io import pdfvector
-from markforge.pdf import engine
-from markforge.pdf.engine import PdfError
-from markforge.pdf.objects import Name, Ref
+from calcforge.io import pdfvector
+from calcforge.pdf import engine
+from calcforge.pdf.engine import PdfError
+from calcforge.pdf.objects import Name, Ref
 
 # Always exercise the real reference PDF shipped with the repository. An
 # optional external corpus must not depend on one developer's Linux home path.
 _reference = Path(__file__).resolve().parents[1] / 'btx' / 'Document1.pdf'
-_external = os.environ.get('MARKFORGE_PDF_CORPUS', '')
+_external = os.environ.get('CALCFORGE_PDF_CORPUS', '')
 CORPUS = ([str(_reference)] if _reference.exists() else []) + (
     sorted(glob.glob(os.path.join(_external, '**', '*.pdf'), recursive=True))
     if _external else [])
@@ -246,10 +246,10 @@ def test_text_beyond_latin_1_goes_out_as_utf_16():
     It comes back as the bytes a PDF text string is — the mark on the front
     and two bytes to the letter — because only the reader knows which strings
     are words. Turning those into words is
-    :func:`markforge.io.pdfmarkups._readable`, and this checks the pair of them
+    :func:`calcforge.io.pdfmarkups._readable`, and this checks the pair of them
     end to end.
     """
-    from markforge.io.pdfmarkups import _readable
+    from calcforge.io.pdfmarkups import _readable
 
     said = "dwg — Ø12 café"
     assert engine.serialize(said).startswith(b"<feff")
@@ -326,7 +326,7 @@ def test_saving_over_a_file_lets_go_of_it_first(tmp_path):
     export having its markups added, an outline written onto a finished PDF.
     Windows refuses to rename over a file anything still has open: the save
     fails with a permission error and what is left beside the drawing is a
-    ``.markforge-part`` file nobody asked for. Unix allows it and hides the
+    ``.calcforge-part`` file nobody asked for. Unix allows it and hides the
     whole thing, so the only way to keep it fixed is to check here.
     """
     path = str(tmp_path / "drawing.pdf")
@@ -337,7 +337,7 @@ def test_saving_over_a_file_lets_go_of_it_first(tmp_path):
     engine.save_as(document, path, also=(other,))
     assert document.is_closed, "the document written must be let go of"
     assert other.is_closed, "and so must anything else holding the file"
-    assert not os.path.exists(path + ".markforge-part"), \
+    assert not os.path.exists(path + ".calcforge-part"), \
         "and nothing may be left lying beside it"
     engine.close(engine.open_path(path))               # still a readable PDF
 
@@ -354,7 +354,7 @@ def test_a_save_survives_a_scratch_file_that_will_not_delete(tmp_path,
     """
     import os as real_os
 
-    from markforge.io import annotate
+    from calcforge.io import annotate
 
     appearances = annotate.Appearances()
     path = str(tmp_path / "held.pdf")
@@ -545,7 +545,7 @@ def test_one_repaint_never_asks_for_the_whole_sheet(tmp_path):
     """
     from PySide6.QtCore import QRectF
 
-    from markforge.io import pdftiles
+    from calcforge.io import pdftiles
 
     cache = pdftiles.TileCache()
     asked: list = []
@@ -561,7 +561,7 @@ def test_a_zoom_gives_up_on_the_zoom_before_it(tmp_path):
     """Squares of a page at a zoom nobody is looking at are not worth drawing."""
     from PySide6.QtCore import QRectF
 
-    from markforge.io import pdftiles
+    from calcforge.io import pdftiles
 
     cache = pdftiles.TileCache()
     cache._ask = lambda key, data, page, sheet: cache._waiting.add(key)
@@ -586,7 +586,7 @@ def test_a_page_is_drawn_at_every_zoom_including_right_out(tmp_path):
     """
     from PySide6.QtCore import QRectF
 
-    from markforge.io import pdftiles
+    from calcforge.io import pdftiles
 
     cache = pdftiles.TileCache()
     asked: list = []
@@ -610,7 +610,7 @@ def test_a_page_is_drawn_at_the_real_pixels_of_the_screen_showing_it():
     """
     from PySide6.QtGui import QImage, QPainter
 
-    from markforge.ui.scene import _painted_scale
+    from calcforge.ui.scene import _painted_scale
 
     sharpness = {}
     for ratio in (1.0, 2.0):
@@ -626,7 +626,7 @@ def test_a_page_nobody_can_see_is_not_drawn():
     """Opening a forty-sheet set draws the sheets being read, not all forty."""
     from PySide6.QtCore import QRectF
 
-    from markforge.io import pdftiles
+    from calcforge.io import pdftiles
 
     cache = pdftiles.TileCache()
     asked: list = []

@@ -13,11 +13,11 @@ import pymupdf
 import pytest
 from PySide6.QtCore import QPointF, QRectF, Qt
 
-from markforge.core.document import PageSetup
-from markforge.items.calc import CalcItem
-from markforge.items.shapes import RectItem
-from markforge.items.snapshot import SnapshotItem
-from markforge.items.text import TextItem
+from calcforge.core.document import PageSetup
+from calcforge.items.calc import CalcItem
+from calcforge.items.shapes import RectItem
+from calcforge.items.snapshot import SnapshotItem
+from calcforge.items.text import TextItem
 from tests import fidelity
 from tests.test_calc_saving import answer, reopen, save_to, write_lines
 from tests.test_roundtrip import (assert_alike, compare_everywhere, every_kind,

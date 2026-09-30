@@ -1,6 +1,6 @@
 # TEST-ONLY. CalcForge has no .sm support (decision 2); this reader and
 # writer exists so the tests can check answers against the results SMath
-# itself saved in its example files. Nothing under markforge/ imports it.
+# itself saved in its example files. Nothing under calcforge/ imports it.
 """Read and write SMath Studio worksheets (*.sm).
 
 The format is XML; a math region stores its expression in reverse Polish
@@ -10,15 +10,15 @@ and the last result in ``<result>``.
 """
 from __future__ import annotations
 
-from markforge.calc.astitems import (PREC, _prec, _chars, ast_to_items, _row,
+from calcforge.calc.astitems import (PREC, _prec, _chars, ast_to_items, _row,
                                       _node_items, _join_args, _call_items)
 
 import xml.etree.ElementTree as ET
 
-from markforge.calc.editor import MathEditor
-from markforge.calc.engine import ast as A
-from markforge.calc.engine.display import display_text
-from markforge.calc.page import is_field
+from calcforge.calc.editor import MathEditor
+from calcforge.calc.engine import ast as A
+from calcforge.calc.engine.display import display_text
+from calcforge.calc.page import is_field
 from dataclasses import dataclass, field as _field
 
 # SMath's page model, which CalcForge does not have (phase 6: MarkForge's page
@@ -66,9 +66,9 @@ def _sheet_parts(ws):
     if not hasattr(ws, "metadata"):
         ws.metadata = {}
     return ws
-from markforge.calc.engine.model import Abs, Frac, Index, Matrix, Paren, Pow, Program, Root, Row, Sqrt
-from markforge.calc.engine.parser import parse_row
-from markforge.calc.worksheet import Worksheet
+from calcforge.calc.engine.model import Abs, Frac, Index, Matrix, Paren, Pow, Program, Root, Row, Sqrt
+from calcforge.calc.engine.parser import parse_row
+from calcforge.calc.worksheet import Worksheet
 
 NS = "http://smath.info/schemas/worksheet/1.0"
 
@@ -622,7 +622,7 @@ def _save_region(ws, parent, r, k) -> None:
 # ---------------------------------------------------------------------------
 
 def _load_plot(ws: Worksheet, reg, plot, x: float, y: float) -> None:
-    from markforge.calc.plot import PX_PER_SCALE
+    from calcforge.calc.plot import PX_PER_SCALE
 
     region = ws.add_plot(x, y)
     st = region.plot

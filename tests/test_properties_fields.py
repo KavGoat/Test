@@ -7,8 +7,8 @@ import datetime
 import pymupdf
 import pytest
 
-from markforge.core.document import Document
-from markforge.ui import dialogs
+from calcforge.core.document import Document
+from calcforge.ui import dialogs
 
 
 @pytest.fixture
@@ -110,7 +110,7 @@ def test_title_author_subject_and_keywords_go_into_the_pdf(win, tmp_path):
 
 
 def test_an_exported_pdf_has_them_too(win, tmp_path):
-    from markforge.io import export as export_io
+    from calcforge.io import export as export_io
     win.document.title, win.document.keywords = "Export", "K1"
     path = str(tmp_path / "exported.pdf")
     export_io.export_pdf(win.document, path, resolution=150)
@@ -121,7 +121,7 @@ def test_an_exported_pdf_has_them_too(win, tmp_path):
 
 # -- one File > Properties --------------------------------------------------------------------
 
-def test_one_properties_dialog_with_markforges_and_smaths_fields(win):
+def test_one_properties_dialog_with_calcforges_and_smaths_fields(win):
     dialog = dialogs.DocumentPropertiesDialog(win.document, win)
     dialog.title.setText("T")
     dialog.company.setText("ACME")

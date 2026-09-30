@@ -1,14 +1,14 @@
 """Scales, sizes and measurements use SMath's unit system (decision 1).
 
-These pin the adapter in markforge/core/units.py to the calculation engine: a
+These pin the adapter in calcforge/core/units.py to the calculation engine: a
 quantity here is the engine's SI value and dimensions, the unit names are
 SMath's, and a label is written by the engine's own number formatter.
 """
 import pytest
 
-from markforge.calc.engine.unitdata import UNITS
-from markforge.core.document import PageScale
-from markforge.core.units import (UNIT_MENU, Q_, convert, format_quantity, parse_unit,
+from calcforge.calc.engine.unitdata import UNITS
+from calcforge.core.document import PageScale
+from calcforge.core.units import (UNIT_MENU, Q_, convert, format_quantity, parse_unit,
                                   DimensionalityError)
 
 
@@ -16,7 +16,7 @@ def test_pint_is_gone():
     """No module in the application imports Pint; SMath's table is the only one."""
     import pathlib
     import re
-    root = pathlib.Path(__file__).resolve().parents[1] / "markforge"
+    root = pathlib.Path(__file__).resolve().parents[1] / "calcforge"
     offenders = [str(p) for p in root.rglob("*.py")
                  if re.search(r"^\s*(import|from)\s+pint\b", p.read_text(encoding="utf-8"), re.M)]
     assert offenders == []
@@ -76,7 +76,7 @@ def test_labels_are_written_with_a_dot_and_superscripts(value, unit, digits, tex
 
 def test_a_label_rounds_exactly_as_an_equation_does():
     """Both go through the engine's formatter: half to even on the binary value."""
-    from markforge.calc.engine.numformat import NumberFormat, format_real
+    from calcforge.calc.engine.numformat import NumberFormat, format_real
     for x in (2.345, 2.355, 0.125, 0.375, 1.0005, 99.995):
         shown = format_real(x, NumberFormat(decimals=2, trailing_zeros=True, threshold=15))
         assert format_quantity(Q_(x, "m"), 2, "fixed") == shown.mantissa + " m"
@@ -101,7 +101,7 @@ def test_a_volume_from_an_area_and_a_depth_reads_in_one_unit():
     {"magnitude": 17.6388888, "units": "millimeter"},          # and Pint's long ones
     {"magnitude": 0.0176388888, "units": "meter"},
 ])
-def test_a_scale_saved_by_markforge_still_opens(stored):
+def test_a_scale_saved_by_calcforge_still_opens(stored):
     scale = PageScale.from_dict(dict(stored, label="1:50", calibrated=True))
     assert scale.ratio() == pytest.approx(50, rel=1e-6)
 
