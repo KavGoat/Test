@@ -152,24 +152,37 @@ def test_opening_a_pdf_is_opening_a_document_not_converting_one(window, tmp_path
 
 
 
-def test_saving_a_marked_up_drawing_leaves_the_drawing_byte_for_byte(
-        window, tmp_path):
-    """The file that comes out starts with the file that went in.
+def _page_content(path: str, index: int = 0, strip: bool = False) -> bytes:
+    """A page's own drawing: its content streams, decompressed, in order —
+    with CalcForge's tagged layers taken off first when *strip*."""
+    import pymupdf
 
-    Not "the same drawing", not "the same pages" — the same bytes. That is
-    what makes a save an addition to somebody else's document rather than a
-    re-export of it: a signature over the original still covers the original,
-    an embedded font is still the font that was embedded, and nothing has been
-    quietly re-compressed on the way through.
+    from markforge.io import calclayer
+
+    document = pymupdf.open(path)
+    try:
+        if strip:
+            calclayer.strip(document, index)
+        return b"".join(document.xref_stream(xref) or b""
+                        for xref in document[index].get_contents())
+    finally:
+        document.close()
+
+
+def test_saving_a_marked_up_drawing_leaves_the_drawing_s_own_content_alone(
+        window, tmp_path):
+    """Every save writes a fresh, compact file (decision 4) — and the page's
+    own drawing in it is exactly the drawing that came in.
+
+    CalcForge's own drawing goes over it in tagged layers of its own and the
+    markups go in as annotations; the page's content streams are not touched.
+    (Only a signed file is appended to: test_calc_saving.py.)
     """
     from PySide6.QtCore import QRectF
     from markforge.items.shapes import RectItem
 
     source = str(tmp_path / "drawing.pdf")
     _a_pdf_with_line_work(source)
-    with open(source, "rb") as handle:
-        original = handle.read()
-
     window.open_path(source)
     window.rebuild_scenes()
     drawn = RectItem()
@@ -181,10 +194,14 @@ def test_saving_a_marked_up_drawing_leaves_the_drawing_byte_for_byte(
     with open(saved, "rb") as handle:
         written = handle.read()
 
-    assert written[:len(original)] == original, \
+    assert _page_content(saved, strip=True) == _page_content(source), \
         "the drawing that came in should still be there, exactly"
-    assert len(written) > len(original), "and the markups appended after it"
+    assert written.count(b"%%EOF") == 1, "a fresh file, not an update appended to the old"
     assert _readable_pdf(saved).pageCount() == 1
+
+    size = len(written)
+    project_io.save_document(window.document, saved)
+    assert abs(os.path.getsize(saved) - size) <= 64, "saving again does not grow it"
 
 
 def test_an_updated_drawing_still_reads_as_a_pdf_everywhere(window, tmp_path):
@@ -234,11 +251,11 @@ def test_saving_twice_leaves_one_record_to_read_back(window, tmp_path):
 
 
 def test_a_page_the_update_cannot_describe_is_assembled_instead(window, tmp_path):
-    """A drawing that has been dimmed is not the drawing that came in.
+    """A signed drawing that has been dimmed is not the drawing that came in.
 
-    The incremental path can only add to the source page; anything that
-    changes the page itself has to be painted, and then the file is built
-    rather than added to. It still has to be a correct PDF either way.
+    The appending path — for signed files only — can only add to the source
+    page; anything that changes the page itself has to be painted, and then
+    the file is written afresh. It still has to be a correct PDF either way.
     """
     from markforge.io import pdfsave
 
@@ -246,6 +263,9 @@ def test_a_page_the_update_cannot_describe_is_assembled_instead(window, tmp_path
     _a_pdf_with_line_work(source)
     window.open_path(source)
     window.rebuild_scenes()
+    assert pdfsave.source_bytes(window.document) is None, "an unsigned file is never appended to"
+    key = window.document.pages[0].pdf_key
+    window.document.signed_source = (key, window.document.asset(key))
     assert pdfsave.source_bytes(window.document) is not None
 
     window.document.pages[0].background_opacity = 0.4
@@ -917,15 +937,13 @@ def test_a_turned_page_comes_in_as_the_sheet_it_is_drawn_as(window, tmp_path,
 
 
 def test_a_turned_page_is_still_turned_after_it_is_saved(window, tmp_path):
-    """Saving a turned drawing adds to it; it does not straighten it out.
+    """Saving a turned drawing does not straighten it out.
 
     A page says it is turned with ``/Rotate``, and that is part of the file its
-    author wrote. Marking it up and saving must leave it saying so — appended
-    to, byte for byte, like any other drawing. Rewriting the page to bake the
-    rotation into its content puts the markups in the right place on screen and
-    still hands back a file that is not the one that came in: the original
-    bytes are gone, and with them the promise that a signature over them still
-    covers them.
+    author wrote. Marking it up and saving must leave it saying so, with its
+    own content exactly as it was, like any other drawing. Rewriting the page
+    to bake the rotation into its content puts the markups in the right place
+    on screen and still hands back a page that is not the one that came in.
     """
     import pymupdf
     from PySide6.QtCore import QRectF
@@ -933,8 +951,6 @@ def test_a_turned_page_is_still_turned_after_it_is_saved(window, tmp_path):
 
     source = str(tmp_path / "turned.pdf")
     _a_turned_pdf(source, 90)
-    with open(source, "rb") as handle:
-        original = handle.read()
 
     window.open_path(source)
     window.rebuild_scenes()
@@ -945,10 +961,8 @@ def test_a_turned_page_is_still_turned_after_it_is_saved(window, tmp_path):
     saved = str(tmp_path / "marked.pdf")
     project_io.save_document(window.document, saved)
 
-    with open(saved, "rb") as handle:
-        written = handle.read()
-    assert written[:len(original)] == original, \
-        "a turned page is added to like any other, not written again"
+    assert _page_content(saved, strip=True) == _page_content(source), \
+        "a turned page keeps its own content like any other, not baked straight"
 
     document = pymupdf.open(saved)
     try:

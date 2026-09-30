@@ -184,3 +184,78 @@ SMath or Bluebeam. The plan is `CALCFORGE_PLAN.md`; requirements are in
 - SMath's Ctrl+G (Greek) and Ctrl+W (units list) are left out, as asked.
 - WebSMath only showed Ctrl+\, Ctrl+1, Ctrl+8 and Ctrl+[ in its panel tooltips;
   CalcForge binds them, as SMath desktop does.
+
+## Phase 4 — saving and flattening
+
+**What changed**
+
+- **Every save writes a fresh, compact file** (decision 4). It is built in
+  memory and written once, with unused objects dropped, so saving again —
+  or opening and saving again — gives the same size. A page that is a page
+  of the opened PDF is that PDF's page (the file is copied and its pages
+  picked out, so every annotation on it survives as its author wrote it).
+- **Equations are page content in a tagged layer** (decision 3). On every
+  save CalcForge recalculates, then draws the equations as vector lines and
+  real, embedded-font text into a content stream of their own, appended after
+  the page's own content, which is never touched. MarkForge's own sheet
+  drawing (header, footer, flattened markups, the paper of written pages)
+  goes in the same way as a second layer. Both are tagged with a private key
+  (`/CalcForge /Calc`, `/CalcForge /Sheet`) and each page carries its uid.
+- **Reopening takes the layers off and rebuilds live equations** from the
+  record. The page left behind is the page's source from then on, so the
+  record no longer stores a second copy of the PDF (that copy was what made
+  MarkForge's files grow on every save).
+- **Warnings on open** — in the status bar, and in a message box:
+  - the calc layer was changed in another program: CalcForge rebuilds it from
+    its record, and says so;
+  - pages were deleted elsewhere: their equations go, and the variables that
+    became undefined are named; reordered pages carry their equations;
+  - the record is missing: the file opens as a plain PDF, and says the
+    calculations show but can't be edited.
+- **Markups** stay ordinary annotations. Somebody else's untouched markups are
+  found again after each save and stay theirs. A markup added in another
+  program comes in as a markup.
+- **Signed PDFs** (a `/Sig` field with a `/ByteRange`) are appended to, so the
+  signature stays valid; the old calc layer is taken off and the new one put
+  on in the appended part, and the status bar says why. If the pages have
+  changed (added, moved, resized) the file is written afresh and the status
+  bar says the signature no longer applies.
+- **Extract and Split** carry their pages' equations live, and warn of
+  variables the extracted equations use that are defined only on pages left
+  behind. **Insert PDF** (and dropping a file on the pages panel) brings a
+  CalcForge file's pages in with their equations live, in reading order.
+- **Autosave** writes the same format (a PDF with the record; the layers are
+  left out of recovery copies, as before, to keep autosave quick).
+- **Found and fixed on the way:** the equations' layer was drawn at 200 dpi,
+  which made SMath's point-sized fonts come out about a third too big and run
+  into each other. It is drawn at 96 dpi now. The equation snapshot (phase 2)
+  had the same fault the other way (72 dpi, letters too small) and is fixed
+  too.
+
+**Tests**
+
+- `tests/test_calc_saving.py` (new, all through the real window): text reads
+  back; the saved page renders like the screen (same ink, same places); a
+  pypdf reader sees the markups as annotations and not the equations;
+  reopening rebuilds live, editable equations; the drawing is not stored
+  twice; repeated saves (and reopen-then-save) don't grow the file; the three
+  warnings; reordered pages; a markup added elsewhere; a signed file signed
+  with pyHanko stays valid after two saves, with one calc layer; a signed file
+  whose pages changed is written afresh and says why; Extract, Split, Insert
+  and autosave.
+- MarkForge's incremental-save tests in `tests/test_format.py` are rewritten
+  to the new rule: the page's own content is unchanged, the file is fresh
+  (one `%%EOF`) and doesn't grow; a turned page keeps its content and its
+  `/Rotate`; only a signed file takes the appending path.
+- pyHanko is a new test-only dependency (signing and validating).
+
+**Different from SMath or Bluebeam**
+
+- Markups: when one of CalcForge's own markups is edited in another program,
+  CalcForge's record wins on reopen (as MarkForge did). Markups *added* in
+  another program are read in.
+- Another reader can switch nothing off: the calc layer is page content with
+  a private tag, not an optional-content layer, so it can't be hidden or
+  deleted as a unit elsewhere.
+- Recovery copies (autosave) hold the record and the pages but not the drawn
+  layers, so opened in another reader they show no equations.

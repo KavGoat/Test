@@ -51,6 +51,22 @@ def undefined_without(document, going: list) -> list:
     return sorted(lost - kept)
 
 
+def names_left_behind(document, kept: list) -> list:
+    """The variables equations on the *kept* pages use that are defined only
+    on pages left behind — undefined in a file of the kept pages alone."""
+    sheet = sheet_for(document)
+    kept_uids = {page.uid for page in kept}
+    used, here, there = set(), set(), set()
+    for region in sheet.worksheet.regions:
+        names = set(region.defined_vars) | {name for name, _ in region.defined_funcs}
+        if sheet.page_uid(region) in kept_uids:
+            used |= set(region.uses)
+            here |= names
+        else:
+            there |= names
+    return sorted((used & there) - here)
+
+
 def _word_char(ch: str) -> bool:
     return ch.isalnum() or ch in "_."
 

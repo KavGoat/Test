@@ -268,8 +268,10 @@ markforge/
     calcdialogs.py   WebSMath's matrix/function/constants/double-check
                      dialogs (ANSWERS lets tests answer them)
     theme.py (markforge/theme.py) light and dark stylesheets
-  io/          pdfbase (what a saved document is), pdfsave (the incremental
-               update), project (open and save), annotate (markups as real PDF
+  io/          pdfbase (what a saved document is: a fresh file every save,
+               and reopening it), calclayer (CalcForge's tagged sheet and calc
+               layers, taking them off, signatures), pdfsave (appending to a
+               signed file), project (open and save), annotate (markups as real PDF
                annotations), pdfio, pdfvector, pdfmarkups, pdflinks,
                btx (Bluebeam tool sets), recolour, export
 btx/           the real Bluebeam tool sets the importer is tested against
@@ -294,14 +296,22 @@ docs/          this file, tasklist.md, interface.md, backlog.md,
   at the top of `tests/conftest.py` and **not in a fixture**, because Qt works
   out those locations once and keeps the answer. Do not call `sync()` to "fix"
   ordering — that broke the layout tests once already.
-- **A saved document is a PDF, and saving adds to it.** `io/pdfsave.py` writes
-  an incremental update when the document is one source PDF and its markups:
-  same source, pages in order, at their own size and full strength, printable,
-  nothing flattened in, no grid and no running text. Anything else has to be
-  painted, so `io/pdfbase.py` assembles it page by page as it always did. Both
-  put the record — everything a PDF cannot hold — inside the file as an
-  embedded attachment. What decides how a file opens is what it holds, never
-  what it is called: `project.carries_a_document(path)`.
+- **A saved document is a PDF, written afresh every save** (decisions 3
+  and 4). `io/pdfbase.py` builds it in memory and writes it once, compact:
+  each page's own content (when every page is a page of one PDF at its size,
+  that PDF is copied and its pages selected — grafting page by page drops
+  annotations), then two tagged layers (`io/calclayer.py`: the sheet —
+  header, footer, flattened markups, paper — and the equations as vector
+  drawing and text), then the markups as annotations, then the record. Every
+  page carries `/CalcForgePage` (its uid). Opening strips both layers and our
+  own annotations; what is left is the page's source from then on, so the
+  record no longer carries the PDF again (`FILE_FACTS["itself"]`). Markups
+  that are still somebody else's annotation are found again by
+  `calclayer.annotation_print` (object numbers change on every save).
+  Annotations added elsewhere come in as markups; ours changed elsewhere lose
+  to the record. Only a digitally signed file is appended to
+  (`io/pdfsave.py`, `Document.signed_source`). What decides how a file opens
+  is what it holds, never what it is called: `project.carries_a_document(path)`.
 - **A markup is a real annotation.** `io/annotate.py` builds each one in the
   PDF's own vocabulary — the plain dictionaries and names of `markforge/pdf`,
   not any library's object types — so the same description can be appended by
@@ -470,13 +480,18 @@ in a state somebody else could pick up from, because they may have to.
 
 ## 5. The parts most likely to bite you
 
-**The incremental save (`io/pdfsave.py`).** `source_bytes(document)` decides
-whether this document is an addition to one file or a new file. Every condition
-in it is there because something has to be painted otherwise — a grid, a
-running header, a flattened markup, a dimmed page, a page fitted to different
-paper. If you add anything that paints onto the sheet, add its condition there
-too, or a save will silently lose it. Object numbers belong to the file they
-are in, so anything brought across from the scratch appearance PDF goes through
+**Saving (`io/pdfbase.py`, `io/calclayer.py`, `io/pdfsave.py`).** Anything
+new that paints onto the sheet must be painted by `render_page(layer="sheet")`
+so it lands in the tagged sheet layer — anything drawn into the page any other
+way is not taken off on reopen and doubles up on the next save.
+`tests/test_calc_saving.py::test_repeated_saves_do_not_grow_the_file` guards
+it. The equations' layer is drawn at 96 dpi (`CALC_DPI`): SMath's fonts are
+in points and Qt resolves points by the device's resolution, so any other
+resolution draws letters a different size from the layout. A signed file is
+only appended to while it is still that file's pages in order
+(`pdfsave.source_bytes`); anything else is written afresh with a note that the
+signature no longer applies. Object numbers belong to the file they are in,
+so anything brought across from the scratch appearance PDF goes through
 `copy_into`, which renumbers as it copies.
 
 **Leaders (`markforge/items/text.py`).** A `_Leader` stores `tip`, `side`,

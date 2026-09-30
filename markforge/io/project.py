@@ -53,8 +53,11 @@ def assets_in_use(document) -> set[str]:
 
 
 def save_document(document, path: str, enforce_extension: bool = True,
-                  appearance: bool = True) -> None:
+                  appearance: bool = True) -> str:
     """Write *document* to *path* atomically, as a PDF.
+
+    Says anything worth telling about how it was written — appended to,
+    because the file is signed — or "" when there is nothing to tell.
 
     Recovery copies are written beside the document as ``….pdf.autosave``, so
     they pass *enforce_extension* False to keep the name they were given, and
@@ -71,7 +74,7 @@ def save_document(document, path: str, enforce_extension: bool = True,
     os.close(descriptor)
     try:
         document.assets = {key: value for key, value in assets.items() if key in used}
-        pdfbase.write(document, temporary, appearance=appearance)
+        note = pdfbase.write(document, temporary, appearance=appearance)
         os.replace(temporary, path)
     finally:
         document.assets = assets
@@ -79,6 +82,7 @@ def save_document(document, path: str, enforce_extension: bool = True,
             os.remove(temporary)
     document.path = path
     document.modified = False
+    return note
 
 
 def load_document(document, path: str) -> None:

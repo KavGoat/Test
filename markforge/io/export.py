@@ -32,7 +32,7 @@ def _apply_layout(device, page) -> None:
 def paint_pages(device, document: Document, pages: Iterable, resolution: float,
                 per_page_layout: bool = True,
                 pdf_overlay_pages: Optional[set[str]] = None,
-                without_markups: bool = False) -> None:
+                without_markups: bool = False, layer: str = "") -> None:
     """Render *pages* onto a paged paint device.
 
     ``QPdfWriter`` accepts a new page size for every page, so an export can mix
@@ -64,7 +64,7 @@ def paint_pages(device, document: Document, pages: Iterable, resolution: float,
                 painter, _target_rect(painter, page, resolution, per_page_layout),
                 for_print=True,
                 pdf_overlay=bool(pdf_overlay_pages and page.uid in pdf_overlay_pages),
-                without_markups=without_markups)
+                without_markups=without_markups, layer=layer)
     finally:
         if started:
             painter.end()

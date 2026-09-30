@@ -1,27 +1,23 @@
-"""Saving a marked-up drawing back onto the drawing itself.
+"""Saving a digitally signed PDF by appending to it.
 
-The ordinary way to save a PDF is to read every object out of it and write
-every object back. It works, and it quietly changes the file: streams are
-re-compressed, dictionaries come out in another order, and a signature that
-covered the old bytes no longer covers the new ones. For a program whose whole
-job is adding to somebody else's drawing, that is the wrong shape of operation.
-
-So when the document *is* one PDF plus what has been drawn on it — which is
-what "open a drawing, mark it up, save" means — this writes an **incremental
-update** instead. Every original byte stays where it was. Appended after them
-are the markups as annotations, the pages that now point at them, and the
-record of everything a PDF has no word for. Readers follow the new
-cross-reference back through ``/Prev`` to the original, which is how a PDF has
-always been added to.
+Every save writes a fresh, compact file (decision 4) — except a signed one.
+Rewriting a signed file re-compresses its streams and reorders its
+dictionaries, and the signature, which covers the old bytes, no longer covers
+the new ones. So a signed file gets an **incremental update** instead: every
+original byte stays where it was, and appended after them are the markups as
+annotations, CalcForge's layers (the old ones taken off the pages, the new
+ones put on), the pages that now point at them, and the record. Readers
+follow the new cross-reference back through ``/Prev`` to the original, which
+is how a PDF has always been added to.
 
 MuPDF does the appending. It also decides when it cannot: a file it had to
 repair on the way in has no original bytes left to leave alone, and then this
-falls back to writing the file out whole — which is still the same document,
-just not the same bytes.
+falls back to writing the file out whole.
 
-Anything else — pages from several files, blank pages, pages fitted to
-different paper or reordered — is not an update to one file, and
-:mod:`markforge.io.pdfbase` assembles it as before.
+That only works while the document is still that file's pages, in its order,
+at its sizes: anything else is not an update to that file, and
+:mod:`markforge.io.pdfbase` writes it afresh (and says the signature no
+longer applies).
 """
 from __future__ import annotations
 
@@ -33,37 +29,20 @@ from ..pdf.engine import PdfError
 
 
 def source_bytes(document) -> Optional[bytes]:
-    """The one PDF this document is, when it is one PDF and its markups.
+    """The signed file this document is, when it is still that file.
 
-    Every page has to have come from the same file, in its order, at its size
-    and its full strength. A page moved, resized, turned or dimmed is a page
-    this file no longer describes, and then the document has to be assembled
-    rather than added to.
+    Every page has to be that file's page, in its order, at its size and its
+    full strength. A page moved, resized or dimmed is a page the file no
+    longer describes, and then the document is written afresh.
     """
-    if not document.pages:
+    signed = getattr(document, "signed_source", None)
+    if signed is None or not document.pages:
         return None
-    key = document.pages[0].pdf_key
-    if not key:
-        return None
-    data = document.asset(key)
-    if not data:
-        return None
-    settings = document.settings
+    key, data = signed
     for index, page in enumerate(document.pages):
         if page.pdf_key != key or page.pdf_page_index != index:
             return None
         if not page.printable or page.background_opacity != 1.0:
-            return None
-        # Anything painted onto the sheet — a running header, a markup
-        # somebody flattened into the page — has to be painted, and painting
-        # means writing the page again. Then this is not an update to a file;
-        # it is a new file, and pdfbase assembles it. (The grid is a guide on
-        # the screen and is never painted.)
-        if page.shows_a_header(settings, index) \
-                or page.shows_a_footer(settings, index):
-            return None
-        if page.frame is not None and any(item.flattened or getattr(item, "IS_CALC", False)
-                                          for item in page.frame.markups()):
             return None
     try:
         source = engine.open_bytes(data)
@@ -105,49 +84,58 @@ def save(document, path: str, original: bytes, appearance: bool = True) -> int:
 
     The original bytes go down first and the update is appended to them, so
     saving over the file it came from and saving somewhere else give the same
-    result. It has to be a file rather than the bytes in hand because an
-    incremental update *is* an append: there has to be something on disk to
-    append to, and its offsets have to be the ones the new cross-reference
-    points back into.
+    result.
     """
-    from . import pdfbase
+    from . import calclayer, pdfbase
 
     temporary = path + ".tmp"
     written = 0
-    # The scratch file the markups were drawn into. It cannot be deleted while
-    # the document it was grafted into is open — MuPDF holds it, and Windows
-    # will not delete a file anything holds — so it is kept until everything
-    # is shut, which is after the file has been put in place. Deleting it too
-    # early is what made every save fail on Windows with a message naming a
-    # file in the temp folder.
+    # Scratch files the layers and markups were drawn into, and the files
+    # opened on them. They cannot be deleted while the document they were
+    # grafted into is open — MuPDF holds them, and Windows will not delete a
+    # file anything holds — so they are kept until everything is shut.
     leftovers: list = []
+    opened: list = []
     try:
         with open(temporary, "wb") as handle:
             handle.write(original)
         target = engine.open_path(temporary)
         try:
+            # CalcForge's own layers from the last save come off; the page's
+            # own content is not touched.
+            for index in range(target.page_count):
+                calclayer.strip(target, index)
+                calclayer.mark_page(target, index, document.pages[index].uid)
+            layers: dict = {}
             if appearance:
+                pdfbase._draw_a_layer(target, document, leftovers, opened,
+                                      calclayer.SHEET)
+                layers = pdfbase._draw_a_layer(target, document, leftovers, opened,
+                                               calclayer.CALC)
                 written = _add_the_markups(target, document, leftovers)
                 from .export import outline_and_links
                 from . import pdflinks
                 outline, links = outline_and_links(document, document.pages)
                 pdflinks._set_outline(target, outline)
                 pdflinks._add_links(target, links)
+            key = document.pages[0].pdf_key
+            facts = pdfbase._file_facts(document, {key: target},
+                                        {page.uid for page in document.pages}, layers)
             engine.embed(target, pdfbase.RECORD_ENTRY,
-                         pdfbase.record_bytes(document))
+                         pdfbase.record_bytes(document, facts))
             if not engine.save_incremental(target, temporary):
                 # A repaired file has no original bytes worth keeping — there
                 # is nothing to append to that a reader would follow — so it
-                # is written out whole instead. Still the same document. It
-                # goes beside the file rather than over it: the document still
-                # has that one open, and a file that is open is a file that
-                # cannot be replaced.
+                # is written out whole instead. It goes beside the file rather
+                # than over it: the document still has that one open.
                 whole = temporary + ".whole"
                 target.save(whole)
                 engine.close(target)
                 os.replace(whole, temporary)
         finally:
             engine.close(target)
+            for held in opened:
+                engine.close(held)
         os.replace(temporary, path)
     except Exception as exc:                           # noqa: BLE001
         engine.drain_messages()

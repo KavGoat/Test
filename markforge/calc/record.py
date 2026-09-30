@@ -139,3 +139,24 @@ def region_text(data: dict) -> Optional[str]:
         return data.get("text", "")
     from .engine.model import to_text
     return to_text(row_from_data(data.get("root", [])))
+
+
+def defined_names(payloads) -> set:
+    """The variable and function names the equations in *payloads* (saved
+    ``calc`` items) define — what goes undefined if they go."""
+    from .worksheet import Worksheet
+
+    worksheet = Worksheet()
+    for order, payload in enumerate(payloads):
+        data = payload.get("calc") if isinstance(payload, dict) else None
+        if not isinstance(data, dict):
+            continue
+        try:
+            add_region_from_data(worksheet, 0.0, order * 100.0, data)
+        except Exception:                              # noqa: BLE001
+            continue
+    worksheet.calculate()                  # what a region defines is known once it has run
+    names: set = set()
+    for region in worksheet.regions:
+        names |= set(region.defined_vars) | {name for name, _ in region.defined_funcs}
+    return names

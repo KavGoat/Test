@@ -107,14 +107,21 @@ text" versus "`"` = text box" are ordinary `Binding`s with clash checking.
 
 - On every save, CalcForge recalculates, then writes the calc content as
   vector drawing and embedded-font text. It goes into a separate content
-  stream on each page, wrapped as an optional-content group tagged
-  `CalcForge` and appended after the page's own content, which is never
-  changed.
+  stream on each page, appended after the page's own content (which is never
+  changed) and invoking one form XObject; the stream and the form both carry
+  the private key `/CalcForge /Calc`, which readers ignore. (Built as a
+  private key rather than an optional-content group, so other readers don't
+  list a "CalcForge" layer anyone could switch off.) MarkForge's own sheet
+  drawing (header, footer, flattened markups, paper of written pages) goes
+  in the same way, tagged `/CalcForge /Sheet`, and each page carries
+  `/CalcForgePage` with its uid.
 - The record gains `calc`: every region's source, format, unit box, position
   and page uid.
-- On open, the tagged stream is found and removed, then its bytes are
-  compared with what the record would draw. A difference warns, and the
-  record wins. Pages are matched by uid, so deleted or reordered pages are
+- On open, the tagged streams are found and removed, and the calc layer's
+  fingerprint (a hash of its drawing streams, kept in the record at save) is
+  compared. A difference warns, and the record wins. The page left behind is
+  the page's source from then on, so the record no longer carries a second
+  copy of the PDF. Pages are matched by uid, so deleted or reordered pages are
   handled as decision 3 says. With no record, the file opens as a plain PDF
   and a warning says the calc can't be edited.
 - Save writes a fresh, garbage-collected file every time. A file with a

@@ -505,6 +505,12 @@ class Document:
         self.assets: dict[str, bytes] = {}
         self.path: Optional[str] = None
         self.modified = False
+        # A digitally signed file this document is: (the asset key its pages
+        # are drawn from, the file's own bytes). Saved by appending to those
+        # bytes so the signature stays valid (io/pdfsave.py). Not saved.
+        self.signed_source: Optional[tuple] = None
+        # What opening the file found worth saying (io/pdfbase.py). Not saved.
+        self.open_warnings: list[str] = []
 
     # -- pages -------------------------------------------------------------
     def add_page(self, index: Optional[int] = None, setup: Optional[PageSetup] = None) -> Page:

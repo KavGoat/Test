@@ -2065,6 +2065,7 @@ class MainWindow(QMainWindow):
             project_io.load_document(document, path)
             self.document = document
             self._new_undo_stack()
+            self._say_what_opening_found(document.open_warnings)
             return
         document = Document()
         document.mode = "pdf"
@@ -2098,6 +2099,34 @@ class MainWindow(QMainWindow):
         note = pdfio.trouble_with(path)
         if note:
             self.status_hint.setText(note)
+        from ..io import calclayer
+        from ..pdf import engine as pdf_engine
+        found = []
+        try:
+            source = pdf_engine.open_bytes(document.asset(document.pages[0].pdf_key))
+            try:
+                if calclayer.is_signed(source):
+                    document.signed_source = (document.pages[0].pdf_key,
+                                              document.asset(document.pages[0].pdf_key))
+                if calclayer.has_layers(source):
+                    found.append("This PDF has CalcForge calculations, but the record "
+                                 "they are edited from is missing. It has opened as a "
+                                 "plain PDF: the calculations show, but can't be edited.")
+            finally:
+                pdf_engine.close(source)
+        except Exception:                            # noqa: BLE001
+            pass
+        self._say_what_opening_found(found)
+
+    def _say_what_opening_found(self, warnings: list) -> None:
+        """Warnings from opening a file (decision 3): in the status bar, and
+        in a message box when the window may ask things."""
+        if not warnings:
+            return
+        text = "\n\n".join(warnings)
+        self.status_hint.setText(" ".join(warnings))
+        if self.interactive_prompts:
+            QMessageBox.warning(self, "Open document", text)
 
     def save_document(self) -> bool:
         # A line still being typed is part of the document being saved, so it
@@ -2106,16 +2135,28 @@ class MainWindow(QMainWindow):
         self.view.end_item_edit()
         if not self.document.path:
             return self.save_document_as()
+        self._recalculate_for_saving()
         try:
-            project_io.save_document(self.document, self.document.path)
+            note = project_io.save_document(self.document, self.document.path)
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, "Save", f"Could not save:\n{exc}")
             return False
         self.undo_stack.setClean()
         self.clear_autosave()
         self.update_title()
-        self.status_hint.setText(f"Saved {self.document.path}")
+        said = f"Saved {self.document.path}"
+        self.status_hint.setText(f"{said} — {note}" if note else said)
         return True
+
+    def _recalculate_for_saving(self) -> None:
+        """Every save recalculates first (decision 3): what goes into the file
+        is the answer to what is on the page now."""
+        from ..calc.docsheet import sheet_for
+        if self.view.calc.editing():
+            self.view.calc.leave()
+        sheet = sheet_for(self.document)
+        sheet.settle()
+        sheet.recalculate(force=True)
 
     def save_document_as(self) -> bool:
         suggested = project_io.suggested_name(self.document)
@@ -2858,6 +2899,9 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Insert PDF", "No pages were selected.")
             return
         target = self.page_index(index) + (0 if before else 1)
+        if project_io.carries_a_document(path):
+            self.insert_calcforge_pages(path, at=target, indices=indices)
+            return
         brought: list = []
 
         def mutate():
@@ -2879,6 +2923,41 @@ class MainWindow(QMainWindow):
                      if lines else " — no line work could be read out of this one")
         self.status_hint.setText(said)
 
+    def _calcforge_pages(self, path: str, indices=None) -> list:
+        """The pages of a CalcForge file, as they are in it: its equations
+        live, its markups markups, its drawings drawn from the file itself.
+        Their assets come into this document with them."""
+        import uuid
+        other = Document()
+        project_io.load_document(other, path)
+        numbers = range(len(other.pages)) if indices is None else indices
+        pages = [other.pages[i] for i in numbers if 0 <= i < len(other.pages)]
+        taken = {page.uid for page in self.document.pages}
+        for page in pages:
+            if page.uid in taken:
+                page.uid = uuid.uuid4().hex
+            taken.add(page.uid)
+        for key, data in other.assets.items():
+            self.document.assets.setdefault(key, data)
+        self._say_what_opening_found(other.open_warnings)
+        return pages
+
+    def insert_calcforge_pages(self, path: str, at: Optional[int] = None,
+                               indices=None) -> list:
+        """Insert PDF, for a file written here: its equations come in live
+        and join this document's reading order (decision 9)."""
+        at = len(self.document.pages) if at is None else max(0, min(at, len(self.document.pages)))
+        brought: list = []
+
+        def mutate():
+            brought.extend(self._calcforge_pages(path, indices))
+            self.document.pages[at:at] = brought
+            self.current_index = at
+        self._structural_change(f"Insert {os.path.basename(path)}", mutate)
+        self.status_hint.setText(
+            f"Inserted {len(brought)} page(s) from {os.path.basename(path)}, equations and all")
+        return brought
+
     def insert_files_at(self, paths: list[str], row: int) -> int:
         """Put PDFs and images in as pages, starting where they were dropped.
 
@@ -2894,7 +2973,12 @@ class MainWindow(QMainWindow):
             at = row
             for path in paths:
                 try:
-                    if path.lower().endswith(".pdf"):
+                    if path.lower().endswith(".pdf") and project_io.carries_a_document(path):
+                        pages = self._calcforge_pages(path)
+                        self.document.pages[at:at] = pages
+                        added += len(pages)
+                        at += len(pages)
+                    elif path.lower().endswith(".pdf"):
                         pages = pdfio.import_pages(
                             self.document, path,
                             list(range(pdfio.page_count(path))),
@@ -4392,8 +4476,9 @@ class MainWindow(QMainWindow):
                 self, "Extract pages", f"{base} extract.pdf", "PDF files (*.pdf)")
             if not path:
                 return ""
-        self._save_pages_as(indices, path)
+        lost = self._save_pages_as(indices, path)
         self.status_hint.setText(f"Saved {len(indices)} page(s) to {os.path.basename(path)}")
+        self.warn_undefined(lost, f"In {os.path.basename(path)}, defined on pages left behind")
         return path
 
     def split_into_files(self, every: int = 0, folder: str = "") -> list[str]:
@@ -4411,26 +4496,46 @@ class MainWindow(QMainWindow):
                 return []
         stem = os.path.splitext(os.path.basename(self.document.path or "document.pdf"))[0]
         written = []
+        warned: list = []
         for number, start in enumerate(range(0, total, every), start=1):
             chunk = list(range(start, min(start + every, total)))
             path = os.path.join(folder, f"{stem} part {number}.pdf")
-            self._save_pages_as(chunk, path)
+            lost = self._save_pages_as(chunk, path)
+            if lost:
+                warned.append(f"{os.path.basename(path)}: {', '.join(lost)}")
             written.append(path)
         self.status_hint.setText(f"Split into {len(written)} file(s)")
+        if warned:
+            text = ("Variables defined on pages in other parts are undefined in "
+                    + "; ".join(warned) + ".")
+            self.status_hint.setText(text)
+            if self.interactive_prompts:
+                QMessageBox.warning(self, "Variables undefined", text)
         return written
 
-    def _save_pages_as(self, indices, path: str) -> None:
-        """Write only *indices* of this document to *path*, leaving it as it was."""
+    def _save_pages_as(self, indices, path: str) -> list:
+        """Write only *indices* of this document to *path*, leaving it as it
+        was. Their equations go live into the new file's record; says which
+        variables they use that are defined only on pages left behind."""
+        from .calcedit import names_left_behind
         self.view.end_item_edit()
         document = self.document
         pages, kept_path, modified = document.pages, document.path, document.modified
+        self._recalculate_for_saving()
+        lost = names_left_behind(document, [pages[i] for i in indices])
+        signed = document.signed_source
         document.pages = [pages[i] for i in indices]
+        # Some of a signed file is a new file: written afresh, and the
+        # document keeps its own signature for its own saves.
+        document.signed_source = None
         try:
             project_io.save_document(document, path)
         finally:
             document.pages = pages
             document.path = kept_path
             document.modified = modified
+            document.signed_source = signed
+        return lost
 
     def whiteout_region(self, frame, region):
         """Cut a region out of source artwork without covering live markups."""

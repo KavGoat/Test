@@ -250,6 +250,7 @@ class PageFrame(QGraphicsObject):
         self.active_viewport = None
         self.show_all_viewports = False
         self._pdf_overlay = False
+        self._items_only = False
         self.setFlag(QGraphicsItem.ItemIsSelectable, False)
         self.setFlag(QGraphicsItem.ItemIsMovable, False)
         # Behind every markup, and behind the desk's own shadow drawing.
@@ -414,6 +415,8 @@ class PageFrame(QGraphicsObject):
         return drew
 
     def paint(self, painter: QPainter, option, widget=None) -> None:
+        if self._items_only:
+            return                        # the equations' own layer: nothing of the page
         rect = self.page_rect()
         if not self.print_mode:
             self._paint_shadow(painter, rect)
@@ -877,8 +880,15 @@ class PageFrame(QGraphicsObject):
 
     # -- rendering ---------------------------------------------------------
     def render_page(self, painter: QPainter, target: QRectF, for_print: bool = True,
-                    pdf_overlay: bool = False, without_markups: bool = False) -> None:
+                    pdf_overlay: bool = False, without_markups: bool = False,
+                    layer: str = "") -> None:
         """Draw the whole page into *target*, hiding editing chrome.
+
+        *layer* picks one of the two drawings a save puts into the page as
+        content of its own (io/calclayer.py): ``"sheet"`` is the page without
+        its markups and without its equations, ``"calc"`` is the equations
+        alone — no paper, no grid, no header — so each can be told apart in
+        the file and taken off again when it is opened here.
 
         With *without_markups*, only the page itself is drawn — the paper, the
         imported background, the grid, the running header and footer, the
@@ -894,6 +904,7 @@ class PageFrame(QGraphicsObject):
         previous_overlay = self._pdf_overlay
         self.print_mode = for_print
         self._pdf_overlay = bool(pdf_overlay)
+        self._items_only = layer == "calc"
         # The selection is *hidden* for the render, not cleared and put back.
         # Putting it back is how a page thumbnail resurrected a selection the
         # reader had since let go of: the thumbnail is drawn from a queued
@@ -908,7 +919,9 @@ class PageFrame(QGraphicsObject):
                     item.set_chrome(False)
                 item._handles_visible = False
             hidden = [item for item in self.markups()
-                      if (without_markups and not item.flattened
+                      if (layer == "calc" and not getattr(item, "IS_CALC", False))
+                      or (layer == "sheet" and getattr(item, "IS_CALC", False))
+                      or (without_markups and not item.flattened
                           and not item.from_drawing
                           # equations are page drawing, not annotations
                           and not getattr(item, "IS_CALC", False))
@@ -933,6 +946,7 @@ class PageFrame(QGraphicsObject):
                 item.update()
             self.print_mode = previous
             self._pdf_overlay = previous_overlay
+            self._items_only = False
 
     def render_picture(self, region: QRectF) -> QPicture:
         """Snapshot drawing in *region*, recorded as vectors where possible.

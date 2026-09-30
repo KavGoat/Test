@@ -34,18 +34,60 @@ ASSET_PREFIX = "assets/"
 # imported page's own content is carried through as itself and never resampled;
 # this only governs what MarkForge draws on top.
 APPEARANCE_DPI = 200
+# What the calc layer is drawn at: the resolution SMath's layout measures its
+# fonts at (see _rendered_overlay).
+CALC_DPI = 96
 
 
 # -- the record ------------------------------------------------------------
-def record_bytes(document) -> bytes:
-    """The markup record: the document's own account of itself, and its assets."""
-    payload = json.dumps(document.to_dict(), indent=1, ensure_ascii=False)
+# What the record says about the file it is inside (io/calclayer.py): which
+# assets the file's own pages stand in for, and a fingerprint of the calc
+# layer written on each page.
+FILE_FACTS = "calcforge_file"
+
+
+def record_bytes(document, facts: Optional[dict] = None) -> bytes:
+    """The markup record: the document's own account of itself, and its assets.
+
+    With *facts* the record is going into a file whose pages are the pages'
+    own sources: the PDFs they came from are not stored again (the file is
+    them, once CalcForge's layers are taken off), and each markup that is
+    still somebody else's annotation is named by what it is rather than by an
+    object number, because the saved file numbers its objects afresh.
+    """
+    data = document.to_dict()
+    assets = document.assets
+    if facts is not None:
+        data[FILE_FACTS] = {key: value for key, value in facts.items()
+                            if not key.startswith("_")}
+        itself = set(facts.get("itself", ()))
+        assets = {key: value for key, value in assets.items() if key not in itself}
+        prints = facts.get("_prints", {})
+        for page in data.get("pages", []):
+            known = prints.get(page.get("uid"), {})
+            page["markup_prints"] = [known[number] for number in
+                                     page.get("markup_annotations", ()) if number in known]
+            for payload in _payloads(page.get("items", [])):
+                number = payload.get("from_annotation")
+                if number and number in known:
+                    payload["annotation_print"] = known[number]
+    payload = json.dumps(data, indent=1, ensure_ascii=False)
     holder = io.BytesIO()
     with zipfile.ZipFile(holder, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr(DOCUMENT_ENTRY, payload)
-        for key, data in document.assets.items():
-            archive.writestr(ASSET_PREFIX + key, data)
+        for key, value in assets.items():
+            archive.writestr(ASSET_PREFIX + key, value)
     return holder.getvalue()
+
+
+def _payloads(items):
+    """Every markup payload in a page's items, groups' members included."""
+    for payload in items or ():
+        if isinstance(payload, dict):
+            yield payload
+            for key in ("items", "children", "members"):
+                if isinstance(payload.get(key), list):
+                    yield from _payloads(payload[key])
 
 
 def read_record(data: bytes) -> tuple[dict, dict[str, bytes]]:
@@ -82,70 +124,185 @@ def record_in(path: str) -> Optional[bytes]:
 
 
 # -- writing ---------------------------------------------------------------
-def write(document, path: str, appearance: bool = True) -> None:
+def write(document, path: str, appearance: bool = True) -> str:
     """Write *document* to *path* as a PDF carrying its markup record.
 
-    Two ways, and which one is used depends on what the document is.
-
-    A document that *is* one PDF with markups on it — a drawing opened, marked
-    up and saved — is written as an incremental update to that PDF by
-    :mod:`markforge.io.pdfsave`: the original bytes are kept exactly, and the
-    markups are appended. Anything else is assembled page by page here.
+    Every save writes a fresh, compact file (decision 4), so the file never
+    grows however often it is saved. The one exception is a digitally signed
+    PDF: rewriting it would break the signature, so it is appended to instead
+    (:mod:`markforge.io.pdfsave`), with CalcForge's layers swapped in the
+    appended part. Says why when it did that, or why it could not.
     """
     from . import pdfsave
 
-    original = pdfsave.source_bytes(document)
-    if original is not None:
-        try:
-            pdfsave.save(document, path, original, appearance=appearance)
-            return
-        except Exception:                              # noqa: BLE001
-            # Never lose a save over the clever path. The file is assembled
-            # instead, which is what every earlier version did.
-            pass
+    note = ""
+    signed = getattr(document, "signed_source", None)
+    if signed is not None:
+        original = pdfsave.source_bytes(document)
+        if original is not None:
+            try:
+                pdfsave.save(document, path, original, appearance=appearance)
+                return "Appended to the file, because it is digitally signed"
+            except Exception:                          # noqa: BLE001
+                # Never lose a save over the signature. The file is written
+                # afresh, and says so.
+                pass
+        note = ("The file was digitally signed; its pages have changed, so it was "
+                "saved afresh and the signature no longer applies")
     _assemble(document, path, appearance=appearance)
+    if signed is not None:
+        document.signed_source = None             # what was written is not signed
+    return note
 
 
 def _assemble(document, path: str, appearance: bool = True) -> None:
-    """Build the file page by page, from whatever each page came from."""
+    """Build the file page by page, from whatever each page came from, in
+    memory, and write it once."""
     import pymupdf
+
+    from . import calclayer
 
     output = pymupdf.open()
     sources: dict[str, object] = {}       # the PDFs pages are coming from
-    # Scratch files the pages were drawn into. They are kept until the file
-    # they were grafted into is shut, because until then it holds them open —
-    # and a file anything holds open is a file Windows will not delete.
+    # Scratch files the pages were drawn into, and the files opened on them.
+    # They are kept until the file they were grafted into is shut, because
+    # until then it holds them open — and a file anything holds open is a
+    # file Windows will not delete.
     leftovers: list = []
+    opened: list = []
+    appearances = None
     carried: set = set()                  # pages that kept their annotations
     try:
-        for page in document.pages:
-            if _add_page_body(output, document, page, sources):
+        whole = _one_source_whole(document)
+        if whole is not None:
+            # Every page is a page of one PDF at its own size: that PDF is
+            # copied and its pages picked out, rather than each page grafted
+            # into a new file — grafting drops most annotations on the way,
+            # and these are somebody's markups, to be kept exactly.
+            key, wanted = whole
+            engine.close(output)
+            output = engine.open_bytes(document.asset(key))
+            sources[key] = engine.open_bytes(document.asset(key))
+            output.select(wanted)
+            for index, page in enumerate(document.pages):
+                _drop_the_ones_taken_over(output[index], page)
                 carried.add(page.uid)
+        else:
+            for page in document.pages:
+                if _add_page_body(output, document, page, sources):
+                    carried.add(page.uid)
+        for index, page in enumerate(document.pages):
+            calclayer.mark_page(output, index, page.uid)
+        layers: dict = {}
         if appearance:
-            _draw_the_sheets_onto(output, document, leftovers)
-        engine.embed(output, RECORD_ENTRY, record_bytes(document))
+            _draw_a_layer(output, document, leftovers, opened, calclayer.SHEET)
+            layers = _draw_a_layer(output, document, leftovers, opened, calclayer.CALC)
+            # The markups go in as real annotations, not as ink on the page.
+            # A saved document is a PDF that anybody can open, and a markup
+            # that cannot be picked up in the editor it is opened in is a
+            # picture of a markup. The record is still what this application
+            # reads back.
+            appearances = _place_the_markups(output, document, carried, opened)
+            from .export import outline_and_links
+            from . import pdflinks
+            outline, links = outline_and_links(document, _drawn_pages(document))
+            pdflinks._set_outline(output, outline)
+            pdflinks._add_links(output, links)
+        facts = _file_facts(document, sources, carried, layers)
+        engine.embed(output, RECORD_ENTRY, record_bytes(document, facts))
         output.set_metadata({"title": document.title or "",
-                             "creator": "MarkForge",
-                             "producer": "MarkForge"})
-        engine.save_as(output, path)
+                             "creator": "CalcForge",
+                             "producer": "CalcForge"})
+        engine.save_as(output, path, also=tuple(opened))
+        output = None
+        opened = []
     finally:
         for source in sources.values():
             engine.close(source)
         engine.close(output)
+        for held in opened:
+            engine.close(held)
+        if appearances is not None:
+            appearances.discard()
         for scratch in leftovers:
             _throw_away(scratch)
-    if appearance:
-        # The markups go in as real annotations, not as ink on the page. A
-        # saved document is a PDF that anybody can open, and a markup that
-        # cannot be picked up in the editor it is opened in is a picture of a
-        # markup. The record is still what this application reads back.
-        from . import annotate
 
-        annotate.add_markups(path, document, _drawn_pages(document), carried)
-        from .export import outline_and_links
-        from . import pdflinks
-        outline, links = outline_and_links(document, _drawn_pages(document))
-        pdflinks.add_outline_and_links(path, outline, links)
+
+def _one_source_whole(document):
+    """(key, page numbers) when every page is a page of one PDF at its own
+    size, else None."""
+    if not document.pages:
+        return None
+    key = document.pages[0].pdf_key
+    data = document.asset(key)
+    if not key or not data:
+        return None
+    wanted = []
+    for page in document.pages:
+        if page.pdf_key != key or page.pdf_page_index is None:
+            return None
+        wanted.append(int(page.pdf_page_index))
+    try:
+        source = engine.open_bytes(data)
+    except PdfError:
+        return None
+    try:
+        for page, index in zip(document.pages, wanted):
+            if not 0 <= index < source.page_count:
+                return None
+            across, down = engine.page_size(source, index)
+            if abs(across - page.width_pt) >= 1.0 or abs(down - page.height_pt) >= 1.0:
+                return None
+    finally:
+        engine.close(source)
+    return key, wanted
+
+
+def _file_facts(document, sources: dict, carried: set, layers: dict) -> dict:
+    """What the record says about the file around it (see :func:`record_bytes`)."""
+    from . import calclayer
+
+    itself = sorted({page.pdf_key for page in document.pages if page.pdf_key})
+    prints: dict = {}
+    for page in document.pages:
+        if page.uid not in carried or page.pdf_key not in sources:
+            continue
+        source = sources[page.pdf_key]
+        known = {}
+        wanted = set(page.markup_annotations)
+        frame = page.frame
+        if frame is not None:
+            wanted |= {int(item.from_annotation) for item in frame.markups()
+                       if getattr(item, "from_annotation", 0)}
+        else:
+            wanted |= {int(payload.get("from_annotation") or 0)
+                       for payload in page._pending_items if isinstance(payload, dict)}
+        for number in wanted:
+            if number:
+                known[number] = calclayer.annotation_print(source, number)
+        prints[page.uid] = known
+    return {"version": 1, "itself": itself, "calc_layers": layers, "_prints": prints}
+
+
+def _place_the_markups(output, document, carried: set, opened: list):
+    """Every markup that is not already its own annotation, as one of ours."""
+    from . import annotate
+
+    appearances = annotate.markups_to_place(document, document.pages, carried)
+    if not appearances.entries:
+        return appearances
+    try:
+        if appearances.draw() is None:
+            return appearances
+        scratch = engine.open_path(appearances.path)
+        opened.append(scratch)
+        if scratch.page_count == len(appearances.entries):
+            annotate.place_markups(output, scratch, appearances, keep_existing=True)
+    except Exception:                                  # noqa: BLE001
+        # Never lose a save over its annotations: the record still holds
+        # every markup, and they come back when the file is opened here.
+        engine.drain_messages()
+    return appearances
 
 
 def _add_page_body(output, document, page, sources: dict) -> bool:
@@ -235,51 +392,62 @@ def _drawn_pages(document) -> list:
     return [page for page in document.pages if page.frame is not None]
 
 
-def _draw_the_sheets_onto(output, document, leftovers: list) -> None:
-    """Paint the sheet itself onto the pages — everything but the markups.
+def _draw_a_layer(output, document, leftovers: list, opened: list,
+                  kind: str) -> dict:
+    """Paint one of CalcForge's layers onto the pages, tagged as such.
 
-    The paper, the grid, the running header and footer, the page's own line
-    work and anything flattened into it. The markups are not painted: they go
-    in afterwards as annotations, so they can still be moved wherever the file
-    is opened. This needs a scene to draw from; a document that has not been
-    opened in a window has none, and then the file is still a correct PDF of
-    the pages themselves.
+    The sheet (``SHEET``) is everything but the markups and the equations:
+    the paper of a page written on here, the running header and footer, the
+    page's own line work and anything flattened into it. The markups are not
+    painted — they go in as annotations — and the equations have a layer of
+    their own (``CALC``): vector drawing and real text, which other readers
+    show and search but cannot move. Both are taken off again when the file
+    is opened here (io/calclayer.py).
+
+    This needs a scene to draw from; a document that has not been opened in a
+    window has none, and then the file is still a correct PDF of the pages.
+    Says, for each page given the calc layer, its fingerprint.
     """
+    from . import calclayer
+
     drawn = _drawn_pages(document)
+    if kind == calclayer.CALC:
+        drawn = [page for page in drawn
+                 if any(getattr(item, "IS_CALC", False) and item.printable
+                        for item in page.frame.markups())]
     if not drawn:
-        return
-    overlay_path = None
-    overlay = None
+        return {}
+    prints: dict = {}
     try:
-        overlay_path = _rendered_overlay(document, drawn)
+        overlay_path = _rendered_overlay(document, drawn, kind)
         if overlay_path is None:
-            return
+            return {}
         leftovers.append(overlay_path)
         overlay = engine.open_path(overlay_path)
+        opened.append(overlay)
         if overlay.page_count != len(drawn):
-            return
+            return {}
         where = {id(page): index for index, page in enumerate(document.pages)}
         for offset, page in enumerate(drawn):
             index = where.get(id(page))
             if index is None or not 0 <= index < output.page_count:
                 continue
-            sheet = output[index]
-            sheet.show_pdf_page(sheet.rect, overlay, offset, overlay=True)
+            made = calclayer.place_layer(output, index, overlay, offset, kind)
+            if made is not None:
+                prints[page.uid] = made
     except Exception:                                  # noqa: BLE001
         # Never lose a save over its appearance elsewhere.
         engine.drain_messages()
-        return
-    finally:
-        engine.close(overlay)
+    return prints
 
 
-def _rendered_overlay(document, drawn: list) -> Optional[str]:
-    """The sheet itself, without its markups, on pages in a scratch file."""
+def _rendered_overlay(document, drawn: list, kind: str) -> Optional[str]:
+    """One layer of the pages, on pages in a scratch file."""
     import tempfile
 
     from PySide6.QtGui import QPdfWriter
 
-    from . import export
+    from . import calclayer, export
 
     handle, overlay_path = tempfile.mkstemp(suffix=".pdf")
     os.close(handle)
@@ -287,12 +455,18 @@ def _rendered_overlay(document, drawn: list) -> Optional[str]:
                        if page.pdf_key and page.pdf_page_index is not None
                        and page.background_opacity == 1.0
                        and document.asset(page.pdf_key)}
+    # The equations' fonts are sized in points and Qt turns points into
+    # pixels by the device's resolution: drawn at anything but the screen's
+    # 96 dpi, the letters come out a different size from the layout they
+    # were measured for, and run into each other.
+    resolution = CALC_DPI if kind == calclayer.CALC else APPEARANCE_DPI
     writer = QPdfWriter(overlay_path)
-    writer.setResolution(APPEARANCE_DPI)
-    writer.setCreator("MarkForge")
-    export.paint_pages(writer, document, drawn, APPEARANCE_DPI,
+    writer.setResolution(resolution)
+    writer.setCreator("CalcForge")
+    export.paint_pages(writer, document, drawn, resolution,
                        pdf_overlay_pages=over_the_source,
-                       without_markups=True)
+                       without_markups=True,
+                       layer="calc" if kind == calclayer.CALC else "sheet")
     del writer
     if os.path.getsize(overlay_path) < 1:
         _throw_away(overlay_path)
@@ -316,13 +490,217 @@ def _throw_away(path: str) -> None:
 
 # -- reading ---------------------------------------------------------------
 def read(document, path: str) -> bool:
-    """Load *path* into *document*. True when it carried a markup record."""
+    """Load *path* into *document*. True when it carried a markup record.
+
+    Anything worth telling the reader about how the file was found — the calc
+    layer edited in another program, pages deleted elsewhere — is left in
+    ``document.open_warnings``.
+    """
     found = record_in(path)
     if found is None:
         return False
     record, assets = read_record(found)
+    document.open_warnings = []
+    document.signed_source = None
+    if isinstance(record.get(FILE_FACTS), dict):
+        with open(path, "rb") as handle:
+            data = handle.read()
+        _take_the_file_back(document, data, record, assets)
     document.assets = assets
     document.load_dict(record)
     document.path = path
     document.modified = False
     return True
+
+
+def _take_the_file_back(document, data: bytes, record: dict, assets: dict) -> None:
+    """The file's own pages, with CalcForge's layers off, as their source.
+
+    The pages are matched to the record by the uid each carries, so a reorder
+    or a deletion done elsewhere is followed (decision 3): the record's pages
+    are put in the file's order, a page the file no longer has goes, with its
+    equations, and a page the record never had comes in as a plain page.
+    """
+    import uuid
+
+    from . import calclayer
+
+    facts = record[FILE_FACTS]
+    written = facts.get("calc_layers") or {}
+    itself = set(facts.get("itself") or ())
+    source = engine.open_bytes(data)
+    try:
+        signed = calclayer.is_signed(source)
+        record_pages = {page.get("uid"): page for page in record.get("pages", [])}
+        key = f"asset_{uuid.uuid4().hex[:12]}.pdf"
+        pages: list = []
+        changed: list = []
+        foreign: dict = {}                       # file page index -> annotations to read
+        for index in range(source.page_count):
+            uid = calclayer.page_uid(source, index)
+            page = record_pages.pop(uid, None) if uid else None
+            there = calclayer.layer_print(source, index, calclayer.CALC)
+            if page is not None and written.get(uid) != there and \
+                    (uid in written or there is not None):
+                changed.append(index + 1)
+            calclayer.strip(source, index)
+            if page is None:
+                page = _plain_page(source, index)
+                page["pdf_key"] = key
+            elif page.get("pdf_key") and (page["pdf_key"] in itself
+                                          or page["pdf_key"] not in assets):
+                page["pdf_key"] = key
+                page["pdf_page_index"] = index
+            new = _sort_the_annotations(source, index, page)
+            if new:
+                foreign[index] = new
+            pages.append(page)
+        cleaned = source.tobytes(garbage=0)
+    finally:
+        engine.close(source)
+    assets[key] = cleaned
+    for index, numbers in foreign.items():
+        _read_their_markups(document, cleaned, index, pages[index], numbers, assets)
+    gone = list(record_pages.values())
+    record["pages"] = pages or record.get("pages", [])
+    document.signed_source = (key, data) if signed else None
+    warnings = []
+    if changed:
+        warnings.append(
+            "The calculations on page " + ", ".join(str(n) for n in changed)
+            + " were changed in another program. CalcForge has rebuilt them from "
+            "its own record; the changes made elsewhere are not kept.")
+    lost_equations = [payload for page in gone for payload in page.get("items", [])
+                      if isinstance(payload, dict) and payload.get("type") == "calc"]
+    if gone:
+        text = (f"{len(gone)} page(s) were deleted in another program"
+                + (", with the equations on them" if lost_equations else "") + ".")
+        names = _names_lost(lost_equations, pages)
+        if names:
+            text += " " + ", ".join(names) + (" is" if len(names) == 1 else " are") + \
+                " no longer defined."
+        warnings.append(text)
+    document.open_warnings = warnings
+
+
+def _plain_page(source, index: int) -> dict:
+    """A page the record never had — added in another program."""
+    from ..core.document import Page, PageSetup
+
+    width, height = engine.page_size(source, index)
+    setup = PageSetup.from_name("A4")
+    setup.size_name = "Custom"
+    setup.orientation = "portrait"
+    setup.width_mm = width * 25.4 / 72.0
+    setup.height_mm = height * 25.4 / 72.0
+    setup.margin_left = setup.margin_top = setup.margin_right = setup.margin_bottom = 0.0
+    page = Page(setup)
+    page.pdf_page_index = index
+    page.grid = False
+    page.source_note = f"page {index + 1}, added in another program"
+    page.label = page.source_note
+    return page.to_dict()
+
+
+def _sort_the_annotations(source, index: int, page: dict) -> list:
+    """Leave on the page only its furniture and the annotations that are
+    still somebody else's markups; say which others are new to the record.
+
+    Ours — each markup of the record, written as an annotation on the last
+    save — come off: the record is what they are. Somebody else's that a
+    markup still is are found again by what they are, and the markup is
+    pointed at the annotation's number in this file. Anything else was added
+    or changed in another program, and is read in as a markup of its own.
+    """
+    from . import calclayer
+
+    wanted: dict = {}
+    for payload in _payloads(page.get("items", [])):
+        made = payload.get("annotation_print")
+        if made:
+            wanted.setdefault(made, []).append(payload)
+    kept_prints = set(page.get("markup_prints") or ())
+    uids = {payload.get("uid") for payload in _payloads(page.get("items", []))}
+    kept, found, new = [], {}, []
+    for number in engine.annotation_xrefs(source, index):
+        kind = source.xref_get_key(number, "Subtype")[1].lstrip("/")
+        if kind in engine.NOT_MARKUP:
+            kept.append(number)
+            continue
+        made = calclayer.annotation_print(source, number)
+        if made in wanted or made in kept_prints:
+            found[made] = number
+            kept.append(number)
+            continue
+        ours = source.xref_get_key(number, calclayer.KEY)[0] == "name"
+        name = source.xref_get_key(number, "NM")
+        if ours or (name[0] == "string" and name[1] in uids):
+            continue
+        kept.append(number)
+        new.append(number)
+    engine.set_page_annotations(source, index, kept)
+    for made, payloads in wanted.items():
+        for payload in payloads:
+            if made in found:
+                payload["from_annotation"] = found[made]
+            else:
+                payload["from_annotation"] = 0
+                payload["still_theirs"] = False
+            payload.pop("annotation_print", None)
+    page["markup_annotations"] = [found[made] for made in page.pop("markup_prints", [])
+                                  if made in found]
+    for payload in _payloads(page.get("items", [])):
+        if payload.get("still_theirs") and payload.get("from_annotation") and \
+                payload["from_annotation"] not in found.values():
+            payload["still_theirs"] = False
+            payload["from_annotation"] = 0
+    return new
+
+
+def _read_their_markups(document, cleaned: bytes, index: int, page: dict,
+                        numbers, assets: dict) -> None:
+    """Annotations added or changed in another program, read in as markups
+    that are still theirs (drawn by the file until changed here)."""
+    import tempfile
+
+    from . import pdfmarkups, pdfvector
+
+    handle, path = tempfile.mkstemp(suffix=".pdf")
+    os.close(handle)
+    try:
+        with open(path, "wb") as out:
+            out.write(cleaned)
+        pdf = pdfvector.PdfFile.open(path)
+        try:
+            import uuid
+
+            def picture_of(png: bytes) -> str:
+                if not png:
+                    return ""
+                name = f"asset_{uuid.uuid4().hex[:12]}.png"
+                assets[name] = png
+                return name
+            made = pdfmarkups.markups_of_page(pdf, index, keep_the_look=True,
+                                              picture_of=picture_of)
+        finally:
+            pdf.close()
+    except Exception:                                  # noqa: BLE001
+        made = []
+    finally:
+        _throw_away(path)
+    wanted = set(numbers)
+    made = [payload for payload in made if payload.get("from_annotation") in wanted]
+    if not made:
+        return
+    page["items"] = list(page.get("items", [])) + made
+    page["markup_annotations"] = list(page.get("markup_annotations", [])) + [
+        int(payload["from_annotation"]) for payload in made if payload.get("from_annotation")]
+
+
+def _names_lost(equations: list, pages: list) -> list:
+    """The variables the *equations* defined that nothing left defines."""
+    from ..calc.record import defined_names
+
+    kept = [payload for page in pages for payload in page.get("items", [])
+            if isinstance(payload, dict) and payload.get("type") == "calc"]
+    return sorted(defined_names(equations) - defined_names(kept))

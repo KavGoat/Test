@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtGui import QColor, QPainter, QPen, QPicture
 from PySide6.QtWidgets import QGraphicsItem
 
 from ..calc.docsheet import PT_PER_PX, PX_PER_PT, sheet_for
@@ -256,7 +256,25 @@ class CalcItem(MarkupItem):
             return
         painter.save()
         painter.scale(PT_PER_PX, PT_PER_PX)
-        self._view.paint(painter, None)
+        device = painter.device()
+        picture = QPicture()
+        if device is None or (device.logicalDpiX() == picture.logicalDpiX()
+                              and device.logicalDpiY() == picture.logicalDpiY()):
+            self._view.paint(painter, None)
+        else:
+            # SMath's layout sizes its fonts in points, and Qt turns points
+            # into pixels by the device's resolution: drawn straight onto a
+            # PDF writer or a printer the letters come out bigger than the
+            # layout they were measured for (at 300 dpi they run into each
+            # other). Recorded at the screen's resolution and played back, the
+            # drawing — text still text — is scaled as one, exactly.
+            recorder = QPainter(picture)
+            recorder.setRenderHints(painter.renderHints())
+            self._view.paint(recorder, None)
+            recorder.end()
+            painter.scale(picture.logicalDpiX() / device.logicalDpiX(),
+                          picture.logicalDpiY() / device.logicalDpiY())
+            painter.drawPicture(0, 0, picture)
         painter.restore()
 
     @property
@@ -381,10 +399,13 @@ def line_work_svg(item: "CalcItem") -> str:
     buffer = QBuffer(data)
     buffer.open(QIODevice.WriteOnly)
     writer = QPdfWriter(buffer)
-    writer.setResolution(72)
+    # At the screen's 96 dpi: the fonts are sized in points, and Qt turns
+    # points into pixels by the device's resolution (io/pdfbase.py).
+    writer.setResolution(96)
     writer.setPageLayout(QPageLayout(QPageSize(QSizeF(rect.width(), rect.height()), QPageSize.Point),
                                      QPageLayout.Portrait, QMarginsF(0, 0, 0, 0)))
     painter = QPainter(writer)
+    painter.scale(96 / 72, 96 / 72)
     painter.translate(-rect.topLeft())
     focused, item.focused = item.focused, False
     try:

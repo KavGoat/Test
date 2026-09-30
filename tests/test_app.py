@@ -1018,7 +1018,13 @@ def test_an_inserted_pdf_page_survives_saving_and_reopening(window, tmp_path, mo
     page = reopened.pages[1]
     assert page.background_key is None
     assert page.pdf_key and reopened.asset(page.pdf_key).startswith(b"%PDF")
-    assert page.pdf_page_index == 0
+    # The saved file's own page is the page's source now (CalcForge decision
+    # 3): its second page, with CalcForge's layers taken off.
+    assert page.pdf_page_index == 1
+    import pymupdf
+    with pymupdf.open(stream=reopened.asset(page.pdf_key)) as underneath, \
+            pymupdf.open(path) as original:
+        assert underneath[1].get_text() == original[0].get_text()
 
 
 def test_an_inserted_pdf_page_prints(window, tmp_path, monkeypatch):

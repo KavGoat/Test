@@ -804,6 +804,9 @@ def annotation_for(item, rect, place, appearance=None) -> dict:
         "Rect": place.rect(rect),
         "F": 4,                                         # printed, not hidden
         "NM": item.uid,
+        # Written by CalcForge from its record: taken off again when the file
+        # is opened here, and the record's markup used (io/pdfbase.py).
+        "CalcForge": Name("Markup"),
     }
     if item.author:
         annotation["T"] = item.author
