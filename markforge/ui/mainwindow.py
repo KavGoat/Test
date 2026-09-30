@@ -1983,6 +1983,10 @@ class MainWindow(QMainWindow):
             ordered.append(page.frame)
         self.scene.frames = ordered
         self.scene.layout_pages()
+        # Pages moved, added or deleted: equations are evaluated in page
+        # order, so the document's worksheet re-keys them (decision 9).
+        from ..calc.docsheet import sheet_for
+        sheet_for(self.document).pages_changed()
         self.current_index = max(0, min(self.current_index, len(self.document.pages) - 1))
         self.page_spin.blockSignals(True)
         self.page_spin.setRange(1, len(self.document.pages))

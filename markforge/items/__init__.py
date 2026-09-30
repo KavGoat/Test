@@ -7,6 +7,7 @@ would depend on which modules happened to have been imported first — which is
 the kind of bug that only shows up in the one place nobody looked.
 """
 from . import base           # noqa: F401  the registry itself
+from . import calc           # noqa: F401
 from . import contents       # noqa: F401
 from . import link           # noqa: F401
 from . import measure        # noqa: F401

@@ -815,7 +815,10 @@ class PageFrame(QGraphicsObject):
     def load_items(self, data: list[dict]) -> None:
         # Restoring one page is one change. Rebuilding the panels after each
         # removal otherwise makes undo quadratic in the number of markups.
-        with QSignalBlocker(self):
+        # Equations coming and going are calculated once, at the end, rather
+        # than once each (calc/docsheet.py).
+        from ..calc.docsheet import sheet_for
+        with QSignalBlocker(self), sheet_for(self.document).batch():
             for item in self.markups():
                 self.remove_markup(item)
             for entry in data:
