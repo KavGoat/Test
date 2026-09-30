@@ -70,7 +70,7 @@ class PanelSection(QWidget):
         self.body = QWidget()
         self.body.setStyleSheet("QWidget{background:#ffffff;}"
                                 "QToolButton{border:1px solid transparent;background:transparent;"
-                                "font-size:13px;padding:0;}"
+                                "color:#000000;font-size:13px;padding:0;}"
                                 "QToolButton:hover{border:1px solid #316ac5;background:#c1d2ee;}"
                                 "QToolButton:pressed{background:#98b5e2;}"
                                 "QToolButton:disabled{color:#a0a0a0;}")

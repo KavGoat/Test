@@ -707,3 +707,47 @@ def test_selection_keys_fuzz(win):
                     assert 0 <= a < b <= len(r.items) and r is ed.row, (seed, ed.root.text())
                 assert item._row_info(ed.row) is not None
         press(v, Qt.Key_Return)
+
+
+def test_selection_box_is_drawn_while_dragging(app):
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QColor, QImage, QPainter
+
+    v = WorksheetView()
+    type_at(v, 36, 36, "x:1")
+    press(v, Qt.Key_Return)
+    v.focus_item(None)
+    _mouse(v, "press", QPointF(10, 10))
+    _mouse(v, "move", QPointF(150, 80))
+    assert v.scene_.rubber is not None and v.selected
+    img = QImage(200, 120, QImage.Format_RGB32)
+    img.fill(QColor("white"))
+    p = QPainter(img)
+    v.scene_.render(p, QRectF(0, 0, 200, 120), QRectF(0, 0, 200, 120))
+    p.end()
+    # the dotted blue frame is on screen at the box's right edge
+    edge = [QColor(img.pixel(x, y)) for x in range(146, 152) for y in range(20, 70)]
+    assert any(c.blue() > 150 and c.red() < 100 for c in edge)
+    _mouse(v, "release", QPointF(150, 80))
+    assert v.scene_.rubber is None and v.selected  # the box goes, the selection stays
+
+
+def test_side_panel_symbols_are_visible_and_insert(app):
+    from PySide6.QtTest import QTest
+
+    from websmath.app import use_light_palette
+    from websmath.ui.mainwindow import MainWindow
+
+    use_light_palette(app)
+    w = MainWindow()
+    w.show()
+    for sec in w.panel.sections:
+        for b in sec.buttons:
+            if b.isEnabled():  # black on the white panel, whatever the system theme
+                assert b.palette().color(b.foregroundRole()).lightness() < 60, (sec.title, b.text())
+    v = w.view
+    type_at(v, 18, 18, "a+")
+    sqrt = next(b for b in w.panel.sections[0].buttons if b.text() == "√")
+    QTest.mouseClick(sqrt, Qt.LeftButton)
+    assert "√" in v.focused_item.editor.root.text()
+    w.close()

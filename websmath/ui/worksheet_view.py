@@ -63,6 +63,7 @@ class WorksheetScene(QGraphicsScene):
         self.show_grid = True
         self.page_mode = "pages"  # "pages", "bounds" (printing bounds) or "none"
         self.printing = False
+        self.rubber: Optional[QRectF] = None  # the selection box being dragged
         self.setSceneRect(0, 0, PAGE_W + 40, PAGE_H * 3)
 
     def page_count(self) -> int:
@@ -127,6 +128,15 @@ class WorksheetScene(QGraphicsScene):
     def drawForeground(self, p: QPainter, rect: QRectF) -> None:
         if self.printing:
             return
+        if self.rubber is not None:
+            # the selection box: blue frame, light blue fill
+            p.save()
+            p.fillRect(self.rubber, QColor(0, 120, 215, 40))
+            pen = QPen(QColor("#0078d7"), 1)
+            pen.setCosmetic(True)
+            p.setPen(pen)
+            p.drawRect(self.rubber.adjusted(0.5, 0.5, -0.5, -0.5))
+            p.restore()
         view = self.views()[0] if self.views() else None
         if view is not None and getattr(view, "focused_item", None) is not None:
             return
@@ -587,6 +597,9 @@ class WorksheetView(QGraphicsView):
         elif self._drag[0] == "rubber":
             start = self._drag[1]
             rect = QRectF(start, pt).normalized()
+            old = self.scene_.rubber
+            self.scene_.rubber = rect
+            self.scene_.update(rect.united(old) if old is not None else rect)
             self.clear_selection()
             for it in self.items.values():
                 if rect.intersects(it.mapRectToScene(it.frame_rect())):
@@ -632,6 +645,9 @@ class WorksheetView(QGraphicsView):
             elif len(group) == 1 and group[0][0] is not self.focused_item and not group[0][0].region.special:
                 self.focus_item(group[0][0])  # a click on the frame focuses
             self.viewport().unsetCursor()
+        if self.scene_.rubber is not None:
+            self.scene_.update(self.scene_.rubber)
+            self.scene_.rubber = None
         self._drag = None
 
     def mouseDoubleClickEvent(self, e) -> None:
