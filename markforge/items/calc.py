@@ -29,6 +29,8 @@ from .base import MarkupItem, register_item
 def created_here(page) -> bool:
     """A page CalcForge made (File > New, an added or automatic page), rather
     than one that came in from a PDF or an image."""
+    if getattr(page, "written_here", None) is not None:
+        return bool(page.written_here)
     return page.pdf_key is None and page.background_key is None
 
 

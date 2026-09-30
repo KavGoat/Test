@@ -308,8 +308,15 @@ docs/          this file, tasklist.md, interface.md, backlog.md,
   record no longer carries the PDF again (`FILE_FACTS["itself"]`). Markups
   that are still somebody else's annotation are found again by
   `calclayer.annotation_print` (object numbers change on every save).
-  Annotations added elsewhere come in as markups; ours changed elsewhere lose
-  to the record. Only a digitally signed file is appended to
+  For markups the file wins: each annotation CalcForge writes carries a
+  fingerprint in the record (`written_print`); on reopen an unchanged one is
+  replaced by the record's markup, a changed one is read in as the other
+  editor wrote it (keeping uid, lock, group), a missing one means deleted.
+  On reopen every non-image page gets its saved page as source
+  (`Page.written_here` keeps SMath's margins on written pages). Layers are
+  placed with a matrix from the page's own boxes (`calclayer._put_it_where_it_is_shown`)
+  because MuPDF's placement is wrong on turned pages with offset crop boxes.
+  `tests/test_roundtrip.py` compares CalcForge, MuPDF and pdfium page by page. Only a digitally signed file is appended to
   (`io/pdfsave.py`, `Document.signed_source`). What decides how a file opens
   is what it holds, never what it is called: `project.carries_a_document(path)`.
 - **A markup is a real annotation.** `io/annotate.py` builds each one in the

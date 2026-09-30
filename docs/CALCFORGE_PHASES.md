@@ -251,11 +251,57 @@ SMath or Bluebeam. The plan is `CALCFORGE_PLAN.md`; requirements are in
 
 **Different from SMath or Bluebeam**
 
-- Markups: when one of CalcForge's own markups is edited in another program,
-  CalcForge's record wins on reopen (as MarkForge did). Markups *added* in
-  another program are read in.
+- Markups: the file wins (see the addendum below).
 - Another reader can switch nothing off: the calc layer is page content with
   a private tag, not an optional-content layer, so it can't be hidden or
   deleted as a unit elsewhere.
 - Recovery copies (autosave) hold the record and the pages but not the drawn
   layers, so opened in another reader they show no equations.
+
+### Phase 4 addendum — the round trip (2026-09-30)
+
+Asked for: save, open in another editor, delete pages or move markups, open
+again; and a page must look the same in CalcForge and in any other reader.
+
+**What changed**
+
+- **For markups the file wins.** A CalcForge markup moved, restyled, retyped
+  or reshaped in another editor opens as that editor left it (drawn by the
+  file, exactly as they drew it), keeping its identity, lock and group. One
+  deleted elsewhere is gone. Somebody else's markup changed elsewhere is read
+  in afresh. Untouched markups keep everything CalcForge knows about them.
+  Each annotation CalcForge writes is fingerprinted (place, shape, colours,
+  words, date and its appearance drawing) so an edit is noticed.
+- **A written page now has its own saved page underneath** once reopened, so
+  anything another editor leaves on it shows. It still counts as written in
+  CalcForge (SMath's margins) through a new `written_here` flag.
+- **Deleting pages elsewhere doesn't corrupt anything:** the rest opens,
+  recalculates, saves and opens again cleanly.
+
+**Found by the testing and fixed**
+
+- On a page that says it is turned (`/Rotate`), the equations layer (and the
+  header/footer layer, a MarkForge fault too) landed at half size and off the
+  sheet in other readers. The placement is now worked out from the page's own
+  boxes; checked at 0/90/180/270° with and without an offset crop box.
+- A markup changed elsewhere on a written page wasn't drawn in CalcForge at
+  all (there was no page underneath to draw it). Fixed as above.
+- A markup that was still somebody else's could be mistaken for deleted on
+  the second reopen. Fixed.
+
+**Tests** — `tests/test_roundtrip.py` (15) and `tests/fidelity.py`:
+
+- Every page is drawn three ways — by CalcForge, by MuPDF and by pdfium
+  (Chrome's and Foxit's engine) — and compared region by region: where the
+  ink is, how far its edges are apart, and its colour.
+- Covered: rectangle, filled ellipse, cloud, arrow, polygon, pen, text box,
+  callout, stamp, length, area, dimension, count, typewriter, photo, note,
+  flag, sketch, equations, Calculation text, a plot, a snapshot; dashes,
+  hatch, cut-out, transparency, arrowheads, bold/italic/coloured words,
+  highlight; header and footer; a flattened markup; a turned drawing; a real
+  Bluebeam-marked sheet; after save, after reopen-and-save, and Export PDF.
+- Edited elsewhere: moved, restyled and retyped, deleted, a callout and an
+  area measurement moved, a page deleted, pages reordered, the whole file
+  rewritten by another program (pypdf).
+- A test plants a wrong colour and a wrong position and checks the comparison
+  catches both, so the check can't pass by being blind.

@@ -120,7 +120,8 @@ def save(document, path: str, original: bytes, appearance: bool = True) -> int:
                 pdflinks._add_links(target, links)
             key = document.pages[0].pdf_key
             facts = pdfbase._file_facts(document, {key: target},
-                                        {page.uid for page in document.pages}, layers)
+                                        {page.uid for page in document.pages}, layers,
+                                        target)
             engine.embed(target, pdfbase.RECORD_ENTRY,
                          pdfbase.record_bytes(document, facts))
             if not engine.save_incremental(target, temporary):

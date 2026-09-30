@@ -320,6 +320,12 @@ class Page:
         # direction (items/calc.py), so a new one written on a turned page is
         # born turned too.
         self.turn: int = 0
+        # Whether CalcForge made this page (File > New, an added page) rather
+        # than it coming in from a PDF or an image — which is what decides
+        # SMath's margins (items/calc.py). None means "work it out": a page
+        # with no PDF or picture under it. A written page opened again from
+        # its saved file has that file's page under it, so it says so here.
+        self.written_here: Optional[bool] = None
         self.frame = None                           # set by the UI layer
         self._pending_items: list[dict] = []
 
@@ -385,6 +391,7 @@ class Page:
             "footer": self.footer,
             "printable": self.printable,
             "turn": self.turn,
+            "written_here": self.written_here,
             "items": items,
         }
 
@@ -408,6 +415,8 @@ class Page:
             setattr(page, which, None if said is None else bool(said))
         page.printable = bool(data.get("printable", True))
         page.turn = int(data.get("turn", 0) or 0) % 360
+        said = data.get("written_here")
+        page.written_here = None if said is None else bool(said)
         page._pending_items = data.get("items", [])
         return page
 

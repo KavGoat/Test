@@ -182,7 +182,8 @@ def test_reopening_rebuilds_live_equations_and_takes_the_layer_off(win, tmp_path
     assert win.document.open_warnings == []
     # the page underneath is the page without CalcForge's drawing on it
     page = win.document.pages[0]
-    assert page.pdf_key is None, "a page written here stays a page written here"
+    from markforge.items.calc import created_here
+    assert created_here(page), "a page written here stays a page written here (SMath's margins)"
     for data in win.document.assets.values():
         if data[:4] == b"%PDF":
             with pymupdf.open(stream=data) as source:

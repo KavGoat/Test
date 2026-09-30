@@ -60,10 +60,54 @@ def place_layer(document, index: int, overlay, overlay_index: int,
     for xref in page.get_contents():
         if xref not in before:
             document.xref_set_key(xref, KEY, "/" + kind)
-    for xref, name, invoker, _box in page.get_xobjects():
+    entries = page.get_xobjects()
+    for xref, name, invoker, _box in entries:
         if invoker == 0 and name not in names_before:
             document.xref_set_key(xref, KEY, "/" + kind)
+            _put_it_where_it_is_shown(document, page, xref, entries,
+                                      overlay[overlay_index].rect)
     return layer_print(document, index, kind)
+
+
+def _put_it_where_it_is_shown(document, page, outer: int, entries, drawn) -> None:
+    """Place the layer exactly over the page as it is shown.
+
+    The layer was drawn the way the page is shown: its crop box, turned the
+    way its /Rotate says. The page's content lives in its own unturned space,
+    measured from its media box. MuPDF's own placement gets that wrong for a
+    turned sheet whose crop box is not at the origin (the layer lands off the
+    sheet), so the form's matrix is set here from the page's own boxes.
+    """
+    width, height = drawn.width, drawn.height
+    left, bottom, across, up = _crop_box(document, page.xref)
+    turn = page.rotation % 360
+    matrix = {0: (1, 0, 0, 1, left, bottom),
+              90: (0, 1, -1, 0, left + across, bottom),
+              180: (-1, 0, 0, -1, left + across, bottom + up),
+              270: (0, -1, 1, 0, left, bottom + up)}.get(turn, (1, 0, 0, 1, left, bottom))
+    document.xref_set_key(outer, "Matrix", "[%g %g %g %g %g %g]" % matrix)
+    document.xref_set_key(outer, "BBox", "[0 0 %g %g]" % (width, height))
+    for xref, _name, invoker, _box in entries:
+        if invoker == outer:
+            document.xref_set_key(xref, "Matrix", "[1 0 0 1 0 0]")
+
+
+def _crop_box(document, xref: int) -> tuple:
+    """The page's crop box (else its media box), as the file says it,
+    inherited from its parents if need be: left, bottom, width, height."""
+    for key in ("CropBox", "MediaBox"):
+        at = xref
+        while at:
+            kind, value = document.xref_get_key(at, key)
+            if kind == "array":
+                try:
+                    a, b, c, d = (float(v) for v in value.strip("[] ").split())
+                except ValueError:
+                    break
+                return min(a, c), min(b, d), abs(c - a), abs(d - b)
+            kind, value = document.xref_get_key(at, "Parent")
+            at = int(value.split()[0]) if kind == "xref" else 0
+    return 0.0, 0.0, 612.0, 792.0
 
 
 def layer_print(document, index: int, kind: str) -> Optional[str]:
@@ -202,21 +246,43 @@ def is_signed(document) -> bool:
 
 # -- annotations ---------------------------------------------------------------
 def annotation_print(document, xref: int) -> str:
-    """What an annotation is, independent of its object number: how a markup
-    that is still somebody else's annotation is found again in the saved file,
-    whose objects are numbered afresh."""
+    """What an annotation is, independent of its object number.
+
+    How a markup that is still somebody else's annotation is found again in
+    the saved file, whose objects are numbered afresh — and how an annotation
+    CalcForge wrote is known to have been moved or edited in another program
+    since: where it is, its shape, colours, words, date and its appearance
+    drawing all go into it.
+    """
     parts = []
-    for key in ("Subtype", "Rect", "NM", "M", "Contents"):
+    for key in ("Subtype", "Rect", "NM", "M", "Contents", "C", "IC", "CA", "BS",
+                "Border", "L", "Vertices", "InkList", "QuadPoints", "CL", "RD", "DA",
+                "Rotate"):
         try:
             kind, value = document.xref_get_key(xref, key)
         except Exception:                              # noqa: BLE001
             engine.drain_messages()
             kind, value = "null", ""
-        if key == "Rect" and kind == "array":
-            try:
-                value = " ".join(f"{float(v):.2f}"
-                                 for v in value.strip("[] ").split())
-            except ValueError:
-                pass
+        if kind == "array":
+            value = _rounded(value)
         parts.append(f"{key}={value}")
+    try:
+        kind, value = document.xref_get_key(xref, "AP/N")
+        if kind == "xref":
+            parts.append(hashlib.sha1(
+                document.xref_stream(int(value.split()[0])) or b"").hexdigest())
+    except Exception:                                  # noqa: BLE001
+        engine.drain_messages()
     return hashlib.sha1("\n".join(parts).encode("utf-8", "replace")).hexdigest()
+
+
+def _rounded(value: str) -> str:
+    """An array's numbers to two places, so writing the file out again (which
+    may reformat them) does not change the fingerprint."""
+    out = []
+    for token in re.split(r"(\s+|\[|\])", value):
+        try:
+            out.append(f"{float(token):.2f}")
+        except ValueError:
+            out.append(token)
+    return "".join(out)

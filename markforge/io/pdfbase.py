@@ -63,7 +63,12 @@ def record_bytes(document, facts: Optional[dict] = None) -> bytes:
         itself = set(facts.get("itself", ()))
         assets = {key: value for key, value in assets.items() if key not in itself}
         prints = facts.get("_prints", {})
+        written = facts.get("_ours", {})
         for page in data.get("pages", []):
+            for payload in _payloads(page.get("items", [])):
+                made = written.get(payload.get("uid"))
+                if made:
+                    payload["written_print"] = made
             known = prints.get(page.get("uid"), {})
             page["markup_prints"] = [known[number] for number in
                                      page.get("markup_annotations", ()) if number in known]
@@ -208,7 +213,7 @@ def _assemble(document, path: str, appearance: bool = True) -> None:
             outline, links = outline_and_links(document, _drawn_pages(document))
             pdflinks._set_outline(output, outline)
             pdflinks._add_links(output, links)
-        facts = _file_facts(document, sources, carried, layers)
+        facts = _file_facts(document, sources, carried, layers, output)
         engine.embed(output, RECORD_ENTRY, record_bytes(document, facts))
         output.set_metadata({"title": document.title or "",
                              "creator": "CalcForge",
@@ -258,7 +263,8 @@ def _one_source_whole(document):
     return key, wanted
 
 
-def _file_facts(document, sources: dict, carried: set, layers: dict) -> dict:
+def _file_facts(document, sources: dict, carried: set, layers: dict,
+                output=None) -> dict:
     """What the record says about the file around it (see :func:`record_bytes`)."""
     from . import calclayer
 
@@ -281,7 +287,24 @@ def _file_facts(document, sources: dict, carried: set, layers: dict) -> dict:
             if number:
                 known[number] = calclayer.annotation_print(source, number)
         prints[page.uid] = known
-    return {"version": 1, "itself": itself, "calc_layers": layers, "_prints": prints}
+    return {"version": 1, "itself": itself, "calc_layers": layers, "_prints": prints,
+            "_ours": {} if output is None else _ours_written(output)}
+
+
+def _ours_written(output) -> dict:
+    """Each annotation CalcForge wrote, by its markup's uid: its
+    fingerprint, so an edit made to it in another program is noticed."""
+    from . import calclayer
+
+    found = {}
+    for index in range(output.page_count):
+        for number in engine.annotation_xrefs(output, index):
+            if output.xref_get_key(number, calclayer.KEY)[0] != "name":
+                continue
+            kind, name = output.xref_get_key(number, "NM")
+            if kind == "string" and name:
+                found[name] = calclayer.annotation_print(output, number)
+    return found
 
 
 def _place_the_markups(output, document, carried: set, opened: list):
@@ -547,20 +570,31 @@ def _take_the_file_back(document, data: bytes, record: dict, assets: dict) -> No
             if page is None:
                 page = _plain_page(source, index)
                 page["pdf_key"] = key
+                page["written_here"] = False
             elif page.get("pdf_key") and (page["pdf_key"] in itself
                                           or page["pdf_key"] not in assets):
                 page["pdf_key"] = key
                 page["pdf_page_index"] = index
-            new = _sort_the_annotations(source, index, page)
+            elif not page.get("pdf_key") and not page.get("background_key"):
+                # A page written here: the file's page is under it from now
+                # on too, so whatever another program left on it — a markup
+                # as they drew it, a stamp pressed into it — shows as it does
+                # there. It is still a written page, with SMath's margins.
+                page["pdf_key"] = key
+                page["pdf_page_index"] = index
+                if page.get("written_here") is None:
+                    page["written_here"] = True
+            new, replaced = _sort_the_annotations(source, index, page)
             if new:
-                foreign[index] = new
+                foreign[index] = (new, replaced)
             pages.append(page)
         cleaned = source.tobytes(garbage=0)
     finally:
         engine.close(source)
     assets[key] = cleaned
-    for index, numbers in foreign.items():
-        _read_their_markups(document, cleaned, index, pages[index], numbers, assets)
+    for index, (numbers, replaced) in foreign.items():
+        _read_their_markups(document, cleaned, index, pages[index], numbers, assets,
+                            replaced)
     gone = list(record_pages.values())
     record["pages"] = pages or record.get("pages", [])
     document.signed_source = (key, data) if signed else None
@@ -602,65 +636,100 @@ def _plain_page(source, index: int) -> dict:
     return page.to_dict()
 
 
-def _sort_the_annotations(source, index: int, page: dict) -> list:
+def _sort_the_annotations(source, index: int, page: dict) -> tuple[list, dict]:
     """Leave on the page only its furniture and the annotations that are
-    still somebody else's markups; say which others are new to the record.
+    markups as the file now has them; say which are to be read in.
 
-    Ours — each markup of the record, written as an annotation on the last
-    save — come off: the record is what they are. Somebody else's that a
-    markup still is are found again by what they are, and the markup is
-    pointed at the annotation's number in this file. Anything else was added
-    or changed in another program, and is read in as a markup of its own.
+    For markups the file wins (2026-09-30): whatever another program wrote is
+    what opens.
+
+    - One of CalcForge's own, unchanged since it was saved: it comes off, and
+      the record's markup — which knows more than a PDF can say — is used.
+    - One of CalcForge's own, moved or edited elsewhere: it stays, and is
+      read in as that program wrote it, keeping the record's identity.
+    - One of CalcForge's own that is no longer there: deleted elsewhere, so
+      its markup goes too.
+    - Somebody else's that a markup still is, unchanged: found again by what
+      it is, and the markup pointed at its number in this file.
+    - Anything else was added or changed elsewhere, and is read in; a markup
+      that was somebody else's annotation and no longer matches goes, because
+      its new version is what is read in.
+
+    Returns the annotations to read in, and for each one that replaces a
+    markup of the record, that markup's payload.
     """
     from . import calclayer
 
+    items = [payload for payload in page.get("items", []) if isinstance(payload, dict)]
+    by_uid = {payload.get("uid"): payload for payload in items if payload.get("uid")}
     wanted: dict = {}
-    for payload in _payloads(page.get("items", [])):
+    for payload in items:
         made = payload.get("annotation_print")
         if made:
             wanted.setdefault(made, []).append(payload)
     kept_prints = set(page.get("markup_prints") or ())
-    uids = {payload.get("uid") for payload in _payloads(page.get("items", []))}
     kept, found, new = [], {}, []
+    replaced: dict = {}
+    seen: set = set()
     for number in engine.annotation_xrefs(source, index):
         kind = source.xref_get_key(number, "Subtype")[1].lstrip("/")
         if kind in engine.NOT_MARKUP:
             kept.append(number)
             continue
         made = calclayer.annotation_print(source, number)
+        name = source.xref_get_key(number, "NM")
+        name = name[1] if name[0] == "string" else ""
         if made in wanted or made in kept_prints:
             found[made] = number
             kept.append(number)
+            seen.add(name)
             continue
-        ours = source.xref_get_key(number, calclayer.KEY)[0] == "name"
-        name = source.xref_get_key(number, "NM")
-        if ours or (name[0] == "string" and name[1] in uids):
-            continue
+        old = by_uid.get(name)
+        ours = source.xref_get_key(number, calclayer.KEY)[0] == "name" or \
+            (old is not None and not old.get("still_theirs"))
+        if ours:
+            seen.add(name)
+            if old is not None and old.get("written_print") and \
+                    old["written_print"] != made:
+                kept.append(number)                  # edited elsewhere: as written there
+                new.append(number)
+                replaced[number] = old
+            continue                                 # unchanged: the record's markup
         kept.append(number)
         new.append(number)
     engine.set_page_annotations(source, index, kept)
-    for made, payloads in wanted.items():
-        for payload in payloads:
+    gone = {id(old) for old in replaced.values()}
+    for payload in items:
+        if payload.get("written_print") and payload.get("uid") not in seen:
+            gone.add(id(payload))                     # deleted elsewhere
+        made = payload.get("annotation_print")
+        if made:
             if made in found:
                 payload["from_annotation"] = found[made]
             else:
-                payload["from_annotation"] = 0
-                payload["still_theirs"] = False
-            payload.pop("annotation_print", None)
+                gone.add(id(payload))                 # changed or deleted elsewhere
+        elif payload.get("still_theirs") and payload.get("from_annotation"):
+            gone.add(id(payload))                     # not found again at all
+        payload.pop("annotation_print", None)
+        payload.pop("written_print", None)
+    page["items"] = [payload for payload in page.get("items", [])
+                     if not isinstance(payload, dict) or id(payload) not in gone]
     page["markup_annotations"] = [found[made] for made in page.pop("markup_prints", [])
                                   if made in found]
-    for payload in _payloads(page.get("items", [])):
-        if payload.get("still_theirs") and payload.get("from_annotation") and \
-                payload["from_annotation"] not in found.values():
-            payload["still_theirs"] = False
-            payload["from_annotation"] = 0
-    return new
+    return new, replaced
+
+
+# What a markup of the record keeps when another program has edited its
+# annotation: who it is, and what a PDF has no word for.
+_KEPT_THROUGH_AN_EDIT = ("uid", "locked", "group", "group_path", "group_title",
+                         "created", "label")
 
 
 def _read_their_markups(document, cleaned: bytes, index: int, page: dict,
-                        numbers, assets: dict) -> None:
+                        numbers, assets: dict, replaced: Optional[dict] = None) -> None:
     """Annotations added or changed in another program, read in as markups
-    that are still theirs (drawn by the file until changed here)."""
+    that are still theirs: drawn by the file, exactly as that program wrote
+    them, until changed here."""
     import tempfile
 
     from . import pdfmarkups, pdfvector
@@ -692,6 +761,17 @@ def _read_their_markups(document, cleaned: bytes, index: int, page: dict,
     made = [payload for payload in made if payload.get("from_annotation") in wanted]
     if not made:
         return
+    replaced = replaced or {}
+    done: set = set()
+    for payload in made:
+        number = payload.get("from_annotation")
+        old = replaced.get(number)
+        if old is None or number in done:
+            continue
+        done.add(number)
+        for key in _KEPT_THROUGH_AN_EDIT:
+            if key in old:
+                payload[key] = old[key]
     page["items"] = list(page.get("items", [])) + made
     page["markup_annotations"] = list(page.get("markup_annotations", [])) + [
         int(payload["from_annotation"]) for payload in made if payload.get("from_annotation")]
