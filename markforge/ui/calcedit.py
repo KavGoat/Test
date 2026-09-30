@@ -429,13 +429,54 @@ class CalcEditing:
         if text == " ":
             self.place_cross(frame, QPointF(point.x() + GRID_PT, point.y()))
             return True
-        if text == "@":
-            self.start_plot(frame, point)
-            self._after_edit(self.item)
+        # the Calc-mode typing keys are bindings like any other: " for
+        # Calculation text and @ for a plot by default
+        from .shortcuts import CALC, INSERT
+        binding = self.window.shortcuts.match_typed(text, mods, CALC)
+        if binding is not None and binding.kind == INSERT:
+            self.insert(binding.payload, frame, point)
             return True
         item = self.start(frame, point)
         self._type(item, text)
         return True
+
+    def insert(self, what: str, frame, point: QPointF) -> None:
+        """Start an equation, a plot or Calculation text at *point*."""
+        if what == "plot":
+            self.start_plot(frame, point)
+            self._after_edit(self.item)
+        elif what == "calc_text":
+            self.start_calc_text(frame, point)
+        else:
+            self.start(frame, point)
+
+    def start_calc_text(self, frame, point: QPointF, text: str = "", replacing=None):
+        """New Calculation text at *point*, with the caret in it (in place of
+        the equation *replacing*, in the same undo step)."""
+        from ..items.calc import CalcTextItem
+
+        self.leave()
+        view = self.view
+        if view.editing_item() is not None:
+            view.end_item_edit()
+        view.begin_snapshot([frame])
+        if replacing is not None and replacing.scene() is not None:
+            frame.remove_markup(replacing)
+        item = CalcTextItem(text)
+        item.author = self.window.document.settings.default_author or self.window.document.author
+        item.set_local_rect(QRectF(0, 0, 180, 4 * GRID_PT))
+        frame.add_markup(item, QPointF(snap(point.x()), snap(point.y())))
+        view.scene().clearSelection()
+        item.setSelected(True)
+        view.commit_snapshot("Add Calculation text")
+        self.clear_cross()
+        view.begin_item_edit(item)
+        editor = getattr(item, "_editor", None)
+        if editor is not None:
+            cursor = editor.textCursor()
+            cursor.movePosition(cursor.MoveOperation.End)
+            editor.setTextCursor(cursor)
+        return item
 
     def _where_typing_starts(self):
         if self.cross is not None and self.cross[0].scene() is not None:
@@ -461,11 +502,12 @@ class CalcEditing:
             redo = key == Qt.Key_Y or bool(mods & Qt.ShiftModifier)
             (self.window.redo_something if redo else self.window.undo_something)()
             return True
-        if ctrl and key == Qt.Key_Equal:
-            self._type(item, "≡")
+        if ctrl and key in (Qt.Key_B, Qt.Key_I, Qt.Key_U) and not mods & Qt.AltModifier:
+            # MarkForge's formatting keys, reaching the equation (decision 6)
+            {Qt.Key_B: self.window.toggle_bold, Qt.Key_I: self.window.toggle_italic,
+             Qt.Key_U: self.window.toggle_underline}[key]()
             return True
-        if ctrl and key in (Qt.Key_3, Qt.Key_9, Qt.Key_0):
-            self._type(item, {Qt.Key_3: "≠", Qt.Key_9: "≤", Qt.Key_0: "≥"}[key])
+        if (ctrl or mods & Qt.AltModifier) and self._smath_key(event):
             return True
         if key in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Home, Qt.Key_End):
             name = _selection_key_name(key, mods)
@@ -495,6 +537,52 @@ class CalcEditing:
             return self._pass_to_window(event)
         return True                           # every other key belongs to the equation
 
+    def _smath_key(self, event) -> bool:
+        """A key from the SMath section of the shortcut manager (decision 6)."""
+        from .shortcuts import EQUATION, TYPING
+        sequence = QKeySequence(event.keyCombination())
+        binding = self.window.shortcuts.binding_for(sequence, scopes=(EQUATION, TYPING))
+        if binding is None:
+            return False
+        if binding.kind == "symbol":
+            return self.insert_symbol(binding.payload)
+        self.run_smath(binding.payload)
+        return True
+
+    def run_smath(self, payload: str) -> None:
+        item = self.item
+        what, _, arg = payload.partition(":")
+        if what == "type" and item is not None:
+            self._type(item, arg)
+        elif what == "box" and item is not None:
+            item.region.editor.insert_structure(arg)
+            self._after_edit(item)
+        elif what == "command":
+            getattr(self.window, arg)()
+
+    # MarkForge's symbol keys, with their meaning in an equation (the answer
+    # to the symbol-keys question): what gets typed into the editor.
+    SYMBOL_MEANINGS = {
+        "×": "*", "÷": "/", "^": "^", "√(": "\\", "²": "^2", "³": "^3", "±": "±",
+        "≤": "≤", "≥": "≥", "≠": "≠", "π": "π", "°": "'°", "Δ": "Δ", "Σ": "Σ",
+        "⌀": "⌀", "µ": "μ", "φ": "φ", "σ": "σ", "α": "α", "β": "β", "γ": "γ",
+        "θ": "θ", "λ": "λ", "ρ": "ρ", "ε": "ε", "ω": "ω",
+    }
+
+    def insert_symbol(self, symbol: str) -> bool:
+        """A symbol key while an equation has the cursor; False if none has."""
+        item = self.item if self.editing() else None
+        if item is None:
+            return False
+        typed = self.SYMBOL_MEANINGS.get(symbol, symbol)
+        if symbol in ("²", "³"):
+            self._type(item, typed)
+            item.region.editor.key("RIGHT")          # out of the exponent again
+            self._after_edit(item)
+            return True
+        self._type(item, typed)
+        return True
+
     def _pass_to_window(self, event) -> bool:
         """A Ctrl key SMath has no use for: the window's own command (save, zoom…)."""
         wanted = QKeySequence(event.keyCombination())
@@ -521,7 +609,22 @@ class CalcEditing:
             return                            # m is a variable and a unit: pick one first
         for ch in text:
             item.region.editor.key(ch)
+            if item.region.editor.kind == "text" and item.region.plot is None:
+                # SMath: a lone word and a space make a text region; here that
+                # is Calculation text (decision 22, and the word-space answer)
+                self._becomes_calc_text(item)
+                return
         self._after_edit(item, typed=True)
+
+    def _becomes_calc_text(self, item: CalcItem) -> None:
+        """Turn the equation just typed into Calculation text with the same
+        words; one Ctrl+Z (after the typing) turns it back, as in SMath."""
+        editor = item.region.editor
+        words = editor.text
+        editor.undo()                         # the equation as it was: the lone word
+        frame, point = item.parentItem(), QPointF(item.pos())
+        self.leave()                          # one undo step: the equation
+        self.start_calc_text(frame, point, words, replacing=item)
 
     def _ordered_items(self) -> list:
         sheet = self.item._sheet if self.item is not None else None

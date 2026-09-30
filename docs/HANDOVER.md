@@ -261,7 +261,12 @@ markforge/
     panels.py        the docked panels; toolsets.py, rail.py, docks.py
     dialogs.py       every dialog
     tools.py         the tool table: key, label, icon, shortcut, factory
-    shortcuts.py     DEFAULT_BINDINGS and the shortcut manager
+    shortcuts.py     DEFAULT_BINDINGS and the shortcut manager. Every
+                     binding has a scope (ALWAYS, CALC, MARKUP, EQUATION,
+                     TYPING); a key clashes only where scopes overlap
+                     (scopes_overlap). SMATH_KEYS is the SMath section.
+    calcdialogs.py   WebSMath's matrix/function/constants/double-check
+                     dialogs (ANSWERS lets tests answer them)
     theme.py (markforge/theme.py) light and dark stylesheets
   io/          pdfbase (what a saved document is), pdfsave (the incremental
                update), project (open and save), annotate (markups as real PDF

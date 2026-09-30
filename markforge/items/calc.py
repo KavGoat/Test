@@ -448,3 +448,44 @@ class CalcDrawingItem(MarkupItem):
     def deserialize(self, data: dict) -> None:
         self._rect = QRectF(*data.get("rect", [0, 0, 10, 10]))
         self.load_base(data)
+
+
+# -- Calculation text (decision 22) ---------------------------------------------------
+
+from .text import TextItem  # noqa: E402  (after the equation classes on purpose)
+
+
+@register_item
+class CalcTextItem(TextItem):
+    """Calculation text: SMath's text regions, as a MarkForge text box.
+
+    A separate type from a text box, with a default style of its own — plain,
+    as SMath writes text: no frame, no fill, Arial 10 pt in black — that the
+    user can change and that keeps a border and fill if given one. It is saved
+    as a text annotation like any other text box, never flattened, and it has
+    no effect on the calculation. It never takes a callout leader, and it sits
+    on the calculation grid.
+    """
+
+    TYPE = "calc_text"
+    NAME = "Calculation text"
+    CAN_LEAD = False
+
+    def __init__(self, text: str = "", rect: Optional[QRectF] = None):
+        super().__init__(text, rect)
+        plain = default_calc_text_style()
+        for field_name in ("stroke", "fill", "fill_opacity", "width", "text_color",
+                           "font_family", "font_size", "padding"):
+            setattr(self.style, field_name, getattr(plain, field_name))
+        if hasattr(self, "apply_style"):
+            self.apply_style()
+
+    def add_leader(self, *args, **kwargs):          # never a callout
+        return None
+
+
+def default_calc_text_style():
+    """The look new Calculation text gets (Preferences can change it, phase 5)."""
+    from .base import Style
+    return Style(stroke="", fill="", fill_opacity=0.0, width=0.0, text_color="#000000",
+                 font_family="Arial", font_size=10.0, padding=2.0)

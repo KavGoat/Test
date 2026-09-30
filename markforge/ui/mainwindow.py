@@ -46,7 +46,7 @@ from .docks import PanelDock, load_panel_state, save_panel_state
 from .rail import (AREAS, LEFT, RIGHT, PanelRail, RailBar, load_order,
                    load_sides, save_order, save_sides)
 from .scene import DocumentScene, detach
-from .shortcuts import COMMAND, INSERT, SYMBOL, TOOL, ShortcutManager
+from .shortcuts import MARKUP, COMMAND, INSERT, SYMBOL, TOOL, ShortcutManager
 from .stylecaps import (ARROW_SIZE, DASH, FILL, FILL_OPACITY, FONT, HATCH,
                         OPACITY, STROKE, WIDTH, capabilities,
                         common_capabilities)
@@ -288,9 +288,11 @@ def _stretch(parent) -> QWidget:
 _ALREADY_BOUND = {
     "fit_page": "command.fit_page", "fit_width": "command.fit_width",
     "renumber_counts": "command.renumber_counts",
+    "calc_mode": "command.calc_mode",
 }
 
 _SHORTCUT_GROUPS = {
+    "calculate": "SMath", "insert_matrix": "SMath", "auto_calc": "SMath",
     "new": "File", "open": "File", "save": "File", "save_as": "File",
     "insert_pdf": "File", "insert_image_page": "File", "import_toolset": "File",
     "export_pdf": "File", "export_png": "File", "export_markups": "File",
@@ -612,6 +614,29 @@ class MainWindow(QMainWindow):
         self._act("duplicate", "Duplicate", self.duplicate_selection, "Ctrl+D")
         self._act("delete", "Delete", self.delete_selection, "", "delete")
         self._act("select_all", "Select all", self.select_all, "Ctrl+A")
+        # SMath (decisions 5, 6 and 18): the mode switch and the calculation
+        # commands the document has whatever is going on. SMath's keys inside
+        # an equation are in the shortcut manager's SMath section.
+        self._act("calc_mode", "Calc mode", self.toggle_calc_mode, "F12", checkable=True,
+                  tip="Calc mode: typing on the page starts an equation, as in SMath. "
+                      "Markup mode: MarkForge's tool keys")
+        self._act("calculate", "Calculate", self.calculate, "F9",
+                  tip="Recalculate every equation in the document")
+        self._act("auto_calc", "Auto-calc", self.set_auto_calc, checkable=True,
+                  tip="Recalculate what depends on an equation as soon as it is left")
+        self.act_auto_calc.setChecked(True)
+        self._act("insert_matrix", "Matrix", self.insert_matrix, "Ctrl+M",
+                  tip="Insert a matrix into the equation, or start one")
+        # Keys inside an equation only (the SMath section of the shortcut
+        # manager): on the menu without a window shortcut, since outside an
+        # equation Ctrl+E is Export PDF and Ctrl+Shift+D is Multiple.
+        self._act("insert_function", "Function…", self.insert_function,
+                  tip="Insert a function into the equation (Ctrl+E in an equation)")
+        self._act("constants", "Constants…", self.show_constants,
+                  tip="SMath's constants; double-click one to insert it (Ctrl+K in an equation)")
+        self._act("double_check", "Double-check", self.double_check,
+                  tip="Recalculate every result independently and compare "
+                      "(Ctrl+Shift+D in an equation)")
         self._act("lock", "Lock", self.toggle_lock, "Ctrl+L",
                   tip="Lock the selection so it cannot be moved, or let it go")
         self._act("array", "Multiple…", self.array_selection,
@@ -1460,6 +1485,12 @@ class MainWindow(QMainWindow):
         insert_menu.addAction(self.act_insert_pdf)
         insert_menu.addAction(self.act_insert_image_page)
 
+        calc_menu = bar.addMenu("&Calculation")
+        for action in (self.act_calc_mode, None, self.act_calculate, self.act_auto_calc,
+                       None, self.act_insert_matrix, self.act_insert_function,
+                       self.act_constants, None, self.act_double_check):
+            calc_menu.addSeparator() if action is None else calc_menu.addAction(action)
+
         settings_menu = bar.addMenu("&Settings")
         settings_menu.addAction(self.act_preferences)
         settings_menu.addAction(self.act_shortcuts)
@@ -1561,6 +1592,14 @@ class MainWindow(QMainWindow):
         self.status_scroll.setPopupMode(QToolButton.InstantPopup)
         status.addPermanentWidget(self.status_scroll)
 
+        # Calc or Markup (decision 5): always in view, one click to change.
+        self.status_mode = QToolButton()
+        self.status_mode.setAutoRaise(True)
+        self.status_mode.setCheckable(True)
+        self.status_mode.setText("Markup")
+        self.status_mode.setToolTip("Calc or Markup mode — what typing on the page does")
+        self.status_mode.toggled.connect(lambda on: self.toggle_calc_mode(on))
+        status.addPermanentWidget(self.status_mode)
         self.status_grid = QToolButton()
         self.status_grid.setAutoRaise(True)
         self.status_grid.setCheckable(True)
@@ -1950,6 +1989,7 @@ class MainWindow(QMainWindow):
         self.current_index = 0
         self.rebuild_scenes()
         self.select_tool("select")
+        self.toggle_calc_mode(False)          # decision 7: File > New is in Markup mode
         self.view.fit_page()
         self.update_title()
 
@@ -2363,6 +2403,16 @@ class MainWindow(QMainWindow):
                 and not (isinstance(watched, QToolButton)
                          and watched.defaultAction() is self.act_format_painter)):
             self.put_the_format_painter_down()
+        if (event.type() == QEvent.ShortcutOverride and self.view.calc.calc_mode()
+                and not self.view.is_editing()):
+            # Calc mode: no tool key fires, with or without Shift or Alt
+            # (decision 5). The key goes to the canvas, where a letter —
+            # Shift+E included — starts an equation.
+            binding = self.shortcuts.binding_for(QKeySequence(event.keyCombination()),
+                                                 scopes=(MARKUP,))
+            if binding is not None:
+                event.accept()
+                return True
         if event.type() == QEvent.ShortcutOverride and self.view.is_editing():
             sequence = QKeySequence(event.keyCombination())
             binding = self.shortcuts.binding_for(sequence)
@@ -3556,9 +3606,14 @@ class MainWindow(QMainWindow):
 
     def run_typed_binding(self, text: str, modifiers, position: QPointF) -> bool:
         """Act on a bare keystroke over the canvas; False if nothing is bound."""
-        binding = self.shortcuts.match_typed(text, modifiers)
+        binding = self.shortcuts.match_typed(text, modifiers, self.view.calc.mode)
         if binding is None:
             return False
+        if binding.kind == INSERT and binding.payload in ("equation", "calc_text", "plot"):
+            frame = self.view.frame_at(position) or self.view.frame()
+            if frame is not None:
+                self.view.calc.insert(binding.payload, frame, frame.mapFromScene(position))
+            return True
         if binding.kind == INSERT:
             self._insert_at(binding.payload, position)
             return True
@@ -3705,6 +3760,128 @@ class MainWindow(QMainWindow):
         item = self.view.editing_item()
         editor = getattr(item, "_editor", None) if item is not None else None
         return editor.document() if editor is not None else None
+
+    # ==================================================================
+    # calculation (SMath)
+    # ==================================================================
+    def toggle_calc_mode(self, on=None) -> None:
+        """Calc mode or Markup mode (decision 5), shown in the status bar."""
+        calc = self.view.calc
+        if on is None or not isinstance(on, bool):
+            on = calc.mode != "calc"
+        calc.leave()
+        calc.mode = "calc" if on else "markup"
+        if not on:
+            calc.clear_cross()
+        for widget in (getattr(self, "act_calc_mode", None), getattr(self, "status_mode", None)):
+            if widget is not None and widget.isChecked() != on:
+                widget.blockSignals(True)
+                widget.setChecked(on)
+                widget.blockSignals(False)
+        if getattr(self, "status_mode", None) is not None:
+            self.status_mode.setText("Calc" if on else "Markup")
+        self.status_hint.setText("Calc mode — typing on the page starts an equation" if on
+                                 else "Markup mode — MarkForge's tool keys")
+        self.view.viewport().update()
+
+    def calculate(self) -> None:
+        """F9: every equation, in reading order."""
+        from ..calc.docsheet import sheet_for
+        self.view.calc.leave()
+        sheet_for(self.document).recalculate(force=True)
+        self.status_hint.setText("Calculated")
+
+    def set_auto_calc(self, on: bool) -> None:
+        from ..calc.docsheet import sheet_for
+        sheet_for(self.document).worksheet.auto_calculation = bool(on)
+        if on:
+            sheet_for(self.document).recalculate()
+
+    def _into_an_equation(self):
+        """The equation being typed into, or a new one at the red cross (or
+        under the pointer)."""
+        calc = self.view.calc
+        if calc.editing():
+            return calc.item
+        frame, point = calc._where_typing_starts()
+        if frame is None:
+            return None
+        return calc.start(frame, point)
+
+    def insert_matrix(self) -> None:
+        from ..calc.engine.model import Matrix
+        from . import calcdialogs
+        size = calcdialogs.matrix_size(self)
+        if size is None:
+            return
+        item = self._into_an_equation()
+        if item is None:
+            return
+        editor = item.region.editor
+        editor._push_undo()
+        editor._insert_box(Matrix(size[0], size[1]), into=0)
+        self.view.calc._after_edit(item)
+        self.view.setFocus()
+
+    def insert_function(self) -> None:
+        from . import calcdialogs
+        name = calcdialogs.function_to_insert(self)
+        if name:
+            item = self._into_an_equation()
+            if item is not None:
+                self.view.calc._type(item, name + "(")
+
+    def show_constants(self) -> None:
+        from . import calcdialogs
+        typed = calcdialogs.constant_to_insert(self)
+        if typed:
+            item = self._into_an_equation()
+            if item is not None:
+                self.view.calc._type(item, typed)
+
+    def double_check(self) -> None:
+        """Every result recalculated by a second, independent calculator."""
+        from ..calc.docsheet import sheet_for
+        from ..calc.engine.verify import double_check
+        from . import calcdialogs
+        self.view.calc.leave()        # the open equation's result first
+        try:
+            report = double_check(sheet_for(self.document).worksheet)
+        except Exception as error:              # noqa: BLE001 — never break the page
+            self.status_hint.setText(f"Double-check could not run: {error}")
+            return
+        self.status_hint.setText(report.summary())
+        calcdialogs.show_double_check(self, report)
+
+    def select_all_equations(self) -> None:
+        """Ctrl+A inside an equation: every equation, as SMath selects all regions."""
+        self.view.calc.leave()
+        self.view.scene().clearSelection()
+        for page in self.document.pages:
+            if page.frame is None:
+                continue
+            for item in page.frame.markups():
+                if getattr(item, "IS_CALC", False):
+                    item.setSelected(True)
+        self.view.selectionChanged.emit()
+
+    def _format_equations(self, which: str) -> bool:
+        """Bold, italic or underline on the equation being typed into, or the
+        equations selected (decision 6: MarkForge's keys reach equations)."""
+        calc = self.view.calc
+        items = [calc.item] if calc.editing() else [
+            i for i in self.selected_items() if getattr(i, "IS_CALC", False) and not i.locked]
+        if not items:
+            return False
+        if not calc.editing():
+            self.view.begin_snapshot(self.view.involved_frames(*items))
+        wanted = not all(getattr(i.region, which) for i in items)
+        for item in items:
+            setattr(item.region, which, wanted)
+            item.relayout()
+        if not calc.editing():
+            self.view.commit_snapshot(which.capitalize())
+        return True
 
     def undo_something(self) -> None:
         """Take back the typing first, then the document change under it."""
@@ -5796,6 +5973,8 @@ class MainWindow(QMainWindow):
         region. They are the same leader drawn two ways, and one call-out can
         carry both.
         """
+        if not getattr(item, "CAN_LEAD", True):
+            return                    # Calculation text never becomes a callout
         arrow = menu.addAction("Add arrow leader",
                                lambda: self.add_leader_to(item, "arrow"))
         arrow.setToolTip("A line with a head on it, dragged to what it is about")
@@ -5822,6 +6001,8 @@ class MainWindow(QMainWindow):
         down beside the note and leaving it to be dragged made every leader
         two gestures, the first of them wrong.
         """
+        if not getattr(item, "CAN_LEAD", True):
+            return
         if kind == "cloud":
             self.view.begin_cloud_leader(item)
             return
@@ -5879,7 +6060,7 @@ class MainWindow(QMainWindow):
 
     def set_leader(self, item, wanted: bool) -> None:
         """Give a text box or call-out a leader, or take its leaders away."""
-        if item is None or not isinstance(item, _TextBase):
+        if item is None or not isinstance(item, _TextBase) or not getattr(item, "CAN_LEAD", True):
             return
         if item.leader_shown == wanted:
             return
@@ -5904,7 +6085,8 @@ class MainWindow(QMainWindow):
     # something anybody has to ask for.
     def becomes_a_callout(self, item):
         """A text box given a leader is a call-out. Says which item to use."""
-        if isinstance(item, CalloutItem) or not isinstance(item, TextItem):
+        if isinstance(item, CalloutItem) or not isinstance(item, TextItem) \
+                or not getattr(item, "CAN_LEAD", True):
             return item
         return self._swap_text_kind(item, CalloutItem)
 
@@ -5967,6 +6149,8 @@ class MainWindow(QMainWindow):
         page. Returning False is what tells Ctrl+B it is free to mean
         "bookmark" instead.
         """
+        if self._format_equations("bold"):
+            return True
         if self.bold_the_selected_run():
             return True
 
@@ -6011,6 +6195,8 @@ class MainWindow(QMainWindow):
 
     def _toggle_text_style(self, which: str) -> bool:
         """Bold, italic or underline, wherever the words happen to be."""
+        if self._format_equations(which):
+            return True
         if self._style_the_selected_run(which):
             return True
         item = self.view.editing_item()

@@ -3822,6 +3822,8 @@ class PageView(QGraphicsView):
         bracket with it and leaves the caret between the two, because ``√(``
         on its own is half of something.
         """
+        if self.calc.insert_symbol(text):
+            return True                        # into an equation, with its maths meaning
         closing = ")" if text.endswith("(") else ""
         item = self._editing_item
         editor = getattr(item, "_editor", None) if item is not None else None

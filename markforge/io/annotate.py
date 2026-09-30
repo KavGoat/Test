@@ -165,7 +165,7 @@ def subtype_for(item) -> str:
         return STAMP                       # radius and diameter draw a circle
     if item.TYPE == "note":
         return "Text"
-    if item.TYPE in ("callout", "typewriter", "text"):
+    if item.TYPE in ("callout", "typewriter", "text", "calc_text"):
         return "FreeText"
     return STAMP
 

@@ -998,8 +998,8 @@ class ShortcutManagerDialog(QDialog):
         self.filter.textChanged.connect(self._apply_filter)
         layout.addWidget(self.filter)
 
-        self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(["Group", "Command", "Shortcut", "Default"])
+        self.table = QTableWidget(0, 5)
+        self.table.setHorizontalHeaderLabels(["Group", "Command", "Shortcut", "Default", "Where"])
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -1024,6 +1024,13 @@ class ShortcutManagerDialog(QDialog):
             default = QTableWidgetItem(binding.default or "—")
             default.setFlags(Qt.ItemIsEnabled)
             self.table.setItem(row, 3, default)
+            from .shortcuts import SCOPE_NAMES
+            where = QTableWidgetItem(SCOPE_NAMES.get(binding.scope, ""))
+            where.setFlags(Qt.ItemIsEnabled)
+            where.setToolTip("Where the key acts. One key may do two things only where "
+                             "they can never both act: Calc and Markup mode, or inside "
+                             "an equation and outside it.")
+            self.table.setItem(row, 4, where)
         self.table.resizeColumnsToContents()
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
 
@@ -1081,22 +1088,23 @@ class ShortcutManagerDialog(QDialog):
                 for binding in self.manager.bindings()}
 
     def _check(self) -> None:
-        """Flag anything bound twice, on the rows themselves and in a line."""
-        seen: dict[str, list] = {}
-        for binding in self.manager.bindings():
-            text = self.editors[binding.action_id].text().strip()
-            if text:
-                seen.setdefault(text.lower(), []).append(binding)
+        """Flag anything bound twice, on the rows themselves and in a line.
+
+        Twice means where both could act: a key may be one thing in Calc mode
+        and another in Markup mode, or one thing inside an equation and
+        another outside it (shortcuts.scopes_overlap).
+        """
+        from .shortcuts import BY_ID, clashes_in
+        found = clashes_in(self.assignments())
+        clashing = {action_id for ids in found.values() for action_id in ids}
         clashes = []
-        for text, bindings in seen.items():
-            clash = len(bindings) > 1
-            if clash:
-                clashes.append(f"{bindings[0].label} and "
-                               f"{', '.join(b.label for b in bindings[1:])} "
-                               f"are both on {text}")
-            for binding in bindings:
-                editor = self.editors[binding.action_id]
-                editor.setStyleSheet("border: 1px solid #c0392b;" if clash else "")
+        for text, ids in found.items():
+            labels = [BY_ID[i].label if i in BY_ID else i for i in ids]
+            clashes.append(f"{labels[0]} and {', '.join(labels[1:])} are both on {text}")
+        for binding in self.manager.bindings():
+            editor = self.editors[binding.action_id]
+            editor.setStyleSheet("border: 1px solid #c0392b;"
+                                 if binding.action_id in clashing else "")
         for binding in self.manager.bindings():
             if not self.editors[binding.action_id].text().strip():
                 self.editors[binding.action_id].setStyleSheet("")
@@ -1104,12 +1112,9 @@ class ShortcutManagerDialog(QDialog):
         self.warning.setStyleSheet("color:#b3261e;" if clashes else "")
 
     def clashes(self) -> list[str]:
-        """Keys bound to more than one thing."""
-        seen: dict[str, list[str]] = {}
-        for action_id, text in self.assignments().items():
-            if text:
-                seen.setdefault(text.lower(), []).append(action_id)
-        return [key for key, ids in seen.items() if len(ids) > 1]
+        """Keys bound to more than one thing that could both act."""
+        from .shortcuts import clashes_in
+        return list(clashes_in(self.assignments()))
 
     def accept(self) -> None:
         """Refuse to save a key that would mean two different things."""

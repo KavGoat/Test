@@ -20,6 +20,32 @@ TOOL = "tool"
 INSERT = "insert"
 COMMAND = "command"
 SYMBOL = "symbol"
+SMATH = "smath"          # a key inside an equation (calcedit.py handles it)
+
+# Where a binding acts (decisions 5 and 6). A key may mean two things only
+# when its two meanings can never both be live: Calc and Markup mode are
+# never on together, and inside an equation SMath's keys win ("editing
+# decides"), so Ctrl+0 is ≥ there and Fit page everywhere else.
+ALWAYS = "always"        # document commands, whatever is going on
+CALC = "calc"            # on the canvas in Calc mode
+MARKUP = "markup"        # on the canvas in Markup mode (tool keys, typing keys)
+EQUATION = "equation"    # while an equation has the cursor
+TYPING = "typing"        # symbols: wherever words or an equation are being typed
+
+SCOPE_NAMES = {ALWAYS: "Always", CALC: "Calc mode", MARKUP: "Markup mode",
+               EQUATION: "In an equation", TYPING: "While typing"}
+
+
+def scopes_overlap(a: str, b: str) -> bool:
+    """Whether a key bound in scope *a* and in scope *b* could both be live."""
+    if a == b or TYPING in (a, b):
+        return True
+    pair = {a, b}
+    if pair == {CALC, MARKUP}:
+        return False
+    if EQUATION in pair:
+        return False              # inside an equation SMath's key wins
+    return True                   # ALWAYS with CALC or MARKUP
 
 
 @dataclass(frozen=True)
@@ -32,13 +58,17 @@ class Binding:
     kind: str
     category: str
     payload: str = ""          # tool key, or command method name
+    scope: str = ALWAYS
 
 
 def _tool_bindings() -> list[Binding]:
     bindings = []
     for tool in TOOLS:
+        # Every tool key is off in Calc mode, with or without Shift or Alt
+        # (decision 5): there a letter starts an equation.
         bindings.append(Binding(f"tool.{tool.key}", tool.label, tool.shortcut,
-                                TOOL, tool.category, tool.key))
+                                TOOL, tool.category, tool.key,
+                                ALWAYS if tool.key == "select" else MARKUP))
     return bindings
 
 
@@ -81,17 +111,50 @@ SYMBOLS: list[tuple[str, str, str, str]] = [
 
 
 def _symbol_bindings() -> list[Binding]:
-    return [Binding(f"symbol.{name}", label, keys, SYMBOL, "Symbols", symbol)
+    return [Binding(f"symbol.{name}", label, keys, SYMBOL, "Symbols", symbol, TYPING)
             for name, symbol, label, keys in SYMBOLS]
+
+
+# SMath's keys inside an equation (decision 6: the SMath section of the
+# shortcut manager). The payload says what calcedit.py does with it: "type:"
+# types those characters into the equation, "box:" inserts a structure,
+# "command:" runs a command. Bold, italic and underline are not here: they
+# are MarkForge's own Ctrl+B/I/U, which reach equations too.
+SMATH_KEYS: list[tuple[str, str, str, str]] = [
+    # action name,       label,                    default,     payload
+    ("boolean_equal",    "Boolean equals ≡",       "Ctrl+=",    "type:≡"),
+    ("not_equal",        "Not equal ≠",            "Ctrl+3",    "type:≠"),
+    ("at_most",          "At most ≤",              "Ctrl+9",    "type:≤"),
+    ("at_least",         "At least ≥",             "Ctrl+0",    "type:≥"),
+    ("nth_root",         "N-th root",              "Ctrl+\\",   "box:nthroot"),
+    ("transpose",        "Transpose",              "Ctrl+1",    "type:transpose("),
+    ("cross_product",    "Cross product ×",        "Ctrl+8",    "type:†"),
+    ("element",          "Element (index)",        "Ctrl+[",    "type:["),
+    ("insert_function",  "Insert function",        "Ctrl+E",    "command:insert_function"),
+    ("constants",        "Constants",              "Ctrl+K",    "command:show_constants"),
+    ("double_check",     "Double-check results",   "Ctrl+Shift+D", "command:double_check"),
+    ("select_all",       "Select all equations",   "Ctrl+A",    "command:select_all_equations"),
+]
+
+
+def _smath_bindings() -> list[Binding]:
+    return [Binding(f"smath.{name}", label, keys, SMATH, "SMath", payload, EQUATION)
+            for name, label, keys, payload in SMATH_KEYS]
 
 
 # Typing on bare paper comes first because it is reached without choosing a
 # tool. One explicit trigger avoids consuming ordinary typing.
 DEFAULT_BINDINGS: list[Binding] = [
-    Binding("insert.text", "Start text", '"', INSERT, "Typing", "text"),
-    Binding("insert.note", "Start note", "|", INSERT, "Typing", "note"),
-    Binding("insert.callout", "Start callout", "@", INSERT, "Typing", "callout"),
-] + _tool_bindings() + [
+    Binding("insert.text", "Start text", '"', INSERT, "Typing", "text", MARKUP),
+    Binding("insert.note", "Start note", "|", INSERT, "Typing", "note", MARKUP),
+    Binding("insert.callout", "Start callout", "@", INSERT, "Typing", "callout", MARKUP),
+    # Decision 5: the mode switch, the equation start key in Markup mode, and
+    # " giving Calculation text in Calc mode are ordinary bindings.
+    Binding("command.calc_mode", "Calc/Markup mode", "F12", COMMAND, "SMath", "toggle_calc_mode"),
+    Binding("insert.equation", "Start equation", "'", INSERT, "SMath", "equation", MARKUP),
+    Binding("insert.calc_text", "Start Calculation text", '"', INSERT, "SMath", "calc_text", CALC),
+    Binding("insert.plot", "Insert plot", "@", INSERT, "SMath", "plot", CALC),
+] + _smath_bindings() + _tool_bindings() + [
     Binding("command.fit_page", "Fit page", "Ctrl+0", COMMAND, "View", "fit_page"),
     Binding("command.fit_width", "Fit width", "Ctrl+1", COMMAND, "View", "fit_width"),
     Binding("command.renumber_counts", "Renumber counts", "", COMMAND, "Markup",
@@ -99,6 +162,27 @@ DEFAULT_BINDINGS: list[Binding] = [
 ] + _symbol_bindings()
 
 BY_ID = {binding.action_id: binding for binding in DEFAULT_BINDINGS}
+
+
+def clashes_in(assignments: dict) -> dict[str, list[str]]:
+    """Keys given to two actions that could both be live (scopes_overlap)."""
+    by_key: dict[str, list[str]] = {}
+    for action_id, text in assignments.items():
+        if text:
+            by_key.setdefault(QKeySequence(text).toString(QKeySequence.PortableText).lower()
+                              or text.lower(), []).append(action_id)
+    found = {}
+    for key, ids in by_key.items():
+        bad = set()
+        for i, a in enumerate(ids):
+            for b in ids[i + 1:]:
+                sa = BY_ID[a].scope if a in BY_ID else ALWAYS
+                sb = BY_ID[b].scope if b in BY_ID else ALWAYS
+                if scopes_overlap(sa, sb):
+                    bad.update((a, b))
+        if bad:
+            found[key] = [i for i in ids if i in bad]
+    return found
 
 
 class ShortcutManager(QObject):
@@ -120,7 +204,7 @@ class ShortcutManager(QObject):
         self.load()
 
     def register(self, action_id: str, label: str, default: str,
-                 category: str = "Document", payload: str = "") -> str:
+                 category: str = "Document", payload: str = "", scope: str = ALWAYS) -> str:
         """Add a binding the window owns, and give back the key to use.
 
         Called once per action as the window is built. A binding that has been
@@ -128,7 +212,7 @@ class ShortcutManager(QObject):
         """
         known = BY_ID.get(action_id)
         if known is None:
-            binding = Binding(action_id, label, default, COMMAND, category, payload)
+            binding = Binding(action_id, label, default, COMMAND, category, payload, scope)
             BY_ID[action_id] = binding
             self._extra.append(binding)
         elif not any(b.action_id == action_id for b in self._extra) \
@@ -174,12 +258,12 @@ class ShortcutManager(QObject):
         self.changed.emit()
 
     def conflicts(self) -> dict[str, list[str]]:
-        """Key sequences bound to more than one action."""
-        seen: dict[str, list[str]] = {}
-        for action_id, text in self._sequences.items():
-            if text:
-                seen.setdefault(text.lower(), []).append(action_id)
-        return {text: ids for text, ids in seen.items() if len(ids) > 1}
+        """Key sequences bound to more than one action that could both be live."""
+        return clashes_in(self._sequences)
+
+    def scope_of(self, action_id: str) -> str:
+        binding = BY_ID.get(action_id)
+        return binding.scope if binding is not None else ALWAYS
 
     # -- canvas typing -----------------------------------------------------
     def is_canvas_binding(self, sequence: "QKeySequence") -> bool:
@@ -203,23 +287,33 @@ class ShortcutManager(QObject):
                 return True
         return False
 
-    def binding_for(self, sequence: "QKeySequence") -> Optional[Binding]:
-        """Return the configured binding that owns *sequence*, if any."""
+    def binding_for(self, sequence: "QKeySequence", scopes=None) -> Optional[Binding]:
+        """Return the configured binding that owns *sequence*, if any — in one
+        of *scopes*, when given."""
         if sequence.isEmpty():
             return None
         wanted = sequence.toString(QKeySequence.PortableText).lower()
-        for binding in self.bindings():
+        # Without a scope asked for, the meaning outside an equation comes
+        # first: that is where a key is asked about when nothing is being
+        # typed (inside an equation calcedit asks for EQUATION explicitly).
+        ordered = sorted(self.bindings(), key=lambda b: b.scope == EQUATION)
+        for binding in ordered:
+            if scopes is not None and binding.scope not in scopes:
+                continue
             current = self._sequences.get(binding.action_id, "")
             if (current and QKeySequence(current).toString(
                     QKeySequence.PortableText).lower() == wanted):
                 return binding
         return None
 
-    def match_typed(self, text: str, modifiers) -> Optional[Binding]:
-        """The binding a bare keypress on the canvas should run, if any."""
+    def match_typed(self, text: str, modifiers, mode: str = MARKUP) -> Optional[Binding]:
+        """The binding a bare keypress on the canvas should run, if any, in
+        the canvas mode *mode* (Calc or Markup)."""
         if not text or modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier):
             return None
         for binding in DEFAULT_BINDINGS:
+            if binding.scope not in (mode, ALWAYS, TYPING) or binding.kind == SMATH:
+                continue
             sequence = self._sequences.get(binding.action_id, "")
             if not sequence:
                 continue

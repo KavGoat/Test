@@ -121,3 +121,66 @@ SMath or Bluebeam. The plan is `CALCFORGE_PLAN.md`; requirements are in
 - Margins are the page's own (10 mm by default); SMath's are 37 px (9.8 mm).
 - A single click on an equation puts the cursor in it, as in SMath. Dragging
   one moves it, as in Bluebeam.
+
+## Phase 3 — modes and shortcuts (2026-09-30)
+
+**What changed**
+
+- **Calc and Markup modes** (decision 5).
+  - The mode shows in the status bar, and a click there switches it. F12 or
+    Calculation ▸ Calc mode switches it too.
+  - F12 is my choice of default key; it is an ordinary binding.
+  - File ▸ New opens one blank A4 portrait page in Markup mode.
+- **Calc mode.**
+  - Typing on the page starts an equation at the red cross, or at the pointer.
+  - Every tool key is off, including Shift and Alt ones: Shift+E types `E`,
+    Alt+P does nothing, and 1–9 are digits rather than My Tools.
+  - `"` starts Calculation text and `@` starts a plot.
+  - A lone word followed by a space becomes Calculation text; one Ctrl+Z
+    (after the typing) turns it back into the equation.
+- **Markup mode.** MarkForge as before. `'` starts an equation at the pointer,
+  and `"` makes a text box.
+- **Calculation text** (`CalcTextItem`).
+  - A text box type of its own, plain by default: Arial 10 pt black, no frame,
+    no fill.
+  - It never takes a leader and is saved as a `/FreeText` annotation.
+  - Its style defaults, tool sets and spell checking come in phase 5.
+- **Shortcut scopes.** Every binding says where it acts: Always, Calc mode,
+  Markup mode, in an equation, or while typing.
+  - A key may do two things only where both can never act at once: Calc vs
+    Markup mode, or inside vs outside an equation ("editing decides").
+  - The manager and the shortcuts dialog check clashes that way. The dialog
+    has a new "Where" column.
+- **SMath section of the shortcut manager.** Each key works inside an equation
+  and can be rebound:
+  - Ctrl+= ≡, Ctrl+3 ≠, Ctrl+9 ≤, Ctrl+0 ≥
+  - Ctrl+\ n-th root, Ctrl+1 transpose, Ctrl+8 cross product, Ctrl+[ element
+  - Ctrl+E insert function, Ctrl+K constants, Ctrl+Shift+D double-check,
+    Ctrl+A select all equations
+  - Also in the section: the mode switch F12, the equation start key `'`,
+    Calculation text `"`, and plot `@`.
+- **Calculation menu.** Calc mode, Calculate (F9), Auto-calc, Matrix (Ctrl+M),
+  Function…, Constants…, Double-check. The dialogs are WebSMath's own.
+- **Ctrl+B/I/U** are MarkForge's formatting keys and now bold, italicise or
+  underline the equation being typed into, or the selected equations. Ctrl+B
+  no longer adds a bookmark while an equation is open.
+- **MarkForge's symbol keys inside an equation** type their maths meaning: π,
+  ≤ ≥ ≠, √ as a real root, ² and ³ as powers, Greek letters, and ° as the unit.
+- **Tests.** `tests/test_calc_modes.py` has 22 tests, all through key events
+  delivered the way Qt's shortcut map delivers them.
+
+**Keyboard clashes found beyond the brief** (all settled by "editing decides"):
+
+- Ctrl+[ — element (SMath) vs send backward (MarkForge)
+- Ctrl+= — boolean equals vs zoom in, where the keyboard maps them together
+- Ctrl+K — constants; no clash
+- Ctrl+M — insert matrix; no clash
+- `|` — absolute value inside an equation vs start note in Markup mode
+- `@` — plot in Calc mode vs callout in Markup mode
+- Ctrl+E, Ctrl+Shift+D, Ctrl+A, Ctrl+0 and Ctrl+1, as listed in the brief
+
+**Different from SMath**
+
+- SMath's Ctrl+G (Greek) and Ctrl+W (units list) are left out, as asked.
+- WebSMath only showed Ctrl+\, Ctrl+1, Ctrl+8 and Ctrl+[ in its panel tooltips;
+  CalcForge binds them, as SMath desktop does.
