@@ -53,7 +53,7 @@ class FormattedNumber:
         return s
 
 
-def _round(x: float, places: int, fmt: NumberFormat) -> str:
+def _round(x, places: int, fmt: NumberFormat) -> str:
     mode = ROUND_HALF_EVEN if fmt.half_even else ROUND_HALF_UP
     q = Decimal(1).scaleb(-places) if places > 0 else Decimal(1)
     with localcontext() as ctx:
@@ -78,26 +78,30 @@ def format_real(x: float, fmt: NumberFormat | None = None) -> FormattedNumber:
     if a == 0:
         return FormattedNumber(False, "0" if not fmt.trailing_zeros else "0." + "0" * fmt.decimals)
 
-    exp = math.floor(math.log10(a))
+    # all in exact decimals: the binary value itself, its power of ten and
+    # its mantissa (a float division such as 6567.5/1000 = 6.567499... would
+    # round an exact tie the wrong way)
+    da = Decimal(a)
+    exp = da.adjusted()
     # rounding can carry into the next decade (99999.99 -> 100000)
     if fmt.significant:
         places = max(fmt.decimals - 1 - exp, 0)
     else:
         places = fmt.decimals
-    fixed = _round(a, places, fmt)
-    if float(fixed) != 0:
-        exp = math.floor(math.log10(float(fixed)))
+    fixed = _round(da, places, fmt)
+    if Decimal(fixed) != 0:
+        exp = Decimal(fixed).adjusted()
 
     if exp >= fmt.threshold or exp <= -fmt.threshold:
-        m = a / 10 ** exp
+        m = da.scaleb(-exp)
         mplaces = fmt.decimals - 1 if fmt.significant else fmt.decimals
         ms = _round(m, mplaces, fmt)
-        if float(ms) >= 10:
+        if Decimal(ms) >= 10:
             exp += 1
-            ms = _round(m / 10, mplaces, fmt)
+            ms = _round(m.scaleb(-1), mplaces, fmt)
         return FormattedNumber(neg, ms, exp)
 
-    if float(fixed) == 0:
+    if Decimal(fixed) == 0:
         return FormattedNumber(False, fixed)
     return FormattedNumber(neg, fixed)
 

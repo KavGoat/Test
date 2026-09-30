@@ -250,6 +250,13 @@ class Worksheet:
             self._run(r, ctx, record=True)
         except RecursionError:
             r.error = err("recursion")
+        except SMathError as e:
+            r.error = e
+        except Exception as e:  # never let one odd region break the page
+            import logging
+
+            logging.getLogger(__name__).exception("evaluating %s", r.editor.root.text())
+            r.error = err("cannot_evaluate")
         if commit:
             r.defined_vars, r.defined_funcs = dict(ctx.vars), dict(ctx.funcs)
             self.index.add(r.key, r.defined_vars, r.defined_funcs)
@@ -351,13 +358,15 @@ class Worksheet:
         try:
             unode = parse_row(unit_row)
             uval = need_scalar(self.evaluator.eval(unode, ctx))
-        except (SMathError, ParseError):
+        except (SMathError, ParseError) as e:
             if self._live:
                 # a unit still being typed ("k" of kN): show the result as if
                 # the box were empty, not a stray conversion.  As on SMath
                 # Cloud a unit gets into the box from the list (Tab), which
                 # inserts 'kN; a plain word stays a name ("cm - not defined.")
                 return display_value(value, fmt)
+            if isinstance(e, ParseError):
+                raise err("syntax")
             raise
         q = value
         # non-linear temperature units (°C, °F): subtract the offset

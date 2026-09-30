@@ -89,6 +89,7 @@ class Snapshot:
     in_unit: bool
     path: list
     pos: int
+    text_pos: int = 0
 
 
 class MathEditor:
@@ -105,6 +106,7 @@ class MathEditor:
         self.evaluate = False  # region ends with "=" (result shown)
         self.unit = Row()  # unit placeholder after the result
         self.text = ""  # when kind == "text"
+        self.text_pos = 0
         self.cursor = Cursor(self.root, len(self.root))
         self.in_unit = False
         self.selection: Optional[tuple] = None  # (row, start, end)
@@ -138,7 +140,7 @@ class MathEditor:
         self._fix_parents(root)
         self._fix_parents(unit)
         return Snapshot(self.kind, root, unit, self.text, self.in_unit,
-                        _row_path(self.cursor.row), self.cursor.pos)
+                        _row_path(self.cursor.row), self.cursor.pos, self.text_pos)
 
     def _restore(self, s: Snapshot) -> None:
         self.kind = s.kind
@@ -153,7 +155,9 @@ class MathEditor:
         except (IndexError, AttributeError):
             r = self.root
         self.cursor = Cursor(r, min(s.pos, len(r)))
+        self.text_pos = min(s.text_pos, len(self.text))
         self.selection = None
+        self.node = None
 
     def _push_undo(self) -> None:
         self._undo.append(self._snapshot())

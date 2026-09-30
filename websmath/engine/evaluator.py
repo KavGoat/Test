@@ -324,7 +324,10 @@ class Evaluator:
         return m(n, ctx)
 
     def _Num(self, n: A.Num, ctx):
-        return Q(float(n.text))
+        try:
+            return Q(float(n.text))
+        except ValueError:
+            raise err("syntax", node=n)  # e.g. ".6." left after cursor moves
 
     def _Str(self, n: A.Str, ctx):
         return String(n.text)

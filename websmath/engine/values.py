@@ -85,6 +85,8 @@ def need_int(v, node=None) -> int:
 # ---------------------------------------------------------------------------
 
 def _elementwise(a, b, f):
+    if isinstance(a, String) or isinstance(b, String):
+        raise err("cannot_evaluate")
     if isinstance(a, Matrix) and isinstance(b, Matrix):
         if (a.nrows, a.ncols) != (b.nrows, b.ncols):
             raise err("matrix_size")
