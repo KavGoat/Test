@@ -98,6 +98,7 @@ class RegionItem(QGraphicsObject):
         err = None if pending else self.region.error
         lay = Layouter(self.style, var_kind=self._var_kind, error_node=getattr(err, "node", None) or _src_node(err),
                        user_funcs=frozenset(n for n, _ in self.worksheet.index.funcs))
+        lay.eval_glyph = "→" if self.region.symbolic_eval else None
         root = lay.row(self.editor.root)
         parts = [root]
         self._result_unit_rect = None
@@ -114,7 +115,9 @@ class RegionItem(QGraphicsObject):
             res.x = root.w + (1 if shown is not None else 2)
             parts.append(res)
             box = None
-            if not unit_row.is_empty() or (self.focused and self.editor.in_unit):
+            if self.region.symbolic_eval:
+                box = None  # → has no desired-unit box
+            elif not unit_row.is_empty() or (self.focused and self.editor.in_unit):
                 box = lay.row(unit_row)
             elif self.focused:
                 box = lay.placeholder()

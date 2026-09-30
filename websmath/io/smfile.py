@@ -353,6 +353,8 @@ def _load_regions(ws, group) -> None:
             ed.set_cursor(ed.root, len(ed.expression_items()))
             region = ws.add_region(x, y, ed)
             region.enabled = reg.get("enabled", "true") != "false"
+            res = math.find(f"{{{NS}}}result")
+            region.symbolic_eval = res is not None and res.get("action") == "symbolic"
             _load_math_options(region, math, ws)
         elif not text:
             # a region this app does not display (a plug-in region, a 3-D
@@ -692,6 +694,14 @@ def _save_region(ws, parent, r, k) -> None:
             except Exception:
                 pass
             c.extend(cels)
+        if r.symbolic_eval:
+            res = ET.SubElement(math, f"{{{NS}}}result", {"action": "symbolic"})
+            node = getattr(r.value, "node", None)
+            if node is not None:
+                rels: list = []
+                ast_to_rpn(node, rels)
+                res.extend(rels)
+            return
         res = ET.SubElement(math, f"{{{NS}}}result", {"action": "numeric"})
         if r.display is not None:
             txt = display_text(r.display).split(" ")[0].replace("·10^", "E")

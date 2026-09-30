@@ -555,7 +555,7 @@ class MainWindow(QMainWindow):
                 ("ⁿ√", struct("nthroot"), "N-th root (Ctrl+\\)"),
                 ("1", typed("1"), "1"), ("2", typed("2"), "2"), ("3", typed("3"), "3"),
                 ("×", typed("*"), "Multiplication (*)"), (",", typed(","), "Arguments separator"),
-                ("→", None, "Symbolic evaluation (not available)"),
+                ("→", lambda: self.view.symbolic_evaluation(), "Symbolic evaluation (Ctrl+.)"),
                 (".", typed("."), "Decimal symbol"), ("0", typed("0"), "0"), ("!", typed("!"), "Factorial (!)"),
                 ("/", typed("/"), "Division (/)"), ("≔", typed(":"), "Definition (:)"),
                 ("=", typed("="), "Numeric evaluation (=)"),

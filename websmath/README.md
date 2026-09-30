@@ -195,11 +195,27 @@ Correctness proofs (numbers and units):
   units, areas). `io.smfile.dumps`/`loads` give the same XML as a string for
   embedding.
 
+**Symbolic results (with SymPy):**
+* `→` (Ctrl+. or the side panel) evaluates symbolically: `(x²−1)/(x−1) → x+1`.
+  Defined values are used, and undefined names stay symbols.
+* `expand()`, `factor()`, and `solve()` with formulas when the equation has
+  other unknowns (`solve(a·x+b, x) = −b/a`). Numeric solves are unchanged.
+* `lim()` is exact. It errors when there is no limit (one-sided limits
+  differ, or oscillation).
+* A symbolic answer is never guessed. A name the worksheet defines above
+  without a value (a failed or partial definition) is not taken as a free
+  symbol. Against the symbolic answers stored in SMath's own examples, every
+  result either matches exactly or is an error.
+
+Plug-in functions: `eigenvals`, `eigenvecs`, `fft`, `ifft`, `delta`, and
+`importData` / `exportData.CSV`.
+
 Not replicated:
-* SMath's *symbolic* engine: symbolic differentiation, Solve, Simplify,
-  `==`, polynomials in an undefined variable;
-* 3-D and polar plots;
-* the CheckBox/ComboBox/Modeller plug-in regions and sharing.
+* matrices of formulas built element by element in programs (SMath's
+  symbolic `m[j,k] := diff(f, x[k])` with x undefined): these show an error;
+* 3-D plots;
+* plug-in regions (CheckBox, ComboBox, Modeller…): shown as a grey box and
+  saved back unchanged.
 
 Python runs the evaluation on one core. Evaluating in parallel wouldn't help,
 because each region depends on the ones above it; the speed comes from only

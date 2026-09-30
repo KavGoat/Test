@@ -86,6 +86,7 @@ class Region:
     # (SMath's rich text: <p style>, <span style>, <br/>); empty = the region's own style
     line_runs: list = field(default_factory=list)
     text_width: float = 0.0  # text regions with a fixed width wrap their lines
+    symbolic_eval: bool = False  # "→" (symbolic evaluation) rather than "="
     raw_xml: object = None  # "plugin" regions: the region's XML, saved back unchanged
     plugin_name: str = ""
     field_code: str = ""  # header/footer math regions holding a field (\[TITLE]\ ...)
@@ -258,10 +259,11 @@ class Worksheet:
                 changed |= _changed_names(old_vars, old_funcs, r.defined_vars, r.defined_funcs)
 
     def _evaluate(self, r: Region, commit: bool) -> None:
-        from .engine import files
+        from .engine import files, sym
 
         # importData / exportData: relative names are relative to the worksheet's folder
         files.base_dir = os.path.dirname(getattr(self, "filename", "") or "")
+        sym.defined_above = lambda r=r: self.names_defined_above(r)
         r.pending = False
         before = (_shown(r.display), r.error.message if r.error else None)
         if commit and r.id in self._keys:
@@ -286,6 +288,30 @@ class Worksheet:
         if (_shown(r.display), r.error.message if r.error else None) != before or r.plot is not None:
             self.changed.add(r.id)
 
+    def names_defined_above(self, region: Region) -> set:
+        """Every name a region above this one defines (variables, functions,
+        matrices assigned element by element, also inside programs) -
+        whether or not the definition worked."""
+        out = set()
+        for r in self.ordered():
+            if r.key >= region.key:
+                break
+            if r.kind != "math":
+                continue
+            try:
+                node = parse_row(r.expression_row())
+            except Exception:
+                continue
+            for m in A.walk(node):
+                if isinstance(m, A.Define):
+                    t = m.target
+                    if isinstance(t, A.IndexOp):
+                        t = t.base
+                    name = getattr(t, "name", None)
+                    if name:
+                        out.add(name)
+        return out
+
     def take_changed(self) -> set:
         out, self.changed = self.changed, set()
         return out
@@ -300,6 +326,8 @@ class Worksheet:
         if r.kind != "math" or not r.enabled:
             r.uses = frozenset()
             return
+        if not r.editor.evaluate:
+            r.symbolic_eval = False  # the → went with its evaluation sign
         ed = r.editor
         # the parsed expression is kept while the region is unchanged: the key
         # is the full text of the equation and its unit box, so any change -
@@ -368,6 +396,19 @@ class Worksheet:
                     if record:
                         r.value = value
                         r.display = self._display(r, value, ctx)
+                return
+            if r.editor.evaluate and r.symbolic_eval:
+                # → : SMath's symbolic evaluation (SymPy), never a guess
+                from .engine import sym
+                from .engine.symbolic import Expr, NotSymbolic, to_row
+
+                try:
+                    out = sym.symbolic_value(node, ctx)
+                except NotSymbolic:
+                    raise SMathError("This expression cannot be evaluated symbolically.", None) from None
+                if record:
+                    r.value = Expr(out)
+                    r.display = DExpr(to_row(out))
                 return
             if not r.editor.evaluate:
                 # a bare expression (no "=" or ":=") runs - a for loop in it

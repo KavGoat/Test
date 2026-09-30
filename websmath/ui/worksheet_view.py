@@ -1033,6 +1033,15 @@ class WorksheetView(QGraphicsView):
         self.scene_.update()
         self.layer_changed.emit(None)
 
+    def symbolic_evaluation(self) -> None:
+        """→ : evaluate the region being edited symbolically (SMath's Ctrl+.)."""
+        item = self.focused_item
+        if item is None or item.region.kind != "math" or item.region.plot is not None:
+            return
+        if item.editor.symbolic_equals():
+            item.region.symbolic_eval = True
+            self._after_edit(item)
+
     def refresh_fields(self) -> None:
         """Redraw what shows metadata (fields, header/footer) after File > Properties."""
         for it in self.items.values():
@@ -1095,6 +1104,9 @@ class WorksheetView(QGraphicsView):
             return
         if ctrl and key in (Qt.Key_Z, Qt.Key_Y):
             self.undo() if key == Qt.Key_Z else self.redo()
+            return
+        if ctrl and key == Qt.Key_Period:
+            self.symbolic_evaluation()  # → (SMath: Ctrl+.)
             return
         if ctrl and key == Qt.Key_Equal:
             self._key_to_region("≡")

@@ -280,6 +280,9 @@ def double_check(ws) -> Report:
     for r in ws.ordered():
         if r.kind != "math" or not r.enabled or r.plot is not None:
             continue
+        if getattr(r, "symbolic_eval", False):
+            rep.unchecked += 1  # → shows an expression: nothing numeric to compare
+            continue
         try:
             node = parse_row(r.expression_row())
         except ParseError:

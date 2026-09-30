@@ -961,6 +961,23 @@ def _with_var(ev, ctx, expr, var, x):
     return need_scalar(ev.eval(expr, local))
 
 
+def _names(node) -> set:
+    out = set()
+    for m in A.walk(node):
+        if isinstance(m, A.Var):
+            out.add(m.name)
+        elif isinstance(m, A.IndexOp) and isinstance(m.base, A.Var):
+            out.add(m.base.name)
+    return out
+
+
+def _undefined_names(node, ctx, var: str) -> set:
+    from .evaluator import BUILTIN_CONSTANTS
+
+    return {name for name in _names(node) if name != var and name not in BUILTIN_CONSTANTS
+            and ctx.lookup(name) is None}
+
+
 def _diff(ev, n: A.Call, ctx):
     """diff(f, x[, n]): symbolic when x has no value (diff(x^3,x) = 3·x²),
     the derivative's value at x when it has one."""
@@ -973,9 +990,21 @@ def _diff(ev, n: A.Call, ctx):
         raise err("syntax", node=var)
     order = need_int(ev.eval(n.args[2], ctx)) if len(n.args) == 3 else 1
     try:
-        d = S.derivative(S.expand(expr, ctx), var.name, order)
+        expanded = S.expand(expr, ctx)
+        d = S.derivative(expanded, var.name, order)
     except S.NotSymbolic:
         d = None
+    if d is not None:
+        # an unknown name that vanished from the derivative (diff(T[k], z)
+        # with T undefined gave 0) is reported, never silently taken as a
+        # constant: that turned a failed definition into zeros
+        from . import sym
+
+        # (only names the worksheet defines above: a free constant such as c
+        # in diff(a·x²+b·x+c, x) rightly drops out)
+        lost = (_undefined_names(expanded, ctx, var.name) - _names(d)) & sym.defined_above()
+        if lost:
+            raise err("not_defined", sorted(lost)[0], node=n)
     if ctx.lookup(var.name) is None or _is_lazy(ctx.lookup(var.name)):
         if d is None:
             raise err("cannot_evaluate", node=n)
