@@ -469,15 +469,22 @@ class PageFrame(QGraphicsObject):
 
     def markups_drawn_alone(self) -> tuple:
         """The page's own annotations that came in as markups: on screen the
-        page leaves them out, and the markups draw them — all but a
-        highlighter nobody has changed. One multiplies into what is under it,
-        which only drawing it with the page does exactly (on the graphics
-        card a multiply came out as a black block, 2026-10-01)."""
+        page leaves them out, and the markups draw them — but for, on the
+        graphics card, a highlighter nobody has changed: it multiplies into
+        what is under it, which OpenGL cannot do (a black block, 2026-10-01),
+        so there the page's own render draws it."""
         numbers = set(getattr(self.page, "markup_annotations", ()) or ())
+        scene = self.scene()
+        on_the_card = bool(scene is not None and any(getattr(view, "gpu", False)
+                                                     for view in scene.views()))
         for item in self.markups():
-            if (getattr(item, "still_theirs", False) and item.from_annotation in numbers
+            if (on_the_card and getattr(item, "still_theirs", False)
+                    and item.from_annotation in numbers
                     and item.style.blend == "multiply" and item.isVisible()):
                 numbers.discard(item.from_annotation)
+            elif getattr(item, "split_theirs", False) and item.isVisible():
+                # an annotation in several strokes, all untouched
+                numbers.discard(item.split_from)
         return tuple(sorted(numbers))
 
     def paint(self, painter: QPainter, option, widget=None) -> None:

@@ -246,7 +246,11 @@ def _leave_it_to_the_file(annotation: dict, made: list) -> None:
         # saved twice (Calcs.pdf, 2026-10-01). Said on the side rather than as
         # from_annotation: the strokes are this application's markups, saved
         # and read back as its own.
-        made[0]["split_from_annotation"] = number
+        # On screen, while every stroke is untouched, the page draws the
+        # annotation itself as its file says (split_theirs).
+        for payload in made:
+            payload["split_from_annotation"] = number
+            payload["split_theirs"] = True
         return
     made[0]["from_annotation"] = number
     made[0]["still_theirs"] = True

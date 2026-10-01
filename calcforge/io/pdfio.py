@@ -471,6 +471,7 @@ def _scaled_markups(payloads: list[dict], scale: float) -> list[dict]:
         entry.pop("still_theirs", None)
         entry.pop("from_annotation", None)
         entry.pop("their_box", None)
+        entry.pop("split_theirs", None)
         for key in ("x", "y"):
             if key in entry:
                 entry[key] = entry[key] * scale
@@ -620,10 +621,10 @@ def import_pages(document, path: str, indices: list[int], fit: str = FIT_ORIGINA
                 # goes on drawing them — that is what makes somebody else's
                 # drawing look like theirs — and leaves out the ones that have
                 # since been taken over or deleted.
-                page.markup_annotations = [
+                page.markup_annotations = list(dict.fromkeys(
                     int(payload.get("from_annotation") or payload.get("split_from_annotation"))
                     for payload in marked[index]
-                    if payload.get("from_annotation") or payload.get("split_from_annotation")]
+                    if payload.get("from_annotation") or payload.get("split_from_annotation")))
             page.pdf_key = pdf_key
             page.pdf_page_index = index
             page.source_note = f"{os.path.basename(path)} page {index + 1}"

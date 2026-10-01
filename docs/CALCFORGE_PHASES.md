@@ -800,8 +800,13 @@ checked against its saved files and WebSMath's recordings of SMath Cloud.
   its leader, had been cut away. Annotations are hidden from the page's
   render by writing the flag into their dictionary: PyMuPDF's set_flags
   had MuPDF build a new appearance its own way — the likely source of the
-  solid blue call-outs in the video. Untouched highlighters (which
-  multiply) are drawn by the page's own render. Checked against MuPDF's
+  solid blue call-outs in the video. An ink annotation in several strokes
+  is drawn, while all of them are untouched, by the page as its file says
+  (it had been drawn by CalcForge from the moment it opened); changing one
+  stroke hands all of them over. On the graphics card, an untouched
+  highlighter (which multiplies, which OpenGL cannot) is drawn by the
+  page's own render. On Calcs.pdf nothing at all is drawn by CalcForge on
+  opening. Checked against MuPDF's
   render of every page of Calcs.pdf: with a pixel of slack, only
   anti-aliasing specks differ.
 - **Groups carry their call-outs' leaders** (the user's video): moved with

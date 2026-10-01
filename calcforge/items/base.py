@@ -477,6 +477,11 @@ class MarkupItem(QGraphicsObject):
         # what the markup measures as its own box.
         self.their_box: tuple = ()
         self._their_look = None
+        # One stroke of an annotation that came apart into several markups
+        # (a multi-stroke ink line): while all of them are untouched the page
+        # draws the annotation, on screen, and they draw nothing there.
+        self.split_from = 0
+        self.split_theirs = False
         # For the few markups there is nothing to draw from — a stamp is a
         # picture and a company logo, described nowhere but in its own
         # appearance — the file's drawing of it, kept.
@@ -712,9 +717,27 @@ class MarkupItem(QGraphicsObject):
               widget: Optional[QWidget] = None) -> None:
         painter.save()
         self.apply_blend(painter)
-        self.paint_visible(painter)          # nothing while it is still theirs
+        frame = self.parentItem()
+        if not (self.split_theirs and not getattr(frame, "print_mode", True)):
+            self.paint_visible(painter)      # nothing while it is still theirs
         painter.restore()
         self.paint_handles(painter)
+
+    def release_split(self) -> None:
+        """A stroke of a split annotation changed: all of its strokes are
+        drawn here from now on, and the page leaves the annotation out."""
+        if not self.split_theirs:
+            return
+        frame = self.parentItem()
+        siblings = [self]
+        if frame is not None and hasattr(frame, "markups"):
+            siblings = [i for i in frame.markups()
+                        if getattr(i, "split_from", 0) == self.split_from]
+        for item in siblings:
+            item.split_theirs = False
+            item.update()
+        if frame is not None:
+            frame.update()
 
     def sync_their_look(self) -> None:
         """Show the file's own drawing of this markup while it is unchanged,
@@ -898,6 +921,7 @@ class MarkupItem(QGraphicsObject):
 
     def make_it_ours(self) -> None:
         """Take this markup over: from here it is drawn and saved as ours."""
+        self.release_split()
         if self.still_theirs:
             self.still_theirs = False
             self.sync_their_look()
@@ -918,7 +942,7 @@ class MarkupItem(QGraphicsObject):
         """
         if change in (QGraphicsItem.ItemPositionHasChanged,
                       QGraphicsItem.ItemTransformHasChanged) \
-                and self.still_theirs and not self._still_arriving:
+                and (self.still_theirs or self.split_theirs) and not self._still_arriving:
             self.make_it_ours()
         return super().itemChange(change, value)
 
@@ -1013,6 +1037,8 @@ class MarkupItem(QGraphicsObject):
             "flattened": self.flattened,
             "from_annotation": self.from_annotation,
             "still_theirs": self.still_theirs,
+            "split_from_annotation": self.split_from,
+            "split_theirs": self.split_theirs,
             "their_box": list(self.their_box) if self.still_theirs else [],
             "their_picture_asset": self.their_picture_asset,
             "picture_framed": self.picture_framed,
@@ -1056,6 +1082,8 @@ class MarkupItem(QGraphicsObject):
         self.hidden = bool(data.get("hidden", False))
         self.from_annotation = int(data.get("from_annotation", 0) or 0)
         self.still_theirs = bool(data.get("still_theirs", False))
+        self.split_from = int(data.get("split_from_annotation", 0) or 0)
+        self.split_theirs = bool(data.get("split_theirs", False)) and bool(self.split_from)
         found_box = data.get("their_box") or ()
         self.their_box = tuple(float(v) for v in found_box) if len(found_box) == 4 else ()
         self.their_picture_asset = str(data.get("their_picture_asset", ""))
@@ -1257,7 +1285,9 @@ class _TheirLook(QGraphicsItem):
         markup = self.parentItem()
         if markup is None or not markup.still_theirs:
             return
-        if markup.style.blend == "multiply":
+        engine = painter.paintEngine()
+        if (markup.style.blend == "multiply" and engine is not None
+                and engine.type() == engine.Type.OpenGL2):
             return                     # the page draws it (markups_drawn_alone)
         painter.save()
         markup.apply_blend(painter)

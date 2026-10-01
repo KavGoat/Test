@@ -332,13 +332,20 @@ def test_a_three_stroke_ink_note_is_drawn_once(calcs):
     strokes = [i for i in frame.markups() if getattr(i, "kind", "") == "ink"
                and i.style.width < 10]
     assert len(strokes) == 3
-    assert not any(i.still_theirs or i.from_annotation for i in strokes), "ours"
+    assert not any(i.still_theirs or i.from_annotation for i in strokes)
     import pymupdf
     with pymupdf.open(path) as document:
         three = [a.xref for a in document[0].annots()
                  if a.type[1] == "Ink" and len(a.vertices or []) == 3]
-    assert three and three[0] in frame.markups_drawn_alone(), "the page leaves the original out"
-    assert three[0] in frame.left_to_us(), "and so does a save"
+    assert three
+    # untouched: on screen the page draws the original, as its file says
+    assert all(i.split_theirs for i in strokes)
+    assert three[0] not in frame.markups_drawn_alone()
+    assert three[0] in frame.left_to_us(), "a save writes the strokes, not both"
+    # one stroke moved: all three are drawn here, and the page leaves it out
+    strokes[0].setPos(strokes[0].pos() + QPointF(5, 0))
+    assert not any(i.split_theirs for i in strokes)
+    assert three[0] in frame.markups_drawn_alone()
 
 
 def test_a_three_stroke_ink_note_survives_save_and_reopen(calcs, tmp_path):
@@ -456,15 +463,19 @@ def test_a_markups_file_drawing_reaches_as_far_as_its_file_says(window, tmp_path
     assert not look.isVisible()
 
 
-def test_an_untouched_highlighter_is_drawn_with_the_page(calcs):
-    """It multiplies into what is under it, which only the page's own render
-    does exactly — on the graphics card a multiply was a black block."""
+def test_on_the_graphics_card_an_untouched_highlighter_is_drawn_with_the_page(calcs):
+    """It multiplies into what is under it, which OpenGL cannot do (a black
+    block): there the page's own render draws it. Drawn by the processor it
+    draws itself, in its place among the other markups."""
     window, path = calcs
     frame = window.document.pages[0].frame
     marker = next(i for i in frame.markups() if i.style.blend == "multiply")
+    assert marker.from_annotation in frame.markups_drawn_alone()
+    window.view.gpu = True                      # as when OpenGL draws the view
     assert marker.from_annotation not in frame.markups_drawn_alone()
     marker.setPos(marker.pos() + QPointF(0, 20))           # taken over
     assert marker.from_annotation in frame.markups_drawn_alone()
+    window.view.gpu = False
 
 
 def test_hiding_an_annotation_never_rebuilds_its_appearance(tmp_path):
