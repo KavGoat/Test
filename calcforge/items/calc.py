@@ -419,8 +419,63 @@ class _PageRegionView(RegionItem):
         p.drawLine(QPointF(x0, underline_y), QPointF(bar, underline_y))
         p.drawLine(QPointF(bar, info.base - info.asc), QPointF(bar, underline_y))
 
+    def _unit_in_place(self) -> bool:
+        """Being edited, a result with an automatic unit and nothing typed in
+        its unit box (x = 2 kN)."""
+        from ..calc.engine.display import DQuantity
+        region, ed = self.region, self.editor
+        return bool(self.focused and region.kind == "math" and not region.special
+                    and not region.field_code and region.plot is None and ed.evaluate
+                    and ed.unit.is_empty() and not region.pending
+                    and isinstance(region.display, DQuantity)
+                    and region.display.unit is not None)
+
+    def _relayout_unit_in_place(self) -> None:
+        """WebSMath, being edited, drew the automatic unit and then an empty
+        unit box after it (x = 2 kN ■), so nothing lined up with the result
+        as it reads once left. Here the unit box is the automatic unit's own
+        place: the unit shows there, exactly where it is drawn unfocused; with
+        the caret in the box its empty square stands there, and what is typed
+        takes its place (the user, 2026-10-01: the input unit box in line with
+        the automatic unit)."""
+        from ..calc.engine.display import DQuantity
+        from ..calc.ui.layout import LBox, Layouter, Style, absolute_rows
+        from ..calc.ui.region_item import MIN_H, PAD_BOTTOM, PAD_TOP, _src_node
+        self.prepareGeometryChange()
+        if self.style.size_pt != self.region.font_size:
+            self.style = Style(self.region.font_size)
+        err = self.region.error
+        lay = Layouter(self.style, var_kind=self._var_kind,
+                       error_node=getattr(err, "node", None) or _src_node(err),
+                       user_funcs=frozenset(n for n, _ in self.worksheet.index.funcs))
+        root = lay.row(self.editor.root)
+        shown = self.region.display
+        res = lay.result(DQuantity(shown.value, None), 1.0)
+        res.x = root.w + 1
+        # the gap WebSMath's result puts before its automatic unit
+        gap = lay.metrics(self.style.font(1.0)).horizontalAdvance(" ") * 0.5
+        box = lay.row(self.editor.unit) if self.editor.in_unit else lay.unit(shown.unit, 1.0)
+        box.x = res.x + res.w + gap
+        parts = [root, res, box]
+        self._result_unit_rect = QRectF(box.x - 2, -max(box.asc, 12), box.w + 6,
+                                        max(box.asc, 12) + box.desc + 4)
+        whole = LBox(children=parts)
+        whole.w = max(p.x + p.w for p in parts)
+        whole.asc = max(p.asc for p in parts)
+        whole.desc = max(p.desc for p in parts)
+        base = max(PAD_TOP + whole.asc, PAD_TOP + 11.4)
+        whole.x, whole.y = PAD_X, base
+        self._baseline = base
+        self._layout = whole
+        self._rows = absolute_rows(whole, lay.rows)
+        self._size = (whole.w + PAD_X * 2, max(MIN_H, base + whole.desc + PAD_BOTTOM))
+        self.update()
+
     def relayout(self) -> None:
-        super().relayout()
+        if self._unit_in_place():
+            self._relayout_unit_in_place()
+        else:
+            super().relayout()
         self.too_wide = False
         if self.focused or not self.max_width or self._size[0] <= self.max_width + 1e-6:
             return

@@ -149,3 +149,33 @@ def test_the_caret_on_an_empty_slot_stands_clear_of_its_square(window):
     assert abs(under[0].x() - left) < 0.01, "the underline starts at the square"
     assert width < bar[0].x() < width + 2.5, "the bar just past the square, not through it"
     assert bar[0].x() < view.frame_rect().width() - 1, "and inside the equation's frame"
+
+
+def test_the_unit_box_stands_where_the_automatic_unit_is(window):
+    """Opened again, `x = 2 kN` stays as it is (WebSMath drew `2 kN ■`, a box
+    after the unit), and the caret goes into the unit's own place."""
+    from calcforge.calc.docsheet import PT_PER_PX
+    _run(window, [("at", 18, 18), "x:2'kN", ("key", "Return"), ("at", 18, 72), "x=",
+                  ("key", "Return")])
+    item = max(sheet_for(window.document).items.values(), key=lambda i: i.region.id)
+    view, calc = item._view, window.view.calc
+
+    def last_part():
+        part = view._layout.children[-1]
+        return round(part.x, 3), view._size
+
+    left = (view._layout.children[1].x + view._layout.children[1].w, view._size)
+    calc.focus(item, item.mapToScene(QPointF(8, 12) * PT_PER_PX))
+    assert len(view._layout.children) == 3 and view._size == left[1], \
+        "the same drawing focused: number, then its unit — no extra box"
+    unit_x, _ = last_part()
+    spot = view._result_unit_rect.translated(view._layout.x, view._baseline).center()
+    calc.focus(item, item.mapToScene(spot * PT_PER_PX))
+    assert item.editor.in_unit
+    assert last_part()[0] == unit_x, "the empty unit box is where the unit was"
+    for ch in "'N":
+        QApplication.sendEvent(window.view, QKeyEvent(QKeyEvent.KeyPress, 0, Qt.NoModifier, ch))
+    QApplication.sendEvent(window.view, QKeyEvent(QKeyEvent.KeyPress, Qt.Key_Return,
+                                                  Qt.NoModifier, ""))
+    QApplication.instance().processEvents()
+    assert display_text(item.region.display) == "2000"
