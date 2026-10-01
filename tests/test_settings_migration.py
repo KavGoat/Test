@@ -111,3 +111,45 @@ def test_the_names_are_calcforges(qapp):
     import calcforge
     assert "CalcForge" in calcforge.__doc__
     assert QApplication.instance() is not None
+
+
+def test_calcforge_opens_a_pdf_named_on_the_command_line(tmp_path, monkeypatch, qapp):
+    """`calcforge drawing.pdf`: main() called a method that no longer
+    existed, so the file never opened (found using the app, 2026-10-01)."""
+    import pymupdf
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QApplication
+
+    from calcforge import app as entry
+    from calcforge.ui.mainwindow import MainWindow
+
+    path = str(tmp_path / "drawing.pdf")
+    document = pymupdf.open()
+    document.new_page(width=595, height=842).insert_text((72, 72), "DRAWING")
+    document.new_page(width=595, height=842)
+    document.save(path)
+    document.close()
+    opened = {}
+    real_exec = QApplication.exec
+
+    def run_briefly(self=None):
+        windows = [w for w in QApplication.topLevelWidgets() if isinstance(w, MainWindow)
+                   and getattr(w.document, "path", "") == path]
+        assert windows, "no window has the file open"
+        window = windows[-1]
+        opened["pages"] = len(window.document.pages)
+        opened["title"] = window.windowTitle()
+        window.confirm_discard = lambda: True
+        window.document.modified = False
+        window.close()
+        return 0
+
+    monkeypatch.setattr(entry, "build_application", lambda argv: QApplication.instance())
+    monkeypatch.setattr(QApplication, "exec", run_briefly)
+    monkeypatch.setattr(MainWindow, "offer_recovery", lambda self: None)
+    errors = []
+    monkeypatch.setattr("sys.stderr", type("E", (), {"write": lambda s, t: errors.append(t),
+                                                      "flush": lambda s: None})())
+    assert entry.main(["calcforge", path]) == 0
+    assert opened["pages"] == 2 and "drawing" in opened["title"], (opened, errors)
+    assert not any("Could not open" in e for e in errors)

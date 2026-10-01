@@ -6,7 +6,7 @@ import json
 import os
 from typing import Optional
 
-from PySide6.QtCore import (QBuffer, QByteArray, QEvent, QIODevice, QMimeData, QModelIndex,
+from PySide6.QtCore import (QBuffer, QByteArray, QEvent, QIODevice, QMimeData, QModelIndex, QObject,
                             QPoint, QPointF, QRect, QRectF,
                             QSize, Qt, QTimer, Signal)
 from PySide6.QtGui import (QAction, QActionGroup, QColor, QCursor, QFont, QFontInfo, QImage, QPixmap,
@@ -118,12 +118,57 @@ class CenteredStatusBar(QStatusBar):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.center_widget = None
+        self._spacers = (None, None)
 
     def set_center_widget(self, widget: QWidget) -> None:
         self.center_widget = widget
-        self.addWidget(_stretch(self), 1)
+        left, right = _stretch(self), _stretch(self)
+        self._spacers = (left, right)
+        self.addWidget(left, 1)
         self.addWidget(widget)
-        self.addWidget(_stretch(self), 1)
+        self.addWidget(right, 1)
+
+    def center_on(self, global_x: float) -> None:
+        """Put the centre widget's middle under *global_x* (the middle of the
+        page view, not of the status bar): as close as the room between the
+        texts on the left and the controls on the right allows. Still in the
+        layout — one spacer is made wider than the other — so nothing is ever
+        drawn over anything else."""
+        left, right = self._spacers
+        widget = self.center_widget
+        if widget is None or left is None or not self.isVisible():
+            return
+        # how far the widget's middle is from where it should be, measured as
+        # laid out now (spacing and margins included), moved by exactly that
+        # as far as the two spacers have room
+        now = widget.mapToGlobal(QPoint(widget.width() // 2, 0)).x()
+        shift = int(round(global_x - now))
+        before = min(max(left.width() + shift, 0), left.width() + right.width())
+        after = left.width() + right.width() - before
+        # equal stretches share the room; the side that needs more than half
+        # is given it as its minimum, the other takes what is left
+        left.setMinimumWidth(before if before > after else 0)
+        right.setMinimumWidth(after if after > before else 0)
+
+
+class _SizeFollower(QObject):
+    """Calls *callback* (soon, once) whenever a watched widget is resized,
+    moved or shown."""
+
+    def __init__(self, callback, parent=None):
+        super().__init__(parent)
+        self._callback = callback
+        self._posted = False
+
+    def eventFilter(self, watched, event) -> bool:
+        if event.type() in (QEvent.Resize, QEvent.Move, QEvent.Show) and not self._posted:
+            self._posted = True
+            QTimer.singleShot(0, self._run)
+        return False
+
+    def _run(self) -> None:
+        self._posted = False
+        self._callback()
 
 
 class DetachableTabBar(QTabBar):
@@ -876,7 +921,9 @@ class MainWindow(QMainWindow):
         """Toolbars go on any edge, and remember where they were put."""
         bar.setMovable(True)
         bar.setFloatable(False)
-        bar.setAllowedAreas(Qt.AllToolBarAreas)
+        # top and bottom only: the left and right edges are the panel rails,
+        # and a toolbar dropped beside one is a toolbar in a panel bar
+        bar.setAllowedAreas(Qt.TopToolBarArea | Qt.BottomToolBarArea)
         self.addToolBar(bar)
         self.toolbars.append(bar)
 
@@ -888,6 +935,15 @@ class MainWindow(QMainWindow):
                        self.act_insert_pdf, self.act_export_pdf, self.act_print, None,
                        self.act_undo, self.act_redo):
             main_bar.addSeparator() if action is None else main_bar.addAction(action)
+        # Markup | Calc at the end of the top row, where it can be seen: what
+        # typing on the page does depends on it
+        from .widgets import ModeSwitch
+        push = QWidget()
+        push.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        main_bar.addWidget(push)
+        self.mode_switch = ModeSwitch()
+        self.mode_switch.toggled.connect(lambda on: self.toggle_calc_mode(on))
+        main_bar.addWidget(self.mode_switch)
         self._add_toolbar(main_bar)
         # The markup tools get a row to themselves: there are enough of them
         # that sharing one with the file actions hides the last few.
@@ -934,6 +990,19 @@ class MainWindow(QMainWindow):
         self.fill_button = ColorButton("", True, "Fill colour")
         self.fill_button.colorChanged.connect(self._style_fill)
         self._style_widgets[FILL].append(style_bar.addWidget(self.fill_button))
+        # Each opacity sits beside the thing it fades: the fill's by the fill
+        # colour, the hatch's by the hatch, and Overall (line, fill and hatch
+        # together) on its own at the end.
+        self.fill_opacity_spin = QSpinBox()
+        self.fill_opacity_spin.setObjectName("fillOpacity")
+        self.fill_opacity_spin.setRange(0, 100)
+        self.fill_opacity_spin.setSuffix(" %")
+        self.fill_opacity_spin.setToolTip(
+            "Fill opacity: how solid the fill is (not the line or the hatch)")
+        self.fill_opacity_spin.setValue(int(self.default_style.fill_opacity * 100))
+        self.fill_opacity_spin.valueChanged.connect(self._style_fill_opacity)
+        self._style_widgets[FILL_OPACITY].append(
+            style_bar.addWidget(self.fill_opacity_spin))
         self._style_widgets[WIDTH].append(style_bar.addWidget(QLabel(" Thickness ")))
         self.width_spin = QDoubleSpinBox()
         self.width_spin.setRange(0.0, 40.0)
@@ -1048,25 +1117,25 @@ class MainWindow(QMainWindow):
         self.hatch_scale_spin.valueChanged.connect(lambda value: self._style_change(
             HATCH, lambda style: setattr(style, "hatch_scale", value), "Hatch scale"))
         self._style_widgets[HATCH].append(style_bar.addWidget(self.hatch_scale_spin))
-        self._style_widgets[OPACITY].append(style_bar.addWidget(QLabel(" Opacity ")))
+        self.hatch_opacity_spin = QSpinBox()
+        self.hatch_opacity_spin.setObjectName("hatchOpacity")
+        self.hatch_opacity_spin.setRange(0, 100)
+        self.hatch_opacity_spin.setSuffix(" %")
+        self.hatch_opacity_spin.setToolTip(
+            "Hatch opacity: how solid the hatch lines are (not the fill or the line)")
+        self.hatch_opacity_spin.setValue(int(self.default_style.hatch_opacity * 100))
+        self.hatch_opacity_spin.valueChanged.connect(self._style_hatch_opacity)
+        self._style_widgets[HATCH].append(style_bar.addWidget(self.hatch_opacity_spin))
+        self._style_widgets[OPACITY].append(style_bar.addWidget(QLabel(" Overall ")))
         self.opacity_spin = QSpinBox()
+        self.opacity_spin.setObjectName("overallOpacity")
         self.opacity_spin.setRange(0, 100)
         self.opacity_spin.setSuffix(" %")
-        self.opacity_spin.setToolTip("How much of what is underneath shows through")
+        self.opacity_spin.setToolTip(
+            "Overall opacity: the whole markup — line, fill and hatch together")
         self.opacity_spin.setValue(int(self.default_style.opacity * 100))
         self.opacity_spin.valueChanged.connect(self._style_opacity)
         self._style_widgets[OPACITY].append(style_bar.addWidget(self.opacity_spin))
-        self._style_widgets[FILL_OPACITY].append(
-            style_bar.addWidget(QLabel(" Fill % ")))
-        self.fill_opacity_spin = QSpinBox()
-        self.fill_opacity_spin.setRange(0, 100)
-        self.fill_opacity_spin.setSuffix(" %")
-        self.fill_opacity_spin.setToolTip(
-            "How solid the fill is, separately from the line round it")
-        self.fill_opacity_spin.setValue(int(self.default_style.fill_opacity * 100))
-        self.fill_opacity_spin.valueChanged.connect(self._style_fill_opacity)
-        self._style_widgets[FILL_OPACITY].append(
-            style_bar.addWidget(self.fill_opacity_spin))
         self.default_button = QToolButton()
         self.default_button.setText("Set default")
         self.default_button.setToolTip(
@@ -1679,6 +1748,10 @@ class MainWindow(QMainWindow):
         self.page_forward.clicked.connect(lambda: self.go_to_page(self.current_index + 1))
         page_bar.addWidget(self.page_forward)
         status.set_center_widget(self.page_navigation)
+        # centred on the page view: follow it as panels open, close and resize
+        self._page_bar_follower = _SizeFollower(self._center_page_bar, self)
+        for watched in (self.view, self.view.viewport(), status, self.page_navigation):
+            watched.installEventFilter(self._page_bar_follower)
 
         self.status_fit = QToolButton()
         self.status_fit.setAutoRaise(True)
@@ -1709,13 +1782,6 @@ class MainWindow(QMainWindow):
         status.addPermanentWidget(self.status_scroll)
 
         # Calc or Markup (decision 5): always in view, one click to change.
-        self.status_mode = QToolButton()
-        self.status_mode.setAutoRaise(True)
-        self.status_mode.setCheckable(True)
-        self.status_mode.setText("Markup")
-        self.status_mode.setToolTip("Calc or Markup mode — what typing on the page does")
-        self.status_mode.toggled.connect(lambda on: self.toggle_calc_mode(on))
-        status.addPermanentWidget(self.status_mode)
         self.status_grid = QToolButton()
         self.status_grid.setAutoRaise(True)
         self.status_grid.setCheckable(True)
@@ -1744,6 +1810,14 @@ class MainWindow(QMainWindow):
         self.window_sync.currentIndexChanged.connect(self._set_window_sync)
         self.window_sync.setToolTip(
             "Link this view with other windows showing the same document")
+
+        # as wide as what it says now, not as its longest choice: the status
+        # bar's room is what lets the page number sit under the page's middle
+        def fit_the_sync(_text="") -> None:
+            box = self.window_sync
+            box.setFixedWidth(box.fontMetrics().horizontalAdvance(box.currentText()) + 34)
+        self.window_sync.currentTextChanged.connect(fit_the_sync)
+        fit_the_sync()
         status.addPermanentWidget(self.window_sync)
 
         self.status_size = QToolButton()
@@ -2165,6 +2239,14 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Open document", f"Could not open the file:\n{exc}")
             return
         self.undo_stack.clear()
+        self.current_index = 0
+        self.rebuild_scenes()
+        self.view.fit_page()
+        self.update_title()
+
+    def open_from_command_line(self, path: str) -> None:
+        """`calcforge drawing.pdf`: open it as File > Open would."""
+        self.open_path(path)
         self.current_index = 0
         self.rebuild_scenes()
         self.view.fit_page()
@@ -2606,6 +2688,13 @@ class MainWindow(QMainWindow):
             bar.setMovable(not locked)
         self.status_hint.setText("Toolbars locked" if locked else "Toolbars unlocked")
 
+    def _toolbars_off_the_rails(self) -> None:
+        """A layout saved with a toolbar on a side edge (beside a panel rail)
+        puts it back at the top."""
+        for bar in self.toolbars:
+            if self.toolBarArea(bar) not in (Qt.TopToolBarArea, Qt.BottomToolBarArea):
+                self.addToolBar(Qt.TopToolBarArea, bar)
+
     def reset_layout(self) -> None:
         """Put every panel and toolbar back where it started."""
         settings = app_settings()
@@ -2718,6 +2807,7 @@ class MainWindow(QMainWindow):
             self.restoreGeometry(geometry)
         if state is not None:
             self.restoreState(state)
+            self._toolbars_off_the_rails()
         stored = settings.value("window/markups_list")
         try:
             shown, height = (int(v) for v in stored) if stored else (0, 220)
@@ -3915,20 +4005,27 @@ class MainWindow(QMainWindow):
                 # controls show and change is the look remembered for them.
                 self._style_own_look = True
                 toolsets.apply_default(active)
+        # The bar never comes and goes (the page would jump under it): with
+        # nothing that takes a style, the everyday controls stay, greyed out.
+        idle = not supported
+        shown = supported or {STROKE, FILL, FILL_OPACITY, WIDTH, DASH, OPACITY}
         for field, actions in self._style_widgets.items():
             for action in actions:
-                action.setVisible(field in supported)
+                action.setVisible(field in shown)
+                action.setEnabled(not idle)
         for control in (self.font_family_combo, *self.font_buttons.values()):
             control.setVisible(FONT in supported and not isinstance(active, ContentsItem))
         self.text_align_combo.setVisible(FONT in supported and isinstance(active, _TextBase))
         self.arrow_start_combo.setVisible(ARROW_SIZE in supported and not isinstance(active, CalloutItem))
         self.arrow_start_label_action.setVisible(ARROW_SIZE in supported and not isinstance(active, CalloutItem))
-        # With nothing selected and a tool that styles nothing, every control
-        # on this bar is hidden and what is left is an empty band with one
-        # disabled button stranded in it. A toolbar with nothing to offer is
-        # not a toolbar, so it goes until there is something to put on it.
-        self._default_action.setVisible(bool(supported))
-        self.style_bar.setVisible(bool(supported))
+        self._default_action.setVisible(True)
+        self._default_action.setEnabled(bool(supported) and len(items) == 1)
+        if not self.style_bar.isVisibleTo(self):
+            self.style_bar.setVisible(True)
+        # which controls it holds changed: lay it out again (it used to be
+        # hidden and shown, which did this as a side effect)
+        self.style_bar.layout().invalidate()
+        self.style_bar.layout().activate()
         if active is None:
             return
         controls = ((self.stroke_button, active.style.stroke, "set_color"),
@@ -3948,6 +4045,8 @@ class MainWindow(QMainWindow):
                      "setCurrentText"),
                     (self.hatch_scale_spin, active.style.hatch_scale, "setValue"),
                     (self.hatch_colour_button, active.style.hatch_color, "set_color"),
+                    (self.hatch_opacity_spin,
+                     int(round(getattr(active.style, "hatch_opacity", 1.0) * 100)), "setValue"),
                     (self.opacity_spin, int(round(active.style.opacity * 100)),
                      "setValue"),
                     (self.fill_opacity_spin,
@@ -3980,13 +4079,11 @@ class MainWindow(QMainWindow):
         calc.mode = "calc" if on else "markup"
         if not on:
             calc.clear_cross()
-        for widget in (getattr(self, "act_calc_mode", None), getattr(self, "status_mode", None)):
+        for widget in (getattr(self, "act_calc_mode", None), getattr(self, "mode_switch", None)):
             if widget is not None and widget.isChecked() != on:
                 widget.blockSignals(True)
                 widget.setChecked(on)
                 widget.blockSignals(False)
-        if getattr(self, "status_mode", None) is not None:
-            self.status_mode.setText("Calc" if on else "Markup")
         self.status_hint.setText("Calc mode — typing on the page starts an equation" if on
                                  else "Markup mode — the markup tools' keys")
         self.view.viewport().update()
@@ -4081,19 +4178,30 @@ class MainWindow(QMainWindow):
         self.view.commit_snapshot("Add calculation block")
         calc.clear_cross()
         self.refresh_selection()
+        # a box takes in whatever is inside it: say so when that is more than
+        # what was selected
+        extra = [i for i in block.members() if i not in chosen]
+        if chosen and extra:
+            names = ", ".join(i.text() if hasattr(i, "text") and callable(i.text) else "text"
+                              for i in extra[:3])
+            self.status_hint.setText(
+                f"The block also holds {len(extra)} more inside its box: {names}")
+        else:
+            self.status_hint.setText("Calculation block: its equations stay in it; "
+                                     "right-click for Self-contained")
 
     def set_measure_variable(self, item, name: str) -> bool:
         """Name a measurement's value for the calculations (decision 24), or
         take the name away with an empty one. One undo step."""
-        from ..items.calc import valid_variable_name
+        from ..items.calc import smath_variable_name, valid_variable_name
 
-        name = (name or "").strip()
+        name = smath_variable_name(name)
         if name == item.variable:
             return True
         if name and not valid_variable_name(name):
             self.status_hint.setText(
-                f"“{name}” is not a variable name: start with a letter, then letters, "
-                "digits, _ or .")
+                f"“{name}” is not a variable name: a letter, then letters and digits, "
+                "and a subscript after a dot if you like (L.beam)")
             self.refresh_selection()
             return False
         self.view.begin_snapshot(self.view.involved_frames(item))
@@ -4104,12 +4212,45 @@ class MainWindow(QMainWindow):
         self.refresh_selection()
         return True
 
+    def show_variable_of(self, item) -> None:
+        """Open the Variables panel at a measurement's variable."""
+        self.show_panel("dock_variables", True)
+        panel = self.variables_panel
+        panel.refresh()
+        panel.filter.setText("")
+        for index in range(panel.tree.topLevelItemCount()):
+            node = panel.tree.topLevelItem(index)
+            row = panel.row_of(node)
+            if row is not None and row.region_id == item.variable_region_id:
+                panel.tree.setCurrentItem(node)
+                panel.tree.scrollToItem(node)
+                return
+
     def ask_measure_variable(self, item) -> None:
         name, accepted = QInputDialog.getText(
             self, "Variable name", "Name this measurement for the calculations "
-            "(empty for none):", text=item.variable)
+            "(L.beam for a subscript; empty for none):", text=item.variable)
         if accepted:
             self.set_measure_variable(item, name)
+
+    def _select_block_members(self, block) -> None:
+        self.view.scene().clearSelection()
+        for member in block.members():
+            member.setSelected(True)
+        self.refresh_selection()
+
+    def remove_block_keep_equations(self, block) -> None:
+        """The block's frame goes; its equations stay where they are."""
+        if block.locked or block.scene() is None:
+            return
+        frame = block.parentItem()
+        self.view.begin_snapshot(self.view.involved_frames(block))
+        frame.remove_markup(block)
+        self.view.commit_snapshot("Remove block")
+        from ..calc.docsheet import sheet_for
+        sheet_for(self.document).settle()
+        self.refresh_selection()
+        self.status_hint.setText("Block removed; its equations are on the page as they were")
 
     def set_block_self_contained(self, blocks: list, on: bool) -> None:
         blocks = [b for b in blocks if not b.locked and b.self_contained != bool(on)]
@@ -4325,6 +4466,11 @@ class MainWindow(QMainWindow):
         value = percent / 100.0
         self._style_change(OPACITY, lambda style: setattr(style, "opacity", value),
                            "Opacity")
+
+    def _style_hatch_opacity(self, percent: int) -> None:
+        value = percent / 100.0
+        self._style_change(HATCH, lambda style: setattr(style, "hatch_opacity", value),
+                           "Hatch opacity")
 
     def _style_fill_opacity(self, percent: int) -> None:
         value = percent / 100.0
@@ -6027,6 +6173,13 @@ class MainWindow(QMainWindow):
         return [tool for _score, _label, tool in scored]
 
 
+    def _center_page_bar(self) -> None:
+        status = self.statusBar()
+        viewport = self.view.viewport()
+        if isinstance(status, CenteredStatusBar) and viewport.isVisible():
+            middle = viewport.mapToGlobal(QPoint(viewport.width() // 2, 0)).x()
+            status.center_on(middle)
+
     def refresh_lists(self) -> None:
         self.markups_panel.rebuild(self.document)
         self.bookmarks_panel.rebuild(self.document)
@@ -7084,6 +7237,7 @@ class MainWindow(QMainWindow):
     def build_context_menu(self, item, scene_pos: QPointF,
                            menu: Optional[QMenu] = None) -> QMenu:
         menu = menu or QMenu(self)
+        menu.setSeparatorsCollapsible(True)
         if item is not None and getattr(item, "IS_CALC", False) \
                 and getattr(item, "region", None) is not None:
             from . import calcmenu
@@ -7095,6 +7249,10 @@ class MainWindow(QMainWindow):
             contained.setEnabled(not item.locked)
             contained.setToolTip("What the equations in the block define stays inside it")
             contained.triggered.connect(lambda on: self.set_block_self_contained([item], on))
+            menu.addAction("Select its equations", lambda: self._select_block_members(item))
+            remove = menu.addAction("Remove block, keep equations",
+                                    lambda: self.remove_block_keep_equations(item))
+            remove.setEnabled(not item.locked)
             menu.addSeparator()
         if item is not None:
             if isinstance(item, ImageItem) and not item.locked:
@@ -7127,6 +7285,16 @@ class MainWindow(QMainWindow):
                 show.setChecked(item.show_size)
                 show.toggled.connect(lambda on: self.set_size_visible(item, on))
             if isinstance(item, MeasureItem):
+                if item.kind != "calibrate":
+                    # first: a measurement's name is what ties it to the calcs
+                    named = menu.addAction(f"Variable: {item.variable}…" if item.variable
+                                           else "Variable name…",
+                                           lambda i=item: self.ask_measure_variable(i))
+                    named.setToolTip("Name this measurement for the calculations (L.beam)")
+                    if item.variable:
+                        menu.addAction("Show in Variables",
+                                       lambda i=item: self.show_variable_of(i))
+                    menu.addSeparator()
                 menu.addAction("Edit text…", lambda: self.edit_measure_text(item))
                 straight = menu.addAction("Inline text")
                 straight.setToolTip("Keep the measurement text in line with its line")
@@ -7135,8 +7303,6 @@ class MainWindow(QMainWindow):
                 straight.toggled.connect(
                     lambda on, i=item: self.set_label_angle(i, None if on else 0.0))
                 menu.addAction("Page scale…", self.calibrate_dialog)
-                if item.kind != "calibrate":
-                    menu.addAction("Variable name…", lambda i=item: self.ask_measure_variable(i))
             if hasattr(item, "size_to_text"):
                 menu.addAction(self.act_autosize)
             menu.addSeparator()
@@ -7146,8 +7312,12 @@ class MainWindow(QMainWindow):
                 menu.addAction(self.act_ungroup)
             if isinstance(item, _TextBase):
                 self._fill_leader_menu(menu, item, scene_pos)
-            default = menu.addAction("Set default", lambda: self.set_as_default(item))
-            default.setToolTip("Use these properties for new markups of this kind")
+            # equations and blocks are not drawn with a markup's pen, never
+            # hidden or flattened (decision 17): only what applies to them
+            calc_like = bool(getattr(item, "IS_CALC", False))
+            if not calc_like:
+                default = menu.addAction("Set default", lambda: self.set_as_default(item))
+                default.setToolTip("Use these properties for new markups of this kind")
             add_tool = menu.addAction("Add tool…", lambda: self.add_to_toolset(item))
             add_tool.setToolTip("Add this item to a tool set")
             menu.addSeparator()
@@ -7155,7 +7325,8 @@ class MainWindow(QMainWindow):
             menu.addAction(self.act_copy)
             menu.addAction(self.act_paste)
             menu.addAction(self.act_duplicate)
-            menu.addAction(self.act_format_painter)
+            if not calc_like:
+                menu.addAction(self.act_format_painter)
             menu.addAction(self.act_delete)
             menu.addSeparator()
             order = menu.addMenu("Order")
@@ -7167,12 +7338,14 @@ class MainWindow(QMainWindow):
                 align.addAction(getattr(self, f"act_align_{key}"))
             menu.addAction(self.act_array)
             menu.addAction(self.act_lock)
-            menu.addAction(self.act_hide)
+            if not calc_like:
+                menu.addAction(self.act_hide)
+                menu.addSeparator()
+                menu.addAction(self.act_flatten)
+                apply_pages = menu.addAction("Apply pages…",
+                                             lambda: self.apply_to_pages(item))
+                apply_pages.setToolTip("Copy this markup to chosen pages")
             menu.addSeparator()
-            menu.addAction(self.act_flatten)
-            apply_pages = menu.addAction("Apply pages…",
-                                         lambda: self.apply_to_pages(item))
-            apply_pages.setToolTip("Copy this markup to chosen pages")
             menu.addAction("Properties", self.show_properties_panel)
         else:
             menu.addAction(self.act_paste)

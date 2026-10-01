@@ -612,7 +612,17 @@ class MathEditor:
     def _equals(self) -> None:
         if self.in_unit or self.plot_input:
             return
-        if self.evaluate or "≔" in self.root.items:
+        if self.evaluate:
+            return
+        if "≔" in self.root.items:
+            # x := expression = value: SMath Studio desktop defines and shows
+            # the value in one region (the worksheet already shows it;
+            # WebSMath, following SMath Cloud, refused the "=")
+            if self.root.items[-1] == "≔":
+                return                      # nothing to show yet
+            self.root.append("=")
+            self.evaluate = True
+            self.unit = Row()
             return
         name, nargs = self._definable_head()
         if name is not None and not self.is_defined(name, nargs):

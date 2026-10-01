@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 
-from PySide6.QtCore import QEvent, QObject, QPointF, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRect, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap, QPen
-from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QColorDialog, QComboBox,
+from PySide6.QtWidgets import (QAbstractScrollArea, QLayout, QAbstractSpinBox, QColorDialog, QComboBox,
                                QGridLayout, QHBoxLayout, QLabel, QMenu, QSlider,
                                QToolButton, QWidget, QWidgetAction, QSpinBox,
                                QDoubleSpinBox)
@@ -297,3 +297,121 @@ class _BigPatternDelegate(QStyledItemDelegateBase := __import__(
         painter.drawText(words, Qt.AlignVCenter | Qt.AlignLeft,
                          str(index.data(Qt.DisplayRole) or ""))
         painter.restore()
+
+
+class FlowLayout(QLayout):
+    """A row of widgets that wraps onto more rows when the panel is narrow
+    (Qt's own flow-layout example): buttons and options stay whole, however
+    thin the panel is dragged."""
+
+    def __init__(self, parent=None, spacing: int = 4):
+        super().__init__(parent)
+        self._items: list = []
+        self.setContentsMargins(0, 0, 0, 0)
+        self.setSpacing(spacing)
+
+    def addItem(self, item) -> None:
+        self._items.append(item)
+
+    def count(self) -> int:
+        return len(self._items)
+
+    def itemAt(self, index):
+        return self._items[index] if 0 <= index < len(self._items) else None
+
+    def takeAt(self, index):
+        return self._items.pop(index) if 0 <= index < len(self._items) else None
+
+    def expandingDirections(self):
+        return Qt.Orientations(0)
+
+    def hasHeightForWidth(self) -> bool:
+        return True
+
+    def heightForWidth(self, width: int) -> int:
+        return self._arrange(QRect(0, 0, width, 0), move=False)
+
+    def setGeometry(self, rect) -> None:
+        super().setGeometry(rect)
+        self._arrange(rect, move=True)
+
+    def sizeHint(self) -> QSize:
+        return self.minimumSize()
+
+    def minimumSize(self) -> QSize:
+        size = QSize()
+        for item in self._items:
+            size = size.expandedTo(item.minimumSize())
+        left, top, right, bottom = self.getContentsMargins()
+        return size + QSize(left + right, top + bottom)
+
+    def _arrange(self, rect, move: bool) -> int:
+        left, top, right, bottom = self.getContentsMargins()
+        area = rect.adjusted(left, top, -right, -bottom)
+        x, y, line = area.x(), area.y(), 0
+        gap = self.spacing()
+        for item in self._items:
+            if item.widget() is not None and not item.widget().isVisible() \
+                    and item.widget().isHidden():
+                continue
+            hint = item.sizeHint()
+            if x + hint.width() > area.right() + 1 and line > 0:
+                x, y, line = area.x(), y + line + gap, 0
+            if move:
+                item.setGeometry(QRect(QPoint(x, y), hint))
+            x += hint.width() + gap
+            line = max(line, hint.height())
+        return y + line - rect.y() + bottom
+
+
+class ModeSwitch(QWidget):
+    """Markup | Calc — the two modes side by side, the one on lit up.
+
+    What typing on the page does depends on it, so it is where it can be
+    seen at a glance rather than a word in the status bar. Speaks the little
+    a checkable button does (isChecked/setChecked = Calc), so the window
+    keeps one way to set it.
+    """
+
+    toggled = Signal(bool)
+
+    def __init__(self, parent=None):
+        from PySide6.QtWidgets import QButtonGroup, QHBoxLayout, QToolButton
+        super().__init__(parent)
+        self.setObjectName("modeSwitch")
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(6, 0, 6, 0)
+        lay.setSpacing(0)
+        self.markup = QToolButton()
+        self.markup.setText("Markup")
+        self.markup.setObjectName("modeMarkup")
+        self.markup.setToolTip("Markup mode: the markup tools' keys (F12 switches)")
+        self.calc = QToolButton()
+        self.calc.setText("Calc")
+        self.calc.setObjectName("modeCalc")
+        self.calc.setToolTip("Calc mode: typing on the page starts an equation, "
+                             "as in SMath (F12 switches)")
+        self._group = QButtonGroup(self)
+        self._group.setExclusive(True)
+        for button in (self.markup, self.calc):
+            button.setCheckable(True)
+            button.setCursor(Qt.PointingHandCursor)
+            button.setFocusPolicy(Qt.NoFocus)
+            button.setMinimumWidth(64)
+            self._group.addButton(button)
+            lay.addWidget(button)
+        self.markup.setChecked(True)
+        self.calc.toggled.connect(self.toggled.emit)
+
+    # -- what a checkable button would say -----------------------------------------
+    def isChecked(self) -> bool:
+        return self.calc.isChecked()
+
+    def setChecked(self, on: bool) -> None:
+        (self.calc if on else self.markup).setChecked(True)
+
+    def text(self) -> str:
+        return "Calc" if self.calc.isChecked() else "Markup"
+
+    def setText(self, _text: str) -> None:
+        pass                                   # each side has its own word

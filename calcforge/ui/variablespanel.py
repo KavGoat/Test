@@ -132,7 +132,11 @@ class VariablesPanel(QWidget):
         self.tree.setUniformRowHeights(True)
         self.tree.setAlternatingRowColors(True)
         header = self.tree.header()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        # Name and Value share what is left after Unit and Page, so the
+        # table fits the panel at any width instead of scrolling sideways
+        header.setMinimumSectionSize(30)
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(0, QHeaderView.Stretch)
         header.setSectionResizeMode(1, QHeaderView.Stretch)
         header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(3, QHeaderView.ResizeToContents)

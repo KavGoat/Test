@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pymupdf
 import pytest
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
@@ -210,3 +210,126 @@ def test_a_snapshot_takes_the_block_as_line_work(v):
     block, outside, inside, after = two_checks(v)
     drawing = CalcDrawingItem.of(block)
     assert "<path" in drawing.stamp_svg or "<rect" in drawing.stamp_svg
+
+
+# -- a block is a little page of its own: nothing is dragged in or out ----------------------
+
+def _drag_item(v, item, dx, dy):
+    v.window.select_tool("select")
+    v.calc.leave()
+    v.view.scene().clearSelection()
+    start = item.mapToScene(item.local_rect().center())
+    drag(v.view, start.x(), start.y(), start.x() + dx, start.y() + dy)
+    settle(v.window)
+
+
+def test_an_equation_cant_be_dragged_out_of_its_block(v):
+    block, outside, inside, after = two_checks(v)
+    member = inside[0]
+    was = QPointF(member.pos())
+    _drag_item(v, member, 0, 400)                    # far below the block
+    assert block.scene_box().contains(member.scenePos()), "still in its block"
+    assert member in block.members()
+    assert member.pos().y() > was.y() + 20, "it did move: to the block's bottom edge"
+
+
+def test_an_equation_cant_be_dragged_into_a_block(v):
+    block, outside, inside, after = two_checks(v)
+    before = QPointF(after[0].pos())
+    target = block.scene_box().center()
+    start = after[0].mapToScene(after[0].local_rect().center())
+    seen = []
+    v.view.statusMessage.connect(seen.append)
+    _drag_item(v, after[0], target.x() - start.x(), target.y() - start.y())
+    assert after[0].pos() == before, "back where it was"
+    assert any("can't be dragged into a block" in m for m in seen)
+    assert after[0] not in block.members() and len(block.members()) == 3
+
+
+def test_moving_inside_the_block_is_fine(v):
+    block, outside, inside, after = two_checks(v)
+    member = inside[2]
+    _drag_item(v, member, 40, 0)
+    assert member in block.members()
+    assert member.pos().x() > inside[1].pos().x()
+
+
+def test_a_block_cant_be_stretched_over_other_equations_or_shrunk_off_its_own(v):
+    block, outside, inside, after = two_checks(v)
+    rect = QRectF(block.local_rect())
+    v.window.select_tool("select")
+    v.view.scene().clearSelection()
+    block.setSelected(True)
+    corner = block.mapToScene(block.local_rect().bottomRight())
+    drag(v.view, corner.x(), corner.y(), corner.x(), corner.y() + 300)   # over x= and y=
+    settle(v.window)
+    assert block.local_rect() == rect and len(block.members()) == 3
+    corner = block.mapToScene(block.local_rect().bottomRight())
+    drag(v.view, corner.x(), corner.y(), corner.x(), corner.y() - 80)    # off its own
+    settle(v.window)
+    assert block.local_rect() == rect and len(block.members()) == 3
+    corner = block.mapToScene(block.local_rect().bottomRight())
+    drag(v.view, corner.x(), corner.y(), corner.x() + 60, corner.y())    # wider is fine
+    settle(v.window)
+    assert block.local_rect().width() > rect.width()
+
+
+def test_typing_inside_a_block_puts_the_equation_in_it(v):
+    block, outside, inside, after = two_checks(v)
+    box = block.local_rect()
+    point = block.mapToParent(QPointF(box.right() - 40, box.bottom() - 14))
+    v.calc.place_cross(v.frame, point)
+    v.keys("9=")
+    v.press(Qt.Key_Return)
+    assert len(block.members()) == 4
+
+
+def test_a_block_says_when_its_box_takes_in_more_than_was_selected(v):
+    for y, keys in ((18, "x:1"), (60, "y:2"), (100, "z:3")):
+        v.type_at(36, y, "")
+        v.keys(keys)
+        v.press(Qt.Key_Return)
+    v.calc.leave()
+    made = sorted(equations(v.window), key=lambda i: i.pos().y())
+    v.view.scene().clearSelection()
+    made[0].setSelected(True)
+    made[2].setSelected(True)
+    v.window.insert_block()
+    assert "also holds 1 more" in v.window.status_hint.text()
+    assert "y≔2" in v.window.status_hint.text()
+
+
+def test_a_blocks_menu_and_properties_offer_what_applies_to_it(v):
+    from PySide6.QtWidgets import QCheckBox, QLabel, QPushButton
+    block, outside, inside, after = two_checks(v)
+    menu = v.window.build_context_menu(block, block.sceneBoundingRect().center())
+    texts = [a.text() for a in menu.actions() if a.text()]
+    for wanted in ("Self-contained", "Select its equations", "Remove block, keep equations",
+                   "Delete", "Properties"):
+        assert wanted in texts, wanted
+    for gone in ("Set default", "Format painter", "Hide", "Flatten selection", "Apply pages…"):
+        assert gone not in texts, gone
+    v.view.scene().clearSelection()
+    block.setSelected(True)
+    v.window.refresh_selection()
+    panel = v.window.properties_panel
+    assert panel.findChild(QLabel, "blockHolds").text() == "3 equations"
+    assert panel.findChild(QCheckBox, "blockSelfContained") is not None
+    panel.findChild(QPushButton, "blockRemove").click()
+    settle(v.window)
+    assert blocks(v.window) == [] and len(equations(v.window)) == 6, "the equations stay"
+    v.window.undo_stack.undo()
+    assert len(blocks(v.window)) == 1
+
+
+def test_an_equation_has_no_markup_pen_in_properties(v):
+    from PySide6.QtWidgets import QGroupBox
+    block, outside, inside, after = two_checks(v)
+    v.view.scene().clearSelection()
+    inside[0].setSelected(True)
+    v.window.refresh_selection()
+    titles = [g.title() for g in v.window.properties_panel.findChildren(QGroupBox)]
+    assert "Appearance" not in titles and "Equation" in " ".join(titles)
+    menu = v.window.build_context_menu(inside[0], inside[0].sceneBoundingRect().center())
+    texts = [a.text() for a in menu.actions() if a.text()]
+    assert "Format painter" not in texts and "Hide" not in texts

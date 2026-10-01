@@ -11,7 +11,7 @@ cross (or under the pointer), exactly as the key it stands for would.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtWidgets import (QGridLayout, QPushButton, QScrollArea, QSizePolicy,
                                QToolButton, QVBoxLayout, QWidget)
 
@@ -22,12 +22,23 @@ COMMON_UNITS = ("m", "mm", "cm", "km", "m²", "m³", "kg", "t", "s", "min", "h",
 
 
 class MathsSection(QWidget):
-    """A title that folds its buttons away, and the buttons."""
+    """A title that folds its buttons away, and the buttons.
+
+    The buttons flex with the panel: as many columns as fit (each button at
+    least CELL wide), every column stretched equally to fill the width, so a
+    wide panel has more buttons to a row and a narrow one fewer — never a gap
+    down the right.
+    """
+
+    CELL = 46            # the narrowest a button gets before a column is dropped
 
     def __init__(self, title: str, buttons: list, cols: int = 6,
-                 collapsed: bool = False, extra: QWidget = None):
+                 collapsed: bool = False, extra: QWidget = None, keypad: bool = False):
         super().__init__()
         self.title = title
+        self.base_cols = cols
+        self.keypad = keypad
+        self.cols = cols
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 4)
         lay.setSpacing(2)
@@ -41,12 +52,11 @@ class MathsSection(QWidget):
         self.header.toggled.connect(lambda on: self.set_collapsed(not on))
         lay.addWidget(self.header)
         self.body = QWidget()
-        grid = QGridLayout(self.body)
-        grid.setContentsMargins(2, 0, 2, 0)
-        grid.setSpacing(1)
-        grid.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        self.grid = QGridLayout(self.body)
+        self.grid.setContentsMargins(2, 0, 2, 0)
+        self.grid.setSpacing(1)
         self.buttons: list[QToolButton] = []
-        for index, (label, action, tip) in enumerate(buttons):
+        for label, action, tip in buttons:
             button = QToolButton()
             button.setObjectName("mathsButton")
             button.setText(label)
@@ -54,17 +64,44 @@ class MathsSection(QWidget):
             button.setFocusPolicy(Qt.NoFocus)     # the equation keeps the keyboard
             button.setAutoRaise(True)
             button.setMinimumSize(QSize(28, 24))
+            button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             if action is None:
                 button.setEnabled(False)
             else:
                 button.clicked.connect(action)
-            grid.addWidget(button, index // cols, index % cols)
             self.buttons.append(button)
+        self.extra = extra
         if extra is not None:
-            grid.addWidget(extra, (len(buttons) + cols - 1) // cols, 0, 1, cols)
+            extra.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._lay_out(cols)
         lay.addWidget(self.body)
         self.header.setChecked(not collapsed)
         self.set_collapsed(collapsed)
+
+    def _lay_out(self, cols: int) -> None:
+        grid = self.grid
+        for widget in self.buttons + ([self.extra] if self.extra is not None else []):
+            grid.removeWidget(widget)
+        for column in range(grid.columnCount()):
+            grid.setColumnStretch(column, 0)
+        for index, button in enumerate(self.buttons):
+            grid.addWidget(button, index // cols, index % cols)
+        for column in range(cols):
+            grid.setColumnStretch(column, 1)
+        if self.extra is not None:
+            grid.addWidget(self.extra, (len(self.buttons) + cols - 1) // cols, 0, 1, cols)
+        self.cols = cols
+
+    def columns_for(self, width: int) -> int:
+        fits = max(1, width // self.CELL)
+        return max(1, min(fits, len(self.buttons)))
+
+    def fit(self, width: int) -> None:
+        """Lay the buttons out for *width* (the panel's, not this section's:
+        a section can't shrink below the columns it already has)."""
+        wanted = self.columns_for(width)
+        if wanted != self.cols:
+            self._lay_out(wanted)
 
     def set_collapsed(self, on: bool) -> None:
         self.collapsed = bool(on)
@@ -97,6 +134,28 @@ class MathsPanel(QScrollArea):
             lay.addWidget(section)
         lay.addStretch(1)
         self.setWidget(inner)
+
+    def resizeEvent(self, event) -> None:
+        # The columns first, for the width there will be; then the scroll area
+        # sizes what is inside it (the other way round, it has already sized
+        # it to the old columns and doesn't look again).
+        bar = self.verticalScrollBar()
+        width = event.size().width() - 2 * self.frameWidth() \
+            - (bar.sizeHint().width() if bar.isVisible() else 0) - 8
+        for section in self.sections:
+            section.fit(width)
+        super().resizeEvent(event)
+        # and once the new columns have settled, the content to the panel's
+        # width (a scroll area only resizes what is in it on its own resize)
+        QTimer.singleShot(0, self._fill_the_width)
+
+    def _fill_the_width(self) -> None:
+        inner = self.widget()
+        if inner is None:
+            return
+        width = max(self.viewport().width(), inner.minimumSizeHint().width())
+        if inner.width() != width:
+            inner.resize(width, inner.height())
 
     def section(self, title: str) -> MathsSection:
         return next(s for s in self.sections if s.title == title)

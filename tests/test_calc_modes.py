@@ -73,11 +73,11 @@ def into_calc_mode(window, x=100, y=120):
 # -- the modes --------------------------------------------------------------------------
 
 def test_the_status_bar_shows_the_mode_and_f12_switches_it(win):
-    assert win.status_mode.text() == "Markup" and not win.status_mode.isChecked()
+    assert win.mode_switch.text() == "Markup" and not win.mode_switch.isChecked()
     keys(win, Qt.Key_F12)
-    assert win.view.calc.mode == "calc" and win.status_mode.text() == "Calc"
+    assert win.view.calc.mode == "calc" and win.mode_switch.text() == "Calc"
     keys(win, Qt.Key_F12)
-    assert win.view.calc.mode == "markup" and win.status_mode.text() == "Markup"
+    assert win.view.calc.mode == "markup" and win.mode_switch.text() == "Markup"
 
 
 def test_file_new_is_one_blank_a4_portrait_page_in_markup_mode(win):
@@ -86,7 +86,7 @@ def test_file_new_is_one_blank_a4_portrait_page_in_markup_mode(win):
     assert len(win.document.pages) == 1
     setup = win.document.pages[0].setup
     assert setup.size_name == "A4" and setup.orientation == "portrait"
-    assert win.view.calc.mode == "markup" and win.status_mode.text() == "Markup"
+    assert win.view.calc.mode == "markup" and win.mode_switch.text() == "Markup"
 
 
 # -- Calc mode: every tool key is off ----------------------------------------------------

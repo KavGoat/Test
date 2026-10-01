@@ -538,26 +538,27 @@ def test_same_document_windows_can_sync_by_page_or_document(window):
         QApplication.processEvents()
 
 
-def test_the_style_toolbar_goes_when_it_has_nothing_to_offer(window, qapp):
-    """An empty band with one stranded button is not a toolbar.
-
-    With nothing selected and the Select tool held, every control on the style
-    bar is hidden and what was left was a full row of chrome carrying a
-    disabled "Set default".
-    """
+def test_the_style_toolbar_stays_put(window, qapp):
+    """The style bar is always there (the user, 2026-09-30: it used to come
+    and go, and the page jumped under it). With nothing that takes a style its
+    everyday controls stay, greyed out."""
     window.show()
     window.select_tool("select")
     window.view.scene().clearSelection()
     window.refresh_selection()
     qapp.processEvents()
-    assert not window.style_bar.isVisible()
+    height = window.view.height()
+    assert window.style_bar.isVisible()
+    assert not window.stroke_button.isEnabled(), "nothing to style: greyed out"
 
     box = _a_rectangle(window)
     window.select_tool("select")
     box.setSelected(True)
     window.refresh_selection()
     qapp.processEvents()
-    assert window.style_bar.isVisible(), "a rectangle has a line, a fill and a width"
+    assert window.style_bar.isVisible() and window.stroke_button.isEnabled(), \
+        "a rectangle has a line, a fill and a width"
+    assert window.view.height() == height, "the page didn't move"
 
 
 def test_every_label_the_user_reads_is_one_or_two_words(window, qapp):

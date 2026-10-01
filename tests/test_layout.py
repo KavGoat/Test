@@ -77,15 +77,21 @@ def test_a_panel_can_go_to_any_edge(window):
 # toolbars
 # ---------------------------------------------------------------------------
 
-def test_the_toolbars_can_be_moved_to_any_edge(window):
+def test_toolbars_move_between_top_and_bottom_never_onto_the_rails(window):
+    """The left and right edges hold the panel rails: a toolbar dropped there
+    ended up inside a panel bar (the user, 2026-10-01). Top and bottom only,
+    and a layout saved with one at a side puts it back at the top."""
     for bar in window.toolbars:
         assert bar.isMovable()
-        assert bar.allowedAreas() == Qt.AllToolBarAreas
+        assert bar.allowedAreas() == (Qt.TopToolBarArea | Qt.BottomToolBarArea)
+        assert not bar.isAreaAllowed(Qt.LeftToolBarArea)
+        assert not bar.isAreaAllowed(Qt.RightToolBarArea)
     tools = toolbars(window)["toolbar_tools"]
-    for area in (Qt.LeftToolBarArea, Qt.RightToolBarArea, Qt.BottomToolBarArea,
-                 Qt.TopToolBarArea):
-        window.addToolBar(area, tools)
-        assert window.toolBarArea(tools) == area
+    window.addToolBar(Qt.BottomToolBarArea, tools)
+    assert window.toolBarArea(tools) == Qt.BottomToolBarArea
+    window.addToolBar(Qt.LeftToolBarArea, tools)          # as an old saved layout might
+    window._toolbars_off_the_rails()
+    assert window.toolBarArea(tools) == Qt.TopToolBarArea
 
 
 def test_the_toolbars_can_be_locked(window):

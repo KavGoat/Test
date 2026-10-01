@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout,
-                               QGroupBox, QHBoxLayout, QLabel, QListWidget,
+                               QGroupBox, QHBoxLayout, QLabel, QListWidget, QSizePolicy,
                                QPushButton, QScrollArea, QSpinBox, QVBoxLayout,
                                QWidget)
 
@@ -56,9 +56,14 @@ class PagePanel(QScrollArea):
             box.setSuffix(" mm")
             box.setKeyboardTracking(False)
             box.valueChanged.connect(lambda _v, b=box: self._paper_changed(b))
-        sizes.addWidget(self.width_mm)
-        sizes.addWidget(QLabel("×"))
-        sizes.addWidget(self.height_mm)
+        # the two boxes share the width, with the × tight between them
+        by = QLabel("×")
+        by.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        for box in (self.width_mm, self.height_mm):
+            box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        sizes.addWidget(self.width_mm, 1)
+        sizes.addWidget(by)
+        sizes.addWidget(self.height_mm, 1)
         form.addRow("Size", sizes)
         self.all_pages = QCheckBox("Apply to all pages")
         self.all_pages.setToolTip("Paper changes go to every page, not just this one")

@@ -178,30 +178,27 @@ def test_up_down_move_between_regions(v):
     assert v.focused_item.region.y == 72
 
 
-def test_variable_unit_clash_needs_a_choice(v):
+def test_a_variable_named_like_a_unit_is_the_variable(v):
+    """The user (2026-10-01): "I couldn't type = at all" — m:10 above, then
+    m typed, used to block every key until the variable or the unit was
+    picked from the list (WebSMath, after SMath Cloud). The variable defined
+    here is what is meant; the unit is 'm."""
     v.type_at(18, 18, "m:10")
     v.press(Qt.Key_Return)
     v.type_at(18, 72, "m")
-    ed = v.focused_item.editor
-    v.press(0, "=")                           # blocked: m is a variable and a unit
-    assert ed.root.text() == "m" and v.suggestions.isVisible()
-    v.press(Qt.Key_Return)                    # Enter too (nothing chosen with the arrows yet)
-    assert v.focused_item is not None and ed.root.text() == "m"
-    s = v.suggestions
-    s.setCurrentRow([i for i, e in enumerate(s.entries()) if e.name == "m"][0])
-    v.press(Qt.Key_Tab)
-    v.press(0, "=")
+    v.press(0, "=")                           # straight through
     it = v.focused_item
+    assert it.editor.root.text() == "m="
     v.press(Qt.Key_Return)
     assert display_text(it.region.display) == "10"
-    v.type_at(18, 126, "m")                   # choosing the unit instead gives 'm
-    s.setCurrentRow([i for i, e in enumerate(s.entries()) if e.name == "'m"][0])
-    v.press(Qt.Key_Tab)
+    v.type_at(18, 126, "'m")                  # the unit, as SMath writes one
     v.press(0, "=")
     it = v.focused_item
     v.press(Qt.Key_Return)
     assert display_text(it.region.display) == "1 m"
-    v.type_at(18, 180, "q+1")                 # no clash: typed straight through
+    v.type_at(18, 180, "m:")                  # and : as well
+    assert v.focused_item.editor.root.text().startswith("m≔")
+    v.type_at(18, 234, "q+1")                 # no clash: typed straight through
     assert v.focused_item.editor.root.text() == "q+1"
 
 

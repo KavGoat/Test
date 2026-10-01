@@ -33,21 +33,21 @@ def type_line(v, y_pt, keys, x_pt=36):
 
 def test_a_named_measurement_is_a_variable_below_it(v):
     measure = a_length(v)
-    assert v.window.set_measure_variable(measure, "L_b")
-    below = type_line(v, 400, "L_b=")
-    above = type_line(v, 150, "L_b+0=")
+    assert v.window.set_measure_variable(measure, "L.b")
+    below = type_line(v, 400, "L.b=")
+    above = type_line(v, 150, "L.b+0=")
     settle(v.window)
     # 100 pt at the page's 1:1 scale is 35.28 mm, kept in the measurement's
     # own unit (m) to full precision, shown as SMath shows it
     assert shown(below) == "0.0353 m"
     assert "not defined" in shown(above), "above its top-left it is not defined yet"
-    assert measure.value_text.startswith("L_b = "), "the label says what it is called"
+    assert measure.value_text.startswith("L.b = "), "the label says what it is called"
 
 
 def test_it_follows_the_measurement_live(v):
     measure = a_length(v)
-    v.window.set_measure_variable(measure, "L_b")
-    doubled = type_line(v, 400, "L_b*2=")
+    v.window.set_measure_variable(measure, "L.b")
+    doubled = type_line(v, 400, "L.b*2=")
     assert shown(doubled) == "0.0706 m"
     measure.points[1] = QPointF(200, 0)                 # twice as long
     measure.refresh()
@@ -57,8 +57,8 @@ def test_it_follows_the_measurement_live(v):
 
 def test_moving_it_below_an_equation_takes_the_value_away_from_it(v):
     measure = a_length(v)
-    v.window.set_measure_variable(measure, "L_b")
-    use = type_line(v, 400, "L_b=")
+    v.window.set_measure_variable(measure, "L.b")
+    use = type_line(v, 400, "L.b=")
     assert "not defined" not in shown(use)
     measure.setPos(QPointF(150, 600))
     settle(v.window)
@@ -84,11 +84,11 @@ def test_the_properties_panel_names_it(v):
 
 def test_it_is_in_the_variables_panel(v):
     measure = a_length(v)
-    v.window.set_measure_variable(measure, "L_b")
+    v.window.set_measure_variable(measure, "L.b")
     v.window.show_panel("dock_variables", True)
     panel = v.window.variables_panel
     panel.refresh()
-    (row,) = [r for r in panel.rows if r.name == "L_b"]
+    (row,) = [r for r in panel.rows if r.name == "L.b"]
     assert row.source == "Measurement" and row.page == 1 and not row.error
     node = panel.tree.topLevelItem(panel.rows.index(row))
     panel.go_to(node)
@@ -97,13 +97,13 @@ def test_it_is_in_the_variables_panel(v):
 
 def test_deleting_it_says_what_is_no_longer_defined(v):
     measure = a_length(v)
-    v.window.set_measure_variable(measure, "L_b")
-    use = type_line(v, 400, "L_b=")
+    v.window.set_measure_variable(measure, "L.b")
+    use = type_line(v, 400, "L.b=")
     v.view.scene().clearSelection()
     measure.setSelected(True)
     v.window.delete_selection()
     settle(v.window)
-    assert v.window.status_hint.text() == "L_b is no longer defined"
+    assert v.window.status_hint.text() == "L.b is no longer defined"
     assert "not defined" in shown(use)
     v.window.undo_stack.undo()
     settle(v.window)
@@ -114,8 +114,8 @@ def test_deleting_it_says_what_is_no_longer_defined(v):
 def test_the_name_is_saved_with_it(v, tmp_path):
     from tests.test_calc_saving import reopen, save_to
     measure = a_length(v)
-    v.window.set_measure_variable(measure, "L_b")
-    type_line(v, 400, "L_b=")
+    v.window.set_measure_variable(measure, "L.b")
+    type_line(v, 400, "L.b=")
     path = str(tmp_path / "measured.pdf")
     save_to(v.window, path)
     reopen(v.window, path)
@@ -123,7 +123,7 @@ def test_the_name_is_saved_with_it(v, tmp_path):
     (use,) = equations(v.window)
     assert "not defined" not in shown(use)
     measures = [i for i in v.window.view.scene().items() if isinstance(i, MeasureItem)]
-    assert [m.variable for m in measures] == ["L_b"]
+    assert [m.variable for m in measures] == ["L.b"]
 
 
 # -- it follows every way a measurement's value can change -----------------------------
@@ -138,8 +138,8 @@ def test_dragging_an_end_point_updates_the_calculation(v):
     v.window.current_page().scale = PageScale.from_ratio(100)
     v.window.apply_scale_change()
     measure = a_length(v, 150, 300, 250, 300)            # 100 pt at 1:100
-    v.window.set_measure_variable(measure, "L_b")
-    use = type_line(v, 400, "L_b=")
+    v.window.set_measure_variable(measure, "L.b")
+    use = type_line(v, 400, "L.b=")
     before = shown(use)
     v.window.select_tool("select")
     v.view.scene().clearSelection()
@@ -161,8 +161,8 @@ def test_changing_the_page_scale_updates_the_calculation(v):
     v.window.current_page().scale = PageScale.from_ratio(100)
     v.window.apply_scale_change()
     measure = a_length(v)
-    v.window.set_measure_variable(measure, "L_b")
-    use = type_line(v, 400, "L_b=")
+    v.window.set_measure_variable(measure, "L.b")
+    use = type_line(v, 400, "L.b=")
     first = float(shown(use).split()[0])
     v.window.current_page().scale = PageScale.from_ratio(200)
     v.window.apply_scale_change()                   # what the Page setup panel calls
@@ -180,8 +180,8 @@ def test_dragging_it_into_a_viewport_takes_the_viewports_scale(v):
     v.window.apply_scale_change()
     v.window.add_viewport(v.frame, QRectF(300, 40, 250, 200), PageScale.from_ratio(20), "A")
     measure = a_length(v, 150, 300, 250, 300)
-    v.window.set_measure_variable(measure, "L_b")
-    use = type_line(v, 400, "L_b=")
+    v.window.set_measure_variable(measure, "L.b")
+    use = type_line(v, 400, "L.b=")
     at_1_100 = float(shown(use).split()[0])
     v.window.select_tool("select")
     v.view.scene().clearSelection()
@@ -191,3 +191,57 @@ def test_dragging_it_into_a_viewport_takes_the_viewports_scale(v):
     settle(v.window)
     assert page.viewport_at(measure.pos().x() + 5, measure.pos().y())
     assert float(shown(use).split()[0]) == pytest.approx(at_1_100 / 5, rel=1e-2)
+
+
+# -- SMath's names, and finding them ------------------------------------------------------------
+
+def test_l_underscore_beam_becomes_smaths_l_dot_beam(v):
+    measure = a_length(v)
+    assert v.window.set_measure_variable(measure, "L_beam")
+    assert measure.variable == "L.beam"
+    use = type_line(v, 400, "L.beam=")
+    assert shown(use) == "0.0353 m"
+    assert measure.value_text.startswith("L.beam = ")
+    assert measure._named_parts(measure.value_text) == ("L", "beam", " = 0.04 m")
+
+
+def test_the_label_draws_the_subscript_smaller_and_lower(v):
+    from PySide6.QtGui import QColor, QImage, QPainter
+    measure = a_length(v)
+    v.window.set_measure_variable(measure, "L.beam")
+
+    def ink_rows(item):
+        box = item.boundingRect()
+        image = QImage(int(box.width() * 4) + 4, int(box.height() * 4) + 4, QImage.Format_ARGB32)
+        image.fill(QColor("white"))
+        painter = QPainter(image)
+        painter.scale(4, 4)
+        painter.translate(-box.topLeft())
+        item.paint_visible(painter)
+        painter.end()
+        return image
+
+    with_sub = ink_rows(measure)
+    v.window.set_measure_variable(measure, "Lbeam")
+    plain = ink_rows(measure)
+    assert with_sub != plain, "the subscript is drawn, not the dot"
+
+
+def test_right_click_on_an_area_offers_its_variable_first(v):
+    from calcforge.items.measure import AREA
+    frame = v.frame
+    area = MeasureItem(AREA, [QPointF(0, 0), QPointF(120, 0), QPointF(120, 60), QPointF(0, 60)])
+    v.view.begin_snapshot([frame])
+    frame.add_markup(area, QPointF(150, 300))
+    v.view.commit_snapshot("Area")
+    menu = v.window.build_context_menu(area, area.sceneBoundingRect().center())
+    texts = [a.text() for a in menu.actions() if a.text()]
+    assert texts.index("Variable name…") < texts.index("Edit text…")
+    v.window.set_measure_variable(area, "A.slab")
+    menu = v.window.build_context_menu(area, area.sceneBoundingRect().center())
+    texts = [a.text() for a in menu.actions() if a.text()]
+    assert "Variable: A.slab…" in texts and "Show in Variables" in texts
+    next(a for a in menu.actions() if a.text() == "Show in Variables").trigger()
+    panel = v.window.variables_panel
+    assert v.window.dock_variables.isVisible()
+    assert panel.row_of(panel.tree.currentItem()).name == "A.slab"

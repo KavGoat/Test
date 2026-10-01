@@ -122,7 +122,8 @@ def paint_hatch(painter: QPainter, region: QPainterPath, style) -> None:
         return
     from . import hatches
     ink = QColor(style.hatch_color or style.stroke or "#000000")
-    ink.setAlphaF(max(0.0, min(1.0, style.opacity)))
+    ink.setAlphaF(max(0.0, min(1.0, style.opacity
+                                * getattr(style, "hatch_opacity", 1.0))))
     if style.hatch_tile:
         hatches.paint_tile(painter, region, style.hatch_tile, style.hatch_scale, ink)
         return
@@ -173,6 +174,9 @@ class Style:
     hatch: str = ""
     hatch_scale: float = 1.0
     hatch_color: str = "#000000"
+    # How solid the hatch lines are, on their own: fill_opacity is the
+    # fill's, opacity the whole markup's (line, fill and hatch together).
+    hatch_opacity: float = 1.0
     # A dash pattern of this line's own, in multiples of its width. Empty
     # means the named line style decides, which is the usual case; a line
     # read out of a Bluebeam file brings its own.

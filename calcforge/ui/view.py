@@ -2564,7 +2564,9 @@ class PageView(QGraphicsView):
                 # A click on bare paper only clears the selection, which the
                 # press already did, unless the optional insertion point is
                 # enabled. Dragging still draws a marquee.
-                if preferences.current().insertion_point:
+                # In Calc mode SMath's red cross is the insertion point (it
+                # was placed on the press); one marker, never two.
+                if preferences.current().insertion_point and not self.calc.calc_mode():
                     frame = self.frame_at(scene_pos)
                     if frame is not None:
                         self._insertion_point = self.snap_scene(scene_pos, frame)
@@ -2615,6 +2617,10 @@ class PageView(QGraphicsView):
                     member.setSelected(wanted)
                 self.selectionChanged.emit()
             self._shift_click_selection = None
+            from ..items.calc import keep_blocks_whole
+            said = keep_blocks_whole(self.scene(), self._move_items)
+            if said:
+                self.statusMessage.emit(said)
             self.settle_pages([item for item, _ in self._move_items])
             self.rescale_where_they_landed([item for item, _ in self._move_items])
             self.commit_snapshot("Copy markup" if self._copied else "Move markup")
@@ -2643,6 +2649,11 @@ class PageView(QGraphicsView):
             self._handle_item = None
             if item is not None:
                 item.refresh(page=self.page_of(item) or self.page())
+                from ..items.calc import CalcBlockItem, keep_block_resize
+                if isinstance(item, CalcBlockItem):
+                    said = keep_block_resize(item)
+                    if said:
+                        self.statusMessage.emit(said)
             self.commit_snapshot("Resize markup")
             self.selectionChanged.emit()
             self._update_hover_cursor(scene_pos, event.modifiers())
@@ -3915,7 +3926,9 @@ class PageView(QGraphicsView):
         else:
             self._draw_tool_preview(painter)
         if (preferences.current().insertion_point
-                and self._insertion_point is not None):
+                and self._insertion_point is not None
+                and not self.calc.calc_mode()):
+            # (in Calc mode the red cross is the insertion point)
             self._draw_insertion_point(painter, self._insertion_point)
         if getattr(self, "_search_marks", None):
             self._draw_search_marks(painter)
@@ -4625,8 +4638,13 @@ class PageView(QGraphicsView):
                                 math.copysign(GRID_PT, delta.y()) if delta.y() else 0.0)
             if items:
                 self.begin_snapshot(self.all_frames())
+                origins = [(item, QPointF(item.pos())) for item in items]
                 for item in items:
                     self._place(item, item.pos() + delta)
+                from ..items.calc import keep_blocks_whole
+                said = keep_blocks_whole(self.scene(), origins)
+                if said:
+                    self.statusMessage.emit(said)
                 self.settle_pages(items)
                 self.commit_snapshot("Nudge markup")
                 box = items[0].sceneBoundingRect()

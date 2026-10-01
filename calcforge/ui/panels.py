@@ -195,7 +195,6 @@ class PagesPanel(QWidget):
             button.setToolTip(tip)
             button.clicked.connect(slot)
             buttons.addWidget(button)
-        buttons.addStretch(1)
         layout.addLayout(buttons)
 
         self.list = PageListWidget()
@@ -549,6 +548,32 @@ class PagesPanel(QWidget):
         if entry is not None and 0 <= current < len(document.pages):
             entry.setIcon(self._thumbnail(document.pages[current], document))
 
+    @staticmethod
+    def _with_markups(sheet, page):
+        """The page's markups and calculations drawn over its sheet: the PDF
+        holds the drawing, but what was put on it lives on the canvas (and a
+        CalcForge file's calculations are taken out of the PDF on opening)."""
+        frame = page.frame
+        if frame is None:
+            return sheet
+        items = [i for i in frame.markups() if i.isVisible() and not i.from_drawing]
+        if not items:
+            return sheet
+        from PySide6.QtGui import QPainter
+        from PySide6.QtCore import QRectF
+        image = sheet.toImage() if hasattr(sheet, "toImage") else sheet
+        painter = QPainter(image)
+        painter.scale(image.width() / max(page.width_pt, 1.0),
+                      image.height() / max(page.height_pt, 1.0))
+        previous = frame.print_mode
+        frame.print_mode = True                  # no handles or selection boxes
+        try:
+            frame.paint_items(painter, items, QRectF(0, 0, page.width_pt, page.height_pt))
+        finally:
+            frame.print_mode = previous
+            painter.end()
+        return QPixmap.fromImage(image) if hasattr(sheet, "toImage") else image
+
     def _thumbnail(self, page, document=None, ask: bool = True) -> QIcon:
         """A small picture of the page for the list.
 
@@ -575,22 +600,22 @@ class PagesPanel(QWidget):
                     page.pdf_key, data, int(page.pdf_page_index), whole,
                     bool(getattr(page, "pdf_annotations", True)), ask=ask)
                 if sheet is not None and not sheet.isNull():
-                    return QIcon(sheet.scaled(
-                        across, across, Qt.KeepAspectRatio,
-                        Qt.SmoothTransformation))
+                    small = sheet.scaled(across, across, Qt.KeepAspectRatio,
+                                         Qt.SmoothTransformation)
+                    return _untinted(self._with_markups(small, page))
                 # Not drawn yet. A blank sheet of the right shape now, and the
                 # row is refreshed when the picture arrives.
                 tall = int(across * page.height_pt / max(page.width_pt, 1.0))
                 waiting = QPixmap(across, max(tall, 1))
                 waiting.fill(Qt.white)
-                return QIcon(waiting)
+                return _untinted(waiting)
         scene = page.frame
         if scene is None:
             pixmap = QPixmap(max(int(96 * scale), 16), max(int(128 * scale), 20))
             pixmap.fill(Qt.white)
-            return QIcon(pixmap)
+            return _untinted(pixmap)
         image = scene.render_image(dpi=18.0 * scale, for_print=False)
-        return QIcon(QPixmap.fromImage(image))
+        return _untinted(QPixmap.fromImage(image))
 
 
 # ---------------------------------------------------------------------------
@@ -1076,7 +1101,8 @@ class BookmarksPanel(QWidget):
         self.tree.itemDoubleClicked.connect(self._activate)
         layout.addWidget(self.tree, 1)
 
-        buttons = QHBoxLayout()
+        from .widgets import FlowLayout
+        buttons = FlowLayout()           # wraps when the panel is narrow
         for label, tip, slot in (
                 ("Add", "Bookmark where you are now", self.add_here),
                 ("Rename", "Rename the selected bookmark", self.rename),
@@ -1087,7 +1113,6 @@ class BookmarksPanel(QWidget):
             button.setToolTip(tip)
             button.clicked.connect(slot)
             buttons.addWidget(button)
-        buttons.addStretch(1)
         layout.addLayout(buttons)
 
     # -- display -----------------------------------------------------------
@@ -1504,6 +1529,16 @@ class ToolSetsPanel(QWidget):
         self.rebuild()
 
 
+def _untinted(pixmap) -> QIcon:
+    """A page thumbnail that stays readable when its row is the current one:
+    the same picture for the selected state, so Qt doesn't wash it blue (the
+    row's own highlight says which page is current)."""
+    icon = QIcon()
+    for mode in (QIcon.Normal, QIcon.Selected, QIcon.Active):
+        icon.addPixmap(pixmap, mode)
+    return icon
+
+
 def entry_thumbnail(entry, width: int = 48, height: int = 34) -> QPixmap:
     """Draw a tool set entry as the thing it actually is.
 
@@ -1654,6 +1689,8 @@ class PropertiesPanel(QScrollArea):
         if all(getattr(i, "IS_CALC", False) and getattr(i, "region", None) is not None
                for i in self._items):
             self._add_equation(first)
+        if all(getattr(i, "TYPE", "") == "calc_block" for i in self._items):
+            self._add_block(first)
         appearance = common_capabilities(self._items)
         if appearance - {"font"}:
             self._add_appearance(first, appearance)
@@ -1972,6 +2009,18 @@ class PropertiesPanel(QScrollArea):
                     lambda i: setattr(i.style, "fill", colour), "Fill colour"))
             form.addRow("Fill", fill)
 
+        # each opacity beside what it fades: the fill's here, the hatch's with
+        # the hatch, and the overall one (line, fill and hatch) last
+        if FILL_OPACITY in controls:
+            fill_opacity = LabeledSlider(0, 100, int(first.style.fill_opacity * 100))
+            fill_opacity.setObjectName("fillOpacity")
+            fill_opacity.setToolTip("How solid the fill is (not the line or the hatch)")
+            fill_opacity.valueChanged.connect(
+                lambda value: self._slide(
+                    lambda i: setattr(i.style, "fill_opacity", value),
+                    "Fill opacity"))
+            form.addRow("Fill opacity", fill_opacity)
+
         if WIDTH in controls:
             width = QDoubleSpinBox()
             width.setRange(0.0, 40.0)
@@ -2043,21 +2092,23 @@ class PropertiesPanel(QScrollArea):
             hatch_scale.valueChanged.connect(lambda value: self._apply(
                 lambda i: setattr(i.style, "hatch_scale", value), "Hatch scale"))
             form.addRow("Hatch scale", hatch_scale)
+            hatch_opacity = LabeledSlider(
+                0, 100, int(getattr(first.style, "hatch_opacity", 1.0) * 100))
+            hatch_opacity.setObjectName("hatchOpacity")
+            hatch_opacity.setToolTip("How solid the hatch lines are (not the fill or the line)")
+            hatch_opacity.valueChanged.connect(
+                lambda value: self._slide(
+                    lambda i: setattr(i.style, "hatch_opacity", value), "Hatch opacity"))
+            form.addRow("Hatch opacity", hatch_opacity)
 
         if OPACITY in controls:
             opacity = LabeledSlider(0, 100, int(first.style.opacity * 100))
+            opacity.setObjectName("overallOpacity")
+            opacity.setToolTip("The whole markup: line, fill and hatch together")
             opacity.valueChanged.connect(
                 lambda value: self._slide(
                     lambda i: setattr(i.style, "opacity", value), "Opacity"))
-            form.addRow("Opacity", opacity)
-
-        if FILL_OPACITY in controls:
-            fill_opacity = LabeledSlider(0, 100, int(first.style.fill_opacity * 100))
-            fill_opacity.valueChanged.connect(
-                lambda value: self._slide(
-                    lambda i: setattr(i.style, "fill_opacity", value),
-                    "Fill opacity"))
-            form.addRow("Fill opacity", fill_opacity)
+            form.addRow("Overall opacity", opacity)
 
 
     def _add_breaks(self, item: PolyItem) -> None:
@@ -2383,7 +2434,7 @@ class PropertiesPanel(QScrollArea):
         if len(self._items) == 1 and item.kind != "calibrate":
             variable = QLineEdit(item.variable)
             variable.setObjectName("measureVariable")
-            variable.setPlaceholderText("a name, e.g. L_beam")
+            variable.setPlaceholderText("a name, e.g. L.beam")
             variable.setToolTip("Give it a name and the calculations can use it: it is "
                                 "defined at the top-left of the measurement, and follows "
                                 "it as it changes")
@@ -2510,6 +2561,31 @@ class PropertiesPanel(QScrollArea):
         add.clicked.connect(lambda: self.window.add_to_toolset(first))
         form.addRow("", add)
 
+    def _add_block(self, first) -> None:
+        """A calculation block: what it holds, and whether it keeps its names."""
+        form = self._group("Calculation block")
+        members = first.members()
+        equations = [m for m in members if getattr(m, "region", None) is not None]
+        held = QLabel(f"{len(equations)} equation{'s' if len(equations) != 1 else ''}"
+                      + (f", {len(members) - len(equations)} text" if len(members) > len(equations)
+                         else ""))
+        held.setObjectName("blockHolds")
+        form.addRow("Holds", held)
+        contained = QCheckBox("Self-contained")
+        contained.setObjectName("blockSelfContained")
+        contained.setToolTip("What the equations in the block define stays inside it; "
+                             "the block still reads everything defined above it")
+        contained.setChecked(first.self_contained)
+        contained.toggled.connect(
+            lambda on: self._apply(lambda i: i.set_self_contained(on), "Self-contained"))
+        form.addRow("", contained)
+        if len(self._items) == 1:
+            remove = QPushButton("Remove block, keep equations")
+            remove.setObjectName("blockRemove")
+            remove.setToolTip("Take the frame away; its equations stay on the page as they are")
+            remove.clicked.connect(lambda: self.window.remove_block_keep_equations(first))
+            form.addRow("", remove)
+
     def _forget_default(self, item: MarkupItem) -> None:
         from . import toolsets
 
@@ -2541,16 +2617,6 @@ class PropertiesPanel(QScrollArea):
         locked.toggled.connect(
             lambda on: self._apply(lambda i: i.set_locked(on), "Lock"))
         form.addRow("", locked)
-
-        if all(getattr(i, "TYPE", "") == "calc_block" for i in self._items):
-            contained = QCheckBox("Self-contained")
-            contained.setObjectName("blockSelfContained")
-            contained.setToolTip("What the equations in the block define stays inside it; "
-                                 "the block still reads everything defined above it")
-            contained.setChecked(first.self_contained)
-            contained.toggled.connect(
-                lambda on: self._apply(lambda i: i.set_self_contained(on), "Self-contained"))
-            form.addRow("", contained)
 
         if not getattr(first, "IS_CALC", False):
             # an equation always prints (decision 17)

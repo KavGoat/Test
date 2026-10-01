@@ -392,6 +392,52 @@ class _PageRegionView(RegionItem):
     max_width = 0.0
     too_wide = False
 
+    def _paint_cursor(self, p: QPainter) -> None:
+        """WebSMath's caret (region_item.py, kept byte for byte), with two
+        things the user found wrong while typing a unit: the bar sat on the
+        last letter (an italic N and the bar read as M), and nothing said a
+        unit was being typed. Here the bar stands a pixel clear of the text
+        and, from the ' on, is drawn in the units' blue."""
+        ed = self.editor
+        info = self._row_info(ed.row)
+        if info is None:
+            return
+        n = len(info.slots) - 1
+        x = info.slots[min(ed.pos, n)] if info.slots else info.x
+        urow, ua, ub = ed.underline()
+        uinfo = self._row_info(urow) or info
+        if uinfo.slots:
+            x0, x1 = uinfo.slots[min(ua, len(uinfo.slots) - 1)], uinfo.slots[min(ub, len(uinfo.slots) - 1)]
+        else:
+            x0 = x1 = x
+        if not ed.row.items:
+            x0, x = info.x, info.x + 9   # after the placeholder square, not on it
+            x1 = x
+        elif ed.pos > 0:
+            x += 1.0                     # clear of the glyph before it
+        underline_y = uinfo.base + uinfo.desc + 0.5
+        top = info.base - info.asc
+        if ed.in_subscript():
+            top += info.asc * 0.55
+            underline_y += info.asc * 0.4
+        typing_a_unit = ed.in_unit or ed.row is ed.unit or self._after_apostrophe(ed)
+        p.setPen(QPen(QColor("#0000ff") if typing_a_unit else QColor("black"), 1))
+        if x1 > x0:
+            p.drawLine(QPointF(x0, underline_y), QPointF(x1 + (1.0 if ed.pos > 0 else 0), underline_y))
+        p.drawLine(QPointF(x, top), QPointF(x, max(underline_y, info.base + info.desc + 0.5)))
+
+    @staticmethod
+    def _after_apostrophe(ed) -> bool:
+        """The caret is in a unit name typed after ' (2'kN): from the ' to it,
+        nothing but name characters."""
+        items = ed.row.items[:ed.pos]
+        for item in reversed(items):
+            if item == "'":
+                return True
+            if not isinstance(item, str) or not (item.isalnum() or item in "._°µΩ"):
+                return False
+        return False
+
     def relayout(self) -> None:
         super().relayout()
         self.too_wide = False
@@ -589,6 +635,11 @@ class CalcBlockItem(MarkupItem):
         self.self_contained = False
         self.style = default_block_style()
         self._sheet = None
+        # Its box (scene) and rect at the end of the last gesture: what it held
+        # then is what it holds — equations aren't dragged in or out of a
+        # block (the user: it is like a little page of its own).
+        self._settled_box = None
+        self._settled_rect = None
         # Behind the equations in it, so a click on one finds the equation.
         self.setZValue(-1)
 
@@ -633,7 +684,19 @@ class CalcBlockItem(MarkupItem):
                       QGraphicsItem.ItemPositionHasChanged,
                       QGraphicsItem.ItemRotationHasChanged):
             self._tell_the_sheet()
+        if change in (QGraphicsItem.ItemParentHasChanged, QGraphicsItem.ItemSceneHasChanged):
+            self.settle()
         return result
+
+    def scene_box(self) -> QRectF:
+        return self.mapRectToScene(self._rect.normalized())
+
+    def settle(self) -> None:
+        """What it holds now is what it holds (the end of a gesture)."""
+        if self.scene() is not None:
+            self._settled_box = self.scene_box()
+            self._settled_rect = QRectF(self._rect)
+            self._settled_pos = QPointF(self.pos())
 
     def set_self_contained(self, on: bool) -> None:
         self.self_contained = bool(on)
@@ -743,7 +806,17 @@ def with_block_members(items: list) -> list:
 
 import re as _re  # noqa: E402
 
-NAME_PATTERN = _re.compile(r"^[^\W\d_][\w.]*$")
+# a letter, then letters and digits, and at most one subscript after a dot (L.beam)
+NAME_PATTERN = _re.compile(r"^[^\W\d_][^\W_]*(\.[^\W_]+)?$")
+
+
+def smath_variable_name(name: str) -> str:
+    """A name as SMath writes it: a subscript after a dot. L_beam (as other
+    programs write it) becomes L.beam."""
+    name = (name or "").strip()
+    if "_" in name and "." not in name:
+        name = name.replace("_", ".", 1)
+    return name
 
 
 def valid_variable_name(name: str) -> bool:
@@ -841,3 +914,98 @@ def _typed_region_data(keys: str) -> dict:
     for key in keys:
         editor.key(key)
     return region_to_data(region)
+
+
+
+# -- keeping a block's equations its own ------------------------------------------------------
+
+def _corner(item) -> QPointF:
+    """Where an equation is, for which block holds it: its top-left on the scene."""
+    parent = item.parentItem()
+    return parent.mapToScene(item.pos()) if parent is not None else item.pos()
+
+
+def _holder(blocks, point: QPointF, settled: bool):
+    found, area = None, None
+    for block in blocks:
+        box = block._settled_box if settled else block.scene_box()
+        if box is not None and box.contains(point):
+            size = box.width() * box.height()
+            if area is None or size < area:
+                found, area = block, size
+    return found
+
+
+def keep_blocks_whole(scene, moved: list) -> str:
+    """After a drag or nudge (*moved*: [(item, origin)], origin in the item's
+    parent): an equation that was in a block stays in it, one that wasn't
+    can't be dropped into one, and a block can't land on equations that
+    aren't its own. Returns what to tell the user ('' if nothing was undone)."""
+    blocks = [i for i in scene.items() if isinstance(i, CalcBlockItem)]
+    if not blocks:
+        return ""
+    said = ""
+    origin_of = {id(item): origin for item, origin in moved}
+
+    def before_point(item) -> QPointF:
+        origin = origin_of.get(id(item))
+        parent = item.parentItem()
+        if origin is not None and parent is not None:
+            return parent.mapToScene(origin)
+        return _corner(item)
+
+    calc_items = [i for i in scene.items() if isinstance(i, (CalcItem, CalcTextItem))
+                  and i.parentItem() is not None]
+    # a block put down over equations that aren't its own: the whole move goes back
+    for block in blocks:
+        if id(block) not in origin_of:
+            continue
+        own = {id(i) for i in calc_items if block._settled_box is not None
+               and _holder([block], before_point(i), settled=True) is block}
+        if any(id(i) not in own and block.scene_box().contains(_corner(i)) for i in calc_items):
+            for item, origin in moved:
+                item.setPos(origin)
+            said = "A block can't be put down over equations that aren't its own"
+            break
+    else:
+        for item, origin in moved:
+            if not isinstance(item, (CalcItem, CalcTextItem)):
+                continue
+            before = _holder(blocks, before_point(item), settled=True)
+            now = _holder(blocks, _corner(item), settled=False)
+            if before is now:
+                continue
+            if before is None:
+                item.setPos(origin)                    # not dragged into a block
+                said = "Equations can't be dragged into a block — type them inside it"
+                continue
+            # dragged out of its block: kept inside it, at the nearest place
+            box = item.parentItem().mapRectFromScene(before.scene_box())
+            size = item.local_rect()
+            x = min(max(item.pos().x(), box.left()), box.right() - min(size.width(), box.width()) - 1)
+            y = min(max(item.pos().y(), box.top()), box.bottom() - min(size.height(), box.height()) - 1)
+            item.setPos(QPointF(max(x, box.left()), max(y, box.top())))
+            said = "Equations stay in their block — it is a page of its own"
+    for block in blocks:
+        block.settle()
+    return said
+
+
+def keep_block_resize(block) -> str:
+    """After a block's frame is dragged: it may not take in equations that
+    weren't its own, or leave its own out. If it would, the resize goes back."""
+    scene = block.scene()
+    if scene is None or block._settled_box is None:
+        return ""
+    calc_items = [i for i in scene.items() if isinstance(i, (CalcItem, CalcTextItem))
+                  and i.parentItem() is not None]
+    before = {id(i) for i in calc_items if block._settled_box.contains(_corner(i))}
+    now = {id(i) for i in calc_items if block.scene_box().contains(_corner(i))}
+    if before == now:
+        block.settle()
+        return ""
+    block.set_local_rect(QRectF(block._settled_rect))
+    block.setPos(block._settled_pos)
+    block.settle()
+    return ("A block can't be made smaller than what is in it" if before - now
+            else "A block can't be stretched over equations that aren't its own")

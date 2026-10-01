@@ -64,12 +64,7 @@ def main(argv: list[str] | None = None) -> int:
     for argument in argv[1:]:
         if argument.lower().endswith(".pdf") and os.path.exists(argument):
             try:
-                window.open_path(argument)
-                window.current_index = 0
-                window.rebuild_scenes()
-                window.apply_document_mode()
-                window.view.fit_page()
-                window.update_title()
+                window.open_from_command_line(argument)
             except Exception as exc:  # noqa: BLE001
                 print(f"Could not open {argument}: {exc}", file=sys.stderr)
             break

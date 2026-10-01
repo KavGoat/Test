@@ -606,3 +606,73 @@ paste back live.
   rename didn't touch it.
 
 **Different from SMath and Bluebeam** — nothing new in this phase.
+
+## After phase 8 — the user's bug list (2026-09-30 and 2026-10-01)
+
+**Fixed**
+
+- **`=` couldn't be typed.** A name that is also a unit (t, m, s, g, A,
+  h, L…) blocked every key after it — `=`, `:`, operators — until the
+  variable or the unit was picked from the list (WebSMath, after SMath
+  Cloud). The variable defined on the sheet now wins and typing carries
+  on; the unit is `'m` as SMath writes units.
+- **`t:=test+1=`** — a definition can show its value, as SMath Studio
+  desktop does (the worksheet already could; the editor refused the `=`).
+- **Autocomplete list in the wrong place**: it was offset by the
+  equation's whole position on the page. It now opens under the caret and
+  follows the page when it scrolls.
+- **Red and blue crosses together**: in Calc mode the red cross is the only
+  insertion marker.
+- **Caret while typing a unit**: it stands a pixel clear of the last
+  letter (an italic N and the bar read as M), sits after the empty unit
+  box's square rather than on it, and is blue from the `'` on.
+- **Calculation blocks are pages of their own**: an equation can't be
+  dragged out of its block (it stops at the edge) or into one (it goes
+  back); a block can't be moved or resized over equations that aren't its
+  own, or shrunk off its own. Typed or pasted inside, an equation belongs.
+  Right-click: Select its equations, Remove block (keep equations); in
+  Properties, a Calculation block section (what it holds, Self-contained,
+  Remove). Making one over more than was selected says what else it took.
+- **Measurement variables** use SMath's names: `L.beam` (typing `L_beam`
+  gives `L.beam`), drawn with the subscript on the measurement. Right-click
+  any measurement (area included): Variable… first, and Show in Variables.
+- **Markup | Calc** is a switch at the end of the top toolbar, the mode on
+  lit in the accent colour (it was a word in the status bar).
+- **Toolbars** go top or bottom only — dropped at a side they ended up in
+  the panel rails; an old saved layout with one there is put right.
+- **Panels flex with their width**: the Maths panel reflows (more buttons
+  to a row when wide, every row filled); Bookmarks' buttons and Search's
+  options wrap; Search's and Variables' columns share the width; Page setup's
+  two size boxes share the row.
+- **Style bar** stays put (it came and went, moving the page); with nothing
+  to style its controls are greyed. **Fill %** sits by the fill colour,
+  **Hatch %** (new: the hatch on its own) by the hatch, **Overall %** (line,
+  fill and hatch together) last; changing the hatch's no longer fades the
+  fill. Properties says the same.
+- **Page number** is centred under the page view, following panels as they
+  open and close (as close as the status bar's controls allow).
+- **Equations** have no markup pen in Properties or on the style bar; their
+  menu leaves out Set default, Format painter, Hide, Flatten, Apply pages.
+- **Page thumbnails** show the markups and calculations (a reopened page's
+  was blank) and are no longer washed blue when current.
+- **`calcforge drawing.pdf`** opens the file again (`main()` called a
+  method that no longer existed).
+- **Dark theme checkboxes** were invisible when unticked; both themes now
+  draw the box, filled with the accent and a tick when on.
+
+**Tests**: `tests/test_ui_fixes.py`, `tests/test_real_session.py` (the
+whole session above, checked at every stage), `tests/test_smath_examples_in_window.py`
+(SMath's example files on a CalcForge page give the results SMath saved:
+all 36 numeric results it stores, 15 of them quantities), additions to
+`test_calc_blocks.py`, `test_measure_variables.py`, `test_layout.py`,
+`test_settings_migration.py`. Rewritten to the new rules (the old ones
+recorded the behaviour asked to change):
+`test_variable_unit_clash_needs_a_choice` →
+`test_a_variable_named_like_a_unit_is_the_variable`,
+`test_the_style_toolbar_goes_when_it_has_nothing_to_offer` →
+`test_the_style_toolbar_stays_put`, `test_the_toolbars_can_be_moved_to_any_edge`
+→ `test_toolbars_move_between_top_and_bottom_never_onto_the_rails`.
+
+**Different from SMath**: a variable named like a unit is the variable
+without asking (SMath Cloud asks); SMath can't run here, so its behaviour is
+checked against its saved files and WebSMath's recordings of SMath Cloud.

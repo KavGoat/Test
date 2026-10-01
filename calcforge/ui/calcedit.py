@@ -92,6 +92,10 @@ class CalcEditing:
         self.suggestions = SuggestionList(view)
         self.suggestions.hide()
         self.suggestions.itemClicked.connect(self._apply_suggestion)
+        # The list is a window of its own, placed on the screen: when the page
+        # scrolls or zooms under it, it moves with the equation.
+        for bar in (view.horizontalScrollBar(), view.verticalScrollBar()):
+            bar.valueChanged.connect(lambda _v: self._follow_the_view())
         self.dynamic_assistance = True
         self._select_drag = None                    # (row, first slot) while dragging a selection
         self._overflow: list = []                   # equations past the bottom of their page
@@ -779,11 +783,13 @@ class CalcEditing:
             region.pending = True
         item.relayout()
         self.view.documentEdited.emit()
+        # scroll first: the list is placed on the screen, so it goes where
+        # the equation is once the view has moved to keep it in sight
+        self.view.follow_off_screen(item.sceneBoundingRect())
         if typed and region.kind == "math":
             self.update_suggestions(item)
         else:
             self.hide_suggestions()
-        self.view.follow_off_screen(item.sceneBoundingRect())
 
     def undo(self) -> bool:
         """Ctrl+Z inside an equation takes back the last keystroke first."""
@@ -826,16 +832,28 @@ class CalcEditing:
         s.start = start
         s.word = word
         s.fill(entries, selected_index(entries, word))
-        view_point = self.view.mapFromScene(self._cursor_scene_pos(item))
-        s.move(self.view.viewport().mapToGlobal(view_point) + QPoint(-2, 1))
+        self._place_suggestions(item)
         rows = min(s.count(), 8)
         s.setMaximumHeight(16 * 8 + 4)
         s.resize(max(90, s.sizeHintForColumn(0) + 22), s.sizeHintForRow(0) * rows + 4)
         s.show()
         s.show_tooltip()
 
+    def _follow_the_view(self) -> None:
+        if self.suggestions.isVisible() and self.item is not None:
+            self._place_suggestions(self.item)
+
+    def _place_suggestions(self, item: CalcItem) -> None:
+        view_point = self.view.mapFromScene(self._cursor_scene_pos(item))
+        self.suggestions.move(self.view.viewport().mapToGlobal(view_point) + QPoint(-2, 1))
+
     def _cursor_scene_pos(self, item: CalcItem) -> QPointF:
-        at = item._view.cursor_scene_pos()      # off the scene: region pixels
+        # WebSMath's drawing puts itself at the region's worksheet position
+        # (setPos(region.x, region.y)), which in CalcForge has the page folded
+        # into y; the page item places it, so only the cursor's place inside
+        # the region counts here — otherwise the list lands that far away.
+        view = item._view
+        at = view.cursor_scene_pos() - view.pos()      # region pixels, from its corner
         return item.mapToScene(QPointF(at.x() * PT_PER_PX, at.y() * PT_PER_PX))
 
     def hide_suggestions(self) -> None:
@@ -846,8 +864,6 @@ class CalcEditing:
         entry, Enter only once the list has been moved through, Up/Down move."""
         s = self.suggestions
         if key == Qt.Key_Escape or s.count() < 1:
-            if self._clash(self.item) and key != Qt.Key_Escape:
-                return True
             self.hide_suggestions()
             return key == Qt.Key_Escape
         if key == Qt.Key_Tab or (key in (Qt.Key_Return, Qt.Key_Enter) and s.activated):
@@ -907,16 +923,18 @@ class CalcEditing:
         return word
 
     def _block_for_clash(self, item: Optional[CalcItem]) -> bool:
+        """A name that is both a worksheet variable and a unit (m:10 above,
+        then m typed): the variable is meant — it was defined here — and the
+        typing carries on. (WebSMath, after SMath Cloud, blocked every key
+        until one was chosen from the list, so = and : could not be typed.)
+        The unit is still one keystroke away: 'm."""
         word = self._clash(item)
         if word is None:
             return False
-        if not self.suggestions.isVisible():
-            self.update_suggestions(item, force=True)
-        QApplication.beep()
+        item.region.editor.confirmed_words.add(word)
         self.view.statusMessage.emit(
-            f"'{word}' is both a variable and a unit - choose which one from the list "
-            "(Up/Down, then Tab or Enter).")
-        return True
+            f"'{word}' is taken as your variable — for the unit, type '{word}")
+        return False
 
 
 # -- WebSMath's commands on the selected part of an equation ---------------------------------

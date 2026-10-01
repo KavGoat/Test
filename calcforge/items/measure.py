@@ -5,7 +5,7 @@ import math
 from typing import Optional
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import (QBrush, QColor, QFontMetricsF, QPainter, QPainterPath,
+from PySide6.QtGui import (QBrush, QColor, QFont, QFontMetricsF, QPainter, QPainterPath,
                            QPen, QPolygonF)
 
 from ..core.units import Q_, convert, format_quantity, parse_unit
@@ -669,8 +669,36 @@ class MeasureItem(MarkupItem):
         painter.rotate(self.label_rotation())
         box = QRectF(-width / 2, -height / 2, width, height)
         painter.setPen(QPen(self.style.text_qcolor()))
-        painter.drawText(box, Qt.AlignCenter, text)
+        named = self._named_parts(text)
+        if named is None:
+            painter.drawText(box, Qt.AlignCenter, text)
+        else:
+            # L.beam = 6.25 m, with "beam" as a subscript — as SMath writes it
+            base, sub, rest = named
+            small = QFont(font)
+            small.setPointSizeF(font.pointSizeF() * 0.72 if font.pointSizeF() > 0 else 7)
+            small_metrics = QFontMetricsF(small)
+            whole = (metrics.horizontalAdvance(base) + small_metrics.horizontalAdvance(sub)
+                     + metrics.horizontalAdvance(rest))
+            x = -whole / 2
+            baseline = metrics.ascent() / 2 - metrics.descent() / 2
+            painter.drawText(QPointF(x, baseline), base)
+            x += metrics.horizontalAdvance(base)
+            painter.setFont(small)
+            painter.drawText(QPointF(x, baseline + metrics.ascent() * 0.28), sub)
+            x += small_metrics.horizontalAdvance(sub)
+            painter.setFont(font)
+            painter.drawText(QPointF(x, baseline), rest)
         painter.restore()
+
+    def _named_parts(self, text: str):
+        """(base, subscript, the rest) when the label starts with a subscripted
+        variable name (L.beam = …); None otherwise."""
+        name = self.variable
+        if not name or "." not in name or self.custom_label or not text.startswith(name + " = "):
+            return None
+        base, sub = name.split(".", 1)
+        return base, sub, text[len(name):]
 
     def leader_path(self) -> list:
         """From the dimension line out to a value that has been moved off it.

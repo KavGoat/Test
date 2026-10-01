@@ -75,6 +75,21 @@ QToolBar QToolButton:checked {{
     background: {accent_soft}; border-bottom: 2px solid {accent};
 }}
 QToolBar QToolButton::menu-indicator {{ width: 0; }}
+/* Markup | Calc: one pill, the mode on filled with the accent */
+QWidget#modeSwitch QToolButton {{
+    border: 1px solid {chrome_edge}; border-radius: 0; margin: 0;
+    padding: 4px 12px; font-weight: 600; background: {surface};
+}}
+QWidget#modeSwitch QToolButton#modeMarkup {{
+    border-top-left-radius: 11px; border-bottom-left-radius: 11px; border-right: 0;
+}}
+QWidget#modeSwitch QToolButton#modeCalc {{
+    border-top-right-radius: 11px; border-bottom-right-radius: 11px;
+}}
+QWidget#modeSwitch QToolButton:checked {{
+    background: {accent}; color: white; border-color: {accent};
+}}
+QWidget#modeSwitch QToolButton:hover:!checked {{ background: {accent_soft}; }}
 QToolBar QLabel {{ color: {ink_soft}; padding: 0 3px 0 6px; }}
 QToolBar::separator {{ background: {chrome_edge}; width: 1px; margin: 5px 6px; }}
 /* The grip is left to the style to draw — a rule here would replace the dots
@@ -225,6 +240,16 @@ QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
 
 QSplitter::handle {{ background: {chrome_edge}; }}
 QCheckBox, QRadioButton {{ spacing: 7px; }}
+/* a box you can see in either theme, filled with the accent when ticked */
+QCheckBox::indicator {{
+    width: 13px; height: 13px; border-radius: 3px;
+    border: 1px solid {ink_soft}; background: {field};
+}}
+QCheckBox::indicator:hover {{ border-color: {accent}; }}
+QCheckBox::indicator:checked {{
+    background: {accent}; border-color: {accent}; image: url("{arrow_tick}");
+}}
+QCheckBox::indicator:disabled {{ border-color: {chrome_edge}; background: {surface}; }}
 QToolTip {{
     background: {ink}; color: {field}; border: 0; padding: 6px 8px;
     border-radius: 3px;
@@ -262,11 +287,16 @@ def _arrow_files(ink: str, name: str) -> dict:
     folder = os.path.join(tempfile.gettempdir(), "calcforge-theme")
     shapes = {"up": "1,7 5,2 9,7", "down": "1,3 5,8 9,3"}
     paths = {}
-    for way, points in shapes.items():
+    drawings = {way: ('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" '
+                      f'viewBox="0 0 10 10"><polygon points="{points}" '
+                      f'fill="{ink}"/></svg>') for way, points in shapes.items()}
+    # a ticked box's tick, white on the accent
+    drawings["tick"] = ('<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" '
+                        'viewBox="0 0 12 12"><polyline points="2.5,6.5 5,9 9.5,3" '
+                        'fill="none" stroke="#ffffff" stroke-width="1.9" '
+                        'stroke-linecap="round" stroke-linejoin="round"/></svg>')
+    for way, svg in drawings.items():
         path = os.path.join(folder, f"{name}-{way}.svg")
-        svg = ('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" '
-               f'viewBox="0 0 10 10"><polygon points="{points}" '
-               f'fill="{ink}"/></svg>')
         try:
             os.makedirs(folder, exist_ok=True)
             current = ""

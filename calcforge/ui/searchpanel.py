@@ -11,7 +11,7 @@ import re
 
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QTextCursor, QTextDocument
-from PySide6.QtWidgets import (QCheckBox, QGridLayout, QHBoxLayout, QLabel,
+from PySide6.QtWidgets import (QCheckBox, QGridLayout, QHBoxLayout, QHeaderView, QLabel,
                                QLineEdit, QPushButton, QTreeWidget,
                                QTreeWidgetItem, QVBoxLayout, QWidget)
 
@@ -48,7 +48,8 @@ class SearchPanel(QWidget):
         grid.addWidget(self.replacement, 1, 0)
         grid.addWidget(replace, 1, 1)
         layout.addLayout(grid)
-        options = QHBoxLayout()
+        from .widgets import FlowLayout
+        options = FlowLayout(spacing=6)   # wraps when the panel is narrow
         self.in_drawing = QCheckBox("Drawing")
         self.in_drawing.setToolTip("The PDF's own text, on every page")
         self.in_drawing.setChecked(True)
@@ -61,12 +62,18 @@ class SearchPanel(QWidget):
         self.whole_word.setToolTip("Whole words only (markups)")
         for box in (self.in_drawing, self.in_markups, self.match_case, self.whole_word):
             options.addWidget(box)
-        options.addStretch(1)
         layout.addLayout(options)
         self.results = QTreeWidget()
         self.results.setHeaderLabels(["Page", "Found", "In"])
         self.results.setRootIsDecorated(False)
         self.results.setAlternatingRowColors(True)
+        # the columns share the panel's width rather than scrolling sideways
+        header = self.results.header()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.Stretch)
+        header.setMinimumSectionSize(30)
         self.results.itemClicked.connect(lambda node, _c: self.show_hit(node))
         self.results.currentItemChanged.connect(
             lambda node, _old: node is not None and self.show_hit(node))

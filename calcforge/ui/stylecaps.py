@@ -28,6 +28,13 @@ def capabilities(item, for_default: bool = False) -> set[str]:
     """
     if getattr(item, "TYPE", "") == "link":
         return {STROKE}           # only the colour of its on-screen outline
+    if getattr(item, "TYPE", "") in ("calc", "calc_drawing"):
+        # an equation is drawn by SMath's typesetting: its font, colours and
+        # result format are its own settings (Properties > Equation), not a
+        # markup's pen and fill
+        return set()
+    if getattr(item, "TYPE", "") == "calc_block":
+        return {STROKE, WIDTH, DASH}      # its frame
     if isinstance(item, SnapshotItem):
         # A snapshot is drawn linework, not a photo: it has an outline, that
         # outline defaults to none, and it is the user's to set — its colour,
