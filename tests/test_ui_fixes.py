@@ -405,3 +405,16 @@ def test_the_style_bars_number_boxes_fit_their_numbers_and_no_more(window):
                       for v in (spin.minimum(), spin.maximum())), key=metrics.horizontalAdvance)
         assert spin.width() >= metrics.horizontalAdvance(widest) + 18, spin.objectName()
         assert spin.width() <= metrics.horizontalAdvance(widest) + 50, spin.objectName()
+
+
+def test_line_and_hatch_pickers_show_only_their_sample(window):
+    """As Bluebeam's: closed, the sample fills the box — no name, and no
+    empty room beside it (the user, 2026-10-01). The name is the tooltip."""
+    from calcforge.ui.widgets import PatternCombo
+    for combo in (window.dash_combo, window.hatch_combo):
+        assert isinstance(combo, PatternCombo)
+        assert combo.sizeHint().width() <= 120
+        combo.setCurrentIndex(1)
+        assert combo.toolTip() == combo.currentText()
+        image = combo.grab().toImage()
+        assert not image.isNull()

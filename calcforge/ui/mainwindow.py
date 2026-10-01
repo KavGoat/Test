@@ -1051,7 +1051,8 @@ class MainWindow(QMainWindow):
             self._style_widgets[ARROW_SIZE].append(label_action)
             self._style_widgets[ARROW_SIZE].append(style_bar.addWidget(control))
         self._style_widgets[DASH].append(style_bar.addWidget(QLabel(" Dash ")))
-        self.dash_combo = QComboBox()
+        from .widgets import PatternCombo
+        self.dash_combo = PatternCombo()
         from .widgets import big_pattern_dropdown
         big_pattern_dropdown(self.dash_combo)
         for name in DASH_ARRAYS:
@@ -1141,7 +1142,8 @@ class MainWindow(QMainWindow):
         # panel offered a hatch and a transparency the toolbar had no way to
         # reach. They are the same setting either way, so they are here too.
         self._style_widgets[HATCH].append(style_bar.addWidget(QLabel(" Hatch ")))
-        self.hatch_combo = QComboBox()
+        from .widgets import PatternCombo
+        self.hatch_combo = PatternCombo()
         self.hatch_combo.setObjectName("hatchPattern")
         big_pattern_dropdown(self.hatch_combo)
         for name in HATCH_PATTERNS:
@@ -7316,6 +7318,20 @@ class MainWindow(QMainWindow):
         self.zoom_combo.blockSignals(False)
 
     def _show_position(self, point: QPointF) -> None:
+        """The pointer's place in the status bar, at most every 30 ms: set on
+        every mouse move it laid the status bar out again under a pan or a
+        drag, many times a frame."""
+        self._position_wanted = QPointF(point)
+        timer = getattr(self, "_position_timer", None)
+        if timer is None:
+            timer = self._position_timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.setInterval(30)
+            timer.timeout.connect(lambda: self._write_position(self._position_wanted))
+        if not timer.isActive():
+            timer.start()
+
+    def _write_position(self, point: QPointF) -> None:
         scale = self.current_page().scale
         millimetres = f"{point.x() * PT_TO_MM:.1f}, {point.y() * PT_TO_MM:.1f} mm"
         if scale.is_calibrated():

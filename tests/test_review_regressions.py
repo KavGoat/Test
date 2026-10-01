@@ -304,6 +304,7 @@ def test_wheel_scrolls_the_canvas_in_small_steps(window):
     event = QWheelEvent(QPointF(point), QPointF(window.view.viewport().mapToGlobal(point)),
                         QPoint(), QPoint(0, -120), Qt.NoButton, mods, Qt.NoScrollPhase, False)
     QApplication.sendEvent(window.view.viewport(), event)
+    window.view.finish_scrolling()          # it glides there
     assert bar.value() - before == 30
 
 

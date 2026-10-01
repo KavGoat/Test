@@ -388,9 +388,13 @@ class PageFrame(QGraphicsObject):
         tiles: list = []
         missing = True
         if not shown_part.isEmpty():
-            # A margin, so a small scroll lands on tiles that are already here.
+            # A margin, so a scroll lands on tiles that are already here: most
+            # of a screen up and down, which is the way a drawing set is read
+            # — rendered on the spare cores while the screen is looked at, so
+            # what scrolls in is already sharp (2026-10-01). The tiles nearest
+            # the middle are asked for first.
             margin_x = shown_part.width() * 0.25
-            margin_y = shown_part.height() * 0.25
+            margin_y = shown_part.height() * 0.75
             asked = shown_part.adjusted(-margin_x, -margin_y, margin_x, margin_y)
             tiles, missing = pdftiles.TILES.tiles(
                 page.pdf_key, data, index, whole, scale, asked, shown, without,

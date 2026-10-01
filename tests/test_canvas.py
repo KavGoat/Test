@@ -239,6 +239,8 @@ def wheel(view, dy, modifiers=Qt.NoModifier, at=None, pixels=False):
                         pixel, angle, Qt.NoButton, modifiers,
                         Qt.NoScrollPhase, False)
     QApplication.sendEvent(view.viewport(), event)
+    if hasattr(view, "finish_scrolling"):
+        view.finish_scrolling()          # a notch glides; measure where it lands
 
 
 def press(view, key, modifiers=Qt.NoModifier):
@@ -551,3 +553,53 @@ def test_closing_a_panel_any_other_way_unlights_its_icon(window):
     window.show_panel("dock_pages", True)
     window.dock_pages.close()
     assert not window.left_rail.buttons["dock_pages"].isChecked()
+
+
+def test_a_wheel_notch_glides_instead_of_jumping(window):
+    """The user, 2026-10-01: scrolling was jittery. A notch now eases over a
+    few frames, and a quick spin is one continuous movement."""
+    import time
+    from PySide6.QtWidgets import QApplication
+    from calcforge.ui import preferences
+    _three_pages(window)
+    window.show()
+    prefs = preferences.current()
+    was = prefs.wheel
+    prefs.wheel = preferences.WHEEL_SCROLL
+    try:
+        bar = window.view.verticalScrollBar()
+        for _ in range(20):
+            QApplication.processEvents()                     # the window settles first
+            time.sleep(0.005)
+        bar.setValue(bar.maximum() // 3)
+        QApplication.processEvents()
+        start = bar.value()
+        from PySide6.QtCore import QPoint
+        from PySide6.QtGui import QWheelEvent
+        view = window.view
+        centre = QPointF(view.viewport().rect().center())
+        for _ in range(3):                                   # a quick spin
+            QApplication.sendEvent(view.viewport(), QWheelEvent(
+                centre, view.viewport().mapToGlobal(centre.toPoint()), QPoint(), QPoint(0, -120),
+                Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False))
+        assert bar.value() == start, "nothing jumps"
+        seen = []
+        until = time.monotonic() + 1.0
+        while time.monotonic() < until and bar.value() != start + 90:
+            QApplication.processEvents()
+            if not seen or seen[-1] != bar.value():
+                seen.append(bar.value())
+            time.sleep(0.004)
+        assert bar.value() == start + 90, "three notches, all of the way"
+        assert len(seen) >= 5, f"in many small steps, not a jump: {seen}"
+        bar.setValue(start)                                  # the bar itself wins
+        QApplication.sendEvent(view.viewport(), QWheelEvent(
+            centre, view.viewport().mapToGlobal(centre.toPoint()), QPoint(), QPoint(0, -120),
+            Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False))
+        bar.setValue(start - 200)
+        for _ in range(40):
+            QApplication.processEvents()
+            time.sleep(0.004)
+        assert bar.value() == start - 200, "a glide gives way to the scroll bar"
+    finally:
+        prefs.wheel = was

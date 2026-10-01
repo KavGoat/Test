@@ -776,3 +776,20 @@ checked against its saved files and WebSMath's recordings of SMath Cloud.
   the style bar's line and hatch samples are drawn in the theme's ink and
   its number boxes are as wide as their longest value; an equation in a
   block stops at the block's edge while it is dragged.
+- **Smooth scrolling and panning** (2026-10-01). A wheel notch glides over
+  a few frames instead of jumping 30 px; a quick spin is one continuous
+  movement, and the scroll bar or a key takes over at once. A pan step is
+  one scroll, not two (across and down separately made Qt repaint a third
+  of the window on every step instead of shifting it). Tiles are put into
+  the screen's pixel format on the render thread — converting them on the
+  window's thread was a 10 ms freeze per tile, the stutter felt while
+  scrolling — and pages render most of a screen ahead up and down on the
+  spare cores. The pointer's position in the status bar is updated at most
+  every 30 ms. Measured on a 30-sheet A1 drawing at 60 frames a second:
+  0–1 frames over 16 ms in 2,800 at 100% scaling; a pan step repaints 0.6%
+  of the window.
+- **Line and hatch pickers as Bluebeam's** (2026-10-01): closed, they show
+  only the sample, filling the box (104 px, was ~170 with the name and room
+  beside it); the name is the tooltip; the open list keeps every pattern
+  big with its name, on the list's own background so the theme's ink shows
+  in dark mode too.

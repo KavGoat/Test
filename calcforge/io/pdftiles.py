@@ -393,6 +393,13 @@ class _Worker(QThread):
                                 # Own the pixels before this worker gets another
                                 # job and overwrites its fixed shared buffer.
                                 image = QImage(slot['memory'].buf, width, height, stride, shape).copy()
+                                # In the screen's own pixel format, here off the
+                                # window's thread: converting each tile there as
+                                # it arrived was a 10 ms freeze apiece, felt as
+                                # stutter while scrolling (2026-10-01).
+                                image = image.convertToFormat(
+                                    QImage.Format_ARGB32_Premultiplied if alpha
+                                    else QImage.Format_RGB32)
                             self._emit(key, image)
             finally:
                 for slot in slots:

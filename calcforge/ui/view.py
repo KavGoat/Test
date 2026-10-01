@@ -10,7 +10,7 @@ import re
 from copy import deepcopy
 from typing import Optional
 
-from PySide6.QtCore import (QEvent, QMimeData, QPoint, QPointF, QRect, QRectF, Qt,
+from PySide6.QtCore import (QEvent, QMimeData, QObject, QPoint, QPointF, QRect, QRectF, Qt,
                             QTimer, Signal)
 from PySide6.QtGui import (QBrush, QColor, QCursor, QFontMetricsF, QKeyEvent,
                            QMouseEvent, QPainter, QPen, QPolygonF, QTextCursor,
@@ -304,6 +304,68 @@ def typing_somewhere_else() -> bool:
     return False
 
 
+
+class _Glide(QObject):
+    """A wheel notch glides rather than jumps (the user, 2026-10-01: "jittery,
+    it needs to be ultra smooth"). Each notch moves where the view is going;
+    every frame the view covers a share of what is left — the same share per
+    millisecond whatever the frame rate — so a quick spin of the wheel is one
+    continuous movement and a single notch eases in and out of its 30 px.
+    Anything else that moves the view (the scroll bar, a key, a pan) wins
+    straight away: the glide notices and lets go."""
+
+    #: how quickly what is left is covered: ~95% of it in 3 x this
+    EASE_MS = 38.0
+
+    def __init__(self, view):
+        super().__init__(view)
+        from PySide6.QtCore import QElapsedTimer, QTimer
+        self.view = view
+        self.timer = QTimer(self)
+        self.timer.setTimerType(Qt.PreciseTimer)
+        self.timer.setInterval(7)
+        self.timer.timeout.connect(self._step)
+        self.clock = QElapsedTimer()
+        self.axes = {}        # bar -> [where it is going, where it is (float), what was set]
+
+    def by(self, bar, distance: float) -> None:
+        state = self.axes.get(bar)
+        if state is None or bar.value() != state[2]:
+            state = [float(bar.value()), float(bar.value()), bar.value()]
+            self.axes[bar] = state
+        state[0] = min(max(state[0] + distance, bar.minimum()), bar.maximum())
+        if not self.timer.isActive():
+            self.clock.start()
+            self.timer.start()
+
+    def finish(self) -> None:
+        """Arrive now: wherever every glide was going."""
+        for bar, state in list(self.axes.items()):
+            if bar.value() == state[2]:
+                bar.setValue(round(state[0]))
+        self.axes.clear()
+        self.timer.stop()
+
+    def _step(self) -> None:
+        import math
+        elapsed = max(self.clock.restart(), 1)
+        share = 1.0 - math.exp(-elapsed / self.EASE_MS)
+        for bar, state in list(self.axes.items()):
+            if bar.value() != state[2]:
+                del self.axes[bar]              # something else moved it: it wins
+                continue
+            target, here, _set = state
+            here += (target - here) * share
+            if abs(target - here) < 0.5:
+                here = target
+            state[1] = here
+            state[2] = round(here)
+            bar.setValue(state[2])
+            if here == target:
+                del self.axes[bar]
+        if not self.axes:
+            self.timer.stop()
+
 class PageView(QGraphicsView):
     """Displays one :class:`~calcforge.ui.scene.PageScene` and edits it."""
 
@@ -322,6 +384,7 @@ class PageView(QGraphicsView):
         # Equations: the one being typed into, the red cross, SMath's keys.
         from .calcedit import CalcEditing
         self.calc = CalcEditing(self)
+        self.glide = _Glide(self)
         self.tool_key = "select"
         self.sticky_tool = False
         self.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing |
@@ -883,9 +946,11 @@ class PageView(QGraphicsView):
         notches = event.angleDelta().y()
         if event.modifiers() & Qt.ShiftModifier:
             raw = pixels.y() or pixels.x()
-            step = raw if raw else round(notches * WHEEL_SCROLL_FACTOR)
             bar = self.horizontalScrollBar()
-            bar.setValue(bar.value() - step)
+            if raw:
+                bar.setValue(bar.value() - raw)          # a trackpad: already smooth
+            else:
+                self.glide.by(bar, -notches * WHEEL_SCROLL_FACTOR)
             event.accept()
             return
         if (self.scroll_mode == "page"
@@ -920,9 +985,37 @@ class PageView(QGraphicsView):
             event.accept()
             return
         if notches:
-            bar = self.verticalScrollBar()
-            bar.setValue(bar.value() - round(notches * WHEEL_SCROLL_FACTOR))
+            self.glide.by(self.verticalScrollBar(), -notches * WHEEL_SCROLL_FACTOR)
         event.accept()
+
+    _scroll_batch = None
+
+    def scrollContentsBy(self, dx: int, dy: int) -> None:
+        if self._scroll_batch is not None:
+            self._scroll_batch[0] += dx
+            self._scroll_batch[1] += dy
+            return
+        super().scrollContentsBy(dx, dy)
+
+    def scroll_both(self, dx: int, dy: int) -> None:
+        """Move the view by (dx, dy) as one scroll. Set across and then down,
+        it was two scrolls in one frame, and Qt gave up shifting what was
+        already drawn and painted a third of the window again on every step
+        of a pan (2026-10-01)."""
+        self._scroll_batch = [0, 0]
+        try:
+            across, down = self.horizontalScrollBar(), self.verticalScrollBar()
+            across.setValue(across.value() - dx)
+            down.setValue(down.value() - dy)
+        finally:
+            moved_x, moved_y = self._scroll_batch
+            self._scroll_batch = None
+        if moved_x or moved_y:
+            super().scrollContentsBy(moved_x, moved_y)
+
+    def finish_scrolling(self) -> None:
+        """Put the view where the wheel was taking it, now."""
+        self.glide.finish()
 
     # ------------------------------------------------------------------
     # snapping
@@ -2005,8 +2098,7 @@ class PageView(QGraphicsView):
         if self._mode == "pan":
             delta = event.position().toPoint() - self._pan_origin
             self._pan_origin = event.position().toPoint()
-            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta.x())
-            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta.y())
+            self.scroll_both(delta.x(), delta.y())
             event.accept()
             return
 

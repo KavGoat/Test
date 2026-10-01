@@ -288,7 +288,8 @@ class _BigPatternDelegate(QStyledItemDelegateBase := __import__(
             text_colour = option.palette.text().color()
         swatch = option.rect.adjusted(6, 3, 0, -3)
         swatch.setWidth(self.SWATCH.width())
-        painter.fillRect(swatch, QColor("#ffffff"))
+        # the list's own background: the samples are drawn in the theme's ink
+        painter.fillRect(swatch, option.palette.base())
         icon = index.data(Qt.DecorationRole)
         if icon is not None:
             icon.paint(painter, swatch)
@@ -415,3 +416,48 @@ class ModeSwitch(QWidget):
 
     def setText(self, _text: str) -> None:
         pass                                   # each side has its own word
+
+
+class PatternCombo(QComboBox):
+    """A line-style or hatch picker that shows, closed, only the sample —
+    filling the box, no name and no room left over beside it, as Bluebeam's
+    do (the user, 2026-10-01: "padding on the right of the word"). The name
+    is the tooltip, and the open list shows every pattern big with its name."""
+
+    SAMPLE_WIDTH = 72
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.currentIndexChanged.connect(lambda _i: self.setToolTip(self.currentText()))
+
+    def sizeHint(self):
+        from PySide6.QtWidgets import QStyle, QStyleOptionComboBox
+        option = QStyleOptionComboBox()
+        self.initStyleOption(option)
+        arrow = self.style().subControlRect(QStyle.CC_ComboBox, option,
+                                            QStyle.SC_ComboBoxArrow, self).width()
+        return QSize(self.SAMPLE_WIDTH + max(arrow, 16) + 14, super().sizeHint().height())
+
+    def minimumSizeHint(self):
+        return self.sizeHint()
+
+    def paintEvent(self, event) -> None:
+        from PySide6.QtWidgets import QStyle, QStyleOptionComboBox, QStylePainter
+        painter = QStylePainter(self)
+        option = QStyleOptionComboBox()
+        self.initStyleOption(option)
+        icon = self.itemIcon(self.currentIndex()) if self.currentIndex() >= 0 else QIcon()
+        option.currentText = ""
+        option.currentIcon = QIcon()
+        painter.drawComplexControl(QStyle.CC_ComboBox, option)
+        field = self.style().subControlRect(QStyle.CC_ComboBox, option,
+                                            QStyle.SC_ComboBoxEditField, self)
+        field = field.adjusted(4, 3, -2, -3)
+        if not icon.isNull() and field.width() > 4 and field.height() > 4:
+            # the sample's middle, at its own scale, across the whole field
+            picture = icon.pixmap(QSize(150, 34))
+            ratio = picture.devicePixelRatio() or 1.0
+            wide, high = picture.width() / ratio, picture.height() / ratio
+            take = min(wide, field.width() * high / max(field.height(), 1))
+            source = QRect(int((wide - take) / 2 * ratio), 0, int(take * ratio), picture.height())
+            painter.drawPixmap(field, picture, source)

@@ -103,7 +103,7 @@ def test_equations_in_a_snapshot_stay_as_they_were(win, tmp_path):
     from tests.test_calc_modes import typed
     press_key(win.view, Qt.Key_End)
     typed(win, "0")
-    press_key(win.view, Qt.Key_Escape)
+    win.view.calc.leave()          # Esc keeps the equation open, as in WebSMath
     assert answer(win, "b1=") == "100"
     after = fidelity.calcforge(win.document.pages[index].frame)
     assert (before == after).all(), "the snapshot is what was seen, not live"
