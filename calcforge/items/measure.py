@@ -675,19 +675,24 @@ class MeasureItem(MarkupItem):
         else:
             # L.beam = 6.25 m, with "beam" as a subscript — as SMath writes it
             base, sub, rest = named
-            small = QFont(font)
-            small.setPointSizeF(font.pointSizeF() * 0.72 if font.pointSizeF() > 0 else 7)
-            small_metrics = QFontMetricsF(small)
-            whole = (metrics.horizontalAdvance(base) + small_metrics.horizontalAdvance(sub)
+            # The subscript is the same font drawn at 72%: a smaller font set
+            # in points (the label's is set in pixels, so it had no point size
+            # and fell back to a fixed 7 pt) came out enormous in the PDF the
+            # label is written into — "beam" towering over its L in Bluebeam
+            # (the user, 2026-10-01).
+            shrink = 0.72
+            whole = (metrics.horizontalAdvance(base) + metrics.horizontalAdvance(sub) * shrink
                      + metrics.horizontalAdvance(rest))
             x = -whole / 2
             baseline = metrics.ascent() / 2 - metrics.descent() / 2
             painter.drawText(QPointF(x, baseline), base)
             x += metrics.horizontalAdvance(base)
-            painter.setFont(small)
-            painter.drawText(QPointF(x, baseline + metrics.ascent() * 0.28), sub)
-            x += small_metrics.horizontalAdvance(sub)
-            painter.setFont(font)
+            painter.save()
+            painter.translate(x, baseline + metrics.ascent() * 0.28)
+            painter.scale(shrink, shrink)
+            painter.drawText(QPointF(0, 0), sub)
+            painter.restore()
+            x += metrics.horizontalAdvance(sub) * shrink
             painter.drawText(QPointF(x, baseline), rest)
         painter.restore()
 

@@ -781,7 +781,9 @@ def _read_their_markups(document, cleaned: bytes, index: int, page: dict,
                 payload[key] = old[key]
     page["items"] = list(page.get("items", [])) + made
     page["markup_annotations"] = list(page.get("markup_annotations", [])) + [
-        int(payload["from_annotation"]) for payload in made if payload.get("from_annotation")]
+        int(payload.get("from_annotation") or payload.get("split_from_annotation"))
+        for payload in made
+        if payload.get("from_annotation") or payload.get("split_from_annotation")]
 
 
 def _names_lost(equations: list, pages: list) -> list:

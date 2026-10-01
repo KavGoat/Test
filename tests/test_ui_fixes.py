@@ -378,3 +378,30 @@ def test_a_red_cross_on_a_page_that_has_gone_is_forgotten_not_a_crash(window):
     assert window.view.calc.cross is None
     click(window.view, 200, 200)                     # a click goes on as normal
     assert not window.view.calc.editing()
+
+
+def test_dark_mode_line_and_hatch_samples_can_be_seen(window):
+    """The user, 2026-10-01: in dark mode the style bar's line and hatch
+    samples were near-black on a dark bar."""
+    from PySide6.QtGui import QColor
+    window.toggle_theme(True)
+    try:
+        for combo in (window.dash_combo, window.hatch_combo):
+            index = 1 if combo is window.hatch_combo else 0     # a pattern, not "plain"
+            image = combo.itemIcon(index).pixmap(150, 34).toImage()
+            inked = [QColor.fromRgba(image.pixel(x, y)) for x in range(image.width())
+                     for y in range(image.height())]
+            lightest = max(c.lightness() for c in inked if c.alpha() > 40)
+            assert lightest > 150, (combo.objectName(), lightest)
+    finally:
+        window.toggle_theme(False)
+
+
+def test_the_style_bars_number_boxes_fit_their_numbers_and_no_more(window):
+    from PySide6.QtWidgets import QAbstractSpinBox
+    for spin in window.style_bar.findChildren(QAbstractSpinBox):
+        metrics = spin.fontMetrics()
+        widest = max((spin.prefix() + spin.textFromValue(v) + spin.suffix()
+                      for v in (spin.minimum(), spin.maximum())), key=metrics.horizontalAdvance)
+        assert spin.width() >= metrics.horizontalAdvance(widest) + 18, spin.objectName()
+        assert spin.width() <= metrics.horizontalAdvance(widest) + 50, spin.objectName()

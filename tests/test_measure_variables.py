@@ -9,7 +9,7 @@ from PySide6.QtCore import QPointF, Qt
 from PySide6.QtWidgets import QLineEdit
 
 from calcforge.calc.docsheet import PT_PER_PX
-from calcforge.items.measure import LENGTH, MeasureItem
+from calcforge.items.measure import DIMENSION, LENGTH, MeasureItem
 from tests.test_calc_blocks import equations, settle, shown, v  # noqa: F401
 
 
@@ -234,14 +234,75 @@ def test_right_click_on_an_area_offers_its_variable_first(v):
     v.view.begin_snapshot([frame])
     frame.add_markup(area, QPointF(150, 300))
     v.view.commit_snapshot("Area")
+    from PySide6.QtWidgets import QLineEdit, QWidgetAction
     menu = v.window.build_context_menu(area, area.sceneBoundingRect().center())
-    texts = [a.text() for a in menu.actions() if a.text()]
-    assert texts.index("Variable name…") < texts.index("Edit text…")
-    v.window.set_measure_variable(area, "A.slab")
+    first = menu.actions()[0]
+    assert isinstance(first, QWidgetAction), "the name is typed in the menu, first"
+    field = menu.findChild(QLineEdit, "measureVariable")
+    assert field.text() == ""
+    field.setText("A_slab")
+    field.returnPressed.emit()
+    assert area.variable == "A.slab", "L_beam is written as SMath writes it"
     menu = v.window.build_context_menu(area, area.sceneBoundingRect().center())
+    assert menu.findChild(QLineEdit, "measureVariable").text() == "A.slab"
     texts = [a.text() for a in menu.actions() if a.text()]
-    assert "Variable: A.slab…" in texts and "Show in Variables" in texts
+    assert "Show in Variables" in texts
     next(a for a in menu.actions() if a.text() == "Show in Variables").trigger()
     panel = v.window.variables_panel
     assert v.window.dock_variables.isVisible()
     assert panel.row_of(panel.tree.currentItem()).name == "A.slab"
+
+
+def test_a_subscript_is_small_in_the_saved_pdf_too(v, tmp_path):
+    """Opened in Bluebeam, "beam" towered over its L (the user, 2026-10-01):
+    the subscript fell back to a fixed size in points while the label is set
+    in pixels, which the PDF's resolution blew up."""
+    import pymupdf
+    from tests.test_calc_saving import save_to
+    measure = MeasureItem(DIMENSION, [QPointF(0, 0), QPointF(300, 0)])
+    v.frame.add_markup(measure, QPointF(100, 300))
+    v.window.set_measure_variable(measure, "L.beam")
+    path = str(tmp_path / "subscript.pdf")
+    save_to(v.window, path)
+    with pymupdf.open(path) as saved:
+        page = saved[0]
+        sizes = {span["text"].strip(): span["size"]
+                 for block in page.get_text("dict")["blocks"]
+                 for line in block.get("lines", []) for span in line["spans"]}
+    assert sizes["beam"] < sizes["L"], sizes
+    assert 0.6 < sizes["beam"] / sizes["L"] < 0.85
+
+
+def test_scaling_a_group_with_a_measurement_updates_what_it_measures(v):
+    """The user, 2026-10-01: a group with a dimension in it was scaled and
+    the dimension kept its old value (it was only stretched, by a transform)."""
+    from PySide6.QtCore import QEvent, QRectF
+    from PySide6.QtWidgets import QApplication
+    from calcforge.items.shapes import RectItem
+    from tests.test_usability import _mouse
+    window = v.window
+    window.select_tool("select")
+    box = RectItem("rect", QRectF(0, 0, 100, 60))
+    v.frame.add_markup(box, QPointF(150, 400))
+    dim = MeasureItem(DIMENSION, [QPointF(0, 0), QPointF(200, 0)])
+    v.frame.add_markup(dim, QPointF(150, 500))
+    dim.refresh(page=v.frame.page)
+    before = dim.value_text
+    v.view.scene().clearSelection()
+    box.setSelected(True)
+    dim.setSelected(True)
+    window.group_selection()
+    outer = v.view.markup_box(box).united(v.view.markup_box(dim))
+    corner = outer.bottomRight()
+    view = v.view
+    QApplication.sendEvent(view.viewport(), _mouse(view, QEvent.MouseButtonPress, corner.x(), corner.y()))
+    QApplication.sendEvent(view.viewport(), _mouse(
+        view, QEvent.MouseMove, corner.x() + outer.width(), corner.y() + outer.height(),
+        Qt.NoButton, Qt.LeftButton))
+    QApplication.sendEvent(view.viewport(), _mouse(
+        view, QEvent.MouseButtonRelease, corner.x() + outer.width(), corner.y() + outer.height()))
+    assert dim.transform().isIdentity(), "stretched by its points, not by a transform"
+    assert dim.points[1].x() == pytest.approx(400, rel=0.05), "twice as long"
+    assert dim.value_text != before
+    window.set_measure_variable(dim, "L.beam")
+    window.undo_stack.undo()

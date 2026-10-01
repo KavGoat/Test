@@ -332,10 +332,26 @@ def test_a_three_stroke_ink_note_is_drawn_once(calcs):
     strokes = [i for i in frame.markups() if getattr(i, "kind", "") == "ink"
                and i.style.width < 10]
     assert len(strokes) == 3
-    numbers = {i.from_annotation for i in strokes}
-    assert len(numbers) == 1 and 0 not in numbers
-    assert numbers <= set(frame.markups_drawn_alone()), "the page leaves the original out"
-    assert not any(i.still_theirs for i in strokes)
+    assert not any(i.still_theirs or i.from_annotation for i in strokes), "ours"
+    import pymupdf
+    with pymupdf.open(path) as document:
+        three = [a.xref for a in document[0].annots()
+                 if a.type[1] == "Ink" and len(a.vertices or []) == 3]
+    assert three and three[0] in frame.markups_drawn_alone(), "the page leaves the original out"
+    assert three[0] in frame.left_to_us(), "and so does a save"
+
+
+def test_a_three_stroke_ink_note_survives_save_and_reopen(calcs, tmp_path):
+    from tests.test_calc_saving import save_to
+    window, path = calcs
+    saved = str(tmp_path / "again.pdf")
+    save_to(window, saved)
+    window.open_path(saved)
+    window.rebuild_scenes()
+    frame = window.document.pages[0].frame
+    strokes = [i for i in frame.markups() if getattr(i, "kind", "") == "ink"
+               and i.style.width < 10]
+    assert len(strokes) == 3, "every stroke, once"
 
 
 # -- taken over, a Bluebeam markup still looks as it did (Calcs.pdf, 2026-10-01) -------

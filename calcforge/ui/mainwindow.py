@@ -411,6 +411,21 @@ _SHORTCUT_GROUPS = {
 }
 
 
+
+
+def snug_number_box(spin) -> None:
+    """Size a spin box to its widest value, suffix and arrows."""
+    metrics = spin.fontMetrics()
+    widest = max((spin.prefix() + spin.textFromValue(value) + spin.suffix() for value in
+                  (spin.minimum(), spin.maximum())), key=metrics.horizontalAdvance)
+    # the text, the theme's padding round it, and the arrows (18 px)
+    spin.setFixedWidth(int(metrics.horizontalAdvance(widest)) + 18 + 22)
+
+def _bar_ink() -> str:
+    """The ink the theme draws its icons in."""
+    from .icons import _THEME_INK, icon_theme
+    return _THEME_INK.get(icon_theme(), "#2c3340")
+
 class MainWindow(QMainWindow):
     """Everything the user sees: canvas, toolbars, panels and menus."""
 
@@ -936,15 +951,6 @@ class MainWindow(QMainWindow):
                        self.act_insert_pdf, self.act_export_pdf, self.act_print, None,
                        self.act_undo, self.act_redo):
             main_bar.addSeparator() if action is None else main_bar.addAction(action)
-        # Markup | Calc at the end of the top row, where it can be seen: what
-        # typing on the page does depends on it
-        from .widgets import ModeSwitch
-        push = QWidget()
-        push.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        main_bar.addWidget(push)
-        self.mode_switch = ModeSwitch()
-        self.mode_switch.toggled.connect(lambda on: self.toggle_calc_mode(on))
-        main_bar.addWidget(self.mode_switch)
         self._add_toolbar(main_bar)
         # The markup tools get a row to themselves: there are enough of them
         # that sharing one with the file actions hides the last few.
@@ -1049,7 +1055,7 @@ class MainWindow(QMainWindow):
         from .widgets import big_pattern_dropdown
         big_pattern_dropdown(self.dash_combo)
         for name in DASH_ARRAYS:
-            self.dash_combo.addItem(_line_style_icon(name, "#212529", 1), name)
+            self.dash_combo.addItem(_line_style_icon(name, _bar_ink(), 1), name)
         self.dash_combo.currentTextChanged.connect(self._style_dash)
         self._style_widgets[DASH].append(style_bar.addWidget(self.dash_combo))
         # How far apart the dashes are — the line's thickness does not say.
@@ -1139,7 +1145,7 @@ class MainWindow(QMainWindow):
         self.hatch_combo.setObjectName("hatchPattern")
         big_pattern_dropdown(self.hatch_combo)
         for name in HATCH_PATTERNS:
-            self.hatch_combo.addItem(_hatch_icon(name, "#212529"), name or "plain", name)
+            self.hatch_combo.addItem(_hatch_icon(name, _bar_ink()), name or "plain", name)
         self.hatch_combo.setToolTip("Hatch pattern, drawn over the fill in its own colour")
         self.hatch_combo.currentIndexChanged.connect(
             lambda _index: self._style_hatch(self.hatch_combo.currentData()))
@@ -1205,6 +1211,12 @@ class MainWindow(QMainWindow):
         count_button.clicked.connect(self.choose_count_subject)
         self._count_widgets = [style_bar.addWidget(count_button)]
         self._show_tool_extras("select")
+        # Every number box as wide as its longest value and no wider: they
+        # took a hundred pixels each and the bar ran off the window (the user,
+        # 2026-10-01).
+        from PySide6.QtWidgets import QAbstractSpinBox
+        for spin in style_bar.findChildren(QAbstractSpinBox):
+            snug_number_box(spin)
         self._add_toolbar(style_bar)
         self._refresh_style_controls()
 
@@ -1462,9 +1474,18 @@ class MainWindow(QMainWindow):
         self._search_completer = completer
         field.textEdited.connect(self._search_typed)
         field.returnPressed.connect(self._search_enter)
+        # Markup | Calc on the menu bar, after Help: always in sight, never in
+        # a toolbar that can be dragged away or hidden — what typing on the
+        # page does depends on it (the user, 2026-10-01)
+        from .widgets import ModeSwitch
+        self.mode_switch = ModeSwitch()
+        self.mode_switch.toggled.connect(lambda on: self.toggle_calc_mode(on))
         holder = QWidget(self)
+        holder.setObjectName("menuBarCorner")
         row = QHBoxLayout(holder)
         row.setContentsMargins(0, 1, 8, 1)
+        row.setSpacing(10)
+        row.addWidget(self.mode_switch)
         row.addWidget(field)
         self.menuBar().setCornerWidget(holder, Qt.TopRightCorner)
 
@@ -1702,7 +1723,9 @@ class MainWindow(QMainWindow):
         insert_menu.addAction(self.act_insert_image_page)
 
         calc_menu = bar.addMenu("&Calculation")
-        for action in (self.act_calc_mode, None, self.act_calculate, self.act_auto_calc,
+        # Calc mode is the switch on the menu bar (and F12), not a menu entry
+        self.addAction(self.act_calc_mode)
+        for action in (self.act_calculate, self.act_auto_calc,
                        None, self.act_insert_plot, self.act_insert_matrix,
                        self.act_insert_calc_text, self.act_insert_block,
                        self.act_insert_function,
@@ -4284,12 +4307,44 @@ class MainWindow(QMainWindow):
                 panel.tree.scrollToItem(node)
                 return
 
-    def ask_measure_variable(self, item) -> None:
-        name, accepted = QInputDialog.getText(
-            self, "Variable name", "Name this measurement for the calculations "
-            "(L.beam for a subscript; empty for none):", text=item.variable)
-        if accepted:
-            self.set_measure_variable(item, name)
+    def _variable_field(self, menu, item):
+        """The measurement's variable name, as a box in its right-click menu:
+        Enter (or closing the menu) names it, an empty box takes the name
+        away."""
+        from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QWidget, QWidgetAction
+
+        holder = QWidget(menu)
+        holder.setObjectName("measureVariableRow")
+        row = QHBoxLayout(holder)
+        row.setContentsMargins(24, 3, 10, 3)
+        row.setSpacing(6)
+        row.addWidget(QLabel("Variable"))
+        field = QLineEdit(item.variable)
+        field.setObjectName("measureVariable")
+        field.setPlaceholderText("L.beam")
+        field.setToolTip("Name this measurement for the calculations: L.beam for a "
+                         "subscript, empty for none · Enter to set")
+        field.setMinimumWidth(110)
+        row.addWidget(field, 1)
+        action = QWidgetAction(menu)
+        action.setDefaultWidget(holder)
+        done = {"set": False}
+
+        def commit():
+            if done["set"] or item.scene() is None:
+                return
+            done["set"] = True
+            if field.text().strip() != item.variable:
+                self.set_measure_variable(item, field.text())
+
+        def on_enter():
+            commit()
+            menu.close()
+        field.returnPressed.connect(on_enter)
+        menu.aboutToHide.connect(commit)
+        # the box takes the keys as soon as the menu opens
+        menu.aboutToShow.connect(lambda: field.setFocus(Qt.PopupFocusReason))
+        return action
 
     def _select_block_members(self, block) -> None:
         self.view.scene().clearSelection()
@@ -7211,6 +7266,14 @@ class MainWindow(QMainWindow):
         """Redraw every icon in the colours of the theme now in use."""
         for action, name in self._icon_names.items():
             action.setIcon(icon(name))
+        # the style bar's line and hatch samples, in the theme's ink: drawn
+        # near-black they were invisible on the dark bar (the user, 2026-10-01)
+        for index in range(self.dash_combo.count()):
+            self.dash_combo.setItemIcon(
+                index, _line_style_icon(self.dash_combo.itemText(index), _bar_ink(), 1))
+        for index in range(self.hatch_combo.count()):
+            self.hatch_combo.setItemIcon(
+                index, _hatch_icon(self.hatch_combo.itemData(index) or "", _bar_ink()))
         for dock in self.panels:
             bar = dock.titleBarWidget()
             if hasattr(bar, "refresh_icons"):
@@ -7423,11 +7486,9 @@ class MainWindow(QMainWindow):
                 show.toggled.connect(lambda on: self.set_size_visible(item, on))
             if isinstance(item, MeasureItem):
                 if item.kind != "calibrate":
-                    # first: a measurement's name is what ties it to the calcs
-                    named = menu.addAction(f"Variable: {item.variable}…" if item.variable
-                                           else "Variable name…",
-                                           lambda i=item: self.ask_measure_variable(i))
-                    named.setToolTip("Name this measurement for the calculations (L.beam)")
+                    # first: a measurement's name is what ties it to the calcs,
+                    # typed right here (the user, 2026-10-01: no separate popup)
+                    menu.addAction(self._variable_field(menu, item))
                     if item.variable:
                         menu.addAction("Show in Variables",
                                        lambda i=item: self.show_variable_of(i))

@@ -300,3 +300,29 @@ def test_f9_calculates_and_ctrl_m_inserts_a_matrix(win):
     win.view.calc.leave()   # Esc keeps the equation open, as in WebSMath
     keys(win, Qt.Key_F9)
     assert win.status_hint.text() == "Calculated"
+
+
+def test_the_mode_switch_is_on_the_menu_bar_not_in_a_toolbar(win):
+    """The user, 2026-10-01: one Markup | Calc switch, after Help, never in a
+    toolbar that can be dragged about — and no second one in Calculation."""
+    from PySide6.QtWidgets import QMenuBar, QToolBar
+    holder = win.mode_switch.parentWidget()
+    assert win.menuBar().cornerWidget(Qt.TopRightCorner) is holder
+    widget = win.mode_switch
+    while widget is not None:
+        assert not isinstance(widget, QToolBar)
+        widget = widget.parentWidget()
+    calculation = next(a.menu() for a in win.menuBar().actions() if a.text() == "&Calculation")
+    assert "Calc mode" not in [a.text() for a in calculation.actions()]
+    for bar in win.findChildren(QToolBar):
+        assert win.act_calc_mode not in bar.actions()
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QApplication
+    win.show()
+    win.activateWindow()
+    QApplication.processEvents()
+    win.view.setFocus()
+    QTest.keyClick(win.view, Qt.Key_F12)                  # still F12, as before
+    assert win.view.calc.mode == "calc" and win.mode_switch.isChecked()
+    QTest.keyClick(win.view, Qt.Key_F12)
+    assert win.view.calc.mode == "markup"

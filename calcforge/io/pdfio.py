@@ -620,8 +620,9 @@ def import_pages(document, path: str, indices: list[int], fit: str = FIT_ORIGINA
                 # drawing look like theirs — and leaves out the ones that have
                 # since been taken over or deleted.
                 page.markup_annotations = [
-                    int(payload["from_annotation"]) for payload in marked[index]
-                    if payload.get("from_annotation")]
+                    int(payload.get("from_annotation") or payload.get("split_from_annotation"))
+                    for payload in marked[index]
+                    if payload.get("from_annotation") or payload.get("split_from_annotation")]
             page.pdf_key = pdf_key
             page.pdf_page_index = index
             page.source_note = f"{os.path.basename(path)} page {index + 1}"

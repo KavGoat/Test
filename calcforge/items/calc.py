@@ -960,6 +960,37 @@ def _holder(blocks, point: QPointF, settled: bool):
     return found
 
 
+def blocks_holding(scene, moved: list) -> dict:
+    """At the start of a drag: each equation being moved -> the block it is
+    in, for the blocks not moving with it (they hold it while it moves)."""
+    blocks = [i for i in scene.items() if isinstance(i, CalcBlockItem)]
+    if not blocks:
+        return {}
+    moving = {id(item) for item, _ in moved}
+    held = {}
+    for item, _origin in moved:
+        if isinstance(item, (CalcItem, CalcTextItem)) and item.parentItem() is not None:
+            block = _holder(blocks, _corner(item), settled=True)
+            if block is not None and id(block) not in moving:
+                held[id(item)] = block
+    return held
+
+
+def stay_in_block(item, block) -> None:
+    """Keep an equation inside its block while it is dragged: it stops at
+    the edge rather than leaving and being put back when it is let go (the
+    user, 2026-10-01)."""
+    if block.scene() is None or item.parentItem() is None:
+        return
+    box = item.parentItem().mapRectFromScene(block.scene_box())
+    size = item.local_rect()
+    x = min(max(item.pos().x(), box.left()), box.right() - min(size.width(), box.width()) - 1)
+    y = min(max(item.pos().y(), box.top()), box.bottom() - min(size.height(), box.height()) - 1)
+    wanted = QPointF(max(x, box.left()), max(y, box.top()))
+    if wanted != item.pos():
+        item.setPos(wanted)
+
+
 def keep_blocks_whole(scene, moved: list) -> str:
     """After a drag or nudge (*moved*: [(item, origin)], origin in the item's
     parent): an equation that was in a block stays in it, one that wasn't

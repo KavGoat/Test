@@ -738,3 +738,41 @@ checked against its saved files and WebSMath's recordings of SMath Cloud.
   (btx/Document1.pdf): every markup clicked and shown in Properties, all
   still the file's, nothing to undo or save; the screen is identical pixel
   for pixel after picking one out and letting go.
+- **Bluebeam PDFs fast and true to their look** (2026-10-01, Calcs.pdf).
+  The page is rendered without its markups; each markup nobody has
+  changed draws its file's own appearance (its annotation alone, from tiles
+  the render processes make, at its place in the stacking order). So
+  taking one over, or undoing that, never re-renders or blanks the page —
+  before, every take-over threw away every tile of the page. Dragging:
+  clouds' and call-outs' geometry is cached (Qt asks for a markup's box
+  thousands of times a frame), snapping is gathered once per drag and
+  vectorised, and Properties is rebuilt when the button comes up rather
+  than before the drag can start (a drag step on a busy sheet: 72 → ~34 ms
+  with a full repaint each step; press 217 → ~78 ms). Edited, a Bluebeam
+  markup keeps its look: pictures (/IT /SquareImage) keep their image at
+  its own resolution, highlighters multiply (/BM), call-outs with no
+  border keep a 1 pt leader, lines indented with spaces keep the indent,
+  words wrap where Bluebeam wraps them (Qt keeps a point for the caret),
+  multi-stroke ink is drawn once and saved once. A page 0.00000001 off its
+  own size no longer had all its markups converted on opening.
+- **Crash after pages are rebuilt** (PowerShell log): the red cross and the
+  equation being typed in forget a deleted page instead of failing on every
+  repaint.
+- **Edit mode as WebSMath** (2026-10-01): the result's unit box shows after
+  the automatic unit while editing (the earlier "unit box in its place"
+  change is withdrawn); Esc only closes the suggestion list — a click
+  elsewhere or Enter leaves the equation (a double-clicked plot still
+  closes on Esc). Twelve edit-mode sequences — reopening a result, editing
+  a definition's number and unit, Home/End, fraction navigation, Delete,
+  Tab into the unit box, errors — are recorded from WebSMath and checked
+  on every test run; identical but for the empty-slot caret.
+- **Smaller fixes** (2026-10-01): the autocomplete list is sized to what it
+  shows; a measurement's variable is typed in a box at the top of its
+  right-click menu; its subscript is the label's font at 72% (a fixed 7 pt
+  fallback blew up in the saved PDF — "beam" towering over its L in
+  Bluebeam); scaling a group stretches a measurement by its points, so its
+  value (and variable) update; Markup | Calc is one switch on the menu bar
+  after Help, not in a toolbar or the Calculation menu (F12 as before);
+  the style bar's line and hatch samples are drawn in the theme's ink and
+  its number boxes are as wide as their longest value; an equation in a
+  block stops at the block's edge while it is dragged.

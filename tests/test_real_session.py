@@ -81,9 +81,10 @@ def test_session(window, monkeypatch, tmp_path):
     window.select_tool("select")
     from calcforge.items.measure import MeasureItem
     measure = [i for i in window.view.scene().items() if isinstance(i, MeasureItem)][0]
-    monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: ("L_beam", True)))
+    from PySide6.QtWidgets import QLineEdit
     menu = window.build_context_menu(measure, measure.sceneBoundingRect().center())
-    next(x for x in menu.actions() if x.text() == "Variable name…").trigger(); pump()
+    field = menu.findChild(QLineEdit, "measureVariable")      # typed in the menu itself
+    field.setText("L_beam"); field.returnPressed.emit(); pump()
     window.toggle_calc_mode(True)
     click_page(window, 60, 560); type_keys(window, "L.beam=", Qt.Key_Return)
     click_page(window, 60, 600); type_keys(window, "w:L.beam*2'kN/'m", Qt.Key_Right, Qt.Key_Right, "=", Qt.Key_Return)

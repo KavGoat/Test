@@ -436,3 +436,26 @@ def test_a_closed_blocks_equation_points_and_right_clicks_as_the_block(v):
     assert "Self-contained" in [a.text() for a in menu.actions()]
     open_by_double_click(v, block)
     assert v.calc.hover_cursor(centre) == Qt.ArrowCursor, "open: the equation's own"
+
+
+def test_an_equation_stops_at_its_blocks_edge_while_it_is_dragged(v):
+    """The user, 2026-10-01: it could be dragged outside and snapped back on
+    release; now it never leaves."""
+    from PySide6.QtCore import QEvent
+    from tests.test_usability import _mouse
+    block, outside, inside, after = two_checks(v)
+    open_by_double_click(v, block)
+    v.calc.leave()
+    v.calc.clear_cross()
+    v.view.scene().clearSelection()
+    member = inside[0]
+    start = member.mapToScene(member.local_rect().center())
+    view = v.view
+    QApplication.sendEvent(view.viewport(), _mouse(view, QEvent.MouseButtonPress, start.x(), start.y()))
+    for step in range(1, 8):
+        QApplication.sendEvent(view.viewport(), _mouse(
+            view, QEvent.MouseMove, start.x(), start.y() + step * 60, Qt.NoButton, Qt.LeftButton))
+        assert block.scene_box().contains(member.scenePos()), f"left its block at step {step}"
+    QApplication.sendEvent(view.viewport(), _mouse(
+        view, QEvent.MouseButtonRelease, start.x(), start.y() + 420))
+    assert member in block.members()

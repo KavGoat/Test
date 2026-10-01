@@ -239,11 +239,12 @@ def _leave_it_to_the_file(annotation: dict, made: list) -> None:
     if not made or not isinstance(number, int) or number <= 0:
         return
     if len(made) > 1:
-        # Ours, but still that annotation: the page leaves it out, or a
-        # three-stroke ink line showed twice — the file's and ours — and was
-        # saved twice (Calcs.pdf, 2026-10-01).
-        for payload in made:
-            payload["from_annotation"] = number
+        # Ours from the start, but the page must leave the annotation out, or
+        # a three-stroke ink line showed twice — the file's and ours — and was
+        # saved twice (Calcs.pdf, 2026-10-01). Said on the side rather than as
+        # from_annotation: the strokes are this application's markups, saved
+        # and read back as its own.
+        made[0]["split_from_annotation"] = number
         return
     made[0]["from_annotation"] = number
     made[0]["still_theirs"] = True

@@ -1638,6 +1638,10 @@ class PageView(QGraphicsView):
                     (member, member.mapToScene(QPointF(0, 0)),
                      QTransform(member.transform()))
                     for member in members]
+                # a measurement's own points, as the gesture found them
+                self._group_resize_points = {
+                    id(member): [QPointF(p) for p in member.points]
+                    for member in members if isinstance(member, MeasureItem)}
                 self._mode = "group_resize"
                 self.begin_snapshot(self.all_frames())
                 event.accept()
@@ -1784,6 +1788,8 @@ class PageView(QGraphicsView):
         self._move_items = [(other, other.pos()) for other in
                             with_block_members(self.scene().selectedItems())
                             if isinstance(other, MarkupItem) and self.editable(other)]
+        from ..items.calc import blocks_holding
+        self._held_in_blocks = blocks_holding(self.scene(), self._move_items)
         self._move_original_data = {
             other.uid: deepcopy(other.serialize()) for other, _ in self._move_items}
         self.begin_snapshot(self.all_frames())
@@ -2048,6 +2054,7 @@ class PageView(QGraphicsView):
                 from .calcedit import snap as onto_the_grid
                 delta = QPointF(onto_the_grid(delta.x()), onto_the_grid(delta.y()))
                 free = True
+            held = getattr(self, "_held_in_blocks", {}) if not self._copy_on_move else {}
             for item, origin in self._move_items:
                 target = origin + delta
                 # Copying takes the arrow along: what is being dragged out is
@@ -2055,6 +2062,9 @@ class PageView(QGraphicsView):
                 # arrow pointing at whatever it was pointing at.
                 self._place(item, target if free else self.snap(target),
                             keep_leader=not self._copy_on_move)
+                if id(item) in held:
+                    from ..items.calc import stay_in_block
+                    stay_in_block(item, held[id(item)])
             event.accept()
             return
 
@@ -3915,9 +3925,19 @@ class PageView(QGraphicsView):
             x = new_box.left() + (old_origin.x() - old.left()) * sx
             y = new_box.top() + (old_origin.y() - old.top()) * sy
             wanted = QPointF(x, y)
-            transform = QTransform(old_transform)
-            transform.scale(sx, sy)
-            item.setTransform(transform)
+            points = getattr(self, "_group_resize_points", {}).get(id(item))
+            if points is not None:
+                # A measurement is stretched by its points, not by a transform:
+                # what it measures changes with it, and its words stay the
+                # size they are (the user, 2026-10-01: the value didn't update).
+                item.prepareGeometryChange()
+                item.points = [QPointF(p.x() * sx, p.y() * sy) for p in points]
+                item.refresh(page=item.parentItem().page
+                             if hasattr(item.parentItem(), "page") else None)
+            else:
+                transform = QTransform(old_transform)
+                transform.scale(sx, sy)
+                item.setTransform(transform)
             parent = item.parentItem()
             if parent is not None:
                 correction = (parent.mapFromScene(wanted)
