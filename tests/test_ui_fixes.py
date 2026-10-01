@@ -307,3 +307,27 @@ def test_count_symbol_and_corner_radius_from_the_toolbar(window):
     _select(window, box)
     window.corner_spin.setValue(6.0)
     assert box.style.corner_radius == pytest.approx(6.0)
+
+
+# -- the mouse pointer over equations, as WebSMath's ------------------------------------
+
+def test_the_pointer_over_an_equation_is_websmaths(v):
+    from PySide6.QtGui import QCursor
+    from tests.test_usability import hover
+    v.type_at(36, 36, "")
+    v.keys("2+3=")
+    v.press(Qt.Key_Return)
+    v.calc.leave()
+    v.window.select_tool("select")
+    (item,) = v.items.values()
+    box = item.sceneBoundingRect()
+    rect = item.mapRectToScene(item.local_rect())
+    hover(v.view, rect.center().x(), rect.center().y())
+    assert v.view.cursor().shape() == Qt.ArrowCursor, "inside: the arrow, as WebSMath"
+    edge = rect.left() + 0.5 / v.view.transform().m11()
+    hover(v.view, edge, rect.center().y())
+    assert v.view.cursor().shape() == Qt.BitmapCursor, "on the frame: SMath's move cursor"
+    assert not v.view.cursor().pixmap().isNull()
+    v.focus_item(item)                                   # typing in it: still the arrow
+    hover(v.view, rect.center().x(), rect.center().y())
+    assert v.view.cursor().shape() == Qt.ArrowCursor

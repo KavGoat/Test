@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (QApplication, QCompleter, QGraphicsProxyWidget,
 
 from ..core.document import MM_TO_PT
 from ..core.units import parse_unit
-from ..items.calc import CalcItem, CalcTextItem
+from ..items.calc import CalcBlockItem, CalcItem, CalcTextItem
 from ..items.base import (HANDLE_CURSORS, HANDLE_SCREEN_PX, HANDLE_SIZE,
                           MarkupItem, build_item, cloud_path,
                           cursor_for_handle, rename_groups)
@@ -1453,6 +1453,10 @@ class PageView(QGraphicsView):
         self._press_view = event.position().toPoint()
         if event.button() == Qt.LeftButton:
             self.click_into_viewport(scene_pos)
+            block = self.open_block()
+            if block is not None and not block.scene_box().adjusted(
+                    -4, -4, 4, 4).contains(scene_pos):
+                self.close_block()
 
         if self.calc.mouse_press(event, scene_pos):
             event.accept()
@@ -1987,6 +1991,9 @@ class PageView(QGraphicsView):
 
         if self._mode == "move":
             delta = scene_pos - self._press_scene
+            if any(isinstance(i, CalcItem) for i, _ in self._move_items) \
+                    and not self._is_a_click(scene_pos):
+                self.setCursor(self.calc.move_cursor())    # WebSMath's, while dragging
             control = bool(event.modifiers() & Qt.ControlModifier)
             if not control:
                 self._ctrl_from_the_press = False
@@ -2004,6 +2011,15 @@ class PageView(QGraphicsView):
                 self._snap_marker = None
             else:
                 delta = self.snap_moved(self._move_items, delta)
+            # A calculation block carries its equations by one step, whole
+            # steps of SMath's grid (where its equations land), so they keep
+            # their places in it.
+            lead = next(((i, o) for i, o in self._move_items
+                         if isinstance(i, CalcBlockItem)), None)
+            if lead is not None and not free:
+                from .calcedit import snap as onto_the_grid
+                delta = QPointF(onto_the_grid(delta.x()), onto_the_grid(delta.y()))
+                free = True
             for item, origin in self._move_items:
                 target = origin + delta
                 # Copying takes the arrow along: what is being dragged out is
@@ -2085,6 +2101,9 @@ class PageView(QGraphicsView):
         if self.calc.editing():
             self.calc.leave()
             undone.append("the equation")
+        if self.open_block() is not None:
+            self.close_block()
+            undone.append("the calculation block")
         if self.calc.cross is not None:
             self.calc.clear_cross()
         if self.clear_pending_tool():
@@ -2463,6 +2482,13 @@ class PageView(QGraphicsView):
                 "curve": "Click to bend this into an arc, or straighten it",
             }[what])
             return
+        # An equation: WebSMath's pointer — the arrow over it, SMath's move
+        # cursor on the band along its frame (selected equations' handles
+        # aside, which the loop below still offers)
+        pointer = self.calc.hover_cursor(scene_pos)
+        if pointer is not None:
+            self.setCursor(pointer)
+            return
         # Words being typed: an I-beam over them, as in anything else that
         # holds text.
         editing = self._editing_item
@@ -2729,6 +2755,22 @@ class PageView(QGraphicsView):
             self.select_in_marquee()
             event.accept()
             return
+        # A closed calculation block opens, as a text box does, and the
+        # double-click goes on to what is under it inside.
+        if event.button() == Qt.LeftButton:
+            from ..items.calc import CalcBlockItem
+            block = self.markup_at(scene_pos)
+            if isinstance(block, CalcBlockItem) and not block.opened:
+                self.open_block(block)
+                if self.calc.calc_item_at(scene_pos) is None:
+                    inside = self.markup_at(scene_pos)
+                    if inside is None or inside is block:
+                        if self.calc.calc_mode():
+                            frame = self.frame_at(scene_pos)
+                            if frame is not None:
+                                self.calc.place_cross(frame, frame.mapFromScene(scene_pos))
+                        event.accept()
+                        return
         # An equation: the cursor goes where it was double-clicked, as a
         # single click puts it (SMath's automatic unit is not editable).
         if event.button() == Qt.LeftButton:
@@ -3844,9 +3886,42 @@ class PageView(QGraphicsView):
             return bool(event.modifiers() & Qt.ShiftModifier)
         return None
 
+    _opened_block = None
+
+    def open_block(self, block=None):
+        """The calculation block open for editing (None if none); with
+        *block*, open that one (closing any other) and return it."""
+        current = self._opened_block
+        if current is not None and (current.scene() is None or not current.opened):
+            current = self._opened_block = None
+        if block is None:
+            return current
+        if current is not None and current is not block:
+            self.close_block()
+        self.calc.leave()
+        block.set_opened(True)
+        block.setSelected(False)
+        self._opened_block = block
+        self.selectionChanged.emit()
+        self.statusMessage.emit("Calculation block open: click an equation to edit it, "
+                                "or the page inside it to start one · click outside "
+                                "or Esc to close it")
+        return block
+
+    def close_block(self) -> None:
+        block, self._opened_block = self._opened_block, None
+        if block is not None:
+            if block.scene() is not None and self.calc.item in block.members():
+                self.calc.leave()
+            block.set_opened(False)
+
     def markup_at(self, scene_pos: QPointF) -> Optional[MarkupItem]:
+        from ..items.calc import closed_block_of
         for item in self.scene().items(scene_pos):
             if isinstance(item, MarkupItem):
+                block = closed_block_of(item)
+                if block is not None:
+                    return block           # a closed block is one thing
                 if item.flattened:
                     # Flattened is part of the page, the way it is on a
                     # Bluebeam PDF. It was already unselectable, but it went on

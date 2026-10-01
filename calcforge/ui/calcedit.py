@@ -322,11 +322,48 @@ class CalcEditing:
         page.setup = setup
         window.rebuild_scenes()
 
+    # -- the mouse pointer, as WebSMath's ---------------------------------------------
+    MOVE_EDGE_PX = 4.0     # WebSMath's band along a region's frame that drags it
+
+    @staticmethod
+    def move_cursor():
+        """SMath's own move cursor (WebSMath's icons/move.cur)."""
+        from pathlib import Path
+
+        from PySide6.QtGui import QCursor, QPixmap
+        cached = getattr(CalcEditing, "_move_cur", None)
+        if cached is None:
+            from ..calc import ui as calc_ui
+            pm = QPixmap(str(Path(calc_ui.__file__).with_name("icons") / "move.cur"))
+            cached = QCursor(pm) if not pm.isNull() else QCursor(Qt.SizeAllCursor)
+            CalcEditing._move_cur = cached
+        return cached
+
+    def hover_cursor(self, scene_pos: QPointF):
+        """What WebSMath shows over an equation: the arrow inside it (typing
+        or not, over a plot too), and SMath's move cursor on the band along
+        its frame that drags it. None when the pointer isn't on an equation."""
+        item = self.calc_item_at(scene_pos)
+        if item is None:
+            return None
+        local = item.mapFromScene(scene_pos)
+        rect = item.local_rect()
+        # WebSMath's 4 px, on the screen whatever the zoom
+        edge = self.MOVE_EDGE_PX / max(self.view.transform().m11(), 0.05)
+        on_edge = (local.x() - rect.left() < edge or local.y() - rect.top() < edge
+                   or rect.right() - local.x() < edge or rect.bottom() - local.y() < edge)
+        if item.region is not None and item.region.plot is not None and not on_edge:
+            return Qt.ArrowCursor
+        return self.move_cursor() if on_edge else Qt.ArrowCursor
+
     # -- mouse -----------------------------------------------------------------------
     def calc_item_at(self, scene_pos: QPointF) -> Optional[CalcItem]:
+        """The equation under the point, unless it is in a closed calculation
+        block: that click is the block's until it is double-clicked open."""
+        from ..items.calc import closed_block_of
         for item in self.view.scene().items(scene_pos):
             if isinstance(item, CalcItem) and item.local_rect().contains(item.mapFromScene(scene_pos)):
-                return item
+                return None if closed_block_of(item) is not None else item
         return None
 
     def mouse_press(self, event, scene_pos: QPointF) -> bool:

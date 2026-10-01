@@ -143,18 +143,103 @@ def test_arrow_keys_nudge_the_block_and_its_equations(v):
     assert all(i.pos().x() - p.x() == pytest.approx(step) for i, p in zip(inside, before[0]))
 
 
-def test_a_click_inside_the_block_starts_an_equation_there(v):
+def at(v, scene_point):
+    """The pointer helpers take scene coordinates."""
+    return scene_point.x(), scene_point.y()
+
+
+def open_by_double_click(v, block):
+    """Double-click the page inside the block, clear of its equations."""
+    from tests.test_usability import double_click
+    box = block.local_rect()
+    point = block.mapToScene(QPointF(box.right() - 30, box.bottom() - 12))
+    double_click(v.view, *at(v, point))
+    QApplication.instance().processEvents()
+    return point
+
+
+def test_one_click_on_a_blocks_equation_selects_the_block(v):
+    """Like a text box: closed, a click anywhere on it is the block's."""
+    from tests.test_usability import click
     block, outside, inside, after = two_checks(v)
-    frame = v.frame
-    inside_point = block.mapToScene(block.local_rect().bottomRight() - QPointF(30, 12))
-    assert not block.contains(block.mapFromScene(inside_point)), \
-        "the block is picked by its frame only"
     v.view.scene().clearSelection()
-    v.calc.place_cross(frame, frame.mapFromScene(inside_point))
+    click(v.view, *at(v, inside[1].mapToScene(inside[1].local_rect().center())))
+    assert block.isSelected() and not inside[1].isSelected()
+    assert not v.calc.editing(), "no caret: the equation is part of the closed block"
+    assert v.calc.cross is None
+    assert v.view.markup_at(inside[1].scenePos() + QPointF(4, 4)) is block
+    # the empty paper inside it is the block's too
+    box = block.local_rect()
+    assert block.contains(QPointF(box.right() - 30, box.bottom() - 12))
+
+
+def test_dragging_a_closed_block_by_an_equation_moves_it_all(v):
+    block, outside, inside, after = two_checks(v)
+    before = [QPointF(i.pos()) for i in inside], QPointF(block.pos())
+    _drag_item(v, inside[0], 120, 0)
+    step = block.pos().x() - before[1].x()
+    assert step > 90
+    assert all(i.pos().x() - p.x() == pytest.approx(step) for i, p in zip(inside, before[0]))
+
+
+def test_double_click_opens_the_block_to_edit_an_equation_in_it(v):
+    from tests.test_usability import double_click
+    block, outside, inside, after = two_checks(v)
+    v.view.scene().clearSelection()
+    target = inside[1]                                   # x:5
+    double_click(v.view, *at(v, target.mapToScene(target.local_rect().center())))
+    assert block.opened and v.view.open_block() is block
+    assert v.calc.editing() and v.calc.item is target
+    target.editor.set_cursor(target.editor.root, len(target.editor.root))
+    v.keys("0")
+    v.press(Qt.Key_Return)
+    settle(v.window)
+    assert shown(inside[2]) == "52", "x:50, y = 1+1"
+
+
+def test_an_open_block_takes_new_equations_and_clicks_on_its_own(v):
+    from tests.test_usability import click
+    block, outside, inside, after = two_checks(v)
+    point = open_by_double_click(v, block)
+    assert block.opened
+    assert v.calc.cross is not None, "the red cross, where it was double-clicked"
     v.keys("9=")
     v.press(Qt.Key_Return)
-    assert len(equations(v.window)) == 7
-    assert any(i.text() == "9=" for i in block.members())
+    assert len(block.members()) == 4 and any(i.text() == "9=" for i in block.members())
+    # open, one click on an equation in it puts the caret there
+    v.calc.leave()
+    click(v.view, *at(v, inside[0].mapToScene(inside[0].local_rect().center())))
+    QApplication.instance().processEvents()
+    assert v.calc.item is inside[0] and block.opened
+    # the frame shows it is open on the screen, never in print
+    assert not block.contains(block.local_rect().center()), "open: picked by its frame"
+    del point
+
+
+def test_a_click_outside_or_esc_closes_the_block(v):
+    from tests.test_usability import click
+    block, outside, inside, after = two_checks(v)
+    open_by_double_click(v, block)
+    assert block.opened
+    far = after[1].mapToScene(after[1].local_rect().bottomRight() + QPointF(200, 60))
+    click(v.view, *at(v, far))
+    assert not block.opened and v.view.open_block() is None
+    open_by_double_click(v, block)
+    assert block.opened
+    v.calc.leave()
+    v.calc.clear_cross()
+    v.view.setFocus()
+    QTest.keyClick(v.view.viewport(), Qt.Key_Escape)
+    assert not block.opened
+    # closed again: a click on its equation is the block's
+    click(v.view, *at(v, inside[0].mapToScene(inside[0].local_rect().center())))
+    assert block.isSelected() and not v.calc.editing()
+
+
+def test_the_open_frame_is_not_saved(v):
+    block, outside, inside, after = two_checks(v)
+    open_by_double_click(v, block)
+    assert "opened" not in block.serialize()
 
 
 def test_deleting_the_block_deletes_its_equations_and_undo_brings_them_back(v):
@@ -214,10 +299,14 @@ def test_a_snapshot_takes_the_block_as_line_work(v):
 
 # -- a block is a little page of its own: nothing is dragged in or out ----------------------
 
-def _drag_item(v, item, dx, dy):
+def _drag_item(v, item, dx, dy, opened=None):
     v.window.select_tool("select")
     v.calc.leave()
     v.view.scene().clearSelection()
+    if opened is not None:
+        open_by_double_click(v, opened)
+        v.calc.leave()
+        v.calc.clear_cross()
     start = item.mapToScene(item.local_rect().center())
     drag(v.view, start.x(), start.y(), start.x() + dx, start.y() + dy)
     settle(v.window)
@@ -227,7 +316,7 @@ def test_an_equation_cant_be_dragged_out_of_its_block(v):
     block, outside, inside, after = two_checks(v)
     member = inside[0]
     was = QPointF(member.pos())
-    _drag_item(v, member, 0, 400)                    # far below the block
+    _drag_item(v, member, 0, 400, opened=block)      # far below the block
     assert block.scene_box().contains(member.scenePos()), "still in its block"
     assert member in block.members()
     assert member.pos().y() > was.y() + 20, "it did move: to the block's bottom edge"
@@ -249,7 +338,7 @@ def test_an_equation_cant_be_dragged_into_a_block(v):
 def test_moving_inside_the_block_is_fine(v):
     block, outside, inside, after = two_checks(v)
     member = inside[2]
-    _drag_item(v, member, 40, 0)
+    _drag_item(v, member, 40, 0, opened=block)
     assert member in block.members()
     assert member.pos().x() > inside[1].pos().x()
 
@@ -276,6 +365,7 @@ def test_a_block_cant_be_stretched_over_other_equations_or_shrunk_off_its_own(v)
 
 def test_typing_inside_a_block_puts_the_equation_in_it(v):
     block, outside, inside, after = two_checks(v)
+    open_by_double_click(v, block)
     box = block.local_rect()
     point = block.mapToParent(QPointF(box.right() - 40, box.bottom() - 14))
     v.calc.place_cross(v.frame, point)
@@ -333,3 +423,16 @@ def test_an_equation_has_no_markup_pen_in_properties(v):
     menu = v.window.build_context_menu(inside[0], inside[0].sceneBoundingRect().center())
     texts = [a.text() for a in menu.actions() if a.text()]
     assert "Format painter" not in texts and "Hide" not in texts
+
+
+def test_a_closed_blocks_equation_points_and_right_clicks_as_the_block(v):
+    from tests.test_usability import hover
+    block, outside, inside, after = two_checks(v)
+    centre = inside[0].mapToScene(inside[0].local_rect().center())
+    assert v.calc.hover_cursor(centre) is None, "not WebSMath's equation arrow"
+    hover(v.view, centre.x(), centre.y())
+    assert v.view.cursor().shape() != Qt.IBeamCursor
+    menu = v.window.build_context_menu(v.view.markup_at(centre), centre)
+    assert "Self-contained" in [a.text() for a in menu.actions()]
+    open_by_double_click(v, block)
+    assert v.calc.hover_cursor(centre) == Qt.ArrowCursor, "open: the equation's own"

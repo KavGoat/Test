@@ -392,6 +392,33 @@ class _PageRegionView(RegionItem):
     max_width = 0.0
     too_wide = False
 
+    def _paint_cursor(self, p: QPainter) -> None:
+        """WebSMath's caret everywhere but on an empty slot. There WebSMath
+        puts the bar a fixed 7 px in, through the placeholder square's right
+        edge, with the underline starting before the square — on screen the
+        square looked boxed in white (the user, 2026-10-01). Here the
+        underline runs exactly under the square and the bar stands just
+        clear of it, measured from the square itself, at any size."""
+        ed = self.editor
+        info = self._row_info(ed.row)
+        if info is None or ed.row.items:
+            super()._paint_cursor(p)
+            return
+        from ..calc.ui.layout import Layouter
+        lay = Layouter(self.style)
+        square = lay.placeholder()
+        # an empty row is a line of text tall: its size against a full-size
+        # line says how small it is (an exponent, a fraction's part)
+        line = lay.text("H", self.style.font(1.0))
+        scale = min(1.0, info.asc / max(line.asc, 1e-6))
+        left, width = square.box[0] * scale, square.box[1] * scale
+        x0 = info.x + left
+        bar = x0 + width + 1.5          # just clear of it: no sliver, no merging
+        underline_y = info.base + info.desc + 0.5
+        p.setPen(QPen(Qt.black, 1))
+        p.drawLine(QPointF(x0, underline_y), QPointF(bar, underline_y))
+        p.drawLine(QPointF(bar, info.base - info.asc), QPointF(bar, underline_y))
+
     def relayout(self) -> None:
         super().relayout()
         self.too_wide = False
@@ -581,6 +608,10 @@ class CalcBlockItem(MarkupItem):
     _turn_while_editing = None
     focused = False
     warning = ""
+    # Like a text box: closed, one click anywhere on it picks it up (with its
+    # equations); double-clicked, it is open and what is in it is edited,
+    # until a click outside it or Esc. Not part of the record.
+    opened = False
 
     def __init__(self, rect: Optional[QRectF] = None):
         super().__init__()
@@ -685,15 +716,23 @@ class CalcBlockItem(MarkupItem):
     def relayout(self) -> None:
         self.update()
 
+    def set_opened(self, on: bool) -> None:
+        if bool(on) == self.opened:
+            return
+        self.prepareGeometryChange()
+        self.opened = bool(on)
+        self.update()
+
     def shape(self):
-        """Its frame only: a click inside it is a click on the page (to type
-        an equation there), not on the block."""
+        """Closed, all of it: a click anywhere on it is a click on the block.
+        Open, its frame only: a click inside is a click on what is in it (or
+        on the page there, to type a new equation)."""
         from PySide6.QtGui import QPainterPath
         rect = self._rect.normalized()
         grow = 4.0
         path = QPainterPath()
         path.addRect(rect.adjusted(-grow, -grow, grow, grow))
-        if rect.width() > 2 * grow and rect.height() > 2 * grow:
+        if self.opened and rect.width() > 2 * grow and rect.height() > 2 * grow:
             inner = QPainterPath()
             inner.addRect(rect.adjusted(grow, grow, -grow, -grow))
             path = path.subtracted(inner)
@@ -709,7 +748,19 @@ class CalcBlockItem(MarkupItem):
     def paint(self, painter: QPainter, option, widget=None) -> None:
         super().paint(painter, option, widget)
         frame = self._page_frame()
-        if not self.self_contained or getattr(frame, "print_mode", False):
+        if getattr(frame, "print_mode", False):
+            return
+        if self.opened:
+            # On the screen only: it is open for editing, as a text box shows
+            painter.save()
+            pen = QPen(QColor("#1c7ed6"), 0)
+            pen.setStyle(Qt.DashLine)
+            pen.setCosmetic(True)
+            painter.setPen(pen)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRect(self._rect.normalized().adjusted(-3, -3, 3, 3))
+            painter.restore()
+        if not self.self_contained:
             return
         # On the screen only: say it keeps its names to itself.
         painter.save()
@@ -724,7 +775,7 @@ class CalcBlockItem(MarkupItem):
 
     def boundingRect(self) -> QRectF:
         return super().boundingRect().united(
-            self._rect.normalized().adjusted(0, -11, 0, 0))
+            self._rect.normalized().adjusted(-4, -11, 4, 4))
 
     def summary(self) -> str:
         return "Self-contained" if self.self_contained else ""
@@ -740,6 +791,25 @@ class CalcBlockItem(MarkupItem):
         self._rect = QRectF(*data.get("rect", [0, 0, 100, 60]))
         self.self_contained = bool(data.get("self_contained", False))
         self.load_base(data)
+
+
+def closed_block_of(item):
+    """The closed calculation block *item* is in, or None: while its block is
+    closed an equation is part of it, and a click on it is a click on the
+    block (the smallest, when one block sits in another)."""
+    if not isinstance(item, (CalcItem, CalcTextItem)):
+        return None
+    frame = item.parentItem()
+    if frame is None or not hasattr(frame, "markups"):
+        return None
+    found = None
+    for other in frame.markups():
+        if isinstance(other, CalcBlockItem) and not other.opened \
+                and item in other.members():
+            if found is None or (other._rect.width() * other._rect.height()
+                                 < found._rect.width() * found._rect.height()):
+                found = other
+    return found
 
 
 def with_block_members(items: list) -> list:

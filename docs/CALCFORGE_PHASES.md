@@ -506,8 +506,9 @@ paste back live.
   menu › Block). It wraps the selected equations, or starts empty at the red
   cross. The equations and Calculation text whose top-left is inside it are
   its members: they calculate exactly as they did, and move (drag or arrow
-  keys), copy, duplicate and delete with the block. It is picked by its thin
-  frame only, so a click inside still starts an equation there. Like an
+  keys), copy, duplicate and delete with the block. Since 2026-10-01 it behaves
+  like a text box: one click anywhere on it picks it up, and a double-click
+  opens it to edit what is inside (see "After phase 8"). Like an
   equation it is page drawing when saved, never an annotation, and always
   prints.
 - **Self-contained** (decision 10), on the block's right-click menu and in
@@ -547,8 +548,8 @@ paste back live.
   inside; two blocks don't see each other; moving out recalculates.
 - `tests/test_calc_blocks.py` (11), through the window: Block wraps the
   selection; right-click and Properties toggle Self-contained with undo;
-  editing above; drag and arrow keys move members; a click inside starts an
-  equation; delete and undo; duplicate; saved as page drawing (not an
+  editing above; drag and arrow keys move members; typing inside an opened
+  block starts an equation in it; delete and undo; duplicate; saved as page drawing (not an
   annotation) and reopened with its setting; snapshot as line work.
 - `tests/test_calc_toolsets.py` (3): an equation's row picture and held
   size; placed below/above its definition; a block tool.
@@ -703,3 +704,23 @@ checked against its saved files and WebSMath's recordings of SMath Cloud.
   `tests/calc/test_websmath_reference.py` keeps WebSMath's reference
   (tests/calc/data/websmath_reference) and checks CalcForge against it on
   every run.
+- **Unit box: no white box round it** (2026-10-01): typing into an empty
+  unit box, WebSMath's caret line ran 1–2 px into the black square, which
+  showed as a sliver of white between two black edges. On an empty slot the
+  caret now stands just clear of its square. That is the one place it is
+  drawn differently from WebSMath (the reference test records it).
+- **WebSMath's mouse pointer** (2026-10-01): over an equation, the arrow
+  (typing or not, over a plot too) and, along the 4-pixel band of its frame
+  that drags it, SMath's own move cursor (WebSMath's `move.cur`, at any
+  zoom); the same move cursor while an equation is being dragged.
+- **A calculation block works like a text box** (2026-10-01): closed, it is
+  one thing — a click anywhere on it, its equations included, selects it,
+  a drag moves it with everything in it (by whole grid steps, so the
+  equations keep their places), right-click gives the block's menu. A
+  double-click opens it: a dashed blue frame shows it is open (on the
+  screen only, never printed or saved), the double-click lands where it was
+  pointed (the caret in that equation, or the red cross on the page inside
+  it), and clicks inside edit, type and select its equations as anywhere
+  else. A click outside it or Esc closes it. A block just made is closed
+  and selected. *Different from Bluebeam*: a Bluebeam text box opens on a
+  double-click the same way; Bluebeam has no block of equations.
