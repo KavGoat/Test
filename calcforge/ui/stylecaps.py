@@ -17,6 +17,9 @@ OPACITY = "opacity"
 FILL_OPACITY = "fill_opacity"
 FONT = "font"
 ARROW_SIZE = "arrow_size"
+CLOUD = "cloud"            # a cloud's arc size
+CORNER = "corner"          # a rectangle's corner radius
+SYMBOL = "symbol"          # a count's symbol
 
 
 def capabilities(item, for_default: bool = False) -> set[str]:
@@ -48,7 +51,8 @@ def capabilities(item, for_default: bool = False) -> set[str]:
         # Imported drawing strokes carry their own per-path colours and widths.
         return {OPACITY}
     if isinstance(item, CountItem):
-        return {STROKE, FILL, WIDTH, DASH, HATCH, OPACITY, FILL_OPACITY, FONT}
+        # a small symbol with its number: no dashes or hatching on a marker
+        return {STROKE, FILL, WIDTH, OPACITY, FILL_OPACITY, FONT, SYMBOL}
     if isinstance(item, StampItem):
         return {STROKE, FILL, WIDTH, DASH, HATCH, OPACITY, FILL_OPACITY, FONT}
     if isinstance(item, FlagItem):
@@ -61,17 +65,30 @@ def capabilities(item, for_default: bool = False) -> set[str]:
             result.add(ARROW_SIZE)
         return result
     if isinstance(item, MeasureItem):
-        result = {STROKE, WIDTH, DASH, FONT, OPACITY, ARROW_SIZE}
+        result = {STROKE, WIDTH, DASH, FONT, OPACITY}
         if getattr(item, "closed", False):
-            result |= {FILL, FILL_OPACITY}
+            result |= {FILL, FILL_OPACITY}       # an area has no arrowheads
+        else:
+            result |= {ARROW_SIZE}
         return result
+    if isinstance(item, PolyItem) and item.kind == "highlighter":
+        return {STROKE, WIDTH, OPACITY}       # a highlighter pen: colour, width, opacity
     if isinstance(item, PolyItem):
         result = {STROKE, WIDTH, DASH, OPACITY, ARROW_SIZE}
         if getattr(item, "closed", False) or item.kind in ("polygon", "cloud"):
             result |= {FILL, HATCH, FILL_OPACITY}
+        if item.kind == "cloud":
+            result |= {CLOUD}
         return result
+    if isinstance(item, RectItem) and item.kind == "highlight":
+        return {FILL, FILL_OPACITY, OPACITY}  # a highlight is a colour wash
     if isinstance(item, RectItem):
-        return {STROKE, FILL, WIDTH, DASH, HATCH, OPACITY, FILL_OPACITY}
+        result = {STROKE, FILL, WIDTH, DASH, HATCH, OPACITY, FILL_OPACITY}
+        if item.kind == "cloud":
+            result |= {CLOUD}
+        elif item.kind == "rect":
+            result |= {CORNER}
+        return result
     return {STROKE, FILL, WIDTH, DASH, OPACITY, FILL_OPACITY}
 
 

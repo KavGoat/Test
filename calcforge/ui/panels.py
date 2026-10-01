@@ -26,6 +26,7 @@ from ..items.measure import CountItem, MeasureItem
 from ..items.shapes import PolyItem, RectItem
 from ..items.text import STAMP_PRESETS, CalloutItem, NoteItem, StampItem, TextItem
 from .icons import icon
+from .stylecaps import CLOUD
 from .stylecaps import (DASH, FILL, FILL_OPACITY, HATCH, OPACITY, STROKE,
                         WIDTH, common_capabilities)
 from .widgets import (ColorButton, LabeledSlider, UnitCombo, arrow_combo,
@@ -2008,6 +2009,19 @@ class PropertiesPanel(QScrollArea):
                 lambda colour: self._apply(
                     lambda i: setattr(i.style, "fill", colour), "Fill colour"))
             form.addRow("Fill", fill)
+
+        if CLOUD in controls:
+            arc = QDoubleSpinBox()
+            arc.setObjectName("cloudArc")
+            arc.setRange(2.0, 60.0)
+            arc.setDecimals(1)
+            arc.setSuffix(" pt")
+            arc.setValue(float(getattr(first, "cloud_radius", 9.0)))
+            arc.setToolTip("Cloud arc size: how big each bump of the cloud is")
+            arc.valueChanged.connect(lambda value: self._apply(
+                lambda i: (i.prepareGeometryChange(), setattr(i, "cloud_radius", value)),
+                "Cloud arc size", coalesce=True))
+            form.addRow("Arc size", arc)
 
         # each opacity beside what it fades: the fill's here, the hatch's with
         # the hatch, and the overall one (line, fill and hatch) last

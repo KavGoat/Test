@@ -271,3 +271,96 @@ def test_the_caret_stands_clear_of_the_last_letter(v):
     painter.end()
     bar = [a for a, b in drawn if a.x() == b.x()][0]
     assert bar.x() >= end_of_text + 1
+
+
+# -- the properties toolbar, per markup type (as Bluebeam's) -------------------------------
+
+def _bar_fields(window):
+    return {field for field, actions in window._style_widgets.items()
+            if any(a.isVisible() for a in actions)}
+
+
+def _select(window, item):
+    window.select_tool("select")
+    window.view.scene().clearSelection()
+    item.setSelected(True)
+    window.refresh_selection()
+
+
+def test_the_toolbar_shows_each_types_own_controls(window):
+    from PySide6.QtCore import QRectF
+    from calcforge.items.measure import CountItem, MeasureItem
+    from calcforge.items.shapes import PolyItem, RectItem
+    from calcforge.items.text import TextItem
+    from calcforge.ui.stylecaps import (ARROW_SIZE, CLOUD, CORNER, DASH, FILL, FONT,
+                                        HATCH, OPACITY, STROKE, SYMBOL)
+    window.show()
+    frame = window.document.pages[0].frame
+    cloud = RectItem("cloud", QRectF(0, 0, 120, 60))
+    box = RectItem("rect", QRectF(0, 0, 120, 60))
+    highlight = RectItem("highlight", QRectF(0, 0, 120, 20))
+    text = TextItem("Words", QRectF(0, 0, 120, 30))
+    count = CountItem()
+    area = MeasureItem("area", [QPointF(0, 0), QPointF(80, 0), QPointF(80, 50)])
+    for y, item in enumerate((cloud, box, highlight, text, count, area)):
+        frame.add_markup(item, QPointF(80, 60 + 80 * y))
+    _select(window, cloud)
+    assert CLOUD in _bar_fields(window) and CORNER not in _bar_fields(window)
+    assert window.style_kind_label.text().strip() == "Cloud"
+    _select(window, box)
+    assert CORNER in _bar_fields(window) and CLOUD not in _bar_fields(window)
+    _select(window, highlight)
+    assert _bar_fields(window) == {FILL, "fill_opacity", OPACITY}
+    _select(window, count)
+    assert SYMBOL in _bar_fields(window) and DASH not in _bar_fields(window)
+    assert HATCH not in _bar_fields(window)
+    _select(window, area)
+    assert ARROW_SIZE not in _bar_fields(window)
+    _select(window, text)
+    bar = window.style_bar
+    visible = [a for a in bar.actions() if a.isVisible()]
+    first_font = min(visible.index(a) for a in window._style_widgets[FONT] if a.isVisible())
+    first_line = min(visible.index(a) for a in window._style_widgets[STROKE] if a.isVisible())
+    assert first_font < first_line, "words first for anything with words in it, as Bluebeam"
+
+
+def test_the_cloud_arc_is_set_from_the_toolbar_and_for_new_clouds(window):
+    from PySide6.QtCore import QRectF
+    from calcforge.items.shapes import RectItem
+    window.show()
+    frame = window.document.pages[0].frame
+    cloud = RectItem("cloud", QRectF(0, 0, 120, 60))
+    frame.add_markup(cloud, QPointF(100, 100))
+    _select(window, cloud)
+    window.cloud_spin.setValue(18.0)
+    assert cloud.cloud_radius == pytest.approx(18.0)
+    window.undo_stack.undo()
+    (cloud,) = [i for i in frame.markups() if isinstance(i, RectItem)]
+    assert cloud.cloud_radius == pytest.approx(9.0)
+    # nothing selected, the cloud tool in hand: the next cloud's arcs
+    window.view.scene().clearSelection()
+    window.select_tool("cloud")
+    window.refresh_selection()
+    assert window.style_kind_label.text().strip() == "New cloud"
+    window.cloud_spin.setValue(24.0)
+    made = RectItem("cloud", QRectF(0, 0, 50, 50))
+    window.apply_default_style(made)
+    assert made.cloud_radius == pytest.approx(24.0)
+
+
+def test_count_symbol_and_corner_radius_from_the_toolbar(window):
+    from PySide6.QtCore import QRectF
+    from calcforge.items.measure import CountItem
+    from calcforge.items.shapes import RectItem
+    window.show()
+    frame = window.document.pages[0].frame
+    count = CountItem()
+    box = RectItem("rect", QRectF(0, 0, 120, 60))
+    frame.add_markup(count, QPointF(100, 100))
+    frame.add_markup(box, QPointF(300, 100))
+    _select(window, count)
+    window.symbol_combo.setCurrentText("star")
+    assert count.symbol == "star"
+    _select(window, box)
+    window.corner_spin.setValue(6.0)
+    assert box.style.corner_radius == pytest.approx(6.0)

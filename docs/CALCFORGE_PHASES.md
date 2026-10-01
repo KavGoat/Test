@@ -676,3 +676,15 @@ recorded the behaviour asked to change):
 **Different from SMath**: a variable named like a unit is the variable
 without asking (SMath Cloud asks); SMath can't run here, so its behaviour is
 checked against its saved files and WebSMath's recordings of SMath Cloud.
+- **The properties toolbar works per markup type, as Bluebeam's does**
+  (2026-10-01): it starts with the type it is setting (Cloud, Text box,
+  Area… or "New cloud" with a tool in hand) and shows that type's own
+  controls, in Bluebeam's order — the font first for anything with words in
+  it, the line and fill first for shapes. New on it: **Arc** (a cloud's arc
+  size — there was no control for it anywhere), **Radius** (a rectangle's
+  corners) and **Symbol** (a count's); each also sets what the next one is
+  drawn with. A highlight shows only its colour and opacities, a
+  highlighter pen its colour, width and opacity, an area no arrowheads, a
+  count no dashes or hatch. The toolbar and Properties still offer exactly
+  the same settings for every tool (the existing check), and Properties
+  gained Arc size too.

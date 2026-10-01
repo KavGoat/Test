@@ -7351,6 +7351,7 @@ def test_properties_only_offers_controls_the_selected_kind_can_use(window):
 def test_arrowhead_size_is_independent_in_properties_and_toolbar(window):
     from PySide6.QtWidgets import QDoubleSpinBox
 
+    window.show()           # the toolbar's width is the window's only once shown
     window.select_tool("arrow")
     drag(window.view, 120, 160, 300, 160)
     arrow = markups(window)[-1]

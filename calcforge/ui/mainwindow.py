@@ -47,6 +47,7 @@ from .rail import (AREAS, LEFT, RIGHT, PanelRail, RailBar, load_order,
                    load_sides, save_order, save_sides)
 from .scene import DocumentScene, detach
 from .shortcuts import MARKUP, COMMAND, INSERT, SYMBOL, TOOL, ShortcutManager
+from .stylecaps import (CLOUD, CORNER, SYMBOL)
 from .stylecaps import (ARROW_SIZE, DASH, FILL, FILL_OPACITY, FONT, HATCH,
                         OPACITY, STROKE, WIDTH, capabilities,
                         common_capabilities)
@@ -981,7 +982,15 @@ class MainWindow(QMainWindow):
         style_bar.setObjectName("toolbar_style")
         self._style_widgets: dict[str, list] = {
             STROKE: [], FILL: [], WIDTH: [], DASH: [], FONT: [],
-            HATCH: [], OPACITY: [], FILL_OPACITY: [], ARROW_SIZE: []}
+            HATCH: [], OPACITY: [], FILL_OPACITY: [], ARROW_SIZE: [],
+            CLOUD: [], CORNER: [], SYMBOL: []}
+        # As Bluebeam's Properties toolbar: it says what it is setting — the
+        # selected markup's type, or the kind the tool in hand draws
+        self.style_kind_label = QLabel("")
+        self.style_kind_label.setObjectName("styleKind")
+        self._style_kind_action = style_bar.addWidget(self.style_kind_label)
+        # what a new cloud's arcs are (an item setting, not a pen setting)
+        self.default_cloud_radius = 9.0
         self._style_widgets[STROKE].append(style_bar.addWidget(QLabel(" Line ")))
         self.stroke_button = ColorButton(self.default_style.stroke, True, "Line colour")
         self.stroke_button.colorChanged.connect(self._style_stroke)
@@ -1056,6 +1065,39 @@ class MainWindow(QMainWindow):
         self.dash_scale_spin.valueChanged.connect(lambda value: self._style_change(
             DASH, lambda style: setattr(style, "dash_scale", value), "Dash spacing"))
         self._style_widgets[DASH].append(style_bar.addWidget(self.dash_scale_spin))
+        # a cloud's arc size (Bluebeam's cloud intensity)
+        self._style_widgets[CLOUD].append(style_bar.addWidget(QLabel(" Arc ")))
+        self.cloud_spin = QDoubleSpinBox()
+        self.cloud_spin.setObjectName("cloudArc")
+        self.cloud_spin.setRange(2.0, 60.0)
+        self.cloud_spin.setDecimals(1)
+        self.cloud_spin.setSingleStep(1.0)
+        self.cloud_spin.setSuffix(" pt")
+        self.cloud_spin.setValue(self.default_cloud_radius)
+        self.cloud_spin.setToolTip("Cloud arc size: how big each bump of the cloud is")
+        self.cloud_spin.valueChanged.connect(self._style_cloud)
+        self._style_widgets[CLOUD].append(style_bar.addWidget(self.cloud_spin))
+        # a rectangle's corners
+        self._style_widgets[CORNER].append(style_bar.addWidget(QLabel(" Radius ")))
+        self.corner_spin = QDoubleSpinBox()
+        self.corner_spin.setObjectName("cornerRadius")
+        self.corner_spin.setRange(0.0, 200.0)
+        self.corner_spin.setDecimals(1)
+        self.corner_spin.setSuffix(" pt")
+        self.corner_spin.setValue(self.default_style.corner_radius)
+        self.corner_spin.setToolTip("Corner radius: 0 is square")
+        self.corner_spin.valueChanged.connect(lambda value: self._style_change(
+            CORNER, lambda style: setattr(style, "corner_radius", value), "Corner radius"))
+        self._style_widgets[CORNER].append(style_bar.addWidget(self.corner_spin))
+        # a count's symbol
+        self._style_widgets[SYMBOL].append(style_bar.addWidget(QLabel(" Symbol ")))
+        self.symbol_combo = QComboBox()
+        self.symbol_combo.setObjectName("countSymbol")
+        from ..items.measure import CountItem as _Count
+        self.symbol_combo.addItems(list(_Count.SYMBOLS))
+        self.symbol_combo.setToolTip("Count symbol")
+        self.symbol_combo.currentTextChanged.connect(self._style_symbol)
+        self._style_widgets[SYMBOL].append(style_bar.addWidget(self.symbol_combo))
         self._style_widgets[FONT].append(style_bar.addWidget(QLabel(" Text ")))
         self.font_family_combo = QFontComboBox()
         self.font_family_combo.setMaximumWidth(145)
@@ -4009,6 +4051,14 @@ class MainWindow(QMainWindow):
         # nothing that takes a style, the everyday controls stay, greyed out.
         idle = not supported
         shown = supported or {STROKE, FILL, FILL_OPACITY, WIDTH, DASH, OPACITY}
+        self._order_style_bar(active)
+        if items:
+            names = {self._type_name(i) for i in items}
+            kind = names.pop() if len(names) == 1 else f"{len(items)} markups"
+        else:
+            kind = (f"New {self._type_name(active).lower()}" if active is not None
+                    else "Nothing selected")
+        self.style_kind_label.setText(f" {kind} ")
         for field, actions in self._style_widgets.items():
             for action in actions:
                 action.setVisible(field in shown)
@@ -4047,6 +4097,12 @@ class MainWindow(QMainWindow):
                     (self.hatch_colour_button, active.style.hatch_color, "set_color"),
                     (self.hatch_opacity_spin,
                      int(round(getattr(active.style, "hatch_opacity", 1.0) * 100)), "setValue"),
+                    (self.cloud_spin, float(getattr(active, "cloud_radius", self.default_cloud_radius))
+                     if items else self.default_cloud_radius, "setValue"),
+                    (self.corner_spin, float(active.style.corner_radius) if items
+                     else self.default_style.corner_radius, "setValue"),
+                    (self.symbol_combo, getattr(active, "symbol", self.view.count_symbol)
+                     if items else self.view.count_symbol, "setCurrentText"),
                     (self.opacity_spin, int(round(active.style.opacity * 100)),
                      "setValue"),
                     (self.fill_opacity_spin,
@@ -4467,6 +4523,69 @@ class MainWindow(QMainWindow):
         self._style_change(OPACITY, lambda style: setattr(style, "opacity", value),
                            "Opacity")
 
+    # Bluebeam's Properties toolbar leads with what matters for the markup:
+    # the font for anything with words in it, the line and fill for shapes.
+    _SHAPE_ORDER = (STROKE, FILL, FILL_OPACITY, WIDTH, DASH, CLOUD, CORNER, ARROW_SIZE,
+                    SYMBOL, HATCH, FONT, OPACITY)
+    _TEXT_ORDER = (FONT, STROKE, FILL, FILL_OPACITY, WIDTH, DASH, CLOUD, CORNER,
+                   ARROW_SIZE, SYMBOL, HATCH, OPACITY)
+
+    @staticmethod
+    def _type_name(item) -> str:
+        """What kind of markup it is — Cloud, Arrow, Area — not what it is
+        called (a count's subject, a measurement's label)."""
+        from ..items.measure import MEASURE_NAMES
+        kind_name = getattr(item, "NAME_FOR_KIND", None)
+        if isinstance(kind_name, str) and kind_name:
+            return kind_name
+        if isinstance(item, MeasureItem):
+            return MEASURE_NAMES.get(item.kind, "Measurement")
+        return item.NAME
+
+    def _order_style_bar(self, active) -> None:
+        order = self._TEXT_ORDER if isinstance(active, _TextBase) else self._SHAPE_ORDER
+        if getattr(self, "_style_order", None) == order:
+            return
+        self._style_order = order
+        bar = self.style_bar
+        bar.setUpdatesEnabled(False)
+        try:
+            for field in order:
+                for action in self._style_widgets.get(field, ()):
+                    bar.insertAction(self._default_action, action)
+        finally:
+            bar.setUpdatesEnabled(True)
+
+    def _item_setting(self, field: str, attr: str, value, description: str) -> None:
+        """A toolbar control that sets something of the markup itself rather
+        than its pen (a cloud's arcs, a count's symbol): the selection, as one
+        undo step — or, with nothing selected, what the next one is drawn with."""
+        items = [i for i in self.selected_items() if field in capabilities(i)]
+        if not items:
+            return
+        self.view.begin_snapshot(self.view.involved_frames(*items))
+        for item in items:
+            item.prepareGeometryChange()
+            setattr(item, attr, value)
+            item.touch()
+            item.update()
+        self.view.commit_snapshot(description)
+        self.properties_panel.show_items(self.selected_items())
+
+    def _style_cloud(self, value: float) -> None:
+        if not self.selected_items():
+            self.default_cloud_radius = float(value)
+            return
+        self._item_setting(CLOUD, "cloud_radius", float(value), "Cloud arc size")
+
+    def _style_symbol(self, value: str) -> None:
+        if not value:
+            return
+        if not self.selected_items():
+            self.view.count_symbol = value
+            return
+        self._item_setting(SYMBOL, "symbol", value, "Count symbol")
+
     def _style_hatch_opacity(self, percent: int) -> None:
         value = percent / 100.0
         self._style_change(HATCH, lambda style: setattr(style, "hatch_opacity", value),
@@ -4615,6 +4734,12 @@ class MainWindow(QMainWindow):
             item.style.hatch = style.hatch
             item.style.hatch_scale = style.hatch_scale
             item.style.hatch_color = style.hatch_color
+            item.style.hatch_opacity = style.hatch_opacity
+        caps = capabilities(item)
+        if CLOUD in caps:
+            item.cloud_radius = self.default_cloud_radius
+        if CORNER in caps:
+            item.style.corner_radius = style.corner_radius
         item.style.font_size = style.font_size
         if hasattr(item, "apply_style"):
             item.apply_style()
