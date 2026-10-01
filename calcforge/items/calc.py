@@ -392,52 +392,6 @@ class _PageRegionView(RegionItem):
     max_width = 0.0
     too_wide = False
 
-    def _paint_cursor(self, p: QPainter) -> None:
-        """WebSMath's caret (region_item.py, kept byte for byte), with two
-        things the user found wrong while typing a unit: the bar sat on the
-        last letter (an italic N and the bar read as M), and nothing said a
-        unit was being typed. Here the bar stands a pixel clear of the text
-        and, from the ' on, is drawn in the units' blue."""
-        ed = self.editor
-        info = self._row_info(ed.row)
-        if info is None:
-            return
-        n = len(info.slots) - 1
-        x = info.slots[min(ed.pos, n)] if info.slots else info.x
-        urow, ua, ub = ed.underline()
-        uinfo = self._row_info(urow) or info
-        if uinfo.slots:
-            x0, x1 = uinfo.slots[min(ua, len(uinfo.slots) - 1)], uinfo.slots[min(ub, len(uinfo.slots) - 1)]
-        else:
-            x0 = x1 = x
-        if not ed.row.items:
-            x0, x = info.x, info.x + 9   # after the placeholder square, not on it
-            x1 = x
-        elif ed.pos > 0:
-            x += 1.0                     # clear of the glyph before it
-        underline_y = uinfo.base + uinfo.desc + 0.5
-        top = info.base - info.asc
-        if ed.in_subscript():
-            top += info.asc * 0.55
-            underline_y += info.asc * 0.4
-        typing_a_unit = ed.in_unit or ed.row is ed.unit or self._after_apostrophe(ed)
-        p.setPen(QPen(QColor("#0000ff") if typing_a_unit else QColor("black"), 1))
-        if x1 > x0:
-            p.drawLine(QPointF(x0, underline_y), QPointF(x1 + (1.0 if ed.pos > 0 else 0), underline_y))
-        p.drawLine(QPointF(x, top), QPointF(x, max(underline_y, info.base + info.desc + 0.5)))
-
-    @staticmethod
-    def _after_apostrophe(ed) -> bool:
-        """The caret is in a unit name typed after ' (2'kN): from the ' to it,
-        nothing but name characters."""
-        items = ed.row.items[:ed.pos]
-        for item in reversed(items):
-            if item == "'":
-                return True
-            if not isinstance(item, str) or not (item.isalnum() or item in "._°µΩ"):
-                return False
-        return False
-
     def relayout(self) -> None:
         super().relayout()
         self.too_wide = False

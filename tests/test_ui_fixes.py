@@ -216,63 +216,6 @@ def test_equals_and_define_type_after_any_name(v, name):
     assert display_text(item.region.display) == "8"
 
 
-# -- the caret while typing a unit --------------------------------------------------------
-
-def _caret_pixels(item, colour):
-    from PySide6.QtGui import QColor, QImage, QPainter
-    rect = item.boundingRect()
-    image = QImage(int(rect.width() * 6) + 8, int(rect.height() * 6) + 8, QImage.Format_ARGB32)
-    image.fill(QColor("white"))
-    painter = QPainter(image)
-    painter.scale(6, 6)
-    painter.translate(-rect.topLeft())
-    item.paint_visible(painter)
-    painter.end()
-    want = QColor(colour)
-    return sum(1 for x in range(image.width()) for y in range(image.height())
-               if QColor(image.pixel(x, y)).blue() > 200 and QColor(image.pixel(x, y)).red() < 60
-               and QColor(image.pixel(x, y)).green() < 60) if colour == "blue" else None
-
-
-def test_the_caret_turns_blue_in_a_unit(v):
-    v.type_at(36, 36, "")
-    v.keys("x:2")
-    item = v.focused_item
-    plain = _caret_pixels(item, "blue")
-    v.keys("'")
-    after_apostrophe = _caret_pixels(item, "blue")
-    assert after_apostrophe > plain, "from the ' on, the caret says a unit is being typed"
-
-
-def test_the_caret_stands_clear_of_the_last_letter(v):
-    v.type_at(36, 36, "")
-    v.keys("x")
-    item = v.focused_item
-    view = item._view
-    info = view._row_info(item.editor.row)
-    end_of_text = info.slots[-1]
-    drawn = []
-
-    class Spy:
-        def __init__(self, painter):
-            self.p = painter
-
-        def __getattr__(self, name):
-            return getattr(self.p, name)
-
-        def drawLine(self, a, b):
-            drawn.append((a, b))
-            return self.p.drawLine(a, b)
-
-    from PySide6.QtGui import QImage, QPainter
-    image = QImage(200, 100, QImage.Format_ARGB32)
-    painter = QPainter(image)
-    view._paint_cursor(Spy(painter))
-    painter.end()
-    bar = [a for a, b in drawn if a.x() == b.x()][0]
-    assert bar.x() >= end_of_text + 1
-
-
 # -- the properties toolbar, per markup type (as Bluebeam's) -------------------------------
 
 def _bar_fields(window):

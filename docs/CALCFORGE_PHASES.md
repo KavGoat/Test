@@ -623,9 +623,9 @@ paste back live.
   follows the page when it scrolls.
 - **Red and blue crosses together**: in Calc mode the red cross is the only
   insertion marker.
-- **Caret while typing a unit**: it stands a pixel clear of the last
-  letter (an italic N and the bar read as M), sits after the empty unit
-  box's square rather than on it, and is blue from the `'` on.
+- **Caret while typing a unit**: briefly changed (a pixel to the right,
+  blue in units), then put back to WebSMath's own caret when the user asked
+  for CalcForge to match WebSMath exactly (2026-10-01).
 - **Calculation blocks are pages of their own**: an equation can't be
   dragged out of its block (it stops at the edge) or into one (it goes
   back); a block can't be moved or resized over equations that aren't its
@@ -688,3 +688,18 @@ checked against its saved files and WebSMath's recordings of SMath Cloud.
   count no dashes or hatch. The toolbar and Properties still offer exactly
   the same settings for every tool (the existing check), and Properties
   gained Arc size too.
+- **Compared with WebSMath itself** (2026-10-01): WebSMath's window (its
+  branch at 8b340fa, run read-only from a scratch checkout) and CalcForge's
+  were given the same keystrokes — sums, definitions with units, the
+  result's unit box, undefined names, fractions, roots, powers, functions,
+  unit arithmetic, mismatched units, autocomplete, editing in the middle —
+  and every step compared: the equation's text, unit box, result, error,
+  the caret's place and the suggestion list, and the drawing pixel for
+  pixel at 4×, caret and colours included. All the same, but for one
+  deliberate difference: a name that is also a unit no longer blocks the
+  next key (`a*a=` after `a:5`). On screen at 1 SMath pixel = 1 screen
+  pixel they match too; the page around them differs (WebSMath's sheet has
+  SMath's line grid, CalcForge's page its margins and grid switch).
+  `tests/calc/test_websmath_reference.py` keeps WebSMath's reference
+  (tests/calc/data/websmath_reference) and checks CalcForge against it on
+  every run.

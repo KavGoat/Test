@@ -1,0 +1,294 @@
+{
+ "sum.typing": {
+  "text": "2+3=",
+  "unit": "",
+  "shown": null,
+  "error": null,
+  "pending": true,
+  "cursor_pos": 3,
+  "cursor_in_root": true,
+  "in_unit": false,
+  "suggestions": []
+ },
+ "sum.left": {
+  "text": "2+3=",
+  "unit": "",
+  "shown": "5",
+  "error": null,
+  "pending": false,
+  "cursor_pos": 3,
+  "cursor_in_root": true,
+  "in_unit": false,
+  "suggestions": []
+ },
+ "unit_def.apostrophe": {
+  "text": "x≔2'",
+  "unit": "",
+  "shown": null,
+  "error": null,
+  "pending": true,
+  "cursor_pos": 4,
+  "cursor_in_root": true,
+  "in_unit": false,
+  "suggestions": []
+ },
+ "unit_def.unit": {
+  "text": "x≔2'kN",
+  "unit": "",
+  "shown": null,
+  "error": null,
+  "pending": true,
+  "cursor_pos": 6,
+  "cursor_in_root": true,
+  "in_unit": false,
+  "suggestions": []
+ },
+ "unit_def.left": {
+  "text": "x≔2'kN",
+  "unit": "",
+  "shown": null,
+  "error": null,
+  "pending": false,
+  "cursor_pos": 6,
+  "cursor_in_root": true,
+  "in_unit": false,
+  "suggestions": []
+ },
+ "result_unit.result": {
+  "text": "x=",
+  "unit": "",
+  "shown": null,
+  "error": null,
+  "pending": true,
+  "cursor_pos": 1,
+  "cursor_in_root": true,
+  "in_unit": false,
+  "suggestions": [
+   "x",
+   "Glx",
+   "klx",
+   "lx",
+   "mlx",
+   "Mlx"
+  ]
+ },
+ "result_unit.in_unit_box": {
+  "text": "x=",
+  "unit": "",
+  "shown": null,
+  "error": null,
+  "pending": true,
+  "cursor_pos": 0,
+  "cursor_in_root": false,
+  "in_unit": true,
+  "suggestions": []
+ },
+ "result_unit.unit_typed": {
+  "text": "x=",
+  "unit": "N",
+  "shown": null,
+  "error": null,
+  "pending": true,
+  "cursor_pos": 1,
+  "cursor_in_root": false,
+  "in_unit": true,
+  "suggestions": [
+   "N",
+   "N.A",
+   "nA",
+   "nbar",
+   "nBq",
+   "nC"
+  ]
+ },
+ "result_unit.left": {
+  "text": "x=",
+  "unit": "N",
+  "shown": null,
+  "error": "N - not defined.",
+  "pending": false,
+  "cursor_pos": 1,
+  "cursor_in_root": false,
+  "in_unit": true,
+  "suggestions": []
+ },
+ "not_defined.typing": {
+  "text": "q*2=",
+  "unit": "",
+  "shown": null,
+  "error": null,
+  "pending": true,
+  "cursor_pos": 3,
+  "cursor_in_root": true,
+  "in_unit": false,
+  "suggestions": []
+ },
+ "not_defined.error": {
+  "text": "q*2=",
+  "unit": "",
+  "shown": null,
+  "error": "q - not defined.",
+  "pending": false,
+  "cursor_pos": 3,
+  "cursor_in_root": true,
+  "in_unit": false,
+  "suggestions": []
+ },
+ "fraction.typing": {
+  "text": "(1)/(3)=",
+  "unit": "",
+  "shown": null,
+  "error": null,
+  "pending": true,
+  "cursor_pos": 1,
+  "cursor_in_root": false,
+  "in_unit": false,
+  "suggestions": []
+ },
+ "fraction.left": {
+  "text": "(1)/(3)=",
+  "unit": "",
+  "shown": "0.3333",
+  "error": null,
+  "pending": false,
+  "cursor_pos": 1,
+  "cursor_in_root": false,
+  "in_unit": false,
+  "suggestions": []
+ },
+ "power_sqrt.typing": {
+  "text": "√(2)+x^(2)",
+  "unit": "",
+  "shown": null,
+  "error": null,
+  "pending": true,
+  "cursor_pos": 1,
+  "cursor_in_root": false,
+  "in_unit": false,
+  "suggestions": []
+ },
+ "power_sqrt.left": {
+  "text": "√(2)+x^(2)",
+  "unit": "",
+  "shown": null,
+  "error": null,
+  "pending": false,
+  "cursor_pos": 1,
+  "cursor_in_root": false,
+  "in_unit": false,
+  "suggestions": []
+ },
+ "function.typing": {
+  "text": "f(3)=",
+  "unit": "",
+  "shown": null,
+  "error": null,
+  "pending": true,
+  "cursor_pos": 2,
+  "cursor_in_root": true,
+  "in_unit": false,
+  "suggestions": []
+ },
+ "function.left": {
+  "text": "f(3)=",
+  "unit": "",
+  "shown": "9",
+  "error": null,
+  "pending": false,
+  "cursor_pos": 2,
+  "cursor_in_root": true,
+  "in_unit": false,
+  "suggestions": []
+ },
+ "units_maths.typing": {
+  "text": "(M)/(b)=",
+  "unit": "",
+  "shown": null,
+  "error": null,
+  "pending": true,
+  "cursor_pos": 1,
+  "cursor_in_root": false,
+  "in_unit": false,
+  "suggestions": [
+   "b",
+   "B",
+   "bar",
+   "barn",
+   "bit",
+   "bohr"
+  ]
+ },
+ "units_maths.left": {
+  "text": "(M)/(b)=",
+  "unit": "",
+  "shown": "41.6667 kN",
+  "error": null,
+  "pending": false,
+  "cursor_pos": 1,
+  "cursor_in_root": false,
+  "in_unit": false,
+  "suggestions": []
+ },
+ "mismatch.error": {
+  "text": "2'm+3'kg=",
+  "unit": "",
+  "shown": null,
+  "error": "Units don't match.",
+  "pending": false,
+  "cursor_pos": 8,
+  "cursor_in_root": true,
+  "in_unit": false,
+  "suggestions": []
+ },
+ "autocomplete.typing": {
+  "text": "si",
+  "unit": "",
+  "shown": null,
+  "error": null,
+  "pending": true,
+  "cursor_pos": 2,
+  "cursor_in_root": true,
+  "in_unit": false,
+  "suggestions": [
+   "kpsi",
+   "ksi",
+   "psi",
+   "appVersion",
+   "asin",
+   "asinh"
+  ]
+ },
+ "back_and_edit.middle": {
+  "text": "12+34",
+  "unit": "",
+  "shown": null,
+  "error": null,
+  "pending": true,
+  "cursor_pos": 3,
+  "cursor_in_root": true,
+  "in_unit": false,
+  "suggestions": []
+ },
+ "back_and_edit.deleted": {
+  "text": "1234",
+  "unit": "",
+  "shown": null,
+  "error": null,
+  "pending": true,
+  "cursor_pos": 2,
+  "cursor_in_root": true,
+  "in_unit": false,
+  "suggestions": []
+ },
+ "matrix_eval.left": {
+  "text": "aa≔",
+  "unit": "",
+  "shown": null,
+  "error": "Fill in all empty elements.",
+  "pending": false,
+  "cursor_pos": 3,
+  "cursor_in_root": true,
+  "in_unit": false,
+  "suggestions": []
+ }
+}

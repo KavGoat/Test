@@ -1,0 +1,28 @@
+"""The same keystrokes for both apps. ("at", x, y) clicks the red cross at
+SMath pixels, a string types characters, ("key", name) presses a named key,
+("snap", name) records the focused equation (or the last one) as drawn."""
+SCENARIOS = {
+    "sum": [("at", 18, 18), "2+3=", ("snap", "typing"), ("key", "Return"), ("snap", "left")],
+    "unit_def": [("at", 18, 18), "x:2'", ("snap", "apostrophe"), "kN", ("snap", "unit"),
+                 ("key", "Return"), ("snap", "left")],
+    "result_unit": [("at", 18, 18), "x:2'kN", ("key", "Return"), ("at", 18, 72), "x=",
+                    ("snap", "result"), ("key", "Right"), ("snap", "in_unit_box"), "N",
+                    ("snap", "unit_typed"), ("key", "Return"), ("snap", "left")],
+    "not_defined": [("at", 18, 18), "q*2=", ("snap", "typing"), ("key", "Return"),
+                    ("snap", "error")],
+    "fraction": [("at", 18, 18), "1/3=", ("snap", "typing"), ("key", "Return"), ("snap", "left")],
+    "power_sqrt": [("at", 18, 18), "\\2", ("key", "Right"), "+x^2", ("snap", "typing"),
+                   ("key", "Return"), ("snap", "left")],
+    "function": [("at", 18, 18), "f(z", ("key", "Right"), ":z^2", ("key", "Return"),
+                 ("at", 18, 72), "f(3", ("key", "Right"), "=", ("snap", "typing"),
+                 ("key", "Return"), ("snap", "left")],
+    "units_maths": [("at", 18, 18), "M:12.5'kN*'m", ("key", "Return"), ("at", 18, 72),
+                    "b:300'mm", ("key", "Return"), ("at", 18, 126), "M/b=",
+                    ("snap", "typing"), ("key", "Return"), ("snap", "left")],
+    "mismatch": [("at", 18, 18), "2'm+3'kg=", ("key", "Return"), ("snap", "error")],
+    "autocomplete": [("at", 18, 18), "si", ("snap", "typing")],
+    "back_and_edit": [("at", 18, 18), "12+34", ("key", "Left"), ("key", "Left"),
+                      ("snap", "middle"), ("key", "Backspace"), ("snap", "deleted")],
+    "matrix_eval": [("at", 18, 18), "a:5", ("key", "Return"), ("at", 18, 72), "a*a=",
+                    ("key", "Return"), ("snap", "left")],
+}
