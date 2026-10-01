@@ -129,7 +129,8 @@ from PySide6.QtWidgets import (QApplication, QWidget, QLabel, QLineEdit, QTextEd
                                QScrollArea, QVBoxLayout, QHBoxLayout, QMenu,
                                QFrame, QSlider, QGraphicsDropShadowEffect,
                                QMessageBox, QDialog, QCalendarWidget, QPushButton,
-                               QStyledItemDelegate, QStyle, QWidgetAction)
+                               QStyledItemDelegate, QStyle, QWidgetAction,
+                               QListWidget, QListWidgetItem)
 WM_TODO_CLOSE = 0x8012          # F2 while the list is in front: close
 WM_AHK_TOGGLE = 0x8001          # sent by TodoLauncher.ahk on F2: show / close
 START_HIDDEN = "--background" in sys.argv and "--show" not in sys.argv
@@ -1736,7 +1737,7 @@ def unarchive(block, copies):
                 f.write(text)
     except OSError as exc:
         log_error("Couldn't undo an archive in TodoArchive.txt", exc)
-def open_archive(parent=None):
+def open_archive_file(parent=None):
     if not os.path.exists(ARCHIVE_FILE):
         alert(parent, "Archive", "Nothing archived yet.")
         return
@@ -1745,6 +1746,202 @@ def open_archive(parent=None):
     except OSError as exc:
         log_error(f"Couldn't open '{ARCHIVE_FILE}'", exc)
         alert(parent, "Archive", f"Couldn't open:\n{ARCHIVE_FILE}\n\n{exc}")
+def open_archive(win):
+    """The archive, in the app: search it, and restore tasks into the tab
+    that's open in `win`."""
+    if not read_archive():
+        alert(win, "Archive", "Nothing archived yet.")
+        return
+    ArchiveViewer(win).exec()
+_RE_ARCHIVE_LINE = re.compile(
+    r"^(?P<done>.{10})  \[(?P<group>[^\]]*)\]  (?P<text>.*?)"
+    r"(?:  \(due (?P<due>\d{4}-\d{2}-\d{2})\))?$")
+def read_archive():
+    """Every entry in TodoArchive.txt, oldest first, as dicts with the
+    task's text, group, doneat, due, attachments / locations, and 'block' -
+    the exact text it occupies in the file (to take it out again)."""
+    try:
+        with open(ARCHIVE_FILE, "r", encoding="utf-8") as f:
+            lines = f.read().split("\n")
+    except OSError:
+        return []
+    out = []
+    for ln in lines:
+        sub = ln.startswith(" " * 12)
+        if sub and out:
+            kind, _, path = ln.strip().partition(": ")
+            if kind in ("attachment", "location") and path:
+                out[-1][kind + "s"].append(path)
+            out[-1]["block"] += ln + "\n"
+            continue
+        m = _RE_ARCHIVE_LINE.match(ln)
+        if not m:
+            continue
+        out.append({"text": m["text"], "group": m["group"], "doneat": m["done"].strip(),
+                    "due": m["due"], "attachments": [], "locations": [], "block": ln + "\n"})
+    return out
+def rearchive(blocks):
+    """Undo of a restore: the entries go back into TodoArchive.txt."""
+    if not blocks:
+        return
+    try:
+        new = not os.path.exists(ARCHIVE_FILE)
+        with open(ARCHIVE_FILE, "a", encoding="utf-8") as f:
+            if new:
+                f.write(ARCHIVE_HEADER)
+            f.write("".join(blocks))
+    except OSError as exc:
+        log_error("Couldn't put restored tasks back into TodoArchive.txt", exc)
+class _ArchiveDelegate(QStyledItemDelegate):
+    """One archived task: its text, and underneath when it was done and
+    which group it was in."""
+    def sizeHint(self, opt, index):
+        return QSize(opt.rect.width(), int(42 * S))
+    def paint(self, p, opt, index):
+        e = index.data(Qt.UserRole)
+        p.save()
+        p.setRenderHint(QPainter.Antialiasing)
+        r = QRectF(opt.rect).adjusted(2, 1, -2, -1)
+        if opt.state & QStyle.State_Selected:
+            p.setPen(QPen(QColor(ACCENT), 1))
+            p.setBrush(QColor(CARD_SELECTED))
+        elif opt.state & QStyle.State_MouseOver:
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(255, 255, 255, 14))
+        else:
+            p.setPen(Qt.NoPen)
+            p.setBrush(Qt.NoBrush)
+        p.drawRoundedRect(r, RADIUS, RADIUS)
+        pad = int(10 * S)
+        fm = QFontMetrics(F(9.5))
+        p.setFont(F(9.5))
+        p.setPen(QColor(TEXT))
+        top = r.adjusted(pad, int(5 * S), -pad, 0)
+        p.drawText(top, Qt.AlignLeft | Qt.AlignTop,
+                   fm.elidedText(e["text"], Qt.ElideRight, int(top.width())))
+        done = parse_due(e["doneat"])
+        bits = [f"Done {done.day} {done:%b %Y}" if done else "Done", e["group"]]
+        n = len(e["attachments"]) + len(e["locations"])
+        if n:
+            bits.append(f"{n} attachment{'s' if n > 1 else ''}")
+        p.setFont(F(8))
+        p.setPen(QColor(TEXT_SUB))
+        p.drawText(r.adjusted(pad, 0, -pad, -int(5 * S)), Qt.AlignLeft | Qt.AlignBottom,
+                   "  \u00b7  ".join(bits))
+        p.restore()
+class ArchiveViewer(QDialog):
+    """Archived tasks, newest first, with a search box. Restore (button,
+    Enter or double-click) puts the selected ones back into the open tab's
+    Completed list and takes them out of TodoArchive.txt - Ctrl+Z in the
+    list undoes that."""
+    def __init__(self, win):
+        super().__init__(win, Qt.Popup | Qt.FramelessWindowHint)
+        no_system_shadow(self)
+        self.win = win
+        self.setStyleSheet(f"""
+QLabel {{ color: {TEXT}; background: transparent; }}
+QLabel#dim {{ color: {TEXT_DONE}; }}
+QLineEdit {{ background: #3b4146; color: {TEXT}; border: 1px solid #4a5055; border-radius: 5px;
+    padding: 4px 8px; font-family: '{FONT}'; font-size: {9 * S:.1f}pt;
+    selection-background-color: #3d6fb4; }}
+QLineEdit:focus {{ border-color: {ACCENT}; }}
+QListWidget {{ background: transparent; border: none; outline: none; }}
+QPushButton {{ background: {ACCENT}; color: #1b1f22; border: none; border-radius: 5px;
+    padding: 5px 14px; font-family: '{FONT}'; font-size: {9 * S:.1f}pt; }}
+QPushButton:hover {{ background: #a3c4fa; }}
+QPushButton:disabled {{ background: #3b4146; color: #8f979a; }}
+QPushButton#plain {{ background: transparent; color: {ACCENT}; padding: 5px 4px; }}
+QPushButton#plain:hover {{ color: #a3c4fa; }}
+""")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(14 + SHADOW, 10 + SHADOW - 2, 14 + SHADOW, 12 + SHADOW + 2)
+        lay.setSpacing(int(8 * S))
+        head = QHBoxLayout()
+        title = QLabel("Archive")
+        title.setFont(F(11, bold=True))
+        head.addWidget(title)
+        head.addStretch()
+        self.count = QLabel()
+        self.count.setObjectName("dim")
+        self.count.setFont(F(8.5))
+        head.addWidget(self.count)
+        lay.addLayout(head)
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Search archived tasks")
+        self.search.textChanged.connect(self.fill)
+        lay.addWidget(self.search)
+        self.list = QListWidget()
+        self.list.setSelectionMode(QListWidget.ExtendedSelection)
+        self.list.setItemDelegate(_ArchiveDelegate(self.list))
+        self.list.setMouseTracking(True)
+        self.list.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.list.verticalScrollBar().setStyleSheet(SCROLL_STYLE)
+        self.list.itemSelectionChanged.connect(self._selection)
+        self.list.itemDoubleClicked.connect(lambda _: self.restore())
+        lay.addWidget(self.list, 1)
+        bottom = QHBoxLayout()
+        as_text = QPushButton("Open as text")
+        as_text.setObjectName("plain")
+        as_text.setCursor(Qt.PointingHandCursor)
+        as_text.setAutoDefault(False)
+        as_text.clicked.connect(lambda: (self.close(), open_archive_file(win)))
+        bottom.addWidget(as_text)
+        bottom.addStretch()
+        self.restore_btn = QPushButton("Restore")
+        self.restore_btn.setCursor(Qt.PointingHandCursor)
+        self.restore_btn.setAutoDefault(False)
+        self.restore_btn.clicked.connect(self.restore)
+        bottom.addWidget(self.restore_btn)
+        lay.addLayout(bottom)
+        self.entries = list(reversed(read_archive()))       # newest first
+        self.fill()
+        # Over the list, about as big as it
+        panel = win.scroll.geometry()
+        w = max(int(300 * S), min(int(440 * S), panel.width() - int(24 * S)))
+        h = max(int(260 * S), min(int(520 * S), panel.height() - int(24 * S)))
+        self.resize(w + 2 * SHADOW, h + 2 * SHADOW)
+        centre = win.mapToGlobal(panel.center())
+        self.move(centre.x() - self.width() // 2, centre.y() - self.height() // 2)
+        self.search.setFocus()
+    def fill(self, *_):
+        words = self.search.text().lower().split()
+        self.list.clear()
+        shown = 0
+        for e in self.entries:
+            hay = f"{e['text']} {e['group']}".lower()
+            if all(wd in hay for wd in words):
+                item = QListWidgetItem(e["text"])
+                item.setData(Qt.UserRole, e)
+                item.setToolTip(e["text"])
+                self.list.addItem(item)
+                shown += 1
+        total = len(self.entries)
+        self.count.setText(f"{shown} of {total}" if words else
+                           f"{total} task{'s' if total != 1 else ''}")
+        self._selection()
+    def _selection(self):
+        n = len(self.list.selectedItems())
+        self.restore_btn.setEnabled(n > 0 and self.win.board is not None)
+        self.restore_btn.setText(f"Restore {n}" if n > 1 else "Restore")
+    def keyPressEvent(self, e):
+        if e.key() in (Qt.Key_Return, Qt.Key_Enter) and self.list.selectedItems():
+            self.restore()
+            return
+        if e.key() == Qt.Key_Down and self.search.hasFocus() and self.list.count():
+            self.list.setFocus()
+            self.list.setCurrentRow(0)
+            return
+        super().keyPressEvent(e)
+    def restore(self):
+        picked = [i.data(Qt.UserRole) for i in self.list.selectedItems()]
+        if not picked or self.win.board is None:
+            return
+        self.win.board.restore_archived(picked)
+        self.accept()
+    def paintEvent(self, _):
+        p = QPainter(self)
+        paint_panel(p, QRectF(self.rect()).adjusted(SHADOW, SHADOW - 2, -SHADOW, -SHADOW - 2))
 TRASH_DIR = os.path.join(ATTACH_DIR, ".deleted")
 def trash_files(names):
     """Take files out of the attachments folder straight away. They sit in a
@@ -1873,7 +2070,11 @@ _RE_ISO = re.compile(_LEAD + r"(?P<y>\d{4})-(?P<m>\d{1,2})-(?P<d>\d{1,2})" + _TA
 # "cl 4.2" or "NZS 3404" - accepting "." or "-" as date separators here
 # would silently misread those as due dates. ISO (yyyy-mm-dd) and
 # month-name dates below cover the rest without that ambiguity.
-_RE_NUMERIC = re.compile(_LEAD + r"(?P<d>\d{1,2})/(?P<m>\d{1,2})(?:/(?P<y>\d{2,4}))?" + _TAIL)
+# A bare d/m (no year) only counts after a cue word or with a day over 12 -
+# otherwise "Read chapter 1/2" or "Mix ratio 3/4" would lose their numbers
+# and turn into due dates.
+_RE_NUMERIC = re.compile(r"(?:\s+(?P<cue>due|by|on|before|until))?\s+"
+                         r"(?P<d>\d{1,2})/(?P<m>\d{1,2})(?:/(?P<y>\d{2,4}))?" + _TAIL, re.I)
 _RE_MONTH_DMY = re.compile(
     _LEAD + r"(?P<d>\d{1,2})(?:st|nd|rd|th)?\s+(?P<mon>" + _MONTH_ALT + r")"
     r"(?:\s+(?P<y>\d{4}))?" + _TAIL, re.I)
@@ -1929,6 +2130,8 @@ def due_from_text(text):
             elif rx is _RE_NUMERIC:
                 day, month = int(m["d"]), int(m["m"])
                 year = m["y"]
+                if not year and not m["cue"] and day <= 12:
+                    continue          # could just as well be a fraction / ratio
                 if year:
                     y = int(year) + (2000 if len(year) <= 2 else 0)
                     d = date(y, month, day)
@@ -2536,6 +2739,7 @@ class TaskCard(QWidget):
         self._colour = None
         self.cy = MIN_H / 2
         self.editor = None      # only built when you edit (keeps loading fast)
+        self._flash = False     # due date just read from the typed text
         self._suspend_focus_commit = False  # True only while edit_menu()'s menu is open
         self.anim = make_anim(self)
         self.apply_scale()
@@ -2565,6 +2769,13 @@ class TaskCard(QWidget):
         if self.editor is not None:
             self.editor.apply_scale()
         self.refresh()
+    def flash_due(self):
+        self._flash = True
+        self.update()
+        def off():
+            self._flash = False
+            self.update()
+        QTimer.singleShot(1600, self, off)
     def has_sub(self):
         return self.task["done"] or bool(self.task.get("due"))
     def urgency(self):
@@ -2718,6 +2929,7 @@ class TaskCard(QWidget):
             text = body
             if due:
                 self.task["due"] = due
+                QTimer.singleShot(0, self, self.flash_due)   # once it's laid out again
             if urgent:
                 self.task["star"] = True
             self.task["text"] = text
@@ -2801,6 +3013,14 @@ class TaskCard(QWidget):
             p.setPen(QPen(QColor(ACCENT), 2))
             p.setBrush(Qt.NoBrush)
             p.drawRoundedRect(rect.adjusted(1, 1, -1, -1), RADIUS, RADIUS)
+        if self._flash and self.sub.isVisible():
+            # Just picked up a due date from what was typed: highlight it
+            # for a moment so a mis-read date doesn't go unnoticed.
+            g = QRectF(self.sub.geometry()).adjusted(-4 * S, -1 * S, 0, 1 * S)
+            g.setWidth(QFontMetrics(self.sub.font()).horizontalAdvance(self.sub.text()) + 8 * S)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(138, 180, 248, 70))
+            p.drawRoundedRect(g, 3 * S, 3 * S)
         # attachments
         col = QColor(TEXT_DONE if done else TEXT_SUB)
         fm = QFontMetrics(F(8))
@@ -3667,6 +3887,11 @@ class Board(QWidget):
     def start_drag(self, card):
         self._drag_snap = self.snapshot()
         self.drag = card
+        # Groups the tasks started in - dragging up to the tab row passes
+        # over the top group, which mustn't decide where they land in
+        # another tab.
+        self._drag_origin = {id(c): c.task["group"] for c in self.selected_cards()}
+        self._drag_origin[id(card)] = card.task["group"]
         # Other selected (open) tasks come along: tucked away while dragging,
         # dropped in right under the one you're holding
         self.drag_extra = [c for c in self.selected_cards()
@@ -3689,6 +3914,12 @@ class Board(QWidget):
         card = self.drag
         if card is None or not self.regions:
             return
+        win = self.window()
+        target_win, target_tabid = tab_chip_at_global_pos(
+            global_pos, exclude=(win, getattr(win, "active_tab", None)))
+        self._set_group_drop_tab(target_win, target_tabid)
+        if target_win is not None:
+            return          # hovering a tab to drop onto - no in-board repositioning
         first_top = self.regions[0][1]
         last_bottom = self.regions[-1][2]
         mouse_y = self.mapFromGlobal(global_pos).y()
@@ -3728,6 +3959,11 @@ class Board(QWidget):
     def end_drag(self):
         card = self.drag
         self.drag = None
+        target = getattr(self, "_group_drop_target", None)
+        if target and target[0] is not None:
+            self._set_group_drop_tab(None, None)
+            self._move_cards_to_tab(card, *target)
+            return
         self._drag_snap_saved = None
         if getattr(self, "drag_extra", []):
             self._drag_snap_saved = self._drag_snap      # always a change when several move
@@ -3760,6 +3996,73 @@ class Board(QWidget):
                 card.update()
         QTimer.singleShot(ANIM_MS + 20, card, drop_shadow)
         card.update()
+        self.changed.emit()
+    def _move_cards_to_tab(self, card, target_win, target_tabid):
+        """Dragged task(s) dropped on a tab: they leave this board and land
+        in that tab (this window or another), in the group of the same name
+        there if it has one, otherwise in General. Ctrl+Z here brings them
+        back."""
+        self.scroll_timer.stop()
+        card.dragging = False
+        card.setGraphicsEffect(None)
+        card.setCursor(Qt.ArrowCursor)
+        cards = [card] + getattr(self, "drag_extra", [])
+        self.drag_extra = []
+        token = uuid.uuid4().hex
+        if self._drag_snap is not None:
+            self.checkpoint(self._drag_snap)
+            self._note_moved_out(target_tabid, token)
+        self._drag_snap = None
+        origin = getattr(self, "_drag_origin", {})
+        tasks = []
+        for c in cards:
+            g = self.group_of(c)
+            if g:
+                g.cards.remove(c)
+            t = self._task_copy(c.task)
+            t["group"] = origin.get(id(c), t["group"])
+            t["_moved"] = token
+            tasks.append(t)
+            self.selected.discard(id(c))
+            if self.anchor is c:
+                self.anchor = None
+            if self.kb_cursor is c:
+                self.kb_cursor = None
+            c.hide()
+            c.deleteLater()      # not _remove(): the attachments go with the tasks
+        self.relayout(animate=True)
+        self.changed.emit()
+        if target_win.active_tab == target_tabid:
+            target_win.board.receive_tasks(tasks)
+        else:
+            data = target_win.tab_data.get(target_tabid)
+            if data is None:
+                meta = target_win.tab_meta[target_tabid]
+                data = target_win.tab_data[target_tabid] = _empty_tab(meta["name"], meta["colour"])
+            groups = dict((n, ts) for n, ts in data["groups"])
+            for t in tasks:
+                if t["group"] not in groups:
+                    t["group"] = GENERAL
+                groups.setdefault(GENERAL, [])
+                if GENERAL not in [n for n, _ in data["groups"]]:
+                    data["groups"].insert(0, [GENERAL, groups[GENERAL]])
+                groups[t["group"]].append(t)
+            target_win.tabbar.update()
+        global_save()
+    def receive_tasks(self, tasks):
+        """The other side of _move_cards_to_tab() for an open tab."""
+        self.checkpoint()
+        new = []
+        for t in tasks:
+            g = next((g for g in self.groups if g.name == t["group"]), self.groups[0])
+            t = dict(t)
+            t["group"] = g.name
+            card = TaskCard(self, t)
+            g.cards.append(card)
+            new.append(card)
+        self.relayout(animate=True)
+        for c in new:
+            c.show()
         self.changed.emit()
     # ---------- dragging whole groups ----------
     def start_group_drag(self, group, offset):
@@ -3855,12 +4158,13 @@ class Board(QWidget):
             w.deleteLater()
         if self.active_group is group:
             self.active_group = self.groups[0]
-        tasks = [dict(c.task) for c in group.cards]
+        token = uuid.uuid4().hex
+        tasks = [dict(c.task, _moved=token) for c in group.cards]
         colour, folded, name = group.colour, group.folded, group.name
         self.relayout(animate=True)
         self.changed.emit()
         if target_win.active_tab == target_tabid:
-            target_win.board.receive_group(name, tasks, colour, folded)
+            new_name = target_win.board.receive_group(name, tasks, colour, folded)
         else:
             data = target_win.tab_data.get(target_tabid)
             if data is None:
@@ -3876,7 +4180,38 @@ class Board(QWidget):
             if colour:
                 data["colours"][new_name] = colour
             target_win.tabbar.update()
+        self._note_moved_out(target_tabid, token, new_name)
         global_save()
+    def _note_moved_out(self, tabid, token, group_name=None):
+        """Marks the undo step just taken as a move into another tab, so
+        Ctrl+Z also takes the moved tasks (and the group, if one was made
+        for them) back out of there - instead of leaving a copy behind."""
+        if self.history:
+            self.history[-1]["moved_out"] = (tabid, token, group_name)
+    def drop_moved(self, token, group_name=None):
+        """Removes tasks tagged with `token` (and the then-empty group
+        `group_name`) from this board - the far side of undoing a move."""
+        for c in [c for c in self.all_cards() if c.task.get("_moved") == token]:
+            g = self.group_of(c)
+            if g:
+                g.cards.remove(c)
+            self.selected.discard(id(c))
+            if self.anchor is c:
+                self.anchor = None
+            if self.kb_cursor is c:
+                self.kb_cursor = None
+            c.hide()
+            c.deleteLater()
+        g = next((g for g in self.groups if g.name == group_name), None)
+        if g is not None and g.name != GENERAL and not g.cards:
+            self.groups.remove(g)
+            for w in (g.header, g.add_row):
+                w.hide()
+                w.deleteLater()
+            if self.active_group is g:
+                self.active_group = self.groups[0]
+        self.relayout(animate=True)
+        self.changed.emit()
     def receive_group(self, name, tasks, colour, folded):
         """The other side of _move_group_to_tab(): adds a whole group
         (dragged in from another tab, possibly another window) to this
@@ -3895,6 +4230,7 @@ class Board(QWidget):
         for c in g.cards:
             c.show()
         self.changed.emit()
+        return new_name
     # ---------- auto scroll while dragging ----------
     def auto_scroll(self):
         if self.gdrag is not None:
@@ -4221,6 +4557,8 @@ class Board(QWidget):
         group.cards.append(card)
         self.relayout(animate=True)
         card.show()
+        if due and due == auto_due:
+            card.flash_due()
         card.stackUnder(group.add_row)
         self.reveal_later(group.add_row)
         self.changed.emit()
@@ -4497,6 +4835,47 @@ class Board(QWidget):
         self._remove(cards)
         self.relayout(animate=True)
         self.changed.emit()
+    def restore_archived(self, entries):
+        """Archived tasks back into this tab's Completed list (their group
+        if it's still here, otherwise General), attachments copied back in.
+        They come out of TodoArchive.txt; Ctrl+Z puts them back there."""
+        snap = self.snapshot()
+        snap["rearchive"] = [e["block"] for e in entries]
+        self.checkpoint(snap)
+        for e in entries:
+            unarchive(e["block"], [])
+        names = [g.name for g in self.groups]
+        new = []
+        for e in entries:
+            files = []
+            for src in e["attachments"]:
+                if os.path.isfile(src):
+                    try:
+                        dst = unique_path(os.path.basename(src))
+                        shutil.copy2(src, dst)
+                        files.append(os.path.basename(dst))
+                    except OSError as exc:
+                        log_error(f"Couldn't restore attachment '{src}'", exc)
+            mark_owned(files)
+            files += e["locations"]
+            task = {"text": e["text"], "done": True,
+                    "doneat": e["doneat"] or date.today().isoformat(),
+                    "group": e["group"] if e["group"] in names else GENERAL}
+            if e["due"]:
+                task["due"] = e["due"]
+            if files:
+                task["files"] = files
+            card = TaskCard(self, task)
+            self.done_cards.insert(0, card)
+            new.append(card)
+        self.collapsed = False            # show where they went
+        self.relayout(animate=True)
+        for c in new:
+            c.show()
+        self.selected = {id(c) for c in new}
+        self.refresh_selection()
+        QTimer.singleShot(ANIM_MS, new[0], lambda: self.scroll.ensureWidgetVisible(new[0], 0, 30))
+        self.changed.emit()
     def auto_archive(self, days):
         if days <= 0 or self.dead:
             return
@@ -4523,7 +4902,7 @@ class Board(QWidget):
         act_arch = menu.addAction(menu_icon("box"), f"Archive all completed ({n})")
         act_del = menu.addAction(menu_icon("bin", OVERDUE), f"Delete all completed ({n})")
         menu.addSeparator()
-        act_open = menu.addAction(menu_icon("open"), "Open archive file")
+        act_open = menu.addAction(menu_icon("open"), "Open archive\u2026")
         chosen = menu.open_at(global_pos)
         if chosen == act_arch:
             if self.confirm("Archive completed",
@@ -5680,7 +6059,8 @@ class TabBar(QWidget):
             if c is dragged:
                 continue           # follows the cursor, not its slot
             target = QPoint(x, 0)
-            if animate and c.isVisible() and c.pos() != target:
+            placed, c.placed = getattr(c, "placed", False), True
+            if animate and placed and c.isVisible() and c.pos() != target:
                 c.anim.stop()
                 c.anim.setStartValue(c.pos())
                 c.anim.setEndValue(target)
@@ -5984,11 +6364,33 @@ class TabBar(QWidget):
         so a stale rename box is never left floating over the wrong tab."""
         if self.rename_edit is not None:
             self.finish_rename(False)
+def take_back_moved(tabid, token, group_name=None):
+    """Undo of moving tasks / a group into another tab: removes them from
+    that tab again, wherever it is now (any window, open or not)."""
+    for w in WINDOWS:
+        if tabid not in w.tab_order:
+            continue
+        if tabid == w.active_tab and w.board is not None:
+            w.board.drop_moved(token, group_name)
+        else:
+            data = w.tab_data.get(tabid)
+            if data is None:
+                return
+            for entry in data["groups"]:
+                entry[1][:] = [t for t in entry[1] if t.get("_moved") != token]
+            if group_name and group_name != GENERAL:
+                if any(n == group_name and not ts for n, ts in data["groups"]):
+                    data["groups"][:] = [e for e in data["groups"] if e[0] != group_name]
+                    data["folded"].discard(group_name)
+                    data["colours"].pop(group_name, None)
+            w.tabbar.update()
+        w.save_timer.start()
+        return
 def move_tab_to_window(src, tabid, dst, index):
     """A tab dropped on another window's tab row: it moves there (opened),
     and the window it came from closes if that was its last tab."""
-    data, meta = src.pop_tab_for_transfer(tabid)
-    dst.insert_tab(tabid, data, meta, index=index, activate=True)
+    data, meta, history = src.pop_tab_for_transfer(tabid)
+    dst.insert_tab(tabid, data, meta, index=index, activate=True, history=history)
     if not src.tab_order:
         src.close_emptied_by_transfer()
     else:
@@ -6021,7 +6423,7 @@ class Window(QWidget):
         # ---- figure out which tab(s) this window starts with ----
         if detached is not None:
             # Torn off a tab from another window: starts with just that one.
-            tabid, tdata, tmeta = detached
+            tabid, tdata, tmeta, thistory = detached
             self.tab_order = [tabid]
             self.tab_meta = {tabid: tmeta}
             self.tab_data = {}
@@ -6091,6 +6493,8 @@ class Window(QWidget):
         # memory only - self.history is always an alias for whichever tab's
         # list is currently showing, swapped by switch_tab()/add_tab()/etc.
         self.tab_history = {tid: [] for tid in self.tab_order}
+        if detached is not None:
+            self.tab_history[self.active_tab] = thistory      # Ctrl+Z history travels with the tab
         self.history = self.tab_history[self.active_tab]
         self.board = None
         self.data = active_tab_data
@@ -6230,9 +6634,8 @@ class Window(QWidget):
                 or rec["mark"][1] is not (self.history[-1] if self.history else None):
             return False
         DELETED_TABS.pop()
-        self.tab_history[rec["tabid"]] = rec["history"]
         self.insert_tab(rec["tabid"], rec["data"], rec["meta"],
-                        index=rec["index"], activate=True)
+                        index=rec["index"], activate=True, history=rec["history"])
         restore_files(self.board.used_files())
         self.save_timer.start()
         return True
@@ -6241,7 +6644,8 @@ class Window(QWidget):
         another bar, or tear-off) - this window keeps running with its
         remaining tabs (switching to a neighbour if the removed tab was the
         active one). If that leaves zero tabs, active_tab becomes None and
-        the caller must close this window (close_emptied_by_transfer)."""
+        the caller must close this window (close_emptied_by_transfer).
+        Returns (data, meta, undo history) - the history goes with the tab."""
         was_active = tabid == self.active_tab
         if was_active:
             data = self.export_active_tab_data()
@@ -6249,7 +6653,7 @@ class Window(QWidget):
             data = self.tab_data.pop(tabid, None) or _empty_tab(
                 self.tab_meta[tabid]["name"], self.tab_meta[tabid]["colour"])
         meta = self.tab_meta.pop(tabid)
-        self.tab_history.pop(tabid, None)
+        history = self.tab_history.pop(tabid, None) or []
         self.tab_order.remove(tabid)
         if was_active:
             if self.tab_order:
@@ -6263,14 +6667,16 @@ class Window(QWidget):
                 self.apply_tab_background(self.tab_meta[new_active]["colour"])
             else:
                 self.active_tab = None
-        return data, meta
-    def insert_tab(self, tabid, data, meta, index=None, activate=True):
+        return data, meta, history
+    def insert_tab(self, tabid, data, meta, index=None, activate=True, history=None):
         """Receives a tab dragged in from another window (or being restored
-        after a merge)."""
+        after a merge, or after being deleted), with its undo history."""
         if index is None or index > len(self.tab_order):
             index = len(self.tab_order)
         self.tab_order.insert(index, tabid)
         self.tab_meta[tabid] = meta
+        if history is not None:
+            self.tab_history[tabid] = history
         if activate:
             if self.active_tab is not None and self.board is not None:
                 self.tab_data[self.active_tab] = self.export_active_tab_data()
@@ -6286,8 +6692,8 @@ class Window(QWidget):
     def detach_tab_to_new_window(self, tabid, global_pos):
         """A tab was dragged out of the row and let go anywhere that isn't a
         tab row - it becomes its own window, appearing where it was dropped."""
-        data, meta = self.pop_tab_for_transfer(tabid)
-        new_win = Window(detached=(tabid, data, meta))
+        data, meta, history = self.pop_tab_for_transfer(tabid)
+        new_win = Window(detached=(tabid, data, meta, history))
         new_win.resize(self._normal_geom.size() if self._normal_geom else self.size())
         # global_pos is where the tab's top-left was let go: the new window's
         # (only) tab lands right there.
@@ -6314,7 +6720,7 @@ class Window(QWidget):
             else:
                 data = self.tab_data.get(tabid) or _empty_tab(
                     self.tab_meta[tabid]["name"], self.tab_meta[tabid]["colour"])
-            out.append((tabid, data, self.tab_meta[tabid]))
+            out.append((tabid, data, self.tab_meta[tabid], self.tab_history.get(tabid, [])))
         self.tab_order, self.tab_data, self.tab_meta, self.active_tab = [], {}, {}, None
         return out
     def close_emptied_by_transfer(self):
@@ -6354,12 +6760,30 @@ class Window(QWidget):
         the active tab's own colour is changed."""
         self.bg_top, self.bg_bottom = derive_theme(colour or default_tab_colour(0))
         self.update()
+    def archive_old_everywhere(self):
+        """Auto-archive for every tab in this window - the open one through
+        its board, the others straight from their stored data - so tabs
+        you don't open still get their old completed tasks archived."""
+        days = self.autoarchive
+        if self.board is not None:
+            self.board.auto_archive(days)
+        if days <= 0:
+            return
+        today = date.today()
+        changed = False
+        for tabid, data in self.tab_data.items():
+            old = [t for t in data["done"] if parse_due(t.get("doneat") or "")
+                   and (today - parse_due(t["doneat"])).days >= days]
+            if old and archive_tasks(old) is not None:
+                data["done"] = [t for t in data["done"] if t not in old]
+                changed = True
+        if changed:
+            self.save_timer.start()
     def set_autoarchive(self, days):
         APP_SETTINGS["autoarchive"] = days
         for w in WINDOWS:
             w.autoarchive = days
-            if w.board is not None:
-                w.board.auto_archive(days)
+            w.archive_old_everywhere()
         self.save_timer.start()
     def on_tick(self):
         if self.board is None:
@@ -6373,11 +6797,11 @@ class Window(QWidget):
         if date.today() != self.today:
             self.today = date.today()
             self.board.refresh_dates()
-            self.board.auto_archive(self.autoarchive)
+            self.archive_old_everywhere()
     def load_board(self):
         self.build_board(self.data)
         self.data = None
-        self.board.auto_archive(self.autoarchive)
+        self.archive_old_everywhere()
         self.scroll_to_top()
         self.save_now()
         general = self.board.groups[0]
@@ -6474,6 +6898,10 @@ class Window(QWidget):
         snap = self.history.pop()
         if snap.get("archive"):
             unarchive(*snap["archive"])
+        if snap.get("moved_out"):
+            take_back_moved(*snap["moved_out"])
+        if snap.get("rearchive"):
+            rearchive(snap["rearchive"])
         bar = self.scroll.verticalScrollBar()
         pos = bar.value()
         active = self.board.active_group.name
@@ -6660,10 +7088,10 @@ class Window(QWidget):
             QTimer.singleShot(0, QApplication.quit)
             return
         target = most_recently_focused_other(self)
-        for tabid, data, meta in self._harvest_all_tabs():
-            target.insert_tab(tabid, data, meta, activate=False)
+        for tabid, data, meta, history in self._harvest_all_tabs():
+            target.insert_tab(tabid, data, meta, activate=False, history=history)
         target.tabbar.refresh()
-        self.history.clear()
+        self.history = []          # the tab's own history list moved on with it
         self.quitting = True
         if self in WINDOWS:
             WINDOWS.remove(self)
