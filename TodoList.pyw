@@ -1808,13 +1808,23 @@ def _weekday_date(today, day_word, prefix):
     if prefix and prefix.lower() == "next":
         ahead += 7                              # always the occurrence after that
     return today + timedelta(days=ahead)
+def _yearless_date(today, month, day):
+    """A day and month typed without a year: whichever occurrence is
+    nearest today. A date a few weeks back stays this year (it's simply
+    overdue - '2/9' typed in October means the 2nd of September just gone);
+    only one more than half a year back means next year ('3/1' typed in
+    December is January). May raise ValueError - the caller handles it."""
+    d = date(today.year, month, day)
+    if (today - d).days > 182:
+        d = date(today.year + 1, month, day)
+    elif (d - today).days > 182:
+        d = date(today.year - 1, month, day)
+    return d
 def _month_date(today, day, mon_word, year):
     month = _MONTHS[mon_word.lower()]
-    y = int(year) if year else today.year
-    d = date(y, month, int(day))                 # may raise ValueError - caller handles it
-    if not year and d < today:
-        d = date(y + 1, month, int(day))          # no year given and already passed = next year
-    return d
+    if not year:
+        return _yearless_date(today, month, int(day))
+    return date(int(year), month, int(day))       # may raise ValueError - caller handles it
 def due_from_text(text):
     """'Check shop drawings fri' -> ('Check shop drawings', '2026-10-02').
     Only looks at the very end of the task. Recognises (in order tried):
@@ -1837,12 +1847,11 @@ def due_from_text(text):
             elif rx is _RE_NUMERIC:
                 day, month = int(m["d"]), int(m["m"])
                 year = m["y"]
-                y = int(year) if year else today.year
-                if year and len(year) <= 2:
-                    y += 2000
-                d = date(y, month, day)
-                if not year and d < today:
-                    d = date(y + 1, month, day)     # 3/1 in December = next January
+                if year:
+                    y = int(year) + (2000 if len(year) <= 2 else 0)
+                    d = date(y, month, day)
+                else:
+                    d = _yearless_date(today, month, day)
             elif rx is _RE_IN_N:
                 n = int(m["n"])
                 d = today + (timedelta(weeks=n) if m["unit"].lower().startswith("week")
@@ -2180,9 +2189,16 @@ def find_links(text):
         if n > 3 and free(m.start(), m.start() + n):
             spans.append((m.start(), m.start() + n, text[m.start():m.start() + n]))
     return sorted(spans)
+_RE_LONG_RUN = re.compile(r"\S{16,}")
+def breakable(text):
+    """Text as displayed on a task: runs of 16+ characters with no space
+    (long words, paths, URLs) get invisible break points between their
+    characters, so they wrap at the card's edge instead of running off it.
+    Display only - the stored text is never changed."""
+    return _RE_LONG_RUN.sub(lambda m: "\u200b".join(m.group()), text)
 def links_html(text, links):
     def esc(t):
-        return html.escape(t, quote=False).replace("\n", "<br>")
+        return html.escape(breakable(t), quote=False).replace("\n", "<br>")
     out, i = [], 0
     for k, (s, e, _) in enumerate(links):
         out.append(esc(text[i:s]))
@@ -2488,7 +2504,7 @@ class TaskCard(QWidget):
         else:
             self._html = None
             self.label.setTextFormat(Qt.PlainText)
-            self.label.setText(text)
+            self.label.setText(breakable(text))
         self._doc_key = None
         colour = TEXT_DONE if done else TEXT
         if colour != self._colour:
@@ -3005,14 +3021,13 @@ class GroupHeader(QWidget):
             arrow.lineTo(ax + a, ay - a / 2)
         p.drawPath(arrow)
         pad = int(4 * S) + ARROW_W
+        name, nw, _ = self._name_layout()
         p.setFont(self.font_)
         p.setPen(QColor(TEXT))
-        name = self.group.name
         p.drawText(self.rect().adjusted(pad, 0, 0, 0),
                    Qt.AlignVCenter | Qt.AlignLeft, name)
         n = len(self.group.cards)
         if n:
-            nw = QFontMetrics(self.font_).horizontalAdvance(name)
             p.setFont(self.count_font)
             p.setPen(QColor(TEXT if colour else TEXT_SUB))
             x = pad + nw + int(8 * S)
@@ -3045,9 +3060,25 @@ class GroupHeader(QWidget):
         if e.button() == Qt.LeftButton:
             self.press = (e.globalPosition().toPoint(), int(e.position().y()))
             self.last_press = (time.monotonic(), e.globalPosition().toPoint())
+    def _name_layout(self):
+        """(name as shown, its width, width of what follows it). A long
+        name is cut short with '…' so the task count and overdue badge
+        after it, and the drag grip, always stay visible."""
+        n = len(self.group.cards)
+        extras = 0
+        if n:
+            extras = int(8 * S) + QFontMetrics(self.count_font).horizontalAdvance(str(n))
+            late = self.group.overdue()
+            if late:
+                extras += int(7 * S) + int(QFontMetrics(F(7.5, bold=True)).horizontalAdvance(
+                    f"{late} overdue") + 12 * S)
+        room = self.width() - (int(4 * S) + ARROW_W) - extras - int(28 * S)
+        fm = QFontMetrics(self.font_)
+        name = fm.elidedText(self.group.name, Qt.ElideRight, max(0, room))
+        return name, fm.horizontalAdvance(name), extras
     def on_name(self, pos):
         pad = int(4 * S) + ARROW_W
-        nw = QFontMetrics(self.font_).horizontalAdvance(self.group.name)
+        nw = self._name_layout()[1]
         return pad - 4 * S <= pos.x() <= pad + nw + 6 * S
     def mouseMoveEvent(self, e):
         if not self.press or not (e.buttons() & Qt.LeftButton):
@@ -3243,6 +3274,7 @@ class Board(QWidget):
         self.done_cards = []
         self.selected = set()
         self.anchor = None
+        self.kb_cursor = None      # where Up/Down moves on from
         self.press = None
         self.drag = None
         self.slots = {}
@@ -3459,6 +3491,33 @@ class Board(QWidget):
             self.refresh_selection()
     def selected_cards(self):
         return [c for c in self.all_cards() if id(c) in self.selected]
+    def move_selection(self, step, extend=False):
+        """Up/Down: select the task above/below (in the order shown, across
+        groups, skipping folded ones). Shift+Up/Down grows or shrinks the
+        selection from where it started. Nothing selected yet: Down picks
+        the first task, Up the last."""
+        order = self.visible_cards()
+        if not order:
+            return
+        cursor = self.kb_cursor if self.kb_cursor in order and id(self.kb_cursor) in \
+            self.selected else None
+        if cursor is None:
+            picked = [c for c in order if id(c) in self.selected]
+            if picked:
+                cursor = picked[0] if step < 0 else picked[-1]
+        if cursor is None:
+            target = order[0] if step > 0 else order[-1]
+        else:
+            target = order[max(0, min(len(order) - 1, order.index(cursor) + step))]
+        if extend and self.anchor in order:
+            a, b = sorted((order.index(self.anchor), order.index(target)))
+            self.selected = {id(c) for c in order[a:b + 1]}
+            self.refresh_selection()
+        else:
+            self.select_only(target)
+        self.kb_cursor = target
+        self.active_group = target.home_group() or self.active_group
+        self.scroll.ensureWidgetVisible(target, 0, int(20 * S))
     # ---------- mouse on cards ----------
     def card_press(self, card, e):
         if e.button() != Qt.LeftButton:
@@ -3494,6 +3553,7 @@ class Board(QWidget):
             else:
                 self.selected = {id(card)}
             self.anchor = card
+        self.kb_cursor = card
         self.refresh_selection()
         self.press = {
             "card": card,
@@ -3616,7 +3676,7 @@ class Board(QWidget):
             if not card.dragging:
                 card.setGraphicsEffect(None)
                 card.update()
-        QTimer.singleShot(ANIM_MS + 20, drop_shadow)
+        QTimer.singleShot(ANIM_MS + 20, card, drop_shadow)
         card.update()
         self.changed.emit()
     # ---------- dragging whole groups ----------
@@ -3698,7 +3758,7 @@ class Board(QWidget):
             if not g.header.dragging:
                 g.header.setGraphicsEffect(None)
                 g.header.update()
-        QTimer.singleShot(ANIM_MS + 20, drop_shadow)
+        QTimer.singleShot(ANIM_MS + 20, g.header, drop_shadow)
         g.header.update()
         self.changed.emit()
     def _move_group_to_tab(self, group, target_win, target_tabid):
@@ -4004,7 +4064,7 @@ class Board(QWidget):
                 card.show()
                 card.stackUnder(g.add_row)
             g.header.update()
-            QTimer.singleShot(ANIM_MS, lambda: self.scroll.ensureWidgetVisible(g.add_row, 0, 30))
+            self.reveal_later(g.add_row)
         self.changed.emit()
     def chip_menu(self, card, name, global_pos):
         place = is_location(name)
@@ -4080,7 +4140,7 @@ class Board(QWidget):
         self.relayout(animate=True)
         card.show()
         card.stackUnder(group.add_row)
-        QTimer.singleShot(ANIM_MS, lambda: self.scroll.ensureWidgetVisible(group.add_row, 0, 30))
+        self.reveal_later(group.add_row)
         self.changed.emit()
         # Ctrl+Z right after adding this undoes only "pressing Enter" - the
         # task disappears again and exactly what you typed goes back into
@@ -4480,15 +4540,24 @@ class Board(QWidget):
             name = f"{base} {n}"
             n += 1
         return name
+    def reveal_later(self, widget, then=None):
+        """Scrolls `widget` into view once the layout animation has moved it
+        there. Tied to the widget, so it's simply dropped if the widget is
+        gone by then (tab switched, group deleted, undo)."""
+        def go():
+            if self.dead:
+                return
+            self.scroll.ensureWidgetVisible(widget, 0, 30)
+            if then is not None:
+                then()
+        QTimer.singleShot(ANIM_MS, widget, go)
     def new_group(self):
         self.checkpoint()
         g = self.create_group(self.unique_name("New group"))
         g.header.move(self.new_group_btn.pos())
         g.add_row.move(self.new_group_btn.pos())
         self.relayout(animate=True)
-        QTimer.singleShot(ANIM_MS, lambda: (
-            self.scroll.ensureWidgetVisible(g.add_row, 0, 30),
-            g.header.start_rename()))
+        self.reveal_later(g.add_row, then=g.header.start_rename)
         self.changed.emit()
     def rename_group(self, group, text):
         name = clean(text).replace("[", "(").replace("]", ")")
@@ -4664,6 +4733,9 @@ class Board(QWidget):
             if can_accept_drop(mime):
                 self.paste_attachment(mime)
             # otherwise: nothing sensible to paste plain text into here
+        elif key in (Qt.Key_Up, Qt.Key_Down) and not ctrl:
+            self.move_selection(-1 if key == Qt.Key_Up else 1,
+                                bool(e.modifiers() & Qt.ShiftModifier))
         elif key == Qt.Key_Space and self.selected:
             cards = self.selected_cards()
             self.set_done(cards, not cards[0].task["done"])
@@ -4697,7 +4769,8 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: n
 # SETTINGS BUTTON + SIZE SLIDER POPUP
 # ------------------------------------------------------------------
 class IconButton(QWidget):
-    """Small top-bar button: 'pin', 'more', 'min', 'max', 'close' or 'plus'."""
+    """Small top-bar button: 'pin', 'more', 'min', 'max', 'close', 'plus' or
+    'tabs' (the all-tabs menu)."""
     clicked = Signal()
     def __init__(self, parent, kind, tip):
         super().__init__(parent)
@@ -4751,6 +4824,15 @@ class IconButton(QWidget):
             p.drawRoundedRect(QRectF(-2.8 * S, -6.5 * S, 5.6 * S, 5 * S), 1 * S, 1 * S)
             p.drawLine(QPointF(-5 * S, -1.5 * S), QPointF(5 * S, -1.5 * S))
             p.drawLine(QPointF(0, -1.5 * S), QPointF(0, 6.5 * S))
+        elif self.kind == "tabs":
+            a = 3.5 * S
+            p.setPen(QPen(QColor(TEXT), 1.5, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+            p.setBrush(Qt.NoBrush)
+            chevron = QPainterPath()
+            chevron.moveTo(cx - a, cy - a / 2)
+            chevron.lineTo(cx, cy + a / 2)
+            chevron.lineTo(cx + a, cy - a / 2)
+            p.drawPath(chevron)
         elif self.kind == "plus":
             a = 5 * S
             p.setPen(QPen(QColor(TEXT), 1.4, Qt.SolidLine, Qt.RoundCap))
@@ -4810,7 +4892,7 @@ class TabScrollArea(QScrollArea):
     row. Tabs shrink to fit first (TabBar.relayout); only once they're at
     their minimum width does the row scroll - by mouse wheel, by dragging a
     tab against either end, and automatically so the open tab is always in
-    view. No scrollbar or arrow buttons."""
+    view - and the all-tabs menu button appears. No scrollbar or arrows."""
     def __init__(self, parent):
         super().__init__(parent)
         self.setFrameShape(QFrame.NoFrame)
@@ -4856,6 +4938,10 @@ class TopBar(QWidget):
         self.tabbar.setAutoFillBackground(False)     # setWidget turns this on
         self.plus_btn = IconButton(self, "plus", "New tab")
         self.plus_btn.clicked.connect(win.add_tab)
+        # Only shown while some tabs don't fit: lists every tab to jump to.
+        self.tabs_btn = IconButton(self, "tabs", "All tabs")
+        self.tabs_btn.clicked.connect(self.tabbar.all_tabs_menu)
+        self.tabs_btn.hide()
         # Kept only so set_busy() has somewhere to park a short status
         # string while a background fetch runs - never shown on screen.
         self.title = QLabel("", self)
@@ -4871,9 +4957,18 @@ class TopBar(QWidget):
     def apply_scale(self):
         self.setFixedHeight(int(34 * S))
         self.plus_btn.apply_scale()
+        self.tabs_btn.apply_scale()
         for b in self.controls:
             b.apply_scale()
         self.tabbar.apply_scale()      # re-measures every tab, then lays the bar out
+        # Never so narrow that the open tab, '+' and the all-tabs menu can't
+        # all fit beside the window controls.
+        self.win.setMinimumWidth(self.min_width() + 2 * EDGE)
+    def min_width(self):
+        sp = int(2 * S)
+        controls = sum(b.width() + sp for b in self.controls)
+        return (self.tab_left() + int(84 * S) + sp + self.plus_btn.width() + sp
+                + self.tabs_btn.width() + int(6 * S) + controls + int(4 * S))
     def tab_top(self):
         return int(4 * S)
     def tab_left(self):
@@ -4891,10 +4986,16 @@ class TopBar(QWidget):
             x -= sp
         left, top = self.tab_left(), self.tab_top()
         avail = max(0, x - int(6 * S) - left - sp - self.plus_btn.width())
+        overflow = self.tabbar.content_width(avail) > avail
+        if overflow:
+            avail = max(0, avail - sp - self.tabs_btn.width())
         content = self.tabbar.relayout(avail, h - top, animate)
         shown = min(content, avail)
         self.tab_scroll.setGeometry(left, top, shown, h - top)
-        self.plus_btn.move(left + shown + sp, top + (h - top - self.plus_btn.height()) // 2)
+        y = top + (h - top - self.plus_btn.height()) // 2
+        self.plus_btn.move(left + shown + sp, y)
+        self.tabs_btn.move(self.plus_btn.x() + self.plus_btn.width() + sp, y)
+        self.tabs_btn.setVisible(overflow)
     def resizeEvent(self, e):
         super().resizeEvent(e)
         self.layout_children()
@@ -5065,6 +5166,7 @@ QLabel#link:hover {{ text-decoration: underline; }}
 # TABS / MULTIPLE WINDOWS
 # ------------------------------------------------------------------
 WINDOWS = []                  # every live Window, in creation order
+DELETED_TABS = []             # tabs deleted this session, newest last - for Ctrl+Z
 TAB_ID_COUNTER = [1]          # next id to hand out to a brand-new tab
 def alloc_tab_id():
     tid = TAB_ID_COUNTER[0]
@@ -5407,34 +5509,44 @@ class TabBar(QWidget):
         self.scroll_into_view(self.win.active_tab)
         self.win.update()
     def _widths(self, tabids, avail):
+        """Each tab's width. The open tab always gets its whole name (as far
+        as the row allows); the others share what's left - narrow ones keep
+        their size, wide ones shrink equally, down to a minimum."""
         gap = int(TAB_GAP_BASE * S)
+        low = int(TAB_MIN_W_BASE * S)
         ideal = [self.chips[t].ideal_width() for t in tabids]
         if self._incoming:
             ideal.append(self._incoming[1])
         n = len(ideal)
-        budget = avail - gap * (n - 1)
-        cap = None
-        if n and sum(ideal) > budget:
-            # Water-fill: narrow tabs keep their size, the wide ones share
-            # what's left equally.
-            left, rest = budget, n
-            for w in sorted(ideal):
-                share = left / rest
-                if w > share:
-                    cap = share
-                    break
-                left -= w
-                rest -= 1
-        low = int(TAB_MIN_W_BASE * S)
-        widths = [int(max(low, min(w, cap))) if cap is not None else w for w in ideal]
+        budget = avail - gap * max(0, n - 1)
+        if not n or sum(ideal) <= budget:
+            return ideal
+        active = self.win.active_tab
+        fixed = [i for i, t in enumerate(tabids) if t == active]
+        for i in fixed:
+            ideal[i] = max(low, min(ideal[i], avail))     # others scroll if need be
+        shared = [i for i in range(n) if i not in fixed]
+        left = budget - sum(ideal[i] for i in fixed)
+        cap, rest = None, len(shared)
+        for w in sorted(ideal[i] for i in shared):
+            share = left / rest
+            if w > share:
+                cap = share
+                break
+            left -= w
+            rest -= 1
+        widths = list(ideal)
+        if cap is not None:
+            for i in shared:
+                widths[i] = int(max(low, min(ideal[i], cap)))
         return widths
-    def _slots(self, tabids=None):
-        """{tabid: (x, width)} for the row as it currently stands (a tab
-        lifted out of it leaves no gap; room made for an incoming tab does)."""
-        if tabids is None:
-            tabids = [t for t in self.win.tab_order if t in self.chips
-                      and not self.chips[t].lifted]
-        widths = self._widths(tabids, self._avail)
+    def _slots(self, avail=None):
+        """{tabid: (x, width)} and the total width, for the row as it
+        currently stands (a tab lifted out of it leaves no gap; room made
+        for an incoming tab does)."""
+        tabids = [t for t in self.win.tab_order if t in self.chips
+                  and not self.chips[t].lifted]
+        widths = self._widths(tabids, self._avail if avail is None else avail)
         incoming_w = widths.pop() if self._incoming else 0
         gap = int(TAB_GAP_BASE * S)
         slots, x = {}, 0
@@ -5446,6 +5558,9 @@ class TabBar(QWidget):
         if self._incoming and self._incoming[0] >= len(tabids):
             x += incoming_w + gap
         return slots, max(0, x - gap)
+    def content_width(self, avail):
+        """How wide the row would be if given `avail` (nothing moves)."""
+        return self._slots(avail)[1]
     def relayout(self, avail, height, animate=True):
         """Called by TopBar.layout_children() with the room it can give the
         row; returns the width the row actually needs."""
@@ -5650,6 +5765,22 @@ class TabBar(QWidget):
             global_save()                  # just moved the window
             return
         self.win.detach_tab_to_new_window(tabid, global_pos - QPoint(d["dx"], d["dy"]))
+    def all_tabs_menu(self):
+        """Every tab in this window, to jump to - for when they don't all
+        fit in the row. The open one is marked."""
+        self.commit_rename_if_open()
+        btn = self.top.tabs_btn
+        menu = RoundMenu(self)
+        actions = {}
+        for tabid in self.win.tab_order:
+            meta = self.win.tab_meta[tabid]
+            act = menu.addAction(colour_icon(meta["colour"] or ACCENT,
+                                             tabid == self.win.active_tab), meta["name"])
+            actions[act] = tabid
+        chosen = menu.open_at(btn.mapToGlobal(QPoint(0, btn.height())))
+        if chosen in actions:
+            self.win.switch_tab(actions[chosen])
+            self.scroll_into_view(actions[chosen])
     # ---------- per-tab menu / rename ----------
     def tab_context_menu(self, tabid, global_pos):
         self.commit_rename_if_open()
@@ -5946,28 +6077,61 @@ class Window(QWidget):
     def delete_tab(self, tabid):
         """Removes a tab entirely (after the user confirmed). If it was the
         last tab in THIS window, the window closes - but only ever called
-        when at least one other tab exists somewhere in the app."""
+        when at least one other tab exists somewhere in the app.
+        Ctrl+Z brings it back (see DELETED_TABS), in this window - or, if
+        this window closed with it, in the window that's used next."""
+        index = self.tab_order.index(tabid)
+        data = None
         if tabid == self.active_tab:
             others = [t for t in self.tab_order if t != tabid]
             if others:
                 self.switch_tab(others[0])     # snapshots tabid's data first
             else:
+                data = self.export_active_tab_data()
                 self.board.dead = True
                 self.scroll.takeWidget()
                 self.board.hide()
                 self.board.deleteLater()
                 self.board = None
                 self.active_tab = None
-        self.tab_data.pop(tabid, None)
-        self.tab_meta.pop(tabid, None)
-        self.tab_history.pop(tabid, None)
+        data = self.tab_data.pop(tabid, None) or data or _empty_tab(
+            self.tab_meta[tabid]["name"], self.tab_meta[tabid]["colour"])
+        meta = self.tab_meta.pop(tabid)
+        history = self.tab_history.pop(tabid, None) or []
         if tabid in self.tab_order:
             self.tab_order.remove(tabid)
+        home = self if self.tab_order else most_recently_focused_other(self)
+        if home is not None:
+            DELETED_TABS.append({"tabid": tabid, "data": data, "meta": meta,
+                                 "history": history, "index": index, "win": home,
+                                 "mark": home.undo_mark()})
+            del DELETED_TABS[:-UNDO_LIMIT]
         if not self.tab_order:
             self.close_emptied_by_transfer()
         else:
             self.tabbar.refresh()
             self.save_timer.start()
+    def undo_mark(self):
+        """Identifies 'nothing has been done here since': the open tab and
+        the newest step in its undo history."""
+        return self.active_tab, (self.history[-1] if self.history else None)
+    def _restore_deleted_tab(self):
+        """Ctrl+Z straight after deleting a tab (nothing else done since in
+        the tab you're on): the tab comes back where it was, opened, with
+        its own undo history. Returns True if it did."""
+        if not DELETED_TABS:
+            return False
+        rec = DELETED_TABS[-1]
+        if rec["win"] is not self or rec["mark"][0] != self.active_tab \
+                or rec["mark"][1] is not (self.history[-1] if self.history else None):
+            return False
+        DELETED_TABS.pop()
+        self.tab_history[rec["tabid"]] = rec["history"]
+        self.insert_tab(rec["tabid"], rec["data"], rec["meta"],
+                        index=rec["index"], activate=True)
+        restore_files(self.board.used_files())
+        self.save_timer.start()
+        return True
     def pop_tab_for_transfer(self, tabid):
         """Pulls one tab's data out for moving to another window (drag to
         another bar, or tear-off) - this window keeps running with its
@@ -6145,7 +6309,7 @@ class Window(QWidget):
         except Exception:
             pass
     def undo(self):
-        if not self.history or self.board is None:
+        if self.board is None or self._restore_deleted_tab() or not self.history:
             return
         top = self.history[-1]
         reedit = top.get("_reedit")
