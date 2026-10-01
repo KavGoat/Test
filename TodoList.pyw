@@ -129,7 +129,7 @@ from PySide6.QtWidgets import (QApplication, QWidget, QLabel, QLineEdit, QTextEd
                                QScrollArea, QVBoxLayout, QHBoxLayout, QMenu,
                                QFrame, QSlider, QGraphicsDropShadowEffect,
                                QMessageBox, QDialog, QCalendarWidget, QPushButton,
-                               QStyledItemDelegate, QStyle)
+                               QStyledItemDelegate, QStyle, QWidgetAction)
 WM_TODO_CLOSE = 0x8012          # F2 while the list is in front: close
 WM_AHK_TOGGLE = 0x8001          # sent by TodoLauncher.ahk on F2: show / close
 START_HIDDEN = "--background" in sys.argv and "--show" not in sys.argv
@@ -505,6 +505,9 @@ class ColourSlider(QWidget):
     def wheelEvent(self, e):
         step = 0.02 if e.angleDelta().y() > 0 else -0.02
         self._set(self.value() + step)
+# Light rim on every colour swatch, so dark colours still show on the dark
+# menus and popups.
+SWATCH_EDGE = QColor(255, 255, 255, 90)
 class _Preset(QWidget):
     """Small round quick-pick colour under the wheel."""
     def __init__(self, picker, hexc):
@@ -521,9 +524,9 @@ class _Preset(QWidget):
             p.setPen(QPen(QColor(255, 255, 255, 130), 1.5))
             p.setBrush(Qt.NoBrush)
             p.drawEllipse(QRectF(1.5, 1.5, 19, 19))
-        p.setPen(QPen(QColor(255, 255, 255, 30), 1))
+        p.setPen(QPen(SWATCH_EDGE, 1))
         p.setBrush(QColor(self.hexc))
-        p.drawEllipse(QRectF(5, 5, 12, 12))
+        p.drawEllipse(QRectF(4.5, 4.5, 13, 13))
     def enterEvent(self, _):
         self.hover = True
         self.update()
@@ -728,7 +731,7 @@ def colour_icon(hexc, current=False):
         p.setBrush(Qt.NoBrush)
         p.drawEllipse(QRectF(0.8, 0.8, 14.4, 14.4))
     if hexc:
-        p.setPen(Qt.NoPen)
+        p.setPen(QPen(SWATCH_EDGE, 0.8))
         p.setBrush(QColor(hexc))
         p.drawEllipse(QRectF(3, 3, 10, 10))
     else:
@@ -816,6 +819,85 @@ class RoundMenu(QMenu):
         with it. (Overriding QMenu.exec itself crashes PySide6.)"""
         m = self.contentsMargins()
         return self.exec(pos - QPoint(m.left() - 2, m.top() - 2))
+class SwatchGrid(QWidget):
+    """Colour choices as a grid of round swatches inside a menu - one click
+    picks. The current colour is ringed; hovering shows its name. After
+    the menu closes, `chosen` is the picked colour (None = 'no colour'),
+    or the NOT_CHOSEN marker if nothing was clicked."""
+    NOT_CHOSEN = object()
+    def __init__(self, colours, current, cols=4):
+        super().__init__()
+        self.colours = colours            # [(name, '#hex' or None)]
+        self.current = current
+        self.cols = cols
+        self.chosen = self.NOT_CHOSEN
+        self.hover = -1
+        self.d = int(24 * S)              # swatch size
+        self.gap = int(8 * S)
+        self.pad = int(8 * S)
+        rows = (len(colours) + cols - 1) // cols
+        self.setFixedSize(2 * self.pad + cols * self.d + (cols - 1) * self.gap,
+                          2 * self.pad + rows * self.d + (rows - 1) * self.gap)
+        self.setMouseTracking(True)
+        self.setCursor(Qt.PointingHandCursor)
+    def _rect(self, i):
+        r, c = divmod(i, self.cols)
+        return QRectF(self.pad + c * (self.d + self.gap), self.pad + r * (self.d + self.gap),
+                      self.d, self.d)
+    def _at(self, pos):
+        return next((i for i in range(len(self.colours))
+                     if self._rect(i).adjusted(-3, -3, 3, 3).contains(QPointF(pos))), -1)
+    def paintEvent(self, _):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        for i, (_, hexc) in enumerate(self.colours):
+            r = self._rect(i)
+            inner = r.adjusted(3.5, 3.5, -3.5, -3.5)
+            if hexc == self.current:
+                p.setPen(QPen(QColor(TEXT), 1.6))
+                p.setBrush(Qt.NoBrush)
+                p.drawEllipse(r.adjusted(0.8, 0.8, -0.8, -0.8))
+            elif i == self.hover:
+                p.setPen(QPen(QColor(255, 255, 255, 120), 1.4))
+                p.setBrush(Qt.NoBrush)
+                p.drawEllipse(r.adjusted(0.8, 0.8, -0.8, -0.8))
+            if hexc:
+                p.setPen(QPen(SWATCH_EDGE, 1))
+                p.setBrush(QColor(hexc))
+                p.drawEllipse(inner)
+            else:                                    # 'no colour'
+                p.setPen(QPen(QColor(TEXT_SUB), 1.3))
+                p.setBrush(Qt.NoBrush)
+                p.drawEllipse(inner)
+                c, k = inner.center(), inner.width() * 0.33
+                p.drawLine(QPointF(c.x() - k, c.y() + k), QPointF(c.x() + k, c.y() - k))
+    def mouseMoveEvent(self, e):
+        i = self._at(e.position())
+        if i != self.hover:
+            self.hover = i
+            self.setToolTip(self.colours[i][0] if i >= 0 else "")
+            self.update()
+    def leaveEvent(self, _):
+        self.hover = -1
+        self.update()
+    def mouseReleaseEvent(self, e):
+        i = self._at(e.position())
+        if e.button() != Qt.LeftButton or i < 0:
+            return
+        self.chosen = self.colours[i][1]
+        menu = self.parentWidget()           # close the whole menu chain, like any menu click
+        while isinstance(menu, QMenu):
+            menu.close()
+            menu = menu.parentWidget()
+def add_swatch_grid(menu, colours, current):
+    """Puts a SwatchGrid at the top of `menu` and returns it - in rows of
+    four, or three when that fills the rows evenly (e.g. nine)."""
+    cols = 3 if len(colours) % 4 and not len(colours) % 3 else 4
+    grid = SwatchGrid(colours, current, cols)
+    act = QWidgetAction(menu)
+    act.setDefaultWidget(grid)
+    menu.addAction(act)
+    return grid
 def menu_icon(kind, colour="#d6dfe1"):
     """Small line icons for the menus."""
     from PySide6.QtGui import QPixmap, QIcon
@@ -4674,11 +4756,9 @@ class Board(QWidget):
         if group.name != GENERAL:
             act_rename = menu.addAction(menu_icon("pen"), "Rename group")
         colour_menu = menu.sub("Colour", menu_icon("palette"))
-        colour_actions = {}
         presets = [h for _, h in GROUP_COLOURS]
-        for name, hexc in [("None", None)] + GROUP_COLOURS:
-            act = colour_menu.addAction(colour_icon(hexc, group.colour == hexc), name)
-            colour_actions[act] = hexc
+        grid = add_swatch_grid(colour_menu, GROUP_COLOURS + [("No colour", None)],
+                               group.colour)
         colour_menu.addSeparator()
         custom_now = group.colour if group.colour and group.colour not in presets else None
         act_custom = colour_menu.addAction(
@@ -4690,10 +4770,10 @@ class Board(QWidget):
             menu.addSeparator()
             act_delete = menu.addAction(menu_icon("bin", OVERDUE), "Delete group")
         chosen = menu.open_at(global_pos)
-        if chosen is None:
+        if grid.chosen is not SwatchGrid.NOT_CHOSEN:
+            self.set_group_colour(group, grid.chosen)
+        elif chosen is None:
             return
-        if chosen in colour_actions:
-            self.set_group_colour(group, colour_actions[chosen])
         elif chosen == act_custom:
             head = group.header
             top = head.mapToGlobal(QPoint(0, 0))
@@ -5816,11 +5896,8 @@ class TabBar(QWidget):
         menu = RoundMenu(self)
         act_rename = menu.addAction(menu_icon("pen"), "Rename tab")
         colour_menu = menu.sub("Colour", menu_icon("palette"))
-        colour_actions = {}
         presets = [h for _, h in TAB_COLOURS]
-        for name, hexc in TAB_COLOURS:
-            act = colour_menu.addAction(colour_icon(hexc, meta["colour"] == hexc), name)
-            colour_actions[act] = hexc
+        grid = add_swatch_grid(colour_menu, TAB_COLOURS, meta["colour"])
         colour_menu.addSeparator()
         custom_now = meta["colour"] if meta["colour"] not in presets else None
         act_custom = colour_menu.addAction(
@@ -5832,11 +5909,11 @@ class TabBar(QWidget):
             menu.addSeparator()
             act_delete = menu.addAction(menu_icon("bin", OVERDUE), "Delete tab")
         chosen = menu.open_at(global_pos)
-        if chosen is None:
-            return
-        if chosen in colour_actions:
-            win.set_tab_colour(tabid, colour_actions[chosen])
+        if grid.chosen is not SwatchGrid.NOT_CHOSEN:
+            win.set_tab_colour(tabid, grid.chosen)
             global_save()
+        elif chosen is None:
+            return
         elif chosen == act_custom:
             chip = self.chips.get(tabid)
             anchor = QRect(chip.mapToGlobal(QPoint(0, 0)), chip.size()) if chip else \
