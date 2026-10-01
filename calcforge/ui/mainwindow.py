@@ -1881,7 +1881,7 @@ class MainWindow(QMainWindow):
         self.view.cursorMoved.connect(self._show_position)
         self.view.zoomChanged.connect(self._show_zoom)
         self.view.zoomChanged.connect(lambda _zoom: self._sync_other_windows(True))
-        self.view.selectionChanged.connect(self.refresh_selection)
+        self.view.selectionChanged.connect(self._selection_changed_on_the_canvas)
         self.view.toolFinished.connect(self.select_tool)
         self.view.documentEdited.connect(self.mark_modified)
         self.view.pageChanged.connect(self.follow_scrolled_page)
@@ -4825,6 +4825,16 @@ class MainWindow(QMainWindow):
         if scene is None:
             return []
         return [item for item in scene.selectedItems() if isinstance(item, MarkupItem)]
+
+    def _selection_changed_on_the_canvas(self) -> None:
+        """While the mouse button is down, the panels wait for it to come up:
+        rebuilding Properties for a markup somebody has just grabbed held up
+        the start of the drag by a tenth of a second (Calcs.pdf, 2026-10-01).
+        A click comes up at once, so it still shows straight away."""
+        if self.view.pointer_is_down():
+            self.view.refresh_on_release = True
+            return
+        self.refresh_selection()
 
     def refresh_selection(self) -> None:
         items = self.selected_items()

@@ -208,7 +208,7 @@ def test_ctrl_1_is_transpose_in_an_equation_and_fit_width_outside(win):
     keys(win, Qt.Key_1, Qt.ControlModifier)
     assert win.view.calc.item.text().startswith("Mtranspose(") or \
         "transpose(" in win.view.calc.item.text()
-    press_key(win.view, Qt.Key_Escape)
+    win.view.calc.leave()   # Esc keeps the equation open, as in WebSMath
     win.view.set_zoom(3.0)
     keys(win, Qt.Key_1, Qt.ControlModifier)
     assert win.view._zoom != 3.0, "fit width outside an equation"
@@ -297,6 +297,6 @@ def test_f9_calculates_and_ctrl_m_inserts_a_matrix(win):
     keys(win, Qt.Key_M, Qt.ControlModifier)
     item = win.view.calc.item
     assert item is not None and "mat(" in item.text()
-    press_key(win.view, Qt.Key_Escape)
+    win.view.calc.leave()   # Esc keeps the equation open, as in WebSMath
     keys(win, Qt.Key_F9)
     assert win.status_hint.text() == "Calculated"

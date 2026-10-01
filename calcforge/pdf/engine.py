@@ -370,6 +370,44 @@ def display_list(document: "pymupdf.Document", index: int,
         return None
 
 
+def without_page_content(document: "pymupdf.Document", index: int) -> None:
+    """Empty a page's own drawing, leaving its annotations. **Changes the
+    document**: for a copy kept only to draw annotations from."""
+    try:
+        page = document[index]
+        for number in page.get_contents():
+            document.update_stream(number, b"")
+    except Exception:                                  # noqa: BLE001
+        drain_messages()
+
+
+def annotation_display_list(document: "pymupdf.Document", index: int, xref: int):
+    """One annotation alone, parsed once, as its own file draws it — in the
+    page's display space, like :func:`display_list`, so it is cut into the
+    same tiles. *document* is a copy whose page content has been emptied
+    (:func:`without_page_content`); the other annotations are hidden while
+    this one is taken, then put back."""
+    try:
+        page = document[index]
+        hidden = []
+        # Straight into each annotation's dictionary: Annot.set_flags has
+        # PyMuPDF build the appearance afresh, MuPDF's way, and Bluebeam's own
+        # (its pictures, its text) would be gone from then on.
+        for annotation in page.annots():
+            if annotation.xref != xref and not annotation.flags & pymupdf.PDF_ANNOT_IS_HIDDEN:
+                hidden.append((annotation.xref, annotation.flags))
+        for number, flags in hidden:
+            document.xref_set_key(number, "F", str(flags | pymupdf.PDF_ANNOT_IS_HIDDEN))
+        try:
+            return document[index].get_displaylist(annots=True)
+        finally:
+            for number, flags in hidden:
+                document.xref_set_key(number, "F", str(flags))
+    except Exception:                                  # noqa: BLE001
+        drain_messages()
+        return None
+
+
 def annotation_raster(document: "pymupdf.Document", index: int, xref: int,
                       scale: float = 3.0) -> Optional[Raster]:
     """One annotation drawn the way its own file draws it.
@@ -408,14 +446,15 @@ def leave_out(page, without: "tuple") -> None:
 
 
 def raster_from(drawing, region: tuple[float, float, float, float],
-                scale: float) -> Optional[Raster]:
-    """Part of an already-parsed page, at *scale* pixels to the display point."""
+                scale: float, alpha: bool = False) -> Optional[Raster]:
+    """Part of an already-parsed page, at *scale* pixels to the display point
+    (*alpha*: on a clear background, for an annotation drawn on its own)."""
     try:
         clip = pymupdf.Rect(*region).normalize()
         if clip.is_empty:
             return None
         pixmap = drawing.get_pixmap(matrix=pymupdf.Matrix(scale, scale),
-                                    clip=clip, alpha=False)
+                                    clip=clip, alpha=alpha)
     except Exception:                                  # noqa: BLE001
         drain_messages()
         return None

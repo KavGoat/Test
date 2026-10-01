@@ -64,6 +64,7 @@ def markups_of_page(source, index: int, scale: float = 1.0,
                 _leave_it_to_the_file(annotation, made)
             if picture_of is not None:
                 _the_file_draws_it(source, index, annotation, made, picture_of)
+                _the_picture_in_it(source, annotation, made, picture_of)
             for payload in made:
                 payload.pop(NOTHING_TO_DRAW, None)
             found.extend(made)
@@ -168,6 +169,43 @@ def _the_file_draws_it(source, index: int, annotation: dict, made: list,
                                     float(payload["rect"][3])]
 
 
+def _the_picture_in_it(source, annotation: dict, made: list, picture_of) -> None:
+    """A Bluebeam picture (/IT /SquareImage): a rectangle whose appearance is
+    an image it keeps under /Image. Kept at its own resolution, so the
+    markup, once somebody moves or resizes it, still shows the picture —
+    taken over, it was an empty red box (Calcs.pdf, 2026-10-01)."""
+    if len(made) != 1:
+        return
+    if str(source.resolve(annotation.get("IT")) or "").lstrip("/") != "SquareImage":
+        return
+    number = getattr(annotation.get("Image"), "number", None)
+    if not isinstance(number, int):
+        return
+    try:
+        picture = pymupdf.Pixmap(source.doc, number)
+        mask = source.resolve(source.resolve(annotation.get("Image")) or {}).get("SMask") \
+            if isinstance(source.resolve(annotation.get("Image")), dict) else None
+        if getattr(mask, "number", None):
+            picture = pymupdf.Pixmap(picture, pymupdf.Pixmap(source.doc, mask.number))
+        if picture.colorspace and picture.colorspace.n not in (1, 3):
+            picture = pymupdf.Pixmap(pymupdf.csRGB, picture)
+        data = picture.tobytes("png")
+    except Exception:                                  # noqa: BLE001
+        return
+    kept = picture_of(data) if data else ""
+    if kept:
+        made[0]["their_picture_asset"] = kept
+        made[0]["picture_framed"] = True
+        border = source.resolve(annotation.get("BS"))
+        width = source.resolve(border.get("W")) if isinstance(border, dict) else 1
+        if isinstance(width, (int, float)) and float(width) <= 0:
+            # Bluebeam strokes nothing round a picture with no border width
+            style = dict(made[0].get("style") or {})
+            style["stroke"] = ""
+            style["width"] = 0.0
+            made[0]["style"] = style
+
+
 def _as_png(raster) -> bytes:
     """A rendered appearance as PNG bytes."""
     from PySide6.QtCore import QBuffer, QIODevice
@@ -198,7 +236,14 @@ def _leave_it_to_the_file(annotation: dict, made: list) -> None:
     from the start and are drawn here.
     """
     number = annotation.get("__xref__")
-    if len(made) != 1 or not isinstance(number, int) or number <= 0:
+    if not made or not isinstance(number, int) or number <= 0:
+        return
+    if len(made) > 1:
+        # Ours, but still that annotation: the page leaves it out, or a
+        # three-stroke ink line showed twice — the file's and ours — and was
+        # saved twice (Calcs.pdf, 2026-10-01).
+        for payload in made:
+            payload["from_annotation"] = number
         return
     made[0]["from_annotation"] = number
     made[0]["still_theirs"] = True
@@ -359,6 +404,11 @@ def _style(source, annotation: dict, colour, scale: float) -> dict:
     # highlight drawn here and wrong for everything read out of a file: it
     # turned every solid black section arrowhead on a sheet into a grey one.
     style["fill_opacity"] = style.get("opacity", 1.0) if fill else 1.0
+    # Bluebeam's highlighter is an ink line that multiplies (/BM /Multiply):
+    # the words under it show through. Read as a plain line it covered them
+    # the moment it was edited (Calcs.pdf, 2026-10-01).
+    if str(source.resolve(annotation.get("BM")) or "").lstrip("/").lower() == "multiply":
+        style["blend"] = "multiply"
     return style
 
 
@@ -600,6 +650,19 @@ def _free_text(source, annotation: dict, box: list, style: dict, common: dict,
     from .btx import free_text_colours
     width = setting.get("width")
     setting.update(free_text_colours(said, border_width=width))
+    # Qt keeps a point at the end of every line for the caret, so words set
+    # to a box's exact width by Bluebeam broke a line early here: that point
+    # goes back on the right (Calcs.pdf, 2026-10-01).
+    pad = float(setting.get("padding", 4.0) or 0.0)
+    if not setting.get("text_margins"):
+        setting["text_margins"] = (pad, pad, max(pad - 1.0, 0.0), pad)
+    if kind == "callout":
+        drawn = source.resolve(annotation.get("BS"))
+        width = source.resolve(drawn.get("W")) if isinstance(drawn, dict) else None
+        if isinstance(width, (int, float)) and float(width) <= 0:
+            # No frame, but Bluebeam still draws the leader, a point wide.
+            setting["width"] = 1.0
+            payload["box_border"] = False
     payload["style"] = setting
     runs = _rich_text(said)
     if runs:

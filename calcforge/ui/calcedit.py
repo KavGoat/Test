@@ -35,6 +35,14 @@ CALC = "calc"
 MARKUP = "markup"
 
 
+def alive(obj) -> bool:
+    """Whether a Qt object is there and still has its C++ half."""
+    if obj is None:
+        return False
+    import shiboken6
+    return shiboken6.isValid(obj)
+
+
 def snap(value: float) -> float:
     return round(value / GRID_PT) * GRID_PT
 
@@ -87,8 +95,8 @@ class CalcEditing:
     def __init__(self, view):
         self.view = view
         self.mode = MARKUP
-        self.item: Optional[CalcItem] = None
-        self.cross: Optional[tuple] = None          # (frame, page point)
+        self._item: Optional[CalcItem] = None
+        self._cross: Optional[tuple] = None         # (frame, page point)
         self.suggestions = SuggestionList(view)
         self.suggestions.hide()
         self.suggestions.itemClicked.connect(self._apply_suggestion)
@@ -112,6 +120,31 @@ class CalcEditing:
 
     def editing(self) -> bool:
         return self.item is not None and self.item.scene() is not None
+
+    @property
+    def item(self) -> Optional[CalcItem]:
+        """The equation being typed in, or None (and None once it is gone)."""
+        if self._item is not None and not alive(self._item):
+            self._item = None
+        return self._item
+
+    @item.setter
+    def item(self, value: Optional[CalcItem]) -> None:
+        self._item = value
+
+    @property
+    def cross(self) -> Optional[tuple]:
+        """(page, point) of the red cross, or None. A page is rebuilt by undo,
+        by a page change or by opening a file, and the cross went on holding
+        the deleted one: every repaint then failed ("Internal C++ object
+        (PageFrame) already deleted", seen in use, 2026-10-01)."""
+        if self._cross is not None and not alive(self._cross[0]):
+            self._cross = None
+        return self._cross
+
+    @cross.setter
+    def cross(self, value: Optional[tuple]) -> None:
+        self._cross = value
 
     def calc_mode(self) -> bool:
         return self.mode == CALC
@@ -637,7 +670,11 @@ class CalcEditing:
         if self.suggestions.isVisible() and self._suggestion_key(key):
             return True
         if key == Qt.Key_Escape:
-            self.leave()
+            # WebSMath: Esc closes the suggestion list and nothing else — the
+            # equation stays open, as it does in SMath; a click elsewhere or
+            # Enter leaves it. A plot double-clicked into closes on Esc.
+            if item.region.plot is not None:
+                self.leave()
             return True
         if ctrl and key in (Qt.Key_Z, Qt.Key_Y):
             # one history: the window takes back the keystrokes first, then
@@ -870,11 +907,27 @@ class CalcEditing:
         s.word = word
         s.fill(entries, selected_index(entries, word))
         self._place_suggestions(item)
-        rows = min(s.count(), 8)
-        s.setMaximumHeight(16 * 8 + 4)
-        s.resize(max(90, s.sizeHintForColumn(0) + 22), s.sizeHintForRow(0) * rows + 4)
+        self._size_suggestions()
         s.show()
         s.show_tooltip()
+
+    SUGGESTION_ROWS = 8
+
+    def _size_suggestions(self) -> None:
+        """Big enough for what it lists, measured as it is drawn here: one
+        name was cut in half and a long one cut short, the list being sized
+        from Qt's row hint before the app's theme and the screen's scaling
+        had their say, with a scrollbar it had no room for."""
+        s = self.suggestions
+        rows = min(s.count(), self.SUGGESTION_ROWS)
+        scrolls = s.count() > rows
+        s.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn if scrolls else Qt.ScrollBarAlwaysOff)
+        row = max(s.sizeHintForRow(0), s.fontMetrics().height() + 2)
+        frame = 2 * s.frameWidth()
+        bar = s.verticalScrollBar().sizeHint().width() if scrolls else 0
+        wide = s.sizeHintForColumn(0) + s.iconSize().width() + bar + frame + 10
+        s.setMaximumHeight(16777215)
+        s.setFixedSize(max(90, wide), row * rows + frame + 2)
 
     def _follow_the_view(self) -> None:
         if self.suggestions.isVisible() and self.item is not None:

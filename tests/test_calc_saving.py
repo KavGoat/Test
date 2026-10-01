@@ -195,7 +195,7 @@ def test_reopening_rebuilds_live_equations_and_takes_the_layer_off(win, tmp_path
     win.view.calc.focus(x, x.sceneBoundingRect().center())
     press_key(win.view, Qt.Key_End)
     typed(win, "0")
-    press_key(win.view, Qt.Key_Escape)
+    win.view.calc.leave()        # Esc keeps the equation open, as in WebSMath
     assert answer(win, "y=") == "60"
 
 

@@ -50,6 +50,12 @@ def at(window, x, y):
     return window.document.pages[0].frame.mapToScene(QPointF(x, y))
 
 
+def leave_by_clicking_off(window):
+    """Out of the equation the way WebSMath leaves one: a click on bare paper."""
+    p = at(window, 560, 800)
+    click(window.view, p.x(), p.y())
+
+
 def test_typing_on_paper_starts_an_equation_at_the_red_cross(window):
     calc_mode(window)
     p = at(window, 100, 120)
@@ -94,7 +100,7 @@ def test_a_click_on_an_equation_puts_the_cursor_in_it(window):
     assert window.view.calc.item is define
     press_key(window.view, Qt.Key_Backspace)
     type_text(window.view, "5")
-    press_key(window.view, Qt.Key_Escape)
+    leave_by_clicking_off(window)   # Esc keeps the equation open, as in WebSMath
     assert window.view.calc.item is None
     assert shown(use) == "6"
 
@@ -125,7 +131,7 @@ def test_an_equation_left_empty_disappears(window):
     click(window.view, p.x(), p.y())
     type_text(window.view, "x")
     press_key(window.view, Qt.Key_Backspace)
-    press_key(window.view, Qt.Key_Escape)
+    leave_by_clicking_off(window)   # Esc keeps the equation open, as in WebSMath
     assert equations(window) == []
 
 
@@ -294,7 +300,7 @@ def test_rotating_a_page_turns_its_equations_but_never_changes_a_result(window):
     click(window.view, p.x(), p.y())
     assert window.view.calc.item is use
     assert use.sceneTransform().m12() == 0 and use.sceneTransform().m11() > 0
-    press_key(window.view, Qt.Key_Escape)
+    leave_by_clicking_off(window)   # Esc keeps the equation open, as in WebSMath
     assert use.rotation() % 360 == 90
     # a new one written on the turned page turns with it
     frame = window.document.pages[0].frame

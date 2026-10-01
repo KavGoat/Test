@@ -478,6 +478,9 @@ class MarkupItem(QGraphicsObject):
         self._their_picture = None
         self.their_picture_asset = ""
         self.their_picture_box: tuple = ()
+        # A Bluebeam picture (/IT /SquareImage): the picture fills the box,
+        # whatever size it is given, and the box's own border goes over it.
+        self.picture_framed = False
         self._stamp_picture_b64 = ""
         # A stamp's drawing kept as SVG linework, drawn as vectors.
         self.stamp_svg = ""
@@ -698,9 +701,46 @@ class MarkupItem(QGraphicsObject):
               widget: Optional[QWidget] = None) -> None:
         painter.save()
         self.apply_blend(painter)
-        self.paint_visible(painter)
+        if self.still_theirs:
+            self.paint_their_file(painter)
+        else:
+            self.paint_visible(painter)
         painter.restore()
         self.paint_handles(painter)
+
+    def paint_their_file(self, painter: QPainter) -> None:
+        """On screen, a markup nobody has changed is drawn by its own file:
+        its annotation alone, in squares the render processes draw, laid in
+        its place among the other markups — so one taken over and moved does
+        not suddenly cover those the file draws on top of it (Calcs.pdf,
+        2026-10-01). The page itself is drawn without its markups."""
+        frame = self.parentItem()
+        page = getattr(frame, "page", None)
+        if (page is None or not self.from_annotation or getattr(frame, "print_mode", False)
+                or not getattr(page, "pdf_key", None) or page.pdf_page_index is None
+                or not getattr(page, "pdf_annotations", True)
+                or self.from_annotation not in set(page.markup_annotations or ())):
+            return
+        data = frame.document.asset(page.pdf_key)
+        if not data:
+            return
+        from ..io import pdftiles
+        from ..ui.scene import _draw_on_the_pixel_grid, _painted_scale
+
+        to_page = self.sceneTransform() * frame.sceneTransform().inverted()[0]
+        back, ok = to_page.inverted()
+        if not ok:
+            return
+        box = self.mapRectToParent(self.boundingRect()).adjusted(-12, -12, 12, 12)
+        whole = frame.page_rect()
+        tiles = pdftiles.TILES.annotation_tiles(
+            page.pdf_key, data, int(page.pdf_page_index), whole, _painted_scale(painter),
+            box, self.from_annotation, box)
+        if not tiles:
+            return
+        painter.setWorldTransform(back * painter.worldTransform())
+        for where, tile in tiles:
+            _draw_on_the_pixel_grid(painter, where, tile)
 
     def paint_content(self, painter: QPainter) -> None:
         return
@@ -717,6 +757,9 @@ class MarkupItem(QGraphicsObject):
             return
         if self.stamp_svg:
             self.paint_stamp_drawing(painter)
+        elif self._their_picture is not None and self.picture_framed:
+            self.paint_their_picture(painter)
+            self.paint_content(painter)
         elif self._their_picture is not None:
             self.paint_their_picture(painter)
         else:
@@ -763,7 +806,7 @@ class MarkupItem(QGraphicsObject):
     def paint_their_picture(self, painter: QPainter) -> None:
         picture = self._their_picture
         box = (QRectF(*self.their_picture_box) if self.their_picture_box
-               else self.local_rect())
+               and not self.picture_framed else self.local_rect().normalized())
         if picture is None or picture.isNull() or box.isEmpty():
             return
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
@@ -951,6 +994,7 @@ class MarkupItem(QGraphicsObject):
             "from_annotation": self.from_annotation,
             "still_theirs": self.still_theirs,
             "their_picture_asset": self.their_picture_asset,
+            "picture_framed": self.picture_framed,
             "their_picture_box": list(self.their_picture_box),
             "stamp_picture": self._stamp_picture_b64,
             "stamp_svg": self.stamp_svg,
@@ -992,6 +1036,7 @@ class MarkupItem(QGraphicsObject):
         self.from_annotation = int(data.get("from_annotation", 0) or 0)
         self.still_theirs = bool(data.get("still_theirs", False))
         self.their_picture_asset = str(data.get("their_picture_asset", ""))
+        self.picture_framed = bool(data.get("picture_framed", False))
         found = data.get("their_picture_box") or ()
         self.their_picture_box = tuple(float(v) for v in found) \
             if len(found) == 4 else ()

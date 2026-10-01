@@ -439,6 +439,19 @@ def _inline(node) -> str:
     return out
 
 
+def _kept_spaces(html: str) -> str:
+    """Spaces as Bluebeam sets them. A run of spaces is how its text boxes
+    indent a line under a numbered one; HTML folds a run into one space, or
+    none at the start of a line, and every hanging indent went (Calcs.pdf,
+    2026-10-01). Only the words between tags are touched."""
+    def words(found):
+        return re.sub(r" {2,}", lambda run: "&nbsp;" * len(run.group(0)), found.group(0))
+    html = re.sub(r"(?<=>)[^<]+|^[^<]+", words, html)
+    # the indent at the start of the line, whatever tags open it
+    return re.sub(r"^((?:<[^>]*>)*) +", lambda found: found.group(1) + "&nbsp;"
+                  * (len(found.group(0)) - len(found.group(1))), html)
+
+
 def _rich_text(annotation: dict) -> str:
     """A text markup's rich text as HTML, or "" when it has none worth having.
 
@@ -460,8 +473,8 @@ def _rich_text(annotation: dict) -> str:
     for node in body.iter():
         if _plain_tag(node.tag) != "p":
             continue
-        words = _inline(node).strip()
-        anything = anything or bool(words)
+        words = _kept_spaces(_inline(node).rstrip())
+        anything = anything or bool(words.replace("&nbsp;", "").strip())
         own = node.get("style", "")
         # A line is as tall as the runs on it say. A paragraph whose words
         # are all in spans that set their own line height takes theirs: that

@@ -931,13 +931,29 @@ class _TextBase(MarkupItem):
             return leader.join_nearest(self._rect.normalized().center())
         return QPointF(leader.tip)
 
+    def _leader_signature(self) -> tuple:
+        r = self._rect
+        return ((r.x(), r.y(), r.width(), r.height()), self.LEAST_REACH,
+                tuple((l.tip.x(), l.tip.y(), l.side, l.reach, l.kind,
+                       tuple((p.x(), p.y()) for p in l.cloud)) for l in self.leaders))
+
     def leader_points(self) -> list:
-        """Every point every leader passes through, for measuring the item."""
+        """Every point every leader passes through, for measuring the item.
+
+        Worked out once for each arrangement of the box and its leaders: Qt
+        asks for the bounding box thousands of times a frame, and choosing
+        each leader's side afresh every time was most of the cost of dragging
+        on a sheet of somebody's call-outs (Calcs.pdf, 2026-10-01)."""
+        signature = self._leader_signature()
+        cached = self.__dict__.get("_leader_cache")
+        if cached is not None and cached[0] == signature:
+            return [QPointF(p) for p in cached[1]]
         points = []
         for leader in self.leaders:
             points += [self.tip_of(leader), self.elbow_of(leader),
                        self.side_point_of(leader)]
             points += [QPointF(p) for p in leader.cloud]
+        self._leader_cache = (signature, [QPointF(p) for p in points])
         return points
 
     # -- geometry, once the leader is taken into account -------------------
@@ -1361,6 +1377,8 @@ class CalloutItem(_TextBase):
         # kept in a tool set as one thing, because it is one thing.
         self.style.arrow_end = "arrow"
         self.leader_shown = True
+        # Bluebeam's call-out with a border width of 0: a leader, no frame.
+        self.box_border = True
         points = [QPointF(p) for p in (leader or [])]
         if points:
             self.tip = QPointF(points[0])
@@ -1480,7 +1498,7 @@ class CalloutItem(_TextBase):
         rect = self._rect.normalized()
         painter.setBrush(self.style.brush())
         painter.setPen(self.style.pen() if self.style.stroke and self.style.width > 0
-                       else QPen(Qt.NoPen))
+                       and self.box_border else QPen(Qt.NoPen))
         if self.shape_kind == "cloud":
             from .base import cloud_path, round_the_joins
             round_the_joins(painter)
@@ -1553,6 +1571,8 @@ class CalloutItem(_TextBase):
         data = super().serialize()
         data["shape_kind"] = self.shape_kind
         data["cloud_radius"] = self.cloud_radius
+        if not self.box_border:
+            data["box_border"] = False
         # The region travels on its leader now. This is written as well so a
         # file saved here still opens in a version that expects it there.
         if self.cloud_points:
@@ -1563,6 +1583,7 @@ class CalloutItem(_TextBase):
         super().deserialize(data)
         self.shape_kind = data.get("shape_kind", "box")
         self.cloud_radius = float(data.get("cloud_radius", 9.0))
+        self.box_border = bool(data.get("box_border", True))
         if self.clouds_a_region():
             return                    # it came in on its leader, as it should
         points = data.get("cloud_points")

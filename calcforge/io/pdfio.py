@@ -460,7 +460,10 @@ def _scaled_markups(payloads: list[dict], scale: float) -> list[dict]:
     markup at the size the page is now. So a fitted page's markups are ours
     from the start and this application draws them.
     """
-    if scale == 1.0:
+    # The page's own size comes back from millimetres a hair off (842 pt is
+    # 0.9999999999999999 of itself): that is the same paper, not a fitted
+    # page, and its markups stay the file's (2026-10-01).
+    if abs(scale - 1.0) < 1e-6:
         return payloads
     moved = []
     for payload in payloads:

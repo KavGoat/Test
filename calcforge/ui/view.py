@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import math
+
+import numpy  # noqa: F401  (loaded now: the first drag that snaps needs it at once)
 import os
 import re
 from copy import deepcopy
@@ -1333,23 +1335,39 @@ class PageView(QGraphicsView):
         frame = item.parentItem()
         if frame is None:
             return delta
-        targets = self.snap_targets(frame, ignore={i for i, _ in items})
-        if not targets:
+        # What can be snapped to does not change during a drag: gathered once
+        # per gesture, as arrays. Gathered on every move it was a third of the
+        # cost of dragging on a sheet with ink on it (Calcs.pdf, 2026-10-01).
+        import numpy as np
+        moving = tuple(sorted(id(i) for i, _ in items))
+        cached = self.__dict__.get("_snap_gesture")
+        if cached is None or cached[0] != (id(frame), moving):
+            found = self.snap_targets(frame, ignore={i for i, _ in items})
+            targets = (np.array([(p.x(), p.y()) for p in found], dtype=float)
+                       if found else np.zeros((0, 2)))
+            own = self.points_of(item)
+            mine = (np.array([(p.x(), p.y()) for p in own], dtype=float)
+                    if own else np.zeros((0, 2)))
+            start = frame.mapToScene(item.pos())
+            cached = ((id(frame), moving), targets, mine,
+                      (start.x(), start.y()))
+            self._snap_gesture = cached
+        _key, targets, mine, (sx, sy) = cached
+        if not len(targets) or not len(mine):
             return delta
-        shift = frame.mapToScene(origin + delta) - frame.mapToScene(item.pos())
+        here = frame.mapToScene(origin + delta)
+        # the item's points where they were when first gathered, carried to
+        # where this move puts it
+        moved = mine + np.array([here.x() - sx, here.y() - sy])
         reach = SNAP_REACH / max(self._zoom, 0.05)
-        best = None
-        best_distance = reach
-        for point in self.points_of(item):
-            moved = point + shift
-            for target in targets:
-                distance = math.hypot(target.x() - moved.x(), target.y() - moved.y())
-                if distance < best_distance:
-                    best_distance = distance
-                    best = (target - moved, target)
-        if best is None:
+        apart = targets[None, :, :] - moved[:, None, :]
+        distance = np.hypot(apart[..., 0], apart[..., 1])
+        at = np.unravel_index(int(np.argmin(distance)), distance.shape)
+        if distance[at] >= reach:
             return delta
-        offset, marker = best
+        offset_x, offset_y = apart[at]
+        target_x, target_y = targets[at[1]]
+        offset, marker = QPointF(float(offset_x), float(offset_y)), QPointF(float(target_x), float(target_y))
         self._snap_marker = QPointF(marker)
         self._invalidate_snap_overlay(self._snap_marker)
         return delta + offset
@@ -1448,6 +1466,7 @@ class PageView(QGraphicsView):
             frame.set_active_viewport(inside)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        self._pointer_down = event.button() == Qt.LeftButton
         scene_pos = self.mapToScene(event.position().toPoint())
         self._press_scene = scene_pos
         self._press_view = event.position().toPoint()
@@ -1761,6 +1780,7 @@ class PageView(QGraphicsView):
         self._copied = False
         from ..items.calc import with_block_members
         self._moved_yet = False
+        self._snap_gesture = None              # gathered afresh for each drag
         self._move_items = [(other, other.pos()) for other in
                             with_block_members(self.scene().selectedItems())
                             if isinstance(other, MarkupItem) and self.editable(other)]
@@ -2531,15 +2551,31 @@ class PageView(QGraphicsView):
         else:
             self.setCursor(Qt.SizeAllCursor)
 
+    refresh_on_release = False
+    _pointer_down = False
+
+    def pointer_is_down(self) -> bool:
+        """Whether a press on the canvas is still held (and Qt agrees: a
+        release that went elsewhere, to a menu say, does not leave the panels
+        waiting for one that never comes)."""
+        from PySide6.QtGui import QGuiApplication
+        return self._pointer_down and bool(QGuiApplication.mouseButtons() & Qt.LeftButton)
+
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        scene_pos = self.mapToScene(event.position().toPoint())
-        if self.calc._select_drag is not None:
+        self._pointer_down = False
+        try:
+            scene_pos = self.mapToScene(event.position().toPoint())
+            if self.calc._select_drag is not None:
+                self.calc.mouse_release(event, scene_pos)
+                event.accept()
+                return
+            self._mouse_release(event)
+            # A click (not a drag) on an equation puts the cursor in it.
             self.calc.mouse_release(event, scene_pos)
-            event.accept()
-            return
-        self._mouse_release(event)
-        # A click (not a drag) on an equation puts the cursor in it.
-        self.calc.mouse_release(event, scene_pos)
+        finally:
+            if self.refresh_on_release:
+                self.refresh_on_release = False
+                self.selectionChanged.emit()
 
     def _mouse_release(self, event: QMouseEvent) -> None:
         scene_pos = self.mapToScene(event.position().toPoint())

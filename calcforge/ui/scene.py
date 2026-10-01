@@ -272,7 +272,7 @@ class PageFrame(QGraphicsObject):
         return pdftiles.TILES.sheet(
             page.pdf_key, b"", int(page.pdf_page_index), self.page_rect(),
             bool(getattr(page, "pdf_annotations", True)),
-            without=self.left_to_us(), ask=False) is None
+            without=self.markups_drawn_alone(), ask=False) is None
 
     def left_to_us(self, for_print: bool = False) -> tuple:
         """The page's own annotations this application is now drawing itself.
@@ -352,9 +352,13 @@ class PageFrame(QGraphicsObject):
         whole = self.page_rect()
         index = int(page.pdf_page_index)
         shown = bool(getattr(page, "pdf_annotations", True))
-        # The ones this application has taken over, which the page must now
-        # leave to it rather than drawing them itself.
-        without = self.left_to_us(for_print=self.print_mode)
+        # On screen the page is drawn without any of its markups, and each one
+        # nobody has changed draws its file's own drawing in its place
+        # (MarkupItem.paint_their_file), so taking one over, or undoing that,
+        # never re-renders the page. In print, the page draws the ones still
+        # the file's itself.
+        without = (self.left_to_us(for_print=True) if self.print_mode
+                   else self.markups_drawn_alone())
         painter.save()
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
         drew = False
@@ -413,6 +417,11 @@ class PageFrame(QGraphicsObject):
             drew = True
         painter.restore()
         return drew
+
+    def markups_drawn_alone(self) -> tuple:
+        """The page's own annotations that came in as markups: on screen the
+        page leaves all of them out, and the markups draw them."""
+        return tuple(sorted(set(getattr(self.page, "markup_annotations", ()) or ())))
 
     def paint(self, painter: QPainter, option, widget=None) -> None:
         if self._items_only:

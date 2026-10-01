@@ -724,18 +724,6 @@ checked against its saved files and WebSMath's recordings of SMath Cloud.
   else. A click outside it or Esc closes it. A block just made is closed
   and selected. *Different from Bluebeam*: a Bluebeam text box opens on a
   double-click the same way; Bluebeam has no block of equations.
-- **The unit box stands where the unit is** (2026-10-01): opening a result
-  that has an automatic unit, WebSMath drew the unit and then an empty unit
-  box after it (`x = 2 kN ■`), so the line changed as soon as it was
-  clicked and the box sat beside the unit, not in its place. Now the
-  equation looks the same opened as left (`x = 2 kN`), the unit is the unit
-  box — a click on it puts the caret there, its empty square standing
-  exactly where the unit was — and what is typed goes in that place
-  (`x = 2000 N`). Checked across the maths at 1×, 1.5×, 2× and 4×: names,
-  subscripts, powers, roots, fractions, units divided by units, negative
-  numbers, functions and typed or automatic units all share one baseline,
-  and fractions centre on the `=`. *Different from WebSMath* (deliberate);
-  SMath Studio itself shows the result's unit in its units placeholder.
 - **A PDF opens exactly as written** (2026-10-01): its markups are drawn by
   the file itself, untouched, and opening it is not a change (no "save
   changes?" on closing an untouched file — it used to count as modified).

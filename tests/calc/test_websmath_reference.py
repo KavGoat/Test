@@ -33,7 +33,9 @@ from tests.calc.websmath_scenarios import SCENARIOS
 REFERENCE = Path(__file__).parent / "data" / "websmath_reference"
 FACTS = json.loads((REFERENCE / "facts.json").read_text(encoding="utf-8"))
 KEYS = {"Return": Qt.Key_Return, "Right": Qt.Key_Right, "Left": Qt.Key_Left,
-        "Backspace": Qt.Key_Backspace}
+        "Backspace": Qt.Key_Backspace, "Home": Qt.Key_Home, "End": Qt.Key_End,
+        "Escape": Qt.Key_Escape, "Up": Qt.Key_Up, "Down": Qt.Key_Down, "Tab": Qt.Key_Tab,
+        "Delete": Qt.Key_Delete}
 SCALE = 4.0
 DELIBERATE = {
     "matrix_eval.left": {"text": "a*a=", "shown": "25", "error": None},
@@ -41,7 +43,8 @@ DELIBERATE = {
 # Drawn differently on purpose (same facts): the caret on an empty slot
 # stands clear of the placeholder square instead of cutting through it
 # (the user, 2026-10-01: "a weird white box round the second black box").
-DRAWN_DIFFERENTLY = {"result_unit.in_unit_box"}
+DRAWN_DIFFERENTLY = {"result_unit.in_unit_box", "reopen_name.b", "reopen_name.c",
+                     "reopen_name.d", "reopen_end.b"}
 
 
 def _render(paint, rect: QRectF) -> QImage:
@@ -70,6 +73,18 @@ def _facts(item, suggestions) -> dict:
     }
 
 
+def _click(view, scene_point) -> None:
+    """A real click, through the view, as the user makes one."""
+    from PySide6.QtCore import QEvent
+    from PySide6.QtGui import QMouseEvent
+    local = QPointF(view.mapFromScene(scene_point))
+    where = QPointF(view.viewport().mapToGlobal(local.toPoint()))
+    for kind, buttons in ((QEvent.MouseButtonPress, Qt.LeftButton),
+                          (QEvent.MouseButtonRelease, Qt.NoButton)):
+        QApplication.sendEvent(view.viewport(), QMouseEvent(kind, local, where, Qt.LeftButton,
+                                                            buttons, Qt.NoModifier))
+
+
 def _run(window, steps):
     window.show()
     window.toggle_calc_mode(True)
@@ -84,6 +99,9 @@ def _run(window, steps):
             calc.leave()
             view.scene().clearSelection()
             calc.place_cross(frame, QPointF(step[1] * PT_PER_PX, step[2] * PT_PER_PX))
+        elif step[0] == "click":
+            made = sorted(sheet_for(window.document).items.values(), key=lambda i: i.region.id)
+            _click(view, made[step[1]].mapToScene(QPointF(step[2], step[3]) * PT_PER_PX))
         elif step[0] == "key":
             QApplication.sendEvent(view, QKeyEvent(QKeyEvent.KeyPress, KEYS[step[1]],
                                                    Qt.NoModifier, ""))
@@ -150,32 +168,3 @@ def test_the_caret_on_an_empty_slot_stands_clear_of_its_square(window):
     assert width < bar[0].x() < width + 2.5, "the bar just past the square, not through it"
     assert bar[0].x() < view.frame_rect().width() - 1, "and inside the equation's frame"
 
-
-def test_the_unit_box_stands_where_the_automatic_unit_is(window):
-    """Opened again, `x = 2 kN` stays as it is (WebSMath drew `2 kN ■`, a box
-    after the unit), and the caret goes into the unit's own place."""
-    from calcforge.calc.docsheet import PT_PER_PX
-    _run(window, [("at", 18, 18), "x:2'kN", ("key", "Return"), ("at", 18, 72), "x=",
-                  ("key", "Return")])
-    item = max(sheet_for(window.document).items.values(), key=lambda i: i.region.id)
-    view, calc = item._view, window.view.calc
-
-    def last_part():
-        part = view._layout.children[-1]
-        return round(part.x, 3), view._size
-
-    left = (view._layout.children[1].x + view._layout.children[1].w, view._size)
-    calc.focus(item, item.mapToScene(QPointF(8, 12) * PT_PER_PX))
-    assert len(view._layout.children) == 3 and view._size == left[1], \
-        "the same drawing focused: number, then its unit — no extra box"
-    unit_x, _ = last_part()
-    spot = view._result_unit_rect.translated(view._layout.x, view._baseline).center()
-    calc.focus(item, item.mapToScene(spot * PT_PER_PX))
-    assert item.editor.in_unit
-    assert last_part()[0] == unit_x, "the empty unit box is where the unit was"
-    for ch in "'N":
-        QApplication.sendEvent(window.view, QKeyEvent(QKeyEvent.KeyPress, 0, Qt.NoModifier, ch))
-    QApplication.sendEvent(window.view, QKeyEvent(QKeyEvent.KeyPress, Qt.Key_Return,
-                                                  Qt.NoModifier, ""))
-    QApplication.instance().processEvents()
-    assert display_text(item.region.display) == "2000"

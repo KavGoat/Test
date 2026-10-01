@@ -133,6 +133,29 @@ class TileKey:
 
 
 @dataclass(frozen=True)
+class AnnotationTileKey:
+    """One square of one of the page's own markups, drawn alone as its file
+    draws it, at one rung of the zoom ladder. The page is drawn without its
+    markups and each markup nobody has changed lays this over it, so taking
+    one over — or undoing that — changes nothing about the page's tiles: no
+    re-render, no flash (Calcs.pdf, 2026-10-01)."""
+    source: str
+    index: int
+    xref: int
+    scale: float
+    col: int
+    row: int
+    #: The markup's box on the page, in points (left, top, right, bottom).
+    box: tuple
+
+    def page_rect(self, pixels=None) -> QRectF:
+        size = TILE / self.scale
+        tile = QRectF(self.col * size, self.row * size, size, size)
+        left, top, right, bottom = self.box
+        return tile.intersected(QRectF(left, top, right - left, bottom - top))
+
+
+@dataclass(frozen=True)
 class SheetKey:
     """The small picture of a whole page."""
     source: str
@@ -319,6 +342,13 @@ class _Worker(QThread):
                                     output.write(data)
                                 paths[key.source] = path
                                 sizes[key.source] = len(data)
+                            if isinstance(key, AnnotationTileKey):
+                                part = key.page_rect()
+                                slot['job'] = job
+                                slot['pipe'].send(('annotation', path, key.index, key.xref,
+                                                   (part.left(), part.top(), part.right(),
+                                                    part.bottom()), key.scale))
+                                continue
                             if isinstance(key, SheetKey):
                                 region = (0., 0., width, height)
                                 scale = min(THUMBNAIL_EDGE / max(width, height, 1.), 4.)
@@ -517,6 +547,48 @@ class TileCache(QObject):
             self._ask(key, data, page, sheet=False)
         return ready, missing
 
+    def annotation_tiles(self, source: str, data: bytes, index: int, page: QRectF,
+                         scale: float, region: QRectF, xref: int, box: QRectF
+                         ) -> list[tuple[QRectF, QPixmap]]:
+        """One of the page's markups as its file draws it: the squares of it
+        inside *region* that are ready (other zooms standing in for the ones
+        still coming), asking for the rest."""
+        step = zoom_step(scale)
+        size = TILE / step
+        outer = QRectF(box).intersected(page)
+        wanted = QRectF(region).intersected(outer)
+        if size <= 0 or wanted.isEmpty():
+            return []
+        edges = (math.floor(outer.left()), math.floor(outer.top()),
+                 math.ceil(outer.right()), math.ceil(outer.bottom()))
+        first_col, last_col = int(wanted.left() // size), int((wanted.right() - 1e-6) // size)
+        first_row, last_row = int(wanted.top() // size), int((wanted.bottom() - 1e-6) // size)
+        # (Nothing outstanding is given up on here: a markup is small, and two
+        # views of the same page at different zooms would keep cancelling each
+        # other's squares of it, so neither ever arrived.)
+        ready, wanting = [], []
+        for row in range(max(first_row, 0), last_row + 1):
+            for col in range(max(first_col, 0), last_col + 1):
+                key = AnnotationTileKey(source, index, xref, step, col, row, edges)
+                found = self._tiles.get(key)
+                if found is not None:
+                    if not found.isNull():
+                        ready.append((key.page_rect(), found))
+                    continue
+                wanting.append(key)
+        if wanting:
+            others = sorted(((key.scale, key.page_rect(), pixmap)
+                             for key, pixmap in self._tiles.items()
+                             if isinstance(key, AnnotationTileKey) and key.source == source
+                             and key.index == index and key.xref == xref
+                             and key.scale != step and pixmap is not None
+                             and not pixmap.isNull() and key.page_rect().intersects(wanted)),
+                            key=lambda entry: entry[0])
+            ready = [(where, pixmap) for _scale, where, pixmap in others] + ready
+            for key in wanting[:MOST_TILES_AT_ONCE]:
+                self._ask(key, data, page, sheet=False)
+        return ready
+
     def _standing_in(self, source: str, index: int, step: float,
                      region: QRectF, annotations: bool, without: tuple = ()
                      ) -> list[tuple[QRectF, QPixmap]]:
@@ -529,6 +601,8 @@ class TileCache(QObject):
         """
         found: list[tuple[float, QRectF, QPixmap]] = []
         for key, pixmap in self._tiles.items():
+            if not isinstance(key, TileKey):
+                continue
             if (key.source != source or key.index != index
                     or key.scale == step or key.annotations != annotations
                     or key.without != without

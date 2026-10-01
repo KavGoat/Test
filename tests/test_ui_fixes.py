@@ -31,6 +31,35 @@ def test_the_autocomplete_list_opens_under_the_cursor(v, x_px, y_px):
     assert -5 < top_left.y() - right_under.y() < 25, (top_left, right_under)
 
 
+@pytest.mark.parametrize("theme", ["light", "dark"])
+@pytest.mark.parametrize("word", ["test", "a", "app"])
+def test_the_autocomplete_list_shows_its_entries_whole(v, theme, word):
+    """One entry was cut in half and a long name cut short (the user,
+    2026-10-01): every row shown fits, and the widest name fits beside the
+    scrollbar."""
+    from calcforge.app import apply_theme
+    apply_theme(QApplication.instance(), theme)
+    try:
+        v.type_at(36, 36, "")
+        v.keys("test:5")
+        v.press(Qt.Key_Return)
+        v.type_at(36, 90, "")
+        v.keys(word)
+        QApplication.instance().processEvents()
+        s = v.suggestions
+        assert s.isVisible() and s.count() >= 1
+        port = s.viewport().rect()
+        first = s.indexAt(port.topLeft() + __import__("PySide6.QtCore", fromlist=["QPoint"]).QPoint(1, 1)).row()
+        for row in range(first, min(s.count(), first + 8)):
+            box = s.visualItemRect(s.item(row))
+            assert port.top() <= box.top() and box.bottom() <= port.bottom(), (row, box, port)
+        widest = s.sizeHintForColumn(0)
+        assert port.width() >= widest, (port.width(), widest)
+        assert s.verticalScrollBar().isVisibleTo(s) == (s.count() > 8)
+    finally:
+        apply_theme(QApplication.instance(), "light")
+
+
 # -- one insertion marker ------------------------------------------------------------------
 
 def test_calc_mode_shows_only_the_red_cross(window):
@@ -331,3 +360,21 @@ def test_the_pointer_over_an_equation_is_websmaths(v):
     v.focus_item(item)                                   # typing in it: still the arrow
     hover(v.view, rect.center().x(), rect.center().y())
     assert v.view.cursor().shape() == Qt.ArrowCursor
+
+
+def test_a_red_cross_on_a_page_that_has_gone_is_forgotten_not_a_crash(window):
+    """Seen in use (2026-10-01): the cross held a page that had been rebuilt,
+    and every repaint and click after failed with 'Internal C++ object
+    (PageFrame) already deleted'."""
+    import shiboken6
+    from PySide6.QtWidgets import QGraphicsRectItem
+    window.show()
+    window.toggle_calc_mode(True)
+    gone = QGraphicsRectItem()
+    shiboken6.delete(gone)
+    window.view.calc.cross = (gone, QPointF(5, 5))
+    window.view.viewport().repaint()
+    QApplication.instance().processEvents()
+    assert window.view.calc.cross is None
+    click(window.view, 200, 200)                     # a click goes on as normal
+    assert not window.view.calc.editing()

@@ -620,8 +620,30 @@ class PolyItem(MarkupItem):
         return QPointF(corner.x() + inward.x() / length * reach,
                        corner.y() + inward.y() / length * reach)
 
+    def _path_signature(self) -> tuple:
+        """Everything the outline is made from. Qt asks for a markup's
+        bounding box thousands of times a frame, and a cloud's arcs were
+        worked out afresh every time — the main cost of dragging on a sheet
+        full of somebody's clouds (Calcs.pdf, 2026-10-01)."""
+        # the points themselves: compared by value, in C++, one by one (nothing
+        # moves a point in place; a moved point is a new one)
+        return (self.kind, tuple(self.points), self.cloud_radius,
+                self.smooth, self.closed, repr(sorted(self.rounded.items())),
+                repr(sorted(self.curved.items())), repr(sorted(self.broken.items())),
+                repr(sorted(self.bezier.items())), self.style.width)
+
     def build_path(self) -> QPainterPath:
-        """The shape's geometry, with its rounded corners and its curves."""
+        """The shape's geometry, with its rounded corners and its curves
+        (worked out once for each shape it has; see _path_signature)."""
+        signature = self._path_signature()
+        cached = self.__dict__.get("_path_cache")
+        if cached is not None and cached[0] == signature:
+            return QPainterPath(cached[1])
+        path = self._build_path()
+        self._path_cache = (signature, QPainterPath(path))
+        return path
+
+    def _build_path(self) -> QPainterPath:
         path = QPainterPath()
         if len(self.points) < 2:
             if self.points:
@@ -729,12 +751,18 @@ class PolyItem(MarkupItem):
 
     def shape(self) -> QPainterPath:
         from PySide6.QtGui import QPainterPathStroker
+        signature = (self._path_signature(), self.style.paints_inside())
+        cached = self.__dict__.get("_shape_cache")
+        if cached is not None and cached[0] == signature:
+            return QPainterPath(cached[1])
         stroker = QPainterPathStroker()
         stroker.setWidth(max(self.style.width, 6.0) + 4)
         stroker.setCapStyle(Qt.RoundCap)
-        path = stroker.createStroke(self.build_path())
+        outline = self.build_path()
+        path = stroker.createStroke(outline)
         if self.closed and self.style.paints_inside():
-            path.addPath(self.build_path())
+            path.addPath(outline)
+        self._shape_cache = (signature, QPainterPath(path))
         return path
 
     def boundingRect(self) -> QRectF:

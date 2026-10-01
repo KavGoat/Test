@@ -15,6 +15,8 @@ from ..pdf import engine
 MAX_DOCUMENTS = 6
 # Parsed pages are what make a re-render fast; keep plenty of them.
 MAX_DISPLAY_LISTS = 24
+# A sheet's markups, one parsed annotation each: small, so many more.
+MAX_ANNOTATION_LISTS = 600
 
 
 def worker_count() -> int:
@@ -34,6 +36,8 @@ class Renderer:
     def __init__(self):
         self.documents = OrderedDict()
         self.drawings = OrderedDict()
+        self.annotations = OrderedDict()          # (path, index, xref) -> display list
+        self.emptied = set()                      # (path, index) emptied in the copy
         self.opens = 0
         self.parses = 0
 
@@ -44,6 +48,10 @@ class Renderer:
         self.documents.clear()
 
     def forget(self, path):
+        for key in list(self.annotations):
+            if key[0] == path:
+                del self.annotations[key]
+        self.emptied = {key for key in self.emptied if key[0] != path}
         for key in list(self.drawings):
             if key[0] == path:
                 del self.drawings[key]
@@ -75,6 +83,36 @@ class Renderer:
         self.drawings.move_to_end(key)
         return engine.raster_from(drawing, region, scale)
 
+    def render_annotation(self, path, index, xref, region, scale):
+        """One of the page's markups alone, as its file draws it, on a clear
+        background: the page is drawn without it, and the markup's own item
+        lays this over the page until somebody changes it."""
+        key = (path, index, xref)
+        drawing = self.annotations.get(key)
+        if drawing is None:
+            document_key = (path, "annotations only")
+            document = self.documents.get(document_key)
+            if document is None:
+                if len(self.documents) >= MAX_DOCUMENTS:
+                    oldest = next(iter(self.documents))
+                    self.forget(oldest[0])
+                document = engine.open_path(path)
+                self.documents[document_key] = document
+                self.opens += 1
+            self.documents.move_to_end(document_key)
+            if (path, index) not in self.emptied:
+                engine.without_page_content(document, index)
+                self.emptied.add((path, index))
+            drawing = engine.annotation_display_list(document, index, xref)
+            if drawing is None:
+                return None
+            self.annotations[key] = drawing
+            self.parses += 1
+            while len(self.annotations) > MAX_ANNOTATION_LISTS:
+                self.annotations.popitem(last=False)
+        self.annotations.move_to_end(key)
+        return engine.raster_from(drawing, region, scale, alpha=True)
+
 
 def serve(connection, memory_name, memory_size):
     """One persistent renderer. The parent assigns at most one job at a time."""
@@ -91,7 +129,10 @@ def serve(connection, memory_name, memory_size):
                 continue
             started = time.perf_counter()
             try:
-                raster = renderer.render(*request[1:])
+                if request[0] == 'annotation':
+                    raster = renderer.render_annotation(*request[1:])
+                else:
+                    raster = renderer.render(*request[1:])
             except Exception:
                 # A broken PDF does not poison the renderer for the next file.
                 raster = None
@@ -111,3 +152,4 @@ def serve(connection, memory_name, memory_size):
         renderer.close()
         memory.close()
         connection.close()
+
