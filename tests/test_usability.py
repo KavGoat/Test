@@ -10589,3 +10589,34 @@ def test_a_page_on_the_clipboard_shows_an_insertion_bar_where_it_will_go(window)
     QApplication.clipboard().setText("something else")
     QApplication.processEvents()
     assert panel.list.external_drop_row is None
+
+
+def test_a_group_moved_takes_its_call_outs_leaders_with_it(window):
+    """The user's video, 2026-10-01: a group of a picture and its call-outs
+    moved, and every leader stayed pointing at where the picture had been."""
+    from calcforge.items.text import CalloutItem
+    frame = window.document.pages[0].frame
+    box = RectItem("rect", QRectF(0, 0, 120, 80))
+    frame.add_markup(box, QPointF(100, 300))
+    call = CalloutItem("BUS BAR 1", QRectF(0, 0, 90, 30), leader=[QPointF(-40, 60)])
+    frame.add_markup(call, QPointF(300, 260))
+    tip = lambda: call.mapToScene(call.leaders[0].tip)
+    window.view.scene().clearSelection()
+    box.setSelected(True)
+    call.setSelected(True)
+    window.group_selection()
+    before = tip()
+    start = box.mapToScene(box.local_rect().center())
+    drag(window.view, start.x(), start.y(), start.x() + 80, start.y() + 40)
+    moved = box.mapToScene(box.local_rect().center()) - start
+    assert moved.x() > 50
+    assert tip() == before + moved, "the arrow came with its group"
+    # one call-out on its own still keeps pointing where it pointed
+    window.view.scene().clearSelection()
+    lone = CalloutItem("NOTE", QRectF(0, 0, 90, 30), leader=[QPointF(-40, 60)])
+    frame.add_markup(lone, QPointF(500, 500))
+    pointing = lone.mapToScene(lone.leaders[0].tip)
+    window.view.scene().clearSelection()
+    centre = lone.mapToScene(lone.local_rect().center())
+    drag(window.view, centre.x(), centre.y(), centre.x() + 60, centre.y())
+    assert lone.mapToScene(lone.leaders[0].tip) == pointing

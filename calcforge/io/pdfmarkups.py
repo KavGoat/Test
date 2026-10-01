@@ -62,6 +62,8 @@ def markups_of_page(source, index: int, scale: float = 1.0,
             grouping.append((_group_facts(source, annotation), made))
             if keep_the_look:
                 _leave_it_to_the_file(annotation, made)
+                if made[0].get("still_theirs"):
+                    made[0]["their_box"] = _box(source, annotation, place, scale)
             if picture_of is not None:
                 _the_file_draws_it(source, index, annotation, made, picture_of)
                 _the_picture_in_it(source, annotation, made, picture_of)

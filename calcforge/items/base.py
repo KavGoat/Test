@@ -472,6 +472,11 @@ class MarkupItem(QGraphicsObject):
         # See "somebody else's markup" below.
         self.from_annotation = 0
         self.still_theirs = False
+        # The annotation's own box on the page (/Rect: x, y, w, h), which is
+        # where its file draws it — a dimension's words can sit well outside
+        # what the markup measures as its own box.
+        self.their_box: tuple = ()
+        self._their_look = None
         # For the few markups there is nothing to draw from — a stamp is a
         # picture and a company logo, described nowhere but in its own
         # appearance — the file's drawing of it, kept.
@@ -695,20 +700,33 @@ class MarkupItem(QGraphicsObject):
     # -- painting helpers --------------------------------------------------
     def apply_blend(self, painter: QPainter) -> None:
         if self.style.blend == "multiply":
+            engine = painter.paintEngine()
+            if engine is not None and engine.type() == engine.Type.OpenGL2:
+                # Qt's OpenGL engine cannot multiply (it paints black): a
+                # translucent highlighter over the words instead.
+                painter.setOpacity(painter.opacity() * 0.45)
+                return
             painter.setCompositionMode(QPainter.CompositionMode_Multiply)
 
     def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem,
               widget: Optional[QWidget] = None) -> None:
         painter.save()
         self.apply_blend(painter)
-        if self.still_theirs:
-            self.paint_their_file(painter)
-        else:
-            self.paint_visible(painter)
+        self.paint_visible(painter)          # nothing while it is still theirs
         painter.restore()
         self.paint_handles(painter)
 
-    def paint_their_file(self, painter: QPainter) -> None:
+    def sync_their_look(self) -> None:
+        """Show the file's own drawing of this markup while it is unchanged,
+        and nothing of it once it has been taken over."""
+        wanted = bool(self.still_theirs and self.from_annotation)
+        if wanted and self._their_look is None:
+            self._their_look = _TheirLook(self)
+        if self._their_look is not None:
+            self._their_look.prepareGeometryChange()
+            self._their_look.setVisible(wanted)
+
+    def paint_their_file(self, painter: QPainter, box=None) -> None:
         """On screen, a markup nobody has changed is drawn by its own file:
         its annotation alone, in squares the render processes draw, laid in
         its place among the other markups — so one taken over and moved does
@@ -731,7 +749,8 @@ class MarkupItem(QGraphicsObject):
         back, ok = to_page.inverted()
         if not ok:
             return
-        box = self.mapRectToParent(self.boundingRect()).adjusted(-12, -12, 12, 12)
+        if box is None:
+            box = self.mapRectToParent(self.boundingRect()).adjusted(-12, -12, 12, 12)
         whole = frame.page_rect()
         tiles = pdftiles.TILES.annotation_tiles(
             page.pdf_key, data, int(page.pdf_page_index), whole, _painted_scale(painter),
@@ -881,6 +900,7 @@ class MarkupItem(QGraphicsObject):
         """Take this markup over: from here it is drawn and saved as ours."""
         if self.still_theirs:
             self.still_theirs = False
+            self.sync_their_look()
             if self.scene() is not None:
                 self.scene().update()
             self.update()
@@ -993,6 +1013,7 @@ class MarkupItem(QGraphicsObject):
             "flattened": self.flattened,
             "from_annotation": self.from_annotation,
             "still_theirs": self.still_theirs,
+            "their_box": list(self.their_box) if self.still_theirs else [],
             "their_picture_asset": self.their_picture_asset,
             "picture_framed": self.picture_framed,
             "their_picture_box": list(self.their_picture_box),
@@ -1035,6 +1056,8 @@ class MarkupItem(QGraphicsObject):
         self.hidden = bool(data.get("hidden", False))
         self.from_annotation = int(data.get("from_annotation", 0) or 0)
         self.still_theirs = bool(data.get("still_theirs", False))
+        found_box = data.get("their_box") or ()
+        self.their_box = tuple(float(v) for v in found_box) if len(found_box) == 4 else ()
         self.their_picture_asset = str(data.get("their_picture_asset", ""))
         self.picture_framed = bool(data.get("picture_framed", False))
         found = data.get("their_picture_box") or ()
@@ -1076,6 +1099,7 @@ class MarkupItem(QGraphicsObject):
         # from the position stored in the document.
         self.setTransformOriginPoint(self.local_rect().center())
         self.setRotation(float(data.get("rotation", 0)))
+        self.sync_their_look()
 
     def deserialize(self, data: dict) -> None:
         self.load_base(data)
@@ -1196,3 +1220,46 @@ def cloud_path(polygon: QPolygonF, radius: float, closed: bool = True) -> QPaint
 def dash_pattern_preview(style: str) -> list[float]:
     return {"solid": [], "dash": [4, 3], "dot": [1, 3],
             "dashdot": [5, 3, 1, 3], "dashdotdot": [5, 3, 1, 3, 1, 3]}.get(style, [])
+
+
+class _TheirLook(QGraphicsItem):
+    """The file's own drawing of a markup nobody has changed, in the box the
+    file gives it (/Rect) — not the box this application would measure:
+    Bluebeam puts a dimension's words out at the end of a leader, and drawn
+    inside the markup's own box "1m" was cut away (the user, 2026-10-01).
+    It belongs to its markup, so it is stacked with it among the others; it
+    takes no clicks, and goes the moment the markup is changed."""
+
+    def __init__(self, markup):
+        super().__init__(markup)
+        self.setAcceptedMouseButtons(Qt.NoButton)
+        self.setAcceptHoverEvents(False)
+        self.setFlag(QGraphicsItem.ItemIsSelectable, False)
+        self.setFlag(QGraphicsItem.ItemIsFocusable, False)
+
+    def _page_box(self) -> QRectF:
+        markup = self.parentItem()
+        if markup.their_box:
+            return QRectF(*markup.their_box)
+        return markup.mapRectToParent(markup.boundingRect()).adjusted(-12, -12, 12, 12)
+
+    def boundingRect(self) -> QRectF:
+        markup = self.parentItem()
+        if markup is None or markup.parentItem() is None:
+            return QRectF()
+        return markup.mapRectFromParent(self._page_box()).adjusted(-2, -2, 2, 2)
+
+    def shape(self):
+        from PySide6.QtGui import QPainterPath
+        return QPainterPath()                      # nothing to click on
+
+    def paint(self, painter: QPainter, option, widget=None) -> None:
+        markup = self.parentItem()
+        if markup is None or not markup.still_theirs:
+            return
+        if markup.style.blend == "multiply":
+            return                     # the page draws it (markups_drawn_alone)
+        painter.save()
+        markup.apply_blend(painter)
+        markup.paint_their_file(painter, self._page_box().adjusted(-1, -1, 1, 1))
+        painter.restore()

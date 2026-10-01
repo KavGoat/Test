@@ -423,3 +423,67 @@ def test_a_call_out_with_no_border_keeps_its_leader(bits):
 def test_indented_lines_keep_their_indent(bits):
     words = next(i for i in bits.markups() if i.TYPE == "text" and "numbered" in i.text())
     assert "\xa0" * 6 + "its second line" in words.serialize()["html"]
+
+
+# -- the file's drawing, all of it (the user's photo and video, 2026-10-01) ---------
+
+def test_a_markups_file_drawing_reaches_as_far_as_its_file_says(window, tmp_path):
+    """A Bluebeam dimension's words sit out at the end of a leader, beyond
+    what the markup measures as its own box: drawn only inside that box the
+    "1m" was cut away. The file's drawing is laid in the box the file gives
+    the annotation (/Rect)."""
+    import pymupdf
+    path = str(tmp_path / "dim.pdf")
+    document = pymupdf.open()
+    page = document.new_page(width=842, height=595)
+    line = page.add_line_annot((100, 300), (200, 300))
+    line.set_colors(stroke=(1, 0, 0))
+    line.update()
+    # a label well outside the line, as Bluebeam writes a dimension's value
+    document.xref_set_key(line.xref, "Rect", "[90 250 330 320]")
+    document.save(path)
+    document.close()
+    window.open_path(path)
+    window.rebuild_scenes()
+    frame = window.document.pages[0].frame
+    (item,) = [i for i in frame.markups() if i.from_annotation]
+    assert item.still_theirs and item.their_box
+    look = item._their_look
+    assert look is not None and look.isVisible()
+    shown = item.mapRectToParent(look.boundingRect())
+    assert shown.left() <= 91 and shown.right() >= 329, shown
+    item.setPos(item.pos() + QPointF(10, 0))              # taken over: the file's drawing goes
+    assert not look.isVisible()
+
+
+def test_an_untouched_highlighter_is_drawn_with_the_page(calcs):
+    """It multiplies into what is under it, which only the page's own render
+    does exactly — on the graphics card a multiply was a black block."""
+    window, path = calcs
+    frame = window.document.pages[0].frame
+    marker = next(i for i in frame.markups() if i.style.blend == "multiply")
+    assert marker.from_annotation not in frame.markups_drawn_alone()
+    marker.setPos(marker.pos() + QPointF(0, 20))           # taken over
+    assert marker.from_annotation in frame.markups_drawn_alone()
+
+
+def test_hiding_an_annotation_never_rebuilds_its_appearance(tmp_path):
+    """PyMuPDF's set_flags has MuPDF build a new appearance its own way — a
+    Bluebeam call-out became a solid box. The hidden flag is written into
+    the dictionary instead, and the appearance stream is untouched."""
+    import pymupdf
+    from calcforge.pdf import engine
+    path = str(tmp_path / "box.pdf")
+    _bluebeam_bits(path)
+    with pymupdf.open(path) as document:
+        page = document[0]
+        callout = next(a for a in page.annots() if a.type[1] == "FreeText")
+        number = callout.xref
+        appearance = document.xref_get_key(number, "AP")
+        stream = document.xref_stream(int(appearance[1].split()[1]))
+        engine.leave_out(page, (number,))
+        engine.display_list(document, 0, True)
+        assert document.xref_get_key(number, "AP") == appearance
+        assert document.xref_stream(int(appearance[1].split()[1])) == stream
+        flags = int(document.xref_get_key(number, "F")[1])
+        assert flags & pymupdf.PDF_ANNOT_IS_HIDDEN

@@ -282,7 +282,7 @@ class SplitDocumentWindow(QSplitter):
             state, status_visible = pane._before_split
             pane.restoreState(state)
             pane.statusBar().setVisible(status_visible)
-            pane.menuBar().setNativeMenuBar(True)
+            pane.menuBar().setNativeMenuBar(NATIVE_MENU_BAR)
             for action in pane.findChildren(QAction):
                 action.setShortcutContext(Qt.WindowShortcut)
             pane.setGeometry(self.geometry().adjusted(36 * offset, 36 * offset,
@@ -333,7 +333,7 @@ class SplitDocumentWindow(QSplitter):
         state, status_visible = keep._before_split
         keep.restoreState(state)
         keep.statusBar().setVisible(status_visible)
-        keep.menuBar().setNativeMenuBar(True)
+        keep.menuBar().setNativeMenuBar(NATIVE_MENU_BAR)
         for action in keep.findChildren(QAction):
             action.setShortcutContext(Qt.WindowShortcut)
         keep.setGeometry(self.geometry())
@@ -421,6 +421,10 @@ def snug_number_box(spin) -> None:
     # the text, the theme's padding round it, and the arrows (18 px)
     spin.setFixedWidth(int(metrics.horizontalAdvance(widest)) + 18 + 22)
 
+
+#: The menu bar is the window's own on every system (see _build_search).
+NATIVE_MENU_BAR = False
+
 def _bar_ink() -> str:
     """The ink the theme draws its icons in."""
     from .icons import _THEME_INK, icon_theme
@@ -480,6 +484,8 @@ class MainWindow(QMainWindow):
         self._build_status()
         self._connect()
         self.apply_shortcuts()
+        from . import preferences as _prefs
+        self.view.use_the_graphics_card(_prefs.current().gpu_drawing)
 
         self._autosave = QTimer(self)
         self._autosave.setInterval(120_000)
@@ -1454,6 +1460,11 @@ class MainWindow(QMainWindow):
                 self.rail_for(name).show_open(name, not dock.isHidden())
 
     def _build_search(self) -> None:
+        # The window keeps its own menu bar on macOS too: the Markup | Calc
+        # switch and the search box sit after Help, and the Mac's system bar
+        # at the top of the screen has no room for them — there they simply
+        # were not shown (the user's Mac, 2026-10-01).
+        self.menuBar().setNativeMenuBar(NATIVE_MENU_BAR)
         """The search field in the menu bar's corner, with its live dropdown."""
         from PySide6.QtGui import QStandardItemModel
         from PySide6.QtWidgets import QCompleter
@@ -6954,6 +6965,7 @@ class MainWindow(QMainWindow):
             sheet.adopt_format()
             sheet.recalculate(force=True)
             self.mark_modified()
+        self.view.use_the_graphics_card(prefs.gpu_drawing)
         self.view.viewport().update()
         self.status_hint.setText("Preferences saved")
 

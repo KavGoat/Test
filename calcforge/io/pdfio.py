@@ -470,6 +470,7 @@ def _scaled_markups(payloads: list[dict], scale: float) -> list[dict]:
         entry = dict(payload)
         entry.pop("still_theirs", None)
         entry.pop("from_annotation", None)
+        entry.pop("their_box", None)
         for key in ("x", "y"):
             if key in entry:
                 entry[key] = entry[key] * scale

@@ -46,6 +46,12 @@ class Preferences:
     insertion_point: bool = False
     """Whether an empty-canvas click leaves an insertion point to type at."""
 
+    gpu_drawing: bool = True
+    """Draw the pages with the graphics card (OpenGL): scrolling and panning
+    stay smooth on a high-density display, where moving every pixel on the
+    processor stutters. Falls back to the processor where there is no
+    OpenGL."""
+
     recover_flattened: bool = True
     """Keep source item data when content is flattened into the page."""
 

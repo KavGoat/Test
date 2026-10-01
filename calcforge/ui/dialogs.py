@@ -1411,6 +1411,12 @@ class PreferencesDialog(QDialog):
         self.insertion.setToolTip(
             "Click empty paper to leave a caret there; the arrow keys move it")
         form.addRow("", self.insertion)
+        self.gpu_drawing = QCheckBox("Draw with the graphics card")
+        self.gpu_drawing.setChecked(getattr(prefs, "gpu_drawing", True))
+        self.gpu_drawing.setToolTip(
+            "Smooth scrolling and panning on high-density (Retina, 4K) screens.\n"
+            "Turn off if pages draw wrongly with your graphics driver.")
+        form.addRow("", self.gpu_drawing)
         self.recover_flattened = QCheckBox("Recoverable flattening")
         self.recover_flattened.setChecked(prefs.recover_flattened)
         self.recover_flattened.setToolTip(
@@ -1483,6 +1489,7 @@ class PreferencesDialog(QDialog):
             snap_while_drawing=self.snapping.isChecked(),
             autosize_text=self.autosize.isChecked(),
             insertion_point=self.insertion.isChecked(),
+            gpu_drawing=self.gpu_drawing.isChecked(),
             recover_flattened=self.recover_flattened.isChecked(),
             page_thumbnails=getattr(self.prefs, "page_thumbnails", 1.0),
             result_decimals=self.result_decimals.value(),

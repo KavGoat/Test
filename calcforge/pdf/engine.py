@@ -436,11 +436,17 @@ def leave_out(page, without: "tuple") -> None:
     wanted = set(without)
     if not wanted:
         return
+    # Straight into each annotation's dictionary. Annot.set_flags has MuPDF
+    # mark the annotation for a new appearance, which it then builds its own
+    # way — a Bluebeam call-out became an opaque box in its fill colour with
+    # its words lost in it, on screen and in no other reader (the user's
+    # Mac, 2026-10-01). A PDF is drawn as its file says or not at all.
     try:
-        for annotation in page.annots():
-            if annotation.xref in wanted:
-                annotation.set_flags(annotation.flags
-                                     | pymupdf.PDF_ANNOT_IS_HIDDEN)
+        document = page.parent
+        found = [(annotation.xref, annotation.flags) for annotation in page.annots()
+                 if annotation.xref in wanted]
+        for number, flags in found:
+            document.xref_set_key(number, "F", str(flags | pymupdf.PDF_ANNOT_IS_HIDDEN))
     except Exception:                                  # noqa: BLE001
         drain_messages()
 

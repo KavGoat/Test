@@ -978,10 +978,10 @@ class PageView(QGraphicsView):
             event.accept()
             return
         if not pixels.isNull():
-            self.horizontalScrollBar().setValue(
-                self.horizontalScrollBar().value() - pixels.x())
-            self.verticalScrollBar().setValue(
-                self.verticalScrollBar().value() - pixels.y())
+            # A trackpad: one scroll for both directions, or Qt repaints a
+            # third of the window on every event instead of shifting what is
+            # drawn — the lag of two-finger scrolling on a Mac (2026-10-01).
+            self.scroll_both(pixels.x(), pixels.y())
             event.accept()
             return
         if notches:
@@ -989,6 +989,40 @@ class PageView(QGraphicsView):
         event.accept()
 
     _scroll_batch = None
+    gpu = False
+
+    def use_the_graphics_card(self, on: bool = True) -> bool:
+        """Draw the canvas with OpenGL, or with the processor. Says which.
+
+        On a high-density screen a scroll moves millions of pixels; on the
+        processor that is the stutter of scrolling on a Mac (the user's video,
+        2026-10-01), on the graphics card it is nothing. Where no OpenGL
+        context can be made — a remote desktop, a headless test — it stays on
+        the processor."""
+        if bool(on) == self.gpu:
+            return self.gpu
+        if on:
+            from PySide6.QtGui import QOpenGLContext, QSurfaceFormat
+            probe = QOpenGLContext()
+            if not probe.create():
+                return False
+            from PySide6.QtOpenGLWidgets import QOpenGLWidget
+            surface = QOpenGLWidget()
+            shape = QSurfaceFormat()
+            shape.setSamples(4)                       # smooth markup edges
+            surface.setFormat(shape)
+            self.setViewport(surface)
+            # GL repaints the whole view each frame: there is no scroll blit
+            self.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
+            self.gpu = True
+        else:
+            self.setViewport(QWidget())
+            self.setViewportUpdateMode(QGraphicsView.SmartViewportUpdate)
+            self.gpu = False
+        viewport = self.viewport()
+        viewport.setMouseTracking(True)
+        viewport.setAcceptDrops(self.acceptDrops())
+        return self.gpu
 
     def scrollContentsBy(self, dx: int, dy: int) -> None:
         if self._scroll_batch is not None:
@@ -2152,8 +2186,13 @@ class PageView(QGraphicsView):
                 # Copying takes the arrow along: what is being dragged out is
                 # a new callout, and its arrow belongs to it. Moving leaves the
                 # arrow pointing at whatever it was pointing at.
+                # One call-out on its own keeps pointing where it pointed;
+                # moved with others — a group, a selection — its arrow comes
+                # along, or the group leaves its leaders behind (the user's
+                # video, 2026-10-01).
                 self._place(item, target if free else self.snap(target),
-                            keep_leader=not self._copy_on_move)
+                            keep_leader=not self._copy_on_move
+                            and len(self._move_items) == 1)
                 if id(item) in held:
                     from ..items.calc import stay_in_block
                     stay_in_block(item, held[id(item)])
@@ -3898,6 +3937,8 @@ class PageView(QGraphicsView):
         if before is not None and item.scene() is not None \
                 and _as_written(item.serialize()) == _as_written(before):
             item.still_theirs = True             # untouched: the file draws it again
+            item.their_box = tuple(before.get("their_box") or ())
+            item.sync_their_look()
             item.modified = before.get("modified", item.modified)
             self.scene().update()
         # A text box left completely empty is an invisible click target; drop it.
@@ -4883,7 +4924,7 @@ class PageView(QGraphicsView):
                 self.begin_snapshot(self.all_frames())
                 origins = [(item, QPointF(item.pos())) for item in items]
                 for item in items:
-                    self._place(item, item.pos() + delta)
+                    self._place(item, item.pos() + delta, keep_leader=len(items) == 1)
                 from ..items.calc import keep_blocks_whole
                 said = keep_blocks_whole(self.scene(), origins)
                 if said:
@@ -5055,7 +5096,8 @@ class PageView(QGraphicsView):
 
 def _as_written(data: dict) -> dict:
     """A markup's record, leaving out who draws it and when it was touched."""
-    return {k: v for k, v in data.items() if k not in ("still_theirs", "modified")}
+    return {k: v for k, v in data.items()
+            if k not in ("still_theirs", "modified", "their_box")}
 
 
 def _far_enough(a: QPointF, b: QPointF) -> bool:

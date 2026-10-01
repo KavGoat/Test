@@ -603,3 +603,16 @@ def test_a_wheel_notch_glides_instead_of_jumping(window):
         assert bar.value() == start - 200, "a glide gives way to the scroll bar"
     finally:
         prefs.wheel = was
+
+
+def test_drawing_with_the_graphics_card_falls_back_where_there_is_none(window):
+    """On by default (Preferences), for smooth scrolling on a Retina screen;
+    with no OpenGL — a remote desktop, these tests — the processor draws."""
+    from PySide6.QtGui import QOpenGLContext
+    from calcforge.ui import preferences
+    assert preferences.Preferences().gpu_drawing is True
+    available = QOpenGLContext().create()
+    assert window.view.use_the_graphics_card(True) is available
+    window.view.use_the_graphics_card(False)
+    assert window.view.gpu is False
+    assert window.view.viewport().hasMouseTracking()

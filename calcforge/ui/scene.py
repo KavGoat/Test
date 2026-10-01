@@ -139,6 +139,51 @@ def _draw_on_the_pixel_grid(painter, where: QRectF, tile) -> None:
     painter.restore()
 
 
+def _outline_where_exposed(painter, rect: QRectF, exposed: Optional[QRectF]) -> None:
+    """A rectangle's outline, only the stretches of it inside *exposed*.
+
+    Qt strokes a whole outline on every repaint — every dash of a margin all
+    round an A1 sheet, at the screen's resolution — when a scroll has exposed
+    a strip a few pixels high: most of the cost of each step of a scroll on a
+    Mac's display (2026-10-01). Each side is cut to the exposed part, its
+    dashes starting where they would have, so nothing looks different.
+    """
+    if exposed is None or exposed.contains(rect):
+        painter.drawRect(rect)
+        return
+    width = max(painter.pen().widthF(), 0.0)
+    reach = exposed.adjusted(-width - 1, -width - 1, width + 1, width + 1)
+    pen = QPen(painter.pen())
+    dashed = pen.style() != Qt.SolidLine
+    unit = max(width, 1e-6) if not pen.isCosmetic() and width > 0 else 1.0
+    left, top, right, bottom = rect.left(), rect.top(), rect.right(), rect.bottom()
+    # each side as (fixed coordinate, start, end, horizontal, distance along the outline to its start)
+    sides = ((top, left, right, True, 0.0),
+             (right, top, bottom, False, rect.width()),
+             (bottom, right, left, True, rect.width() + rect.height()),
+             (left, bottom, top, False, 2 * rect.width() + rect.height()))
+    for fixed, start, end, across, before in sides:
+        if across:
+            if not reach.top() <= fixed <= reach.bottom():
+                continue
+            low, high = max(min(start, end), reach.left()), min(max(start, end), reach.right())
+        else:
+            if not reach.left() <= fixed <= reach.right():
+                continue
+            low, high = max(min(start, end), reach.top()), min(max(start, end), reach.bottom())
+        if high <= low:
+            continue
+        forwards = end >= start
+        a, b = (low, high) if forwards else (high, low)
+        if dashed:
+            pen.setDashOffset((before + abs(a - start)) / unit)
+            painter.setPen(pen)
+        if across:
+            painter.drawLine(QPointF(a, fixed), QPointF(b, fixed))
+        else:
+            painter.drawLine(QPointF(fixed, a), QPointF(fixed, b))
+
+
 def _exposed_part(option, whole: QRectF, item=None) -> QRectF:
     """The part of the page this repaint is actually for.
 
@@ -424,8 +469,16 @@ class PageFrame(QGraphicsObject):
 
     def markups_drawn_alone(self) -> tuple:
         """The page's own annotations that came in as markups: on screen the
-        page leaves all of them out, and the markups draw them."""
-        return tuple(sorted(set(getattr(self.page, "markup_annotations", ()) or ())))
+        page leaves them out, and the markups draw them — all but a
+        highlighter nobody has changed. One multiplies into what is under it,
+        which only drawing it with the page does exactly (on the graphics
+        card a multiply came out as a black block, 2026-10-01)."""
+        numbers = set(getattr(self.page, "markup_annotations", ()) or ())
+        for item in self.markups():
+            if (getattr(item, "still_theirs", False) and item.from_annotation in numbers
+                    and item.style.blend == "multiply" and item.isVisible()):
+                numbers.discard(item.from_annotation)
+        return tuple(sorted(numbers))
 
     def paint(self, painter: QPainter, option, widget=None) -> None:
         if self._items_only:
@@ -449,9 +502,10 @@ class PageFrame(QGraphicsObject):
             self.paint_the_pdf(painter, _exposed_part(option, rect, self),
                                _painted_scale(painter), consumer=widget)
             painter.restore()
+        exposed = _exposed_part(option, rect, self) if not self.print_mode else rect
         if not self.print_mode:
             self._paint_grid(painter, rect)
-            self._paint_margins(painter)
+            self._paint_margins(painter, exposed)
             self._paint_viewports(painter)
         self._paint_running_text(painter)
         if not self.print_mode:
@@ -461,7 +515,7 @@ class PageFrame(QGraphicsObject):
             pen.setWidthF(0)              # one device pixel, at any zoom
             painter.setPen(pen)
             painter.setBrush(Qt.NoBrush)
-            painter.drawRect(rect)
+            _outline_where_exposed(painter, rect, exposed)
             painter.restore()
 
     def set_active_viewport(self, viewport) -> None:
@@ -560,7 +614,7 @@ class PageFrame(QGraphicsObject):
         from .calcedit import calc_area
         return calc_area(self)
 
-    def _paint_margins(self, painter: QPainter) -> None:
+    def _paint_margins(self, painter: QPainter, exposed: Optional[QRectF] = None) -> None:
         if not self.document.settings.show_margins:
             return
         x, y, width, height = self.page.setup.content_rect_pt
@@ -570,7 +624,7 @@ class PageFrame(QGraphicsObject):
         painter.save()
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
-        painter.drawRect(QRectF(x, y, width, height))
+        _outline_where_exposed(painter, QRectF(x, y, width, height), exposed)
         painter.restore()
 
     def load_logo(self) -> Optional[QPixmap]:

@@ -793,3 +793,26 @@ checked against its saved files and WebSMath's recordings of SMath Cloud.
   beside it); the name is the tooltip; the open list keeps every pattern
   big with its name, on the list's own background so the theme's ink shows
   in dark mode too.
+- **A PDF looks as its file says, everywhere** (2026-10-01, the user's
+  photo and video of Calcs.pdf on a Mac). The file's drawing of each
+  untouched markup is laid in the box the file gives it (/Rect), not the
+  box CalcForge measures: a Bluebeam dimension's "1m", out at the end of
+  its leader, had been cut away. Annotations are hidden from the page's
+  render by writing the flag into their dictionary: PyMuPDF's set_flags
+  had MuPDF build a new appearance its own way — the likely source of the
+  solid blue call-outs in the video. Untouched highlighters (which
+  multiply) are drawn by the page's own render. Checked against MuPDF's
+  render of every page of Calcs.pdf: with a pixel of slack, only
+  anti-aliasing specks differ.
+- **Groups carry their call-outs' leaders** (the user's video): moved with
+  others, a call-out's arrow moves too; on its own it still keeps pointing
+  where it pointed.
+- **Mac: the Markup | Calc switch and search show.** The window keeps its
+  own menu bar on macOS too; on the Mac's system bar Qt cannot show them.
+- **Drawing with the graphics card** (Preferences, on by default): the
+  canvas is drawn with OpenGL, so a scroll on a Retina screen is no longer
+  millions of pixels moved by the processor each step. Falls back where
+  there is no OpenGL. On the graphics card a highlighter CalcForge draws is
+  translucent (OpenGL cannot multiply). Scrolling also no longer strokes
+  every dash of the margin and the page edge on each step, only the part
+  scrolled into view, and a trackpad scroll is one scroll, not two.
