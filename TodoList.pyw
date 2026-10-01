@@ -5634,27 +5634,28 @@ def alloc_tab_id():
 def window_by_pyid(pyid_str):
     return next((w for w in WINDOWS if str(id(w)) == pyid_str), None)
 def tab_chip_at_global_pos(global_pos, exclude=None):
-    """(window, tabid) the cursor is currently over, checking every open
-    window's tab bar - used while dragging a GROUP so it can be dropped
-    onto a tab (same window, a different tab; or a different window
-    entirely) to move the whole group there. `exclude` is the (window,
-    tabid) the group already lives in - hovering back over that one isn't
-    a move, it's just normal in-board reordering."""
-    for w in WINDOWS:
-        bar = w.tabbar
-        # The row can be wider than what's shown (it scrolls): a chip
-        # scrolled out of view must never count as a drop target.
-        viewport = bar.scroll.viewport()
-        if not viewport.rect().contains(viewport.mapFromGlobal(global_pos)):
-            continue
-        local = bar.mapFromGlobal(global_pos)
-        if not bar.rect().contains(local):
-            continue
-        for tabid, chip in bar.chips.items():
-            if chip.geometry().contains(local):
-                if exclude is not None and (w, tabid) == exclude:
-                    return None, None
-                return w, tabid
+    """(window, tabid) of the tab under the cursor - used while dragging a
+    task or a whole GROUP so it can be dropped onto a tab (this window or
+    another). Only the front-most window there counts, and whichever of our
+    windows the cursor reaches is brought to the front, so a window that
+    was behind shows its tabs. `exclude` is the (window, tabid) the drag
+    came from - hovering back over that one isn't a move."""
+    w = window_at_global_pos(global_pos)
+    if w is None:
+        return None, None
+    bring_to_front(w)
+    bar = w.tabbar
+    # The row can be wider than what's shown (it scrolls): a chip
+    # scrolled out of view must never count as a drop target.
+    viewport = bar.scroll.viewport()
+    if not viewport.rect().contains(viewport.mapFromGlobal(global_pos)):
+        return None, None
+    local = bar.mapFromGlobal(global_pos)
+    for tabid, chip in bar.chips.items():
+        if chip.geometry().contains(local):
+            if exclude is not None and (w, tabid) == exclude:
+                return None, None
+            return w, tabid
     return None, None
 def _unique_group_name(name, existing):
     if name not in existing:
@@ -5785,20 +5786,29 @@ def tab_flares(r):
         path.lineTo(edge, r.bottom())
         path.closeSubpath()
     return path
+_Z_COUNTER = [0]
+def bring_to_front(win):
+    """Raises one of our windows above the others (without activating it)
+    and records that, so window_at_global_pos() knows the stacking order."""
+    if max(WINDOWS, key=lambda w: w._z, default=None) is win:
+        return
+    win.raise_()
+    _Z_COUNTER[0] += 1
+    win._z = _Z_COUNTER[0]
+def window_at_global_pos(global_pos, exclude=None):
+    """Which of our windows is actually visible under the cursor - the
+    front-most one containing it, so a window hidden behind another never
+    counts."""
+    hits = [w for w in WINDOWS if w is not exclude and w.isVisible() and not w.isMinimized()
+            and w.windowOpacity() > 0 and w.frameGeometry().contains(global_pos)]
+    return max(hits, key=lambda w: w._z, default=None)
 def tab_bar_at_global_pos(global_pos, exclude=None):
-    """The TabBar whose top-bar row is under the cursor (dragging a tab onto
-    another window). If windows overlap, the most recently used one wins."""
-    hits = []
-    for w in WINDOWS:
-        if w is exclude or not w.isVisible() or w.isMinimized():
-            continue
-        local = w.bar.mapFromGlobal(global_pos)
-        if w.bar.rect().contains(local):
-            hits.append(w)
-    if not hits:
-        return None
-    hits.sort(key=lambda w: getattr(w, "_last_focus_at", 0), reverse=True)
-    return hits[0].tabbar
+    """The TabBar under the cursor (dragging a tab onto another window) -
+    only if it's the front-most window there, so you can see where it'll go."""
+    w = window_at_global_pos(global_pos, exclude)
+    if w is not None and w.bar.rect().contains(w.bar.mapFromGlobal(global_pos)):
+        return w.tabbar
+    return None
 class TabChip(QWidget):
     """One tab. Press selects it (any tab, open or not); dragging it slides
     it along the row (the others make room as it passes them), or out of
@@ -6133,8 +6143,14 @@ class TabBar(QWidget):
             else:
                 self._slide(global_pos)
                 return
-        # Out of the row: over another window's tabs, back over our own, or loose
-        target = tab_bar_at_global_pos(global_pos, exclude=self.win if self._single() else None)
+        # Out of the row: over another window's tabs, back over our own, or
+        # loose. Whichever of our windows the cursor reaches comes to the
+        # front, so a window that was behind shows where the tab would go.
+        carrying = d["mode"] == "window"          # the whole (one-tab) window moves along
+        under = window_at_global_pos(global_pos, exclude=self.win if carrying else None)
+        if under is not None and not carrying:
+            bring_to_front(under)
+        target = tab_bar_at_global_pos(global_pos, exclude=self.win if carrying else None)
         if target is self and not self._torn(global_pos):
             self._land(global_pos)
             return
@@ -6147,13 +6163,23 @@ class TabBar(QWidget):
         if target is not None:
             target.set_incoming(target.index_at(target.mapFromGlobal(global_pos).x()),
                                 d["chip"].width())
-            if d["mode"] == "window":
-                target.win.raise_()
-        if d["mode"] == "ghost":
+        if carrying:
+            self.win.move(global_pos - d["win_offset"])
+            # Over another window's tabs: this window steps aside (fully
+            # see-through, but still there - it holds the drag) and the tab
+            # is shown on its own where it would land.
+            over = target is not None
+            self.win.setWindowOpacity(0.0 if over else 1.0)
+            if over:
+                bring_to_front(target.win)
+                if d["ghost"] is None:
+                    d["ghost"] = TabGhost(d["chip"].ghost_pixmap())
+                d["ghost"].show()
+            elif d["ghost"] is not None:
+                d["ghost"].hide()
+        if d["ghost"] is not None:
             d["ghost"].move(global_pos - QPoint(d["dx"], d["dy"]) - QPoint(d["ghost"].pad,
                                                                              d["ghost"].pad))
-        elif d["mode"] == "window":
-            self.win.move(global_pos - d["win_offset"])
     def _slide(self, global_pos):
         """Along the row: the tab follows the cursor, the others make room."""
         d, chip = self._drag, self._drag["chip"]
@@ -6235,17 +6261,22 @@ class TabBar(QWidget):
             d["target"].set_incoming(None, 0)
         d["chip"].lifted = False
         d["chip"].setCursor(Qt.PointingHandCursor)
+        self.win.setWindowOpacity(1.0)
         return d
     def _end_drag(self, global_pos):
+        target = self._drag["target"]
+        # Land exactly in the gap the target row was showing.
+        index = target._incoming[0] if target is not None and target._incoming else None
         d = self._finish_drag()
-        tabid, target = d["tabid"], d["target"]
+        tabid = d["tabid"]
         if d["mode"] == "row":
             self.top.layout_children(animate=True)    # settle into its slot
             self.win.update()
             global_save()
             return
         if target is not None and target.win in WINDOWS:
-            index = target.index_at(target.mapFromGlobal(global_pos).x())
+            if index is None:
+                index = target.index_at(target.mapFromGlobal(global_pos).x())
             move_tab_to_window(self.win, tabid, target.win, index)
             return
         if d["mode"] == "window":
@@ -6499,6 +6530,8 @@ class Window(QWidget):
         self.board = None
         self.data = active_tab_data
         self._last_focus_at = time.monotonic()
+        _Z_COUNTER[0] += 1
+        self._z = _Z_COUNTER[0]              # stacking order among our windows
         self.apply_header_scale()
         self.start_zoomed = zoomed
         self.restore_window(geometry)
@@ -6958,6 +6991,8 @@ class Window(QWidget):
             self._apply_window_state()
         elif e.type() == QEvent.ActivationChange and self.isActiveWindow():
             self._last_focus_at = time.monotonic()
+            _Z_COUNTER[0] += 1
+            self._z = _Z_COUNTER[0]          # activating brings it to the front
         super().changeEvent(e)
     def set_ui_scale(self, s):
         if abs(s - S) < 0.001:
