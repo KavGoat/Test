@@ -491,6 +491,7 @@ def test_shift_wheel_scrolls_sideways(v):
     ev = QWheelEvent(QPointF(50, 50), QPointF(50, 50), QPoint(0, 0), QPoint(0, -120), Qt.NoButton,
                      Qt.ShiftModifier, Qt.NoScrollPhase, False)
     QApplication.sendEvent(v.view.viewport(), ev)
+    v.view.finish_scrolling()          # a notch glides (2026-10-01)
     assert bar.value() > before
 
 

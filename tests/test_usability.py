@@ -1816,8 +1816,14 @@ def test_every_tool_and_application_action_is_reachable_from_the_menu_bar(window
            for action in window.menuBar().actions()}
     for menu in top.values():
         collect(menu)
+    # Calc mode is the Markup | Calc switch on the menu bar itself, after
+    # Help (the user, 2026-10-01), not an entry in a menu: reachable there
+    on_the_bar = {"act_calc_mode"}
+    corner = window.menuBar().cornerWidget(Qt.TopRightCorner)
+    assert corner is not None and window.mode_switch.parentWidget() is corner
     missing = [(name, getattr(window, name).text()) for name in dir(window)
-               if name.startswith("act_") and getattr(window, name) not in all_actions]
+               if name.startswith("act_") and getattr(window, name) not in all_actions
+               and name not in on_the_bar]
     assert missing == []
 
     insert_labels = set(_menu_labels(top["Insert"]))

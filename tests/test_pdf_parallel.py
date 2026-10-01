@@ -13,6 +13,14 @@ from calcforge.io.pdfio import to_image
 from calcforge.pdf import engine
 
 
+
+def same_pixels(actual, expected) -> bool:
+    """The same picture: tiles arrive already in the screen's pixel format
+    (converted on the render thread, 2026-10-01), so compare the pixels."""
+    from PySide6.QtGui import QImage
+    shape = QImage.Format_ARGB32_Premultiplied if actual.hasAlphaChannel() else QImage.Format_RGB32
+    return actual.convertToFormat(shape) == expected.convertToFormat(shape)
+
 def source_pdf(rotation=0):
     document = pymupdf.open()
     page = document.new_page(width=1200, height=800)
@@ -64,7 +72,7 @@ def test_parallel_tiles_match_serial_pixels_and_own_their_buffers(qapp, rotation
                 box = key.page_rect().intersected(QRectF(0, 0, width, height))
                 expected = to_image(engine.raster_from(drawing, (box.left(), box.top(), box.right(), box.bottom()), key.scale))
                 assert not actual.isNull()
-                assert actual == expected
+                assert same_pixels(actual, expected)
         before = {key: image.copy() for key, image in images.items()}
         images.clear()
         for key in keys:
@@ -206,7 +214,7 @@ def test_reference_pdf_matches_at_overview_and_detail_zooms(qapp):
                 expected = to_image(engine.raster_from(drawing,
                     (box.left(), box.top(), box.right(), box.bottom()), key.scale))
                 assert not images[key].isNull()
-                assert images[key] == expected
+                assert same_pixels(images[key], expected)
     finally:
         worker.stop()
         assert worker.wait(5000)
