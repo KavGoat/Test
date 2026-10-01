@@ -9,13 +9,15 @@ Click selects a task, double-click edits it, Ctrl+Z undoes.
 Uses a real (hidden) Windows frame so Aero Snap / Win+arrows work.
 
 Tabs and windows:
-  - Each window shows a bar of tabs along the top (bookmark-style, with a
-    colour and a name), plus a '+' to add one; every tab is always visible
-    somewhere - right-click a tab for Rename / Colour / Delete.
-  - Drag a tab to reorder it, drop it on another window's tab bar to move
-    it there, or drop it anywhere else to tear it off into its own new
-    window. Dragging a window's only remaining tab elsewhere closes that
-    window (it has nothing left to show).
+  - Each window shows a row of tabs along the top (each with a colour and
+    a name), plus a '+' to add one; every tab is always visible somewhere -
+    double-click a tab to rename it, right-click for Rename / Colour /
+    Delete. Tabs shrink to fit; past their minimum width the row scrolls
+    (mouse wheel, or drag a tab against either end).
+  - Drag any tab (open or not) along the row to reorder it, onto another
+    window's tabs to move it there, or anywhere else to tear it off into
+    its own new window. Dragging a window's only tab drags the window
+    itself - drop it on another window's tabs to merge the two.
   - Closing a window (the X) moves its tabs into whichever other open
     window was used most recently; closing the very last window saves
     everything and exits the app completely, same as a second F2.
@@ -116,14 +118,13 @@ import traceback
 from datetime import datetime, date, timedelta
 from PySide6.QtCore import (Qt, QTimer, QThread, QPoint, QRectF, QPointF, QEvent,
                             QPropertyAnimation, QAbstractAnimation,
-                            QEasingCurve, Signal, QUrl, QDate, QRect, QSize,
-                            QMimeData)
+                            QEasingCurve, Signal, QUrl, QDate, QRect, QSize)
 from PySide6.QtGui import (QPainter, QColor, QFont, QPen, QPainterPath,
                            QLinearGradient, QGuiApplication, QCursor,
                            QPalette, QFontMetrics, QTextOption, QTextCursor,
                            QKeySequence, QTextDocument, QDesktopServices,
                            QTextCharFormat, QIcon, QPixmap, QRadialGradient,
-                           QDrag)
+                           QBrush, QTransform)
 from PySide6.QtWidgets import (QApplication, QWidget, QLabel, QLineEdit, QTextEdit,
                                QScrollArea, QVBoxLayout, QHBoxLayout, QMenu,
                                QFrame, QSlider, QGraphicsDropShadowEffect,
@@ -147,6 +148,7 @@ if os.name == "nt":
                     ("ptMaxPosition", wintypes.POINT), ("ptMinTrackSize", wintypes.POINT),
                     ("ptMaxTrackSize", wintypes.POINT)]
     user32.IsZoomed.argtypes = [wintypes.HWND]
+    user32.IsIconic.argtypes = [wintypes.HWND]
     user32.MonitorFromRect.argtypes = [ctypes.POINTER(wintypes.RECT), wintypes.DWORD]
     user32.MonitorFromRect.restype = wintypes.HMONITOR
     user32.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.POINTER(MONITORINFO)]
@@ -2247,15 +2249,6 @@ def shadow_for(widget):
     sh.setOffset(0, 5 * S)
     sh.setColor(QColor(0, 0, 0, 145))
     return sh
-def tab_shadow(widget):
-    """Smaller, subtler shadow than shadow_for() - just enough to lift the
-    currently-open tab visually in front of the cascade of tabs behind it,
-    without the heavier drag-shadow look used elsewhere."""
-    sh = QGraphicsDropShadowEffect(widget)
-    sh.setBlurRadius(14 * S)
-    sh.setOffset(0, 2 * S)
-    sh.setColor(QColor(0, 0, 0, 120))
-    return sh
 def set_colour(widget, colour):
     """Text colour via palette - much faster than a style sheet per widget."""
     pal = widget.palette()
@@ -2287,6 +2280,26 @@ class LineEdit(QLineEdit):
         self.apply_scale()
     def apply_scale(self):
         self.setFont(F(self.pt, self.bold))
+    def event(self, e):
+        # Left/Right with text selected (e.g. the whole name, right after
+        # starting a rename) and no modifier: put the cursor at the START /
+        # END of the selection and drop it, like every native text box. Qt's
+        # QLineEdit instead steps one character from the cursor, which after
+        # select-all sits at the end - so Left landed one before the end.
+        # Done in event(), ahead of QLineEdit's own key handling, so nothing
+        # in between can act on the key first. Shift/Ctrl/Alt are untouched
+        # (extend selection, word jumps).
+        if (e.type() in (QEvent.KeyPress, QEvent.ShortcutOverride)
+                and e.key() in (Qt.Key_Left, Qt.Key_Right) and self.hasSelectedText()
+                and not (e.modifiers() & (Qt.ShiftModifier | Qt.ControlModifier
+                                          | Qt.AltModifier))):
+            e.accept()
+            if e.type() == QEvent.KeyPress:
+                start = self.selectionStart()
+                end = start + len(self.selectedText())
+                self.setCursorPosition(start if e.key() == Qt.Key_Left else end)
+            return True
+        return super().event(e)
     def keyPressEvent(self, e):
         if e.key() == Qt.Key_Escape:
             self.escaped.emit()
@@ -2294,23 +2307,6 @@ class LineEdit(QLineEdit):
         # Ctrl+Z: undo typing first, then undo task changes
         if e.matches(QKeySequence.StandardKey.Undo) and not self.isUndoAvailable():
             self.undo_requested.emit()
-            return
-        # Left/Right with an existing selection (e.g. right after
-        # double-click selects everything to rename a group/tab) and no
-        # modifier: collapse to the START for Left, the END for Right -
-        # explicit rather than relying on Qt's own resolution, which was
-        # sending Left to the end too (same as Right) instead of the start.
-        # Ctrl/Alt/Shift are left alone so word-jump and extend-selection
-        # still work normally. setCursorPosition() already clears the
-        # selection as part of moving the cursor (that's one Qt-internal
-        # update) - a separate self.deselect() call after it was a second,
-        # redundant update causing the visible lag on the very first press.
-        if (e.key() in (Qt.Key_Left, Qt.Key_Right) and self.hasSelectedText()
-                and not (e.modifiers() & (Qt.ShiftModifier | Qt.ControlModifier
-                                          | Qt.AltModifier))):
-            start = self.selectionStart()
-            end = start + len(self.selectedText())
-            self.setCursorPosition(start if e.key() == Qt.Key_Left else end)
             return
         super().keyPressEvent(e)
     def focusInEvent(self, e):
@@ -4701,8 +4697,7 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: n
 # SETTINGS BUTTON + SIZE SLIDER POPUP
 # ------------------------------------------------------------------
 class IconButton(QWidget):
-    """Small top-bar button: 'pin', 'more', 'min', 'max', 'close', 'plus',
-    or a tab-scroll 'left'/'right' chevron."""
+    """Small top-bar button: 'pin', 'more', 'min', 'max', 'close' or 'plus'."""
     clicked = Signal()
     def __init__(self, parent, kind, tip):
         super().__init__(parent)
@@ -4735,7 +4730,7 @@ class IconButton(QWidget):
             a = 4.5 * S
             p.setPen(pen)
             p.setBrush(Qt.NoBrush)
-            if getattr(self.window(), "is_full", lambda: self.window().isMaximized())():
+            if self.window().isMaximized():
                 d = 2 * S
                 p.drawRect(QRectF(cx - a, cy - a + d, 2 * a - d, 2 * a - d))
                 back = QPainterPath()
@@ -4761,20 +4756,6 @@ class IconButton(QWidget):
             p.setPen(QPen(QColor(TEXT), 1.4, Qt.SolidLine, Qt.RoundCap))
             p.drawLine(QPointF(cx - a, cy), QPointF(cx + a, cy))
             p.drawLine(QPointF(cx, cy - a), QPointF(cx, cy + a))
-        elif self.kind in ("left", "right"):
-            a = 3.5 * S
-            p.setPen(QPen(QColor(TEXT), 1.5, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
-            p.setBrush(Qt.NoBrush)
-            path = QPainterPath()
-            if self.kind == "left":
-                path.moveTo(cx + a / 1.6, cy - a)
-                path.lineTo(cx - a / 1.6, cy)
-                path.lineTo(cx + a / 1.6, cy + a)
-            else:
-                path.moveTo(cx - a / 1.6, cy - a)
-                path.lineTo(cx + a / 1.6, cy)
-                path.lineTo(cx - a / 1.6, cy + a)
-            p.drawPath(path)
         else:
             a = 4.5 * S
             p.setPen(QPen(QColor(TEXT), 1.3, Qt.SolidLine, Qt.RoundCap))
@@ -4800,66 +4781,83 @@ class IconButton(QWidget):
         if (was and e.button() == Qt.LeftButton
                 and self.rect().contains(e.position().toPoint())):
             self.clicked.emit()
+class TabFade(QWidget):
+    """Soft fade at whichever end of the tab row has more tabs scrolled out
+    of view - the only hint needed that the row scrolls (mouse wheel, or
+    automatically to keep the open / dragged tab in view)."""
+    def __init__(self, area):
+        super().__init__(area)
+        self.area = area
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+    def paintEvent(self, _):
+        bar = self.area.horizontalScrollBar()
+        if bar.maximum() <= 0:
+            return
+        p = QPainter(self)
+        w = 18 * S
+        solid = QColor(TOPBAR_BG[0])
+        clear = QColor(solid)
+        clear.setAlpha(0)
+        for show, x0, x1 in ((bar.value() > bar.minimum(), 0, w),
+                             (bar.value() < bar.maximum(), self.width(), self.width() - w)):
+            if show:
+                g = QLinearGradient(x0, 0, x1, 0)
+                g.setColorAt(0, solid)
+                g.setColorAt(1, clear)
+                p.fillRect(QRectF(min(x0, x1), 0, w, self.height()), g)
 class TabScrollArea(QScrollArea):
-    """Horizontal-only, frameless, background-free scroll area around the
-    tab row - its own scrollbar is never shown (dragging a trackpad/mouse
-    scrollbar that overlaps the title-bar drag region was itself being
-    read as "drag the window" by Windows); TopBar's own left/right arrow
-    buttons scroll it instead, appearing only when needed. A normal
-    (vertical) mouse wheel over the tabs still scrolls them sideways, same
-    as most browsers' tab strips."""
+    """Horizontal-only, frameless, background-free viewport around the tab
+    row. Tabs shrink to fit first (TabBar.relayout); only once they're at
+    their minimum width does the row scroll - by mouse wheel, by dragging a
+    tab against either end, and automatically so the open tab is always in
+    view. No scrollbar or arrow buttons."""
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setFrameShape(QFrame.NoFrame)
+        self.setWidgetResizable(False)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setFocusPolicy(Qt.NoFocus)
+        self.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        self.viewport().setAutoFillBackground(False)
+        self.viewport().setStyleSheet("background: transparent;")
+        self.fade = TabFade(self)
+        bar = self.horizontalScrollBar()
+        bar.valueChanged.connect(self._scrolled)
+        bar.rangeChanged.connect(self._scrolled)
+    def _scrolled(self, *_):
+        self.fade.update()
+        self.window().update()      # the open tab's background is painted by the window
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self.fade.setGeometry(self.rect())
+        self.fade.raise_()
     def wheelEvent(self, e):
         delta = e.angleDelta().y() or e.angleDelta().x()
         bar = self.horizontalScrollBar()
         bar.setValue(bar.value() - delta)
         e.accept()
 class TopBar(QWidget):
-    """The window's only top row now: tabs (with a '+' to add one) on the
-    left - where a plain title used to sit - and the window controls
-    (pin / settings / minimise / maximise / close) on the right. There's no
-    separate row of tabs underneath any more, and no icon drawn in here
-    either (the app icon only shows in the taskbar / Alt-Tab / title-bar
-    tooltip, via setWindowIcon() on the Window itself).
-    The tabs themselves scroll horizontally if there isn't room to show
-    them all - via small left/right arrow buttons (shown only while
-    there's actually more to scroll to in that direction), not a visible
-    scrollbar. The '+' button stays outside the scrollable area, so it's
-    always reachable.
-    Dragging empty space in this bar moves the window; double-click
-    maximises - same as a normal title bar, just doubling as the tab row."""
+    """The window's only top row: tabs (with a '+' right after the last one)
+    on the left, the window controls (pin / settings / minimise / maximise /
+    close) on the right. Tabs sit flush with the bottom of the bar so the
+    open tab runs straight into the list below it.
+    Children are placed by hand (layout_children) rather than by a layout,
+    because how wide the tab row may be depends on how much room the
+    controls leave, and the '+' then follows the tab row's actual width.
+    Empty space in this bar is a native caption (Window.hit_test): drag to
+    move the window, double-click to maximise / restore."""
     def __init__(self, win):
         super().__init__(win)
         self.win = win
-        lay = QHBoxLayout(self)
-        lay.setSpacing(int(2 * S))
-        self.scroll_left_btn = IconButton(self, "left", "Scroll tabs left")
-        self.scroll_left_btn.clicked.connect(lambda: self.nudge_scroll(-1))
-        self.scroll_left_btn.hide()
-        lay.addWidget(self.scroll_left_btn, 0, Qt.AlignTop)
-        self.tabbar = TabBar(win)
         self.tab_scroll = TabScrollArea(self)
+        self.tabbar = TabBar(self)
         self.tab_scroll.setWidget(self.tabbar)
-        self.tab_scroll.setWidgetResizable(False)
-        self.tab_scroll.setFrameShape(QFrame.NoFrame)
-        self.tab_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.tab_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.tab_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
-        self.tab_scroll.viewport().setAutoFillBackground(False)
-        self.tab_scroll.viewport().setStyleSheet("background: transparent;")
-        self.tab_scroll.horizontalScrollBar().valueChanged.connect(self.update_scroll_arrows)
-        self.tab_scroll.horizontalScrollBar().rangeChanged.connect(self.update_scroll_arrows)
-        lay.addWidget(self.tab_scroll, 1, Qt.AlignTop)
-        self.scroll_right_btn = IconButton(self, "right", "Scroll tabs right")
-        self.scroll_right_btn.clicked.connect(lambda: self.nudge_scroll(1))
-        self.scroll_right_btn.hide()
-        lay.addWidget(self.scroll_right_btn, 0, Qt.AlignTop)
+        self.tabbar.setAutoFillBackground(False)     # setWidget turns this on
         self.plus_btn = IconButton(self, "plus", "New tab")
         self.plus_btn.clicked.connect(win.add_tab)
-        lay.addWidget(self.plus_btn, 0, Qt.AlignTop)
         # Kept only so set_busy() has somewhere to park a short status
-        # string while a background fetch runs - never shown on screen
-        # (not added to any layout), since the tab row now occupies this
-        # bar's whole width.
+        # string while a background fetch runs - never shown on screen.
         self.title = QLabel("", self)
         self.title.hide()
         self.pin_btn = IconButton(self, "pin", "Keep on top")
@@ -4867,40 +4865,41 @@ class TopBar(QWidget):
         self.min_btn = IconButton(self, "min", "Minimise")
         self.max_btn = IconButton(self, "max", "Maximise")
         self.close_btn = IconButton(self, "close", "Close (F2)")
-        for b in (self.pin_btn, self.settings_btn, self.min_btn, self.max_btn, self.close_btn):
-            lay.addWidget(b, 0, Qt.AlignTop)
+        self.controls = (self.pin_btn, self.settings_btn, self.min_btn,
+                         self.max_btn, self.close_btn)
         self.apply_scale()
     def apply_scale(self):
-        self.layout().setContentsMargins(MARGIN + int(2 * S), int(2 * S),
-                                         int(4 * S), int(2 * S))
-        self.layout().setSpacing(int(2 * S))
-        self.tabbar.apply_scale()
-        self.tab_scroll.setFixedHeight(self.tabbar.height())
-        self.plus_btn.apply_scale()
-        self.scroll_left_btn.apply_scale()
-        self.scroll_right_btn.apply_scale()
-        for b in (self.pin_btn, self.settings_btn, self.min_btn, self.max_btn, self.close_btn):
-            b.apply_scale()
         self.setFixedHeight(int(34 * S))
-        self.update_scroll_arrows()
-    def nudge_scroll(self, direction):
-        """direction -1 (left) or +1 (right): scrolls by roughly one tab's
-        width, same step a browser's overflow arrows use."""
-        bar = self.tab_scroll.horizontalScrollBar()
-        step = int(120 * S)
-        bar.setValue(bar.value() + direction * step)
-    def update_scroll_arrows(self, *_):
-        """Shows each arrow only while there's actually more to scroll to
-        in that direction - never both hidden with tabs still cut off,
-        never shown with nothing left to scroll to."""
-        bar = self.tab_scroll.horizontalScrollBar()
-        can_scroll = bar.maximum() > 0
-        self.scroll_left_btn.setVisible(can_scroll and bar.value() > bar.minimum())
-        self.scroll_right_btn.setVisible(can_scroll and bar.value() < bar.maximum())
+        self.plus_btn.apply_scale()
+        for b in self.controls:
+            b.apply_scale()
+        self.tabbar.apply_scale()      # re-measures every tab, then lays the bar out
+    def tab_top(self):
+        return int(4 * S)
+    def tab_left(self):
+        return MARGIN                  # tabs line up with the list's own left edge
+    def caption_widgets(self):
+        """What counts as empty bar space (window drag / double-click to
+        maximise) rather than something clickable."""
+        return (self, self.tab_scroll, self.tab_scroll.viewport(), self.tabbar)
+    def layout_children(self, animate=False):
+        h, sp = self.height(), int(2 * S)
+        x = self.width() - int(4 * S)
+        for b in reversed(self.controls):
+            x -= b.width()
+            b.move(x, (h - b.height()) // 2)
+            x -= sp
+        left, top = self.tab_left(), self.tab_top()
+        avail = max(0, x - int(6 * S) - left - sp - self.plus_btn.width())
+        content = self.tabbar.relayout(avail, h - top, animate)
+        shown = min(content, avail)
+        self.tab_scroll.setGeometry(left, top, shown, h - top)
+        self.plus_btn.move(left + shown + sp, top + (h - top - self.plus_btn.height()) // 2)
     def resizeEvent(self, e):
         super().resizeEvent(e)
-        self.update_scroll_arrows()
+        self.layout_children()
     def mousePressEvent(self, e):
+        # Only reached where the native caption isn't (non-Windows)
         if e.button() == Qt.LeftButton:
             self.win.windowHandle().startSystemMove()
     def mouseDoubleClickEvent(self, e):
@@ -5067,7 +5066,6 @@ QLabel#link:hover {{ text-decoration: underline; }}
 # ------------------------------------------------------------------
 WINDOWS = []                  # every live Window, in creation order
 TAB_ID_COUNTER = [1]          # next id to hand out to a brand-new tab
-MIME_TAB = "application/x-todotab"
 def alloc_tab_id():
     tid = TAB_ID_COUNTER[0]
     TAB_ID_COUNTER[0] += 1
@@ -5083,31 +5081,19 @@ def tab_chip_at_global_pos(global_pos, exclude=None):
     a move, it's just normal in-board reordering."""
     for w in WINDOWS:
         bar = w.tabbar
-        # The tab row can be wider than what's actually shown (it scrolls) -
-        # a chip that's scrolled out of view must never register as a drop
-        # target just because it still exists at some x position in the
-        # bar's own (un-clipped) coordinate space. Checking against the
-        # scroll area's viewport first (bar's Qt parent, once placed inside
-        # a QScrollArea) makes sure only what's genuinely on screen counts.
-        viewport = bar.parentWidget()
-        if viewport is not None:
-            local_vp = viewport.mapFromGlobal(global_pos)
-            if not viewport.rect().contains(local_vp):
-                continue
+        # The row can be wider than what's shown (it scrolls): a chip
+        # scrolled out of view must never count as a drop target.
+        viewport = bar.scroll.viewport()
+        if not viewport.rect().contains(viewport.mapFromGlobal(global_pos)):
+            continue
         local = bar.mapFromGlobal(global_pos)
         if not bar.rect().contains(local):
             continue
-        # Tabs now genuinely overlap each other (the cascading layout), so
-        # more than one chip's rect can contain the same point - prefer
-        # whichever one is actually on top (the active tab, explicitly
-        # raised above the rest) if it's among the matches, so a drop in
-        # the small overlapped sliver lands on the tab you can actually see.
-        matches = [tabid for tabid, chip in bar.chips.items() if chip.geometry().contains(local)]
-        if matches:
-            tabid = w.active_tab if w.active_tab in matches else matches[0]
-            if exclude is not None and (w, tabid) == exclude:
-                return None, None
-            return w, tabid
+        for tabid, chip in bar.chips.items():
+            if chip.geometry().contains(local):
+                if exclude is not None and (w, tabid) == exclude:
+                    return None, None
+                return w, tabid
     return None, None
 def _unique_group_name(name, existing):
     if name not in existing:
@@ -5144,7 +5130,7 @@ def global_save():
                     w.tab_meta[tid]["name"], w.tab_meta[tid]["colour"])
             tabs_out[tid]["name"] = w.tab_meta[tid]["name"]
             tabs_out[tid]["colour"] = w.tab_meta[tid]["colour"]
-        windows_out.append({"geometry": w.current_geometry(), "zoomed": w.is_full(),
+        windows_out.append({"geometry": w.current_geometry(), "zoomed": w.isMaximized(),
                             "pinned": w.pinned, "tabs": list(w.tab_order),
                             "active": w.active_tab})
     if not windows_out:
@@ -5203,13 +5189,43 @@ def shutdown_everything():
     release_instance()
     QTimer.singleShot(0, QApplication.quit)
 # ------------------------------------------------------------------
-# TAB BAR (bookmark-style tabs across the top of each window)
+# TAB BAR (tabs across the top of each window)
 # ------------------------------------------------------------------
-TAB_OVERLAP_BASE = 12    # how much each tab tucks under the one before it
+TAB_GAP_BASE = 2         # space between neighbouring tabs
+TAB_PAD_BASE = 12        # space either side of a tab's name
+TAB_MIN_W_BASE = 56      # tabs shrink to this before the row starts scrolling
+TAB_MAX_W_BASE = 180
+TAB_TEAR_BASE = 30       # how far above / below the bar a dragged tab tears out
+def tab_shape(r, rad):
+    """Rounded top corners, square bottom (it sits on the list below)."""
+    path = QPainterPath()
+    path.moveTo(r.left(), r.bottom())
+    path.lineTo(r.left(), r.top() + rad)
+    path.quadTo(r.left(), r.top(), r.left() + rad, r.top())
+    path.lineTo(r.right() - rad, r.top())
+    path.quadTo(r.right(), r.top(), r.right(), r.top() + rad)
+    path.lineTo(r.right(), r.bottom())
+    path.closeSubpath()
+    return path
+def tab_bar_at_global_pos(global_pos, exclude=None):
+    """The TabBar whose top-bar row is under the cursor (dragging a tab onto
+    another window). If windows overlap, the most recently used one wins."""
+    hits = []
+    for w in WINDOWS:
+        if w is exclude or not w.isVisible() or w.isMinimized():
+            continue
+        local = w.bar.mapFromGlobal(global_pos)
+        if w.bar.rect().contains(local):
+            hits.append(w)
+    if not hits:
+        return None
+    hits.sort(key=lambda w: getattr(w, "_last_focus_at", 0), reverse=True)
+    return hits[0].tabbar
 class TabChip(QWidget):
-    """One tab button. Click selects it; drag reorders within the bar, or
-    (dropped on another window's bar) moves it there, or (dropped nowhere
-    accepting it) tears it off into a brand-new window."""
+    """One tab. Press selects it (any tab, open or not); dragging it slides
+    it along the row (the others make room as it passes them), or out of
+    the row to move it to another window or tear it off into a new one.
+    Double-click renames it; right-click for the menu."""
     def __init__(self, bar, tabid):
         super().__init__(bar)
         self.bar = bar
@@ -5217,90 +5233,77 @@ class TabChip(QWidget):
         self.hover = False
         self.drop_hover = False    # a dragged GROUP is hovering over this tab
         self.renaming = False      # a rename LineEdit is open on top of this chip
-        self._press_pos = None
-        self._press_local = None
-        self._dragging = False
+        self.lifted = False        # dragged out of the row: drawn by the ghost instead
+        self._press = None         # (global, local) position of a left-button press
+        self.anim = QPropertyAnimation(self, b"pos", self)
+        self.anim.setDuration(150)
+        self.anim.setEasingCurve(QEasingCurve.OutCubic)
         self.setCursor(Qt.PointingHandCursor)
-        self.setAcceptDrops(True)
         self.apply_scale()
     def meta(self):
         return self.bar.win.tab_meta.get(self.tabid, {"name": "Tab", "colour": ACCENT})
     def is_active(self):
         return self.tabid == self.bar.win.active_tab
     def apply_scale(self):
-        self.font_ = F(10, bold=True)          # slightly bigger than before (was 9)
-        self.setFixedHeight(int(29 * S))
+        self.font_ = F(10, bold=True)
     def ideal_width(self):
-        fm = QFontMetrics(self.font_)
-        overlap = int(TAB_OVERLAP_BASE * S)
-        # Extra width equal to the overlap, so the part that tucks under
-        # the tab in front never eats into the text's own usable space.
-        w = fm.horizontalAdvance(self.meta()["name"]) + int(28 * S) + overlap
-        return int(min(max(w, 68 * S + overlap), 170 * S + overlap))
-    def paintEvent(self, _):
-        p = QPainter(self)
+        w = QFontMetrics(self.font_).horizontalAdvance(self.meta()["name"]) \
+            + 2 * int(TAB_PAD_BASE * S)
+        return int(min(max(w, TAB_MIN_W_BASE * S), TAB_MAX_W_BASE * S))
+    def _paint(self, p, fill, text_colour):
         p.setRenderHint(QPainter.Antialiasing)
-        m = self.meta()
-        active = self.is_active()
-        colour = m["colour"] or ACCENT
         r = QRectF(self.rect())
-        rad = RADIUS * S
-        # Straight (not angled/diagonal) edges, rounded top corners only -
-        # same silhouette as before. The cascading, layered look comes from
-        # each tab's widget genuinely overlapping the one after it (see
-        # TabBar.refresh()) combined with z-stacking and a shadow on the
-        # active tab, not from the tab's own shape.
-        path = QPainterPath()
-        path.moveTo(r.left(), r.bottom())
-        path.lineTo(r.left(), r.top() + rad)
-        path.quadTo(r.left(), r.top(), r.left() + rad, r.top())
-        path.lineTo(r.right() - rad, r.top())
-        path.quadTo(r.right(), r.top(), r.right(), r.top() + rad)
-        path.lineTo(r.right(), r.bottom())
-        path.closeSubpath()
-        p.setPen(Qt.NoPen)
-        # The tab's OWN colour fills its whole background now (not just a
-        # thin stripe) - the active tab is filled with that colour exactly
-        # (the same colour the list panel below becomes, via
-        # derive_theme()), so it visually flows straight into the list and
-        # it's unmistakable which tab is currently open. Inactive tabs show
-        # a muted version of their own colour, a bit brighter on hover, so
-        # you can still tell them apart without them competing visually
-        # with the active one.
-        if active:
-            fill = QColor(colour)
-        elif self.hover:
-            fill = QColor(mix(TINT_BASE, colour, 0.75))
-        else:
-            fill = QColor(mix(TINT_BASE, colour, 0.55))
-        p.setBrush(fill)
-        p.drawPath(path)
+        path = tab_shape(r, RADIUS)
+        p.fillPath(path, fill)
         if not self.renaming:
-            # While a rename LineEdit sits on top of this chip, its own
-            # text must NOT also be drawn underneath - the edit box has a
-            # transparent background (same as the task editor), so without
-            # this the chip's own name would bleed through and double up
-            # with whatever's being typed, garbling the text.
-            # Every tab except the very first reserves space past the
-            # overlap zone, so its label never sits under the tab tucked in
-            # front of it. The first tab has nothing overlapping its own
-            # left edge, so it just uses the small padding alone - giving it
-            # the same extra offset as the others made its (often shorter)
-            # name look off-centre instead of left-aligned like the rest.
-            overlap = int(TAB_OVERLAP_BASE * S)
-            is_first = self.bar.win.tab_order and self.tabid == self.bar.win.tab_order[0]
-            text_x = int(8 * S) if is_first else overlap + int(8 * S)
+            # The rename box is transparent - drawing the name under it too
+            # would double up the text being typed.
+            pad = int(TAB_PAD_BASE * S)
             p.setFont(self.font_)
-            p.setPen(QColor(TEXT if (active or self.hover) else TEXT_SUB))
-            fm = QFontMetrics(self.font_)
-            name = fm.elidedText(m["name"], Qt.ElideRight,
-                                  int(self.width() - text_x - int(6 * S)))
-            p.drawText(r.adjusted(text_x, int(4 * S), -int(6 * S), 0),
-                       Qt.AlignVCenter | Qt.AlignLeft, name)
+            p.setPen(QColor(text_colour))
+            name = QFontMetrics(self.font_).elidedText(
+                self.meta()["name"], Qt.ElideRight, max(0, self.width() - 2 * pad))
+            p.drawText(r.adjusted(pad, 0, -pad, 0), Qt.AlignVCenter | Qt.AlignLeft, name)
         if self.drop_hover:
             p.setPen(QPen(QColor(ACCENT), 2))
             p.setBrush(Qt.NoBrush)
-            p.drawPath(path)
+            p.drawPath(tab_shape(r.adjusted(1, 1, -1, 0), RADIUS))
+    def paintEvent(self, _):
+        if self.lifted:
+            return
+        p = QPainter(self)
+        colour = self.meta()["colour"] or ACCENT
+        if self.is_active():
+            # Exactly the list's own background (same gradient, same
+            # origin), so the open tab and the list are one surface.
+            win = self.bar.win
+            fill = QBrush(win.list_gradient())
+            off = self.mapTo(win, QPoint(0, 0))
+            fill.setTransform(QTransform.fromTranslate(-off.x(), -off.y()))
+            self._paint(p, fill, TEXT)
+        else:
+            fill = QColor(mix(TINT_BASE, colour, 0.75 if self.hover else 0.55))
+            self._paint(p, fill, TEXT if self.hover else TEXT_SUB)
+    def ghost_pixmap(self):
+        """The tab as it looks while being carried outside the row."""
+        dpr = self.devicePixelRatioF()
+        pm = QPixmap(self.size() * dpr)
+        pm.setDevicePixelRatio(dpr)
+        pm.fill(Qt.transparent)
+        p = QPainter(pm)
+        lifted, self.lifted = self.lifted, False
+        self._paint(p, QColor(self.meta()["colour"] or ACCENT), TEXT)
+        self.lifted = lifted
+        p.end()
+        return pm
+    def moveEvent(self, e):
+        super().moveEvent(e)
+        if self.is_active():
+            self.bar.win.update()      # the window leaves a hole in the top strip for it
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        if self.is_active():
+            self.bar.win.update()
     def enterEvent(self, _):
         self.hover = True
         self.update()
@@ -5309,166 +5312,344 @@ class TabChip(QWidget):
         self.update()
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:
-            self._press_pos = e.globalPosition().toPoint()
-            self._press_local = e.position().toPoint()   # where on the tab itself, for the drag hotspot
-            self._dragging = False
+            self._press = (e.globalPosition().toPoint(), e.position().toPoint())
             self.bar.win.switch_tab(self.tabid)
+            self.bar.scroll_into_view(self.tabid)
     def mouseMoveEvent(self, e):
-        if self._press_pos is None or not (e.buttons() & Qt.LeftButton):
+        if self.bar._drag is not None:
+            self.bar.mouseMoveEvent(e)     # in case the bar's grab didn't take
             return
-        if not self._dragging:
-            if (e.globalPosition().toPoint() - self._press_pos).manhattanLength() < 8:
-                return
-            self._dragging = True
-            self.bar.start_tab_drag(self, self._press_local)
-            self._press_pos = None
+        if self._press is None or not (e.buttons() & Qt.LeftButton):
+            return
+        if (e.globalPosition().toPoint() - self._press[0]).manhattanLength() < 6:
+            return
+        press, self._press = self._press, None
+        self.bar.begin_drag(self, press[1], e.globalPosition().toPoint())
     def mouseReleaseEvent(self, e):
-        self._press_pos = None
-        self._dragging = False
+        self._press = None
+        if self.bar._drag is not None:
+            self.bar.mouseReleaseEvent(e)
     def mouseDoubleClickEvent(self, e):
         if e.button() == Qt.LeftButton:
+            self._press = None
             self.bar.start_rename(self.tabid)
     def contextMenuEvent(self, e):
         self.bar.tab_context_menu(self.tabid, e.globalPos())
+class TabGhost(QWidget):
+    """Picture of a tab following the cursor once it's dragged out of its
+    row - the only image shown (no OS drag cursor on top of it)."""
+    def __init__(self, pixmap):
+        super().__init__(None, Qt.ToolTip | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
+                         | Qt.WindowTransparentForInput | Qt.NoDropShadowWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)
+        self.pm = pixmap
+        self.pad = int(10 * S)
+        size = pixmap.size() / pixmap.devicePixelRatio()
+        self.resize(size.width() + 2 * self.pad, size.height() + 2 * self.pad)
+    def paintEvent(self, _):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        inner = QRectF(self.rect()).adjusted(self.pad, self.pad, -self.pad, -self.pad)
+        paint_shadow(p, inner, RADIUS, self.pad)
+        p.setOpacity(0.95)
+        p.drawPixmap(inner.topLeft(), self.pm)
 class TabBar(QWidget):
-    """Row of tabs - embedded inside TopBar's scroll area (where a plain
-    title used to sit), not a separate row below it. Sizes itself to fit
-    all its tabs (which may be wider than the visible area - the
-    surrounding QScrollArea in TopBar handles clipping/scrolling, so this
-    widget's own coordinate space always has every chip at its full,
-    un-clipped position, exactly as if there were no scrolling at all).
-    Every window shows its own tabs; dragging a tab onto a DIFFERENT
-    window's bar moves it there; dragging it out of every bar entirely
-    tears it off into its own new window. Paints no background of its own
-    - TopBar fills the whole merged bar in one unified strip."""
-    def __init__(self, win):
-        super().__init__(win)
-        self.win = win
-        self.setAcceptDrops(True)
+    """The row of tabs, inside TopBar's TabScrollArea. Tabs sit side by side
+    (no overlap) and shrink, Chrome-style, to share the room there is;
+    only past their minimum width does the row scroll.
+    Chips live as long as their tab does - refresh() adds / removes /
+    re-measures them rather than rebuilding the row - so a tab pressed a
+    moment ago is still the same widget when the drag starts.
+    Dragging is handled here directly with a mouse grab (no QDrag): along
+    the row it reorders live; pulled out of the row it becomes a floating
+    ghost that can be dropped on another window's tab row, or anywhere else
+    to tear it off into its own window. A window's only tab drags the whole
+    window instead (dropping it on another window's tabs merges them)."""
+    def __init__(self, top):
+        super().__init__(top)
+        self.top = top
+        self.win = top.win
+        self.scroll = top.tab_scroll
         self.chips = {}
         self.rename_edit = None
         self._rename_tabid = None
-        self.apply_scale()
+        self._avail = 0
+        self._height = int(30 * S)
+        self._incoming = None      # (index, width): room made for a tab from another window
+        self._drag = None
+        self._drag_timer = QTimer(self)
+        self._drag_timer.setInterval(16)
+        self._drag_timer.timeout.connect(self._drag_tick)
     def apply_scale(self):
-        self.setFixedHeight(int(30 * S))
-        self.refresh()
-    def refresh(self):
-        for c in list(self.chips.values()):
-            c.setParent(None)
+        for c in self.chips.values():
+            c.apply_scale()
+        self.refresh(animate=False)
+    # ---------- layout ----------
+    def refresh(self, animate=True):
+        """Brings the chips in line with win.tab_order / tab_meta, then lays
+        the whole bar out again (the '+' follows the row's new width)."""
+        order = self.win.tab_order
+        for tabid in [t for t in self.chips if t not in order]:
+            c = self.chips.pop(tabid)
+            if self._drag and self._drag["chip"] is c:
+                self._finish_drag()
+            c.hide()
             c.deleteLater()
-        self.chips = {}
-        x = int(4 * S)
-        y = int(1 * S)
-        overlap = int(TAB_OVERLAP_BASE * S)
-        ordered = []
-        for tabid in self.win.tab_order:
-            c = TabChip(self, tabid)
-            w = c.ideal_width()
-            c.setGeometry(x, y, w, c.height())
-            c.show()
-            self.chips[tabid] = c
-            ordered.append(c)
-            # Each tab tucks UNDER the one before it rather than sitting
-            # fully apart - a cascading, layered row instead of plain
-            # side-by-side blocks.
-            x += w - overlap
-        # Sized to fit every tab at its full width (the last tab's true
-        # right edge is x + overlap, undoing the final overlap step) - if
-        # that's wider than what's visible, the QScrollArea around this
-        # widget (in TopBar) shows its slim horizontal scrollbar
-        # automatically.
-        self.resize(x + overlap + int(2 * S), self.height())
-        # Cascading stack order: earlier (further LEFT) tabs sit ON TOP of
-        # later ones, like a fanned hand of cards - lowering each tab in
-        # left-to-right order leaves the leftmost one highest, since every
-        # later lower() call only pushes the NEXT one further back.
-        for c in ordered:
-            c.lower()
-        # Whichever tab is actually open always comes out in front of that
-        # cascade, wherever it sits in the list. No drop shadow on it - the
-        # active tab is filled with the exact same colour the list panel
-        # below becomes, and a shadow there just drew a visible seam right
-        # at that handoff instead of letting the two blend together.
-        for c in ordered:
-            c.setGraphicsEffect(None)
-        active_chip = self.chips.get(self.win.active_tab)
-        if active_chip is not None:
-            active_chip.raise_()
-        self.update()
-    def resizeEvent(self, e):
-        pass
-    # ---------- drag-and-drop ----------
-    def start_tab_drag(self, chip, hotspot=None):
-        tabid = chip.tabid
-        drag = QDrag(chip)
-        # Render the tab itself as the drag image, so it visibly follows
-        # the cursor the whole time (like dragging a browser tab out) -
-        # without this Qt/Windows has nothing to show but the bare system
-        # drag cursor, which looks like a plain "forbidden" icon the
-        # instant you're over an area that hasn't accepted the drop (e.g.
-        # empty desktop during a tear-off, even though that's a perfectly
-        # valid gesture in this app).
-        pm = chip.grab()
-        drag.setPixmap(pm)
-        drag.setHotSpot(hotspot if hotspot is not None
-                        else QPoint(pm.width() // 2, pm.height() // 2))
-        # Dropping on empty space (desktop, the task list, anywhere that
-        # isn't a tab bar) is a valid "tear this off into its own window"
-        # gesture, not an error - so it shouldn't show the native red
-        # forbidden/no-drop badge while hovering there. Qt draws that badge
-        # specifically for the IgnoreAction cursor; giving it the same
-        # plain dragged-tab image used everywhere else removes the badge
-        # without changing what actually happens on drop (still decided by
-        # `result` below).
-        drag.setDragCursor(pm, Qt.IgnoreAction)
-        mime = QMimeData()
-        mime.setData(MIME_TAB, f"{id(self.win)}:{tabid}".encode())
-        drag.setMimeData(mime)
-        result = drag.exec(Qt.MoveAction)
-        if result == Qt.IgnoreAction and tabid in self.win.tab_order:
-            # Not accepted by any tab bar - detach it into a brand-new
-            # window at wherever the cursor ended up.
-            self.win.detach_tab_to_new_window(tabid, QCursor.pos())
-    def dragEnterEvent(self, e):
-        if e.mimeData().hasFormat(MIME_TAB):
-            e.acceptProposedAction()
-    def dragMoveEvent(self, e):
-        if e.mimeData().hasFormat(MIME_TAB):
-            e.acceptProposedAction()
-    def _index_for_x(self, x):
-        for i, tabid in enumerate(self.win.tab_order):
+        for tabid in order:
             c = self.chips.get(tabid)
-            if c and x < c.x() + c.width() / 2:
-                return i
-        return len(self.win.tab_order)
-    def dropEvent(self, e):
-        if not e.mimeData().hasFormat(MIME_TAB):
-            e.ignore()
+            if c is None:
+                c = self.chips[tabid] = TabChip(self, tabid)
+                c.show()
+            c.setToolTip(c.meta()["name"])
+            c.update()
+        self.top.layout_children(animate)
+        self.scroll_into_view(self.win.active_tab)
+        self.win.update()
+    def _widths(self, tabids, avail):
+        gap = int(TAB_GAP_BASE * S)
+        ideal = [self.chips[t].ideal_width() for t in tabids]
+        if self._incoming:
+            ideal.append(self._incoming[1])
+        n = len(ideal)
+        budget = avail - gap * (n - 1)
+        cap = None
+        if n and sum(ideal) > budget:
+            # Water-fill: narrow tabs keep their size, the wide ones share
+            # what's left equally.
+            left, rest = budget, n
+            for w in sorted(ideal):
+                share = left / rest
+                if w > share:
+                    cap = share
+                    break
+                left -= w
+                rest -= 1
+        low = int(TAB_MIN_W_BASE * S)
+        widths = [int(max(low, min(w, cap))) if cap is not None else w for w in ideal]
+        return widths
+    def _slots(self, tabids=None):
+        """{tabid: (x, width)} for the row as it currently stands (a tab
+        lifted out of it leaves no gap; room made for an incoming tab does)."""
+        if tabids is None:
+            tabids = [t for t in self.win.tab_order if t in self.chips
+                      and not self.chips[t].lifted]
+        widths = self._widths(tabids, self._avail)
+        incoming_w = widths.pop() if self._incoming else 0
+        gap = int(TAB_GAP_BASE * S)
+        slots, x = {}, 0
+        for i, (t, w) in enumerate(zip(tabids, widths)):
+            if self._incoming and i == self._incoming[0]:
+                x += incoming_w + gap
+            slots[t] = (x, w)
+            x += w + gap
+        if self._incoming and self._incoming[0] >= len(tabids):
+            x += incoming_w + gap
+        return slots, max(0, x - gap)
+    def relayout(self, avail, height, animate=True):
+        """Called by TopBar.layout_children() with the room it can give the
+        row; returns the width the row actually needs."""
+        self._avail, self._height = avail, height
+        slots, content = self._slots()
+        dragged = self._drag["chip"] if self._drag else None
+        for t, (x, w) in slots.items():
+            c = self.chips[t]
+            c.resize(w, height)
+            if c is dragged:
+                continue           # follows the cursor, not its slot
+            target = QPoint(x, 0)
+            if animate and c.isVisible() and c.pos() != target:
+                c.anim.stop()
+                c.anim.setStartValue(c.pos())
+                c.anim.setEndValue(target)
+                c.anim.start()
+            else:
+                c.anim.stop()
+                c.move(target)
+        if self.rename_edit is not None and self._rename_tabid in slots:
+            x, w = slots[self._rename_tabid]
+            self.rename_edit.setGeometry(x, 0, w, height)
+        self.resize(content, height)
+        return content
+    def scroll_into_view(self, tabid):
+        slots, _ = self._slots()
+        if tabid not in slots:
             return
+        x, w = slots[tabid]
+        bar = self.scroll.horizontalScrollBar()
+        view = self.scroll.viewport().width()
+        if x < bar.value():
+            bar.setValue(x)
+        elif x + w > bar.value() + view:
+            bar.setValue(x + w - view)
+    def index_at(self, x):
+        """Where in this row a tab dropped at bar x would go."""
+        slots, _ = self._slots()
+        order = [t for t in self.win.tab_order if t in slots]
+        return sum(1 for t in order if slots[t][0] + slots[t][1] / 2 < x)
+    def set_incoming(self, index, width):
+        value = None if index is None else (index, width)
+        if value != self._incoming:
+            self._incoming = value
+            self.top.layout_children(animate=True)
+    # ---------- dragging ----------
+    def begin_drag(self, chip, local, global_pos):
         self.commit_rename_if_open()
-        raw = bytes(e.mimeData().data(MIME_TAB)).decode()
-        src_pyid, _, tabid_s = raw.partition(":")
-        tabid = int(tabid_s)
-        src_win = window_by_pyid(src_pyid)
-        if src_win is None:
-            e.ignore()
+        self._drag = {"chip": chip, "tabid": chip.tabid, "dx": local.x(), "dy": local.y(),
+                      "mode": "row", "ghost": None, "target": None,
+                      "win_offset": None}
+        chip.anim.stop()
+        chip.raise_()
+        chip.setCursor(Qt.ClosedHandCursor)
+        self.grabMouse(Qt.ClosedHandCursor)
+        self._drag_timer.start()
+        self._drag_move(global_pos)
+    def mouseMoveEvent(self, e):
+        if self._drag is None:
             return
-        drop_index = self._index_for_x(e.position().x())
-        if src_win is self.win:
-            if tabid in self.win.tab_order:
-                cur = self.win.tab_order.index(tabid)
-                self.win.tab_order.remove(tabid)
-                if drop_index > cur:
-                    drop_index -= 1
-                self.win.tab_order.insert(min(drop_index, len(self.win.tab_order)), tabid)
-                self.refresh()
+        if not (e.buttons() & Qt.LeftButton):
+            self._end_drag(e.globalPosition().toPoint())   # missed the release
+            return
+        self._drag_move(e.globalPosition().toPoint())
+    def mouseReleaseEvent(self, e):
+        if self._drag is not None and e.button() == Qt.LeftButton:
+            self._end_drag(e.globalPosition().toPoint())
+    def _single(self):
+        return len(self.win.tab_order) == 1
+    def _torn(self, global_pos):
+        """Far enough above / below this window's top bar (or right out of
+        the window sideways) to count as pulling the tab out of the row."""
+        local = self.top.mapFromGlobal(global_pos)
+        tear = int(TAB_TEAR_BASE * S)
+        return (local.y() < -tear or local.y() > self.top.height() + tear
+                or not self.win.rect().contains(self.win.mapFromGlobal(global_pos)))
+    def _drag_move(self, global_pos):
+        d = self._drag
+        if d["mode"] == "row":
+            if self._torn(global_pos):
+                self._lift(global_pos)
+            else:
+                self._slide(global_pos)
+                return
+        # Out of the row: over another window's tabs, back over our own, or loose
+        target = tab_bar_at_global_pos(global_pos, exclude=self.win if self._single() else None)
+        if target is self and not self._torn(global_pos):
+            self._land(global_pos)
+            return
+        if target is self:
+            target = None
+        if d["target"] is not target:
+            if d["target"] is not None:
+                d["target"].set_incoming(None, 0)
+            d["target"] = target
+        if target is not None:
+            target.set_incoming(target.index_at(target.mapFromGlobal(global_pos).x()),
+                                d["chip"].width())
+            if d["mode"] == "window":
+                target.win.raise_()
+        if d["mode"] == "ghost":
+            d["ghost"].move(global_pos - QPoint(d["dx"], d["dy"]) - QPoint(d["ghost"].pad,
+                                                                             d["ghost"].pad))
+        elif d["mode"] == "window":
+            self.win.move(global_pos - d["win_offset"])
+    def _slide(self, global_pos):
+        """Along the row: the tab follows the cursor, the others make room."""
+        d, chip = self._drag, self._drag["chip"]
+        slots, content = self._slots()
+        x = self.mapFromGlobal(global_pos).x() - d["dx"]
+        x = max(0, min(x, content - chip.width()))
+        chip.move(x, 0)
+        # A neighbour steps aside once the dragged tab's leading edge passes
+        # its middle (right edge going right, left edge going left).
+        order = self.win.tab_order
+        mine = order.index(d["tabid"])
+        index = 0
+        for i, t in enumerate(order):
+            if t == d["tabid"]:
+                continue
+            centre = slots[t][0] + slots[t][1] / 2
+            if (centre <= x) if i < mine else (centre < x + chip.width()):
+                index += 1
+        if self.win.tab_order.index(d["tabid"]) != index:
+            self.win.tab_order.remove(d["tabid"])
+            self.win.tab_order.insert(index, d["tabid"])
+            self.top.layout_children(animate=True)
+    def _drag_tick(self):
+        """Keeps the row scrolling while a tab is held against either end."""
+        d = self._drag
+        if d is None or d["mode"] != "row":
+            return
+        vp = self.scroll.viewport()
+        x = vp.mapFromGlobal(QCursor.pos()).x()
+        edge, step = int(24 * S), int(8 * S)
+        bar = self.scroll.horizontalScrollBar()
+        if x < edge and bar.value() > bar.minimum():
+            bar.setValue(bar.value() - step)
+        elif x > vp.width() - edge and bar.value() < bar.maximum():
+            bar.setValue(bar.value() + step)
         else:
-            data, meta = src_win.pop_tab_for_transfer(tabid)
-            self.win.insert_tab(tabid, data, meta, index=drop_index, activate=True)
-            if not src_win.tab_order:
-                src_win.close_emptied_by_transfer()
-        e.acceptProposedAction()
-        global_save()
+            return
+        self._slide(QCursor.pos())
+    def _lift(self, global_pos):
+        d, chip = self._drag, self._drag["chip"]
+        if self._single():
+            # The only tab: carry the whole window, like a browser does.
+            if self.win.isMaximized():
+                self.win.showNormal()
+            d["mode"] = "window"
+            d["win_offset"] = chip.mapTo(self.win, QPoint(d["dx"], d["dy"]))
+            return
+        d["mode"] = "ghost"
+        d["ghost"] = TabGhost(chip.ghost_pixmap())
+        chip.lifted = True
+        chip.update()
+        self.top.layout_children(animate=True)     # the others close the gap
+        self.win.update()
+        d["ghost"].move(global_pos - QPoint(d["dx"] + d["ghost"].pad, d["dy"] + d["ghost"].pad))
+        d["ghost"].show()
+    def _land(self, global_pos):
+        """A lifted tab brought back over its own row."""
+        d, chip = self._drag, self._drag["chip"]
+        if d["ghost"] is not None:
+            d["ghost"].hide()
+            d["ghost"].deleteLater()
+            d["ghost"] = None
+        d["mode"] = "row"
+        chip.lifted = False
+        chip.raise_()
+        self.win.update()
+        self._slide(global_pos)
+        self.top.layout_children(animate=True)
+    def _finish_drag(self):
+        """Ends the drag's bookkeeping (grab, timer, ghost, markers) without
+        deciding where the tab goes. Returns the drag's state."""
+        d, self._drag = self._drag, None
+        self._drag_timer.stop()
+        self.releaseMouse()
+        if d["ghost"] is not None:
+            d["ghost"].hide()
+            d["ghost"].deleteLater()
+        if d["target"] is not None:
+            d["target"].set_incoming(None, 0)
+        d["chip"].lifted = False
+        d["chip"].setCursor(Qt.PointingHandCursor)
+        return d
+    def _end_drag(self, global_pos):
+        d = self._finish_drag()
+        tabid, target = d["tabid"], d["target"]
+        if d["mode"] == "row":
+            self.top.layout_children(animate=True)    # settle into its slot
+            self.win.update()
+            global_save()
+            return
+        if target is not None and target.win in WINDOWS:
+            index = target.index_at(target.mapFromGlobal(global_pos).x())
+            move_tab_to_window(self.win, tabid, target.win, index)
+            return
+        if d["mode"] == "window":
+            global_save()                  # just moved the window
+            return
+        self.win.detach_tab_to_new_window(tabid, global_pos - QPoint(d["dx"], d["dy"]))
     # ---------- per-tab menu / rename ----------
     def tab_context_menu(self, tabid, global_pos):
         self.commit_rename_if_open()
@@ -5486,7 +5667,7 @@ class TabBar(QWidget):
         custom_now = meta["colour"] if meta["colour"] not in presets else None
         act_custom = colour_menu.addAction(
             colour_icon(custom_now, True) if custom_now else menu_icon("palette"),
-            "Custom colour\u2026")
+            "Custom colour…")
         act_delete = None
         total_tabs = sum(len(w.tab_order) for w in WINDOWS)
         if total_tabs > 1:
@@ -5520,26 +5701,20 @@ class TabBar(QWidget):
                 win.delete_tab(tabid)
                 global_save()
     def start_rename(self, tabid):
-        # A plain click elsewhere (e.g. the '+' button) doesn't necessarily
-        # take Qt focus away from this edit box - IconButton never requests
-        # focus, so clicking it leaves the rename box open without firing
-        # its focus-lost signal. Without this, a second tab added while one
-        # is still "New tab" (being renamed) would silently fail to open
-        # its own rename box (blocked by the old one still being open) and
-        # leave a stale, misplaced edit floating over the wrong chip.
-        # Explicitly committing here removes that possibility entirely.
+        # Clicking the '+' (or anything else that never takes focus) doesn't
+        # fire the old box's focus-lost, so close any open one explicitly.
         self.commit_rename_if_open()
         chip = self.chips.get(tabid)
         if chip is None:
             return
-        meta = self.win.tab_meta[tabid]
+        self.scroll_into_view(tabid)
         edit = LineEdit(self, 10, bold=True)
+        pad = int(TAB_PAD_BASE * S)
+        edit.setTextMargins(pad, 0, pad, 0)       # text stays exactly where the name was
         edit.setGeometry(chip.geometry())
-        edit.setText(meta["name"])
+        edit.setText(self.win.tab_meta[tabid]["name"])
         edit.show()
         edit.raise_()
-        edit.setFocus()
-        edit.selectAll()
         self.rename_edit = edit
         self._rename_tabid = tabid
         chip.renaming = True
@@ -5547,30 +5722,45 @@ class TabBar(QWidget):
         edit.returnPressed.connect(lambda: self.finish_rename(False))
         edit.escaped.connect(lambda: self.finish_rename(True))
         edit.focus_lost.connect(lambda: self.finish_rename(False))
+        edit.setFocus(Qt.OtherFocusReason)
+        edit.selectAll()
     def finish_rename(self, cancel=False):
         if self.rename_edit is None:
             return
         edit, tabid = self.rename_edit, self._rename_tabid
         self.rename_edit = None
         self._rename_tabid = None
-        if not cancel:
-            meta = self.win.tab_meta.get(tabid)
-            if meta is not None:
-                new_name = clean(edit.text()) or meta["name"]
-                self.win.rename_tab(tabid, new_name)
-                global_save()
         edit.hide()
         edit.deleteLater()
         chip = self.chips.get(tabid)
         if chip is not None:
             chip.renaming = False
-        self.refresh()
+            chip.update()
+        if not cancel:
+            meta = self.win.tab_meta.get(tabid)
+            if meta is not None:
+                new_name = clean(edit.text()) or meta["name"]
+                if new_name != meta["name"]:
+                    self.win.rename_tab(tabid, new_name)
+                    global_save()
     def commit_rename_if_open(self):
         """Finishes (keeping whatever was typed) any rename box that's
         still open - called before anything else that changes the tab bar,
         so a stale rename box is never left floating over the wrong tab."""
         if self.rename_edit is not None:
             self.finish_rename(False)
+def move_tab_to_window(src, tabid, dst, index):
+    """A tab dropped on another window's tab row: it moves there (opened),
+    and the window it came from closes if that was its last tab."""
+    data, meta = src.pop_tab_for_transfer(tabid)
+    dst.insert_tab(tabid, data, meta, index=index, activate=True)
+    if not src.tab_order:
+        src.close_emptied_by_transfer()
+    else:
+        src.tabbar.refresh()
+    dst.raise_()
+    dst.activateWindow()
+    global_save()
 # ------------------------------------------------------------------
 # MAIN WINDOW
 # ------------------------------------------------------------------
@@ -5587,18 +5777,12 @@ class Window(QWidget):
             self.setWindowIcon(QIcon(ICON_FILE))
         self.setMinimumSize(220, 160)
         self.setMouseTracking(True)
-        # "Maximize" is done ourselves (geometry set directly to the
-        # screen's available area) rather than via Qt/Windows' own native
-        # maximize - this frameless window gains its resize frame only
-        # after creation (enable_snap()), which made native maximize
-        # (WM_GETMINMAXINFO) unreliable: it would sometimes keep the old
-        # size and jump to the corner instead of filling the screen. Our
-        # own button/double-click always goes through _enter_pseudo_max() /
-        # _exit_pseudo_max() below, which is a plain, reliable setGeometry()
-        # - only an OS-driven gesture (dragging to the very top of the
-        # screen, Win+Up) still goes through the native path.
-        self._pseudo_max = False
-        self._premax_geom = None
+        # Maximise is always the real Windows state (button, double-click
+        # on the bar, Win+Up, dragging to the top edge alike), so Windows
+        # itself handles restoring, dragging a maximised window off the top,
+        # and snapping. _normal_geom is the last un-maximised geometry, the
+        # one saved to file.
+        self._normal_geom = None
         # ---- figure out which tab(s) this window starts with ----
         if detached is not None:
             # Torn off a tab from another window: starts with just that one.
@@ -5679,6 +5863,7 @@ class Window(QWidget):
         self.apply_header_scale()
         self.start_zoomed = zoomed
         self.restore_window(geometry)
+        self._normal_geom = self.geometry()
         self.ready = True
         WINDOWS.append(self)
     # ---------- board ----------
@@ -5831,13 +6016,15 @@ class Window(QWidget):
             self.tab_data[tabid] = data
         self.tabbar.refresh()
     def detach_tab_to_new_window(self, tabid, global_pos):
-        """A tab was dragged out and released somewhere that didn't accept
-        it (empty desktop, or just outside every tab bar) - it becomes its
-        own window, appearing where the cursor let go of it."""
+        """A tab was dragged out of the row and let go anywhere that isn't a
+        tab row - it becomes its own window, appearing where it was dropped."""
         data, meta = self.pop_tab_for_transfer(tabid)
         new_win = Window(detached=(tabid, data, meta))
-        new_win.resize(self.size())
-        new_win.move(global_pos.x() - 40, global_pos.y() - 10)
+        new_win.resize(self._normal_geom.size() if self._normal_geom else self.size())
+        # global_pos is where the tab's top-left was let go: the new window's
+        # (only) tab lands right there.
+        new_win.move(global_pos - QPoint(EDGE + new_win.bar.tab_left(),
+                                         EDGE + new_win.bar.tab_top()))
         new_win.winId()      # must exist before enable_snap() can touch its HWND
         enable_snap(new_win)
         new_win.show_panel()
@@ -5931,42 +6118,15 @@ class Window(QWidget):
         else:
             general.add_row.edit.setFocus()
     # ---------- top bar buttons ----------
-    def is_full(self):
-        """True if filling the screen - either really (native OS maximize,
-        e.g. dragged to the top edge or Win+Up) or our own pseudo-maximize
-        (the square button / double-clicking the bar)."""
-        return self.isMaximized() or self._pseudo_max
     def toggle_max(self):
         if self.isMaximized():
             self.showNormal()
-            return
-        if self._pseudo_max:
-            self._exit_pseudo_max()
         else:
-            self._enter_pseudo_max()
-    def _enter_pseudo_max(self):
-        screen = self.screen() if hasattr(self, "screen") else None
-        if screen is None:
-            screen = QGuiApplication.screenAt(self.geometry().center()) \
-                or QGuiApplication.primaryScreen()
-        if screen is None:
-            return
-        self._premax_geom = self.geometry()
-        self._pseudo_max = True
-        self.setGeometry(screen.availableGeometry())
-        self._apply_full_margins()
-    def _exit_pseudo_max(self):
-        self._pseudo_max = False
-        if self._premax_geom is not None:
-            self.setGeometry(self._premax_geom)
-        self._premax_geom = None
-        self._apply_full_margins()
-    def _apply_full_margins(self):
-        """Shared by both the real (native) and our own pseudo maximize:
-        no resize-border margin while filling the screen (there's nothing
-        to drag-resize from, the window IS the screen), square corners to
-        match the screen edges, and the maximize button's icon updated."""
-        m = 0 if self.is_full() else EDGE
+            self.showMaximized()
+    def _apply_window_state(self):
+        """No resize border while maximised (nothing to drag-resize from),
+        and the maximise button's icon kept in step."""
+        m = 0 if self.isMaximized() else EDGE
         self.layout().setContentsMargins(m, m, m, m)
         self.bar.max_btn.update()
         QTimer.singleShot(0, self.update_corners)
@@ -6062,7 +6222,7 @@ class Window(QWidget):
         self.bar.apply_scale()      # also rescales the embedded tab bar
     # ---------- resizing the frameless window from its edges ----------
     def _edges(self, pos):
-        if self.is_full():
+        if self.isMaximized():
             return []
         m = EDGE + 2
         e = []
@@ -6099,42 +6259,10 @@ class Window(QWidget):
         self.unsetCursor()
     def changeEvent(self, e):
         if e.type() == QEvent.WindowStateChange:
-            # Real, OS-driven maximize (dragged to the top of the screen,
-            # Win+Up, taskbar "Maximize") - our own button/double-click
-            # never goes through this path any more (see _enter_pseudo_max),
-            # but this still handles those native gestures as before.
-            self._apply_full_margins()
-            if self.isMaximized():
-                QTimer.singleShot(0, self._fix_maximized_geometry)
+            self._apply_window_state()
         elif e.type() == QEvent.ActivationChange and self.isActiveWindow():
             self._last_focus_at = time.monotonic()
         super().changeEvent(e)
-    def _fix_maximized_geometry(self):
-        """Belt-and-braces for the WM_GETMINMAXINFO fix below: on some
-        Windows/Qt combinations, a frameless window that only gained its
-        resize frame AFTER creation (enable_snap adds WS_THICKFRAME /
-        WS_CAPTION post-construction, since the window starts fully
-        borderless) doesn't reliably get the native maximise size/position
-        corrected - whether triggered by the maximise button, double-
-        clicking the bar, Win+Up, or dragging to the top of the screen -
-        leaving it pinned to the top-left corner at its old, narrow size
-        instead of filling the screen. Qt's own logical-pixel QScreen
-        geometry is correct and DPI-safe regardless of whether the native
-        fix took hold, so this forces it explicitly right after Qt reports
-        the state change. A no-op if the geometry's already correct, and
-        harmless if called after the window's been restored again in the
-        meantime (guarded by isMaximized())."""
-        if not self.isMaximized():
-            return
-        screen = self.screen() if hasattr(self, "screen") else None
-        if screen is None:
-            screen = QGuiApplication.screenAt(self.geometry().center()) \
-                or QGuiApplication.primaryScreen()
-        if screen is None:
-            return
-        avail = screen.availableGeometry()
-        if self.geometry() != avail:
-            self.setGeometry(avail)
     def set_ui_scale(self, s):
         if abs(s - S) < 0.001:
             return
@@ -6167,13 +6295,19 @@ class Window(QWidget):
             return
         self.resize(*DEFAULT_SIZE)
     def current_geometry(self):
-        if self.isMaximized():
-            g = self.normalGeometry()
-        elif self._pseudo_max and self._premax_geom is not None:
-            g = self._premax_geom
-        else:
-            g = self.geometry()
+        g = self._normal_geom or self.geometry()
         return g.x(), g.y(), g.width(), g.height()
+    def _note_normal_geometry(self):
+        """Remembers the geometry while the window is neither maximised nor
+        minimised. Asks Windows directly: Qt's own window state can lag a
+        step behind the move/resize that maximising causes."""
+        if os.name == "nt":
+            hwnd = int(self.winId())
+            off = user32.IsZoomed(hwnd) or user32.IsIconic(hwnd)
+        else:
+            off = self.isMaximized() or self.isMinimized()
+        if not off:
+            self._normal_geom = self.geometry()
     def save_now(self):
         """Returns True/False - callers must never treat a False return as
         a successful save (no cleanup, no 'saved' assumptions). The data
@@ -6209,21 +6343,23 @@ class Window(QWidget):
             focus.clearFocus()
     def moveEvent(self, e):
         if getattr(self, "ready", False) and self.isVisible():
+            self._note_normal_geometry()
             self.save_timer.start()
             QTimer.singleShot(0, self.update_corners)
     def resizeEvent(self, e):
         if getattr(self, "ready", False) and self.isVisible():
+            self._note_normal_geometry()
             self.save_timer.start()
             QTimer.singleShot(0, self.update_corners)
     # ---------- show / close ----------
     def show_panel(self):
-        self.show()
         if self.start_zoomed:
-            # Our own reliable pseudo-maximize, not showMaximized() - see
-            # _enter_pseudo_max(). Needs the window already shown/placed
-            # (restore_window() has run) so self.geometry() is the real
-            # pre-maximize size to remember.
-            QTimer.singleShot(0, self._enter_pseudo_max)
+            # Placed at its saved normal geometry already (restore_window),
+            # so that's what un-maximising goes back to.
+            self.start_zoomed = False
+            self.showMaximized()
+        else:
+            self.show()
         self.apply_pin()
         self.raise_()
         self.activateWindow()
@@ -6319,8 +6455,10 @@ class Window(QWidget):
                     # Tells Windows the correct maximised size/position
                     # BEFORE it picks a (wrong) default - see
                     # fill_minmaxinfo()'s docstring for why this matters.
+                    dpr = self.devicePixelRatioF()
                     fill_minmaxinfo(msg.hWnd, msg.lParam,
-                                    self.minimumWidth(), self.minimumHeight())
+                                    int(self.minimumWidth() * dpr),
+                                    int(self.minimumHeight() * dpr))
                     return True, 0
                 if m == WM_NCCALCSIZE and msg.wParam:
                     # No visible frame; when maximised, fit the work area exactly
@@ -6353,7 +6491,7 @@ class Window(QWidget):
         rc = wintypes.RECT()
         user32.GetClientRect(hwnd, ctypes.byref(rc))
         dpr = self.devicePixelRatioF()
-        if not user32.IsZoomed(hwnd) and not self._pseudo_max:
+        if not user32.IsZoomed(hwnd):
             b = int(EDGE * dpr) + 1
             left, right = pt.x < b, pt.x >= rc.right - b
             top, bottom = pt.y < b, pt.y >= rc.bottom - b
@@ -6375,21 +6513,18 @@ class Window(QWidget):
                 return HTBOTTOM
         lp = QPoint(int(pt.x / dpr), int(pt.y / dpr))
         if self.bar.geometry().contains(lp):
-            # The top bar now also contains the tab row - a click on a tab
-            # (or the '+' button) must reach Qt as a normal client click
-            # (so TabChip gets to handle select/drag/rename), not be
-            # swallowed by Windows as a native caption-drag. Only genuinely
-            # empty bar space still counts as draggable caption area.
+            # Only genuinely empty bar space is caption (drag the window,
+            # double-click to maximise); tabs, the rename box and buttons
+            # are ordinary clicks for Qt.
             child = self.bar.childAt(lp - self.bar.pos())
-            return HTCLIENT if isinstance(child, (IconButton, TabChip)) else HTCAPTION
+            if child is None or child in self.bar.caption_widgets():
+                return HTCAPTION
         return HTCLIENT
     def corners_cut(self):
         """True when Windows 11 would square the corners (snapped / maximised),
         so we round them ourselves."""
         if os.name != "nt" or not self.isVisible() or self.isMinimized():
             return False
-        if self._pseudo_max:
-            return True
         hwnd = int(self.winId())
         if user32.IsZoomed(hwnd):
             return True
@@ -6411,6 +6546,25 @@ class Window(QWidget):
         if cut != getattr(self, "_rounded", False):
             self._rounded = cut
         self.update()
+    def list_gradient(self):
+        """The list's background, in window coordinates - the open tab
+        paints itself with this too, so the two are one surface."""
+        bar_h = self.bar.y() + self.bar.height()
+        g = QLinearGradient(0, bar_h, self.width() * 0.3, self.height())
+        g.setColorAt(0, QColor(self.bg_top))
+        g.setColorAt(1, QColor(self.bg_bottom))
+        return g
+    def _open_tab_shape(self):
+        """Where the open tab is (window coordinates, cut to the visible
+        part of the tab row), or None if it isn't in the row right now."""
+        chip = self.tabbar.chips.get(self.active_tab)
+        if chip is None or chip.lifted or not chip.isVisible():
+            return None
+        vp = self.bar.tab_scroll.viewport()
+        shown = QPainterPath()
+        shown.addRect(QRectF(QRect(vp.mapTo(self, QPoint(0, 0)), vp.size())))
+        r = QRectF(QRect(chip.mapTo(self, QPoint(0, 0)), chip.size()))
+        return tab_shape(r, RADIUS).intersected(shown)
     def paintEvent(self, _):
         p = QPainter(self)
         r = QRectF(self.rect())
@@ -6420,28 +6574,31 @@ class Window(QWidget):
         p.fillRect(self.rect(), QColor(0, 0, 0, 1))
         p.setCompositionMode(QPainter.CompositionMode_SourceOver)
         p.setRenderHint(QPainter.Antialiasing)
-        rad = CORNER * max(S, 0.8)
+        rad = 0 if self.isMaximized() else CORNER * max(S, 0.8)
         shape = QPainterPath()
         shape.addRoundedRect(r, rad, rad)
         p.save()
         p.setClipPath(shape)
-        # 2. Top strip (behind the tab bar): the bar's own flat colour,
-        # reaching every edge - including the thin EDGE margin around the
-        # TopBar widget itself (the invisible resize border, already
-        # included in self.bar.y()) - so none of the list's own colour
-        # (below) ever peeks through as a seam around the bar.
+        # 2. Top strip (behind the tab bar), reaching every edge - except
+        #    where the open tab is: that tab paints the list's own gradient
+        #    (TabChip.paintEvent), so tab and list are one seamless surface
+        #    even with a see-through colour.
         bar_h = self.bar.y() + self.bar.height()
-        p.fillRect(QRectF(r.left(), r.top(), r.width(), bar_h), QColor(TOPBAR_BG[0]))
+        strip = QPainterPath()
+        strip.addRect(QRectF(r.left(), r.top(), r.width(), bar_h))
+        tab = self._open_tab_shape()
+        if tab is not None:
+            strip = strip.subtracted(tab)
+        p.fillPath(strip, QColor(TOPBAR_BG[0]))
         # 3. The list itself: gradient, filling the rest
-        g = QLinearGradient(0, bar_h, self.width() * 0.3, self.height())
-        g.setColorAt(0, QColor(self.bg_top))
-        g.setColorAt(1, QColor(self.bg_bottom))
-        p.fillRect(QRectF(r.left(), r.top() + bar_h, r.width(), r.height() - bar_h), g)
+        p.fillRect(QRectF(r.left(), r.top() + bar_h, r.width(), r.height() - bar_h),
+                   self.list_gradient())
         p.restore()
         # 4. Thin light edge so it stands out from what's behind
-        p.setPen(QPen(QColor(255, 255, 255, 38), 1))
-        p.setBrush(Qt.NoBrush)
-        p.drawRoundedRect(r.adjusted(0.5, 0.5, -0.5, -0.5), rad, rad)
+        if rad:
+            p.setPen(QPen(QColor(255, 255, 255, 38), 1))
+            p.setBrush(Qt.NoBrush)
+            p.drawRoundedRect(r.adjusted(0.5, 0.5, -0.5, -0.5), rad, rad)
 def fit_to_work_area(lparam):
     rect = wintypes.RECT.from_address(lparam)
     mon = user32.MonitorFromRect(ctypes.byref(rect), 2)    # nearest monitor
@@ -6476,8 +6633,6 @@ def fill_minmaxinfo(hwnd, lparam, min_w, min_h):
             info.ptMaxPosition.y = work.top - full.top
             info.ptMaxSize.x = work.right - work.left
             info.ptMaxSize.y = work.bottom - work.top
-            info.ptMaxTrackSize.x = work.right - work.left
-            info.ptMaxTrackSize.y = work.bottom - work.top
     info.ptMinTrackSize.x = max(info.ptMinTrackSize.x, min_w)
     info.ptMinTrackSize.y = max(info.ptMinTrackSize.y, min_h)
 def enable_snap(widget):
