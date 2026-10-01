@@ -5293,13 +5293,17 @@ def shutdown_everything():
 # ------------------------------------------------------------------
 # TAB BAR (tabs across the top of each window)
 # ------------------------------------------------------------------
-TAB_GAP_BASE = 2         # space between neighbouring tabs
+TAB_GAP_BASE = 4         # space between neighbouring tabs
 TAB_PAD_BASE = 12        # space either side of a tab's name
 TAB_MIN_W_BASE = 56      # tabs shrink to this before the row starts scrolling
 TAB_MAX_W_BASE = 180
 TAB_TEAR_BASE = 30       # how far above / below the bar a dragged tab tears out
+TAB_INSET_BASE = 3       # other tabs stop this far above the list
+def tab_flare():
+    return 8 * S
 def tab_shape(r, rad):
-    """Rounded top corners, square bottom (it sits on the list below)."""
+    """The open tab: rounded top corners, square bottom (it sits on the list
+    below)."""
     path = QPainterPath()
     path.moveTo(r.left(), r.bottom())
     path.lineTo(r.left(), r.top() + rad)
@@ -5308,6 +5312,19 @@ def tab_shape(r, rad):
     path.quadTo(r.right(), r.top(), r.right(), r.top() + rad)
     path.lineTo(r.right(), r.bottom())
     path.closeSubpath()
+    return path
+def tab_flares(r):
+    """The two small concave curves either side of the open tab's foot,
+    sweeping out into the list - so the tab grows out of the list instead
+    of meeting it at a hard right angle. Painted by the window as part of
+    the list's own background."""
+    f = tab_flare()
+    path = QPainterPath()
+    for edge, out in ((r.left(), -f), (r.right(), f)):
+        path.moveTo(edge + out, r.bottom())
+        path.quadTo(edge, r.bottom(), edge, r.bottom() - f)
+        path.lineTo(edge, r.bottom())
+        path.closeSubpath()
     return path
 def tab_bar_at_global_pos(global_pos, exclude=None):
     """The TabBar whose top-bar row is under the cursor (dragging a tab onto
@@ -5352,11 +5369,21 @@ class TabChip(QWidget):
         w = QFontMetrics(self.font_).horizontalAdvance(self.meta()["name"]) \
             + 2 * int(TAB_PAD_BASE * S)
         return int(min(max(w, TAB_MIN_W_BASE * S), TAB_MAX_W_BASE * S))
-    def _paint(self, p, fill, text_colour):
-        p.setRenderHint(QPainter.Antialiasing)
+    def _shape(self, open_tab):
         r = QRectF(self.rect())
-        path = tab_shape(r, RADIUS)
+        if open_tab:
+            return r, tab_shape(r, RADIUS)
+        # Other tabs float just above the list, rounded all round, so only
+        # the open one visibly joins it.
+        r = r.adjusted(0, 0, 0, -int(TAB_INSET_BASE * S))
+        path = QPainterPath()
+        path.addRoundedRect(r, RADIUS, RADIUS)
+        return r, path
+    def _paint(self, p, fill, text_colour, open_tab):
+        p.setRenderHint(QPainter.Antialiasing)
+        r, path = self._shape(open_tab)
         p.fillPath(path, fill)
+        r = QRectF(self.rect())          # same text line on every tab
         if not self.renaming:
             # The rename box is transparent - drawing the name under it too
             # would double up the text being typed.
@@ -5369,7 +5396,7 @@ class TabChip(QWidget):
         if self.drop_hover:
             p.setPen(QPen(QColor(ACCENT), 2))
             p.setBrush(Qt.NoBrush)
-            p.drawPath(tab_shape(r.adjusted(1, 1, -1, 0), RADIUS))
+            p.drawRoundedRect(r.adjusted(1, 1, -1, -1), RADIUS, RADIUS)
     def paintEvent(self, _):
         if self.lifted:
             return
@@ -5382,10 +5409,10 @@ class TabChip(QWidget):
             fill = QBrush(win.list_gradient())
             off = self.mapTo(win, QPoint(0, 0))
             fill.setTransform(QTransform.fromTranslate(-off.x(), -off.y()))
-            self._paint(p, fill, TEXT)
+            self._paint(p, fill, TEXT, True)
         else:
             fill = QColor(mix(TINT_BASE, colour, 0.75 if self.hover else 0.55))
-            self._paint(p, fill, TEXT if self.hover else TEXT_SUB)
+            self._paint(p, fill, TEXT if self.hover else TEXT_SUB, False)
     def ghost_pixmap(self):
         """The tab as it looks while being carried outside the row."""
         dpr = self.devicePixelRatioF()
@@ -5394,7 +5421,7 @@ class TabChip(QWidget):
         pm.fill(Qt.transparent)
         p = QPainter(pm)
         lifted, self.lifted = self.lifted, False
-        self._paint(p, QColor(self.meta()["colour"] or ACCENT), TEXT)
+        self._paint(p, QColor(self.meta()["colour"] or ACCENT), TEXT, False)
         self.lifted = lifted
         p.end()
         return pm
@@ -6719,16 +6746,19 @@ class Window(QWidget):
         g.setColorAt(1, QColor(self.bg_bottom))
         return g
     def _open_tab_shape(self):
-        """Where the open tab is (window coordinates, cut to the visible
-        part of the tab row), or None if it isn't in the row right now."""
+        """(the open tab's body, its two flares) in window coordinates, cut
+        to the visible part of the tab row - or None if it isn't in the row
+        right now."""
         chip = self.tabbar.chips.get(self.active_tab)
         if chip is None or chip.lifted or not chip.isVisible():
             return None
         vp = self.bar.tab_scroll.viewport()
+        f = tab_flare()
         shown = QPainterPath()
-        shown.addRect(QRectF(QRect(vp.mapTo(self, QPoint(0, 0)), vp.size())))
+        shown.addRect(QRectF(QRect(vp.mapTo(self, QPoint(0, 0)), vp.size())).adjusted(-f, 0, f, 0))
         r = QRectF(QRect(chip.mapTo(self, QPoint(0, 0)), chip.size()))
-        return tab_shape(r, RADIUS).intersected(shown)
+        return (tab_shape(r, RADIUS).intersected(shown),
+                tab_flares(r).intersected(shown))
     def paintEvent(self, _):
         p = QPainter(self)
         r = QRectF(self.rect())
@@ -6752,11 +6782,15 @@ class Window(QWidget):
         strip.addRect(QRectF(r.left(), r.top(), r.width(), bar_h))
         tab = self._open_tab_shape()
         if tab is not None:
-            strip = strip.subtracted(tab)
+            strip = strip.subtracted(tab[0]).subtracted(tab[1])
         p.fillPath(strip, QColor(TOPBAR_BG[0]))
-        # 3. The list itself: gradient, filling the rest
-        p.fillRect(QRectF(r.left(), r.top() + bar_h, r.width(), r.height() - bar_h),
-                   self.list_gradient())
+        # 3. The list itself: gradient, filling the rest - and the open
+        #    tab's flares, which are part of the list's surface.
+        listed = QPainterPath()
+        listed.addRect(QRectF(r.left(), r.top() + bar_h, r.width(), r.height() - bar_h))
+        if tab is not None:
+            listed = listed.united(tab[1])
+        p.fillPath(listed, self.list_gradient())
         p.restore()
         # 4. Thin light edge so it stands out from what's behind
         if rad:
