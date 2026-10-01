@@ -5789,7 +5789,11 @@ def tab_flares(r):
 _Z_COUNTER = [0]
 def bring_to_front(win):
     """Raises one of our windows above the others (without activating it)
-    and records that, so window_at_global_pos() knows the stacking order."""
+    and records that, so window_at_global_pos() knows the stacking order.
+    Only ever mid-drag: with no mouse button held (the cursor just moving
+    over a window) nothing is raised."""
+    if not (QApplication.mouseButtons() & Qt.LeftButton):
+        return
     if max(WINDOWS, key=lambda w: w._z, default=None) is win:
         return
     win.raise_()
