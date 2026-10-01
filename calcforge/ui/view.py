@@ -1760,6 +1760,7 @@ class PageView(QGraphicsView):
         self._ctrl_from_the_press = control
         self._copied = False
         from ..items.calc import with_block_members
+        self._moved_yet = False
         self._move_items = [(other, other.pos()) for other in
                             with_block_members(self.scene().selectedItems())
                             if isinstance(other, MarkupItem) and self.editable(other)]
@@ -1990,6 +1991,13 @@ class PageView(QGraphicsView):
             return
 
         if self._mode == "move":
+            # A click that trembles is still a click: nothing moves (and so
+            # nothing read out of the file is taken over) until the pointer
+            # has really left where it was pressed.
+            if not self._moved_yet and self._is_a_click(scene_pos):
+                event.accept()
+                return
+            self._moved_yet = True
             delta = scene_pos - self._press_scene
             if any(isinstance(i, CalcItem) for i, _ in self._move_items) \
                     and not self._is_a_click(scene_pos):
@@ -3705,6 +3713,10 @@ class PageView(QGraphicsView):
         # can scroll while a note is open — so its own page is what has to be
         # recorded, not whichever the chrome calls current.
         self.begin_snapshot(self.involved_frames(item))
+        # Somebody else's text, opened: drawn here while it is typed in, and
+        # given back to its file if it is closed without a change.
+        self._edit_was_theirs = (item.serialize() if getattr(item, "still_theirs", False)
+                                 else None)
         self.scene().clearSelection()
         item.setSelected(True)
         item.begin_edit()
@@ -3744,8 +3756,14 @@ class PageView(QGraphicsView):
             return
         self._editing_item = None
         item.end_edit()
+        before, self._edit_was_theirs = self._edit_was_theirs, None
+        if before is not None and item.scene() is not None \
+                and _as_written(item.serialize()) == _as_written(before):
+            item.still_theirs = True             # untouched: the file draws it again
+            item.modified = before.get("modified", item.modified)
+            self.scene().update()
         # A text box left completely empty is an invisible click target; drop it.
-        if self._is_empty(item):
+        elif self._is_empty(item):
             detach(item)
         self.commit_snapshot("Edit text")
         self.documentEdited.emit()
@@ -3887,6 +3905,8 @@ class PageView(QGraphicsView):
         return None
 
     _opened_block = None
+    _moved_yet = False
+    _edit_was_theirs = None
 
     def open_block(self, block=None):
         """The calculation block open for editing (None if none); with
@@ -4883,6 +4903,11 @@ class PageView(QGraphicsView):
             self.selectionChanged.emit()
         menu = self.window.build_context_menu(item, scene_pos)
         menu.exec(event.globalPos())
+
+
+def _as_written(data: dict) -> dict:
+    """A markup's record, leaving out who draws it and when it was touched."""
+    return {k: v for k, v in data.items() if k not in ("still_theirs", "modified")}
 
 
 def _far_enough(a: QPointF, b: QPointF) -> bool:

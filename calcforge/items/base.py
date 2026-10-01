@@ -843,17 +843,17 @@ class MarkupItem(QGraphicsObject):
             self.update()
 
     def itemChange(self, change, value):
-        """Anything at all done to this markup takes it over.
+        """Anything done to this markup takes it over.
 
         Moving especially. While it is still theirs it is their file drawing
         it, at the place their file has it — so a markup dragged across the
         sheet without changing hands would not appear to move at all. Being
-        picked up counts too: somebody who has taken hold of a markup has
-        started working on it, and it should behave like one of ours from
-        that moment rather than at some later one they cannot predict.
+        picked out does not count: a click, or the properties showing what it
+        is, changes nothing, and the file goes on drawing it exactly as it
+        was written (the user, 2026-10-01). Undoing the change that took it
+        over gives it back to the file.
         """
         if change in (QGraphicsItem.ItemPositionHasChanged,
-                      QGraphicsItem.ItemSelectedHasChanged,
                       QGraphicsItem.ItemTransformHasChanged) \
                 and self.still_theirs and not self._still_arriving:
             self.make_it_ours()

@@ -7748,8 +7748,11 @@ def test_the_markups_on_a_page_are_there_to_be_worked_with(window, tmp_path):
     assert page.pdf_annotations, "the file goes on drawing what it drew"
     assert all(item.still_theirs for item in theirs)
     assert page.frame.left_to_us() == ()
-    # Taking hold of one hands it over, and only that one.
+    # Picking one out changes nothing (the user, 2026-10-01: it opens as
+    # written); moving it hands it over, and only that one.
     theirs[0].setSelected(True)
+    assert theirs[0].still_theirs and page.frame.left_to_us() == ()
+    theirs[0].setPos(theirs[0].pos() + QPointF(10, 0))
     assert not theirs[0].still_theirs
     assert page.frame.left_to_us() == (theirs[0].from_annotation,)
 

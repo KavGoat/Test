@@ -2331,7 +2331,9 @@ class MainWindow(QMainWindow):
         # — the source page comes through untouched and the markups go on top
         # of it, the way Bluebeam saves a marked-up drawing.
         document.path = path
-        document.modified = True
+        # Opened, not changed: nothing to save until something is (the user,
+        # 2026-10-01: a PDF opens exactly as it was written).
+        document.modified = False
         self.document = document
         self._new_undo_stack()
         # A file that had to be repaired to be read still opens, and is still

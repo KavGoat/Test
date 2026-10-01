@@ -736,3 +736,17 @@ checked against its saved files and WebSMath's recordings of SMath Cloud.
   numbers, functions and typed or automatic units all share one baseline,
   and fractions centre on the `=`. *Different from WebSMath* (deliberate);
   SMath Studio itself shows the result's unit in its units placeholder.
+- **A PDF opens exactly as written** (2026-10-01): its markups are drawn by
+  the file itself, untouched, and opening it is not a change (no "save
+  changes?" on closing an untouched file — it used to count as modified).
+  Picking a markup out — a click, a box selection, the properties and
+  style bar showing it — no longer takes it over (it did, the moment it was
+  selected). It becomes CalcForge's only when it is actually changed:
+  moved, resized, nudged, restyled, or typed into. A click that trembles a
+  pixel is not a move. Undoing the change gives it back to the file — drawn
+  as written again, and saved as the very annotation it was. A text box
+  double-clicked into is drawn here while it is open, and given back to the
+  file if it is closed without a change. Checked on Bluebeam's own drawing
+  (btx/Document1.pdf): every markup clicked and shown in Properties, all
+  still the file's, nothing to undo or save; the screen is identical pixel
+  for pixel after picking one out and letting go.
