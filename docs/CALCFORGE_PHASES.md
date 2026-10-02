@@ -838,4 +838,9 @@ checked against its saved files and WebSMath's recordings of SMath Cloud.
   picture zoomed or scrolled into view is never blank first. Measured with
   screenshots taken mid-zoom against the same view settled: at most 0.4%
   of the pixels short (was 3.5%, whole pictures missing).
-
+  No sharpening after a zoom in (the user: "Bluebeam handles it much
+  better"): once the screen is sharp and the render processes are idle,
+  what is on screen — page and markups — is also drawn at twice the zoom.
+  A zoom in of up to 2× then shrinks that sharper drawing instead of
+  stretching a softer one (measured: 1.17× the resolution needed, where it
+  was 0.58×), so when the exact zoom arrives nothing visibly changes.

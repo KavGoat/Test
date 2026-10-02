@@ -236,3 +236,37 @@ def test_markups_off_screen_have_their_look_made_ahead(pdf_window, qapp):
               if isinstance(key, pdftiles.AnnotationTileKey) and key.source == source
               and key.index == third.page.pdf_page_index}
     assert {item.from_annotation for item in markups} <= wanted
+
+
+def test_a_sharp_idle_screen_is_drawn_ahead_at_twice_the_zoom(qapp):
+    """So a zoom in shrinks something sharper rather than stretching something
+    softer: the page never goes soft and then sharpens (the user, 2026-10-02:
+    "Why is there page sharpening? Bluebeam handles it much better")."""
+    from calcforge.io import pdftiles
+
+    cache, asked = _cache()
+    view = QRectF(0, 0, 600, 400)
+    cache.tiles("pdf", b"%PDF-", 0, PAGE, 1.0, view)
+    cache.ahead("pdf", b"%PDF-", 0, PAGE, 1.0, view)
+    assert not [k for k in asked if k.scale == 2.0], "not while the screen is still coming"
+    _fill(cache, list(cache._waiting))
+    asked.clear()
+    cache.ahead("pdf", b"%PDF-", 0, PAGE, 1.0, view)
+    ahead = [k for k in asked if isinstance(k, pdftiles.TileKey)]
+    assert ahead and {k.scale for k in ahead} == {2.0}
+    # a zoom elsewhere on the page does not give them up
+    cache.tiles("pdf", b"%PDF-", 0, PAGE, 1.0, view)
+    assert set(ahead) <= cache._waiting
+    _fill(cache, ahead)
+    ready, missing, covered = cache.tiles("pdf", b"%PDF-", 0, PAGE, 1.7, view,
+                                          say_covered=True)
+    assert missing and covered
+    assert {round(p.width() / w.width(), 2) for w, p in ready} == {2.0}, \
+        "zoomed in, the sharper drawing stands in"
+
+
+def test_nothing_is_drawn_ahead_while_a_zoom_moves(qapp):
+    cache, asked = _cache()
+    cache.hold(5.0)
+    cache.ahead("pdf", b"%PDF-", 0, PAGE, 1.0, QRectF(0, 0, 600, 400))
+    assert not asked

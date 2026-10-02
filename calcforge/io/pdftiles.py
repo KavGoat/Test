@@ -443,6 +443,10 @@ class TileCache(QObject):
         # through a dozen zooms in half a second, and drawing each of them was
         # all the render processes did while the one wanted waited behind them.
         self._held_until = 0.0
+        # Squares asked for ahead — what is on screen at twice the zoom, drawn
+        # while nothing else is wanted (see ahead()). A zoom does not give
+        # them up the way it gives up the zoom before it.
+        self._ahead: set = set()
 
     # -- the thread --------------------------------------------------------
     def _started(self) -> _Worker:
@@ -514,6 +518,54 @@ class TileCache(QObject):
 
     def let_go(self) -> None:
         self._held_until = 0.0
+
+    # -- ahead of the zoom ------------------------------------------------------
+    #: The most squares drawn ahead for one page or markup at once.
+    MOST_AHEAD = 16
+
+    def _busy(self) -> bool:
+        """Whether anything is wanted that is not ahead-of-time."""
+        return len(self._waiting) > len(self._ahead & self._waiting)
+
+    def ahead(self, source: str, data: bytes, index: int, page: QRectF,
+              scale: float, region: QRectF, annotations: bool = True,
+              without: tuple = ()) -> None:
+        """With the screen sharp and nothing else to draw, draw what is on
+        screen at twice the zoom. A zoom in then has something sharper than
+        it needs to stand in while its own zoom is drawn — shrunk, it is
+        crisp — so the page never goes soft and then sharpens; the moment
+        the zoom wanted arrives, nothing visible changes. Bluebeam's zoom
+        looks like that (the user, 2026-10-02)."""
+        if self.held() or self._busy() or not data:
+            return
+        step = zoom_step(min(scale * 2.0, 64.0))
+        keys = self._squares(TileKey, source, index, step, QRectF(region).intersected(page),
+                             annotations, tuple(without))
+        self._ask_ahead(keys, ("page", source, index, annotations, tuple(without)),
+                        data, page)
+
+    def _squares(self, kind, source, index, step, wanted, *rest) -> list:
+        if wanted.isEmpty():
+            return []
+        size = TILE / step
+        return [kind(source, index, step, col, row, *rest)
+                for row in range(max(int(wanted.top() // size), 0),
+                                 int((wanted.bottom() - 1e-6) // size) + 1)
+                for col in range(max(int(wanted.left() // size), 0),
+                                 int((wanted.right() - 1e-6) // size) + 1)]
+
+    def _ask_ahead(self, keys, page_key, data, page) -> None:
+        # what was ahead for this page before, and is not now, is given up
+        stale = {key for key in self._ahead
+                 if self._page_of(key) == page_key and key not in keys}
+        self._waiting.difference_update(stale)
+        self._ahead.difference_update(stale)
+        if len(keys) > self.MOST_AHEAD:
+            return
+        for key in keys:
+            if key not in self._tiles and key not in self._waiting:
+                self._ahead.add(key)
+                self._ask(key, data, page, sheet=False)
 
     # -- the index -------------------------------------------------------------
     @staticmethod
@@ -723,6 +775,16 @@ class TileCache(QObject):
                         ready.append((key.page_rect(), found))
                     continue
                 wanting.append(key)
+        if not wanting and not self.held() and not self._busy():
+            # all of it here: draw it ahead at twice the zoom (ahead())
+            twice = zoom_step(min(step * 2.0, 64.0))
+            size2 = TILE / twice
+            keys = [AnnotationTileKey(source, index, xref, twice, col, row, edges)
+                    for row in range(max(int(wanted.top() // size2), 0),
+                                     int((wanted.bottom() - 1e-6) // size2) + 1)
+                    for col in range(max(int(wanted.left() // size2), 0),
+                                     int((wanted.right() - 1e-6) // size2) + 1)]
+            self._ask_ahead(keys, ("markup", source, index, xref), data, page)
         if wanting:
             others, covers = self._stand_ins(("markup", source, index, xref),
                                              step, wanted)
@@ -792,7 +854,8 @@ class TileCache(QObject):
             retained.extend(requests[(source, index)] for requests in self._consumers.values()
                             if (source, index) in requests)
         stale = [key for key in self._waiting
-                 if isinstance(key, TileKey) and key.source == source
+                 if isinstance(key, TileKey) and key not in self._ahead
+                 and key.source == source
                  and key.index == index
                  and not any(key.scale == scale and key.without == omitted
                              and (area is None or key.page_rect().intersects(area))
@@ -816,6 +879,7 @@ class TileCache(QObject):
         if key not in self._waiting:
             return
         self._waiting.discard(key)
+        self._ahead.discard(key)
         if image.isNull():
             self._render_failed(key)
             return
@@ -870,12 +934,14 @@ class TileCache(QObject):
             self._held = 0
             self._sheet_bytes = 0
             self._waiting.clear()
+            self._ahead.clear()
             self._failures.clear()
             self._consumers.clear()
             if self._worker is not None:
                 self._worker.drop("")
             return
         self._waiting.difference_update(key for key in list(self._waiting) if key.source == source)
+        self._ahead.difference_update(key for key in list(self._ahead) if key.source == source)
         for key in list(self._failures):
             if key.source == source:
                 del self._failures[key]

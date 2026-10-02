@@ -445,6 +445,11 @@ class PageFrame(QGraphicsObject):
                 page.pdf_key, data, index, whole, scale, asked, shown, without,
                 consumer=consumer, say_covered=True, shown=shown_part)
             self._ask_for_markup_previews(scale)
+            if not missing:
+                # sharp and idle: what is on screen at twice the zoom, so a
+                # zoom in never shows the page soft (TileCache.ahead)
+                pdftiles.TILES.ahead(page.pdf_key, data, index, whole, scale,
+                                     shown_part, shown, without)
         if missing and not covered:
             # Only while the tiles are still coming, and only the part of it
             # that is on screen: stretching the whole small picture over a
