@@ -11,3 +11,4 @@ htmlcov/
 *.cfx
 !examples/*.cfx
 .DS_Store
+text_maths_error.log

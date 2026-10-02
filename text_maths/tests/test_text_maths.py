@@ -1,0 +1,452 @@
+"""Run with:  python -m pytest text_maths/tests"""
+
+import ctypes
+import os
+import subprocess
+import sys
+import time
+
+import pytest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+sys.path.insert(0, ROOT)
+
+import text_maths_core as core  # noqa: E402
+from text_maths_core import process_text  # noqa: E402
+
+
+def calc(text, mode):
+    return process_text(text, mode)
+
+
+def last(text, mode):
+    return calc(text, mode).splitlines()[-1]
+
+
+# ------------------------------------------------------------ pure maths
+
+@pytest.mark.parametrize("line, expected", [
+    ("5+5=", "5+5= 10"),
+    ("2^3=", "2^3= 8"),
+    ("2**3=", "2**3= 8"),
+    ("1/3=", "1/3= 0.333"),
+    ("0.05=", "0.05= 0.05"),
+    ("0.1+0.2=", "0.1+0.2= 0.3"),
+    ("1e7/3=", "1e7/3= 3.333e6"),
+    ("2^20=", "2^20= 1048576"),
+    ("1/7*1e-5=", "1/7*1e-5= 1.429e-6"),
+    ("-2^2=", "-2^2= -4"),
+    ("2^3^2=", "2^3^2= 512"),
+    ("2pi=", "2pi= 6.283"),
+    ("2(3+4)=", "2(3+4)= 14"),
+    ("(1+2)(3+4)=", "(1+2)(3+4)= 21"),
+    ("3×4÷2−1=", "3×4÷2−1= 5"),
+    ("5%*200=", "5%*200= 10"),
+    ("√16=", "√16= 4"),
+    ("3² =", "3² = 9"),
+    ("sin(30)=", "sin(30)= 0.5"),
+    ("cos(60)=", "cos(60)= 0.5"),
+    ("asin(0.5)=", "asin(0.5)= 30°"),
+    ("sin(radians(30))=", "sin(radians(30))= 0.5"),
+    ("degrees(pi)=", "degrees(pi)= 180°"),
+    ("sin(30°)=", "sin(30°)= 0.5"),
+    ("max(1,2,3)=", "max(1,2,3)= 3"),
+    ("min([4,2,8])=", "min([4,2,8])= 2"),
+    ("lin_int((0,0),(10,100),5)=", "lin_int((0,0),(10,100),5)= 50"),
+    ("round(2.567, 1)=", "round(2.567, 1)= 2.6"),
+    ("cbrt(-8)=", "cbrt(-8)= -2"),
+    ("log(100, 10)=", "log(100, 10)= 2"),
+    ("ln(e)=", "ln(e)= 1"),
+    ("ge=", "ge= 9.81"),
+    ("area = 5*3 =", "area = 5*3 = 15"),
+])
+def test_pure(line, expected):
+    assert calc(line, "pure") == expected
+
+
+@pytest.mark.parametrize("line, message", [
+    ("10/0=", "division by zero"),
+    ("(1+2=", "bracket"),
+    ("2x=", "unknown name 'x'"),
+    ("(-8)^(1/3)=", "fractional power"),
+    ("10^400=", "too big"),
+    ("asin(2)=", "between -1 and 1"),
+    ("sqrt(-1)=", "negative"),
+    ("sin=", "needs brackets"),
+    ("max(1, 2m)=", "unknown name"),
+])
+def test_pure_errors(line, message):
+    out = calc(line, "pure")
+    assert out.startswith(line) and "[Error:" in out and message in out
+
+
+@pytest.mark.parametrize("text", [
+    "hello = world",
+    "no equals sign here",
+    "if x >= 5 then y = 2",
+    "a == b",
+    "# 5+5=",
+    "Total = 5 bolts",
+    "",
+])
+def test_prose_is_left_alone(text):
+    for mode in core.MODES:
+        assert calc(text, mode) == text
+
+
+def test_rerun_recalculates_old_answers_and_errors():
+    assert calc("5+5= 11", "pure") == "5+5= 10"
+    assert calc("5+5= [Error: old]", "pure") == "5+5= 10"
+    assert calc("5+5= 10", "pure") == "5+5= 10"
+
+
+# ------------------------------------------------------------ units
+
+@pytest.mark.parametrize("line, expected", [
+    ("5m+5m=m", "5m+5m= 10m"),
+    ("5mm+5mm=", "5mm+5mm= 10mm"),
+    ("5 kN + 3 kN =", "5 kN + 3 kN = 8kN"),
+    ("1kN+500N=", "1kN+500N= 1.5kN"),
+    ("5kN*2m=", "5kN*2m= 10kNm"),
+    ("10kN/(2m^2)=", "10kN/(2m^2)= 5kPa"),
+    ("20kN/m*(6m)^2/8=", "20kN/m*(6m)^2/8= 90kNm"),
+    ("10kN/m*2=", "10kN/m*2= 20kN/m"),
+    ("5MPa*100mm^2=", "5MPa*100mm^2= 500N"),
+    ("5MPa*100mm^2 = kN", "5MPa*100mm^2 = 0.5kN"),
+    ("5kN = (N)", "5kN = 5000N"),
+    ("6m = mm", "6m = 6000mm"),
+    ("1m^2= mm^2", "1m^2= 1e6mm²"),
+    ("100kN/(300mm*500mm)=", "100kN/(300mm*500mm)= 666.667kPa"),
+    ("32MPa*0.85=", "32MPa*0.85= 27.2MPa"),
+    ("200GPa*2=", "200GPa*2= 400GPa"),
+    ("45kNm/(1.2e6mm^3)=", "45kNm/(1.2e6mm^3)= 37.5MPa"),
+    ("9.81kg*ge=", "9.81kg*ge= 96.236N"),
+    ("2t*ge=", "2t*ge= 19.62kN"),
+    ("200mm*(300mm)^3/12=", "200mm*(300mm)^3/12= 450e6mm⁴"),
+    ("200mm*300mm^3/12=", "200mm*300mm^3/12= 5000mm⁴"),     # 300 mm³, not (300mm)³
+    ("2sin(30deg)=", "2sin(30deg)= 1"),
+    ("sin(30°)=", "sin(30°)= 0.5"),
+    ("asin(0.5)=", "asin(0.5)= 30°"),
+    ("atan2(1m, 1m)=", "atan2(1m, 1m)= 45°"),
+    ("sqrt(16m^2)=", "sqrt(16m^2)= 4m"),
+    ("5kn+5KN=", "5kn+5KN= 10kN"),
+    ("10mpa*2=", "10mpa*2= 20MPa"),
+    ("1 kN = 1000 N", "1 kN = 1000N"),
+    ("3m/1.5m=", "3m/1.5m= 2"),
+    ("5000mm/1m=", "5000mm/1m= 5"),
+    ("max(1m, 500mm)=", "max(1m, 500mm)= 1m"),
+    ("round(1.2345m, 2)=", "round(1.2345m, 2)= 1.23m"),
+    ("6kNm/(2kN)=", "6kNm/(2kN)= 3m"),
+    ("10 kNm + 5 kN*m =", "10 kNm + 5 kN*m = 15kNm"),
+])
+def test_units(line, expected):
+    assert calc(line, "units") == expected
+
+
+@pytest.mark.parametrize("line, message", [
+    ("5kN+2m=", "can't add a force and a length"),
+    ("5kN = mm", "the answer is a force, not mm"),
+    ("sin(5m)=", "needs an angle"),
+    ("2^(3m)=", "plain number"),
+])
+def test_unit_errors(line, message):
+    out = calc(line, "units")
+    assert "[Error:" in out and message in out
+
+
+def test_unit_request_survives_a_rerun_and_an_error():
+    once = calc("6m = mm", "units")
+    assert calc(once, "units") == once
+    bad = calc("5kN = mm", "units")
+    assert bad.startswith("5kN = mm [Error:")
+    assert calc(bad, "units") == bad
+
+
+def test_stale_answer_with_wrong_kind_of_unit_is_recalculated():
+    assert calc("5+5= 10m", "units") == "5+5= 10"
+
+
+def test_old_original_format_answers_are_recognised():
+    assert calc("b*h = 1066.667e+06mm⁴", "units") == "b*h = 1066.667e+06mm⁴"  # b unknown: left
+    assert calc("2m*3m= 6000000mm²", "units") == "2m*3m= 6e6mm²"
+
+
+def test_units_are_off_in_pure_mode():
+    assert "unknown name 'm'" in calc("5m+5m=", "pure")
+
+
+def test_function_names_are_not_read_as_units():
+    # "sin" could be s·in, "min" is minutes: a bracket means a function.
+    assert calc("2sin(30)=", "units") == "2sin(30)= 1"
+    assert calc("min(3m, 2m)=", "units") == "min(3m, 2m)= 2m"
+    assert calc("5min=", "units") == "5min= 5min"
+
+
+# ------------------------------------------------------------ variables
+
+BEAM = "L = 6m\nw = 10kN/m\nM = w*L^2/8 =\n"
+
+
+def test_variables_basic():
+    assert calc(BEAM, "variables") == "L = 6m\nw = 10kN/m\nM = w*L^2/8 = 45kNm\n"
+
+
+def test_variables_chain_and_display():
+    out = calc("a=5\nb=a*2=\na+b=\nb =", "variables")
+    assert out == "a=5\nb=a*2= 10\na+b= 15\nb = 10"
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("x = 5 kN\nx*2 =", "x*2 = 10kN"),
+    ("m = 5kg\nF = m*ge =", "F = m*ge = 49.05N"),
+    ("L=6m\nL*2 = (mm)", "L*2 = 12000mm"),
+    ("b = 200mm\nh = 400mm\nI = b*h^3/12 =", "I = b*h^3/12 = 1.067e9mm⁴"),
+    ("a = 2\n2a =", "2a = 4"),
+    ("t = 10mm\n2 t =", "2 t = 20mm"),          # spaced: the variable wins
+    ("t = 10mm\n2t =", "2t = 2t"),              # attached: always the unit
+    ("σ = 5MPa\nσ*2 =", "σ*2 = 10MPa"),
+    ("f'c = 40MPa\nf'c/2 =", "f'c/2 = 20MPa"),
+    ("f_c = 32MPa\n0.85*f_c =", "0.85*f_c = 27.2MPa"),
+    ("M₁ = 3kNm\nM₁*2 =", "M₁*2 = 6kNm"),
+    ("N = 500kN\nA = 300mm*300mm\nN/A =", "N/A = 5.556MPa"),
+    ("e = 50mm\npi*e =", "pi*e = 157.08mm"),     # a variable hides the constant
+    ("E = 200GPa\ne =", "e = 2.718"),            # names are case sensitive
+    ("L = 6m\nL2 = L*2 = mm\nL2 =", "L2 = 12000mm"),
+    ("x = 5 # comment\nx*2 =", "x*2 = 10"),
+    ("m = 5kg\nL = 6m\nL*m =", "L*m = 30kg·m"),
+    ("rho = 2400kg/m3\nrho*ge =", "rho*ge = 23.544kN/m³"),
+    ("v = 3m/s\nv*2 =", "v*2 = 6m/s"),
+])
+def test_variables(text, expected):
+    assert last(text, "variables") == expected
+
+
+def test_variable_errors():
+    assert "unknown name 'q'" in calc("y = q*2 =", "variables")
+    out = calc("x = 5kN + 2m", "variables")
+    assert out == "x = 5kN + 2m [Error: can't add a force and a length]"
+    assert calc(out, "variables") == out
+    # A broken line doesn't stop the rest.
+    assert calc("y = q*2 =\nz = 3\nz*2 =", "variables").endswith("z*2 = 6")
+
+
+def test_assignment_that_is_prose_is_left_alone():
+    text = "Note = see drawing\nx = 2\nx ="
+    assert calc(text, "variables") == "Note = see drawing\nx = 2\nx = 2"
+
+
+def test_variables_rerun_is_stable_and_updates():
+    once = calc(BEAM, "variables")
+    assert calc(once, "variables") == once
+    changed = once.replace("L = 6m", "L = 4m")
+    assert "M = w*L^2/8 = 20kNm" in calc(changed, "variables")
+
+
+# ------------------------------------------------------------ substitution
+
+@pytest.mark.parametrize("text, expected", [
+    (BEAM, "M = w*L^2/8 = 10kN/m*(6m)^2/8 = 45kNm"),
+    ("a=5\nb=a*2=", "b=a*2= 5*2 = 10"),
+    ("b = 200mm\nh = 400mm\nI = b*h^3/12 =", "I = b*h^3/12 = 200mm*(400mm)^3/12 = 1.067e9mm⁴"),
+    ("a = -2\nb = 3 - a =", "b = 3 - a = 3 - (-2) = 5"),
+    ("a = -2\nc = a^2 =", "c = a^2 = (-2)^2 = 4"),
+    ("L = 6m\nx = 2L =", "x = 2L = 2*6m = 12m"),
+    ("L = 6m\nx = L(1+1) =", "x = L(1+1) = 6m*(1+1) = 12m"),
+    ("L = 6m\nx = L² =", "x = L² = (6m)² = 36m²"),
+    ("m = 5kg\nF = m*ge =", "F = m*ge = 5kg*9.81m/s² = 49.05N"),
+    ("w = 10kN/m\nx = 5kN\nx/w =", "x/w = 5kN/(10kN/m) = 0.5m"),
+    ("L=6m\nL*2 = (mm)", "L*2 = 6m*2 = 12000mm"),
+    ("L = 6m\nL =", "L = 6m"),
+    ("x = 3\ny = 2x + 1 =", "y = 2x + 1 = 2*3 + 1 = 7"),
+    ("5+5=", "5+5= 10"),
+])
+def test_substitution(text, expected):
+    assert last(text, "substitution") == expected
+
+
+def test_substitution_rerun_replaces_old_working():
+    once = calc(BEAM, "substitution")
+    assert calc(once, "substitution") == once
+    changed = once.replace("w = 10kN/m", "w = 20kN/m")
+    assert last(changed, "substitution") == "M = w*L^2/8 = 20kN/m*(6m)^2/8 = 90kNm"
+    # Switching to the plain Variables script drops the working.
+    assert last(once, "variables") == "M = w*L^2/8 = 45kNm"
+
+
+# ------------------------------------------------------------ text handling
+
+def test_line_endings_and_trailing_newline_are_kept():
+    assert calc("x=1\r\ny=x+1=\r\n", "variables") == "x=1\r\ny=x+1= 2\r\n"
+    assert calc("1+1=\n\n2+2=\n", "pure") == "1+1= 2\n\n2+2= 4\n"
+    assert calc("1+1=\x0b2+2=", "pure") == "1+1= 2\x0b2+2= 4"       # Word soft break
+    assert calc("  1+1=  \n", "pure") == "  1+1= 2\n"
+
+
+def test_non_breaking_spaces_from_word_or_web():
+    assert calc("5\xa0kN\xa0+\xa03\xa0kN =", "units") == "5\xa0kN\xa0+\xa03\xa0kN = 8kN"
+
+
+def test_unexpected_characters_do_not_crash():
+    for text in ["5 & 3 =", "x = 'hello'", "=", "==", "= =", "a = = 5", "(" * 2000 + "1=",
+                 "1" * 5000 + "=", "€5 =", "5@3=", ")=", "1,2=", "()="]:
+        for mode in core.MODES:
+            calc(text, mode)        # must not raise
+
+
+def test_big_input_is_fast():
+    lines = [f"x{i} = {i}mm" for i in range(500)] + [f"x{i}*2 =" for i in range(500)]
+    text = "\n".join(lines)
+    start = time.perf_counter()
+    out = calc(text, "substitution")
+    assert time.perf_counter() - start < 1.0
+    assert out.splitlines()[-1] == "x499*2 = 499mm*2 = 998mm"
+
+
+@pytest.mark.parametrize("value, text", [
+    (0, "0"), (-0.0, "0"), (12.5, "12.5"), (1 / 3, "0.333"), (0.0123456, "0.0123"),
+    (1066666666.67, "1.067e9"), (999999.9, "999999.9"), (999999999.9996, "1e9"), (0.0001234, "123.4e-6"),
+    (-2.5e7, "-25e6"), (float("inf"), "inf"),
+])
+def test_number_format(value, text):
+    assert core.format_number(value) == text
+
+
+# ------------------------------------------------------------ clipboard + paste
+
+class FakeSystem:
+    def __init__(self, text):
+        self.text = text
+        self.pasted = False
+
+    def get(self):
+        return self.text
+
+    def set(self, text):
+        self.text = text
+
+    def paste(self):
+        self.pasted = True
+
+
+@pytest.fixture
+def fake(monkeypatch):
+    holder = {}
+
+    def make(text):
+        holder["system"] = FakeSystem(text)
+        monkeypatch.setattr(core, "_Fallback", lambda: holder["system"])
+        monkeypatch.setattr(core.sys, "platform", "linux")
+        return holder["system"]
+    return make
+
+
+def test_run_pastes_the_result(fake):
+    system = fake("L = 6m\nL*2 =\n")
+    core.run("variables")
+    assert system.text == "L = 6m\nL*2 = 12m\n" and system.pasted
+
+
+def test_run_does_not_paste_when_nothing_changed(fake):
+    system = fake("just some text = here")
+    core.run("variables")
+    assert not system.pasted
+
+
+def test_run_does_not_paste_an_empty_clipboard(fake):
+    system = fake("")
+    core.run("pure")
+    assert not system.pasted
+
+
+def test_run_logs_instead_of_crashing(monkeypatch, tmp_path):
+    log = tmp_path / "log.txt"
+    monkeypatch.setattr(core, "ERROR_LOG", str(log))
+    monkeypatch.setattr(core.sys, "platform", "linux")
+
+    def broken():
+        raise RuntimeError("no clipboard")
+    monkeypatch.setattr(core, "_Fallback", broken)
+    core.run("pure")
+    assert "no clipboard" in log.read_text()
+
+
+class _FakeDLL:
+    """Stands in for user32/kernel32 so the Win32 code runs on any OS."""
+
+    def __init__(self, calls):
+        self._calls = calls
+
+    def __getattr__(self, name):
+        calls = self._calls
+
+        class Function:
+            argtypes = restype = None
+
+            def __call__(self, *args):
+                calls.append((name, args))
+                return {"GetAsyncKeyState": 0, "OpenClipboard": 1, "MapVirtualKeyW": 47,
+                        "SendInput": 4}.get(name, 1)
+        function = Function()
+        setattr(self, name, function)
+        return function
+
+
+def test_windows_paste_sends_ctrl_v(monkeypatch):
+    calls = []
+    monkeypatch.setattr(ctypes, "WinDLL", lambda *a, **k: _FakeDLL(calls), raising=False)
+    monkeypatch.setattr(core, "PASTE_DELAY_S", 0)
+    win = core._Windows()
+    assert ctypes.sizeof(win.INPUT) == (40 if ctypes.sizeof(ctypes.c_void_p) == 8 else 28)
+    win.paste()
+    count, inputs, size = next(args for name, args in calls if name == "SendInput")
+    keys = [(inputs[i].ki.wVk, inputs[i].ki.dwFlags) for i in range(count)]
+    assert keys == [(0x11, 0), (0x56, 0), (0x56, 2), (0x11, 2)]
+    assert size == ctypes.sizeof(win.INPUT)
+
+
+def test_windows_paste_waits_for_hotkey_modifiers(monkeypatch):
+    calls = []
+    monkeypatch.setattr(ctypes, "WinDLL", lambda *a, **k: _FakeDLL(calls), raising=False)
+    monkeypatch.setattr(core, "PASTE_DELAY_S", 0)
+    monkeypatch.setattr(core, "MODIFIER_WAIT_S", 0.05)
+    win = core._Windows()
+    win.user32.GetAsyncKeyState = lambda vk: -32768 if vk == 0x12 else 0   # Alt stuck down
+    win.paste()
+    count, inputs, _ = next(args for name, args in calls if name == "SendInput")
+    keys = [(inputs[i].ki.wVk, inputs[i].ki.dwFlags) for i in range(count)]
+    assert keys[0] == (0x12, 2)            # Alt lifted before Ctrl+V
+    assert keys[1:] == [(0x11, 0), (0x56, 0), (0x56, 2), (0x11, 2)]
+
+
+# ------------------------------------------------------------ launchers
+
+LAUNCHERS = {
+    "Text Maths - Pure Maths.pyw": "pure",
+    "Text Maths - Pure Maths and Units.pyw": "units",
+    "Text Maths - Variables.pyw": "variables",
+    "Text Maths - Variables with Substitution.pyw": "substitution",
+}
+
+
+@pytest.mark.parametrize("name, mode", LAUNCHERS.items())
+def test_launcher_runs_its_mode(name, mode, tmp_path):
+    # Run each launcher for real with a stub pyperclip/pyautogui on the path.
+    stub = tmp_path / "stub"
+    stub.mkdir()
+    (stub / "pyperclip.py").write_text(
+        "import os\nF=os.environ['CLIP']\n"
+        "def paste(): return open(F, encoding='utf-8').read()\n"
+        "def copy(t): open(F, 'w', encoding='utf-8').write(t)\n")
+    (stub / "pyautogui.py").write_text(
+        "import os\ndef hotkey(*k): open(os.environ['CLIP']+'.keys','w').write('+'.join(k))\n")
+    clip = tmp_path / "clip.txt"
+    clip.write_text("L = 6m\nL*2 =", encoding="utf-8")
+    env = dict(os.environ, CLIP=str(clip), PYTHONPATH=str(stub))
+    subprocess.run([sys.executable, os.path.join(ROOT, name)], env=env, check=True)
+    expected = {"pure": "L = 6m\nL*2 = [Error: unknown name 'L']",
+                "units": "L = 6m\nL*2 = [Error: unknown name 'L']",
+                "variables": "L = 6m\nL*2 = 12m",
+                "substitution": "L = 6m\nL*2 = 6m*2 = 12m"}[mode]
+    assert clip.read_text(encoding="utf-8") == expected
+    assert (tmp_path / "clip.txt.keys").read_text() == "ctrl+v"
