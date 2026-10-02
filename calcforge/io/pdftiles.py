@@ -25,7 +25,7 @@ import weakref
 
 from PySide6.QtCore import (QCoreApplication, QObject, QRectF, Qt, QThread,
                             Signal, QTimer)
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtGui import QImage, QPixmap, QRegion
 
 
 #: How big a tile is, in screen pixels.
@@ -433,6 +433,16 @@ class TileCache(QObject):
         self._consumers = weakref.WeakKeyDictionary()
         self._worker: Optional[_Worker] = None
         self._farewell = False
+        # What is drawn of each page (and of each of its markups), by zoom:
+        # {page key: {scale: {key, ...}}}. Finding what can stand in for a
+        # zoom still coming used to mean looking through every tile cached —
+        # thousands, once a few sheets had been zoomed about — for every page
+        # and every markup on every frame of a zoom (2026-10-02).
+        self._index: dict = {}
+        # Until when new squares are not asked for: a zoom on the wheel goes
+        # through a dozen zooms in half a second, and drawing each of them was
+        # all the render processes did while the one wanted waited behind them.
+        self._held_until = 0.0
 
     # -- the thread --------------------------------------------------------
     def _started(self) -> _Worker:
@@ -491,30 +501,141 @@ class TileCache(QObject):
     def _sheets_wanted(self) -> int:
         return sum(1 for key in self._waiting if isinstance(key, SheetKey))
 
+    # -- a zoom in progress --------------------------------------------------
+    def hold(self, seconds: float = 0.15) -> None:
+        """Ask for no new squares for *seconds*: the zoom on screen is still
+        moving, and what is already drawn stands in, scaled, until it stops.
+        Each call pushes the end out; whoever is zooming repaints when it
+        comes, which asks for the squares of the zoom it stopped at."""
+        self._held_until = max(self._held_until, time.monotonic() + seconds)
+
+    def held(self) -> bool:
+        return time.monotonic() < self._held_until
+
+    def let_go(self) -> None:
+        self._held_until = 0.0
+
+    # -- the index -------------------------------------------------------------
+    @staticmethod
+    def _page_of(key):
+        if isinstance(key, AnnotationTileKey):
+            return ("markup", key.source, key.index, key.xref)
+        return ("page", key.source, key.index, key.annotations, key.without)
+
+    def _keep(self, key, pixmap: QPixmap) -> None:
+        self._held -= _weight(self._tiles.pop(key, None))
+        self._tiles[key] = pixmap
+        self._held += _weight(pixmap)
+        self._index.setdefault(self._page_of(key), {}).setdefault(
+            key.scale, set()).add(key)
+
+    def _drop(self, key) -> None:
+        pixmap = self._tiles.pop(key, None)
+        self._held -= _weight(pixmap)
+        page = self._index.get(self._page_of(key))
+        if page is None:
+            return
+        rung = page.get(key.scale)
+        if rung is not None:
+            rung.discard(key)
+            if not rung:
+                del page[key.scale]
+        if not page:
+            del self._index[self._page_of(key)]
+
+    def _stand_ins(self, page_key, step: float, region: QRectF,
+                   pixels=False, already=()) -> tuple[list, bool]:
+        """What other zooms have of *region*, and whether it covers it.
+
+        Not every zoom ever drawn, stacked: the nearest that covers it — a
+        little sharper by choice, since shrinking looks better than
+        stretching — and, only where that one has gaps, the next nearest
+        under it. Stacking every rung a zoom had passed through was thirty
+        thousand pictures drawn over each other in one gesture on a marked-up
+        page (Calcs.pdf, 2026-10-02). Drawn worst first, so the best is on top.
+        """
+        page = self._index.get(page_key) or {}
+
+        def unlikeness(scale: float) -> float:
+            apart = math.log2(scale / step)
+            # sharper is better than softer; far sharper is a lot of squares
+            return apart * 0.6 if 0 < apart <= 2 else abs(apart) + (4 if apart > 2 else 0)
+
+        wanted = QRectF(region)
+        area = max(wanted.width() * wanted.height(), 1e-9)
+        unit = 16.0                      # coverage on a grid of 1/16 point
+        chosen, covered = [], QRegion()
+
+        def cover(where):
+            nonlocal covered
+            part = where.intersected(wanted)
+            if part.isEmpty():
+                return
+            covered = covered.united(QRegion(
+                math.floor(part.left() * unit), math.floor(part.top() * unit),
+                max(math.ceil(part.width() * unit), 1),
+                max(math.ceil(part.height() * unit), 1)))
+
+        def inside():
+            return sum(r.width() * r.height() for r in covered) / unit / unit
+
+        for where in already:
+            cover(where)
+        if inside() >= area * 0.999:
+            return [], True
+        for scale in sorted((s for s in page if s != step), key=unlikeness)[:6]:
+            here = []
+            for key in page[scale]:
+                pixmap = self._tiles.get(key)
+                if pixmap is None or pixmap.isNull():
+                    continue
+                where = key.page_rect(pixmap) if pixels else key.page_rect()
+                if where.intersects(wanted):
+                    here.append((where, pixmap))
+            if not here:
+                continue
+            chosen.append(here)
+            for where, _pixmap in here:
+                cover(where)
+            if inside() >= area * 0.999 or len(chosen) >= 3:
+                break
+        drawn = [entry for here in reversed(chosen) for entry in here]
+        return drawn, inside() >= area * 0.999
+
     def tiles(self, source: str, data: bytes, index: int, page: QRectF,
               scale: float, region: QRectF, annotations: bool = True,
-              without: tuple = (), consumer=None
-              ) -> tuple[list[tuple[QRectF, QPixmap]], bool]:
+              without: tuple = (), consumer=None, say_covered: bool = False,
+              shown: Optional[QRectF] = None):
         """Every tile of *region* that is ready, and whether any is missing.
 
         The missing ones are asked for on the way past. Whether anything is
         missing is what decides if the small picture of the page needs drawing
         underneath: once the tiles cover what is on screen, it does not, and
         skipping it saves a full-page scaled blit on every repaint.
+
+        With *say_covered*, a third answer: whether what is ready, other zooms
+        standing in, covers *shown* (what is on screen; *region* without it)
+        without the small picture.
         """
         step = zoom_step(scale)
         without = tuple(without)
         size = TILE / step
+
+        def answer(ready, missing, covers):
+            return (ready, missing, covers) if say_covered else (ready, missing)
+
         if size <= 0:
-            return [], True
+            return answer([], True, False)
         wanted = QRectF(region).intersected(page)
         if wanted.isEmpty():
-            return [], False
+            return answer([], False, True)
+        seen = wanted if shown is None else QRectF(shown).intersected(wanted)
         first_col = max(int(wanted.left() // size), 0)
         last_col = int((wanted.right() - 1e-6) // size)
         first_row = max(int(wanted.top() // size), 0)
         last_row = int((wanted.bottom() - 1e-6) // size)
         self._stop_wanting(source, index, step, without, consumer, wanted)
+        held = self.held()
         ready: list[tuple[QRectF, QPixmap]] = []
         wanting: list = []
         missing = False
@@ -533,13 +654,32 @@ class TileCache(QObject):
                 wanting.append(key)
         if missing:
             # Something better than the small picture of the whole page while
-            # the squares for this zoom are still coming: whatever is already
+            # the squares for this zoom are still coming: what is already
             # drawn of this page at another zoom. Zooming in on a sheet that
             # was sharp should not go soft on the way — the rung below is half
             # the resolution, not a thumbnail of the entire drawing — and
-            # these are drawn under the tiles that are ready, coarsest first.
-            ready = self._standing_in(source, index, step, wanted,
-                                      annotations, without) + ready
+            # these are drawn under the tiles that are ready.
+            on_screen_missing = any(key.page_rect().intersects(seen)
+                                    and self._failures.get(key, (0,))[0] < 3
+                                    for key in wanting)
+            standing, covers = self._standing_in(source, index, step, seen,
+                                                 annotations, without)
+            if on_screen_missing and covers:
+                # All at once: what is on screen goes sharp in one go when the
+                # last of its squares is in, not square by square over a
+                # blurred page — a patchwork that reads as the page being
+                # repainted (the user, 2026-10-02).
+                ready = standing
+            else:
+                standing, covers = self._standing_in(
+                    source, index, step, seen, annotations, without,
+                    already=[where for where, _pixmap in ready])
+                ready = standing + ready
+        else:
+            covers = True
+        if held:
+            # mid-zoom: what is here stands in, and nothing new is started
+            return answer(ready, missing, covers)
         # Nearest the middle of what is being looked at first, and never more
         # than a few screenfuls at once. A repaint that asks for a thousand
         # tiles is a repaint whose answers arrive minutes later, by which time
@@ -552,7 +692,7 @@ class TileCache(QObject):
         wanting.reverse()
         for key in wanting:
             self._ask(key, data, page, sheet=False)
-        return ready, missing
+        return answer(ready, missing, covers)
 
     def annotation_tiles(self, source: str, data: bytes, index: int, page: QRectF,
                          scale: float, region: QRectF, xref: int, box: QRectF
@@ -584,42 +724,52 @@ class TileCache(QObject):
                     continue
                 wanting.append(key)
         if wanting:
-            others = sorted(((key.scale, key.page_rect(), pixmap)
-                             for key, pixmap in self._tiles.items()
-                             if isinstance(key, AnnotationTileKey) and key.source == source
-                             and key.index == index and key.xref == xref
-                             and key.scale != step and pixmap is not None
-                             and not pixmap.isNull() and key.page_rect().intersects(wanted)),
-                            key=lambda entry: entry[0])
-            ready = [(where, pixmap) for _scale, where, pixmap in others] + ready
-            for key in wanting[:MOST_TILES_AT_ONCE]:
-                self._ask(key, data, page, sheet=False)
+            others, covers = self._stand_ins(("markup", source, index, xref),
+                                             step, wanted)
+            # all at once, as the page does (TileCache.tiles)
+            ready = others if covers else others + ready
+            if not self.held():
+                for key in wanting[:MOST_TILES_AT_ONCE]:
+                    self._ask(key, data, page, sheet=False)
+            elif not ready:
+                # Mid-zoom, and nothing of it drawn at any zoom: a markup just
+                # come into view as the page zooms out. Not left out until the
+                # zoom stops: its preview stands in.
+                self.annotation_preview(source, data, index, page, step, xref, outer)
         return ready
 
-    def _standing_in(self, source: str, index: int, step: float,
-                     region: QRectF, annotations: bool, without: tuple = ()
-                     ) -> list[tuple[QRectF, QPixmap]]:
-        """What is already drawn of this page at other zooms, coarsest first.
+    def annotation_preview(self, source: str, data: bytes, index: int, page: QRectF,
+                           scale: float, xref: int, box: QRectF) -> None:
+        """Make sure something of a markup is drawn, at whatever zoom: if
+        nothing is, ask for it at a modest one — the power of two above
+        *scale*, but no more than 2, so the same for every notch of a zoom
+        and a few squares at most. It stands in until the zoom wanted
+        arrives; zoomed out, it is the zoom wanted."""
+        if self._index.get(("markup", source, index, xref)):
+            return
+        outer = QRectF(box).intersected(page)
+        if outer.isEmpty():
+            return
+        edges = (math.floor(outer.left()), math.floor(outer.top()),
+                 math.ceil(outer.right()), math.ceil(outer.bottom()))
+        rung = min(2.0 ** math.ceil(math.log2(max(float(scale), 0.02))), 2.0)
+        size = TILE / rung
+        for row in range(max(int(outer.top() // size), 0),
+                         int((outer.bottom() - 1e-6) // size) + 1):
+            for col in range(max(int(outer.left() // size), 0),
+                             int((outer.right() - 1e-6) // size) + 1):
+                key = AnnotationTileKey(source, index, xref, rung, col, row, edges)
+                if key not in self._tiles:
+                    self._ask(key, data, page, sheet=False)
 
-        A page that was sharp a moment ago has squares of itself in the cache,
-        and half the resolution wanted is far better than a picture of the
-        whole sheet stretched over it. Drawn coarsest first so anything finer
-        lands on top, and the tiles for the zoom actually wanted go on last.
-        """
-        found: list[tuple[float, QRectF, QPixmap]] = []
-        for key, pixmap in self._tiles.items():
-            if not isinstance(key, TileKey):
-                continue
-            if (key.source != source or key.index != index
-                    or key.scale == step or key.annotations != annotations
-                    or key.without != without
-                    or pixmap is None or pixmap.isNull()):
-                continue
-            where = key.page_rect(pixmap)
-            if where.intersects(region):
-                found.append((key.scale, where, pixmap))
-        found.sort(key=lambda entry: entry[0])
-        return [(where, pixmap) for _scale, where, pixmap in found]
+    def _standing_in(self, source: str, index: int, step: float,
+                     region: QRectF, annotations: bool, without: tuple = (),
+                     already=()) -> tuple[list[tuple[QRectF, QPixmap]], bool]:
+        """What is already drawn of this page at other zooms, and whether it,
+        with *already* (what the zoom wanted has ready), covers *region* —
+        see :meth:`_stand_ins`."""
+        return self._stand_ins(("page", source, index, annotations, tuple(without)),
+                               step, region, pixels=True, already=already)
 
     def _stop_wanting(self, source: str, index: int, step: float,
                       without: tuple = (), consumer=None, region=None) -> None:
@@ -670,10 +820,7 @@ class TileCache(QObject):
             self._render_failed(key)
             return
         self._failures.pop(key, None)
-        pixmap = QPixmap.fromImage(image)
-        self._held -= _weight(self._tiles.pop(key, None))
-        self._tiles[key] = pixmap
-        self._held += _weight(pixmap)
+        self._keep(key, QPixmap.fromImage(image))
         self._make_room()
         self.tileReady.emit(key)
 
@@ -713,12 +860,12 @@ class TileCache(QObject):
         again and drawn again, which costs one tile.
         """
         while self._held > CACHE_BYTES and self._tiles:
-            oldest = next(iter(self._tiles))
-            self._held -= _weight(self._tiles.pop(oldest))
+            self._drop(next(iter(self._tiles)))
 
     def forget(self, source: str = "") -> None:
         if not source:
             self._tiles.clear()
+            self._index.clear()
             self._sheets.clear()
             self._held = 0
             self._sheet_bytes = 0
@@ -737,7 +884,7 @@ class TileCache(QObject):
                 if page_key[0] == source:
                     del requests[page_key]
         for key in [k for k in self._tiles if k.source == source]:
-            self._held -= _weight(self._tiles.pop(key))
+            self._drop(key)
         for key in [k for k in self._sheets if k.source == source]:
             self._sheet_bytes -= _weight(self._sheets.pop(key, None))
         if self._worker is not None:

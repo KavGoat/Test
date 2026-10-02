@@ -431,7 +431,7 @@ class PageFrame(QGraphicsObject):
             painter.restore()
             return False
         tiles: list = []
-        missing = True
+        missing, covered = True, False
         if not shown_part.isEmpty():
             # A margin, so a scroll lands on tiles that are already here: most
             # of a screen up and down, which is the way a drawing set is read
@@ -441,17 +441,19 @@ class PageFrame(QGraphicsObject):
             margin_x = shown_part.width() * 0.25
             margin_y = shown_part.height() * 0.75
             asked = shown_part.adjusted(-margin_x, -margin_y, margin_x, margin_y)
-            tiles, missing = pdftiles.TILES.tiles(
+            tiles, missing, covered = pdftiles.TILES.tiles(
                 page.pdf_key, data, index, whole, scale, asked, shown, without,
-                consumer=consumer)
-        if missing:
+                consumer=consumer, say_covered=True, shown=shown_part)
+            self._ask_for_markup_previews(scale)
+        if missing and not covered:
             # Only while the tiles are still coming, and only the part of it
             # that is on screen: stretching the whole small picture over a
             # whole sheet on every repaint is the sort of thing that makes
             # scrolling a drawing feel like wading.
             sheet = pdftiles.TILES.sheet(page.pdf_key, data, index, whole,
                                          shown, without=without,
-                                         ask=scale > pdftiles._sheet_scale(whole))
+                                         ask=(scale > pdftiles._sheet_scale(whole)
+                                              or pdftiles.TILES.held()))
             if sheet is not None:
                 part = shown_part if not shown_part.isEmpty() else whole
                 across = sheet.width() / max(whole.width(), 1.0)
@@ -466,6 +468,51 @@ class PageFrame(QGraphicsObject):
             drew = True
         painter.restore()
         return drew
+
+    def _ask_for_markup_previews(self, scale: float) -> None:
+        """Have the small picture of this page and two pages either side,
+        and something of the file's own drawing of every markup on them, made
+        ahead: Qt only paints a markup once it is on screen, so each one
+        used to be asked for as it scrolled or zoomed into view, and showed
+        up a moment after the page round it — a picture popping in (the
+        user, 2026-10-02). A preview each (TileCache.annotation_preview),
+        asked for once; the sharp one comes as it shows."""
+        scene = self.scene()
+        frames = getattr(scene, "frames", None) or [self]
+        try:
+            here = frames.index(self)
+        except ValueError:
+            return
+        for frame in frames[max(here - 2, 0):here + 3]:
+            frame._preview_markups(scale)
+
+    def _preview_markups(self, scale: float) -> None:
+        from ..io import pdftiles
+
+        page = self.page
+        if page.pdf_key is None or page.pdf_page_index is None:
+            return
+        data = self.document.asset(page.pdf_key)
+        if not data:
+            return
+        whole = self.page_rect()
+        shown = bool(getattr(page, "pdf_annotations", True))
+        # and the page's own small picture, so a page zoomed or scrolled into
+        # view is never a blank sheet while its squares are drawn
+        pdftiles.TILES.sheet(page.pdf_key, data, int(page.pdf_page_index), whole, shown,
+                             without=self.markups_drawn_alone(), ask=True)
+        numbers = set(getattr(page, "markup_annotations", ()) or ())
+        if not numbers or not shown:
+            return
+        for item in self.markups():
+            box = getattr(item, "their_box", ())
+            if (not box or not getattr(item, "still_theirs", False)
+                    or item.from_annotation not in numbers or not item.isVisible()):
+                continue
+            where = QRectF(*box)              # x, y, width, height (_TheirLook)
+            pdftiles.TILES.annotation_preview(page.pdf_key, data, int(page.pdf_page_index),
+                                              whole, scale, item.from_annotation,
+                                              where.adjusted(-1, -1, 1, 1))
 
     def markups_drawn_alone(self) -> tuple:
         """The page's own annotations that came in as markups: on screen the
@@ -1243,13 +1290,24 @@ class DocumentScene(QGraphicsScene):
             self._settling.start()
 
     def _draw_what_arrived(self) -> None:
+        """Repaint where squares arrived: the whole page for one of its own,
+        and the whole markup for one of a markup's — what is on screen goes
+        sharp all at once (TileCache.tiles), so the squares that came before
+        this one are waiting to be shown too."""
+        from ..io.pdftiles import AnnotationTileKey
+
         keys, self._arrived = self._arrived, []
         for frame in self.frames:
             box = QRectF()
             for key in keys:
-                if frame.shows(key):
-                    box = box.united(key.page_rect()) if not box.isEmpty() \
-                        else key.page_rect()
+                if not frame.shows(key):
+                    continue
+                if isinstance(key, AnnotationTileKey):
+                    left, top, right, bottom = key.box
+                    where = QRectF(left, top, right - left, bottom - top)
+                else:
+                    where = frame.page_rect()
+                box = box.united(where) if not box.isEmpty() else where
             if not box.isEmpty():
                 frame.update(box)
 

@@ -821,3 +821,21 @@ checked against its saved files and WebSMath's recordings of SMath Cloud.
   translucent (OpenGL cannot multiply). Scrolling also no longer strokes
   every dash of the margin and the page edge on each step, only the part
   scrolled into view, and a trackpad scroll is one scroll, not two.
+- **Zooming without repainting** (2026-10-02, the user on Windows). A wheel
+  notch of zoom glides over a few frames about the point under the pointer
+  instead of jumping a fifth. While a zoom moves nothing new is drawn: what
+  is already drawn stands in, scaled, and the zoom it stops at is asked for
+  140 ms after the last notch (every notch used to start a screenful of
+  renders nobody would see, and each frame drew what arrived of them).
+  What stands in is the nearest zoom that covers the screen, not every
+  zoom passed through stacked — on Calcs.pdf a zoom had drawn 31,000
+  pictures; frames went from 100–900 ms to 6–15 ms. The cache keeps an
+  index by page and zoom, so finding stand-ins no longer searches every
+  tile for every markup. When the zoom has stopped, the screen goes sharp
+  in one go when its last square is in, not square by square over a
+  blurred page. The page's small picture, and a preview of each of its
+  Bluebeam markups, are made ahead for the pages either side, so a page or
+  picture zoomed or scrolled into view is never blank first. Measured with
+  screenshots taken mid-zoom against the same view settled: at most 0.4%
+  of the pixels short (was 3.5%, whole pictures missing).
+

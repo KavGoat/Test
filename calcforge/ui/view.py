@@ -327,6 +327,25 @@ class _Glide(QObject):
         self.timer.timeout.connect(self._step)
         self.clock = QElapsedTimer()
         self.axes = {}        # bar -> [where it is going, where it is (float), what was set]
+        # A zoom glides the same way: [zoom it is going to, the point it is
+        # about (view pixels), the zoom last set] — or None.
+        self.zooming = None
+
+    def zoom_by(self, factor: float, at) -> None:
+        """Zoom by *factor* about *at* (a point of the view), gliding."""
+        view = self.view
+        state = self.zooming
+        if state is None or abs(view.zoom() - state[2]) > 1e-9:
+            state = self.zooming = [view.zoom(), None, view.zoom(), None]
+        state[0] = min(max(state[0] * factor, MIN_ZOOM), MAX_ZOOM)
+        if state[1] is None or QPointF(at) != state[1]:
+            # the canvas point under the pointer, exactly, kept there all the way
+            state[1] = QPointF(at)
+            state[3] = view.viewportTransform().inverted()[0].map(QPointF(at))
+        view.zooming_by_hand()
+        if not self.timer.isActive():
+            self.clock.start()
+            self.timer.start()
 
     def by(self, bar, distance: float) -> None:
         state = self.axes.get(bar)
@@ -340,16 +359,37 @@ class _Glide(QObject):
 
     def finish(self) -> None:
         """Arrive now: wherever every glide was going."""
+        state, self.zooming = self.zooming, None
+        if state is not None and abs(self.view.zoom() - state[2]) <= 1e-9:
+            self.view.set_zoom(state[0], at=state[1], keep=state[3])
         for bar, state in list(self.axes.items()):
             if bar.value() == state[2]:
                 bar.setValue(round(state[0]))
         self.axes.clear()
         self.timer.stop()
 
+    def _zoom_step(self, share: float) -> None:
+        import math
+        view, state = self.view, self.zooming
+        if abs(view.zoom() - state[2]) > 1e-9:
+            self.zooming = None                # zoomed some other way: it wins
+            return
+        target, at, _set, keep = state
+        apart = math.log(target / view.zoom())
+        here = target if abs(apart) * (1.0 - share) < 0.002 else \
+            view.zoom() * math.exp(apart * share)
+        view.zooming_by_hand()
+        view.set_zoom(here, at=at, keep=keep)
+        state[2] = view.zoom()
+        if here == target or abs(view.zoom() - target) < 1e-9:
+            self.zooming = None
+
     def _step(self) -> None:
         import math
         elapsed = max(self.clock.restart(), 1)
         share = 1.0 - math.exp(-elapsed / self.EASE_MS)
+        if self.zooming is not None:
+            self._zoom_step(share)
         for bar, state in list(self.axes.items()):
             if bar.value() != state[2]:
                 del self.axes[bar]              # something else moved it: it wins
@@ -363,7 +403,7 @@ class _Glide(QObject):
             bar.setValue(state[2])
             if here == target:
                 del self.axes[bar]
-        if not self.axes:
+        if not self.axes and self.zooming is None:
             self.timer.stop()
 
 class PageView(QGraphicsView):
@@ -773,7 +813,8 @@ class PageView(QGraphicsView):
                               self.viewport().height() / (2.0 * scale) + 12.0)
 
     def set_zoom(self, factor: float, anchor_mouse: bool = False,
-                 at: Optional[QPointF] = None) -> None:
+                 at: Optional[QPointF] = None,
+                 keep: Optional[QPointF] = None) -> None:
         """Zoom to *factor*, keeping one point of the page where it is.
 
         Which point: the one under the pointer when the wheel is turned, and
@@ -784,6 +825,11 @@ class PageView(QGraphicsView):
         without a real pointer. So the anchoring is done here: note where the
         point is on the page, scale, then scroll until it is back under the
         same pixel. That holds however the zoom was asked for.
+
+        *keep* is the point of the canvas to keep under *at*, when the caller
+        knows it better than the nearest pixel does: a gliding zoom sets a
+        dozen zooms about one point, and re-reading it each time to the pixel
+        let it wander.
         """
         factor = max(MIN_ZOOM, min(factor, MAX_ZOOM))
         if abs(factor - self._zoom) < 1e-6:
@@ -795,7 +841,8 @@ class PageView(QGraphicsView):
                 at = None
         keep_view = QPointF(at) if at is not None else QPointF(
             self.viewport().rect().center())
-        keep_scene = self.mapToScene(keep_view.toPoint())
+        keep_scene = QPointF(keep) if keep is not None else \
+            self.mapToScene(keep_view.toPoint())
 
         self.setTransformationAnchor(QGraphicsView.NoAnchor)
         self._zooming = True
@@ -803,8 +850,8 @@ class PageView(QGraphicsView):
         self.apply_view_transform()
         self._update_desk_margin()
         # Where that page point landed, and how far it has to come back.
-        landed = self.mapFromScene(keep_scene)
-        drift = QPointF(landed) - keep_view
+        landed = self.viewportTransform().map(keep_scene)
+        drift = landed - keep_view
         self.horizontalScrollBar().setValue(
             self.horizontalScrollBar().value() + round(drift.x()))
         self.verticalScrollBar().setValue(
@@ -973,8 +1020,9 @@ class PageView(QGraphicsView):
             if delta:
                 # Where the wheel was turned is where the zoom happens; the
                 # event knows, so it does not have to be asked for again.
-                self.set_zoom(self._zoom * (1.0015 ** delta),
-                              at=event.position())
+                # A notch glides there, as a notch of scrolling does: a jump
+                # of a fifth at a time is a zoom that lurches (2026-10-02).
+                self.glide.zoom_by(1.0015 ** delta, event.position())
             event.accept()
             return
         if not pixels.isNull():
@@ -987,6 +1035,32 @@ class PageView(QGraphicsView):
         if notches:
             self.glide.by(self.verticalScrollBar(), -notches * WHEEL_SCROLL_FACTOR)
         event.accept()
+
+    #: How long after the last notch of a zoom the page is drawn afresh.
+    ZOOM_SETTLES_MS = 140
+
+    def zooming_by_hand(self) -> None:
+        """A zoom on the wheel is under way: until it has stopped for a
+        moment, the page is drawn from what is already drawn, scaled, and
+        nothing new is asked for. Asking at every notch had the render
+        processes drawing a dozen zooms nobody would see, every frame drew
+        what arrived of them, and the one wanted came last — a zoom that
+        repainted and stuttered all the way (the user, 2026-10-02)."""
+        from ..io import pdftiles
+        pdftiles.TILES.hold(self.ZOOM_SETTLES_MS / 1000.0)
+        timer = getattr(self, "_zoom_settled", None)
+        if timer is None:
+            timer = self._zoom_settled = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self._zoom_has_settled)
+        timer.start(self.ZOOM_SETTLES_MS + 15)
+
+    def _zoom_has_settled(self) -> None:
+        from ..io import pdftiles
+        if pdftiles.TILES.held():
+            self._zoom_settled.start(10)
+            return
+        self.viewport().update()
 
     _scroll_batch = None
     gpu = False
