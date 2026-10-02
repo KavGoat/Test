@@ -144,6 +144,10 @@ if os.name == "nt":
     class MONITORINFO(ctypes.Structure):
         _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
                     ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD)]
+    class WINDOWPOS(ctypes.Structure):
+        _fields_ = [("hwnd", wintypes.HWND), ("hwndInsertAfter", wintypes.HWND),
+                    ("x", ctypes.c_int), ("y", ctypes.c_int),
+                    ("cx", ctypes.c_int), ("cy", ctypes.c_int), ("flags", wintypes.UINT)]
     class MINMAXINFO(ctypes.Structure):
         _fields_ = [("ptReserved", wintypes.POINT), ("ptMaxSize", wintypes.POINT),
                     ("ptMaxPosition", wintypes.POINT), ("ptMinTrackSize", wintypes.POINT),
@@ -169,6 +173,8 @@ if os.name == "nt":
     user32.SetForegroundWindow.argtypes = [wintypes.HWND]
 WM_NCCALCSIZE, WM_NCHITTEST, WM_EXITSIZEMOVE = 0x0083, 0x0084, 0x0232
 WM_GETMINMAXINFO = 0x0024
+WM_WINDOWPOSCHANGING = 0x0046
+SWP_NOSIZE, SWP_NOMOVE = 0x0001, 0x0002
 HTCLIENT, HTCAPTION = 1, 2
 HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT = 10, 11, 12, 13, 14
 HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT = 15, 16, 17
@@ -7021,14 +7027,20 @@ class Window(QWidget):
     def restore_window(self, geo):
         if geo:
             x, y, w, h = geo
-            screen = QGuiApplication.screenAt(QPoint(x + w // 2, y + h // 2))
-            if screen is not None:
-                y = max(y, screen.availableGeometry().top())   # never above the top
-                self.setGeometry(x, y, max(w, 240), max(h, 200))
-                return
-            self.resize(w, h)
+            # Saved on a monitor that may not be there any more (3 screens
+            # then, 2 now): always brought back onto one that is.
+            self.setGeometry(on_screen(QRect(x, y, max(w, 240), max(h, 200))))
             return
         self.resize(*DEFAULT_SIZE)
+    def keep_on_screen(self):
+        """After monitors change: if this window (or the size it restores
+        to) is now partly or wholly off every screen, it's moved back."""
+        if self._normal_geom is not None:
+            self._normal_geom = on_screen(self._normal_geom)
+        if self.isVisible() and not self.isMaximized() and not self.isMinimized():
+            fitted = on_screen(self.geometry())
+            if fitted != self.geometry():
+                self.setGeometry(fitted)
     def current_geometry(self):
         g = self._normal_geom or self.geometry()
         return g.x(), g.y(), g.width(), g.height()
@@ -7162,6 +7174,7 @@ class Window(QWidget):
             self.bring_back()
     def bring_back(self):
         """Second F2 while this copy was still starting: just come to the front."""
+        self.keep_on_screen()
         if self.isMinimized():
             self.showNormal()
         elif not self.isVisible():
@@ -7187,14 +7200,17 @@ class Window(QWidget):
                 msg = wintypes.MSG.from_address(int(message))
                 m = msg.message
                 if m == WM_GETMINMAXINFO:
-                    # Tells Windows the correct maximised size/position
-                    # BEFORE it picks a (wrong) default - see
-                    # fill_minmaxinfo()'s docstring for why this matters.
+                    # Only the minimum size - Windows' own maximised
+                    # size/position defaults are left alone (see
+                    # fill_minmaxinfo); WM_WINDOWPOSCHANGING below makes a
+                    # maximised window fit its monitor exactly.
                     dpr = self.devicePixelRatioF()
-                    fill_minmaxinfo(msg.hWnd, msg.lParam,
-                                    int(self.minimumWidth() * dpr),
+                    fill_minmaxinfo(msg.lParam, int(self.minimumWidth() * dpr),
                                     int(self.minimumHeight() * dpr))
                     return True, 0
+                if m == WM_WINDOWPOSCHANGING and user32.IsZoomed(msg.hWnd):
+                    snap_to_work_area(msg.hWnd, msg.lParam)
+                    return False, 0
                 if m == WM_NCCALCSIZE and msg.wParam:
                     # No visible frame; when maximised, fit the work area exactly
                     if user32.IsZoomed(msg.hWnd):
@@ -7341,6 +7357,45 @@ class Window(QWidget):
             p.setPen(QPen(QColor(255, 255, 255, 38), 1))
             p.setBrush(Qt.NoBrush)
             p.drawRoundedRect(r.adjusted(0.5, 0.5, -0.5, -0.5), rad, rad)
+def on_screen(rect):
+    """`rect` if it's entirely on the screens that exist right now (spanning
+    two is fine); otherwise moved - and shrunk if it has to be - onto the
+    screen it overlaps most, or the nearest one if it's on none."""
+    screens = QGuiApplication.screens()
+    seen = 0
+    best, best_area = None, 0
+    for sc in screens:
+        part = sc.availableGeometry().intersected(rect)
+        area = part.width() * part.height() if not part.isEmpty() else 0
+        seen += area
+        if area > best_area:
+            best, best_area = sc, area
+    if seen >= rect.width() * rect.height():
+        return QRect(rect)
+    if best is None and screens:
+        # On none of them: the nearest one (where the monitor that's gone was)
+        c = rect.center()
+        def gap(sc):
+            g = sc.availableGeometry()
+            dx = max(g.left() - c.x(), 0, c.x() - g.right())
+            dy = max(g.top() - c.y(), 0, c.y() - g.bottom())
+            return dx * dx + dy * dy
+        best = min(screens, key=gap)
+    sc = best or QGuiApplication.primaryScreen()
+    if sc is None:
+        return QRect(rect)
+    av = sc.availableGeometry()
+    w, h = min(rect.width(), av.width()), min(rect.height(), av.height())
+    x = min(max(rect.x(), av.left()), av.right() - w + 1)
+    y = min(max(rect.y(), av.top()), av.bottom() - h + 1)
+    return QRect(x, y, w, h)
+def keep_windows_on_screen(*_):
+    """Monitors were added / removed / rearranged: once Windows has settled,
+    every window is checked and brought back on screen if need be."""
+    def check():
+        for w in WINDOWS:
+            w.keep_on_screen()
+    QTimer.singleShot(800, check)
 def fit_to_work_area(lparam):
     rect = wintypes.RECT.from_address(lparam)
     mon = user32.MonitorFromRect(ctypes.byref(rect), 2)    # nearest monitor
@@ -7349,34 +7404,41 @@ def fit_to_work_area(lparam):
     if mon and user32.GetMonitorInfoW(mon, ctypes.byref(info)):
         w = info.rcWork
         rect.left, rect.top, rect.right, rect.bottom = w.left, w.top, w.right, w.bottom
-def fill_minmaxinfo(hwnd, lparam, min_w, min_h):
-    """WM_GETMINMAXINFO: without this, a frameless window that gained
-    WS_THICKFRAME dynamically (enable_snap, applied AFTER the window was
-    already created with no border) has nothing telling Windows what its
-    maximised size/position should actually be. Windows then falls back to
-    a default based on standard caption/border metrics that don't apply
-    here, which is exactly why double-clicking maximise - or Windows snap
-    (dragging to the top of the screen) - was landing the window in the
-    top-left corner at a narrow, wrong size instead of filling the work
-    area: fit_to_work_area() (WM_NCCALCSIZE) only ever got a chance to
-    correct the size AFTER Windows had already decided on that wrong one.
-    This fills in the real answer up front, from the correct monitor (the
-    one the window is actually on, not always the primary one)."""
+def fill_minmaxinfo(lparam, min_w, min_h):
+    """WM_GETMINMAXINFO: just the minimum window size. The maximised size and
+    position are deliberately NOT set here: Windows reads them as values for
+    the PRIMARY monitor and then shifts them for whichever monitor the
+    window is actually maximising on, so filling them in from the window's
+    own monitor gave a wrong size / offset on any monitor whose size or
+    taskbar differs from the primary one. snap_to_work_area() does the
+    fitting instead, once Windows has picked the monitor."""
     info = MINMAXINFO.from_address(lparam)
-    mon = user32.MonitorFromWindow(hwnd, 2)      # MONITOR_DEFAULTTONEAREST
-    if mon:
-        mi = MONITORINFO()
-        mi.cbSize = ctypes.sizeof(MONITORINFO)
-        if user32.GetMonitorInfoW(mon, ctypes.byref(mi)):
-            work, full = mi.rcWork, mi.rcMonitor
-            # Position is relative to the monitor's own top-left, which
-            # matters as soon as there's more than one monitor.
-            info.ptMaxPosition.x = work.left - full.left
-            info.ptMaxPosition.y = work.top - full.top
-            info.ptMaxSize.x = work.right - work.left
-            info.ptMaxSize.y = work.bottom - work.top
     info.ptMinTrackSize.x = max(info.ptMinTrackSize.x, min_w)
     info.ptMinTrackSize.y = max(info.ptMinTrackSize.y, min_h)
+def snap_to_work_area(hwnd, lparam):
+    """WM_WINDOWPOSCHANGING while maximised: the window is placed exactly on
+    the work area (screen minus taskbar) of the monitor it's going to - no
+    invisible overhang past the edges. With no visible frame, that's what
+    maximised has to mean for this see-through (layered) window, whose
+    content always covers its whole window rectangle."""
+    pos = WINDOWPOS.from_address(lparam)
+    if pos.flags & SWP_NOMOVE and pos.flags & SWP_NOSIZE:
+        return                                   # only a z-order change
+    cur = wintypes.RECT()
+    user32.GetWindowRect(hwnd, ctypes.byref(cur))
+    x = cur.left if pos.flags & SWP_NOMOVE else pos.x
+    y = cur.top if pos.flags & SWP_NOMOVE else pos.y
+    w = cur.right - cur.left if pos.flags & SWP_NOSIZE else pos.cx
+    h = cur.bottom - cur.top if pos.flags & SWP_NOSIZE else pos.cy
+    rect = wintypes.RECT(x, y, x + w, y + h)
+    mon = user32.MonitorFromRect(ctypes.byref(rect), 2)          # nearest monitor
+    info = MONITORINFO()
+    info.cbSize = ctypes.sizeof(MONITORINFO)
+    if mon and user32.GetMonitorInfoW(mon, ctypes.byref(info)):
+        work = info.rcWork
+        pos.x, pos.y = work.left, work.top
+        pos.cx, pos.cy = work.right - work.left, work.bottom - work.top
+        pos.flags &= ~(SWP_NOMOVE | SWP_NOSIZE)
 def enable_snap(widget):
     """Give the frameless window a real (invisible) resizable frame so Windows
     treats it like a normal window: Aero Snap, Win+arrows, snap layouts."""
@@ -7420,6 +7482,13 @@ def main(mutex=None):
     app.setQuitOnLastWindowClosed(False)
     if os.path.exists(ICON_FILE):
         app.setWindowIcon(QIcon(ICON_FILE))
+    def watch(screen):
+        screen.availableGeometryChanged.connect(keep_windows_on_screen)
+    for screen in app.screens():
+        watch(screen)
+    app.screenAdded.connect(watch)
+    for signal in (app.screenAdded, app.screenRemoved, app.primaryScreenChanged):
+        signal.connect(keep_windows_on_screen)
     state = load_app_state()
     set_scale(state["scale"])
     APP_SETTINGS["autoarchive"] = state["autoarchive"]
