@@ -213,6 +213,8 @@ def _clean(hint, dims):
         return False
     if dims in (FORCE, PRESSURE):       # kg·m/s² -> kN, N/mm² -> MPa
         return len(hint) == 1 and hint[0][1] == SIXTHS
+    if dims == MOMENT:                  # kN×mm -> kNm
+        return frozenset(hint) in _TIDY_MOMENTS
     seen = set()
     for symbol, _ in hint:
         family = UNITS[symbol][1]
@@ -222,6 +224,10 @@ def _clean(hint, dims):
     if MASS in seen and TIME in seen:   # kg/m³ × m/s² -> kN/m³
         return False
     return not (PRESSURE in seen and (LENGTH in seen or FORCE in seen))
+
+
+_TIDY_MOMENTS = {frozenset(((f, SIXTHS), (l, SIXTHS)))
+                 for f, l in (("kN", "m"), ("N", "mm"), ("N", "m"), ("MN", "m"))}
 
 
 def _run_symbols(run, allowed):
@@ -619,6 +625,11 @@ def is_name(text):
         _is_name_char(c) for c in text)
 
 
+def is_variable_name(text):
+    """A name to the left of '=': also allows M*, V* (design actions)."""
+    return is_name(text[:-1] if text.endswith("*") else text)
+
+
 def _unit_start(c):
     return c == "°" or (c.isascii() and c.isalpha())
 
@@ -664,7 +675,13 @@ def tokenize(text, mode, variables, fixes=None):
             end = i + 1
             while end < n and _is_name_char(text[end]):
                 end += 1
-            tokens.append(("name", text[i:end], i, end))
+            name = text[i:end]
+            if (variables and end < n and text[end] == "*" and name + "*" in variables
+                    and not text.startswith("**", end)
+                    and (name not in variables
+                         or end + 1 == n or not _starts_value(text[end + 1]))):
+                name, end = name + "*", end + 1     # M*, V*: design actions
+            tokens.append(("name", name, i, end))
             i = end
         elif c in SUPERSCRIPTS:
             end = i
@@ -1005,7 +1022,7 @@ def process_line(line, mode, variables):
     allowed = ALL_UNITS if mode.units else ANGLE_UNITS
     name = None
 
-    if is_name(first) and (len(parts) >= 3 or (mode.variables and len(parts) == 2)):
+    if is_variable_name(first) and (len(parts) >= 3 or (mode.variables and len(parts) == 2)):
         name = first
         if len(parts) == 2 and parts[1].strip():
             # x = 5kN  : remember it, print nothing

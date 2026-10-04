@@ -513,3 +513,81 @@ def test_unit_powers_become_superscripts(line, mode, expected):
 ])
 def test_other_powers_are_left_as_typed(line, mode, expected):
     assert calc(line, mode).splitlines()[-1] == expected
+
+
+# ------------------------------------------------------------ design actions and full sheets
+
+@pytest.mark.parametrize("text, expected", [
+    ("M* = 120kNm\nφMs = 180kNm\nM*/φMs =", "M*/φMs = 120kNm/180kNm = 0.667"),
+    ("V* = 250kN\ne = 150mm\nMz = V* * e =", "Mz = V* * e = 250kN * 150mm = 37.5kNm"),
+    ("M* = 120kNm\n2*M* =", "2*M* = 2*120kNm = 240kNm"),
+    ("M* = 120kNm\nM*2 =", "M*2 = 120kNm*2 = 240kNm"),
+    ("M = 5kNm\nM* = 120kNm\nM*2 =", "M*2 = 5kNm*2 = 10kNm"),     # M defined: M times 2
+    ("N* = 500kN\nφNc = 900kN\nN*/φNc =", "N*/φNc = 500kN/900kN = 0.556"),
+    ("x = 3\nx*2 =", "x*2 = 3*2 = 6"),
+])
+def test_starred_design_actions(text, expected):
+    assert last(text, "substitution") == expected
+
+
+STEEL_BEAM = """# Simply supported steel beam - 310UB40.4
+L = 7.2 m
+s = 3.0m
+G = 1.2 kPa
+Q_floor = 3.0kPa
+SW = 0.396kN/m
+w_G = G*s + SW =
+w_Q = Q_floor*s =
+w_ULS = 1.2*w_G + 1.5*w_Q =
+w_SLS = w_G + 0.7*w_Q =
+M* = w_ULS*L^2/8 =
+V* = w_ULS*L/2 =
+fy = 320MPa
+Zex = 633e3 mm3
+φ = 0.9
+φMs = φ*fy*Zex = kNm
+util = M*/φMs =
+E = 200GPa
+Ix = 86.4e6mm4
+δ = 5*w_SLS*L^4/(384*E*Ix) = mm
+δ_lim = L/250 = mm
+"""
+
+
+def test_full_steel_beam_sheet_matches_hand_calcs():
+    out = calc(STEEL_BEAM, "variables").splitlines()
+    answers = {line.split(" =")[0]: line.rsplit("= ", 1)[1] for line in out if line.count("=") >= 2}
+    assert answers == {
+        "w_G": "3.996kN/m", "w_Q": "9kN/m", "w_ULS": "18.295kN/m", "w_SLS": "10.296kN/m",
+        "M*": "118.553kNm", "V*": "65.863kN", "φMs": "182.304kNm", "util": "0.65",
+        "δ": "20.849mm", "δ_lim": "28.8mm",
+    }
+    assert "Zex = 633e3 mm³" in out and "Ix = 86.4e6mm⁴" in out
+    once = calc(STEEL_BEAM, "substitution")
+    assert calc(once, "substitution") == once
+
+
+def test_footing_and_concrete_sheets():
+    footing = calc("N_G = 850 kN\nN_Q = 400 kN\nB = 2.4m\nqa = 250 kPa\n"
+                   "q = (N_G + N_Q)/B^2 =\ncheck = q/qa =\nq_u = (1.2*N_G + 1.5*N_Q)/B^2 =\n"
+                   "M_f = q_u*B*((B - 0.4m)/2)^2/2 =", "variables").splitlines()
+    assert footing[-4:] == ["q = (N_G + N_Q)/B^2 = 217.014kPa", "check = q/qa = 0.868",
+                            "q_u = (1.2*N_G + 1.5*N_Q)/B^2 = 281.25kPa",
+                            "M_f = q_u*B*((B - 0.4m)/2)^2/2 = 337.5kNm"]
+    slab = calc("f'c = 32 MPa\nb = 1000 mm\nd = 169mm\nAst = 565.487mm2\nfsy = 500 MPa\n"
+                "γ = 0.85 - 0.007*(32 - 28) =\nku = Ast*fsy/(0.85*f'c*γ*b*d) =\n"
+                "φMu = 0.85*Ast*fsy*d*(1 - 0.5*γ*ku) = kNm", "variables").splitlines()
+    assert slab[-3:] == ["γ = 0.85 - 0.007*(32 - 28) = 0.822", "ku = Ast*fsy/(0.85*f'c*γ*b*d) = 0.0748",
+                         "φMu = 0.85*Ast*fsy*d*(1 - 0.5*γ*ku) = 39.367kNm"]
+
+
+def test_hundred_member_sheet():
+    rows = []
+    for i in range(1, 101):
+        rows += [f"L{i} = {3 + i * 0.05:.2f}m", f"w{i} = {5 + i * 0.1:.1f}kN/m",
+                 f"M{i}* = w{i}*L{i}^2/8 ="]
+    out = calc("\n".join(rows), "substitution").splitlines()
+    for i in range(1, 101):
+        length, load = round(3 + i * 0.05, 2), round(5 + i * 0.1, 1)
+        got = float(out[3 * i - 1].rsplit("= ", 1)[1].removesuffix("kNm"))
+        assert abs(got - load * length ** 2 / 8) < 0.001

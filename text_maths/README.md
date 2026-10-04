@@ -60,12 +60,15 @@ change `L = 6m` to `L = 7m`, select the block, and press the hotkey again.
 - **A number with letters stuck to it is a unit**: `5m`, `2t` (tonnes),
   `300mm`. With a space, a variable of that name wins: `2 t` is 2 × t.
   Use `2*t` or `2 t` for "twice the variable t".
-- **`300mm^3` is 300 mm³**, not (300 mm)³. Write `(300mm)^3`, or use a variable.
+- **`300mm^3` is 300 mm³**, not (300 mm)³, so `A = 3480mm2` works as an area.
+  For a length squared write `(300mm)^3` or `sqrt((60mm)^2 + (35mm)^2)`, or
+  use variables (`h^3` is always the variable cubed).
 - Implicit multiplication works: `2pi`, `2L`, `2(a+b)`, `(a+b)(c+d)`.
 - `^`, `**` and superscripts are all powers: `x^2`, `x**2`, `x²`, `mm⁴`.
 - `×`, `÷`, `−`, `·` and non-breaking spaces from Word or the web are fine.
 - Variable names: letters (Greek too), digits, `_`, `'` and subscripts:
-  `f'c`, `M_Ed`, `σ`, `M₁`. They are case sensitive (`E` ≠ `e`). A variable
+  `f'c`, `M_Ed`, `σ`, `M₁`, `φMs`. Design actions `M*`, `V*`, `N*` work too
+  (`M*2` is M × 2 only if a plain `M` also exists; write `M* * 2` to be clear). They are case sensitive (`E` ≠ `e`). A variable
   hides a constant of the same name (`e = 50mm`).
 - `# comment` lines are skipped; `x = 5  # note` works on assignments.
 - Numbers: 3 decimals, 3 significant figures below 0.1, and engineering
