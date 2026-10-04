@@ -280,6 +280,12 @@ UNDO_LIMIT = 50
 # ------------------------------------------------------------------
 S = 1.0
 EDGE = 6        # invisible resize border around the frameless window
+# See-through window backgrounds (a tab colour's Transparency) need a
+# "layered" window, and Windows' own maximise / snap don't work on one - the
+# window jumps to the corner instead of filling the screen. So on Windows
+# the list is an ordinary solid window and Windows does maximise, snapping,
+# rounded corners and the shadow itself; see-through stays on the Mac.
+SEE_THROUGH = os.name != "nt"
 BASE = dict(MARGIN=12, TOP_PAD=4, MIN_H=40, GAP=3, GROUP_GAP=16, TEXT_X=40,
             RADIUS=5, HEAD_H=28, EDIT_H=26, PILL_H=26, CARD_PAD=20, SUB_H=13,
             ATT_H=22, ARROW_W=20, STAR_W=32)
@@ -345,7 +351,7 @@ def qcolour(hexc, alpha=None):
 def derive_theme(hexc):
     """One colour -> background gradient (top, bottom): the colour you picked
     at the top, a bit lighter at the bottom. Transparency is kept."""
-    a = alpha_of(hexc)
+    a = alpha_of(hexc) if SEE_THROUGH else 255     # a solid window can't show through
     top = QColor(hexc).name()
     return with_alpha(top, a), with_alpha(mix(top, "#c8d0d2", 0.35), a)
 def legacy_theme_top_colour(name):
@@ -563,7 +569,9 @@ class ColourPicker(QDialog):
         h, s, v, a = start.getHsvF()
         self.h = h if h >= 0 else 0.0            # greys have no hue
         self.s, self.v, self.a = s, v, a
-        self.max_clear = 0.9 if background else 1.0   # background never fully invisible
+        # A window background is never fully invisible - and can't be
+        # see-through at all where the window is solid (Windows).
+        self.max_clear = (0.9 if SEE_THROUGH else 0.0) if background else 1.0
         self.setStyleSheet(f"""
 QLabel {{ color: {TEXT}; background: transparent; }}
 QLabel#dim {{ color: {TEXT_DONE}; }}
@@ -587,8 +595,14 @@ QPushButton:hover {{ background: #a3c4fa; }}
         self.bright_val = QLabel()
         self.clear = ColourSlider(self, "clear")
         self.clear_val = QLabel()
-        for name, slider, val in (("Brightness", self.bright, self.bright_val),
-                                  ("Transparency", self.clear, self.clear_val)):
+        rows = [("Brightness", self.bright, self.bright_val)]
+        if self.max_clear > 0:
+            rows.append(("Transparency", self.clear, self.clear_val))
+        else:
+            for wdg in (self.clear, self.clear_val):     # kept for _refresh, never shown
+                wdg.setParent(self)
+                wdg.hide()
+        for name, slider, val in rows:
             row = QHBoxLayout()
             lab = QLabel(name)
             lab.setFont(QFont(FONT, 8))
@@ -2539,8 +2553,12 @@ def check_path(cx, cy, s=1.0):
     path.lineTo(cx - 1.3 * s, cy + 3.0 * s)
     path.lineTo(cx + 4.3 * s, cy - 3.2 * s)
     return path
+class _MARGINS(ctypes.Structure):
+    _fields_ = [("left", ctypes.c_int), ("right", ctypes.c_int),
+                ("top", ctypes.c_int), ("bottom", ctypes.c_int)]
 def round_corners(widget):
-    """Windows 11 rounded corners for the frameless window."""
+    """Windows 11 draws the frameless window's rounded corners and its
+    shadow, like any other window (square when maximised or snapped)."""
     if os.name != "nt":
         return
     try:
@@ -2548,6 +2566,10 @@ def round_corners(widget):
         value = ctypes.c_int(2)     # DWMWCP_ROUND
         ctypes.windll.dwmapi.DwmSetWindowAttribute(
             hwnd, 33, ctypes.byref(value), ctypes.sizeof(value))
+        # A 1px sliver of DWM frame keeps the native drop shadow on a window
+        # whose visible frame has been removed (WM_NCCALCSIZE).
+        margins = _MARGINS(1, 1, 1, 1)
+        ctypes.windll.dwmapi.DwmExtendFrameIntoClientArea(hwnd, ctypes.byref(margins))
     except Exception:
         pass
 def shadow_for(widget):
@@ -5845,8 +5867,10 @@ class TabChip(QWidget):
     def apply_scale(self):
         self.font_ = F(10, bold=True)
     def ideal_width(self):
+        # +2: text measures in whole pixels but is laid out in fractions -
+        # an exact fit was a hair short and got cut to "Seeth\u2026"
         w = QFontMetrics(self.font_).horizontalAdvance(self.meta()["name"]) \
-            + 2 * int(TAB_PAD_BASE * S)
+            + 2 * int(TAB_PAD_BASE * S) + 2
         return int(min(max(w, TAB_MIN_W_BASE * S), TAB_MAX_W_BASE * S))
     def _shape(self, open_tab):
         r = QRectF(self.rect())
@@ -6448,7 +6472,8 @@ class Window(QWidget):
         # See-through window so the corners can be drawn smooth (anti-aliased).
         # The corners are painted almost-transparent (not fully), so clicks
         # there still land on the list, never on the window behind.
-        self.setAttribute(Qt.WA_TranslucentBackground)
+        if SEE_THROUGH:
+            self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAutoFillBackground(False)
         self.setWindowTitle(WINDOW_TITLE)
         if os.path.exists(ICON_FILE):
@@ -7322,13 +7347,18 @@ class Window(QWidget):
     def paintEvent(self, _):
         p = QPainter(self)
         r = QRectF(self.rect())
-        # 1. Whole window: alpha 1/255 - looks invisible, but still catches
-        #    the mouse, so the corner areas never click through.
-        p.setCompositionMode(QPainter.CompositionMode_Source)
-        p.fillRect(self.rect(), QColor(0, 0, 0, 1))
-        p.setCompositionMode(QPainter.CompositionMode_SourceOver)
+        if SEE_THROUGH:
+            # 1. Whole window: alpha 1/255 - looks invisible, but still
+            #    catches the mouse, so the corner areas never click through.
+            p.setCompositionMode(QPainter.CompositionMode_Source)
+            p.fillRect(self.rect(), QColor(0, 0, 0, 1))
+            p.setCompositionMode(QPainter.CompositionMode_SourceOver)
+            rad = 0 if self.isMaximized() else CORNER * max(S, 0.8)
+        else:
+            # Solid window: Windows draws the rounded corners and shadow.
+            p.fillRect(self.rect(), QColor(TINT_BASE))
+            rad = 0
         p.setRenderHint(QPainter.Antialiasing)
-        rad = 0 if self.isMaximized() else CORNER * max(S, 0.8)
         shape = QPainterPath()
         shape.addRoundedRect(r, rad, rad)
         p.save()
