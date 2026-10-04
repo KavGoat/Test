@@ -144,10 +144,6 @@ if os.name == "nt":
     class MONITORINFO(ctypes.Structure):
         _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
                     ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD)]
-    class WINDOWPOS(ctypes.Structure):
-        _fields_ = [("hwnd", wintypes.HWND), ("hwndInsertAfter", wintypes.HWND),
-                    ("x", ctypes.c_int), ("y", ctypes.c_int),
-                    ("cx", ctypes.c_int), ("cy", ctypes.c_int), ("flags", wintypes.UINT)]
     class MINMAXINFO(ctypes.Structure):
         _fields_ = [("ptReserved", wintypes.POINT), ("ptMaxSize", wintypes.POINT),
                     ("ptMaxPosition", wintypes.POINT), ("ptMinTrackSize", wintypes.POINT),
@@ -173,8 +169,6 @@ if os.name == "nt":
     user32.SetForegroundWindow.argtypes = [wintypes.HWND]
 WM_NCCALCSIZE, WM_NCHITTEST, WM_EXITSIZEMOVE = 0x0083, 0x0084, 0x0232
 WM_GETMINMAXINFO = 0x0024
-WM_WINDOWPOSCHANGING = 0x0046
-SWP_NOSIZE, SWP_NOMOVE = 0x0001, 0x0002
 HTCLIENT, HTCAPTION = 1, 2
 HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT = 10, 11, 12, 13, 14
 HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT = 15, 16, 17
@@ -2980,18 +2974,23 @@ class TaskCard(QWidget):
             if len(self.board.history) > history_len:
                 self.board.history[-1]["_reedit"] = {
                     "mode": "edit", "card": self, "old_task": old_task, "raw_text": raw_text}
-        self.editor.hide()
-        self.label.show()
-        self.refresh()
-        self.board.relayout(animate=True)
         group = self.home_group()
         self.board.active_group = group
+        # Focus moves on BEFORE the editor is hidden: hiding the focused
+        # editor first made Qt pass focus to the next widget in line, and
+        # the list scrolled to show that one instead.
         if then == "add":
             # Enter while editing -> straight to this group's "Add a task"
             self.board.clear_selection()
             self.board.focus_add(group)
         elif then == "board":
             self.board.setFocus()
+        self.editor.hide()
+        self.label.show()
+        self.refresh()
+        self.board.relayout(animate=True)
+        if then == "add":
+            self.board.reveal_later(group.add_row)     # only scrolls if it's out of view
     # ---------- painting ----------
     def paintEvent(self, _):
         p = QPainter(self)
@@ -5276,7 +5275,10 @@ class IconButton(QWidget):
         if self.hover:
             p.setBrush(QColor("#c42b1c") if self.kind == "close"
                        else QColor(255, 255, 255, 40))
-            p.drawRoundedRect(QRectF(self.rect()), RADIUS, RADIUS)
+            if self.height() > int(30 * S):
+                p.drawRect(self.rect())          # full-height caption button
+            else:
+                p.drawRoundedRect(QRectF(self.rect()), RADIUS, RADIUS)
         cx, cy = self.width() / 2, self.height() / 2
         pen = QPen(QColor(TEXT), 1.2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
         if self.kind == "more":
@@ -5447,15 +5449,16 @@ class TopBar(QWidget):
         self.tabs_btn.apply_scale()
         for b in self.controls:
             b.apply_scale()
+            b.setFixedHeight(self.height())
         self.tabbar.apply_scale()      # re-measures every tab, then lays the bar out
         # Never so narrow that the open tab, '+' and the all-tabs menu can't
         # all fit beside the window controls.
         self.win.setMinimumWidth(self.min_width() + 2 * EDGE)
     def min_width(self):
         sp = int(2 * S)
-        controls = sum(b.width() + sp for b in self.controls)
+        controls = sum(b.width() for b in self.controls)
         return (self.tab_left() + int(84 * S) + sp + self.plus_btn.width() + sp
-                + self.tabs_btn.width() + int(6 * S) + controls + int(4 * S))
+                + self.tabs_btn.width() + int(6 * S) + controls)
     def tab_top(self):
         return int(4 * S)
     def tab_left(self):
@@ -5466,11 +5469,13 @@ class TopBar(QWidget):
         return (self, self.tab_scroll, self.tab_scroll.viewport(), self.tabbar)
     def layout_children(self, animate=False):
         h, sp = self.height(), int(2 * S)
-        x = self.width() - int(4 * S)
+        # Window controls run the full height of the bar and right up to its
+        # edge, like any window's - so in a screen corner the corner pixel
+        # is the close button.
+        x = self.width()
         for b in reversed(self.controls):
             x -= b.width()
-            b.move(x, (h - b.height()) // 2)
-            x -= sp
+            b.move(x, 0)
         left, top = self.tab_left(), self.tab_top()
         avail = max(0, x - int(6 * S) - left - sp - self.plus_btn.width())
         overflow = self.tabbar.content_width(avail) > avail
@@ -6767,6 +6772,7 @@ class Window(QWidget):
         # (only) tab lands right there.
         new_win.move(global_pos - QPoint(EDGE + new_win.bar.tab_left(),
                                          EDGE + new_win.bar.tab_top()))
+        new_win.setGeometry(on_screen(new_win.geometry()))     # never partly off screen
         new_win.winId()      # must exist before enable_snap() can touch its HWND
         enable_snap(new_win)
         new_win.show_panel()
@@ -6884,10 +6890,8 @@ class Window(QWidget):
         else:
             self.showMaximized()
     def _apply_window_state(self):
-        """No resize border while maximised (nothing to drag-resize from),
-        and the maximise button's icon kept in step."""
-        m = 0 if self.isMaximized() else EDGE
-        self.layout().setContentsMargins(m, m, m, m)
+        """Maximised / restored: resize borders, corners and the maximise
+        button's icon follow (see update_corners)."""
         self.bar.max_btn.update()
         QTimer.singleShot(0, self.update_corners)
     def toggle_pin(self):
@@ -6986,17 +6990,16 @@ class Window(QWidget):
         self.bar.apply_scale()      # also rescales the embedded tab bar
     # ---------- resizing the frameless window from its edges ----------
     def _edges(self, pos):
-        if self.isMaximized():
-            return []
+        flush = getattr(self, "_flush", frozenset())
         m = EDGE + 2
         e = []
-        if pos.x() < m:
+        if pos.x() < m and "left" not in flush:
             e.append(Qt.Edge.LeftEdge)
-        if pos.x() > self.width() - m:
+        if pos.x() > self.width() - m and "right" not in flush:
             e.append(Qt.Edge.RightEdge)
-        if pos.y() < m:
+        if pos.y() < m and "top" not in flush:
             e.append(Qt.Edge.TopEdge)
-        if pos.y() > self.height() - m:
+        if pos.y() > self.height() - m and "bottom" not in flush:
             e.append(Qt.Edge.BottomEdge)
         return e
     def mouseMoveEvent(self, e):
@@ -7227,17 +7230,15 @@ class Window(QWidget):
                 if m == WM_GETMINMAXINFO:
                     # Only the minimum size - Windows' own maximised
                     # size/position defaults are left alone (see
-                    # fill_minmaxinfo); WM_WINDOWPOSCHANGING below makes a
-                    # maximised window fit its monitor exactly.
+                    # fill_minmaxinfo).
                     dpr = self.devicePixelRatioF()
                     fill_minmaxinfo(msg.lParam, int(self.minimumWidth() * dpr),
                                     int(self.minimumHeight() * dpr))
                     return True, 0
-                if m == WM_WINDOWPOSCHANGING and user32.IsZoomed(msg.hWnd):
-                    snap_to_work_area(msg.hWnd, msg.lParam)
-                    return False, 0
                 if m == WM_NCCALCSIZE and msg.wParam:
-                    # No visible frame; when maximised, fit the work area exactly
+                    # No visible frame. Maximised, Windows hangs the (frame)
+                    # window a few pixels past every screen edge; the
+                    # content is fitted to the work area inside that.
                     if user32.IsZoomed(msg.hWnd):
                         fit_to_work_area(msg.lParam)
                     return True, 0
@@ -7267,10 +7268,14 @@ class Window(QWidget):
         rc = wintypes.RECT()
         user32.GetClientRect(hwnd, ctypes.byref(rc))
         dpr = self.devicePixelRatioF()
+        flush = getattr(self, "_flush", frozenset())
         if not user32.IsZoomed(hwnd):
+            # Resize only on sides that aren't flush with the screen edge
             b = int(EDGE * dpr) + 1
-            left, right = pt.x < b, pt.x >= rc.right - b
-            top, bottom = pt.y < b, pt.y >= rc.bottom - b
+            left = pt.x < b and "left" not in flush
+            right = pt.x >= rc.right - b and "right" not in flush
+            top = pt.y < b and "top" not in flush
+            bottom = pt.y >= rc.bottom - b and "bottom" not in flush
             if top and left:
                 return HTTOPLEFT
             if top and right:
@@ -7296,31 +7301,44 @@ class Window(QWidget):
             if child is None or child in self.bar.caption_widgets():
                 return HTCAPTION
         return HTCLIENT
-    def corners_cut(self):
-        """True when Windows 11 would square the corners (snapped / maximised),
-        so we round them ourselves."""
-        if os.name != "nt" or not self.isVisible() or self.isMinimized():
-            return False
-        hwnd = int(self.winId())
-        if user32.IsZoomed(hwnd):
-            return True
-        rc = wintypes.RECT()
-        user32.GetWindowRect(hwnd, ctypes.byref(rc))
-        info = MONITORINFO()
-        info.cbSize = ctypes.sizeof(MONITORINFO)
-        mon = user32.MonitorFromWindow(hwnd, 2)
-        if not (mon and user32.GetMonitorInfoW(mon, ctypes.byref(info))):
-            return False
-        w, t = info.rcWork, 2
-        touching = sum((abs(rc.left - w.left) <= t, abs(rc.right - w.right) <= t,
-                        abs(rc.top - w.top) <= t, abs(rc.bottom - w.bottom) <= t))
-        return touching >= 2
+    def touching_edges(self):
+        """Which sides sit flush on the edge of the screen's usable area -
+        snapped, maximised, or reopened where it was snapped (Windows can't
+        put a window back into 'snapped', so the position is what counts)."""
+        if self.isMaximized():
+            return frozenset(("left", "top", "right", "bottom"))
+        if not self.isVisible() or self.isMinimized():
+            return frozenset()
+        g = self.frameGeometry()
+        screen = QGuiApplication.screenAt(g.center()) or self.screen()
+        if screen is None:
+            return frozenset()
+        a, t = screen.availableGeometry(), 2
+        return frozenset(side for side, flush in (
+            ("left", abs(g.left() - a.left()) <= t), ("top", abs(g.top() - a.top()) <= t),
+            ("right", abs(g.right() - a.right()) <= t),
+            ("bottom", abs(g.bottom() - a.bottom()) <= t)) if flush)
     def update_corners(self):
-        """Corners are always drawn round by paintEvent (smooth, any state).
-        Just repaint when snapped / maximised / restored."""
-        cut = self.corners_cut() if os.name == "nt" else False
-        if cut != getattr(self, "_rounded", False):
-            self._rounded = cut
+        """Keeps the window behaving like a snapped one wherever it's flush
+        with the screen edge: no resize border on those sides (the window's
+        own buttons reach right into a top-right corner, so flicking the
+        mouse up there and clicking closes it, like any app), and square
+        corners once it touches two or more edges, as Windows does for a
+        snapped window."""
+        edges = self.touching_edges()
+        if edges != getattr(self, "_flush", None):
+            self._flush = edges
+            m = {side: 0 if side in edges else EDGE
+                 for side in ("left", "top", "right", "bottom")}
+            self.layout().setContentsMargins(m["left"], m["top"], m["right"], m["bottom"])
+            if os.name == "nt" and not SEE_THROUGH:
+                try:
+                    value = ctypes.c_int(1 if len(edges) >= 2 else 2)   # DONOTROUND / ROUND
+                    ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                        int(self.winId()), 33, ctypes.byref(value), ctypes.sizeof(value))
+                except Exception:
+                    pass
+            self.bar.max_btn.update()
         self.update()
     def list_gradient(self):
         """The list's background, in window coordinates - the open tab
@@ -7353,7 +7371,7 @@ class Window(QWidget):
             p.setCompositionMode(QPainter.CompositionMode_Source)
             p.fillRect(self.rect(), QColor(0, 0, 0, 1))
             p.setCompositionMode(QPainter.CompositionMode_SourceOver)
-            rad = 0 if self.isMaximized() else CORNER * max(S, 0.8)
+            rad = 0 if len(getattr(self, "_flush", ())) >= 2 else CORNER * max(S, 0.8)
         else:
             # Solid window: Windows draws the rounded corners and shadow.
             p.fillRect(self.rect(), QColor(TINT_BASE))
@@ -7440,35 +7458,11 @@ def fill_minmaxinfo(lparam, min_w, min_h):
     the PRIMARY monitor and then shifts them for whichever monitor the
     window is actually maximising on, so filling them in from the window's
     own monitor gave a wrong size / offset on any monitor whose size or
-    taskbar differs from the primary one. snap_to_work_area() does the
-    fitting instead, once Windows has picked the monitor."""
+    taskbar differs from the primary one. WM_NCCALCSIZE (fit_to_work_area)
+    fits the content to the monitor Windows picked."""
     info = MINMAXINFO.from_address(lparam)
     info.ptMinTrackSize.x = max(info.ptMinTrackSize.x, min_w)
     info.ptMinTrackSize.y = max(info.ptMinTrackSize.y, min_h)
-def snap_to_work_area(hwnd, lparam):
-    """WM_WINDOWPOSCHANGING while maximised: the window is placed exactly on
-    the work area (screen minus taskbar) of the monitor it's going to - no
-    invisible overhang past the edges. With no visible frame, that's what
-    maximised has to mean for this see-through (layered) window, whose
-    content always covers its whole window rectangle."""
-    pos = WINDOWPOS.from_address(lparam)
-    if pos.flags & SWP_NOMOVE and pos.flags & SWP_NOSIZE:
-        return                                   # only a z-order change
-    cur = wintypes.RECT()
-    user32.GetWindowRect(hwnd, ctypes.byref(cur))
-    x = cur.left if pos.flags & SWP_NOMOVE else pos.x
-    y = cur.top if pos.flags & SWP_NOMOVE else pos.y
-    w = cur.right - cur.left if pos.flags & SWP_NOSIZE else pos.cx
-    h = cur.bottom - cur.top if pos.flags & SWP_NOSIZE else pos.cy
-    rect = wintypes.RECT(x, y, x + w, y + h)
-    mon = user32.MonitorFromRect(ctypes.byref(rect), 2)          # nearest monitor
-    info = MONITORINFO()
-    info.cbSize = ctypes.sizeof(MONITORINFO)
-    if mon and user32.GetMonitorInfoW(mon, ctypes.byref(info)):
-        work = info.rcWork
-        pos.x, pos.y = work.left, work.top
-        pos.cx, pos.cy = work.right - work.left, work.bottom - work.top
-        pos.flags &= ~(SWP_NOMOVE | SWP_NOSIZE)
 def enable_snap(widget):
     """Give the frameless window a real (invisible) resizable frame so Windows
     treats it like a normal window: Aero Snap, Win+arrows, snap layouts."""
