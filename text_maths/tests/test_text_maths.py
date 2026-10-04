@@ -130,8 +130,8 @@ def test_rerun_recalculates_old_answers_and_errors():
     ("asin(0.5)=", "asin(0.5)= 30°"),
     ("atan2(1m, 1m)=", "atan2(1m, 1m)= 45°"),
     ("sqrt(16m^2)=", "sqrt(16m^2)= 4m"),
-    ("5kn+5KN=", "5kn+5KN= 10kN"),
-    ("10mpa*2=", "10mpa*2= 20MPa"),
+    ("5kn+5KN=", "5kN+5kN= 10kN"),
+    ("10mpa*2=", "10MPa*2= 20MPa"),
     ("1 kN = 1000 N", "1 kN = 1000N"),
     ("3m/1.5m=", "3m/1.5m= 2"),
     ("5000mm/1m=", "5000mm/1m= 5"),
@@ -450,3 +450,41 @@ def test_launcher_runs_its_mode(name, mode, tmp_path):
                 "substitution": "L = 6m\nL*2 = 6m*2 = 12m"}[mode]
     assert clip.read_text(encoding="utf-8") == expected
     assert (tmp_path / "clip.txt.keys").read_text() == "ctrl+v"
+
+
+# ------------------------------------------------------------ unit spelling
+
+@pytest.mark.parametrize("line, mode, expected", [
+    ("5kn+3KN=", "units", "5kN+3kN= 8kN"),
+    ("10 Mpa*100MM^2 = kn", "units", "10 MPa*100mm^2 = 1kN"),
+    ("5KNm*2 =", "units", "5kNm*2 = 10kNm"),
+    ("5 Nmm + 3 NMM =", "units", "5 Nmm + 3 Nmm = 8Nmm"),
+    ("6M = mm", "units", "6m = 6000mm"),
+    ("5 KG*ge=", "units", "5 kg*ge= 49.05N"),
+    ("2 secs + 1 mins =", "units", "2 s + 1 min = 62s"),
+    ("sin(30 degrees)=", "pure", "sin(30 deg)= 0.5"),
+    ("5kn+2m=", "units", "5kN+2m= [Error: can't add a force and a length]"),
+    ("5kn = MM", "units", "5kN = mm [Error: the answer is a force, not mm]"),
+    ("w = 10 kn/m\nw*2 =", "variables", "w = 10 kN/m\nw*2 = 20kN/m"),
+    ("x = 5kn + 2m", "variables", "x = 5kN + 2m [Error: can't add a force and a length]"),
+    ("w = 10kn/m\nL = 6M\nM = w*L^2/8 =", "substitution",
+     "w = 10kN/m\nL = 6m\nM = w*L^2/8 = 10kN/m*(6m)^2/8 = 45kNm"),
+    ("t = 2 hours\nt =", "variables", "t = 2 hr\nt = 2hr"),
+])
+def test_misspelt_units_are_corrected_in_the_text(line, mode, expected):
+    assert calc(line, mode) == expected
+
+
+@pytest.mark.parametrize("line, mode", [
+    ("Total = 5 KN", "units"),          # not a sum: prose is never touched
+    ("5mn=", "units"),                  # mN or MN? too risky to guess
+    ("5kn=", "pure"),                   # no units in Pure Maths
+])
+def test_spelling_is_not_guessed(line, mode):
+    out = calc(line, mode)
+    assert "kN" not in out and "MN" not in out
+
+
+def test_corrected_spelling_is_stable_on_rerun():
+    once = calc("w = 10kn/m\nL = 6M\nM = w*L^2/8 =", "substitution")
+    assert calc(once, "substitution") == once

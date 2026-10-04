@@ -74,7 +74,11 @@ change `L = 6m` to `L = 7m`, select the block, and press the hotkey again.
 
 **Units:** N kN MN lbf kip · g kg t · mm cm m km in ft · s min hr ·
 Pa kPa MPa GPa psi ksi · rad deg ° · and force×length together, such as kNm, Nmm.
-`kn`, `kpa` and `mpa` typed in lower case are understood. Combine units with
+**Misspelt units are corrected in your text** on any line that gets calculated:
+`5kn` → `5kN`, `10Mpa` → `10MPa`, `100MM^2` → `100mm^2`, `KNm` → `kNm`,
+`6M` → `6m`, `KG` → `kg`, `secs`/`mins`/`hours`/`degrees` → `s`/`min`/`hr`/`deg`.
+Other single letters (N, s, g, t) must be typed exactly, and `mn` is left alone
+(mN or MN?). Prose lines are never changed. Combine units with
 `/` `*` `·` and powers: `kN/m`, `kN/m^2`, `m/s²`, `kg/m3`.
 
 When the inputs don't give a tidy unit, the answer uses kN or N for force,

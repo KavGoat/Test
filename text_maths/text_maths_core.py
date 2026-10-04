@@ -137,12 +137,25 @@ UNITS = {
 ANGLE_UNITS = frozenset(("rad", "deg"))
 ALL_UNITS = frozenset(UNITS)
 
-# Accepted when typed in lower case.
-UNIT_ALIASES = {"kn": "kN", "kpa": "kPa", "mpa": "MPa", "gpa": "GPa", "°": "deg"}
+# Other spellings, matched ignoring case. They are corrected in the text:
+# 5kn -> 5kN, 3 secs -> 3 s.
+UNIT_SPELLINGS = {
+    "sec": "s", "secs": "s", "second": "s", "seconds": "s",
+    "mins": "min", "minute": "min", "minutes": "min",
+    "hrs": "hr", "hour": "hr", "hours": "hr",
+    "degs": "deg", "degree": "deg", "degrees": "deg",
+    "kgs": "kg", "tonne": "t", "tonnes": "t", "kips": "kip",
+    "m": "m",       # 6M -> 6m; other single letters (n, S, G, T) stay exact
+}
+# Any capitalisation of a unit of two or more letters: KN, Mpa, KG, MM.
+# Other single letters must be exact (N, s, g, t), and mn is left out because
+# 5mn -> 5MN would be a million times out.
+_UNITS_BY_LOWER = {s.lower(): s for s in UNITS if len(s) > 1 and s.lower() != "mn"}
 
 FORCE_SYMBOLS = sorted((s for s, u in UNITS.items() if u[1] == FORCE),
                        key=len, reverse=True)
 LENGTH_SYMBOLS = frozenset(s for s, u in UNITS.items() if u[1] == LENGTH)
+_LENGTH_BY_LOWER = {s.lower(): s for s in LENGTH_SYMBOLS}
 
 # Order units are printed in: kN before m (kNm), kg before m/s².
 _RANK = {FORCE: 0, MASS: 1, PRESSURE: 2, LENGTH: 3, TIME: 4, ANGLE: 5}
@@ -212,14 +225,23 @@ def _clean(hint, dims):
 
 
 def _run_symbols(run, allowed):
-    """A run of letters as unit symbols: 'mm' -> ['mm'], 'kNm' -> ['kN','m']."""
-    symbol = run if run in UNITS else UNIT_ALIASES.get(run.lower())
+    """A run of letters as unit symbols: 'mm' -> ['mm'], 'kNm' -> ['kN','m'],
+    'kn' -> ['kN'].  The correct spelling is "".join(symbols)."""
+    if run == "°":
+        symbol = "deg"
+    elif run in UNITS:
+        symbol = run
+    else:
+        lower = run.lower()
+        symbol = UNIT_SPELLINGS.get(lower) or (_UNITS_BY_LOWER.get(lower) if len(run) > 1 else None)
     if symbol:
         return [symbol] if symbol in allowed else None
-    for force in FORCE_SYMBOLS:         # kNm, Nmm, MNm ... and nothing else
-        if run.startswith(force) and run[len(force):] in LENGTH_SYMBOLS:
-            if force in allowed:
-                return [force, run[len(force):]]
+    lower = run.lower()
+    for force in FORCE_SYMBOLS:         # kNm, Nmm, MNm (any case) and nothing else
+        if lower.startswith(force.lower()) and force in allowed:
+            length = _LENGTH_BY_LOWER.get(lower[len(force):])
+            if length and (run.startswith(force) or force != "MN"):
+                return [force, length]
     return None
 
 
@@ -250,12 +272,13 @@ def _scan_power(text, pos):
     return 1, pos
 
 
-def scan_unit(text, pos, allowed, variables=None):
+def scan_unit(text, pos, allowed, variables=None, fixes=None):
     """
     Read a unit such as kN, mm², kN/m, kNm or m/s^2 starting at pos.
 
     Returns (hint, end) or None. A unit never swallows a function call
     (s·in is not 'sin(') and stops before a name that is a variable.
+    Misspelt units (kn, Mpa) are added to fixes as (start, end, correct).
     """
     n = len(text)
     totals = {}
@@ -275,6 +298,8 @@ def scan_unit(text, pos, allowed, variables=None):
         symbols = _run_symbols(run, allowed)
         if not symbols or (committed and variables and run in variables):
             break
+        if fixes is not None and run != "°" and run != "".join(symbols):
+            fixes.append((start, end, "".join(symbols)))
         power, end = _scan_power(text, end)
         for symbol in symbols:
             totals[symbol] = totals.get(symbol, 0) + sign * power * SIXTHS
@@ -292,13 +317,28 @@ def scan_unit(text, pos, allowed, variables=None):
 
 def parse_unit(text, allowed=ALL_UNITS):
     """A whole string as a unit ('mm', '(kN/m)'), or None."""
-    text = text.strip()
-    if text.startswith("(") and text.endswith(")"):
-        text = text[1:-1].strip()
-    found = scan_unit(text, 0, allowed) if text else None
-    if found and found[1] == len(text) and found[0]:
-        return found[0]
+    found = _parse_unit_fixed(text, allowed)
+    return found and found[0]
+
+
+def _parse_unit_fixed(text, allowed):
+    """(hint, text with the spelling corrected) or None."""
+    stripped = text.strip()
+    inner = stripped
+    if inner.startswith("(") and inner.endswith(")"):
+        inner = inner[1:-1].strip()
+    fixes = []
+    found = scan_unit(inner, 0, allowed, fixes=fixes) if inner else None
+    if found and found[1] == len(inner) and found[0]:
+        return found[0], stripped.replace(inner, apply_fixes(inner, fixes), 1)
     return None
+
+
+def apply_fixes(text, fixes, offset=0):
+    """Splice corrected unit spellings into text (fix positions minus offset)."""
+    for start, end, correct in sorted(fixes, reverse=True):
+        text = text[:start - offset] + correct + text[end - offset:]
+    return text
 
 
 # ============================================================
@@ -577,7 +617,7 @@ def _unit_start(c):
     return c == "°" or (c.isascii() and c.isalpha())
 
 
-def tokenize(text, mode, variables):
+def tokenize(text, mode, variables, fixes=None):
     """Tokens are (kind, value, start, end); kinds: num name op sup end."""
     allowed = ALL_UNITS if mode.units else ANGLE_UNITS
     tokens, i, n = [], 0, len(text)
@@ -591,7 +631,7 @@ def tokenize(text, mode, variables):
             found = None
             if end < n and _unit_start(text[end]):
                 # 5mm: a unit written straight after a number always wins.
-                found = scan_unit(text, end, allowed, variables)
+                found = scan_unit(text, end, allowed, variables, fixes)
             else:
                 # 5 mm: a unit unless that word is a variable or constant.
                 gap = end
@@ -603,7 +643,7 @@ def tokenize(text, mode, variables):
                         word_end += 1
                     word = text[gap:word_end]
                     if not (variables and word in variables) and word not in CONSTANTS:
-                        found = scan_unit(text, gap, allowed, variables)
+                        found = scan_unit(text, gap, allowed, variables, fixes)
             value = float(match.group())
             if found and found[0]:
                 factor, dims = hint_factor_dims(found[0])
@@ -765,10 +805,11 @@ class Parser:
         raise NotACalc(f"didn't expect what's at position {start + 1}")
 
 
-def evaluate(text, mode, variables=None):
-    """Return (value, [(start, end, value) of variables used])."""
+def evaluate(text, mode, variables=None, fixes=None):
+    """Return (value, [(start, end, value) of variables used]).
+    Misspelt units found on the way are added to fixes."""
     try:
-        parser = Parser(tokenize(text, mode, variables), mode, variables)
+        parser = Parser(tokenize(text, mode, variables, fixes), mode, variables)
         value = parser.parse()
     except ZeroDivisionError:
         raise CalcError("division by zero") from None
@@ -931,9 +972,9 @@ def _read_tail(tail, allowed):
     text = tail.strip()
     if not text:
         return None, False, ""
-    hint = parse_unit(text, allowed)
-    if hint:
-        return hint, False, text
+    found = _parse_unit_fixed(text, allowed)
+    if found:
+        return found[0], False, found[1]        # 'kn' comes back as 'kN'
     match = _OLD_ANSWER.match(text)
     if match:
         rest = match.group(1).strip()
@@ -963,20 +1004,21 @@ def process_line(line, mode, variables):
         if len(parts) == 2 and parts[1].strip():
             # x = 5kN  : remember it, print nothing
             expression = parts[1].split("#")[0]
+            fixes = []
             try:
-                value, _ = evaluate(expression, mode, variables)
+                value, _ = evaluate(expression, mode, variables, fixes)
             except NotACalc:
                 return line
             except CalcError as error:
-                return _error(work, error)
+                return _error(apply_fixes(work, fixes, -(equals[0] + 1)), error)
             variables[name] = value
-            return work
+            return apply_fixes(work, fixes, -(equals[0] + 1))
         if len(parts) == 2:                     # x =   : show x
-            expression, cut, tail = first, equals[0], ""
+            expression, cut, tail, start = first, equals[0], "", 0
         else:                                   # x = expr = [working =] answer
-            expression, cut, tail = parts[1], equals[1], parts[-1]
+            expression, cut, tail, start = parts[1], equals[1], parts[-1], equals[0] + 1
     else:
-        expression, cut, tail = parts[0], equals[0], parts[-1]
+        expression, cut, tail, start = parts[0], equals[0], parts[-1], 0
 
     if not expression.strip():
         return line
@@ -984,14 +1026,21 @@ def process_line(line, mode, variables):
     if read is False:
         return line
     wanted, stale, request = read
-    head = work[:cut + 1]
-
+    known = variables if mode.variables else None
+    fixes = []
     try:
-        value, used = evaluate(expression, mode, variables if mode.variables else None)
+        value, used = evaluate(expression, mode, known, fixes)
     except NotACalc as error:
-        return line if stale else _error(head, error)
+        if stale:
+            return line
+        return _error(apply_fixes(work[:cut + 1], fixes, -start), error)
     except CalcError as error:
+        head = apply_fixes(work[:cut + 1], fixes, -start)
         return _error(head + (" " + request if request else ""), error)
+    head = apply_fixes(work[:cut + 1], fixes, -start)   # 5kn -> 5kN in the text
+    if fixes and mode.substitution:
+        expression = apply_fixes(expression, fixes)
+        value, used = evaluate(expression, mode, known)
 
     if wanted and value.d != hint_factor_dims(wanted)[1]:
         if stale:
