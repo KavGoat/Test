@@ -591,3 +591,117 @@ def test_hundred_member_sheet():
         length, load = round(3 + i * 0.05, 2), round(5 + i * 0.1, 1)
         got = float(out[3 * i - 1].rsplit("= ", 1)[1].removesuffix("kNm"))
         assert abs(got - load * length ** 2 / 8) < 0.001
+
+
+# ------------------------------------------------------------ messy input and code formulas
+
+@pytest.mark.parametrize("line, mode, expected", [
+    ("1 000 000 / 2 =", "pure", "1 000 000 / 2 = 500000"),        # spaces as thousands
+    ("12 345.678 =", "pure", "12 345.678 = 12345.678"),
+    ("6 000 mm = m", "units", "6 000 mm = 6m"),
+    ("max(1 000, 2) =", "pure", "max(1 000, 2) = 1000"),
+    ("200 x 300 mm =", "units", "200 x 300 mm = 60000mm"),
+    ("200mm x 300mm =", "units", "200mm x 300mm = 60000mm²"),
+    ("5 kN/m x 6m =", "units", "5 kN/m x 6m = 30kN"),
+    ("x = 5\n2 x 3 =", "variables", "2 x 3 = 30"),                 # x is a variable here
+    ("mod(10, 3) =", "pure", "mod(10, 3) = 1"),
+    ("12.5% * 80kN =", "units", "12.5% * 80kN = 10kN"),
+    ("f'c = 32MPa\nf'ct = 0.6*sqrt(f'c) =", "variables", "f'ct = 0.6*sqrt(f'c) = 3.394MPa"),
+    ("f'c = 32MPa\nf'c^(1/3) =", "variables", "f'c^(1/3) = 3.175MPa"),
+    ("sqrt(32000kPa) =", "units", "sqrt(32000kPa) = 5.657MPa"),
+    ("sqrt(400mm2) =", "units", "sqrt(400mm²) = 20mm"),           # not a stress: physical
+    ("h = 9m\n1.25*0.05*(h/1m)^0.75 =", "variables", "1.25*0.05*(h/1m)^0.75 = 0.325"),
+    ("0.5*25kN/m^3*(3m)^2 =", "units", "0.5*25kN/m³*(3m)^2 = 112.5kN/m"),
+    ("1/2*9.81m/s^2*(2s)^2 =", "units", "1/2*9.81m/s²*(2s)^2 = 19.62m"),
+    ("area = 2 ft * 3 ft = m^2", "units", "area = 2 ft * 3 ft = 0.557m²"),
+    ("v = 100 km/hr = m/s", "units", "v = 100 km/hr = 27.778m/s"),
+    ("P = 50 kip = kN", "units", "P = 50 kip = 222.411kN"),
+])
+def test_messy_input_and_code_formulas(line, mode, expected):
+    assert calc(line, mode).splitlines()[-1] == expected
+
+
+@pytest.mark.parametrize("line, mode, message", [
+    ("3.5.2 =", "pure", "two decimal points"),
+    ("2 3 =", "pure", "two numbers in a row"),
+    ("5kN 3kN =", "units", "two numbers in a row"),
+    ("10 % 3 =", "pure", "mod(a, b)"),
+    ("h = 9m\nh^0.75 =", "variables", "(x/1m)^0.75"),
+    ("b = c*2", "variables", "unknown name 'c'"),
+    ("a = 1\nb = a + c", "variables", "unknown name 'c'"),
+])
+def test_mistakes_are_reported_not_guessed(line, mode, message):
+    out = calc(line, mode)
+    assert "[Error:" in out and message in out
+
+
+@pytest.mark.parametrize("text", [
+    "Total = 5 bolts", "Ref = AS4100 cl 5.1", "Note = see drawing A-1", "Grade = 300PLUS",
+    "Job = 2024-117", "Rev = B", "Check: 5kN < 10kN OK",
+])
+def test_notes_in_a_calc_are_left_alone(text):
+    assert calc(text, "variables") == text
+
+
+# ------------------------------------------------------------ randomised checks
+
+def test_random_pure_expressions_match_python():
+    import math
+    import random
+    rng = random.Random(7)
+
+    def build(depth=0):
+        if depth > 3 or rng.random() < 0.3:
+            return rng.choice([str(rng.randint(0, 50)), f"{rng.uniform(0.1, 99):.2f}"])
+        pick = rng.random()
+        if pick < 0.6:
+            return f"{build(depth + 1)}{rng.choice('+-*/')}{build(depth + 1)}"
+        if pick < 0.8:
+            return f"({build(depth + 1)})"
+        if pick < 0.9:
+            return f"({build(depth + 1)})^{rng.randint(0, 3)}"
+        return f"max({build(depth + 1)},{build(depth + 1)})"
+
+    checked = 0
+    for _ in range(3000):
+        text = build()
+        try:
+            want = eval(text.replace("^", "**"), {"max": max})
+        except (ZeroDivisionError, OverflowError):
+            continue
+        if isinstance(want, complex):
+            continue
+        got = core.evaluate(text, core.MODES["pure"])[0].v
+        assert math.isclose(got, want, rel_tol=1e-9, abs_tol=1e-9), text
+        checked += 1
+    assert checked > 2500
+
+
+def test_random_unit_conversions():
+    import math
+    import random
+    rng = random.Random(3)
+    groups = [["N", "kN", "MN", "lbf", "kip"], ["mm", "cm", "m", "km", "in", "ft"],
+              ["Pa", "kPa", "MPa", "GPa", "psi", "ksi"], ["g", "kg", "t"], ["s", "min", "hr"]]
+    for _ in range(1500):
+        group = rng.choice(groups)
+        a, b = rng.choice(group), rng.choice(group)
+        value = round(rng.uniform(0.5, 900), 2)
+        out = calc(f"{value}{a} = {b}", "units")
+        answer = out.split("= ", 1)[1]
+        assert answer.endswith(b)
+        got = float(answer[:-len(b)])
+        want = value * core.UNITS[a][0] / core.UNITS[b][0]
+        assert math.isclose(got, float(core.format_number(want)), rel_tol=1e-9), out
+
+
+def test_random_sheets_are_stable_when_run_twice():
+    import random
+    rng = random.Random(11)
+    for _ in range(300):
+        lines = [f"v{i} = {rng.randint(1, 99)}{rng.choice(['', 'kN', 'm', 'mm', 'kPa'])}" for i in range(4)]
+        lines += [f"r{i} = v{rng.randint(0, 3)}*v{rng.randint(0, 3)} + {rng.randint(1, 9)} =" for i in range(3)]
+        text = "\n".join(lines)
+        for mode in core.MODES:
+            once = calc(text, mode)
+            assert calc(once, mode) == once

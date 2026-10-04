@@ -64,6 +64,15 @@ change `L = 6m` to `L = 7m`, select the block, and press the hotkey again.
   For a length squared write `(300mm)^3` or `sqrt((60mm)^2 + (35mm)^2)`, or
   use variables (`h^3` is always the variable cubed).
 - Implicit multiplication works: `2pi`, `2L`, `2(a+b)`, `(a+b)(c+d)`.
+- `200 x 300` means times (unless you have a variable called `x`), and spaces
+  can group thousands: `1 000 000`, `6 000mm`.
+- `%` is percent (`12.5% * 80kN`); use `mod(a, b)` for a remainder.
+- **Code formulas with roots of a stress** (`0.6*sqrt(f'c)`, `f'c^(1/3)`) work
+  the way the codes mean them: f'c in MPa gives MPa. For other empirical
+  powers of a unit, divide by the unit first: `(h_n/1m)^0.75`.
+- Mistakes are reported, not guessed: `3.5.2`, `2 3`, or `b = c*2` with an
+  unknown `c` all show an `[Error: …]`. Notes like `Ref = AS4100 cl 5.1`
+  are left alone.
 - `^`, `**` and superscripts are all powers: `x^2`, `x**2`, `x²`, `mm⁴`.
 - `×`, `÷`, `−`, `·` and non-breaking spaces from Word or the web are fine.
 - Variable names: letters (Greek too), digits, `_`, `'` and subscripts:

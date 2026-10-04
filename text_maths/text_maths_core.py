@@ -433,9 +433,14 @@ def pw(a, b):
         raise CalcError("negative number to a fractional power")
     if a.d == NONE:
         return Q(result)
+    if a.d == PRESSURE and _whole(p) is None:
+        # Code formulas (0.6*sqrt(f'c), f'c^(1/3)) take f'c in MPa and give MPa.
+        return Q((a.v / 1e6) ** p * 1e6, PRESSURE, MPA)
     dims = tuple(_whole(x * p) for x in a.d)
     if None in dims:
-        raise CalcError(f"can't raise {dim_name(a.d)} to the power {format_number(p)}")
+        unit = unit_text(a.h or auto_hint(a))
+        raise CalcError(f"can't raise {dim_name(a.d)} to the power {format_number(p)}; "
+                        f"for an empirical formula divide by the unit first, like (x/1{unit})^{format_number(p)}")
     hint = None
     if a.h:
         powers = [_whole(power * p) for _, power in a.h]
@@ -449,6 +454,7 @@ def pw(a, b):
 # ============================================================
 
 DEG = (("deg", SIXTHS),)
+MPA = (("MPa", SIXTHS),)
 RAD = (("rad", SIXTHS),)
 
 
@@ -561,6 +567,10 @@ def _pick(chooser, name):
     return apply
 
 
+def _raise_zero():
+    raise CalcError("division by zero")
+
+
 def _abs(x):
     _no_lists(x)
     return Q(abs(x.v), x.d, x.h)
@@ -581,6 +591,7 @@ FUNCTIONS = {
     "ceil": _display_rounding(math.ceil),
     "min": _pick(min, "min"), "max": _pick(max, "max"),
     "lin_int": _lin_int,
+    "mod": lambda a, b: Q(math.fmod(_plain(a, "mod"), _plain(b, "mod"))) if _plain(b, "mod") else _raise_zero(),
     "log": _log, "ln": lambda x: Q(math.log(_plain(x, "ln"))),
     "log10": lambda x: Q(math.log10(_plain(x, "log10"))),
     "log2": lambda x: Q(math.log2(_plain(x, "log2"))),
@@ -612,6 +623,7 @@ _OPERATORS = {
     ",": ",", "%": "%", "√": "√",
 }
 _SPACES = " \t\xa0  "
+_THOUSANDS = re.compile("[ \u2009\u202f\xa0]" r"(\d{3})(\.\d+)?(?![\d.])")
 _SUBSCRIPT_DIGITS = "₀₁₂₃₄₅₆₇₈₉"
 
 
@@ -645,6 +657,18 @@ def tokenize(text, mode, variables, fixes=None):
         elif (c.isascii() and c.isdigit()) or (c == "." and i + 1 < n and text[i + 1].isdigit()):
             match = _NUMBER.match(text, i)
             end = match.end()
+            digits = match.group()
+            if re.fullmatch(r"\d{1,3}", digits):
+                # 1 000 000 and 6 000mm: spaces as thousands separators
+                group = _THOUSANDS.match(text, end)
+                while group:
+                    digits += group.group(1) + (group.group(2) or "")
+                    end = group.end()
+                    if group.group(2):
+                        break
+                    group = _THOUSANDS.match(text, end)
+            if end < n and (text[end] == "." or (text[end].isascii() and text[end].isdigit())):
+                raise NotACalc("a number has two decimal points")
             found = None
             if end < n and _unit_start(text[end]):
                 # 5mm: a unit written straight after a number always wins.
@@ -661,7 +685,7 @@ def tokenize(text, mode, variables, fixes=None):
                     word = text[gap:word_end]
                     if not (variables and word in variables) and word not in CONSTANTS:
                         found = scan_unit(text, gap, allowed, variables, fixes)
-            value = float(match.group())
+            value = float(digits)
             if found and found[0]:
                 factor, dims = hint_factor_dims(found[0])
                 tokens.append(("num", Q(value * factor, dims, found[0]), i, found[1]))
@@ -676,6 +700,12 @@ def tokenize(text, mode, variables, fixes=None):
             while end < n and _is_name_char(text[end]):
                 end += 1
             name = text[i:end]
+            if (name in ("x", "X") and not (variables and name in variables) and tokens
+                    and (tokens[-1][0] in ("num", "name", "sup") or tokens[-1][1] == ")")
+                    and _next_starts_value(text, end)):
+                tokens.append(("op", "*", i, end))          # 200 x 300
+                i = end
+                continue
             if (variables and end < n and text[end] == "*" and name + "*" in variables
                     and not text.startswith("**", end)
                     and (name not in variables
@@ -702,7 +732,16 @@ def tokenize(text, mode, variables, fixes=None):
         else:
             raise NotACalc(f"unexpected character '{c}'")
     tokens.append(("end", None, n, n))
+    for before, after in zip(tokens, tokens[1:]):
+        if before[0] == "num" and after[0] == "num":
+            raise NotACalc("two numbers in a row")
     return tokens
+
+
+def _next_starts_value(text, pos):
+    rest = text[pos:].lstrip(_SPACES)
+    return bool(rest) and pos < len(text) and text[pos] in _SPACES and (
+        rest[0].isalnum() or rest[0] in "(.√")
 
 
 # ============================================================
@@ -774,6 +813,9 @@ class Parser:
                 value = pw(value, Q(float(extra)))
             elif kind == "op" and extra == "%":
                 self.i += 1
+                following = self.tokens[self.i]
+                if following[0] in ("num", "name") or (following[0] == "op" and following[1] == "("):
+                    raise CalcError("% means percent here; for a remainder use mod(a, b)")
                 value = mul(value, Q(0.01))
             else:
                 return value
@@ -1009,6 +1051,14 @@ def _read_tail(tail, allowed):
     return False
 
 
+def _looks_like_maths(text, variables):
+    words = re.findall(r"[^\W\d][\w']*", text)
+    if variables and any(word in variables for word in words):
+        return True
+    prose = re.search(r"[^\W\d]{2,}\s+[^\W\d]{2,}", text)
+    return not prose and bool(re.search(r"[+\-*/^×÷]", text))
+
+
 def process_line(line, mode, variables):
     if "=" not in line or len(line) > MAX_LINE_LENGTH:
         return line
@@ -1030,6 +1080,11 @@ def process_line(line, mode, variables):
             fixes = []
             try:
                 value, _ = evaluate(expression, mode, variables, fixes)
+            except UnknownName as error:
+                # b = a + c with c misspelt: say so; "Note = see drawing" is prose.
+                if _looks_like_maths(expression, variables):
+                    return _error(apply_fixes(work, fixes, -(equals[0] + 1)), error)
+                return line
             except NotACalc:
                 return line
             except CalcError as error:
