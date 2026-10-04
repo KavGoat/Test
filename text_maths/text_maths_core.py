@@ -278,7 +278,8 @@ def scan_unit(text, pos, allowed, variables=None, fixes=None):
 
     Returns (hint, end) or None. A unit never swallows a function call
     (s·in is not 'sin(') and stops before a name that is a variable.
-    Misspelt units (kn, Mpa) are added to fixes as (start, end, correct).
+    Misspelt units (kn, Mpa) and plain powers (m2, m^2) are added to
+    fixes as (start, end, correct).
     """
     n = len(text)
     totals = {}
@@ -300,7 +301,12 @@ def scan_unit(text, pos, allowed, variables=None, fixes=None):
             break
         if fixes is not None and run != "°" and run != "".join(symbols):
             fixes.append((start, end, "".join(symbols)))
+        power_start = end
         power, end = _scan_power(text, end)
+        if fixes is not None and end > power_start:
+            neat = "" if power == 1 else str(power).translate(_TO_SUPERSCRIPT)
+            if text[power_start:end] != neat:           # m2, m^2 -> m²
+                fixes.append((power_start, end, neat))
         for symbol in symbols:
             totals[symbol] = totals.get(symbol, 0) + sign * power * SIXTHS
         committed = end

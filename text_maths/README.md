@@ -78,7 +78,9 @@ Pa kPa MPa GPa psi ksi · rad deg ° · and force×length together, such as kNm,
 `5kn` → `5kN`, `10Mpa` → `10MPa`, `100MM^2` → `100mm^2`, `KNm` → `kNm`,
 `6M` → `6m`, `KG` → `kg`, `secs`/`mins`/`hours`/`degrees` → `s`/`min`/`hr`/`deg`.
 Other single letters (N, s, g, t) must be typed exactly, and `mn` is left alone
-(mN or MN?). Prose lines are never changed. Combine units with
+(mN or MN?). Unit powers are tidied the same way: `m2` and `m^2` → `m²`, `mm4` → `mm⁴`,
+`kg/m3` → `kg/m³`, `m^-1` → `m⁻¹` (powers of brackets and variables, like
+`(6m)^2` or `x^2`, are left alone). Prose lines are never changed. Combine units with
 `/` `*` `·` and powers: `kN/m`, `kN/m^2`, `m/s²`, `kg/m3`.
 
 When the inputs don't give a tidy unit, the answer uses kN or N for force,

@@ -109,27 +109,27 @@ def test_rerun_recalculates_old_answers_and_errors():
     ("5 kN + 3 kN =", "5 kN + 3 kN = 8kN"),
     ("1kN+500N=", "1kN+500N= 1.5kN"),
     ("5kN*2m=", "5kN*2m= 10kNm"),
-    ("10kN/(2m^2)=", "10kN/(2m^2)= 5kPa"),
+    ("10kN/(2m^2)=", "10kN/(2m²)= 5kPa"),
     ("20kN/m*(6m)^2/8=", "20kN/m*(6m)^2/8= 90kNm"),
     ("10kN/m*2=", "10kN/m*2= 20kN/m"),
-    ("5MPa*100mm^2=", "5MPa*100mm^2= 500N"),
-    ("5MPa*100mm^2 = kN", "5MPa*100mm^2 = 0.5kN"),
+    ("5MPa*100mm^2=", "5MPa*100mm²= 500N"),
+    ("5MPa*100mm^2 = kN", "5MPa*100mm² = 0.5kN"),
     ("5kN = (N)", "5kN = 5000N"),
     ("6m = mm", "6m = 6000mm"),
-    ("1m^2= mm^2", "1m^2= 1e6mm²"),
+    ("1m^2= mm^2", "1m²= 1e6mm²"),
     ("100kN/(300mm*500mm)=", "100kN/(300mm*500mm)= 666.667kPa"),
     ("32MPa*0.85=", "32MPa*0.85= 27.2MPa"),
     ("200GPa*2=", "200GPa*2= 400GPa"),
-    ("45kNm/(1.2e6mm^3)=", "45kNm/(1.2e6mm^3)= 37.5MPa"),
+    ("45kNm/(1.2e6mm^3)=", "45kNm/(1.2e6mm³)= 37.5MPa"),
     ("9.81kg*ge=", "9.81kg*ge= 96.236N"),
     ("2t*ge=", "2t*ge= 19.62kN"),
     ("200mm*(300mm)^3/12=", "200mm*(300mm)^3/12= 450e6mm⁴"),
-    ("200mm*300mm^3/12=", "200mm*300mm^3/12= 5000mm⁴"),     # 300 mm³, not (300mm)³
+    ("200mm*300mm^3/12=", "200mm*300mm³/12= 5000mm⁴"),     # 300 mm³, not (300mm)³
     ("2sin(30deg)=", "2sin(30deg)= 1"),
     ("sin(30°)=", "sin(30°)= 0.5"),
     ("asin(0.5)=", "asin(0.5)= 30°"),
     ("atan2(1m, 1m)=", "atan2(1m, 1m)= 45°"),
-    ("sqrt(16m^2)=", "sqrt(16m^2)= 4m"),
+    ("sqrt(16m^2)=", "sqrt(16m²)= 4m"),
     ("5kn+5KN=", "5kN+5kN= 10kN"),
     ("10mpa*2=", "10MPa*2= 20MPa"),
     ("1 kN = 1000 N", "1 kN = 1000N"),
@@ -456,7 +456,7 @@ def test_launcher_runs_its_mode(name, mode, tmp_path):
 
 @pytest.mark.parametrize("line, mode, expected", [
     ("5kn+3KN=", "units", "5kN+3kN= 8kN"),
-    ("10 Mpa*100MM^2 = kn", "units", "10 MPa*100mm^2 = 1kN"),
+    ("10 Mpa*100MM^2 = kn", "units", "10 MPa*100mm² = 1kN"),
     ("5KNm*2 =", "units", "5kNm*2 = 10kNm"),
     ("5 Nmm + 3 NMM =", "units", "5 Nmm + 3 Nmm = 8Nmm"),
     ("6M = mm", "units", "6m = 6000mm"),
@@ -488,3 +488,28 @@ def test_spelling_is_not_guessed(line, mode):
 def test_corrected_spelling_is_stable_on_rerun():
     once = calc("w = 10kn/m\nL = 6M\nM = w*L^2/8 =", "substitution")
     assert calc(once, "substitution") == once
+
+
+# ------------------------------------------------------------ unit powers
+
+@pytest.mark.parametrize("line, mode, expected", [
+    ("5m2+3m^2=", "units", "5m²+3m²= 8m²"),
+    ("I = 450e6mm4\nI*2 =", "variables", "I = 450e6mm⁴\nI*2 = 900e6mm⁴"),
+    ("5m^-1*2m=", "units", "5m⁻¹*2m= 10"),
+    ("5mm^1=", "units", "5mm= 5mm"),
+    ("10 Mpa*100MM2 = kn", "units", "10 MPa*100mm² = 1kN"),
+    ("rho = 2400kg/m3\nrho*ge =", "substitution",
+     "rho = 2400kg/m³\nrho*ge = 2400kg/m³*9.81m/s² = 23.544kN/m³"),
+    ("5m² + 2m^2 = mm^2", "units", "5m² + 2m² = 7e6mm²"),
+])
+def test_unit_powers_become_superscripts(line, mode, expected):
+    assert calc(line, mode) == expected
+
+
+@pytest.mark.parametrize("line, mode, expected", [
+    ("(6m)^2=", "units", "(6m)^2= 36m²"),         # a bracket's power is maths, not a unit
+    ("x = 3\nx^2 =", "variables", "x^2 = 9"),
+    ("2^3=", "pure", "2^3= 8"),
+])
+def test_other_powers_are_left_as_typed(line, mode, expected):
+    assert calc(line, mode).splitlines()[-1] == expected
