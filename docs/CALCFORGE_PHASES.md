@@ -882,4 +882,12 @@ checked against its saved files and WebSMath's recordings of SMath Cloud.
   on such a sheet). Pages exported or printed one at a time leave the pages
   either side out of the drawing. A contents block knows its rows before it
   is first painted.
+- **Dragging pages in the Pages panel** (2026-10-05): a small white,
+  slightly see-through sheet beside the pointer (a little stack with the
+  count when several are picked out), an ordinary move cursor along the
+  strip instead of Qt's no-entry cross, the blue line where they will land,
+  and the strip scrolls when the pointer nears its top or bottom. Fixed on
+  the way: a drag passed the count where the target belonged, so pages could
+  land in the wrong place. Pages picked out here and there gather into a run
+  where they are dropped.
 

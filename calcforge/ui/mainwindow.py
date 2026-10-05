@@ -1932,7 +1932,10 @@ class MainWindow(QMainWindow):
         if application is not None:
             application.installEventFilter(self)
         self.pages_panel.pageSelected.connect(self.go_to_page)
-        self.pages_panel.pagesReordered.connect(self.move_page)
+        # (first page, how many, where the run now starts) — move_page takes
+        # the last two the other way round
+        self.pages_panel.pagesReordered.connect(
+            lambda first, count, target: self.move_page(first, target, count))
         self.markups_panel.markupActivated.connect(self.reveal_markup)
         self.markups_panel.markupPicked.connect(self.pick_markup)
         self.markups_panel.markupsPicked.connect(self.pick_markups)

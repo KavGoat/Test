@@ -4,9 +4,10 @@ from __future__ import annotations
 import csv
 import re
 
-from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, QTimer, Qt, Signal
-from PySide6.QtGui import (QBrush, QColor, QFont, QFontInfo, QIcon, QKeySequence,
-                           QPainter, QPen, QPixmap)
+from PySide6.QtCore import (QByteArray, QEvent, QMimeData, QPoint, QPointF, QRectF, QSize,
+                            QTimer, Qt, Signal)
+from PySide6.QtGui import (QBrush, QColor, QDrag, QFont, QFontInfo, QIcon, QKeySequence,
+                           QPainter, QPainterPath, QPen, QPixmap)
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox,
                                QDoubleSpinBox, QInputDialog, QMessageBox,
                                QFontComboBox, QFormLayout, QGroupBox, QHBoxLayout,
@@ -117,6 +118,69 @@ class PageListWidget(QListWidget):
         if abs(wanted - self.scale) > 1e-6:
             self.zoomed.emit(wanted)
         event.accept()
+
+    #: What a drag of pages within the strip carries.
+    PAGES_MIME = "application/x-calcforge-pages"
+
+    def startDrag(self, actions) -> None:
+        """Pages dragged to a new place: a small white sheet by the pointer,
+        with how many when there are several — not a picture of the whole
+        page covering where it is going, and not Qt's no-entry cross over the
+        strip it is being dragged along (the user, 2026-10-05)."""
+        rows = sorted(self.row(entry) for entry in self.selectedItems())
+        if not rows and self.currentRow() >= 0:
+            rows = [self.currentRow()]
+        if not rows:
+            return
+        self.dragging_rows = rows
+        data = QMimeData()
+        data.setData(self.PAGES_MIME, QByteArray(",".join(map(str, rows)).encode()))
+        drag = QDrag(self)
+        drag.setMimeData(data)
+        ratio = self.devicePixelRatioF()
+        picture = self._drag_picture(len(rows), ratio)
+        drag.setPixmap(picture)
+        drag.setHotSpot(QPoint(-10, -8))          # beside the pointer, not under it
+        try:
+            drag.exec(Qt.MoveAction, Qt.MoveAction)
+        finally:
+            self.dragging_rows = None
+            self.set_external_drop_row(None)
+
+    dragging_rows = None
+
+    @staticmethod
+    def _drag_picture(count: int, ratio: float = 1.0) -> QPixmap:
+        width, height = 30, 38
+        stacked = 4 if count > 1 else 0
+        pixmap = QPixmap(int((width + stacked + 4) * ratio), int((height + stacked + 4) * ratio))
+        pixmap.setDevicePixelRatio(ratio)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        border = QPen(QColor(120, 128, 140, 200), 1.0)
+        if stacked:
+            painter.setPen(border)
+            painter.setBrush(QColor(255, 255, 255, 170))
+            painter.drawRoundedRect(QRectF(stacked + 1.5, 1.5, width, height), 2, 2)
+        painter.setPen(border)
+        painter.setBrush(QColor(255, 255, 255, 215))
+        painter.drawRoundedRect(QRectF(1.5, stacked + 1.5, width, height), 2, 2)
+        # a few grey lines: it reads as a sheet
+        painter.setPen(QPen(QColor(170, 176, 186, 200), 1.0))
+        for line in range(3):
+            y = stacked + 9.5 + line * 6
+            painter.drawLine(QPointF(7, y), QPointF(width - 5, y))
+        if count > 1:
+            font = painter.font()
+            font.setPixelSize(11)
+            font.setBold(True)
+            painter.setFont(font)
+            painter.setPen(QColor(40, 48, 60))
+            painter.drawText(QRectF(1.5, stacked + height - 15, width, 14),
+                             Qt.AlignCenter, str(count))
+        painter.end()
+        return pixmap
 
     def set_external_drop_row(self, row: int | None) -> None:
         row = None if row is None else max(0, min(int(row), self.count()))
@@ -297,7 +361,17 @@ class PagesPanel(QWidget):
         return [path for path in paths
                 if path.lower().endswith(self.WELCOME)]
 
+    def _ours(self, event) -> bool:
+        """Pages of this strip being dragged along it."""
+        return (event.source() is self.list
+                and event.mimeData().hasFormat(PageListWidget.PAGES_MIME))
+
     def _drag_enter(self, event) -> None:
+        if self._ours(event):
+            self.list.set_external_drop_row(self.drop_row(event.position().toPoint()))
+            event.setDropAction(Qt.MoveAction)
+            event.accept()
+            return
         if self._files_in(event):
             self.list.set_external_drop_row(
                 self.drop_row(event.position().toPoint()))
@@ -308,6 +382,13 @@ class PagesPanel(QWidget):
         QListWidget.dragEnterEvent(self.list, event)
 
     def _drag_move(self, event) -> None:
+        if self._ours(event):
+            # the blue line says where they will go; nothing else moves yet
+            self.list.set_external_drop_row(self.drop_row(event.position().toPoint()))
+            event.setDropAction(Qt.MoveAction)
+            event.accept()
+            self._scroll_near_the_edge(event.position().toPoint())
+            return
         if self._files_in(event):
             self.list.set_external_drop_row(
                 self.drop_row(event.position().toPoint()))
@@ -344,7 +425,25 @@ class PagesPanel(QWidget):
                 return row
         return self.list.count()
 
+    def _scroll_near_the_edge(self, point) -> None:
+        bar = self.list.verticalScrollBar()
+        height = self.list.viewport().height()
+        if point.y() < 24:
+            bar.setValue(bar.value() - 12)
+        elif point.y() > height - 24:
+            bar.setValue(bar.value() + 12)
+
     def _drop(self, event) -> None:
+        if self._ours(event):
+            rows = self.list.dragging_rows or [
+                int(part) for part in bytes(event.mimeData().data(
+                    PageListWidget.PAGES_MIME)).decode().split(",") if part]
+            slot = self.drop_row(event.position().toPoint())
+            self.list.set_external_drop_row(None)
+            event.setDropAction(Qt.MoveAction)
+            event.accept()
+            self.move_rows(rows, slot)
+            return
         files = self._files_in(event)
         if not files:
             self.list.set_external_drop_row(None)
@@ -355,6 +454,31 @@ class PagesPanel(QWidget):
         event.setDropAction(Qt.CopyAction)
         event.accept()
         self.window.insert_files_at(files, row)
+
+    def move_rows(self, rows: list, slot: int) -> None:
+        """Pages *rows* dropped in front of *slot* (a slot in the strip as it
+        is, before they leave). A run moves in one go; pages picked out here
+        and there are gathered up into a run where they were dropped."""
+        rows = sorted(set(rows))
+        if not rows:
+            return
+        if rows == list(range(rows[0], rows[-1] + 1)):
+            first, count = rows[0], len(rows)
+            if first <= slot <= first + count:
+                return                                    # dropped where it was
+            target = slot - count if slot > first else slot
+            self.pagesReordered.emit(first, count, max(target, 0))
+            return
+        # one at a time, each to the place after the one before it, keeping
+        # track of where every page has got to
+        order = list(range(self.list.count()))
+        start = slot - sum(1 for row in rows if row < slot)
+        for placed, row in enumerate(rows):
+            current = order.index(row)
+            target = start + placed
+            if current != target:
+                self.pagesReordered.emit(current, 1, target)
+                order.insert(target, order.pop(current))
 
     def show_where_it_landed(self, row: int, count: int = 1) -> None:
         """Say where pasted pages went: the slot line, and the pages picked out.
