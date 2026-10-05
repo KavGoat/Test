@@ -89,6 +89,13 @@ GRID_DOT = QColor("#a8a8a8")
 GRID_PX = 9.0                 # SMath's grid, in its 96-dpi pixels
 
 
+def suspend_markup_squares(scene) -> None:
+    """Before the scene is drawn for anything but the screen: every markup
+    paints itself (ui/markuplayer.py); the squares come back on screen."""
+    for frame in getattr(scene, "frames", ()):
+        frame.layer.suspend()
+
+
 def _painted_scale(painter) -> float:
     """Pixels per point, the way this painter is set up to draw.
 
@@ -289,6 +296,9 @@ class PageFrame(QGraphicsObject):
         self._sharp_scale = 0.0
         self._logo: Optional[QPixmap] = None
         self._logo_key = ""
+        from .markuplayer import MarkupLayer
+        # The page's markups drawn into squares, shown from them on screen.
+        self.layer = MarkupLayer(self)
         self.print_mode = False
         # The viewport last clicked into, whose frame is shown; and whether
         # every viewport's frame is shown (while the Viewport tool is out).
@@ -347,8 +357,22 @@ class PageFrame(QGraphicsObject):
     def page_rect(self) -> QRectF:
         return QRectF(0, 0, self.page.width_pt, self.page.height_pt)
 
+    #: Room round the page for markups drawn from the page's squares: their
+    #: boxes allow for the selection handles, which reach past the sheet's
+    #: edge for a markup near it (ui/markuplayer.py).
+    MARKUP_ROOM = 48.0
+
     def boundingRect(self) -> QRectF:
-        return self.page_rect().adjusted(-1, -1, SHADOW_DEPTH + 1, SHADOW_DEPTH + 1)
+        room = self.MARKUP_ROOM
+        return self.page_rect().adjusted(-room, -room, SHADOW_DEPTH + room, SHADOW_DEPTH + room)
+
+    def shape(self):
+        """What a click on the page hits: the page and its shadow, not the
+        room kept round it for drawing."""
+        from PySide6.QtGui import QPainterPath
+        path = QPainterPath()
+        path.addRect(self.page_rect().adjusted(-1, -1, SHADOW_DEPTH + 1, SHADOW_DEPTH + 1))
+        return path
 
     def update_scene_rect(self) -> None:
         """The page's size changed; the canvas has to be laid out again."""
@@ -576,6 +600,9 @@ class PageFrame(QGraphicsObject):
             painter.setBrush(Qt.NoBrush)
             _outline_where_exposed(painter, rect, exposed)
             painter.restore()
+            if not self._pdf_overlay:
+                # the markups nobody is touching, from their squares
+                self.layer.paint(painter, exposed, _painted_scale(painter))
 
     def set_active_viewport(self, viewport) -> None:
         if viewport is not self.active_viewport:
@@ -1063,6 +1090,9 @@ class PageFrame(QGraphicsObject):
             for item in hidden:
                 item.setVisible(False)
             source = self.mapRectToScene(self.page_rect())
+            # Drawn through the scene for paper or a file: every markup paints
+            # itself, not from the screen's squares.
+            suspend_markup_squares(scene)
             scene.render(painter, target, source, Qt.IgnoreAspectRatio)
         finally:
             # Whatever happened while it was being drawn, the page goes back
@@ -1310,6 +1340,8 @@ class DocumentScene(QGraphicsScene):
                 if isinstance(key, AnnotationTileKey):
                     left, top, right, bottom = key.box
                     where = QRectF(left, top, right - left, bottom - top)
+                    # a markup's file drawing came in: its squares redraw
+                    frame.layer.dirty(where)
                 else:
                     where = frame.page_rect()
                 box = box.united(where) if not box.isEmpty() else where

@@ -844,3 +844,30 @@ checked against its saved files and WebSMath's recordings of SMath Cloud.
   A zoom in of up to 2× then shrinks that sharper drawing instead of
   stretching a softer one (measured: 1.17× the resolution needed, where it
   was 0.58×), so when the exact zoom arrives nothing visibly changes.
+- **A thousand markups on a sheet** (2026-10-05). Each page's markups
+  nobody is touching are drawn once into squares (256 px) and shown from
+  them, as the PDF is: a frame of a scroll, pan or zoom is pictures moved,
+  however many markups there are, and on the graphics card those pictures
+  are textures. The markups stay real items — clicked, hovered, snapped to,
+  selected (the page draws the handles over the squares) — they are only
+  not painted one by one. Anything being drawn, typed into, dragged or
+  changed is drawn live and goes back into the squares 0.4 s after it
+  stops; a markup leaving or joining them patches just its own part of the
+  squares (its neighbours drawn again into that patch), so picking one up
+  off a crowded sheet costs a millisecond or two. Squares are drawn while
+  the hand is still — never between the frames of a movement — nearest the
+  middle of the screen first, then most of a screen above and below. While a
+  zoom moves, the squares of the zoom before stand in. Highlighters (which
+  multiply into the page) and equations are always drawn live. Print,
+  export and snapshots draw every markup itself. Also: the markups list is
+  rebuilt once a burst of changes is over, not once per markup (adding a
+  thousand: 43 s → 1 s); its columns size from a sample of rows; page
+  thumbnails are cached until a markup on the page changes and drawn again
+  after edits stop; add-page's undo record reuses the pages that did not
+  change; pens and clouds are worked out once. Measured on a 30-sheet A1 set
+  with 1,000 markups on sheet 1, processor drawing: frames scrolling 1.5 ms
+  (was 13), panning 2 ms (was 21), zooming 3–5 ms (was 70–110), dragging a
+  markup 2 ms; adding a page 0.2–0.3 s (was 0.9 s). The squares match the
+  markups drawn live pixel for pixel at 100% and 200% scaling; at 125% and
+  150% they can sit up to half a pixel off, which moves anti-aliasing only.
+

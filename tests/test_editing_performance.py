@@ -6,18 +6,25 @@ from calcforge.items.base import Style
 from dataclasses import asdict
 
 
-def test_bulk_restore_publishes_only_the_finished_page(window):
+def test_bulk_restore_publishes_only_the_finished_page(window, qapp):
     frame = window.view.frame()
     for i in range(25):
         frame.add_markup(RectItem(rect=QRectF(0, 0, 20, 20)), QPointF(30 + i, 40))
     before = frame.serialize_items()
     seen = []
     frame.itemsChanged.connect(lambda: seen.append(frame.serialize_items()))
+    rebuilt = []
+    original = window.markups_panel.rebuild
+    window.markups_panel.rebuild = lambda document: (rebuilt.append(1), original(document))
     frame.load_items(before)
     assert seen == [before]
+    # the list is rebuilt once the burst is over, and once (2026-10-05)
+    qapp.processEvents()
     assert len(window.markups_panel._rows) == len(before)
+    assert len(rebuilt) == 1
     frame.load_items([])
     assert seen == [before, []]
+    qapp.processEvents()
     assert window.markups_panel._rows == []
 
 

@@ -447,6 +447,9 @@ class TileCache(QObject):
         # while nothing else is wanted (see ahead()). A zoom does not give
         # them up the way it gives up the zoom before it.
         self._ahead: set = set()
+        #: Counts the markups drawn from squares not all here yet, so whoever
+        #: keeps a drawing of them (ui/markuplayer.py) knows to draw it again.
+        self.short = 0
 
     # -- the thread --------------------------------------------------------
     def _started(self) -> _Worker:
@@ -786,6 +789,7 @@ class TileCache(QObject):
                                      int((wanted.right() - 1e-6) // size2) + 1)]
             self._ask_ahead(keys, ("markup", source, index, xref), data, page)
         if wanting:
+            self.short += 1
             others, covers = self._stand_ins(("markup", source, index, xref),
                                              step, wanted)
             # all at once, as the page does (TileCache.tiles)

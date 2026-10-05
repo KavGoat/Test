@@ -386,6 +386,8 @@ class _Glide(QObject):
 
     def _step(self) -> None:
         import math
+        from .markuplayer import busy
+        busy()
         elapsed = max(self.clock.restart(), 1)
         share = 1.0 - math.exp(-elapsed / self.EASE_MS)
         if self.zooming is not None:
@@ -2323,7 +2325,12 @@ class PageView(QGraphicsView):
         super().mouseMoveEvent(event)
 
     def viewportEvent(self, event) -> bool:
-        if event.type() == QEvent.Leave:
+        kind = event.type()
+        if kind == QEvent.Wheel or (kind == QEvent.MouseMove and event.buttons()):
+            # the page's markup squares are drawn when the hand is still
+            from .markuplayer import busy
+            busy()
+        if kind == QEvent.Leave:
             self.forget_snap()
             self.viewport().update()
         return super().viewportEvent(event)

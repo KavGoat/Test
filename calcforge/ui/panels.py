@@ -169,6 +169,7 @@ class PagesPanel(QWidget):
 
     def __init__(self, window):
         super().__init__()
+        self._thumbnails: dict = {}      # id(page) -> (what it showed, icon, page)
         self.window = window
         # A page finished being drawn in the background: put it in its row.
         from ..io import pdftiles
@@ -481,6 +482,9 @@ class PagesPanel(QWidget):
 
     def rebuild(self, document, current: int) -> None:
         self._suppress = True
+        live = {id(page) for page in document.pages}
+        for gone in [key for key in self._thumbnails if key not in live]:
+            del self._thumbnails[gone]
         self.list.clear()
         for index, page in enumerate(document.pages):
             # The scale rides with the page number: what a measurement on that
@@ -590,6 +594,33 @@ class PagesPanel(QWidget):
         """
         scale = getattr(self.list, "scale", 1.0)
         across = max(int(160 * scale), 24)
+        frame = page.frame
+        if frame is not None:
+            # Drawn again only when something on the page has changed: a page
+            # of a thousand markups drew all of them into its thumbnail every
+            # time a page was added anywhere (2026-10-05).
+            key = (across, frame.layer.generation, page.width_pt, page.height_pt,
+                   page.pdf_key, page.pdf_page_index, page.background_key,
+                   page.grid, page.header, page.footer, page.turn,
+                   bool(getattr(page, "pdf_annotations", True)))
+            kept = self._thumbnails.get(id(page))
+            if kept is not None and kept[0] == key and kept[2] is page:
+                return kept[1]
+            made = self._thumbnail_drawn(page, document, ask, scale, across)
+            if made is not None:
+                self._thumbnails[id(page)] = (key, made, page)
+                return made
+        made = self._thumbnail_drawn(page, document, ask, scale, across)
+        return made if made is not None else self._blank_for(page, across)
+
+    def _blank_for(self, page, across: int) -> QIcon:
+        tall = int(across * page.height_pt / max(page.width_pt, 1.0))
+        waiting = QPixmap(across, max(tall, 1))
+        waiting.fill(Qt.white)
+        return _untinted(waiting)
+
+    def _thumbnail_drawn(self, page, document, ask: bool, scale: float, across: int):
+        """The thumbnail, or None while the page's sheet is still coming."""
         if document is not None and page.pdf_key and page.pdf_page_index is not None:
             data = document.asset(page.pdf_key)
             if data:
@@ -606,10 +637,7 @@ class PagesPanel(QWidget):
                     return _untinted(self._with_markups(small, page))
                 # Not drawn yet. A blank sheet of the right shape now, and the
                 # row is refreshed when the picture arrives.
-                tall = int(across * page.height_pt / max(page.width_pt, 1.0))
-                waiting = QPixmap(across, max(tall, 1))
-                waiting.fill(Qt.white)
-                return _untinted(waiting)
+                return None
         scene = page.frame
         if scene is None:
             pixmap = QPixmap(max(int(96 * scale), 16), max(int(128 * scale), 20))
@@ -699,6 +727,10 @@ class MarkupsPanel(QWidget):
             lambda point: self.filter_menu(header.logicalIndexAt(point),
                                            header.mapToGlobal(point)))
         self.tree.setSortingEnabled(True)
+        # Sizing a column to its contents reads a sample of the rows, not all
+        # of them: with a thousand markups, all of them was a tenth of a
+        # second each time anything changed (2026-10-05).
+        self.tree.header().setResizeContentsPrecision(64)
         layout.addWidget(self.tree, 1)
         # Values each column is narrowed to; a column not here shows all.
         self.column_filters: dict[int, set] = {}

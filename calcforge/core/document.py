@@ -370,10 +370,12 @@ class Page:
         return self.footer
 
     # -- serialisation -----------------------------------------------------
-    def to_dict(self) -> dict:
-        items = self._pending_items
-        if self.frame is not None:
-            items = self.frame.serialize_items()
+    def to_dict(self, items: Optional[list] = None) -> dict:
+        """*items*, when given, are this page's markups already written out."""
+        if items is None:
+            items = self._pending_items
+            if self.frame is not None:
+                items = self.frame.serialize_items()
         return {
             "uid": self.uid,
             "label": self.label,

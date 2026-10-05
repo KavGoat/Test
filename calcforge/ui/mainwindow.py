@@ -2272,7 +2272,7 @@ class MainWindow(QMainWindow):
         self._adopt_calc_defaults(self.document)
         if self.scene is None or self.scene.document is not self.document:
             self.scene = DocumentScene(self.document)
-            self.scene.itemsChanged.connect(self.refresh_lists)
+            self.scene.itemsChanged.connect(self._refresh_lists_soon)
             self.view.setScene(self.scene)
         # Frames whose page has gone leave the canvas with it.
         live = {id(page) for page in self.document.pages}
@@ -2613,7 +2613,16 @@ class MainWindow(QMainWindow):
     def mark_modified(self) -> None:
         self.document.modified = True
         self.refresh_lists()
-        self.pages_panel.refresh_current(self.document, self.current_index)
+        # The page's thumbnail is drawn again once the edits stop: drawn on
+        # every one, a page of a thousand markups cost a sixth of a second
+        # each time one was let go of (2026-10-05).
+        timer = getattr(self, "_thumbnail_timer", None)
+        if timer is None:
+            timer = self._thumbnail_timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(
+                lambda: self.pages_panel.refresh_current(self.document, self.current_index))
+        timer.start(400)
 
     # ==================================================================
     # pages
@@ -2928,9 +2937,25 @@ class MainWindow(QMainWindow):
         self.refresh_scale_label()
         self._sync_other_windows(True)
 
-    def _structure_snapshot(self) -> dict:
-        return {"pages": [page.to_dict() for page in self.document.pages],
-                "current": self.current_index}
+    def _structure_snapshot(self, reuse: Optional[dict] = None) -> dict:
+        """Every page written out. With *reuse* (from the snapshot before a
+        change), a page whose markups have not changed since keeps the
+        markups written then: adding a page to a sheet of a thousand markups
+        wrote all thousand out twice (2026-10-05)."""
+        pages, written = [], {}
+        for page in self.document.pages:
+            frame = page.frame
+            generation = frame.layer.generation if frame is not None else None
+            kept = (reuse or {}).get(id(page))
+            if kept is not None and generation is not None and kept[0] == generation:
+                entry = page.to_dict(items=kept[1])
+            else:
+                entry = page.to_dict()
+            if generation is not None:
+                written[id(page)] = (generation, entry["items"])
+            pages.append(entry)
+        self._written_pages = written
+        return {"pages": pages, "current": self.current_index}
 
     def _restore_structure(self, snapshot: dict, preserve_view: bool = False) -> None:
         scroll = (self.view.horizontalScrollBar().value(),
@@ -2982,7 +3007,7 @@ class MainWindow(QMainWindow):
         self.current_index = target
         self.view._shown_page = target
         self.follow_scrolled_page(target)
-        after = self._structure_snapshot()
+        after = self._structure_snapshot(reuse=getattr(self, "_written_pages", None))
         restore = (lambda snapshot: self._restore_structure(snapshot, True)) \
             if preserve_view else self._restore_structure
         self.undo_stack.push(DocumentStructureCommand(before, after, description,
@@ -6385,7 +6410,22 @@ class MainWindow(QMainWindow):
             middle = viewport.mapToGlobal(QPoint(viewport.width() // 2, 0)).x()
             status.center_on(middle)
 
+    def _refresh_lists_soon(self) -> None:
+        """The markups changed: the lists are rebuilt once the burst is over,
+        not once per markup — pasting or opening a thousand markups rebuilt
+        the markups list a thousand times (2026-10-05)."""
+        timer = getattr(self, "_lists_timer", None)
+        if timer is None:
+            timer = self._lists_timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self.refresh_lists)
+        if not timer.isActive():
+            timer.start(0)
+
     def refresh_lists(self) -> None:
+        timer = getattr(self, "_lists_timer", None)
+        if timer is not None:
+            timer.stop()
         self.markups_panel.rebuild(self.document)
         self.bookmarks_panel.rebuild(self.document)
         self.variables_panel.watch(self.document)

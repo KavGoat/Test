@@ -206,6 +206,17 @@ class Style:
         return [step * scale for step in steps]
 
     def pen(self, scale: float = 1.0) -> QPen:
+        key = (self.stroke, self.opacity, self.width, scale, self.line_style,
+               self.dash_scale, tuple(self.dash_array or ()))
+        made = _PENS.get(key)
+        if made is None:
+            made = self._make_pen(scale)
+            if len(_PENS) > 512:
+                _PENS.clear()
+            _PENS[key] = made
+        return QPen(made)
+
+    def _make_pen(self, scale: float) -> QPen:
         colour = QColor(self.stroke or "#000000")
         colour.setAlphaF(max(0.0, min(1.0, self.opacity)))
         pen = QPen(colour)
@@ -406,6 +417,15 @@ def cursor_for_handle(key: str):
 # Base item
 # ---------------------------------------------------------------------------
 
+#: What changes how a markup looks on its page, before it happens.
+_CHANGES_THAT_SHOW = (QGraphicsItem.ItemPositionChange, QGraphicsItem.ItemTransformChange,
+                      QGraphicsItem.ItemRotationChange, QGraphicsItem.ItemScaleChange,
+                      QGraphicsItem.ItemTransformOriginPointChange,
+                      QGraphicsItem.ItemZValueChange,
+                      QGraphicsItem.ItemVisibleChange, QGraphicsItem.ItemEnabledChange,
+                      QGraphicsItem.ItemChildAddedChange, QGraphicsItem.ItemChildRemovedChange)
+
+
 class MarkupItem(QGraphicsObject):
     """Base class: selection handles, style, metadata and serialisation."""
 
@@ -417,6 +437,39 @@ class MarkupItem(QGraphicsObject):
 
     geometryChanged = Signal()
     contentChanged = Signal()
+
+    #: While this markup is drawn from its page's squares (ui/markuplayer.py),
+    #: its size as it was when it went in: it is not changing, and Qt asks
+    #: for it twice per markup per frame.
+    _baked_rect = None
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        own = cls.__dict__.get("boundingRect")
+        if own is not None and not getattr(own, "_answers_baked", False):
+            def boundingRect(self, _own=own):
+                baked = self._baked_rect
+                return baked if baked is not None else _own(self)
+            boundingRect._answers_baked = True
+            boundingRect.__doc__ = own.__doc__
+            cls.boundingRect = boundingRect
+
+    # -- the page's squares (ui/markuplayer.py) ------------------------------
+    def _layer(self):
+        return getattr(self.parentItem(), "layer", None)
+
+    def _changing(self) -> None:
+        layer = self._layer()
+        if layer is not None:
+            layer.touched(self)
+
+    def update(self, *args):                 # (no annotation: a Qt slot)
+        self._changing()
+        super().update(*args)
+
+    def prepareGeometryChange(self):
+        self._changing()
+        super().prepareGeometryChange()
 
     def __init__(self):
         super().__init__()
@@ -540,6 +593,8 @@ class MarkupItem(QGraphicsObject):
         return
 
     def boundingRect(self) -> QRectF:
+        if self._baked_rect is not None:
+            return self._baked_rect
         margin = self.style.width + HANDLE_SIZE + 4
         box = self.local_rect().normalized().adjusted(-margin, -margin, margin, margin)
         if self.ROTATABLE:
@@ -940,6 +995,20 @@ class MarkupItem(QGraphicsObject):
         was written (the user, 2026-10-01). Undoing the change that took it
         over gives it back to the file.
         """
+        if change in _CHANGES_THAT_SHOW:
+            self._changing()
+        elif change == QGraphicsItem.ItemSelectedHasChanged:
+            # Picking a markup out changes nothing about its drawing, only
+            # whether its handles show; the page draws those over its squares.
+            frame = self.parentItem()
+            if self in getattr(getattr(frame, "layer", None), "members", ()):
+                frame.update(self.mapRectToParent(self.boundingRect()))
+        elif change == QGraphicsItem.ItemParentChange:
+            layer = self._layer()
+            if layer is not None:
+                layer.forget(self)
+        elif change == QGraphicsItem.ItemParentHasChanged:
+            self._changing()
         if change in (QGraphicsItem.ItemPositionHasChanged,
                       QGraphicsItem.ItemTransformHasChanged) \
                 and (self.still_theirs or self.split_theirs) and not self._still_arriving:
@@ -1215,6 +1284,23 @@ def round_the_joins(painter: QPainter) -> None:
 
 def cloud_path(polygon: QPolygonF, radius: float, closed: bool = True) -> QPainterPath:
     """Convert a polyline into a Bluebeam-style revision cloud."""
+    key = (tuple((point.x(), point.y()) for point in polygon), radius, closed)
+    made = _CLOUDS.get(key)
+    if made is None:
+        made = _cloud_path(polygon, radius, closed)
+        if len(_CLOUDS) > 2048:
+            _CLOUDS.clear()
+        _CLOUDS[key] = made
+    return QPainterPath(made)
+
+
+#: Clouds and pens already worked out: the same cloud is drawn again on every
+#: repaint and into every square it crosses.
+_CLOUDS: dict = {}
+_PENS: dict = {}
+
+
+def _cloud_path(polygon: QPolygonF, radius: float, closed: bool = True) -> QPainterPath:
     path = QPainterPath()
     points = list(polygon)
     if len(points) < 2:
@@ -1258,6 +1344,9 @@ class _TheirLook(QGraphicsItem):
     It belongs to its markup, so it is stacked with it among the others; it
     takes no clicks, and goes the moment the markup is changed."""
 
+    MARKUP_LOOK = True
+    _baked_rect = None
+
     def __init__(self, markup):
         super().__init__(markup)
         self.setAcceptedMouseButtons(Qt.NoButton)
@@ -1272,6 +1361,8 @@ class _TheirLook(QGraphicsItem):
         return markup.mapRectToParent(markup.boundingRect()).adjusted(-12, -12, 12, 12)
 
     def boundingRect(self) -> QRectF:
+        if self._baked_rect is not None:
+            return self._baked_rect
         markup = self.parentItem()
         if markup is None or markup.parentItem() is None:
             return QRectF()
