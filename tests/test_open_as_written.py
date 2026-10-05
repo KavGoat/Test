@@ -198,6 +198,16 @@ def test_the_screen_is_the_same_after_picking_one_out_and_letting_go(sheet):
         sheet.view.viewport().repaint()
         return sheet.view.viewport().grab().toImage()
 
+    # Everything drawn first: a square of the page or of a markup arriving
+    # between the two pictures is the drawing sharpening, not the selection.
+    import time
+    from calcforge.io import pdftiles
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        shot()
+        if not pdftiles.TILES._waiting and not pdftiles.TILES.held():
+            break
+        time.sleep(0.02)
     before = shot()
     cloud = by_kind(sheet, "cloud")
     edge = cloud.mapToScene(cloud.local_rect().topLeft() + QPointF(0, 30))
@@ -271,10 +281,15 @@ def _page_as_shown(window, settle=True):
         window.view.scene().render(painter, QRectF(image.rect()), rect)
         painter.end()
         return image
+    quiet = 0
     for _ in range(500):
         shot()
         QApplication.instance().processEvents()
-        if not pdftiles.TILES._waiting:
+        # nothing outstanding twice running, and no zoom holding requests
+        # back: a request goes out on the repaint after the one that found
+        # its square missing
+        quiet = quiet + 1 if not pdftiles.TILES._waiting and not pdftiles.TILES.held() else 0
+        if quiet >= 2:
             break
         time.sleep(0.01)
     return shot()

@@ -143,6 +143,10 @@ class MarkupLayer:
             return False
         if getattr(item, "IS_CALC", False) or getattr(item, "live", False):
             return False
+        if getattr(item, "still_theirs", False) or getattr(item, "split_theirs", False):
+            # drawn by its own file, from squares the render processes make:
+            # already pictures, and kept in step with them there
+            return False
         if getattr(getattr(item, "style", None), "blend", "") == "multiply":
             return False
         if item.flags() & QGraphicsItem.ItemIgnoresTransformations:
@@ -402,6 +406,7 @@ class MarkupLayer:
         self.wanted = (step, seen, seen.center())
         squares = self.tiles.get(step, {})
         drawn, standing, idle_work = [], [], False
+        rung_deadline = time.perf_counter() + 0.006
         for col, row in self._keys(exposed, step):
             square = squares.get((col, row))
             if square is not None and not (square.redo and not held):
@@ -411,7 +416,7 @@ class MarkupLayer:
                     drawn.append((QRectF(col * size, row * size, size, size), square.pixmap))
                 continue
             others = self._stand_ins(step, col, row)
-            if not others and held:
+            if not others and held and time.perf_counter() < rung_deadline:
                 others = self._rung(step, col, row)
             if others:
                 standing.extend(others)
@@ -525,6 +530,13 @@ class MarkupLayer:
 
         todo.sort(key=distance)
         later.sort(key=distance)
+        # and last, the whole page small: whatever a zoom out comes to, it
+        # has something to stand in while its own squares are drawn
+        overview = self.overview_step()
+        page = self.frame.page_rect()
+        far = [] if overview >= step else [
+            (overview, key) for key in self._keys(page, overview)
+            if self._needs(self.tiles.get(overview, {}).get(key))]
         changed = QRectF()
         for key in todo + later:
             if time.perf_counter() > deadline:
@@ -533,12 +545,23 @@ class MarkupLayer:
             if key in todo or self.pending:
                 where = QRectF(key[0] * size, key[1] * size, size, size)
                 changed = changed.united(where) if not changed.isEmpty() else where
+        for other, key in far:
+            if time.perf_counter() > deadline:
+                break
+            self._draw(other, key[0], key[1], False)
         self._bake_what_is_drawn(step, ahead)
         if not changed.isEmpty():
             self.frame.update(changed)
         squares = self.tiles.get(step, {})
-        if any(self._needs(squares.get(key)) for key in todo + later):
+        if any(self._needs(squares.get(key)) for key in todo + later) or any(
+                self._needs(self.tiles.get(other, {}).get(key)) for other, key in far):
             self._idle.start(0)
+
+    def overview_step(self) -> float:
+        """The zoom the whole page is kept at: about a thousand pixels across."""
+        page = self.frame.page_rect()
+        longest = max(page.width(), page.height(), 1.0)
+        return 2.0 ** math.floor(math.log2(max(1000.0 / longest, 0.02)))
 
     @staticmethod
     def _needs(square) -> bool:
