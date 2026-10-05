@@ -797,7 +797,9 @@ class MarkupItem(QGraphicsObject):
     def sync_their_look(self) -> None:
         """Show the file's own drawing of this markup while it is unchanged,
         and nothing of it once it has been taken over."""
-        wanted = bool(self.still_theirs and self.from_annotation)
+        # (a page that draws its file's markups with itself draws this one too)
+        wanted = bool(self.still_theirs and self.from_annotation
+                      and not getattr(self.parentItem(), "file_draws", False))
         if wanted and self._their_look is None:
             self._their_look = _TheirLook(self)
         if self._their_look is not None:

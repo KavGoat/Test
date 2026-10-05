@@ -441,12 +441,19 @@ def leave_out(page, without: "tuple") -> None:
     # way — a Bluebeam call-out became an opaque box in its fill colour with
     # its words lost in it, on screen and in no other reader (the user's
     # Mac, 2026-10-01). A PDF is drawn as its file says or not at all.
+    # By number, not by walking the page's annotations: on a sheet carrying
+    # a thousand that walk was over a second, every time (2026-10-05).
     try:
         document = page.parent
-        found = [(annotation.xref, annotation.flags) for annotation in page.annots()
-                 if annotation.xref in wanted]
-        for number, flags in found:
-            document.xref_set_key(number, "F", str(flags | pymupdf.PDF_ANNOT_IS_HIDDEN))
+        on_page = {entry[0] for entry in page.annot_xrefs()}
+        for number in wanted & on_page:
+            kind, value = document.xref_get_key(number, "F")
+            try:
+                flags = int(value) if kind == "int" else 0
+            except ValueError:
+                flags = 0
+            if not flags & pymupdf.PDF_ANNOT_IS_HIDDEN:
+                document.xref_set_key(number, "F", str(flags | pymupdf.PDF_ANNOT_IS_HIDDEN))
     except Exception:                                  # noqa: BLE001
         drain_messages()
 

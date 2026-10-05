@@ -660,7 +660,7 @@ class TileCache(QObject):
     def tiles(self, source: str, data: bytes, index: int, page: QRectF,
               scale: float, region: QRectF, annotations: bool = True,
               without: tuple = (), consumer=None, say_covered: bool = False,
-              shown: Optional[QRectF] = None):
+              shown: Optional[QRectF] = None, loose_without: bool = False):
         """Every tile of *region* that is ready, and whether any is missing.
 
         The missing ones are asked for on the way past. Whether anything is
@@ -717,8 +717,16 @@ class TileCache(QObject):
             on_screen_missing = any(key.page_rect().intersects(seen)
                                     and self._failures.get(key, (0,))[0] < 3
                                     for key in wanting)
-            standing, covers = self._standing_in(source, index, step, seen,
-                                                 annotations, without)
+            standing, covers = [], False
+            if loose_without:
+                # the page as it was before a markup changed hands, at this
+                # very zoom: right everywhere but where that markup is, which
+                # the page patches (PageFrame._patch_what_changed)
+                standing, covers = self._same_zoom_other_state(
+                    source, index, step, seen, annotations, without)
+            if not covers:
+                standing, covers = self._standing_in(source, index, step, seen,
+                                                     annotations, without)
             if on_screen_missing and covers:
                 # All at once: what is on screen goes sharp in one go when the
                 # last of its squares is in, not square by square over a
@@ -827,6 +835,38 @@ class TileCache(QObject):
                 key = AnnotationTileKey(source, index, xref, rung, col, row, edges)
                 if key not in self._tiles:
                     self._ask(key, data, page, sheet=False)
+
+    def _same_zoom_other_state(self, source, index, step, region, annotations, without):
+        found, best = [], None
+        for page_key, rungs in self._index.items():
+            if (page_key[0] != "page" or page_key[1] != source or page_key[2] != index
+                    or page_key[3] != annotations or page_key[4] == without
+                    or step not in rungs):
+                continue
+            here = []
+            for key in rungs[step]:
+                pixmap = self._tiles.get(key)
+                if pixmap is not None and not pixmap.isNull() \
+                        and key.page_rect(pixmap).intersects(region):
+                    here.append((key.page_rect(pixmap), pixmap))
+            if best is None or len(here) > len(best):
+                best = here
+        if not best:
+            return [], False
+        drawn, covers = self._stand_ins(("none",), step, region, already=[w for w, _p in best])
+        return best, covers
+
+    def has_all(self, source: str, index: int, page: QRectF, scale: float,
+                region: QRectF, annotations: bool, without: tuple) -> bool:
+        """Whether every square of *region* at *scale* is drawn."""
+        step = zoom_step(scale)
+        size = TILE / step
+        wanted = QRectF(region).intersected(page)
+        for row in range(max(int(wanted.top() // size), 0), int((wanted.bottom() - 1e-6) // size) + 1):
+            for col in range(max(int(wanted.left() // size), 0), int((wanted.right() - 1e-6) // size) + 1):
+                if TileKey(source, index, step, col, row, annotations, tuple(without)) not in self._tiles:
+                    return False
+        return True
 
     def _standing_in(self, source: str, index: int, step: float,
                      region: QRectF, annotations: bool, without: tuple = (),

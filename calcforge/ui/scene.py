@@ -96,6 +96,28 @@ def suspend_markup_squares(scene) -> None:
         frame.layer.suspend()
 
 
+class only_this_page:
+    """While one page is drawn through the scene for paper or a file, the
+    pages either side are out of it: a page keeps room round itself for its
+    markups' handles (PageFrame.MARKUP_ROOM), which reaches over the gap, and
+    a neighbour drawn there — clipped out of sight but still written — put
+    the next sheet's heading into this one's text."""
+
+    def __init__(self, scene, frame):
+        self.others = [other for other in getattr(scene, "frames", ())
+                       if other is not frame and other.isVisible()]
+
+    def __enter__(self):
+        for other in self.others:
+            other.setVisible(False)
+        return self
+
+    def __exit__(self, *_):
+        for other in self.others:
+            other.setVisible(True)
+        return False
+
+
 def _painted_scale(painter) -> float:
     """Pixels per point, the way this painter is set up to draw.
 
@@ -306,6 +328,15 @@ class PageFrame(QGraphicsObject):
         self.show_all_viewports = False
         self._pdf_overlay = False
         self._items_only = False
+        # A page carrying a great many markups from its file (a Bluebeam set
+        # with hundreds on a sheet) has its file draw the untouched ones with
+        # the page, in the page's own squares, on every core at once; a page
+        # with a few has each drawn on its own (MarkupItem.paint_their_file).
+        self.file_draws = False
+        self._annotation_boxes: dict = {}
+        self._last_without = None
+        self._patches: list = []
+        self._last_scale = 1.0
         self.setFlag(QGraphicsItem.ItemIsSelectable, False)
         self.setFlag(QGraphicsItem.ItemIsMovable, False)
         # Behind every markup, and behind the desk's own shadow drawing.
@@ -465,9 +496,12 @@ class PageFrame(QGraphicsObject):
             margin_x = shown_part.width() * 0.25
             margin_y = shown_part.height() * 0.75
             asked = shown_part.adjusted(-margin_x, -margin_y, margin_x, margin_y)
+            if self.file_draws:
+                self._patch_what_changed(data, index, whole, scale, shown, without)
             tiles, missing, covered = pdftiles.TILES.tiles(
                 page.pdf_key, data, index, whole, scale, asked, shown, without,
-                consumer=consumer, say_covered=True, shown=shown_part)
+                consumer=consumer, say_covered=True, shown=shown_part,
+                loose_without=self.file_draws)
             self._ask_for_markup_previews(scale)
             if not missing:
                 # sharp and idle: what is on screen at twice the zoom, so a
@@ -495,8 +529,60 @@ class PageFrame(QGraphicsObject):
         for where, tile in tiles:
             _draw_on_the_pixel_grid(painter, where, tile)
             drew = True
+        if self._patches:
+            self._draw_patches(painter, page, index, whole, scale, shown, without)
         painter.restore()
         return drew
+
+    def _patch_what_changed(self, data, index, whole, scale, shown, without) -> None:
+        """A markup the page was drawing has been taken over, given back,
+        hidden or deleted: the page's squares for the new state take a moment,
+        and the old ones stand in meanwhile (TileCache.tiles, loose_without) —
+        so the part of the page where that markup is is drawn now, as it is
+        now, over them. No ghost of the markup where it was, and no blank
+        page while the rest is drawn."""
+        from ..io import pdfio
+
+        self._last_scale = scale
+        last, self._last_without = self._last_without, tuple(without)
+        if last is None or last == tuple(without):
+            return
+        changed = set(last) ^ set(without)
+        boxes = [self._annotation_boxes[number] for number in changed
+                 if number in self._annotation_boxes]
+        if not boxes:
+            return
+        if len(boxes) > 12:
+            union = boxes[0]
+            for box in boxes[1:]:
+                union = union.united(box)
+            boxes = [union]
+        step = max(min(scale, 8.0), 0.25)
+        for box in boxes:
+            region = box.adjusted(-2, -2, 2, 2).intersected(whole)
+            if region.isEmpty():
+                continue
+            region, step_used = _region_to_draw(region, whole, step, pdfio.MOST_LIVE_PIXELS)
+            image = pdfio.LIVE.draw_region(self.page.pdf_key, data, index, whole,
+                                           region, step_used, shown, tuple(without))
+            if image is not None and not image.isNull():
+                self._patches.append((region, image, tuple(without)))
+        del self._patches[:-24]
+
+    def _draw_patches(self, painter, page, index, whole, scale, shown, without) -> None:
+        from ..io import pdftiles
+
+        step = pdftiles.zoom_step(scale)
+        kept = []
+        for region, image, state in self._patches:
+            if state != tuple(without):
+                continue                       # drawn for a state since changed
+            if pdftiles.TILES.has_all(page.pdf_key, index, whole, step, region,
+                                      shown, tuple(without)):
+                continue                       # its own squares are in
+            painter.drawImage(region, image, QRectF(image.rect()))
+            kept.append((region, image, state))
+        self._patches = kept
 
     def _ask_for_markup_previews(self, scale: float) -> None:
         """Have the small picture of this page and two pages either side,
@@ -531,7 +617,7 @@ class PageFrame(QGraphicsObject):
         pdftiles.TILES.sheet(page.pdf_key, data, int(page.pdf_page_index), whole, shown,
                              without=self.markups_drawn_alone(), ask=True)
         numbers = set(getattr(page, "markup_annotations", ()) or ())
-        if not numbers or not shown:
+        if not numbers or not shown or self.file_draws:
             return
         for item in self.markups():
             box = getattr(item, "their_box", ())
@@ -550,6 +636,17 @@ class PageFrame(QGraphicsObject):
         what is under it, which OpenGL cannot do (a black block, 2026-10-01),
         so there the page's own render draws it."""
         numbers = set(getattr(self.page, "markup_annotations", ()) or ())
+        if self.file_draws:
+            # the page draws every untouched one; left out are only those
+            # taken over, hidden or gone
+            for item in self.markups():
+                if not item.isVisible():
+                    continue
+                if getattr(item, "still_theirs", False):
+                    numbers.discard(item.from_annotation)
+                elif getattr(item, "split_theirs", False):
+                    numbers.discard(item.split_from)
+            return tuple(sorted(numbers))
         scene = self.scene()
         on_the_card = bool(scene is not None and any(getattr(view, "gpu", False)
                                                      for view in scene.views()))
@@ -1006,7 +1103,29 @@ class PageFrame(QGraphicsObject):
                     item.load_from_document(self.document)
                 item.setParentItem(self)
             self.refresh_items()
+            self._choose_who_draws_file_markups()
         self.itemsChanged.emit()
+
+    #: How many of its file's markups, untouched, make a page draw them with
+    #: the page rather than one at a time.
+    FILE_DRAWN_FROM = 120
+
+    def _choose_who_draws_file_markups(self) -> None:
+        theirs = [item for item in self.markups()
+                  if getattr(item, "still_theirs", False) or getattr(item, "split_theirs", False)]
+        self.file_draws = len(theirs) > self.FILE_DRAWN_FROM
+        self._annotation_boxes = {}
+        if self.file_draws:
+            for item in theirs:
+                number = item.split_from if getattr(item, "split_theirs", False) \
+                    else item.from_annotation
+                box = QRectF(*item.their_box) if item.their_box else \
+                    item.mapRectToParent(item.boundingRect())
+                known = self._annotation_boxes.get(number)
+                self._annotation_boxes[number] = box if known is None else known.united(box)
+        for item in self.markups():
+            if hasattr(item, "sync_their_look"):
+                item.sync_their_look()
 
     def refresh_items(self) -> None:
         """Work out again what every markup on this page reads.
@@ -1093,7 +1212,8 @@ class PageFrame(QGraphicsObject):
             # Drawn through the scene for paper or a file: every markup paints
             # itself, not from the screen's squares.
             suspend_markup_squares(scene)
-            scene.render(painter, target, source, Qt.IgnoreAspectRatio)
+            with only_this_page(scene, self):
+                scene.render(painter, target, source, Qt.IgnoreAspectRatio)
         finally:
             # Whatever happened while it was being drawn, the page goes back
             # to how it looks on screen. Leaving the handles off is how a

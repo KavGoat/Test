@@ -281,6 +281,9 @@ def _page_as_shown(window, settle=True):
         window.view.scene().render(painter, QRectF(image.rect()), rect)
         painter.end()
         return image
+    if not settle:
+        shot()                      # the repaint that notices what changed
+        return shot()
     quiet = 0
     for _ in range(500):
         shot()
@@ -513,3 +516,113 @@ def test_hiding_an_annotation_never_rebuilds_its_appearance(tmp_path):
         assert document.xref_stream(int(appearance[1].split()[1])) == stream
         flags = int(document.xref_get_key(number, "F")[1])
         assert flags & pymupdf.PDF_ANNOT_IS_HIDDEN
+
+
+# -- a sheet crowded with its file's markups (the user, 2026-10-05) ------------
+
+def _a_crowded_sheet(path, count=160):
+    import random
+    import pymupdf
+    rnd = random.Random(5)
+    document = pymupdf.open()
+    page = document.new_page(width=842, height=595)
+    page.insert_text((72, 60), "A SHEET FULL OF MARKUPS", fontsize=14)
+    for i in range(count):
+        x, y = rnd.uniform(30, 760), rnd.uniform(80, 540)
+        if i % 3 == 0:
+            note = page.add_rect_annot(pymupdf.Rect(x, y, x + 40, y + 25))
+            note.set_colors(stroke=(1, 0, 0))
+        elif i % 3 == 1:
+            note = page.add_freetext_annot(pymupdf.Rect(x, y, x + 60, y + 16), f"N{i}",
+                                           fontsize=8, text_color=(0, 0, 1))
+        else:
+            note = page.add_line_annot((x, y), (x + 40, y + 20))
+            note.set_colors(stroke=(0, 0.5, 0))
+        note.update()
+    document.save(path)
+
+
+@pytest.fixture
+def crowded(window, tmp_path):
+    path = str(tmp_path / "crowded.pdf")
+    _a_crowded_sheet(path)
+    window.show()
+    window.open_path(path)
+    window.rebuild_scenes()
+    window.select_tool("select")
+    QApplication.instance().processEvents()
+    return window, path
+
+
+def _file_render(path, hide=()):
+    import numpy as np
+    import pymupdf
+    with pymupdf.open(path) as document:
+        for number in hide:
+            kind, value = document.xref_get_key(number, "F")
+            flags = int(value) if kind == "int" else 0
+            document.xref_set_key(number, "F", str(flags | pymupdf.PDF_ANNOT_IS_HIDDEN))
+        pixmap = document[0].get_pixmap(annots=True, alpha=False)
+        return np.frombuffer(pixmap.samples, np.uint8).reshape(
+            pixmap.height, pixmap.width, 3).astype(int)
+
+
+def _apart_with_slack(ours, theirs):
+    """How far apart, each pixel, allowing a pixel's slack: thin lines a
+    pixel over are the same lines."""
+    import numpy as np
+
+    def one_way(first, second):
+        nearest = None
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                off = np.abs(np.roll(np.roll(first, dy, 0), dx, 1) - second).max(axis=2)
+                nearest = off if nearest is None else np.minimum(nearest, off)
+        return nearest
+    # both ways: ink of ours with nothing near it in theirs (a ghost), and
+    # ink of theirs with nothing near it in ours (something missing)
+    return np.maximum(one_way(ours, theirs), one_way(theirs, ours))
+
+
+def test_a_crowded_page_draws_its_file_markups_with_itself(crowded):
+    import numpy as np
+    window, path = crowded
+    frame = window.document.pages[0].frame
+    assert frame.file_draws, "a sheet this crowded draws its file's markups with the page"
+    assert not frame.markups_drawn_alone(), "all of them, untouched"
+    ours = _as_array(_page_as_shown(window))
+    theirs = _file_render(path)
+    h, w = min(ours.shape[0], theirs.shape[0]), min(ours.shape[1], theirs.shape[1])
+    apart = _apart_with_slack(ours[2:h - 2, 2:w - 2], theirs[2:h - 2, 2:w - 2])
+    # ink against paper, not one grey of an edge against another: a markup
+    # missing or drawn twice would be hundreds of these
+    assert (apart > 160).sum() < 0.0004 * h * w, int((apart > 160).sum())
+
+
+def test_taking_one_over_on_a_crowded_page_leaves_no_ghost(crowded):
+    import numpy as np
+    window, path = crowded
+    frame = window.document.pages[0].frame
+    _page_as_shown(window)
+    square = next(i for i in frame.markups() if i.TYPE == "rect" and i.still_theirs)
+    x, y, width, height = square.their_box
+    square.setPos(square.pos() + QPointF(0, 300))
+    assert not square.still_theirs
+    assert square.from_annotation in frame.markups_drawn_alone()
+    # straight away, before the page's new squares are drawn: where it was
+    # shows the page without it
+    ours = _as_array(_page_as_shown(window, settle=False))
+    theirs = _file_render(path, hide=(square.from_annotation,))
+    left, top = max(int(x) - 3, 0), max(int(y) - 3, 0)
+    right, bottom = int(x + width) + 4, int(y + height) + 4
+    h, w = min(ours.shape[0], theirs.shape[0]), min(ours.shape[1], theirs.shape[1])
+    everywhere = _apart_with_slack(ours[:h, :w], theirs[:h, :w])
+    apart = everywhere[top:bottom, left:right]
+    assert (apart > 160).sum() < 12, int((apart > 160).sum())
+    # and the rest of the sheet did not blink out while its new squares are
+    # drawn: the old ones stand in (all but where the markup now is)
+    moved = square.mapRectToParent(square.boundingRect())
+    everywhere[max(int(moved.top()), 0):max(int(moved.bottom()) + 1, 0),
+               max(int(moved.left()), 0):max(int(moved.right()) + 1, 0)] = 0
+    inside = everywhere[3:h - 3, 3:w - 3]          # not the canvas's edge round the page
+    assert (inside > 160).sum() < 0.0004 * h * w, int((inside > 160).sum())

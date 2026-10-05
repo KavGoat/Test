@@ -89,13 +89,16 @@ def _difference(a: QImage, b: QImage) -> float:
     # A pixel of slack: at a fractional scale (150% on Windows) a square sits
     # up to half a pixel off where the markup would have been drawn live,
     # which moves anti-aliasing, not ink.
-    nearest = None
-    for dy in (-1, 0, 1):
-        for dx in (-1, 0, 1):
-            shifted = np.roll(np.roll(first, dy, 0), dx, 1)
-            off = np.abs(shifted - second).max(axis=2)
-            nearest = off if nearest is None else np.minimum(nearest, off)
-    return float((nearest > 40).mean())
+    def one_way(one, other):
+        nearest = None
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                off = np.abs(np.roll(np.roll(one, dy, 0), dx, 1) - other).max(axis=2)
+                nearest = off if nearest is None else np.minimum(nearest, off)
+        return nearest
+    # both ways, so a thin line in one with paper beside it in the other is
+    # still a difference
+    return float((np.maximum(one_way(first, second), one_way(second, first)) > 40).mean())
 
 
 @pytest.fixture

@@ -870,4 +870,16 @@ checked against its saved files and WebSMath's recordings of SMath Cloud.
   markup 2 ms; adding a page 0.2–0.3 s (was 0.9 s). The squares match the
   markups drawn live pixel for pixel at 100% and 200% scaling; at 125% and
   150% they can sit up to half a pixel off, which moves anti-aliasing only.
+  Markups still drawn by their own file stay drawn that way (their own
+  squares from the render processes). A page carrying more than 120 of them
+  (a crowded Bluebeam sheet) has the file draw them with the page, in the
+  page's own squares, on every core: a PDF with 1,000 annotations on a sheet
+  went from 45–60 ms a frame to 1.5–5 ms. Taking one of those over leaves
+  the page's squares as they were, standing in, while the page is drawn
+  again without it, and the patch where it was is drawn straight away — no
+  ghost, no blank page. Hiding an annotation from the page's drawing now
+  goes by its number (it walked every annotation on the page: over a second
+  on such a sheet). Pages exported or printed one at a time leave the pages
+  either side out of the drawing. A contents block knows its rows before it
+  is first painted.
 

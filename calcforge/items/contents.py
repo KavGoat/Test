@@ -36,7 +36,18 @@ class ContentsItem(MarkupItem):
                            padding=8.0)
         # Filled in as it paints: one (rect, page index, y) per row, for the
         # click that follows a row and for the link in the exported PDF.
-        self.rows: list[tuple[QRectF, int, float]] = []
+        self._rows: Optional[list] = None
+
+    @property
+    def rows(self) -> list:
+        """The rows as last painted — or, before it has been, as they will
+        be: a block drawn from its page's squares, or not on screen yet, is
+        still clicked on and linked (ui/markuplayer.py)."""
+        return self._rows if self._rows is not None else self.link_rows()
+
+    @rows.setter
+    def rows(self, value: list) -> None:
+        self._rows = value
 
     # -- geometry ----------------------------------------------------------
     def local_rect(self) -> QRectF:

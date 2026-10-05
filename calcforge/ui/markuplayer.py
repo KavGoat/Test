@@ -145,8 +145,9 @@ class MarkupLayer:
             return False
         if getattr(item, "still_theirs", False) or getattr(item, "split_theirs", False):
             # drawn by its own file, from squares the render processes make:
-            # already pictures, and kept in step with them there
-            return False
+            # already pictures, and kept in step with them there. On a page
+            # that draws them with itself, there is nothing of it to paint.
+            return bool(getattr(self.frame, "file_draws", False))
         if getattr(getattr(item, "style", None), "blend", "") == "multiply":
             return False
         if item.flags() & QGraphicsItem.ItemIgnoresTransformations:
