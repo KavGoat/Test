@@ -46,6 +46,10 @@ IDLE_SECONDS = 0.008
 #: Squares above and below what is on screen, drawn ahead: most of a screen.
 AHEAD = 0.75
 
+#: While a page's squares at the zoom on screen are not all drawn, up to this
+#: many markups on screen are drawn as they are rather than stood in for.
+LIVE_MOST = 150
+
 #: Memory for every page's squares together.
 CACHE_BYTES = 384 * 1024 * 1024
 
@@ -406,6 +410,23 @@ class MarkupLayer:
         seen = _visible_part(self.frame) or exposed
         self.wanted = (step, seen, seen.center())
         squares = self.tiles.get(step, {})
+        if any(self._needs(squares.get(key)) for key in self._keys(exposed, step)):
+            # Not drawn at this zoom yet — a zoom moving, or just landed. A
+            # few markups are drawn as they are, sharp, rather than their
+            # squares of another zoom stretched (the user, 2026-10-08:
+            # Bluebeam is always sharp); a crowd stands in from its squares.
+            visible = self._drawn_in(exposed)
+            if len(visible) <= LIVE_MOST:
+                base = painter.worldTransform()
+                _drawing[0] = True
+                try:
+                    for item in visible:
+                        self._paint_item(painter, item, base)  # handles and all
+                finally:
+                    _drawing[0] = False
+                    painter.setWorldTransform(base)
+                self._wake()
+                return
         drawn, standing, idle_work = [], [], False
         rung_deadline = time.perf_counter() + 0.006
         for col, row in self._keys(exposed, step):

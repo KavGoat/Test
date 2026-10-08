@@ -308,9 +308,10 @@ def test_the_mode_switch_is_on_the_menu_bar_not_in_a_toolbar(win):
     from PySide6.QtWidgets import QMenuBar, QToolBar
     holder = win.mode_switch.parentWidget()
     assert win.menuBar().cornerWidget(Qt.TopRightCorner) is holder
-    # the window's own menu bar on every system: on a Mac's system bar the
-    # switch and the search box were not shown at all
-    assert not win.menuBar().isNativeMenuBar()
+    # the window's own menu bar on Windows; a Mac keeps its own system bar
+    # (the user, 2026-10-08)
+    import sys
+    assert win.menuBar().isNativeMenuBar() == (sys.platform == "darwin")
     widget = win.mode_switch
     while widget is not None:
         assert not isinstance(widget, QToolBar)

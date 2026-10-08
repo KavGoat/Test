@@ -343,6 +343,8 @@ class _Glide(QObject):
             state[1] = QPointF(at)
             state[3] = view.viewportTransform().inverted()[0].map(QPointF(at))
         view.zooming_by_hand()
+        # where it is going is known now: have it drawn on the way there
+        view.expect_zoom(state[0], state[1], state[3])
         if not self.timer.isActive():
             self.clock.start()
             self.timer.start()
@@ -1056,6 +1058,22 @@ class PageView(QGraphicsView):
             timer.setSingleShot(True)
             timer.timeout.connect(self._zoom_has_settled)
         timer.start(self.ZOOM_SETTLES_MS + 15)
+
+    def expect_zoom(self, zoom: float, at: QPointF, keep: QPointF) -> None:
+        """The view is gliding to *zoom* with canvas point *keep* under view
+        point *at*: what it will show there is drawn now, so it is sharp
+        when it lands rather than a moment after."""
+        scene = self.scene()
+        if scene is None or zoom <= 0:
+            return
+        size = self.viewport().size()
+        seen = QRectF(keep.x() - at.x() / zoom, keep.y() - at.y() / zoom,
+                      size.width() / zoom, size.height() / zoom)
+        ratio = max(float(self.viewport().devicePixelRatioF()), 1.0)
+        for frame in getattr(scene, "frames", ()):
+            box = frame.mapRectToScene(frame.page_rect())
+            if box.intersects(seen):
+                frame.expect(zoom * ratio, frame.mapRectFromScene(seen))
 
     def _zoom_has_settled(self) -> None:
         from ..io import pdftiles

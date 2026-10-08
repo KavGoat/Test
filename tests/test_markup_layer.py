@@ -242,3 +242,36 @@ def test_a_thousand_markups_scroll_without_painting_each_one(window, qapp):
     finally:
         RectItem.paint = original
     assert not painted
+
+
+def test_a_few_markups_stay_sharp_while_their_squares_are_coming(busy_page, qapp):
+    """Zoomed somewhere their squares are not drawn yet, a page of a few
+    markups draws them as they are, not stretched."""
+    from calcforge.items.shapes import RectItem
+    window, frame, items = busy_page
+    view = window.view
+    painted = []
+    original = RectItem.paint
+    RectItem.paint = lambda self, *a: (painted.append(self), original(self, *a))
+    try:
+        view.set_zoom(3.7)                    # a zoom with nothing drawn yet
+        view.viewport().grab()
+    finally:
+        RectItem.paint = original
+    assert painted, "drawn as they are"
+
+
+def test_a_markups_size_follows_it(window, qapp):
+    """Kept for a markup still its file's; ours is asked afresh, however it
+    is resized."""
+    from calcforge.items.shapes import RectItem
+    frame = window.view.scene().frames[0]
+    box = RectItem("rect", QRectF(0, 0, 40, 20))
+    frame.add_markup(box, QPointF(50, 50))
+    before = box.boundingRect()
+    box.set_local_rect(QRectF(0, 0, 120, 90))       # no word to Qt about it
+    after = box.boundingRect()
+    assert after.width() > before.width() + 70 and after.height() > before.height() + 60
+    box.style.width = 6.0
+    box.update()
+    assert box.boundingRect().width() > after.width()

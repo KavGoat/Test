@@ -1,6 +1,8 @@
 """The CalcForge main window."""
 from __future__ import annotations
 
+import sys
+
 import base64
 import json
 import os
@@ -422,8 +424,12 @@ def snug_number_box(spin) -> None:
     spin.setFixedWidth(int(metrics.horizontalAdvance(widest)) + 18 + 22)
 
 
-#: The menu bar is the window's own on every system (see _build_search).
-NATIVE_MENU_BAR = False
+#: On a Mac the menus go in the Mac's own bar at the top of the screen, as
+#: every Mac application's do; on Windows (and Linux) the window has its own,
+#: with the Markup | Calc switch and the search box after Help. The Mac's bar
+#: has no room for those two (the user, 2026-10-08: "I don't like the separate
+#: menu bar, put it back so it works in Windows only").
+NATIVE_MENU_BAR = sys.platform == "darwin"
 
 def _bar_ink() -> str:
     """The ink the theme draws its icons in."""
@@ -1460,10 +1466,8 @@ class MainWindow(QMainWindow):
                 self.rail_for(name).show_open(name, not dock.isHidden())
 
     def _build_search(self) -> None:
-        # The window keeps its own menu bar on macOS too: the Markup | Calc
-        # switch and the search box sit after Help, and the Mac's system bar
-        # at the top of the screen has no room for them — there they simply
-        # were not shown (the user's Mac, 2026-10-01).
+        # The Markup | Calc switch and the search box sit after Help in the
+        # window's own menu bar (Windows); on a Mac the menus are the Mac's.
         self.menuBar().setNativeMenuBar(NATIVE_MENU_BAR)
         """The search field in the menu bar's corner, with its live dropdown."""
         from PySide6.QtGui import QStandardItemModel

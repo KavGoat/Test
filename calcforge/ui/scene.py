@@ -89,13 +89,6 @@ GRID_DOT = QColor("#a8a8a8")
 GRID_PX = 9.0                 # SMath's grid, in its 96-dpi pixels
 
 
-def suspend_markup_squares(scene) -> None:
-    """Before the scene is drawn for anything but the screen: every markup
-    paints itself (ui/markuplayer.py); the squares come back on screen."""
-    for frame in getattr(scene, "frames", ()):
-        frame.layer.suspend()
-
-
 class only_this_page:
     """While one page is drawn through the scene for paper or a file, the
     pages either side are out of it: a page keeps room round itself for its
@@ -104,17 +97,20 @@ class only_this_page:
     the next sheet's heading into this one's text."""
 
     def __init__(self, scene, frame):
-        self.others = [other for other in getattr(scene, "frames", ())
+        self.others = [(other, other.opacity()) for other in getattr(scene, "frames", ())
                        if other is not frame and other.isVisible()]
 
+    # Fully see-through rather than hidden: Qt then draws nothing of the page
+    # or its markups, and does not tell each markup it has been hidden — which
+    # had a thousand markups leave their page's squares and be drawn again.
     def __enter__(self):
-        for other in self.others:
-            other.setVisible(False)
+        for other, _was in self.others:
+            other.setOpacity(0.0)
         return self
 
     def __exit__(self, *_):
-        for other in self.others:
-            other.setVisible(True)
+        for other, was in self.others:
+            other.setOpacity(was)
         return False
 
 
@@ -337,6 +333,7 @@ class PageFrame(QGraphicsObject):
         self._last_without = None
         self._patches: list = []
         self._last_scale = 1.0
+        self._previews_asked = None
         self.setFlag(QGraphicsItem.ItemIsSelectable, False)
         self.setFlag(QGraphicsItem.ItemIsMovable, False)
         # Behind every markup, and behind the desk's own shadow drawing.
@@ -503,11 +500,11 @@ class PageFrame(QGraphicsObject):
                 consumer=consumer, say_covered=True, shown=shown_part,
                 loose_without=self.file_draws)
             self._ask_for_markup_previews(scale)
-            if not missing:
-                # sharp and idle: what is on screen at twice the zoom, so a
-                # zoom in never shows the page soft (TileCache.ahead)
-                pdftiles.TILES.ahead(page.pdf_key, data, index, whole, scale,
-                                     shown_part, shown, without)
+            # once what is on screen is sharp: it at twice the zoom next, ahead
+            # of the squares off screen, so a zoom in never shows the page
+            # soft (TileCache.ahead)
+            pdftiles.TILES.ahead(page.pdf_key, data, index, whole, scale,
+                                 shown_part, shown, without)
         if missing and not covered:
             # Only while the tiles are still coming, and only the part of it
             # that is on screen: stretching the whole small picture over a
@@ -598,7 +595,19 @@ class PageFrame(QGraphicsObject):
             here = frames.index(self)
         except ValueError:
             return
-        for frame in frames[max(here - 2, 0):here + 3]:
+        # Once asked, asked: again only when the preview's zoom, the pages
+        # round it or what is on them has changed — this ran on every repaint
+        # of every page, looking through every markup on five of them.
+        from ..io import pdftiles
+        rung = min(2.0 ** math.ceil(math.log2(max(scale, 0.02))), 2.0)
+        near = frames[max(here - 2, 0):here + 3]
+        state = (rung, tuple((id(frame), frame.layer.generation, frame.file_draws,
+                              pdftiles.TILES.sheet_count(frame.page.pdf_key))
+                             for frame in near))
+        if state == self._previews_asked:
+            return
+        self._previews_asked = state
+        for frame in near:
             frame._preview_markups(scale)
 
     def _preview_markups(self, scale: float) -> None:
@@ -628,6 +637,40 @@ class PageFrame(QGraphicsObject):
             pdftiles.TILES.annotation_preview(page.pdf_key, data, int(page.pdf_page_index),
                                               whole, scale, item.from_annotation,
                                               where.adjusted(-1, -1, 1, 1))
+
+    def expect(self, scale: float, region: QRectF) -> None:
+        """A zoom is heading for *scale*, showing *region* of this page:
+        have it drawn now (TileCache.expect), the page and its file's own
+        markups."""
+        page = self.page
+        if self.print_mode or page.pdf_key is None or page.pdf_page_index is None:
+            return
+        data = self.document.asset(page.pdf_key)
+        if not data:
+            return
+        from ..io import pdftiles
+
+        whole = self.page_rect()
+        region = QRectF(region).intersected(whole)
+        if region.isEmpty():
+            return
+        index = int(page.pdf_page_index)
+        shown = bool(getattr(page, "pdf_annotations", True))
+        without = self.markups_drawn_alone()
+        pdftiles.TILES.expect(page.pdf_key, data, index, whole, scale, region, shown, without)
+        if self.file_draws or not shown:
+            return
+        numbers = set(getattr(page, "markup_annotations", ()) or ())
+        for item in self.markups():
+            box = getattr(item, "their_box", ())
+            if (not box or not getattr(item, "still_theirs", False)
+                    or item.from_annotation not in numbers or not item.isVisible()):
+                continue
+            where = QRectF(*box).adjusted(-1, -1, 1, 1)
+            if where.intersects(region):
+                pdftiles.TILES.annotation_tiles(page.pdf_key, data, index, whole, scale,
+                                                where, item.from_annotation, where,
+                                                expecting=True)
 
     def markups_drawn_alone(self) -> tuple:
         """The page's own annotations that came in as markups: on screen the
@@ -1211,7 +1254,7 @@ class PageFrame(QGraphicsObject):
             source = self.mapRectToScene(self.page_rect())
             # Drawn through the scene for paper or a file: every markup paints
             # itself, not from the screen's squares.
-            suspend_markup_squares(scene)
+            self.layer.suspend()          # the other pages are not drawn
             with only_this_page(scene, self):
                 scene.render(painter, target, source, Qt.IgnoreAspectRatio)
         finally:

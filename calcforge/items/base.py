@@ -443,13 +443,30 @@ class MarkupItem(QGraphicsObject):
     #: for it twice per markup per frame.
     _baked_rect = None
 
+    #: Its size, worked out once, for a markup still exactly as its file
+    #: wrote it: Qt asks every markup on the canvas for it several times a
+    #: frame, a few dozen Python calls each time (2026-10-08), and one still
+    #: its file's cannot change without being taken over first — which ends
+    #: this. (A markup of ours is asked afresh: some of the ways it is resized
+    #: only repaint the view.)
+    _bounds = None
+
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
         own = cls.__dict__.get("boundingRect")
         if own is not None and not getattr(own, "_answers_baked", False):
             def boundingRect(self, _own=own):
                 baked = self._baked_rect
-                return baked if baked is not None else _own(self)
+                if baked is not None:
+                    return baked
+                if not (self.still_theirs or self.split_theirs):
+                    return _own(self)
+                known = self._bounds
+                if known is None:
+                    known = _own(self)
+                    if self.parentItem() is not None:
+                        self._bounds = known
+                return known
             boundingRect._answers_baked = True
             boundingRect.__doc__ = own.__doc__
             cls.boundingRect = boundingRect
@@ -459,6 +476,7 @@ class MarkupItem(QGraphicsObject):
         return getattr(self.parentItem(), "layer", None)
 
     def _changing(self) -> None:
+        self._bounds = None
         layer = self._layer()
         if layer is not None:
             layer.touched(self)
@@ -470,6 +488,8 @@ class MarkupItem(QGraphicsObject):
     def prepareGeometryChange(self):
         self._changing()
         super().prepareGeometryChange()
+        # Qt reads the old size in there; the new one is read fresh after
+        self._bounds = None
 
     def __init__(self):
         super().__init__()
@@ -595,6 +615,16 @@ class MarkupItem(QGraphicsObject):
     def boundingRect(self) -> QRectF:
         if self._baked_rect is not None:
             return self._baked_rect
+        if not (self.still_theirs or self.split_theirs):
+            return self._bounds_now()
+        known = self._bounds
+        if known is None:
+            known = self._bounds_now()
+            if self.parentItem() is not None:
+                self._bounds = known
+        return known
+
+    def _bounds_now(self) -> QRectF:
         margin = self.style.width + HANDLE_SIZE + 4
         box = self.local_rect().normalized().adjusted(-margin, -margin, margin, margin)
         if self.ROTATABLE:
@@ -1362,13 +1392,25 @@ class _TheirLook(QGraphicsItem):
             return QRectF(*markup.their_box)
         return markup.mapRectToParent(markup.boundingRect()).adjusted(-12, -12, 12, 12)
 
+    _bounds = None
+    _bounds_for = None
+
     def boundingRect(self) -> QRectF:
         if self._baked_rect is not None:
             return self._baked_rect
         markup = self.parentItem()
         if markup is None or markup.parentItem() is None:
             return QRectF()
-        return markup.mapRectFromParent(self._page_box()).adjusted(-2, -2, 2, 2)
+        if not markup.their_box:
+            return markup.mapRectFromParent(self._page_box()).adjusted(-2, -2, 2, 2)
+        # the same while its markup stays where it is and its box is the same
+        position = markup.pos()
+        key = (position.x(), position.y(), markup.their_box, markup.rotation(), markup.scale())
+        if self._bounds is not None and self._bounds_for == key and markup.transform().isIdentity():
+            return self._bounds
+        self._bounds = markup.mapRectFromParent(self._page_box()).adjusted(-2, -2, 2, 2)
+        self._bounds_for = key
+        return self._bounds
 
     def shape(self):
         from PySide6.QtGui import QPainterPath

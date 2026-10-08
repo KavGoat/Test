@@ -270,3 +270,39 @@ def test_nothing_is_drawn_ahead_while_a_zoom_moves(qapp):
     cache.hold(5.0)
     cache.ahead("pdf", b"%PDF-", 0, PAGE, 1.0, QRectF(0, 0, 600, 400))
     assert not asked
+
+
+def test_a_zoom_has_where_it_is_going_drawn_while_it_moves(pdf_window, qapp):
+    """The user, 2026-10-08: "on zoom it is blurry and then takes a split
+    second to render, Bluebeam ... it's always sharp". The squares of the zoom
+    a glide is heading for are asked for at the notch, not after it stops."""
+    from calcforge.io import pdftiles
+
+    view = pdf_window.view
+    view.set_zoom(1.0)
+    at = QPointF(view.viewport().rect().center())
+    _wheel(view, 3, at)
+    target = view.glide.zooming[0]
+    step = pdftiles.zoom_step(target * view.viewport().devicePixelRatioF())
+    assert pdftiles.TILES.held(), "still moving"
+    asked = [key for key in list(pdftiles.TILES._waiting) + list(pdftiles.TILES._tiles)
+             if isinstance(key, pdftiles.TileKey) and key.scale == step]
+    assert asked, "the zoom it is heading for is being drawn already"
+    view.finish_scrolling()
+
+
+def test_a_zoom_heading_elsewhere_gives_up_the_last_ones(qapp):
+    from calcforge.io import pdftiles
+
+    cache, asked = _cache()
+    view = QRectF(0, 0, 600, 400)
+    cache.hold(5.0)
+    cache.expect("pdf", b"%PDF-", 0, PAGE, 2.0, view)
+    first = {k for k in cache._waiting if k.scale == 2.0}
+    assert first
+    cache.expect("pdf", b"%PDF-", 0, PAGE, 3.0, view)
+    assert not first & cache._waiting, "the zoom that is no longer coming"
+    assert {k.scale for k in cache._waiting} == {3.0}
+    # and a repaint mid-zoom does not give them up either
+    cache.tiles("pdf", b"%PDF-", 0, PAGE, 2.5, view)
+    assert {k.scale for k in cache._waiting} == {3.0}

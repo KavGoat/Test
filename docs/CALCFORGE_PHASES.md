@@ -890,4 +890,25 @@ checked against its saved files and WebSMath's recordings of SMath Cloud.
   the way: a drag passed the count where the target belonged, so pages could
   land in the wrong place. Pages picked out here and there gather into a run
   where they are dropped.
+- **The Mac's own menu bar again** (2026-10-08): on a Mac the menus are in
+  the Mac's bar at the top of the screen; the window's own bar, with the
+  Markup | Calc switch and the search box after Help, is Windows (and
+  Linux) only. On a Mac, F12 switches modes.
+- **Sharp while zooming** (2026-10-08). A notch of the wheel knows where the
+  zoom is going: the page there is drawn straight away on every core, while
+  the zoom is still gliding, rather than after it stops — what arrives
+  stands in, shrunk and so sharp, and is the page itself when the zoom
+  lands (sharp 0.1–0.17 s after the last notch on a 30-sheet A1 set, was
+  0.45 s, and mostly sharp throughout). What is on screen at twice the zoom
+  is asked for as soon as what is on screen is sharp, ahead of the squares
+  off screen. Markups whose squares at a new zoom are not drawn yet are
+  drawn as they are — sharp — when there are up to 150 of them on screen.
+- **Faster frames** (2026-10-08): a markup still its file's keeps its size
+  instead of working it out each time Qt asks (several times a frame for
+  every markup on the canvas); the previews of the pages round the one on
+  screen are asked for once, not on every repaint; a page drawn for export
+  or a thumbnail leaves the others out by making them see-through rather
+  than hiding them, which had every markup on them told it was hidden and
+  drawn again. Calcs.pdf scrolling 6.9 → 2.2 ms a frame; adding a page next
+  to a sheet of a thousand markups 0.5 → 0.2 s.
 

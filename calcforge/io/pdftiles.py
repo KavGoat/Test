@@ -422,6 +422,7 @@ class TileCache(QObject):
         super().__init__()
         self._tiles: dict[TileKey, QPixmap] = {}
         self._sheets: dict[SheetKey, QPixmap] = {}
+        self._sheet_counts: dict = {}     # source -> sheets arrived or failed (see sheet_count)
         # Shared with the worker, which reads it to decide whether a job it is
         # about to start is still worth doing. A set of immutable keys, added
         # to and discarded from on this thread only, so the worker never sees
@@ -447,6 +448,8 @@ class TileCache(QObject):
         # while nothing else is wanted (see ahead()). A zoom does not give
         # them up the way it gives up the zoom before it.
         self._ahead: set = set()
+        # page key -> the squares of the zoom a zoom is heading for (expect())
+        self._expected: dict = {}
         #: Counts the markups drawn from squares not all here yet, so whoever
         #: keeps a drawing of them (ui/markuplayer.py) knows to draw it again.
         self.short = 0
@@ -505,6 +508,12 @@ class TileCache(QObject):
             self._ask(key, data, page, sheet=True)
         return None
 
+    def sheet_count(self, source) -> int:
+        """How many small pictures of *source*'s pages are drawn (or wanted):
+        a change in it means another one may now be worth asking for."""
+        counts = self._sheet_counts
+        return counts.get(source, 0)
+
     def _sheets_wanted(self) -> int:
         return sum(1 for key in self._waiting if isinstance(key, SheetKey))
 
@@ -539,13 +548,49 @@ class TileCache(QObject):
         crisp — so the page never goes soft and then sharpens; the moment
         the zoom wanted arrives, nothing visible changes. Bluebeam's zoom
         looks like that (the user, 2026-10-02)."""
-        if self.held() or self._busy() or not data:
-            return
+        if self.held() or not data or not self.has_all(
+                source, index, page, scale, region, annotations, tuple(without)):
+            return                       # not before what is on screen is drawn
         step = zoom_step(min(scale * 2.0, 64.0))
         keys = self._squares(TileKey, source, index, step, QRectF(region).intersected(page),
                              annotations, tuple(without))
         self._ask_ahead(keys, ("page", source, index, annotations, tuple(without)),
                         data, page)
+
+    #: The most squares of a zoom on its way that are asked for at once.
+    MOST_EXPECTED = 32
+
+    def expect(self, source: str, data: bytes, index: int, page: QRectF,
+               scale: float, region: QRectF, annotations: bool = True,
+               without: tuple = ()) -> None:
+        """A zoom is on its way to *scale*, and will show *region*: draw that
+        now, while the zoom is still moving, on every core — not after it has
+        stopped. What arrives stands in for the frames on the way (shrunk,
+        so sharp) and is the page itself the moment the zoom lands: no soft
+        page sharpening a moment later (the user, 2026-10-08: "Bluebeam ...
+        it's always sharp"). A later notch going somewhere else gives these
+        up for its own."""
+        if not data:
+            return
+        step = zoom_step(scale)
+        page_key = ("page", source, index, annotations, tuple(without))
+        keys = self._squares(TileKey, source, index, step, QRectF(region).intersected(page),
+                             annotations, tuple(without))
+        if len(keys) > self.MOST_EXPECTED:
+            middle = QRectF(region).center()
+            keys.sort(key=lambda key: _distance_from(key, middle))
+            keys = keys[:self.MOST_EXPECTED]
+        before = self._expected.get(page_key, set())
+        stale = {key for key in before if key not in keys and key not in self._tiles}
+        self._waiting.difference_update(stale)
+        self._ahead.difference_update(stale)
+        self._expected[page_key] = set(keys)
+        # the middle last, so the render processes (a stack) draw it first
+        middle = QRectF(region).center()
+        for key in sorted(keys, key=lambda key: -_distance_from(key, middle)):
+            if key not in self._tiles and key not in self._waiting:
+                self._ahead.add(key)
+                self._ask(key, data, page, sheet=False)
 
     def _squares(self, kind, source, index, step, wanted, *rest) -> list:
         if wanted.isEmpty():
@@ -758,8 +803,8 @@ class TileCache(QObject):
         return answer(ready, missing, covers)
 
     def annotation_tiles(self, source: str, data: bytes, index: int, page: QRectF,
-                         scale: float, region: QRectF, xref: int, box: QRectF
-                         ) -> list[tuple[QRectF, QPixmap]]:
+                         scale: float, region: QRectF, xref: int, box: QRectF,
+                         expecting: bool = False) -> list[tuple[QRectF, QPixmap]]:
         """One of the page's markups as its file draws it: the squares of it
         inside *region* that are ready (other zooms standing in for the ones
         still coming), asking for the rest."""
@@ -802,7 +847,7 @@ class TileCache(QObject):
                                              step, wanted)
             # all at once, as the page does (TileCache.tiles)
             ready = others if covers else others + ready
-            if not self.held():
+            if expecting or not self.held():
                 for key in wanting[:MOST_TILES_AT_ONCE]:
                     self._ask(key, data, page, sheet=False)
             elif not ready:
@@ -943,6 +988,7 @@ class TileCache(QObject):
         pixmap = QPixmap.fromImage(image)
         self._sheet_bytes -= _weight(self._sheets.pop(key, None))
         self._sheets[key] = pixmap
+        self._sheet_counts[key.source] = self._sheet_counts.get(key.source, 0) + 1
         self._sheet_bytes += _weight(pixmap)
         while self._sheet_bytes > SHEET_CACHE_BYTES and self._sheets:
             self._sheet_bytes -= _weight(self._sheets.pop(next(iter(self._sheets))))
@@ -979,6 +1025,7 @@ class TileCache(QObject):
             self._sheet_bytes = 0
             self._waiting.clear()
             self._ahead.clear()
+            self._expected.clear()
             self._failures.clear()
             self._consumers.clear()
             if self._worker is not None:
