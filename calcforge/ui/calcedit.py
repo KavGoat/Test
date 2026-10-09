@@ -151,6 +151,9 @@ class CalcEditing:
 
     # -- where the red cross is ----------------------------------------------------
     def place_cross(self, frame, page_point: QPointF) -> None:
+        from .sheetpages import blocks_calc
+        if blocks_calc(frame):
+            return                  # no equations on a spreadsheet page
         old = self._cross_rect()
         self.cross = (frame, QPointF(snap(page_point.x()), snap(page_point.y())))
         self.view.viewport().update()
@@ -602,6 +605,9 @@ class CalcEditing:
         frame, point = self._where_typing_starts()
         if frame is None:
             return False
+        from .sheetpages import blocks_calc
+        if blocks_calc(frame):
+            return False            # no equations on a spreadsheet page
         if text == " ":
             self.place_cross(frame, QPointF(point.x() + GRID_PT, point.y()))
             return True

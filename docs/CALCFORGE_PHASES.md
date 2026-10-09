@@ -1061,3 +1061,52 @@ rules compare units.
 
 Tests: `tests/sheet/test_data_tools.py` (11), `tests/test_table_data.py` (8),
 `tests/test_equation_rules.py` (8).
+
+## Spreadsheets, phase 4 — sheet pages, page breaks and the scratch area (2026-10-09)
+
+Answers by pop-up: the columns that fit inside the page's margins print and
+everything to their right is scratch (a blue line at the edge; Print Area or
+Fit to page width prints more); markups over a sheet move with their cells;
+empty pages at the end of a run are kept; row numbers and column letters
+always show on screen.
+
+* **Insert spreadsheet page**: the ▦ button in the Pages panel, Page ▸ Insert
+  spreadsheet page, or a page's right-click menu (on a sheet page: "Add a page
+  to this spreadsheet"). Consecutive sheet pages are one sheet (`Sheet1`…),
+  shown as one continuous grid: no gap between its pages, Excel's Page Break
+  Preview lines where one ends (dashed blue where the break fell by itself,
+  solid blue where the user put it), "Page N" faintly on each, the printed
+  part white and the scratch area grey to its right (at least a page wide, and
+  always two columns past the last one used).
+* **Clicks**: in Markup mode a markup over the cells is picked first and
+  anywhere else is a cell; in Calc mode clicks go to the cells. Row numbers and
+  column letters always show.
+* **Growth**: the selection can go one row past the last page; typing there
+  adds a page, in the same undo step as the typing. Empty pages are kept.
+* **Pages of a run**: nothing goes in between them (a page added inside goes
+  after the run); a reorder that would split a run is refused, a whole run
+  moves; turning one page turns the run (portrait ⇄ landscape) and the breaks
+  flow again; Page Setup on a sheet page sets the whole run's paper; deleting
+  a page of a run deletes its rows (its markups go with it, later ones keep
+  their cells); a duplicated or pasted sheet page is an ordinary page.
+* **Markups move with their cells**: rows or columns inserted, deleted,
+  resized or hidden move each markup with the cell under its corner, onto the
+  next page when that is where its cell went.
+* **Page layout** (right-click ▸ Page Layout, or Page ▸ Spreadsheet page
+  layout…): Insert/Remove Page Break, Reset All Page Breaks, Set/Clear Print
+  Area, and the dialog: print area, rows to repeat at top, fit all columns to
+  the page width, centre horizontally/vertically, print gridlines, print
+  headings, gridlines on screen. Dragging a break line makes a manual break
+  there. Breaks, print area and titles move with inserted and deleted rows.
+* **On paper**: each page prints its slice of rows inside the margins (scaled
+  for Fit to page width), title rows repeated at the top of later pages, the
+  markups over their cells; gridlines and headings only when switched on;
+  borders always.
+* **Saving**: the cells and the markups of a sheet page are CalcForge's own
+  drawing (the calc layer, taken off and rebuilt on reopen) and are kept in the
+  record — not written as annotations, because another reader could move them
+  off their cells.
+* **Not on sheet pages**: equations (no red cross, typing goes to the cells,
+  an equation dropped there stays where it was) and tables.
+
+Tests: `tests/sheet/test_pagination.py` (8), `tests/test_sheet_pages.py` (16).

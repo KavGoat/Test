@@ -95,6 +95,8 @@ class Sheet:
         self.validations: list = []          # data validation (validation.py)
         self.filter: Optional[dict] = None   # AutoFilter: {"range": [t,l,b,r], "criteria": {col: {...}}}
         self.filtered_rows: set = set()      # rows the filter hides
+        self.page: dict = {}                 # a sheet section's page options (pagination.py)
+        self.on_shift: list = []             # told (axis, at, delta) when rows/columns go in or out
 
     def __repr__(self) -> str:
         return f"Sheet({self.name!r})"
@@ -978,6 +980,8 @@ class Workbook:
     def _shift_extras(self, sheet, axis, at, delta) -> None:
         """Sizes, hidden rows/columns, merges and a table's extent move with
         inserted and deleted rows and columns."""
+        for listener in list(sheet.on_shift):
+            listener(axis, at, delta)
         before = _layout_state(sheet)
 
         def moved(i):
@@ -1034,6 +1038,23 @@ class Workbook:
                 (r + delta if r >= at else r) if delta > 0 else
                 (None if at <= r < at - delta else (r + delta if r >= at - delta else r))
                 for r in sheet.filtered_rows) if moved_r is not None} if axis == "row" else sheet.filtered_rows
+        if sheet.page:
+            page = dict(sheet.page)
+            def mv(i):
+                if delta > 0:
+                    return i + delta if i >= at else i
+                return None if at <= i < at - delta else (i + delta if i >= at - delta else i)
+            if axis == "row" and page.get("breaks"):
+                page["breaks"] = sorted({m for m in (mv(b) for b in page["breaks"]) if m})
+            for key in ("print_area",):
+                if page.get(key):
+                    moved = _shift_ranges({"ranges": [page[key]]}, axis, at, delta)
+                    page[key] = moved["ranges"][0] if moved else None
+            if axis == "row" and page.get("titles"):
+                moved = _shift_ranges({"ranges": [[page["titles"][0], 0, page["titles"][1], 0]]},
+                                      axis, at, delta)
+                page["titles"] = [moved["ranges"][0][0], moved["ranges"][0][2]] if moved else None
+            sheet.page = page
         if sheet.size is not None:
             rows, cols = sheet.size
             if axis == "row":
@@ -1136,6 +1157,11 @@ class Workbook:
         with self.transaction("Conditional formatting"):
             self._layout_change(sheet, lambda: setattr(sheet, "cond_rules", copy.deepcopy(rules)))
         self._tell({("layout", sheet.id)})
+
+    def set_page_options(self, sheet: Sheet, **changes) -> None:
+        """Print area, titles, breaks, fit to width, centring... (one step)."""
+        with self.transaction("Page setup"):
+            self._layout_change(sheet, lambda: setattr(sheet, "page", {**sheet.page, **changes}))
 
     def set_validations(self, sheet: Sheet, validations: list) -> None:
         import copy
@@ -1314,12 +1340,13 @@ def _layout_state(sheet: Sheet) -> tuple:
     return (dict(sheet.widths), dict(sheet.heights), frozenset(sheet.hidden_rows),
             frozenset(sheet.hidden_cols), tuple(sheet.merges), sheet.size,
             copy.deepcopy(sheet.cond_rules), copy.deepcopy(sheet.validations),
-            copy.deepcopy(sheet.filter), frozenset(sheet.filtered_rows))
+            copy.deepcopy(sheet.filter), frozenset(sheet.filtered_rows), copy.deepcopy(sheet.page))
 
 
 def _set_layout(sheet: Sheet, state: tuple) -> None:
     import copy
-    widths, heights, hrows, hcols, merges, size, rules, valids, filt, frows = state
+    widths, heights, hrows, hcols, merges, size, rules, valids, filt, frows, page = state
+    sheet.page = copy.deepcopy(page)
     sheet.widths, sheet.heights = dict(widths), dict(heights)
     sheet.hidden_rows, sheet.hidden_cols = set(hrows), set(hcols)
     sheet.merges, sheet.size = list(merges), size

@@ -184,6 +184,12 @@ def exportable(frame, page, preserved: bool) -> list:
     decision that it is part of the page now, and it is painted in.
     """
     items = []
+    if getattr(page, "sheet", None) is not None:
+        # A spreadsheet page: its markups sit on its cells, which on paper
+        # are scaled and placed inside the margins, so they are drawn with
+        # the cells (the calc layer) and kept in the record, not written as
+        # annotations a reader could move off their cells.
+        return items
     # Stacking order, bottom first, as a PDF paints its annotations: reading
     # order put a section mark's arrowhead over the white bubble meant to
     # cover its base, because the arrowhead's top was the higher on the page.

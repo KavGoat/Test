@@ -382,8 +382,28 @@ class PageFrame(QGraphicsObject):
         return tuple(sorted(left_out))
 
     # -- geometry ----------------------------------------------------------
+    #: A spreadsheet page's on-screen shape: its rows and the columns shown,
+    #: printed and scratch (items/sheetpage.py); None: still the paper.
+    sheet_rect: Optional[QRectF] = None
+    _as_paper = False
+
+    @property
+    def is_sheet(self) -> bool:
+        return getattr(self.page, "sheet", None) is not None
+
     def page_rect(self) -> QRectF:
+        if self.sheet_rect is not None and not self._as_paper and self.is_sheet:
+            return QRectF(self.sheet_rect)
         return QRectF(0, 0, self.page.width_pt, self.page.height_pt)
+
+    def paper_rect(self) -> QRectF:
+        return QRectF(0, 0, self.page.width_pt, self.page.height_pt)
+
+    def set_sheet_rect(self, rect: Optional[QRectF]) -> None:
+        if rect == self.sheet_rect:
+            return
+        self.prepareGeometryChange()
+        self.sheet_rect = QRectF(rect) if rect is not None else None
 
     #: Room round the page for markups drawn from the page's squares: their
     #: boxes allow for the selection handles, which reach past the sheet's
@@ -706,6 +726,14 @@ class PageFrame(QGraphicsObject):
     def paint(self, painter: QPainter, option, widget=None) -> None:
         if self._items_only:
             return                        # the equations' own layer: nothing of the page
+        if self.is_sheet:
+            # a spreadsheet page: its grid draws itself (items/sheetpage.py),
+            # continuous with the pages above and below it; only the markups'
+            # squares here, on screen
+            if not self.print_mode:
+                self.layer.paint(painter, _exposed_part(option, self.page_rect(), self),
+                                 _painted_scale(painter))
+            return
         rect = self.page_rect()
         if not self.print_mode:
             self._paint_shadow(painter, rect)
@@ -1215,6 +1243,9 @@ class PageFrame(QGraphicsObject):
         scene = self.scene()
         if scene is None:
             return
+        if self.is_sheet and self.sheet_rect is not None:
+            self._render_sheet_page(painter, target, for_print, layer)
+            return
         previous = self.print_mode
         previous_overlay = self._pdf_overlay
         self.print_mode = for_print
@@ -1275,6 +1306,63 @@ class PageFrame(QGraphicsObject):
             self.print_mode = previous
             self._pdf_overlay = previous_overlay
             self._items_only = False
+
+    def _render_sheet_page(self, painter: QPainter, target: QRectF, for_print: bool,
+                           layer: str) -> None:
+        """A spreadsheet page on paper: its slice of the grid inside the
+        margins (scaled down for Fit to page width), title rows repeated, the
+        markups over it, and the running header and footer. Its grid and its
+        markups are CalcForge's own drawing (the calc layer): they are taken
+        off and rebuilt from the record when the file is opened here."""
+        from ..items.sheetpage import run_item_for
+        scene = self.scene()
+        run = run_item_for(self)
+        paper = self.paper_rect()
+        sx = target.width() / max(paper.width(), 1e-9)
+        sy = target.height() / max(paper.height(), 1e-9)
+        previous = self.print_mode
+        self.print_mode = for_print
+        try:
+            painter.save()
+            painter.translate(target.topLeft())
+            painter.scale(sx, sy)
+            if layer in ("", "sheet"):
+                # header and footer, on the paper
+                self._as_paper = True
+                try:
+                    self._paint_running_text(painter)
+                finally:
+                    self._as_paper = False
+            placed = None
+            if layer in ("", "calc") and run is not None:
+                placed = run.paint_page(painter, self)
+            painter.restore()
+            if layer in ("", "calc") and run is not None and placed is not None:
+                # the markups over the grid, where its cells went on the paper
+                source, inner = placed
+                inner = QRectF(target.left() + inner.left() * sx, target.top() + inner.top() * sy,
+                               inner.width() * sx, inner.height() * sy)
+                markups = [m for m in self.markups() if m is not run and m.printable and m.isVisible()]
+                if markups:
+                    hidden = []
+                    for item in self.markups():
+                        if (item is run or item not in markups) and item.isVisible():
+                            hidden.append(item)
+                            item.setVisible(False)
+                    for item in markups:
+                        item._handles_visible = False
+                    try:
+                        self.layer.suspend()
+                        with only_this_page(scene, self):
+                            scene.render(painter, inner, self.mapRectToScene(source), Qt.IgnoreAspectRatio)
+                    finally:
+                        for item in hidden:
+                            item.setVisible(not item.hidden)
+                        for item in markups:
+                            item._handles_visible = True
+                            item.update()
+        finally:
+            self.print_mode = previous
 
     def render_picture(self, region: QRectF) -> QPicture:
         """Snapshot drawing in *region*, recorded as vectors where possible.
@@ -1553,15 +1641,38 @@ class DocumentScene(QGraphicsScene):
         stays the shape it always was and the pages simply lie on their side.
         """
         turned = self.reading_turn % 360 in (90, 270)
+
+        def sheet(frame):
+            return frame.is_sheet and frame.sheet_rect is not None
+
         def across(frame):
+            if sheet(frame):
+                return frame.page.width_pt          # centred as its paper, scratch to the right
             return frame.page.height_pt if turned else frame.page.width_pt
 
         def down(frame):
+            if sheet(frame):
+                return frame.sheet_rect.height()
             return frame.page.width_pt if turned else frame.page.height_pt
 
         widest = max((across(frame) for frame in self.frames), default=0.0)
         y = 0.0
+        right = widest
+        previous = None
         for frame in self.frames:
+            if sheet(frame):
+                # a run of spreadsheet pages is one continuous grid: no gap
+                # between its pages, a blue line where one ends (sheetpage.py)
+                if previous is not None and sheet(previous) and previous.page.sheet == frame.page.sheet:
+                    y -= PAGE_GAP
+                left = (widest - across(frame)) / 2.0
+                frame.setRotation(0)
+                frame.setPos(left, y)
+                right = max(right, left + frame.sheet_rect.width())
+                y += down(frame) + PAGE_GAP
+                previous = frame
+                continue
+            previous = frame
             frame.setTransformOriginPoint(0, 0)
             frame.setRotation(self.reading_turn)
             # A rotated item hangs off its own corner, so it is pushed back
@@ -1576,7 +1687,7 @@ class DocumentScene(QGraphicsScene):
             frame.setPos(left + offset.x(), y + offset.y())
             y += down(frame) + PAGE_GAP
         height = max(y - PAGE_GAP, 0.0)
-        self._pages_rect = QRectF(0, 0, widest, height)
+        self._pages_rect = QRectF(0, 0, right, height)
         self._apply_desk_margin()
 
     def set_desk_margin(self, across: float, down: float) -> None:

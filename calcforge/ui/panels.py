@@ -248,6 +248,8 @@ class PagesPanel(QWidget):
         # that would otherwise arrive as the page to act on.
         for label, tip, slot in (
                 ("+", "Add a page", lambda: self.window.add_page()),
+                ("▦", "Insert a spreadsheet page (pages next to each other are one sheet)",
+                 lambda: self.window.insert_sheet_page()),
                 ("⧉", "Duplicate the page, or the pages picked out",
                  lambda: self.window.duplicate_page(
                      self.window.selected_pages()[0]

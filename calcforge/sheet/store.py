@@ -66,6 +66,7 @@ def sheet_to_dict(sheet) -> dict:
         "names": names_homed_on(sheet),
         "cond_rules": sheet.cond_rules, "validations": sheet.validations,
         "filter": sheet.filter, "filtered_rows": sorted(sheet.filtered_rows),
+        "page": sheet.page,
     }
 
 
@@ -120,6 +121,7 @@ def load_sheet(sheet, data: dict) -> None:
             if sheet.filter is not None:
                 sheet.filter["criteria"] = {int(k): v for k, v in sheet.filter.get("criteria", {}).items()}
             sheet.filtered_rows = set(data.get("filtered_rows", []))
+            sheet.page = _copy.deepcopy(data.get("page", {}))
             for name, refers_to in data.get("names", []):
                 key = (name.lower(), None)
                 if key not in wb.names:

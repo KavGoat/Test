@@ -31,6 +31,7 @@ from PySide6.QtGui import QColor, QCursor, QFont, QKeySequence, QPainter, QPen
 from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QLineEdit, QMenu,
                                QWidget)
 
+from ..items.base import MarkupItem
 from ..items.table import (HEADING_H, ROWNUM_W, TAB_H, TableItem, THIN, cell_font)
 from ..sheet import clip
 from ..sheet import formula as F
@@ -45,6 +46,18 @@ def _alive(item) -> bool:
         return item is not None and item.scene() is not None
     except RuntimeError:
         return False
+
+
+def _frames(item) -> list:
+    """The pages a change to a table's cells can touch: its own, or every
+    page of a spreadsheet (its markups move with the cells)."""
+    if getattr(item, "SHEET_RUN", False):
+        return item.run_frames() or [item.parentItem()]
+    return [item.parentItem()]
+
+
+def _is_run(item) -> bool:
+    return bool(getattr(item, "SHEET_RUN", False))
 
 
 class CellEditor(QLineEdit):
@@ -250,6 +263,8 @@ class TableEditing:
         if item is None:
             return
         rows, cols = item.size
+        if _is_run(item):
+            rows += 1                    # one row past the last page: typing there adds a page
         clamp = lambda rc: (max(0, min(rc[0], rows - 1)), max(0, min(rc[1], cols - 1)))
         self.anchor = clamp(anchor)
         self.edge = clamp(edge if edge is not None else anchor)
@@ -319,7 +334,14 @@ class TableEditing:
         if handle is not None and handle.adjusted(-tol, -tol, tol, tol).contains(local):
             return ("fill",)
         w, h = xs[-1], ys[-1]
-        if w - 1 <= local.x() <= w + 5 and h - 1 <= local.y() <= h + 5 and \
+        if _is_run(item) and item.paging is not None and 0 <= local.x() < w:
+            # a page break line: dragged, it becomes a manual break (Excel)
+            paging = item.paging
+            if xs[paging.first_col] <= local.x() <= xs[paging.last_col + 1]:
+                for k, (a, _b) in enumerate(paging.slices[1:], 1):
+                    if abs(local.y() - ys[a]) <= tol and 0 <= local.y():
+                        return ("break", a)
+        if not _is_run(item) and w - 1 <= local.x() <= w + 5 and h - 1 <= local.y() <= h + 5 and \
                 not (0 <= local.x() < w and 0 <= local.y() < h):
             return ("grow",)
         if -HEADING_H <= local.y() < 0 and 0 <= local.x() <= w + tol:
@@ -384,6 +406,21 @@ class TableEditing:
             return False
         target = self.table_at(scene_pos)
         if target is None or not view.editable(target):
+            return False
+        if _is_run(target) and not view.calc.calc_mode():
+            # a spreadsheet page: a markup over the cells is picked first,
+            # and anywhere else is a cell (the user's choice)
+            for other in view.scene().items(scene_pos):
+                if other is target:
+                    break
+                if isinstance(other, MarkupItem) and other.isVisible():
+                    return False
+            local = target.mapFromScene(scene_pos)
+            cell = target.cell_at(local)
+            if cell is not None:
+                self.open(target, cell)
+                self.drag = ("select", cell)
+                return True
             return False
         if view.calc.calc_mode():
             local = target.mapFromScene(scene_pos)
@@ -456,11 +493,11 @@ class TableEditing:
         elif kind == "col_edge":
             c = zone[1]
             self.drag = ("col_size", c, scene_pos, item.sheet.width(c), self._chosen_cols(c))
-            self.view.begin_snapshot([item.parentItem()])
+            self.view.begin_snapshot(_frames(item))
         elif kind == "row_edge":
             r = zone[1]
             self.drag = ("row_size", r, scene_pos, item.sheet.height(r), self._chosen_rows(r))
-            self.view.begin_snapshot([item.parentItem()])
+            self.view.begin_snapshot(_frames(item))
         elif kind == "fill":
             self.drag = ("fill", self.selection(), None, ctrl)
         elif kind == "border":
@@ -468,7 +505,9 @@ class TableEditing:
                          None)
         elif kind == "grow":
             self.drag = ("grow", item.size)
-            self.view.begin_snapshot([item.parentItem()])
+            self.view.begin_snapshot(_frames(item))
+        elif kind == "break":
+            self.drag = ("break", zone[1], zone[1])
         return True
 
     def _chosen_cols(self, c) -> list:
@@ -539,6 +578,14 @@ class TableEditing:
             dc = max(-src[1], min(dc, cols - 1 - src[3]))
             self.drag = ("move", src, grabbed, (dr, dc))
             item.update()
+        elif kind == "break":
+            row = max(1, self._cell_near(item, local)[0])
+            if local.y() - item.edges()[1][row] > item.sheet.height(row) / 2:
+                row += 1
+            self.drag = ("break", drag[1], row)
+            item.break_drag = item.edges()[1][min(row, len(item.edges()[1]) - 1)]
+            item.update()
+            self.view.statusMessage.emit(f"Page break above row {row + 1}")
         elif kind == "grow":
             xs, ys = item.edges()
             rows, cols = drag[1]
@@ -582,6 +629,15 @@ class TableEditing:
         if drag is None or item is None:
             return False
         kind = drag[0]
+        if kind == "break":
+            item.break_drag = None
+            item.update()
+            if drag[2] != drag[1]:
+                from . import sheetlayout
+                from ..sheet.pagination import options
+                old = drag[1] if drag[1] in options(item.sheet)["breaks"] else None
+                sheetlayout.move_break(self.view.window, item, old, drag[2])
+            return True
         if kind in ("col_size", "row_size", "grow"):
             self.view.commit_snapshot({"col_size": "Column width", "row_size": "Row height",
                                        "grow": "Resize table"}[kind])
@@ -665,6 +721,7 @@ class TableEditing:
             else:
                 QToolTip.hideText()
         cursor = {"col_edge": Qt.SplitHCursor, "row_edge": Qt.SplitVCursor, "fill": Qt.CrossCursor,
+                  "break": Qt.SplitVCursor,
                   "border": Qt.SizeAllCursor, "grow": Qt.SizeFDiagCursor, "tab": Qt.OpenHandCursor,
                   "col": Qt.ArrowCursor, "row": Qt.ArrowCursor, "corner": Qt.ArrowCursor,
                   "cell": Qt.CrossCursor}.get(kind)
@@ -681,6 +738,7 @@ class TableEditing:
         zone = self._zone(item, local)
         kind = zone[0] if zone else None
         return {"col_edge": Qt.SplitHCursor, "row_edge": Qt.SplitVCursor, "fill": Qt.CrossCursor,
+                "break": Qt.SplitVCursor,
                 "border": Qt.SizeAllCursor, "grow": Qt.SizeFDiagCursor, "tab": Qt.OpenHandCursor,
                 "cell": Qt.CrossCursor}.get(kind, Qt.ArrowCursor)
 
@@ -732,6 +790,11 @@ class TableEditing:
         if got is None:
             return
         frame, rect, rows, cols = got
+        from .sheetpages import blocks_calc
+        if blocks_calc(frame):
+            self.view.statusMessage.emit("Tables don't go on spreadsheet pages: "
+                                         "type into its cells instead")
+            return
         if abs(end.x() - start.x()) < 4 and abs(end.y() - start.y()) < 4:
             rows, cols = 4, 3                 # a click: Excel's handful of cells
         item = TableItem(rows, cols)
@@ -1381,9 +1444,8 @@ class TableEditing:
         item = self.item
         if item is None or item.sheet is None:
             return
-        frame = item.parentItem()
         view = self.view
-        view.begin_snapshot([frame])
+        view.begin_snapshot(_frames(item))
         sheet = item.sheet
         change(sheet.workbook, sheet)
         item.layout_changed()
@@ -1468,7 +1530,11 @@ class TableEditing:
     def _look_like_neighbours(wb, sheet, axis, at, n) -> None:
         """New rows and columns take the look of the one before them (as
         Excel's Format Same As Above), so a bordered table stays bordered."""
-        rows, cols = sheet.size
+        if sheet.size is not None:
+            rows, cols = sheet.size
+        else:                            # a spreadsheet page: as far as its cells go
+            rows = max((r for r, _c in sheet.cells), default=-1) + 1
+            cols = max((c for _r, c in sheet.cells), default=-1) + 1
         src = at - 1 if at > 0 else at + n
         for k in range(n):
             i = at + k
@@ -1676,7 +1742,7 @@ class TableEditing:
             ref += f":${col_letters(r)}${b + 1}"
         wb = item.sheet.workbook
         try:
-            self.view.begin_snapshot([item.parentItem()])
+            self.view.begin_snapshot(_frames(item))
             wb.define_name(name, ref)
             item.update()
             self.view.commit_snapshot("Define name")
@@ -1826,9 +1892,35 @@ class TableEditing:
         datatools.fill_menu(menu, self)
         menu.addSeparator()
         menu.addAction("Define Name…", self._ask_name)
-        menu.addAction("Rename Table…", self.rename)
+        if _is_run(item):
+            self._page_layout_menu(menu, item)
+            menu.addAction("Rename Sheet…", self.rename)
+        else:
+            menu.addAction("Rename Table…", self.rename)
         menu.exec(global_pos)
         return True
+
+    def _page_layout_menu(self, menu, item) -> None:
+        """Excel's Page Layout commands, for a spreadsheet page."""
+        from . import sheetlayout
+        from ..sheet.pagination import options
+        window = self.view.window
+        layout = menu.addMenu("Page Layout")
+        row = self.active[0]
+        breaks = options(item.sheet)["breaks"]
+        if row in breaks:
+            layout.addAction("Remove Page Break", lambda: sheetlayout.remove_break(window, item, row))
+        else:
+            act = layout.addAction("Insert Page Break", lambda: sheetlayout.insert_break(window, item, row))
+            act.setEnabled(row > 0)
+        layout.addAction("Reset All Page Breaks", lambda: sheetlayout.reset_breaks(window, item))
+        layout.addSeparator()
+        layout.addAction("Set Print Area", lambda: sheetlayout.set_print_area(
+            window, item, list(self.selection())))
+        layout.addAction("Clear Print Area", lambda: sheetlayout.set_print_area(window, item, None))
+        layout.addSeparator()
+        index = window.document.index_of(item.parentItem().page)
+        layout.addAction("Page Layout…", lambda: window.sheet_page_setup(index))
 
     def _ask_size(self, axis: str) -> None:
         from PySide6.QtWidgets import QInputDialog

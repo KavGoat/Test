@@ -655,6 +655,22 @@ class PageView(QGraphicsView):
             self.window.record_structure_change(before, text)
             self.documentEdited.emit()
             return
+        # A spreadsheet whose cells now reach past its last page grows a page
+        # (the user's choice) — in the same undo step as what made it grow.
+        from . import sheetpages
+        short = sheetpages.short_runs(self.window) if self.window.scene is not None else []
+        if short:
+            before = self.window._structure_snapshot()
+            by_uid = {entry["uid"]: entry for entry in before["pages"]}
+            for frame, items in (self._snapshot or []):
+                entry = by_uid.get(frame.page.uid)
+                if entry is not None:
+                    entry["items"] = items
+            self._snapshot = []
+            sheetpages.add_run_pages(self.window, short)
+            self.window.record_structure_change(before, text)
+            self.documentEdited.emit()
+            return
         self._commit_snapshot(text, coalesce)
 
     def _commit_snapshot(self, text: str, coalesce: bool) -> None:
@@ -2052,6 +2068,10 @@ class PageView(QGraphicsView):
         for item in items:
             frame = scene.frame_at(self.markup_box(item).center())
             if frame is None or item.parentItem() is frame:
+                continue
+            if getattr(item, "IS_CALC", False) and getattr(frame.page, "sheet", None) is not None:
+                # equations and tables do not go on spreadsheet pages
+                self.statusMessage.emit("Equations and tables don't go on spreadsheet pages")
                 continue
             position = item.scenePos()
             item.setParentItem(frame)
@@ -4081,6 +4101,8 @@ class PageView(QGraphicsView):
     def editable(item) -> bool:
         """False when the markup is locked, or has been made part of the page."""
         from PySide6.QtWidgets import QGraphicsItem as _GraphicsItem
+        if getattr(item, "SHEET_RUN", False):
+            return True                # a spreadsheet page's cells: never picked up, always typed in
         return bool(item.flags() & _GraphicsItem.ItemIsMovable) and not item.locked
 
     def text_clipboard(self, action: str) -> bool:

@@ -51,6 +51,10 @@ here is new.
 | A number too wide for its cell | `####` as Excel, with Excel's feel: typing a number into a General cell of a column whose width was never set widens the column to fit it. |
 | Find and Replace | Both: Ctrl+F in an open table is Excel's Find & Replace for that table; the document Search also finds text in every table's cells. |
 | Cell conditional formatting with units | Units allowed: "greater than 200 kN" compares quantities (250 kN > 0.2 MN); a plain number compares the number as shown; units that don't match never match. |
+| Print width of a sheet page (phase 4) | The columns that fit inside the page's margins print; every column after them is the scratch area (never printed), a blue line marking the edge. A Print Area, or Fit to N pages wide (which scales down), prints more. |
+| Markups over a sheet page | Move with cells (Excel's "move but don't size with cells"): a markup stays on the cell it was drawn over when rows/columns are inserted, deleted or resized. |
+| Empty pages at the end of a run | Kept: pages added stay until deleted in the Pages panel (the run still grows when typing past its last page). |
+| Row numbers and column letters on sheet pages | Always on screen, in both modes, like Excel; printing follows each sheet's own switch. |
 | Build order | 1 engine and formulas · 2 table markup with editing, fill, copy, formatting · 3 conditional formatting and data tools · 4 sheet pages, page breaks, scratch area · 5 charts, spill, named ranges · 6 xlsx. Each phase tested, pushed and reported. |
 
 ## Settled while building (small; recorded so they can be changed)
@@ -105,6 +109,15 @@ here is new.
   bordered table stays bordered as it grows.
 * **Moving a table** in Calc mode: by its name tab (clicks on cells go to the
   cells); in Markup mode it is a markup like any other.
+
+* **Sheet pages (phase 4), small things settled while building:** Fit to
+  page width is "fit to 1 page wide" (Excel's N pages wide with N = 1); a page
+  added beside a run joins it at its end; a copied sheet page is an ordinary
+  page (one sheet is one run); deleting a run's page deletes its rows; the
+  column letters sit above the run's first row (not frozen at the window top);
+  the selection reaches one row past the last page, where typing adds a page;
+  a sheet page's markups are drawn with its cells into the calc layer and kept
+  in the record instead of being written as annotations.
 
 ## Tables on pages (phase 2)
 

@@ -329,6 +329,9 @@ class Page:
         self.written_here: Optional[bool] = None
         self.frame = None                           # set by the UI layer
         self._pending_items: list[dict] = []
+        # The spreadsheet section this page is a page of (its run's id), or
+        # None for an ordinary page (sheet/pagination.py, items/sheetpage.py).
+        self.sheet: Optional[str] = None
 
     # -- geometry ----------------------------------------------------------
     @property
@@ -395,6 +398,7 @@ class Page:
             "printable": self.printable,
             "turn": self.turn,
             "written_here": self.written_here,
+            "sheet": self.sheet,
             "items": items,
         }
 
@@ -421,6 +425,7 @@ class Page:
         said = data.get("written_here")
         page.written_here = None if said is None else bool(said)
         page._pending_items = data.get("items", [])
+        page.sheet = data.get("sheet") or None
         return page
 
 

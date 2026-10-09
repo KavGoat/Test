@@ -69,6 +69,9 @@ class TableItem(MarkupItem):
     IS_CALC = True
     region = None                    # it is not an equation
     opened = False                   # open for its cells (not part of the record)
+    SHEET_KIND = "table"             # what the workbook calls it (a sheet section: "sheet")
+    #: the rows and columns painted: (top, bottom, left, right), or None for all
+    _range: Optional[tuple] = None
 
     def __init__(self, rows: int = 4, cols: int = 3):
         super().__init__()
@@ -111,7 +114,7 @@ class TableItem(MarkupItem):
             from PySide6.QtCore import QTimer
             book.later = lambda run: QTimer.singleShot(0, run)
         data, self._data = self._data, None
-        sheet = book.attach(self.uid, (data or {}).get("name"), "table")
+        sheet = book.attach(self.uid, (data or {}).get("name"), self.SHEET_KIND)
         self._book = book
         self.sheet = sheet
         if data is not None:
@@ -338,12 +341,17 @@ class TableItem(MarkupItem):
             fields["underline"] = "single"
         return _replace(st, **fields)
 
+    def _gridlines_shown(self, printing: bool) -> bool:
+        return self.sheet.show_gridlines and not printing
+
     def paint_content(self, painter: QPainter) -> None:
         sheet = self.sheet
         if sheet is None:
             return
         xs, ys = self.edges()
         rows, cols = self.size
+        r0, r1, c0, c1 = self._range or (0, rows - 1, 0, cols - 1)
+        r1, c1 = min(r1, rows - 1), min(c1, cols - 1)
         frame = self._page_frame()
         printing = bool(getattr(frame, "print_mode", False))
         merges = [m for m in sheet.merges if m[0] < rows and m[1] < cols]
@@ -355,8 +363,8 @@ class TableItem(MarkupItem):
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing, False)
         # fills
-        for r in range(rows):
-            for c in range(cols):
+        for r in range(r0, r1 + 1):
+            for c in range(c0, c1 + 1):
                 m = covered.get((r, c))
                 if m is not None and (r, c) != (m[0], m[1]):
                     continue
@@ -377,14 +385,14 @@ class TableItem(MarkupItem):
                     grad.setColorAt(1, end)
                     painter.fillRect(rect, grad)
         # gridlines, on screen only (Excel's default)
-        if sheet.show_gridlines and not printing:
+        if self._gridlines_shown(printing):
             pen = QPen(GRIDLINE, 0)
             pen.setCosmetic(True)
             painter.setPen(pen)
-            for c in range(cols + 1):
-                painter.drawLine(QPointF(xs[c], 0), QPointF(xs[c], ys[-1]))
-            for r in range(rows + 1):
-                painter.drawLine(QPointF(0, ys[r]), QPointF(xs[-1], ys[r]))
+            for c in range(c0, c1 + 2):
+                painter.drawLine(QPointF(xs[c], ys[r0]), QPointF(xs[c], ys[r1 + 1]))
+            for r in range(r0, r1 + 2):
+                painter.drawLine(QPointF(xs[c0], ys[r]), QPointF(xs[c1 + 1], ys[r]))
             # no gridlines inside merged cells
             for m in merges:
                 rect = self.cell_rect(m[0], m[1])
@@ -396,14 +404,17 @@ class TableItem(MarkupItem):
         for (r, c), cell in list(sheet.cells.items()):
             if r >= rows or c >= cols or cell.value is BLANK:
                 continue
+            if self._range is not None and not (r0 <= r <= r1) and \
+                    not any(m[0] <= r1 and m[2] >= r0 for m in [covered.get((r, c))] if m):
+                continue
             m = covered.get((r, c))
             if m is not None and (r, c) != (m[0], m[1]):
                 continue
             self._paint_text(painter, r, c, cell, rows, cols, covered)
         # borders
         painter.setRenderHint(QPainter.Antialiasing, False)
-        for r in range(rows):
-            for c in range(cols):
+        for r in range(r0, r1 + 1):
+            for c in range(c0, c1 + 1):
                 m = covered.get((r, c))
                 st = self._style(m[0], m[1]) if m else self._style(r, c)
                 rect = QRectF(xs[c], ys[r], xs[c + 1] - xs[c], ys[r + 1] - ys[r])

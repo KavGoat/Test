@@ -866,6 +866,10 @@ class MainWindow(QMainWindow):
                   tip="Pick which tools appear on the markup toolbar")
 
         self._act("add_page", "Add page", lambda: self.add_page())
+        self._act("add_sheet_page", "Insert spreadsheet page", lambda: self.insert_sheet_page(),
+                  tip="A page of spreadsheet cells; pages next to each other are one sheet")
+        self._act("sheet_page_setup", "Spreadsheet page layout…", lambda: self.sheet_page_setup(),
+                  tip="Print area, titles, fit to page width, centring, gridlines and headings")
         self._act("duplicate_page", "Duplicate page", lambda: self.duplicate_page())
         self._act("delete_page", "Delete page", lambda: self.delete_page())
         # No key: Ctrl+Shift+P shows the problems panel, and page setup is on
@@ -1716,7 +1720,8 @@ class MainWindow(QMainWindow):
         self.current_page_menu.aboutToShow.connect(self._rebuild_current_page_menu)
         page_menu.addSeparator()
         for action in (self.act_bookmark, None,
-                       self.act_add_page, self.act_duplicate_page, self.act_delete_page,
+                       self.act_add_page, self.act_add_sheet_page, self.act_duplicate_page,
+                       self.act_delete_page, self.act_sheet_page_setup,
                        None, self.act_crop_page, self.act_extract_pages,
                        self.act_split_pages,
                        None, self.act_page_setup, self.act_scale, self.act_viewports,
@@ -2315,6 +2320,10 @@ class MainWindow(QMainWindow):
             ordered.append(page.frame)
         self.scene.frames = ordered
         self.scene.layout_pages()
+        # spreadsheet pages: each run's cells on its first page, each page
+        # its slice of the grid (ui/sheetpages.py)
+        from . import sheetpages
+        sheetpages.settle(self)
         # Pages moved, added or deleted: equations are evaluated in page
         # order, so the document's worksheet re-keys them (decision 9).
         from ..calc.docsheet import sheet_for
@@ -3044,7 +3053,8 @@ class MainWindow(QMainWindow):
         return max(0, min(int(index), len(self.document.pages) - 1))
 
     def add_page(self, index: Optional[int] = None, before: bool = False) -> None:
-        target = self.page_index(index) + (0 if before else 1)
+        from .sheetpages import safe_target
+        target = safe_target(self.document, self.page_index(index) + (0 if before else 1))
         count = 1
         setup = PageSetup.from_dict(self.current_page().setup.to_dict())
         if self.interactive_prompts:
@@ -3061,14 +3071,27 @@ class MainWindow(QMainWindow):
             self.current_index = target
         self._structural_change("Add page" if count == 1 else f"Add {count} pages", mutate)
 
+    def insert_sheet_page(self, index: Optional[int] = None, before: bool = False) -> None:
+        """A page of spreadsheet cells (ui/sheetpages.py)."""
+        from .sheetpages import insert_sheet_page
+        insert_sheet_page(self, index, before)
+
+    def sheet_page_setup(self, index: Optional[int] = None) -> None:
+        """The spreadsheet's own page layout (ui/sheetlayout.py)."""
+        from .sheetlayout import sheet_page_setup
+        sheet_page_setup(self, self.page_index(index))
+
     def add_page_before(self, index: Optional[int] = None) -> None:
         self.add_page(index, before=True)
 
     def duplicate_page(self, index: Optional[int] = None) -> None:
         """Copy the page — or the whole picked run — in after the last of it."""
+        from .sheetpages import plain_copy, safe_target
         wanted = self.pages_acted_on(index)
         sources = [self.document.pages[which].to_dict() for which in wanted]
-        target = wanted[-1] + 1
+        if any(self.document.pages[which].sheet for which in wanted):
+            sources = [plain_copy(source) for source in sources]
+        target = safe_target(self.document, wanted[-1] + 1)
 
         def mutate():
             for offset, source in enumerate(sources):
@@ -3125,8 +3148,9 @@ class MainWindow(QMainWindow):
         if payload is None:
             self.status_hint.setText("There is no page on the clipboard")
             return
+        from .sheetpages import plain_copy, safe_target
         which = self.page_index(index)
-        target = which if before else which + 1
+        target = safe_target(self.document, which if before else which + 1)
         for key, encoded in (payload.get("assets") or {}).items():
             if not self.document.asset(key):
                 try:
@@ -3135,6 +3159,7 @@ class MainWindow(QMainWindow):
                     pass
 
         waiting = payload.get("calcforge_pages") or [payload["calcforge_page"]]
+        waiting = [plain_copy(source) if source.get("sheet") else source for source in waiting]
 
         def mutate():
             for offset, source in enumerate(waiting):
@@ -3178,6 +3203,9 @@ class MainWindow(QMainWindow):
         lost = undefined_without(self.document, going_equations)
 
         def mutate():
+            # a spreadsheet page takes its rows with it (ui/sheetpages.py)
+            from .sheetpages import before_delete
+            before_delete(self, going)
             # Backwards, so each removal leaves the ones still to go where
             # they were.
             for which in reversed(going):
@@ -3190,6 +3218,14 @@ class MainWindow(QMainWindow):
     def move_page(self, source: int, target: int, count: int = 1) -> None:
         """Move a page, or a run of them, to start at *target*."""
         count = max(int(count), 1)
+        from .sheetpages import move_allowed
+        if not move_allowed(self.document, source, count, target):
+            # a run of spreadsheet pages is one sheet: it moves whole, and
+            # nothing goes in between its pages
+            self.status_hint.setText("A spreadsheet's pages move together, and nothing goes "
+                                     "between them")
+            self.pages_panel.rebuild(self.document, self.current_index)
+            return
 
         def mutate():
             self.current_index = self.document.move_pages(source, count, target)
@@ -3202,6 +3238,8 @@ class MainWindow(QMainWindow):
             return
         setup = dialog.result_setup()
         pages = self.document.pages if dialog.apply_all.isChecked() else [self.current_page()]
+        from .sheetpages import with_runs
+        pages = with_runs(self.document, pages)      # a spreadsheet's paper is its run's
 
         def mutate():
             for page in pages:
@@ -3212,6 +3250,8 @@ class MainWindow(QMainWindow):
     def set_page_setup(self, setup: PageSetup, all_pages: bool = False) -> None:
         """Give the current page (or every page) this paper; one undo step."""
         pages = self.document.pages if all_pages else [self.current_page()]
+        from .sheetpages import with_runs
+        pages = with_runs(self.document, pages)
         if all(page.setup.to_dict() == setup.to_dict() for page in pages):
             return
 
@@ -3371,6 +3411,12 @@ class MainWindow(QMainWindow):
         """
         which = self.page_index(index)
         page = self.document.pages[which]
+        if page.sheet is not None:
+            # a spreadsheet turns as a whole: portrait ⇄ landscape, and its
+            # page breaks flow again; its markups stay on their cells
+            from .sheetpages import turn_run
+            turn_run(self, which)
+            return
         setup = page.setup
         width, height = setup.width_pt, setup.height_pt
         rotated_background = self._rotate_background(page, clockwise)
@@ -3573,6 +3619,14 @@ class MainWindow(QMainWindow):
         blank_before.setToolTip("Insert a blank page before this page")
         blank_after = menu.addAction("Blank after", lambda: self.add_page(index))
         blank_after.setToolTip("Insert a blank page after this page")
+        sheet_page = menu.addAction("Spreadsheet page after",
+                                    lambda: self.insert_sheet_page(index))
+        sheet_page.setToolTip("Insert a page of spreadsheet cells after this page")
+        if self.document.pages[index].sheet is not None:
+            sheet_page.setText("Add a page to this spreadsheet")
+            layout = menu.addAction("Spreadsheet page layout…",
+                                    lambda: self.sheet_page_setup(index))
+            layout.setToolTip("Print area, titles, fit to page width, centring, gridlines")
         duplicate = menu.addAction("Duplicate pages" if several else "Duplicate page",
                                    lambda: self.duplicate_page(index))
         duplicate.setToolTip(f"Duplicate {these}")

@@ -443,7 +443,8 @@ def _draw_a_layer(output, document, leftovers: list, opened: list,
     drawn = _drawn_pages(document)
     if kind == calclayer.CALC:
         drawn = [page for page in drawn
-                 if any(getattr(item, "IS_CALC", False) and item.printable
+                 if getattr(page, "sheet", None) is not None
+                 or any(getattr(item, "IS_CALC", False) and item.printable
                         for item in page.frame.markups())]
     if not drawn:
         return {}
