@@ -1070,9 +1070,9 @@ Fit to page width prints more); markups over a sheet move with their cells;
 empty pages at the end of a run are kept; row numbers and column letters
 always show on screen.
 
-* **Insert spreadsheet page**: the ▦ button in the Pages panel, Page ▸ Insert
-  spreadsheet page, or a page's right-click menu (on a sheet page: "Add a page
-  to this spreadsheet"). Consecutive sheet pages are one sheet (`Sheet1`…),
+* **Insert spreadsheet page**: the ▦ button in the Pages panel, Page ▸ Spreadsheet
+  page, or a page's right-click menu ("Spreadsheet after"; on a sheet page
+  "Add sheet page"). Consecutive sheet pages are one sheet (`Sheet1`…),
   shown as one continuous grid: no gap between its pages, Excel's Page Break
   Preview lines where one ends (dashed blue where the break fell by itself,
   solid blue where the user put it), "Page N" faintly on each, the printed
@@ -1092,7 +1092,7 @@ always show on screen.
 * **Markups move with their cells**: rows or columns inserted, deleted,
   resized or hidden move each markup with the cell under its corner, onto the
   next page when that is where its cell went.
-* **Page layout** (right-click ▸ Page Layout, or Page ▸ Spreadsheet page
+* **Page layout** (right-click ▸ Page Layout, or Page ▸ Sheet
   layout…): Insert/Remove Page Break, Reset All Page Breaks, Set/Clear Print
   Area, and the dialog: print area, rows to repeat at top, fit all columns to
   the page width, centre horizontally/vertically, print gridlines, print

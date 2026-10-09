@@ -866,9 +866,9 @@ class MainWindow(QMainWindow):
                   tip="Pick which tools appear on the markup toolbar")
 
         self._act("add_page", "Add page", lambda: self.add_page())
-        self._act("add_sheet_page", "Insert spreadsheet page", lambda: self.insert_sheet_page(),
+        self._act("add_sheet_page", "Spreadsheet page", lambda: self.insert_sheet_page(),
                   tip="A page of spreadsheet cells; pages next to each other are one sheet")
-        self._act("sheet_page_setup", "Spreadsheet page layout…", lambda: self.sheet_page_setup(),
+        self._act("sheet_page_setup", "Sheet layout…", lambda: self.sheet_page_setup(),
                   tip="Print area, titles, fit to page width, centring, gridlines and headings")
         self._act("duplicate_page", "Duplicate page", lambda: self.duplicate_page())
         self._act("delete_page", "Delete page", lambda: self.delete_page())
@@ -3619,12 +3619,12 @@ class MainWindow(QMainWindow):
         blank_before.setToolTip("Insert a blank page before this page")
         blank_after = menu.addAction("Blank after", lambda: self.add_page(index))
         blank_after.setToolTip("Insert a blank page after this page")
-        sheet_page = menu.addAction("Spreadsheet page after",
+        sheet_page = menu.addAction("Spreadsheet after",
                                     lambda: self.insert_sheet_page(index))
         sheet_page.setToolTip("Insert a page of spreadsheet cells after this page")
         if self.document.pages[index].sheet is not None:
-            sheet_page.setText("Add a page to this spreadsheet")
-            layout = menu.addAction("Spreadsheet page layout…",
+            sheet_page.setText("Add sheet page")
+            layout = menu.addAction("Sheet layout…",
                                     lambda: self.sheet_page_setup(index))
             layout.setToolTip("Print area, titles, fit to page width, centring, gridlines")
         duplicate = menu.addAction("Duplicate pages" if several else "Duplicate page",
