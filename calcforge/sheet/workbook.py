@@ -1,0 +1,1091 @@
+"""The cells of every sheet and table in a document, and keeping them calculated.
+
+One :class:`Workbook` holds all of a document's spreadsheet sections and
+tables (each a :class:`Sheet`), so a formula can read any of them by name
+('Sheet 2'!B4). Within the workbook cells are calculated in the order they
+depend on each other, as Excel does; a loop is a circular reference: its
+cells show 0 and :attr:`Workbook.circular` lists them, as Excel's status bar
+does.
+
+Names that are neither cells nor defined names are variables from the
+document's equations; :attr:`Workbook.outside` is asked for them (the
+document answers with the value defined before the sheet in reading order).
+
+Every change goes through a transaction, so it can be undone as one step.
+"""
+from __future__ import annotations
+
+import bisect
+from contextlib import contextmanager
+from dataclasses import dataclass, field, replace
+from typing import Callable, Iterable, Optional
+
+from . import formula as F
+from .inputs import read_value
+from .refs import MAX_COLS, MAX_ROWS, CellRef, RangeRef, is_cell_name, parse_range
+from .style import Style, StyleTable
+from .values import BLANK, NAME, REF, Array, ErrorValue, SheetError
+
+
+# -- cells ---------------------------------------------------------------------------
+class Cell:
+    """What is in one cell: what was typed, its style, and its value."""
+
+    __slots__ = ("input", "style", "value", "parsed", "problem", "comment", "spill_from")
+
+    def __init__(self, input: str = "", style: int = 0):
+        self.input = input              # exactly what was typed ("=A1*2", "5 kN", "")
+        self.style = style              # index into the workbook's style table
+        self.value = BLANK
+        self.parsed: Optional[F.Parsed] = None
+        self.problem: Optional[str] = None   # why a formula can't be read
+        self.comment: Optional[str] = None
+        self.spill_from = None
+
+    @property
+    def is_formula(self) -> bool:
+        return self.input.startswith("=") and len(self.input) > 1
+
+    @property
+    def formula(self) -> Optional[str]:
+        return self.input[1:] if self.is_formula else None
+
+    def state(self) -> tuple:
+        return (self.input, self.style, self.comment)
+
+    def empty(self) -> bool:
+        return not self.input and not self.style and not self.comment
+
+
+@dataclass
+class DefinedName:
+    """A name for a cell, a block or a constant: W_total = Loads!$D$12."""
+
+    name: str
+    refers_to: str                       # formula text without "=", absolute refs
+    sheet: Optional[int] = None          # sheet id when the name is local to one sheet
+    comment: str = ""
+
+
+class Sheet:
+    """One spreadsheet section or table."""
+
+    def __init__(self, workbook: "Workbook", sheet_id: int, name: str, kind: str = "sheet"):
+        self.workbook = workbook
+        self.id = sheet_id
+        self.name = name
+        self.kind = kind                 # "sheet" (pages of grid) or "table" (on a page)
+        self.cells: dict[tuple, Cell] = {}
+        self._rows_in_col: dict[int, list] = {}
+        # where it sits in the document's reading order (set by the document)
+        self.position: tuple = ()
+
+    def __repr__(self) -> str:
+        return f"Sheet({self.name!r})"
+
+    # -- sparse storage --
+    def cell(self, row: int, col: int) -> Optional[Cell]:
+        return self.cells.get((row, col))
+
+    def _put(self, row: int, col: int, cell: Cell) -> None:
+        if (row, col) not in self.cells:
+            rows = self._rows_in_col.setdefault(col, [])
+            bisect.insort(rows, row)
+        self.cells[(row, col)] = cell
+
+    def _drop(self, row: int, col: int) -> None:
+        if self.cells.pop((row, col), None) is not None:
+            rows = self._rows_in_col.get(col)
+            if rows:
+                i = bisect.bisect_left(rows, row)
+                if i < len(rows) and rows[i] == row:
+                    rows.pop(i)
+                if not rows:
+                    del self._rows_in_col[col]
+
+    def positions_in(self, top: int, left: int, bottom: int, right: int):
+        """(row, col) of every cell that holds something in the block, row
+        by row within each column (cheap for whole columns and rows)."""
+        cols = self._rows_in_col
+        if right - left + 1 > len(cols):
+            wanted = sorted(c for c in cols if left <= c <= right)
+        else:
+            wanted = [c for c in range(left, right + 1) if c in cols]
+        for col in wanted:
+            rows = cols[col]
+            i = bisect.bisect_left(rows, top)
+            j = bisect.bisect_right(rows, bottom)
+            for row in rows[i:j]:
+                yield row, col
+
+    def used_area(self) -> Optional[tuple]:
+        """(top, left, bottom, right) of everything in the sheet, or None."""
+        if not self.cells:
+            return None
+        rows = [r for r, _ in self.cells]
+        cols = [c for _, c in self.cells]
+        return min(rows), min(cols), max(rows), max(cols)
+
+    # -- reading --
+    def value(self, row: int, col: int):
+        return self.workbook.value(self, row, col)
+
+    def input(self, row: int, col: int) -> str:
+        cell = self.cells.get((row, col))
+        return cell.input if cell else ""
+
+    def __getitem__(self, a1: str):
+        ref = parse_range(a1)
+        if isinstance(ref, CellRef):
+            return self.value(ref.row, ref.col)
+        raise KeyError(a1)
+
+
+# -- dependency bookkeeping --------------------------------------------------------------
+_BUCKET = 32  # columns per bucket of block references
+
+
+class _Dependents:
+    """Who reads what: for a changed cell, the formulas to recalculate."""
+
+    def __init__(self):
+        self.cell: dict[tuple, set] = {}         # (sheet, row, col) -> {reader key}
+        self.blocks: dict[tuple, list] = {}      # (sheet, bucket) -> [(top, left, bottom, right, reader)]
+        self.names: dict[str, set] = {}          # lower name -> {reader key}
+        self.read: dict[tuple, tuple] = {}       # reader key -> (cells, blocks, names) it registered
+
+    def add(self, reader, cells, blocks, names) -> None:
+        self.remove(reader)
+        for key in cells:
+            self.cell.setdefault(key, set()).add(reader)
+        for sheet, top, left, bottom, right in blocks:
+            for b in range(left // _BUCKET, right // _BUCKET + 1):
+                self.blocks.setdefault((sheet, b), []).append((top, left, bottom, right, reader))
+        for name in names:
+            self.names.setdefault(name, set()).add(reader)
+        self.read[reader] = (tuple(cells), tuple(blocks), tuple(names))
+
+    def remove(self, reader) -> None:
+        old = self.read.pop(reader, None)
+        if old is None:
+            return
+        cells, blocks, names = old
+        for key in cells:
+            s = self.cell.get(key)
+            if s:
+                s.discard(reader)
+                if not s:
+                    del self.cell[key]
+        for sheet, top, left, bottom, right in blocks:
+            for b in range(left // _BUCKET, right // _BUCKET + 1):
+                lst = self.blocks.get((sheet, b))
+                if lst:
+                    try:
+                        lst.remove((top, left, bottom, right, reader))
+                    except ValueError:
+                        pass
+                    if not lst:
+                        del self.blocks[(sheet, b)]
+        for name in names:
+            s = self.names.get(name)
+            if s:
+                s.discard(reader)
+                if not s:
+                    del self.names[name]
+
+    def hit(self, reached, skip: set) -> list:
+        """Readers (not in skip) of blocks that hold any of the reached
+        cells; each block is looked at once, however many cells changed."""
+        by_bucket: dict = {}
+        for sheet, row, col in reached:
+            by_bucket.setdefault((sheet, col // _BUCKET), {}).setdefault(col, []).append(row)
+        out = []
+        for (sheet, b), cols in by_bucket.items():
+            entries = self.blocks.get((sheet, b))
+            if not entries:
+                continue
+            for rows in cols.values():
+                rows.sort()
+            for top, left, bottom, right, reader in entries:
+                if reader in skip:
+                    continue
+                for col, rows in cols.items():
+                    if left <= col <= right:
+                        i = bisect.bisect_left(rows, top)
+                        if i < len(rows) and rows[i] <= bottom:
+                            skip.add(reader)
+                            out.append(reader)
+                            break
+        return out
+
+    def of(self, sheet: int, row: int, col: int):
+        out = set(self.cell.get((sheet, row, col), ()))
+        for top, left, bottom, right, reader in self.blocks.get((sheet, col // _BUCKET), ()):
+            if top <= row <= bottom and left <= col <= right:
+                out.add(reader)
+        return out
+
+
+# -- the workbook ------------------------------------------------------------------------
+class _Transaction:
+    def __init__(self, label: str):
+        self.label = label
+        self.steps: list = []            # (undo, redo) callables
+
+
+class Workbook:
+    def __init__(self):
+        self.sheets: list[Sheet] = []
+        self._next_id = 1
+        self.styles = StyleTable()
+        self.names: dict[tuple, DefinedName] = {}    # (lower name, sheet id or None)
+        self.day_first = True
+        # asked for a document variable: outside(sheet, name) -> value; raises KeyError
+        self.outside: Optional[Callable] = None
+        self.circular: list[tuple] = []              # (sheet, row, col) in a loop
+        self.listeners: list[Callable[[set], None]] = []   # told the keys whose values changed
+        self._deps = _Dependents()
+        self._dirty: set = set()
+        self._touched: list = []                     # cells changed since the last calculation
+        self._volatile: set = set()
+        self._precedents: dict[tuple, tuple] = {}    # key -> (cells, blocks) as read statically
+        self._evaluating: set = set()
+        self._done: set = set()
+        self._in_pass = False
+        self._changed: set = set()
+        self._outside_reads: dict[tuple, set] = {}
+        self._undo: list[_Transaction] = []
+        self._redo: list[_Transaction] = []
+        self._open: Optional[_Transaction] = None
+        self._depth = 0
+        self.auto = True
+
+    # -- sheets --------------------------------------------------------------------
+    def add_sheet(self, name: Optional[str] = None, kind: str = "sheet") -> Sheet:
+        name = name or self.free_name("Table" if kind == "table" else "Sheet")
+        if self.sheet(name) is not None:
+            raise ValueError(f"A sheet or table is already called {name}.")
+        problem = name_problem(name)
+        if problem:
+            raise ValueError(problem)
+        sheet = Sheet(self, self._next_id, name, kind)
+        self._next_id += 1
+        self.sheets.append(sheet)
+
+        def undo(s=sheet):
+            self.sheets.remove(s)
+            self._names_changed()
+
+        def redo(s=sheet):
+            self.sheets.append(s)
+            self._names_changed()
+
+        self._record(undo, redo)
+        self._names_changed()
+        return sheet
+
+    def free_name(self, stem: str) -> str:
+        taken = {s.name.lower() for s in self.sheets}
+        n = 1
+        while f"{stem}{n}".lower() in taken:
+            n += 1
+        return f"{stem}{n}"
+
+    def sheet(self, name: Optional[str]) -> Optional[Sheet]:
+        if name is None:
+            return None
+        lower = name.lower()
+        for s in self.sheets:
+            if s.name.lower() == lower:
+                return s
+        return None
+
+    def sheet_by_id(self, sheet_id: int) -> Optional[Sheet]:
+        for s in self.sheets:
+            if s.id == sheet_id:
+                return s
+        return None
+
+    def remove_sheet(self, sheet: Sheet) -> None:
+        """Formulas that read it show #REF!, as in Excel."""
+        index = self.sheets.index(sheet)
+        saved = {pos: c.state() for pos, c in sheet.cells.items()}
+        with self.transaction("Delete sheet"):
+            for (row, col) in list(sheet.cells):
+                self._set_state(sheet, row, col, ("", 0, None))
+            self.sheets.remove(sheet)
+
+            def undo(s=sheet, i=index):
+                self.sheets.insert(i, s)
+                self._names_changed()
+
+            def redo(s=sheet):
+                self.sheets.remove(s)
+                self._names_changed()
+
+            self._record(undo, redo)
+            self._names_changed()
+        del saved
+
+    def rename_sheet(self, sheet: Sheet, new: str) -> None:
+        """Every formula and name that reads the sheet follows the new name."""
+        new = new.strip()
+        if new.lower() != sheet.name.lower() and self.sheet(new) is not None:
+            raise ValueError(f"A sheet or table is already called {new}.")
+        problem = name_problem(new)
+        if problem:
+            raise ValueError(problem)
+        old = sheet.name
+        if old == new:
+            return
+        with self.transaction("Rename sheet"):
+            for other in self.sheets:
+                for (row, col), cell in list(other.cells.items()):
+                    if cell.is_formula and old.lower() in cell.input.lower():
+                        text = F.rename_sheet_in(cell.input[1:], old, new)
+                        if "=" + text != cell.input:
+                            self._set_state(other, row, col, ("=" + text, cell.style, cell.comment))
+            for key, dn in list(self.names.items()):
+                text = F.rename_sheet_in(dn.refers_to, old, new)
+                if text != dn.refers_to:
+                    self._set_name(key, replace(dn, refers_to=text))
+
+            def apply(name, s=sheet):
+                s.name = name
+                self._names_changed()
+
+            apply(new)
+            self._record(lambda: apply(old), lambda: apply(new))
+
+    def _names_changed(self) -> None:
+        """Sheets or names came or went: anything reading them by name is
+        looked at again."""
+        for sheet in self.sheets:
+            for (row, col), cell in sheet.cells.items():
+                if cell.is_formula:
+                    self._dirty.add((sheet.id, row, col))
+        self._recalc_if_auto()
+
+    # -- defined names ----------------------------------------------------------------
+    def define_name(self, name: str, refers_to: str, sheet: Optional[Sheet] = None) -> None:
+        """Name a cell, block or constant: define_name("W_total", "Loads!$D$12")."""
+        problem = name_problem(name)
+        if problem:
+            raise ValueError(problem)
+        if refers_to.startswith("="):
+            refers_to = refers_to[1:]
+        F.parse(refers_to)              # raises FormulaError if it can't be read
+        key = (name.lower(), sheet.id if sheet else None)
+        with self.transaction("Define name"):
+            self._set_name(key, DefinedName(name, refers_to, sheet.id if sheet else None))
+
+    def remove_name(self, name: str, sheet: Optional[Sheet] = None) -> None:
+        key = (name.lower(), sheet.id if sheet else None)
+        if key in self.names:
+            with self.transaction("Delete name"):
+                self._set_name(key, None)
+
+    def _set_name(self, key, dn: Optional[DefinedName]) -> None:
+        old = self.names.get(key)
+        if dn is None:
+            self.names.pop(key, None)
+        else:
+            self.names[key] = dn
+        self._record(lambda: self._put_name(key, old), lambda: self._put_name(key, dn))
+        self._name_dirty(key[0])
+
+    def _put_name(self, key, dn) -> None:
+        if dn is None:
+            self.names.pop(key, None)
+        else:
+            self.names[key] = dn
+        self._name_dirty(key[0])
+
+    def _name_dirty(self, lower: str) -> None:
+        self._dirty_many(list(self._deps.names.get(lower, ())), include_self=True)
+        self._recalc_if_auto()
+
+    def find_name(self, name: str, sheet: Optional[Sheet]) -> Optional[DefinedName]:
+        lower = name.lower()
+        if sheet is not None:
+            local = self.names.get((lower, sheet.id))
+            if local is not None:
+                return local
+        return self.names.get((lower, None))
+
+    # -- transactions and undo -------------------------------------------------------------
+    @contextmanager
+    def transaction(self, label: str = "Edit"):
+        """Changes made inside are one undo step, calculated once at the end."""
+        outer = self._open is None
+        if outer:
+            self._open = _Transaction(label)
+        self._depth += 1
+        try:
+            yield self._open
+        finally:
+            self._depth -= 1
+            if outer:
+                t, self._open = self._open, None
+                if t.steps:
+                    self._undo.append(t)
+                    self._redo.clear()
+                self.recalculate()
+
+    def _record(self, undo: Callable, redo: Callable) -> None:
+        if self._open is not None:
+            self._open.steps.append((undo, redo))
+        elif not self._replaying:
+            t = _Transaction("Edit")
+            t.steps.append((undo, redo))
+            self._undo.append(t)
+            self._redo.clear()
+
+    _replaying = False
+
+    def can_undo(self) -> bool:
+        return bool(self._undo)
+
+    def can_redo(self) -> bool:
+        return bool(self._redo)
+
+    def undo_label(self) -> str:
+        return self._undo[-1].label if self._undo else ""
+
+    def undo(self) -> None:
+        if not self._undo:
+            return
+        t = self._undo.pop()
+        self._replaying = True
+        try:
+            for undo, _redo in reversed(t.steps):
+                undo()
+        finally:
+            self._replaying = False
+        self._redo.append(t)
+        self.recalculate()
+
+    def redo(self) -> None:
+        if not self._redo:
+            return
+        t = self._redo.pop()
+        self._replaying = True
+        try:
+            for _undo, redo in t.steps:
+                redo()
+        finally:
+            self._replaying = False
+        self._undo.append(t)
+        self.recalculate()
+
+    # -- changing cells ------------------------------------------------------------------
+    def set_input(self, sheet: Sheet, row: int, col: int, text: str) -> None:
+        """Type into a cell, as Excel takes what is typed (a number, a date,
+        5 kN, a formula...). A number format it implies (12% -> 0%) is set
+        unless the cell already has one."""
+        cell = sheet.cells.get((row, col))
+        style = cell.style if cell else 0
+        comment = cell.comment if cell else None
+        if text and not text.startswith("=") and not text.startswith("'"):
+            _value, fmt = read_value(text, self.day_first)
+            if fmt and self.styles.get(style).number_format in (None, "General"):
+                style = self.styles.add(replace(self.styles.get(style), number_format=fmt))
+        if text.startswith("=") and len(text) > 1:
+            text = "=" + _tidy_formula(text[1:])
+        with self.transaction("Typing"):
+            self._set_state(sheet, row, col, (text, style, comment))
+
+    def set_inputs(self, sheet: Sheet, row: int, col: int, rows: list[list[str]], label="Paste") -> None:
+        with self.transaction(label):
+            for i, line in enumerate(rows):
+                for j, text in enumerate(line):
+                    self.set_input(sheet, row + i, col + j, text)
+
+    def set_style(self, sheet: Sheet, row: int, col: int, style: int) -> None:
+        cell = sheet.cells.get((row, col))
+        state = (cell.input, style, cell.comment) if cell else ("", style, None)
+        with self.transaction("Format"):
+            self._set_state(sheet, row, col, state)
+
+    def set_comment(self, sheet: Sheet, row: int, col: int, comment: Optional[str]) -> None:
+        cell = sheet.cells.get((row, col))
+        state = (cell.input, cell.style, comment) if cell else ("", 0, comment)
+        with self.transaction("Comment"):
+            self._set_state(sheet, row, col, state)
+
+    def clear(self, sheet: Sheet, top: int, left: int, bottom: int, right: int,
+              what: str = "contents") -> None:
+        """Delete key ("contents"), Clear Formats ("formats"), Clear All ("all")."""
+        with self.transaction("Clear"):
+            for row, col in list(sheet.positions_in(top, left, bottom, right)):
+                cell = sheet.cells[(row, col)]
+                if what == "contents":
+                    state = ("", cell.style, cell.comment)
+                elif what == "formats":
+                    state = (cell.input, 0, cell.comment)
+                elif what == "comments":
+                    state = (cell.input, cell.style, None)
+                else:
+                    state = ("", 0, None)
+                self._set_state(sheet, row, col, state)
+
+    def _set_state(self, sheet: Sheet, row: int, col: int, state: tuple) -> None:
+        cell = sheet.cells.get((row, col))
+        old = cell.state() if cell else ("", 0, None)
+        if old == state:
+            return
+        self._apply_state(sheet, row, col, state)
+        self._record(lambda: self._apply_state(sheet, row, col, old),
+                     lambda: self._apply_state(sheet, row, col, state))
+
+    def _apply_state(self, sheet: Sheet, row: int, col: int, state: tuple) -> None:
+        text, style, comment = state
+        key = (sheet.id, row, col)
+        cell = sheet.cells.get((row, col))
+        same_input = cell is not None and cell.input == text
+        if not text and not style and not comment:
+            sheet._drop(row, col)
+            cell = None
+        else:
+            if cell is None:
+                cell = Cell()
+                sheet._put(row, col, cell)
+            cell.input, cell.style, cell.comment = text, style, comment
+        if same_input:
+            return
+        self._forget(key)
+        if cell is not None and cell.is_formula:
+            self._learn(sheet, row, col, cell)
+            self._dirty.add(key)
+        elif cell is not None:
+            value, _fmt = read_value(text, self.day_first)
+            if cell.value != value or type(cell.value) is not type(value):
+                cell.value = value
+            cell.parsed = None
+            cell.problem = None
+            self._changed.add(key)
+        else:
+            self._changed.add(key)
+        self._touched.append(key)
+        if key in self.circular:
+            self.circular.remove(key)
+        self._recalc_if_auto()
+
+    def _recalc_if_auto(self) -> None:
+        if self.auto and self._open is None and not self._replaying and not self._in_pass:
+            self.recalculate()
+
+    # -- what each formula reads ------------------------------------------------------------
+    def _forget(self, key) -> None:
+        self._deps.remove(key)
+        self._precedents.pop(key, None)
+        self._volatile.discard(key)
+        self._outside_reads.pop(key, None)
+
+    def _learn(self, sheet: Sheet, row: int, col: int, cell: Cell) -> None:
+        key = (sheet.id, row, col)
+        try:
+            cell.parsed = F.parse(cell.input[1:], row, col)
+            cell.problem = None
+        except F.FormulaError as e:
+            cell.parsed = None
+            cell.problem = str(e)
+            return
+        cells, blocks = [], []
+        for sheet_name, top, left, bottom, right in F.references(cell.parsed.tree, row, col):
+            target = sheet if sheet_name is None else self.sheet(sheet_name)
+            if target is None:
+                continue
+            if top == bottom and left == right:
+                cells.append((target.id, top, left))
+            else:
+                blocks.append((target.id, top, left, bottom, right))
+        names = [n.lower() for n in cell.parsed.names]
+        for n in cell.parsed.names:
+            dn = self.find_name(n, sheet)
+            if dn is not None:
+                try:
+                    p = F.parse(dn.refers_to)
+                except F.FormulaError:
+                    continue
+                for sheet_name, top, left, bottom, right in F.references(p.tree, 0, 0):
+                    target = self.sheet_by_id(dn.sheet) if sheet_name is None and dn.sheet else \
+                        self.sheet(sheet_name) if sheet_name else sheet
+                    if target is None:
+                        continue
+                    if top == bottom and left == right:
+                        cells.append((target.id, top, left))
+                    else:
+                        blocks.append((target.id, top, left, bottom, right))
+        # sheets named in formulas: registered by name so a new or renamed
+        # sheet brings them back
+        self._deps.add(key, cells, blocks, names)
+        self._precedents[key] = (tuple(cells), tuple(blocks))
+        if cell.parsed.volatile:
+            self._volatile.add(key)
+
+    def _dirty_from(self, key, include_self: bool) -> None:
+        """Mark everything that reads key (directly or not) for recalculation."""
+        self._dirty_many([key], include_self)
+
+    def _dirty_many(self, keys, include_self: bool) -> None:
+        seen = set(keys)
+        if include_self:
+            self._dirty.update(keys)
+        frontier = list(keys)
+        cell_readers = self._deps.cell
+        while frontier:
+            reached = list(frontier)
+            stack = list(frontier)
+            while stack:
+                k = stack.pop()
+                for reader in cell_readers.get(k, ()):
+                    if reader not in seen:
+                        seen.add(reader)
+                        self._dirty.add(reader)
+                        stack.append(reader)
+                        reached.append(reader)
+            frontier = self._deps.hit(reached, seen)
+            self._dirty.update(frontier)
+
+    # -- outside names (the document's equations) ------------------------------------------------
+    def outside_changed(self, names: Optional[Iterable[str]] = None) -> None:
+        """Document variables changed: recalculate the cells that read them
+        (all that read any, when names is None)."""
+        lowered = None if names is None else {n.lower() for n in names}
+        hit = [key for key, read in self._outside_reads.items() if lowered is None or read & lowered]
+        self._dirty_many(hit, include_self=True)
+        self.recalculate()
+
+    def outside_names_read(self) -> set:
+        out = set()
+        for read in self._outside_reads.values():
+            out |= read
+        return out
+
+    # -- calculating ---------------------------------------------------------------------
+    def recalculate(self, everything: bool = False) -> set:
+        """Bring every value up to date. Returns the keys whose value changed."""
+        if self._in_pass:
+            return set()
+        edited = bool(self._touched) or bool(self._dirty)
+        if self._touched:
+            touched, self._touched = self._touched, []
+            self._dirty_many(touched, include_self=False)
+        if everything:
+            for sheet in self.sheets:
+                for (row, col), cell in sheet.cells.items():
+                    if cell.is_formula:
+                        self._dirty.add((sheet.id, row, col))
+        if edited and self._volatile:
+            self._dirty_many(list(self._volatile), include_self=True)
+        if not self._dirty:
+            changed, self._changed = self._changed, set()
+            if changed:
+                self._tell(changed)
+            return changed
+        self._in_pass = True
+        try:
+            order, loops = self._order()
+            kept = {k for k in self.circular if k not in self._dirty}
+            self.circular = sorted(kept | loops)
+            for key in loops:
+                sheet = self.sheet_by_id(key[0])
+                cell = sheet.cells.get(key[1:]) if sheet else None
+                if cell is not None and cell.value != 0.0:
+                    cell.value = 0.0
+                    self._changed.add(key)
+                self._done.add(key)
+                self._dirty.discard(key)
+            for key in order:
+                if key not in self._done:
+                    self._compute(key)
+                    self._dirty.discard(key)
+        finally:
+            self._dirty.clear()
+            self._done.clear()
+            self._in_pass = False
+        changed, self._changed = self._changed, set()
+        if changed:
+            self._tell(changed)
+        return changed
+
+    def _tell(self, changed: set) -> None:
+        for listener in list(self.listeners):
+            listener(changed)
+
+    def _order(self):
+        """The dirty formulas, each after those it reads; and the ones in loops."""
+        dirty = self._dirty
+        state: dict = {}
+        order: list = []
+        loops: set = set()
+        sheets = {s.id: s for s in self.sheets}
+
+        def precedents(key):
+            cells, blocks = self._precedents.get(key, ((), ()))
+            for k in cells:
+                if k in dirty:
+                    yield k
+            for sid, top, left, bottom, right in blocks:
+                sheet = sheets.get(sid)
+                if sheet is None:
+                    continue
+                for row, col in sheet.positions_in(top, left, bottom, right):
+                    k = (sid, row, col)
+                    if k in dirty:
+                        yield k
+
+        for start in list(dirty):
+            if start in state:
+                continue
+            sheet = sheets.get(start[0])
+            if sheet is None or (start[1], start[2]) not in sheet.cells:
+                state[start] = 2
+                continue
+            state[start] = 1
+            stack = [(start, precedents(start))]
+            while stack:
+                key, it = stack[-1]
+                for p in it:
+                    s = state.get(p)
+                    if s is None:
+                        state[p] = 1
+                        stack.append((p, precedents(p)))
+                        break
+                    if s == 1:
+                        # a loop: everything on the stack from p up to here
+                        at = len(stack) - 1
+                        while at >= 0 and stack[at][0] != p:
+                            loops.add(stack[at][0])
+                            at -= 1
+                        loops.add(p)
+                else:
+                    stack.pop()
+                    state[key] = 2
+                    order.append(key)
+        return order, loops
+
+    def _compute(self, key) -> None:
+        from .evaluate import evaluate_cell
+
+        sheet = self.sheet_by_id(key[0])
+        cell = sheet.cells.get(key[1:]) if sheet else None
+        if cell is None:
+            self._done.add(key)
+            return
+        if not cell.is_formula:
+            self._done.add(key)
+            return
+        self._evaluating.add(key)
+        try:
+            if cell.parsed is None and cell.problem is None:
+                self._learn(sheet, key[1], key[2], cell)
+            if cell.parsed is None:
+                value = NAME if cell.problem else BLANK
+                reads = set()
+            else:
+                value, reads = evaluate_cell(self, sheet, key[1], key[2], cell.parsed.tree)
+        finally:
+            self._evaluating.discard(key)
+        self._done.add(key)
+        self._dirty.discard(key)
+        if reads:
+            self._outside_reads[key] = reads
+        else:
+            self._outside_reads.pop(key, None)
+        if not _same(cell.value, value):
+            cell.value = value
+            self._changed.add(key)
+
+    def value(self, sheet: Sheet, row: int, col: int):
+        """A cell's value, calculating it first if it is out of date (a
+        reference found while calculating, e.g. through INDIRECT)."""
+        cell = sheet.cells.get((row, col))
+        if cell is None:
+            return BLANK
+        key = (sheet.id, row, col)
+        if self._in_pass and key in self._dirty:
+            if key in self._evaluating:
+                if key not in self.circular:
+                    self.circular.append(key)
+                    self.circular.sort()
+                return 0.0
+            self._compute(key)
+        return cell.value
+
+    # -- moving things about -------------------------------------------------------------------
+    def _rewrite_all(self, change, label_sheet: Sheet) -> None:
+        """Pass every reference in every formula and name through change(ref,
+        effective sheet)."""
+        for other in self.sheets:
+            for (row, col), cell in list(other.cells.items()):
+                if not cell.is_formula:
+                    continue
+                text = F.rewrite(cell.input[1:], lambda ref, s, o=other: change(ref, self.sheet(s) if s else o))
+                if "=" + text != cell.input:
+                    self._set_state(other, row, col, ("=" + text, cell.style, cell.comment))
+        for key, dn in list(self.names.items()):
+            home = self.sheet_by_id(dn.sheet) if dn.sheet else None
+            text = F.rewrite(dn.refers_to, lambda ref, s, h=home: change(ref, self.sheet(s) if s else h))
+            if text != dn.refers_to:
+                self._set_name(key, replace(dn, refers_to=text))
+
+    def _move_cells(self, sheet: Sheet, mapping: Callable[[int, int], Optional[tuple]]) -> None:
+        """Move every cell of the sheet to mapping(row, col) (None: deleted)."""
+        moves = []
+        for (row, col), cell in list(sheet.cells.items()):
+            to = mapping(row, col)
+            if to != (row, col):
+                moves.append(((row, col), to, cell.state()))
+        for (row, col), _to, _state in moves:
+            self._set_state(sheet, row, col, ("", 0, None))
+        for _frm, to, state in moves:
+            if to is not None:
+                self._set_state(sheet, to[0], to[1], state)
+
+    def insert_rows(self, sheet: Sheet, at: int, count: int = 1) -> None:
+        with self.transaction("Insert rows"):
+            self._move_cells(sheet, lambda r, c: (r + count, c) if r >= at else (r, c))
+            self._rewrite_all(lambda ref, s: _shift_ref(ref, s is sheet, "row", at, count, 0), sheet)
+            self._shift_extras(sheet, "row", at, count)
+
+    def delete_rows(self, sheet: Sheet, at: int, count: int = 1) -> None:
+        with self.transaction("Delete rows"):
+            last = at + count - 1
+            self._move_cells(sheet, lambda r, c: None if at <= r <= last else
+                             ((r - count, c) if r > last else (r, c)))
+            self._rewrite_all(lambda ref, s: _shift_ref(ref, s is sheet, "row", at, 0, count), sheet)
+            self._shift_extras(sheet, "row", at, -count)
+
+    def insert_cols(self, sheet: Sheet, at: int, count: int = 1) -> None:
+        with self.transaction("Insert columns"):
+            self._move_cells(sheet, lambda r, c: (r, c + count) if c >= at else (r, c))
+            self._rewrite_all(lambda ref, s: _shift_ref(ref, s is sheet, "col", at, count, 0), sheet)
+            self._shift_extras(sheet, "col", at, count)
+
+    def delete_cols(self, sheet: Sheet, at: int, count: int = 1) -> None:
+        with self.transaction("Delete columns"):
+            last = at + count - 1
+            self._move_cells(sheet, lambda r, c: None if at <= c <= last else
+                             ((r, c - count) if c > last else (r, c)))
+            self._rewrite_all(lambda ref, s: _shift_ref(ref, s is sheet, "col", at, 0, count), sheet)
+            self._shift_extras(sheet, "col", at, -count)
+
+    # things beside cells that move with rows and columns (sizes, merges...),
+    # each a callable(sheet, axis, at, delta) that records its own undo
+    extras: list = []
+
+    def _shift_extras(self, sheet, axis, at, delta) -> None:
+        for shift in self.extras:
+            shift(sheet, axis, at, delta)
+
+    def copy_block(self, src: Sheet, top: int, left: int, bottom: int, right: int,
+                   dst: Sheet, row: int, col: int, what: str = "all") -> None:
+        """Copy and paste: formulas follow by their relative references;
+        what is "all", "values", "formulas" or "formats" (Paste Special)."""
+        drow, dcol = row - top, col - left
+        block = {}
+        for r, c in list(src.positions_in(top, left, bottom, right)):
+            cell = src.cells[(r, c)]
+            block[(r - top, c - left)] = (cell.input, cell.style, cell.comment, cell.value)
+        with self.transaction("Paste"):
+            for i in range(bottom - top + 1):
+                for j in range(right - left + 1):
+                    got = block.get((i, j))
+                    target = dst.cells.get((row + i, col + j))
+                    old_style = target.style if target else 0
+                    old_comment = target.comment if target else None
+                    old_input = target.input if target else ""
+                    if got is None:
+                        if what in ("all", "formulas", "values"):
+                            state = ("", old_style if what != "all" else 0, old_comment if what != "all" else None)
+                        else:
+                            state = (old_input, 0, old_comment)
+                        self._set_state(dst, row + i, col + j, state)
+                        continue
+                    text, style, comment, value = got
+                    if text.startswith("=") and len(text) > 1:
+                        moved = F.moved_formula(text[1:], drow, dcol)
+                        if src is not dst:
+                            moved = _qualify_for(moved, src, dst)
+                        text = "=" + moved
+                    if what == "values":
+                        text = value_as_input(value)
+                        state = (text, old_style, old_comment)
+                    elif what == "formulas":
+                        state = (text, old_style, old_comment)
+                    elif what == "formats":
+                        state = (old_input, style, old_comment)
+                    else:
+                        state = (text, style, comment)
+                    self._set_state(dst, row + i, col + j, state)
+
+    def move_block(self, sheet: Sheet, top: int, left: int, bottom: int, right: int,
+                   dst: Sheet, row: int, col: int) -> None:
+        """Cut and paste, or drag the selection's border: the cells move and
+        every formula that read them reads them where they are now; the
+        moved formulas themselves are unchanged."""
+        drow, dcol = row - top, col - left
+        if dst is sheet and drow == 0 and dcol == 0:
+            return
+        block = {}
+        for r, c in list(sheet.positions_in(top, left, bottom, right)):
+            block[(r, c)] = sheet.cells[(r, c)].state()
+        with self.transaction("Move"):
+            def change(ref, s):
+                if s is not sheet:
+                    return ref
+                if isinstance(ref, CellRef):
+                    if top <= ref.row <= bottom and left <= ref.col <= right:
+                        moved = replace(ref, row=ref.row + drow, col=ref.col + dcol)
+                        return replace(moved, sheet=dst.name) if dst is not sheet else moved
+                    return ref
+                if ref.whole:
+                    return ref
+                if top <= ref.top and ref.bottom <= bottom and left <= ref.left and ref.right <= right:
+                    moved = RangeRef(replace(ref.first, row=ref.first.row + drow, col=ref.first.col + dcol),
+                                     replace(ref.last, row=ref.last.row + drow, col=ref.last.col + dcol),
+                                     sheet=ref.sheet)
+                    return replace(moved, sheet=dst.name) if dst is not sheet else moved
+                return ref
+
+            self._rewrite_all(change, sheet)
+            fresh = {}
+            for (r, c) in block:
+                cell = sheet.cells.get((r, c))
+                fresh[(r, c)] = cell.state() if cell else block[(r, c)]
+                self._set_state(sheet, r, c, ("", 0, None))
+            for i in range(bottom - top + 1):
+                for j in range(right - left + 1):
+                    state = fresh.get((top + i, left + j), ("", 0, None))
+                    if dst is not sheet and state[0].startswith("="):
+                        state = ("=" + _qualify_for(state[0][1:], sheet, dst), state[1], state[2])
+                    self._set_state(dst, row + i, col + j, state)
+
+
+def _qualify_for(text: str, src: Sheet, dst: Sheet) -> str:
+    """A formula moved to another sheet keeps reading its old sheet."""
+    def change(ref, s):
+        if ref.sheet is None:
+            return replace(ref, sheet=src.name)
+        return ref
+
+    return F.rewrite(text, change)
+
+
+def _shift_ref(ref, on_sheet: bool, axis: str, at: int, inserted: int, deleted: int):
+    """A reference after rows/columns were inserted or deleted (Excel's rules)."""
+    if not on_sheet:
+        return ref
+    if isinstance(ref, CellRef):
+        pos = ref.row if axis == "row" else ref.col
+        if inserted:
+            if pos >= at:
+                pos += inserted
+            else:
+                return ref
+        else:
+            last = at + deleted - 1
+            if at <= pos <= last:
+                return None
+            if pos > last:
+                pos -= deleted
+            else:
+                return ref
+        return replace(ref, row=pos) if axis == "row" else replace(ref, col=pos)
+    if (axis == "row" and ref.whole == "cols") or (axis == "col" and ref.whole == "rows"):
+        return ref
+    lo = ref.top if axis == "row" else ref.left
+    hi = ref.bottom if axis == "row" else ref.right
+    limit = (MAX_ROWS if axis == "row" else MAX_COLS) - 1
+    if inserted:
+        new_lo = lo + inserted if lo >= at else lo
+        new_hi = min(hi + inserted, limit) if hi >= at else hi
+    else:
+        last = at + deleted - 1
+        if lo >= at and hi <= last:
+            return None
+        new_lo = lo if lo < at else (at if lo <= last else lo - deleted)
+        new_hi = hi if hi < at else (at - 1 if hi <= last else hi - deleted)
+    if (new_lo, new_hi) == (lo, hi):
+        return ref
+    first, last_ref = ref.first, ref.last
+    # keep first as the top-left corner, as written
+    if axis == "row":
+        a, b = (first, last_ref) if first.row <= last_ref.row else (last_ref, first)
+        a, b = replace(a, row=new_lo), replace(b, row=new_hi)
+    else:
+        a, b = (first, last_ref) if first.col <= last_ref.col else (last_ref, first)
+        a, b = replace(a, col=new_lo), replace(b, col=new_hi)
+    if first.row <= last_ref.row and first.col <= last_ref.col:
+        return replace(ref, first=a, last=b)
+    return replace(ref, first=a, last=b)
+
+
+def _same(a, b) -> bool:
+    if type(a) is not type(b):
+        return False
+    if isinstance(a, float):
+        return a == b or (a != a and b != b)
+    return a == b
+
+
+def _tidy_formula(text: str) -> str:
+    """What Excel does to a formula as it is entered: missing closing
+    brackets are added."""
+    depth = 0
+    in_str = False
+    for ch in text:
+        if ch == '"':
+            in_str = not in_str
+        elif not in_str:
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+    if depth > 0 and not in_str:
+        text += ")" * depth
+    return text
+
+
+def value_as_input(value) -> str:
+    """What to type to get this value back (Paste Values)."""
+    from .values import Qty, general_number
+
+    if value is BLANK:
+        return ""
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    if isinstance(value, float):
+        return general_number(value)
+    if isinstance(value, Qty):
+        unit = value.unit
+        if not unit:
+            from .values import default_unit
+            unit = default_unit(value.dims)
+        return f"{general_number(value.shown())} {unit}".strip()
+    if isinstance(value, ErrorValue):
+        return value.code
+    if isinstance(value, str):
+        from .inputs import read_value as rv
+
+        got, _ = rv(value)
+        return value if isinstance(got, str) and got == value else "'" + value
+    if isinstance(value, Array):
+        return value_as_input(value.get(0, 0))
+    return str(value)
+
+
+def name_problem(name: str) -> Optional[str]:
+    """Why a name can't be used for a sheet, a table or a defined name; None
+    when it can."""
+    if not name or not name.strip():
+        return "A name can't be empty."
+    if len(name) > 31 and False:
+        return "A name can be at most 31 characters."
+    if any(ch in name for ch in "[]:*?/\\!"):
+        return "A name can't contain [ ] : * ? / \\ or !"
+    if name.startswith("'") or name.endswith("'"):
+        return "A name can't start or end with an apostrophe."
+    return None

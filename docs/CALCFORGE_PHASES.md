@@ -912,3 +912,34 @@ checked against its saved files and WebSMath's recordings of SMath Cloud.
   drawn again. Calcs.pdf scrolling 6.9 → 2.2 ms a frame; adding a page next
   to a sheet of a thousand markups 0.5 → 0.2 s.
 
+
+## Spreadsheets, phase 1 — engine and formulas (2026-10-09)
+
+Written from scratch in `calcforge/sheet/` (no Qt; design and every decision
+in `docs/SPREADSHEET_DESIGN.md`):
+
+* Excel formulas: references (`A1`, `$B$7`, `A:A`, `3:5`, `'Loads 2'!B4`),
+  operators with Excel's precedence (`-2^2` = 4), `%`, `&`, arrays
+  `{1,2;3,4}`, omitted arguments, defined names, `_xlfn.` prefixes; units
+  after numbers (`=10 kN/m*B2`) and `'kN`; document variables by name or
+  `var(M20)`.
+* About 260 Excel functions (maths, statistics, logic, lookup incl.
+  XLOOKUP/INDEX/OFFSET/INDIRECT, text, dates, dynamic arrays
+  FILTER/SORT/UNIQUE/SEQUENCE, money, matrices, LET/LAMBDA), all keeping units;
+  CalcForge's own VALUEIN, CONVERT(x,"kN"), INTERP, UNITOF, STRIPUNIT.
+* Typed entries as Excel reads them (numbers, 12%, $1,200, dates, times,
+  fractions, TRUE, errors, `'text`) plus quantities (`5 kN`, `2.5 kN/m^2`).
+* Excel number formats (sections, colours, conditions, dates and times,
+  elapsed time, fractions, scientific, thousands scaling, text sections).
+* A workbook of sheets and tables: dependency-ordered recalculation of only
+  what changed, circular references, volatile functions, insert/delete
+  rows and columns with Excel's reference rules, copy (relative references
+  follow), Paste Special values/formats/formulas, cut-and-move (readers
+  follow), rename (formulas follow), defined names, undo/redo of whole steps.
+* Found and settled while building: Excel's own `VAR` (variance) clashes with
+  `var(M20)`; one bare cell-like name or bare name is the document variable,
+  anything else is Excel's VAR (see the design doc).
+
+Tests: `tests/sheet/` (311: 230 formulas against Excel's answers, the
+workbook's rules, parsing, formats, speed — one edit in a 15,000-formula
+sheet under 0.1 s).
