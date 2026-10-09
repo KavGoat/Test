@@ -217,6 +217,19 @@ class CalcItem(MarkupItem):
         return result
 
     # -- geometry and drawing ---------------------------------------------------
+    # conditional formatting (calc/condformat.py): its own rules, or a preset
+    cond_rules: list = None
+    cond_preset: str = ""
+
+    def _settings(self):
+        frame = self._page_frame()
+        document = getattr(frame, "document", None)
+        return getattr(document, "settings", None)
+
+    def _looking(self):
+        from ..calc.condformat import looking
+        return looking(self, self._settings())
+
     def relayout(self) -> None:
         self.prepareGeometryChange()
         if self._view is not None:
@@ -225,7 +238,10 @@ class CalcItem(MarkupItem):
             if frame is not None:
                 room = calc_area(frame).right() - self.pos().x()
                 self._view.max_width = max(room, 0.0) * PX_PER_PT
-            self._view.relayout()
+            with self._looking():
+                self._view.relayout()
+            from ..calc.condformat import look_for
+            self._last_look = look_for(self, self._settings())
         self.geometryChanged.emit()
         self.update()
 
@@ -282,6 +298,10 @@ class CalcItem(MarkupItem):
         view = self._view or self._preview_view()
         if view is None:
             return
+        with self._looking():
+            self._paint_view(painter, view)
+
+    def _paint_view(self, painter: QPainter, view) -> None:
         painter.save()
         painter.scale(PT_PER_PX, PT_PER_PX)
         device = painter.device()
@@ -339,10 +359,16 @@ class CalcItem(MarkupItem):
         if self._turn_while_editing is not None:
             data["rotation"] = self._turn_while_editing
         data["calc"] = self.source()
+        if self.cond_rules:
+            data["cond_rules"] = [dict(r) for r in self.cond_rules]
+        if self.cond_preset:
+            data["cond_preset"] = self.cond_preset
         return data
 
     def deserialize(self, data: dict) -> None:
         self.load_base(data)
+        self.cond_rules = [dict(r) for r in data.get("cond_rules", [])] or None
+        self.cond_preset = str(data.get("cond_preset", "") or "")
         self._data = dict(data.get("calc") or EMPTY)
         self._preview = None
 
@@ -361,10 +387,24 @@ def _connect(sheet, scene) -> None:
 
     def changed(ids: set) -> None:
         items = getattr(sheet, "items", {})
+        done = set()
         for region_id in ids or ():
             item = items.get(region_id)
             if item is not None:
                 item.relayout()
+                done.add(region_id)
+        # conditional formatting: an equation whose rules now give another
+        # look is drawn again (a definition shows no result to say so)
+        settings = getattr(sheet.document, "settings", None)
+        store = getattr(settings, "calc_rules", None) or {}
+        if store.get("by_name") or any(i.cond_rules or i.cond_preset for i in items.values()):
+            from ..calc.condformat import look_for
+            for region_id, item in list(items.items()):
+                look = look_for(item, settings)
+                if look != getattr(item, "_last_look", (None, None)):
+                    item._last_look = look
+                    if region_id not in done:
+                        item.relayout()
 
     sheet.on_changed = changed
 

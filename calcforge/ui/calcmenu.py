@@ -154,6 +154,8 @@ def fill(window, menu: QMenu, item) -> None:
     equation.addAction("Background…",
                        lambda: choose_colour(window, items, "bg_color", "Background"))
     check(equation, "Border", region.border, lambda r: setattr(r, "border", not r.border))
+    from .condformat import open_equation_rules
+    equation.addAction("Conditional Formatting…", lambda: open_equation_rules(window, items))
     menu.addSeparator()
 
 

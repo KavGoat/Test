@@ -433,6 +433,10 @@ class DocumentSettings:
     # travels with the document so it reads the same anywhere; a new document
     # takes Preferences' (ui/preferences.py). Empty: not yet decided.
     calc_format: dict = field(default_factory=dict)
+    # Conditional formatting of equations (calc/condformat.py): named presets
+    # of rules, and document-wide rules by variable name — {"presets":
+    # {name: [rule, ...]}, "by_name": [[pattern, preset name], ...]}.
+    calc_rules: dict = field(default_factory=dict)
 
     show_grid: bool = False
     snap_to_grid: bool = False

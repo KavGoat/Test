@@ -751,6 +751,9 @@ class MainWindow(QMainWindow):
                   tip="Drag out a table on the page: the rows and columns follow the "
                       "size you drag. Excel's formulas, formats and units in its cells; "
                       "the equations can read its values")
+        self._act("calc_rules", "Conditional Formatting…", self.conditional_formatting_rules,
+                  tip="Presets of rules that colour and size equations by their result "
+                      "(DCR > 1 red…), and which variable names use them")
         self._act("insert_calc_text", "Calc text", self.insert_calc_text,
                   tip="Calculation text: words among the equations, on their grid "
                       "(\" in Calc mode)")
@@ -1758,7 +1761,7 @@ class MainWindow(QMainWindow):
         for action in (self.act_calculate, self.act_auto_calc,
                        None, self.act_insert_plot, self.act_insert_matrix,
                        self.act_insert_calc_text, self.act_insert_block,
-                       self.act_insert_table, self.act_insert_function,
+                       self.act_insert_table, self.act_insert_function, self.act_calc_rules,
                        self.act_constants, None):
             calc_menu.addSeparator() if action is None else calc_menu.addAction(action)
         calc_menu.addAction(self.act_insert_operator)
@@ -4312,6 +4315,10 @@ class MainWindow(QMainWindow):
                                         text=item.name)
         if ok and name.strip():
             self.view.tables.rename_to(item, name.strip())
+
+    def conditional_formatting_rules(self) -> None:
+        from .condformat import open_document_rules
+        open_document_rules(self)
 
     def insert_table(self) -> None:
         """Drag out a table (a click gives Excel's handful of cells)."""

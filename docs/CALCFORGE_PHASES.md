@@ -994,3 +994,34 @@ cell comments, find/replace.
 
 Tests: `tests/test_tables.py` (32, the real window), `tests/test_table_equations.py`
 (4), `tests/sheet/test_clip.py` (4, Excel's clipboard).
+
+## Conditional formatting of equations (2026-10-09)
+
+The user: "add a conditional formatting to smath equation … based on the
+final number, like for dcr I can do more than 1 is red etc, less than 1 is
+green". Their answers (pop-up questions): size and background only (what
+WebSMath's drawing shows on maths — the drawing stays byte for byte); the
+whole equation; rules per equation, as presets, and document-wide by
+variable name; only results without units are compared.
+
+* Right-click an equation ▸ Equation ▸ **Conditional Formatting…**: no rules
+  of its own, a preset, or its own rules (greater/less than, equal, between,
+  not between; a font size and/or background each; a "DCR: > 1 red, ≤ 1
+  green" button); Save these rules as a preset.
+* Calculation ▸ **Conditional Formatting…**: the document's presets, and
+  name patterns that use them (`DCR*` → DCR) for every equation without
+  rules of its own.
+* The number is what the equation shows (`DCR=`), or what it defines
+  (`DCR:=M/Mc`). Every rule that matches applies; the higher one wins where
+  two set the same thing.
+* The equation's own size and background are never changed: the rule's look
+  is put on only while it is laid out and drawn, so it prints and exports as
+  seen, the record keeps the equation's own look, and the menus still set it.
+  Rules travel with an equation (copy, paste, tool sets, undo); presets and
+  name rules are saved with the document.
+
+Found while checking: the equation menu's Colour, Bold and Underline have
+never shown on maths — WebSMath draws maths black and regular. Left as they
+are for the user to decide.
+
+Tests: `tests/test_equation_rules.py` (6).
