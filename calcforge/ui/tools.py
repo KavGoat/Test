@@ -130,6 +130,9 @@ TOOLS: list[Tool] = [
     Tool("image", "Image", "image", DRAG, "Annotate", "",
          "Place an image from disk", factory=lambda: ImageItem()),
 
+    Tool("table", "Table", "table", "table", "Annotate", "",
+         "Drag out a table: the rows and columns follow the size you drag — "
+         "a spreadsheet on the page, with Excel's formulas, formats and units"),
     Tool("contents", "Contents", "contents", DRAG, "Annotate", "",
          "A table of contents built from the document's bookmarks — click a "
          "line to go there", factory=lambda: ContentsItem()),

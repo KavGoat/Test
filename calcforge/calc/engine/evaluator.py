@@ -55,6 +55,12 @@ BUILTIN_CONSTANTS = {
 }
 
 
+# Names and functions the equations don't define themselves but the
+# document's tables and sheets offer (calcforge/sheet/docbook.py): an object
+# with value(name), has(name), function(name, nargs) and names(), or None.
+EXTERNAL = None
+
+
 class Context:
     def __init__(self, parent: Optional["Context"] = None):
         self.parent = parent
@@ -188,7 +194,9 @@ class IndexedContext(Context):
         return self.index.var_before(name, self.key)
 
     def has(self, name: str) -> bool:
-        return name in self.vars or self.index.var_before(name, self.key) is not None
+        if name in self.vars or self.index.var_before(name, self.key) is not None:
+            return True
+        return EXTERNAL is not None and EXTERNAL.has(name)
 
     def function(self, name: str, nargs: int):
         f = self.funcs.get((name, nargs))
@@ -358,6 +366,10 @@ class Evaluator:
         if v is None:
             if n.name in BUILTIN_CONSTANTS:
                 return BUILTIN_CONSTANTS[n.name]
+            if EXTERNAL is not None:
+                v = EXTERNAL.value(n.name)
+                if v is not None:
+                    return v
             raise err("not_defined", n.name, node=n)
         if isinstance(v, Lazy):
             try:
@@ -494,6 +506,13 @@ class Evaluator:
                 raise err("cannot_evaluate", node=n)
         if name == "":
             raise err("syntax", node=n)
+        if EXTERNAL is not None:
+            table = EXTERNAL.function(name, len(n.args))
+            if table is not None:
+                try:
+                    return table([self.eval(a, ctx) for a in n.args])
+                except SMathError as e:
+                    raise _at(e, n)
         # a variable holding a matrix called like v(2)? SMath reports undefined.
         if self.builtins.known(name) or ctx.any_function(name):
             raise err("args_count", node=n)

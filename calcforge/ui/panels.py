@@ -1848,6 +1848,8 @@ class PropertiesPanel(QScrollArea):
             self._add_equation(first)
         if all(getattr(i, "TYPE", "") == "calc_block" for i in self._items):
             self._add_block(first)
+        if len(self._items) == 1 and getattr(first, "TYPE", "") == "table":
+            self._add_table(first)
         appearance = common_capabilities(self._items)
         if appearance - {"font"}:
             self._add_appearance(first, appearance)
@@ -2755,6 +2757,30 @@ class PropertiesPanel(QScrollArea):
             remove.setToolTip("Take the frame away; its equations stay on the page as they are")
             remove.clicked.connect(lambda: self.window.remove_block_keep_equations(first))
             form.addRow("", remove)
+
+    def _add_table(self, first) -> None:
+        """A table: its name (formulas and equations use it), its size."""
+        form = self._group("Table")
+        name = QLineEdit(first.name)
+        name.setObjectName("tableName")
+        name.setToolTip("The table's name: formulas read it as Name!B4, equations as Name.B4; "
+                        "renaming it updates them")
+
+        def renamed():
+            text = name.text().strip()
+            if text and text != first.name:
+                if not self.window.view.tables.rename_to(first, text):
+                    name.setText(first.name)
+        name.editingFinished.connect(renamed)
+        form.addRow("Name", name)
+        rows, cols = first.size
+        size = QLabel(f"{rows} rows × {cols} columns")
+        size.setObjectName("tableSize")
+        form.addRow("Size", size)
+        open_button = QPushButton("Edit cells")
+        open_button.setToolTip("Open the table for its cells (or double-click it)")
+        open_button.clicked.connect(lambda: self.window.view.tables.open(first))
+        form.addRow("", open_button)
 
     def _forget_default(self, item: MarkupItem) -> None:
         from . import toolsets

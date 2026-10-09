@@ -79,6 +79,46 @@ here is new.
   agree with Excel. A typed `9/10/2026` is read day first (the workbook's
   `day_first` setting).
 
+* **Lookups by table name (phase 2).** A table used as a function in an
+  equation searches its first column (numbers, with units) and interpolates
+  in a straight line between rows; outside the table is an error, never an
+  extrapolation:
+    - `bolts(d)` — the rest of that row (one value, or a vector);
+    - `bolts(d, "A")` or `bolts(d, "A", "B")` — the values under those
+      headings (first row), a value or a vector;
+    - `bolts(d, t)` — with numbers along the first row: interpolated both ways;
+    - `bolts(d, 2)` — with text headings: the second column after the keys.
+* **Columns as vectors.** `Loads.Load` is the column under the heading
+  "Load" in the table's first row (the heading's first word, so
+  "Load (kN)" is `Loads.Load`), down to its last filled cell. A cell
+  reference wins over a heading spelled like one.
+* **Defined names** (`W_total`) are kept, saved and undone with the table
+  their cells are on.
+* **Copying across tables** behaves as in Excel: a copied formula reads the
+  table it lands in; a *cut* keeps reading the cells it read.
+* **New rows and columns** take the look of the one beside them, so a
+  bordered table stays bordered as it grows.
+* **Moving a table** in Calc mode: by its name tab (clicks on cells go to the
+  cells); in Markup mode it is a markup like any other.
+
+## Tables on pages (phase 2)
+
+* `items/table.py` — the table markup. Calc layer, printed, saved as page
+  drawing with its cells in the record. Screen only: the name tab, and while
+  open the row/column headings, selection, fill handle, reference colours.
+* `ui/tableedit.py` — working in the cells: selection and Excel's keys, the
+  cell editor and formula bar, point mode, F4, fill handle, drag-move,
+  heading resize and AutoFit, insert/delete/hide/distribute, merge, clipboard
+  (CalcForge's own, Excel's XML Spreadsheet with R1C1 formulas, HTML, text),
+  Format Painter, the right-click menu. Every change is one undo step of the
+  window (a page snapshot).
+* `ui/tablebar.py` — the table's controls on the properties toolbar.
+* `ui/celldialog.py` — Format Cells (Number with a display unit, Alignment,
+  Font, Border, Fill).
+* `sheet/docbook.py` — the document's workbook and the bridge to the
+  equations; `sheet/clip.py`, `sheet/fill.py`, `sheet/store.py` — clipboard,
+  fill series, the record.
+
 ## Engine (phase 1)
 
 `calcforge/sheet/` holds the engine; it has no Qt in it.
@@ -105,5 +145,8 @@ here is new.
   document variable (the document answers with the value defined before the
   sheet's place in reading order); `outside_changed(names)` recalculates the
   cells that read them. `evaluate.to_engine` / `from_engine` convert values
-  both ways. Wiring this into the document's worksheet, with dependency order
-  across equations and sheets, comes with tables in phase 2.
+  both ways. The document's worksheet asks the book for names and functions
+  it does not define itself (`evaluator.EXTERNAL`, set per worksheet); after
+  each calculation, tables and equations take up each other's changes on the
+  next turn of the event loop, round after round until nothing changes, so
+  dependencies win over reading order.

@@ -23,7 +23,7 @@ from typing import Callable, Iterable, Optional
 from . import formula as F
 from .inputs import read_value
 from .refs import MAX_COLS, MAX_ROWS, CellRef, RangeRef, is_cell_name, parse_range
-from .style import Style, StyleTable
+from .style import Border, Style, StyleTable
 from .values import BLANK, NAME, REF, Array, ErrorValue, SheetError
 
 
@@ -79,6 +79,18 @@ class Sheet:
         self._rows_in_col: dict[int, list] = {}
         # where it sits in the document's reading order (set by the document)
         self.position: tuple = ()
+        # how it is laid out, in points (Excel's 64 x 20 px at 96 px to the inch)
+        self.default_width = DEFAULT_WIDTH
+        self.default_height = DEFAULT_HEIGHT
+        self.widths: dict[int, float] = {}
+        self.heights: dict[int, float] = {}
+        self.hidden_rows: set = set()
+        self.hidden_cols: set = set()
+        self.merges: list[tuple] = []        # (top, left, bottom, right)
+        # a table's extent (rows, columns); a sheet section grows without one
+        self.size: Optional[tuple] = None
+        self.show_gridlines = True
+        self.show_headings = False           # print row and column headings
 
     def __repr__(self) -> str:
         return f"Sheet({self.name!r})"
@@ -134,11 +146,71 @@ class Sheet:
         cell = self.cells.get((row, col))
         return cell.input if cell else ""
 
+    # -- layout --
+    def width(self, col: int) -> float:
+        if col in self.hidden_cols:
+            return 0.0
+        return self.widths.get(col, self.default_width)
+
+    def height(self, row: int) -> float:
+        if row in self.hidden_rows:
+            return 0.0
+        return self.heights.get(row, self.default_height)
+
+    def col_x(self, col: int) -> float:
+        """Left edge of a column, from the sheet's left edge."""
+        x = col * self.default_width
+        for c, w in self.widths.items():
+            if c < col:
+                x += w - self.default_width
+        for c in self.hidden_cols:
+            if c < col:
+                x -= self.widths.get(c, self.default_width)
+        return x
+
+    def row_y(self, row: int) -> float:
+        y = row * self.default_height
+        for r, h in self.heights.items():
+            if r < row:
+                y += h - self.default_height
+        for r in self.hidden_rows:
+            if r < row:
+                y -= self.heights.get(r, self.default_height)
+        return y
+
+    def col_at(self, x: float) -> int:
+        """The column under x (the last one when x is past the right edge of a table)."""
+        return _index_at(x, self.width, self.size[1] if self.size else None)
+
+    def row_at(self, y: float) -> int:
+        return _index_at(y, self.height, self.size[0] if self.size else None)
+
+    def merge_at(self, row: int, col: int) -> Optional[tuple]:
+        for m in self.merges:
+            if m[0] <= row <= m[2] and m[1] <= col <= m[3]:
+                return m
+        return None
+
     def __getitem__(self, a1: str):
         ref = parse_range(a1)
         if isinstance(ref, CellRef):
             return self.value(ref.row, ref.col)
         raise KeyError(a1)
+
+
+DEFAULT_WIDTH = 48.0      # points: 64 px
+DEFAULT_HEIGHT = 15.0     # points: 20 px
+
+
+def _index_at(pos: float, size, count: Optional[int]) -> int:
+    i, edge = 0, 0.0
+    limit = count if count is not None else MAX_ROWS
+    while i < limit - 1:
+        edge += size(i)
+        if pos < edge:
+            return i
+        i += 1
+    return i
 
 
 # -- dependency bookkeeping --------------------------------------------------------------
@@ -357,9 +429,15 @@ class Workbook:
             apply(new)
             self._record(lambda: apply(old), lambda: apply(new))
 
+    #: told when sheets or defined names come, go or are renamed (the
+    #: document's equations read them by name)
+    on_names_changed: Optional[Callable[[], None]] = None
+
     def _names_changed(self) -> None:
         """Sheets or names came or went: anything reading them by name is
         looked at again."""
+        if self.on_names_changed is not None:
+            self.on_names_changed()
         for sheet in self.sheets:
             for (row, col), cell in sheet.cells.items():
                 if cell.is_formula:
@@ -402,6 +480,8 @@ class Workbook:
         self._name_dirty(key[0])
 
     def _name_dirty(self, lower: str) -> None:
+        if self.on_names_changed is not None:
+            self.on_names_changed()
         self._dirty_many(list(self._deps.names.get(lower, ())), include_self=True)
         self._recalc_if_auto()
 
@@ -427,12 +507,18 @@ class Workbook:
             self._depth -= 1
             if outer:
                 t, self._open = self._open, None
-                if t.steps:
+                if t.steps and self.journal:
                     self._undo.append(t)
                     self._redo.clear()
                 self.recalculate()
 
+    #: Whether the workbook keeps its own undo steps. The app turns it off:
+    #: its undo stack records whole pages, tables and all.
+    journal = True
+
     def _record(self, undo: Callable, redo: Callable) -> None:
+        if not self.journal:
+            return
         if self._open is not None:
             self._open.steps.append((undo, redo))
         elif not self._replaying:
@@ -872,13 +958,201 @@ class Workbook:
             self._rewrite_all(lambda ref, s: _shift_ref(ref, s is sheet, "col", at, 0, count), sheet)
             self._shift_extras(sheet, "col", at, -count)
 
-    # things beside cells that move with rows and columns (sizes, merges...),
-    # each a callable(sheet, axis, at, delta) that records its own undo
-    extras: list = []
-
     def _shift_extras(self, sheet, axis, at, delta) -> None:
-        for shift in self.extras:
-            shift(sheet, axis, at, delta)
+        """Sizes, hidden rows/columns, merges and a table's extent move with
+        inserted and deleted rows and columns."""
+        before = _layout_state(sheet)
+
+        def moved(i):
+            if delta > 0:
+                return i + delta if i >= at else i
+            gone = -delta
+            if at <= i < at + gone:
+                return None
+            return i - gone if i >= at + gone else i
+
+        sizes = sheet.heights if axis == "row" else sheet.widths
+        hidden = sheet.hidden_rows if axis == "row" else sheet.hidden_cols
+        new_sizes = {moved(i): v for i, v in sizes.items() if moved(i) is not None}
+        new_hidden = {moved(i) for i in hidden if moved(i) is not None}
+        sizes.clear()
+        sizes.update(new_sizes)
+        hidden.clear()
+        hidden.update(new_hidden)
+        merges = []
+        for top, left, bottom, right in sheet.merges:
+            lo, hi = (top, bottom) if axis == "row" else (left, right)
+            if delta > 0:
+                lo2 = lo + delta if lo >= at else lo
+                hi2 = hi + delta if hi >= at else hi
+            else:
+                gone = -delta
+                last = at + gone - 1
+                if lo >= at and hi <= last:
+                    continue
+                lo2 = lo if lo < at else (at if lo <= last else lo - gone)
+                hi2 = hi if hi < at else (at - 1 if hi <= last else hi - gone)
+            m = (lo2, left, hi2, right) if axis == "row" else (top, lo2, bottom, hi2)
+            if m[0] != m[2] or m[1] != m[3]:
+                merges.append(m)
+        sheet.merges = merges
+        if sheet.size is not None:
+            rows, cols = sheet.size
+            if axis == "row":
+                rows = max(1, rows + delta) if delta > 0 or at < rows else rows
+            else:
+                cols = max(1, cols + delta) if delta > 0 or at < cols else cols
+            sheet.size = (rows, cols)
+        after = _layout_state(sheet)
+        self._record(lambda: _set_layout(sheet, before), lambda: _set_layout(sheet, after))
+
+    # -- layout ---------------------------------------------------------------------
+    def _layout_change(self, sheet: Sheet, change: Callable[[], None]) -> None:
+        before = _layout_state(sheet)
+        change()
+        after = _layout_state(sheet)
+        if after != before:
+            self._record(lambda: _set_layout(sheet, before), lambda: _set_layout(sheet, after))
+            self._tell({("layout", sheet.id)})
+
+    def set_widths(self, sheet: Sheet, cols, width: Optional[float]) -> None:
+        """Column widths in points (None: back to the default)."""
+        def change():
+            for c in cols:
+                if width is None:
+                    sheet.widths.pop(c, None)
+                else:
+                    sheet.widths[c] = max(0.0, float(width))
+        self._layout_change(sheet, change)
+
+    def set_heights(self, sheet: Sheet, rows, height: Optional[float]) -> None:
+        def change():
+            for r in rows:
+                if height is None:
+                    sheet.heights.pop(r, None)
+                else:
+                    sheet.heights[r] = max(0.0, float(height))
+        self._layout_change(sheet, change)
+
+    def distribute(self, sheet: Sheet, axis: str, first: int, last: int) -> None:
+        """Make the rows (or columns) first..last share their total evenly."""
+        size = sheet.height if axis == "row" else sheet.width
+        total = sum(size(i) for i in range(first, last + 1))
+        each = total / (last - first + 1)
+        if axis == "row":
+            self.set_heights(sheet, range(first, last + 1), each)
+        else:
+            self.set_widths(sheet, range(first, last + 1), each)
+
+    def set_hidden(self, sheet: Sheet, axis: str, indexes, hidden: bool) -> None:
+        def change():
+            target = sheet.hidden_rows if axis == "row" else sheet.hidden_cols
+            for i in indexes:
+                (target.add if hidden else target.discard)(i)
+        self._layout_change(sheet, change)
+
+    def merge(self, sheet: Sheet, top: int, left: int, bottom: int, right: int,
+              across: bool = False) -> None:
+        """Merge cells (Excel keeps only the top-left value); across=True
+        merges each row on its own (Merge Across)."""
+        with self.transaction("Merge"):
+            blocks = [(r, left, r, right) for r in range(top, bottom + 1)] if across \
+                else [(top, left, bottom, right)]
+            for t, l, b, r in blocks:
+                for row, col in list(sheet.positions_in(t, l, b, r)):
+                    if (row, col) != (t, l):
+                        cell = sheet.cells[(row, col)]
+                        self._set_state(sheet, row, col, ("", cell.style, cell.comment))
+
+            def change():
+                for t, l, b, r in blocks:
+                    sheet.merges = [m for m in sheet.merges
+                                    if m[2] < t or m[0] > b or m[3] < l or m[1] > r]
+                    if (t, l) != (b, r):
+                        sheet.merges.append((t, l, b, r))
+            self._layout_change(sheet, change)
+
+    def unmerge(self, sheet: Sheet, top: int, left: int, bottom: int, right: int) -> None:
+        def change():
+            sheet.merges = [m for m in sheet.merges
+                            if m[2] < top or m[0] > bottom or m[3] < left or m[1] > right]
+        with self.transaction("Unmerge"):
+            self._layout_change(sheet, change)
+
+    def set_size(self, sheet: Sheet, rows: int, cols: int) -> None:
+        """A table's extent; cells outside it are cleared."""
+        rows, cols = max(1, int(rows)), max(1, int(cols))
+        with self.transaction("Resize table"):
+            for (r, c) in list(sheet.cells):
+                if r >= rows or c >= cols:
+                    self._set_state(sheet, r, c, ("", 0, None))
+
+            def change():
+                sheet.size = (rows, cols)
+                sheet.merges = [m for m in sheet.merges if m[2] < rows and m[3] < cols]
+            self._layout_change(sheet, change)
+
+    # -- styles ------------------------------------------------------------------------
+    def style_of(self, sheet: Sheet, row: int, col: int) -> Style:
+        cell = sheet.cells.get((row, col))
+        return self.styles.get(cell.style if cell else 0)
+
+    def restyle(self, sheet: Sheet, top: int, left: int, bottom: int, right: int,
+                change: Callable[[Style, int, int], Style], label: str = "Format") -> None:
+        """Give every cell in the block change(style, row, col)."""
+        with self.transaction(label):
+            for row in range(top, bottom + 1):
+                for col in range(left, right + 1):
+                    cell = sheet.cells.get((row, col))
+                    old = self.styles.get(cell.style if cell else 0)
+                    new = change(old, row, col)
+                    if new != old:
+                        index = self.styles.add(new)
+                        state = (cell.input, index, cell.comment) if cell else ("", index, None)
+                        self._set_state(sheet, row, col, state)
+
+    def format_block(self, sheet: Sheet, top: int, left: int, bottom: int, right: int,
+                     **fields) -> None:
+        """Set style fields on every cell of a block: bold=True, fill="#ffff00"..."""
+        self.restyle(sheet, top, left, bottom, right, lambda st, r, c: replace(st, **fields))
+
+    def border_block(self, sheet: Sheet, top: int, left: int, bottom: int, right: int,
+                     which: str, border) -> None:
+        """Excel's border buttons: which is "all", "outside", "inside",
+        "left", "right", "top", "bottom", "thick_box", or "none"."""
+        def change(st: Style, r: int, c: int) -> Style:
+            edges = {}
+            if which == "none":
+                return replace(st, left=None, right=None, top=None, bottom=None)
+            if which in ("all", "inside"):
+                if which == "all" or c > left:
+                    edges["left"] = border
+                if which == "all" or c < right:
+                    edges["right"] = border
+                if which == "all" or r > top:
+                    edges["top"] = border
+                if which == "all" or r < bottom:
+                    edges["bottom"] = border
+            if which in ("outside", "thick_box"):
+                b = border if which == "outside" else replace(border, style="thick")
+                if c == left:
+                    edges["left"] = b
+                if c == right:
+                    edges["right"] = b
+                if r == top:
+                    edges["top"] = b
+                if r == bottom:
+                    edges["bottom"] = b
+            if which == "left" and c == left:
+                edges["left"] = border
+            if which == "right" and c == right:
+                edges["right"] = border
+            if which == "top" and r == top:
+                edges["top"] = border
+            if which == "bottom" and r == bottom:
+                edges["bottom"] = border
+            return replace(st, **edges) if edges else st
+        self.restyle(sheet, top, left, bottom, right, change, "Borders")
 
     def copy_block(self, src: Sheet, top: int, left: int, bottom: int, right: int,
                    dst: Sheet, row: int, col: int, what: str = "all") -> None:
@@ -906,10 +1180,7 @@ class Workbook:
                         continue
                     text, style, comment, value = got
                     if text.startswith("=") and len(text) > 1:
-                        moved = F.moved_formula(text[1:], drow, dcol)
-                        if src is not dst:
-                            moved = _qualify_for(moved, src, dst)
-                        text = "=" + moved
+                        text = "=" + F.moved_formula(text[1:], drow, dcol)
                     if what == "values":
                         text = value_as_input(value)
                         state = (text, old_style, old_comment)
@@ -962,6 +1233,18 @@ class Workbook:
                     if dst is not sheet and state[0].startswith("="):
                         state = ("=" + _qualify_for(state[0][1:], sheet, dst), state[1], state[2])
                     self._set_state(dst, row + i, col + j, state)
+
+
+def _layout_state(sheet: Sheet) -> tuple:
+    return (dict(sheet.widths), dict(sheet.heights), frozenset(sheet.hidden_rows),
+            frozenset(sheet.hidden_cols), tuple(sheet.merges), sheet.size)
+
+
+def _set_layout(sheet: Sheet, state: tuple) -> None:
+    widths, heights, hrows, hcols, merges, size = state
+    sheet.widths, sheet.heights = dict(widths), dict(heights)
+    sheet.hidden_rows, sheet.hidden_cols = set(hrows), set(hcols)
+    sheet.merges, sheet.size = list(merges), size
 
 
 def _qualify_for(text: str, src: Sheet, dst: Sheet) -> str:

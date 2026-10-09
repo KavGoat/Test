@@ -428,6 +428,9 @@ class PageView(QGraphicsView):
         # Equations: the one being typed into, the red cross, SMath's keys.
         from .calcedit import CalcEditing
         self.calc = CalcEditing(self)
+        # Tables: the one open for its cells, its selection, Excel's keys.
+        from .tableedit import TableEditing
+        self.tables = TableEditing(self)
         self.glide = _Glide(self)
         self.tool_key = "select"
         self.sticky_tool = False
@@ -1698,6 +1701,10 @@ class PageView(QGraphicsView):
                     -4, -4, 4, 4).contains(scene_pos):
                 self.close_block()
 
+        if self.tables.mouse_press(event, scene_pos):
+            event.accept()
+            return
+
         if self.calc.mouse_press(event, scene_pos):
             event.accept()
             return
@@ -2196,6 +2203,9 @@ class PageView(QGraphicsView):
         scene_pos = self.mapToScene(event.position().toPoint())
         self._last_scene_pos = scene_pos
         self.cursorMoved.emit(scene_pos)
+        if self.tables.mouse_move(event, scene_pos):
+            event.accept()
+            return
         if self.calc.mouse_move(event, scene_pos):
             event.accept()
             return
@@ -2753,7 +2763,9 @@ class PageView(QGraphicsView):
         # An equation: WebSMath's pointer — the arrow over it, SMath's move
         # cursor on the band along its frame (selected equations' handles
         # aside, which the loop below still offers)
-        pointer = self.calc.hover_cursor(scene_pos)
+        pointer = self.tables.hover_cursor(scene_pos)
+        if pointer is None:
+            pointer = self.calc.hover_cursor(scene_pos)
         if pointer is not None:
             self.setCursor(pointer)
             return
@@ -2805,6 +2817,9 @@ class PageView(QGraphicsView):
         self._pointer_down = False
         try:
             scene_pos = self.mapToScene(event.position().toPoint())
+            if self.tables.mouse_release(event, scene_pos):
+                event.accept()
+                return
             if self.calc._select_drag is not None:
                 self.calc.mouse_release(event, scene_pos)
                 event.accept()
@@ -3037,6 +3052,11 @@ class PageView(QGraphicsView):
             return
         if self._mode == "lasso":
             self.select_in_marquee()
+            event.accept()
+            return
+        # A table: double-clicked, it opens for its cells (Markup mode), or
+        # the cell double-clicked is edited (it was already open).
+        if self.tables.mouse_double_click(event, scene_pos):
             event.accept()
             return
         # A closed calculation block opens, as a text box does, and the
@@ -4297,6 +4317,8 @@ class PageView(QGraphicsView):
     def drawForeground(self, painter: QPainter, rect: QRectF) -> None:
         """Whatever floats above the page: marquee, previews, leaders."""
         super().drawForeground(painter, rect)
+        self.tables.paint_insert_preview(painter)
+        self.tables.view_moved()
         if self._marquee:
             if self._mode == "cloud_leader":
                 self._draw_cloud_leader_preview(painter)
@@ -4852,8 +4874,15 @@ class PageView(QGraphicsView):
         actually being typed into; otherwise it moves the focus as it always
         did.
         """
+        if event.type() == QEvent.ShortcutOverride and self.tables.wants_shortcut(event):
+            event.accept()
+            return True
         if event.type() == QEvent.KeyPress and event.key() in (Qt.Key_Tab,
                                                                Qt.Key_Backtab):
+            if self.tables.is_open():
+                event.accept()
+                self.keyPressEvent(event)
+                return True
             if self._editing_item is not None or self.calc.editing():
                 event.accept()
                 self.keyPressEvent(event)
@@ -4893,6 +4922,11 @@ class PageView(QGraphicsView):
         if key in (Qt.Key_Control, Qt.Key_Shift) and self.tool_key == "select":
             # What the pointer would do has just changed under it.
             self._update_hover_cursor(self._last_scene_pos)
+
+        # An open table takes Excel's keys (tableedit.py).
+        if self.tables.key_press(event):
+            event.accept()
+            return
 
         # An equation being typed into takes SMath's keys; on bare paper in
         # Calc mode, typing starts one (calcedit.py).
@@ -5184,6 +5218,11 @@ class PageView(QGraphicsView):
             event.accept()
             return
         scene_pos = self.mapToScene(event.pos())
+        table = self.tables.item
+        if table is not None and table.chrome_rect().contains(table.mapFromScene(scene_pos)):
+            self.tables.context_menu(event.globalPos())
+            event.accept()
+            return
         item = self.markup_at(scene_pos)
         if item is not None and not item.isSelected():
             self.scene().clearSelection()

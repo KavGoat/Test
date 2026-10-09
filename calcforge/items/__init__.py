@@ -14,6 +14,7 @@ from . import measure        # noqa: F401
 from . import media          # noqa: F401
 from . import shapes         # noqa: F401
 from . import snapshot       # noqa: F401
+from . import table          # noqa: F401
 from . import text           # noqa: F401
 
 from .base import MarkupItem, Style, build_item   # noqa: F401

@@ -943,3 +943,54 @@ in `docs/SPREADSHEET_DESIGN.md`):
 Tests: `tests/sheet/` (311: 230 formulas against Excel's answers, the
 workbook's rules, parsing, formats, speed — one edit in a 15,000-formula
 sheet under 0.1 s).
+
+## Spreadsheets, phase 2 — tables on pages (2026-10-09)
+
+The user's answers for this phase (pop-up questions): new tables have thin
+borders on every cell, printed; Excel's Calibri 11 and 64 × 20 px cells; a
+table behaves as sheet pages will (Markup mode: a markup, double-click for
+its cells; Calc mode: clicks and typing go to the cells); dragging its edge
+adds or removes rows and columns.
+
+* **Insert Table** (Calculation bar, Calculation menu, Annotate tools): drag
+  a rectangle — the grid and "rows × columns" follow the drag; a click gives
+  4 × 3.
+* **Cells as in Excel:** typing, F2, Enter/Tab/arrows/Ctrl+arrows/Home/End,
+  Shift to extend, headings and corner to select rows, columns, all; the
+  name box and formula bar over the canvas; references coloured on their
+  cells while a formula is typed; point mode (click or arrow to a cell, also
+  in another table, which is then named); F4; Ctrl+Enter; Alt+= AutoSum;
+  Ctrl+D/R; Ctrl+; date; Delete/Backspace; Ctrl+B/I/U/5; Ctrl+1.
+* **Fill handle** with Excel's series; **drag the selection's border** to move
+  cells (Ctrl copies; readers follow a move); **cut/copy/paste** inside
+  CalcForge and with Excel (its XML Spreadsheet: formulas, number formats,
+  fonts, fills, borders, merges, column widths), HTML and text; Paste Special
+  values/formulas/formats; a block pasted into a multiple of its size repeats.
+* **Rows and columns:** drag heading borders (all selected ones together),
+  double-click to AutoFit, insert/delete/hide/unhide, Distribute Rows/Columns
+  Evenly (selected ones, or all), row height/column width by number; the
+  table's corner or edge adds and removes rows and columns.
+* **Formatting:** the properties toolbar shows the table's controls while it is
+  open (font, size, B/I/U, colours, alignment, wrap, merge, borders, number
+  format, fewer/more decimals, display unit, rows & columns, Format Painter,
+  Format…); Format Cells dialog; merge & center/across/unmerge.
+* **Names:** auto Table1, Table2…; renamed from the name tab (double-click),
+  the right-click menu, or the Properties panel; every formula that reads it
+  follows. Define Name for a cell or block.
+* **Equations ↔ tables** (see the design doc): `Loads.D12`, `W_total`,
+  `Loads.Load` (column vector), `bolts(d, "A")` (interpolating lookup); a
+  table reads variables defined before it; dependencies win over reading
+  order; a table that appears, goes or is renamed recalculates the equations.
+* **Saving:** a table is page drawing on the calc layer (real text, never an
+  annotation), with its cells, formats, sizes, merges and names in the record;
+  it prints without the on-screen headings and tab.
+
+Found and fixed while building: Qt crashed when a table recalculated in the
+middle of an equation being put on its page — tables and equations now take
+up each other's changes on the next turn of the event loop.
+
+Not yet (phase 3): conditional formatting, sort/filter, data validation,
+cell comments, find/replace.
+
+Tests: `tests/test_tables.py` (32, the real window), `tests/test_table_equations.py`
+(4), `tests/sheet/test_clip.py` (4, Excel's clipboard).

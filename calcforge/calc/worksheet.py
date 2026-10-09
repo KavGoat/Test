@@ -113,6 +113,9 @@ class Region:
 
 
 class Worksheet:
+    # names offered by the document's tables and sheets (CalcForge), or None
+    external = None
+
     def __init__(self):
         self.regions: list[Region] = []
         self.format = NumberFormat()
@@ -172,10 +175,16 @@ class Worksheet:
         from .engine import builtins
         from .engine.evaluator import BUILTIN_CONSTANTS
 
+        from .engine import evaluator as _evaluator
+        _evaluator.EXTERNAL = self.external
         ctx = self._context_before(region)
         if nargs is None:
             return ctx.has(name) or name in BUILTIN_CONSTANTS
         if ctx.function(name, nargs) is not None:
+            return True
+        from .engine import evaluator
+
+        if evaluator.EXTERNAL is not None and evaluator.EXTERNAL.function(name, nargs) is not None:
             return True
         return builtins.has_overload(name, nargs)
 
@@ -285,6 +294,8 @@ class Worksheet:
         # importData / exportData: relative names are relative to the worksheet's folder
         files.base_dir = os.path.dirname(getattr(self, "filename", "") or "")
         sym.defined_above = lambda r=r: self.names_defined_above(r)
+        from .engine import evaluator as _evaluator
+        _evaluator.EXTERNAL = self.external     # this document's tables
         r.pending = False
         before = (_shown(r.display), r.error.message if r.error else None)
         if commit and r.id in self._keys:
@@ -607,7 +618,11 @@ class ScopedContext(IndexedContext):
         return self._latest("vars", name)
 
     def has(self, name: str) -> bool:
-        return name in self.vars or self._latest("vars", name) is not None
+        from .engine import evaluator
+
+        if name in self.vars or self._latest("vars", name) is not None:
+            return True
+        return evaluator.EXTERNAL is not None and evaluator.EXTERNAL.has(name)
 
     def function(self, name: str, nargs: int):
         f = self.funcs.get((name, nargs))

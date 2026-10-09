@@ -574,6 +574,11 @@ class MainWindow(QMainWindow):
         self.bottom_split.addWidget(self.view)
         self.bottom_split.setCollapsible(0, False)
         self.bottom_split.splitterMoved.connect(self._markups_list_moved)
+        # Excel's formula bar, over the canvas while a table is open
+        from .tableedit import FormulaBar
+        self.formula_bar = FormulaBar(self.view.tables)
+        self.view.tables.bar = self.formula_bar
+        layout.addWidget(self.formula_bar)
         layout.addWidget(self.bottom_split, 1)
         self.setCentralWidget(central)
 
@@ -742,6 +747,10 @@ class MainWindow(QMainWindow):
                   tip="A calculation block round the selected equations, or at the red "
                       "cross: its equations move, copy and delete with it, and it can "
                       "keep what they define to itself (Self-contained)")
+        self._act("insert_table", "Table", self.insert_table,
+                  tip="Drag out a table on the page: the rows and columns follow the "
+                      "size you drag. Excel's formulas, formats and units in its cells; "
+                      "the equations can read its values")
         self._act("insert_calc_text", "Calc text", self.insert_calc_text,
                   tip="Calculation text: words among the equations, on their grid "
                       "(\" in Calc mode)")
@@ -1206,6 +1215,9 @@ class MainWindow(QMainWindow):
         self.default_button.clicked.connect(self.set_selected_as_default)
         self._default_action = style_bar.addWidget(self.default_button)
         self.style_bar = style_bar
+        # a table's own controls, on the same bar while it is open
+        from .tablebar import TableControls
+        self.table_controls = TableControls(self)
         # The stamp's wording and the count's subject only mean anything while
         # those tools are in hand, and reading "APPROVED" across the top of the
         # window while drawing a rectangle is just noise. Both come and go with
@@ -1246,6 +1258,7 @@ class MainWindow(QMainWindow):
                           (None, None), ("insert_plot", "calc_plot"),
                           ("insert_matrix", "calc_matrix"),
                           ("insert_calc_text", "calc_text"), ("insert_block", "calc_block"),
+                          ("insert_table", "table"),
                           (None, None),
                           ("prog_if", "prog_if"), ("prog_for", "prog_for"),
                           ("prog_while", "prog_while"), ("prog_line", "prog_line")):
@@ -1745,7 +1758,7 @@ class MainWindow(QMainWindow):
         for action in (self.act_calculate, self.act_auto_calc,
                        None, self.act_insert_plot, self.act_insert_matrix,
                        self.act_insert_calc_text, self.act_insert_block,
-                       self.act_insert_function,
+                       self.act_insert_table, self.act_insert_function,
                        self.act_constants, None):
             calc_menu.addSeparator() if action is None else calc_menu.addAction(action)
         calc_menu.addAction(self.act_insert_operator)
@@ -4100,6 +4113,26 @@ class MainWindow(QMainWindow):
         """Show only style controls meaningful for the selection or tool."""
         if not hasattr(self, "_style_widgets"):
             return
+        tables = self.view.tables
+        if tables.is_open():
+            # a table open for its cells: its own controls, in the same bar
+            for actions in self._style_widgets.values():
+                for action in actions:
+                    action.setVisible(False)
+            for control in (self.font_family_combo, *self.font_buttons.values(),
+                            self.text_align_combo, self.arrow_start_combo):
+                control.setVisible(False)
+            self.arrow_start_label_action.setVisible(False)
+            self._default_action.setVisible(False)
+            item = tables.item
+            self.style_kind_label.setText(f" {item.name} ")
+            self.table_controls.show(True)
+            self.table_controls.sync()
+            self.style_bar.layout().invalidate()
+            self.style_bar.layout().activate()
+            return
+        if hasattr(self, "table_controls"):
+            self.table_controls.show(False)
         items = self.selected_items()
         active = items[0] if items else None
         self._style_own_look = False
@@ -4269,6 +4302,36 @@ class MainWindow(QMainWindow):
         frame, point = calc._where_typing_starts()
         if frame is not None:
             calc.start_calc_text(frame, point)
+
+    def _rename_table(self, item) -> None:
+        if not self.interactive_prompts:
+            return
+        from PySide6.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(self, "Rename table",
+                                        "Name (formulas and equations that use it follow):",
+                                        text=item.name)
+        if ok and name.strip():
+            self.view.tables.rename_to(item, name.strip())
+
+    def insert_table(self) -> None:
+        """Drag out a table (a click gives Excel's handful of cells)."""
+        self.view.calc.leave()
+        self.view.tables.close()
+        self.view.set_tool("table")
+        self.status_hint.setText("Drag out the table: the rows and columns follow the size "
+                                 "you drag · a click makes a 4 × 3 table")
+
+    def format_cells_dialog(self) -> None:
+        """Format Cells (Ctrl+1) for the selected cells of the open table."""
+        tables = self.view.tables
+        if not tables.is_open():
+            return
+        from .celldialog import FormatCellsDialog
+        dialog = FormatCellsDialog(tables, self)
+        if not self.interactive_prompts:
+            self._last_format_dialog = dialog
+            return
+        dialog.exec()
 
     def insert_block(self) -> None:
         """A calculation block round the selected equations (on the page of the
@@ -4955,6 +5018,9 @@ class MainWindow(QMainWindow):
         self.view.viewport().update()
 
     def delete_selection(self) -> None:
+        if self.view.tables.is_open():
+            self.view.tables.clear("contents")
+            return
         if self.view.editing_item() is not None:
             return                      # Delete belongs to the text being edited
         from ..items.calc import with_block_members
@@ -5856,6 +5922,8 @@ class MainWindow(QMainWindow):
             + (f" — {inside} of them are still grouped inside" if inside else ""))
 
     def copy_selection(self) -> None:
+        if self.view.tables.is_open() and self.view.tables.copy():
+            return
         from . import calcedit
         if calcedit.clipboard(self.view.calc, "copy"):
             return
@@ -5920,6 +5988,8 @@ class MainWindow(QMainWindow):
         return image
 
     def cut_selection(self) -> None:
+        if self.view.tables.is_open() and self.view.tables.copy(cut=True):
+            return
         from . import calcedit
         if calcedit.clipboard(self.view.calc, "cut"):
             return
@@ -5930,6 +6000,8 @@ class MainWindow(QMainWindow):
         self.delete_selection()
 
     def paste_items(self) -> None:
+        if self.view.tables.is_open() and self.view.tables.paste():
+            return
         from . import calcedit
         if calcedit.clipboard(self.view.calc, "paste"):
             return
@@ -6026,6 +6098,11 @@ class MainWindow(QMainWindow):
         self.refresh_selection()
 
     def select_all(self) -> None:
+        tables = self.view.tables
+        if tables.is_open():
+            rows, cols = tables.item.size
+            tables.select((0, 0), (rows - 1, cols - 1), tables.active)
+            return
         for item in self.view.frame().markups():
             if item.isVisible():
                 item.setSelected(True)
@@ -7517,6 +7594,11 @@ class MainWindow(QMainWindow):
                 and getattr(item, "region", None) is not None:
             from . import calcmenu
             calcmenu.fill(self, menu, item)
+        if item is not None and getattr(item, "TYPE", "") == "table":
+            menu.addAction("Edit Cells", lambda: self.view.tables.open(item))
+            rename = menu.addAction("Rename Table…", lambda: self._rename_table(item))
+            rename.setEnabled(not item.locked)
+            menu.addSeparator()
         if item is not None and getattr(item, "TYPE", "") == "calc_block":
             contained = menu.addAction("Self-contained")
             contained.setCheckable(True)

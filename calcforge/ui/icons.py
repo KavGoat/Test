@@ -590,6 +590,15 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
             for y in (5, 19):
                 painter.drawPoint(QPointF(x - 1, y))
         _glyph(painter, "Tt", INK, 11)
+    elif name == "table":
+        # a small spreadsheet: a heading row and a grid
+        _pen(painter, INK, 1.2)
+        painter.drawRect(QRectF(3, 4, 18, 16))
+        painter.fillRect(QRectF(3.6, 4.6, 16.8, 3.9), QColor(ACCENT))
+        for y in (8.5, 12.5, 16.5):
+            painter.drawLine(QPointF(3, y), QPointF(21, y))
+        for x in (9, 15):
+            painter.drawLine(QPointF(x, 4), QPointF(x, 20))
     elif name == "calc_block":
         # a frame holding two lines of equations
         _pen(painter, INK, 1.2)
