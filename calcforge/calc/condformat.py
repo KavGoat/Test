@@ -4,15 +4,17 @@ The user, 2026-10-09: "add a conditional formatting to smath equation …
 based on the final number, like for dcr … more than 1 is red, less than 1
 is green". Their answers:
 
-* a rule changes the equation's font size and background — WebSMath's
-  drawing (kept byte for byte) draws only those two on maths;
+* a rule changes the equation's font colour, size, bold, underline and
+  background (first size and background only; colour, bold and underline
+  once the user let the maths drawing show them, the same day);
 * it restyles the whole equation;
 * rules are set per equation, kept as named presets, and also for the whole
   document by variable name (DCR* → the "DCR" preset);
 * only results without units are compared (DCR, ratios); a result with
   units never matches.
 
-A rule: {"op": ">", "a": 1.0, "b": None, "size": None, "bg": "#ffc9c9"};
+A rule: {"op": ">", "a": 1.0, "b": None, "color": "#c92a2a", "size": None,
+"bold": True, "underline": None, "bg": "#ffc9c9"} (None: no change);
 op is one of > >= < <= = <> between outside. Every rule that matches is
 applied, an earlier one winning where two set the same thing.
 
@@ -34,8 +36,10 @@ OPS = [(">", "greater than"), (">=", "greater than or equal to"), ("<", "less th
        ("between", "between"), ("outside", "not between")]
 
 #: what the "DCR" button in the dialogs fills in
-DCR_EXAMPLE = [{"op": ">", "a": 1.0, "b": None, "size": None, "bg": "#ffc9c9"},
-               {"op": "<=", "a": 1.0, "b": None, "size": None, "bg": "#d3f9d8"}]
+DCR_EXAMPLE = [{"op": ">", "a": 1.0, "b": None, "color": "#c92a2a", "size": None, "bold": True,
+                "underline": None, "bg": "#ffc9c9"},
+               {"op": "<=", "a": 1.0, "b": None, "color": "#2b8a3e", "size": None, "bold": None,
+                "underline": None, "bg": "#d3f9d8"}]
 
 
 def matches(rule: dict, x: float) -> bool:
@@ -55,10 +59,16 @@ def describe(rule: dict) -> str:
     cond = f"{op} {a} and {float(rule.get('b') or 0):g}" if rule.get("op") in ("between", "outside") \
         else f"{op} {a}"
     look = []
-    if rule.get("bg"):
-        look.append(f"background {rule['bg']}")
+    if rule.get("color"):
+        look.append(f"colour {rule['color']}")
     if rule.get("size"):
         look.append(f"{float(rule['size']):g} pt")
+    if rule.get("bold") is not None:
+        look.append("bold" if rule["bold"] else "not bold")
+    if rule.get("underline") is not None:
+        look.append("underlined" if rule["underline"] else "not underlined")
+    if rule.get("bg"):
+        look.append(f"background {rule['bg']}")
     return f"Result {cond}: " + (", ".join(look) or "no change")
 
 
@@ -117,41 +127,47 @@ def rules_for(item, settings) -> list:
     return []
 
 
-def look_for(item, settings) -> tuple:
-    """(font size or None, background or None) the rules give this equation now."""
+FIELDS = ("color", "size", "bold", "underline", "bg")
+_REGION = {"color": "color", "size": "font_size", "bold": "bold", "underline": "underline",
+           "bg": "bg_color"}
+
+
+def look_for(item, settings) -> dict:
+    """What the rules give this equation now: {field: value} for colour,
+    size, bold, underline and background (only those a matching rule sets)."""
     region = getattr(item, "region", None)
     if region is None:
-        return None, None
+        return {}
     rules = rules_for(item, settings)
     if not rules:
-        return None, None
+        return {}
     x = result_number(region)
     if x is None:
-        return None, None
-    size = bg = None
+        return {}
+    look = {}
     for rule in rules:
         if matches(rule, x):
-            if size is None and rule.get("size"):
-                size = float(rule["size"])
-            if bg is None and rule.get("bg"):
-                bg = rule["bg"]
-    return size, bg
+            for field in FIELDS:
+                value = rule.get(field)
+                if value is None or value == "" or (field == "size" and not value):
+                    continue
+                look.setdefault(field, float(value) if field == "size" else value)
+    return look
 
 
 @contextmanager
 def looking(item, settings):
     """The equation as its rules have it, for laying out and drawing."""
     region = getattr(item, "region", None)
-    size, bg = look_for(item, settings) if region is not None else (None, None)
-    if size is None and bg is None:
+    look = look_for(item, settings) if region is not None else {}
+    if not look:
         yield
         return
-    own = (region.font_size, region.bg_color)
-    if size is not None:
-        region.font_size = size
-    if bg is not None:
-        region.bg_color = bg
+    own = {field: getattr(region, _REGION[field]) for field in look}
+    for field, value in look.items():
+        setattr(region, _REGION[field], value)
     try:
         yield
     finally:
-        region.font_size, region.bg_color = own
+        for field, value in own.items():
+            setattr(region, _REGION[field], value)

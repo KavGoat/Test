@@ -564,3 +564,21 @@ def test_ctrl_d_fills_down_and_autosum(w):
     tabs.select((0, 1), (2, 1))
     key(w, Qt.Key_D, mods=Qt.ControlModifier)
     assert typed(table, "B3") == "=A3*2" and value(table, "B3") == 6
+
+
+def test_a_typed_number_widens_a_never_sized_column(w):
+    table = make_table(w)
+    fill_column(w, table, ["12.5 kN/m"])
+    assert table.sheet.width(0) > 48, "widened to fit, as Excel does for a typed number"
+    assert "#" not in shown(table, "A1")
+    tabs = w.view.tables
+    tabs.select((0, 1))
+    tabs.set_size("col", 30)
+    tabs.select((0, 1))
+    type_text(w, "123456789")
+    enter(w)
+    assert table.sheet.width(1) == 30, "a column sized by hand keeps its width (####)"
+    tabs.select((1, 2))
+    type_text(w, "a long piece of text")
+    enter(w)
+    assert table.sheet.width(2) == 48, "text runs on instead"

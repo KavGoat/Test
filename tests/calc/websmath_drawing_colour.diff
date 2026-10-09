@@ -1,0 +1,74 @@
+diff --git a/calcforge/calc/ui/layout.py b/calcforge/calc/ui/layout.py
+index ba77324..e5a184f 100644
+--- a/calcforge/calc/ui/layout.py
++++ b/calcforge/calc/ui/layout.py
+@@ -43,19 +43,37 @@ def _family(candidates):
+ 
+ 
+ class Style:
+-    def __init__(self, size_pt: float = 10.0):
++    # CalcForge (the user, 2026-10-09): an equation's Colour, Bold and
++    # Underline are drawn on its maths too. None/False: WebSMath's look.
++    def __init__(self, size_pt: float = 10.0, color=None, bold: bool = False,
++                 underline: bool = False):
+         self.size_pt = size_pt
+         self.mono = _family(MONO_FAMILIES)
+         self.opfam = _family(OP_FAMILIES)
++        self.color = QColor(color) if color else None
++        self.bold = bold
++        self.underline = underline
+ 
+     def font(self, scale=1.0, italic=False, bold=False, op=False) -> QFont:
+         f = QFont(self.opfam if op else self.mono)
+         f.setPointSizeF(self.size_pt * scale)
+         f.setItalic(italic)
+-        f.setBold(bold)
++        f.setBold(bold or self.bold)
++        if self.underline:
++            f.setUnderline(True)
+         return f
+ 
+ 
++def recolour(box, color: QColor) -> None:
++    """CalcForge: the equation's colour for everything drawn in black (its
++    text, bars, roots and boxes); error red and unit blue stay as they are."""
++    if isinstance(box, (LText, LRect, LPath)):
++        if box.color is None or box.color == BLACK:
++            box.color = color
++    for child in getattr(box, "children", ()) or ():
++        recolour(child, color)
++
++
+ # ---------------------------------------------------------------------------
+ # Layout boxes
+ # ---------------------------------------------------------------------------
+diff --git a/calcforge/calc/ui/region_item.py b/calcforge/calc/ui/region_item.py
+index 12f0298..82ba17f 100644
+--- a/calcforge/calc/ui/region_item.py
++++ b/calcforge/calc/ui/region_item.py
+@@ -73,8 +73,13 @@ class RegionItem(QGraphicsObject):
+ 
+     def relayout(self) -> None:
+         self.prepareGeometryChange()
+-        if self.style.size_pt != self.region.font_size:
+-            self.style = Style(self.region.font_size)
++        reg = self.region
++        colour = reg.color if (reg.color or "#000000").lower() != "#000000" else None
++        want = (reg.font_size, colour, bool(reg.bold), bool(reg.underline))
++        have = (self.style.size_pt, self.style.color.name() if getattr(self.style, "color", None) else None,
++                getattr(self.style, "bold", False), getattr(self.style, "underline", False))
++        if have != want:
++            self.style = Style(reg.font_size, colour, bool(reg.bold), bool(reg.underline))
+         if self.region.special == "picture":
+             self._size = (max(4.0, self.region.pic_w), max(4.0, self.region.pic_h))
+             self._layout = None
+@@ -136,6 +141,9 @@ class RegionItem(QGraphicsObject):
+         base = max(PAD_TOP + whole.asc, PAD_TOP + 11.4)
+         whole.x, whole.y = PAD_X, base
+         self._baseline = base
++        if self.style.color is not None:
++            from .layout import recolour
++            recolour(whole, self.style.color)
+         self._layout = whole
+         self._rows = absolute_rows(whole, lay.rows)
+         h = max(MIN_H, base + whole.desc + PAD_BOTTOM)

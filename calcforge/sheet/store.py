@@ -64,6 +64,8 @@ def sheet_to_dict(sheet) -> dict:
         "default_width": sheet.default_width, "default_height": sheet.default_height,
         "gridlines": sheet.show_gridlines, "headings": sheet.show_headings,
         "names": names_homed_on(sheet),
+        "cond_rules": sheet.cond_rules, "validations": sheet.validations,
+        "filter": sheet.filter, "filtered_rows": sorted(sheet.filtered_rows),
     }
 
 
@@ -111,6 +113,13 @@ def load_sheet(sheet, data: dict) -> None:
             sheet.default_height = float(data.get("default_height", sheet.default_height))
             sheet.show_gridlines = bool(data.get("gridlines", sheet.show_gridlines))
             sheet.show_headings = bool(data.get("headings", sheet.show_headings))
+            import copy as _copy
+            sheet.cond_rules = _copy.deepcopy(data.get("cond_rules", []))
+            sheet.validations = _copy.deepcopy(data.get("validations", []))
+            sheet.filter = _copy.deepcopy(data.get("filter"))
+            if sheet.filter is not None:
+                sheet.filter["criteria"] = {int(k): v for k, v in sheet.filter.get("criteria", {}).items()}
+            sheet.filtered_rows = set(data.get("filtered_rows", []))
             for name, refers_to in data.get("names", []):
                 key = (name.lower(), None)
                 if key not in wb.names:

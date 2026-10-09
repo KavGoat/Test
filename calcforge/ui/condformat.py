@@ -5,8 +5,8 @@
 * Calculation ▸ Conditional Formatting…: the document's presets, and
   which preset applies to which variable names (DCR* → DCR).
 
-A rule sets the font size and/or the background (what WebSMath's drawing
-shows on maths), when a result without units passes its test.
+A rule sets the font colour, size, bold, underline and/or background, when
+a result without units passes its test.
 """
 from __future__ import annotations
 
@@ -23,9 +23,11 @@ from ..calc.condformat import DCR_EXAMPLE, OPS, describe
 
 
 class _Swatch(QPushButton):
-    def __init__(self, colour):
+    def __init__(self, colour, start: str = "#ffc9c9", title: str = "Background"):
         super().__init__()
         self.colour = colour
+        self.start = start
+        self.title = title
         self.clicked.connect(self._pick)
         self._show()
 
@@ -38,7 +40,7 @@ class _Swatch(QPushButton):
             self.setStyleSheet("")
 
     def _pick(self):
-        got = QColorDialog.getColor(QColor(self.colour or "#ffc9c9"), self, "Background")
+        got = QColorDialog.getColor(QColor(self.colour or self.start), self, self.title)
         if got.isValid():
             self.colour = got.name()
             self._show()
@@ -55,8 +57,9 @@ class RulesEditor(QWidget):
         super().__init__()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(["Result is", "Value", "and", "Font size", "Background"])
+        self.table = QTableWidget(0, 8)
+        self.table.setHorizontalHeaderLabels(["Result is", "Value", "and", "Colour", "Size", "Bold",
+                                              "Underline", "Background"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.table.verticalHeader().setVisible(False)
         layout.addWidget(self.table)
@@ -104,12 +107,20 @@ class RulesEditor(QWidget):
         size.setSpecialValueText("No change")
         size.setSuffix(" pt")
         size.setValue(float(rule.get("size") or 0.0))
+        colour = _Swatch(rule.get("color"), "#c92a2a", "Font colour")
+        bold, underline = QComboBox(), QComboBox()
+        for box, key in ((bold, "bold"), (underline, "underline")):
+            box.addItems(["No change", "Yes", "No"])
+            box.setCurrentIndex({None: 0, True: 1, False: 2}.get(rule.get(key), 0))
         swatch = _Swatch(rule.get("bg"))
         self.table.setCellWidget(r, 0, op)
         self.table.setCellWidget(r, 1, a)
         self.table.setCellWidget(r, 2, b)
-        self.table.setCellWidget(r, 3, size)
-        self.table.setCellWidget(r, 4, swatch)
+        self.table.setCellWidget(r, 3, colour)
+        self.table.setCellWidget(r, 4, size)
+        self.table.setCellWidget(r, 5, bold)
+        self.table.setCellWidget(r, 6, underline)
+        self.table.setCellWidget(r, 7, swatch)
 
     def remove(self) -> None:
         r = self.table.currentRow()
@@ -133,9 +144,13 @@ class RulesEditor(QWidget):
             op = self.table.cellWidget(r, 0).currentData()
             a = self.table.cellWidget(r, 1).value()
             b = self.table.cellWidget(r, 2).value() if op in ("between", "outside") else None
-            size = self.table.cellWidget(r, 3).value() or None
-            bg = self.table.cellWidget(r, 4).colour
-            out.append({"op": op, "a": a, "b": b, "size": size, "bg": bg})
+            colour = self.table.cellWidget(r, 3).colour
+            size = self.table.cellWidget(r, 4).value() or None
+            flags = [{0: None, 1: True, 2: False}[self.table.cellWidget(r, k).currentIndex()]
+                     for k in (5, 6)]
+            bg = self.table.cellWidget(r, 7).colour
+            out.append({"op": op, "a": a, "b": b, "color": colour, "size": size, "bold": flags[0],
+                        "underline": flags[1], "bg": bg})
         return out
 
 

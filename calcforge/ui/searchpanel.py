@@ -137,6 +137,11 @@ class SearchPanel(QWidget):
         for number, hit in enumerate(self.hits):
             where = ("Drawing" if hit["kind"] == DRAWING
                      else hit["item"].display_name())
+            field = str(hit.get("field", ""))
+            if field.split(":")[0] in ("cell", "value"):
+                from ..sheet.refs import col_letters
+                _, row, col = field.split(":")
+                where = f"{hit['item'].name} {col_letters(int(col))}{int(row) + 1}"
             node = QTreeWidgetItem([str(hit["page"] + 1), hit["context"], where])
             node.setData(0, Qt.UserRole, number)
             self.results.addTopLevelItem(node)
@@ -145,9 +150,11 @@ class SearchPanel(QWidget):
         self.results.blockSignals(False)
         drawing = sum(1 for hit in self.hits if hit["kind"] == DRAWING)
         maths = sum(1 for hit in self.hits if hit.get("field") in EQUATION_FIELDS)
+        cells = sum(1 for hit in self.hits if str(hit.get("field", "")).split(":")[0] in ("cell", "value"))
         self.summary.setText(f"{len(self.hits)} found — {drawing} in the drawing, "
-                             f"{len(self.hits) - drawing - maths} in markups"
-                             + (f", {maths} in equations" if maths else ""))
+                             f"{len(self.hits) - drawing - maths - cells} in markups"
+                             + (f", {maths} in equations" if maths else "")
+                             + (f", {cells} in table cells" if cells else ""))
         self._mark_all()
 
     def _mark_all(self, current=None) -> None:
@@ -167,6 +174,12 @@ class SearchPanel(QWidget):
         if number is None or not 0 <= number < len(self.hits):
             return
         hit = self.hits[number]
+        if hit["kind"] == MARKUP and hit["field"].split(":")[0] in ("cell", "value"):
+            _, row, col = hit["field"].split(":")
+            self.window.reveal_markup(hit["page"], hit["item"].uid)
+            self.window.view.tables.open(hit["item"], (int(row), int(col)))
+            self._mark_all()
+            return
         if hit["kind"] == MARKUP:
             self.window.reveal_markup(hit["page"], hit["item"].uid)
             self._mark_all()
@@ -188,14 +201,15 @@ class SearchPanel(QWidget):
         if hit is None or hit["kind"] != MARKUP:
             self.summary.setText("Only words in markups can be replaced")
             return 0
-        if hit["field"] in EQUATION_FIELDS:
-            self.summary.setText("An equation is changed by typing into it")
+        if hit["field"] in EQUATION_FIELDS or hit["field"].startswith("value:"):
+            self.summary.setText("An equation or a formula's value is changed by typing into it")
             return 0
         return self._replace([hit])
 
     def replace_all(self) -> int:
         return self._replace([hit for hit in self.hits if hit["kind"] == MARKUP
-                              and hit["field"] not in EQUATION_FIELDS])
+                              and hit["field"] not in EQUATION_FIELDS
+                              and not hit["field"].startswith("value:")])
 
     def _replace(self, hits) -> int:
         if not hits:
@@ -208,6 +222,15 @@ class SearchPanel(QWidget):
         # From the end of each field backwards, so earlier positions hold.
         for hit in sorted(hits, key=lambda h: (id(h["item"]), h["field"], -h["start"])):
             item = hit["item"]
+            if hit["field"].startswith("cell:"):
+                _, row, col = hit["field"].split(":")
+                row, col = int(row), int(col)
+                text = item.sheet.input(row, col)
+                item.sheet.workbook.set_input(item.sheet, row, col,
+                                              text[:hit["start"]] + new + text[hit["start"] + hit["length"]:])
+                item.layout_changed()
+                changed += 1
+                continue
             if hit["field"] == "text" and hasattr(item, "doc"):
                 cursor = QTextCursor(item.doc)
                 cursor.setPosition(hit["start"])
@@ -241,6 +264,19 @@ def _searchable(item) -> list[tuple[str, str]]:
     result it shows (phase 5: Search finds variable names and equation text).
     """
     fields = []
+    if getattr(item, "TYPE", "") == "table" and getattr(item, "sheet", None) is not None:
+        # a table's cells: what was typed (replaceable) and, for a formula,
+        # the value it shows
+        from ..sheet.find import _shown
+        sheet = item.sheet
+        for (row, col), cell in sorted(sheet.cells.items()):
+            if cell.input:
+                fields.append((f"cell:{row}:{col}", cell.input))
+                if cell.is_formula:
+                    shown = _shown(sheet, cell)
+                    if shown:
+                        fields.append((f"value:{row}:{col}", shown))
+        return fields
     region = getattr(item, "region", None)
     if getattr(item, "IS_CALC", False) and region is not None:
         from ..calc.engine.display import display_text

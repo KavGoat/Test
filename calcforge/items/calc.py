@@ -401,7 +401,7 @@ def _connect(sheet, scene) -> None:
             from ..calc.condformat import look_for
             for region_id, item in list(items.items()):
                 look = look_for(item, settings)
-                if look != getattr(item, "_last_look", (None, None)):
+                if look != getattr(item, "_last_look", {}):
                     item._last_look = look
                     if region_id not in done:
                         item.relayout()

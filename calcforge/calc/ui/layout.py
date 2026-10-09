@@ -43,17 +43,35 @@ def _family(candidates):
 
 
 class Style:
-    def __init__(self, size_pt: float = 10.0):
+    # CalcForge (the user, 2026-10-09): an equation's Colour, Bold and
+    # Underline are drawn on its maths too. None/False: WebSMath's look.
+    def __init__(self, size_pt: float = 10.0, color=None, bold: bool = False,
+                 underline: bool = False):
         self.size_pt = size_pt
         self.mono = _family(MONO_FAMILIES)
         self.opfam = _family(OP_FAMILIES)
+        self.color = QColor(color) if color else None
+        self.bold = bold
+        self.underline = underline
 
     def font(self, scale=1.0, italic=False, bold=False, op=False) -> QFont:
         f = QFont(self.opfam if op else self.mono)
         f.setPointSizeF(self.size_pt * scale)
         f.setItalic(italic)
-        f.setBold(bold)
+        f.setBold(bold or self.bold)
+        if self.underline:
+            f.setUnderline(True)
         return f
+
+
+def recolour(box, color: QColor) -> None:
+    """CalcForge: the equation's colour for everything drawn in black (its
+    text, bars, roots and boxes); error red and unit blue stay as they are."""
+    if isinstance(box, (LText, LRect, LPath)):
+        if box.color is None or box.color == BLACK:
+            box.color = color
+    for child in getattr(box, "children", ()) or ():
+        recolour(child, color)
 
 
 # ---------------------------------------------------------------------------

@@ -271,6 +271,10 @@ class TableEditing:
         controls = getattr(self.view.window, "table_controls", None)
         if controls is not None:
             controls.sync()
+        from ..sheet import validation
+        rule = validation.at(item.sheet, *self.active) if item.sheet is not None else None
+        if rule is not None and rule.get("input"):
+            self.view.statusMessage.emit(rule["input"])
         self._scroll_to(self.active)
 
     def _scroll_to(self, cell) -> None:
@@ -302,6 +306,15 @@ class TableEditing:
         tol = 2.0 / max(self.view.transform().m11(), 0.05) * 1.5
         if item.tab_rect().contains(local):
             return ("tab",)
+        sheet = item.sheet
+        if sheet is not None and sheet.filter is not None:
+            t, l, b, r = sheet.filter["range"]
+            for c in range(l, min(r, item.size[1] - 1) + 1):
+                if item.filter_button(c).contains(local):
+                    return ("filter", c)
+        if item.active is not None and item.list_button() is not None and \
+                item.list_button().contains(local):
+            return ("list",)
         handle = item.fill_handle_rect()
         if handle is not None and handle.adjusted(-tol, -tol, tol, tol).contains(local):
             return ("fill",)
@@ -399,6 +412,17 @@ class TableEditing:
             self.close()
             item.setSelected(True)
             return False                     # picked up and dragged like any markup
+        if kind == "filter":
+            if self.editor is not None and not self.commit(move=None):
+                return True
+            from . import datatools
+            pos = self.view.viewport().mapToGlobal(self.view.mapFromScene(
+                item.mapToScene(item.filter_button(zone[1]).bottomLeft())))
+            datatools.filter_menu(self, zone[1], pos)
+            return True
+        if kind == "list":
+            self.list_menu()
+            return True
         if self.editor is not None:
             if kind == "cell" and self._pointing():
                 self._point_at((zone[1], zone[2]), (zone[1], zone[2]))
@@ -633,6 +657,13 @@ class TableEditing:
     def _hover(self, item, scene_pos) -> None:
         zone = self._zone(item, item.mapFromScene(scene_pos))
         kind = zone[0] if zone else None
+        if kind == "cell":
+            cell = item.sheet.cells.get((zone[1], zone[2]))
+            from PySide6.QtWidgets import QToolTip
+            if cell is not None and cell.comment:
+                QToolTip.showText(QCursor.pos(), cell.comment, self.view)
+            else:
+                QToolTip.hideText()
         cursor = {"col_edge": Qt.SplitHCursor, "row_edge": Qt.SplitVCursor, "fill": Qt.CrossCursor,
                   "border": Qt.SizeAllCursor, "grow": Qt.SizeFDiagCursor, "tab": Qt.OpenHandCursor,
                   "col": Qt.ArrowCursor, "row": Qt.ArrowCursor, "corner": Qt.ArrowCursor,
@@ -814,6 +845,9 @@ class TableEditing:
             return True
         text = editor.text()
         cell = self.editing_cell
+        if item is not None and cell is not None and not self._valid(item, cell, text):
+            editor.setFocus()
+            return False
         self.editor = None
         self.editing_cell = None
         self.point = None
@@ -837,7 +871,10 @@ class TableEditing:
                             wb.set_input(sheet, row, col, moved)
                 self._change("Typing", put)
             else:
-                self._change("Typing", lambda wb, sheet: wb.set_input(sheet, cell[0], cell[1], text))
+                def put_one(wb, sheet):
+                    wb.set_input(sheet, cell[0], cell[1], text)
+                    self._widen_for_number(sheet, *cell)
+                self._change("Typing", put_one)
             problem = item.sheet.cell(*cell).problem if item.sheet.cell(*cell) else None
             if problem:
                 self.view.statusMessage.emit(f"{col_letters(cell[1])}{cell[0] + 1}: {problem}")
@@ -846,6 +883,85 @@ class TableEditing:
         else:
             self._show_selection()
         return True
+
+    def _valid(self, item, cell, text: str) -> bool:
+        """Data validation: a Stop rule won't take what it doesn't allow
+        (Retry or Cancel); a Warning asks; Information tells."""
+        from ..sheet import validation
+        if text.startswith("=") or text == item.sheet.input(*cell):
+            return True
+        message = validation.check(item.sheet, cell[0], cell[1], text)
+        if message is None:
+            return True
+        rule = validation.at(item.sheet, *cell)
+        style = rule.get("style", "stop")
+        window = self.view.window
+        self.view.statusMessage.emit(message)
+        if not getattr(window, "interactive_prompts", True):
+            return style != "stop"
+        from PySide6.QtWidgets import QMessageBox
+        title = rule.get("error_title") or "CalcForge"
+        if style == "stop":
+            got = QMessageBox.critical(self.view, title, message, QMessageBox.Retry | QMessageBox.Cancel)
+            if got == QMessageBox.Cancel:
+                self.cancel()
+            return False
+        if style == "warning":
+            got = QMessageBox.warning(self.view, title, message + "\n\nContinue?",
+                                      QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel)
+            if got == QMessageBox.Cancel:
+                self.cancel()
+            return got == QMessageBox.Yes
+        got = QMessageBox.information(self.view, title, message, QMessageBox.Ok | QMessageBox.Cancel)
+        if got == QMessageBox.Cancel:
+            self.cancel()
+            return False
+        return True
+
+    def list_menu(self):
+        """A list validation's choices, to pick one for the active cell."""
+        from ..sheet import validation
+        item = self.item
+        if item is None:
+            return None
+        rule = validation.at(item.sheet, *self.active)
+        if rule is None or rule.get("type") != "list":
+            return None
+        menu = QMenu(self.view)
+        row, col = self.active
+        for text in validation.list_items(item.sheet, rule, row, col):
+            menu.addAction(text, lambda t=text: self._change(
+                "Pick", lambda wb, s: wb.set_input(s, row, col, t)))
+        if getattr(self.view.window, "interactive_prompts", True):
+            rect = item.mapRectToScene(item.cell_rect(row, col))
+            menu.exec(self.view.viewport().mapToGlobal(self.view.mapFromScene(rect.bottomLeft())))
+        return menu
+
+    @staticmethod
+    def _widen_for_number(sheet, row: int, col: int) -> None:
+        """Excel's feel: a number typed into a column whose width was never
+        set widens it to fit, rather than showing ####. (A column sized by
+        hand keeps its width, and shows ####.)"""
+        from PySide6.QtGui import QFontMetricsF
+        from ..sheet.numfmt import format_value
+        from ..sheet.values import Qty
+
+        if col in sheet.widths or sheet.merge_at(row, col):
+            return
+        cell = sheet.cells.get((row, col))
+        if cell is None or cell.is_formula:
+            return
+        value = cell.value
+        if not isinstance(value, (float, Qty)) or isinstance(value, bool):
+            return
+        wb = sheet.workbook
+        st = wb.styles.get(cell.style)
+        if st.wrap or st.shrink or st.rotation:
+            return
+        text = format_value(value, st.number_format, st.unit).text
+        need = QFontMetricsF(cell_font(st)).horizontalAdvance(text) + 2 * 2.0 + 2
+        if need > sheet.width(col):
+            wb.set_widths(sheet, [col], need)
 
     def cancel(self) -> None:
         editor = self.editor
@@ -1088,8 +1204,15 @@ class TableEditing:
             step = 10 if key == Qt.Key_PageDown else -10
             self.select((self.active[0] + step, self.active[1]))
             return True
+        if key == Qt.Key_F2 and shift:
+            from . import datatools
+            datatools.comment_dialog(self)
+            return True
         if key == Qt.Key_F2:
             self.begin_edit(None, enter_mode=False)
+            return True
+        if key == Qt.Key_Down and alt:
+            self.list_menu()
             return True
         if key in (Qt.Key_Delete,) and not ctrl:
             self.clear("contents")
@@ -1109,7 +1232,7 @@ class TableEditing:
                       Qt.Key_X: "x", Qt.Key_V: "v", Qt.Key_D: "d", Qt.Key_R: "r", Qt.Key_1: "1",
                       Qt.Key_5: "5", Qt.Key_Semicolon: ";", Qt.Key_Colon: ":", Qt.Key_Minus: "-",
                       Qt.Key_Plus: "+", Qt.Key_Equal: "+", Qt.Key_Z: "z", Qt.Key_Y: "y",
-                      Qt.Key_9: "9", Qt.Key_0: "0"}.get(key)
+                      Qt.Key_9: "9", Qt.Key_0: "0", Qt.Key_F: "f", Qt.Key_H: "h"}.get(key)
             if letter is not None:
                 return self._ctrl(letter, shift)
             return False
@@ -1132,13 +1255,14 @@ class TableEditing:
                                                   Qt.Key_5, Qt.Key_Semicolon, Qt.Key_Colon,
                                                   Qt.Key_Minus, Qt.Key_Plus, Qt.Key_Equal, Qt.Key_9,
                                                   Qt.Key_0, Qt.Key_Home, Qt.Key_End, Qt.Key_Space,
+                                                  Qt.Key_F, Qt.Key_H,
                                                   Qt.Key_Up, Qt.Key_Down, Qt.Key_Left, Qt.Key_Right):
             return True
         if key in (Qt.Key_Delete, Qt.Key_Backspace, Qt.Key_F2, Qt.Key_Escape, Qt.Key_Return,
                    Qt.Key_Enter, Qt.Key_Tab, Qt.Key_Backtab, Qt.Key_Home, Qt.Key_End,
                    Qt.Key_Up, Qt.Key_Down, Qt.Key_Left, Qt.Key_Right, Qt.Key_PageUp, Qt.Key_PageDown):
             return True
-        if mods & Qt.AltModifier and key == Qt.Key_Equal:
+        if mods & Qt.AltModifier and key in (Qt.Key_Equal, Qt.Key_Down):
             return True
         text = event.text()
         return bool(text and text.isprintable() and not (mods & (Qt.ControlModifier | Qt.AltModifier)))
@@ -1181,6 +1305,9 @@ class TableEditing:
             self.view.window.undo_stack.undo()
         elif letter == "y":
             self.view.window.undo_stack.redo()
+        elif letter in ("f", "h"):
+            from . import datatools
+            datatools.find_dialog(self, replace=letter == "h")
         elif letter == "9":
             self.hide("row", not shift)
         elif letter == "0":
@@ -1695,6 +1822,9 @@ class TableEditing:
         window = self.view.window
         if hasattr(window, "format_cells_dialog"):
             menu.addAction("Format Cells…", window.format_cells_dialog, QKeySequence("Ctrl+1"))
+        from . import datatools
+        datatools.fill_menu(menu, self)
+        menu.addSeparator()
         menu.addAction("Define Name…", self._ask_name)
         menu.addAction("Rename Table…", self.rename)
         menu.exec(global_pos)

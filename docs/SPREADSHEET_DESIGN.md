@@ -46,6 +46,11 @@ here is new.
 | Default font and size | Excel's: Calibri 11, columns 64 px and rows 20 px wide/high (96 px to the inch), so Excel content keeps its size. |
 | A table on a normal page | As on sheet pages: in Markup mode it is a markup (click selects, drag moves, double-click goes into its cells); in Calc mode clicks and typing go to the cells. |
 | Dragging a table's edge or corner | Adds or removes rows and columns, as when inserting it; row and column sizes change by dragging their header borders. |
+| Lookups by table name (confirmed 2026-10-09) | As built: `bolts(d)`, `bolts(d, "A", "B")`, `bolts(d, t)`; straight-line interpolation between rows, never extrapolated. |
+| Column lists in equations (confirmed) | `Loads.Load` — the column under the heading's first word ("Load (kN)"), e.g. `sum(Loads.Load)`. |
+| A number too wide for its cell | `####` as Excel, with Excel's feel: typing a number into a General cell of a column whose width was never set widens the column to fit it. |
+| Find and Replace | Both: Ctrl+F in an open table is Excel's Find & Replace for that table; the document Search also finds text in every table's cells. |
+| Cell conditional formatting with units | Units allowed: "greater than 200 kN" compares quantities (250 kN > 0.2 MN); a plain number compares the number as shown; units that don't match never match. |
 | Build order | 1 engine and formulas · 2 table markup with editing, fill, copy, formatting · 3 conditional formatting and data tools · 4 sheet pages, page breaks, scratch area · 5 charts, spill, named ranges · 6 xlsx. Each phase tested, pushed and reported. |
 
 ## Settled while building (small; recorded so they can be changed)

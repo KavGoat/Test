@@ -288,7 +288,7 @@ class TableItem(MarkupItem):
 
     def chrome_rect(self) -> QRectF:
         r = self.local_rect()
-        return r.adjusted(-ROWNUM_W, -(HEADING_H + TAB_H), 4, 4)
+        return r.adjusted(-ROWNUM_W, -(HEADING_H + TAB_H), 16, 4)
 
     def tab_rect(self) -> QRectF:
         """The name tab above the table (screen only)."""
@@ -318,6 +318,26 @@ class TableItem(MarkupItem):
         cell = sheet.cells.get((row, col))
         return sheet.workbook.styles.get(cell.style if cell else 0)
 
+    def _looks(self, row, col) -> dict:
+        """What conditional formatting makes of a cell ({} when nothing)."""
+        sheet = self.sheet
+        if sheet is None or not sheet.cond_rules:
+            return {}
+        from ..sheet.condfmt import looks_for
+        return looks_for(sheet).look(row, col)
+
+    def _shown_style(self, row, col) -> Style:
+        """The cell's style with its conditional formats on."""
+        st = self._style(row, col)
+        fmt = self._looks(row, col).get("format")
+        if not fmt:
+            return st
+        from dataclasses import replace as _replace
+        fields = {k: v for k, v in fmt.items() if hasattr(st, k)}
+        if "underline" in fields and fields["underline"] is True:
+            fields["underline"] = "single"
+        return _replace(st, **fields)
+
     def paint_content(self, painter: QPainter) -> None:
         sheet = self.sheet
         if sheet is None:
@@ -340,9 +360,22 @@ class TableItem(MarkupItem):
                 m = covered.get((r, c))
                 if m is not None and (r, c) != (m[0], m[1]):
                     continue
-                st = self._style(r, c)
-                if st.fill:
-                    painter.fillRect(self.cell_rect(r, c), QColor(st.fill))
+                st = self._shown_style(r, c)
+                look = self._looks(r, c) if sheet.cond_rules else {}
+                fill = st.fill if (look.get("format") or {}).get("fill") else (look.get("scale") or st.fill)
+                if fill:
+                    painter.fillRect(self.cell_rect(r, c), QColor(fill))
+                bar = look.get("bar")
+                if bar is not None:
+                    rect = self.cell_rect(r, c).adjusted(1, 1.5, -1, -1.5)
+                    rect.setWidth(rect.width() * bar[0])
+                    from PySide6.QtGui import QLinearGradient
+                    grad = QLinearGradient(rect.topLeft(), rect.topRight())
+                    grad.setColorAt(0, QColor(bar[1]))
+                    end = QColor(bar[1])
+                    end.setAlpha(60)
+                    grad.setColorAt(1, end)
+                    painter.fillRect(rect, grad)
         # gridlines, on screen only (Excel's default)
         if sheet.show_gridlines and not printing:
             pen = QPen(GRIDLINE, 0)
@@ -393,12 +426,22 @@ class TableItem(MarkupItem):
 
     def _paint_text(self, painter, r, c, cell, rows, cols, covered) -> None:
         sheet = self.sheet
-        st = self.sheet.workbook.styles.get(cell.style)
+        st = self._shown_style(r, c)
         shown = format_value(cell.value, st.number_format, st.unit)
         text = shown.text
         if not text:
             return
         rect = self.cell_rect(r, c)
+        icon = self._looks(r, c).get("icon") if sheet.cond_rules else None
+        if icon is not None:
+            # an icon set's icon at the cell's left, the text beside it
+            painter.save()
+            painter.setFont(page_font("", 9.0))
+            painter.setPen(QColor(icon[1]))
+            painter.drawText(QRectF(rect.left() + 1, rect.top(), 11, rect.height()),
+                             Qt.AlignCenter, icon[0])
+            painter.restore()
+            rect = rect.adjusted(11, 0, 0, 0)
         font = cell_font(st)
         metrics = QFontMetricsF(font)
         value = cell.value
@@ -502,6 +545,9 @@ class TableItem(MarkupItem):
         if getattr(frame, "print_mode", False) or self.sheet is None:
             return
         painter.save()
+        self._paint_marks(painter)
+        painter.restore()
+        painter.save()
         if self.opened:
             self._paint_chrome(painter)
             self._paint_selection(painter)
@@ -510,6 +556,91 @@ class TableItem(MarkupItem):
         if self.opened or self.isSelected():
             self._paint_tab(painter)
         painter.restore()
+
+    circles: list = ()            # Circle Invalid Data: cells to ring (screen only)
+
+    def _paint_marks(self, painter) -> None:
+        """On screen only: comment triangles, filter buttons, the list
+        drop-down on the active cell, invalid-data circles."""
+        sheet = self.sheet
+        rows, cols = self.size
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        for (r, c), cell in sheet.cells.items():
+            if cell.comment and r < rows and c < cols:
+                rect = self.cell_rect(r, c)
+                path = QPainterPath()
+                path.moveTo(rect.topRight())
+                path.lineTo(rect.topRight() + QPointF(-4, 0))
+                path.lineTo(rect.topRight() + QPointF(0, 4))
+                path.closeSubpath()
+                painter.fillPath(path, QColor("#d9480f"))
+        flt = sheet.filter
+        if flt is not None:
+            t, l, b, r = flt["range"]
+            for c in range(l, min(r, cols - 1) + 1):
+                box = self.filter_button(c)
+                on = c in flt.get("criteria", {})
+                painter.setPen(QPen(QColor("#8c8c8c"), 0))
+                painter.setBrush(QColor("#ffffff"))
+                painter.drawRect(box)
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(EXCEL_GREEN if on else QColor("#444444"))
+                mid = box.center()
+                if on:              # a funnel: this column is filtered
+                    tri = QPainterPath()
+                    tri.moveTo(mid + QPointF(-3, -2.5))
+                    tri.lineTo(mid + QPointF(3, -2.5))
+                    tri.lineTo(mid + QPointF(0.7, 0.5))
+                    tri.lineTo(mid + QPointF(0.7, 3))
+                    tri.lineTo(mid + QPointF(-0.7, 3))
+                    tri.lineTo(mid + QPointF(-0.7, 0.5))
+                    tri.closeSubpath()
+                    painter.drawPath(tri)
+                else:
+                    tri = QPainterPath()
+                    tri.moveTo(mid + QPointF(-2.5, -1))
+                    tri.lineTo(mid + QPointF(2.5, -1))
+                    tri.lineTo(mid + QPointF(0, 1.8))
+                    tri.closeSubpath()
+                    painter.drawPath(tri)
+        if self.opened and self.active is not None and self.list_button() is not None:
+            box = self.list_button()
+            painter.setPen(QPen(QColor("#8c8c8c"), 0))
+            painter.setBrush(QColor("#f3f3f3"))
+            painter.drawRect(box)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor("#444444"))
+            mid = box.center()
+            tri = QPainterPath()
+            tri.moveTo(mid + QPointF(-2.5, -1))
+            tri.lineTo(mid + QPointF(2.5, -1))
+            tri.lineTo(mid + QPointF(0, 1.8))
+            tri.closeSubpath()
+            painter.drawPath(tri)
+        if self.circles:
+            pen = QPen(QColor("#e03131"), 1.2)
+            painter.setPen(pen)
+            painter.setBrush(Qt.NoBrush)
+            for r, c in self.circles:
+                if r < rows and c < cols:
+                    painter.drawEllipse(self.cell_rect(r, c).adjusted(-3, -2, 3, 2))
+
+    def filter_button(self, col: int) -> QRectF:
+        """The AutoFilter drop-down of a column (in the filter's first row)."""
+        top = self.sheet.filter["range"][0]
+        rect = self.cell_rect(top, col, merged=False)
+        s = min(11.0, rect.height() - 2)
+        return QRectF(rect.right() - s - 1, rect.bottom() - s - 1, s, s)
+
+    def list_button(self) -> Optional[QRectF]:
+        """The drop-down beside the active cell when it has a list to pick from."""
+        from ..sheet.validation import at
+        rule = at(self.sheet, *self.active)
+        if rule is None or rule.get("type") != "list" or not rule.get("dropdown", True):
+            return None
+        rect = self.cell_rect(*self.active)
+        s = min(12.0, rect.height())
+        return QRectF(rect.right() + 1, rect.bottom() - s, s, s)
 
     def paint_handles(self, painter: QPainter) -> None:
         if not self.opened:
@@ -536,6 +667,7 @@ class TableItem(MarkupItem):
         painter.setRenderHint(QPainter.Antialiasing, False)
         grid = QPen(QColor("#bdbdbd"), 0)
         grid.setCosmetic(True)
+        painter.setBrush(Qt.NoBrush)
         for c in range(cols):
             cell = QRectF(xs[c], -HEADING_H, xs[c + 1] - xs[c], HEADING_H)
             on = sel is not None and sel[1] <= c <= sel[3]

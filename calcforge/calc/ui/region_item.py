@@ -73,8 +73,13 @@ class RegionItem(QGraphicsObject):
 
     def relayout(self) -> None:
         self.prepareGeometryChange()
-        if self.style.size_pt != self.region.font_size:
-            self.style = Style(self.region.font_size)
+        reg = self.region
+        colour = reg.color if (reg.color or "#000000").lower() != "#000000" else None
+        want = (reg.font_size, colour, bool(reg.bold), bool(reg.underline))
+        have = (self.style.size_pt, self.style.color.name() if getattr(self.style, "color", None) else None,
+                getattr(self.style, "bold", False), getattr(self.style, "underline", False))
+        if have != want:
+            self.style = Style(reg.font_size, colour, bool(reg.bold), bool(reg.underline))
         if self.region.special == "picture":
             self._size = (max(4.0, self.region.pic_w), max(4.0, self.region.pic_h))
             self._layout = None
@@ -136,6 +141,9 @@ class RegionItem(QGraphicsObject):
         base = max(PAD_TOP + whole.asc, PAD_TOP + 11.4)
         whole.x, whole.y = PAD_X, base
         self._baseline = base
+        if self.style.color is not None:
+            from .layout import recolour
+            recolour(whole, self.style.color)
         self._layout = whole
         self._rows = absolute_rows(whole, lay.rows)
         h = max(MIN_H, base + whole.desc + PAD_BOTTOM)

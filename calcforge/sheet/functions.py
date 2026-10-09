@@ -828,7 +828,21 @@ def RANDARRAY(rows=MISSING, cols=MISSING, lo=MISSING, hi=MISSING, whole=MISSING)
 
 @fn("SUBTOTAL", least=2)
 def SUBTOTAL(code, *refs):
-    which = integer(code) % 100
+    """Leaves out rows a filter hides (101-111: rows hidden by hand too), as Excel."""
+    n = integer(code)
+    which = n % 100
+    kept = []
+    for ref in refs:
+        if isinstance(ref, RefValue):
+            sheet = ref.sheet
+            skip = set(sheet.filtered_rows) | (set(sheet.hidden_rows) if n > 100 else set())
+            if skip:
+                rows = [tuple(sheet.workbook.value(sheet, r, c) for c in range(ref.left, ref.right + 1))
+                        for r in range(ref.top, ref.bottom + 1) if r not in skip]
+                kept.append(Array(tuple(rows)) if rows else Array(((BLANK,),)))
+                continue
+        kept.append(ref)
+    refs = kept
     table = {1: AVERAGE, 2: COUNT, 3: COUNTA, 4: MAX, 5: MIN, 6: PRODUCT, 7: STDEV, 8: STDEVP,
              9: SUM, 10: VAR, 11: VARP}
     f = table.get(which)

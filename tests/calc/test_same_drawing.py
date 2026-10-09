@@ -6,7 +6,8 @@ Three things together say so, now that WebSMath's own window is gone
 
 - the drawing code *is* WebSMath's: ``calc/ui/layout.py`` and
   ``calc/ui/region_item.py`` are byte for byte the files at WebSMath's commit
-  8b340fa (their SHA-256 is below);
+  8b340fa (their SHA-256 is below), but for the one change the user allowed
+  on 2026-10-09 (colour, bold and underline on maths), kept as a diff;
 - the same keystrokes typed into CalcForge make the same equations, with the
   same results, as they did in WebSMath's window (recorded from it before it
   was removed);
@@ -63,11 +64,28 @@ def _difference(a: QImage, b: QImage) -> int:
                for x in range(a.width()) for y in range(a.height()))
 
 
-def test_the_drawing_code_is_websmaths_byte_for_byte():
+# The one change the user allowed (2026-10-09: "Make them work" — an
+# equation's Colour, Bold and Underline drawn on its maths): this diff, and
+# nothing else, separates the files from WebSMath's. Ordinary equations
+# (black, regular) go through it untouched.
+APPROVED = Path(__file__).with_name("websmath_drawing_colour.diff")
+
+
+def test_the_drawing_code_is_websmaths_byte_for_byte(tmp_path):
+    import shutil
+    import subprocess
+
     folder = Path(__file__).resolve().parents[2] / "calcforge" / "calc" / "ui"
+    target = tmp_path / "calcforge" / "calc" / "ui"
+    target.mkdir(parents=True)
+    for name in WEBSMATH_CODE:
+        shutil.copy(folder / name, target / name)
+    undone = subprocess.run(["git", "apply", "-R", str(APPROVED)], cwd=tmp_path,
+                            capture_output=True, text=True)
+    assert undone.returncode == 0, undone.stderr
     for name, digest in WEBSMATH_CODE.items():
-        assert hashlib.sha256((folder / name).read_bytes()).hexdigest() == digest, \
-            f"calc/ui/{name} is no longer WebSMath's drawing code, one to one"
+        assert hashlib.sha256((target / name).read_bytes()).hexdigest() == digest, \
+            f"calc/ui/{name} differs from WebSMath's drawing code by more than the approved change"
 
 
 def test_equations_are_drawn_pixel_for_pixel_as_websmath_draws_them(window):

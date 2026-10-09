@@ -1025,3 +1025,39 @@ never shown on maths — WebSMath draws maths black and regular. Left as they
 are for the user to decide.
 
 Tests: `tests/test_equation_rules.py` (6).
+
+## Spreadsheets, phase 3 — conditional formatting and data tools (2026-10-09)
+
+Open points from phase 2, answered by the user: lookups kept as built;
+column lists are `Loads.Load`; a typed number widens a never-sized column
+(else ####); **equations' Colour, Bold and Underline now show on maths** —
+the user let WebSMath's drawing change for this (`calc/ui/layout.py` and
+`region_item.py` differ from WebSMath's only by the diff kept in
+`tests/calc/websmath_drawing_colour.diff`, which the identity test checks);
+equation conditional formatting sets colour, size, bold, underline and
+background; Find & Replace both in tables and in the document Search; cell
+rules compare units.
+
+* **Conditional formatting** (right-click ▸ Conditional Formatting): Highlight
+  Cells Rules (greater/less/between/equal/not equal, text that contains, a date
+  occurring, duplicates), Top/Bottom rules (top/bottom n or n%, above/below
+  average), Data Bars, Colour Scales, Icon Sets, New Rule with a formula, Clear
+  Rules, Manage Rules (order, applies to, Stop If True). "200 kN" compares
+  quantities; a plain number compares the number as shown; units that don't
+  match never match. Rules move with inserted/deleted rows and columns.
+* **Sort** A→Z / Z→A on the active column, Custom Sort with levels and
+  headings; blanks last; formulas keep reading their own row.
+* **AutoFilter**: drop-downs in the first row (screen only): sort, choose
+  values, number/text filter with two conditions, top 10, clear; filtered rows
+  take no room and don't print; SUBTOTAL leaves them out.
+* **Data validation**: whole number, decimal, list (in-cell drop-down, Alt+↓),
+  date, time, text length, custom formula, with units in limits; input message;
+  Stop/Warning/Information alerts; Circle Invalid Data.
+* **Comments**: new/edit/delete (Shift+F2), a red triangle on screen, the comment
+  as a tooltip.
+* **Find & Replace** (Ctrl+F / Ctrl+H in an open table): this table or all,
+  formulas/values/comments, match case, entire cell, Excel's wildcards; the
+  document Search also finds and replaces in table cells.
+
+Tests: `tests/sheet/test_data_tools.py` (11), `tests/test_table_data.py` (8),
+`tests/test_equation_rules.py` (8).

@@ -581,7 +581,8 @@ def format_value(value, code: Optional[str] = None, unit: Optional[str] = None) 
                 x = (value.si - offset) / factor
         got = format_number(x, code)
         if shown_unit:
-            got.text = f"{got.text} {shown_unit}"
+            # kN*m is written kN·m, as CalcForge's equations write it
+            got.text = f"{got.text} {shown_unit.replace('*', '·')}"
         return got
     if isinstance(value, (int, float)):
         if unit and code is None:

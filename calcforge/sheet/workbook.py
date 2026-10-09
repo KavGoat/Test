@@ -91,6 +91,10 @@ class Sheet:
         self.size: Optional[tuple] = None
         self.show_gridlines = True
         self.show_headings = False           # print row and column headings
+        self.cond_rules: list = []           # conditional formatting (condfmt.py)
+        self.validations: list = []          # data validation (validation.py)
+        self.filter: Optional[dict] = None   # AutoFilter: {"range": [t,l,b,r], "criteria": {col: {...}}}
+        self.filtered_rows: set = set()      # rows the filter hides
 
     def __repr__(self) -> str:
         return f"Sheet({self.name!r})"
@@ -130,6 +134,17 @@ class Sheet:
             for row in rows[i:j]:
                 yield row, col
 
+    def data_area(self) -> Optional[tuple]:
+        """(top, left, bottom, right) of the cells that hold something typed
+        (not those that only have a look, like a table's empty bordered
+        cells); None when there are none."""
+        keys = [k for k, c in self.cells.items() if c.input]
+        if not keys:
+            return None
+        rows = [r for r, _ in keys]
+        cols = [c for _, c in keys]
+        return min(rows), min(cols), max(rows), max(cols)
+
     def used_area(self) -> Optional[tuple]:
         """(top, left, bottom, right) of everything in the sheet, or None."""
         if not self.cells:
@@ -147,15 +162,15 @@ class Sheet:
         return cell.input if cell else ""
 
     # -- layout --
+    def height(self, row: int) -> float:
+        if row in self.hidden_rows or row in self.filtered_rows:
+            return 0.0
+        return self.heights.get(row, self.default_height)
+
     def width(self, col: int) -> float:
         if col in self.hidden_cols:
             return 0.0
         return self.widths.get(col, self.default_width)
-
-    def height(self, row: int) -> float:
-        if row in self.hidden_rows:
-            return 0.0
-        return self.heights.get(row, self.default_height)
 
     def col_x(self, col: int) -> float:
         """Left edge of a column, from the sheet's left edge."""
@@ -173,7 +188,7 @@ class Sheet:
         for r, h in self.heights.items():
             if r < row:
                 y += h - self.default_height
-        for r in self.hidden_rows:
+        for r in self.hidden_rows | self.filtered_rows:
             if r < row:
                 y -= self.heights.get(r, self.default_height)
         return y
@@ -326,6 +341,7 @@ class Workbook:
         self._in_pass = False
         self._changed: set = set()
         self._outside_reads: dict[tuple, set] = {}
+        self.version = 0                             # bumped whenever a value changes
         self._undo: list[_Transaction] = []
         self._redo: list[_Transaction] = []
         self._open: Optional[_Transaction] = None
@@ -797,6 +813,7 @@ class Workbook:
         return changed
 
     def _tell(self, changed: set) -> None:
+        self.version += 1
         for listener in list(self.listeners):
             listener(changed)
 
@@ -996,6 +1013,27 @@ class Workbook:
             if m[0] != m[2] or m[1] != m[3]:
                 merges.append(m)
         sheet.merges = merges
+        sheet.cond_rules = [r for r in (_shift_ranges(rule, axis, at, delta) for rule in sheet.cond_rules) if r]
+        sheet.validations = [r for r in (_shift_ranges(v, axis, at, delta) for v in sheet.validations) if r]
+        if sheet.filter is not None:
+            moved = _shift_ranges({"ranges": [sheet.filter["range"]]}, axis, at, delta)
+            if moved is None:
+                sheet.filter, sheet.filtered_rows = None, set()
+            else:
+                sheet.filter["range"] = moved["ranges"][0]
+                if axis == "col":
+                    crit = {}
+                    for c, v in sheet.filter.get("criteria", {}).items():
+                        c = int(c)
+                        nc = c + delta if (delta > 0 and c >= at) else (
+                            None if delta < 0 and at <= c < at - delta else (c + delta if delta < 0 and c >= at - delta else c))
+                        if nc is not None:
+                            crit[nc] = v
+                    sheet.filter["criteria"] = crit
+            sheet.filtered_rows = {moved_r for moved_r in (
+                (r + delta if r >= at else r) if delta > 0 else
+                (None if at <= r < at - delta else (r + delta if r >= at - delta else r))
+                for r in sheet.filtered_rows) if moved_r is not None} if axis == "row" else sheet.filtered_rows
         if sheet.size is not None:
             rows, cols = sheet.size
             if axis == "row":
@@ -1091,6 +1129,18 @@ class Workbook:
                 sheet.size = (rows, cols)
                 sheet.merges = [m for m in sheet.merges if m[2] < rows and m[3] < cols]
             self._layout_change(sheet, change)
+
+    # -- conditional formats, validation, filter ------------------------------------------
+    def set_cond_rules(self, sheet: Sheet, rules: list) -> None:
+        import copy
+        with self.transaction("Conditional formatting"):
+            self._layout_change(sheet, lambda: setattr(sheet, "cond_rules", copy.deepcopy(rules)))
+        self._tell({("layout", sheet.id)})
+
+    def set_validations(self, sheet: Sheet, validations: list) -> None:
+        import copy
+        with self.transaction("Data validation"):
+            self._layout_change(sheet, lambda: setattr(sheet, "validations", copy.deepcopy(validations)))
 
     # -- styles ------------------------------------------------------------------------
     def style_of(self, sheet: Sheet, row: int, col: int) -> Style:
@@ -1235,16 +1285,46 @@ class Workbook:
                     self._set_state(dst, row + i, col + j, state)
 
 
+def _shift_ranges(rule: dict, axis: str, at: int, delta: int):
+    """A rule's (or validation's) ranges after rows/columns were inserted
+    (delta > 0) or deleted; None when nothing of it is left."""
+    out = []
+    for t, l, b, r in rule.get("ranges", []):
+        lo, hi = (t, b) if axis == "row" else (l, r)
+        if delta > 0:
+            lo2 = lo + delta if lo >= at else lo
+            hi2 = hi + delta if hi >= at else hi
+        else:
+            gone = -delta
+            last = at + gone - 1
+            if lo >= at and hi <= last:
+                continue
+            lo2 = lo if lo < at else (at if lo <= last else lo - gone)
+            hi2 = hi if hi < at else (at - 1 if hi <= last else hi - gone)
+        out.append([lo2, l, hi2, r] if axis == "row" else [t, lo2, b, hi2])
+    if not out:
+        return None
+    new = dict(rule)
+    new["ranges"] = out
+    return new
+
+
 def _layout_state(sheet: Sheet) -> tuple:
+    import copy
     return (dict(sheet.widths), dict(sheet.heights), frozenset(sheet.hidden_rows),
-            frozenset(sheet.hidden_cols), tuple(sheet.merges), sheet.size)
+            frozenset(sheet.hidden_cols), tuple(sheet.merges), sheet.size,
+            copy.deepcopy(sheet.cond_rules), copy.deepcopy(sheet.validations),
+            copy.deepcopy(sheet.filter), frozenset(sheet.filtered_rows))
 
 
 def _set_layout(sheet: Sheet, state: tuple) -> None:
-    widths, heights, hrows, hcols, merges, size = state
+    import copy
+    widths, heights, hrows, hcols, merges, size, rules, valids, filt, frows = state
     sheet.widths, sheet.heights = dict(widths), dict(heights)
     sheet.hidden_rows, sheet.hidden_cols = set(hrows), set(hcols)
     sheet.merges, sheet.size = list(merges), size
+    sheet.cond_rules, sheet.validations = copy.deepcopy(rules), copy.deepcopy(valids)
+    sheet.filter, sheet.filtered_rows = copy.deepcopy(filt), set(frows)
 
 
 def _qualify_for(text: str, src: Sheet, dst: Sheet) -> str:
