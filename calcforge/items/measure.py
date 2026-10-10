@@ -5,7 +5,7 @@ import math
 from typing import Optional
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import (QBrush, QColor, QFont, QFontMetricsF, QPainter, QPainterPath,
+from PySide6.QtGui import (QBrush, QColor, QFontMetricsF, QPainter, QPainterPath,
                            QPen, QPolygonF)
 
 from ..core.units import Q_, convert, format_quantity, parse_unit

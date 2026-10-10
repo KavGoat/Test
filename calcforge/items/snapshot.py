@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QByteArray, QDataStream, QIODevice, QRectF, Qt
+from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QPainter, QPicture
 
 from .base import MarkupItem, Style, build_item, register_item
@@ -119,7 +119,6 @@ class SnapshotItem(MarkupItem):
 
     def source_markups(self, document=None) -> list:
         """The markups it was taken of, built back from what was kept."""
-        from ..io import pdfsnapshot  # register source paths when opening a saved snapshot
         made = []
         for payload in self.source_items:
             try:

@@ -6,9 +6,7 @@ shown in it (5000 N shown as 5 kN), with the format's digits.
 """
 from __future__ import annotations
 
-from dataclasses import replace
 
-from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox,
                                QDoubleSpinBox, QFontComboBox, QFormLayout, QGridLayout,
@@ -16,7 +14,7 @@ from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDialog, QDia
                                QSpinBox, QTabWidget, QVBoxLayout, QWidget)
 
 from ..sheet.numfmt import format_value
-from ..sheet.style import Border, Style
+from ..sheet.style import Border
 from ..sheet.values import UnitTextError, unit_parts
 
 CATEGORIES = ["General", "Number", "Currency", "Accounting", "Date", "Time", "Percentage",

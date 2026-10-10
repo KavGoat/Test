@@ -17,18 +17,18 @@ import random
 import re
 import statistics
 from dataclasses import dataclass
-from decimal import ROUND_CEILING, ROUND_DOWN, ROUND_FLOOR, ROUND_HALF_UP, ROUND_UP, Decimal
+from decimal import ROUND_DOWN, ROUND_HALF_UP, ROUND_UP, Decimal
 from typing import Callable, Optional
 
 from calcforge.calc.engine.units import NODIM, dims_scale
 
 from . import formula as F
-from .dates import date_from_serial, datetime_from_serial, serial_from_date, serial_from_datetime
+from .dates import date_from_serial, serial_from_date, serial_from_datetime
 from .evaluate import (MISSING, Ctx, RefValue, _broadcast, compare_values, deref, ev, scalar)
-from .refs import MAX_COLS, MAX_ROWS, CellRef, RangeRef, col_letters, parse_range, quote_sheet
+from .refs import MAX_COLS, MAX_ROWS, CellRef, parse_range, quote_sheet
 from .values import (BLANK, CALC, DIV0, ERROR_NUMBERS, NA, NAME, NUM, REF, UNITS_ERR, VALUE, Array,
                      ErrorValue, Qty, SheetError, add, default_unit, div, general_number, is_number,
-                     magnitude, map_shown, mul, power, quantity, scaled, sub, to_bool, to_float, to_int,
+                     magnitude, map_shown, mul, power, quantity, scaled, to_bool, to_float, to_int,
                      to_number, to_text, unit_parts, UnitTextError)
 
 

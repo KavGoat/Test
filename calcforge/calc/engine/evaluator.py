@@ -274,7 +274,6 @@ class Evaluator:
             if ranged:
                 # SMath: result[k,2]:=f(data[k,2]) with k:=range(1,9) assigns
                 # every element, k taking each value of the range in turn
-                from .values import Matrix as _M
 
                 n = len(next(iter(ranged.values())).items)
                 if any(len(v.items) != n for v in ranged.values()):

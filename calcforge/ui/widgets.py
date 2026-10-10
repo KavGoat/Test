@@ -5,7 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRect, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap, QPen
 from PySide6.QtWidgets import (QAbstractScrollArea, QLayout, QAbstractSpinBox, QColorDialog, QComboBox,
-                               QGridLayout, QHBoxLayout, QLabel, QMenu, QSlider,
+                               QGridLayout, QHBoxLayout, QMenu, QSlider,
                                QToolButton, QWidget, QWidgetAction, QSpinBox,
                                QDoubleSpinBox)
 
@@ -252,7 +252,6 @@ def big_pattern_dropdown(combo, closed=QSize(64, 20)) -> None:
     draws every pattern big, with its name beside it, like Bluebeam's.
     """
     from PySide6.QtWidgets import QListView
-    from PySide6.QtWidgets import QStyledItemDelegate
     view = QListView()
     view.setIconSize(QSize(150, 34))
     view.setSpacing(2)

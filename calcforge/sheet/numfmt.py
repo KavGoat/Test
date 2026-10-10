@@ -115,6 +115,10 @@ def _tokenize(text: str) -> list:
                 tokens.append(("bracket", inner))
             i = j + 1
             continue
+        if text[i:i + 7].lower() == "general":
+            tokens.append(("general", "General"))    # not G, e (a year), n, e, r, a, l
+            i += 7
+            continue
         if ch in "Ee" and i + 1 < len(text) and text[i + 1] in "+-":
             tokens.append(("exp", text[i:i + 2]))
             i += 2
@@ -188,7 +192,9 @@ def _parse(code: str) -> list:
                 continue                # locale codes and the like
             rest.append((kind, t))
         kinds = {k for k, _ in rest}
-        if any(k == "date" for k in kinds):
+        if "general" in kinds:
+            kind = "general"                 # General, with any text round it: General" kN"
+        elif any(k == "date" for k in kinds):
             # m after h or before s is minutes
             fixed = []
             for idx, (k, t) in enumerate(rest):
@@ -209,11 +215,6 @@ def _parse(code: str) -> list:
             kind = "general"
         else:
             kind = "literal"
-        if kind == "number" or kind == "literal":
-            # General inside a section ("General;-General")
-            pass
-        if raw.lower().find("general") >= 0 and kind != "date":
-            kind = "general"
         percent = sum(1 for k, _ in rest if k == "percent")
         # commas right after the last digit (before the point or the end) scale by 1000
         scale = 0
@@ -383,7 +384,6 @@ def _fraction(section: _Section, x: float, own_sign: bool) -> str:
     if den_text.isdigit():
         den = int(den_text)
         num = round(x * den)
-        frac = Fraction(num, den) if False else None
         whole = int(num // den) if has_whole else 0
         n = num - whole * den if has_whole else num
         d = den
@@ -523,10 +523,12 @@ def format_number(x: float, code: Optional[str]) -> Shown:
     section, own_sign = _pick(sections, x)
     if section.kind == "general":
         body = _general(abs(x) if not own_sign else x)
-        prefix = "".join(t for k, t in section.tokens if k == "lit" and False)
-        lits_before = []
-        lits_after = []
-        return Shown(body, section.color, True)
+        if not any(k == "general" for k, _t in section.tokens):
+            return Shown(body, section.color, True)
+        # text written round General: General" kN", "F = "General
+        text = "".join(body if k == "general" else t for k, t in section.tokens
+                       if k in ("general", "lit"))
+        return Shown(text, section.color, True)
     if section.kind == "date":
         return Shown(_date(section, x), section.color, True)
     if section.kind == "text":

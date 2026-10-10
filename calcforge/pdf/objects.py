@@ -13,7 +13,7 @@ object of a known kind or gives null, and there is no third answer.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Iterator, Optional, Union
+from typing import Any, Iterator, Union
 
 
 class Name(str):
@@ -67,42 +67,6 @@ class Stream:
 # What a parsed object can be. Null is Python's None, which is the same thing
 # and saves everything downstream a second way of asking.
 Object = Union[None, bool, int, float, str, Name, list, dict, Ref, Stream]
-
-
-def is_dictionary(value: Any) -> bool:
-    """Whether *value* can be looked up by name — a dictionary or a stream."""
-    return isinstance(value, (dict, Stream))
-
-
-def dictionary_of(value: Any) -> dict:
-    """The dictionary part of *value*, empty when it has none."""
-    if isinstance(value, Stream):
-        return value.dictionary
-    if isinstance(value, dict):
-        return value
-    return {}
-
-
-def as_number(value: Any, otherwise: float = 0.0) -> float:
-    """A number, or *otherwise*. Booleans are not numbers here, deliberately."""
-    if isinstance(value, bool):
-        return otherwise
-    if isinstance(value, (int, float)):
-        return float(value)
-    return otherwise
-
-
-def as_numbers(value: Any) -> list[float]:
-    """A list of the numbers in an array, skipping anything that is not one."""
-    if not isinstance(value, (list, tuple)):
-        return []
-    return [float(item) for item in value
-            if isinstance(item, (int, float)) and not isinstance(item, bool)]
-
-
-def as_name(value: Any) -> str:
-    """A name's text, empty when it is not a name."""
-    return str(value) if isinstance(value, Name) else ""
 
 
 def as_text(value: Any) -> str:

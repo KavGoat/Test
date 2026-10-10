@@ -8,8 +8,7 @@ Format Painter and Format Cells.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QAction, QFont
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (QComboBox, QFontComboBox, QLabel, QLineEdit, QMenu, QToolButton)
 
 from ..sheet.numfmt import is_date_format
@@ -193,7 +192,6 @@ class TableControls:
         self.window.view.setFocus()
 
     def _align(self, key: str) -> None:
-        tables = self._tables()
         st = self._style()
         self._set(h_align="general" if st is not None and st.h_align == key else key)
 

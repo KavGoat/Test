@@ -13,7 +13,6 @@ zoom and are written into a PDF as strokes.
 from __future__ import annotations
 
 import math
-from typing import Optional
 
 from PySide6.QtCore import QLineF, QPointF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen

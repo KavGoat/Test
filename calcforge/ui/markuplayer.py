@@ -29,7 +29,7 @@ import math
 import time
 from collections import OrderedDict
 
-from PySide6.QtCore import QPointF, QRectF, QTimer
+from PySide6.QtCore import QRectF, QTimer
 from PySide6.QtGui import QImage, QPainter, QPixmap, QTransform
 from PySide6.QtWidgets import QGraphicsItem, QStyleOptionGraphicsItem
 

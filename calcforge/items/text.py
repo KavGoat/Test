@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import math
-import re
 from typing import Optional
 
 from PySide6.QtCore import QPointF, QRectF, Qt
@@ -201,21 +200,6 @@ class _InlineEditor(QGraphicsTextItem):
             super().contextMenuEvent(event)
             return
         menu.exec(event.screenPos())
-
-
-def _as_text(value, digits: int = 4) -> str:
-    """A value as it would be written in a sentence."""
-    from ..core.units import Quantity, format_number, format_quantity
-
-    if value is None:
-        return "—"
-    if isinstance(value, Quantity):
-        return format_quantity(value, digits, "auto")
-    if isinstance(value, bool):
-        return "yes" if value else "no"
-    if isinstance(value, (int, float)):
-        return format_number(value, digits)
-    return str(value)
 
 
 def _crosses(rect: QRectF, a: QPointF, b: QPointF) -> bool:
@@ -836,16 +820,8 @@ class _TextBase(MarkupItem):
         return (self.side_point_of(self.leaders[0]) if self.leaders
                 else self._rect.normalized().center())
 
-    def side_normal(self) -> QPointF:
-        return (self.side_normal_of(self.leaders[0]) if self.leaders
-                else QPointF(-1, 0))
-
     def elbow(self) -> QPointF:
         return self.elbow_of(self.leaders[0]) if self.leaders else QPointF()
-
-    def set_elbow_from(self, local_pos: QPointF) -> None:
-        if self.leaders:
-            self.set_elbow_of(self.leaders[0], local_pos)
 
     # -- handles and moving ------------------------------------------------
     def leader_handles(self) -> set[str]:
@@ -1472,11 +1448,6 @@ class CalloutItem(_TextBase):
         if leader is None:
             return self._rect.normalized().center()
         return self.side_point_of(leader)
-
-    def cloud_polygon(self):
-        from PySide6.QtGui import QPolygonF
-
-        return QPolygonF(list(self.cloud_points))
 
     def cloud_at(self, local_pos: QPointF) -> int:
         """Index of the cloud leader whose region contains *local_pos*, or -1."""

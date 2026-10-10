@@ -13,8 +13,8 @@ from typing import Optional
 
 from . import formula as F
 from .refs import MAX_COLS, MAX_ROWS, is_cell_name
-from .values import (BLANK, CALC, DIV0, ERRORS, NA, NAME, NUM, REF, UNITS_ERR, VALUE, Array,
-                     ErrorValue, Qty, SheetError, add, div, is_number, mul, neg, power, sub,
+from .values import (BLANK, ERRORS, NA, NAME, NUM, REF, UNITS_ERR, VALUE, Array,
+                     ErrorValue, Qty, SheetError, add, div, mul, neg, power, sub,
                      to_number, to_text, unit_parts, with_unit, UnitTextError)
 
 

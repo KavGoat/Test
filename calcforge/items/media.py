@@ -24,13 +24,6 @@ class ImageItem(MarkupItem):
         self.style = Style(stroke="", fill="", width=0.0)
         self._pixmap: Optional[QPixmap] = None
 
-    def set_pixmap(self, pixmap: QPixmap) -> None:
-        self._pixmap = pixmap
-        if not pixmap.isNull() and self.keep_aspect and self._rect.width() > 0:
-            ratio = pixmap.height() / max(pixmap.width(), 1)
-            self._rect.setHeight(self._rect.width() * ratio)
-        self.update()
-
     def pixmap(self) -> Optional[QPixmap]:
         return self._pixmap
 

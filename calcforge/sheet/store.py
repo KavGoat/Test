@@ -9,7 +9,7 @@
 """
 from __future__ import annotations
 
-from dataclasses import asdict, fields
+from dataclasses import fields
 
 from .style import Border, Style
 

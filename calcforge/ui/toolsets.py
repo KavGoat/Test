@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any, Optional
 
 from PySide6.QtCore import QSettings
 

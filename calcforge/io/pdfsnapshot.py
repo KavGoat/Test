@@ -6,7 +6,7 @@ import re
 import xml.etree.ElementTree as ET
 
 import pymupdf
-from PySide6.QtCore import QByteArray, QBuffer, QIODevice, QPointF, QRectF, Qt
+from PySide6.QtCore import QByteArray, QBuffer, QIODevice, QRectF, Qt
 from PySide6.QtGui import QImage, QPainterPath, QTransform
 from PySide6.QtSvg import QSvgRenderer
 

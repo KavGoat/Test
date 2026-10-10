@@ -23,7 +23,6 @@ from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QGraphicsScene, QG
 from ..core.document import MM_TO_PT, Document, Page
 from ..theme import CANVAS, LIGHT
 from ..items.base import MarkupItem, build_item
-from ..items.media import ImageItem
 
 ROW_TOLERANCE = 9.0        # points; items this close vertically share a row
 
@@ -277,19 +276,6 @@ def _region_to_draw(wanted: QRectF, whole: QRectF, scale: float,
     return region, scale * (most_pixels / pixels) ** 0.5
 
 
-def _sharpness_step(scale: float) -> float:
-    """The resolution to ask for, in steps rather than continuously.
-
-    Re-drawing the page on every notch of the wheel would be all wait and no
-    picture, so the size asked for doubles rather than creeping: a zoom is one
-    re-draw, not fifty.
-    """
-    step = 0.5
-    while step < scale and step < 32.0:
-        step *= 2.0
-    return step
-
-
 # The edge and label of a viewport: a region of the sheet at its own scale.
 VIEWPORT_INK = QColor("#7048e8")
 
@@ -421,13 +407,6 @@ class PageFrame(QGraphicsObject):
         path = QPainterPath()
         path.addRect(self.page_rect().adjusted(-1, -1, SHADOW_DEPTH + 1, SHADOW_DEPTH + 1))
         return path
-
-    def update_scene_rect(self) -> None:
-        """The page's size changed; the canvas has to be laid out again."""
-        self.prepareGeometryChange()
-        scene = self.scene()
-        if isinstance(scene, DocumentScene):
-            scene.layout_pages()
 
     # -- background --------------------------------------------------------
     def load_background(self) -> None:
@@ -1364,21 +1343,6 @@ class PageFrame(QGraphicsObject):
         finally:
             self.print_mode = previous
 
-    def render_picture(self, region: QRectF) -> QPicture:
-        """Snapshot drawing in *region*, recorded as vectors where possible.
-
-        The paper/background is deliberately absent. Imported PDF linework and
-        ordinary markups are copied, while typed content is included only when
-        that item was explicitly selected before taking the snapshot. This
-        keeps a drawing-detail snapshot from silently carrying somebody's notes
-        across with it.
-
-        The recording is in the region's own coordinates, so its top-left
-        corner is the origin and its size is the size of the snapshot.
-        """
-        box = QRectF(region).normalized()
-        return self.render_items_picture(self.picture_items(box), box)
-
     def picture_items(self, region: QRectF) -> list:
         """What a snapshot of *region* takes: whatever can be seen in it.
 
@@ -1625,11 +1589,6 @@ class DocumentScene(QGraphicsScene):
         self.frames.append(frame)
         return frame
 
-    def clear_frames(self) -> None:
-        for frame in self.frames:
-            self.removeItem(frame)
-        self.frames = []
-
     def layout_pages(self) -> None:
         """Stack the pages down the canvas, centred on the widest one.
 
@@ -1706,12 +1665,6 @@ class DocumentScene(QGraphicsScene):
         self.reading_turn = int(degrees) % 360
         self.layout_pages()
 
-    def frame_for(self, page: Page) -> Optional[PageFrame]:
-        for frame in self.frames:
-            if frame.page is page:
-                return frame
-        return None
-
     def frame_at(self, scene_pos: QPointF) -> Optional[PageFrame]:
         """The page under a point — or the nearest one, for a point on the desk."""
         if not self.frames:
@@ -1730,11 +1683,6 @@ class DocumentScene(QGraphicsScene):
     def index_at(self, scene_pos: QPointF) -> int:
         frame = self.frame_at(scene_pos)
         return self.frames.index(frame) if frame in self.frames else 0
-
-    def page_top(self, index: int) -> float:
-        if 0 <= index < len(self.frames):
-            return self.frames[index].pos().y()
-        return 0.0
 
     # -- items across the whole document ------------------------------------
     def markups(self) -> list[MarkupItem]:

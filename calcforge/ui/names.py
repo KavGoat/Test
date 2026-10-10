@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDialog,
                                QLineEdit, QPushButton, QTableWidget, QTableWidgetItem,
                                QVBoxLayout)
 
-from ..sheet.refs import area_text, col_letters, quote_sheet
+from ..sheet.refs import col_letters, quote_sheet
 
 
 def _frames(tables) -> list:
@@ -415,7 +415,3 @@ def names_menu(tables, menu) -> None:
     for dn in names:
         menu.addAction(dn.name, lambda n=dn.name: go_to_name(tables, n))
 
-
-def selection_text(tables) -> str:
-    t, l, b, r = tables.selection()
-    return area_text(t, l, b, r)

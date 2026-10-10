@@ -243,8 +243,7 @@ def _file_to_page(page: "pymupdf.Page") -> "pymupdf.Matrix":
         media = crop = None
     if not crop or len(crop) < 4:
         return pymupdf.Matrix(page.transformation_matrix)
-    left, bottom, right, top = min(crop[0], crop[2]), min(crop[1], crop[3]), \
-        max(crop[0], crop[2]), max(crop[1], crop[3])
+    left, top = min(crop[0], crop[2]), max(crop[1], crop[3])
     if media and len(media) >= 4:
         left = max(left, min(media[0], media[2]))
         top = min(top, max(media[1], media[3]))

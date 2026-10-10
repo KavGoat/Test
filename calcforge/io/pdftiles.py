@@ -882,7 +882,7 @@ class TileCache(QObject):
                     self._ask(key, data, page, sheet=False)
 
     def _same_zoom_other_state(self, source, index, step, region, annotations, without):
-        found, best = [], None
+        best = None
         for page_key, rungs in self._index.items():
             if (page_key[0] != "page" or page_key[1] != source or page_key[2] != index
                     or page_key[3] != annotations or page_key[4] == without

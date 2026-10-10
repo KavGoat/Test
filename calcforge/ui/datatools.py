@@ -13,8 +13,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox,
                                QFormLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget,
-                               QListWidgetItem, QMenu, QPlainTextEdit, QPushButton, QSpinBox,
-                               QTableWidget, QVBoxLayout, QWidget)
+                               QListWidgetItem, QMenu, QPlainTextEdit, QPushButton, QTableWidget, QVBoxLayout, QWidget)
 
 from ..sheet import condfmt, data, find, validation
 from ..sheet.refs import area_text, col_letters, parse_range
@@ -69,7 +68,6 @@ def clear_rules(tables, everywhere: bool) -> None:
 # -- the menus -------------------------------------------------------------------------------
 def fill_menu(menu: QMenu, tables) -> None:
     """Conditional formatting and the Data tools, for the table's right-click menu."""
-    window = tables.view.window
     cf = menu.addMenu("Conditional Formatting")
     hi = cf.addMenu("Highlight Cells Rules")
     for op, label in CELL_OPS[:5]:

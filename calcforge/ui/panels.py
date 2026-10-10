@@ -2,24 +2,23 @@
 from __future__ import annotations
 
 import csv
-import re
 
 from PySide6.QtCore import (QByteArray, QEvent, QMimeData, QPoint, QPointF, QRectF, QSize,
                             QTimer, Qt, Signal)
-from PySide6.QtGui import (QBrush, QColor, QDrag, QFont, QFontInfo, QIcon, QKeySequence,
-                           QPainter, QPainterPath, QPen, QPixmap)
+from PySide6.QtGui import (QColor, QDrag, QFont, QFontInfo, QIcon, QKeySequence,
+                           QPainter, QPen, QPixmap)
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox,
                                QDoubleSpinBox, QInputDialog, QMessageBox,
                                QFontComboBox, QFormLayout, QGroupBox, QHBoxLayout,
                                QHeaderView, QLabel, QLineEdit, QListView, QListWidget,
                                QListWidgetItem, QMenu, QPlainTextEdit, QPushButton,
-                               QScrollArea, QSpinBox, QTableWidget, QTableWidgetItem, QLayout,
+                               QScrollArea, QSpinBox, QLayout,
                                QToolButton, QTreeWidget, QTreeWidgetItem,
                                QVBoxLayout, QWidget)
 
 from ..core.units import format_quantity
-from ..items.base import (ARROW_HEADS, DASH_ARRAYS, HATCH_PATTERNS,
-                          LINE_STYLES, MarkupItem)
+from ..items.base import (DASH_ARRAYS, HATCH_PATTERNS,
+                          MarkupItem)
 from ..items.contents import ContentsItem
 from ..items.media import ImageItem
 from ..items.snapshot import SnapshotItem
@@ -1416,11 +1415,6 @@ class ToolSetsPanel(QWidget):
                            "Put back exactly what was added" if entry.mode == toolsets.COPY
                            else "Draw a new one with these properties")
             header.addChild(row)
-
-    def rebuild_entries(self) -> None:
-        """Redraw the rows of the set that is open, keeping where you were."""
-        name = self.current_set_name()
-        self.rebuild(keep=name)
 
     def rolled_up(self) -> set:
         """The sets that are currently collapsed, so a rebuild keeps them so."""

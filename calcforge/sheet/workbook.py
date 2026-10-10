@@ -17,14 +17,14 @@ from __future__ import annotations
 
 import bisect
 from contextlib import contextmanager
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from typing import Callable, Iterable, Optional
 
 from . import formula as F
 from .inputs import read_value
 from .refs import MAX_COLS, MAX_ROWS, CellRef, RangeRef, is_cell_name, parse_range
-from .style import Border, Style, StyleTable
-from .values import BLANK, NAME, REF, SPILL, Array, ErrorValue, SheetError
+from .style import Style, StyleTable
+from .values import BLANK, NAME, SPILL, Array, ErrorValue
 
 
 # -- cells ---------------------------------------------------------------------------
@@ -179,31 +179,6 @@ class Sheet:
         if col in self.hidden_cols:
             return 0.0
         return self.widths.get(col, self.default_width)
-
-    def col_x(self, col: int) -> float:
-        """Left edge of a column, from the sheet's left edge."""
-        x = col * self.default_width
-        for c, w in self.widths.items():
-            if c < col:
-                x += w - self.default_width
-        for c in self.hidden_cols:
-            if c < col:
-                x -= self.widths.get(c, self.default_width)
-        return x
-
-    def row_y(self, row: int) -> float:
-        y = row * self.default_height
-        for r, h in self.heights.items():
-            if r < row:
-                y += h - self.default_height
-        for r in self.hidden_rows | self.filtered_rows:
-            if r < row:
-                y -= self.heights.get(r, self.default_height)
-        return y
-
-    def col_at(self, x: float) -> int:
-        """The column under x (the last one when x is past the right edge of a table)."""
-        return _index_at(x, self.width, self.size[1] if self.size else None)
 
     def row_at(self, y: float) -> int:
         return _index_at(y, self.height, self.size[0] if self.size else None)
@@ -575,15 +550,6 @@ class Workbook:
 
     _replaying = False
 
-    def can_undo(self) -> bool:
-        return bool(self._undo)
-
-    def can_redo(self) -> bool:
-        return bool(self._redo)
-
-    def undo_label(self) -> str:
-        return self._undo[-1].label if self._undo else ""
-
     def undo(self) -> None:
         if not self._undo:
             return
@@ -626,12 +592,6 @@ class Workbook:
             text = "=" + _tidy_formula(text[1:])
         with self.transaction("Typing"):
             self._set_state(sheet, row, col, (text, style, comment))
-
-    def set_inputs(self, sheet: Sheet, row: int, col: int, rows: list[list[str]], label="Paste") -> None:
-        with self.transaction(label):
-            for i, line in enumerate(rows):
-                for j, text in enumerate(line):
-                    self.set_input(sheet, row + i, col + j, text)
 
     def set_style(self, sheet: Sheet, row: int, col: int, style: int) -> None:
         cell = sheet.cells.get((row, col))
@@ -799,10 +759,6 @@ class Workbook:
         self._precedents[key] = (tuple(cells), tuple(blocks))
         if cell.parsed.volatile:
             self._volatile.add(key)
-
-    def _dirty_from(self, key, include_self: bool) -> None:
-        """Mark everything that reads key (directly or not) for recalculation."""
-        self._dirty_many([key], include_self)
 
     def _dirty_many(self, keys, include_self: bool) -> None:
         seen = set(keys)

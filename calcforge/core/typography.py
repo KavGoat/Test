@@ -76,13 +76,6 @@ def page_font(family: str, size: float, bold: bool = False, italic: bool = False
     return font
 
 
-def scale_font(font: QFont, factor: float) -> QFont:
-    """A copy of *font* resized by *factor*, keeping pixel sizing."""
-    copy = QFont(font)
-    copy.setPixelSize(max(int(round(font.pixelSize() * factor)), MIN_PIXELS))
-    return copy
-
-
 def set_size(font: QFont, size: float) -> QFont:
     copy = QFont(font)
     copy.setPixelSize(max(int(round(size)), MIN_PIXELS))
@@ -133,6 +126,3 @@ def script_runs(text: str) -> list:
         runs.append(("".join(plain), ""))
     return runs
 
-
-def has_scripts(text: str) -> bool:
-    return any(level for _run, level in script_runs(text))

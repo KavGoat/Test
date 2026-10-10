@@ -282,20 +282,6 @@ def store_raster(document, image: Optional[QImage]) -> str:
     return document.add_asset(bytes(buffer.data()), "png")
 
 
-def ensure_background(document, page, dpi: float = BEST_DPI) -> str:
-    """Give *page* a stored sheet of its own, rendering one if it has none.
-
-    For the operations that destroy what the page came from — a redaction, a
-    recolour — where the point is that the source must stop being consulted.
-    """
-    if page.background_key and document.asset(page.background_key):
-        return page.background_key
-    key = store_raster(document, page_raster(document, page, dpi))
-    if key:
-        page.background_key = key
-    return key
-
-
 def setup_for(info: PdfPageInfo, fit: str, template: Optional[PageSetup]) -> PageSetup:
     """Choose the page geometry for an imported PDF page."""
     if fit == FIT_ORIGINAL:

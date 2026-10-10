@@ -15,11 +15,10 @@ import copy
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (QColorDialog, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
-                               QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit,
-                               QListWidget, QPushButton, QRadioButton, QTableWidget,
+                               QHBoxLayout, QHeaderView, QInputDialog, QLabel, QListWidget, QPushButton, QRadioButton, QTableWidget,
                                QTableWidgetItem, QVBoxLayout, QWidget)
 
-from ..calc.condformat import DCR_EXAMPLE, OPS, describe
+from ..calc.condformat import DCR_EXAMPLE, OPS
 
 
 class _Swatch(QPushButton):

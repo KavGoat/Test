@@ -330,7 +330,6 @@ class CalcEditing:
         next one, at the same distance across; past the last page, a blank
         page is added for it. Called inside the gesture's undo step."""
         window = self.window
-        view = self.view
         for item in items:
             frame = item.parentItem()
             pages = window.document.pages

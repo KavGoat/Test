@@ -1363,11 +1363,6 @@ def _cloud_path(polygon: QPolygonF, radius: float, closed: bool = True) -> QPain
     return path
 
 
-def dash_pattern_preview(style: str) -> list[float]:
-    return {"solid": [], "dash": [4, 3], "dot": [1, 3],
-            "dashdot": [5, 3, 1, 3], "dashdotdot": [5, 3, 1, 3, 1, 3]}.get(style, [])
-
-
 class _TheirLook(QGraphicsItem):
     """The file's own drawing of a markup nobody has changed, in the box the
     file gives it (/Rect) — not the box this application would measure:

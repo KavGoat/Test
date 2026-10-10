@@ -875,18 +875,6 @@ class PolyItem(MarkupItem):
             return
         super().move_handle(key, local_pos, keep_ratio)
 
-    def handle_hint(self, key: str) -> str:
-        """What a handle does, for the status bar and the pointer."""
-        if key.startswith("r") and key != "rot":
-            return "Drag to set how round this corner is"
-        if key.startswith("c"):
-            return "Drag to bend the curve"
-        if key.startswith("n"):
-            return "Drag to lean the curve one way or the other"
-        if key.startswith("v"):
-            return "Drag to move this point"
-        return ""
-
     def insert_point(self, local_pos: QPointF) -> int:
         """Insert a vertex on the nearest side; returns its index.
 

@@ -181,9 +181,6 @@ class PanelDock(QDockWidget):
         self._bar.refresh()
         self.pinnedChanged.emit(self._pinned)
 
-    def toggle_pinned(self) -> None:
-        self.set_pinned(not self._pinned)
-
     @property
     def collapsed(self) -> bool:
         return self._collapsed

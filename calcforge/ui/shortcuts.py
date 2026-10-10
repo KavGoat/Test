@@ -347,6 +347,3 @@ class ShortcutManager(QObject):
                 settings.setValue(action_id, text)
         settings.endGroup()
         settings.sync()
-
-    def as_key_sequence(self, action_id: str) -> QKeySequence:
-        return QKeySequence(self.sequence(action_id))

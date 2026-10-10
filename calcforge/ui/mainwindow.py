@@ -11,11 +11,11 @@ from typing import Optional
 from PySide6.QtCore import (QBuffer, QByteArray, QEvent, QIODevice, QMimeData, QModelIndex, QObject,
                             QPoint, QPointF, QRect, QRectF,
                             QSize, Qt, QTimer, Signal)
-from PySide6.QtGui import (QAction, QActionGroup, QColor, QCursor, QFont, QFontInfo, QImage, QPixmap,
+from PySide6.QtGui import (QAction, QActionGroup, QColor, QFont, QFontInfo, QImage, QPixmap,
                            QKeySequence, QPainter, QTextBlockFormat,
                            QTextCharFormat, QTextCursor, QTransform, QUndoStack)
 from PySide6.QtPrintSupport import QPrintDialog, QPrintPreviewDialog, QPrinter
-from PySide6.QtWidgets import (QTabBar, QApplication, QComboBox, QDockWidget, QDoubleSpinBox, QFontComboBox,
+from PySide6.QtWidgets import (QTabBar, QApplication, QComboBox, QDoubleSpinBox, QFontComboBox,
                                QFileDialog, QGraphicsItem, QHBoxLayout,
                                QInputDialog, QLabel, QLineEdit, QMainWindow,
                                QMenu, QMessageBox, QSizePolicy, QSpinBox,
@@ -48,7 +48,8 @@ from .docks import PanelDock, load_panel_state, save_panel_state
 from .rail import (AREAS, LEFT, RIGHT, PanelRail, RailBar, load_order,
                    load_sides, save_order, save_sides)
 from .scene import DocumentScene, detach
-from .shortcuts import MARKUP, COMMAND, INSERT, SYMBOL, TOOL, ShortcutManager
+from .shortcuts import MARKUP, COMMAND, INSERT, TOOL, ShortcutManager
+from .shortcuts import SYMBOL as TYPED_SYMBOL
 from .stylecaps import (CLOUD, CORNER, SYMBOL)
 from .stylecaps import (ARROW_SIZE, DASH, FILL, FILL_OPACITY, FONT, HATCH,
                         OPACITY, STROKE, WIDTH, capabilities,
@@ -2255,13 +2256,6 @@ class MainWindow(QMainWindow):
         self.switch_to_document(previous)
         return True
 
-    def refresh_document_tabs(self) -> None:
-        """Tab names follow the documents they stand for."""
-        for position, state in enumerate(self._open_documents):
-            if position < self.document_tabs.count():
-                self.document_tabs.setTabText(position,
-                                              self._tab_title(state["document"]))
-
     def open_new_window(self) -> "MainWindow":
         """A second window, with a document, pages and tool of its own.
 
@@ -2812,7 +2806,7 @@ class MainWindow(QMainWindow):
         if event.type() == QEvent.ShortcutOverride and self.view.is_editing():
             sequence = QKeySequence(event.keyCombination())
             binding = self.shortcuts.binding_for(sequence)
-            if not (binding is not None and (binding.kind == SYMBOL
+            if not (binding is not None and (binding.kind == TYPED_SYMBOL
                                              or binding.action_id in self.EDITOR_COMMANDS)):
                 # Including Ctrl+B, Ctrl+I and Ctrl+U. Whatever is bound to
                 # them, it does not fire in the middle of a sentence; the view
@@ -4156,7 +4150,7 @@ class MainWindow(QMainWindow):
             if callable(method):
                 method()
                 return True
-        if binding.kind == SYMBOL:
+        if binding.kind == TYPED_SYMBOL:
             self.insert_symbol(binding.payload)
             return True
         return False
@@ -5187,7 +5181,7 @@ class MainWindow(QMainWindow):
         """Go where a link goes: a page, a view, a file or a web address."""
         from PySide6.QtCore import QUrl
         from PySide6.QtGui import QDesktopServices
-        from ..items.link import FILE, PAGE, VIEW, WEB
+        from ..items.link import PAGE, VIEW, WEB
         if item.kind in (PAGE, VIEW):
             if not 0 <= item.target_page < len(self.document.pages):
                 self.status_hint.setText("That link points at a page that is not here")
@@ -7086,17 +7080,6 @@ class MainWindow(QMainWindow):
         self.status_hint.setText(
             f"{len(item.leaders)} leader(s) — cloud attached where it was drawn")
 
-    @staticmethod
-    def room_for_a_cloud(item) -> list:
-        """Where a fresh cloud leader starts out: beside the note, clear of it."""
-        rect = item.local_rect().normalized()
-        width = max(rect.width() * 0.7, 60.0)
-        height = max(rect.height() * 0.9, 40.0)
-        left = rect.right() + 48.0
-        top = rect.center().y() - height / 2
-        box = QRectF(left, top, width, height)
-        return [box.topLeft(), box.topRight(), box.bottomRight(), box.bottomLeft()]
-
     def remove_leader_from(self, item, index: int) -> None:
         """Take one leader off — and the note with it, if it was the last."""
         self.view.begin_snapshot(self.view.involved_frames(item))
@@ -7921,8 +7904,8 @@ class MainWindow(QMainWindow):
 
     def _burn_into_background(self, page, boxes: list) -> None:
         """Paint the boxes into the page's background image, destroying it."""
-        from PySide6.QtCore import QBuffer, QByteArray, QIODevice
-        from PySide6.QtGui import QImage, QPainter as _Painter
+        from PySide6.QtCore import QBuffer, QIODevice
+        from PySide6.QtGui import QPainter as _Painter
 
         image = pdfio.page_raster(self.document, page)
         if image is None or image.isNull():

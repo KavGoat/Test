@@ -1,7 +1,6 @@
 """Document, page and scale model."""
 from __future__ import annotations
 
-import math
 import uuid
 import re
 from dataclasses import asdict, dataclass, field
@@ -154,10 +153,6 @@ class PageScale:
 
     def separate_y(self) -> bool:
         return abs(self.y_factor - 1.0) > 1e-9
-
-    def length_xy(self, dx: float, dy: float):
-        """The real length of a step *dx* across and *dy* down the page."""
-        return self.length_per_pt * math.hypot(dx, dy * self.y_factor)
 
     def height(self, points: float):
         """A distance straight down the page, at the Y scale."""
@@ -619,11 +614,6 @@ class Document:
             self.assets[key] = data
             self.modified = True
         return key
-
-    def prune_assets(self, used: set[str]) -> None:
-        for key in list(self.assets):
-            if key not in used:
-                del self.assets[key]
 
     # -- serialisation -----------------------------------------------------
     def to_dict(self) -> dict:

@@ -95,7 +95,6 @@ def _origin_icon(kind: str, origin: int) -> QIcon:
     """The site's img-origin-<kind>-<origin> icons (copied from its CSS)."""
     key = (kind, origin)
     if key not in _ICONS:
-        from pathlib import Path
 
         path = PACKAGE_ICONS / f"origin-{kind}-{origin}.png"
         _ICONS[key] = QIcon(str(path)) if path.exists() else QIcon()

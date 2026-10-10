@@ -24,8 +24,8 @@ import re
 from typing import Callable, Optional
 
 from .evaluate import RefValue, from_engine, to_engine
-from .refs import CellRef, parse_cell
-from .values import BLANK, ErrorValue, Qty, SheetError, is_number
+from .refs import parse_cell
+from .values import ErrorValue, Qty, SheetError, is_number
 from .workbook import Sheet, Workbook
 
 STRIDE = 1_000_000.0
@@ -341,7 +341,6 @@ def lookup(sheet: Sheet, args: list):
     bolts(x, "A"): its value under heading A (or column number);
     bolts(x, y): with numbers along the first row, interpolated both ways."""
     from calcforge.calc.engine.errors import SMathError
-    from calcforge.calc.engine.units import Quantity
     from calcforge.calc.engine.values import Matrix, String
 
     used = sheet.used_area()

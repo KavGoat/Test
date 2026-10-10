@@ -41,6 +41,3 @@ def serial_from_datetime(t: _dt.datetime) -> float:
     return serial_from_date(t.date()) + (t.hour * 3600 + t.minute * 60 + t.second
                                          + t.microsecond / 1e6) / 86400.0
 
-
-def is_leap_bug(serial: float) -> bool:
-    return int(serial // 1) == 60

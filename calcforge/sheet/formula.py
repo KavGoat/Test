@@ -19,12 +19,11 @@ Beyond Excel:
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field, replace
-from functools import lru_cache
+from dataclasses import dataclass, replace
 from typing import Callable, Optional
 
-from .refs import MAX_COLS, MAX_ROWS, CellRef, RangeRef, parse_range, quote_sheet
-from .values import ERRORS, is_unit_text
+from .refs import CellRef, parse_range, quote_sheet
+from .values import is_unit_text
 
 
 class FormulaError(ValueError):
@@ -662,15 +661,6 @@ def _rel_text(ref: CellRef, row: int, col: int) -> str:
     r = f"R{ref.row}" if ref.row_abs else f"R[{ref.row - row}]"
     c = f"C{ref.col}" if ref.col_abs else f"C[{ref.col - col}]"
     return f"{ref.sheet}!{r}{c}"
-
-
-@lru_cache(maxsize=20000)
-def _compiled(signature: str, text: str, row: int, col: int) -> Parsed:
-    tokens = tokenize(text)
-    p = _Parser(tokens, row, col)
-    tree = p.parse()
-    return Parsed(tree, bool(p.functions & VOLATILE), frozenset(p.names), frozenset(p.functions),
-                  frozenset(p.tables))
 
 
 def parse(text: str, row: int = 0, col: int = 0) -> Parsed:

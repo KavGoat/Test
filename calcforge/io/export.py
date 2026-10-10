@@ -2,8 +2,6 @@
 from __future__ import annotations
 
 import csv
-import io
-import os
 from typing import Iterable, Optional
 
 from PySide6.QtCore import QMarginsF, QRectF, QSizeF

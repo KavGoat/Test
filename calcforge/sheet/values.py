@@ -556,10 +556,6 @@ def neg(a):
     return Qty(-a.si, a.dims, a.unit) if isinstance(a, Qty) else -float(a)
 
 
-def same_units(a, b) -> bool:
-    return _dims(a) == _dims(b)
-
-
 def magnitude(n) -> float:
     """SI value of a number (for comparing and sorting)."""
     return _si(n)

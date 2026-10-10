@@ -1,7 +1,6 @@
 """The interactive page canvas: tools, selection, editing and navigation."""
 from __future__ import annotations
 
-import json
 import math
 
 import numpy  # noqa: F401  (loaded now: the first drag that snaps needs it at once)
@@ -10,31 +9,29 @@ import re
 from copy import deepcopy
 from typing import Optional
 
-from PySide6.QtCore import (QEvent, QMimeData, QObject, QPoint, QPointF, QRect, QRectF, Qt,
+from PySide6.QtCore import (QEvent, QObject, QPoint, QPointF, QRect, QRectF, Qt,
                             QTimer, Signal)
-from PySide6.QtGui import (QBrush, QColor, QCursor, QFontMetricsF, QKeyEvent,
+from PySide6.QtGui import (QBrush, QColor, QCursor, QKeyEvent,
                            QMouseEvent, QPainter, QPen, QPolygonF, QTextCursor,
                            QPixmap, QTransform, QWheelEvent)
-from PySide6.QtWidgets import (QApplication, QCompleter, QGraphicsProxyWidget,
-                               QGraphicsView, QGridLayout, QHBoxLayout, QLabel,
+from PySide6.QtWidgets import (QApplication, QGraphicsProxyWidget,
+                               QGraphicsView, QGridLayout, QLabel,
                                QLineEdit, QWidget)
 
 from ..core.document import MM_TO_PT
-from ..core.units import parse_unit
 from ..items.calc import CalcBlockItem, CalcItem, CalcTextItem
-from ..items.base import (HANDLE_CURSORS, HANDLE_SCREEN_PX, HANDLE_SIZE,
-                          MarkupItem, build_item, cloud_path,
-                          cursor_for_handle, rename_groups)
+from ..items.base import (HANDLE_SCREEN_PX, HANDLE_SIZE,
+                          MarkupItem, build_item, cursor_for_handle, rename_groups)
 from ..items.contents import ContentsItem
 from .scene import DocumentScene, PageFrame, detach
-from ..items.measure import (AREA, CALIBRATE, DIMENSION, VOLUME, CountItem,
+from ..items.measure import (CALIBRATE, DIMENSION, CountItem,
                              MeasureItem)
 from ..items.media import ImageItem
 from ..items.shapes import PolyItem, RectItem
 from ..items.text import CalloutItem, NoteItem, StampItem, TextItem, _TextBase
 from . import preferences
 from .commands import PageEditCommand
-from .tools import (ANCHOR, CLICK, CLOUD, CLOUDY, DRAG, ERASE, FREE, NONE, POLY,
+from .tools import (ANCHOR, CLICK, CLOUD, CLOUDY, ERASE, FREE, NONE, POLY,
                     SNAPSHOT,
                     TOOL_MAP, Tool)
 
@@ -263,24 +260,6 @@ def cloud_callout_cursor() -> QCursor:
         # The icon's cloud sits at (1.5–13.5, 13–21.5) of 24: its middle.
         _CLOUD_CALLOUT_CURSOR = QCursor(pixmap, round(7.5 * 32 / 24), round(17.2 * 32 / 24))
     return _CLOUD_CALLOUT_CURSOR
-
-
-def _already_bracketed(text: str) -> bool:
-    """Whether the whole of *text* is inside one pair of brackets.
-
-    "(a+b)" is; "(a)+(b)" is not, even though it starts and ends with one.
-    """
-    if not text.startswith("(") or not text.endswith(")"):
-        return False
-    depth = 0
-    for index, character in enumerate(text):
-        if character == "(":
-            depth += 1
-        elif character == ")":
-            depth -= 1
-            if depth == 0 and index < len(text) - 1:
-                return False
-    return depth == 0
 
 
 def typing_somewhere_else() -> bool:
@@ -3958,12 +3937,6 @@ class PageView(QGraphicsView):
             self._update_draft(self._last_scene_pos, Qt.NoModifier)
             self.viewport().update()
 
-    def update_typed_size(self) -> None:
-        """Read every field again, as if each had just been typed into."""
-        for box in (self._size_width, self._size_height, self._size_rotation):
-            if box is not None and box.isModified():
-                self._size_typed(box)
-
     def place_sized_draft(self) -> None:
         """Enter in the size bar: put the shape down at the size it shows."""
         if self._draft is None or self._mode not in ("draw_drag", "draw_click"):
@@ -3990,14 +3963,6 @@ class PageView(QGraphicsView):
             proxy.deleteLater()
         if self.hasFocus() is False:
             self.setFocus(Qt.OtherFocusReason)
-
-    # ------------------------------------------------------------------
-    # item editing
-    # ------------------------------------------------------------------
-    @staticmethod
-    def style_line_height(item) -> float:
-        """A sensible minimum row height for an empty region."""
-        return item.style.font_size * 1.9
 
     def editing_item(self):
         return self._editing_item
@@ -4064,7 +4029,6 @@ class PageView(QGraphicsView):
         editor = getattr(item, "_editor", None)
         if editor is None:
             return
-        from PySide6.QtGui import QTextCursor
 
         local = editor.mapFromScene(scene_pos)
         document = editor.document()

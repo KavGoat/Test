@@ -31,7 +31,6 @@ cells it applies to. Data bars, colour scales and icons are drawn together.
 from __future__ import annotations
 
 import datetime as _dt
-import math
 from typing import Optional
 
 from . import formula as F

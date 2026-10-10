@@ -78,9 +78,6 @@ class DocumentSheet:
     def page_uid(self, region: Region) -> Optional[str]:
         return self._page_of.get(region.id)
 
-    def local_position(self, region: Region) -> Optional[tuple]:
-        return self._local.get(region.id)
-
     # -- regions coming and going ----------------------------------------------
     def add(self, data: dict, page_uid: str, x_px: float, y_px: float) -> Region:
         from .record import add_region_from_data
@@ -269,14 +266,6 @@ class DocumentSheet:
 
     def _apply_scopes(self) -> bool:
         return self.worksheet.set_scopes(self._scopes())
-
-    # -- asking ------------------------------------------------------------------------
-    def region_by_id(self, region_id: int) -> Optional[Region]:
-        for region in self.worksheet.regions:
-            if region.id == region_id:
-                return region
-        return None
-
 
 def sheet_for(document) -> DocumentSheet:
     """The document's sheet, made the first time it is asked for."""

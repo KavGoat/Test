@@ -97,7 +97,7 @@ def _outline_on_the_page(item, place: "Placement") -> list:
     ellipse's and a rounded corner's are the curve followed closely enough
     that no reader can tell it from the curve.
     """
-    from PySide6.QtGui import QPainterPath, QPolygonF
+    from PySide6.QtGui import QPainterPath
     rect = item.local_rect().normalized()
     kind = getattr(item, "kind", "")
     if kind == "cloud" or (kind != "ellipse"
@@ -229,7 +229,7 @@ class Appearances:
         """Paint them all, into a scratch file, and say where it is."""
         if not self.entries:
             return None
-        from PySide6.QtCore import QMarginsF, QRectF, QSizeF
+        from PySide6.QtCore import QMarginsF, QSizeF
         from PySide6.QtGui import (QPageLayout, QPageSize, QPainter, QPdfWriter)
 
         handle, path = tempfile.mkstemp(suffix=".pdf")

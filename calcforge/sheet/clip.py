@@ -21,7 +21,7 @@ from xml.etree import ElementTree as ET
 
 from . import formula as F
 from .numfmt import format_value
-from .refs import MAX_COLS, MAX_ROWS, CellRef, RangeRef, col_letters
+from .refs import MAX_COLS, MAX_ROWS, CellRef, col_letters
 from .store import style_from_dict, style_to_dict
 from .style import Border, Style
 from .values import BLANK, ErrorValue, Qty
@@ -684,16 +684,11 @@ def paste(wb, sheet, row: int, col: int, data: dict, what: str = "all") -> tuple
     return row, col, row + h - 1, col + w - 1
 
 
-def _with_sheet(ref, name):
-    from dataclasses import replace
-    return replace(ref, sheet=name)
-
-
 def _value_text(wb, text, sheet, r, c) -> str:
     """Paste Values: a formula's value as typed text."""
     if not (text.startswith("=") and len(text) > 1):
         return text
-    from .evaluate import evaluate_cell, result
+    from .evaluate import evaluate_cell
     try:
         parsed = F.parse(text[1:], r, c)
     except F.FormulaError:

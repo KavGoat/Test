@@ -25,7 +25,7 @@ from . import formula as F
 from .dates import date_from_serial, serial_from_date
 from .inputs import read_value
 from .numfmt import is_date_format
-from .values import BLANK, Qty, general_number
+from .values import Qty, general_number
 
 _LISTS = [
     ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
@@ -174,7 +174,7 @@ def fill(wb, sheet, src: tuple, dst: tuple, step_one: bool = False) -> None:
             cells = [sheet.cells.get(at(i)) for i in order]
             inputs = [c.input if c else "" for c in cells]
             styles = [c.style if c else 0 for c in cells]
-            comments = [c.comment if c else None for c in cells]
+            comments = [c.comment if c else None for c in cells]   # notes go with the fill (Excel)
             formats = [wb.styles.get(s).number_format for s in styles]
             has_formula = any(t.startswith("=") and len(t) > 1 for t in inputs)
             plain = not has_formula and all(inputs)
@@ -194,4 +194,4 @@ def fill(wb, sheet, src: tuple, dst: tuple, step_one: bool = False) -> None:
             for k, target in enumerate(targets):
                 j = k % len(order)
                 row, col = at(target)
-                wb._set_state(sheet, row, col, (fresh[k], styles[j], None))
+                wb._set_state(sheet, row, col, (fresh[k], styles[j], comments[j]))

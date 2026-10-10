@@ -26,16 +26,16 @@ import datetime
 import re
 from typing import Callable, Optional
 
-from PySide6.QtCore import QEvent, QMimeData, QPointF, QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QMimeData, QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QCursor, QFont, QKeySequence, QPainter, QPen
 from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QLineEdit, QMenu,
                                QWidget)
 
 from ..items.base import MarkupItem
-from ..items.table import (HEADING_H, ROWNUM_W, TAB_H, TableItem, THIN, cell_font)
+from ..items.table import (HEADING_H, ROWNUM_W, TableItem, THIN, cell_font)
 from ..sheet import clip
 from ..sheet import formula as F
-from ..sheet.refs import CellRef, RangeRef, area_text, col_letters, parse_range
+from ..sheet.refs import CellRef, area_text, col_letters, parse_range
 from ..sheet.style import Border
 
 REF_COLOURS = ["#1f6fd1", "#d1281f", "#7b2fb0", "#1d8a3a", "#c76a00", "#008b8b", "#b0306e"]
@@ -1742,7 +1742,6 @@ class TableEditing:
     def fill_direction(self, direction: str) -> None:
         """Ctrl+D / Ctrl+R: copy the top row (left column) through the selection."""
         t, l, b, r = self.selection()
-        from ..sheet.fill import fill
 
         if direction == "down":
             if b == t:
