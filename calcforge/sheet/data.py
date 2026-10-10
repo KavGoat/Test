@@ -266,3 +266,129 @@ def text_to_columns(wb, sheet, top: int, col: int, bottom: int, delimiters: str,
                     piece = piece.strip()          # " 2" comes in as the number 2, as in Excel
                 wb._set_state(sheet, r, col + k, (piece, style, target.comment if target else None))
     return widest
+
+
+# -- Goal Seek -----------------------------------------------------------------------------------------
+def _as_si(v):
+    if isinstance(v, Qty):
+        return v.si
+    if is_number(v) and not isinstance(v, bool):
+        return float(v)
+    return None
+
+
+def goal_seek(wb, sheet, target: tuple, goal, changing: tuple, iterations: int = 100,
+              tolerance: float = 0.001) -> tuple:
+    """Excel's Goal Seek: change the number in ``changing`` until the formula
+    in ``target`` gives ``goal`` (a number, or a quantity in any unit of the
+    same kind). (found, the changing cell's text). A unit in the changing
+    cell stays its unit: 250 mm is tried as 260 mm, not as 0.26 (m).
+
+    Secant steps from the cell's own value, falling back to halving a
+    bracket once the goal has been passed, as Excel's iteration settles.
+    """
+    cell = sheet.cells.get(changing)
+    start_text = cell.input if cell else ""
+    if start_text.startswith("="):
+        raise ValueError("The changing cell must hold a value, not a formula.")
+    start, _fmt = read_value(start_text, wb.day_first) if start_text else (0.0, None)
+    if isinstance(start, Qty):
+        unit, x0 = start.unit, start.shown()
+    elif is_number(start) and not isinstance(start, bool):
+        unit, x0 = None, float(start)
+    elif start is BLANK or start_text == "":
+        unit, x0 = None, 0.0
+    else:
+        raise ValueError("The changing cell must hold a number.")
+    target_cell = sheet.cells.get(target)
+    if target_cell is None or not target_cell.input.startswith("="):
+        raise ValueError("The cell to set must hold a formula.")
+    want = _as_si(goal)
+    if want is None:
+        raise ValueError("Say a number (or quantity) to reach.")
+
+    def text_of(x):
+        n = general_number_text(x)
+        return f"{n} {unit}" if unit else n
+
+    def miss(x):
+        wb._set_state(sheet, *changing, (text_of(x), cell.style if cell else 0,
+                                          cell.comment if cell else None))
+        wb.recalculate()                   # each try is worked out (the whole search one undo)
+        got = _as_si(sheet.value(*target))
+        if got is None or got != got:
+            return None
+        return got - want
+
+    close = tolerance * max(1.0, abs(want))
+    with wb.transaction("Goal seek"):
+        found = _search(miss, x0, close, iterations)
+        if found is None:
+            miss(x0)                       # back as it was, as Excel's Cancel leaves it
+            return False, start_text
+        miss(found)
+        return True, text_of(found)
+
+
+def _search(miss, x0: float, close: float, iterations: int):
+    """x where miss(x) is within ``close`` of 0: bracketed by stepping out
+    from x0 (doubling, halving, and through zero), then closed in on by
+    regula falsi (Illinois); plain secant steps if it can't be bracketed."""
+    f0 = miss(x0)
+    if f0 is None:
+        return None
+    if abs(f0) <= close:
+        return x0
+    tried = [(x0, f0)]
+    scale = abs(x0) or 1.0
+    steps = [x0 * 2 ** k for k in range(1, 12)] + [x0 / 2 ** k for k in range(1, 12)] + \
+        [x0 + scale * d for d in (0.01, -0.01, 1, -1, 10, -10)] + [-x0]
+    steps.sort(key=lambda x: abs(x - x0))
+    lo = hi = None
+    for x in steps:
+        fx = miss(x)
+        if fx is None:
+            continue
+        if abs(fx) <= close:
+            return x
+        tried.append((x, fx))
+        for y, fy in tried:
+            if fx * fy < 0 and (lo is None or abs(x - y) < abs(hi[0] - lo[0])):
+                lo, hi = (y, fy), (x, fx)
+        if lo is not None:
+            break
+    if lo is not None:
+        (a, fa), (b, fb) = lo, hi
+        side = 0
+        for _ in range(iterations):
+            c = b - fb * (b - a) / (fb - fa)
+            fc = miss(c)
+            if fc is None:
+                return None
+            if abs(fc) <= close or abs(b - a) <= 1e-12 * max(1.0, abs(c)):
+                return c
+            if fc * fb < 0:
+                a, fa = b, fb
+                side = 0
+            else:
+                fa /= 2 if side == 1 else 1      # Illinois: don't let one end stall
+                side = 1
+            b, fb = c, fc
+        return None
+    (a, fa), (b, fb) = tried[0], min(tried[1:], key=lambda t: abs(t[1]), default=tried[0])
+    for _ in range(iterations):
+        if fb == fa:
+            return None
+        c = b - fb * (b - a) / (fb - fa)
+        fc = miss(c)
+        if fc is None:
+            return None
+        if abs(fc) <= close:
+            return c
+        a, fa, b, fb = b, fb, c, fc
+    return None
+
+
+def general_number_text(x: float) -> str:
+    from .values import general_number
+    return general_number(round(x, 12))

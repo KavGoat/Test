@@ -1058,6 +1058,10 @@ rules compare units.
 * **AutoFilter**: drop-downs in the first row (screen only): sort, choose
   values, number/text filter with two conditions, top 10, clear; filtered rows
   take no room and don't print; SUBTOTAL leaves them out.
+* **Remove Duplicates**, **Text to Columns** (delimited, quoted pieces kept
+  whole), **Paste Special ▸ Transpose** (references turn with the block) and
+  **Goal Seek** (a unit in the changing cell stays its unit; one undo step)
+  — added 2026-10-10.
 * **Data validation**: whole number, decimal, list (in-cell drop-down, Alt+↓),
   date, time, text length, custom formula, with units in limits; input message;
   Stop/Warning/Information alerts; Circle Invalid Data.

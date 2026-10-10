@@ -5,6 +5,7 @@ sorting from a filter's drop-down, Clear Filter, and Find & Replace across
 tables — each one undone again."""
 from __future__ import annotations
 
+import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QMenu
 
@@ -49,7 +50,7 @@ def test_the_menu_holds_every_tool(w):
     data = menu.actions()[1].menu()
     labels = [a.text() for a in data.actions() if a.text()]
     assert labels == ["Sort A to Z", "Sort Z to A", "Custom Sort…", "Filter", "Clear Filter",
-                      "Remove Duplicates…", "Text to Columns…",
+                      "Remove Duplicates…", "Text to Columns…", "Goal Seek…",
                       "Data Validation…", "Circle Invalid Data", "Clear Validation Circles"]
     assert not data.actions()[4].isEnabled(), "nothing filtered yet"
 
@@ -240,3 +241,44 @@ def test_paste_special_transpose(w):
     assert [[typed(t, f"{c}{r}") for c in "AB"] for r in (4, 5, 6)] == \
         [["1", "2"], ["=A4*10", "=B4*10"], ["=$A$1", ""]], "what was to the left is now above"
     assert [t.sheet.value(4, 0), t.sheet.value(4, 1)] == [10, 20]
+
+
+def test_goal_seek_finds_the_depth_for_a_dcr_of_one(w):
+    table = make_table(w, width=48 * 2, height=15 * 3)
+    wb, s = table.sheet.workbook, table.sheet
+    wb.set_input(s, 0, 0, "250 mm")
+    wb.set_input(s, 1, 0, "=40 kN*m/(A1^2*0.2 m/6*275 MPa)")
+    tabs = w.view.tables
+    tabs.open(table, (1, 0))
+    d = datatools.goal_seek_dialog(tabs)
+    assert d.target.text() == "A2", "the active cell to begin with"
+    d.goal.setText("1")
+    d.changing.setText("A1")
+    d.accept()
+    t = tables(w)[0]
+    assert t.sheet.value(1, 0) == pytest.approx(1, abs=0.002)
+    assert typed(t, "A1").endswith(" mm"), "still in millimetres"
+    assert d.result_text == "Goal Seeking with Cell A2 found a solution."
+    w.undo_stack.undo()
+    assert typed(tables(w)[0], "A1") == "250 mm", "one undo puts it back"
+    d = datatools.goal_seek_dialog(w.view.tables)
+    d.target.setText("A1")
+    d.goal.setText("1")
+    d.changing.setText("A2")
+    d.accept()
+    assert d.problem.text() == "The cell to set must hold a formula."
+
+
+def test_goal_seek_says_when_it_cannot(w):
+    table = make_table(w, width=48 * 2, height=15 * 3)
+    wb, s = table.sheet.workbook, table.sheet
+    wb.set_input(s, 0, 0, "3")
+    wb.set_input(s, 1, 0, "=A1^2+1")
+    tabs = w.view.tables
+    tabs.open(table, (1, 0))
+    d = datatools.goal_seek_dialog(tabs)
+    d.goal.setText("-5")
+    d.changing.setText("A1")
+    d.accept()
+    assert d.result_text == "Goal Seeking with Cell A2 may not have found a solution."
+    assert typed(tables(w)[0], "A1") == "3", "left as it was"

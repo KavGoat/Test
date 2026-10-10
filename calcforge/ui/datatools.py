@@ -118,6 +118,7 @@ def fill_menu(menu: QMenu, tables) -> None:
     dm.addSeparator()
     dm.addAction("Remove Duplicates…", lambda: duplicates_dialog(tables))
     dm.addAction("Text to Columns…", lambda: text_columns_dialog(tables))
+    dm.addAction("Goal Seek…", lambda: goal_seek_dialog(tables))
     dm.addSeparator()
     dm.addAction("Data Validation…", lambda: validation_dialog(tables))
     dm.addAction("Circle Invalid Data", lambda: circle_invalid(tables))
@@ -629,6 +630,76 @@ class TextColumnsDialog(QDialog):
 
 def text_columns_dialog(tables):
     dialog = TextColumnsDialog(tables)
+    _show(tables.view.window, dialog)
+    return dialog
+
+
+class GoalSeekDialog(QDialog):
+    """What-If Analysis ▸ Goal Seek: the formula in one cell brought to a
+    value by changing the number in another."""
+
+    def __init__(self, tables):
+        super().__init__(tables.view)
+        self.tables = tables
+        self.setWindowTitle("Goal Seek")
+        row, col = tables.active
+        layout = QFormLayout(self)
+        self.target = QLineEdit(f"{col_letters(col)}{row + 1}")
+        self.goal = QLineEdit()
+        self.goal.setPlaceholderText("1, 0.95, 250 kN")
+        self.changing = QLineEdit()
+        layout.addRow("Set cell:", self.target)
+        layout.addRow("To value:", self.goal)
+        layout.addRow("By changing cell:", self.changing)
+        self.problem = QLabel("")
+        self.problem.setStyleSheet("color: #c92a2a")
+        layout.addRow(self.problem)
+        self.result_text = ""
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addRow(buttons)
+
+    def accept(self) -> None:
+        from ..sheet.inputs import read_value
+        from ..sheet.refs import parse_cell
+        from ..sheet.values import Qty, is_number
+        target = parse_cell(self.target.text().strip().replace("$", ""))
+        changing = parse_cell(self.changing.text().strip().replace("$", ""))
+        goal = read_value(self.goal.text().strip(), True)[0] if self.goal.text().strip() else None
+        if target is None or changing is None:
+            self.problem.setText("Give both cells as references, such as B4.")
+            return
+        sheet = self.tables.item.sheet
+        if not sheet.input(target.row, target.col).startswith("="):
+            self.problem.setText("The cell to set must hold a formula.")
+            return
+        if sheet.input(changing.row, changing.col).startswith("="):
+            self.problem.setText("The changing cell must hold a value, not a formula.")
+            return
+        if goal is None or not (is_number(goal) or isinstance(goal, Qty)) or isinstance(goal, bool):
+            self.problem.setText("Say a number (or quantity) to reach.")
+            return
+        outcome = []
+
+        def change(wb, sheet):
+            try:
+                outcome.append(data.goal_seek(wb, sheet, (target.row, target.col), goal,
+                                              (changing.row, changing.col)))
+            except ValueError as e:
+                outcome.append((False, str(e)))
+        self.tables._change("Goal seek", change)
+        found = outcome and outcome[0][0]
+        name = self.target.text().strip().upper()
+        # Excel's own words
+        self.result_text = (f"Goal Seeking with Cell {name} found a solution." if found else
+                            f"Goal Seeking with Cell {name} may not have found a solution.")
+        self.tables.view.statusMessage.emit(self.result_text)
+        super().accept()
+
+
+def goal_seek_dialog(tables):
+    dialog = GoalSeekDialog(tables)
     _show(tables.view.window, dialog)
     return dialog
 
