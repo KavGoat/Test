@@ -182,3 +182,19 @@ def test_a_spilled_block_shows_in_its_table(w):
     type_text(w, "=SEQUENCE(3)")
     enter(w)
     assert get(table, "A4").code == "#SPILL!"
+
+
+def test_a_lambda_name_in_the_name_manager_variables_and_cells(w):
+    from calcforge.ui.variablespanel import table_rows
+    table = loads(w)
+    wb = table.sheet.workbook
+    wb.define_name("Factored", "LAMBDA(load,1.5*load)")
+    put(table, "D2", "=Factored(B2)")
+    assert get(table, "D2") == 15
+    dn = wb.find_name("Factored", table.sheet)
+    assert names.name_value(wb, dn) == "#CALC!", "a function, not a value (no Python text)"
+    row = next(r for r in table_rows(w.document) if r.name == "Factored")
+    assert row.error == "#CALC!" or row.value == "#CALC!"
+    wb.define_name("Pair", "{1,2;3,4}")
+    assert names.name_value(wb, wb.find_name("Pair", table.sheet)) == '{"1","2";"3","4"}', \
+        "commas between columns, semicolons between rows (Excel)"

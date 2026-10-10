@@ -179,3 +179,38 @@ def test_the_equation_menu_colour_and_bold_show_on_maths(v):
     eq = item(v, "y:2")
     assert drawn_with(v, eq, "#1971c2") > 5
     assert eq._view.style.bold
+
+
+def test_the_document_rules_dialog(v):
+    """Presets made, renamed and deleted; name rules added and removed (the
+    chosen one); equations using a renamed preset follow it (2026-10-10)."""
+    from calcforge.ui.condformat import open_document_rules
+    v.window.interactive_prompts = False
+    equation(v, 18, "DCR:1.2")
+    eq = item(v, "DCR:1.2")
+    set_rules(v.window, [eq], None, "P")
+    apply_document_rules(v.window, {"presets": {"P": DCR_EXAMPLE}, "by_name": [["u", "P"]]})
+    open_document_rules(v.window)
+    d = v.window._last_rules_dialog
+    assert [d.names.item(i).text() for i in range(d.names.count())] == ["P"]
+    assert d.editor.rules() == DCR_EXAMPLE, "the first preset's rules shown"
+    d.new_preset("Q")
+    d.add_name_rule("DCR*", "P")
+    d.add_name_rule("x", "Q")
+    d.names.setCurrentRow(0)
+    d.rename_preset("Check")
+    assert [d.by_name.cellWidget(r, 1).currentText() for r in range(3)] == ["Check", "Check", "Q"], \
+        "every name rule on the old preset follows it"
+    d.rename_preset("Q")
+    assert "Check" in d.presets, "no renaming onto another preset"
+    d.by_name.setCurrentCell(0, 0)
+    d.remove_name_rule()
+    assert [d.by_name.item(r, 0).text() for r in range(2)] == ["DCR*", "x"], "the chosen rule removed"
+    d.names.setCurrentRow(1)
+    d.delete_preset()
+    d.accept()
+    store = v.window.document.settings.calc_rules
+    assert set(store["presets"]) == {"Check"}
+    assert store["by_name"] == [["DCR*", "Check"]], "the rule on the deleted preset is dropped"
+    assert item(v, "DCR:1.2").cond_preset == "Check"
+    assert look_for(item(v, "DCR:1.2"), v.window.document.settings)["bg"] == RED

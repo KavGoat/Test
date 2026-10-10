@@ -56,7 +56,7 @@ def change_names(tables, label: str, change: Callable) -> Optional[str]:
 def name_value(wb, dn) -> str:
     """What a name holds, shown as the Name Manager shows it."""
     from ..sheet import formula as F
-    from ..sheet.evaluate import Ctx, RefValue, ev
+    from ..sheet.evaluate import Ctx, RefValue, ev, result
     from ..sheet.numfmt import format_value
     from ..sheet.values import Array, SheetError
 
@@ -73,8 +73,10 @@ def name_value(wb, dn) -> str:
         return e.error.code
     if isinstance(got, RefValue):
         got = got.value_at(0, 0) if got.single else got.to_array()
+    elif not isinstance(got, Array):
+        got = result(got)                      # a LAMBDA left uncalled: #CALC!, as in a cell
     if isinstance(got, Array):
-        rows = [";".join(f'"{format_value(v).text}"' for v in row) for row in got.rows[:4]]
+        rows = [",".join(f'"{format_value(v).text}"' for v in row) for row in got.rows[:4]]
         more = "…" if got.height > 4 else ""
         return "{" + ";".join(rows) + more + "}"
     return format_value(got).text

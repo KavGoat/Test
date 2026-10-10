@@ -23,9 +23,9 @@ import math
 import re
 from typing import Callable, Optional
 
-from .evaluate import RefValue, from_engine, to_engine
+from .evaluate import RefValue, from_engine, result, to_engine
 from .refs import parse_cell
-from .values import ErrorValue, Qty, SheetError, is_number
+from .values import Array, ErrorValue, Qty, SheetError, is_number
 from .workbook import Sheet, Workbook
 
 STRIDE = 1_000_000.0
@@ -224,6 +224,8 @@ class DocumentBook:
         self._asked[name] = sheet.id
         if isinstance(value, RefValue):
             value = value.value_at(0, 0) if value.single else value.to_array()
+        elif not isinstance(value, Array):
+            value = result(value)              # a LAMBDA name: #CALC!
         if isinstance(value, ErrorValue):
             from calcforge.calc.engine.errors import SMathError
 

@@ -89,7 +89,7 @@ def table_rows(document) -> list:
     columns by heading, with their values."""
     from ..sheet import formula as F
     from ..sheet.docbook import _ident, book_for
-    from ..sheet.evaluate import Ctx, RefValue, ev
+    from ..sheet.evaluate import Ctx, RefValue, ev, result
     from ..sheet.numfmt import format_value
     from ..sheet.values import Array, ErrorValue, Qty, SheetError
 
@@ -134,6 +134,8 @@ def table_rows(document) -> list:
             sheet = got.sheet
             cells = (sheet.name, (got.top, got.left, got.bottom, got.right))
             got = got.value_at(0, 0) if got.single else got.to_array()
+        elif not isinstance(got, Array):
+            got = result(got)                  # a LAMBDA name: #CALC!, as in a cell
         values = list(got.values()) if isinstance(got, Array) else [got]
         text, unit, error = shown(values)
         page = homes.get(sheet.id, 0) if sheet is not None else 0

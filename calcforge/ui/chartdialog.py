@@ -371,7 +371,7 @@ class ChartDialog(QDialog):
         self.series_list.takeItem(row)
         self._show_series(min(row, len(self.spec["series"]) - 1))
 
-    def result(self) -> dict:
+    def chosen_spec(self) -> dict:
         """The chart as the dialog now says."""
         self._keep_series()
         spec = self.spec
@@ -404,5 +404,5 @@ def apply_dialog(window, chart: ChartItem, dialog: ChartDialog) -> None:
     view = window.view
     frame = chart.parentItem()
     view.begin_snapshot([frame])
-    chart.set_spec(dialog.result())
+    chart.set_spec(dialog.chosen_spec())
     view.commit_snapshot("Edit chart")

@@ -191,7 +191,7 @@ class EquationRulesDialog(QDialog):
         save.clicked.connect(self.save_preset)
         layout.addWidget(save, 0, Qt.AlignLeft)
         manage = QPushButton("Document rules (presets, by variable name)…")
-        manage.clicked.connect(lambda: open_document_rules(window))
+        manage.clicked.connect(self._document_rules)
         layout.addWidget(manage, 0, Qt.AlignLeft)
         if first.cond_rules:
             self.own.setChecked(True)
@@ -207,6 +207,15 @@ class EquationRulesDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
         self.resize(640, 420)
+
+    def _document_rules(self) -> None:
+        """Presets made, renamed or deleted there show here straight away."""
+        open_document_rules(self.window)
+        now = self.preset_combo.currentText()
+        self.preset_combo.clear()
+        self.preset_combo.addItems(sorted(_store(self.window.document)["presets"]))
+        self.preset_combo.setCurrentText(now)
+        self.preset.setEnabled(self.preset_combo.count() > 0)
 
     def save_preset(self, name: str = "") -> None:
         if not name:
@@ -259,6 +268,7 @@ class DocumentRulesDialog(QDialog):
         self.window = window
         store = copy.deepcopy(_store(window.document))
         self.presets = store["presets"]
+        self.renamed: dict = {}                  # old preset name -> new, for the equations using it
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("<b>Presets</b> — named sets of rules"))
         top = QHBoxLayout()
@@ -287,8 +297,7 @@ class DocumentRulesDialog(QDialog):
         add = QPushButton("Add name rule")
         add.clicked.connect(lambda: self.add_name_rule("", ""))
         rm = QPushButton("Remove")
-        rm.clicked.connect(lambda: self.by_name.removeRow(max(self.by_name.currentRow(),
-                                                                  self.by_name.rowCount() - 1)))
+        rm.clicked.connect(self.remove_name_rule)
         row.addWidget(add)
         row.addWidget(rm)
         row.addStretch(1)
@@ -329,24 +338,30 @@ class DocumentRulesDialog(QDialog):
         self.names.setCurrentRow(self.names.count() - 1)
         self._refresh_presets()
 
-    def rename_preset(self) -> None:
+    def rename_preset(self, name: str = "") -> None:
         old = self._current
         if old is None:
             return
-        name, ok = QInputDialog.getText(self, "Rename preset", "Name:", text=old)
-        if not ok or not name.strip() or name.strip() == old:
+        if not name:
+            if not getattr(self.window, "interactive_prompts", True):
+                return
+            name, ok = QInputDialog.getText(self, "Rename preset", "Name:", text=old)
+            if not ok:
+                return
+        name = name.strip()
+        if not name or name == old or name in self.presets:
             return
         self._keep()
-        self.presets[name.strip()] = self.presets.pop(old)
-        self._current = None
-        self.names.currentItem().setText(name.strip())
-        self._current = name.strip()
-        for r in range(self.by_name.rowCount()):
-            combo = self.by_name.cellWidget(r, 1)
-            if combo.currentText() == old:
-                self._refresh_presets()
-                combo.setCurrentText(name.strip())
+        using = [r for r in range(self.by_name.rowCount())
+                 if self.by_name.cellWidget(r, 1).currentText() == old]
+        self.presets[name] = self.presets.pop(old)
+        first = next((k for k, v in self.renamed.items() if v == old), old)
+        self.renamed[first] = name
+        self._current = name
+        self.names.currentItem().setText(name)
         self._refresh_presets()
+        for r in using:
+            self.by_name.cellWidget(r, 1).setCurrentText(name)
 
     def delete_preset(self) -> None:
         if self._current is None:
@@ -365,15 +380,21 @@ class DocumentRulesDialog(QDialog):
         combo.setCurrentText(preset)
         self.by_name.setCellWidget(r, 1, combo)
 
+    def remove_name_rule(self) -> None:
+        """The chosen name rule, or the last one when none is chosen."""
+        r = self.by_name.currentRow()
+        self.by_name.removeRow(r if r >= 0 else self.by_name.rowCount() - 1)
+
     def _refresh_presets(self) -> None:
         for r in range(self.by_name.rowCount()):
             combo = self.by_name.cellWidget(r, 1)
             now = combo.currentText()
             combo.clear()
             combo.addItems(sorted(self.presets))
-            combo.setCurrentText(now)
+            # a deleted preset leaves its rule with none (not quietly another)
+            combo.setCurrentIndex(combo.findText(now))
 
-    def result(self) -> dict:
+    def store(self) -> dict:
         self._keep()
         by_name = []
         for r in range(self.by_name.rowCount()):
@@ -385,13 +406,25 @@ class DocumentRulesDialog(QDialog):
         return {"presets": self.presets, "by_name": by_name}
 
     def accept(self) -> None:
-        apply_document_rules(self.window, self.result())
+        apply_document_rules(self.window, self.store(), self.renamed)
         super().accept()
 
 
-def apply_document_rules(window, store: dict) -> None:
+def apply_document_rules(window, store: dict, renamed: dict | None = None) -> None:
+    """The document's presets and name rules; equations using a renamed
+    preset follow it to its new name."""
     window.document.settings.calc_rules = copy.deepcopy(store)
     window.document.modified = True
+    if renamed:
+        from ..items.calc import CalcItem
+        for page in window.document.pages:
+            frame = getattr(page, "frame", None)
+            for item in frame.markups() if frame is not None else ():
+                if isinstance(item, CalcItem) and item.cond_preset in renamed:
+                    item.cond_preset = renamed[item.cond_preset]
+            for record in getattr(page, "_pending_items", ()):     # pages not built yet
+                if record.get("cond_preset") in renamed:
+                    record["cond_preset"] = renamed[record["cond_preset"]]
     redraw_all(window)
 
 
