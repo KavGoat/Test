@@ -25,9 +25,11 @@ def shown(h):
 
 
 def test_arguments_read_from_the_functions():
-    assert arguments("PMT") == ["rate", "nper", "pv", "[fv]", "[kind]"]
-    assert arguments("SUM") == ["value1", "[value2]", "…"]
-    assert arguments("NPV") == ["rate", "value1", "[value2]", "…"]
+    assert arguments("PMT") == ["rate", "nper", "pv", "[fv]", "[type]"], "Excel's names"
+    assert arguments("SUMIF") == ["range", "criteria", "[sum_range]"]
+    assert arguments("SUM") == ["number1", "[number2]", "…"]
+    assert arguments("NOW") == []
+    assert arguments("KURT") == ["value1", "[value2]", "…"], "from the function itself, in plain words"
     assert call_at('SUM(A1,IF(B1>2,"a,b",', 21) == ("IF", 2), "commas in text don't count"
     assert call_at("SUM({1,2,3},", 12) == ("SUM", 1), "nor in an array"
     assert call_at("A1+B2", 5) is None
@@ -47,9 +49,9 @@ def test_typing_lists_choosing_inserts_and_the_tip_follows(w):
     key(w, Qt.Key_Down)
     key(w, Qt.Key_Tab)
     assert tabs.editor.text() == "=SUM(" and not h.list.isVisible(), "Tab took SUM, not the next cell"
-    assert h.tip.isVisible() and "<b>value1</b>" in h.tip.text()
+    assert h.tip.isVisible() and "<b>number1</b>" in h.tip.text()
     type_text(w, "A1:A3,sp")
-    assert shown(h) == ["Span_main"] and "<b>[value2]</b>" in h.tip.text()
+    assert shown(h) == ["Span_main"] and "<b>[number2]</b>" in h.tip.text()
     key(w, Qt.Key_Escape)
     assert not h.list.isVisible() and tabs.editor is not None, "Escape closed the list only"
     type_text(w, "an_main)")
@@ -87,3 +89,10 @@ def test_the_formula_bar_offers_the_same(w):
     key(w, Qt.Key_Tab, target=bar)
     assert bar.text() == "=AVERAGE(" and tabs.editor.text() == "=AVERAGE("
     assert typed(tables(w)[0], "A1") == ""
+
+
+def test_a_function_without_arguments_has_a_tip_too(w):
+    make_table(w)
+    w.view.tables.select((0, 0))
+    type_text(w, "=NOW(")
+    assert w.view.tables.help.tip.text() == "NOW()"

@@ -27,6 +27,9 @@ FUNCTION, NAME, TABLE = "function", "name", "table"
 def arguments(name: str) -> list[str]:
     """The arguments of an Excel function as Excel lists them:
     PMT -> rate, nper, pv, [fv], [kind]; SUM -> number1, [number2], …"""
+    from .excelargs import ARGS, WORDS
+    if name in ARGS:
+        return [a.strip() for a in ARGS[name].split(",")] if ARGS[name] else []
     spec = FUNCTIONS.get(name)
     if spec is None or spec.lazy:
         return ["…"]
@@ -36,9 +39,9 @@ def arguments(name: str) -> list[str]:
         return ["…"]
     out = []
     for i, p in enumerate(params):
-        word = p.name.lower().strip("_")
+        word = WORDS.get(p.name, p.name.lower().strip("_"))
         if p.kind is inspect.Parameter.VAR_POSITIONAL:
-            word = "value" if word in ("args", "values", "a") else word.rstrip("s")
+            word = word.rstrip("s") if word.endswith("s") and word != "known_x's" else word
             out += [f"{word}1" if i < spec.least else f"[{word}1]", f"[{word}2]", "…"]
             break
         optional = p.default is not inspect.Parameter.empty or i >= spec.least
@@ -165,6 +168,12 @@ class FormulaHelp:
             return
         name, index = got
         args = arguments(name)
+        if not args:
+            self.tip.setText(f"{name}()")
+            self.tip.adjustSize()
+            self.tip.move(widget.mapToGlobal(QPoint(0, widget.height() + 1)))
+            self.tip.show()
+            return
         if args[-1] == "…" and len(args) >= 3:
             # number1, [number2], …: past the second, still the repeating one
             index = min(index, len(args) - 2)
