@@ -925,7 +925,8 @@ in `docs/SPREADSHEET_DESIGN.md`):
   `var(M20)`.
 * About 260 Excel functions (maths, statistics, logic, lookup incl.
   XLOOKUP/INDEX/OFFSET/INDIRECT, text, dates, dynamic arrays
-  FILTER/SORT/UNIQUE/SEQUENCE, money, matrices, LET/LAMBDA), all keeping units;
+  FILTER/SORT/UNIQUE/SEQUENCE, money, matrices, LET/LAMBDA — called at once, by LET or as a defined name — with MAP, BYROW,
+  BYCOL, REDUCE, SCAN and MAKEARRAY), all keeping units;
   CalcForge's own VALUEIN, CONVERT(x,"kN"), INTERP, UNITOF, STRIPUNIT.
 * Typed entries as Excel reads them (numbers, 12%, $1,200, dates, times,
   fractions, TRUE, errors, `'text`) plus quantities (`5 kN`, `2.5 kN/m^2`).

@@ -533,7 +533,8 @@ def export_markups_csv(document: Document, path: str) -> int:
                          getattr(item, "value_text", ""), item.author,
                          item.created[:10], item.modified[:10],
                          item.summary()])
-    with open(path, "w", newline="", encoding="utf-8") as handle:
+    # with a byte-order mark, so Excel reads ×, ², ≔ and the like as written
+    with open(path, "w", newline="", encoding="utf-8-sig") as handle:
         writer = csv.writer(handle)
         writer.writerow(["Page", "Type", "Subject", "Value", "Author", "Created",
                          "Modified", "Comment"])

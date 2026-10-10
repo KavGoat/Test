@@ -2982,6 +2982,9 @@ class MainWindow(QMainWindow):
         """
         if not 0 <= index < len(self.document.pages) or index == self.current_index:
             return
+        from shiboken6 import isValid
+        if not isValid(self.page_spin) or not isValid(self.page_panel.width_mm):
+            return                     # a last scroll while the window is being taken down
         self.current_index = index
         self.page_spin.blockSignals(True)
         self.page_spin.setValue(index + 1)
