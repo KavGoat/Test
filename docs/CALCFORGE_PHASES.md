@@ -965,6 +965,10 @@ adds or removes rows and columns.
   cells while a formula is typed; point mode (click or arrow to a cell, also
   in another table, which is then named); F4; Ctrl+Enter; Alt+= AutoSum;
   Ctrl+D/R; Ctrl+; date; Delete/Backspace; Ctrl+B/I/U/5; Ctrl+1.
+* **Formula AutoComplete** (2026-10-10), in the cell and the formula bar:
+  the functions, defined names and tables starting with the word typed;
+  Up/Down, Tab inserts (a function with its bracket), Escape closes the
+  list; a tip shows the function's arguments with the current one in bold.
 * **Fill handle** with Excel's series; **drag the selection's border** to move
   cells (Ctrl copies; readers follow a move); **cut/copy/paste** inside
   CalcForge and with Excel (its XML Spreadsheet: formulas, number formats,

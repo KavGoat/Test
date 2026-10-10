@@ -145,12 +145,16 @@ class FormulaBar(QWidget):
         self.edit = QLineEdit()
         self.edit.setToolTip("What is typed in the cell: its formula, or its value")
         self.edit.textEdited.connect(tables._typed_in_bar)
+        self.edit.cursorPositionChanged.connect(lambda *_: tables._caret_moved())
         self.edit.returnPressed.connect(lambda: tables.commit(move=(1, 0), enter=True))
         self.edit.installEventFilter(self)
         layout.addWidget(self.edit, 1)
         self.hide()
 
     def eventFilter(self, obj, event) -> bool:
+        if obj is self.edit and event.type() == QEvent.KeyPress and \
+                self.tables._formula_help is not None and self.tables._formula_help.key(event):
+            return True
         if obj is self.edit and event.type() == QEvent.KeyPress and event.key() == Qt.Key_Escape:
             self.tables.cancel()
             return True
@@ -178,6 +182,7 @@ class TableEditing:
         self.active = (0, 0)
         self.edge = (0, 0)              # the selection's moving corner
         self.editor: Optional[CellEditor] = None
+        self._formula_help = None          # Excel's Formula AutoComplete (ui/formulahelp.py)
         self.editing_cell: Optional[tuple] = None
         self.enter_mode = True          # typed straight in: arrows leave the cell
         self.drag: Optional[tuple] = None
@@ -248,8 +253,39 @@ class TableEditing:
         view.setFocus()
         view.statusMessage.emit(f"{item.name}: type into the cells · click outside it or Esc to close it")
 
+    @property
+    def help(self):
+        if self._formula_help is None:
+            from .formulahelp import FormulaHelp
+            self._formula_help = FormulaHelp(self)
+        return self._formula_help
+
+    def _hide_help(self) -> None:
+        if self._formula_help is not None:
+            self._formula_help.hide()
+
+    def _typing_widget(self):
+        """Where the formula is being typed: the formula bar or the cell."""
+        bar = self.bar
+        if bar is not None and QApplication.focusWidget() is bar.edit:
+            return bar.edit
+        return self.editor
+
+    def _formula_from_help(self, widget, text: str, caret: int) -> None:
+        """A function or name chosen from the list, put into the formula."""
+        if self.editor is None:
+            return
+        self.editor.setText(text)
+        if self.bar is not None:
+            self.bar.edit.setText(text)
+        widget.setCursorPosition(caret)
+        if widget is not self.editor:
+            self.editor.setCursorPosition(caret)
+        self._typed(text)
+
     def close(self) -> None:
         item = self.item
+        self._hide_help()
         if self.editor is not None:
             self.commit(move=None)
         if item is not None:
@@ -937,6 +973,9 @@ class TableEditing:
         item = self.item
         if item is not None:
             item.update()
+        widget = self._typing_widget()
+        if widget is not None:
+            self.help.update(widget)
 
     def _typed_in_bar(self, text: str) -> None:
         if self.editor is None:
@@ -953,6 +992,9 @@ class TableEditing:
 
     def _caret_moved(self) -> None:
         self._refresh_point()
+        widget = self._typing_widget()
+        if widget is not None and self._formula_help is not None:
+            self.help.update(widget)
 
     def _focus_left(self) -> None:
         focus = QApplication.focusWidget()
@@ -971,6 +1013,7 @@ class TableEditing:
             if move is not None:
                 self.move_active(*move, tab=tab, enter=enter)
             return True
+        self._hide_help()
         text = editor.text()
         cell = self.editing_cell
         if item is not None and cell is not None and not self._valid(item, cell, text):
@@ -1092,6 +1135,7 @@ class TableEditing:
             wb.set_widths(sheet, [col], need)
 
     def cancel(self) -> None:
+        self._hide_help()
         editor = self.editor
         if editor is None:
             return
@@ -1222,6 +1266,8 @@ class TableEditing:
     # -- keys --------------------------------------------------------------------------------------
     def _editor_key(self, event) -> bool:
         """Keys while typing in a cell; True when handled here."""
+        if self._formula_help is not None and self._formula_help.key(event):
+            return True                    # the AutoComplete list's Up, Down, Tab, Escape
         key, mods = event.key(), event.modifiers()
         ctrl = bool(mods & Qt.ControlModifier)
         shift = bool(mods & Qt.ShiftModifier)
