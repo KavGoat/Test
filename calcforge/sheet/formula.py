@@ -372,6 +372,14 @@ class Call:
 
 
 @dataclass(frozen=True)
+class Apply:
+    """LAMBDA(x, x*2)(3): a function made in the formula, called at once."""
+
+    fn: object
+    args: tuple
+
+
+@dataclass(frozen=True)
 class Missing:
     """An argument left out: IF(A1,,2)."""
 
@@ -471,6 +479,21 @@ class _Parser:
 
     def postfix(self):
         node = self.ranged()
+        while self.peek().kind == "(" and isinstance(node, (Call, Apply)):
+            # LAMBDA(x, x*2)(3): called straight away (Excel 365)
+            self.take()
+            args = []
+            if self.peek().kind == ")":
+                self.take()
+            else:
+                while True:
+                    args.append(Missing() if self.peek().kind in (",", ")") else self.expr(0))
+                    tok = self.take()
+                    if tok.kind == ")":
+                        break
+                    if tok.kind != ",":
+                        raise FormulaError("Expected “,” or “)”.", tok.pos)
+            node = Apply(node, tuple(args))
         while self.peek().kind == "op" and self.peek().text == "%":
             self.take()
             node = Percent(node)
@@ -706,6 +729,10 @@ def references(tree, row: int, col: int):
         elif isinstance(n, (Unary, Percent)):
             walk(n.arg)
         elif isinstance(n, Call):
+            for a in n.args:
+                walk(a)
+        elif isinstance(n, Apply):
+            walk(n.fn)
             for a in n.args:
                 walk(a)
 

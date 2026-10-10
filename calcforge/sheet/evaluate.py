@@ -13,7 +13,7 @@ from typing import Optional
 
 from . import formula as F
 from .refs import MAX_COLS, MAX_ROWS, is_cell_name
-from .values import (BLANK, ERRORS, NA, NAME, NUM, REF, UNITS_ERR, VALUE, Array,
+from .values import (BLANK, CALC, ERRORS, NA, NAME, NUM, REF, UNITS_ERR, VALUE, Array,
                      ErrorValue, Qty, SheetError, add, div, mul, neg, power, sub,
                      to_number, to_text, unit_parts, with_unit, UnitTextError)
 
@@ -104,9 +104,15 @@ def evaluate_cell(wb, sheet, row: int, col: int, tree):
     return value, ctx.reads
 
 
+class Function:
+    """A function made in a formula (LAMBDA): a value only to call."""
+
+
 def result(v):
     """What a cell shows for a formula's result: a reference shows what is
     in it (an empty cell as 0), a 1×1 array its one value."""
+    if isinstance(v, Function):
+        return CALC                    # =LAMBDA(x, x) left uncalled (Excel)
     if isinstance(v, RefValue):
         if v.single:
             v = v.value_at(0, 0)
@@ -182,6 +188,9 @@ def ev(n, ctx: Ctx):
 
             return call(F.Call("VAR", (F.Name(n.name),)), ctx)   # VAR(named block)
         return _outside(n.name, ctx)
+    if t is F.Apply:
+        from .functions import apply
+        return apply(n, ctx)
     if t is F.SpillRef:
         return _spill_ref(n, ctx)
     if t is F.Structured:

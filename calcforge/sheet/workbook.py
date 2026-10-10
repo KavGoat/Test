@@ -712,8 +712,11 @@ class Workbook:
                 cells.append((target.id, top, left))
             else:
                 blocks.append((target.id, top, left, bottom, right))
-        names = [n.lower() for n in cell.parsed.names]
-        for n in cell.parsed.names:
+        from .functions import FUNCTIONS
+        # a call to no Excel function may be a defined name holding a LAMBDA
+        called = [f for f in cell.parsed.functions if f not in FUNCTIONS]
+        names = [n.lower() for n in cell.parsed.names] + [f.lower() for f in called]
+        for n in (*cell.parsed.names, *called):
             dn = self.find_name(n, sheet)
             if dn is not None:
                 try:

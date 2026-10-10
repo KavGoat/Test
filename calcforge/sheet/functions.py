@@ -24,7 +24,7 @@ from calcforge.calc.engine.units import NODIM, dims_scale
 
 from . import formula as F
 from .dates import date_from_serial, serial_from_date, serial_from_datetime
-from .evaluate import (MISSING, Ctx, RefValue, _broadcast, compare_values, deref, ev, scalar)
+from .evaluate import (MISSING, Ctx, Function, RefValue, _broadcast, compare_values, deref, ev, scalar)
 from .refs import MAX_COLS, MAX_ROWS, CellRef, parse_range, quote_sheet
 from .values import (BLANK, CALC, DIV0, ERROR_NUMBERS, NA, NAME, NUM, REF, UNITS_ERR, VALUE, Array,
                      ErrorValue, Qty, SheetError, add, default_unit, div, general_number, is_number,
@@ -59,10 +59,9 @@ def _many(n):
 def call(n: F.Call, ctx: Ctx):
     spec = FUNCTIONS.get(n.name)
     if spec is None:
-        if ctx.lets and n.name.lower() in ctx.lets:
-            fun = ctx.lets[n.name.lower()]
-            if isinstance(fun, _Lambda):
-                return fun.call([ev(a, ctx) for a in n.args], ctx)
+        fun = _lambda_named(n.name, ctx)
+        if fun is not None:
+            return fun.call([ev(a, ctx) for a in n.args], ctx)
         return NAME
     count = len(n.args)
     if count < spec.least or count > _many(spec.most):
@@ -1113,7 +1112,7 @@ def LET(ctx, args):
         ctx.lets = saved
 
 
-class _Lambda:
+class _Lambda(Function):
     def __init__(self, params, body, ctx):
         self.params = params
         self.body = body
@@ -1129,6 +1128,118 @@ class _Lambda:
             return ev(self.body, ctx)
         finally:
             ctx.lets = saved
+
+
+def _lambda_named(name: str, ctx):
+    """A function the formula didn't get from Excel: a LET name holding a
+    LAMBDA, or a defined name (Name Manager) that is one."""
+    lower = name.lower()
+    if ctx.lets and lower in ctx.lets and isinstance(ctx.lets[lower], _Lambda):
+        return ctx.lets[lower]
+    dn = ctx.wb.find_name(name, ctx.sheet)
+    if dn is None or ctx.depth > 40:
+        return None
+    try:
+        parsed = F.parse(dn.refers_to, 0, 0)
+    except F.FormulaError:
+        return None
+    from .evaluate import Ctx
+    home = ctx.wb.sheet_by_id(dn.sheet) if dn.sheet else ctx.sheet
+    inner = Ctx(ctx.wb, home, ctx.row, ctx.col)
+    inner.reads = ctx.reads
+    inner.depth = ctx.depth + 1
+    got = ev(parsed.tree, inner)
+    return got if isinstance(got, _Lambda) else None
+
+
+def apply(n, ctx):
+    """LAMBDA(x, x*2)(3)."""
+    fun = ev(n.fn, ctx)
+    if not isinstance(fun, _Lambda):
+        return VALUE
+    return fun.call([ev(a, ctx) for a in n.args], ctx)
+
+
+def _lambda_arg(node, ctx):
+    fun = ev(node, ctx)
+    if not isinstance(fun, _Lambda):
+        raise SheetError(VALUE)
+    return fun
+
+
+def _scalar_result(v):
+    from .evaluate import result
+    v = result(v)
+    if isinstance(v, Array):
+        raise SheetError(CALC)                 # one value per cell (Excel's #CALC!)
+    return v
+
+
+@fn("MAP", least=2, lazy=True)
+def MAP(ctx, args):
+    """MAP(array1, [array2…], LAMBDA): each element through the function."""
+    fun = _lambda_arg(args[-1], ctx)
+    grids = [grid(ev(a, ctx)) for a in args[:-1]]
+    h = max(g.height for g in grids)
+    w = max(g.width for g in grids)
+    rows = []
+    for r in range(h):
+        rows.append(tuple(_scalar_result(fun.call(
+            [g.get(r if g.height > 1 else 0, c if g.width > 1 else 0) for g in grids], ctx))
+            for c in range(w)))
+    return Array(tuple(rows))
+
+
+@fn("BYROW", least=2, most=2, lazy=True)
+def BYROW(ctx, args):
+    g = grid(ev(args[0], ctx))
+    fun = _lambda_arg(args[1], ctx)
+    return Array(tuple((_scalar_result(fun.call([Array((g.rows[r],))], ctx)),)
+                       for r in range(g.height)))
+
+
+@fn("BYCOL", least=2, most=2, lazy=True)
+def BYCOL(ctx, args):
+    g = grid(ev(args[0], ctx))
+    fun = _lambda_arg(args[1], ctx)
+    cols = [Array(tuple((g.rows[r][c],) for r in range(g.height))) for c in range(g.width)]
+    return Array((tuple(_scalar_result(fun.call([col], ctx)) for col in cols),))
+
+
+@fn("REDUCE", least=3, most=3, lazy=True)
+def REDUCE(ctx, args):
+    acc = ev(args[0], ctx)
+    g = grid(ev(args[1], ctx))
+    fun = _lambda_arg(args[2], ctx)
+    for v in g.values():
+        acc = fun.call([acc, v], ctx)
+    return acc
+
+
+@fn("SCAN", least=3, most=3, lazy=True)
+def SCAN(ctx, args):
+    acc = ev(args[0], ctx)
+    g = grid(ev(args[1], ctx))
+    fun = _lambda_arg(args[2], ctx)
+    rows = []
+    for r in range(g.height):
+        row = []
+        for c in range(g.width):
+            acc = _scalar_result(fun.call([acc, g.get(r, c)], ctx))
+            row.append(acc)
+        rows.append(tuple(row))
+    return Array(tuple(rows))
+
+
+@fn("MAKEARRAY", least=3, most=3, lazy=True)
+def MAKEARRAY(ctx, args):
+    rows = int(to_number(scalar(ev(args[0], ctx))))
+    cols = int(to_number(scalar(ev(args[1], ctx))))
+    if rows < 1 or cols < 1:
+        return VALUE
+    fun = _lambda_arg(args[2], ctx)
+    return Array(tuple(tuple(_scalar_result(fun.call([float(r + 1), float(c + 1)], ctx))
+                             for c in range(cols)) for r in range(rows)))
 
 
 @fn("LAMBDA", least=1, lazy=True)
