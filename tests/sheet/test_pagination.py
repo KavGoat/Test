@@ -74,9 +74,44 @@ def test_fit_to_width_scales_every_data_column_onto_the_page():
     paging = paginate(sheet, a4())
     assert paging.last_col == 20
     printed = sum(sheet.width(c) for c in range(21))
-    assert abs(printed * paging.scale - paging.printable[2]) < 0.01
+    # Excel's whole percentage: the largest that fits
+    assert paging.scale * 100 == int(paging.scale * 100)
+    assert printed * paging.scale <= paging.printable[2] + 0.01
+    assert printed * (paging.scale + 0.01) > paging.printable[2]
     # scaled down, a page holds more rows
     assert paging.slices[0][1] + 1 > 52
+
+
+def test_adjust_to_a_percentage_as_excel():
+    wb, sheet = fresh()
+    wb.set_input(sheet, 120, 0, "end")
+    at_100 = paginate(sheet, a4())
+    wb.set_page_options(sheet, scale=50)
+    half = paginate(sheet, a4())
+    assert half.scale == 0.5
+    assert half.last_col + 1 == 2 * (at_100.last_col + 1)        # twice the columns
+    assert half.slices[0][1] + 1 == 2 * (at_100.slices[0][1] + 1)  # and twice the rows
+    assert half.pages < at_100.pages
+
+
+def test_fit_to_one_page_wide_and_tall_as_excel():
+    """Excel's Fit to 1 page wide by 1 tall: everything on one page, at the
+    largest whole percentage that fits; 0 tall is "automatic"."""
+    wb, sheet = fresh()
+    wb.set_input(sheet, 150, 12, "corner")
+    assert paginate(sheet, a4()).pages > 2
+    wb.set_page_options(sheet, fit_width=True, fit_tall=1)
+    paging = paginate(sheet, a4())
+    assert paging.pages == 1 and paging.last_col == 12
+    assert paging.slices[0][1] >= 150
+    tall = sum(sheet.height(r) for r in range(151))
+    assert tall * paging.scale <= paging.printable[3] + 0.01
+    assert paging.scale * 100 == int(paging.scale * 100)
+    wb.set_page_options(sheet, fit_tall=2)
+    two = paginate(sheet, a4())
+    assert two.pages == 2 and two.scale > paging.scale
+    wb.set_page_options(sheet, fit_tall=0)
+    assert paginate(sheet, a4()).pages > 2, "wide only: as many pages down as it takes"
 
 
 def test_print_area_and_titles():

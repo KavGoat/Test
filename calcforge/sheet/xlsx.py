@@ -378,6 +378,7 @@ def read_workbook(path: str, taken: Optional[set] = None) -> Imported:
         return text
 
     sheets = []
+    converted: dict = {}              # openpyxl's style id -> its look here
     for ws in wb.worksheets:
         name = renames.get(ws.title, ws.title)
         styles = [{}]
@@ -424,7 +425,14 @@ def read_workbook(path: str, taken: Optional[set] = None) -> Imported:
                     text = "=" + renamed(text[1:])
                     if (r, k) in cached_cells:
                         excel_values[(r, k)] = cached_cells[(r, k)]
-                st = _style(c, theme, default_font) if c.has_style else {}
+                if c.has_style:
+                    # a workbook has a few dozen looks over its thousands of cells
+                    st = converted.get(c.style_id)
+                    if st is None:
+                        st = converted[c.style_id] = _style(c, theme, default_font)
+                    st = dict(st)
+                else:
+                    st = {}
                 comment = c.comment.text if c.comment is not None else None
                 if text is None and not st and not comment:
                     continue
@@ -487,12 +495,18 @@ def read_workbook(path: str, taken: Optional[set] = None) -> Imported:
             left_out.append(f"{len(ws._charts)} chart{'s' * (len(ws._charts) > 1)} on “{ws.title}”")
         if getattr(ws, "_images", None):
             left_out.append(f"{len(ws._images)} picture{'s' * (len(ws._images) > 1)} on “{ws.title}”")
-        if setup is not None and setup.scale and int(setup.scale) != 100 and not page.get("fit_width"):
-            left_out.append(f"the print scale of {int(setup.scale)}% on “{ws.title}”")
+        if setup is not None and setup.fitToWidth not in (None, 0, 1) and _fits_to_page(ws):
+            left_out.append(f"fitting “{ws.title}” to {int(setup.fitToWidth)} pages wide "
+                            f"(its columns that fit print, the rest is scratch)")
         sheets.append(ImportedSheet(name, data, paper, orientation, margins,
                                     ws.sheet_state != "visible", excel_values))
     _names(wb, sheets, renames, renamed, left_out)
     return Imported(sheets, left_out)
+
+
+def _fits_to_page(ws) -> bool:
+    pr = ws.sheet_properties.pageSetUpPr if ws.sheet_properties is not None else None
+    return bool(pr is not None and pr.fitToPage)
 
 
 def _page_options(ws, renamed) -> dict:
@@ -519,8 +533,18 @@ def _page_options(ws, renamed) -> dict:
     if breaks:
         out["breaks"] = sorted(set(breaks))
     pr = ws.sheet_properties.pageSetUpPr if ws.sheet_properties is not None else None
-    if pr is not None and pr.fitToPage and ws.page_setup.fitToWidth in (1, None):
-        out["fit_width"] = True
+    setup = ws.page_setup
+    if pr is not None and pr.fitToPage:
+        # Fit to N pages wide by M tall; either left out of the file is 1,
+        # and 0 is "automatic" (Excel's Fit All Columns on One Page is 1 by 0)
+        wide = 1 if setup.fitToWidth is None else int(setup.fitToWidth)
+        tall = 1 if setup.fitToHeight is None else int(setup.fitToHeight)
+        if wide == 1:
+            out["fit_width"] = True
+        if tall >= 1:
+            out["fit_tall"] = tall
+    elif setup is not None and setup.scale and int(setup.scale) != 100:
+        out["scale"] = int(setup.scale)          # Adjust to N% normal size
     po = ws.print_options
     if po is not None:
         if po.horizontalCentered:

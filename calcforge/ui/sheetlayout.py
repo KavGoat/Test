@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtWidgets import (QCheckBox, QDialog, QDialogButtonBox, QFormLayout, QLabel,
-                               QLineEdit, QVBoxLayout)
+from PySide6.QtWidgets import (QCheckBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout,
+                               QLabel, QLineEdit, QSpinBox, QVBoxLayout)
 
 from ..sheet.pagination import options
 from ..sheet.refs import CellRef, area_text, parse_range
@@ -76,8 +76,21 @@ class SheetLayoutDialog(QDialog):
         self.titles.setPlaceholderText("e.g. 1:2")
         form.addRow("Rows to repeat at top:", self.titles)
         layout.addLayout(form)
-        self.fit = QCheckBox("Fit all columns to the page width")
+        # Excel's Scaling: Adjust to N% normal size, or Fit to 1 page wide by N tall
+        self.scale = QSpinBox()
+        self.scale.setRange(10, 400)
+        self.scale.setSuffix("% normal size")
+        self.scale.setValue(int(opts.get("scale") or 100))
+        form.addRow("Adjust to:", self.scale)
+        self.fit = QCheckBox("Fit to 1 page wide (all the columns used)")
         self.fit.setChecked(bool(opts["fit_width"]))
+        self.tall = QSpinBox()
+        self.tall.setRange(0, 999)
+        self.tall.setSpecialValueText("as many pages as it takes, tall")
+        self.tall.setSuffix(" page(s) tall")
+        self.tall.setValue(int(opts.get("fit_tall") or 0))
+        self.fit.toggled.connect(self._fitting)
+        self.tall.valueChanged.connect(self._fitting)
         self.center_h = QCheckBox("Centre on page horizontally")
         self.center_h.setChecked(bool(opts["center_h"]))
         self.center_v = QCheckBox("Centre on page vertically")
@@ -88,7 +101,15 @@ class SheetLayoutDialog(QDialog):
         self.headings.setChecked(bool(opts["print_headings"]))
         self.screen_grid = QCheckBox("Show gridlines on screen")
         self.screen_grid.setChecked(bool(sheet.show_gridlines))
-        for box in (self.fit, self.center_h, self.center_v, self.gridlines, self.headings,
+        layout.addWidget(self.fit)
+        tall = QHBoxLayout()
+        tall.addSpacing(20)
+        tall.addWidget(QLabel("by"))
+        tall.addWidget(self.tall)
+        tall.addStretch(1)
+        layout.addLayout(tall)
+        self._fitting()
+        for box in (self.center_h, self.center_v, self.gridlines, self.headings,
                     self.screen_grid):
             layout.addWidget(box)
         self.problem = QLabel("")
@@ -98,6 +119,10 @@ class SheetLayoutDialog(QDialog):
         buttons.accepted.connect(self._check)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def _fitting(self, *_args) -> None:
+        """Fitting to pages sets the size, as in Excel: Adjust to is unused."""
+        self.scale.setEnabled(not (self.fit.isChecked() or self.tall.value()))
 
     def _check(self) -> None:
         if self.changes() is None:
@@ -114,6 +139,7 @@ class SheetLayoutDialog(QDialog):
             self.problem.setText("Rows to repeat are rows (e.g. 1:2)")
             return None
         return {"print_area": area, "titles": titles, "fit_width": self.fit.isChecked(),
+                "fit_tall": self.tall.value(), "scale": self.scale.value(),
                 "center_h": self.center_h.isChecked(), "center_v": self.center_v.isChecked(),
                 "print_gridlines": self.gridlines.isChecked(),
                 "print_headings": self.headings.isChecked()}

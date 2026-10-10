@@ -123,8 +123,15 @@ class SheetHeadings(QWidget):
             painter.fillRect(rect, HEADING_BG)
             xs, ys = run.edges()
             sel = run.selection if run.opened else None
+            # only the columns or rows the strip shows (a sheet can have thousands)
+            corners = [run.mapFromScene(view.mapToScene(p)) for p in
+                       (rect.topLeft(), rect.topRight(), rect.bottomLeft(), rect.bottomRight())]
             if kind == "col":
-                for c in range(len(xs) - 1):
+                lo = min(p.x() for p in corners)
+                hi = max(p.x() for p in corners)
+                first = max(0, bisect.bisect_right(xs, lo) - 2)
+                last = min(len(xs) - 1, bisect.bisect_right(xs, hi) + 1)
+                for c in range(first, last):
                     a = view.mapFromScene(run.mapToScene(QPointF(xs[c], 0))).x()
                     b = view.mapFromScene(run.mapToScene(QPointF(xs[c + 1], 0))).x()
                     if b < rect.left() or a > rect.right() or b - a < 1:
@@ -137,7 +144,11 @@ class SheetHeadings(QWidget):
                     painter.setPen(EXCEL_GREEN if on else QColor("#444444"))
                     painter.drawText(cell, Qt.AlignCenter, col_letters(c))
             else:
-                for r in range(len(ys) - 1):
+                lo = min(p.y() for p in corners)
+                hi = max(p.y() for p in corners)
+                first = max(0, bisect.bisect_right(ys, lo) - 2)
+                last = min(len(ys) - 1, bisect.bisect_right(ys, hi) + 1)
+                for r in range(first, last):
                     a = view.mapFromScene(run.mapToScene(QPointF(0, ys[r]))).y()
                     b = view.mapFromScene(run.mapToScene(QPointF(0, ys[r + 1]))).y()
                     if b < rect.top() or a > rect.bottom() or b - a < 1:

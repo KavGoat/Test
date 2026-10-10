@@ -18,6 +18,7 @@ from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, 
 from PySide6.QtWidgets import QGraphicsItem
 
 from ..core.typography import page_font
+from ..sheet.condfmt import looks_for
 from ..sheet.numfmt import format_value
 from ..sheet.refs import col_letters
 from ..sheet.style import Border, Style
@@ -41,21 +42,53 @@ _BORDER_WIDTH = {"hair": 0.25, "thin": 0.75, "medium": 1.5, "thick": 2.25,
 THIN = Border("thin", "#000000")
 
 
+_FONTS: dict = {}
+_PENS: dict = {}
+
+
 def cell_font(st: Style) -> QFont:
-    font = page_font(st.font or DEFAULT_FONT, st.size or DEFAULT_SIZE, st.bold, st.italic,
-                     bool(st.underline))
-    if st.strike:
-        font.setStrikeOut(True)
-    return font
+    key = (st.font or DEFAULT_FONT, st.size or DEFAULT_SIZE, bool(st.bold), bool(st.italic),
+           bool(st.underline), bool(st.strike))
+    font = _FONTS.get(key)
+    if font is None:
+        font = page_font(key[0], key[1], key[2], key[3], key[4])
+        if st.strike:
+            font.setStrikeOut(True)
+        _FONTS[key] = font
+    return QFont(font)
+
+
+_METRICS: dict = {}
+_COLOURS: dict = {}
+
+
+def _metrics(st: Style) -> QFontMetricsF:
+    key = (st.font or DEFAULT_FONT, st.size or DEFAULT_SIZE, bool(st.bold), bool(st.italic),
+           bool(st.underline), bool(st.strike))
+    got = _METRICS.get(key)
+    if got is None:
+        got = _METRICS[key] = QFontMetricsF(cell_font(st))
+    return got
+
+
+def _colour(name: str) -> QColor:
+    got = _COLOURS.get(name)
+    if got is None:
+        got = _COLOURS[name] = QColor(name)
+    return got
 
 
 def border_pen(b: Border) -> QPen:
-    pen = QPen(QColor(b.color or "#000000"), _BORDER_WIDTH.get(b.style, 0.75))
-    pen.setCapStyle(Qt.SquareCap)
-    if b.style == "dashed":
-        pen.setDashPattern([4, 2])
-    elif b.style == "dotted":
-        pen.setDashPattern([1, 1.5])
+    key = (b.style, b.color)
+    pen = _PENS.get(key)
+    if pen is None:
+        pen = QPen(QColor(b.color or "#000000"), _BORDER_WIDTH.get(b.style, 0.75))
+        pen.setCapStyle(Qt.SquareCap)
+        if b.style == "dashed":
+            pen.setDashPattern([4, 2])
+        elif b.style == "dotted":
+            pen.setDashPattern([1, 1.5])
+        _PENS[key] = pen
     return pen
 
 
@@ -344,11 +377,21 @@ class TableItem(MarkupItem):
         sheet = self.sheet
         if sheet is None or not sheet.cond_rules:
             return {}
-        from ..sheet.condfmt import looks_for
         return looks_for(sheet).look(row, col)
 
     def _shown_style(self, row, col) -> Style:
         """The cell's style with its conditional formats on."""
+        memo = self._shown_memo
+        if memo is not None:
+            got = memo.get((row, col))
+            if got is None:
+                got = memo[(row, col)] = self._work_out_style(row, col)
+            return got
+        return self._work_out_style(row, col)
+
+    _shown_memo = None               # (row, col) -> shown style, while painting
+
+    def _work_out_style(self, row, col) -> Style:
         st = self._style(row, col)
         fmt = self._looks(row, col).get("format")
         if not fmt:
@@ -378,6 +421,15 @@ class TableItem(MarkupItem):
             for r in range(m[0], min(m[2], rows - 1) + 1):
                 for c in range(m[1], min(m[3], cols - 1) + 1):
                     covered[(r, c)] = m
+        self._shown_memo = {}
+        try:
+            self._paint_cells(painter, xs, ys, rows, cols, r0, r1, c0, c1, printing, merges, covered)
+        finally:
+            self._shown_memo = None
+
+    def _paint_cells(self, painter, xs, ys, rows, cols, r0, r1, c0, c1, printing, merges,
+                     covered) -> None:
+        sheet = self.sheet
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing, False)
         # fills
@@ -419,11 +471,17 @@ class TableItem(MarkupItem):
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setRenderHint(QPainter.TextAntialiasing, True)
         # text
-        for (r, c), cell in list(sheet.cells.items()):
-            if r >= rows or c >= cols or cell.value is BLANK:
-                continue
-            if self._range is not None and not (r0 <= r <= r1) and \
-                    not any(m[0] <= r1 and m[2] >= r0 for m in [covered.get((r, c))] if m):
+        if self._range is None:
+            places = list(sheet.cells)
+        else:
+            # the rows in view, every column (a long text runs over its
+            # neighbours), and merged cells reaching down into view
+            places = sorted(sheet.positions_in(r0, 0, r1, cols - 1))
+            places += [(m[0], m[1]) for m in merges if m[0] < r0 <= m[2]]
+        cells = sheet.cells
+        for r, c in places:
+            cell = cells.get((r, c))
+            if cell is None or r >= rows or c >= cols or cell.value is BLANK:
                 continue
             m = covered.get((r, c))
             if m is not None and (r, c) != (m[0], m[1]):
@@ -434,9 +492,11 @@ class TableItem(MarkupItem):
         for r in range(r0, r1 + 1):
             for c in range(c0, c1 + 1):
                 m = covered.get((r, c))
-                st = self._style(m[0], m[1]) if m else self._style(r, c)
-                rect = QRectF(xs[c], ys[r], xs[c + 1] - xs[c], ys[r + 1] - ys[r])
                 own = self._style(r, c)
+                if m is None and not (own.top or own.bottom or own.left or own.right):
+                    continue
+                st = self._style(m[0], m[1]) if m else own
+                rect = QRectF(xs[c], ys[r], xs[c + 1] - xs[c], ys[r + 1] - ys[r])
                 for side, a, b in (("top", rect.topLeft(), rect.topRight()),
                                    ("bottom", rect.bottomLeft(), rect.bottomRight()),
                                    ("left", rect.topLeft(), rect.bottomLeft()),
@@ -472,7 +532,7 @@ class TableItem(MarkupItem):
             painter.restore()
             rect = rect.adjusted(11, 0, 0, 0)
         font = cell_font(st)
-        metrics = QFontMetricsF(font)
+        metrics = _metrics(st)
         value = cell.value
         numeric = isinstance(value, (float, Qty)) and not isinstance(value, bool)
         align = st.h_align
@@ -481,7 +541,7 @@ class TableItem(MarkupItem):
         indent = st.indent * 7.5
         inner = rect.adjusted(PAD + (indent if align == "left" else 0), 0,
                               -PAD - (indent if align == "right" else 0), 0)
-        colour = QColor(shown.color or st.color or "#000000")
+        colour = _colour(shown.color or st.color or "#000000")
         painter.setFont(font)
         painter.setPen(colour)
         v = {"top": Qt.AlignTop, "center": Qt.AlignVCenter}.get(st.v_align, Qt.AlignBottom)
@@ -549,6 +609,10 @@ class TableItem(MarkupItem):
             y = rect.center().y() + (metrics.ascent() - metrics.descent()) / 2
         else:
             y = rect.bottom() - PAD / 2 - metrics.descent()
+        if x >= clip.left() and x + width <= clip.right() and \
+                y - metrics.ascent() >= clip.top() and y + metrics.descent() <= clip.bottom():
+            painter.drawText(QPointF(x, y), text)       # well inside its cell: no clip needed
+            return
         painter.save()
         painter.setClipRect(clip)
         painter.drawText(QPointF(x, y), text)
@@ -594,8 +658,13 @@ class TableItem(MarkupItem):
         sheet = self.sheet
         rows, cols = self.size
         painter.setRenderHint(QPainter.Antialiasing, True)
-        for (r, c), cell in sheet.cells.items():
-            if cell.comment and r < rows and c < cols:
+        if self._range is not None:
+            places = sheet.positions_in(self._range[0], 0, self._range[1], cols - 1)
+        else:
+            places = list(sheet.cells)
+        for r, c in places:
+            cell = sheet.cells.get((r, c))
+            if cell is not None and cell.comment and r < rows and c < cols:
                 rect = self.cell_rect(r, c)
                 path = QPainterPath()
                 path.moveTo(rect.topRight())

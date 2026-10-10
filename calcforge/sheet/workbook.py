@@ -790,6 +790,8 @@ class Workbook:
         lowered = None if names is None else {n.lower() for n in names}
         hit = [key for key, read in self._outside_reads.items() if lowered is None or read & lowered]
         self._dirty_many(hit, include_self=True)
+        if self._open is not None:
+            return set()            # a transaction is open: calculated once, at its end
         return self.recalculate()
 
     def outside_names_read(self) -> set:

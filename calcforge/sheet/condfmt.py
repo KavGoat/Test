@@ -118,13 +118,18 @@ class Looks:
     def __init__(self, sheet):
         self.sheet = sheet
         self.version = None
+        self._rules = None                # the rules worked out for (held, so compared exactly)
         self._stats: dict = {}
+        self._cells: dict = {}            # (row, col) -> look, until a value or a rule changes
 
     def _fresh(self) -> None:
-        version = (self.sheet.workbook.version, id(self.sheet.cond_rules), len(self.sheet.cond_rules))
-        if version != self.version:
+        rules = self.sheet.cond_rules
+        version = (self.sheet.workbook.version, len(rules))
+        if version != self.version or rules is not self._rules:
             self.version = version
+            self._rules = rules
             self._stats = {}
+            self._cells = {}
 
     def stats(self, index: int, rule: dict):
         got = self._stats.get(index)
@@ -159,6 +164,12 @@ class Looks:
         """{"format": {style fields}, "bar": (fraction, colour), "scale": colour,
         "icon": (glyph, colour)} for one cell (only what applies)."""
         self._fresh()
+        got = self._cells.get((row, col))
+        if got is None:
+            got = self._cells[(row, col)] = self._look(row, col)
+        return got
+
+    def _look(self, row: int, col: int) -> dict:
         out: dict = {}
         fmt: dict = {}
         sheet = self.sheet

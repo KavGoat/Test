@@ -308,16 +308,16 @@ class SheetRunItem(TableItem):
         r0 = max(0, bisect.bisect_right(ys, exposed.top()) - 2)
         r1 = min(rows - 1, bisect.bisect_right(ys, exposed.bottom()) + 1)
         painter.save()
-        self._paint_paper(painter, r0, r1)
-        self._range = (r0, r1, 0, cols - 1)
-        try:
-            self.paint_visible(painter)
-        finally:
-            self._range = None
+        if not self._paint_bands(painter, r0, r1):
+            self._paint_rows(painter, r0, r1)
         painter.restore()
         painter.save()
         self._paint_breaks(painter)
-        self._paint_marks(painter)
+        self._range = (r0, r1, 0, cols - 1)
+        try:
+            self._paint_marks(painter)
+        finally:
+            self._range = None
         painter.restore()
         painter.save()
         self._paint_headings(painter, r0, r1)
@@ -326,6 +326,132 @@ class SheetRunItem(TableItem):
             if self.overlay is not None:
                 self.overlay(painter)
         painter.restore()
+
+    def _paint_rows(self, painter: QPainter, r0: int, r1: int) -> None:
+        """The paper and the cells of rows r0 to r1, drawn afresh."""
+        self._paint_paper(painter, r0, r1)
+        self._range = (r0, r1, 0, self.size[1] - 1)
+        try:
+            self.paint_visible(painter)
+        finally:
+            self._range = None
+
+    # -- bands: the cells drawn once, as pictures, until they change ----------------------------
+    # Drawing a screenful of cells is a thousand formatted texts, fills and
+    # borders, and with the view repainting whole (OpenGL) that was every
+    # frame of a scroll or a pan: four frames a second on a 3000-row
+    # workbook (2026-10-10). The paper and cells are kept as pictures of
+    # BAND rows each, at the scale they are shown, and drawn again only when
+    # what is in them changes — known by comparing what they were drawn from.
+    BAND = 24
+    BAND_PIXELS = 32_000_000          # all bands kept, together (about 128 MB)
+
+    def _band_key(self, a: int, b: int) -> tuple:
+        """Everything a band's picture is drawn from."""
+        sheet = self.sheet
+        xs, ys = self.edges()
+        cells = sheet.cells
+        content = []
+        for r, c in sheet.positions_in(a, 0, b, self.size[1] - 1):
+            cell = cells[(r, c)]
+            content.append((r, c, cell.style, type(cell.value), cell.value))
+        paging = self.paging
+        opts = options(sheet)
+        rules = (sheet.cond_rules, sheet.workbook.version) if sheet.cond_rules else None
+        return (tuple(xs), tuple(ys[a:b + 2]), content, [tuple(m) for m in sheet.merges],
+                paging.first_col, paging.last_col, paging.print_rows, tuple(paging.slices),
+                sheet.show_gridlines, opts["print_gridlines"], self._on_paper, rules,
+                len(sheet.workbook.styles))
+
+    def _paint_bands(self, painter: QPainter, r0: int, r1: int) -> bool:
+        """Draw rows r0 to r1 from the bands' pictures; False when they
+        should be drawn afresh instead (a turned page, a zoom under way, a
+        picture too big to be worth keeping)."""
+        from collections import OrderedDict
+
+        from ..ui.scene import _draw_on_the_pixel_grid, _painted_scale
+        shape = painter.transform()
+        if abs(shape.m12()) > 1e-9 or abs(shape.m21()) > 1e-9:
+            return False
+        scale = round(_painted_scale(painter), 4)
+        steady = scale == getattr(self, "_last_scale", None)
+        self._last_scale = scale
+        xs, ys = self.edges()
+        width = int(round(xs[-1] * scale))
+        if not steady or width <= 0 or width > 8192:
+            return False                       # zooming, or so close in that few cells show
+        bands = self.__dict__.get("_bands")
+        if bands is None or self.__dict__.get("_bands_scale") != scale:
+            bands = self._bands = OrderedDict()
+            self._bands_scale = scale
+        first, last = r0 // self.BAND, r1 // self.BAND
+        for k in range(first, last + 1):
+            entry = self._band(k)
+            if entry is None:
+                continue
+            a, b = entry[2]
+            _draw_on_the_pixel_grid(painter, QRectF(0, ys[a], xs[-1], ys[b + 1] - ys[a]), entry[1])
+        used = sum(e[1].width() * e[1].height() for e in bands.values())
+        while used > self.BAND_PIXELS and len(bands) > 1:
+            _k, (_key, old, _rows) = bands.popitem(last=False)
+            used -= old.width() * old.height()
+        # the bands just out of view, drawn while nothing else is happening
+        self._ahead = [k for k in (last + 1, first - 1, last + 2) if k >= 0]
+        if not self.__dict__.get("_ahead_queued"):
+            self._ahead_queued = True
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(0, self._draw_ahead)
+        return True
+
+    def _band(self, k: int, keep_order: bool = True):
+        """(key, picture, (first row, last row)) of band k at the bands'
+        scale, drawn now if what it shows has changed; None past the end."""
+        from PySide6.QtGui import QPixmap
+        bands = self._bands
+        scale = self._bands_scale
+        xs, ys = self.edges()
+        a, b = k * self.BAND, min(self.size[0] - 1, k * self.BAND + self.BAND - 1)
+        if a > b:
+            return None
+        top, bottom = ys[a], ys[b + 1]
+        width = int(round(xs[-1] * scale))
+        height = int(round((bottom - top) * scale))
+        if height <= 0 or width <= 0:
+            return None
+        key = self._band_key(a, b)
+        entry = bands.get(k)
+        if entry is None or entry[0] != key:
+            picture = QPixmap(width, height)
+            picture.fill(QColor("white"))
+            p = QPainter(picture)
+            p.scale(width / xs[-1], height / (bottom - top))
+            p.translate(0, -top)
+            p.setClipRect(QRectF(0, top, xs[-1], bottom - top))
+            # a merged cell reaching into the band from above is drawn from its top
+            start = min([a] + [m[0] for m in self.sheet.merges if m[0] < a <= m[2]])
+            self._paint_rows(p, start, b)
+            p.end()
+            entry = (key, picture, (a, b))
+        bands[k] = entry
+        if keep_order:
+            bands.move_to_end(k)
+        return entry
+
+    def _draw_ahead(self) -> None:
+        self._ahead_queued = False
+        try:
+            if self.scene() is None or self.sheet is None or self.paging is None:
+                return
+        except RuntimeError:                   # gone with its page
+            return
+        bands = self.__dict__.get("_bands")
+        if bands is None:
+            return
+        for k in self.__dict__.get("_ahead", []):
+            if k in bands or self._band(k, keep_order=False) is None:
+                continue                               # drawn already, or past the end
+            bands.move_to_end(k, last=False)          # first to go if room is short
+            return                                     # one a turn: the next paint asks again
 
     def _paint_paper(self, painter: QPainter, r0: int, r1: int) -> None:
         """White where it prints, grey for the scratch area; "Page N"."""

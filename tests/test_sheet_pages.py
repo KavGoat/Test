@@ -93,12 +93,15 @@ def test_a_sheet_page_is_a_page_of_cells_with_scratch_to_its_right(w):
     assert page.sheet == run.uid
     assert run.parentItem() is page.frame
     paging = run.paging
-    assert (paging.first_col, paging.last_col) == (0, 10)       # A to K print on A4
+    # Excel's Normal margins on A4: A to J print and 48 rows, as in Excel
+    assert (page.setup.margin_left, page.setup.margin_top) == pytest.approx((17.78, 19.05))
+    assert (paging.first_col, paging.last_col) == (0, 9)
+    assert paging.slices[0] == (0, 47)
     rect = page.frame.page_rect()
     xs, ys = run.edges()
     assert rect.width() == pytest.approx(xs[paging.shown_cols])  # printed + scratch
     assert rect.width() > page.setup.width_pt
-    assert rect.height() == pytest.approx(ys[52])                # 52 rows on the page
+    assert rect.height() == pytest.approx(ys[48])
     # the ordinary page before it is still paper
     assert w.document.pages[0].frame.page_rect().width() == pytest.approx(
         w.document.pages[0].setup.width_pt)
@@ -128,25 +131,26 @@ def test_clicks_go_to_the_cells_in_markup_mode_and_markups_win(w):
 
 def test_going_past_the_last_page_adds_one(w):
     run = sheet_page(w)
+    n = run.paging.slices[0][1] + 1            # rows on a page
     open_at(w, run, "A1")
-    w.view.tables.select((51, 0))
+    w.view.tables.select((n - 1, 0))
     key(w, Qt.Key_Down)
-    assert w.view.tables.active == (52, 0), "on to the row below the last page"
+    assert w.view.tables.active == (n, 0), "on to the row below the last page"
     assert len(w.document.pages) == 3, "and the page it is on (2026-10-10)"
     type_text(w, "next")
     enter(w)
     assert len(w.document.pages) == 3
     assert [p.sheet for p in w.document.pages[1:]] == [run.uid, run.uid]
     (run,) = runs(w)
-    assert value(run, 52, 0) == "next"
-    assert run.paging.slices[1][0] == 52
+    assert value(run, n, 0) == "next"
+    assert run.paging.slices[1][0] == n
     # page 2 sits right under page 1: one continuous grid
     f1, f2 = (w.document.pages[i].frame for i in (1, 2))
     assert f2.scenePos().y() == pytest.approx(f1.scenePos().y() + f1.page_rect().height())
     w.undo_stack.undo()
     pump()
     (run,) = runs(w)
-    assert value(run, 52, 0) is None
+    assert value(run, n, 0) is None
     assert len(w.document.pages) == 3, "the typing is undone; the page stays a step longer"
     w.undo_stack.undo()
     pump()
@@ -154,7 +158,7 @@ def test_going_past_the_last_page_adds_one(w):
     w.undo_stack.redo()
     w.undo_stack.redo()
     pump()
-    assert len(w.document.pages) == 3 and value(runs(w)[0], 52, 0) == "next"
+    assert len(w.document.pages) == 3 and value(runs(w)[0], n, 0) == "next"
 
 
 def test_empty_pages_at_the_end_are_kept(w):
@@ -231,23 +235,24 @@ def test_deleting_a_page_of_a_run_takes_its_rows(w, monkeypatch):
     w.insert_sheet_page(1)
     pump()
     (run,) = runs(w)
+    n = run.paging.slices[0][1] + 1            # rows on a page
     wb = run.sheet.workbook
     wb.set_input(run.sheet, 0, 0, "first")
     wb.set_input(run.sheet, 60, 0, "second")
     wb.set_input(run.sheet, 110, 0, "third")
     f3 = w.document.pages[3].frame
     box = box_on(f3, *(run.cell_rect(110, 2).topLeft() - QPointF(0, run._tops[2])).toTuple())
-    w.delete_page(1)                     # the run's first page: rows 1–52 go
+    w.delete_page(1)                     # the run's first page: its rows go
     pump()
     (run,) = runs(w)
     assert len(w.document.pages) == 3
     assert run.parentItem() is w.document.pages[1].frame
     assert value(run, 0, 0) is None
-    assert value(run, 8, 0) == "second"
-    assert value(run, 58, 0) == "third"
+    assert value(run, 60 - n, 0) == "second"
+    assert value(run, 110 - n, 0) == "third"
     # the markup kept to its cell, now on the run's second page
     assert box.parentItem() is w.document.pages[2].frame
-    assert run.mapFromScene(box.scenePos()).y() == pytest.approx(run.cell_rect(58, 2).top())
+    assert run.mapFromScene(box.scenePos()).y() == pytest.approx(run.cell_rect(110 - n, 2).top())
     w.undo_stack.undo()
     pump()
     (run,) = runs(w)
@@ -309,11 +314,11 @@ def test_manual_breaks_and_a_dragged_automatic_break(w):
     assert run.paging.slices[0] == (0, 19) and 20 in run.paging.manual
     sheetlayout.reset_breaks(w, run)
     (run,) = runs(w)
-    assert run.paging.slices[0] == (0, 51)
-    # drag the automatic break at row 53 up to row 41: a manual break there
+    assert run.paging.slices[0] == (0, 47)          # Excel's 48 rows on A4
+    # drag the automatic break at row 49 up to row 41: a manual break there
     open_at(w, run, "A1")
     xs, ys = run.edges()
-    start = run.mapToScene(QPointF(xs[2], ys[52]))
+    start = run.mapToScene(QPointF(xs[2], ys[48]))
     end = run.mapToScene(QPointF(xs[2], ys[40] + 2))
     from tests.test_usability import drag
     drag(w.view, start.x(), start.y(), end.x(), end.y())
@@ -343,6 +348,19 @@ def test_page_layout_dialog_sets_the_options(w):
     assert opts["titles"] == [0, 1]
     assert opts["center_h"] and opts["print_gridlines"]
     assert (run.paging.first_col, run.paging.last_col) == (0, 5)
+    # Excel's scaling: Adjust to %, or Fit to (which sets the size itself)
+    assert dialog.scale.value() == 100 and dialog.scale.isEnabled()
+    dialog.area.setText("")
+    dialog.scale.setValue(70)
+    sheetlayout.apply_dialog(w, run, dialog)
+    (run,) = runs(w)
+    assert options(run.sheet)["scale"] == 70 and run.paging.scale == 0.7
+    dialog.fit.setChecked(True)
+    assert not dialog.scale.isEnabled()
+    dialog.tall.setValue(1)
+    sheetlayout.apply_dialog(w, run, dialog)
+    (run,) = runs(w)
+    assert options(run.sheet)["fit_tall"] == 1 and run.paging.scale == 1.0, "it fits as it is"
     dialog.area.setText("nonsense")
     assert dialog.changes() is None
 
@@ -544,3 +562,45 @@ def test_the_print_area_drags_without_opening_the_sheet_first(w):
     pump()
     (run,) = runs(w)
     assert options(run.sheet)["print_area"][1::2] == [0, 1]
+
+
+def test_the_cells_kept_as_pictures_are_never_stale(w):
+    """Scrolling draws a sheet's cells from pictures kept between frames; any
+    change — a value, a look, a width, an undo — shows at once, exactly as
+    the cells drawn afresh."""
+    from PySide6.QtWidgets import QApplication
+    run = sheet_page(w)
+    open_at(w, run, "B2")
+    put(w, run, 1, 1, "1.5")
+    put(w, run, 2, 1, "=B2*2")
+    vp = w.view.viewport()
+
+    def shot():
+        for _ in range(2):                  # the second paint keeps the pictures
+            vp.repaint()
+            QApplication.processEvents()
+        return vp.grab().toImage()
+
+    def fresh():
+        (item,) = runs(w)
+        item.__dict__.pop("_bands", None)
+        item._last_scale = None              # drawn afresh, not from pictures
+        vp.repaint()
+        QApplication.processEvents()
+        return vp.grab().toImage()
+
+    before = shot()
+    (item,) = runs(w)
+    assert item.__dict__.get("_bands"), "the cells were kept as pictures"
+    wb = item.sheet.workbook
+    for change in (lambda: wb.set_input(item.sheet, 1, 1, "40"),
+                   lambda: wb.format_block(item.sheet, 1, 1, 2, 1, bold=True),
+                   lambda: wb.set_widths(item.sheet, [1], 90.0),
+                   lambda: w.undo_stack.undo()):
+        change()
+        (item,) = runs(w)
+        item.relayout()
+        kept = shot()
+        assert kept != before
+        assert kept == fresh()
+        before = kept

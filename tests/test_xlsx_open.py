@@ -187,6 +187,25 @@ def test_the_sheet_chooser_ticks_them_all_to_start(qapp, tmp_path):
     assert chooser.buttons.button(QDialogButtonBox.Ok).isEnabled()
 
 
+def test_excels_print_scaling_comes_across(tmp_path):
+    """Adjust to N%, and Fit to page — 1 by 1 when the file names neither."""
+    path = str(tmp_path / "scaled.xlsx")
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Adjusted"
+    ws["A1"] = 1
+    ws.page_setup.scale = 85
+    fit = wb.create_sheet("Fitted")
+    fit["A1"] = 1
+    fit.sheet_properties.pageSetUpPr.fitToPage = True
+    wb.save(path)
+    got = read_workbook(path)
+    adjusted, fitted = (s.data["page"] for s in got.sheets)
+    assert adjusted["scale"] == 85 and not adjusted.get("fit_width")
+    assert fitted["fit_width"] and fitted["fit_tall"] == 1
+    assert not any("scale" in what for what in got.left_out)
+
+
 def test_charts_and_pictures_are_left_out_and_said(tmp_path):
     path = a_workbook(str(tmp_path / "chart.xlsx"), with_chart=True)
     got = read_workbook(path)

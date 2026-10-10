@@ -2313,15 +2313,27 @@ class MainWindow(QMainWindow):
                 self.scene.frames.remove(frame)
                 self.scene.removeItem(frame)
         ordered = []
-        for page in self.document.pages:
-            if page.frame is None or page.frame.scene() is not self.scene:
-                frame = self.scene.add_frame(page)
-                page.frame = frame
-                frame.load_items(page._pending_items)
-            elif page._pending_items:
-                page.frame.load_items(page._pending_items)
-            page._pending_items = []
-            ordered.append(page.frame)
+        # tables and sheets coming in are calculated once, all together, at
+        # the end — not each again as the next sheet it reads arrives (a
+        # workbook of three sheets was calculated over four times, 2026-10-10)
+        from contextlib import nullcontext
+        cells = any(r.get("type") in ("table", "sheet_run") for page in self.document.pages
+                    for r in (page._pending_items or ()) if isinstance(r, dict))
+        if cells:
+            from ..sheet.docbook import book_for
+            batch = book_for(self.document).workbook.transaction("Load")
+        else:
+            batch = nullcontext()
+        with batch:
+            for page in self.document.pages:
+                if page.frame is None or page.frame.scene() is not self.scene:
+                    frame = self.scene.add_frame(page)
+                    page.frame = frame
+                    frame.load_items(page._pending_items)
+                elif page._pending_items:
+                    page.frame.load_items(page._pending_items)
+                page._pending_items = []
+                ordered.append(page.frame)
         self.scene.frames = ordered
         self.scene.layout_pages()
         # spreadsheet pages: each run's cells on its first page, each page

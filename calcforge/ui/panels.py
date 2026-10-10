@@ -622,8 +622,7 @@ class PagesPanel(QWidget):
             if scale:
                 parts.append(scale)
             caption = "   ".join(parts)
-            entry = QListWidgetItem(self._thumbnail(page, document, ask=False),
-                                    caption)
+            entry = QListWidgetItem(self._placeholder(page, document), caption)
             entry.setTextAlignment(Qt.AlignHCenter)
             tip = page.label or page.source_note or f"Page {index + 1}"
             if not page.printable:
@@ -635,6 +634,19 @@ class PagesPanel(QWidget):
         self.list.setCurrentRow(current)
         self._suppress = False
         self._draw_what_is_on_screen()
+
+    def _placeholder(self, page, document) -> QIcon:
+        """A row's picture until it is in view: a PDF page's small sheet if
+        it is already drawn, or what the row last showed, or a blank page of
+        its shape. Drawing every sheet page of a 69-page workbook here took
+        seven seconds of its opening (2026-10-10)."""
+        if page.pdf_key:
+            return self._thumbnail(page, document, ask=False)
+        kept = self._thumbnails.get(id(page))
+        if kept is not None and kept[2] is page:
+            return kept[1]
+        scale = getattr(self.list, "scale", 1.0)
+        return self._blank_for(page, max(int(160 * scale), 24))
 
     def _draw_what_is_on_screen(self) -> None:
         """Ask for the sheets of the rows somebody can actually see.

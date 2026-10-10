@@ -127,6 +127,10 @@ def add_run_pages(window, short: list) -> None:
 
 
 # -- making them --------------------------------------------------------------------------------
+# Excel's Normal margins: 0.7" left and right, 0.75" top and bottom
+EXCEL_MARGINS_MM = (0.7 * 25.4, 0.75 * 25.4, 0.7 * 25.4, 0.75 * 25.4)
+
+
 def insert_sheet_page(window, index: Optional[int] = None, before: bool = False) -> None:
     """A spreadsheet page beside page *index*: part of the run it touches,
     or a new sheet of its own."""
@@ -146,6 +150,11 @@ def insert_sheet_page(window, index: Optional[int] = None, before: bool = False)
         run = None
         target = safe_target(document, which if before else which + 1)
         setup = PageSetup.from_dict(here.setup.to_dict())
+        # a new sheet starts with Excel's Normal margins, so it falls onto
+        # its pages as the same sheet would in Excel (its paper and turn are
+        # the page's beside it)
+        (setup.margin_left, setup.margin_top, setup.margin_right,
+         setup.margin_bottom) = EXCEL_MARGINS_MM
 
     def mutate():
         page = document.add_page(target)

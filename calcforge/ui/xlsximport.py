@@ -32,16 +32,36 @@ def _setup_for(sheet, base: PageSetup) -> PageSetup:
     return setup
 
 
+class _Layout:
+    """Just what pagination reads of a sheet's record — its sizes, what is
+    filled and its page options — so its pages are counted without
+    calculating it (that is done once, when it is on its pages)."""
+
+    def __init__(self, data: dict):
+        self.page = data.get("page") or {}
+        self.widths = {int(k): float(v) for k, v in data.get("widths", {}).items()}
+        self.heights = {int(k): float(v) for k, v in data.get("heights", {}).items()}
+        self.hidden_rows = set(data.get("hidden_rows", [])) | set(data.get("filtered_rows", []))
+        self.hidden_cols = set(data.get("hidden_cols", []))
+        self.default_width = float(data.get("default_width", 48.0))
+        self.default_height = float(data.get("default_height", 15.0))
+        filled = [(e[0], e[1]) for e in data.get("cells", []) if e[2]]
+        self._area = (min(r for r, _ in filled), min(c for _, c in filled),
+                      max(r for r, _ in filled), max(c for _, c in filled)) if filled else None
+
+    def width(self, col: int) -> float:
+        return 0.0 if col in self.hidden_cols else self.widths.get(col, self.default_width)
+
+    def height(self, row: int) -> float:
+        return 0.0 if row in self.hidden_rows else self.heights.get(row, self.default_height)
+
+    def data_area(self):
+        return self._area
+
+
 def _pages_needed(data: dict, setup: PageSetup) -> int:
     from ..sheet.pagination import paginate
-    from ..sheet.store import load_sheet
-    from ..sheet.workbook import Workbook
-
-    wb = Workbook()
-    wb.journal = False
-    sheet = wb.add_sheet(data["name"])
-    load_sheet(sheet, data)
-    return max(1, paginate(sheet, setup).pages)
+    return max(1, paginate(_Layout(data), setup).pages)
 
 
 def pages_for(imported, base: PageSetup) -> list:
