@@ -1231,6 +1231,10 @@ class Workbook:
                 moved = _shift_ranges({"ranges": [[page["titles"][0], 0, page["titles"][1], 0]]},
                                       axis, at, delta)
                 page["titles"] = [moved["ranges"][0][0], moved["ranges"][0][2]] if moved else None
+            if axis == "col" and page.get("title_cols"):
+                moved = _shift_ranges({"ranges": [[0, page["title_cols"][0], 0, page["title_cols"][1]]]},
+                                      axis, at, delta)
+                page["title_cols"] = [moved["ranges"][0][1], moved["ranges"][0][3]] if moved else None
             sheet.page = page
         if sheet.size is not None:
             rows, cols = sheet.size

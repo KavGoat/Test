@@ -84,7 +84,8 @@ def test_a_spreadsheets_headings_stay_in_view_and_select_whole_columns(w):
             Qt.LeftButton if kind == QEvent.MouseButtonPress else Qt.NoButton, Qt.NoModifier))
     pump()
     t, l, b, r = w.view.tables.selection()
-    assert (l, r, t) == (2, 2, 0) and b >= 51, "clicking C selects the whole column"
+    assert (l, r, t) == (2, 2, 0) and b >= run.paging.slices[0][1], \
+        "clicking C selects the whole column"
 
 
 def test_a_duplicated_page_gets_its_own_tables(w):

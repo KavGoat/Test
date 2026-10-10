@@ -675,11 +675,11 @@ class CalcEditing:
         if self.suggestions.isVisible() and self._suggestion_key(key):
             return True
         if key == Qt.Key_Escape:
-            # WebSMath: Esc closes the suggestion list and nothing else — the
-            # equation stays open, as it does in SMath; a click elsewhere or
-            # Enter leaves it. A plot double-clicked into closes on Esc.
-            if item.region.plot is not None:
-                self.leave()
+            # An open suggestion list was closed just above (WebSMath's first
+            # Esc). Otherwise Escape lets go, as it does of any markup: out of
+            # the equation and nothing left picked (the user, 2026-10-10 —
+            # it used to keep the equation open, as SMath does).
+            self.view.escape_everything()
             return True
         if ctrl and key in (Qt.Key_Z, Qt.Key_Y):
             # one history: the window takes back the keystrokes first, then

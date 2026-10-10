@@ -529,6 +529,12 @@ def _page_options(ws, renamed) -> dict:
         m = re.match(r"\$?(\d+):\$?(\d+)", str(titles).split("!")[-1])
         if m:
             out["titles"] = [int(m.group(1)) - 1, int(m.group(2)) - 1]
+    cols = ws.print_title_cols
+    if cols:
+        m = re.match(r"\$?([A-Za-z]{1,3}):\$?([A-Za-z]{1,3})", str(cols).split("!")[-1])
+        if m:
+            from openpyxl.utils import column_index_from_string as index
+            out["title_cols"] = [index(m.group(1).upper()) - 1, index(m.group(2).upper()) - 1]
     breaks = [int(b.id) for b in (ws.row_breaks.brk if ws.row_breaks else []) if b.id]
     if breaks:
         out["breaks"] = sorted(set(breaks))
@@ -806,3 +812,34 @@ def _reads(text: str, sheets: set, names: set) -> bool:
             if name.lower() in names or (sheet and sheet.lower() in sheets):
                 return True
     return False
+
+
+def sheet_links(imported: Imported) -> dict:
+    """{sheet name: the other worksheets its formulas read} — directly
+    (Factors!B2, 'Load Cases'!A1) or through a defined name — for warning
+    before some of them are left out. A quick look at the formulas' text;
+    keep_only does the exact work."""
+    names = {s.name for s in imported.sheets}
+
+    def pattern(sheet: str):
+        quoted = "'" + sheet.replace("'", "''") + "'!"
+        plain = re.escape(sheet) + "!"
+        return re.compile(rf"(?:{re.escape(quoted)}|(?<![\w.']){plain})", re.I)
+
+    patterns = {n: pattern(n) for n in names}
+    named = {}                                  # a defined name -> sheets it reads
+    for sheet in imported.sheets:
+        for entry in sheet.data.get("names", []):
+            hits = {n for n, p in patterns.items() if p.search(entry[1] or "")}
+            if hits:
+                named[entry[0]] = hits
+    out = {}
+    for sheet in imported.sheets:
+        text = "\n".join(e[2] for e in sheet.data.get("cells", [])
+                         if isinstance(e[2], str) and e[2].startswith("="))
+        reads = {n for n, p in patterns.items() if n != sheet.name and p.search(text)}
+        for name, hits in named.items():
+            if re.search(rf"(?<![\w.]){re.escape(name)}(?![\w(])", text, re.I):
+                reads |= hits - {sheet.name}
+        out[sheet.name] = reads
+    return out

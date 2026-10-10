@@ -497,12 +497,12 @@ class SheetRunItem(TableItem):
             painter.setPen(solid if a in paging.manual else dashed)
             painter.drawLine(QPointF(xs[c0], ys[a]), QPointF(xs[c1 + 1], ys[a]))
         if self.area_drag is not None:
-            t, l, b, r = self.area_drag
+            top, first, bottom, last = self.area_drag
             moving = QPen(BREAK_BLUE, 3.0)
             moving.setCosmetic(True)
             painter.setPen(moving)
-            painter.drawRect(QRectF(xs[l], ys[t], xs[min(r + 1, len(xs) - 1)] - xs[l],
-                                    ys[min(b + 1, len(ys) - 1)] - ys[t]))
+            painter.drawRect(QRectF(xs[first], ys[top], xs[min(last + 1, len(xs) - 1)] - xs[first],
+                                    ys[min(bottom + 1, len(ys) - 1)] - ys[top]))
         if self.break_drag is not None:
             moving = QPen(BREAK_BLUE, 3.0)
             moving.setCosmetic(True)
@@ -570,12 +570,16 @@ class SheetRunItem(TableItem):
         heads = bool(opts["print_headings"])
         hw = PRINT_HEADING_W if heads else 0.0
         hh = PRINT_HEADING_H if heads else 0.0
+        # Print Titles: rows to repeat on every page whose rows start below
+        # them, columns to repeat at the left of a print area to their right
         titles = paging.titles
-        title_rows = titles if titles and k > 0 and a > titles[1] else None
+        title_rows = titles if titles and a > titles[1] else None
         th = (ys[title_rows[1] + 1] - ys[title_rows[0]]) if title_rows else 0.0
+        tc = paging.title_cols
+        tw = (xs[tc[1] + 1] - xs[tc[0]]) if tc else 0.0
         w = xs[c1 + 1] - xs[c0]
         h = ys[b + 1] - ys[a]
-        total_w = w * scale + hw
+        total_w = (w + tw) * scale + hw
         total_h = (h + th) * scale + hh
         x0 = left + ((width + hw - total_w) / 2 if opts["center_h"] else 0.0)
         y0 = top + ((height + hh - total_h) / 2 if opts["center_v"] else 0.0)
@@ -584,36 +588,45 @@ class SheetRunItem(TableItem):
         if title_rows:
             blocks.append((title_rows[0], title_rows[1], gy))
         blocks.append((a, b, gy + th * scale))
+        across = [(c0, c1, gx + tw * scale)]
+        if tc:
+            across.insert(0, (tc[0], tc[1], gx))
         for ra, rb, at in blocks:
-            painter.save()
-            painter.translate(gx, at)
-            painter.scale(scale, scale)
-            painter.translate(-xs[c0], -ys[ra])
-            painter.setClipRect(QRectF(xs[c0], ys[ra], w, ys[rb + 1] - ys[ra]))
-            self._range = (ra, rb, c0, c1)
-            self._on_paper = True
-            try:
-                self.paint_content(painter)
-            finally:
-                self._range = None
-                self._on_paper = False
-            painter.restore()
+            for ca, cb, left_at in across:
+                painter.save()
+                painter.translate(left_at, at)
+                painter.scale(scale, scale)
+                painter.translate(-xs[ca], -ys[ra])
+                painter.setClipRect(QRectF(xs[ca], ys[ra], xs[cb + 1] - xs[ca], ys[rb + 1] - ys[ra]))
+                self._range = (ra, rb, ca, cb)
+                self._on_paper = True
+                try:
+                    self.paint_content(painter)
+                finally:
+                    self._range = None
+                    self._on_paper = False
+                painter.restore()
             if heads:
                 self._print_headings(painter, ra, rb, c0, c1, x0, at, scale, hw, hh,
-                                     first=(at == gy))
-        inner = QRectF(gx, gy + th * scale, w * scale, h * scale)
+                                     first=(at == gy), title_cols=tc)
+        inner = QRectF(gx + tw * scale, gy + th * scale, w * scale, h * scale)
         source = QRectF(xs[c0], ys[a] - self._tops[k], w, h)
         return source, inner
 
-    def _print_headings(self, painter, ra, rb, c0, c1, x0, at, scale, hw, hh, first) -> None:
+    def _print_headings(self, painter, ra, rb, c0, c1, x0, at, scale, hw, hh, first,
+                        title_cols=None) -> None:
         xs, ys = self.edges()
         painter.save()
         painter.setFont(page_font("", 7.0))
         pen = QPen(QColor("#808080"), 0.4)
         if first:
-            for c in range(c0, c1 + 1):
-                cell = QRectF(x0 + hw + (xs[c] - xs[c0]) * scale, at - hh,
-                              (xs[c + 1] - xs[c]) * scale, hh)
+            # the repeated columns first, then the print area's, side by side
+            shown = (list(range(title_cols[0], title_cols[1] + 1)) if title_cols else []) + \
+                list(range(c0, c1 + 1))
+            x = x0 + hw
+            for c in shown:
+                cell = QRectF(x, at - hh, (xs[c + 1] - xs[c]) * scale, hh)
+                x += cell.width()
                 if cell.width() <= 0:
                     continue
                 painter.setPen(pen)

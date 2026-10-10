@@ -604,3 +604,31 @@ def test_the_cells_kept_as_pictures_are_never_stale(w):
         assert kept != before
         assert kept == fresh()
         before = kept
+
+
+def test_print_titles_are_added_to_the_print_area_as_excel(w):
+    """Excel's Print Titles: rows to repeat at the top and columns to repeat
+    at the left print with the print area on every page — page 1 too, when
+    the print area starts below or to the right of them — and take room."""
+    run = sheet_page(w)
+    wb = run.sheet.workbook
+    wb.set_input(run.sheet, 0, 0, "HEAD")           # A1: a title row and a title column
+    wb.set_input(run.sheet, 9, 3, "body")           # D10: in the print area
+    wb.set_page_options(run.sheet, print_area=[4, 3, 30, 6])
+    run.relayout()
+    (run,) = runs(w)
+    f1 = w.document.pages[1].frame
+    left, top, _w, _h = run.paging.printable
+    bare = ink_box(paper(f1, 2))
+    assert bare[0] >= (left - 1) * 2 and bare[1] > (top + 5 * 15) * 2, "D10 only, from D5 down"
+    wb.set_page_options(run.sheet, titles=[0, 0], title_cols=[0, 0])
+    run.relayout()
+    (run,) = runs(w)
+    assert run.paging.title_cols == (0, 0)
+    titled = ink_box(paper(f1, 2))
+    assert titled[1] < (top + 15) * 2 + 2, "the title row is at the top of page 1"
+    assert titled[0] < (left + 10) * 2, "and the title column at its left"
+    # typed as Excel writes them, and moving with the columns
+    assert sheetlayout.parse_cols("$A:$B") == [0, 1] and sheetlayout.parse_cols("1") is False
+    wb.insert_cols(run.sheet, 0, 1)
+    assert options(run.sheet)["title_cols"] == [1, 1]

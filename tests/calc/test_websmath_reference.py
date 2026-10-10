@@ -9,12 +9,13 @@ text, unit box, result, error, the caret's place and the suggestion list
 CalcForge window and both must match — pixel for pixel, caret and colours
 included.
 
-Two differences are deliberate and asserted as such. The caret on an empty
+Three differences are deliberate and asserted as such. The caret on an empty
 slot (the result's unit box) stands clear of the placeholder square, which
 WebSMath's caret cut through. And a name that is also a
 unit (a is the are) no longer blocks the next key (the user, 2026-10-01: "I
 couldn't type = at all"), so `a*a=` after `a:5` is 25 here where WebSMath
-made `aa≔`.
+made `aa≔`. And Escape leaves the equation, as it lets go of any markup (the
+user, 2026-10-10), where WebSMath kept it open.
 """
 from __future__ import annotations
 
@@ -39,6 +40,7 @@ KEYS = {"Return": Qt.Key_Return, "Right": Qt.Key_Right, "Left": Qt.Key_Left,
 SCALE = 4.0
 DELIBERATE = {
     "matrix_eval.left": {"text": "a*a=", "shown": "25", "error": None},
+    "home_end.esc": {"text": "a+b+c", "pending": False},
 }
 # Drawn differently on purpose (same facts): the caret on an empty slot
 # stands clear of the placeholder square instead of cutting through it

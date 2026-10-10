@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (QCheckBox, QDialog, QDialogButtonBox, QFormLayout
                                QLabel, QLineEdit, QSpinBox, QVBoxLayout)
 
 from ..sheet.pagination import options
-from ..sheet.refs import CellRef, area_text, parse_range
+from ..sheet.refs import CellRef, area_text, col_letters, parse_range
 
 
 def _run_item(window, index: int):
@@ -61,6 +61,20 @@ def parse_rows(text: str) -> Optional[list]:
     return [first, last]
 
 
+def parse_cols(text: str) -> Optional[list]:
+    """"A:B" or "$A:$B" or "C" → [first, last] columns; "" → None; nonsense → False."""
+    from ..sheet.refs import col_index
+    text = (text or "").strip().replace("$", "").upper()
+    if not text:
+        return None
+    a, _, b = text.partition(":")
+    b = b or a
+    if not (a.isalpha() and b.isalpha() and len(a) <= 3 and len(b) <= 3):
+        return False
+    first, last = sorted((col_index(a), col_index(b)))
+    return [first, last]
+
+
 class SheetLayoutDialog(QDialog):
     def __init__(self, sheet, parent=None):
         super().__init__(parent)
@@ -75,6 +89,10 @@ class SheetLayoutDialog(QDialog):
         self.titles = QLineEdit(f"${titles[0] + 1}:${titles[1] + 1}" if titles else "")
         self.titles.setPlaceholderText("e.g. 1:2")
         form.addRow("Rows to repeat at top:", self.titles)
+        cols = opts.get("title_cols")
+        self.title_cols = QLineEdit(f"${col_letters(cols[0])}:${col_letters(cols[1])}" if cols else "")
+        self.title_cols.setPlaceholderText("e.g. A:B")
+        form.addRow("Columns to repeat at left:", self.title_cols)
         layout.addLayout(form)
         # Excel's Scaling: Adjust to N% normal size, or Fit to 1 page wide by N tall
         self.scale = QSpinBox()
@@ -138,7 +156,12 @@ class SheetLayoutDialog(QDialog):
         if titles is False:
             self.problem.setText("Rows to repeat are rows (e.g. 1:2)")
             return None
-        return {"print_area": area, "titles": titles, "fit_width": self.fit.isChecked(),
+        title_cols = parse_cols(self.title_cols.text())
+        if title_cols is False:
+            self.problem.setText("Columns to repeat are columns (e.g. A:B)")
+            return None
+        return {"print_area": area, "titles": titles, "title_cols": title_cols,
+                "fit_width": self.fit.isChecked(),
                 "fit_tall": self.tall.value(), "scale": self.scale.value(),
                 "center_h": self.center_h.isChecked(), "center_v": self.center_v.isChecked(),
                 "print_gridlines": self.gridlines.isChecked(),

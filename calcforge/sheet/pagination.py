@@ -9,7 +9,8 @@ title rows (Print Titles) repeat at the top of every page after the first.
 A sheet's page options live in ``sheet.page``:
 
     {"fit_width": False, "fit_tall": 0, "scale": 100, "print_area": None or [t, l, b, r],
-     "titles": None or [first_row, last_row], "breaks": [row, ...],
+     "titles": None or [first_row, last_row], "title_cols": None or [first, last],
+     "breaks": [row, ...],
      "center_h": False, "center_v": False,
      "print_gridlines": False, "print_headings": False}
 """
@@ -17,7 +18,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-DEFAULTS = {"fit_width": False, "fit_tall": 0, "scale": 100, "print_area": None, "titles": None, "breaks": [],
+DEFAULTS = {"fit_width": False, "fit_tall": 0, "scale": 100, "print_area": None, "titles": None,
+            "title_cols": None, "breaks": [],
             "center_h": False, "center_v": False, "print_gridlines": False,
             "print_headings": False}
 
@@ -44,6 +46,7 @@ class Paging:
     titles: tuple = None
     shown_cols: int = 0          # columns shown on screen (printed + scratch)
     print_rows: tuple = None     # (first, last) rows printed, from a print area
+    title_cols: tuple = None     # columns printed at the left of every page (Print Titles)
 
     @property
     def pages(self) -> int:
@@ -83,7 +86,14 @@ def paginate(sheet, setup, pages_wanted: int = 1) -> Paging:
                     break
             last_col = max(c - 1, 0)
     printed_w = sum(sheet.width(c) for c in range(first_col, last_col + 1))
-    # title rows
+    # Print Titles: columns to repeat at the left, printed beside the print
+    # area on every page when it starts to their right (as Excel adds them)
+    title_cols = tuple(opts["title_cols"]) if opts.get("title_cols") else None
+    if title_cols and first_col > title_cols[1]:
+        printed_w += sum(sheet.width(c) for c in range(title_cols[0], title_cols[1] + 1))
+    else:
+        title_cols = None
+    # and rows to repeat at the top: on every page whose own rows start below them
     titles = tuple(opts["titles"]) if opts["titles"] else None
     titles_h = sum(sheet.height(r) for r in range(titles[0], titles[1] + 1)) if titles else 0.0
     breaks = set(int(b) for b in opts["breaks"])
@@ -98,7 +108,8 @@ def paginate(sheet, setup, pages_wanted: int = 1) -> Paging:
         row = 0
         while True:
             start = row
-            avail = room - (titles_h if titles and slices and start > titles[1] else 0.0)
+            shown_from = max(start, first_row)
+            avail = room - (titles_h if titles and shown_from > titles[1] else 0.0)
             used = 0.0
             while True:
                 h = sheet.height(row)
@@ -140,7 +151,7 @@ def paginate(sheet, setup, pages_wanted: int = 1) -> Paging:
     shown = max(c, (data[3] + 2) if data is not None else 0)
     print_rows = (area[0], area[2]) if area else None
     return Paging((left, top, width, height), paper, scale, first_col, last_col, slices,
-                  breaks, titles, shown, print_rows)
+                  breaks, titles, shown, print_rows, title_cols)
 
 
 def pages_needed(sheet, setup) -> int:

@@ -188,9 +188,17 @@ class SheetChooser:
         row.addStretch(1)
         layout.addLayout(row)
         self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        self.buttons.accepted.connect(dialog.accept)
+        self.buttons.accepted.connect(self._accept)
         self.buttons.rejected.connect(dialog.reject)
         layout.addWidget(self.buttons)
+        # a ticked sheet reading one left out: said before it is brought in
+        from ..sheet.xlsx import sheet_links
+        self.links = sheet_links(imported)
+        self.warning = QLabel("")
+        self.warning.setWordWrap(True)
+        self.warning.setStyleSheet("color: #c92a2a")
+        self.warning.hide()
+        layout.insertWidget(layout.count() - 1, self.warning)
         self.list.itemChanged.connect(lambda _i: self._enable())
 
     def _tick_all(self, state) -> None:
@@ -200,6 +208,42 @@ class SheetChooser:
     def _enable(self) -> None:
         from PySide6.QtWidgets import QDialogButtonBox
         self.buttons.button(QDialogButtonBox.Ok).setEnabled(bool(self.chosen()))
+        lines = self.missing()
+        self.warning.setText(
+            "\n".join(f"⚠ “{a}” reads “{b}”, which is not ticked." for a, b in lines)
+            + ("\nFormulas reading a worksheet left out keep the values Excel last showed,"
+               " and won't update." if lines else ""))
+        self.warning.setVisible(bool(lines))
+
+    def _accept(self) -> None:
+        """OK with a ticked sheet reading one left out: asked first, with the
+        choice of ticking those too."""
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QMessageBox
+        lines = self.missing()
+        if lines:
+            box = QMessageBox(QMessageBox.Warning, "Import Excel workbook",
+                              self.warning.text(), parent=self.dialog)
+            tick = box.addButton("Tick those too", QMessageBox.AcceptRole)
+            box.addButton("Bring in as chosen", QMessageBox.DestructiveRole)
+            back = box.addButton(QMessageBox.Cancel)
+            box.exec()
+            if box.clickedButton() is back:
+                return
+            if box.clickedButton() is tick:
+                while lines:                  # and whatever those read in turn
+                    wanted = {b for _a, b in lines}
+                    for i in range(self.list.count()):
+                        if self.list.item(i).data(Qt.UserRole) in wanted:
+                            self.list.item(i).setCheckState(Qt.Checked)
+                    lines = self.missing()
+        self.dialog.accept()
+
+    def missing(self) -> list:
+        """(ticked sheet, unticked sheet it reads) pairs."""
+        chosen = self.chosen()
+        return [(a, b) for a in chosen for b in sorted(self.links.get(a, ()))
+                if b not in chosen]
 
     def chosen(self) -> list:
         from PySide6.QtCore import Qt

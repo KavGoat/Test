@@ -1023,7 +1023,12 @@ class ShortcutEdit(QLineEdit):
             return
         chord = modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)
         text = event.text()
-        if text and text.isprintable() and not chord:
+        # Shift with a letter or the space bar is a key of its own, Shift+M,
+        # not the capital it types (it was recorded as "M", which M also
+        # matches); a character that needs Shift to type, " or @, stays one
+        shifted = bool(modifiers & Qt.ShiftModifier) and (
+            key == Qt.Key_Space or (len(text) == 1 and text.isalpha()))
+        if text and text.isprintable() and not chord and not shifted:
             self.setText(text)
         else:
             sequence = QKeySequence(QKeyCombination(modifiers, Qt.Key(key)))
@@ -1042,7 +1047,7 @@ class ShortcutManagerDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Keyboard shortcuts")
         self.manager = manager
-        self.resize(620, 640)
+        self.resize(780, 640)
         outer = QVBoxLayout(self)
         self.tabs = QTabWidget()
         outer.addWidget(self.tabs, 1)
@@ -1098,8 +1103,9 @@ class ShortcutManagerDialog(QDialog):
             where = QTableWidgetItem(SCOPE_NAMES.get(binding.scope, ""))
             where.setFlags(Qt.ItemIsEnabled)
             where.setToolTip("Where the key acts. One key may do two things only where "
-                             "they can never both act: Calc and Markup mode, or inside "
-                             "an equation and outside it.")
+                             "they can never both act: Calc and Markup mode, inside "
+                             "an equation and outside it, or in an open table or "
+                             "spreadsheet and outside it.")
             self.table.setItem(row, 4, where)
         self.table.resizeColumnsToContents()
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)

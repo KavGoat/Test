@@ -133,3 +133,87 @@ def test_redo_after_a_page_was_added_and_taken_away(w):
     pump()
     assert len(w.document.pages) == 2
     assert [type(i).__name__ for i in w.document.pages[1].frame.markups()] == ["RectItem"]
+
+
+def test_escape_lets_go_of_an_equation_too(w):
+    """A click on an equation opens it; Escape closes it and nothing is left
+    picked, as for any markup (it used to keep the equation open)."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    import tests.calc.test_calcforge_window as cw
+    from calcforge.items.calc import CalcItem
+    from tests.test_tables import click
+    v = cw.Sheet(w)
+    v.type_at(36, 18, "")
+    v.keys("x:1")
+    v.press(Qt.Key_Return)
+    v.calc.leave()
+    (eq,) = [i for i in w.view.scene().items() if isinstance(i, CalcItem)]
+    click(w, eq.mapToScene(eq.boundingRect().center()))
+    pump()
+    assert w.view.calc.editing()
+    QTest.keyClick(w.view, Qt.Key_Escape)
+    pump()
+    assert not w.view.calc.editing() and not w.view.scene().selectedItems()
+
+
+def test_shift_and_a_letter_is_a_shortcut_of_its_own(w):
+    """The shortcut box records Shift+M, not the capital M (which plain M
+    also matched); Shift+M runs only what is bound to Shift+M."""
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtGui import QKeyEvent
+    from PySide6.QtWidgets import QApplication
+    from calcforge.ui.dialogs import ShortcutEdit
+    box = ShortcutEdit("")
+    QApplication.sendEvent(box, QKeyEvent(QEvent.KeyPress, Qt.Key_M, Qt.ShiftModifier, "M"))
+    assert box.text() == "Shift+M"
+    QApplication.sendEvent(box, QKeyEvent(QEvent.KeyPress, Qt.Key_Space, Qt.ShiftModifier, " "))
+    assert box.text() == "Shift+Space"
+    QApplication.sendEvent(box, QKeyEvent(QEvent.KeyPress, Qt.Key_QuoteDbl, Qt.ShiftModifier, '"'))
+    assert box.text() == '"', "a character typed with Shift stays the character"
+    shortcuts = w.shortcuts
+    shortcuts.set_sequence("tool.measure_length", "m")
+    shortcuts.set_sequence("tool.rect", "Shift+M")
+    assert shortcuts.match_typed("m", Qt.NoModifier).action_id == "tool.measure_length"
+    assert shortcuts.match_typed("M", Qt.ShiftModifier).action_id == "tool.rect"
+    shortcuts.set_sequence("tool.rect", "R")
+    assert shortcuts.match_typed("M", Qt.ShiftModifier) is None, "Shift+M is not M"
+    assert shortcuts.match_typed("M", Qt.NoModifier).action_id == "tool.measure_length", \
+        "Caps Lock's capital is still M"
+    shortcuts.reset()
+
+
+def test_every_spreadsheet_command_can_be_bound(w):
+    """The Spreadsheet group lists the table's commands with Excel's keys,
+    each one runs, and a key changed in Keyboard shortcuts is the one that
+    works in an open table."""
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtGui import QKeyEvent
+    from calcforge.ui.shortcuts import SHEET_KEYS
+    from calcforge.ui.tableedit import SHEET_COMMANDS
+    from tests.test_tables import cell_scene, click, make_table
+    assert {name for name, _l, _k in SHEET_KEYS} == set(SHEET_COMMANDS)
+    assert w.shortcuts.conflicts() == {}
+    table = make_table(w)
+    click(w, cell_scene(table, "B2"))
+    tables = w.view.tables
+
+    def press(key, mods=Qt.NoModifier, text=""):
+        event = QKeyEvent(QEvent.KeyPress, key, mods, text)
+        assert tables.key_press(event)
+        pump()
+
+    press(Qt.Key_B, Qt.ControlModifier)                     # Excel's Ctrl+B
+    assert table.sheet.workbook.style_of(table.sheet, 1, 1).bold
+    w.shortcuts.set_sequence("sheet.bold", "Ctrl+Shift+B")
+    event = QKeyEvent(QEvent.KeyPress, Qt.Key_B, Qt.ControlModifier, "")
+    assert not tables.wants_shortcut(event), "Ctrl+B is free again"
+    press(Qt.Key_B, Qt.ControlModifier | Qt.ShiftModifier)
+    assert not table.sheet.workbook.style_of(table.sheet, 1, 1).bold
+    # a key Excel writes shifted: Ctrl+Shift+9 unhides rows however the keyboard spells it
+    tables.select((2, 0))
+    press(Qt.Key_9, Qt.ControlModifier)
+    assert table.sheet.height(2) == 0
+    press(Qt.Key_ParenLeft, Qt.ControlModifier | Qt.ShiftModifier)
+    assert table.sheet.height(2) > 0
+    w.shortcuts.reset()

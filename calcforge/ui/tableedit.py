@@ -186,6 +186,124 @@ _CURSORS = {"cell": _excel("cell"), "fill": lambda: QCursor(Qt.CrossCursor),
             "grow": lambda: QCursor(Qt.SizeFDiagCursor), "tab": lambda: QCursor(Qt.OpenHandCursor)}
 
 
+def _now(fmt: str) -> str:
+    return datetime.datetime.now().strftime(fmt)
+
+
+def _cols(te) -> list:
+    _top, first, _bottom, last = te.selection()
+    return list(range(first, last + 1))
+
+
+def _rows(te) -> list:
+    top, _first, bottom, _last = te.selection()
+    return list(range(top, bottom + 1))
+
+
+def _data(name, *args, **kwargs):
+    def run(te):
+        from . import datatools
+        return getattr(datatools, name)(te, *args, **kwargs)
+    return run
+
+
+def _layout(te, what: str) -> None:
+    from . import sheetlayout
+    window, item = te.view.window, te.item
+    if not _is_run(item):
+        window.status_hint.setText("Page layout is for a spreadsheet page")
+        return
+    if what == "print_area":
+        sheetlayout.set_print_area(window, item, list(te.selection()))
+    elif what == "page_break" and te.active[0] > 0:
+        sheetlayout.insert_break(window, item, te.active[0])
+    elif what == "page_layout":
+        window.sheet_page_setup(window.document.index_of(item.parentItem().page))
+
+
+def _names(name):
+    def run(te):
+        from . import names
+        return getattr(names, name)(te)
+    return run
+
+
+# What each of the Spreadsheet group's bindings does (shortcuts.SHEET_KEYS).
+SHEET_COMMANDS = {
+    "edit_cell": lambda te: te.begin_edit(None, enter_mode=False),
+    "select_all": lambda te: te.select((0, 0), (te.item.size[0] - 1, te.item.size[1] - 1), te.active),
+    "select_column": lambda te: te.select((0, te.selection()[1]),
+                                          (te.item.size[0] - 1, te.selection()[3]), te.active),
+    "select_row": lambda te: te.select((te.selection()[0], 0),
+                                       (te.selection()[2], te.item.size[1] - 1), te.active),
+    "copy": lambda te: te.copy(),
+    "cut": lambda te: te.copy(cut=True),
+    "paste": lambda te: te.paste(),
+    "paste_values": lambda te: te.paste("values"),
+    "paste_formulas": lambda te: te.paste("formulas"),
+    "paste_formats": lambda te: te.paste("formats"),
+    "paste_transpose": lambda te: te.paste("transpose"),
+    "fill_down": lambda te: te.fill_direction("down"),
+    "fill_right": lambda te: te.fill_direction("right"),
+    "autosum": lambda te: te.autosum(),
+    "insert_date": lambda te: te.begin_edit(datetime.date.today().isoformat()),
+    "insert_time": lambda te: te.begin_edit(_now("%H:%M")),
+    "list": lambda te: te.list_menu(),
+    "format_cells": lambda te: te.view.window.format_cells_dialog(),
+    "bold": lambda te: te.toggle("bold"),
+    "italic": lambda te: te.toggle("italic"),
+    "underline": lambda te: te.toggle("underline"),
+    "strike": lambda te: te.toggle("strike"),
+    "format_general": lambda te: te.format(number_format="General"),
+    "format_number": lambda te: te.format(number_format="#,##0.00"),
+    "format_currency": lambda te: te.format(number_format="$#,##0.00"),
+    "format_percent": lambda te: te.format(number_format="0%"),
+    "format_scientific": lambda te: te.format(number_format="0.00E+00"),
+    "format_date": lambda te: te.format(number_format="d-mmm-yy"),
+    "format_time": lambda te: te.format(number_format="h:mm AM/PM"),
+    "border_outline": lambda te: te.borders("outside"),
+    "border_none": lambda te: te.borders("none"),
+    "border_all": lambda te: te.borders("all"),
+    "merge_center": lambda te: te.merge("center"),
+    "unmerge": lambda te: te.merge("unmerge"),
+    "insert_cells": lambda te: te.insert_cells(),
+    "delete_cells": lambda te: te.delete_cells(),
+    "insert_rows": lambda te: te.insert_rows(),
+    "insert_cols": lambda te: te.insert_cols(),
+    "delete_rows": lambda te: te.delete_rows(),
+    "delete_cols": lambda te: te.delete_cols(),
+    "hide_rows": lambda te: te.hide("row", True),
+    "unhide_rows": lambda te: te.hide("row", False),
+    "hide_cols": lambda te: te.hide("col", True),
+    "unhide_cols": lambda te: te.hide("col", False),
+    "autofit_cols": lambda te: te.autofit("col", _cols(te)),
+    "autofit_rows": lambda te: te.autofit("row", _rows(te)),
+    "clear_contents": lambda te: te.clear("contents"),
+    "clear_formats": lambda te: te.clear("formats"),
+    "clear_all": lambda te: te.clear("all"),
+    "find": _data("find_dialog"),
+    "replace": _data("find_dialog", replace=True),
+    "note": _data("comment_dialog"),
+    "define_name": lambda te: te._ask_name(),
+    "name_manager": _names("name_manager"),
+    "create_names": _names("ask_create_from_selection"),
+    "filter": _data("toggle_filter"),
+    "sort_ascending": _data("quick_sort", True),
+    "sort_descending": _data("quick_sort", False),
+    "sort": _data("sort_dialog"),
+    "conditional": _data("manage_rules_dialog"),
+    "validation": _data("validation_dialog"),
+    "remove_duplicates": _data("duplicates_dialog"),
+    "text_to_columns": _data("text_columns_dialog"),
+    "goal_seek": _data("goal_seek_dialog"),
+    "insert_chart": lambda te: te.view.window.insert_chart(),
+    "rename": lambda te: te.rename(),
+    "page_layout": lambda te: _layout(te, "page_layout"),
+    "print_area": lambda te: _layout(te, "print_area"),
+    "page_break": lambda te: _layout(te, "page_break"),
+}
+
+
 def _cursor_for(zone) -> Optional[QCursor]:
     if zone and zone[0] == "area":       # the print area's edge, as a column's or a row's
         return QCursor(Qt.SplitHCursor if zone[1] in ("left", "right") else Qt.SplitVCursor)
@@ -1492,6 +1610,10 @@ class TableEditing:
             else:
                 self.close()
             return True
+        command = self._bound_command(event)
+        if command is not None:
+            SHEET_COMMANDS[command](self)
+            return True
         if key in arrows:
             dr, dc = arrows[key]
             if ctrl:
@@ -1528,23 +1650,6 @@ class TableEditing:
             step = 10 if key == Qt.Key_PageDown else -10
             self.select((self.active[0] + step, self.active[1]))
             return True
-        if key == Qt.Key_F2 and shift:
-            from . import datatools
-            datatools.comment_dialog(self)
-            return True
-        if key == Qt.Key_F3 and ctrl:
-            from . import names
-            if shift:
-                names.ask_create_from_selection(self)       # Ctrl+Shift+F3
-            else:
-                names.name_manager(self)                    # Ctrl+F3
-            return True
-        if key == Qt.Key_F2:
-            self.begin_edit(None, enter_mode=False)
-            return True
-        if key == Qt.Key_Down and alt:
-            self.list_menu()
-            return True
         if key in (Qt.Key_Delete,) and not ctrl:
             self.clear("contents")
             return True
@@ -1552,24 +1657,13 @@ class TableEditing:
             self.clear("contents", only_active=True)
             self.begin_edit("", enter_mode=True)
             return True
-        if ctrl and key == Qt.Key_Space:
-            self.select((0, self.selection()[1]), (rows - 1, self.selection()[3]), self.active)
+        if ctrl and not alt and key in (Qt.Key_Z, Qt.Key_Y):
+            # one history with the rest of the document (Excel's Ctrl+Z, Ctrl+Y)
+            stack = self.view.window.undo_stack
+            stack.redo() if key == Qt.Key_Y else stack.undo()
             return True
-        if shift and key == Qt.Key_Space and not ctrl:
-            self.select((self.selection()[0], 0), (self.selection()[2], cols - 1), self.active)
-            return True
-        if ctrl and not alt:
-            letter = {Qt.Key_A: "a", Qt.Key_B: "b", Qt.Key_I: "i", Qt.Key_U: "u", Qt.Key_C: "c",
-                      Qt.Key_X: "x", Qt.Key_V: "v", Qt.Key_D: "d", Qt.Key_R: "r", Qt.Key_1: "1",
-                      Qt.Key_5: "5", Qt.Key_Semicolon: ";", Qt.Key_Colon: ":", Qt.Key_Minus: "-",
-                      Qt.Key_Plus: "+", Qt.Key_Equal: "+", Qt.Key_Z: "z", Qt.Key_Y: "y",
-                      Qt.Key_9: "9", Qt.Key_0: "0", Qt.Key_F: "f", Qt.Key_H: "h"}.get(key)
-            if letter is not None:
-                return self._ctrl(letter, shift)
+        if ctrl:
             return False
-        if alt and key == Qt.Key_Equal:
-            self.autosum()
-            return True
         if text and text.isprintable() and not ctrl and not alt:
             self.begin_edit(text, enter_mode=True)
             return True
@@ -1581,71 +1675,29 @@ class TableEditing:
         if self.item is None or self.editor is not None:
             return False
         key, mods = event.key(), event.modifiers()
-        if mods & Qt.ControlModifier and key in (Qt.Key_A, Qt.Key_B, Qt.Key_I, Qt.Key_U, Qt.Key_C,
-                                                  Qt.Key_X, Qt.Key_V, Qt.Key_D, Qt.Key_R, Qt.Key_1,
-                                                  Qt.Key_5, Qt.Key_Semicolon, Qt.Key_Colon,
-                                                  Qt.Key_Minus, Qt.Key_Plus, Qt.Key_Equal, Qt.Key_9,
-                                                  Qt.Key_0, Qt.Key_Home, Qt.Key_End, Qt.Key_Space,
-                                                  Qt.Key_F, Qt.Key_H,
+        if self._bound_command(event) is not None:
+            return True
+        if mods & Qt.ControlModifier and key in (Qt.Key_Z, Qt.Key_Y, Qt.Key_Home, Qt.Key_End,
                                                   Qt.Key_Up, Qt.Key_Down, Qt.Key_Left, Qt.Key_Right):
             return True
-        if mods & Qt.ControlModifier and key == Qt.Key_F3:
-            return True
-        if key in (Qt.Key_Delete, Qt.Key_Backspace, Qt.Key_F2, Qt.Key_Escape, Qt.Key_Return,
+        if key in (Qt.Key_Delete, Qt.Key_Backspace, Qt.Key_Escape, Qt.Key_Return,
                    Qt.Key_Enter, Qt.Key_Tab, Qt.Key_Backtab, Qt.Key_Home, Qt.Key_End,
                    Qt.Key_Up, Qt.Key_Down, Qt.Key_Left, Qt.Key_Right, Qt.Key_PageUp, Qt.Key_PageDown):
-            return True
-        if mods & Qt.AltModifier and key in (Qt.Key_Equal, Qt.Key_Down):
             return True
         text = event.text()
         return bool(text and text.isprintable() and not (mods & (Qt.ControlModifier | Qt.AltModifier)))
 
-    def _ctrl(self, letter: str, shift: bool) -> bool:
-        item = self.item
-        rows, cols = item.size
-        if letter == "a":
-            self.select((0, 0), (rows - 1, cols - 1), self.active)
-        elif letter == "b":
-            self.toggle("bold")
-        elif letter == "i":
-            self.toggle("italic")
-        elif letter == "u":
-            self.toggle("underline")
-        elif letter == "5":
-            self.toggle("strike")
-        elif letter == "c":
-            self.copy()
-        elif letter == "x":
-            self.copy(cut=True)
-        elif letter == "v":
-            self.paste()
-        elif letter == "d":
-            self.fill_direction("down")
-        elif letter == "r":
-            self.fill_direction("right")
-        elif letter == "1":
-            self.view.window.format_cells_dialog()
-        elif letter == ";":
-            today = datetime.date.today().isoformat()
-            self.begin_edit(today if not shift else datetime.datetime.now().strftime("%H:%M"))
-        elif letter == ":":
-            self.begin_edit(datetime.datetime.now().strftime("%H:%M"))
-        elif letter == "-":
-            self.delete_cells()
-        elif letter == "+":
-            self.insert_cells()
-        elif letter == "z":
-            self.view.window.undo_stack.undo()
-        elif letter == "y":
-            self.view.window.undo_stack.redo()
-        elif letter in ("f", "h"):
-            from . import datatools
-            datatools.find_dialog(self, replace=letter == "h")
-        elif letter == "9":
-            self.hide("row", not shift)
-        elif letter == "0":
-            self.hide("col", not shift)
-        return True
+    def _bound_command(self, event) -> Optional[str]:
+        """The Spreadsheet command a key press is bound to (Excel's keys by
+        default; any of them can be changed in Keyboard shortcuts)."""
+        from .shortcuts import TABLE
+        shortcuts = getattr(self.view.window, "shortcuts", None)
+        if shortcuts is None:
+            return None
+        binding = shortcuts.binding_for_event(event, (TABLE,))
+        if binding is None or binding.payload not in SHEET_COMMANDS:
+            return None
+        return binding.payload
 
     def _jump(self, start: tuple, dr: int, dc: int) -> tuple:
         """Ctrl+arrow: to the edge of the data, as Excel goes."""

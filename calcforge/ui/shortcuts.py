@@ -21,6 +21,7 @@ INSERT = "insert"
 COMMAND = "command"
 SYMBOL = "symbol"
 SMATH = "smath"          # a key inside an equation (calcedit.py handles it)
+SHEET = "sheet"          # a key in an open table or spreadsheet (tableedit.py handles it)
 
 # Where a binding acts (decisions 5 and 6). A key may mean two things only
 # when its two meanings can never both be live: Calc and Markup mode are
@@ -31,9 +32,11 @@ CALC = "calc"            # on the canvas in Calc mode
 MARKUP = "markup"        # on the canvas in Markup mode (tool keys, typing keys)
 EQUATION = "equation"    # while an equation has the cursor
 TYPING = "typing"        # symbols: wherever words or an equation are being typed
+TABLE = "table"          # a table or spreadsheet page open (not typing in a cell)
 
 SCOPE_NAMES = {ALWAYS: "Always", CALC: "Calc mode", MARKUP: "Markup mode",
-               EQUATION: "In an equation", TYPING: "While typing"}
+               EQUATION: "In an equation", TYPING: "While typing",
+               TABLE: "In a table / sheet"}
 
 
 def scopes_overlap(a: str, b: str) -> bool:
@@ -45,6 +48,8 @@ def scopes_overlap(a: str, b: str) -> bool:
         return False
     if EQUATION in pair:
         return False              # inside an equation SMath's key wins
+    if TABLE in pair:
+        return False              # an open table's key wins, as an equation's does
     return True                   # ALWAYS with CALC or MARKUP
 
 
@@ -142,6 +147,88 @@ def _smath_bindings() -> list[Binding]:
             for name, label, keys, payload in SMATH_KEYS]
 
 
+# Excel's keys in an open table or spreadsheet page (tableedit.py runs them).
+# Moving about — the arrows, Enter, Tab, Home, Ctrl+End, Page Up/Down — and
+# Delete, Backspace and Undo are Excel's own and stay as they are.
+SHEET_KEYS: list[tuple[str, str, str]] = [
+    # command (tableedit.SHEET_COMMANDS), label,  default keys
+    ("edit_cell",        "Edit the cell",              "F2"),
+    ("select_all",       "Select all cells",           "Ctrl+A"),
+    ("select_column",    "Select whole column",        "Ctrl+Space"),
+    ("select_row",       "Select whole row",           "Shift+Space"),
+    ("copy",             "Copy cells",                 "Ctrl+C"),
+    ("cut",              "Cut cells",                  "Ctrl+X"),
+    ("paste",            "Paste cells",                "Ctrl+V"),
+    ("paste_values",     "Paste values",               "Ctrl+Shift+V"),
+    ("paste_formulas",   "Paste formulas",             ""),
+    ("paste_formats",    "Paste formats",              ""),
+    ("paste_transpose",  "Paste transposed",           ""),
+    ("fill_down",        "Fill down",                  "Ctrl+D"),
+    ("fill_right",       "Fill right",                 "Ctrl+R"),
+    ("autosum",          "AutoSum",                    "Alt+="),
+    ("insert_date",      "Insert today's date",        "Ctrl+;"),
+    ("insert_time",      "Insert the time",            "Ctrl+Shift+:"),
+    ("list",             "Open the cell's list",       "Alt+Down"),
+    ("format_cells",     "Format cells…",              "Ctrl+1"),
+    ("bold",             "Bold",                       "Ctrl+B"),
+    ("italic",           "Italic",                     "Ctrl+I"),
+    ("underline",        "Underline",                  "Ctrl+U"),
+    ("strike",           "Strikethrough",              "Ctrl+5"),
+    ("format_general",   "General number format",      "Ctrl+Shift+~"),
+    ("format_number",    "Number format (0.00)",       "Ctrl+Shift+!"),
+    ("format_currency",  "Currency format",            "Ctrl+Shift+$"),
+    ("format_percent",   "Percent format",             "Ctrl+Shift+%"),
+    ("format_scientific", "Scientific format",         "Ctrl+Shift+^"),
+    ("format_date",      "Date format",                "Ctrl+Shift+#"),
+    ("format_time",      "Time format",                "Ctrl+Shift+@"),
+    ("border_outline",   "Outline border",             "Ctrl+Shift+&"),
+    ("border_none",      "No borders",                 "Ctrl+Shift+_"),
+    ("border_all",       "All borders",                ""),
+    ("merge_center",     "Merge && Center",            ""),
+    ("unmerge",          "Unmerge cells",              ""),
+    ("insert_cells",     "Insert cells…",              "Ctrl++"),
+    ("delete_cells",     "Delete cells…",              "Ctrl+-"),
+    ("insert_rows",      "Insert rows above",          ""),
+    ("insert_cols",      "Insert columns to the left", ""),
+    ("delete_rows",      "Delete rows",                ""),
+    ("delete_cols",      "Delete columns",             ""),
+    ("hide_rows",        "Hide rows",                  "Ctrl+9"),
+    ("unhide_rows",      "Unhide rows",                "Ctrl+Shift+9"),
+    ("hide_cols",        "Hide columns",               "Ctrl+0"),
+    ("unhide_cols",      "Unhide columns",             "Ctrl+Shift+0"),
+    ("autofit_cols",     "AutoFit column width",       ""),
+    ("autofit_rows",     "AutoFit row height",         ""),
+    ("clear_contents",   "Clear contents",             ""),
+    ("clear_formats",    "Clear formats",              ""),
+    ("clear_all",        "Clear all",                  ""),
+    ("find",             "Find in the cells",          "Ctrl+F"),
+    ("replace",          "Replace in the cells",       "Ctrl+H"),
+    ("note",             "Insert or edit a note",      "Shift+F2"),
+    ("define_name",      "Define name…",               ""),
+    ("name_manager",     "Name Manager…",              "Ctrl+F3"),
+    ("create_names",     "Create names from selection…", "Ctrl+Shift+F3"),
+    ("filter",           "Filter on or off",           "Ctrl+Shift+L"),
+    ("sort_ascending",   "Sort A to Z",                ""),
+    ("sort_descending",  "Sort Z to A",                ""),
+    ("sort",             "Sort…",                      ""),
+    ("conditional",      "Conditional formatting rules…", ""),
+    ("validation",       "Data validation…",           ""),
+    ("remove_duplicates", "Remove duplicates…",        ""),
+    ("text_to_columns",  "Text to columns…",           ""),
+    ("goal_seek",        "Goal Seek…",                 ""),
+    ("insert_chart",     "Insert chart",               "Alt+F1"),
+    ("rename",           "Rename the table or sheet…", ""),
+    ("page_layout",      "Sheet page layout…",         ""),
+    ("print_area",       "Set print area",             ""),
+    ("page_break",       "Insert page break",          ""),
+]
+
+
+def _sheet_bindings() -> list[Binding]:
+    return [Binding(f"sheet.{name}", label, keys, SHEET, "Spreadsheet", name, TABLE)
+            for name, label, keys in SHEET_KEYS]
+
+
 # Typing on bare paper comes first because it is reached without choosing a
 # tool. One explicit trigger avoids consuming ordinary typing.
 DEFAULT_BINDINGS: list[Binding] = [
@@ -159,9 +246,32 @@ DEFAULT_BINDINGS: list[Binding] = [
     Binding("command.fit_width", "Fit width", "Ctrl+1", COMMAND, "View", "fit_width"),
     Binding("command.renumber_counts", "Renumber counts", "", COMMAND, "Markup",
             "renumber_counts"),
-] + _symbol_bindings()
+] + _sheet_bindings() + _symbol_bindings()
 
 BY_ID = {binding.action_id: binding for binding in DEFAULT_BINDINGS}
+
+
+# what Shift makes of the top row on a US keyboard, so Ctrl+Shift+9 is found
+# when the keyboard reports Ctrl+Shift+( (and Ctrl++ when it reports Ctrl+Shift++)
+_UNSHIFTED = {"!": "1", "@": "2", "#": "3", "$": "4", "%": "5", "^": "6", "&": "7",
+              "*": "8", "(": "9", ")": "0", "_": "-", "+": "=", ":": ";", "~": "`",
+              '"': "'", "<": ",", ">": ".", "?": "/", "{": "[", "}": "]", "|": "\\"}
+
+
+def event_sequences(event) -> list:
+    """A key press as the key sequences it can be written as: as reported,
+    with the symbol's unshifted key, and without the Shift that typed it."""
+    from PySide6.QtCore import QKeyCombination
+    mods = event.modifiers() & ~Qt.KeypadModifier
+    key = event.key()
+    out = [QKeySequence(QKeyCombination(mods, Qt.Key(key)))]
+    if mods & Qt.ShiftModifier and not (Qt.Key_A <= key <= Qt.Key_Z):
+        name = QKeySequence(key).toString(QKeySequence.PortableText)
+        base = _UNSHIFTED.get(name)
+        if base:
+            out.append(QKeySequence(QKeySequence(base)[0].key() | mods))
+        out.append(QKeySequence(QKeyCombination(mods & ~Qt.ShiftModifier, Qt.Key(key))))
+    return out
 
 
 def clashes_in(assignments: dict) -> dict[str, list[str]]:
@@ -296,7 +406,7 @@ class ShortcutManager(QObject):
         # Without a scope asked for, the meaning outside an equation comes
         # first: that is where a key is asked about when nothing is being
         # typed (inside an equation calcedit asks for EQUATION explicitly).
-        ordered = sorted(self.bindings(), key=lambda b: b.scope == EQUATION)
+        ordered = sorted(self.bindings(), key=lambda b: b.scope in (EQUATION, TABLE))
         for binding in ordered:
             if scopes is not None and binding.scope not in scopes:
                 continue
@@ -306,10 +416,32 @@ class ShortcutManager(QObject):
                 return binding
         return None
 
+    def binding_for_event(self, event, scopes) -> Optional[Binding]:
+        """The binding in *scopes* a key press answers to, however the
+        keyboard spells it (event_sequences)."""
+        for sequence in event_sequences(event):
+            got = self.binding_for(sequence, scopes=scopes)
+            if got is not None:
+                return got
+        return None
+
     def match_typed(self, text: str, modifiers, mode: str = MARKUP) -> Optional[Binding]:
         """The binding a bare keypress on the canvas should run, if any, in
         the canvas mode *mode* (Calc or Markup)."""
         if not text or modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier):
+            return None
+        if modifiers & Qt.ShiftModifier and len(text) == 1 and text.isalpha():
+            # Shift+M is a key of its own: only a binding for Shift+M answers
+            # it, never M's (Caps Lock gives capitals without Shift, and
+            # those still mean M)
+            wanted = "shift+" + text.lower()
+            for binding in DEFAULT_BINDINGS:
+                if binding.scope not in (mode, ALWAYS, TYPING) or binding.kind == SMATH:
+                    continue
+                sequence = self._sequences.get(binding.action_id, "")
+                if sequence and QKeySequence(sequence).toString(
+                        QKeySequence.PortableText).lower() == wanted:
+                    return binding
             return None
         for binding in DEFAULT_BINDINGS:
             if binding.scope not in (mode, ALWAYS, TYPING) or binding.kind == SMATH:

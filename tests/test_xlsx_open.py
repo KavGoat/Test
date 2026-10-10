@@ -171,6 +171,38 @@ def test_insert_excel_asks_which_worksheets(w, tmp_path):
     assert len(w.document.pages) == pages
 
 
+def test_the_sheet_chooser_warns_of_a_sheet_read_but_left_out(qapp, tmp_path, monkeypatch):
+    """Beams reads Load Cases ('Load Cases'!B2); Load Cases reads Beams through
+    the name Loads. Leaving either out is said at once, and on OK the reader
+    can tick it too."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QMessageBox
+    from calcforge.sheet.xlsx import sheet_links
+    from calcforge.ui.xlsximport import SheetChooser
+    got = read_workbook(a_workbook(str(tmp_path / "beams.xlsx")))
+    assert sheet_links(got) == {"Beams": {"Load Cases"}, "Load Cases": {"Beams"}}
+    chooser = SheetChooser(None, got)
+    assert chooser.warning.isHidden()
+    chooser.list.item(1).setCheckState(Qt.Unchecked)
+    assert chooser.missing() == [("Beams", "Load Cases")]
+    assert "“Beams” reads “Load Cases”" in chooser.warning.text()
+    assert not chooser.warning.isHidden()
+
+    def answer(label):
+        def exec_(box):
+            box._clicked = next(b for b in box.buttons() if b.text() == label)
+            return 0
+        return exec_
+    monkeypatch.setattr(QMessageBox, "clickedButton", lambda box: box._clicked)
+    monkeypatch.setattr(QMessageBox, "exec", answer("Tick those too"))
+    chooser._accept()
+    assert chooser.chosen() == ["Beams", "Load Cases"] and chooser.warning.isHidden()
+    chooser.list.item(0).setCheckState(Qt.Unchecked)
+    monkeypatch.setattr(QMessageBox, "exec", answer("Bring in as chosen"))
+    chooser._accept()
+    assert chooser.chosen() == ["Load Cases"]
+
+
 def test_the_sheet_chooser_ticks_them_all_to_start(qapp, tmp_path):
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QDialogButtonBox
@@ -198,11 +230,14 @@ def test_excels_print_scaling_comes_across(tmp_path):
     fit = wb.create_sheet("Fitted")
     fit["A1"] = 1
     fit.sheet_properties.pageSetUpPr.fitToPage = True
+    fit.print_title_cols = "A:B"
+    fit.print_title_rows = "1:2"
     wb.save(path)
     got = read_workbook(path)
     adjusted, fitted = (s.data["page"] for s in got.sheets)
     assert adjusted["scale"] == 85 and not adjusted.get("fit_width")
     assert fitted["fit_width"] and fitted["fit_tall"] == 1
+    assert fitted["title_cols"] == [0, 1] and fitted["titles"] == [0, 1]
     assert not any("scale" in what for what in got.left_out)
 
 
