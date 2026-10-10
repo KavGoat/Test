@@ -30,3 +30,18 @@ def test_the_fill_handle_takes_the_notes_along():
     wb.set_comment(s, 3, 0, "old note")
     fill(wb, s, (0, 0, 0, 0), (1, 0, 3, 0))
     assert [s.cells[(r, 0)].comment for r in range(4)] == ["checked"] * 4
+
+
+@pytest.mark.parametrize("value, code, shown", [
+    (2.3333, "# ??/??", "2  1/3 "),                    # ? pads fractions with spaces
+    (0.75, "??/??", " 3/4 "),
+    (0, '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)', " -   "),   # Comma Style's zero
+    (0, '_($* #,##0.00_);_($* (#,##0.00);_($* "-"??_);_(@_)', " $-   "),  # Accounting's
+    (1234.5, '_($* #,##0.00_);_($* (#,##0.00);_($* "-"??_);_(@_)', " $1,234.50 "),
+    (0, "??", "  "), (0, "#", ""), (0, "0", "0"),
+    (0.000694444, "[mm]:ss", "01:00"),                 # whole seconds before minutes
+    (1.9999999, "[h]:mm", "48:00"),
+])
+def test_number_formats_as_excel_shows_them(value, code, shown):
+    from calcforge.sheet.numfmt import format_value
+    assert format_value(value, code).text == shown

@@ -303,8 +303,8 @@ def _number(section: _Section, x: float, own_sign: bool) -> str:
     places = len(frac_digits)
     text = _round_half_up(x, places)
     whole, _, frac = text.partition(".")
-    if whole == "0" and all(d == "#" for d in int_digits) and int_digits:
-        whole = ""
+    if whole == "0" and int_digits and all(d in "#?" for d in int_digits):
+        whole = ""                      # no 0 placeholder: no zero ("??" pads it with spaces)
     if grouping and whole:
         whole = f"{int(whole):,}"
     min_int = sum(1 for d in int_digits if d == "0")
@@ -395,13 +395,18 @@ def _fraction(section: _Section, x: float, own_sign: bool) -> str:
         if n == d:
             whole, n = whole + 1, 0
     sign = "-" if negative and own_sign and (whole or n) else ""
+    # "?" pads: the numerator right-aligned, the denominator left-aligned, in
+    # spaces to the width of their placeholders ("# ??/??" -> "2  1/3 ")
+    num_width = len(digit_runs[-1]) if digit_runs and any(t == "?" for t in digit_runs[-1]) else 0
+    den_width = len(den_text) if not den_text.isdigit() and "?" in "".join(
+        t for k, t in den_tokens if k == "digit") else 0
     if has_whole:
         if n == 0:
-            return sign + str(whole) + " " * (len(den_text) * 2 + 2 if False else 0)
-        return sign + (str(whole) + " " if whole else "") + f"{n}/{d}"
+            return sign + str(whole) + " " * (num_width + den_width + 1 + 1 if num_width else 0)
+        return sign + (str(whole) + " " if whole else "") + f"{str(n).rjust(num_width)}/{str(d).ljust(den_width)}"
     if n == 0:
         return sign + "0"
-    return sign + f"{n}/{d}"
+    return sign + f"{str(n).rjust(num_width)}/{str(d).ljust(den_width)}"
 
 
 # -- dates -------------------------------------------------------------------------------------
@@ -427,6 +432,8 @@ def _date(section: _Section, x: float) -> str:
     if fraction_places == 0:
         rounded = round(total_seconds)
         t = datetime_from_serial(rounded / 86400) if abs(rounded - total_seconds) > 1e-9 else t
+    # elapsed time counts whole seconds too: 59.99996 s is [mm]:ss 01:00
+    elapsed_seconds = total_seconds if fraction_places else round(total_seconds)
     out = []
     i = 0
     while i < len(tokens):
@@ -480,11 +487,11 @@ def _date(section: _Section, x: float) -> str:
             pm = t.hour >= 12
             out.append(("P" if pm else "A") if tok[0].isupper() else ("p" if pm else "a"))
         elif low.startswith("[h"):
-            out.append(str(int(total_seconds // 3600)).rjust(len(low) - 2, "0"))
+            out.append(str(int(elapsed_seconds // 3600)).rjust(len(low) - 2, "0"))
         elif low.startswith("[m"):
-            out.append(str(int(total_seconds // 60)).rjust(len(low) - 2, "0"))
+            out.append(str(int(elapsed_seconds // 60)).rjust(len(low) - 2, "0"))
         elif low.startswith("[s"):
-            out.append(str(int(round(total_seconds))).rjust(len(low) - 2, "0"))
+            out.append(str(int(round(elapsed_seconds))).rjust(len(low) - 2, "0"))
         i += 1
     return "".join(out)
 
