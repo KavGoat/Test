@@ -116,6 +116,9 @@ def fill_menu(menu: QMenu, tables) -> None:
     clr = dm.addAction("Clear Filter", lambda: clear_filter(tables))
     clr.setEnabled(bool(sheet.filter and sheet.filter.get("criteria")))
     dm.addSeparator()
+    dm.addAction("Remove Duplicates…", lambda: duplicates_dialog(tables))
+    dm.addAction("Text to Columns…", lambda: text_columns_dialog(tables))
+    dm.addSeparator()
     dm.addAction("Data Validation…", lambda: validation_dialog(tables))
     dm.addAction("Circle Invalid Data", lambda: circle_invalid(tables))
     dm.addAction("Clear Validation Circles", lambda: clear_circles(tables))
@@ -499,6 +502,133 @@ class SortDialog(QDialog):
 
 def sort_dialog(tables):
     dialog = SortDialog(tables)
+    _show(tables.view.window, dialog)
+    return dialog
+
+
+class DuplicatesDialog(QDialog):
+    """Remove Duplicates: which columns make a row a repeat of another."""
+
+    def __init__(self, tables):
+        super().__init__(tables.view)
+        self.tables = tables
+        self.setWindowTitle("Remove Duplicates")
+        self.block, header = _sort_block(tables)
+        layout = QVBoxLayout(self)
+        self.header = QCheckBox("My data has headers")
+        self.header.setChecked(header)
+        layout.addWidget(self.header)
+        layout.addWidget(QLabel("Columns:"))
+        self.columns = QListWidget()
+        layout.addWidget(self.columns)
+        self.header.toggled.connect(lambda _on: self._fill())
+        self._fill()
+        self.result_text = ""
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _fill(self):
+        self.columns.clear()
+        if self.block is None:
+            return
+        t, l, _b, r = self.block
+        sheet = self.tables.item.sheet
+        for c in range(l, r + 1):
+            head = data.shown(sheet, t, c) if self.header.isChecked() else ""
+            entry = QListWidgetItem(head or f"Column {col_letters(c)}")
+            entry.setData(Qt.UserRole, c)
+            entry.setFlags(entry.flags() | Qt.ItemIsUserCheckable)
+            entry.setCheckState(Qt.Checked)
+            self.columns.addItem(entry)
+
+    def chosen(self) -> list:
+        return [self.columns.item(i).data(Qt.UserRole) for i in range(self.columns.count())
+                if self.columns.item(i).checkState() == Qt.Checked]
+
+    def accept(self) -> None:
+        cols = self.chosen()
+        if self.block is not None and cols:
+            block, header, got = self.block, self.header.isChecked(), []
+            self.tables._change("Remove duplicates", lambda wb, s: got.append(
+                data.remove_duplicates(wb, s, *block, cols, header)))
+            removed, kept = got[0] if got else (0, 0)
+            # Excel's own words
+            self.result_text = (f"{removed} duplicate value{'s' if removed != 1 else ''} found and removed; "
+                                f"{kept} unique value{'s' if kept != 1 else ''} remain."
+                                if removed else "No duplicate values found.")
+            self.tables.view.statusMessage.emit(self.result_text)
+        super().accept()
+
+
+def duplicates_dialog(tables):
+    dialog = DuplicatesDialog(tables)
+    _show(tables.view.window, dialog)
+    return dialog
+
+
+class TextColumnsDialog(QDialog):
+    """Text to Columns: the selected column split at its delimiters."""
+
+    def __init__(self, tables):
+        super().__init__(tables.view)
+        self.tables = tables
+        self.setWindowTitle("Convert Text to Columns")
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Split each cell of the selected column at:"))
+        self.tab, self.semicolon, self.comma, self.space = (QCheckBox(t) for t in
+                                                            ("Tab", "Semicolon", "Comma", "Space"))
+        self.tab.setChecked(True)
+        row = QHBoxLayout()
+        for box in (self.tab, self.semicolon, self.comma, self.space):
+            row.addWidget(box)
+        self.other = QLineEdit()
+        self.other.setMaxLength(1)
+        self.other.setFixedWidth(28)
+        row.addWidget(QLabel("Other:"))
+        row.addWidget(self.other)
+        row.addStretch(1)
+        layout.addLayout(row)
+        self.together = QCheckBox("Treat consecutive delimiters as one")
+        layout.addWidget(self.together)
+        self.qualifier = QComboBox()
+        self.qualifier.addItem('"', '"')
+        self.qualifier.addItem("'", "'")
+        self.qualifier.addItem("{none}", "")
+        form = QFormLayout()
+        form.addRow("Text qualifier:", self.qualifier)
+        layout.addLayout(form)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def delimiters(self) -> str:
+        out = "".join(ch for box, ch in ((self.tab, "\t"), (self.semicolon, ";"), (self.comma, ","),
+                                         (self.space, " ")) if box.isChecked())
+        return out + self.other.text()
+
+    def accept(self) -> None:
+        t, l, b, r = self.tables.selection()
+        if l != r:
+            self.tables.view.statusMessage.emit("Text to Columns works on one column at a time")
+            return
+        delims, together, qual = self.delimiters(), self.together.isChecked(), self.qualifier.currentData()
+        item = self.tables.item
+        widest = max((len(data.split_text(item.sheet.input(row, l), delims, together, qual))
+                      for row in range(t, b + 1)), default=1)
+
+        def change(wb, sheet):
+            if l + widest > item.size[1]:
+                item.resize_table(item.size[0], l + widest)      # room for the pieces first
+            data.text_to_columns(wb, sheet, t, l, b, delims, together, qual)
+        self.tables._change("Text to columns", change)
+        super().accept()
+
+
+def text_columns_dialog(tables):
+    dialog = TextColumnsDialog(tables)
     _show(tables.view.window, dialog)
     return dialog
 

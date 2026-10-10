@@ -1,4 +1,5 @@
-"""Excel's Data tools on a sheet: Sort and AutoFilter.
+"""Excel's Data tools on a sheet: Sort, AutoFilter, Remove Duplicates and
+Text to Columns.
 
 Sort: rows of a block reordered by one or more columns, each A→Z or Z→A, as
 Excel orders values (numbers, text without regard to case, FALSE, TRUE,
@@ -9,6 +10,12 @@ AutoFilter: drop-downs on a block's first row; each column may keep only
 some values, or those passing one or two conditions, or its top/bottom n;
 rows that don't pass are hidden (and not printed), and SUBTOTAL leaves them
 out.
+
+Remove Duplicates: rows whose chosen columns repeat an earlier row's (text
+compared without regard to case, as Excel does) go; the rest close up.
+
+Text to Columns: each cell of one column split at its delimiters into it
+and the cells to its right, typed in as if entered there.
 """
 from __future__ import annotations
 
@@ -16,6 +23,7 @@ from functools import cmp_to_key
 from typing import Optional
 
 from . import formula as F
+from .inputs import read_value
 from .numfmt import format_value
 from .values import BLANK, ErrorValue, Qty, is_number
 
@@ -176,3 +184,85 @@ def set_criteria(wb, sheet, col: int, crit: Optional[dict]) -> None:
             sheet.filter = dict(sheet.filter, criteria=criteria)
         wb._layout_change(sheet, change)
         apply_filter(wb, sheet)
+
+
+# -- Remove Duplicates and Text to Columns -------------------------------------------------------------
+def remove_duplicates(wb, sheet, top: int, left: int, bottom: int, right: int,
+                      columns: list, header: bool = False) -> tuple:
+    """(removed, kept): rows of the block whose ``columns`` repeat an earlier
+    row's are taken out and the rest move up, formulas moving with them."""
+    first = top + 1 if header else top
+    seen, keep = set(), []
+    for r in range(first, bottom + 1):
+        key = tuple(_key(sheet.value(r, c)) for c in columns)
+        if key in seen:
+            continue
+        seen.add(key)
+        keep.append(r)
+    removed = bottom - first + 1 - len(keep)
+    if not removed:
+        return 0, len(keep)
+    states = {(r, c): (sheet.cells[(r, c)].state() if (r, c) in sheet.cells else ("", 0, None))
+              for r in range(first, bottom + 1) for c in range(left, right + 1)}
+    with wb.transaction("Remove duplicates"):
+        for target in range(first, bottom + 1):
+            k = target - first
+            for c in range(left, right + 1):
+                if k < len(keep):
+                    source = keep[k]
+                    text, style, comment = states[(source, c)]
+                    if text.startswith("=") and len(text) > 1 and target != source:
+                        text = "=" + F.moved_formula(text[1:], target - source, 0)
+                    wb._set_state(sheet, target, c, (text, style, comment))
+                else:
+                    wb._set_state(sheet, target, c, ("", states[(target, c)][1], None))
+    return removed, len(keep)
+
+
+def split_text(text: str, delimiters: str, together: bool = False, qualifier: str = '"') -> list:
+    """One cell's text in pieces, as Text to Columns cuts it: at any of the
+    delimiters, not inside the qualifier's quotes; several delimiters in a
+    row as one when ``together``."""
+    if not delimiters:
+        return [text]
+    out, piece, quoted, i = [], "", False, 0
+    while i < len(text):
+        ch = text[i]
+        if qualifier and ch == qualifier:
+            if quoted and text[i + 1:i + 2] == qualifier:
+                piece += ch
+                i += 2
+                continue
+            quoted = not quoted
+        elif ch in delimiters and not quoted:
+            out.append(piece)
+            piece = ""
+            if together:
+                while i + 1 < len(text) and text[i + 1] in delimiters:
+                    i += 1
+        else:
+            piece += ch
+        i += 1
+    out.append(piece)
+    return out
+
+
+def text_to_columns(wb, sheet, top: int, col: int, bottom: int, delimiters: str,
+                    together: bool = False, qualifier: str = '"') -> int:
+    """Split column ``col`` from ``top`` to ``bottom``; the widest row's
+    number of pieces."""
+    widest = 0
+    with wb.transaction("Text to columns"):
+        for r in range(top, bottom + 1):
+            cell = sheet.cells.get((r, col))
+            if cell is None or not cell.input or cell.input.startswith("="):
+                continue
+            pieces = split_text(cell.input, delimiters, together, qualifier)
+            widest = max(widest, len(pieces))
+            for k, piece in enumerate(pieces):
+                target = sheet.cells.get((r, col + k))
+                style = target.style if target else 0
+                if piece.strip() and is_number(read_value(piece.strip(), wb.day_first)[0]):
+                    piece = piece.strip()          # " 2" comes in as the number 2, as in Excel
+                wb._set_state(sheet, r, col + k, (piece, style, target.comment if target else None))
+    return widest

@@ -149,11 +149,16 @@ def as_html(sheet, top, left, bottom, right) -> str:
 
 
 # -- R1C1, as Excel's XML Spreadsheet writes formulas ----------------------------------------------
-def to_r1c1(text: str, row: int, col: int) -> str:
-    """=A1+$B$2 in cell (row, col) -> =R[-r]C[-c]+R2C2."""
+def to_r1c1(text: str, row: int, col: int, transpose: bool = False) -> str:
+    """=A1+$B$2 in cell (row, col) -> =R[-r]C[-c]+R2C2. With ``transpose``
+    a relative reference's offset turns with the block (Paste Special ▸
+    Transpose): the cell to the left becomes the cell above."""
     def r1c1(ref: CellRef) -> str:
-        r = f"R{ref.row + 1}" if ref.row_abs else ("R" if ref.row == row else f"R[{ref.row - row}]")
-        c = f"C{ref.col + 1}" if ref.col_abs else ("C" if ref.col == col else f"C[{ref.col - col}]")
+        dr, dc = ref.row - row, ref.col - col
+        if transpose and not ref.row_abs and not ref.col_abs:
+            dr, dc = dc, dr
+        r = f"R{ref.row + 1}" if ref.row_abs else ("R" if dr == 0 else f"R[{dr}]")
+        c = f"C{ref.col + 1}" if ref.col_abs else ("C" if dc == 0 else f"C[{dc}]")
         return r + c
 
     tokens = F.tokenize(text)
@@ -633,6 +638,30 @@ def from_clipboard(formats: dict) -> Optional[dict]:
     if formats.get("text/plain") is not None:
         return from_text(formats["text/plain"].decode("utf-8", "replace"))
     return None
+
+
+def transposed(data: dict) -> dict:
+    """Clipboard data turned on its side: rows become columns, merges turn,
+    and formulas read what was beside them as what is now above them."""
+    rows = data["rows"]
+    top0, left0 = data.get("origin", [0, 0])
+    h = len(rows)
+    w = max((len(r) for r in rows), default=0)
+    out = []
+    for j in range(w):
+        line = []
+        for i in range(h):
+            got = rows[i][j] if j < len(rows[i]) else None
+            if got is not None and got[0].startswith("=") and len(got[0]) > 1:
+                text = R1C1_MARK + "=" + to_r1c1(got[0][1:], top0 + i, left0 + j, transpose=True)
+                got = [text, *got[1:]]
+            line.append(got)
+        out.append(line)
+    turned = dict(data)
+    turned["rows"] = out
+    turned["merges"] = [[m[1], m[0], m[3], m[2]] for m in data.get("merges", [])]
+    turned.pop("widths", None)
+    return turned
 
 
 def paste(wb, sheet, row: int, col: int, data: dict, what: str = "all") -> tuple:

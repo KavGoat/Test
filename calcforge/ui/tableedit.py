@@ -1958,6 +1958,8 @@ class TableEditing:
         data = clip.from_clipboard(formats)
         if data is None:
             return False
+        if what == "transpose":
+            data, what = clip.transposed(data), "all"
         rows = data["rows"]
         h = len(rows)
         w = max((len(x) for x in rows), default=0)
@@ -1996,6 +1998,7 @@ class TableEditing:
         special.addAction("Values", lambda: self.paste("values"))
         special.addAction("Formulas", lambda: self.paste("formulas"))
         special.addAction("Formats", lambda: self.paste("formats"))
+        special.addAction("Transpose", lambda: self.paste("transpose"))
         menu.addSeparator()
         ins = menu.addMenu("Insert")
         ins.addAction("Rows above", self.insert_rows)

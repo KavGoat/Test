@@ -5,6 +5,7 @@ sorting from a filter's drop-down, Clear Filter, and Find & Replace across
 tables — each one undone again."""
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QMenu
 
 from calcforge.sheet import condfmt
@@ -48,6 +49,7 @@ def test_the_menu_holds_every_tool(w):
     data = menu.actions()[1].menu()
     labels = [a.text() for a in data.actions() if a.text()]
     assert labels == ["Sort A to Z", "Sort Z to A", "Custom Sort…", "Filter", "Clear Filter",
+                      "Remove Duplicates…", "Text to Columns…",
                       "Data Validation…", "Circle Invalid Data", "Clear Validation Circles"]
     assert not data.actions()[4].isEnabled(), "nothing filtered yet"
 
@@ -176,3 +178,65 @@ def test_find_and_replace_across_tables(w):
     w.undo_stack.undo()
     a, b = sorted(tables(w), key=lambda t: t.pos().y())
     assert typed(a, "C3") == "S275" and typed(b, "A1") == "S275 plate", "one undo for all of it"
+
+
+def test_remove_duplicates_as_excel(w):
+    table = make_table(w, width=48 * 3, height=15 * 7)
+    wb, s = table.sheet.workbook, table.sheet
+    for r, (a, b) in enumerate([("Member", "Size"), ("B1", "UB 305"), ("b1", "UB 305"), ("B2", "UB 406"),
+                                ("B1", "UB 254"), ("B3", "=A6")]):
+        wb.set_input(s, r, 0, a)
+        wb.set_input(s, r, 1, b)
+    tabs = w.view.tables
+    tabs.open(table, (0, 0))
+    d = datatools.duplicates_dialog(tabs)
+    assert [d.columns.item(i).text() for i in range(2)] == ["Column A", "Column B"]
+    d.header.setChecked(True)               # all text: Excel can't tell either, the box says
+    assert [d.columns.item(i).text() for i in range(2)] == ["Member", "Size"]
+    d.columns.item(1).setCheckState(Qt.Unchecked)          # by member only
+    d.accept()
+    t = tables(w)[0]
+    assert [typed(t, f"A{r}") for r in range(1, 6)] == ["Member", "B1", "B2", "B3", ""], \
+        "b1 is B1 (no regard to case); the second B1 goes; the rest close up"
+    assert typed(t, "B4") == "=A4", "a formula moves with its row and still reads it"
+    assert d.result_text == "2 duplicate values found and removed; 3 unique values remain."
+    w.undo_stack.undo()
+    assert typed(tables(w)[0], "A3") == "b1"
+
+
+def test_text_to_columns(w):
+    table = make_table(w, width=48 * 2, height=15 * 4)
+    wb, s = table.sheet.workbook, table.sheet
+    wb.set_input(s, 0, 0, 'B1, "UB 305x165, 40", 6.5')
+    wb.set_input(s, 1, 0, "B2,,UB 406, 8")
+    tabs = w.view.tables
+    tabs.open(table, (0, 0))
+    tabs.select((0, 0), (1, 0))
+    d = datatools.text_columns_dialog(tabs)
+    d.tab.setChecked(False)
+    d.comma.setChecked(True)
+    d.accept()
+    t = tables(w)[0]
+    assert t.size[1] >= 4, "the table grows to take the pieces"
+    assert [typed(t, a) for a in ("A1", "B1", "C1")] == ["B1", ' UB 305x165, 40', "6.5"]
+    assert t.sheet.value(0, 2) == 6.5
+    assert [typed(t, a) for a in ("A2", "B2", "C2", "D2")] == ["B2", "", "UB 406", "8"]
+    w.undo_stack.undo()
+    assert typed(tables(w)[0], "A2") == "B2,,UB 406, 8"
+
+
+def test_paste_special_transpose(w):
+    table = make_table(w, width=48 * 5, height=15 * 6)
+    wb, s = table.sheet.workbook, table.sheet
+    for (r, c), v in {(0, 0): "1", (1, 0): "2", (0, 1): "=A1*10", (1, 1): "=A2*10", (0, 2): "=$A$1"}.items():
+        wb.set_input(s, r, c, v)
+    tabs = w.view.tables
+    tabs.open(table, (0, 0))
+    tabs.select((0, 0), (1, 2))
+    tabs.copy()
+    tabs.select((3, 0))
+    tabs.paste("transpose")
+    t = tables(w)[0]
+    assert [[typed(t, f"{c}{r}") for c in "AB"] for r in (4, 5, 6)] == \
+        [["1", "2"], ["=A4*10", "=B4*10"], ["=$A$1", ""]], "what was to the left is now above"
+    assert [t.sheet.value(4, 0), t.sheet.value(4, 1)] == [10, 20]
