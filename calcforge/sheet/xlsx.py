@@ -235,7 +235,7 @@ def _plain_formula(text: str) -> str:
     """Excel's stored formula as it is typed: no _xlfn./_xlpm. prefixes,
     ANCHORARRAY(A1) as A1#, SINGLE(x) (the @ operator) as x."""
     text = _ANCHOR.sub(lambda m: m.group(1) + "#", text)
-    text = re.sub(r"_xlfn\.SINGLE\(", "(", text, flags=re.I)
+    text = re.sub(r"_xlfn\.SINGLE\(", "@(", text, flags=re.I)
     text = re.sub(r"_xlpm\.", "", text, flags=re.I)
     text = re.sub(r"_xlfn\._xlws\.", "", text, flags=re.I)
     text = re.sub(r"_xlfn\.", "", text, flags=re.I)

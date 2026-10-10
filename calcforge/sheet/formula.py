@@ -184,6 +184,9 @@ def tokenize(text: str) -> list[Token]:
                 out.append(Token("op", "*", lead, i))
                 out[-1].text = "·"
                 i += 1
+            elif ch == "@":
+                out.append(Token("op", "@", lead, i))   # Excel's implicit intersection
+                i += 1
             else:
                 raise FormulaError(f"“{ch}” can't be used here.", i)
     out.append(Token("end", "", "", n))
@@ -471,7 +474,7 @@ class _Parser:
 
     def unary(self):
         tok = self.peek()
-        if tok.kind == "op" and tok.text in ("-", "+"):
+        if tok.kind == "op" and tok.text in ("-", "+", "@"):
             self.take()
             arg = self.unary()
             return Unary(tok.text, arg)

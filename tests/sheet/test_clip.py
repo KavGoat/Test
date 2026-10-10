@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from calcforge.sheet import clip
+from calcforge.sheet.clip import MIME_EXCEL_XML_ALT, from_clipboard, from_html, paste
 from calcforge.sheet.workbook import Workbook
 
 EXCEL = b'''<?xml version="1.0"?>
@@ -99,3 +100,51 @@ def test_calcforge_own_copy_round_trips_everything():
     clip.paste(wb, s2, 2, 2, data)
     assert s2.input(2, 2) == "=D3+1" and s2.cell(2, 2).comment == "note"
     assert s2.merges == [(2, 2, 2, 3)]
+
+
+EXCEL_365_XML = b'''<?xml version="1.0"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+<Worksheet ss:Name="Sheet1"><Table>
+<Row><Cell><Data ss:Type="String">UB</Data></Cell><Cell><Data ss:Type="Number">305</Data></Cell>
+<Cell ss:Formula="=CONCAT(RC[-2],&quot; &quot;,RC[-1])"><Data ss:Type="String">UB 305</Data></Cell>
+<Cell ss:Formula="=_xlfn.CONCAT(RC[-3]:RC[-2])"><Data ss:Type="String">UB305</Data></Cell>
+<Cell ss:Formula="=_xlfn.TEXTJOIN(&quot;-&quot;,TRUE,RC[-4]:RC[-3])"><Data ss:Type="String">UB-305</Data></Cell>
+<Cell ss:Formula="=_xlfn.LET(_xlpm.x,RC[-4],_xlpm.x*2)"><Data ss:Type="Number">610</Data></Cell></Row>
+<Row><Cell ss:Formula="=_xlfn.SINGLE(R[-1]C:R[-1]C[1])"><Data ss:Type="String">UB</Data></Cell>
+<Cell ss:Formula="=NOT_A_FORMULA_HERE(((("><Data ss:Type="Number">42</Data></Cell></Row>
+</Table></Worksheet></Workbook>'''
+
+
+def test_formulas_copied_from_excel_365_come_through_as_typed():
+    """CONCAT, TEXTJOIN, LET and the @ operator from Excel's clipboard, its
+    _xlfn./_xlpm. prefixes off; one that can't be read keeps Excel's value
+    (2026-10-10: a CONCAT formula didn't come through)."""
+    wb = Workbook()
+    s = wb.add_sheet("S")
+    data = from_clipboard({MIME_EXCEL_XML_ALT: EXCEL_365_XML})
+    paste(wb, s, 0, 0, data)
+    assert [s.input(0, c) for c in range(2, 6)] == ['=CONCAT(A1," ",B1)', "=CONCAT(A1:B1)",
+                                                   '=TEXTJOIN("-",TRUE,A1:B1)', "=LET(x,B1,x*2)"]
+    assert [s.value(0, c) for c in range(2, 6)] == ["UB 305", "UB305", "UB-305", 610]
+    assert s.input(1, 0) == "=@(A1:B1)" and s.value(1, 0) == "UB", "the @ operator: its own column"
+    assert s.input(1, 1) == "42", "unreadable here: Excel's value, not a broken cell"
+
+
+def test_html_from_excel_keeps_merged_cells_room():
+    data = from_html('<table><tr><td colspan=2>Head</td><td>C</td></tr>'
+                     '<tr><td rowspan=2>A</td><td>b</td><td>c</td></tr><tr><td>b2</td><td>c2</td></tr></table>')
+    assert [[x[0] if x else None for x in row] for row in data["rows"]] == \
+        [["Head", None, "C"], ["A", "b", "c"], [None, "b2", "c2"]]
+    assert data["merges"] == [[0, 0, 0, 1], [1, 0, 2, 0]]
+
+
+def test_implicit_intersection():
+    wb = Workbook()
+    s = wb.add_sheet("S")
+    for r in range(3):
+        wb.set_input(s, r, 1, str(r + 10))
+    for formula, want in (("=@B1:B3", 11), ("=@B1", 10), ("=@{5,6}", 5), ("=@(B1:B3)*2", 22)):
+        wb.set_input(s, 1, 0, formula)
+        assert s.value(1, 0) == want, formula
+    wb.set_input(s, 1, 0, "=@B1:C1")
+    assert s.value(1, 0).code == "#VALUE!", "no cell of that row in its column"

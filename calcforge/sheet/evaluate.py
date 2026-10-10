@@ -171,6 +171,8 @@ def ev(n, ctx: Ctx):
     if t is F.Err:
         return ERRORS.get(n.code, VALUE)
     if t is F.Unary:
+        if n.op == "@":
+            return _intersect(ev(n.arg, ctx), ctx)
         v = deref(ev(n.arg, ctx))
         if n.op == "+":
             return v
@@ -202,6 +204,22 @@ def ev(n, ctx: Ctx):
     if t is F.Missing:
         return BLANK
     raise SheetError(VALUE)
+
+
+def _intersect(v, ctx):
+    """Excel's @: one value from a block — the cell in the formula's own row
+    (a column) or column (a row), the first of an array."""
+    if isinstance(v, RefValue):
+        if v.single:
+            return v.value_at(0, 0)
+        if v.width == 1 and v.top <= ctx.row <= v.bottom:
+            return v.value_at(ctx.row - v.top, 0)
+        if v.height == 1 and v.left <= ctx.col <= v.right:
+            return v.value_at(0, ctx.col - v.left)
+        return VALUE
+    if isinstance(v, Array):
+        return v.get(0, 0)
+    return v
 
 
 def _unit(text: str):

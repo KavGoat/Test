@@ -401,6 +401,7 @@ def from_excel_xml(data: bytes) -> Optional[dict]:
             formula = cell.get(_ns("Formula"))
             data_el = cell.find(_ns("Data"))
             text = ""
+            cached = _xml_data_text(data_el, style) if data_el is not None else ""
             if formula:
                 text = R1C1_MARK + formula      # turned into A1 where it lands
             elif data_el is not None:
@@ -431,7 +432,7 @@ def from_excel_xml(data: bytes) -> Optional[dict]:
             com = cell.find(_ns("Comment"))
             if com is not None:
                 comment = "".join(com.itertext()).strip()
-            grid[(row_i, c)] = [text, style, comment]
+            grid[(row_i, c)] = [text, style, comment] + ([cached] if formula else [])
             across = int(cell.get(_ns("MergeAcross"), "0"))
             down = int(cell.get(_ns("MergeDown"), "0"))
             if across or down:
@@ -446,6 +447,24 @@ def from_excel_xml(data: bytes) -> Optional[dict]:
     return {"origin": [0, 0], "sheet": None, "rows": rows,
             "widths": [widths.get(c) for c in range(w)], "heights": [heights.get(r) for r in range(h)],
             "merges": merges}
+
+
+def _xml_data_text(data_el, style) -> str:
+    """What Excel computed for a cell, as typed text (kept with a pasted
+    formula, for when the formula can't be read here)."""
+    kind = data_el.get(_ns("Type"))
+    raw = "".join(data_el.itertext())
+    if kind == "Number":
+        try:
+            x = float(raw)
+        except ValueError:
+            return raw
+        return repr(x) if x != int(x) else str(int(x))
+    if kind == "Boolean":
+        return "TRUE" if raw.strip() in ("1", "true") else "FALSE"
+    if kind == "String" and raw[:1] in ("=", "'"):
+        return "'" + raw
+    return raw
 
 
 def _looks_date(fmt: str) -> bool:
@@ -589,12 +608,28 @@ def from_html(text: str) -> Optional[dict]:
         return None
     if not reader.rows:
         return None
-    rows = []
-    for r in reader.rows:
-        rows.append([[t, style_to_dict(_style_of_css(css)), None] if t or css else None for t, css in r])
-    w = max(len(r) for r in rows)
-    rows = [r + [None] * (w - len(r)) for r in rows]
-    return {"origin": [0, 0], "sheet": None, "rows": rows, "widths": [], "heights": [], "merges": [],
+    # merged cells (colspan/rowspan) hold their room, so the rest stay in their columns
+    grid: dict = {}
+    merges = []
+    spans = iter(reader.spans)
+    for r, line in enumerate(reader.rows):
+        c = 0
+        for t, css in line:
+            while (r, c) in grid:
+                c += 1
+            _r, _c, down, across = next(spans, (r, c, 1, 1))
+            grid[(r, c)] = [t, style_to_dict(_style_of_css(css)), None] if t or css else None
+            for i in range(down):
+                for j in range(across):
+                    if i or j:
+                        grid[(r + i, c + j)] = None
+            if down > 1 or across > 1:
+                merges.append([r, c, r + down - 1, c + across - 1])
+            c += across
+    h = max(r for r, _c in grid) + 1
+    w = max(c for _r, c in grid) + 1
+    rows = [[grid.get((r, c)) for c in range(w)] for r in range(h)]
+    return {"origin": [0, 0], "sheet": None, "rows": rows, "widths": [], "heights": [], "merges": merges,
             "plain": True}
 
 
@@ -664,6 +699,20 @@ def transposed(data: dict) -> dict:
     return turned
 
 
+def _excel_formula(text: str, cached: Optional[str]) -> str:
+    """A formula from Excel's clipboard as it is typed here: Excel's
+    _xlfn./_xlws./_xlpm. prefixes off, _xlfn.SINGLE(x) as the @ it stands
+    for, ANCHORARRAY(A1) as A1#. One that still can't be read keeps the
+    value Excel worked out rather than coming through broken."""
+    from .xlsx import _plain_formula
+    text = "=" + _plain_formula(text[1:]) if text.startswith("=") else text
+    try:
+        F.parse(text[1:])
+    except F.FormulaError:
+        return cached if cached is not None else text
+    return text
+
+
 def paste(wb, sheet, row: int, col: int, data: dict, what: str = "all") -> tuple:
     """Put clipboard data at (row, col). Formulas copied from a sheet move
     by where they land, as in Excel. Returns the block filled."""
@@ -685,7 +734,7 @@ def paste(wb, sheet, row: int, col: int, data: dict, what: str = "all") -> tuple
                     continue
                 text, style_dict, comment = got[0], got[1], got[2] if len(got) > 2 else None
                 if text.startswith(R1C1_MARK):
-                    text = from_r1c1(text[1:], r, c)
+                    text = _excel_formula(from_r1c1(text[1:], r, c), got[3] if len(got) > 3 else None)
                 elif text.startswith("=") and len(text) > 1:
                     # as in Excel, a copied formula reads the sheet it lands on
                     text = "=" + F.moved_formula(text[1:], drow, dcol)
