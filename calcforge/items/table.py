@@ -84,6 +84,7 @@ class TableItem(MarkupItem):
         self.selection: Optional[tuple] = None      # (top, left, bottom, right)
         self.active: Optional[tuple] = None         # (row, col)
         self.overlay = None                          # callable(painter): reference colours...
+        self._turn_while_open = None                 # its rotation, while shown upright to type in
         self.setZValue(-0.5)
 
     # -- the sheet behind it ---------------------------------------------------------
@@ -161,7 +162,8 @@ class TableItem(MarkupItem):
 
         # a page turned since it was written turns its markups with it: the
         # table's place in reading order is where it is on the page as written
-        turns = int(round(self.rotation() / 90.0)) % 4
+        turn = self._turn_while_open if self._turn_while_open is not None else self.rotation()
+        turns = int(round(turn / 90.0)) % 4
         x, y = unturned_px(frame, self.pos().x(), self.pos().y(), turns)
         self._book.place(self.uid, frame.page.uid, x, y)
 
@@ -185,6 +187,22 @@ class TableItem(MarkupItem):
         elif change == QGraphicsItem.ItemPositionHasChanged:
             self._place()
         return result
+
+    def show_upright(self, view_turn: float = 0.0) -> None:
+        """While it is open for its cells it reads the right way up, whatever
+        the page has been turned to (as an equation does); leave_upright
+        turns it back."""
+        if self._turn_while_open is None:
+            self._turn_while_open = self.rotation()
+        if (self._turn_while_open - view_turn) % 360:
+            self.setRotation(-view_turn)
+
+    def leave_upright(self) -> None:
+        if self._turn_while_open is None:
+            return
+        turn, self._turn_while_open = self._turn_while_open, None
+        if self.rotation() != turn:
+            self.setRotation(turn)
 
     def layout_changed(self) -> None:
         """Rows or columns resized, inserted or deleted."""
@@ -754,6 +772,8 @@ class TableItem(MarkupItem):
         from ..sheet.store import sheet_to_dict
 
         data = self.base_dict()
+        if self._turn_while_open is not None:
+            data["rotation"] = self._turn_while_open      # as it lies on the page
         if self.sheet is not None:
             data["table"] = sheet_to_dict(self.sheet)
         elif self._data is not None:

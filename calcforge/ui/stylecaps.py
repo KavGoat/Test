@@ -36,6 +36,8 @@ def capabilities(item, for_default: bool = False) -> set[str]:
         # result format are its own settings (Properties > Equation), not a
         # markup's pen and fill
         return set()
+    if getattr(item, "TYPE", "") in ("table", "sheet_run", "chart"):
+        return set()              # styled in their cells or their own dialog, not as markups
     if getattr(item, "TYPE", "") == "calc_block":
         return {STROKE, WIDTH, DASH}      # its frame
     if isinstance(item, SnapshotItem):

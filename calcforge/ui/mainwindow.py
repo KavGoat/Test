@@ -3129,11 +3129,12 @@ class MainWindow(QMainWindow):
 
     def duplicate_page(self, index: Optional[int] = None) -> None:
         """Copy the page — or the whole picked run — in after the last of it."""
-        from .sheetpages import plain_copy, safe_target
+        from .sheetpages import fresh_item_ids, plain_copy, safe_target
         wanted = self.pages_acted_on(index)
         sources = [self.document.pages[which].to_dict() for which in wanted]
         if any(self.document.pages[which].sheet for which in wanted):
             sources = [plain_copy(source) for source in sources]
+        sources = fresh_item_ids(sources)
         target = safe_target(self.document, wanted[-1] + 1)
 
         def mutate():
@@ -3191,7 +3192,7 @@ class MainWindow(QMainWindow):
         if payload is None:
             self.status_hint.setText("There is no page on the clipboard")
             return
-        from .sheetpages import plain_copy, safe_target
+        from .sheetpages import fresh_item_ids, plain_copy, safe_target
         which = self.page_index(index)
         target = safe_target(self.document, which if before else which + 1)
         for key, encoded in (payload.get("assets") or {}).items():
@@ -3203,6 +3204,7 @@ class MainWindow(QMainWindow):
 
         waiting = payload.get("calcforge_pages") or [payload["calcforge_page"]]
         waiting = [plain_copy(source) if source.get("sheet") else source for source in waiting]
+        waiting = fresh_item_ids(waiting)
 
         def mutate():
             for offset, source in enumerate(waiting):
@@ -3361,6 +3363,13 @@ class MainWindow(QMainWindow):
             if page.uid in taken:
                 page.uid = uuid.uuid4().hex
             taken.add(page.uid)
+        # its tables, equations and blocks are new ones here, even when the
+        # same file comes in twice (each is known by its uid)
+        from .sheetpages import fresh_item_ids
+        entries = [{"items": page._pending_items, "sheet": page.sheet} for page in pages]
+        fresh_item_ids(entries)
+        for page, entry in zip(pages, entries):
+            page._pending_items, page.sheet = entry["items"], entry["sheet"]
         for key, data in other.assets.items():
             self.document.assets.setdefault(key, data)
         self._say_what_opening_found(other.open_warnings)

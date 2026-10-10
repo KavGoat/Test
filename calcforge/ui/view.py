@@ -431,6 +431,9 @@ class PageView(QGraphicsView):
         # Tables: the one open for its cells, its selection, Excel's keys.
         from .tableedit import TableEditing
         self.tables = TableEditing(self)
+        # a spreadsheet page's headings, kept in view as Excel keeps them
+        from .sheetheadings import SheetHeadings
+        self.sheet_headings = SheetHeadings(self)
         self.glide = _Glide(self)
         self.tool_key = "select"
         self.sticky_tool = False
@@ -825,6 +828,7 @@ class PageView(QGraphicsView):
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._update_desk_margin()
+        self.sheet_headings.refresh_soon()
 
     def _update_desk_margin(self) -> None:
         """Keep enough off-page desk to centre a page edge or corner."""
@@ -4278,6 +4282,8 @@ class PageView(QGraphicsView):
         from ..items.calc import closed_block_of
         for item in self.scene().items(scene_pos):
             if isinstance(item, MarkupItem):
+                if getattr(item, "SHEET_RUN", False):
+                    continue               # a spreadsheet page's cells: the page, not a markup on it
                 block = closed_block_of(item)
                 if block is not None:
                     return block           # a closed block is one thing
@@ -5255,11 +5261,12 @@ class PageView(QGraphicsView):
             event.accept()
             return
         item = self.markup_at(scene_pos)
-        if getattr(item, "SHEET_RUN", False):
+        run = self.tables.table_at(scene_pos) if item is None else None
+        if getattr(run, "SHEET_RUN", False):
             # a spreadsheet page's cells: its own menu, on the cell clicked
-            cell = item.cell_at(item.mapFromScene(scene_pos))
+            cell = run.cell_at(run.mapFromScene(scene_pos))
             if cell is not None:
-                self.tables.open(item, cell)
+                self.tables.open(run, cell)
                 self.tables.context_menu(event.globalPos())
             event.accept()
             return

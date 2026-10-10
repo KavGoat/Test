@@ -264,7 +264,7 @@ def _searchable(item) -> list[tuple[str, str]]:
     result it shows (phase 5: Search finds variable names and equation text).
     """
     fields = []
-    if getattr(item, "TYPE", "") == "table" and getattr(item, "sheet", None) is not None:
+    if getattr(item, "TYPE", "") in ("table", "sheet_run") and getattr(item, "sheet", None) is not None:
         # a table's cells: what was typed (replaceable) and, for a formula,
         # the value it shows
         from ..sheet.find import _shown

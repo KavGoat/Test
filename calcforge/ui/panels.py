@@ -1852,6 +1852,8 @@ class PropertiesPanel(QScrollArea):
             self._add_block(first)
         if len(self._items) == 1 and getattr(first, "TYPE", "") == "table":
             self._add_table(first)
+        if len(self._items) == 1 and getattr(first, "TYPE", "") == "chart":
+            self._add_chart(first)
         appearance = common_capabilities(self._items)
         if appearance - {"font"}:
             self._add_appearance(first, appearance)
@@ -2783,6 +2785,19 @@ class PropertiesPanel(QScrollArea):
         open_button.setToolTip("Open the table for its cells (or double-click it)")
         open_button.clicked.connect(lambda: self.window.view.tables.open(first))
         form.addRow("", open_button)
+
+    def _add_chart(self, first) -> None:
+        """A chart: what it is, and its dialog (or double-click it)."""
+        form = self._group("Chart")
+        kind = {"scatter": "XY scatter", "line": "Line", "column": "Column"}.get(
+            first.spec.get("kind"), "")
+        form.addRow("Type", QLabel(kind))
+        form.addRow("Series", QLabel(str(len(first.spec.get("series", [])))))
+        edit = QPushButton("Edit chart…")
+        edit.setToolTip("Type, titles, axes, series, error bars and trendlines (or double-click it)")
+        edit.setEnabled(not first.locked)
+        edit.clicked.connect(lambda: self.window._edit_chart(first))
+        form.addRow("", edit)
 
     def _forget_default(self, item: MarkupItem) -> None:
         from . import toolsets

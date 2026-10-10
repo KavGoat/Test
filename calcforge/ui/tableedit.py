@@ -145,7 +145,7 @@ class FormulaBar(QWidget):
         self.edit = QLineEdit()
         self.edit.setToolTip("What is typed in the cell: its formula, or its value")
         self.edit.textEdited.connect(tables._typed_in_bar)
-        self.edit.returnPressed.connect(lambda: tables.commit(move=(1, 0)))
+        self.edit.returnPressed.connect(lambda: tables.commit(move=(1, 0), enter=True))
         self.edit.installEventFilter(self)
         layout.addWidget(self.edit, 1)
         self.hide()
@@ -235,6 +235,9 @@ class TableEditing:
         item.setSelected(False)
         self._item, self._uid = item, item.uid
         item.opened = True
+        if not getattr(item, "SHEET_RUN", False):
+            # on a turned page: upright while its cells are typed into
+            item.show_upright(float(getattr(view.scene(), "reading_turn", 0) or 0))
         item.prepareGeometryChange()
         cell = cell or (0, 0)
         self.anchor = self.active = self.edge = cell
@@ -253,6 +256,7 @@ class TableEditing:
             item.opened = False
             item.selection = item.active = None
             item.overlay = None
+            item.leave_upright()
             item.prepareGeometryChange()
             item.update()
         self._item = None
@@ -286,10 +290,17 @@ class TableEditing:
                         changed = True
         return top, left, bottom, right
 
+    #: Excel: typing along a row with Tab, then Enter, goes to the next row
+    #: under the cell the Tabs started from
+    tab_start: Optional[int] = None
+    _keep_tab = False
+
     def select(self, anchor: tuple, edge: Optional[tuple] = None, active: Optional[tuple] = None) -> None:
         item = self.item
         if item is None:
             return
+        if not self._keep_tab:
+            self.tab_start = None
         rows, cols = item.size
         if _is_run(item):
             rows += 1                    # one row past the last page: typing there adds a page
@@ -306,6 +317,9 @@ class TableEditing:
         item = self._item
         if item is None:
             return
+        headings = getattr(self.view, "sheet_headings", None)
+        if headings is not None and getattr(item, "SHEET_RUN", False):
+            headings.refresh_soon()
         item.selection = self.selection()
         item.active = self.active
         item.overlay = self._paint_overlay
@@ -408,6 +422,16 @@ class TableEditing:
         view = self.view
         if event.button() not in (Qt.LeftButton, Qt.RightButton):
             return False
+        headings = getattr(view, "sheet_headings", None)
+        hit = headings.hit(event.position()) if headings is not None else None
+        if hit is not None and view.tool_key == "select":
+            # a spreadsheet's headings kept in view: a whole column or row
+            run, zone = hit
+            if self.item is not run:
+                self.open(run, (0, 0))
+            if event.button() == Qt.RightButton:
+                return False
+            return self._press_zone(run, zone, event, scene_pos)
         if view.tool_key == "table" and event.button() == Qt.LeftButton:
             frame = view.frame_at(scene_pos)
             if frame is not None:
@@ -442,6 +466,8 @@ class TableEditing:
         target = self.table_at(scene_pos)
         if target is None or not view.editable(target):
             return False
+        if _is_run(target) and event.modifiers() & Qt.ControlModifier:
+            return False                 # Ctrl+drag: Bluebeam's selection box over the sheet
         if _is_run(target) and not view.calc.calc_mode():
             # a spreadsheet page: a markup over the cells is picked first,
             # and anywhere else is a cell (the user's choice)
@@ -936,13 +962,14 @@ class TableEditing:
             return
         self.commit(move=None)
 
-    def commit(self, move: Optional[tuple] = (1, 0), all_selected: bool = False) -> bool:
+    def commit(self, move: Optional[tuple] = (1, 0), all_selected: bool = False,
+               tab: bool = False, enter: bool = False) -> bool:
         """Enter: what was typed goes into the cell (or every selected cell
         with Ctrl+Enter), and the selection moves on. False when it can't."""
         editor, item = self.editor, self.item
         if editor is None:
             if move is not None:
-                self.move_active(*move)
+                self.move_active(*move, tab=tab, enter=enter)
             return True
         text = editor.text()
         cell = self.editing_cell
@@ -980,7 +1007,7 @@ class TableEditing:
             if problem:
                 self.view.statusMessage.emit(f"{col_letters(cell[1])}{cell[0] + 1}: {problem}")
         if move is not None and not all_selected:
-            self.move_active(*move)
+            self.move_active(*move, tab=tab, enter=enter)
         else:
             self._show_selection()
         return True
@@ -1206,13 +1233,13 @@ class TableEditing:
             if ctrl:
                 self.commit(move=None, all_selected=True)
             else:
-                self.commit(move=(-1, 0) if shift else (1, 0))
+                self.commit(move=(-1, 0) if shift else (1, 0), enter=True)
             return True
         if key == Qt.Key_Tab:
-            self.commit(move=(0, 1))
+            self.commit(move=(0, 1), tab=True)
             return True
         if key == Qt.Key_Backtab:
-            self.commit(move=(0, -1))
+            self.commit(move=(0, -1), tab=True)
             return True
         if key == Qt.Key_Escape:
             self.cancel()
@@ -1294,13 +1321,13 @@ class TableEditing:
                 self.select(target)
             return True
         if key in (Qt.Key_Return, Qt.Key_Enter):
-            self.move_active(-1 if shift else 1, 0, within=True)
+            self.move_active(-1 if shift else 1, 0, within=True, enter=True)
             return True
         if key == Qt.Key_Tab:
-            self.move_active(0, 1, within=True)
+            self.move_active(0, 1, within=True, tab=True)
             return True
         if key == Qt.Key_Backtab:
-            self.move_active(0, -1, within=True)
+            self.move_active(0, -1, within=True, tab=True)
             return True
         if key == Qt.Key_Home:
             target = (0, 0) if ctrl else (self.active[0], 0)
@@ -1460,7 +1487,8 @@ class TableEditing:
             return nr, nc
         return (max(0, min(nr - dr, rows - 1)), max(0, min(nc - dc, cols - 1)))
 
-    def move_active(self, dr: int, dc: int, within: bool = False) -> None:
+    def move_active(self, dr: int, dc: int, within: bool = False, tab: bool = False,
+                    enter: bool = False) -> None:
         """Enter/Tab: on to the next cell (inside the selection when there is one)."""
         item = self.item
         if item is None:
@@ -1484,9 +1512,24 @@ class TableEditing:
             self._show_selection()
             return
         rows, cols = item.size
+        if getattr(item, "SHEET_RUN", False):
+            rows += 1                    # one row past the last page (typing there adds one)
+        start = self.tab_start
+        if tab:
+            start = self.active[1] if start is None else start
+        elif enter and dr > 0 and dc == 0 and start is not None:
+            dc = start - self.active[1]  # Enter after Tabs: back under where they began
+            start = None
+        else:
+            start = None
         row = max(0, min(self.active[0] + dr, rows - 1))
         col = max(0, min(self.active[1] + dc, cols - 1))
-        self.select((row, col))
+        self._keep_tab = True
+        try:
+            self.select((row, col))
+        finally:
+            self._keep_tab = False
+        self.tab_start = start
 
     def go_to(self, text: str) -> None:
         ref = parse_range(text.replace("$", ""))

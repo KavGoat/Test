@@ -170,6 +170,28 @@ def safe_target(document, target: int) -> int:
     return target
 
 
+def fresh_item_ids(entries: list) -> list:
+    """Copies of pages: every markup on them a new one, with its own uid (a
+    table, an equation or a block is known by its uid, so a copy sharing it
+    was the same table on two pages). A run of spreadsheet pages copied
+    whole follows its cells' new uid."""
+    import copy as _copy
+    import uuid
+
+    out = [_copy.deepcopy(entry) for entry in entries]
+    renamed = {}
+    for entry in out:
+        for item in entry.get("items", []) or []:
+            if isinstance(item, dict) and item.get("uid"):
+                new = uuid.uuid4().hex
+                renamed[item["uid"]] = new
+                item["uid"] = new
+    for entry in out:
+        if entry.get("sheet") in renamed:
+            entry["sheet"] = renamed[entry["sheet"]]
+    return out
+
+
 def plain_copy(entry: dict) -> dict:
     """A page copied or duplicated off a run is an ordinary page with the
     markups that were on it (one sheet is one run)."""

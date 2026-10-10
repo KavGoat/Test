@@ -95,6 +95,9 @@ def insert_chart(tables, kind: str = "scatter", lines: bool = False, markers: bo
     view.commit_snapshot("Insert chart")
     view.scene().clearSelection()
     chart.setSelected(True)
+    refresh = getattr(window, "refresh_selection", None)
+    if refresh is not None:
+        refresh()
     return chart
 
 

@@ -59,6 +59,9 @@ here is new.
 | Chart types (phase 5) | The engineering subset, done well: XY scatter (markers, lines, both), line and column; log axes, error bars and trendlines. |
 | Structured references (phase 5) | Excel's full syntax on tables, the first row being the headings: `Loads[Load]`, `Loads[@Load]`, `Loads[[#Headers],[Load]]`, `Loads[#All]`, `Loads[#Data]`, `Loads[[Load]:[Span]]`; they follow renames and grow with the table. |
 | Chart look (phase 5) | Excel's default (2016 and later): Office colours, light grey gridlines, title on top, legend at the bottom; units from the cells shown in the axis titles. |
+| A table on a rotated page (2026-10-10) | Like equations: it turns with the page and prints turned, but is upright while open for its cells. |
+| Box-selecting markups on a sheet page (2026-10-10) | Ctrl+drag draws the selection box over the sheet; a plain drag selects cells; Shift+click adds markups one by one. |
+| Variables panel (2026-10-10) | A Tables section: each defined name and each table column the equations can read, with its value; clicking one goes to its cells. |
 | Build order | 1 engine and formulas · 2 table markup with editing, fill, copy, formatting · 3 conditional formatting and data tools · 4 sheet pages, page breaks, scratch area · 5 charts, spill, named ranges · 6 opening xlsx. Each phase tested, pushed and reported. |
 
 ## Settled while building (small; recorded so they can be changed)

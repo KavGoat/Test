@@ -156,6 +156,11 @@ class SheetRunItem(TableItem):
             scene.layout_pages()
         self.restore_anchors(anchors)
         self.update()
+        if scene is not None:
+            for view in scene.views():
+                headings = getattr(view, "sheet_headings", None)
+                if headings is not None:
+                    headings.refresh_soon()
         return paging.pages > len(frames)
 
     def layout_changed(self) -> None:

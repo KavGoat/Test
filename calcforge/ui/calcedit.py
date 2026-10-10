@@ -899,7 +899,14 @@ class CalcEditing:
             entries = unit_box_entries(word)
         else:
             ctx = item._sheet.worksheet._context_before(item.region)
-            entries = suggestion_entries(word, ctx.names(), ctx.function_arities())
+            # what the tables offer too: named cells and Table.Column (SMath
+            # lists every name an equation can read)
+            from ..sheet.docbook import book_for
+            from_tables = book_for(self.window.document).equation_names()
+            entries = suggestion_entries(word, ctx.names() | set(from_tables), ctx.function_arities())
+            for e in entries:
+                if e.text in from_tables and not e.description:
+                    e.description = from_tables[e.text]
         if not entries:
             self.hide_suggestions()
             return

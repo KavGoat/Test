@@ -5,6 +5,10 @@ its value and unit as the defining equation shows them, the page it is on
 (and whether it is inside a self-contained block), and its error in red when
 it has one. Clicking a row goes to the equation that defines it.
 
+Below them, under Tables (the user's choice, 2026-10-10), what the tables
+give the equations: each defined name (W_total) and each column a table's
+headings name (Loads.Load), with its value; clicking one goes to its cells.
+
 A name defined twice has two rows: SMath allows redefining, and which
 definition an equation sees depends on where it is.
 """
@@ -31,7 +35,8 @@ class VariableRow:
     where: str                  # "Page 2", "Page 2 · block"
     error: str
     region_id: int
-    source: str = "Equation"    # or "Measurement" (decision 24)
+    source: str = "Equation"    # or "Measurement" (decision 24), or "Table"
+    cells: Optional[tuple] = None   # a table's: (sheet name, (top, left, bottom, right))
 
 
 def _split_value(shown: str) -> tuple:
@@ -76,6 +81,79 @@ def variable_rows(document) -> list:
             name = _defined_name(region)
             if name:
                 rows.append(VariableRow(name, "", "", page, where, error, region.id, source))
+    return rows
+
+
+def table_rows(document) -> list:
+    """What the tables give the equations: defined names, then each table's
+    columns by heading, with their values."""
+    from ..sheet import formula as F
+    from ..sheet.docbook import _ident, book_for
+    from ..sheet.evaluate import Ctx, RefValue, ev
+    from ..sheet.numfmt import format_value
+    from ..sheet.values import Array, ErrorValue, Qty, SheetError
+
+    book = book_for(document)
+    wb = book.workbook
+    pages = {page.uid: index for index, page in enumerate(document.pages)}
+    homes = {}
+    for uid, sheet in book.by_uid.items():
+        place = book._places.get(uid)
+        if place is not None and place[0] in pages:
+            homes[sheet.id] = pages[place[0]] + 1
+
+    from ..sheet.values import BLANK
+
+    def shown(values: list) -> tuple:
+        values = [v for v in values if v is not BLANK and v != ""]
+        texts, units, error = [], set(), ""
+        for v in values[:4]:
+            if isinstance(v, ErrorValue):
+                error = v.code
+                break
+            if isinstance(v, Qty):
+                text = format_value(v).text
+                number, _, unit = text.partition(" ")
+                texts.append(number)
+                units.add(unit)
+            else:
+                texts.append(format_value(v).text)
+        text = ", ".join(texts) + ("…" if len(values) > 4 else "")
+        return text, (units.pop() if len(units) == 1 else ""), error
+
+    rows = []
+    for (lower, scope), dn in sorted(wb.names.items(), key=lambda kv: kv[1].name.lower()):
+        home = wb.sheet_by_id(scope) if scope else None
+        try:
+            got = ev(F.parse(dn.refers_to).tree, Ctx(wb, home or (wb.sheets[0] if wb.sheets else None), 0, 0))
+        except (F.FormulaError, SheetError, AttributeError) as e:
+            got = getattr(e, "error", ErrorValue("#NAME?"))
+        cells = None
+        sheet = None
+        if isinstance(got, RefValue):
+            sheet = got.sheet
+            cells = (sheet.name, (got.top, got.left, got.bottom, got.right))
+            got = got.value_at(0, 0) if got.single else got.to_array()
+        values = list(got.values()) if isinstance(got, Array) else [got]
+        text, unit, error = shown(values)
+        page = homes.get(sheet.id, 0) if sheet is not None else 0
+        name = dn.name + (f" ({home.name})" if home is not None else "")
+        rows.append(VariableRow(name, text, unit, page, f"Page {page}" if page else "",
+                                error, -1, "Table", cells))
+    for sheet in wb.sheets:
+        if sheet.kind != "table" or not sheet.size:
+            continue
+        height = sheet.size[0]
+        for (row, col), cell in sorted(sheet.cells.items()):
+            if row != 0 or not isinstance(cell.value, str) or not _ident(cell.value):
+                continue
+            values = [sheet.cells[(r, col)].value for r in range(1, height)
+                      if (r, col) in sheet.cells]
+            text, unit, error = shown(values)
+            page = homes.get(sheet.id, 0)
+            rows.append(VariableRow(f"{sheet.name}.{_ident(cell.value)}", text, unit, page,
+                                    f"Page {page}" if page else "", error, -1, "Table",
+                                    (sheet.name, (1, col, max(1, height - 1), col))))
     return rows
 
 
@@ -164,7 +242,14 @@ class VariablesPanel(QWidget):
             self._watched.listeners.remove(self._soon)
         self._watched = sheet
         sheet.listeners.append(self._soon)
+        from ..sheet.docbook import book_for
+        book = book_for(document)
+        if self._soon_for_tables not in book.listeners:
+            book.listeners.append(self._soon_for_tables)
         self._soon()
+
+    def _soon_for_tables(self, _keys=None) -> None:
+        self._timer.start()
 
     def _soon(self) -> None:
         self._timer.start()
@@ -177,17 +262,33 @@ class VariablesPanel(QWidget):
         document = self.window.document
         self.watch(document)
         self.rows = variable_rows(document)
+        self.table_start = len(self.rows)
+        try:
+            self.rows += table_rows(document)
+        except Exception:  # noqa: BLE001  (the list of equations still shows)
+            pass
         self._fill()
 
     def _fill(self) -> None:
         wanted = self.filter.text().strip().lower()
         self.tree.clear()
+        headed = False
         for index, row in enumerate(self.rows):
             if wanted and wanted not in row.name.lower():
                 continue
+            if row.source == "Table" and not headed:
+                headed = True
+                head = QTreeWidgetItem(["Tables", "", "", ""])
+                font = head.font(0)
+                font.setBold(True)
+                head.setFont(0, font)
+                head.setFlags(Qt.ItemIsEnabled)
+                head.setToolTip(0, "What the tables give the equations: named cells, and "
+                                   "Table.Column for each heading")
+                self.tree.addTopLevelItem(head)
             node = QTreeWidgetItem([row.name, row.error or row.value, row.unit, row.where])
             node.setData(0, Qt.UserRole, index)
-            tip = f"{row.name} — {row.source.lower()} on page {row.page}"
+            tip = f"{row.name} — {row.source.lower()} on page {row.page}" if row.page else row.name
             if row.error:
                 for column in range(len(COLUMNS)):
                     node.setForeground(column, QBrush(QColor(ERROR_RED)))
@@ -206,6 +307,9 @@ class VariablesPanel(QWidget):
         row = self.row_of(node)
         if row is None:
             return
+        if row.cells is not None:
+            self._go_to_cells(*row.cells)
+            return
         item = self.item_for(row.region_id)
         if item is None:
             return
@@ -217,6 +321,18 @@ class VariablesPanel(QWidget):
         item.setSelected(True)
         window.view.centerOn(item)
         window.refresh_selection()
+
+    def _go_to_cells(self, sheet_name: str, block: tuple) -> None:
+        """Open the table (or spreadsheet page) and pick out the cells."""
+        tables = self.window.view.tables
+        target = next((t for t in tables._all_tables()
+                       if t.sheet is not None and t.sheet.name == sheet_name), None)
+        if target is None:
+            return
+        self.window.view.calc.leave()
+        tables.open(target, block[:2])
+        tables.select(block[:2], block[2:], block[:2])
+        self.window.view.centerOn(target.mapToScene(target.block_rect(*block).center()))
 
     def item_for(self, region_id: int):
         from ..calc.docsheet import sheet_for

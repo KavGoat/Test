@@ -198,6 +198,21 @@ class DocumentBook:
                 return RefValue(sheet, 1, col, bottom, col)
         return None
 
+    def equation_names(self) -> dict:
+        """The names the equations can read from the tables, for their
+        autocomplete: defined names, and Table.Column for each heading."""
+        out = {}
+        for (lower, scope), dn in self.workbook.names.items():
+            if scope is None:
+                out[dn.name] = f"named cells: ={dn.refers_to}"
+        for sheet in self.workbook.sheets:
+            if sheet.kind != "table":
+                continue
+            for (row, col), cell in sheet.cells.items():
+                if row == 0 and isinstance(cell.value, str) and _ident(cell.value):
+                    out[f"{sheet.name}.{_ident(cell.value)}"] = f"column “{cell.value}” of {sheet.name}"
+        return out
+
     def has(self, name: str) -> bool:
         return self._named(name) is not None
 
