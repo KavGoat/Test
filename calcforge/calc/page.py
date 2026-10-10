@@ -90,32 +90,3 @@ def number_field(n: int, fmt: str) -> str:
     return str(v)
 
 
-def escape_arg(s: str) -> str:
-    """Field argument as SMath stores it: characters other than letters and
-    digits written as \\XXXX\\ (hex code), e.g. "." -> \\002E\\."""
-    return "".join(c if c.isalnum() else f"\\{ord(c):04X}\\" for c in s)
-
-
-def make_field(name: str, fmt: str = "") -> str:
-    """The operand SMath stores for a field: \\[NAME]\\ or \\[NAME[format]]\\."""
-    if fmt == "" and name not in ("PAGENUM", "COUNT"):
-        return f"\\[{name}]\\"
-    return f"\\[{name}[{escape_arg(fmt) if name in ('DATE', 'TIME') else fmt}]]\\"
-
-
-# The fields of SMath Studio's Insert > Field dialog: (label, command, default format, format choices)
-AVAILABLE_FIELDS = [
-    ("Worksheet Id", "ID", "", []),
-    ("Worksheet revision", "REVISION", "", []),
-    ("File name", "FILENAME", "", []),
-    ("Current date", "DATE", "DD.MM.YYYY", ["DD.MM.YYYY", "DD/MM/YYYY", "MM/DD/YYYY", "YYYY-MM-DD",
-                                            "DD MMMM YYYY", "MMMM DD, YYYY", "DD.MM.YY"]),
-    ("Current time", "TIME", "HH:mm:ss", ["HH:mm:ss", "HH:mm", "hh:mm tt"]),
-    ("Number of pages", "COUNT", "0", ["0", "-1", "1"]),
-    ("Current page index", "PAGENUM", "0", ["0", "-1", "1", "0000"]),
-    ("Author", "AUTHOR", "", []),
-    ("Company", "COMPANY", "", []),
-    ("Keywords", "KEYWORDS", "", []),
-    ("Title", "TITLE", "", []),
-    ("Description", "DESCRIPTION", "", []),
-]

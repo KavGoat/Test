@@ -66,3 +66,34 @@ def test_link_markups_work_in_the_exported_pdf(w, tmp_path):
     export_io.export_pdf(w.document, path, pages=[w.document.pages[0]])
     with pymupdf.open(path) as pdf:
         assert [link["kind"] for link in pdf[0].get_links()].count(pymupdf.LINK_GOTO) == 0
+
+
+def test_link_markups_show_on_screen_and_come_back_after_saving(w, tmp_path):
+    """A link is a dashed blue box on screen (never on paper), and every kind
+    comes back from the saved file as it was (2026-10-10)."""
+    from calcforge.items.link import FILE, PAGE, VIEW, WEB, LinkItem
+    w.add_page()
+    w.go_to_page(0)
+    frame = w.document.pages[0].frame
+    made = [(PAGE, 1, 0.0, ""), (VIEW, 1, 250.0, ""), (WEB, 0, 0.0, "https://example.com/spec"),
+            (FILE, 0, 0.0, "calcs/beam.pdf")]
+    for i, (kind, page, y, address) in enumerate(made):
+        link = LinkItem(QRectF(0, 0, 80, 20))
+        link.kind, link.target_page, link.target_y, link.address = kind, page, y, address
+        frame.add_markup(link, QPointF(60, 100 + 40 * i))
+    w.view.set_zoom(1.0)
+    first = next(i for i in frame.markups() if isinstance(i, LinkItem))
+    w.view.centerOn(first.mapToScene(first.local_rect().center()))
+    pump()
+    image = w.view.viewport().grab().toImage()
+    edge = w.view.mapFromScene(first.mapToScene(first.local_rect().topLeft() + QPointF(20, 0)))
+    colour = image.pixelColor(edge.x(), edge.y())
+    assert colour.blue() > colour.red() + 40, "the dashed blue edge"
+    path = str(tmp_path / "links.pdf")
+    w.document.path = path
+    assert w.save_document()
+    w.open_from_command_line(path)
+    pump()
+    back = sorted(((i.kind, i.target_page, i.target_y, i.address) for i in
+                   w.document.pages[0].frame.markups() if isinstance(i, LinkItem)), key=str)
+    assert back == sorted(made, key=str)
