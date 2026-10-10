@@ -1686,9 +1686,17 @@ def _untinted(pixmap) -> QIcon:
     """A page thumbnail that stays readable when its row is the current one:
     the same picture for the selected state, so Qt doesn't wash it blue (the
     row's own highlight says which page is current)."""
+    # a thin grey edge, as Bluebeam's thumbnails have: a blank page is white
+    # on the white list and otherwise can't be seen at all
+    framed = QPixmap(pixmap)
+    from PySide6.QtGui import QPainter
+    painter = QPainter(framed)
+    painter.setPen(QColor("#a6abb2"))
+    painter.drawRect(0, 0, framed.width() - 1, framed.height() - 1)
+    painter.end()
     icon = QIcon()
     for mode in (QIcon.Normal, QIcon.Selected, QIcon.Active):
-        icon.addPixmap(pixmap, mode)
+        icon.addPixmap(framed, mode)
     return icon
 
 

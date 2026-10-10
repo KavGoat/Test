@@ -2304,6 +2304,7 @@ class MainWindow(QMainWindow):
         if self.scene is None or self.scene.document is not self.document:
             self.scene = DocumentScene(self.document)
             self.scene.itemsChanged.connect(self._refresh_lists_soon)
+            self.scene.selectionChanged.connect(self._scene_selection_changed)
             self.view.setScene(self.scene)
         # Frames whose page has gone leave the canvas with it.
         live = {id(page) for page in self.document.pages}
@@ -5108,6 +5109,25 @@ class MainWindow(QMainWindow):
             self.view.refresh_on_release = True
             return
         self.refresh_selection()
+
+    def _scene_selection_changed(self) -> None:
+        """Every change of what is picked, however it came about (Escape,
+        Select All, a deleted markup…): Properties catches up once the
+        event loop is free, unless it already shows the selection."""
+        if getattr(self, "_selection_check_pending", False):
+            return
+        self._selection_check_pending = True
+
+        def check():
+            self._selection_check_pending = False
+            from shiboken6 import isValid
+            if not isValid(self.properties_panel):
+                return
+            shown = self.properties_panel._items
+            picked = [i for i in self.selected_items() if isinstance(i, MarkupItem)]
+            if len(shown) != len(picked) or any(a is not b for a, b in zip(shown, picked)):
+                self._selection_changed_on_the_canvas()
+        QTimer.singleShot(0, check)
 
     def refresh_selection(self) -> None:
         items = self.selected_items()
