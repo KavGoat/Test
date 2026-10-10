@@ -353,6 +353,9 @@ class Workbook:
         # ranges kept outside the cells (a chart's series): they follow renames
         # and moved rows and columns like formulas (formula_texts / set_formula_texts)
         self.outside_formulas: list = []
+        # formulas naming a sheet or table that isn't there (yet): learnt again
+        # when one comes, so they follow it from then on
+        self._unresolved: set = set()
         self.version = 0                             # bumped whenever a value changes
         self._undo: list[_Transaction] = []
         self._redo: list[_Transaction] = []
@@ -471,6 +474,12 @@ class Workbook:
         looked at again."""
         if self.on_names_changed is not None:
             self.on_names_changed()
+        waiting, self._unresolved = self._unresolved, set()
+        for key in waiting:
+            sheet = self.sheet_by_id(key[0])
+            cell = sheet.cells.get(key[1:]) if sheet is not None else None
+            if cell is not None and cell.is_formula:
+                self._learn(sheet, key[1], key[2], cell)
         for sheet in self.sheets:
             for (row, col), cell in sheet.cells.items():
                 if cell.is_formula:
@@ -717,6 +726,7 @@ class Workbook:
 
     # -- what each formula reads ------------------------------------------------------------
     def _forget(self, key) -> None:
+        self._unresolved.discard(key)
         self._deps.remove(key)
         self._precedents.pop(key, None)
         self._volatile.discard(key)
@@ -732,9 +742,11 @@ class Workbook:
             cell.problem = str(e)
             return
         cells, blocks = [], []
+        self._unresolved.discard(key)
         for sheet_name, top, left, bottom, right in F.references(cell.parsed.tree, row, col):
             target = sheet if sheet_name is None else self.sheet(sheet_name)
             if target is None:
+                self._unresolved.add(key)
                 continue
             if top == bottom and left == right:
                 cells.append((target.id, top, left))
@@ -762,6 +774,8 @@ class Workbook:
         for node in _structured_nodes(cell.parsed.tree):
             target = sheet if node.table is None else self.sheet(node.table)
             names.append((node.table or sheet.name).lower())
+            if target is None:
+                self._unresolved.add(key)
             if target is None or target.size is None:
                 continue
             width = target.size[1]

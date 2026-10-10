@@ -1160,3 +1160,39 @@ default chart look with the cells' units in the axis titles.
 
 Tests: `tests/sheet/test_dynamic_arrays.py` (9), `tests/sheet/test_chartdata.py`
 (9), `tests/test_table_names.py` (6), `tests/test_charts.py` (7).
+
+## Spreadsheets, phase 6 — opening Excel workbooks (2026-10-10)
+
+Answers by pop-up: no export to Excel at all; opening an `.xlsx` brings in its
+cells only (no charts).
+
+* **File ▸ Open** takes an `.xlsx` (or `.xlsm`) as a new document, and **File ▸
+  Insert Excel…** puts a workbook's worksheets after the current page (one
+  undo step). Each worksheet becomes a run of spreadsheet pages of its own
+  name, on its own paper (size, orientation, margins), as many pages as its
+  cells need. A worksheet named like a sheet or table already in the document
+  is renamed ("Beams (2)") and the formulas that read it follow.
+* **What comes across**: values (dates as Excel's serial numbers in their
+  format, text that looks like a number or formula kept as text), formulas
+  (Excel's `_xlfn.` prefixes taken off, `ANCHORARRAY(A1)` as `A1#`, dynamic
+  arrays spilling again, old Ctrl+Shift+Enter arrays the same way), formatting
+  (font, size, bold, italic, underline, strike, colours with the workbook's
+  theme and tints, fills, borders, alignment, wrap, indent, rotation, number
+  formats, locked/hidden), column widths and row heights, hidden rows and
+  columns, merged cells, comments, defined names (workbook and sheet scope),
+  data validation, conditional formatting (cell value, formula, text, blanks,
+  errors, duplicates, top/bottom, above/below average, dates, colour scales,
+  data bars, icon sets), gridlines, and the page layout (print area, rows to
+  repeat, manual page breaks, fit to page width, centring, printed gridlines
+  and headings). An Excel table's references (`BeamTbl[Moment]`,
+  `BeamTbl[@Load]`) become the cells they name — a worksheet's Excel tables
+  are not CalcForge tables.
+* **Said on opening**: how many worksheets came in, which were hidden in
+  Excel, what was left out (charts, pictures, chart sheets, What-If data
+  tables — their values kept —, a print scale other than 100 %, names that
+  refer to deleted cells), and every formula that gives another answer here
+  than Excel last showed for it, by address, with those using functions or
+  names CalcForge does not know.
+* Nothing is written to `.xlsx`. openpyxl is now a dependency.
+
+Tests: `tests/test_xlsx_open.py` (6).

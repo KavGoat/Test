@@ -36,7 +36,7 @@ here is new.
 | Insert table | Drag a rectangle; rows and columns appear live as it grows. Distribute rows/columns evenly (also for selected ones) in tables and sheets. |
 | Tables in the PDF | Like equations: page drawing on the calc layer, editable only in CalcForge. |
 | Clicks on sheet pages | Mode-aware. Markup mode: markup tools draw over the grid; Select picks a markup if one is hit, else a cell. Calc mode: clicks and typing go to cells. |
-| xlsx | Open `.xlsx` as sheet pages and export to `.xlsx` (adds openpyxl). Copy/paste with Excel keeps formulas and formatting. |
+| xlsx (confirmed 2026-10-10) | Open `.xlsx` as sheet pages (adds openpyxl): cells only — values, formulas, formatting, sizes, merges, names, comments, validation, conditional formatting and the page layout; charts and pictures are left out (said so on opening). No export to `.xlsx`. Copy/paste with Excel keeps formulas and formatting. |
 | In scope | Charts, dynamic arrays (spill, FILTER/SORT/UNIQUE/SEQUENCE), named ranges and structured references, and everything else Excel does: fill handle, copy/cut/paste, Paste Special, formatting, borders, merge, number formats, Format Painter, conditional formatting (highlight rules, top/bottom, data bars, colour scales, icon sets, formula rules, rules manager), sort/filter, data validation, comments, find/replace, insert/delete/hide/resize/autofit, point mode, F4, Ctrl+arrows, drag-moving cells. **Out:** pivot tables. |
 | Printing | Excel's defaults: gridlines on screen only, row/column headings never printed (both switchable per sheet); cell borders always print. |
 | Page layout | Fit to N pages wide, repeat header rows (Print Titles), print area, margins and centring. |
@@ -59,7 +59,7 @@ here is new.
 | Chart types (phase 5) | The engineering subset, done well: XY scatter (markers, lines, both), line and column; log axes, error bars and trendlines. |
 | Structured references (phase 5) | Excel's full syntax on tables, the first row being the headings: `Loads[Load]`, `Loads[@Load]`, `Loads[[#Headers],[Load]]`, `Loads[#All]`, `Loads[#Data]`, `Loads[[Load]:[Span]]`; they follow renames and grow with the table. |
 | Chart look (phase 5) | Excel's default (2016 and later): Office colours, light grey gridlines, title on top, legend at the bottom; units from the cells shown in the axis titles. |
-| Build order | 1 engine and formulas · 2 table markup with editing, fill, copy, formatting · 3 conditional formatting and data tools · 4 sheet pages, page breaks, scratch area · 5 charts, spill, named ranges · 6 xlsx. Each phase tested, pushed and reported. |
+| Build order | 1 engine and formulas · 2 table markup with editing, fill, copy, formatting · 3 conditional formatting and data tools · 4 sheet pages, page breaks, scratch area · 5 charts, spill, named ranges · 6 opening xlsx. Each phase tested, pushed and reported. |
 
 ## Settled while building (small; recorded so they can be changed)
 
@@ -134,6 +134,14 @@ here is new.
   clearest; deleting a defined name a cell still reads leaves it reading the
   same word as a unit if it is one (`g` is then grams), as names come before
   units.
+
+* **Phase 6, small things settled while building:** every worksheet comes in,
+  hidden ones too (other sheets' formulas read them), each as its own run of
+  pages; File ▸ Open of an `.xlsx` makes a new document, File ▸ Insert
+  Excel… adds to this one; a worksheet's Excel tables become plain cells and
+  their structured references the cells they name; a print scale other than
+  100 % is left out (said), Fit to page width is kept; cells Excel shows but a
+  formula here gives otherwise are listed by address after opening.
 
 ## Tables on pages (phase 2)
 

@@ -379,6 +379,7 @@ _SHORTCUT_GROUPS = {
     "calculate": "SMath", "insert_matrix": "SMath", "auto_calc": "SMath",
     "new": "File", "open": "File", "save": "File", "save_as": "File",
     "insert_pdf": "File", "insert_image_page": "File", "import_toolset": "File",
+    "insert_workbook": "File",
     "export_pdf": "File", "export_png": "File", "export_markups": "File",
     "preview": "File", "print": "File", "quit": "File",
     "undo": "Edit", "redo": "Edit", "cut": "Edit", "copy": "Edit",
@@ -679,6 +680,9 @@ class MainWindow(QMainWindow):
         # registered, so it was a binding nobody could see or change.
         self._act("insert_pdf", "Insert PDF…", lambda: self.insert_pdf(),
                   "Ctrl+Shift+I", "pdf")
+        self._act("insert_workbook", "Insert Excel…", lambda: self.insert_workbook(),
+                  tip="An Excel workbook's worksheets as spreadsheet pages after this page "
+                      "(cells, formulas, formats, names and page layout)")
         self._act("import_toolset", "Import tools…",
                   lambda: self.import_toolset(),
                   tip="Bring in a Bluebeam tool set — a .btx file")
@@ -1635,7 +1639,7 @@ class MainWindow(QMainWindow):
         for action in (self.act_new, self.act_new_tab, self.act_new_window, self.act_open,
                        None, self.act_save, self.act_save_as,
                        None, self.act_insert_pdf, self.act_insert_image_page,
-                       self.act_import_toolset,
+                       self.act_insert_workbook, self.act_import_toolset,
                        None, self.act_export_pdf,
                        self.act_export_png, self.act_export_markups,
                        None, self.act_preview, self.act_print, None, self.act_quit):
@@ -2345,7 +2349,8 @@ class MainWindow(QMainWindow):
     def open_document(self) -> None:
         if not self.confirm_discard():
             return
-        path, _ = QFileDialog.getOpenFileName(self, "Open document", "", project_io.FILTER)
+        from .xlsximport import OPEN_FILTER
+        path, _ = QFileDialog.getOpenFileName(self, "Open document", "", OPEN_FILTER)
         if not path:
             return
         try:
@@ -2358,6 +2363,7 @@ class MainWindow(QMainWindow):
         self.rebuild_scenes()
         self.view.fit_page()
         self.update_title()
+        self._say_what_the_workbook_left_out()
 
     def open_from_command_line(self, path: str) -> None:
         """`calcforge drawing.pdf`: open it as File > Open would."""
@@ -2366,6 +2372,15 @@ class MainWindow(QMainWindow):
         self.rebuild_scenes()
         self.view.fit_page()
         self.update_title()
+        self._say_what_the_workbook_left_out()
+
+    def _say_what_the_workbook_left_out(self) -> None:
+        """After opening an .xlsx: what came in, what was left out, and any
+        formula that gives another answer here than in Excel."""
+        imported = self.__dict__.pop("_opened_workbook", None)
+        if imported is not None:
+            from .xlsximport import _say
+            _say(self, imported)
 
     def open_path(self, path: str) -> None:
         """Open a document, or bring in a PDF that is not one yet.
@@ -2374,6 +2389,15 @@ class MainWindow(QMainWindow):
         what the file holds and not what it is called: a PDF carrying a
         MarkForge record is a document and opens as one, whatever its name.
         """
+        from .xlsximport import is_workbook
+        if is_workbook(path):
+            # an Excel workbook: its worksheets as spreadsheet pages (cells only)
+            from .xlsximport import open_workbook
+            document, imported = open_workbook(self, path)
+            self.document = document
+            self._new_undo_stack()
+            self._opened_workbook = imported
+            return
         if project_io.carries_a_document(path):
             document = Document()
             project_io.load_document(document, path)
@@ -3084,6 +3108,11 @@ class MainWindow(QMainWindow):
         """Insert ▸ Chart: a chart of the cells picked out in the open table."""
         from .chartdialog import insert_chart
         return insert_chart(self.view.tables, kind, lines, markers)
+
+    def insert_workbook(self, path: Optional[str] = None, index: Optional[int] = None) -> bool:
+        """Insert ▸ Excel workbook: its worksheets as spreadsheet pages."""
+        from .xlsximport import insert_workbook
+        return insert_workbook(self, path, index)
 
     def insert_sheet_page(self, index: Optional[int] = None, before: bool = False) -> None:
         """A page of spreadsheet cells (ui/sheetpages.py)."""
