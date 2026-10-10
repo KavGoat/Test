@@ -434,7 +434,7 @@ def SMALL(values, k):
     return rebuild(sorted(si)[k - 1], dims, unit)
 
 
-@fn("RANK", "RANK.EQ", "RANK.AVG", least=2, most=3)
+@fn("RANK", "RANK.EQ", least=2, most=3)
 def RANK(x, ref, order=MISSING):
     value = magnitude(num(x))
     si, _dims, _unit = unify(numbers([ref]))
@@ -1119,11 +1119,16 @@ class _Lambda(Function):
         self.lets = dict(ctx.lets or {})
 
     def call(self, values, ctx):
-        if len(values) != len(self.params):
+        if len(values) > len(self.params):
             return VALUE
+        # parameters left out (or left empty) are omitted: blank, and ISOMITTED says so
+        omitted = {p for p, v in zip(self.params, list(values) + [MISSING] * len(self.params))
+                   if v is MISSING}
         saved = ctx.lets
         ctx.lets = dict(self.lets)
-        ctx.lets.update({p: v for p, v in zip(self.params, values)})
+        ctx.lets.update({p: (BLANK if p in omitted else v)
+                         for p, v in zip(self.params, list(values) + [MISSING] * len(self.params))})
+        ctx.lets[_OMITTED] = omitted
         try:
             return ev(self.body, ctx)
         finally:
@@ -1740,21 +1745,28 @@ def NOW():
 
 @fn("YEAR", least=1, most=1, lift=(0,))
 def YEAR(x):
-    return float(_date(x).year) if not _leap(x) else 1900.0
+    return float(_ymd(x)[0])
 
 
 @fn("MONTH", least=1, most=1, lift=(0,))
 def MONTH(x):
-    return float(_date(x).month) if not _leap(x) else 2.0
+    return float(_ymd(x)[1])
 
 
 @fn("DAY", least=1, most=1, lift=(0,))
 def DAY(x):
-    return float(_date(x).day) if not _leap(x) else 29.0
+    return float(_ymd(x)[2])
 
 
-def _leap(x) -> bool:
-    return int(real(x)) == 60
+def _ymd(x) -> tuple:
+    """Excel's day 0 is 0 January 1900 and day 60 the 29 February 1900 that never was."""
+    n = int(real(x)) if real(x) >= 0 else -1
+    if n == 0:
+        return 1900, 1, 0
+    if n == 60:
+        return 1900, 2, 29
+    d = _date(x)
+    return d.year, d.month, d.day
 
 
 def _secs(x) -> int:
@@ -2954,6 +2966,10 @@ def CONVERT(x, a, b=MISSING):
             return UNITS_ERR
         return Qty(magnitude(v), tuple(dims), u)
     v = real(x)
+    from .morefunctions import excel_convert
+    got = excel_convert(v, text(a).strip(), text(b).strip())    # Excel's own codes: "F", "C", "ft2"…
+    if got is not None:
+        return got
     ua, ub = _unit_text(a), _unit_text(b)
     fa, da, oa = unit_parts(ua)
     fb, db, ob = unit_parts(ub)
@@ -3005,3 +3021,8 @@ def INTERP(x, xs, ys):
 def names() -> list[str]:
     """Every function's name, for autocomplete."""
     return sorted(FUNCTIONS)
+
+
+_OMITTED = "\0omitted"     # the LAMBDA parameters left out of a call (no name can hold \0)
+
+from . import morefunctions  # noqa: E402,F401  (registers the rest of Excel's functions)

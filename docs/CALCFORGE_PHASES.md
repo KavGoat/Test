@@ -923,7 +923,10 @@ in `docs/SPREADSHEET_DESIGN.md`):
   `{1,2;3,4}`, omitted arguments, defined names, `_xlfn.` prefixes; units
   after numbers (`=10 kN/m*B2`) and `'kN`; document variables by name or
   `var(M20)`.
-* About 260 Excel functions (maths, statistics, logic, lookup incl.
+* About 470 Excel functions (maths, statistics with the distributions and
+  tests, regression incl. LINEST/LOGEST/GROWTH, engineering — number bases,
+  bits, complex numbers, Bessel, ERF — database D-functions, depreciation,
+  REGEX, logic, lookup incl.
   XLOOKUP/INDEX/OFFSET/INDIRECT, text, dates, dynamic arrays
   FILTER/SORT/UNIQUE/SEQUENCE, money, matrices, LET/LAMBDA — called at once, by LET or as a defined name — with MAP, BYROW,
   BYCOL, REDUCE, SCAN and MAKEARRAY), all keeping units;
