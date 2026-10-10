@@ -551,13 +551,14 @@ def _cond_rules(ws, theme, renamed) -> list:
                 continue
         if not ranges:
             continue
-        for rule in sorted(cf.rules, key=lambda x: x.priority or 0):
+        for rule in cf.rules:
             got = _rule(rule, theme, renamed)
             if got is not None:
                 got["ranges"] = [list(x) for x in ranges]
                 got["stop"] = bool(rule.stopIfTrue)
-                out.append(got)
-    return out
+                out.append((rule.priority or 0, len(out), got))
+    # Excel's priority runs across the whole sheet, not within each range
+    return [got for _p, _i, got in sorted(out, key=lambda x: x[:2])]
 
 
 def _dxf_format(dxf, theme) -> dict:

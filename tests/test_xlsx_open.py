@@ -233,3 +233,83 @@ def test_a_formula_that_differs_from_excel_is_reported(w, tmp_path):
     w.open_from_command_line(path)
     report = "\n".join(w._last_import_report)
     assert "Beams!D3" in report and "Beams!D2" not in report
+
+
+def a_checks_workbook(path):
+    """An engineer's check sheet: an Excel table with structured references
+    of every form, conditional formatting of every kind (priorities spread
+    across ranges), validation of every kind, theme colours, fit to width."""
+    from openpyxl.formatting.rule import DataBarRule, FormulaRule, IconSetRule, Rule
+    from openpyxl.styles.colors import Color
+    from openpyxl.styles.differential import DifferentialStyle
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Checks"
+    rows = [("Member", "Unit Load", "Span", "DCR"), ("B1", 10, 4, 0.8), ("B2", 20, 5, 1.1),
+            ("B3", 30, 6, 0.95), ("B4", 30, 2, 0.3)]
+    for r, row in enumerate(rows, 1):
+        for c, v in enumerate(row, 1):
+            ws.cell(r, c, v)
+    ws.add_table(Table(displayName="Chk", ref="A1:D5"))
+    ws["E2"] = "=Chk[@[Unit Load]]*Chk[@Span]"
+    ws["F2"] = "=COUNTA(Chk[#Headers])"
+    ws["F3"] = "=ROWS(Chk[#Data])"
+    ws["F4"] = "=SUM(Chk[[Unit Load]:[Span]])"
+    ws["F5"] = "=MAX(Chk[DCR])"
+    red = DifferentialStyle(font=Font(color="9C0006"), fill=PatternFill(bgColor="FFC7CE"))
+    ws.conditional_formatting.add("D2:D5", FormulaRule(formula=["D2>1"], fill=PatternFill(bgColor="FFC7CE")))
+    rule = Rule(type="containsText", operator="containsText", text="B2", dxf=red)
+    rule.formula = ['NOT(ISERROR(SEARCH("B2",A2)))']
+    ws.conditional_formatting.add("A2:A5", rule)
+    ws.conditional_formatting.add("B2:B5", Rule(type="top10", rank=1, dxf=red))
+    ws.conditional_formatting.add("C2:C5", Rule(type="aboveAverage", aboveAverage=False, dxf=red))
+    ws.conditional_formatting.add("D2:D5", DataBarRule(start_type="min", end_type="max", color="638EC6"))
+    ws.conditional_formatting.add("C2:C5", IconSetRule("3Arrows", "percent", [0, 33, 67]))
+    for kind, op, f1, f2, at in (("whole", "between", "1", "10", "H2:H5"),
+                                 ("decimal", "greaterThan", "$B$2", None, "I2"),
+                                 ("custom", None, "ISNUMBER(J2)", None, "J2"),
+                                 ("list", None, "$A$2:$A$5", None, "K2")):
+        dv = DataValidation(type=kind, operator=op, formula1=f1, formula2=f2)
+        ws.add_data_validation(dv)
+        dv.add(at)
+    ws["A7"] = "themed"
+    ws["A7"].font = Font(color=Color(theme=4, tint=0.3999))
+    ws["A8"] = "shaded"
+    ws["A8"].fill = PatternFill("solid", fgColor=Color(theme=5, tint=-0.25))
+    ws.print_area = "A1:F5"
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.page_setup.fitToWidth, ws.page_setup.fitToHeight = 1, 0
+    wb.save(path)
+    return path
+
+
+def test_an_engineers_check_sheet_opens_as_excel_shows_it(w, tmp_path):
+    from PySide6.QtWidgets import QApplication
+
+    from calcforge.sheet import condfmt, validation
+    path = a_checks_workbook(str(tmp_path / "checks.xlsx"))
+    w.interactive_prompts = False
+    w.open_from_command_line(path)
+    QApplication.processEvents()
+    run = runs(w)["Checks"]
+    sheet = run.sheet
+    assert [value(run, 1, 4), value(run, 1, 5), value(run, 2, 5), value(run, 3, 5), value(run, 4, 5)] == \
+        [40, 4, 4, 90 + 17, 1.1]
+    assert [r["type"] for r in sheet.cond_rules] == ["formula", "text", "top", "below", "databar", "icons"], \
+        "in Excel's priority order across all the ranges"
+    looks = condfmt.looks_for(sheet)
+    fill = lambda r, c: looks.look(r, c).get("format", {}).get("fill")  # noqa: E731
+    assert [fill(r, 3) for r in (1, 2, 3, 4)] == [None, "#FFC7CE", None, None], "only DCR 1.1 > 1"
+    assert [fill(r, 0) for r in (1, 2, 3, 4)] == [None, "#FFC7CE", None, None], "the member B2"
+    assert [fill(r, 1) for r in (1, 2, 3, 4)] == [None, None, "#FFC7CE", "#FFC7CE"], "both 30s are the top 1"
+    assert [fill(r, 2) for r in (1, 2, 3, 4)] == ["#FFC7CE", None, None, "#FFC7CE"], "4 and 2 < 4.25"
+    assert looks.look(4, 3).get("bar") and looks.look(1, 2).get("icon")
+    assert [v["type"] for v in sheet.validations] == ["whole", "decimal", "custom", "list"]
+    wb = sheet.workbook
+    wb.set_input(sheet, 1, 7, "12")
+    wb.set_input(sheet, 1, 8, "5")
+    assert {(1, 7), (1, 8)} <= set(validation.invalid_cells(sheet)), "12 is over 10; 5 isn't over B2's 10"
+    styles = wb.styles
+    assert styles.get(sheet.cells[(6, 0)].style).color.upper() == "#95B3D7", "the file's accent 1, lighter 40%"
+    assert styles.get(sheet.cells[(7, 0)].style).fill.upper() == "#953735", "its accent 2, darker 25%"
+    assert options(sheet)["print_area"] == [0, 0, 4, 5] and options(sheet)["fit_width"]
