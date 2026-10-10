@@ -7,11 +7,15 @@ dragging across) is filled from what the selection holds in that line:
 * two or more numbers continue their straight line (1, 3 -> 5, 7, 9);
 * a date counts on by a day; two dates continue by their step, in months
   or years when they are a whole number of months apart;
-* text ending in a number counts on ("Item 1" -> "Item 2");
+* text ending in a number counts on ("Item 1" -> "Item 2"; quarters Q1-Q4
+  go round again);
 * day and month names continue (Mon, Tue...; January, February...);
 * a quantity continues in its unit (100 mm, 200 mm -> 300 mm);
 * formulas are copied with their relative references moved;
 * anything else is repeated as a pattern.
+
+One cell dragged up or to the left counts down ("Item 5" -> "Item 4"), as
+in Excel; two or more continue their own step either way.
 
 Cell formats come along with the values, repeated as a pattern.
 """
@@ -35,6 +39,7 @@ _LISTS = [
      "October", "November", "December"],
 ]
 _TRAILING = re.compile(r"^(.*?)(\d+)(\D*)$")
+_QUARTER = re.compile(r"^(q|qtr|quarter)\s*$", re.IGNORECASE)
 
 
 def _in_list(text: str):
@@ -70,18 +75,20 @@ def _months_between(a: float, b: float) -> Optional[int]:
 
 
 def series(inputs: list[str], formats: list, count: int, step_one: bool = False,
-           day_first: bool = True) -> list[str]:
+           day_first: bool = True, back: bool = False) -> list[str]:
     """What to type into the next ``count`` cells after ``inputs`` (one
-    line of the selection, in fill order). Formulas are handled by the caller."""
+    line of the selection, in fill order; ``back`` when filling up or left).
+    Formulas are handled by the caller."""
     values = [read_value(t, day_first)[0] for t in inputs]
     n = len(inputs)
     if n == 0:
         return [""] * count
+    one = -1 if back else 1                    # one cell's step
     nums = all(isinstance(v, float) and not isinstance(v, bool) for v in values)
     dated = nums and all(is_date_format(f) for f in formats)
     if dated:
         if n == 1:
-            return [_date_text(values[0] + (i + 1), formats[0]) for i in range(count)]
+            return [_date_text(values[0] + one * (i + 1), formats[0]) for i in range(count)]
         months = _months_between(values[0], values[1]) if n >= 2 else None
         if months and all(_months_between(values[i], values[i + 1]) == months for i in range(n - 1)):
             return [_date_text(_add_months(values[-1], months * (i + 1)), formats[-1]) for i in range(count)]
@@ -89,7 +96,7 @@ def series(inputs: list[str], formats: list, count: int, step_one: bool = False,
         return [_date_text(values[-1] + step * (i + 1), formats[-1]) for i in range(count)]
     if nums:
         if n == 1:
-            step = 1.0 if step_one else 0.0
+            step = float(one) if step_one else 0.0
             return [_number_text(values[0] + step * (i + 1), inputs[0]) for i in range(count)]
         slope, intercept = _line(values)
         return [_number_text(intercept + slope * (n + i), inputs[-1]) for i in range(count)]
@@ -97,7 +104,7 @@ def series(inputs: list[str], formats: list, count: int, step_one: bool = False,
         shown = [v.shown() for v in values]
         unit = values[0].unit
         if n == 1:
-            step = 1.0 if step_one else 0.0
+            step = float(one) if step_one else 0.0
             return [f"{general_number(shown[0] + step * (i + 1))} {unit}" for i in range(count)]
         slope, intercept = _line(shown)
         return [f"{general_number(intercept + slope * (n + i))} {unit}" for i in range(count)]
@@ -105,18 +112,21 @@ def series(inputs: list[str], formats: list, count: int, step_one: bool = False,
         listed = [_in_list(t) for t in inputs]
         if all(listed) and len({id(lst) for lst, _ in listed}) == 1:
             lst = listed[0][0]
-            step = (listed[1][1] - listed[0][1]) % len(lst) if n >= 2 else 1
+            step = (listed[1][1] - listed[0][1]) % len(lst) if n >= 2 else one
             start = listed[-1][1]
             return [_cased(lst[(start + step * (i + 1)) % len(lst)], inputs[-1]) for i in range(count)]
         parts = [_TRAILING.match(t) for t in inputs]
         if all(parts) and len({(m.group(1), m.group(3)) for m in parts}) == 1:
             numbers = [int(m.group(2)) for m in parts]
-            step = numbers[1] - numbers[0] if n >= 2 else 1
+            step = numbers[1] - numbers[0] if n >= 2 else one
             width = len(parts[-1].group(2))
             prefix, suffix = parts[0].group(1), parts[0].group(3)
+            quarters = _QUARTER.match(prefix) and not suffix and all(1 <= k <= 4 for k in numbers)
             out = []
             for i in range(count):
                 k = numbers[-1] + step * (i + 1)
+                if quarters:
+                    k = (k - 1) % 4 + 1
                 digits = str(abs(k)).zfill(width) if parts[-1].group(2).startswith("0") else str(abs(k))
                 out.append(f"{prefix}{'-' if k < 0 else ''}{digits}{suffix}")
             return out
@@ -179,7 +189,7 @@ def fill(wb, sheet, src: tuple, dst: tuple, step_one: bool = False) -> None:
             has_formula = any(t.startswith("=") and len(t) > 1 for t in inputs)
             plain = not has_formula and all(inputs)
             if plain:
-                fresh = series(inputs, formats, len(targets), step_one, wb.day_first)
+                fresh = series(inputs, formats, len(targets), step_one, wb.day_first, back=not forward)
             else:
                 fresh = []
                 for k, target in enumerate(targets):

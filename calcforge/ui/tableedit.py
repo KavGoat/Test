@@ -1440,7 +1440,7 @@ class TableEditing:
         elif letter == "r":
             self.fill_direction("right")
         elif letter == "1":
-            self.view.window.format_cells_dialog() if hasattr(self.view.window, "format_cells_dialog") else None
+            self.view.window.format_cells_dialog()
         elif letter == ";":
             today = datetime.date.today().isoformat()
             self.begin_edit(today if not shift else datetime.datetime.now().strftime("%H:%M"))
@@ -1691,10 +1691,7 @@ class TableEditing:
         if hidden:
             rows, cols = self.item.size
             if len(indexes) >= (rows if axis == "row" else cols):
-                return
-        else:
-            # unhide: those inside the selection
-            pass
+                return                     # Excel keeps one row or column showing
         self._change("Hide" if hidden else "Unhide",
                      lambda wb, sheet: wb.set_hidden(sheet, axis, indexes, hidden))
 
@@ -1989,13 +1986,11 @@ class TableEditing:
         size.addAction("Unhide Columns", lambda: self.hide("col", False))
         menu.addSeparator()
         window = self.view.window
-        if hasattr(window, "format_cells_dialog"):
-            menu.addAction("Format Cells…", window.format_cells_dialog, QKeySequence("Ctrl+1"))
+        menu.addAction("Format Cells…", window.format_cells_dialog, QKeySequence("Ctrl+1"))
         from . import datatools
         datatools.fill_menu(menu, self)
         menu.addSeparator()
         charts = menu.addMenu("Insert Chart")
-        window = self.view.window
         charts.addAction("XY Scatter", lambda: window.insert_chart("scatter", False, True))
         charts.addAction("Scatter with Lines", lambda: window.insert_chart("scatter", True, True))
         charts.addAction("Line", lambda: window.insert_chart("line", True, False))

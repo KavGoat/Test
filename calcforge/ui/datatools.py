@@ -13,7 +13,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox,
                                QFormLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget,
-                               QListWidgetItem, QMenu, QPlainTextEdit, QPushButton, QTableWidget, QVBoxLayout, QWidget)
+                               QListWidgetItem, QMenu, QPlainTextEdit, QPushButton, QTableWidget,
+                               QTableWidgetItem, QVBoxLayout, QWidget)
 
 from ..sheet import condfmt, data, find, validation
 from ..sheet.refs import area_text, col_letters, parse_range
@@ -116,9 +117,8 @@ def fill_menu(menu: QMenu, tables) -> None:
     clr.setEnabled(bool(sheet.filter and sheet.filter.get("criteria")))
     dm.addSeparator()
     dm.addAction("Data Validation…", lambda: validation_dialog(tables))
-    circle = dm.addAction("Circle Invalid Data", lambda: circle_invalid(tables))
+    dm.addAction("Circle Invalid Data", lambda: circle_invalid(tables))
     dm.addAction("Clear Validation Circles", lambda: clear_circles(tables))
-    del circle
     cm = menu.addMenu("Comment")
     cell = sheet.cells.get(tables.active)
     has = bool(cell and cell.comment)
@@ -361,7 +361,6 @@ class ManageRulesDialog(QDialog):
         for rule in self.rules:
             r = self.table.rowCount()
             self.table.insertRow(r)
-            from PySide6.QtWidgets import QTableWidgetItem
             self.table.setItem(r, 0, QTableWidgetItem(condfmt.describe(rule)))
             edit = QLineEdit(",".join(area_text(*rg) for rg in rule["ranges"]))
             self.table.setCellWidget(r, 1, edit)
