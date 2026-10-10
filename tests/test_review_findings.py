@@ -72,3 +72,39 @@ def test_new_markups_are_signed_with_the_persons_name(w, tmp_path, monkeypatch):
 def test_the_author_preference_starts_as_the_login_name():
     from calcforge.ui.preferences import Preferences, login_name
     assert Preferences().author == login_name() != ""
+
+
+def test_restyling_a_picked_markup_leaves_the_next_one_alone(w):
+    """2026-10-10: changing a rectangle's hatch made the next rectangle drawn
+    hatched too. Bluebeam keeps a markup's own change to itself; with
+    nothing picked, the toolbar is what is drawn next."""
+    from tests.test_tables import page_to_scene
+    from tests.test_usability import drag
+
+    def draw(y):
+        w.select_tool("rect")
+        a, b = page_to_scene(w, 80, y), page_to_scene(w, 200, y + 40)
+        w.view.centerOn(a)
+        drag(w.view, a.x(), a.y(), b.x(), b.y())
+        pump()
+        return max((i for i in w.document.pages[0].frame.markups() if isinstance(i, RectItem)),
+                   key=lambda i: i.pos().y())
+
+    first = draw(100)
+    w.view.escape_everything()
+    first.setSelected(True)
+    w.refresh_selection()
+    w.hatch_combo.setCurrentIndex(w.hatch_combo.findData("diagonal") if
+                                  w.hatch_combo.findData("diagonal") >= 0 else 2)
+    pump()
+    assert first.style.hatch, "the picked rectangle is hatched"
+    w.view.escape_everything()
+    pump()
+    assert not w.default_style.hatch
+    second = draw(200)
+    assert not second.style.hatch, "the next one is drawn as before"
+    w.view.escape_everything()
+    w.hatch_combo.setCurrentIndex(2)            # nothing picked: this is the default now
+    pump()
+    third = draw(300)
+    assert third.style.hatch == w.hatch_combo.itemData(2)

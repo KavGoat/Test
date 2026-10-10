@@ -4885,7 +4885,12 @@ class MainWindow(QMainWindow):
         """
         if self._remember_style_default(mutate):
             return
-        mutate(self.default_style)
+        if not self.selected_items():
+            # nothing picked: the toolbar is what the next markup is drawn with.
+            # A change to picked markups is theirs alone (Bluebeam): it used to
+            # carry on into every one drawn after (2026-10-10).
+            mutate(self.default_style)
+            return
         self._push_style(mutate, description,
                          predicate=lambda item: field in capabilities(item))
 
