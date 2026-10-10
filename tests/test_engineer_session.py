@@ -212,3 +212,30 @@ def test_ctrl_drag_box_selects_markups_over_a_spreadsheet(w):
     # a right-click on the cells is still the cells' menu
     click(w, cell_scene(run, "D10"))
     assert w.view.tables.item is run
+
+
+def test_the_pointer_is_excels_over_cells_and_lets_go_of_them(w):
+    """2026-10-10: the pointer stayed a cross everywhere once a table had set
+    it (it was put on the view's viewport, which wins over the view). Over
+    cells it is Excel's white plus, the arrow off them, in both modes."""
+    from tests.test_usability import hover
+    run = sheet_page(w)
+    names = {}
+
+    def shape_at(p):
+        w.view.centerOn(p)
+        pump()
+        hover(w.view, p.x(), p.y())
+        pump()
+        return w.view.viewport().cursor().shape()
+
+    for calc in (False, True):
+        w.toggle_calc_mode(calc)
+        assert shape_at(cell_scene(run, "C5")) == Qt.BitmapCursor, "the white plus, not yet open"
+        w.view.tables.open(run, (0, 0))
+        assert shape_at(cell_scene(run, "C5")) == Qt.BitmapCursor
+        w.view.tables.close()
+        desk = w.document.pages[0].frame.mapToScene(QPointF(-20, 100))
+        assert shape_at(desk) == Qt.ArrowCursor, "and the arrow again off the cells"
+        assert shape_at(w.document.pages[0].frame.mapToScene(QPointF(300, 600))) == Qt.ArrowCursor
+    del names

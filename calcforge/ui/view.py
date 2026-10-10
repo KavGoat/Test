@@ -124,6 +124,50 @@ def format_painter_cursor() -> QCursor:
     return _DRAWING_CURSORS["format_painter"]
 
 
+def excel_cursor(kind: str) -> QCursor:
+    """Excel's own pointers over cells: the fat white plus over a cell
+    ("cell"), the black arrow down a column heading ("col") and across a row
+    heading ("row")."""
+    key = "excel_" + kind
+    if key in _DRAWING_CURSORS:
+        return _DRAWING_CURSORS[key]
+    pixmap = QPixmap(32, 32)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing, False)
+    if kind == "cell":
+        from PySide6.QtGui import QPainterPath
+        plus = QPainterPath()
+        arm, half = 7, 3                     # 7 px arms either side of a 7 px square
+        c = 15
+        plus.moveTo(c - half, c - half - arm)
+        for dx, dy in ((2 * half, 0), (0, arm), (arm, 0), (0, 2 * half), (-arm, 0), (0, arm),
+                       (-2 * half, 0), (0, -arm), (-arm, 0), (0, -2 * half), (arm, 0)):
+            point = plus.currentPosition()
+            plus.lineTo(point.x() + dx, point.y() + dy)
+        plus.closeSubpath()
+        painter.setPen(QPen(QColor("#000000"), 1))
+        painter.setBrush(QColor("#ffffff"))
+        painter.drawPath(plus)
+        hot = (c, c)
+    else:
+        from PySide6.QtGui import QPolygonF
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(QPen(QColor("#ffffff"), 1))
+        painter.setBrush(QColor("#000000"))
+        if kind == "col":                    # pointing down
+            arrow = [(13, 2), (19, 2), (19, 14), (24, 14), (16, 24), (8, 14), (13, 14)]
+            hot = (16, 24)
+        else:                                # pointing right
+            arrow = [(2, 13), (2, 19), (14, 19), (14, 24), (24, 16), (14, 8), (14, 13)]
+            hot = (24, 16)
+        painter.drawPolygon(QPolygonF([QPointF(x, y) for x, y in arrow]))
+    painter.end()
+    cursor = QCursor(pixmap, *hot)
+    _DRAWING_CURSORS[key] = cursor
+    return cursor
+
+
 def drawing_cursor(icon_name: str) -> QCursor:
     """A precise crosshair carrying the icon of the active drawing gesture."""
     if icon_name in _DRAWING_CURSORS:
@@ -771,6 +815,18 @@ class PageView(QGraphicsView):
             self.forget_snapshot()
         self.setCursor(self._cursor_for_tool(self.current_tool()))
         self.viewport().update()
+
+    def setCursor(self, cursor) -> None:
+        """The pointer goes on the viewport, where the canvas is. One set
+        there (by a table, say) overrides any set on the view itself, and the
+        pointer then stayed the cross wherever it went (2026-10-10)."""
+        self.viewport().setCursor(cursor)
+
+    def unsetCursor(self) -> None:
+        self.viewport().unsetCursor()
+
+    def cursor(self):
+        return self.viewport().cursor()
 
     def _cursor_for_tool(self, tool: Tool) -> QCursor:
         if tool.key == "select":
@@ -2743,6 +2799,11 @@ class PageView(QGraphicsView):
         """Say what the pointer would do here, before it is pressed."""
         if self.tool_key != "select":
             return
+        headings = getattr(self, "sheet_headings", None)
+        hit = headings.hit(self.mapFromScene(scene_pos)) if headings is not None else None
+        if hit is not None:
+            self.setCursor(excel_cursor(hit[1][0]))     # down a column, across a row
+            return
         if getattr(self.window, "_held_style", None) is not None:
             # A format is held: the brush stays in hand wherever it goes.
             self.setCursor(format_painter_cursor())
@@ -2809,7 +2870,13 @@ class PageView(QGraphicsView):
         # the width of a gutter under the pointer that had just selected it.
         item = self.markup_at(scene_pos)
         if item is None:
-            self.setCursor(Qt.ArrowCursor)
+            from ..items.sheetpage import SheetRunItem
+            run = next((i for i in self.scene().items(scene_pos) if isinstance(i, SheetRunItem)
+                        and i.local_rect().contains(i.mapFromScene(scene_pos))), None)
+            # a spreadsheet page's cells: Excel's white plus, open or not yet;
+            # the print area's edges and the page breaks to drag
+            edge = self.tables.edge_cursor(run, scene_pos) if run is not None else None
+            self.setCursor(edge or (excel_cursor("cell") if run is not None else Qt.ArrowCursor))
         elif not self.editable(item):
             self.setCursor(Qt.ForbiddenCursor)     # locked, or part of the page
         else:

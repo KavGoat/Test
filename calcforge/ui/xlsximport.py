@@ -138,6 +138,79 @@ def _say(window, imported) -> None:
         QMessageBox.information(window, "Excel workbook", text)
 
 
+class SheetChooser:
+    """The worksheets of a workbook with more than one, each with a tick —
+    all ticked to start — to bring in only some."""
+
+    def __init__(self, parent, imported):
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QHBoxLayout, QLabel,
+                                       QListWidget, QListWidgetItem, QPushButton, QVBoxLayout)
+        self.dialog = dialog = QDialog(parent)
+        dialog.setWindowTitle("Import Excel workbook")
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel("Bring in these worksheets:"))
+        self.list = QListWidget()
+        for sheet in imported.sheets:
+            count = len(sheet.data.get("cells", []))
+            note = f"{count:,} cell{'s' * (count != 1)}" + (", hidden in Excel" if sheet.hidden else "")
+            entry = QListWidgetItem(f"{sheet.name}    ({note})")
+            entry.setData(Qt.UserRole, sheet.name)
+            entry.setFlags(entry.flags() | Qt.ItemIsUserCheckable)
+            entry.setCheckState(Qt.Checked)
+            self.list.addItem(entry)
+        layout.addWidget(self.list)
+        row = QHBoxLayout()
+        for label, state in (("Select all", Qt.Checked), ("Clear", Qt.Unchecked)):
+            button = QPushButton(label)
+            button.clicked.connect(lambda _=False, s=state: self._tick_all(s))
+            row.addWidget(button)
+        row.addStretch(1)
+        layout.addLayout(row)
+        self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self.buttons.accepted.connect(dialog.accept)
+        self.buttons.rejected.connect(dialog.reject)
+        layout.addWidget(self.buttons)
+        self.list.itemChanged.connect(lambda _i: self._enable())
+
+    def _tick_all(self, state) -> None:
+        for i in range(self.list.count()):
+            self.list.item(i).setCheckState(state)
+
+    def _enable(self) -> None:
+        from PySide6.QtWidgets import QDialogButtonBox
+        self.buttons.button(QDialogButtonBox.Ok).setEnabled(bool(self.chosen()))
+
+    def chosen(self) -> list:
+        from PySide6.QtCore import Qt
+        return [self.list.item(i).data(Qt.UserRole) for i in range(self.list.count())
+                if self.list.item(i).checkState() == Qt.Checked]
+
+
+def choose_sheets(window, imported) -> bool:
+    """Which worksheets of a workbook with more than one to bring in; the
+    rest are left out (``keep_only``). False when the reader cancels."""
+    from ..sheet.xlsx import keep_only
+
+    names = [s.name for s in imported.sheets]
+    if len(names) < 2:
+        return True
+    pick = getattr(window, "choose_workbook_sheets", None)    # a test's stand-in for the dialog
+    if pick is not None:
+        chosen = pick(names)
+    elif not getattr(window, "interactive_prompts", True):
+        chosen = names
+    else:
+        chooser = SheetChooser(window, imported)
+        if not chooser.dialog.exec():
+            return False
+        chosen = chooser.chosen()
+    if not chosen:
+        return False
+    keep_only(imported, chosen)
+    return True
+
+
 def insert_workbook(window, path: Optional[str] = None, index: Optional[int] = None) -> bool:
     """Insert ▸ Excel workbook…: its worksheets as spreadsheet pages after the
     current page, one undo step."""
@@ -158,6 +231,8 @@ def insert_workbook(window, path: Optional[str] = None, index: Optional[int] = N
             QMessageBox.critical(window, "Excel workbook", f"Could not read the workbook:\n{exc}")
         window.status_hint.setText(f"Could not read the workbook: {exc}")
         return False
+    if not choose_sheets(window, imported):
+        return False
     document = window.document
     which = window.page_index(index)
     target = safe_target(document, which + 1)
@@ -174,12 +249,15 @@ def insert_workbook(window, path: Optional[str] = None, index: Optional[int] = N
 
 
 def open_workbook(window, path: str):
-    """File ▸ Open of an .xlsx: a new document of its worksheets. Returns
-    the document and what was read."""
+    """File ▸ Open of an .xlsx: a new document of the worksheets chosen.
+    Returns the document and what was read, or (None, None) when the reader
+    cancelled the choice."""
     from ..core.document import Document
     from ..sheet.xlsx import read_workbook
 
     imported = read_workbook(path)
+    if not choose_sheets(window, imported):
+        return None, None
     document = Document()
     import os
     document.title = os.path.splitext(os.path.basename(path))[0]

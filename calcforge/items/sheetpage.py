@@ -75,6 +75,7 @@ class SheetRunItem(TableItem):
     SHEET_RUN = True
     _hold = False          # pages being deleted: the layout waits for the new pages
     break_drag = None      # y of a page break being dragged (screen only)
+    area_drag = None       # [t, l, b, r] of a print area edge being dragged (screen only)
 
     def __init__(self):
         super().__init__(DEFAULT_ROWS, 1)
@@ -369,6 +370,13 @@ class SheetRunItem(TableItem):
                 continue
             painter.setPen(solid if a in paging.manual else dashed)
             painter.drawLine(QPointF(xs[c0], ys[a]), QPointF(xs[c1 + 1], ys[a]))
+        if self.area_drag is not None:
+            t, l, b, r = self.area_drag
+            moving = QPen(BREAK_BLUE, 3.0)
+            moving.setCosmetic(True)
+            painter.setPen(moving)
+            painter.drawRect(QRectF(xs[l], ys[t], xs[min(r + 1, len(xs) - 1)] - xs[l],
+                                    ys[min(b + 1, len(ys) - 1)] - ys[t]))
         if self.break_drag is not None:
             moving = QPen(BREAK_BLUE, 3.0)
             moving.setCosmetic(True)

@@ -2349,7 +2349,8 @@ class MainWindow(QMainWindow):
         if not path:
             return
         try:
-            self.open_path(path)
+            if self.open_path(path) is False:
+                return
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, "Open document", f"Could not open the file:\n{exc}")
             return
@@ -2362,7 +2363,8 @@ class MainWindow(QMainWindow):
 
     def open_from_command_line(self, path: str) -> None:
         """`calcforge drawing.pdf`: open it as File > Open would."""
-        self.open_path(path)
+        if self.open_path(path) is False:
+            return
         self.current_index = 0
         self.rebuild_scenes()
         self.view.fit_page()
@@ -2377,7 +2379,7 @@ class MainWindow(QMainWindow):
             from .xlsximport import _say
             _say(self, imported)
 
-    def open_path(self, path: str) -> None:
+    def open_path(self, path: str) -> Optional[bool]:
         """Open a document, or bring in a PDF that is not one yet.
 
         A saved document is itself a PDF, so what decides between the two is
@@ -2389,6 +2391,8 @@ class MainWindow(QMainWindow):
             # an Excel workbook: its worksheets as spreadsheet pages (cells only)
             from .xlsximport import open_workbook
             document, imported = open_workbook(self, path)
+            if document is None:
+                return False              # the reader cancelled the choice of worksheets
             self.document = document
             self._new_undo_stack()
             self._opened_workbook = imported

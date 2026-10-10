@@ -481,3 +481,66 @@ def test_pasting_more_than_a_page_holds_adds_pages(window):
     (run,) = [i for i in window.view.scene().items() if isinstance(i, SheetRunItem)]
     assert run.sheet.input(169, 4) == "129.4"
     assert run.size[0] >= 170 and len(run.run_frames()) >= 4
+
+
+def test_the_print_area_is_dragged_by_its_edges(w):
+    """Excel's Page Break Preview: the blue border of what prints is dragged
+    — narrower, or wider than the paper, which then prints shrunk to fit."""
+    from tests.test_usability import drag
+    run = sheet_page(w)
+    open_at(w, run, "A1")
+    put(w, run, 0, 0, "1")
+    put(w, run, 9, 0, "2")
+    (run,) = runs(w)
+    last = run.paging.last_col
+    assert last > 4
+    xs, ys = run.edges()
+    # the pointer over the paper's right edge: a column edge's
+    edge = run.mapToScene(QPointF(xs[last + 1], ys[3]))
+    assert w.view.tables.hover_cursor(edge).shape() == Qt.SplitHCursor
+    end = run.mapToScene(QPointF(xs[4] + 2, ys[3]))
+    drag(w.view, edge.x(), edge.y(), end.x(), end.y())
+    pump()
+    (run,) = runs(w)
+    assert options(run.sheet)["print_area"] == [0, 0, 9, 3]
+    assert run.paging.last_col == 3
+    # now it has a bottom edge too
+    xs, ys = run.edges()
+    bottom = run.mapToScene(QPointF(xs[1], ys[10]))
+    assert w.view.tables.hover_cursor(bottom).shape() == Qt.SplitVCursor
+    end = run.mapToScene(QPointF(xs[1], ys[20] + 1))
+    drag(w.view, bottom.x(), bottom.y(), end.x(), end.y())
+    pump()
+    (run,) = runs(w)
+    assert options(run.sheet)["print_area"] == [0, 0, 19, 3]
+    # out past the paper: shrunk to fit, as Excel scales such a page
+    xs, ys = run.edges()
+    right = run.mapToScene(QPointF(xs[4], ys[3]))
+    far = run.mapToScene(QPointF(xs[last + 4], ys[3]))
+    drag(w.view, right.x(), right.y(), far.x(), far.y())
+    pump()
+    (run,) = runs(w)
+    assert options(run.sheet)["print_area"] == [0, 0, 19, last + 3]
+    assert options(run.sheet)["fit_width"] and run.paging.scale < 1.0
+    for _ in range(3):
+        w.undo_stack.undo()
+    pump()
+    (run,) = runs(w)
+    assert options(run.sheet)["print_area"] is None
+
+
+def test_the_print_area_drags_without_opening_the_sheet_first(w):
+    from tests.test_usability import drag, hover
+    run = sheet_page(w)
+    last = run.paging.last_col
+    xs, ys = run.edges()
+    edge = run.mapToScene(QPointF(xs[last + 1], ys[3]))
+    w.view.centerOn(edge)
+    pump()
+    hover(w.view, edge.x(), edge.y())
+    assert w.view.viewport().cursor().shape() == Qt.SplitHCursor
+    end = run.mapToScene(QPointF(xs[2] + 1, ys[3]))
+    drag(w.view, edge.x(), edge.y(), end.x(), end.y())
+    pump()
+    (run,) = runs(w)
+    assert options(run.sheet)["print_area"][1::2] == [0, 1]

@@ -132,6 +132,61 @@ def test_a_worksheet_named_like_a_sheet_already_here_is_renamed(tmp_path):
     assert cells[(3, 6)] == "='Load Cases (2)'!B2*G1", "the formulas follow the new name"
 
 
+def test_only_the_worksheets_chosen_come_in(tmp_path):
+    """A formula on a kept sheet reading one left out keeps Excel's last
+    value, as Excel's Break Links does; a workbook name moves to a kept sheet
+    unless it reads one left out."""
+    from calcforge.sheet.xlsx import keep_only
+    path = a_workbook(str(tmp_path / "beams.xlsx"))
+    got = read_workbook(path)
+    got.sheets[0].excel_values[(3, 6)] = 326.25
+    assert keep_only(got, ["Beams"]) == 1
+    assert [s.name for s in got.sheets] == ["Beams"]
+    cells = {(r, c): text for r, c, text, *_ in got.sheets[0].data["cells"]}
+    assert cells[(3, 6)] == "326.25"
+    assert cells[(0, 6)] == "=SUM($D$2:$D$4)", "formulas on this sheet are untouched"
+    assert any("not brought in" in what for what in got.left_out)
+
+    got = read_workbook(path)
+    assert keep_only(got, ["load cases"]) == 1
+    (cases,) = got.sheets
+    assert {n[0] for n in cases.data["names"]} == {"gee"}, "Loads read Beams; gee is a constant"
+    cells = {(r, c): text for r, c, text, *_ in cases.data["cells"]}
+    assert cells[(1, 3)] == "", "it read the name of Beams' cells"
+    assert cells[(1, 2)] == "=SEQUENCE(3)"
+
+
+def test_insert_excel_asks_which_worksheets(w, tmp_path):
+    from PySide6.QtWidgets import QApplication
+    path = a_workbook(str(tmp_path / "beams.xlsx"))
+    asked = []
+    w.choose_workbook_sheets = lambda names: asked.append(names) or ["Load Cases"]
+    assert w.insert_workbook(path, 0)
+    QApplication.processEvents()
+    assert asked == [["Beams", "Load Cases"]]
+    assert set(runs(w)) == {"Load Cases"}
+    w.choose_workbook_sheets = lambda names: []           # cancelled
+    pages = len(w.document.pages)
+    assert not w.insert_workbook(path, 0)
+    assert len(w.document.pages) == pages
+
+
+def test_the_sheet_chooser_ticks_them_all_to_start(qapp, tmp_path):
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QDialogButtonBox
+    from calcforge.ui.xlsximport import SheetChooser
+    got = read_workbook(a_workbook(str(tmp_path / "beams.xlsx")))
+    chooser = SheetChooser(None, got)
+    assert chooser.chosen() == ["Beams", "Load Cases"]
+    assert "hidden in Excel" in chooser.list.item(1).text()
+    chooser.list.item(0).setCheckState(Qt.Unchecked)
+    assert chooser.chosen() == ["Load Cases"]
+    chooser._tick_all(Qt.Unchecked)
+    assert not chooser.buttons.button(QDialogButtonBox.Ok).isEnabled()
+    chooser._tick_all(Qt.Checked)
+    assert chooser.buttons.button(QDialogButtonBox.Ok).isEnabled()
+
+
 def test_charts_and_pictures_are_left_out_and_said(tmp_path):
     path = a_workbook(str(tmp_path / "chart.xlsx"), with_chart=True)
     got = read_workbook(path)

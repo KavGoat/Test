@@ -171,6 +171,28 @@ class FormulaBar(QWidget):
         names.names_menu(self.tables, menu)
 
 
+def _excel(kind):
+    from .view import excel_cursor
+    return lambda: excel_cursor(kind)
+
+
+# Excel's pointers: the fat white plus over cells, the thin cross on the fill
+# handle, the move arrows on the selection's border, black arrows down and
+# across the headings, the split arrows on their edges
+_CURSORS = {"cell": _excel("cell"), "fill": lambda: QCursor(Qt.CrossCursor),
+            "border": lambda: QCursor(Qt.SizeAllCursor), "col": _excel("col"), "row": _excel("row"),
+            "corner": lambda: QCursor(Qt.ArrowCursor), "col_edge": lambda: QCursor(Qt.SplitHCursor),
+            "row_edge": lambda: QCursor(Qt.SplitVCursor), "break": lambda: QCursor(Qt.SplitVCursor),
+            "grow": lambda: QCursor(Qt.SizeFDiagCursor), "tab": lambda: QCursor(Qt.OpenHandCursor)}
+
+
+def _cursor_for(zone) -> Optional[QCursor]:
+    if zone and zone[0] == "area":       # the print area's edge, as a column's or a row's
+        return QCursor(Qt.SplitHCursor if zone[1] in ("left", "right") else Qt.SplitVCursor)
+    make = _CURSORS.get(zone[0] if zone else None)
+    return make() if make is not None else None
+
+
 class TableEditing:
     """The open table, its selection, and what the pointer and keys do to it."""
 
@@ -438,6 +460,10 @@ class TableEditing:
         if handle is not None and handle.adjusted(-tol, -tol, tol, tol).contains(local):
             return ("fill",)
         w, h = xs[-1], ys[-1]
+        if _is_run(item) and item.paging is not None:
+            side = self._area_edge(item, local, tol)
+            if side is not None:
+                return ("area", side)
         if _is_run(item) and item.paging is not None and 0 <= local.x() < w:
             # a page break line: dragged, it becomes a manual break (Excel)
             paging = item.paging
@@ -532,6 +558,8 @@ class TableEditing:
                 if isinstance(other, MarkupItem) and other.isVisible():
                     return False
             local = target.mapFromScene(scene_pos)
+            if self._press_edge(target, local, event, scene_pos):
+                return True
             cell = target.cell_at(local)
             if cell is not None:
                 self.open(target, cell)
@@ -542,6 +570,8 @@ class TableEditing:
             local = target.mapFromScene(scene_pos)
             if target.tab_rect().contains(local) and target.isSelected():
                 return False                 # the name tab picks it up to move it
+            if _is_run(target) and self._press_edge(target, local, event, scene_pos):
+                return True
             # Calc mode: clicks go to the cells (the user's choice)
             cell = target.cell_at(local)
             if cell is not None:
@@ -549,6 +579,15 @@ class TableEditing:
                 self.drag = ("select", cell)
                 return True
         return False
+
+    def _press_edge(self, target, local: QPointF, event, scene_pos: QPointF) -> bool:
+        """A spreadsheet page not open yet, pressed on its print area's edge
+        or a page break: opened, and the edge dragged from there."""
+        edge = self._zone(target, local)
+        if not edge or edge[0] not in ("area", "break"):
+            return False
+        self.open(target, target.cell_at(local) or (0, 0))
+        return self._press_zone(target, edge, event, scene_pos)
 
     def _in_selection(self, r, c) -> bool:
         t, l, b, rr = self.selection()
@@ -624,7 +663,51 @@ class TableEditing:
             self.view.begin_snapshot(_frames(item))
         elif kind == "break":
             self.drag = ("break", zone[1], zone[1])
+        elif kind == "area":
+            area = self._print_area(item)
+            self.drag = ("area", zone[1], area, list(area))
         return True
+
+    @staticmethod
+    def _print_area(item) -> list:
+        """The print area of a run of pages as [t, l, b, r]: the one set, or
+        the columns that fit on the paper down to the last row used."""
+        from ..sheet.pagination import options
+        area = options(item.sheet)["print_area"]
+        if area:
+            return list(area)
+        paging = item.paging
+        data = item.sheet.data_area()
+        bottom = data[2] if data is not None else paging.slices[-1][1]
+        return [0, paging.first_col, bottom, paging.last_col]
+
+    @staticmethod
+    def _area_edge(item, local: QPointF, tol: float):
+        """The edge of the printed area under a point — "left", "right", "top"
+        or "bottom" — as Excel's Page Break Preview lets them be dragged.
+        Without a print area only the right edge (the paper's width) is one."""
+        paging = item.paging
+        xs, ys = item.edges()
+        c0, c1 = paging.first_col, paging.last_col
+        if c1 + 1 >= len(xs):
+            return None
+        rows = paging.print_rows
+        top = ys[rows[0]] if rows else 0.0
+        bottom = ys[min(rows[1] + 1, len(ys) - 1)] if rows else ys[-1]
+        x, y = local.x(), local.y()
+        across = xs[c0] - tol <= x <= xs[c1 + 1] + tol
+        down = max(top - tol, 0.0) <= y <= bottom + tol
+        if down and abs(x - xs[c1 + 1]) <= tol:
+            return "right"
+        if rows is None:
+            return None
+        if down and abs(x - xs[c0]) <= tol and x >= 0:
+            return "left"
+        if across and abs(y - bottom) <= tol:
+            return "bottom"
+        if across and abs(y - top) <= tol and y >= 0:
+            return "top"
+        return None
 
     def _chosen_cols(self, c) -> list:
         """Dragging the edge of a selected column sizes all the selected ones."""
@@ -694,6 +777,27 @@ class TableEditing:
             dc = max(-src[1], min(dc, cols - 1 - src[3]))
             self.drag = ("move", src, grabbed, (dr, dc))
             item.update()
+        elif kind == "area":
+            side, area = drag[1], list(drag[2])
+            xs, ys = item.edges()
+            t, l, b, r = area
+            if side in ("left", "right"):
+                k = min(range(len(xs)), key=lambda i: abs(xs[i] - local.x()))
+                if side == "right":
+                    area[3] = max(l, k - 1)
+                else:
+                    area[1] = min(r, k)
+            else:
+                k = min(range(len(ys)), key=lambda i: abs(ys[i] - local.y()))
+                if side == "bottom":
+                    area[2] = max(t, k - 1)
+                else:
+                    area[0] = min(b, k)
+            self.drag = ("area", side, drag[2], area)
+            item.area_drag = area
+            item.update()
+            from ..sheet.refs import area_text
+            self.view.statusMessage.emit(f"Print area {area_text(*area)}")
         elif kind == "break":
             row = max(1, self._cell_near(item, local)[0])
             if local.y() - item.edges()[1][row] > item.sheet.height(row) / 2:
@@ -712,6 +816,18 @@ class TableEditing:
             item.resize_table(new_rows, new_cols)
             self.view.statusMessage.emit(f"{item.name}: {new_rows} rows × {new_cols} columns")
         return True
+
+    def _set_print_area(self, item, area: list) -> None:
+        """A dragged print area, one undo step. Wider than the paper, it is
+        shrunk to fit, as Excel scales a page whose break was dragged out."""
+        from . import sheetlayout
+        sheet = item.sheet
+        width = item.paging.printable[2]
+        wide = sum(sheet.width(c) for c in range(area[1], area[3] + 1)) > width + 0.01
+        changes = {"print_area": list(area)}
+        if wide:
+            changes["fit_width"] = True
+        sheetlayout.change_options(self.view.window, item, "Set print area", **changes)
 
     def _cell_near(self, item, local: QPointF) -> tuple:
         xs, ys = item.edges()
@@ -745,6 +861,12 @@ class TableEditing:
         if drag is None or item is None:
             return False
         kind = drag[0]
+        if kind == "area":
+            item.area_drag = None
+            item.update()
+            if drag[3] != drag[2]:
+                self._set_print_area(item, drag[3])
+            return True
         if kind == "break":
             item.break_drag = None
             item.update()
@@ -839,13 +961,15 @@ class TableEditing:
                 QToolTip.showText(QCursor.pos(), cell.comment, self.view)
             else:
                 QToolTip.hideText()
-        cursor = {"col_edge": Qt.SplitHCursor, "row_edge": Qt.SplitVCursor, "fill": Qt.CrossCursor,
-                  "break": Qt.SplitVCursor,
-                  "border": Qt.SizeAllCursor, "grow": Qt.SizeFDiagCursor, "tab": Qt.OpenHandCursor,
-                  "col": Qt.ArrowCursor, "row": Qt.ArrowCursor, "corner": Qt.ArrowCursor,
-                  "cell": Qt.CrossCursor}.get(kind)
+        cursor = _cursor_for(zone)
         if cursor is not None:
             self.view.viewport().setCursor(cursor)
+
+    def edge_cursor(self, item, scene_pos: QPointF) -> Optional[QCursor]:
+        """Over a run of spreadsheet pages not open yet: the pointer for its
+        print area's edges and its page breaks, which drag from there too."""
+        zone = self._zone(item, item.mapFromScene(scene_pos))
+        return _cursor_for(zone) if zone and zone[0] in ("area", "break") else None
 
     def hover_cursor(self, scene_pos: QPointF):
         item = self.item
@@ -854,12 +978,7 @@ class TableEditing:
         local = item.mapFromScene(scene_pos)
         if not item.chrome_rect().contains(local):
             return None
-        zone = self._zone(item, local)
-        kind = zone[0] if zone else None
-        return {"col_edge": Qt.SplitHCursor, "row_edge": Qt.SplitVCursor, "fill": Qt.CrossCursor,
-                "break": Qt.SplitVCursor,
-                "border": Qt.SizeAllCursor, "grow": Qt.SizeFDiagCursor, "tab": Qt.OpenHandCursor,
-                "cell": Qt.CrossCursor}.get(kind, Qt.ArrowCursor)
+        return _cursor_for(self._zone(item, local)) or QCursor(Qt.ArrowCursor)
 
     # -- inserting a table by dragging ---------------------------------------------------------
     def insert_preview(self) -> Optional[tuple]:

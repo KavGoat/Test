@@ -716,3 +716,69 @@ def _names(wb, sheets: list, renames: dict, renamed, left_out: list) -> None:
         if home is None:
             continue
         home.data["names"].append([name, text, local is not None and local.lower() == home.name.lower(), ""])
+
+
+_ERRORS = ("#NULL!", "#DIV/0!", "#VALUE!", "#REF!", "#NAME?", "#NUM!", "#N/A", "#SPILL!", "#CALC!")
+
+
+def keep_only(imported: Imported, chosen) -> int:
+    """Leaves out the worksheets not *chosen* (names). A formula on a kept
+    sheet that reads a sheet left out — or a name only a sheet left out had —
+    comes in as the value Excel last showed, as Excel's Break Links does; the
+    number of such cells is returned and said in ``left_out``."""
+    chosen = {n.lower() for n in chosen}
+    kept = [s for s in imported.sheets if s.name.lower() in chosen]
+    dropped = {s.name.lower() for s in imported.sheets} - chosen
+    if not dropped:
+        return 0
+    lost_names: set = set()
+    for sheet in imported.sheets:
+        if sheet.name.lower() in chosen:
+            continue
+        for entry in sheet.data.get("names", []):
+            name, text, local = entry[0], entry[1], entry[2]
+            if local or not kept or _reads(text, dropped, set()):
+                lost_names.add(name.lower())
+            else:                        # a workbook name of cells still here: it stays
+                kept[0].data["names"].append(entry)
+    for sheet in kept:
+        still = []
+        for entry in sheet.data.get("names", []):
+            if _reads(entry[1], dropped, set()):
+                lost_names.add(entry[0].lower())
+            else:
+                still.append(entry)
+        sheet.data["names"] = still
+    broken = 0
+    for sheet in kept:
+        for entry in sheet.data["cells"]:
+            text = entry[2]
+            if not text.startswith("=") or not _reads(text[1:], dropped, lost_names):
+                continue
+            r, c = entry[0], entry[1]
+            value = sheet.excel_values.pop((r, c), None)
+            kind = "e" if isinstance(value, str) and value.upper() in _ERRORS else "n"
+            entry[2] = _value_input(value, kind) or ""
+            broken += 1
+    imported.sheets = kept
+    if broken:
+        imported.left_out.append(
+            f"{broken} formula{'s' * (broken != 1)} reading worksheets not brought in "
+            f"(kept as the values Excel last showed)")
+    return broken
+
+
+def _reads(text: str, sheets: set, names: set) -> bool:
+    """Whether a formula reads one of *sheets* or *names* (lower case)."""
+    try:
+        tokens = F.tokenize(text)
+    except F.FormulaError:
+        return False
+    for t in tokens:
+        if t.kind == "ref" and t.ref is not None and t.ref.sheet and t.ref.sheet.lower() in sheets:
+            return True
+        if t.kind == "name":
+            sheet, _, name = t.text.rpartition("!")
+            if name.lower() in names or (sheet and sheet.lower() in sheets):
+                return True
+    return False
