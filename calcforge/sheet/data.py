@@ -25,7 +25,7 @@ from typing import Optional
 from . import formula as F
 from .inputs import read_value
 from .numfmt import format_value
-from .values import BLANK, ErrorValue, Qty, is_number
+from .values import BLANK, ErrorValue, Qty, general_number, is_number
 
 
 def _key(value):
@@ -308,7 +308,7 @@ def goal_seek(wb, sheet, target: tuple, goal, changing: tuple, iterations: int =
         raise ValueError("Say a number (or quantity) to reach.")
 
     def text_of(x):
-        n = general_number_text(x)
+        n = general_number(round(x, 12))
         return f"{n} {unit}" if unit else n
 
     def miss(x):
@@ -387,8 +387,3 @@ def _search(miss, x0: float, close: float, iterations: int):
             return c
         a, fa, b, fb = b, fb, c, fc
     return None
-
-
-def general_number_text(x: float) -> str:
-    from .values import general_number
-    return general_number(round(x, 12))
