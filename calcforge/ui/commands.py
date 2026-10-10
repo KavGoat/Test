@@ -25,9 +25,15 @@ class PageEditCommand(QUndoCommand):
     """Restore one page's markup list to its state before or after an edit."""
 
     def __init__(self, frame, before: list[dict], after: list[dict], text: str,
-                 on_apply: Optional[Callable] = None, coalesce: bool = False):
+                 on_apply: Optional[Callable] = None, coalesce: bool = False,
+                 find_frame: Optional[Callable] = None):
         super().__init__(text)
         self.frame = frame
+        # Undoing a page added or moved rebuilds every page's frame: the page
+        # is found again by its id when the step is applied, or a redo after
+        # it wrote into a frame no longer on the canvas (2026-10-10).
+        self.page_uid = getattr(getattr(frame, "page", None), "uid", None)
+        self.find_frame = find_frame
         self.before = before
         self.after = after
         self.on_apply = on_apply
@@ -58,7 +64,15 @@ class PageEditCommand(QUndoCommand):
         self.stamp = other.stamp
         return True
 
+    def _live_frame(self):
+        if self.find_frame is not None and self.page_uid is not None:
+            found = self.find_frame(self.page_uid)
+            if found is not None:
+                self.frame = found
+        return self.frame
+
     def _apply(self, data: list[dict]) -> None:
+        self._live_frame()
         selected = {item.uid for item in self.frame.markups() if item.isSelected()}
         self.frame.load_items(data)
         for item in self.frame.markups():
@@ -103,15 +117,20 @@ class ViewportsCommand(QUndoCommand):
     """A page's viewports added, changed or removed."""
 
     def __init__(self, page, before: list[dict], after: list[dict], text: str,
-                 changed: Callable[[object], None]):
+                 changed: Callable[[object], None], find_page: Optional[Callable] = None):
         super().__init__(text)
         self.page = page
+        self.page_uid = getattr(page, "uid", None)
+        self.find_page = find_page
         self.before = before
         self.after = after
         self.changed = changed
 
     def _apply(self, state: list[dict]) -> None:
         from ..core.document import Viewport
+        if self.find_page is not None:
+            # the page as it is now (undoing a page change makes new ones)
+            self.page = self.find_page(self.page_uid) or self.page
         self.page.viewports = [Viewport.from_dict(v) for v in state]
         self.changed(self.page)
 
@@ -146,5 +165,5 @@ class SnapshotGuard:
         if after != self.before:
             self.view.push_command(PageEditCommand(
                 frame, self.before, after, self.text,
-                on_apply=self.view.after_undo))
+                on_apply=self.view.after_undo, find_frame=self.view.frame_for_page))
         return False

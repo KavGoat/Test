@@ -347,7 +347,26 @@ class TableEditing:
         m = item.sheet.merge_at(*self.active) if item.sheet else None
         if m is not None:
             self.active = (m[0], m[1])
+        if _is_run(item) and self.active[0] >= item.size[0] and self.anchor == self.edge:
+            # Enter or ↓ off the last page: the sheet goes on to a new page
+            # there, as Excel's page layout view always has the next one
+            self._add_run_page()
         self._show_selection()
+
+    def _add_run_page(self) -> None:
+        """One more page at the end of the spreadsheet being typed in (an
+        undo step of its own; an empty page at the end is kept)."""
+        from . import sheetpages
+        window = self.view.window
+        item = self.item
+        if item is None or not hasattr(window, "_structure_snapshot"):
+            return
+        before = window._structure_snapshot()
+        sheetpages.add_run_pages(window, [(item, 1)])
+        window.record_structure_change(before, "Add page")
+        item = self.item
+        if item is not None:
+            self._item = item
 
     def _show_selection(self) -> None:
         item = self._item

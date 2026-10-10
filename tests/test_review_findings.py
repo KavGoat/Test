@@ -108,3 +108,28 @@ def test_restyling_a_picked_markup_leaves_the_next_one_alone(w):
     pump()
     third = draw(300)
     assert third.style.hatch == w.hatch_combo.itemData(2)
+
+
+def test_redo_after_a_page_was_added_and_taken_away(w):
+    """Found 2026-10-10: undoing past an added page and redoing again lost
+    the edit made after it — the redo wrote into a page frame that had been
+    rebuilt. Each step now finds its page again."""
+    from calcforge.items.shapes import RectItem as Rect
+    w.add_page()
+    pump()
+    frame = w.document.pages[1].frame
+    w.view.begin_snapshot([frame])
+    box = Rect()
+    box.set_local_rect(QRectF(0, 0, 30, 20))
+    frame.add_markup(box, QPointF(100, 100))
+    w.view.commit_snapshot("Draw")
+    stack = w.undo_stack
+    stack.undo()
+    stack.undo()
+    pump()
+    assert len(w.document.pages) == 1
+    stack.redo()
+    stack.redo()
+    pump()
+    assert len(w.document.pages) == 2
+    assert [type(i).__name__ for i in w.document.pages[1].frame.markups()] == ["RectItem"]

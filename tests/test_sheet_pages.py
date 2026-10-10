@@ -126,12 +126,13 @@ def test_clicks_go_to_the_cells_in_markup_mode_and_markups_win(w):
     assert box.isSelected()
 
 
-def test_typing_past_the_last_page_adds_one_in_the_same_undo_step(w):
+def test_going_past_the_last_page_adds_one(w):
     run = sheet_page(w)
     open_at(w, run, "A1")
     w.view.tables.select((51, 0))
     key(w, Qt.Key_Down)
-    assert w.view.tables.active == (52, 0), "one row past the last page can be typed in"
+    assert w.view.tables.active == (52, 0), "on to the row below the last page"
+    assert len(w.document.pages) == 3, "and the page it is on (2026-10-10)"
     type_text(w, "next")
     enter(w)
     assert len(w.document.pages) == 3
@@ -144,12 +145,16 @@ def test_typing_past_the_last_page_adds_one_in_the_same_undo_step(w):
     assert f2.scenePos().y() == pytest.approx(f1.scenePos().y() + f1.page_rect().height())
     w.undo_stack.undo()
     pump()
-    assert len(w.document.pages) == 2
     (run,) = runs(w)
     assert value(run, 52, 0) is None
+    assert len(w.document.pages) == 3, "the typing is undone; the page stays a step longer"
+    w.undo_stack.undo()
+    pump()
+    assert len(w.document.pages) == 2
+    w.undo_stack.redo()
     w.undo_stack.redo()
     pump()
-    assert len(w.document.pages) == 3
+    assert len(w.document.pages) == 3 and value(runs(w)[0], 52, 0) == "next"
 
 
 def test_empty_pages_at_the_end_are_kept(w):
@@ -431,3 +436,48 @@ def test_save_and_reopen_keep_the_run_its_cells_and_its_markups(w, tmp_path):
     assert box2.pos() == box.pos()
     with pymupdf.open(path) as doc:
         assert "15" in doc[1].get_text()
+
+
+def test_down_or_enter_off_the_last_page_adds_a_page(window):
+    """2026-10-10: ↓ or Enter on the last row of a spreadsheet's last page
+    goes on to a new page, as Excel's page layout view always has one."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QKeyEvent
+    from PySide6.QtWidgets import QApplication
+
+    from calcforge.items.sheetpage import SheetRunItem
+    window.show()
+    window.insert_sheet_page(0)
+    QApplication.processEvents()
+    (run,) = [i for i in window.view.scene().items() if isinstance(i, SheetRunItem)]
+    tabs = window.view.tables
+    tabs.open(run, (0, 0))
+    rows = run.size[0]
+    pages = len(window.document.pages)
+    tabs.select((rows - 1, 0))
+    QApplication.sendEvent(window.view, QKeyEvent(QKeyEvent.KeyPress, Qt.Key_Down, Qt.NoModifier))
+    QApplication.processEvents()
+    assert len(window.document.pages) == pages + 1 and tabs.active == (rows, 0)
+    assert tabs.item.size[0] > rows
+    window.undo_stack.undo()
+    QApplication.processEvents()
+    assert len(window.document.pages) == pages, "one undo takes the page away"
+
+
+def test_pasting_more_than_a_page_holds_adds_pages(window):
+    from PySide6.QtWidgets import QApplication
+
+    from calcforge.items.sheetpage import SheetRunItem
+    window.show()
+    window.insert_sheet_page(0)
+    QApplication.processEvents()
+    (run,) = [i for i in window.view.scene().items() if isinstance(i, SheetRunItem)]
+    QApplication.clipboard().setText("\n".join("\t".join(f"{r}.{c}" for c in range(5)) for r in range(130)))
+    tabs = window.view.tables
+    tabs.open(run, (0, 0))
+    tabs.select((40, 0))
+    tabs.paste()
+    QApplication.processEvents()
+    (run,) = [i for i in window.view.scene().items() if isinstance(i, SheetRunItem)]
+    assert run.sheet.input(169, 4) == "129.4"
+    assert run.size[0] >= 170 and len(run.run_frames()) >= 4

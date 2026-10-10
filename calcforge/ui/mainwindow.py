@@ -3894,8 +3894,9 @@ class MainWindow(QMainWindow):
         from .commands import ViewportsCommand
         before = [v.to_dict() for v in page.viewports]
         after = [v.to_dict() for v in viewports]
-        self.undo_stack.push(ViewportsCommand(page, before, after, text,
-                                              self._viewports_changed))
+        self.undo_stack.push(ViewportsCommand(
+            page, before, after, text, self._viewports_changed,
+            find_page=lambda uid: next((p for p in self.document.pages if p.uid == uid), None)))
 
     def _viewports_changed(self, page) -> None:
         """Measurements re-read against the new regions, and the page redrawn."""

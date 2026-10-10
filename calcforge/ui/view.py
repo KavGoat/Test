@@ -655,6 +655,14 @@ class PageView(QGraphicsView):
             return
         self._commit_snapshot(text, coalesce)
 
+    def frame_for_page(self, page_uid: str):
+        """The frame on the canvas now for the page with that id."""
+        scene = self.scene()
+        for frame in getattr(scene, "frames", ()) or ():
+            if getattr(frame.page, "uid", None) == page_uid:
+                return frame
+        return None
+
     def _commit_snapshot(self, text: str, coalesce: bool) -> None:
         if not self._snapshot:
             return
@@ -671,7 +679,7 @@ class PageView(QGraphicsView):
         for frame, before, after in changed:
             self.push_command(PageEditCommand(frame, before, after,
                                               text, on_apply=self.after_undo,
-                                              coalesce=coalesce))
+                                              coalesce=coalesce, find_frame=self.frame_for_page))
         if len(changed) > 1:
             stack.endMacro()
         self.documentEdited.emit()
