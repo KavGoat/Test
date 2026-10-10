@@ -112,6 +112,15 @@ class FormulaBar(QWidget):
         self.name.setToolTip("The cell or block selected — type an address (B4, A1:C3) to go there")
         self.name.returnPressed.connect(self._go)
         layout.addWidget(self.name)
+        from PySide6.QtWidgets import QToolButton
+        self.names = QToolButton()
+        self.names.setText("▾")
+        self.names.setToolTip("Go to a named cell or block")
+        self.names.setPopupMode(QToolButton.InstantPopup)
+        names_list = QMenu(self.names)
+        names_list.aboutToShow.connect(lambda: self._fill_names(names_list))
+        self.names.setMenu(names_list)
+        layout.addWidget(self.names)
         fx = QLabel("fx")
         f = fx.font()
         f.setItalic(True)
@@ -137,6 +146,11 @@ class FormulaBar(QWidget):
 
     def _go(self) -> None:
         self.tables.go_to(self.name.text().strip())
+
+    def _fill_names(self, menu) -> None:
+        from . import names
+        menu.clear()
+        names.names_menu(self.tables, menu)
 
 
 class TableEditing:
@@ -305,12 +319,19 @@ class TableEditing:
         if bar is None or item is None or item.sheet is None:
             return
         top, left, bottom, right = self.selection()
-        if (top, left) == (bottom, right) or item.sheet.merge_at(top, left) == (top, left, bottom, right):
+        named = self._name_of(item, top, left, bottom, right)
+        if named:
+            bar.name.setText(named)
+        elif (top, left) == (bottom, right) or item.sheet.merge_at(top, left) == (top, left, bottom, right):
             bar.name.setText(col_letters(self.active[1]) + str(self.active[0] + 1))
         else:
             bar.name.setText(f"{bottom - top + 1}R × {right - left + 1}C")
         if self.editor is None and QApplication.focusWidget() is not bar.edit:
             bar.edit.setText(item.sheet.input(*self.active))
+            # a spilled cell: its formula, greyed (Excel), from the cell it spills from
+            cell = item.sheet.cells.get(self.active)
+            anchor = cell.spill_from if cell is not None else None
+            bar.edit.setPlaceholderText(item.sheet.input(*anchor) if anchor else "")
 
     # -- the pointer ----------------------------------------------------------------------------
     def _zone(self, item: TableItem, local: QPointF):
@@ -1041,6 +1062,18 @@ class TableEditing:
     # point mode: a formula waiting for a reference at the caret
     _POINTABLE = re.compile(r"(^=|[-+*/^&=<>,(:;%]|\s)\s*$")
 
+    @staticmethod
+    def _name_of(item, top, left, bottom, right) -> Optional[str]:
+        """The defined name for exactly this block, if it has one (Excel's Name Box)."""
+        from ..sheet.refs import quote_sheet
+        ref = f"{quote_sheet(item.name)}!${col_letters(left)}${top + 1}"
+        if (top, left) != (bottom, right):
+            ref += f":${col_letters(right)}${bottom + 1}"
+        for dn in item.sheet.workbook.names.values():
+            if dn.refers_to.replace(" ", "").lower() == ref.lower():
+                return dn.name
+        return None
+
     def _pointing(self) -> bool:
         editor = self.editor
         if editor is None:
@@ -1271,6 +1304,13 @@ class TableEditing:
             from . import datatools
             datatools.comment_dialog(self)
             return True
+        if key == Qt.Key_F3 and ctrl:
+            from . import names
+            if shift:
+                names.ask_create_from_selection(self)       # Ctrl+Shift+F3
+            else:
+                names.name_manager(self)                    # Ctrl+F3
+            return True
         if key == Qt.Key_F2:
             self.begin_edit(None, enter_mode=False)
             return True
@@ -1320,6 +1360,8 @@ class TableEditing:
                                                   Qt.Key_0, Qt.Key_Home, Qt.Key_End, Qt.Key_Space,
                                                   Qt.Key_F, Qt.Key_H,
                                                   Qt.Key_Up, Qt.Key_Down, Qt.Key_Left, Qt.Key_Right):
+            return True
+        if mods & Qt.ControlModifier and key == Qt.Key_F3:
             return True
         if key in (Qt.Key_Delete, Qt.Key_Backspace, Qt.Key_F2, Qt.Key_Escape, Qt.Key_Return,
                    Qt.Key_Enter, Qt.Key_Tab, Qt.Key_Backtab, Qt.Key_Home, Qt.Key_End,
@@ -1432,6 +1474,8 @@ class TableEditing:
     def go_to(self, text: str) -> None:
         ref = parse_range(text.replace("$", ""))
         if ref is None:
+            from . import names
+            names.go_to_name(self, text)        # a name: go there, or name the selection
             return
         if isinstance(ref, CellRef):
             self.select((ref.row, ref.col))
@@ -1891,7 +1935,12 @@ class TableEditing:
         from . import datatools
         datatools.fill_menu(menu, self)
         menu.addSeparator()
-        menu.addAction("Define Name…", self._ask_name)
+        names_menu = menu.addMenu("Names")
+        names_menu.addAction("Define Name…", self._ask_name)
+        from . import names as _names
+        names_menu.addAction("Name Manager…", lambda: _names.name_manager(self), QKeySequence("Ctrl+F3"))
+        names_menu.addAction("Create from Selection…", lambda: _names.ask_create_from_selection(self),
+                             QKeySequence("Ctrl+Shift+F3"))
         if _is_run(item):
             self._page_layout_menu(menu, item)
             menu.addAction("Rename Sheet…", self.rename)

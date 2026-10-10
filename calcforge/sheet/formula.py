@@ -83,6 +83,10 @@ def tokenize(text: str) -> list[Token]:
                 if ref is not None:
                     out.append(Token("ref", whole, lead, i, ref))
                     i = m.end()
+                    if i < n and text[i] == "#" and isinstance(ref, CellRef) \
+                            and not _ERROR_RE.match(text, i):
+                        out.append(Token("#", "#", "", i))      # A1#: its spilled block
+                        i += 1
                     continue
         if ch == '"':
             j = i + 1
@@ -129,10 +133,21 @@ def tokenize(text: str) -> list[Token]:
             out.append(Token("unit", text[i:k], lead, i))
             i = k
             continue
+        if ch == "[":
+            end, spec = _structured(text, i, None)
+            out.append(Token("struct", text[i:end], lead, i, spec))
+            i = end
+            continue
         if ch.isalpha() or ch in "_\\" or ord(ch) > 127 and ch not in "°µμΩ·":
             m = _NAME_RE.match(text, i)
             j = m.end()
             word = m.group(0)
+            if j < n and text[j] == "[":
+                # Loads[Load]: a table's column by its heading
+                end, spec = _structured(text, j, word)
+                out.append(Token("struct", text[i:end], lead, i, spec))
+                i = end
+                continue
             # Sheet1!Name (a defined name on that sheet)
             if j < n and text[j] == "!":
                 m2 = _NAME_RE.match(text, j + 1)
@@ -174,6 +189,90 @@ def tokenize(text: str) -> list[Token]:
                 raise FormulaError(f"“{ch}” can't be used here.", i)
     out.append(Token("end", "", "", n))
     return out
+
+
+_SPECIALS = {"#all": "#All", "#data": "#Data", "#headers": "#Headers", "#totals": "#Totals",
+             "#this row": "@"}
+
+
+def _structured(text: str, start: int, table: Optional[str]) -> tuple:
+    """The end of a structured reference's brackets at *start*, and what it says."""
+    depth, k, n = 0, start, len(text)
+    while k < n:
+        ch = text[k]
+        if ch == "'" and k + 1 < n:
+            k += 2                          # an escaped [ ] # or '
+            continue
+        if ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+            if depth == 0:
+                break
+        k += 1
+    if depth != 0 or k >= n:
+        raise FormulaError("A table reference has no closing “]”.", start)
+    inner = text[start + 1:k]
+    specials: list = []
+    columns: list = []
+
+    def unescape(name: str) -> str:
+        return re.sub(r"'(.)", r"\1", name).strip()
+
+    def item(part: str) -> None:
+        part = part.strip()
+        if not part:
+            return
+        if part.startswith("[") and part.endswith("]") and "]:[" in part:
+            a, _, b = part[1:-1].partition("]:[")
+            columns.extend([unescape(a), unescape(b)])
+            return
+        if part.startswith("[") and part.endswith("]"):
+            part = part[1:-1]
+        if part.startswith("#"):
+            special = _SPECIALS.get(part.lower())
+            if special is None:
+                raise FormulaError(f"Unknown table part “{part}”.", start)
+            specials.append(special)
+            return
+        if part.startswith("@"):
+            specials.append("@")
+            rest = part[1:].strip()
+            if rest.startswith("[") and rest.endswith("]"):
+                rest = rest[1:-1]
+            if rest:
+                columns.append(unescape(rest))
+            return
+        columns.append(unescape(part))
+
+    if inner.strip().startswith("[") or inner.strip().startswith("@["):
+        # [[#Headers],[Load]] or [[Load]:[Span]] or [@[Load]]
+        if inner.strip().startswith("@"):
+            item(inner)
+        else:
+            parts, level, cur = [], 0, ""
+            for ch in inner:
+                if ch == "[":
+                    level += 1
+                elif ch == "]":
+                    level -= 1
+                if ch == "," and level == 0:
+                    parts.append(cur)
+                    cur = ""
+                else:
+                    cur += ch
+            parts.append(cur)
+            for part in parts:
+                part = part.strip()
+                if ":" in part and part.startswith("[") and part.endswith("]"):
+                    item(part)
+                else:
+                    item(part)
+    else:
+        item(inner)
+    first = columns[0] if columns else None
+    last = columns[-1] if columns else None
+    return k + 1, Structured(table, tuple(specials), first, last)
 
 
 def join(tokens: list[Token]) -> str:
@@ -229,6 +328,24 @@ class Area:
     last: Ref
     whole: str
     sheet: Optional[str]
+
+
+@dataclass(frozen=True)
+class SpillRef:
+    """A1#: the whole block the formula in A1 spills."""
+
+    ref: Ref
+
+
+@dataclass(frozen=True)
+class Structured:
+    """A table's columns by their headings (Excel's structured references):
+    Loads[Load], Loads[@Load], Loads[[#Headers],[Load]], Loads[[Load]:[Span]]."""
+
+    table: Optional[str]                # None: the table the formula is in
+    specials: tuple                     # "#All", "#Data", "#Headers", "#Totals", "@" (this row)
+    first: Optional[str] = None         # first column's heading (None: every column)
+    last: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -289,6 +406,7 @@ class Parsed:
     volatile: bool
     names: frozenset            # bare names it reads (defined names or document variables)
     functions: frozenset
+    tables: frozenset = frozenset()   # tables named in structured references
 
 
 VOLATILE = {"NOW", "TODAY", "RAND", "RANDBETWEEN", "RANDARRAY", "OFFSET", "INDIRECT", "CELL", "INFO"}
@@ -305,6 +423,7 @@ class _Parser:
         self.col = col
         self.names: set = set()
         self.functions: set = set()
+        self.tables: set = set()
 
     def peek(self, k=0) -> Token:
         return self.t[min(self.i + k, len(self.t) - 1)]
@@ -388,7 +507,11 @@ class _Parser:
         if kind == "ref":
             ref = tok.ref
             if isinstance(ref, CellRef):
-                return self._rel(ref, ref.sheet)
+                node = self._rel(ref, ref.sheet)
+                if self.peek().kind == "#":
+                    self.take()
+                    return SpillRef(node)
+                return node
             whole = ref.whole
             first, last = ref.first, ref.last
             return Area(self._rel(first, None), self._rel(last, None), whole, ref.sheet)
@@ -401,6 +524,10 @@ class _Parser:
             return Name(text, sheet)
         if kind == "func":
             return self.call(tok)
+        if kind == "struct":
+            if tok.ref.table:
+                self.tables.add(tok.ref.table)
+            return tok.ref
         if kind == "(":
             node = self.expr(0)
             self.expect(")")
@@ -542,7 +669,8 @@ def _compiled(signature: str, text: str, row: int, col: int) -> Parsed:
     tokens = tokenize(text)
     p = _Parser(tokens, row, col)
     tree = p.parse()
-    return Parsed(tree, bool(p.functions & VOLATILE), frozenset(p.names), frozenset(p.functions))
+    return Parsed(tree, bool(p.functions & VOLATILE), frozenset(p.names), frozenset(p.functions),
+                  frozenset(p.tables))
 
 
 def parse(text: str, row: int = 0, col: int = 0) -> Parsed:
@@ -555,7 +683,8 @@ def parse(text: str, row: int = 0, col: int = 0) -> Parsed:
         return hit
     p = _Parser(tokens, row, col)
     tree = p.parse()
-    parsed = Parsed(tree, bool(p.functions & VOLATILE), frozenset(p.names), frozenset(p.functions))
+    parsed = Parsed(tree, bool(p.functions & VOLATILE), frozenset(p.names), frozenset(p.functions),
+                    frozenset(p.tables))
     if len(_by_signature) > 50000:
         _by_signature.clear()
     _by_signature[sig] = parsed
@@ -572,6 +701,8 @@ def references(tree, row: int, col: int):
     out = []
 
     def walk(n):
+        if isinstance(n, SpillRef):
+            n = n.ref                       # the formula that spills (its block follows it)
         if isinstance(n, Ref):
             r, c = n.at(row, col)
             out.append((n.sheet, r, c, r, c))
@@ -635,8 +766,10 @@ def rename_sheet_in(text: str, old: str, new: str) -> str:
             if (unquote_sheet(sheet) or "").lower() == old.lower():
                 t.text = quote_sheet(new) + "!" + rest
                 changed = True
-        elif t.kind == "func" and False:
-            pass
+        elif t.kind == "struct" and t.ref.table and t.ref.table.lower() == old.lower():
+            t.text = new + t.text[len(t.ref.table):]
+            t.ref = replace(t.ref, table=new)
+            changed = True
     if not changed:
         return text
     # sheet names inside text arguments of INDIRECT are left alone, as Excel does

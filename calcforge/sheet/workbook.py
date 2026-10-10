@@ -24,7 +24,7 @@ from . import formula as F
 from .inputs import read_value
 from .refs import MAX_COLS, MAX_ROWS, CellRef, RangeRef, is_cell_name, parse_range
 from .style import Border, Style, StyleTable
-from .values import BLANK, NAME, REF, Array, ErrorValue, SheetError
+from .values import BLANK, NAME, REF, SPILL, Array, ErrorValue, SheetError
 
 
 # -- cells ---------------------------------------------------------------------------
@@ -65,6 +65,7 @@ class DefinedName:
     refers_to: str                       # formula text without "=", absolute refs
     sheet: Optional[int] = None          # sheet id when the name is local to one sheet
     comment: str = ""
+    home: Optional[int] = None           # the sheet it is saved with, when it names no cells
 
 
 class Sheet:
@@ -96,6 +97,11 @@ class Sheet:
         self.filter: Optional[dict] = None   # AutoFilter: {"range": [t,l,b,r], "criteria": {col: {...}}}
         self.filtered_rows: set = set()      # rows the filter hides
         self.page: dict = {}                 # a sheet section's page options (pagination.py)
+        # dynamic arrays: a formula whose result is a block spills it into the
+        # cells below and to the right (Excel 365)
+        self.spills: dict = {}               # anchor (row, col) -> (rows, cols) spilled
+        self.spill_values: dict = {}         # anchor -> the whole Array
+        self.wanted: dict = {}               # anchor -> (rows, cols) it would spill, spilled or not
         self.on_shift: list = []             # told (axis, at, delta) when rows/columns go in or out
 
     def __repr__(self) -> str:
@@ -343,6 +349,7 @@ class Workbook:
         self._in_pass = False
         self._changed: set = set()
         self._outside_reads: dict[tuple, set] = {}
+        self._spill_moved: list = []                 # spilled values that changed this pass
         self.version = 0                             # bumped whenever a value changes
         self._undo: list[_Transaction] = []
         self._redo: list[_Transaction] = []
@@ -463,9 +470,12 @@ class Workbook:
         self._recalc_if_auto()
 
     # -- defined names ----------------------------------------------------------------
-    def define_name(self, name: str, refers_to: str, sheet: Optional[Sheet] = None) -> None:
-        """Name a cell, block or constant: define_name("W_total", "Loads!$D$12")."""
-        problem = name_problem(name)
+    def define_name(self, name: str, refers_to: str, sheet: Optional[Sheet] = None,
+                    comment: str = "", home: Optional[Sheet] = None) -> None:
+        """Name a cell, block or constant: define_name("W_total", "Loads!$D$12").
+        *sheet* makes it local to that sheet; *home* is the sheet it is saved
+        with when it names no cells (g = 9.81)."""
+        problem = defined_name_problem(name)
         if problem:
             raise ValueError(problem)
         if refers_to.startswith("="):
@@ -473,7 +483,8 @@ class Workbook:
         F.parse(refers_to)              # raises FormulaError if it can't be read
         key = (name.lower(), sheet.id if sheet else None)
         with self.transaction("Define name"):
-            self._set_name(key, DefinedName(name, refers_to, sheet.id if sheet else None))
+            self._set_name(key, DefinedName(name, refers_to, sheet.id if sheet else None, comment,
+                                            (home or sheet).id if (home or sheet) else None))
 
     def remove_name(self, name: str, sheet: Optional[Sheet] = None) -> None:
         key = (name.lower(), sheet.id if sheet else None)
@@ -647,6 +658,8 @@ class Workbook:
         key = (sheet.id, row, col)
         cell = sheet.cells.get((row, col))
         same_input = cell is not None and cell.input == text
+        if not same_input:
+            self._spill_area_changed(sheet, row, col, cell, text)
         if not text and not style and not comment:
             sheet._drop(row, col)
             cell = None
@@ -674,6 +687,21 @@ class Workbook:
         if key in self.circular:
             self.circular.remove(key)
         self._recalc_if_auto()
+
+    def _spill_area_changed(self, sheet: Sheet, row: int, col: int, cell, text: str) -> None:
+        """Typing into (or clearing) a cell a formula spills, or would spill,
+        over: that formula is calculated again (it spills, or shows #SPILL!)."""
+        if (row, col) in sheet.wanted and not text.startswith("="):
+            self._unspill(sheet, (row, col))           # the spilling formula itself went
+        if cell is not None and cell.spill_from is not None:
+            anchor = cell.spill_from
+            cell.spill_from = None                     # typed over: its own cell now
+            cell.value = BLANK
+            self._dirty.add((sheet.id,) + anchor)
+        for anchor, (rows, cols) in list(sheet.wanted.items()):
+            if anchor != (row, col) and anchor[0] <= row < anchor[0] + rows \
+                    and anchor[1] <= col < anchor[1] + cols:
+                self._dirty.add((sheet.id,) + anchor)
 
     def _recalc_if_auto(self) -> None:
         if self.auto and self._open is None and not self._replaying and not self._in_pass:
@@ -721,6 +749,28 @@ class Workbook:
                         cells.append((target.id, top, left))
                     else:
                         blocks.append((target.id, top, left, bottom, right))
+        # structured references: the table's headings, and the columns (and
+        # rows) they name, as far down as the table may grow
+        for node in _structured_nodes(cell.parsed.tree):
+            target = sheet if node.table is None else self.sheet(node.table)
+            names.append((node.table or sheet.name).lower())
+            if target is None or target.size is None:
+                continue
+            width = target.size[1]
+            blocks.append((target.id, 0, 0, 0, width + 31))
+            left, right = 0, width + 31
+            if node.first is not None:
+                from .evaluate import heading_col
+                a = heading_col(target, node.first)
+                b = heading_col(target, node.last) if node.last is not None else a
+                if a is not None and b is not None:
+                    left, right = min(a, b), max(a, b)
+            if "@" in node.specials:
+                blocks.append((target.id, row, left, row, right))
+            elif set(node.specials) <= {"#Headers"} and node.specials:
+                pass
+            else:
+                blocks.append((target.id, 1, left, MAX_ROWS - 1, right))
         # sheets named in formulas: registered by name so a new or renamed
         # sheet brings them back
         self._deps.add(key, cells, blocks, names)
@@ -753,13 +803,13 @@ class Workbook:
             self._dirty.update(frontier)
 
     # -- outside names (the document's equations) ------------------------------------------------
-    def outside_changed(self, names: Optional[Iterable[str]] = None) -> None:
+    def outside_changed(self, names: Optional[Iterable[str]] = None) -> set:
         """Document variables changed: recalculate the cells that read them
-        (all that read any, when names is None)."""
+        (all that read any, when names is None). Returns the keys that changed."""
         lowered = None if names is None else {n.lower() for n in names}
         hit = [key for key, read in self._outside_reads.items() if lowered is None or read & lowered]
         self._dirty_many(hit, include_self=True)
-        self.recalculate()
+        return self.recalculate()
 
     def outside_names_read(self) -> set:
         out = set()
@@ -805,7 +855,22 @@ class Workbook:
                 if key not in self._done:
                     self._compute(key)
                     self._dirty.discard(key)
+            # spilled blocks that changed: what reads them, again (a few
+            # rounds at most: a spill that feeds itself settles or stops)
+            rounds = 0
+            while self._spill_moved and rounds < 20:
+                rounds += 1
+                moved, self._spill_moved = self._spill_moved, []
+                self._dirty.clear()
+                self._dirty_many(moved, include_self=False)
+                self._done -= self._dirty
+                order, loops = self._order()
+                for key in order:
+                    if key not in self._done:
+                        self._compute(key)
+                        self._dirty.discard(key)
         finally:
+            self._spill_moved = []
             self._dirty.clear()
             self._done.clear()
             self._in_pass = False
@@ -827,11 +892,25 @@ class Workbook:
         loops: set = set()
         sheets = {s.id: s for s in self.sheets}
 
+        def anchor_of(k):
+            """A spilled cell is calculated by the formula it spilled from."""
+            sheet = sheets.get(k[0])
+            ghost = sheet.cells.get(k[1:]) if sheet is not None else None
+            if ghost is not None and ghost.spill_from is not None:
+                a = (k[0],) + ghost.spill_from
+                if a in dirty:
+                    return a
+            return None
+
         def precedents(key):
             cells, blocks = self._precedents.get(key, ((), ()))
             for k in cells:
                 if k in dirty:
                     yield k
+                else:
+                    a = anchor_of(k)
+                    if a is not None:
+                        yield a
             for sid, top, left, bottom, right in blocks:
                 sheet = sheets.get(sid)
                 if sheet is None:
@@ -840,6 +919,10 @@ class Workbook:
                     k = (sid, row, col)
                     if k in dirty:
                         yield k
+                    else:
+                        a = anchor_of(k)
+                        if a is not None:
+                            yield a
 
         for start in list(dirty):
             if start in state:
@@ -899,9 +982,99 @@ class Workbook:
             self._outside_reads[key] = reads
         else:
             self._outside_reads.pop(key, None)
+        value = self._spill(sheet, key, value)
         if not _same(cell.value, value):
             cell.value = value
             self._changed.add(key)
+
+    # -- dynamic arrays ---------------------------------------------------------------------------
+    def _spill_blocked(self, sheet: Sheet, anchor: tuple, rows: int, cols: int) -> bool:
+        """Excel's #SPILL!: something is in the way (a value, another spill,
+        a merged cell), or the block runs off the sheet or out of its table."""
+        r, c = anchor
+        if r + rows > MAX_ROWS or c + cols > MAX_COLS:
+            return True
+        if sheet.size is not None and (r + rows > sheet.size[0] or c + cols > sheet.size[1]):
+            return True
+        for row, col in sheet.positions_in(r, c, r + rows - 1, c + cols - 1):
+            if (row, col) == anchor:
+                continue
+            other = sheet.cells[(row, col)]
+            if other.input or (other.spill_from is not None and other.spill_from != anchor):
+                return True
+        for m in sheet.merges:
+            if m[0] <= r + rows - 1 and m[2] >= r and m[1] <= c + cols - 1 and m[3] >= c:
+                return True
+        return False
+
+    def _spill(self, sheet: Sheet, key: tuple, value):
+        """Put a block result into the cells it spills over; what the formula's
+        own cell shows (its top-left value, or #SPILL!)."""
+        anchor = (key[1], key[2])
+        old = sheet.spills.pop(anchor, None)
+        old_values = sheet.spill_values.pop(anchor, None)
+        new = None
+        shown = value
+        if isinstance(value, Array) and value.height * value.width > 1:
+            size = (value.height, value.width)
+            sheet.wanted[anchor] = size
+            if self._spill_blocked(sheet, anchor, *size):
+                shown = SPILL
+            else:
+                new = size
+                shown = value.get(0, 0)
+                sheet.spills[anchor] = new
+                sheet.spill_values[anchor] = value
+        else:
+            sheet.wanted.pop(anchor, None)
+        if old is None and new is None:
+            return shown
+        r, c = anchor
+        moved = []
+        old_cells = set(_block(anchor, old)) if old else set()
+        new_cells = set(_block(anchor, new)) if new else set()
+        sid = sheet.id
+        for p in old_cells - new_cells:
+            ghost = sheet.cells.get(p)
+            if ghost is None or ghost.spill_from != anchor:
+                continue
+            ghost.spill_from = None
+            if ghost.value is not BLANK:
+                ghost.value = BLANK
+                moved.append((sid,) + p)
+            if ghost.empty():
+                sheet._drop(*p)
+        for p in new_cells:
+            v = value.get(p[0] - r, p[1] - c)
+            ghost = sheet.cells.get(p)
+            if ghost is None:
+                ghost = Cell()
+                sheet._put(p[0], p[1], ghost)
+            ghost.spill_from = anchor
+            if not _same(ghost.value, v):
+                ghost.value = v
+                moved.append((sid,) + p)
+        for k in moved:
+            self._changed.add(k)
+        if moved or old_values != sheet.spill_values.get(anchor) or old != new:
+            # whatever reads the spilled cells, or the block as A1#, again
+            self._spill_moved.extend(moved + [key])
+        return shown
+
+    def _unspill(self, sheet: Sheet, anchor: tuple) -> None:
+        """A formula that spilled is gone or changed: its spilled cells empty."""
+        if anchor in sheet.spills:
+            self._spill(sheet, (sheet.id,) + anchor, BLANK)
+        sheet.wanted.pop(anchor, None)
+
+    def spill_block(self, sheet: Sheet, row: int, col: int) -> Optional[tuple]:
+        """(top, left, bottom, right) of the spill a cell is part of, if any."""
+        cell = sheet.cells.get((row, col))
+        anchor = cell.spill_from if cell is not None and cell.spill_from else (row, col)
+        size = sheet.spills.get(anchor)
+        if size is None:
+            return None
+        return anchor[0], anchor[1], anchor[0] + size[0] - 1, anchor[1] + size[1] - 1
 
     def value(self, sheet: Sheet, row: int, col: int):
         """A cell's value, calculating it first if it is out of date (a
@@ -936,8 +1109,18 @@ class Workbook:
             if text != dn.refers_to:
                 self._set_name(key, replace(dn, refers_to=text))
 
+    def _clear_spills(self, sheet: Sheet) -> None:
+        """Before cells move about: every spill on the sheet is taken back and
+        its formula calculated again where it lands."""
+        for anchor in list(sheet.spills):
+            self._unspill(sheet, anchor)
+        for anchor in list(sheet.wanted):
+            sheet.wanted.pop(anchor, None)
+            self._dirty.add((sheet.id,) + anchor)
+
     def _move_cells(self, sheet: Sheet, mapping: Callable[[int, int], Optional[tuple]]) -> None:
         """Move every cell of the sheet to mapping(row, col) (None: deleted)."""
+        self._clear_spills(sheet)
         moves = []
         for (row, col), cell in list(sheet.cells.items()):
             to = mapping(row, col)
@@ -1439,6 +1622,31 @@ def _tidy_formula(text: str) -> str:
     return text
 
 
+def _structured_nodes(tree) -> list:
+    """The structured references in a formula's tree."""
+    out = []
+
+    def walk(n):
+        if isinstance(n, F.Structured):
+            out.append(n)
+            return
+        for child in getattr(n, "args", ()) or ():
+            walk(child)
+        for attr in ("left", "right", "arg"):
+            child = getattr(n, attr, None)
+            if child is not None:
+                walk(child)
+
+    walk(tree)
+    return out
+
+
+def _block(anchor: tuple, size: tuple):
+    for i in range(size[0]):
+        for j in range(size[1]):
+            yield anchor[0] + i, anchor[1] + j
+
+
 def value_as_input(value) -> str:
     """What to type to get this value back (Paste Values)."""
     from .values import Qty, general_number
@@ -1465,6 +1673,18 @@ def value_as_input(value) -> str:
     if isinstance(value, Array):
         return value_as_input(value.get(0, 0))
     return str(value)
+
+
+def defined_name_problem(name: str) -> Optional[str]:
+    """Why a name can't be a defined name (Excel's rules); None when it can."""
+    import re as _re
+    if not name:
+        return "A name can't be empty."
+    if not _re.match(r"^[A-Za-z_\\\u00c0-\uffff][\w.\u00c0-\uffff]*$", name):
+        return "A name starts with a letter or _ and has no spaces or symbols."
+    if is_cell_name(name) or name.upper() in ("R", "C", "TRUE", "FALSE"):
+        return f"{name} looks like a cell; choose another name."
+    return None
 
 
 def name_problem(name: str) -> Optional[str]:

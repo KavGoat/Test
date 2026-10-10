@@ -182,6 +182,10 @@ def ev(n, ctx: Ctx):
 
             return call(F.Call("VAR", (F.Name(n.name),)), ctx)   # VAR(named block)
         return _outside(n.name, ctx)
+    if t is F.SpillRef:
+        return _spill_ref(n, ctx)
+    if t is F.Structured:
+        return structured(n, ctx)
     if t is F.BadRef:
         return REF
     if t is F.ArrayLit:
@@ -226,6 +230,73 @@ def _area(n: F.Area, ctx: Ctx) -> RefValue:
     left, right = min(c1, c2), max(c1, c2)
     if top < 0 or left < 0 or bottom >= MAX_ROWS or right >= MAX_COLS:
         raise SheetError(REF)
+    return RefValue(sheet, top, left, bottom, right)
+
+
+def _spill_ref(n: F.SpillRef, ctx: Ctx) -> RefValue:
+    """A1#: the block A1's formula spills (#REF! when it spills nothing)."""
+    sheet = _sheet_of(n.ref.sheet, ctx)
+    row, col = n.ref.at(ctx.row, ctx.col)
+    ctx.wb.value(sheet, row, col)               # calculated first
+    size = sheet.spills.get((row, col))
+    if size is not None:
+        return RefValue(sheet, row, col, row + size[0] - 1, col + size[1] - 1)
+    cell = sheet.cells.get((row, col))
+    if cell is not None and cell.is_formula and (row, col) not in sheet.wanted:
+        return RefValue(sheet, row, col, row, col)
+    raise SheetError(REF)
+
+
+def table_for(n: F.Structured, ctx: Ctx):
+    sheet = ctx.sheet if n.table is None else ctx.wb.sheet(n.table)
+    if sheet is None or sheet.kind != "table" or not sheet.size:
+        raise SheetError(REF)
+    return sheet
+
+
+def heading_col(sheet, heading: str) -> Optional[int]:
+    """The column whose heading (first row) is *heading* (any case)."""
+    from .numfmt import format_value
+
+    wanted = heading.strip().lower()
+    for c in range(sheet.size[1]):
+        cell = sheet.cells.get((0, c))
+        if cell is None:
+            continue
+        text = cell.value if isinstance(cell.value, str) else format_value(cell.value).text
+        if str(text).strip().lower() == wanted:
+            return c
+    return None
+
+
+def structured(n: F.Structured, ctx: Ctx) -> RefValue:
+    """Loads[Load], Loads[@Load], Loads[[#Headers],[Load]]...: a block of
+    the table, its first row being the headings (Excel's tables)."""
+    sheet = table_for(n, ctx)
+    rows, cols = sheet.size
+    if n.first is None:
+        left, right = 0, cols - 1
+    else:
+        a = heading_col(sheet, n.first)
+        b = heading_col(sheet, n.last) if n.last is not None else a
+        if a is None or b is None:
+            raise SheetError(REF)
+        left, right = min(a, b), max(a, b)
+    specials = set(n.specials) or {"#Data"}
+    if "#Totals" in specials:
+        raise SheetError(REF)                    # a table here has no totals row
+    if "@" in specials:
+        if ctx.sheet is not sheet or not 1 <= ctx.row < rows:
+            raise SheetError(VALUE)
+        top = bottom = ctx.row
+    elif "#All" in specials or {"#Headers", "#Data"} <= specials:
+        top, bottom = 0, rows - 1
+    elif "#Headers" in specials:
+        top = bottom = 0
+    else:
+        top, bottom = 1, rows - 1
+        if bottom < top:
+            raise SheetError(REF)
     return RefValue(sheet, top, left, bottom, right)
 
 

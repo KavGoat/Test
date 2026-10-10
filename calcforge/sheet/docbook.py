@@ -95,8 +95,8 @@ class DocumentBook:
             return
         self._parked[uid] = sheet
         from .store import names_homed_on
-        for name, _refers in names_homed_on(sheet):
-            self.workbook.names.pop((name.lower(), None), None)
+        for name, _refers, local, _comment in names_homed_on(sheet):
+            self.workbook.names.pop((name.lower(), sheet.id if local else None), None)
             self.workbook._name_dirty(name.lower())
         if sheet in self.workbook.sheets:
             self.workbook.sheets.remove(sheet)

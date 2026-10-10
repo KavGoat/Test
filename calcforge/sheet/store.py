@@ -44,6 +44,8 @@ def sheet_to_dict(sheet) -> dict:
     styles = [{}]
     cells = []
     for (row, col), cell in sorted(sheet.cells.items()):
+        if cell.empty():
+            continue                    # a spilled value: its formula makes it again
         index = local.get(cell.style)
         if index is None:
             index = len(styles)
@@ -71,8 +73,9 @@ def sheet_to_dict(sheet) -> dict:
 
 
 def names_homed_on(sheet) -> list:
-    """The defined names whose cells are on this sheet: they are kept, saved
-    and undone with it."""
+    """The defined names kept, saved and undone with this sheet: those whose
+    cells are on it, and those naming no cells that were made here.
+    Each: [name, refers to, local to this sheet, comment]."""
     from . import formula as F
 
     out = []
@@ -81,10 +84,13 @@ def names_homed_on(sheet) -> list:
             tokens = F.tokenize(dn.refers_to)
         except F.FormulaError:
             continue
-        first = next((t for t in tokens if t.kind == "ref"), None)
-        if first is not None and first.ref.sheet is not None and \
-                first.ref.sheet.lower() == sheet.name.lower():
-            out.append([dn.name, dn.refers_to])
+        first = next((t for t in tokens if t.kind == "ref" and t.ref.sheet is not None), None)
+        if first is not None:
+            homed = first.ref.sheet.lower() == sheet.name.lower()
+        else:
+            homed = (dn.home if dn.home is not None else dn.sheet) == sheet.id
+        if homed:
+            out.append([dn.name, dn.refers_to, dn.sheet == sheet.id, dn.comment])
     return out
 
 
@@ -122,11 +128,15 @@ def load_sheet(sheet, data: dict) -> None:
                 sheet.filter["criteria"] = {int(k): v for k, v in sheet.filter.get("criteria", {}).items()}
             sheet.filtered_rows = set(data.get("filtered_rows", []))
             sheet.page = _copy.deepcopy(data.get("page", {}))
-            for name, refers_to in data.get("names", []):
-                key = (name.lower(), None)
+            for entry in data.get("names", []):
+                name, refers_to = entry[0], entry[1]
+                local = bool(entry[2]) if len(entry) > 2 else False
+                comment = entry[3] if len(entry) > 3 else ""
+                key = (name.lower(), sheet.id if local else None)
                 if key not in wb.names:
                     from .workbook import DefinedName
-                    wb.names[key] = DefinedName(name, refers_to)
+                    wb.names[key] = DefinedName(name, refers_to, sheet.id if local else None,
+                                                comment or "", sheet.id)
                     wb._name_dirty(key[0])
     finally:
         wb.journal = journal

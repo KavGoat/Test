@@ -55,6 +55,10 @@ here is new.
 | Markups over a sheet page | Move with cells (Excel's "move but don't size with cells"): a markup stays on the cell it was drawn over when rows/columns are inserted, deleted or resized. |
 | Empty pages at the end of a run | Kept: pages added stay until deleted in the Pages panel (the run still grows when typing past its last page). |
 | Row numbers and column letters on sheet pages | Always on screen, in both modes, like Excel; printing follows each sheet's own switch. |
+| Where charts go (phase 5) | Anywhere: a chart is its own item, on a sheet page over the cells (moving with them, like Excel) or on any normal page beside the equations; it reads a range of any sheet or table; it moves like a markup in Markup mode. |
+| Chart types (phase 5) | The engineering subset, done well: XY scatter (markers, lines, both), line and column; log axes, error bars and trendlines. |
+| Structured references (phase 5) | Excel's full syntax on tables, the first row being the headings: `Loads[Load]`, `Loads[@Load]`, `Loads[[#Headers],[Load]]`, `Loads[#All]`, `Loads[#Data]`, `Loads[[Load]:[Span]]`; they follow renames and grow with the table. |
+| Chart look (phase 5) | Excel's default (2016 and later): Office colours, light grey gridlines, title on top, legend at the bottom; units from the cells shown in the axis titles. |
 | Build order | 1 engine and formulas · 2 table markup with editing, fill, copy, formatting · 3 conditional formatting and data tools · 4 sheet pages, page breaks, scratch area · 5 charts, spill, named ranges · 6 xlsx. Each phase tested, pushed and reported. |
 
 ## Settled while building (small; recorded so they can be changed)

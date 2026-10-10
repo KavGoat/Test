@@ -628,6 +628,16 @@ class TableItem(MarkupItem):
             tri.lineTo(mid + QPointF(0, 1.8))
             tri.closeSubpath()
             painter.drawPath(tri)
+        if self.opened and self.active is not None:
+            # a dynamic array's block: Excel's thin blue frame while one of its
+            # cells is the active one
+            block = sheet.workbook.spill_block(sheet, *self.active)
+            if block is not None:
+                pen = QPen(QColor("#2f75b5"), 1.0)
+                pen.setCosmetic(True)
+                painter.setPen(pen)
+                painter.setBrush(Qt.NoBrush)
+                painter.drawRect(self.block_rect(*block))
         if self.circles:
             pen = QPen(QColor("#e03131"), 1.2)
             painter.setPen(pen)
