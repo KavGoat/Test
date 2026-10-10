@@ -121,10 +121,14 @@ def test_print_area_and_titles():
     assert (paging.first_col, paging.last_col) == (1, 4)
     assert paging.print_rows == (2, 80)
     assert paging.titles == (0, 1)
-    # the pages after the first hold fewer rows: the titles repeat on them
+    # the print area starts below the titles, so they repeat on every page,
+    # the first too (Excel), and each page holds two rows fewer for them
     first = paging.slices[0][1] - paging.slices[0][0] + 1
     second = paging.slices[1][1] - paging.slices[1][0] + 1
-    assert second == first - 2
+    wb.set_page_options(sheet, titles=None)
+    plain = paginate(sheet, a4())
+    bare = plain.slices[1][1] - plain.slices[1][0] + 1
+    assert first == second == bare - 2
 
 
 def test_page_options_move_with_rows_and_are_saved():
