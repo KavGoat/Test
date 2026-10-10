@@ -552,7 +552,14 @@ class PagesPanel(QWidget):
             self.list.set_external_drop_row(self._hover_row)
 
     def _a_page_is_waiting(self) -> bool:
-        text = QApplication.clipboard().text() or ""
+        board = QApplication.clipboard()
+        if QApplication.platformName() not in ("offscreen", "minimal") and \
+                not board.ownsClipboard():
+            # only a page copied here can be waiting; somebody else's clipboard
+            # is not opened to find out (Excel holds it a moment after a copy,
+            # and Windows then says "Retrying to obtain clipboard", 2026-10-10)
+            return False
+        text = board.text() or ""
         return text.startswith('{"calcforge_page"') and \
             self.window.page_on_the_clipboard() is not None
 

@@ -217,3 +217,30 @@ def test_every_spreadsheet_command_can_be_bound(w):
     press(Qt.Key_ParenLeft, Qt.ControlModifier | Qt.ShiftModifier)
     assert table.sheet.height(2) > 0
     w.shortcuts.reset()
+
+
+def test_slow_downs_are_recorded_with_what_was_running(w, tmp_path, monkeypatch):
+    """Help ▸ Record slow-downs: a stall is written down with the code that
+    was running, in a file beside the crash log."""
+    import time
+    from PySide6.QtWidgets import QApplication
+    import calcforge.app as app_module
+    from calcforge.ui import stallwatch
+    monkeypatch.setattr(app_module, "crash_log_path", lambda: str(tmp_path / "crash.log"))
+    w.interactive_prompts = False
+    w.act_record_slowdowns.setChecked(True)
+
+    def slow_paint():
+        time.sleep(0.25)
+    end = time.perf_counter() + 0.1
+    while time.perf_counter() < end:
+        QApplication.processEvents()
+    slow_paint()
+    end = time.perf_counter() + 0.1
+    while time.perf_counter() < end:
+        QApplication.processEvents()
+    w.act_record_slowdowns.setChecked(False)
+    text = (tmp_path / "slowdowns.log").read_text(encoding="utf-8")
+    assert "1 stalls" in text or "stalls over" in text
+    assert "test_review_findings.py:test_slow_downs" in text or "slow_paint" in text
+    assert stallwatch._running is None

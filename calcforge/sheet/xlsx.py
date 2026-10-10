@@ -341,6 +341,16 @@ def read_workbook(path: str, taken: Optional[set] = None) -> Imported:
     """Every worksheet of an .xlsx as a sheet's record; *taken*: the names
     already used in the document (a worksheet so named is renamed, and the
     formulas reading it follow)."""
+    import warnings
+    with warnings.catch_warnings():
+        # openpyxl says on the console what it drops; the newer validations
+        # it can't read are read here instead (_x14_validations), and what
+        # can't come across at all is said in the window
+        warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
+        return _read_workbook(path, taken)
+
+
+def _read_workbook(path: str, taken: Optional[set] = None) -> Imported:
     import openpyxl
     from openpyxl.utils import range_boundaries
 
@@ -349,6 +359,7 @@ def read_workbook(path: str, taken: Optional[set] = None) -> Imported:
         cached = openpyxl.load_workbook(path, data_only=True, read_only=True)
     except Exception:  # noqa: BLE001
         cached = None
+    newer = _x14_validations(path)
     theme = _theme_colours(wb)
     try:
         base = wb._fonts[0]
@@ -482,7 +493,8 @@ def read_workbook(path: str, taken: Optional[set] = None) -> Imported:
                               else True),
             "headings": bool(ws.print_options.headings) if ws.print_options else False,
             "names": [], "cond_rules": _cond_rules(ws, theme, renamed),
-            "validations": _validations(ws, renamed), "filter": None, "filtered_rows": [],
+            "validations": _validations(ws, renamed, newer.get(ws.title, ())),
+            "filter": None, "filtered_rows": [],
             "page": page,
         }
         setup = ws.page_setup
@@ -675,11 +687,81 @@ def _rule(rule, theme, renamed) -> Optional[dict]:
     return None
 
 
-def _validations(ws, renamed) -> list:
+_X14 = "{http://schemas.microsoft.com/office/spreadsheetml/2009/9/main}"
+_XM = "{http://schemas.microsoft.com/office/excel/2006/main}"
+
+
+def _sheet_parts(archive) -> dict:
+    """{worksheet name: its part in the .xlsx}."""
+    import posixpath
+    import xml.etree.ElementTree as ET
+    main = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+    rel = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+    try:
+        book = ET.fromstring(archive.read("xl/workbook.xml"))
+        rels = ET.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
+    except (KeyError, ET.ParseError):
+        return {}
+    targets = {r.get("Id"): r.get("Target", "") for r in rels}
+    out = {}
+    for sheet in book.iter(main + "sheet"):
+        target = targets.get(sheet.get(rel + "id"), "")
+        if target:
+            path = target.lstrip("/") if target.startswith("/") else posixpath.normpath(
+                posixpath.join("xl", target))
+            out[sheet.get("name")] = path
+    return out
+
+
+def _x14_validations(path: str) -> dict:
+    """{worksheet name: its newer data validations} — the ones Excel writes in
+    its 2010 extension (a list from another sheet, typically), which openpyxl
+    drops with "Data Validation extension is not supported"."""
+    import xml.etree.ElementTree as ET
+    import zipfile
+    from types import SimpleNamespace
+    out: dict = {}
+    try:
+        archive = zipfile.ZipFile(path)
+    except (OSError, zipfile.BadZipFile):
+        return out
+    with archive:
+        for name, part in _sheet_parts(archive).items():
+            try:
+                data = archive.read(part)
+            except KeyError:
+                continue
+            if b"x14:dataValidation" not in data and b"dataValidations" not in data:
+                continue
+            try:
+                root = ET.fromstring(data)
+            except ET.ParseError:
+                continue
+            found = []
+            for dv in root.iter(_X14 + "dataValidation"):
+                def formula(tag):
+                    node = dv.find(f"{_X14}{tag}/{_XM}f")
+                    return node.text if node is not None else None
+                sqref = dv.find(_XM + "sqref")
+                yes = lambda key: dv.get(key) in ("1", "true")      # noqa: E731
+                found.append(SimpleNamespace(
+                    type=dv.get("type"), allow_blank=yes("allowBlank"),
+                    showDropDown=yes("showDropDown"), promptTitle=dv.get("promptTitle"),
+                    prompt=dv.get("prompt"), errorStyle=dv.get("errorStyle"),
+                    errorTitle=dv.get("errorTitle"), error=dv.get("error"),
+                    operator=dv.get("operator"), formula1=formula("formula1"),
+                    formula2=formula("formula2"),
+                    sqref=sqref.text if sqref is not None else ""))
+            if found:
+                out[name] = found
+    return out
+
+
+def _validations(ws, renamed, extra=()) -> list:
     from openpyxl.utils import range_boundaries
     out = []
     dv_list = getattr(ws, "data_validations", None)
-    for dv in (dv_list.dataValidation if dv_list is not None else []):
+    for dv in list(dv_list.dataValidation if dv_list is not None else []) + list(extra):
         ranges = []
         for part in str(dv.sqref).split():
             try:

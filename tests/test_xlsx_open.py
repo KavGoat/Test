@@ -241,6 +241,43 @@ def test_excels_print_scaling_comes_across(tmp_path):
     assert not any("scale" in what for what in got.left_out)
 
 
+def test_excels_newer_validations_come_across_without_a_warning(tmp_path):
+    """A list from another sheet is written in Excel's 2010 extension, which
+    openpyxl drops with a warning on the console; it is read here instead."""
+    import shutil
+    import warnings
+    import zipfile
+    path = str(tmp_path / "lists.xlsx")
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Input"
+    lists = wb.create_sheet("Lists")
+    for i, v in enumerate(["C25", "C32", "C40"], 1):
+        lists.cell(i, 1, v)
+    wb.save(path)
+    ext = ('<extLst><ext uri="{CCE6A557-97BC-4b89-ADB6-D9C93CAAB3DF}" '
+           'xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main">'
+           '<x14:dataValidations count="1" xmlns:xm="http://schemas.microsoft.com/office/excel/2006/main">'
+           '<x14:dataValidation type="list" allowBlank="1" showErrorMessage="1" '
+           'errorTitle="Grade" error="Pick a grade"><x14:formula1><xm:f>Lists!$A$1:$A$3</xm:f>'
+           '</x14:formula1><xm:sqref>B2:B10</xm:sqref></x14:dataValidation></x14:dataValidations>'
+           '</ext></extLst>')
+    patched = str(tmp_path / "patched.xlsx")
+    with zipfile.ZipFile(path) as src, zipfile.ZipFile(patched, "w") as out:
+        for item in src.infolist():
+            data = src.read(item.filename)
+            if item.filename == "xl/worksheets/sheet1.xml":
+                data = data.decode().replace("</worksheet>", ext + "</worksheet>").encode()
+            out.writestr(item, data)
+    shutil.copy(patched, path)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")                 # nothing said on the console
+        got = read_workbook(path)
+    (rule,) = got.sheets[0].data["validations"]
+    assert rule["type"] == "list" and rule["source"] == "=Lists!$A$1:$A$3"
+    assert rule["ranges"] == [[1, 1, 9, 1]] and rule["blank"] and rule["error"] == "Pick a grade"
+
+
 def test_charts_and_pictures_are_left_out_and_said(tmp_path):
     path = a_workbook(str(tmp_path / "chart.xlsx"), with_chart=True)
     got = read_workbook(path)

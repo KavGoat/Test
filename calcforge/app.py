@@ -50,11 +50,48 @@ def apply_theme(application: QApplication, theme: str) -> None:
     app_settings().setValue("theme", theme)
 
 
+def crash_log_path() -> str:
+    from PySide6.QtCore import QStandardPaths
+    folder = QStandardPaths.writableLocation(QStandardPaths.AppLocalDataLocation) or \
+        os.path.expanduser("~")
+    return os.path.join(folder, "crash.log")
+
+
+def keep_a_crash_log():
+    """A record of how each run ended, in crash.log beside CalcForge's other
+    files: a Python error with its traceback, a hard crash with where every
+    thread was, or "closed normally". A window that just vanished leaves
+    nothing behind otherwise (2026-10-10)."""
+    import datetime
+    import faulthandler
+    import traceback
+    path = crash_log_path()
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        if os.path.exists(path) and os.path.getsize(path) > 2_000_000:
+            os.replace(path, path + ".old")
+        log = open(path, "a", encoding="utf-8")
+    except OSError:
+        return None
+    log.write(f"\n--- CalcForge started {datetime.datetime.now():%Y-%m-%d %H:%M:%S}\n")
+    log.flush()
+    faulthandler.enable(log, all_threads=True)
+    before = sys.excepthook
+
+    def told(kind, value, trace):
+        log.write("".join(traceback.format_exception(kind, value, trace)))
+        log.flush()
+        before(kind, value, trace)
+    sys.excepthook = told
+    return log
+
+
 def main(argv: list[str] | None = None) -> int:
     import multiprocessing
     multiprocessing.freeze_support()
     argv = list(sys.argv if argv is None else argv)
     application = build_application(argv)
+    log = keep_a_crash_log()
 
     from .ui.mainwindow import MainWindow
     window = MainWindow()
@@ -69,4 +106,8 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"Could not open {argument}: {exc}", file=sys.stderr)
             break
 
-    return application.exec()
+    code = application.exec()
+    if log is not None:
+        log.write(f"--- closed normally ({code})\n")
+        log.close()
+    return code

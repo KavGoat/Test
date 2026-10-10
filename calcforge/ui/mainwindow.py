@@ -969,6 +969,8 @@ class MainWindow(QMainWindow):
         self._act("contents", "Contents", self.insert_contents_block,
                   tip="Insert a table of contents built from document bookmarks")
         self._act("about", f"About {APP_NAME}", self.show_about)
+        self._act("record_slowdowns", "Record slow-downs", self.record_slowdowns, checkable=True,
+                  tip="Note what the window was doing whenever it stalled, in a file to send back")
 
     def _add_toolbar(self, bar) -> None:
         """Toolbars go on any edge, and remember where they were put."""
@@ -1796,6 +1798,7 @@ class MainWindow(QMainWindow):
         help_menu = bar.addMenu("&Help")
         help_menu.addAction(self.act_find_tool)
         help_menu.addSeparator()
+        help_menu.addAction(self.act_record_slowdowns)
         help_menu.addAction(self.act_about)
 
     def _build_status(self) -> None:
@@ -4061,9 +4064,15 @@ class MainWindow(QMainWindow):
             self.mark_modified()
 
     def refresh_scale_label(self) -> None:
+        from shiboken6 import isValid
+        if not isValid(self.status_scale):
+            return                      # a last scroll as the window closes
         panel = getattr(self, "page_panel", None)
-        if panel is not None:
-            panel.refresh()
+        if panel is not None and isValid(panel):
+            try:
+                panel.refresh()
+            except RuntimeError:        # its fields already gone with the window
+                pass
         scale = self.current_page().scale
         self.status_scale.setText(f"Scale {scale.label}")
         self.status_scale.setToolTip(
@@ -4221,6 +4230,11 @@ class MainWindow(QMainWindow):
             action.setVisible(key == "stamp")
         for action in getattr(self, "_count_widgets", ()):
             action.setVisible(key == "count")
+
+    def record_slowdowns(self, on: bool) -> None:
+        """Help ▸ Record slow-downs (ui/stallwatch.py)."""
+        from . import stallwatch
+        stallwatch.toggle(self, on)
 
     def set_scroll_mode(self, mode: str) -> None:
         """Choose smooth document scrolling or one-page wheel navigation."""

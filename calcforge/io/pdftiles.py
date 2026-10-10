@@ -258,7 +258,12 @@ class _Worker(QThread):
             slot['pipe'].close()
             slot['memory'].close()
             slot['memory'].unlink()
-            process.close()
+            # joined once it has ended, which also takes it off multiprocessing's
+            # list of children: closed while still on it, Python's exit tried
+            # to join it again ("process object is closed" at every exit)
+            process.join(1.0)
+            if process.exitcode is not None:
+                process.close()
 
         with tempfile.TemporaryDirectory(prefix='calcforge-render-') as folder:
             try:
