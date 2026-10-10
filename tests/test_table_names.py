@@ -9,7 +9,15 @@ from PySide6.QtCore import Qt
 
 from calcforge.sheet.refs import parse_cell
 from calcforge.ui import names
-from tests.test_tables import enter, key, make_table, pump, type_text, w  # noqa: F401
+from tests.test_tables import enter, key, make_table, pump, type_text
+
+
+@pytest.fixture
+def w(window):
+    window.show()
+    window.activateWindow()
+    window.view.set_zoom(1.0)
+    return window
 
 
 def put(table, a1, text):

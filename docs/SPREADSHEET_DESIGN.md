@@ -123,6 +123,18 @@ here is new.
   a sheet page's markups are drawn with its cells into the calc layer and kept
   in the record instead of being written as annotations.
 
+* **Phase 5, small things settled while building:** a spilled block may not
+  run out of a table (its size is fixed by dragging its edge), so it is
+  `#SPILL!` there; standard-deviation error bars are drawn round the series'
+  mean with the sample standard deviation, as Excel draws them; R² of an
+  exponential or power trendline is that of the logarithms (as Excel); a
+  chart's title is the series' name when it has one series and none
+  otherwise; when the series have different units the axis title shows none;
+  a trendline's equation goes in the corner of the plot the points leave
+  clearest; deleting a defined name a cell still reads leaves it reading the
+  same word as a unit if it is one (`g` is then grams), as names come before
+  units.
+
 ## Tables on pages (phase 2)
 
 * `items/table.py` — the table markup. Calc layer, printed, saved as page

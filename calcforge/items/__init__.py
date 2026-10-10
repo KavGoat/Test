@@ -16,6 +16,7 @@ from . import shapes         # noqa: F401
 from . import snapshot       # noqa: F401
 from . import table          # noqa: F401
 from . import sheetpage      # noqa: F401
+from . import chart          # noqa: F401
 from . import text           # noqa: F401
 
 from .base import MarkupItem, Style, build_item   # noqa: F401

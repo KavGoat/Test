@@ -751,6 +751,10 @@ class MainWindow(QMainWindow):
                   tip="Drag out a table on the page: the rows and columns follow the "
                       "size you drag. Excel's formulas, formats and units in its cells; "
                       "the equations can read its values")
+        self._act("insert_chart", "Chart", lambda: self.insert_chart(),
+                  tip="A chart of the cells picked out in a table: XY scatter, line or "
+                      "column, with log axes, error bars and trendlines (double-click it "
+                      "to change it)")
         self._act("calc_rules", "Conditional Formatting…", self.conditional_formatting_rules,
                   tip="Presets of rules that colour and size equations by their result "
                       "(DCR > 1 red…), and which variable names use them")
@@ -1766,7 +1770,8 @@ class MainWindow(QMainWindow):
         for action in (self.act_calculate, self.act_auto_calc,
                        None, self.act_insert_plot, self.act_insert_matrix,
                        self.act_insert_calc_text, self.act_insert_block,
-                       self.act_insert_table, self.act_insert_function, self.act_calc_rules,
+                       self.act_insert_table, self.act_insert_chart, self.act_insert_function,
+                       self.act_calc_rules,
                        self.act_constants, None):
             calc_menu.addSeparator() if action is None else calc_menu.addAction(action)
         calc_menu.addAction(self.act_insert_operator)
@@ -3070,6 +3075,15 @@ class MainWindow(QMainWindow):
                 page.setup = PageSetup.from_dict(setup.to_dict())
             self.current_index = target
         self._structural_change("Add page" if count == 1 else f"Add {count} pages", mutate)
+
+    def _edit_chart(self, chart) -> None:
+        from .chartdialog import edit_chart
+        edit_chart(self, chart)
+
+    def insert_chart(self, kind: str = "scatter", lines: bool = False, markers: bool = True):
+        """Insert ▸ Chart: a chart of the cells picked out in the open table."""
+        from .chartdialog import insert_chart
+        return insert_chart(self.view.tables, kind, lines, markers)
 
     def insert_sheet_page(self, index: Optional[int] = None, before: bool = False) -> None:
         """A page of spreadsheet cells (ui/sheetpages.py)."""
@@ -7659,6 +7673,10 @@ class MainWindow(QMainWindow):
             menu.addAction("Edit Cells", lambda: self.view.tables.open(item))
             rename = menu.addAction("Rename Table…", lambda: self._rename_table(item))
             rename.setEnabled(not item.locked)
+            menu.addSeparator()
+        if item is not None and getattr(item, "TYPE", "") == "chart":
+            edit = menu.addAction("Edit Chart…", lambda: self._edit_chart(item))
+            edit.setEnabled(not item.locked)
             menu.addSeparator()
         if item is not None and getattr(item, "TYPE", "") == "calc_block":
             contained = menu.addAction("Self-contained")

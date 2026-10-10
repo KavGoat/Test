@@ -50,10 +50,24 @@ def _alive(item) -> bool:
 
 def _frames(item) -> list:
     """The pages a change to a table's cells can touch: its own, or every
-    page of a spreadsheet (its markups move with the cells)."""
+    page of a spreadsheet (its markups move with the cells), and those of
+    the charts that read it (their ranges follow moved rows)."""
     if getattr(item, "SHEET_RUN", False):
-        return item.run_frames() or [item.parentItem()]
-    return [item.parentItem()]
+        frames = list(item.run_frames() or [item.parentItem()])
+    else:
+        frames = [item.parentItem()]
+    sheet = item.sheet
+    scene = item.scene()
+    if sheet is not None and scene is not None:
+        from ..sheet.chartdata import sheets_read
+        for frame in getattr(scene, "frames", []) or []:
+            if frame in frames:
+                continue
+            for other in frame.markups():
+                if getattr(other, "TYPE", "") == "chart" and sheet.name.lower() in sheets_read(other.spec):
+                    frames.append(frame)
+                    break
+    return frames
 
 
 def _is_run(item) -> bool:
@@ -706,6 +720,9 @@ class TableEditing:
             return False
         item = self.item
         if item is None:
+            top = self.view.markup_at(scene_pos)
+            if top is not None and not isinstance(top, TableItem):
+                return False                 # a markup or chart over the cells: its own
             target = self.table_at(scene_pos)
             if target is None or not self.view.editable(target):
                 return False
@@ -1935,6 +1952,12 @@ class TableEditing:
         from . import datatools
         datatools.fill_menu(menu, self)
         menu.addSeparator()
+        charts = menu.addMenu("Insert Chart")
+        window = self.view.window
+        charts.addAction("XY Scatter", lambda: window.insert_chart("scatter", False, True))
+        charts.addAction("Scatter with Lines", lambda: window.insert_chart("scatter", True, True))
+        charts.addAction("Line", lambda: window.insert_chart("line", True, False))
+        charts.addAction("Column", lambda: window.insert_chart("column", False, False))
         names_menu = menu.addMenu("Names")
         names_menu.addAction("Define Name…", self._ask_name)
         from . import names as _names

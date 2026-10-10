@@ -2069,7 +2069,8 @@ class PageView(QGraphicsView):
             frame = scene.frame_at(self.markup_box(item).center())
             if frame is None or item.parentItem() is frame:
                 continue
-            if getattr(item, "IS_CALC", False) and getattr(frame.page, "sheet", None) is not None:
+            if getattr(item, "IS_CALC", False) and not getattr(item, "SHEET_PAGE_OK", False) \
+                    and getattr(frame.page, "sheet", None) is not None:
                 # equations and tables do not go on spreadsheet pages
                 self.statusMessage.emit("Equations and tables don't go on spreadsheet pages")
                 continue
@@ -3079,6 +3080,14 @@ class PageView(QGraphicsView):
         if self.tables.mouse_double_click(event, scene_pos):
             event.accept()
             return
+        # A chart: its dialog (type, titles, axes, series, error bars, trendlines)
+        if event.button() == Qt.LeftButton:
+            hit = self.markup_at(scene_pos)
+            if getattr(hit, "TYPE", "") == "chart" and self.editable(hit):
+                from .chartdialog import edit_chart
+                edit_chart(self.window, hit)
+                event.accept()
+                return
         # A closed calculation block opens, as a text box does, and the
         # double-click goes on to what is under it inside.
         if event.button() == Qt.LeftButton:
@@ -5246,6 +5255,14 @@ class PageView(QGraphicsView):
             event.accept()
             return
         item = self.markup_at(scene_pos)
+        if getattr(item, "SHEET_RUN", False):
+            # a spreadsheet page's cells: its own menu, on the cell clicked
+            cell = item.cell_at(item.mapFromScene(scene_pos))
+            if cell is not None:
+                self.tables.open(item, cell)
+                self.tables.context_menu(event.globalPos())
+            event.accept()
+            return
         if item is not None and not item.isSelected():
             self.scene().clearSelection()
             item.setSelected(True)

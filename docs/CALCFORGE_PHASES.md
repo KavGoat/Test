@@ -1110,3 +1110,53 @@ always show on screen.
   an equation dropped there stays where it was) and tables.
 
 Tests: `tests/sheet/test_pagination.py` (8), `tests/test_sheet_pages.py` (16).
+
+## Spreadsheets, phase 5 — charts, dynamic arrays and named ranges (2026-10-10)
+
+Answers by pop-up: a chart goes anywhere (a sheet page over its cells, or any
+page beside the equations) and reads any sheet or table; the engineering
+chart types — XY scatter, line, column — with log axes, error bars and
+trendlines; Excel's full structured-reference syntax on tables; Excel's
+default chart look with the cells' units in the axis titles.
+
+* **Dynamic arrays**: a formula whose result is a block (SEQUENCE, FILTER,
+  SORT, UNIQUE, a range…) spills into the cells below and to the right; the
+  spilled cells are read like any other; a thin blue frame shows the block
+  while one of its cells is active, and the formula bar shows its formula
+  greyed. Anything in the way — a value, another spill, a merged cell, the
+  edge of a table — makes it `#SPILL!` until it is cleared. `A1#` is the
+  whole block (`=SUM(A1#)`, `=SORT(A1#)`). Spilled values are not saved:
+  their formula makes them again.
+* **Structured references** on tables, the first row being the headings:
+  `Loads[Load]`, `Loads[@Load]` (this row), `[@Span]` inside the table,
+  `Loads[[#Headers],[Load]]`, `Loads[#All]`, `Loads[#Data]`, `Loads[]`,
+  `Loads[[Load]:[Span]]`; they grow with the table and follow its renames
+  (a table has no totals row, so `#Totals` is `#REF!`).
+* **Named ranges**: the Name Box names the selection (type a new name and
+  Enter) and goes to a name (type it, or its ▾ list); right-click ▸ Names ▸
+  Define Name…, Name Manager… (Ctrl+F3: New, Edit, Delete; name, value,
+  refers to, scope, comment) and Create from Selection… (Ctrl+Shift+F3: top
+  row, left column, bottom row, right column — "Load (kN)" becomes
+  `Load_kN`). Names follow Excel's rules (no spaces, not like a cell), keep
+  their scope and comment, and are saved and undone with the sheet whose
+  cells they name (a constant with the sheet it was made on). The equations
+  read a named block as a vector.
+* **Charts** (Calculation ▸ Chart, or right-click a table ▸ Insert Chart ▸ XY
+  Scatter / Scatter with Lines / Line / Column): the cells picked out are read
+  as Excel reads them — headings as series names, the first column as x (or
+  the categories) — and the chart goes beside the table, or over the cells to
+  the right on a sheet page. Excel's look: Office colours, light grey
+  gridlines, title on top, legend at the bottom, axis titles with the cells'
+  units. Double-click (or right-click ▸ Edit Chart…) for type, titles,
+  legend, each axis's bounds, major unit, log scale and gridlines, and each
+  series' name and cells, y error bars (fixed, percentage, standard
+  deviation, standard error, custom ranges; both/plus/minus), x error bars on
+  scatter charts, and a trendline (linear with an optional intercept,
+  polynomial of order 2–6, exponential, logarithmic, power, moving average)
+  with its equation and R². A chart follows its cells as they change, and its
+  ranges follow renames and inserted or deleted rows; it prints and exports
+  with the page (CalcForge's drawn layer, not an annotation) and moves like a
+  markup.
+
+Tests: `tests/sheet/test_dynamic_arrays.py` (9), `tests/sheet/test_chartdata.py`
+(9), `tests/test_table_names.py` (6), `tests/test_charts.py` (7).

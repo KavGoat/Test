@@ -350,6 +350,9 @@ class Workbook:
         self._changed: set = set()
         self._outside_reads: dict[tuple, set] = {}
         self._spill_moved: list = []                 # spilled values that changed this pass
+        # ranges kept outside the cells (a chart's series): they follow renames
+        # and moved rows and columns like formulas (formula_texts / set_formula_texts)
+        self.outside_formulas: list = []
         self.version = 0                             # bumped whenever a value changes
         self._undo: list[_Transaction] = []
         self._redo: list[_Transaction] = []
@@ -446,6 +449,11 @@ class Workbook:
                 text = F.rename_sheet_in(dn.refers_to, old, new)
                 if text != dn.refers_to:
                     self._set_name(key, replace(dn, refers_to=text))
+            for holder in list(self.outside_formulas):
+                texts = holder.formula_texts()
+                moved = [F.rename_sheet_in(t, old, new) if t else t for t in texts]
+                if moved != texts:
+                    holder.set_formula_texts(moved)
 
             def apply(name, s=sheet):
                 s.name = name
@@ -1108,6 +1116,17 @@ class Workbook:
             text = F.rewrite(dn.refers_to, lambda ref, s, h=home: change(ref, self.sheet(s) if s else h))
             if text != dn.refers_to:
                 self._set_name(key, replace(dn, refers_to=text))
+        for holder in list(self.outside_formulas):
+            texts = holder.formula_texts()
+            moved = []
+            for t in texts:
+                try:
+                    moved.append(F.rewrite(t, lambda ref, s: change(ref, self.sheet(s) if s else None))
+                                 if t else t)
+                except F.FormulaError:
+                    moved.append(t)
+            if moved != texts:
+                holder.set_formula_texts(moved)
 
     def _clear_spills(self, sheet: Sheet) -> None:
         """Before cells move about: every spill on the sheet is taken back and
