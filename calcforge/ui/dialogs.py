@@ -1427,6 +1427,10 @@ class PreferencesDialog(QDialog):
 
         writing = QGroupBox("Writing")
         form = QFormLayout(writing)
+        self.author = QLineEdit(getattr(prefs, "author", ""))
+        self.author.setToolTip("The name new markups are signed with; saved PDFs carry it\n"
+                               "as each markup's author")
+        form.addRow("Author", self.author)
         self.autosize = QCheckBox("Autosize text")
         self.autosize.setToolTip("A text box grows to fit what is typed")
         self.autosize.setChecked(prefs.autosize_text)
@@ -1484,6 +1488,7 @@ class PreferencesDialog(QDialog):
 
         return prefs_module.Preferences(
             wheel=self.wheel.currentData(),
+            author=self.author.text().strip(),
             check_spelling=self.spelling.isChecked(),
             dictionary=self.dictionary.currentData(),
             snap_while_drawing=self.snapping.isChecked(),

@@ -4939,6 +4939,10 @@ class MainWindow(QMainWindow):
         """
         self._apply_toolbar_style(item)
         toolsets.apply_default(item)
+        if not item.author:
+            # signed with the person's name, as Bluebeam signs a new markup
+            from . import preferences
+            item.author = preferences.current().author
 
     def set_as_default(self, item: MarkupItem) -> None:
         """Draw the next markup of this kind the way this one is drawn."""

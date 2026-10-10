@@ -12,6 +12,7 @@ somewhere you have to visit before you can start.
 from __future__ import annotations
 
 from dataclasses import dataclass, fields
+from dataclasses import field as _field
 
 from PySide6.QtCore import QSettings
 
@@ -24,12 +25,27 @@ WHEEL_ZOOM = "zoom"
 WHEEL_SCROLL = "scroll"
 
 
+def login_name() -> str:
+    """The name the computer knows its user by: what Bluebeam signs markups with."""
+    import getpass
+    import os
+    try:
+        return getpass.getuser()
+    except Exception:  # noqa: BLE001 — no login name to be had
+        return os.environ.get("USERNAME") or os.environ.get("USER") or ""
+
+
 @dataclass
 class Preferences:
     """Every preference, its type and its default, in one place."""
 
     wheel: str = WHEEL_ZOOM
     """Whether a notch of the wheel zooms (as Bluebeam does) or scrolls."""
+
+    author: str = _field(default_factory=login_name)
+    """The name new markups are signed with (the login name to begin with,
+    as Bluebeam does; 2026-10-10). Saved PDFs carry it as each annotation's
+    author."""
 
     check_spelling: bool = True
     """Whether words typed on the page are checked against the dictionary."""

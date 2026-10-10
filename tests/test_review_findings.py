@@ -42,3 +42,33 @@ def test_a_blank_pages_thumbnail_has_an_edge(w):
     corner, middle = image.pixelColor(0, image.height() // 2), image.pixelColor(image.width() // 2,
                                                                                image.height() // 2)
     assert middle.name() == "#ffffff" and corner.name() != "#ffffff", "white page, grey edge"
+
+
+def test_new_markups_are_signed_with_the_persons_name(w, tmp_path, monkeypatch):
+    """Answered 2026-10-10: as Bluebeam, a new markup carries the login name
+    as its author (Preferences can change it), and the saved PDF says so."""
+    import pymupdf
+
+    from calcforge.ui import preferences
+    from tests.test_tables import page_to_scene
+    from tests.test_usability import drag
+    prefs = preferences.current()
+    monkeypatch.setattr(prefs, "author", "J. Engineer")
+    w.select_tool("rect")
+    a, b = page_to_scene(w, 80, 100), page_to_scene(w, 200, 140)
+    w.view.centerOn(a)
+    drag(w.view, a.x(), a.y(), b.x(), b.y())
+    pump()
+    (box,) = [i for i in w.document.pages[0].frame.markups() if isinstance(i, RectItem)]
+    assert box.author == "J. Engineer"
+    path = str(tmp_path / "signed.pdf")
+    w.document.path = path
+    assert w.save_document()
+    with pymupdf.open(path) as pdf:
+        authors = [annot.info.get("title") for annot in pdf[0].annots()]
+    assert "J. Engineer" in authors
+
+
+def test_the_author_preference_starts_as_the_login_name():
+    from calcforge.ui.preferences import Preferences, login_name
+    assert Preferences().author == login_name() != ""
