@@ -489,7 +489,10 @@ def test_the_markups_list_lives_under_the_drawing(window):
     assert "dock_markups" not in panels(window)
     split = window.bottom_split
     assert split.orientation() == Qt.Vertical
-    assert split.widget(0) is window.view and split.widget(1) is window.markups_panel
+    # the drawing's pane holds the canvas and, along its foot, the sheet tabs
+    canvas = split.widget(0)
+    assert canvas.isAncestorOf(window.view) and canvas.isAncestorOf(window.sheet_tabs)
+    assert split.widget(1) is window.markups_panel
     assert split.isCollapsible(1) and not split.isCollapsible(0)
     window.resize(1200, 900)
     window.show_markups_list(True)
