@@ -280,3 +280,147 @@ class UnitList:
 
     def visible(self) -> bool:
         return self.list.isVisible()
+
+
+class ResultUnit(QLineEdit):
+    """SMath's unit box on a selected cell's result, typed into (the user's
+    choice, 2026-10-11): click the black box after a quantity — or its unit,
+    once one is set — and type the unit to show it in, with SMath's list of
+    units as in an equation's result box. Enter (or leaving it) sets it, Esc
+    leaves it as it was, blank goes back to the unit as typed."""
+
+    def __init__(self, tables):
+        from ..calc.ui.suggest import SuggestionList
+        super().__init__(tables.view.viewport())
+        self.tables = tables
+        self.setObjectName("resultUnit")
+        self.setFrame(False)
+        self.setStyleSheet("QLineEdit { background: white; color: #0000ff; "
+                           "border: 1px solid #217346; padding: 0px 1px; }")
+        self.list = SuggestionList(tables.view)
+        self.list.hide()
+        self.list.itemClicked.connect(lambda _i: self._take())
+        self.textEdited.connect(lambda _t: self._offer())
+        self.cell = None
+        self._done = True
+        self.hide()
+
+    def open(self, item, cell, rect) -> None:
+        """Over *rect* (of *item*), for cell *cell*."""
+        self.cell = (item.uid, cell)
+        st = item.sheet.workbook.style_of(item.sheet, *cell)
+        view = self.tables.view
+        box = view.mapFromScene(item.mapToScene(rect)).boundingRect()
+        font = self.font()
+        font.setPixelSize(max(9, int(box.height() * 0.9)))
+        self.setFont(font)
+        width = max(48, int(self.fontMetrics().horizontalAdvance((st.unit or "") + "WW")))
+        self.setGeometry(box.left() - 1, box.center().y() - self.sizeHint().height() // 2,
+                         width, self.sizeHint().height())
+        self.setText(st.unit or "")
+        self._done = False
+        self.show()
+        self.raise_()
+        self.setFocus()
+        self.selectAll()
+
+    def _offer(self) -> None:
+        from ..calc.ui.suggest import selected_index, unit_box_entries
+        word = self.text()[:self.cursorPosition()]
+        m = re.search(r"[A-Za-zµμΩ°%_][\wµμΩ°%]*$", word)
+        if m is None:
+            self.list.hide()
+            self.list.tooltip.hide()
+            return
+        from ..sheet.values import is_unit_text
+        found = [e for e in unit_box_entries(m.group(0)) if is_unit_text(e.text)]
+        custom = UnitList(self.tables)._custom()
+        from ..calc.ui.suggest import Suggestion
+        found = [Suggestion(n, n, "unit", 3, 0, d) for n, d in sorted(custom.items())
+                 if n.lower().startswith(m.group(0).lower())] + found
+        if not found:
+            self.list.hide()
+            self.list.tooltip.hide()
+            return
+        self._start = m.start()
+        s = self.list
+        s.fill(found, selected_index(found, m.group(0)))
+        rows = min(s.count(), 8)
+        row = max(s.sizeHintForRow(0), s.fontMetrics().height() + 2)
+        s.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn if s.count() > rows else Qt.ScrollBarAlwaysOff)
+        s.setFixedSize(max(90, s.sizeHintForColumn(0) + 40), row * rows + 4)
+        s.move(self.mapToGlobal(QPoint(0, self.height() + 1)))
+        s.show()
+        s.raise_()
+        s.show_tooltip()
+
+    def _take(self) -> None:
+        it = self.list.currentItem()
+        if it is None:
+            return
+        e = it.data(Qt.UserRole)
+        text, caret = self.text(), self.cursorPosition()
+        self.setText(text[:self._start] + e.text + text[caret:])
+        self.setCursorPosition(self._start + len(e.text))
+        self.list.hide()
+        self.list.tooltip.hide()
+
+    def keyPressEvent(self, event) -> None:
+        s = self.list
+        key = event.key()
+        if s.isVisible():
+            if key in (Qt.Key_Down, Qt.Key_Up):
+                row = s.currentRow()
+                row = (0 if key == Qt.Key_Down else s.count() - 1) if row < 0 else \
+                    max(0, min(s.count() - 1, row + (1 if key == Qt.Key_Down else -1)))
+                s.activated = True
+                s.setCurrentRow(row)
+                return
+            if key == Qt.Key_Tab or (key in (Qt.Key_Return, Qt.Key_Enter) and s.activated):
+                self._take()
+                return
+            if key == Qt.Key_Escape:
+                s.hide()
+                s.tooltip.hide()
+                return
+        if key in (Qt.Key_Return, Qt.Key_Enter):
+            self.finish(True)
+            return
+        if key == Qt.Key_Escape:
+            self.finish(False)
+            return
+        super().keyPressEvent(event)
+
+    def focusOutEvent(self, event) -> None:
+        super().focusOutEvent(event)
+        if event.reason() not in (Qt.PopupFocusReason, Qt.ActiveWindowFocusReason):
+            self.finish(True)
+
+    def finish(self, keep: bool) -> None:
+        if self._done:
+            return
+        self._done = True
+        self.list.hide()
+        self.list.tooltip.hide()
+        text = self.text().strip()
+        self.hide()
+        tables = self.tables
+        tables.view.setFocus()
+        if not keep or self.cell is None:
+            return
+        uid, cell = self.cell
+        item = tables.item
+        if item is None or item.uid != uid:
+            return
+        from ..sheet.values import UnitTextError, unit_parts
+        st = item.sheet.workbook.style_of(item.sheet, *cell)
+        if text:
+            try:
+                unit_parts(text)
+            except UnitTextError:
+                tables.view.statusMessage.emit(f"“{text}” is not a unit")
+                return
+        if (st.unit or "") == text:
+            return
+        tables.select(cell)
+        tables.format(unit=text or None)

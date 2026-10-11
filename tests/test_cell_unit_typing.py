@@ -118,3 +118,66 @@ def test_custom_units_are_offered_and_written_smaths_way(v):
     pump()
     got = table.sheet.workbook.value(table.sheet, 0, 0)
     assert isinstance(got, Qty) and got.si == 10000.0
+
+
+def test_the_result_unit_box_on_the_selected_cell(window):
+    """SMath's unit box after the selected cell's result (the user's choice,
+    2026-10-11): black after a quantity, typed into to show it in another
+    unit, with SMath's list; blank goes back to the unit as typed; only
+    while selected, never printed."""
+    from PySide6.QtGui import QKeyEvent
+    from PySide6.QtWidgets import QApplication
+    from tests.test_tables import cell_scene, click
+    w = window
+    w.show()
+    w.view.set_zoom(2.0)
+    table = make_table(w)
+    wb = table.sheet.workbook
+    wb.set_input(table.sheet, 0, 0, "5000 N")
+    wb.set_input(table.sheet, 1, 0, "12")
+    tables = w.view.tables
+    tables.select((1, 0))
+    assert table.unit_box_rect(1, 0) is None, "a plain number has no unit box"
+    tables.select((0, 0))
+    pump()
+    kind, rect = table.unit_box_rect(0, 0)
+    assert kind == "box" and rect.left() > table.cell_rect(0, 0).right() - 4
+    # drawn on screen while selected, black
+    image = w.view.viewport().grab().toImage()
+    spot = w.view.mapFromScene(table.mapToScene(rect.center()))
+    assert image.pixelColor(spot) == QColor("#000000")
+    w.view.centerOn(table.mapToScene(rect.center()))
+    pump()
+    click(w, table.mapToScene(rect.center()))
+    box = tables._result_unit
+    assert box is not None and box.isVisible() and box.text() == ""
+    for ch in "kN":
+        QApplication.sendEvent(box, QKeyEvent(QKeyEvent.KeyPress, 0, Qt.NoModifier, ch))
+        pump()
+    assert box.list.isVisible() and box.list.currentItem().text() == "kN"
+    box.list.hide()
+    QApplication.sendEvent(box, QKeyEvent(QKeyEvent.KeyPress, Qt.Key_Return, Qt.NoModifier))
+    pump()
+    assert not box.isVisible()
+    assert wb.style_of(table.sheet, 0, 0).unit == "kN"
+    kind, rect = table.unit_box_rect(0, 0)
+    assert kind == "unit", "set: the unit itself is the box"
+    # its unit clicked: typed into again; blank goes back to as typed
+    click(w, table.mapToScene(rect.center()))
+    assert box.isVisible() and box.text() == "kN"
+    box.clear()
+    QApplication.sendEvent(box, QKeyEvent(QKeyEvent.KeyPress, Qt.Key_Return, Qt.NoModifier))
+    pump()
+    assert wb.style_of(table.sheet, 0, 0).unit in (None, "")
+    # Esc leaves it as it was; not a unit is refused
+    kind, rect = table.unit_box_rect(0, 0)
+    click(w, table.mapToScene(rect.center()))
+    box.setText("frobs")
+    QApplication.sendEvent(box, QKeyEvent(QKeyEvent.KeyPress, Qt.Key_Return, Qt.NoModifier))
+    pump()
+    assert wb.style_of(table.sheet, 0, 0).unit in (None, "")
+    w.undo_stack.undo()
+    pump()
+    from calcforge.items.table import TableItem
+    (table,) = [i for i in w.view.scene().items() if type(i) is TableItem]
+    assert table.sheet.workbook.style_of(table.sheet, 0, 0).unit == "kN", "one undo step each"

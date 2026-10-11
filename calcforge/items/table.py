@@ -618,6 +618,51 @@ class TableItem(MarkupItem):
         painter.drawText(QPointF(x, y), text)
         painter.restore()
 
+    def unit_box_rect(self, r: int, c: int) -> Optional[tuple]:
+        """SMath's unit box after a quantity's result (the user's choice,
+        2026-10-11): (kind, rect in this item) — "box", the black placeholder
+        just after the text when no output unit is set, or "unit", the unit
+        part of the text when one is — or None when the cell holds no quantity
+        shown plainly (wrapped, turned or ####)."""
+        cell = self.sheet.cells.get((r, c)) if self.sheet is not None else None
+        if cell is None or not isinstance(cell.value, Qty):
+            return None
+        st = self._shown_style(r, c)
+        if st.wrap or st.rotation or st.shrink:
+            return None
+        shown = format_value(cell.value, st.number_format, st.unit)
+        text = shown.text
+        if not text:
+            return None
+        rect = self.cell_rect(r, c)
+        metrics = _metrics(st)
+        width = metrics.horizontalAdvance(text)
+        align = st.h_align if st.h_align not in ("general", "fill", "centerAcross") else "right"
+        indent = st.indent * 7.5
+        inner = rect.adjusted(PAD + (indent if align == "left" else 0), 0,
+                              -PAD - (indent if align == "right" else 0), 0)
+        if width > inner.width():
+            return None                                # shown as ####
+        x = inner.left() if align == "left" else (
+            inner.right() - width if align == "right" else rect.center().x() - width / 2)
+        v = {"top": Qt.AlignTop, "center": Qt.AlignVCenter}.get(st.v_align, Qt.AlignBottom)
+        if v == Qt.AlignTop:
+            y = rect.top() + PAD / 2 + metrics.ascent()
+        elif v == Qt.AlignVCenter:
+            y = rect.center().y() + (metrics.ascent() - metrics.descent()) / 2
+        else:
+            y = rect.bottom() - PAD / 2 - metrics.descent()
+        px = metrics.height() / 1.15
+        if st.unit and text.endswith(st.unit):
+            left = x + metrics.horizontalAdvance(text[:len(text) - len(st.unit)])
+            return "unit", QRectF(left, y - metrics.ascent(), x + width - left,
+                                  metrics.ascent() + metrics.descent())
+        # the box of SMath's "H" glyph (5 x 7 px at 10 pt, 3 px left
+        # bearing), centred on the middle of the text's x-height
+        w, h = px * 0.376, px * 0.526
+        middle = y - metrics.xHeight() * 0.5
+        return "box", QRectF(x + width + px * 0.225 + 1.0, middle - h / 2, w, h)
+
     def _paint_turned(self, painter, rect, text, st, v) -> None:
         painter.save()
         painter.setClipRect(rect)

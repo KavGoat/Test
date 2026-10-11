@@ -682,6 +682,9 @@ class TableEditing:
                 return True
             return False
         item = self.item
+        if item is not None and event.button() == Qt.LeftButton and \
+                self._press_result_unit(item, item.mapFromScene(scene_pos)):
+            return True
         if item is not None:
             local = item.mapFromScene(scene_pos)
             inside = item.chrome_rect().contains(local) or item.tab_rect().contains(local)
@@ -1520,6 +1523,29 @@ class TableEditing:
         if editor.cursorPosition() != end or editor.text()[start:end] == "" :
             self.point = None
 
+    _result_unit = None
+
+    def _result_unit_open(self) -> bool:
+        box = self._result_unit
+        return box is not None and box.isVisible()
+
+    def _press_result_unit(self, item, local: QPointF) -> bool:
+        """A click on SMath's unit box after the active cell's result (or
+        on its unit): the box is typed into."""
+        if self.editor is not None or self.active is None:
+            return False
+        got = item.unit_box_rect(*self.active)
+        if got is None:
+            return False
+        tol = 3.0 / max(self.view.transform().m11(), 0.05)
+        if not got[1].adjusted(-tol, -tol, tol, tol).contains(local):
+            return False
+        if self._result_unit is None:
+            from .cellunits import ResultUnit
+            self._result_unit = ResultUnit(self)
+        self._result_unit.open(item, self.active, got[1])
+        return True
+
     def _paint_overlay(self, painter: QPainter) -> None:
         """The references of the formula being typed, each in its colour on
         its cells, as Excel shows them; and the copied block's dashed edge."""
@@ -1559,6 +1585,11 @@ class TableEditing:
             painter.setBrush(Qt.NoBrush)
             painter.drawRect(box)
         editor = self.editor
+        if editor is None and self.active is not None and not self._result_unit_open():
+            # SMath's black unit box after the selected cell's quantity
+            got = item.unit_box_rect(*self.active)
+            if got is not None and got[0] == "box":
+                painter.fillRect(got[1], QColor("#000000"))
         if editor is None or not editor.text().startswith("="):
             return
         spans = F.reference_spans(editor.text()[1:])
