@@ -671,15 +671,18 @@ def test_the_page_panel_has_the_spreadsheets_page_layout(w):
     assert w.document.pages[1].setup.margin_left == pytest.approx(0.7 * 25.4)
 
 
-def test_sheet_tabs_go_to_every_sheet_and_table(w):
-    """Excel's tabs under the canvas: each sheet and table in reading order,
-    a click goes there, the tab follows what is in view, + adds a sheet, a
-    sheet's tab dragged along moves its pages."""
+def test_sheet_tabs_go_to_every_sheet_and_not_tables(w):
+    """Excel's tabs under the canvas: each sheet in reading order, a click
+    goes there, the tab follows the sheet in view, + adds a sheet, a tab
+    dragged along moves the sheet's pages. Tables have no tab (the user,
+    2026-10-11: "Tables don't need tabs")."""
     from tests.test_tables import make_table
     tabs = w.sheet_tabs
     assert tabs.isHidden(), "nothing to show yet"
-    table = make_table(w)
+    make_table(w)
     w.view.tables.close()
+    w.refresh_lists()
+    assert tabs.isHidden() and tabs.entries == [], "a table alone gets no tab"
     w.insert_sheet_page(0)                  # Sheet1 on page 2
     pump()
     pump()
@@ -688,23 +691,23 @@ def test_sheet_tabs_go_to_every_sheet_and_table(w):
     pump()
     w.refresh_lists()
     assert not tabs.isHidden()
-    kinds = [k for k, _u, _n in tabs.entries]
-    assert kinds == ["table", "sheet", "sheet"]
+    assert len(tabs.entries) == 2 and tabs.bar.count() == 2
     assert len(w.document.pages) == 3
     sheets = [p.sheet for p in w.document.pages]
     assert sheets[1] != sheets[2] and None not in sheets[1:]
-    tabs.go(2)
+    assert [uid for uid, _n in tabs.entries] == sheets[1:]
+    tabs.go(1)
     pump()
-    assert w.current_index == 2 and tabs.bar.currentIndex() == 2
+    assert w.current_index == 2 and tabs.bar.currentIndex() == 1
     tabs.go(0)
     pump()
-    assert table.isSelected()
-    # drag the last sheet's tab before the first sheet's: its page moves up
+    assert w.current_index == 1 and tabs.bar.currentIndex() == 0
+    # drag the last sheet's tab before the first: its page moves up
     second = sheets[2]
-    tabs.bar.moveTab(2, 1)
+    tabs.bar.moveTab(1, 0)
     pump()
     assert w.document.pages[1].sheet == second
-    assert [k for k, _u, _n in tabs.entries][1:] == ["sheet", "sheet"]
+    assert [uid for uid, _n in tabs.entries] == [second, sheets[1]]
 
 
 def test_pages_across_sit_side_by_side_and_print_their_own_columns(w):

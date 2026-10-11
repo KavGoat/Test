@@ -1,9 +1,10 @@
-"""Excel's sheet tabs, under the canvas: every spreadsheet and table in the
-document, in reading order (the user's choice, 2026-10-11: a tab strip that
-navigates — each sheet stays on its own printed pages).
+"""Excel's sheet tabs, under the canvas: every spreadsheet in the document,
+in reading order (the user's choice, 2026-10-11: a tab strip that navigates
+— each sheet stays on its own printed pages). Tables have none (the user,
+2026-10-11: "Tables don't need tabs").
 
-A click goes to it, the tab of what is in view is the current one, a
-double-click renames, a sheet's tab dragged along moves its run of pages,
+A click goes to it, the tab of the sheet in view is the current one, a
+double-click renames, a tab dragged along moves the sheet's run of pages,
 and + adds a new sheet at the end.
 """
 from __future__ import annotations
@@ -13,7 +14,6 @@ from typing import Optional
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QHBoxLayout, QMenu, QTabBar, QToolButton, QWidget
 
-SHEET, TABLE = "sheet", "table"
 
 
 class SheetTabs(QWidget):
@@ -21,7 +21,7 @@ class SheetTabs(QWidget):
         super().__init__()
         self.window = window
         self.setObjectName("sheetTabs")
-        self.entries: list = []                 # (kind, uid, name)
+        self.entries: list = []                 # (run uid, name)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(4, 0, 4, 0)
         layout.setSpacing(2)
@@ -49,25 +49,17 @@ class SheetTabs(QWidget):
     def _found(self) -> list:
         from shiboken6 import isValid
 
-        from ..items.sheetpage import SheetRunItem, run_item_for
-        from ..items.table import TableItem
+        from ..items.sheetpage import run_item_for
         out, seen = [], set()
-        document = self.window.document
-        for page in document.pages:
+        for page in self.window.document.pages:
+            if page.sheet is None or page.sheet in seen:
+                continue
+            seen.add(page.sheet)
             frame = page.frame
             if frame is not None and not isValid(frame):
                 frame = None                    # its page being rebuilt: no frame yet
-            if page.sheet is not None and page.sheet not in seen:
-                seen.add(page.sheet)
-                run = run_item_for(frame) if frame is not None else None
-                name = run.name if run is not None else "Sheet"
-                out.append((SHEET, page.sheet, name))
-            if frame is None:
-                continue
-            for item in sorted((i for i in frame.markups() if isinstance(i, TableItem)
-                                and not isinstance(i, SheetRunItem)),
-                               key=lambda i: (i.pos().y(), i.pos().x())):
-                out.append((TABLE, item.uid, item.name))
+            run = run_item_for(frame) if frame is not None else None
+            out.append((page.sheet, run.name if run is not None else "Sheet"))
         return out
 
     def refresh(self) -> None:
@@ -81,26 +73,22 @@ class SheetTabs(QWidget):
             self.bar.blockSignals(True)
             while self.bar.count():
                 self.bar.removeTab(0)
-            for kind, _uid, name in found:
-                index = self.bar.addTab(("▦ " if kind == SHEET else "▤ ") + name)
-                self.bar.setTabToolTip(index, f"{'Spreadsheet' if kind == SHEET else 'Table'} {name}")
+            for _uid, name in found:
+                index = self.bar.addTab("▦ " + name)
+                self.bar.setTabToolTip(index, f"Spreadsheet {name}")
             self.bar.blockSignals(False)
         self.setVisible(bool(found))
         self.follow()
 
     def follow(self) -> None:
-        """The tab of the open table, or of the spreadsheet page in view."""
+        """The tab of the spreadsheet page in view."""
         window = self.window
-        tables = window.view.tables
         wanted: Optional[str] = None
-        if tables.item is not None:
-            wanted = tables.item.uid if not getattr(tables.item, "SHEET_RUN", False) else None
-        if wanted is None:
-            pages = window.document.pages
-            index = window.current_index
-            if 0 <= index < len(pages):
-                wanted = pages[index].sheet
-        for i, (_kind, uid, _name) in enumerate(self.entries):
+        pages = window.document.pages
+        index = window.current_index
+        if 0 <= index < len(pages):
+            wanted = pages[index].sheet
+        for i, (uid, _name) in enumerate(self.entries):
             if uid == wanted:
                 self.bar.blockSignals(True)
                 self.bar.setCurrentIndex(i)
@@ -109,29 +97,20 @@ class SheetTabs(QWidget):
 
     # -- going there --------------------------------------------------------------------
     def _item(self, uid: str):
-        from ..items.table import TableItem
+        from ..items.sheetpage import SheetRunItem
         for frame in getattr(self.window.scene, "frames", []) or []:
             for item in frame.markups():
-                if isinstance(item, TableItem) and item.uid == uid:
+                if isinstance(item, SheetRunItem) and item.uid == uid:
                     return item
         return None
 
     def go(self, index: int) -> None:
         if not 0 <= index < len(self.entries):
             return
-        kind, uid, _name = self.entries[index]
+        uid, _name = self.entries[index]
         window = self.window
-        if kind == SHEET:
-            first = next(i for i, page in enumerate(window.document.pages) if page.sheet == uid)
-            window.go_to_page(first)
-        else:
-            item = self._item(uid)
-            if item is None:
-                return
-            window.view.tables.close()
-            window.view.scene().clearSelection()
-            item.setSelected(True)
-            window.view.centerOn(item)
+        first = next(i for i, page in enumerate(window.document.pages) if page.sheet == uid)
+        window.go_to_page(first)
         self.follow()
 
     def _clicked(self, index: int) -> None:
@@ -141,7 +120,7 @@ class SheetTabs(QWidget):
     def _rename(self, index: int) -> None:
         if not 0 <= index < len(self.entries):
             return
-        kind, uid, name = self.entries[index]
+        uid, name = self.entries[index]
         item = self._item(uid)
         if item is None:
             return
@@ -149,7 +128,7 @@ class SheetTabs(QWidget):
         if not getattr(window, "interactive_prompts", True):
             return
         from PySide6.QtWidgets import QInputDialog
-        new, ok = QInputDialog.getText(window, "Rename sheet" if kind == SHEET else "Rename table",
+        new, ok = QInputDialog.getText(window, "Rename sheet",
                                        "Name (formulas that use it follow):", text=name)
         if ok and new.strip() and new.strip() != name:
             window.view.tables.rename_to(item, new.strip())
@@ -161,20 +140,13 @@ class SheetTabs(QWidget):
         entry = self.entries[frm]
         order = list(self.entries)
         order.insert(to, order.pop(frm))
-        if entry[0] != SHEET:
-            self.entries = []                  # tables stay on their pages
-            self.refresh()
-            return
         pages = self.window.document.pages
-        run = [i for i, page in enumerate(pages) if page.sheet == entry[1]]
+        run = [i for i, page in enumerate(pages) if page.sheet == entry[0]]
         after = order[to + 1] if to + 1 < len(order) else None
         if after is None:
             target = len(pages)
-        elif after[0] == SHEET:
-            target = next(i for i, page in enumerate(pages) if page.sheet == after[1])
         else:
-            item = self._item(after[1])
-            target = pages.index(item.parentItem().page) if item is not None else len(pages)
+            target = next(i for i, page in enumerate(pages) if page.sheet == after[0])
         self._moving = True
         try:
             if target > run[0]:
