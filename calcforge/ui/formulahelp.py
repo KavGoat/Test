@@ -106,6 +106,9 @@ class FormulaHelp:
                                "padding:1px 4px;}")
         self.widget = None
         self.word_start = 0
+        # a unit being typed: SMath's own list instead (ui/cellunits.py)
+        from .cellunits import UnitList
+        self.units = UnitList(tables)
 
     # -- what to offer ------------------------------------------------------------------------
     def _candidates(self, word: str) -> list[tuple[str, str]]:
@@ -124,6 +127,9 @@ class FormulaHelp:
         """After a key or a caret move in ``widget`` (a QLineEdit)."""
         self.widget = widget
         text, caret = widget.text(), widget.cursorPosition()
+        if self.units.update(widget):
+            self.list.hide()
+            return
         if not text.startswith("=") or not widget.isVisible() or in_string(text, caret):
             self.hide()
             return
@@ -189,6 +195,8 @@ class FormulaHelp:
     # -- keys ----------------------------------------------------------------------------------
     def key(self, event) -> bool:
         """Up, Down, Tab and Escape while the list is open; True when used."""
+        if self.units.key(event):
+            return True
         if not self.list.isVisible():
             return False
         key = event.key()
@@ -219,6 +227,7 @@ class FormulaHelp:
     def hide(self) -> None:
         self.list.hide()
         self.tip.hide()
+        self.units.hide()
 
     def visible(self) -> bool:
-        return self.list.isVisible()
+        return self.list.isVisible() or self.units.visible()

@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QLineEdit, QMe
                                QWidget)
 
 from ..items.base import MarkupItem
+from .cellunits import UnitText
 from ..items.table import (HEADING_H, ROWNUM_W, TableItem, THIN, cell_font)
 from ..sheet import clip
 from ..sheet import formula as F
@@ -74,13 +75,15 @@ def _is_run(item) -> bool:
     return bool(getattr(item, "SHEET_RUN", False))
 
 
-class CellEditor(QLineEdit):
-    """The text box over the cell being typed into."""
+class CellEditor(UnitText):
+    """The text box over the cell being typed into (units drawn as SMath
+    draws them: ui/cellunits.py)."""
 
     def __init__(self, tables: "TableEditing", parent):
         super().__init__(parent)
         self.tables = tables
         self.setFrame(False)
+        self.on_white = True
         self.setStyleSheet("QLineEdit { background: white; color: black; "
                            "border: 2px solid #217346; padding: 0px 1px; }")
         self.textEdited.connect(tables._typed)
@@ -142,7 +145,7 @@ class FormulaBar(QWidget):
         fx.setFont(f)
         fx.setContentsMargins(4, 0, 4, 0)
         layout.addWidget(fx)
-        self.edit = QLineEdit()
+        self.edit = UnitText()
         self.edit.setToolTip("What is typed in the cell: its formula, or its value")
         self.edit.textEdited.connect(tables._typed_in_bar)
         self.edit.cursorPositionChanged.connect(lambda *_: tables._caret_moved())
