@@ -588,8 +588,7 @@ def test_the_cells_kept_as_pictures_are_never_stale(w):
 
     def fresh():
         (item,) = runs(w)
-        item.__dict__.pop("_bands", None)
-        item._last_scale = None              # drawn afresh, not from pictures
+        item.__dict__.pop("_bands", None)    # the pictures drawn again from scratch
         vp.repaint()
         QApplication.processEvents()
         return vp.grab().toImage()
@@ -776,3 +775,49 @@ def test_a_vertical_page_break_from_the_active_cell(w):
     pump()
     (run,) = runs(w)
     assert options(run.sheet)["col_breaks"] == [] and len(run.paging.groups) == 1
+
+
+def test_zooming_a_sheet_never_jumps_and_glides_on_its_pictures(w, monkeypatch):
+    """The user, 2026-10-11: zooming in on a spreadsheet jumped and stuttered.
+    The first frame after a zoom is the same as every frame after it (no
+    swap from cells drawn afresh to their pictures), and while a wheel zoom
+    glides the pictures already drawn are stretched instead of every cell
+    being drawn again for every frame."""
+    import numpy as np
+    from PySide6.QtWidgets import QApplication
+    run = sheet_page(w)
+    wb = run.sheet.workbook
+    for r in range(30):
+        for c in range(6):
+            wb.set_input(run.sheet, r, c, f"{r * c + 1} kN")
+    pump()
+    vp = w.view.viewport()
+
+    def pixels():
+        image = vp.grab().toImage().convertToFormat(QImage.Format_RGB32)
+        return np.frombuffer(image.constBits(), np.uint8).reshape(
+            image.height(), image.bytesPerLine() // 4, 4)[:, :image.width(), :3].copy()
+
+    for zoom in (1.37, 0.83):
+        w.view.set_zoom(zoom)
+        w.view.centerOn(run.mapToScene(QPointF(150, 120)))
+        first = pixels()
+        assert (first == pixels()).all(), "the next frame is the same frame"
+    # a wheel zoom gliding: no cell is drawn afresh, only pictures stretched
+    (run,) = runs(w)
+    drawn = []
+    real = type(run)._paint_rows
+    monkeypatch.setattr(type(run), "_paint_rows",
+                        lambda self, *a: (drawn.append(a), real(self, *a))[1])
+    w.view.zooming_by_hand()
+    w.view.set_zoom(0.9)
+    vp.repaint()
+    assert drawn == [], "gliding draws from the pictures"
+    import time
+    end = time.time() + 2.0
+    while w.view._zoom_settled.isActive() and time.time() < end:
+        QApplication.processEvents()
+        time.sleep(0.01)
+    assert not w.view._zoom_settled.isActive()
+    vp.repaint()
+    assert drawn, "once it stops, the pictures are drawn again sharp"

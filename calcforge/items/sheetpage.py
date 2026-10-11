@@ -384,10 +384,29 @@ class SheetRunItem(TableItem):
                 sheet.show_gridlines, opts["print_gridlines"], self._on_paper, rules,
                 len(sheet.workbook.styles))
 
+    def _zoom_gliding(self) -> bool:
+        """A wheel zoom is under way in a view of this sheet (view.py)."""
+        scene = self.scene()
+        if scene is None:
+            return False
+        for view in scene.views():
+            timer = getattr(view, "_zoom_settled", None)
+            if timer is not None and timer.isActive():
+                return True
+        return False
+
     def _paint_bands(self, painter: QPainter, r0: int, r1: int) -> bool:
         """Draw rows r0 to r1 from the bands' pictures; False when they
-        should be drawn afresh instead (a turned page, a zoom under way, a
-        picture too big to be worth keeping)."""
+        should be drawn afresh instead (a turned page, or so close in that a
+        picture would be too big to keep).
+
+        The screen always shows the pictures, never a mix: text drawn into a
+        picture lands a shade differently from text drawn straight onto the
+        screen, and swapping one for the other after a zoom made everything
+        jump (the user, 2026-10-11). While a wheel zoom glides, the pictures
+        already drawn are stretched — as a PDF page's are — and drawn again
+        sharp once it stops, instead of every cell being drawn afresh for
+        every frame of the glide (the zoom's stutter)."""
         from collections import OrderedDict
 
         from ..ui.scene import _draw_on_the_pixel_grid, _painted_scale
@@ -395,27 +414,37 @@ class SheetRunItem(TableItem):
         if abs(shape.m12()) > 1e-9 or abs(shape.m21()) > 1e-9:
             return False
         scale = round(_painted_scale(painter), 4)
-        steady = scale == getattr(self, "_last_scale", None)
-        self._last_scale = scale
         xs, ys = self.edges()
-        width = int(round(xs[-1] * scale))
-        if not steady or width <= 0 or width > 8192:
-            return False                       # zooming, or so close in that few cells show
         bands = self.__dict__.get("_bands")
-        if bands is None or self.__dict__.get("_bands_scale") != scale:
-            bands = self._bands = OrderedDict()
-            self._bands_scale = scale
+        kept = self.__dict__.get("_bands_scale")
+        stretch = bands is not None and kept is not None and kept != scale and \
+            int(round(xs[-1] * kept)) <= 8192 and self._zoom_gliding()
+        if not stretch:
+            if int(round(xs[-1] * scale)) <= 0 or int(round(xs[-1] * scale)) > 8192:
+                return False                       # so close in that few cells show
+            if bands is None or kept != scale:
+                bands = self._bands = OrderedDict()
+                self._bands_scale = scale
         first, last = r0 // self.BAND, r1 // self.BAND
         for k in range(first, last + 1):
             entry = self._band(k)
             if entry is None:
                 continue
             a, b = entry[2]
-            _draw_on_the_pixel_grid(painter, QRectF(0, ys[a], xs[-1], ys[b + 1] - ys[a]), entry[1])
+            where = QRectF(0, ys[a], xs[-1], ys[b + 1] - ys[a])
+            if stretch:
+                painter.save()
+                painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+                painter.drawPixmap(where, entry[1], QRectF(entry[1].rect()))
+                painter.restore()
+            else:
+                _draw_on_the_pixel_grid(painter, where, entry[1])
         used = sum(e[1].width() * e[1].height() for e in bands.values())
         while used > self.BAND_PIXELS and len(bands) > 1:
             _k, (_key, old, _rows) = bands.popitem(last=False)
             used -= old.width() * old.height()
+        if stretch:
+            return True                            # the sharp ones once the zoom stops
         # the bands just out of view, drawn while nothing else is happening
         self._ahead = [k for k in (last + 1, first - 1, last + 2) if k >= 0]
         if not self.__dict__.get("_ahead_queued"):
