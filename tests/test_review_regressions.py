@@ -73,14 +73,15 @@ def test_pdf_snapshot_repeated_capture_paste_and_reopen(window, tmp_path):
 
 
 def test_pdf_snapshot_recolours_curves_without_losing_source(window, tmp_path):
-    from calcforge.io.recolour import colourise_lines
+    from calcforge.io import colorproc
     frame = import_drawing(window, tmp_path)
     window.take_snapshot(frame, QRectF(20, 20, 180, 160))
     item = build_item(window._clipboard[0])
     item.load_from_document(window.document)
     sources = item.source_markups()
     assert any(any(c[0] == "c" for c in i.commands) for i in sources)
-    colourise_lines(sources, QColor("#ff0000"))
+    colorproc.process_items(sources, colorproc.Process(colorproc.COLORIZE, select="#ff0000",
+                                                       scale=False))
     item.redraw_from(sources)
     assert replay(item).pixelColor(60, 60).red() > 200
     assert replay(item).pixelColor(10, 10).alpha() == 0
@@ -337,18 +338,16 @@ def test_snapshot_failure_can_be_followed_by_a_fresh_capture(window, tmp_path, m
 
 
 def test_snapshot_recolour_undo_does_not_change_other_copies(window, tmp_path, monkeypatch):
-    from calcforge.ui import dialogs
-    from calcforge.io.recolour import colourise_lines
+    from calcforge.io import colorproc
+    from calcforge.ui import colorprocess
     frame = import_drawing(window, tmp_path)
     window.take_snapshot(frame, QRectF(20, 20, 180, 160))
     window.paste_items()
     window.paste_items()
     first, second = [i for i in frame.markups() if isinstance(i, SnapshotItem)]
     old_key = first.asset_key
-    monkeypatch.setattr(dialogs.RecolourDialog, "exec", lambda self: dialogs.QDialog.Accepted)
-    monkeypatch.setattr(dialogs.RecolourDialog, "apply_to_lines",
-                        lambda self, source: colourise_lines(source, QColor("#ff0000")))
-    window.recolour_snapshot(first)
+    colorprocess.finish_item(window, first, colorproc.Process(colorproc.COLORIZE,
+                                                              select="#ff0000", scale=False))
     assert first.asset_key != old_key
     assert replay(first).pixelColor(60, 60).red() > 200
     assert replay(second).pixelColor(60, 60).red() < 30
@@ -359,7 +358,7 @@ def test_snapshot_recolour_undo_does_not_change_other_copies(window, tmp_path, m
 
 def test_snapshot_includes_pdf_font_outlines_and_scan_without_paper(window, tmp_path):
     from PySide6.QtCore import QBuffer, QIODevice
-    from calcforge.io.recolour import swap_line_colour
+    from calcforge.io import colorproc
     pdf = pymupdf.open()
     page = pdf.new_page(width=200, height=150)
     page.draw_rect(page.rect, fill=(.8, .9, 1), color=None)
@@ -389,7 +388,9 @@ def test_snapshot_includes_pdf_font_outlines_and_scan_without_paper(window, tmp_
     assert image.pixelColor(40, 80).alpha() == 255
     assert any(image.pixelColor(x, y).alpha() > 100 for x in range(20, 150) for y in range(20, 42))
     source = snapshot.source_markups(window.document)
-    assert swap_line_colour(source, QColor('black'), QColor('red')) > 0
+    # Colorize with Process Images: the text and the scan's black both go red
+    assert colorproc.process_items(source, colorproc.Process(
+        colorproc.COLORIZE, select="#ff0000", to="#ffffff", images=True)) > 0
     snapshot.redraw_from(source)
     tinted = replay(snapshot)
     assert tinted.pixelColor(40, 80) == QColor("red")

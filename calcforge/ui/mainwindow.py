@@ -978,6 +978,9 @@ class MainWindow(QMainWindow):
         self._act("contents", "Contents", self.insert_contents_block,
                   tip="Insert a table of contents built from document bookmarks")
         self._act("about", f"About {APP_NAME}", self.show_about)
+        self._act("color_processing", "Color Processing…", lambda: self.color_processing(),
+                  tip="Bluebeam's Color Processing: change the page's own colours — modify, "
+                      "colorize, grayscale, black and white, luminosity/saturation/hue, mask images")
         self._act("record_slowdowns", "Record slow-downs", self.record_slowdowns, checkable=True,
                   tip="Note what the window was doing whenever it stalled, in a file to send back")
 
@@ -1745,7 +1748,7 @@ class MainWindow(QMainWindow):
                        None, self.act_crop_page, self.act_extract_pages,
                        self.act_split_pages,
                        None, self.act_page_setup, self.act_scale, self.act_viewports,
-                       self.act_header_footer,
+                       self.act_header_footer, self.act_color_processing,
                        None, self.act_doc_props):
             page_menu.addSeparator() if action is None else page_menu.addAction(action)
 
@@ -3766,10 +3769,10 @@ class MainWindow(QMainWindow):
                                                self.page_setup()))
         menu.addAction("Page scale…", lambda: (self.go_to_page(index),
                                                self.calibrate_dialog()))
-        recolour = menu.addAction("Change colours…",
-                                  lambda: self.recolour_page(index))
+        processing = menu.addAction("Color Processing…",
+                                    lambda: self.color_processing(index))
         page = self.document.pages[index]
-        recolour.setEnabled(bool(page.background_key or page.pdf_key))
+        processing.setEnabled(bool(page.background_key or page.pdf_key))
         editable = menu.addAction("Make this page's markups editable",
                                   lambda: self.make_markups_editable(index))
         editable.setToolTip(
@@ -5711,88 +5714,15 @@ class MainWindow(QMainWindow):
             f"{len(scaled)} markup(s) on this page can now be changed")
         return len(scaled)
 
-    def recolour_page(self, index: Optional[int] = None) -> None:
-        """Change the colours of the sheet a page came in on."""
-        which = self.page_index(index)
-        page = self.document.pages[which]
-        image = self._background_image(page)
-        if image is None:
-            QMessageBox.information(
-                self, "Change colours",
-                "This page has no drawing on it to recolour — it is a blank "
-                "sheet you have written on, and the markups keep their own "
-                "colours.")
-            return
-        lines = [item for item in (page.frame.markups() if page.frame else [])
-                 if getattr(item, "from_drawing", False)]
-        changed = self._ask_recolour(image, lines)
-        if changed is None:
-            return
+    def color_processing(self, index: Optional[int] = None):
+        """Document ▸ Color Processing, as Bluebeam's (ui/colorprocess.py)."""
+        from .colorprocess import color_processing
+        return color_processing(self, index)
 
-        def mutate():
-            page.background_key = changed
-            # A deliberately recoloured raster no longer represents the
-            # untouched source PDF and must not be replaced by it on export.
-            page.pdf_key = None
-            page.pdf_page_index = None
-            if page.frame is not None:
-                page.frame._background = None
-            self.current_index = which
-        self._structural_change("Change page colours", mutate)
-
-    def recolour_item(self, item) -> None:
-        """Change the colours of a picture on the page — a snapshot, say."""
-        if isinstance(item, SnapshotItem):
-            self.recolour_snapshot(item)
-            return
-        image = QImage()
-        data = self.document.asset(getattr(item, "asset_key", ""))
-        if not data or not image.loadFromData(data) or image.isNull():
-            # Doing nothing at all, silently, is how this looked broken: the
-            # menu entry was there and clicking it appeared to do nothing.
-            QMessageBox.information(
-                self, "Change colours",
-                "There is no picture in this one to recolour.")
-            return
-        changed = self._ask_recolour(image)
-        if changed is None:
-            return
-        self.view.begin_snapshot(self.view.involved_frames(item))
-        item.asset_key = changed
-        item.load_from_document(self.document)
-        self.view.commit_snapshot("Change colours")
-        self.refresh_selection()
-
-    def recolour_snapshot(self, item) -> None:
-        """Change a snapshot's colours, in the drawing rather than in a picture.
-
-        A snapshot is a recording, and a recording cannot be asked what colour
-        anything in it is. What it was taken of is kept beside it, so the
-        colour change is made there and the recording is made again — which is
-        why it stays sharp at any size afterwards, exactly as it was.
-        """
-        source = item.source_markups(self.document)
-        if not source:
-            QMessageBox.information(
-                self, "Change colours",
-                "This snapshot was taken before CalcForge kept what a snapshot "
-                "was made of, so there is nothing left in it to recolour. Take "
-                "it again and the colours will be yours to change.")
-            return
-        dialog = dialogs.RecolourDialog(self._snapshot_preview(item), self)
-        if dialog.exec() != dialogs.QDialog.Accepted:
-            return
-        if not dialog.apply_to_lines(source):
-            self.status_hint.setText("Nothing in that snapshot used that colour")
-            return
-        self.view.begin_snapshot(self.view.involved_frames(item))
-        picture = item.redraw_from(source)
-        # Keep the previous recording immutable: the undo snapshot still
-        # refers to it, and other copies may share that asset.
-        item.asset_key = self.document.add_asset(bytes(picture.data()), "qpic")
-        self.view.commit_snapshot("Change colours")
-        item.update()
-        self.refresh_selection()
+    def change_colors(self, item):
+        """A snapshot's Change Colors; a photo's Color Processing."""
+        from .colorprocess import change_colors
+        return change_colors(self, item)
 
     def _snapshot_preview(self, item) -> QImage:
         """A picture of a snapshot, for the dialog to read its colours off."""
@@ -5812,28 +5742,6 @@ class MainWindow(QMainWindow):
     def _background_image(self, page):
         image = pdfio.page_raster(self.document, page)
         return None if image is None or image.isNull() else image
-
-    def _ask_recolour(self, image, line_work=None) -> Optional[str]:
-        """Run the dialog and store the result; the new asset key, or None.
-
-        *line_work* is the page's own lines, when it has any. A PDF page keeps
-        its line work as the page's own line work, so a colour
-        change has to reach that too: repainting only the picture underneath
-        left every line its old colour on top of a recoloured sheet.
-        """
-        dialog = dialogs.RecolourDialog(image, self)
-        if dialog.exec() != dialogs.QDialog.Accepted:
-            return None
-        if line_work:
-            dialog.apply_to_lines(line_work)
-        recoloured = dialog.apply_to(image)
-        buffer = QBuffer()
-        buffer.open(QIODevice.WriteOnly)
-        if not recoloured.save(buffer, "PNG"):
-            QMessageBox.warning(self, "Change colours",
-                                "The recoloured drawing could not be stored.")
-            return None
-        return self.document.add_asset(bytes(buffer.data()), "png")
 
     # ==================================================================
     # tool sets
@@ -7802,8 +7710,10 @@ class MainWindow(QMainWindow):
                 menu.addAction("Edit link…", lambda: self.edit_link(item))
             if isinstance(item, _TextBase):
                 menu.addAction("Edit…", lambda: self.view.begin_item_edit(item))
-            if isinstance(item, (ImageItem, SnapshotItem)):
-                menu.addAction("Change colours…", lambda: self.recolour_item(item))
+            if isinstance(item, SnapshotItem):
+                menu.addAction("Change Colors…", lambda: self.change_colors(item))
+            elif isinstance(item, ImageItem):
+                menu.addAction("Color Processing…", lambda: self.change_colors(item))
             if self.view.has_an_outline(item):
                 # Rectangles and clouds included: four corners and four sides
                 # is an outline like any other, and everything offered on a

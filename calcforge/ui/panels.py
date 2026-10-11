@@ -1904,8 +1904,8 @@ class PropertiesPanel(QScrollArea):
                     lambda i: setattr(i, "keep_aspect", on), "Snapshot ratio"))
                 form.addRow("", keep)
                 form.addRow("Source page", QLabel(str(first.source_page)))
-                colours = QPushButton("Change colours…")
-                colours.clicked.connect(lambda: self.window.recolour_item(first))
+                colours = QPushButton("Change Colors…")
+                colours.clicked.connect(lambda: self.window.change_colors(first))
                 form.addRow("", colours)
             elif isinstance(first, RectItem) and first.kind in ("rect", "ellipse"):
                 self._add_size(first)
@@ -2575,8 +2575,8 @@ class PropertiesPanel(QScrollArea):
             lambda on: self._apply(lambda i: setattr(i, "keep_aspect", on),
                                    "Image"))
         form.addRow("", keep)
-        colours = QPushButton("Change colours…")
-        colours.clicked.connect(lambda: self.window.recolour_item(item))
+        colours = QPushButton("Color Processing…")
+        colours.clicked.connect(lambda: self.window.change_colors(item))
         form.addRow("", colours)
 
     def _add_cloud(self, first) -> None:

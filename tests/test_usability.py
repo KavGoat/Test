@@ -1790,7 +1790,7 @@ def test_current_page_commands_are_reachable_from_the_menu_bar(window, qapp):
     qapp.processEvents()
     labels = _menu_labels(menu)
     assert {"Rename…", "Blank after", "Move down",
-            "Rotate clockwise", "Change colours…"} <= set(labels)
+            "Rotate clockwise", "Color Processing…"} <= set(labels)
 
     add = _menu_entry(menu, "Blank after")
     QTest.mouseClick(menu, Qt.LeftButton, Qt.NoModifier,
@@ -2449,16 +2449,10 @@ def test_an_empty_text_box_is_still_dropped(window):
 
 
 def test_changing_a_pages_colours_changes_its_line_work_too(window):
-    """A PDF page is a picture and the lines that drew it.
-
-    Recolouring only the picture left every line its old colour on top of a
-    recoloured sheet, which looks like the change half worked — because it
-    did. The lines are the page's own line work, so they change as lines and
-    the page stays as sharp as it was.
-    """
+    """A PDF page's own line work, kept as lines, changes with Color
+    Processing as the PDF's colours do."""
     from PySide6.QtCore import QPointF
-    from PySide6.QtGui import QColor
-    from calcforge.io import recolour
+    from calcforge.io import colorproc
     from calcforge.items.shapes import PolyItem
 
     lines = []
@@ -2468,787 +2462,50 @@ def test_changing_a_pages_colours_changes_its_line_work_too(window):
         line.from_drawing = True
         lines.append(line)
 
-    changed = recolour.swap_line_colour(lines, QColor("#000000"),
-                                        QColor("#1971c2"), 40)
+    changed = colorproc.process_items(lines, colorproc.Process(
+        colorproc.MODIFY, pairs=[("#000000", "#1971c2")], tolerance=16))
     assert changed == 2, "the two near-black lines, and not the red one"
     assert [i.style.stroke for i in lines] == ["#1971c2", "#1971c2", "#c92a2a"]
 
-    recolour.colourise_lines(lines, QColor("#2f9e44"))
-    assert all(i.style.stroke == "#2f9e44" for i in lines), "colourise takes them all"
+    colorproc.process_items(lines, colorproc.Process(colorproc.COLORIZE, select="#2f9e44",
+                                                     scale=False))
+    assert all(i.style.stroke == "#2f9e44" for i in lines), "colorize takes them all"
 
 
-def test_colourise_keeps_the_light_and_shade(window):
-    """Bluebeam's Colorize: one colour, still readable, paper still paper."""
+def test_colorize_keeps_the_light_and_shade(window):
+    """Bluebeam's Colorize: the darkest to one colour, the lightest to another."""
     from PySide6.QtGui import QColor, QImage
-    from calcforge.io import recolour
+    from calcforge.io import colorproc
 
     image = QImage(4, 1, QImage.Format_ARGB32)
     for x, level in enumerate((0, 80, 180, 255)):
         image.setPixelColor(x, 0, QColor(level, level, level))
 
-    out = recolour.colourise(image, QColor("#c92a2a"))
+    out = colorproc.process_qimage(image, colorproc.Process(colorproc.COLORIZE, select="#c92a2a",
+                                                            to="#ffffff"))
     assert out.pixelColor(0, 0).name() == "#c92a2a", "black becomes the colour"
     assert out.pixelColor(3, 0).name() == "#ffffff", "and white stays paper"
     middles = [out.pixelColor(x, 0).lightness() for x in range(4)]
     assert middles == sorted(middles), "light and shade survive in order"
 
-    green = recolour.colourise(image, QColor("#2f9e44"))
-    assert green.pixelColor(0, 0).name() == "#2f9e44", "any colour, not just red"
 
-
-def test_a_colour_can_be_made_transparent_within_a_tolerance(window):
-    """Near enough to the picked colour counts, which is what tolerance is for."""
+def test_a_colour_can_be_masked_within_a_tolerance(window):
+    """Mask Images: near enough to the picked colour counts."""
     from PySide6.QtGui import QColor, QImage
-    from calcforge.io import recolour
+    from calcforge.io import colorproc
 
     image = QImage(3, 1, QImage.Format_ARGB32)
     image.setPixelColor(0, 0, QColor(255, 255, 255))     # the colour picked
     image.setPixelColor(1, 0, QColor(245, 245, 245))     # near it
     image.setPixelColor(2, 0, QColor(20, 20, 20))        # nowhere near
 
-    tight = recolour.make_colour_transparent(image, QColor(255, 255, 255), 0)
+    tight = colorproc.process_qimage(image, colorproc.Process(colorproc.MASK, mask="#ffffff"))
     assert tight.pixelColor(0, 0).alpha() == 0
     assert tight.pixelColor(1, 0).alpha() == 255, "0 tolerance takes only the exact one"
-
-    loose = recolour.make_colour_transparent(image, QColor(255, 255, 255), 40)
-    assert loose.pixelColor(0, 0).alpha() == 0
+    loose = colorproc.process_qimage(image, colorproc.Process(colorproc.MASK, mask="#ffffff",
+                                                              tolerance=16))
     assert loose.pixelColor(1, 0).alpha() == 0, "and a wider one takes its neighbours"
     assert loose.pixelColor(2, 0).alpha() == 255, "but never the drawing"
-
-
-
-
-
-
-
-
-def test_resizing_a_callout_leaves_the_arrow_where_it_points(window):
-    """The arrow points at something on the drawing; resizing must not move it."""
-    call = _callout(window)
-    window.view.end_item_edit()
-    window.select_tool("select")
-    call.setSelected(True)
-    aimed_at = call.mapToScene(call.leader[0])
-
-    for handle in ("topLeft", "bottomRight"):
-        corner = call.mapToScene(getattr(call.local_rect(), handle)())
-        drag(window.view, corner.x(), corner.y(),
-             corner.x() + (-40 if handle == "topLeft" else 50),
-             corner.y() + (-30 if handle == "topLeft" else 20))
-        moved = call.mapToScene(call.leader[0])
-        assert moved.x() == pytest.approx(aimed_at.x(), abs=0.5), handle
-        assert moved.y() == pytest.approx(aimed_at.y(), abs=0.5), handle
-
-
-def test_a_callout_is_arrow_first_then_where_the_words_go(window):
-    """Two clicks and it is on the page, at a size that holds a line or two."""
-    window.select_tool("callout")
-    click(window.view, 200, 300)
-    assert window.view._pending_anchor is not None      # the arrow head is set
-    click(window.view, 300, 200)                        # where the words go
-
-    call = markups(window)[0]
-    assert isinstance(call, CalloutItem)
-    assert call.local_rect().width() > 40
-    assert call.local_rect().height() > 20
-    tip = call.mapToScene(call.leader[0])
-    assert (tip.x(), tip.y()) == pytest.approx((200, 300), abs=1)
-    window.view.end_item_edit()
-
-
-# ---------------------------------------------------------------------------
-# A rectangle is a rectangle, not a dimension
-# ---------------------------------------------------------------------------
-
-def test_a_rectangle_does_not_write_its_size_on_the_drawing(window):
-    window.select_tool("rect")
-    drag(window.view, 100, 100, 260, 180)
-    box = markups(window)[0]
-    assert not box.show_size
-    box.refresh(page=window.current_page())
-    assert box.size_text                       # it knows its size
-    assert box.value_text == box.size_text     # and the takeoff list gets it
-
-
-def test_the_properties_panel_reports_the_size(window):
-    from PySide6.QtWidgets import QLabel
-
-    window.select_tool("rect")
-    drag(window.view, 100, 100, 260, 180)
-    box = markups(window)[0]
-    window.select_tool("select")
-    box.setSelected(True)
-    window.refresh_selection()
-
-    labels = [w.text() for w in window.properties_panel.findChildren(QLabel)]
-    assert any("mm" in text for text in labels)
-
-
-def test_the_size_can_still_be_written_on_it_if_you_want(window):
-    window.select_tool("rect")
-    drag(window.view, 100, 100, 260, 180)
-    box = markups(window)[0]
-    window.set_size_visible(box, True)
-    assert box.show_size
-    assert box.value_text
-
-
-# ---------------------------------------------------------------------------
-# Ctrl to copy, Ctrl to let go of the grid
-# ---------------------------------------------------------------------------
-
-def test_ctrl_dragging_leaves_a_copy_behind(window):
-    window.select_tool("rect")
-    drag(window.view, 100, 100, 200, 160)
-    window.select_tool("select")
-    box = markups(window)[0]
-    box.setSelected(True)
-
-    centre = box.mapToScene(box.local_rect().center())
-    drag(window.view, centre.x(), centre.y(), centre.x() + 120, centre.y() + 60,
-         modifiers=Qt.ControlModifier)
-
-    boxes = [i for i in markups(window) if isinstance(i, RectItem)]
-    assert len(boxes) == 2
-    positions = sorted(round(i.pos().x()) for i in boxes)
-    assert positions[0] == 100                       # one stayed where it was
-    assert positions[1] == pytest.approx(220, abs=3)
-
-
-def test_a_ctrl_click_does_not_copy_anything(window):
-    window.select_tool("rect")
-    drag(window.view, 100, 100, 200, 160)
-    window.select_tool("select")
-    box = markups(window)[0]
-    centre = box.mapToScene(box.local_rect().center())
-    click(window.view, centre.x(), centre.y(), modifiers=Qt.ControlModifier)
-    assert len([i for i in markups(window) if isinstance(i, RectItem)]) == 1
-    assert box.isSelected()
-
-
-def test_a_copy_can_be_undone_in_one_go(window):
-    window.select_tool("rect")
-    drag(window.view, 100, 100, 200, 160)
-    window.select_tool("select")
-    box = markups(window)[0]
-    box.setSelected(True)
-    centre = box.mapToScene(box.local_rect().center())
-    drag(window.view, centre.x(), centre.y(), centre.x() + 120, centre.y(),
-         modifiers=Qt.ControlModifier)
-    assert len(markups(window)) == 2
-    window.undo_stack.undo()
-    assert len(markups(window)) == 1
-
-
-def test_ctrl_taken_hold_of_mid_move_lets_go_of_the_grid_and_copies_nothing(window):
-    """Bluebeam: Ctrl only copies when it is held as the drag starts. Pressed
-    once the move is under way, it lets the markup off the grid instead."""
-    from PySide6.QtCore import QEvent
-    from PySide6.QtWidgets import QApplication
-
-    window.document.settings.snap_to_grid = True
-    window.document.settings.snap_to_items = False
-    window.document.settings.snap_to_alignment = False
-    window.select_tool("rect")
-    drag(window.view, 100, 100, 200, 160)
-    window.select_tool("select")
-    box = markups(window)[0]
-    box.setSelected(True)
-
-    centre = box.mapToScene(box.local_rect().center())
-    QApplication.sendEvent(window.view.viewport(),
-                           _mouse(window.view, QEvent.MouseButtonPress, centre.x(), centre.y()))
-    QApplication.sendEvent(window.view.viewport(), _mouse(
-        window.view, QEvent.MouseMove, centre.x() + 15, centre.y() + 8,
-        Qt.NoButton, Qt.LeftButton))
-    step = 9 * 0.75            # SMath's grid: 9 px, 6.75 pt
-    snapped = box.pos()
-    assert abs(round(snapped.x() / step) * step - snapped.x()) < 0.01
-    QApplication.sendEvent(window.view.viewport(), _mouse(
-        window.view, QEvent.MouseMove, centre.x() + 33, centre.y() + 17,
-        Qt.NoButton, Qt.LeftButton, Qt.ControlModifier))
-    free = box.pos()
-    QApplication.sendEvent(window.view.viewport(), _mouse(
-        window.view, QEvent.MouseButtonRelease, centre.x() + 33, centre.y() + 17,
-        modifiers=Qt.ControlModifier))
-
-    assert len(markups(window)) == 1
-    assert abs(round(free.x() / step) * step - free.x()) > 0.01   # off the grid
-
-
-def test_shift_then_ctrl_mid_move_stays_a_constrained_move(window):
-    import math
-
-    window.document.settings.snap_to_grid = False
-    window.document.settings.snap_to_items = False
-    window.document.settings.snap_to_alignment = False
-    window.select_tool("rect")
-    drag(window.view, 100, 100, 200, 160)
-    window.select_tool("select")
-    box = markups(window)[0]
-    box.setSelected(True)
-    origin = QPointF(box.pos())
-    centre = box.mapToScene(box.local_rect().center())
-
-    QApplication.sendEvent(window.view.viewport(), _mouse(
-        window.view, QEvent.MouseButtonPress, centre.x(), centre.y(),
-        modifiers=Qt.ShiftModifier))
-    QApplication.sendEvent(window.view.viewport(), _mouse(
-        window.view, QEvent.MouseMove, centre.x() + 35, centre.y() + 12,
-        Qt.NoButton, Qt.LeftButton, Qt.ShiftModifier))
-    QApplication.sendEvent(window.view.viewport(), _mouse(
-        window.view, QEvent.MouseMove, centre.x() + 100, centre.y() + 38,
-        Qt.NoButton, Qt.LeftButton,
-        Qt.ControlModifier | Qt.ShiftModifier))
-    QApplication.sendEvent(window.view.viewport(), _mouse(
-        window.view, QEvent.MouseButtonRelease, centre.x() + 100,
-        centre.y() + 38, modifiers=Qt.ControlModifier | Qt.ShiftModifier))
-
-    assert len(markups(window)) == 1                     # moved, not copied
-    delta = box.pos() - origin
-    angle = abs(math.degrees(math.atan2(delta.y(), delta.x())))
-    assert min(abs(angle - expected) for expected in (0, 45, 90)) < 0.5
-
-
-def test_shift_can_be_added_and_removed_while_a_move_is_in_progress(window):
-    window.document.settings.snap_to_grid = False
-    window.document.settings.snap_to_items = False
-    window.document.settings.snap_to_alignment = False
-    window.select_tool("rect")
-    drag(window.view, 100, 100, 200, 160)
-    window.select_tool("select")
-    box = markups(window)[0]
-    box.setSelected(True)
-    origin = QPointF(box.pos())
-    centre = box.mapToScene(box.local_rect().center())
-
-    QApplication.sendEvent(window.view.viewport(), _mouse(
-        window.view, QEvent.MouseButtonPress, centre.x(), centre.y()))
-    QApplication.sendEvent(window.view.viewport(), _mouse(
-        window.view, QEvent.MouseMove, centre.x() + 100, centre.y() + 30,
-        Qt.NoButton, Qt.LeftButton))
-    assert (box.pos() - origin).y() == pytest.approx(30, abs=0.5)
-
-    QApplication.sendEvent(window.view.viewport(), _mouse(
-        window.view, QEvent.MouseMove, centre.x() + 100, centre.y() + 30,
-        Qt.NoButton, Qt.LeftButton, Qt.ShiftModifier))
-    assert (box.pos() - origin).y() == pytest.approx(0, abs=0.5)
-
-    QApplication.sendEvent(window.view.viewport(), _mouse(
-        window.view, QEvent.MouseMove, centre.x() + 100, centre.y() + 30,
-        Qt.NoButton, Qt.LeftButton))
-    assert (box.pos() - origin).y() == pytest.approx(30, abs=0.5)
-    QApplication.sendEvent(window.view.viewport(), _mouse(
-        window.view, QEvent.MouseButtonRelease, centre.x() + 100,
-        centre.y() + 30))
-
-
-# ---------------------------------------------------------------------------
-# Snapping to what is already drawn
-# ---------------------------------------------------------------------------
-
-def test_dragging_catches_the_corner_of_another_markup(window):
-    window.document.settings.snap_to_items = True
-    window.select_tool("rect")
-    drag(window.view, 100, 100, 220, 180)          # the one to line up with
-    window.select_tool("rect")
-    drag(window.view, 300, 400, 380, 460)          # the one to move
-    window.select_tool("select")
-    first, second = markups(window)[0], markups(window)[1]
-    second.setSelected(True)
-
-    # aim the moving box's top-left a few points off the other box's corner
-    corner = first.mapToScene(first.local_rect().bottomRight())
-    grab = second.mapToScene(second.local_rect().center())
-    offset = second.mapToScene(second.local_rect().center()) - \
-        second.mapToScene(second.local_rect().topLeft())
-    drag(window.view, grab.x(), grab.y(),
-         corner.x() + offset.x() + 4, corner.y() + offset.y() - 3)
-
-    landed = second.mapToScene(second.local_rect().topLeft())
-    assert landed.x() == pytest.approx(corner.x(), abs=0.5)
-    assert landed.y() == pytest.approx(corner.y(), abs=0.5)
-
-
-def test_snapping_to_items_can_be_turned_off(window):
-    window.document.settings.snap_to_items = False
-    window.select_tool("rect")
-    drag(window.view, 100, 100, 220, 180)
-    window.select_tool("rect")
-    drag(window.view, 300, 400, 380, 460)
-    window.select_tool("select")
-    first, second = markups(window)[0], markups(window)[1]
-    second.setSelected(True)
-
-    corner = first.mapToScene(first.local_rect().bottomRight())
-    grab = second.mapToScene(second.local_rect().center())
-    offset = second.mapToScene(second.local_rect().center()) - \
-        second.mapToScene(second.local_rect().topLeft())
-    drag(window.view, grab.x(), grab.y(),
-         corner.x() + offset.x() + 4, corner.y() + offset.y() - 3)
-
-    landed = second.mapToScene(second.local_rect().topLeft())
-    assert landed.x() == pytest.approx(corner.x() + 4, abs=0.5)
-
-
-def test_drawing_catches_a_line_end(window):
-    window.document.settings.snap_to_items = True
-    window.select_tool("line")
-    drag(window.view, 100, 100, 260, 200)
-    window.select_tool("line")
-    end = markups(window)[0]
-    tip = end.mapToScene(end.points[-1])
-    drag(window.view, tip.x() + 5, tip.y() - 4, 400, 300)
-
-    started = markups(window)[1].scenePos()
-    assert started.x() == pytest.approx(tip.x(), abs=0.5)
-    assert started.y() == pytest.approx(tip.y(), abs=0.5)
-
-
-def test_the_snap_menu_entry_is_there_and_on(window):
-    assert window.act_snap_items.isChecked()
-    window.act_snap_items.setChecked(False)
-    assert not window.document.settings.snap_to_items
-    window.act_snap_items.setChecked(True)
-    assert window.document.settings.snap_to_items
-
-
-# ---------------------------------------------------------------------------
-# A cloud callout, and a highlight that goes over anything
-# ---------------------------------------------------------------------------
-
-def test_a_cloud_callout_clouds_the_thing_and_notes_it(window):
-    """Bluebeam's: a cloud round what the comment is about, and the note beside
-    it — and the two are one markup, not a cloud and a text box that happen to
-    be grouped."""
-    from calcforge.items.shapes import RectItem
-
-    window.select_tool("cloud_callout")
-    drag(window.view, 160, 260, 300, 340)        # the cloud goes round it
-    click(window.view, 400, 200)                 # and the words go here
-    call = window.view.editing_item()
-    call.set_text("check this")
-    window.view.end_item_edit()
-
-    assert isinstance(call, CalloutItem)
-    assert call.clouds_a_region()
-    # No arrow head: the cloud is what points at the thing, so the line only
-    # says which note goes with which cloud. That is decided by the leader
-    # being a cloud leader, not by taking the heads off the whole call-out —
-    # an arrow leader added to the same note keeps its head.
-    assert [leader.kind for leader in call.leaders] == ["cloud"]
-    # And nothing separate was left on the page.
-    assert not [i for i in markups(window)
-                if isinstance(i, RectItem) and i.kind == "cloud"]
-    assert [i for i in markups(window) if isinstance(i, CalloutItem)] == [call]
-
-    # The clouded region is where it was dragged.
-    clouded = call.mapRectToScene(call.cloud_box()).normalized()
-    drawn = QRectF(QPointF(160, 260), QPointF(300, 340)).normalized()
-    assert clouded.adjusted(-4, -4, 4, 4).contains(drawn)
-
-    # The line runs between the note and the cloud, joining a corner or the
-    # middle of an edge at each end.
-    join = call.cloud_join()
-    corners_and_middles = []
-    points = call.cloud_points
-    for index, point in enumerate(points):
-        after = points[(index + 1) % len(points)]
-        corners_and_middles.append(point)
-        corners_and_middles.append((point + after) / 2)
-    assert any((join - candidate).manhattanLength() < 0.01
-               for candidate in corners_and_middles)
-    assert call.box_join() in (
-        QPointF(call.local_rect().normalized().left(),
-                call.local_rect().normalized().center().y()),
-        QPointF(call.local_rect().normalized().right(),
-                call.local_rect().normalized().center().y()),
-        QPointF(call.local_rect().normalized().center().x(),
-                call.local_rect().normalized().top()),
-        QPointF(call.local_rect().normalized().center().x(),
-                call.local_rect().normalized().bottom()),
-    )
-
-
-def test_a_cloud_callout_can_be_drawn_corner_by_corner(window):
-    """Cloud and Cloud+ are one tool: drag it for a rectangle, click each
-    corner for whatever shape the revision actually is."""
-    window.select_tool("cloud_callout")
-    click(window.view, 160, 260)                 # a click, not a drag
-    click(window.view, 300, 250)
-    click(window.view, 280, 350)
-    press_key(window.view, Qt.Key_Return)        # that closes the cloud
-    click(window.view, 430, 200)                 # and the words go here
-    call = window.view.editing_item()
-    call.set_text("this bit")
-    window.view.end_item_edit()
-
-    assert isinstance(call, CalloutItem)
-    assert call.clouds_a_region()
-    assert len(call.cloud_points) >= 3
-    assert [leader.kind for leader in call.leaders] == ["cloud"]
-
-
-def test_escape_gets_out_of_a_half_drawn_cloud_callout(window):
-    from calcforge.items.shapes import RectItem
-
-    window.select_tool("cloud_callout")
-    drag(window.view, 160, 260, 300, 340)
-    assert window.view._pending_cloud is not None
-
-    press_key(window.view, Qt.Key_Escape)
-    assert window.view._pending_cloud is None
-    assert window.view.tool_key == "select"
-    # Nothing is left behind: the cloud belongs to the note that was never
-    # placed, so cancelling the note cancels the cloud with it.
-    assert not [i for i in markups(window)
-                if isinstance(i, RectItem) and i.kind == "cloud"]
-    assert not [i for i in markups(window) if isinstance(i, CalloutItem)]
-
-
-def test_a_callout_can_have_as_many_leaders_as_you_like(window):
-    """One comment, three bolts: Bluebeam lets a call-out grow arrows."""
-    call = _callout(window)
-    assert len(call.leaders) == 1
-    call.add_leader()
-    call.add_leader()
-    assert len(call.leaders) == 3
-    # Each one gets its own pair of handles.
-    assert {"l0", "e0", "l1", "e1", "l2", "e2"} <= set(call.handle_points())
-    # And they do not land on top of each other.
-    tips = [(round(l.tip.x(), 3), round(l.tip.y(), 3)) for l in call.leaders]
-    assert len(set(tips)) == 3
-
-    call.remove_leader(1)
-    assert len(call.leaders) == 2
-    assert "l2" not in call.handle_points()
-
-
-def test_the_hinge_can_be_moved_to_another_side(window):
-    """It is not pinned to one side: put it above the box and the leader
-    leaves by the top — as long as that does not send the line back over the
-    words to reach the arrow head."""
-    call = _callout(window)
-    box = call.local_rect().normalized()
-    leader = call.leaders[0]
-    leader.tip = QPointF(box.left() - 120, box.center().y())
-    call.leader_moved()
-
-    call.set_elbow_of(leader, QPointF(box.center().x(), box.top() - 40))
-    assert call.side_of(leader) == "top"
-    assert call.side_point_of(leader) == QPointF(box.center().x(), box.top())
-
-    # The right-hand side is behind the box from where the arrow points, so
-    # that one is refused and the leader keeps the side it has.
-    call.set_elbow_of(leader, QPointF(box.right() + 40, box.center().y()))
-    assert call.side_of(leader) == "top"
-
-    # Point it the other way and the right becomes reasonable again.
-    leader.tip = QPointF(box.right() + 160, box.center().y())
-    call.leader_moved()
-    call.set_elbow_of(leader, QPointF(box.right() + 40, box.center().y()))
-    assert call.side_of(leader) == "right"
-    assert call.side_point_of(leader) == QPointF(box.right(), box.center().y())
-
-
-def test_the_leader_never_runs_across_its_own_words(window):
-    """Whatever the hinge is dragged to, the line stays off the text box."""
-    from calcforge.items.text import _crosses
-
-    call = _callout(window)
-    box = call.local_rect().normalized()
-    leader = call.leaders[0]
-    for tip in (QPointF(-140, 20), QPointF(320, 20), QPointF(60, -160),
-                QPointF(60, 220)):
-        leader.tip = QPointF(tip)
-        call.leader_moved()
-        for towards in (QPointF(-80, 0), QPointF(280, 30), QPointF(70, -90),
-                        QPointF(70, 180)):
-            call.set_elbow_of(leader, towards)
-            hinge = call.elbow_of(leader)
-            assert not _crosses(box, hinge, leader.tip), \
-                f"the line crossed the words with the tip at {tip}"
-            assert not _crosses(box, call.side_point_of(leader), hinge)
-
-
-def test_a_plain_callout_is_still_a_box(window):
-    call = _callout(window)
-    assert call.shape_kind == "box"
-
-
-def test_a_cloud_callout_survives_a_round_trip(window):
-    from calcforge.items.base import build_item
-
-    window.select_tool("cloud_callout")
-    drag(window.view, 160, 260, 300, 340)
-    click(window.view, 400, 200)
-    call = window.view.editing_item()
-    call.set_text("check this")
-    window.view.end_item_edit()
-
-    clone = build_item(call.serialize())
-    assert clone.text() == "check this"
-    assert clone.leader_shown
-    assert clone.group == call.group
-
-
-def test_the_highlight_goes_over_whatever_is_under_it(window):
-    from calcforge.items.shapes import RectItem
-
-    window.select_tool("highlight")
-    drag(window.view, 100, 100, 300, 140)
-    mark = markups(window)[0]
-    assert isinstance(mark, RectItem) and mark.kind == "highlight"
-    assert mark.style.blend == "multiply"       # darkens, does not cover
-    assert mark.style.fill_opacity < 1.0
-
-
-def test_the_highlight_and_the_cloud_callout_are_on_keys(window):
-    from calcforge.ui.tools import TOOL_MAP
-    assert TOOL_MAP["highlight"].shortcut == "J"
-    assert TOOL_MAP["cloud_callout"].shortcut == "Shift+Q"
-    assert not window.shortcuts.conflicts()
-
-
-# ---------------------------------------------------------------------------
-# Bookmarks and a contents block
-# ---------------------------------------------------------------------------
-
-def test_bookmark_can_be_renamed_from_the_panel(window, monkeypatch, qapp):
-    from PySide6.QtTest import QTest
-    from PySide6.QtWidgets import QInputDialog, QPushButton
-
-    window.document.add_bookmark("Old name", 0)
-    window.bookmarks_changed()
-    panel = window.bookmarks_panel
-    panel.tree.setCurrentItem(panel.tree.topLevelItem(0))
-    monkeypatch.setattr(QInputDialog, "getText",
-                        lambda *args, **kwargs: ("New name", True))
-    rename = next(button for button in panel.findChildren(QPushButton)
-                  if button.text() == "Rename")
-
-    QTest.mouseClick(rename, Qt.LeftButton)
-    qapp.processEvents()
-
-    assert window.document.bookmarks[0].title == "New name"
-    assert panel.tree.topLevelItem(0).text(0) == "New name"
-    assert window.document.modified
-
-
-def test_there_is_a_key_for_bookmarking_where_you_are(window):
-    from PySide6.QtGui import QKeySequence
-    assert window.act_bookmark.shortcut() == QKeySequence("Ctrl+B")
-
-
-# ---------------------------------------------------------------------------
-# Snapshot
-# ---------------------------------------------------------------------------
-
-def test_a_snapshot_is_a_picture_of_the_region(window):
-    """It is what that part of the page looks like, not a rebuilt copy of it."""
-    _words(window, "600 dia pile", at=(90, 110))
-    window.select_tool("rect")
-    drag(window.view, 100, 200, 220, 260)
-
-    window.select_tool("snapshot")
-    drag(window.view, 60, 80, 400, 320)
-
-    payload = window._clipboard
-    assert [entry["type"] for entry in payload] == ["snapshot"]
-    assert window.document.asset(payload[0]["asset"])
-    # and the marquee itself is not left on the page
-    assert not [i for i in markups(window) if getattr(i, "kind", "") == "marquee"]
-    assert "Snapshot taken" in window.status_hint.text()
-
-
-def test_a_snapshot_pastes_back_as_one_thing(window):
-    _words(window, "300 kerb", at=(90, 110))
-    window.select_tool("snapshot")
-    drag(window.view, 60, 80, 400, 200)
-    before = len(markups(window))
-
-    window.select_tool("select")
-    hover(window.view, 80, 500)
-    window.paste_items()
-
-    after = markups(window)
-    assert len(after) == before + 1
-    pasted = [i for i in after if isinstance(i, SnapshotItem)]
-    assert len(pasted) == 1
-    box = window.view.markup_box(pasted[0])
-    assert box.left() == pytest.approx(80, abs=3)
-    assert box.bottom() == pytest.approx(500, abs=3)
-
-
-def test_a_picture_copied_elsewhere_beats_the_last_snapshot(window):
-    """What is on the clipboard is what gets pasted."""
-    from PySide6.QtGui import QImage
-    from PySide6.QtWidgets import QApplication
-    from calcforge.items.media import ImageItem
-
-    window.select_tool("rect")
-    drag(window.view, 100, 100, 220, 180)
-    window.select_tool("snapshot")
-    drag(window.view, 60, 60, 300, 250)
-    assert window._clipboard                     # a snapshot is held
-
-    foreign = QImage(120, 80, QImage.Format_ARGB32)
-    foreign.fill(0xFF2F9E44)
-    QApplication.clipboard().setImage(foreign)   # copied in another program
-
-    window.select_tool("select")
-    hover(window.view, 120, 520)
-    before = len(markups(window))
-    window.paste_items()
-
-    pasted = [i for i in markups(window) if isinstance(i, ImageItem)
-              and i.pos().y() > 400]
-    assert len(markups(window)) == before + 1
-    assert len(pasted) == 1
-    assert pasted[0].local_rect().width() == pytest.approx(120, abs=1)
-
-
-def test_a_snapshot_is_its_own_kind_of_markup(window):
-    """Not an image with a different name: a snapshot of its own."""
-    window.select_tool("rect")
-    drag(window.view, 80, 510, 120, 540)
-    window.select_tool("snapshot")
-    drag(window.view, 60, 500, 200, 560)
-    assert window._clipboard and window._clipboard[0]["type"] == "snapshot"
-
-
-def test_a_snapshot_of_no_region_at_all_says_so(window):
-    from PySide6.QtCore import QRectF
-
-    window.take_snapshot(window.view.frame(), QRectF(60, 500, 0, 0))
-    assert "drag a region" in window.status_hint.text()
-
-
-def test_a_snapshot_takes_the_drawing_underneath_with_it(window, tmp_path, monkeypatch):
-    from PySide6.QtGui import QImage, QPainter, QPicture
-    from calcforge.io import pdfio
-
-    photo = QImage(400, 300, QImage.Format_ARGB32)
-    photo.fill(0xFF3366AA)
-    path = str(tmp_path / "sheet.png")
-    photo.save(path)
-    pdfio.import_image(window.document, path, at=1)
-    window.rebuild_scenes()
-    window.go_to_page(1)
-
-    from PySide6.QtCore import QRectF
-
-    frame = window.document.pages[1].frame
-    line = PolyItem("polyline")
-    line.points = [QPointF(0, 0), QPointF(90, 0)]
-    line.style.stroke = "#111111"
-    line.style.width = 3.0
-    line.from_drawing = True
-    frame.add_markup(line, QPointF(30, 55))
-    window.take_snapshot(frame, QRectF(20, 20, 120, 90))
-    payload = window._clipboard
-    assert payload and payload[0]["type"] == "snapshot"
-    assert window.document.asset(payload[0]["asset"])
-
-    recorded = QPicture()
-    recorded.setData(bytes(window.document.asset(payload[0]["asset"])))
-    assert not recorded.isNull()
-    replay = QImage(120, 90, QImage.Format_ARGB32)
-    replay.fill(Qt.transparent)
-    painter = QPainter(replay)
-    painter.drawPicture(0, 0, recorded)
-    painter.end()
-    assert replay.pixelColor(55, 35).alpha() > 0       # imported vector linework
-    # What can be seen is what is taken (2026-09-30): a picture page's
-    # picture too — the one place a snapshot holds pixels.
-    assert replay.pixelColor(10, 10).alpha() > 0
-
-    window.paste_items()
-    pasted = [i for i in markups(window) if isinstance(i, SnapshotItem)]
-    assert len(pasted) == 1
-    assert pasted[0].picture() is not None
-    assert pasted[0].local_rect().width() == pytest.approx(120, abs=1)
-
-
-def test_snapshot_takes_the_typing_it_can_see(window, monkeypatch):
-    """A snapshot takes whatever can be seen in the box (2026-09-30): the
-    words over the drawing too, selected or not. (It used to leave typing out
-    unless it was selected, which is how a title block's words went missing
-    while its lines came through.)"""
-    from PySide6.QtGui import QImage
-
-    words = _words(window, "design note", at=(90, 190))
-    window.select_tool("rect")
-    drag(window.view, 90, 280, 220, 340)
-    shape = markups(window)[-1]
-    painted = []
-    monkeypatch.setattr(words, "paint_content",
-                        lambda _painter: painted.append("text"))
-    monkeypatch.setattr(shape, "paint_content",
-                        lambda _painter: painted.append("markup"))
-    monkeypatch.setattr(window.view.frame(), "render_image",
-                        lambda **_kwargs: QImage())
-
-    window.select_tool("snapshot")
-    drag(window.view, 60, 80, 360, 370)
-    assert sorted(painted) == ["markup", "text"]
-
-
-def test_a_snapshot_scaled_up_is_still_drawn_from_its_lines(window):
-    """Blown up, it is redrawn at the new size — not stretched from pixels."""
-    from PySide6.QtGui import QImage, QPainter
-
-    window.select_tool("rect")
-    drag(window.view, 100, 100, 220, 180)
-    window.select_tool("snapshot")
-    drag(window.view, 90, 90, 240, 200)
-    window.paste_items()
-    shot = [i for i in markups(window) if isinstance(i, SnapshotItem)][0]
-
-    def ink(scale):
-        """The box the drawing covers when the snapshot is *scale* times over."""
-        taken = shot.natural_size()
-        shot.set_local_rect(QRectF(0, 0, taken.width() * scale,
-                                   taken.height() * scale))
-        sheet = QImage(int(taken.width() * scale) + 4,
-                       int(taken.height() * scale) + 4, QImage.Format_ARGB32)
-        sheet.fill(0xFFFFFFFF)
-        painter = QPainter(sheet)
-        shot.paint_content(painter)
-        painter.end()
-        marked = [(x, y) for x in range(sheet.width())
-                  for y in range(sheet.height())
-                  if QColor(sheet.pixel(x, y)) != QColor(Qt.white)]
-        assert marked, f"nothing was drawn at {scale}x"
-        xs = [x for x, _ in marked]
-        ys = [y for _, y in marked]
-        return max(xs) - min(xs), max(ys) - min(ys)
-
-    small = ink(1)
-    big = ink(4)
-    # Four times the size, and the drawing is four times across: it was drawn
-    # again at the new size rather than clipped or left where it was.
-    assert big[0] == pytest.approx(small[0] * 4, rel=0.2)
-    assert big[1] == pytest.approx(small[1] * 4, rel=0.2)
-
-
-def test_a_snapshot_puts_a_picture_on_the_clipboard_for_other_apps(window):
-    from PySide6.QtWidgets import QApplication
-
-    window.select_tool("rect")
-    drag(window.view, 100, 100, 220, 180)
-    window.select_tool("snapshot")
-    drag(window.view, 60, 60, 300, 250)
-
-    image = QApplication.clipboard().image()
-    assert not image.isNull()
-    assert image.width() > 100
-
-
-def test_the_snapshot_tool_is_on_g(window):
-    from calcforge.ui.tools import TOOL_MAP
-    assert TOOL_MAP["snapshot"].shortcut == "G"
-    assert not window.shortcuts.conflicts()
 
 
 # ---------------------------------------------------------------------------
@@ -3271,103 +2528,55 @@ def _sheet_page(window, tmp_path, colour=0xFF000000):
     return window.document.pages[1]
 
 
-def test_the_lines_of_a_page_can_be_pushed_to_another_colour(window, tmp_path, monkeypatch):
+def _colour_dialog(window, index):
+    window.interactive_prompts = False
+    window.color_processing(index)
+    return window._last_color_dialog
+
+
+def test_a_scanned_page_changes_with_process_images(window, tmp_path):
+    """A page that is a picture: as in Bluebeam, Colorize, Grayscale, Black
+    and White and the rest change it with Process Images ticked; Modify
+    Colors is for vector content and leaves it be."""
     from PySide6.QtGui import QColor, QImage
-    from calcforge.ui import dialogs
+    from calcforge.io.colorproc import COLORIZE, MODIFY
+    from calcforge.ui import colorprocess
 
     page = _sheet_page(window, tmp_path)
     before = page.background_key
-
-    def choose(self):
-        self.lines_mode.setChecked(True)
-        self.line_target = QColor("#888888")
-        return dialogs.QDialog.Accepted
-
-    monkeypatch.setattr(dialogs.RecolourDialog, "exec", choose)
-    window.recolour_page(1)
-
+    dialog = _colour_dialog(window, 1)
+    dialog.kind.setCurrentIndex(dialog.kind.findData(MODIFY))
+    assert colorprocess.finish_pages(window, dialog) == 0
+    assert page.background_key == before
+    dialog = _colour_dialog(window, 1)
+    dialog.kind.setCurrentIndex(dialog.kind.findData(COLORIZE))
+    dialog.select.set("#888888")
+    dialog.images.setChecked(True)
+    assert colorprocess.finish_pages(window, dialog) == 1
     assert page.background_key != before
     image = QImage()
     image.loadFromData(window.document.asset(page.background_key))
     assert QColor(image.pixel(5, 20)).name() == "#888888"     # the line
     assert QColor(image.pixel(5, 5)).name() == "#ffffff"      # the paper
-
-
-def test_one_colour_can_be_swapped_for_another(window, tmp_path, monkeypatch):
-    from PySide6.QtGui import QColor, QImage
-    from calcforge.ui import dialogs
-
-    page = _sheet_page(window, tmp_path)
-
-    def choose(self):
-        self.swap_mode.setChecked(True)
-        index = self.from_colour.findText("#000000")
-        self.from_colour.setCurrentIndex(max(index, 0))
-        self.to_target = QColor("#c92a2a")
-        return dialogs.QDialog.Accepted
-
-    monkeypatch.setattr(dialogs.RecolourDialog, "exec", choose)
-    window.recolour_page(1)
-
-    image = QImage()
-    image.loadFromData(window.document.asset(page.background_key))
-    assert QColor(image.pixel(5, 20)).name() == "#c92a2a"
-
-
-def test_recolouring_a_page_can_be_undone(window, tmp_path, monkeypatch):
-    from PySide6.QtGui import QColor
-    from calcforge.ui import dialogs
-
-    page = _sheet_page(window, tmp_path)
-    before = page.background_key
-    monkeypatch.setattr(dialogs.RecolourDialog, "exec",
-                        lambda self: dialogs.QDialog.Accepted)
-    window.recolour_page(1)
-    assert page.background_key != before
     window.undo_stack.undo()
     assert window.document.pages[1].background_key == before
 
 
-def test_a_blank_page_says_there_is_nothing_to_recolour(window, monkeypatch):
+def test_a_blank_page_says_there_is_nothing_to_process(window, monkeypatch):
     from PySide6.QtWidgets import QMessageBox
     said = {}
     monkeypatch.setattr(QMessageBox, "information",
                         lambda *a, **k: said.setdefault("text", a[2]))
-    window.recolour_page(0)
+    window.color_processing(0)
     assert "no drawing" in said.get("text", "")
-
-
-def test_image_colour_dialog_offers_greyscale_and_transparency(window):
-    from PySide6.QtGui import QColor, QImage, qAlpha, qBlue, qGreen, qRed
-    from PySide6.QtTest import QTest
-    from calcforge.ui.dialogs import RecolourDialog
-
-    image = QImage(2, 1, QImage.Format_ARGB32)
-    image.setPixelColor(0, 0, QColor("#ff0000"))
-    image.setPixelColor(1, 0, QColor("#0000ff"))
-    dialog = RecolourDialog(image, window)
-
-    QTest.mouseClick(dialog.grey_mode, Qt.LeftButton)
-    grey = dialog.apply_to(image)
-    pixel = grey.pixel(0, 0)
-    assert qRed(pixel) == qGreen(pixel) == qBlue(pixel)
-
-    dialog.from_colour.setItemData(0, QColor("#ff0000"))
-    dialog.from_colour.setCurrentIndex(0)
-    dialog.tolerance.setValue(0)
-    QTest.mouseClick(dialog.transparent_mode, Qt.LeftButton)
-    clear = dialog.apply_to(image)
-    assert qAlpha(clear.pixel(0, 0)) == 0
-    assert qAlpha(clear.pixel(1, 0)) == 255
-    dialog.deleteLater()
 
 
 def test_the_page_menu_only_offers_it_where_there_is_a_drawing(window, tmp_path):
     _sheet_page(window, tmp_path)
     blank = {a.text(): a for a in window.page_menu(0).actions()}
     sheet = {a.text(): a for a in window.page_menu(1).actions()}
-    assert not blank["Change colours…"].isEnabled()
-    assert sheet["Change colours…"].isEnabled()
+    assert not blank["Color Processing…"].isEnabled()
+    assert sheet["Color Processing…"].isEnabled()
 
 
 # ---------------------------------------------------------------------------

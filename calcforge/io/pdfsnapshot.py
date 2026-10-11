@@ -141,26 +141,31 @@ class PdfSvgItem(MarkupItem):
         self._rect = QRectF(*data["rect"])
         self._renderer = None
 
-    def change_colours(self, source, target, tolerance=40):
-        from .recolour import _near
+    def process_colours(self, colour, image) -> int:
+        """Color Processing (io/colorproc.py) on the drawing: *colour* maps
+        "#rrggbb" to a colour ("" for none) for every fill and stroke,
+        *image* a QImage for every picture in it; either may be None."""
         root = ET.fromstring(self.svg)
         changed = 0
         masks = {child for node in root.iter()
                  if node.tag.rsplit("}", 1)[-1] in ("mask", "clipPath")
                  for child in node.iter()}
         for node in root.iter():
-            if node in masks:
+            if node in masks or colour is None:
                 continue
             if node.tag.rsplit("}", 1)[-1] in ("use", "path", "text", "stop"):
                 fields = ("stop-color",) if node.tag.endswith("stop") else ("fill", "stroke")
-                for field in fields:
-                    colour = node.get(field, "#000000" if field == "fill" else "none")
-                    if colour != "none" and (source is None or _near(colour, source, tolerance)):
-                        node.set(field, target.name())
+                for name in fields:
+                    old = node.get(name, "#000000" if name == "fill" else "none")
+                    if old == "none" or not old.startswith("#"):
+                        continue
+                    new = colour(old) or "none"
+                    if new != old:
+                        node.set(name, new)
                         changed += 1
-        def recolour_images(node, in_mask=False):
+
+        def images(node, in_mask=False):
             nonlocal changed
-            from .recolour import colourise, swap_colour
             tag = node.tag.rsplit("}", 1)[-1]
             in_mask = in_mask or tag in ("mask", "clipPath")
             if tag == "image" and not in_mask:
@@ -168,7 +173,7 @@ class PdfSvgItem(MarkupItem):
                 uri = node.get(key, "")
                 if uri.startswith("data:image/") and ";base64," in uri:
                     before = QImage.fromData(base64.b64decode(uri.split(",", 1)[1]))
-                    after = colourise(before, target) if source is None else swap_colour(before, source, target, tolerance)
+                    after = image(before)
                     if after != before:
                         buffer = QBuffer()
                         buffer.open(QIODevice.WriteOnly)
@@ -176,8 +181,9 @@ class PdfSvgItem(MarkupItem):
                         node.set(key, "data:image/png;base64," + base64.b64encode(bytes(buffer.data())).decode())
                         changed += 1
             for child in node:
-                recolour_images(child, in_mask)
-        recolour_images(root)
+                images(child, in_mask)
+        if image is not None:
+            images(root)
         if changed:
             self.svg = ET.tostring(root, encoding="unicode")
             self._renderer = None

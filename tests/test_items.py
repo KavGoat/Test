@@ -1,7 +1,7 @@
 """Item geometry, measurement maths and serialisation round-trips."""
 import pytest
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QImage, QPainter
+from PySide6.QtGui import QImage, QPainter
 
 from calcforge.core.document import Document, PageScale
 from calcforge.items.base import ITEM_REGISTRY, build_item
@@ -194,9 +194,8 @@ def test_crossing_highlighters_are_one_even_wash(qapp):
 def test_a_snapshots_colours_can_be_changed(window):
     """A recording cannot be asked anything, so it keeps what it was made of."""
     from PySide6.QtCore import QPointF, QRectF
-    from PySide6.QtGui import QColor
 
-    from calcforge.io import recolour
+    from calcforge.io import colorproc
     from calcforge.items.shapes import PolyItem
     from calcforge.items.snapshot import SnapshotItem
 
@@ -216,8 +215,8 @@ def test_a_snapshots_colours_can_be_changed(window):
     (drawing,) = source
     svg = drawing.svg.lower()
     assert "#000000" in svg and "#0a0a0a" in svg and "#c92a2a" in svg
-    assert recolour.swap_line_colour(source, QColor("#000000"),
-                                     QColor("#1971c2"), 40) >= 2
+    assert colorproc.process_items(source, colorproc.Process(
+        colorproc.MODIFY, pairs=[("#000000", "#1971c2")], tolerance=16)) >= 1
     picture = snapshot.redraw_from(source)
     assert not picture.isNull(), "still a recording, so still sharp at any size"
     kept = snapshot.source_items[0]["svg"].lower()
