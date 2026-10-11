@@ -131,15 +131,16 @@ def add_run_pages(window, short: list) -> None:
 EXCEL_MARGINS_MM = (0.7 * 25.4, 0.75 * 25.4, 0.7 * 25.4, 0.75 * 25.4)
 
 
-def insert_sheet_page(window, index: Optional[int] = None, before: bool = False) -> None:
+def insert_sheet_page(window, index: Optional[int] = None, before: bool = False,
+                      new_sheet: bool = False) -> None:
     """A spreadsheet page beside page *index*: part of the run it touches,
-    or a new sheet of its own."""
+    or a new sheet of its own (always, with *new_sheet*: after the run)."""
     from ..items.sheetpage import SheetRunItem
 
     document = window.document
     which = window.page_index(index)
     here = document.pages[which]
-    if here.sheet is not None:
+    if here.sheet is not None and not new_sheet:
         # on a run, it is one more page of it, at its end (the sheet grows
         # downwards; a page never goes in ahead of its first)
         run = here.sheet

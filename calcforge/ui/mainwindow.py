@@ -573,7 +573,16 @@ class MainWindow(QMainWindow):
         self.bottom_split.setObjectName("markupsSplit")
         self.bottom_split.setChildrenCollapsible(True)
         self.bottom_split.setHandleWidth(7)
-        self.bottom_split.addWidget(self.view)
+        # the canvas with Excel's sheet tabs along its foot (ui/sheettabs.py)
+        from .sheettabs import SheetTabs
+        canvas = QWidget()
+        canvas_layout = QVBoxLayout(canvas)
+        canvas_layout.setContentsMargins(0, 0, 0, 0)
+        canvas_layout.setSpacing(0)
+        canvas_layout.addWidget(self.view, 1)
+        self.sheet_tabs = SheetTabs(self)
+        canvas_layout.addWidget(self.sheet_tabs)
+        self.bottom_split.addWidget(canvas)
         self.bottom_split.setCollapsible(0, False)
         self.bottom_split.splitterMoved.connect(self._markups_list_moved)
         # Excel's formula bar, over the canvas while a table is open
@@ -4074,6 +4083,9 @@ class MainWindow(QMainWindow):
             except RuntimeError:        # its fields already gone with the window
                 pass
         self.view.tables.refresh_bar()      # a spreadsheet page in view keeps the formula bar
+        tabs = getattr(self, "sheet_tabs", None)
+        if tabs is not None:
+            tabs.refresh()                  # and its tab is the current one
         scale = self.current_page().scale
         self.status_scale.setText(f"Scale {scale.label}")
         self.status_scale.setToolTip(
@@ -6685,6 +6697,7 @@ class MainWindow(QMainWindow):
         self.markups_panel.rebuild(self.document)
         self.bookmarks_panel.rebuild(self.document)
         self.variables_panel.watch(self.document)
+        self.sheet_tabs.refresh()
 
     # ==================================================================
     # bookmarks
