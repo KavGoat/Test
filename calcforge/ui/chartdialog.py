@@ -107,7 +107,7 @@ def _place_for(item, block, chart):
     t, l, b, r = block
     if getattr(item, "SHEET_RUN", False):
         frames = item.run_frames()
-        k = min(item.page_index_of_row(t), len(frames) - 1)
+        k = min(item.page_index_of_row(t, r), len(frames) - 1)
         frame = frames[k]
         point = item.cell_rect(t, r).topRight() + QPointF(12, 0)
         return frame, frame.mapFromItem(item, point)

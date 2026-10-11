@@ -100,8 +100,13 @@ class SheetLayoutDialog(QDialog):
         self.scale.setSuffix("% normal size")
         self.scale.setValue(int(opts.get("scale") or 100))
         form.addRow("Adjust to:", self.scale)
-        self.fit = QCheckBox("Fit to 1 page wide (all the columns used)")
-        self.fit.setChecked(bool(opts["fit_width"]))
+        fit_wide = int(opts["fit_width"] or 0)
+        self.fit = QCheckBox("Fit to")
+        self.fit.setChecked(bool(fit_wide))
+        self.wide = QSpinBox()
+        self.wide.setRange(1, 99)
+        self.wide.setSuffix(" page(s) wide")
+        self.wide.setValue(max(1, fit_wide))
         self.tall = QSpinBox()
         self.tall.setRange(0, 999)
         self.tall.setSpecialValueText("as many pages as it takes, tall")
@@ -119,7 +124,11 @@ class SheetLayoutDialog(QDialog):
         self.headings.setChecked(bool(opts["print_headings"]))
         self.screen_grid = QCheckBox("Show gridlines on screen")
         self.screen_grid.setChecked(bool(sheet.show_gridlines))
-        layout.addWidget(self.fit)
+        wide = QHBoxLayout()
+        wide.addWidget(self.fit)
+        wide.addWidget(self.wide)
+        wide.addStretch(1)
+        layout.addLayout(wide)
         tall = QHBoxLayout()
         tall.addSpacing(20)
         tall.addWidget(QLabel("by"))
@@ -141,6 +150,7 @@ class SheetLayoutDialog(QDialog):
     def _fitting(self, *_args) -> None:
         """Fitting to pages sets the size, as in Excel: Adjust to is unused."""
         self.scale.setEnabled(not (self.fit.isChecked() or self.tall.value()))
+        self.wide.setEnabled(self.fit.isChecked())
 
     def _check(self) -> None:
         if self.changes() is None:
@@ -161,7 +171,7 @@ class SheetLayoutDialog(QDialog):
             self.problem.setText("Columns to repeat are columns (e.g. A:B)")
             return None
         return {"print_area": area, "titles": titles, "title_cols": title_cols,
-                "fit_width": self.fit.isChecked(),
+                "fit_width": self.wide.value() if self.fit.isChecked() else False,
                 "fit_tall": self.tall.value(), "scale": self.scale.value(),
                 "center_h": self.center_h.isChecked(), "center_v": self.center_v.isChecked(),
                 "print_gridlines": self.gridlines.isChecked(),
@@ -199,31 +209,45 @@ def apply_dialog(window, item, dialog: SheetLayoutDialog) -> None:
 
 
 # -- page breaks -----------------------------------------------------------------------------------------
-def insert_break(window, item, row: int) -> None:
-    """A manual break above *row* (Excel's Insert Page Break)."""
-    if row <= 0:
-        return
-    breaks = sorted(set(options(item.sheet)["breaks"]) | {int(row)})
-    change_options(window, item, "Insert page break", breaks=breaks)
+def insert_break(window, item, row: int, col: int = 0) -> None:
+    """Excel's Insert Page Break at the active cell: a break above its row
+    and one left of its column (only the one in row 1 or column A)."""
+    opts = options(item.sheet)
+    changes = {}
+    if row > 0:
+        changes["breaks"] = sorted(set(opts["breaks"]) | {int(row)})
+    if col > 0:
+        changes["col_breaks"] = sorted(set(opts.get("col_breaks") or []) | {int(col)})
+    if changes:
+        change_options(window, item, "Insert page break", **changes)
 
 
-def remove_break(window, item, row: int) -> None:
-    breaks = [b for b in options(item.sheet)["breaks"] if b != int(row)]
-    change_options(window, item, "Remove page break", breaks=breaks)
+def remove_break(window, item, row: int, col: int = 0) -> None:
+    """Excel's Remove Page Break: the breaks at the active cell's top and left."""
+    opts = options(item.sheet)
+    changes = {"breaks": [b for b in opts["breaks"] if b != int(row)],
+               "col_breaks": [c for c in opts.get("col_breaks") or [] if c != int(col)]}
+    change_options(window, item, "Remove page break", **changes)
+
+
+def has_break(item, row: int, col: int) -> bool:
+    opts = options(item.sheet)
+    return (row > 0 and row in opts["breaks"]) or (col > 0 and col in (opts.get("col_breaks") or []))
 
 
 def reset_breaks(window, item) -> None:
-    change_options(window, item, "Reset all page breaks", breaks=[])
+    change_options(window, item, "Reset all page breaks", breaks=[], col_breaks=[])
 
 
-def move_break(window, item, old: Optional[int], new: int) -> None:
-    """A break dragged to another row: manual from now on (Excel)."""
-    breaks = set(options(item.sheet)["breaks"])
+def move_break(window, item, old: Optional[int], new: int, across: bool = False) -> None:
+    """A break dragged to another row (or, *across*, column): manual from now on (Excel)."""
+    key = "col_breaks" if across else "breaks"
+    breaks = set(options(item.sheet).get(key) or [])
     if old is not None:
         breaks.discard(int(old))
     if new > 0:
         breaks.add(int(new))
-    change_options(window, item, "Move page break", breaks=sorted(breaks))
+    change_options(window, item, "Move page break", **{key: sorted(breaks)})
 
 
 def set_print_area(window, item, area: Optional[list]) -> None:

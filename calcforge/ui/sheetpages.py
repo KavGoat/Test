@@ -231,10 +231,11 @@ def before_delete(window, going: list) -> None:
         paging = item.paging
         sheet = item.sheet
         if paging is not None and sheet is not None:
-            for k in sorted(gone, reverse=True):
-                if k < len(paging.slices):
-                    a, b = paging.slices[k]
-                    sheet.workbook.delete_rows(sheet, a, b - a + 1)
+            # a page's rows go with it (a page across: its row of pages' rows)
+            down = sorted({paging.page_of(k)[0] for k in gone if k < paging.pages}, reverse=True)
+            for i in down:
+                a, b = paging.slices[i]
+                sheet.workbook.delete_rows(sheet, a, b - a + 1)
             # the breaks the user put there go with the rows (shifted by the
             # workbook); the first page left starts at row 1 again
         keep = next(f for k, f in enumerate(frames) if k not in gone)

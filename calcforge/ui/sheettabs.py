@@ -47,17 +47,21 @@ class SheetTabs(QWidget):
 
     # -- what there is --------------------------------------------------------------
     def _found(self) -> list:
+        from shiboken6 import isValid
+
         from ..items.sheetpage import SheetRunItem, run_item_for
         from ..items.table import TableItem
         out, seen = [], set()
         document = self.window.document
         for page in document.pages:
+            frame = page.frame
+            if frame is not None and not isValid(frame):
+                frame = None                    # its page being rebuilt: no frame yet
             if page.sheet is not None and page.sheet not in seen:
                 seen.add(page.sheet)
-                run = run_item_for(page.frame) if page.frame is not None else None
+                run = run_item_for(frame) if frame is not None else None
                 name = run.name if run is not None else "Sheet"
                 out.append((SHEET, page.sheet, name))
-            frame = page.frame
             if frame is None:
                 continue
             for item in sorted((i for i in frame.markups() if isinstance(i, TableItem)

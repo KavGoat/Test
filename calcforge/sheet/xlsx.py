@@ -550,6 +550,10 @@ def _page_options(ws, renamed) -> dict:
     breaks = [int(b.id) for b in (ws.row_breaks.brk if ws.row_breaks else []) if b.id]
     if breaks:
         out["breaks"] = sorted(set(breaks))
+    # vertical breaks: id is the last column before the break, so the first after it
+    across = [int(b.id) for b in (ws.col_breaks.brk if ws.col_breaks else []) if b.id]
+    if across:
+        out["col_breaks"] = sorted(set(across))
     pr = ws.sheet_properties.pageSetUpPr if ws.sheet_properties is not None else None
     setup = ws.page_setup
     if pr is not None and pr.fitToPage:
@@ -559,6 +563,8 @@ def _page_options(ws, renamed) -> dict:
         tall = 1 if setup.fitToHeight is None else int(setup.fitToHeight)
         if wide == 1:
             out["fit_width"] = True
+        elif wide > 1:
+            out["fit_width"] = wide            # Fit to N pages wide
         if tall >= 1:
             out["fit_tall"] = tall
     elif setup is not None and setup.scale and int(setup.scale) != 100:

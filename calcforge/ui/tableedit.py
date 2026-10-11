@@ -183,6 +183,7 @@ _CURSORS = {"cell": _excel("cell"), "fill": lambda: QCursor(Qt.CrossCursor),
             "border": lambda: QCursor(Qt.SizeAllCursor), "col": _excel("col"), "row": _excel("row"),
             "corner": lambda: QCursor(Qt.ArrowCursor), "col_edge": lambda: QCursor(Qt.SplitHCursor),
             "row_edge": lambda: QCursor(Qt.SplitVCursor), "break": lambda: QCursor(Qt.SplitVCursor),
+            "vbreak": lambda: QCursor(Qt.SplitHCursor),
             "grow": lambda: QCursor(Qt.SizeFDiagCursor), "tab": lambda: QCursor(Qt.OpenHandCursor)}
 
 
@@ -215,8 +216,8 @@ def _layout(te, what: str) -> None:
         return
     if what == "print_area":
         sheetlayout.set_print_area(window, item, list(te.selection()))
-    elif what == "page_break" and te.active[0] > 0:
-        sheetlayout.insert_break(window, item, te.active[0])
+    elif what == "page_break" and (te.active[0] > 0 or te.active[1] > 0):
+        sheetlayout.insert_break(window, item, te.active[0], te.active[1])
     elif what == "page_layout":
         window.sheet_page_setup(window.document.index_of(item.parentItem().page))
 
@@ -616,6 +617,10 @@ class TableEditing:
                 for k, (a, _b) in enumerate(paging.slices[1:], 1):
                     if abs(local.y() - ys[a]) <= tol and 0 <= local.y():
                         return ("break", a)
+                # and one between pages across
+                for c0, _c1 in paging.groups[1:]:
+                    if abs(local.x() - xs[c0]) <= tol and 0 <= local.y() <= ys[-1]:
+                        return ("vbreak", c0)
         if not _is_run(item) and w - 1 <= local.x() <= w + 5 and h - 1 <= local.y() <= h + 5 and \
                 not (0 <= local.x() < w and 0 <= local.y() < h):
             return ("grow",)
@@ -729,7 +734,7 @@ class TableEditing:
         """A spreadsheet page not open yet, pressed on its print area's edge
         or a page break: opened, and the edge dragged from there."""
         edge = self._zone(target, local)
-        if not edge or edge[0] not in ("area", "break"):
+        if not edge or edge[0] not in ("area", "break", "vbreak"):
             return False
         self.open(target, target.cell_at(local) or (0, 0))
         return self._press_zone(target, edge, event, scene_pos)
@@ -806,8 +811,8 @@ class TableEditing:
         elif kind == "grow":
             self.drag = ("grow", item.size)
             self.view.begin_snapshot(_frames(item))
-        elif kind == "break":
-            self.drag = ("break", zone[1], zone[1])
+        elif kind in ("break", "vbreak"):
+            self.drag = (kind, zone[1], zone[1])
         elif kind == "area":
             area = self._print_area(item)
             self.drag = ("area", zone[1], area, list(area))
@@ -951,6 +956,15 @@ class TableEditing:
             item.break_drag = item.edges()[1][min(row, len(item.edges()[1]) - 1)]
             item.update()
             self.view.statusMessage.emit(f"Page break above row {row + 1}")
+        elif kind == "vbreak":
+            xs = item.edges()[0]
+            col = max(1, self._cell_near(item, local)[1])
+            if local.x() - xs[col] > item.sheet.width(col) / 2:
+                col += 1
+            self.drag = ("vbreak", drag[1], col)
+            item.vbreak_drag = xs[min(col, len(xs) - 1)]
+            item.update()
+            self.view.statusMessage.emit(f"Page break left of column {col_letters(col)}")
         elif kind == "grow":
             xs, ys = item.edges()
             rows, cols = drag[1]
@@ -963,16 +977,11 @@ class TableEditing:
         return True
 
     def _set_print_area(self, item, area: list) -> None:
-        """A dragged print area, one undo step. Wider than the paper, it is
-        shrunk to fit, as Excel scales a page whose break was dragged out."""
+        """A dragged print area, one undo step. Wider than the paper, it
+        prints on pages across, down then over (the user's choice,
+        2026-10-11); Fit to N pages wide shrinks it instead."""
         from . import sheetlayout
-        sheet = item.sheet
-        width = item.paging.printable[2]
-        wide = sum(sheet.width(c) for c in range(area[1], area[3] + 1)) > width + 0.01
-        changes = {"print_area": list(area)}
-        if wide:
-            changes["fit_width"] = True
-        sheetlayout.change_options(self.view.window, item, "Set print area", **changes)
+        sheetlayout.change_options(self.view.window, item, "Set print area", print_area=list(area))
 
     def _cell_near(self, item, local: QPointF) -> tuple:
         xs, ys = item.edges()
@@ -1020,6 +1029,15 @@ class TableEditing:
                 from ..sheet.pagination import options
                 old = drag[1] if drag[1] in options(item.sheet)["breaks"] else None
                 sheetlayout.move_break(self.view.window, item, old, drag[2])
+            return True
+        if kind == "vbreak":
+            item.vbreak_drag = None
+            item.update()
+            if drag[2] != drag[1]:
+                from . import sheetlayout
+                from ..sheet.pagination import options
+                old = drag[1] if drag[1] in (options(item.sheet).get("col_breaks") or []) else None
+                sheetlayout.move_break(self.view.window, item, old, drag[2], across=True)
             return True
         if kind in ("col_size", "row_size", "grow"):
             self.view.commit_snapshot({"col_size": "Column width", "row_size": "Row height",
@@ -1114,7 +1132,7 @@ class TableEditing:
         """Over a run of spreadsheet pages not open yet: the pointer for its
         print area's edges and its page breaks, which drag from there too."""
         zone = self._zone(item, item.mapFromScene(scene_pos))
-        return _cursor_for(zone) if zone and zone[0] in ("area", "break") else None
+        return _cursor_for(zone) if zone and zone[0] in ("area", "break", "vbreak") else None
 
     def hover_cursor(self, scene_pos: QPointF):
         item = self.item
@@ -2289,13 +2307,13 @@ class TableEditing:
         from ..sheet.pagination import options
         window = self.view.window
         layout = menu.addMenu("Page Layout")
-        row = self.active[0]
-        breaks = options(item.sheet)["breaks"]
-        if row in breaks:
-            layout.addAction("Remove Page Break", lambda: sheetlayout.remove_break(window, item, row))
+        row, col = self.active
+        if sheetlayout.has_break(item, row, col):
+            layout.addAction("Remove Page Break", lambda: sheetlayout.remove_break(window, item, row, col))
         else:
-            act = layout.addAction("Insert Page Break", lambda: sheetlayout.insert_break(window, item, row))
-            act.setEnabled(row > 0)
+            act = layout.addAction("Insert Page Break",
+                                   lambda: sheetlayout.insert_break(window, item, row, col))
+            act.setEnabled(row > 0 or col > 0)
         layout.addAction("Reset All Page Breaks", lambda: sheetlayout.reset_breaks(window, item))
         layout.addSeparator()
         layout.addAction("Set Print Area", lambda: sheetlayout.set_print_area(

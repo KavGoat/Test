@@ -170,9 +170,18 @@ class PagePanel(QScrollArea):
         self.adjust.setKeyboardTracking(False)
         self.adjust.valueChanged.connect(lambda _v: self._sheet_changed("scale"))
         form.addRow("Adjust to", self.adjust)
-        self.fit_wide = QCheckBox("Fit to 1 page wide")
+        # Excel's Fit to: N pages wide (unticked: as many across as it takes)
+        self.fit_wide = QCheckBox("Fit to")
         self.fit_wide.toggled.connect(lambda _on: self._sheet_changed("fit_width"))
-        form.addRow("", self.fit_wide)
+        self.fit_wide_n = QSpinBox()
+        self.fit_wide_n.setRange(1, 99)
+        self.fit_wide_n.setSuffix(" wide")
+        self.fit_wide_n.setKeyboardTracking(False)
+        self.fit_wide_n.valueChanged.connect(lambda _v: self._sheet_changed("fit_width"))
+        wide = QHBoxLayout()
+        wide.addWidget(self.fit_wide)
+        wide.addWidget(self.fit_wide_n, 1)
+        form.addRow("", wide)
         self.fit_tall = QSpinBox()
         self.fit_tall.setRange(0, 999)
         self.fit_tall.setSpecialValueText("automatic")
@@ -198,7 +207,7 @@ class PagePanel(QScrollArea):
         form.addRow("Print", prints)
         breaks = QHBoxLayout()
         insert = QPushButton("Insert break")
-        insert.setToolTip("A page break above the selected cell's row")
+        insert.setToolTip("Page breaks above the selected cell's row and left of its column")
         insert.clicked.connect(self._insert_break)
         reset = QPushButton("Reset breaks")
         reset.setToolTip("Reset All Page Breaks")
@@ -238,6 +247,8 @@ class PagePanel(QScrollArea):
         self.title_cols.setText(f"${col_letters(cols[0])}:${col_letters(cols[1])}" if cols else "")
         self.adjust.setValue(int(opts.get("scale") or 100))
         self.fit_wide.setChecked(bool(opts["fit_width"]))
+        self.fit_wide_n.setValue(max(1, int(opts["fit_width"] or 0)))
+        self.fit_wide_n.setEnabled(bool(opts["fit_width"]))
         self.fit_tall.setValue(int(opts.get("fit_tall") or 0))
         self.adjust.setEnabled(not (opts["fit_width"] or opts.get("fit_tall")))
         self.center_h.setChecked(bool(opts["center_h"]))
@@ -261,7 +272,7 @@ class PagePanel(QScrollArea):
         elif key == "scale":
             value = self.adjust.value()
         elif key == "fit_width":
-            value = self.fit_wide.isChecked()
+            value = self.fit_wide_n.value() if self.fit_wide.isChecked() else False
         elif key == "fit_tall":
             value = self.fit_tall.value()
         else:
@@ -296,11 +307,11 @@ class PagePanel(QScrollArea):
         tables = self.window.view.tables
         if item is None:
             return
-        row = tables.active[0] if tables.item is item else 0
-        if row <= 0:
-            self.window.status_hint.setText("Pick a cell below the first row for the break to go above")
+        row, col = tables.active if tables.item is item else (0, 0)
+        if row <= 0 and col <= 0:
+            self.window.status_hint.setText("Pick a cell below row 1 or right of column A for the break")
             return
-        sheetlayout.insert_break(self.window, item, row)
+        sheetlayout.insert_break(self.window, item, row, col)
 
     def _reset_breaks(self) -> None:
         from . import sheetlayout

@@ -157,3 +157,58 @@ def test_rows_going_in_tell_the_listeners_first():
     wb.insert_rows(sheet, 4, 2)
     wb.delete_cols(sheet, 1)
     assert heard == [("row", 4, 2), ("col", 1, -1)]
+
+
+# -- pages across (the user's choice, 2026-10-11: side by side, down then over) ---------------
+def test_a_print_area_wider_than_the_paper_prints_on_pages_across():
+    wb, sheet = fresh()
+    wb.set_input(sheet, 100, 0, "x")                       # two pages down
+    wb.set_page_options(sheet, print_area=[0, 0, 100, 25])
+    paging = paginate(sheet, a4())
+    assert paging.scale == 1.0
+    assert len(paging.groups) == 3
+    assert paging.groups[0] == (0, 10) and paging.groups[-1][1] == 25
+    # each group fits on the paper; together they are the print area's columns
+    for c0, c1 in paging.groups:
+        assert sum(sheet.width(c) for c in range(c0, c1 + 1)) <= paging.printable[2] + 0.01
+    assert [g[0] for g in paging.groups[1:]] == [g[1] + 1 for g in paging.groups[:-1]]
+    down = len(paging.slices)
+    assert down == 2 and paging.pages == 6
+    # Excel's order: down, then over
+    assert [paging.page_of(k) for k in range(4)] == [(0, 0), (1, 0), (0, 1), (1, 1)]
+    assert paging.index_of(1, 2) == 5
+
+
+def test_a_vertical_break_starts_a_page_across():
+    wb, sheet = fresh()
+    wb.set_page_options(sheet, col_breaks=[3])
+    paging = paginate(sheet, a4())
+    assert paging.groups[0] == (0, 2)
+    assert paging.groups[1][0] == 3 and len(paging.groups) == 2
+    assert 3 in paging.col_manual
+    # store and back
+    other = Workbook()
+    again = other.add_sheet("Sheet1", "sheet")
+    load_sheet(again, sheet_to_dict(sheet))
+    assert options(again)["col_breaks"] == [3]
+
+
+def test_fit_to_n_pages_wide():
+    wb, sheet = fresh()
+    wb.set_page_options(sheet, print_area=[0, 0, 10, 25], fit_width=2)
+    paging = paginate(sheet, a4())
+    assert len(paging.groups) == 2 and paging.scale < 1.0
+    wb.set_page_options(sheet, fit_width=True)              # True is 1 wide
+    paging = paginate(sheet, a4())
+    assert len(paging.groups) == 1
+
+
+def test_columns_to_repeat_leave_room_on_each_page_across():
+    wb, sheet = fresh()
+    wb.set_page_options(sheet, print_area=[0, 0, 10, 25], title_cols=[0, 1])
+    paging = paginate(sheet, a4())
+    room = paging.printable[2]
+    titles = sheet.width(0) + sheet.width(1)
+    for c0, c1 in paging.groups[1:]:
+        assert sum(sheet.width(c) for c in range(c0, c1 + 1)) + titles <= room + 0.01
+    assert paging.title_cols == (0, 1)

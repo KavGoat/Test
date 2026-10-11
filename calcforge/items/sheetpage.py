@@ -75,12 +75,14 @@ class SheetRunItem(TableItem):
     SHEET_RUN = True
     _hold = False          # pages being deleted: the layout waits for the new pages
     break_drag = None      # y of a page break being dragged (screen only)
+    vbreak_drag = None     # x of a page break across being dragged (screen only)
     area_drag = None       # [t, l, b, r] of a print area edge being dragged (screen only)
 
     def __init__(self):
         super().__init__(DEFAULT_ROWS, 1)
         self.paging = None
         self._tops: list = []           # each page's first y in the grid
+        self._lefts: list = []          # and its first x (pages across)
         self._anchors: Optional[dict] = None
         self.setFlag(QGraphicsItem.ItemIsSelectable, False)
         self.setFlag(QGraphicsItem.ItemIsMovable, False)
@@ -143,15 +145,25 @@ class SheetRunItem(TableItem):
         self._edges = None
         xs, ys = self.edges()
         self._tops = []
-        width = xs[-1]
+        self._lefts = []
+        groups = paging.groups
         for k, frame in enumerate(frames):
-            if k < len(paging.slices):
-                a, b = paging.slices[k]
+            if k < paging.pages:
+                # pages down, then over: each page across is a band of columns
+                # beside the one before (the first from column A, the last to
+                # the end of the scratch area)
+                i, j = paging.page_of(k)
+                a, b = paging.slices[i]
+                c0, c1 = groups[j]
                 top, height = ys[a], ys[b + 1] - ys[a]
+                left = 0.0 if j == 0 else xs[c0]
+                right = xs[-1] if j == len(groups) - 1 else xs[c1 + 1]
             else:
-                top, height = ys[-1], 1.0
+                top, height, left, right = ys[-1], 1.0, 0.0, xs[-1]
             self._tops.append(top)
-            frame.set_sheet_rect(QRectF(0, 0, width, max(height, 1.0)))
+            self._lefts.append(left)
+            frame.sheet_offset = QPointF(left, top)
+            frame.set_sheet_rect(QRectF(0, 0, max(right - left, 1.0), max(height, 1.0)))
         scene = self.scene()
         if scene is not None and hasattr(scene, "layout_pages"):
             scene.layout_pages()
@@ -177,14 +189,22 @@ class SheetRunItem(TableItem):
         if any(k[0] == sheet.id for k in keys):
             self.update()
 
-    def page_index_of_row(self, row: int) -> int:
+    def page_index_of_row(self, row: int, col: int = 0) -> int:
+        """The run's page cell (row, col) is on (the last across for scratch)."""
         paging = self.paging
         if paging is None:
             return 0
+        i = len(paging.slices) - 1
         for k, (a, b) in enumerate(paging.slices):
             if a <= row <= b:
-                return k
-        return len(paging.slices) - 1
+                i = k
+                break
+        j = len(paging.groups) - 1
+        for k, (c0, c1) in enumerate(paging.groups):
+            if col <= c1:
+                j = k
+                break
+        return paging.index_of(i, j)
 
     # -- markups move with their cells --------------------------------------------------------
     def _grid_cell(self, x: float, y: float) -> tuple:
@@ -260,7 +280,7 @@ class SheetRunItem(TableItem):
             if not isValid(item):
                 continue
             point = self._cell_point(row, col) + QPointF(dx, dy)
-            k = min(self.page_index_of_row(row), len(frames) - 1)
+            k = min(self.page_index_of_row(row, col), len(frames) - 1)
             frame = frames[k]
             target = frame.mapFromItem(self, point)
             if item.parentItem() is not frame:
@@ -360,6 +380,7 @@ class SheetRunItem(TableItem):
         rules = (sheet.cond_rules, sheet.workbook.version) if sheet.cond_rules else None
         return (tuple(xs), tuple(ys[a:b + 2]), content, [tuple(m) for m in sheet.merges],
                 paging.first_col, paging.last_col, paging.print_rows, tuple(paging.slices),
+                tuple(paging.groups),
                 sheet.show_gridlines, opts["print_gridlines"], self._on_paper, rules,
                 len(sheet.workbook.styles))
 
@@ -468,11 +489,12 @@ class SheetRunItem(TableItem):
         font = QFont(page_font("", 40.0, True))
         painter.setFont(font)
         painter.setPen(PAGE_LABEL)
-        for k, (a, b) in enumerate(paging.slices):
+        for i, (a, b) in enumerate(paging.slices):
             if b < r0 or a > r1:
                 continue
-            box = QRectF(xs[c0], ys[a], xs[c1 + 1] - xs[c0], ys[b + 1] - ys[a])
-            painter.drawText(box, Qt.AlignCenter, f"Page {k + 1}")
+            for j, (g0, g1) in enumerate(paging.groups):
+                box = QRectF(xs[g0], ys[a], xs[g1 + 1] - xs[g0], ys[b + 1] - ys[a])
+                painter.drawText(box, Qt.AlignCenter, f"Page {paging.index_of(i, j) + 1}")
 
     def _paint_breaks(self, painter: QPainter) -> None:
         """Excel's Page Break Preview lines: the printed area's edge, and a
@@ -496,6 +518,9 @@ class SheetRunItem(TableItem):
                 continue
             painter.setPen(solid if a in paging.manual else dashed)
             painter.drawLine(QPointF(xs[c0], ys[a]), QPointF(xs[c1 + 1], ys[a]))
+        for g0, _g1 in paging.groups[1:]:
+            painter.setPen(solid if g0 in paging.col_manual else dashed)
+            painter.drawLine(QPointF(xs[g0], top), QPointF(xs[g0], bottom))
         if self.area_drag is not None:
             top, first, bottom, last = self.area_drag
             moving = QPen(BREAK_BLUE, 3.0)
@@ -508,6 +533,11 @@ class SheetRunItem(TableItem):
             moving.setCosmetic(True)
             painter.setPen(moving)
             painter.drawLine(QPointF(xs[c0], self.break_drag), QPointF(xs[c1 + 1], self.break_drag))
+        if self.vbreak_drag is not None:
+            moving = QPen(BREAK_BLUE, 3.0)
+            moving.setCosmetic(True)
+            painter.setPen(moving)
+            painter.drawLine(QPointF(self.vbreak_drag, top), QPointF(self.vbreak_drag, bottom))
 
     def _paint_headings(self, painter: QPainter, r0: int, r1: int) -> None:
         """Row numbers and column letters, always (the user's choice)."""
@@ -555,16 +585,17 @@ class SheetRunItem(TableItem):
         if paging is None or frame not in frames:
             return None
         k = frames.index(frame)
-        if k >= len(paging.slices):
+        if k >= paging.pages:
             return None
         opts = options(self.sheet)
-        a, b = paging.slices[k]
+        i, j = paging.page_of(k)
+        a, b = paging.slices[i]
         if paging.print_rows:
             a, b = max(a, paging.print_rows[0]), min(b, paging.print_rows[1])
             if a > b:
                 return None
         xs, ys = self.edges()
-        c0, c1 = paging.first_col, paging.last_col
+        c0, c1 = paging.groups[j]
         scale = paging.scale
         left, top, width, height = paging.printable
         heads = bool(opts["print_headings"])
@@ -575,7 +606,7 @@ class SheetRunItem(TableItem):
         titles = paging.titles
         title_rows = titles if titles and a > titles[1] else None
         th = (ys[title_rows[1] + 1] - ys[title_rows[0]]) if title_rows else 0.0
-        tc = paging.title_cols
+        tc = paging.title_cols if paging.title_cols and c0 > paging.title_cols[1] else None
         tw = (xs[tc[1] + 1] - xs[tc[0]]) if tc else 0.0
         w = xs[c1 + 1] - xs[c0]
         h = ys[b + 1] - ys[a]
@@ -610,7 +641,7 @@ class SheetRunItem(TableItem):
                 self._print_headings(painter, ra, rb, c0, c1, x0, at, scale, hw, hh,
                                      first=(at == gy), title_cols=tc)
         inner = QRectF(gx + tw * scale, gy + th * scale, w * scale, h * scale)
-        source = QRectF(xs[c0], ys[a] - self._tops[k], w, h)
+        source = QRectF(xs[c0] - self._lefts[k], ys[a] - self._tops[k], w, h)
         return source, inner
 
     def _print_headings(self, painter, ra, rb, c0, c1, x0, at, scale, hw, hh, first,

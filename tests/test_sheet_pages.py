@@ -503,7 +503,8 @@ def test_pasting_more_than_a_page_holds_adds_pages(window):
 
 def test_the_print_area_is_dragged_by_its_edges(w):
     """Excel's Page Break Preview: the blue border of what prints is dragged
-    — narrower, or wider than the paper, which then prints shrunk to fit."""
+    — narrower, or wider than the paper, which then prints on pages across
+    (the user's choice, 2026-10-11: side by side, down then over)."""
     from tests.test_usability import drag
     run = sheet_page(w)
     open_at(w, run, "A1")
@@ -531,7 +532,7 @@ def test_the_print_area_is_dragged_by_its_edges(w):
     pump()
     (run,) = runs(w)
     assert options(run.sheet)["print_area"] == [0, 0, 19, 3]
-    # out past the paper: shrunk to fit, as Excel scales such a page
+    # out past the paper: a second page across, beside the first, full size
     xs, ys = run.edges()
     right = run.mapToScene(QPointF(xs[4], ys[3]))
     far = run.mapToScene(QPointF(xs[last + 4], ys[3]))
@@ -539,7 +540,11 @@ def test_the_print_area_is_dragged_by_its_edges(w):
     pump()
     (run,) = runs(w)
     assert options(run.sheet)["print_area"] == [0, 0, 19, last + 3]
-    assert options(run.sheet)["fit_width"] and run.paging.scale < 1.0
+    assert not options(run.sheet)["fit_width"] and run.paging.scale == 1.0
+    assert len(run.paging.groups) == 2 and run.paging.groups[0] == (0, last)
+    first, second = run.run_frames()[:2]
+    assert abs(second.scenePos().y() - first.scenePos().y()) < 0.01
+    assert second.scenePos().x() > first.scenePos().x() + 100
     for _ in range(3):
         w.undo_stack.undo()
     pump()
@@ -700,3 +705,71 @@ def test_sheet_tabs_go_to_every_sheet_and_table(w):
     pump()
     assert w.document.pages[1].sheet == second
     assert [k for k, _u, _n in tabs.entries][1:] == ["sheet", "sheet"]
+
+
+def test_pages_across_sit_side_by_side_and_print_their_own_columns(w):
+    """A sheet wider than the paper (the user's choice, 2026-10-11): pages
+    across beside each other, numbered down then over, each printing its
+    own columns; markups stay on the page across their cell is on."""
+    run = sheet_page(w)
+    wb = run.sheet.workbook
+    wb.set_input(run.sheet, 60, 0, "end")
+    wb.set_input(run.sheet, 0, 12, "RIGHT")               # column M: on the second page across
+    sheetlayout.change_options(w, run, "Set print area", print_area=[0, 0, 60, 17])
+    pump()
+    pump()
+    (run,) = runs(w)
+    paging = run.paging
+    assert len(paging.groups) == 2 and len(paging.slices) == 2
+    frames = run.run_frames()
+    assert len(frames) == 4
+    at = [f.scenePos() for f in frames]
+    # page 2 under page 1, page 3 beside page 1, page 4 beside page 2
+    assert abs(at[1].x() - at[0].x()) < 0.01 and at[1].y() > at[0].y()
+    assert abs(at[2].y() - at[0].y()) < 0.01 and at[2].x() > at[0].x()
+    assert abs(at[3].y() - at[1].y()) < 0.01 and abs(at[3].x() - at[2].x()) < 0.01
+    # the grid stays continuous: page 3 starts where column L does
+    xs, _ys = run.edges()
+    c0 = paging.groups[1][0]
+    assert abs(at[2].x() - (at[0].x() + xs[c0])) < 0.01
+    # on paper: "RIGHT" is on page 3, nothing of it on page 1
+    assert ink_box(paper(frames[0], 2)) is None
+    box = ink_box(paper(frames[2], 2))
+    left, top, _w, _h = paging.printable
+    assert box is not None and box[0] < (left + xs[12] - xs[c0] + 20) * 2
+    # a markup on page 3 stays there when a row goes in above it
+    mark = box_on(frames[2], 30, 30)
+    wb.insert_rows(run.sheet, 0, 1)
+    pump()
+    (run,) = runs(w)
+    assert mark.parentItem() is run.run_frames()[2]
+    # the next page down appears on the canvas under the first (down, then over)
+    assert w.document.pages[2].sheet == run.uid
+
+
+def test_a_vertical_page_break_from_the_active_cell(w):
+    run = sheet_page(w)
+    open_at(w, run, "D1")
+    from calcforge.ui.tableedit import SHEET_COMMANDS
+    SHEET_COMMANDS["page_break"](w.view.tables)            # Excel's Insert Page Break
+    pump()
+    (run,) = runs(w)
+    assert options(run.sheet)["col_breaks"] == [3]
+    assert options(run.sheet)["breaks"] == []
+    assert run.paging.groups[0] == (0, 2)
+    frames = run.run_frames()
+    assert len(frames) == 2 and frames[1].scenePos().x() > frames[0].scenePos().x()
+    # dragging it one column right moves it (a manual break from then on)
+    from tests.test_usability import drag
+    xs, ys = run.edges()
+    start = run.mapToScene(QPointF(xs[3], ys[5]))
+    assert w.view.tables.hover_cursor(start).shape() == Qt.SplitHCursor
+    end = run.mapToScene(QPointF(xs[4] + 2, ys[5]))
+    drag(w.view, start.x(), start.y(), end.x(), end.y())
+    pump()
+    (run,) = runs(w)
+    assert options(run.sheet)["col_breaks"] == [4]
+    sheetlayout.reset_breaks(w, run)
+    pump()
+    (run,) = runs(w)
+    assert options(run.sheet)["col_breaks"] == [] and len(run.paging.groups) == 1

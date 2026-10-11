@@ -371,6 +371,8 @@ class PageFrame(QGraphicsObject):
     #: A spreadsheet page's on-screen shape: its rows and the columns shown,
     #: printed and scratch (items/sheetpage.py); None: still the paper.
     sheet_rect: Optional[QRectF] = None
+    #: and where in its run's grid it starts (pages across sit side by side)
+    sheet_offset: Optional[QPointF] = None
     _as_paper = False
 
     @property
@@ -1618,17 +1620,24 @@ class DocumentScene(QGraphicsScene):
         y = 0.0
         right = widest
         previous = None
+        run_at = None              # where the run of sheet pages being laid out starts
         for frame in self.frames:
             if sheet(frame):
                 # a run of spreadsheet pages is one continuous grid: no gap
-                # between its pages, a blue line where one ends (sheetpage.py)
+                # between its pages, a blue line where one ends; pages across
+                # sit to the right of each other (sheetpage.py)
                 if previous is not None and sheet(previous) and previous.page.sheet == frame.page.sheet:
-                    y -= PAGE_GAP
-                left = (widest - across(frame)) / 2.0
+                    base, end = run_at
+                else:
+                    base = QPointF((widest - across(frame)) / 2.0, y)
+                    end = y
+                offset = getattr(frame, "sheet_offset", None) or QPointF(0, 0)
                 frame.setRotation(0)
-                frame.setPos(left, y)
-                right = max(right, left + frame.sheet_rect.width())
-                y += down(frame) + PAGE_GAP
+                frame.setPos(base + offset)
+                right = max(right, base.x() + offset.x() + frame.sheet_rect.width())
+                end = max(end, base.y() + offset.y() + down(frame))
+                run_at = (base, end)
+                y = end + PAGE_GAP
                 previous = frame
                 continue
             previous = frame
