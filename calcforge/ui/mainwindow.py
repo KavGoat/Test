@@ -3769,6 +3769,8 @@ class MainWindow(QMainWindow):
                                                self.page_setup()))
         menu.addAction("Page scale…", lambda: (self.go_to_page(index),
                                                self.calibrate_dialog()))
+        from . import calcsections
+        calcsections.add_menu(self, menu, index)
         processing = menu.addAction("Color Processing…",
                                     lambda: self.color_processing(index))
         page = self.document.pages[index]

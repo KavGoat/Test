@@ -39,6 +39,10 @@ class DocumentBook:
         self.workbook = Workbook()
         self.workbook.journal = False           # the window's undo stack records pages
         self.workbook.outside = self._outside
+        self.workbook.reach = self._reach
+        # the reading key of the equation now asking for a table's values
+        # (calc/worksheet.py sets it), for the calculation sections
+        self.reading_at = None
         self.by_uid: dict[str, Sheet] = {}
         self._parked: dict[str, Sheet] = {}
         self._places: dict[str, tuple] = {}     # uid -> (page uid, x px, y px)
@@ -112,6 +116,43 @@ class DocumentBook:
         sheet = self.by_uid.get(uid)
         if sheet is not None:
             self.workbook.outside_changed({n for n in self.workbook.outside_names_read()})
+
+    # -- calculation sections --------------------------------------------------------------
+    def _section(self, key) -> int:
+        return self._calc().section_of_key(key)
+
+    @staticmethod
+    def _within(area, ranges) -> bool:
+        """Whether every cell of *area* is in one of *ranges* (or their union)."""
+        t, l, b, r = area
+        if not ranges:
+            return False
+        for row in range(t, b + 1):
+            for col in range(l, r + 1):
+                if not any(rt <= row <= rb and rl <= col <= rr for rt, rl, rb, rr in ranges):
+                    return False
+                if (b - t + 1) * (r - l + 1) > 20000:
+                    break
+        return True
+
+    def readable(self, sheet: Sheet, area, at_key) -> bool:
+        """Whether cells *area* of *sheet* are seen from reading key *at_key*:
+        in its own section, or later ones where they were made global."""
+        if at_key is None or not self._calc().section_starts():
+            return True
+        mine, theirs = self._section(at_key), self._section(self._key(sheet))
+        if mine == theirs:
+            return True
+        if theirs > mine:
+            return False
+        return self._within(area, (sheet.page or {}).get("global_cells") or [])
+
+    def _reach(self, reader: Sheet, sheet: Sheet, area) -> bool:
+        return self.readable(sheet, area, self._key(reader))
+
+    def sections_changed(self) -> None:
+        """Section breaks or global cells changed: every sheet calculates again."""
+        self.workbook.recalculate(everything=True)
 
     def _key(self, sheet: Sheet) -> tuple:
         uid = next((u for u, s in self.by_uid.items() if s is sheet), None)
@@ -213,13 +254,31 @@ class DocumentBook:
                     out[f"{sheet.name}.{_ident(cell.value)}"] = f"column “{cell.value}” of {sheet.name}"
         return out
 
+    def _seen(self, got):
+        """The (sheet, value) the equation now asking may read, or None."""
+        if got is None:
+            return None
+        sheet, value = got
+        if isinstance(value, RefValue):
+            area = (value.top, value.left, value.bottom, value.right)
+            ref_sheet = value.sheet
+        else:
+            used = sheet.used_area()
+            area, ref_sheet = (used if used is not None else (0, 0, 0, 0)), sheet
+        return got if self.readable(ref_sheet, area, self.reading_at) else None
+
     def has(self, name: str) -> bool:
+        # known even from a later section: its value then says why it can't be read
         return self._named(name) is not None
 
     def value(self, name: str):
         got = self._named(name)
         if got is None:
             return None
+        if self._seen(got) is None:
+            from calcforge.calc.engine.errors import SMathError
+
+            raise SMathError(f"{name} is in an earlier calculation section and not global.")
         sheet, value = got
         self._asked[name] = sheet.id
         if isinstance(value, RefValue):
@@ -241,6 +300,9 @@ class DocumentBook:
         """A table used as a lookup: name(x), name(x, "heading"), name(x, y)."""
         sheet = self.workbook.sheet(name)
         if sheet is None or not 1 <= nargs <= 3 or not _ident_ok(name):
+            return None
+        used = sheet.used_area()
+        if not self.readable(sheet, used if used is not None else (0, 0, 0, 0), self.reading_at):
             return None
 
         def look(args):
@@ -308,8 +370,15 @@ class DocumentBook:
             self._syncing = False
         calc._report()
 
+    _starts_seen = None
+
     def _after_calculation(self) -> None:
         """The equations calculated: tables reading their variables follow."""
+        starts = tuple(self._calc().section_starts())
+        if self._starts_seen is not None and starts != self._starts_seen and not self._syncing:
+            self._starts_seen = starts
+            self._soon("sections", self.sections_changed)
+        self._starts_seen = starts
         if self._syncing or not self.workbook.outside_names_read():
             return
         self._soon("equations", self._take_up_equations)

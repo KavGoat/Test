@@ -92,6 +92,9 @@ class Region:
     field_code: str = ""  # header/footer math regions holding a field (\[TITLE]\ ...)
     area_height: float = 0.0  # an area's extent below its top line
     collapsed: bool = False
+    # CalcForge's calculation sections: what a global region defines is seen
+    # by every later section too (DefinitionIndex.global_keys)
+    is_global: bool = False
 
     @property
     def kind(self) -> str:
@@ -189,6 +192,8 @@ class Worksheet:
         return builtins.has_overload(name, nargs)
 
     def _context_before(self, region: Region) -> Context:
+        if self.external is not None and hasattr(self.external, "reading_at"):
+            self.external.reading_at = region.key     # the tables' sections (CalcForge)
         scope = self.scope_of.get(region.id)
         if scope is not None:
             return ScopedContext(self.index, region.key, self._scoped.get(scope))
@@ -266,6 +271,7 @@ class Worksheet:
             return
         self._index_for(self._scope_indexed.pop(region.id, None)).remove(
             key, region.defined_vars, region.defined_funcs)
+        self.index.global_keys.discard(key)
         changed = set(region.defined_vars) | {n for n, _ in region.defined_funcs}
         self._propagate(key, changed)
 
@@ -299,8 +305,10 @@ class Worksheet:
         r.pending = False
         before = (_shown(r.display), r.error.message if r.error else None)
         if commit and r.id in self._keys:
+            old = self._keys.pop(r.id)
             self._index_for(self._scope_indexed.pop(r.id, None)).remove(
-                self._keys.pop(r.id), r.defined_vars, r.defined_funcs)
+                old, r.defined_vars, r.defined_funcs)
+            self.index.global_keys.discard(old)
         ctx = self._context_before(r)
         self.evaluator.start_clock()
         try:
@@ -318,6 +326,8 @@ class Worksheet:
             r.defined_vars, r.defined_funcs = dict(ctx.vars), dict(ctx.funcs)
             scope = self.scope_of.get(r.id)
             self._index_for(scope).add(r.key, r.defined_vars, r.defined_funcs)
+            if r.is_global and scope is None:
+                self.index.global_keys.add(r.key)
             self._keys[r.id] = r.key
             if scope is not None:
                 self._scope_indexed[r.id] = scope
@@ -596,16 +606,9 @@ class ScopedContext(IndexedContext):
         super().__init__(index, key)
         self.own = own if own is not None else DefinitionIndex()
 
-    @staticmethod
-    def _last(lst, key):
-        if not lst:
-            return None
-        i = bisect.bisect_left(lst, key, key=lambda e: e[0])
-        return lst[i - 1] if i else None
-
     def _latest(self, table: str, name):
-        mine = self._last(getattr(self.own, table).get(name), self.key)
-        theirs = self._last(getattr(self.index, table).get(name), self.key)
+        mine = self.own.last_entry(getattr(self.own, table).get(name), self.key)
+        theirs = self.index.last_entry(getattr(self.index, table).get(name), self.key)
         if mine is None:
             return theirs[1] if theirs is not None else None
         if theirs is None or mine[0] > theirs[0]:
@@ -632,16 +635,16 @@ class ScopedContext(IndexedContext):
         for (n, k), f in self.funcs.items():
             if n == name:
                 return f
-        for table in (self.own.funcs, self.index.funcs):
-            for (n, k), lst in table.items():
-                if n == name and lst[0][0] < self.key:
-                    return lst[0][1]
+        for index in (self.own, self.index):
+            f = index.first_function(name, self.key)
+            if f is not None:
+                return f
         return None
 
     def names(self) -> set:
         return super().names() | self.own.names_before(self.key)
 
     def function_arities(self) -> dict:
-        out = {n: k for (n, k), lst in self.own.funcs.items() if lst[0][0] < self.key}
+        out = self.own.arities_before(self.key)
         out.update(super().function_arities())
         return out

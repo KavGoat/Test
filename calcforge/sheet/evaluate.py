@@ -241,12 +241,23 @@ def _sheet_of(name: Optional[str], ctx: Ctx):
     return sheet
 
 
+def reach(ctx: Ctx, ref: RefValue) -> RefValue:
+    """Another sheet's cells, if this one may read them: one in an earlier
+    calculation section only where they were made global (the document's
+    workbook says, Workbook.reach)."""
+    allowed = ctx.wb.reach
+    if allowed is not None and ref.sheet is not ctx.sheet and \
+            not allowed(ctx.sheet, ref.sheet, (ref.top, ref.left, ref.bottom, ref.right)):
+        raise SheetError(REF)
+    return ref
+
+
 def _ref(n: F.Ref, ctx: Ctx) -> RefValue:
     sheet = _sheet_of(n.sheet, ctx)
     row, col = n.at(ctx.row, ctx.col)
     if not (0 <= row < MAX_ROWS and 0 <= col < MAX_COLS):
         raise SheetError(REF)
-    return RefValue(sheet, row, col, row, col)
+    return reach(ctx, RefValue(sheet, row, col, row, col))
 
 
 def _area(n: F.Area, ctx: Ctx) -> RefValue:
@@ -257,7 +268,7 @@ def _area(n: F.Area, ctx: Ctx) -> RefValue:
     left, right = min(c1, c2), max(c1, c2)
     if top < 0 or left < 0 or bottom >= MAX_ROWS or right >= MAX_COLS:
         raise SheetError(REF)
-    return RefValue(sheet, top, left, bottom, right)
+    return reach(ctx, RefValue(sheet, top, left, bottom, right))
 
 
 def _spill_ref(n: F.SpillRef, ctx: Ctx) -> RefValue:
@@ -267,7 +278,7 @@ def _spill_ref(n: F.SpillRef, ctx: Ctx) -> RefValue:
     ctx.wb.value(sheet, row, col)               # calculated first
     size = sheet.spills.get((row, col))
     if size is not None:
-        return RefValue(sheet, row, col, row + size[0] - 1, col + size[1] - 1)
+        return reach(ctx, RefValue(sheet, row, col, row + size[0] - 1, col + size[1] - 1))
     cell = sheet.cells.get((row, col))
     if cell is not None and cell.is_formula and (row, col) not in sheet.wanted:
         return RefValue(sheet, row, col, row, col)
@@ -324,7 +335,7 @@ def structured(n: F.Structured, ctx: Ctx) -> RefValue:
         top, bottom = 1, rows - 1
         if bottom < top:
             raise SheetError(REF)
-    return RefValue(sheet, top, left, bottom, right)
+    return reach(ctx, RefValue(sheet, top, left, bottom, right))
 
 
 def _name(n: F.Name, ctx: Ctx):

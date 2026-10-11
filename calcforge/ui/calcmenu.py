@@ -95,6 +95,12 @@ def fill(window, menu: QMenu, item) -> None:
             r.fmt = None if made == worksheet.format else made
         return apply
 
+    # calculation sections (2026-10-11): what a global equation defines is
+    # read by every later section too
+    made_global = check(menu, "Global (read by later calc sections)", region.is_global,
+                        lambda r, on=not region.is_global: setattr(r, "is_global", on),
+                        "Make global" if not region.is_global else "Make local")
+    made_global.setToolTip("Its variables carry on past calc section breaks")
     equation = menu.addMenu("Equation")
     check(equation, "Display input data", region.show_input,
           lambda r: setattr(r, "show_input", not r.show_input))

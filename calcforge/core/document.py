@@ -327,6 +327,11 @@ class Page:
         # The spreadsheet section this page is a page of (its run's id), or
         # None for an ordinary page (sheet/pagination.py, items/sheetpage.py).
         self.sheet: Optional[str] = None
+        # A calculation section break above this page (the user's request,
+        # 2026-10-11): from here on is a new document for the calculation —
+        # variables, tables and sheets — but for what was made global.
+        self.section_break: bool = False
+        self.section_title: str = ""
 
     # -- geometry ----------------------------------------------------------
     @property
@@ -394,6 +399,8 @@ class Page:
             "turn": self.turn,
             "written_here": self.written_here,
             "sheet": self.sheet,
+            "section_break": self.section_break,
+            "section_title": self.section_title,
             "items": items,
         }
 
@@ -421,6 +428,8 @@ class Page:
         page.written_here = None if said is None else bool(said)
         page._pending_items = data.get("items", [])
         page.sheet = data.get("sheet") or None
+        page.section_break = bool(data.get("section_break", False))
+        page.section_title = str(data.get("section_title", "") or "")
         return page
 
 

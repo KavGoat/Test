@@ -1721,3 +1721,6 @@ class DocumentScene(QGraphicsScene):
         if any(frame.print_mode for frame in self.frames):
             return
         painter.fillRect(rect, self.backgroundBrush())
+        # calculation section breaks, in the gap above their pages
+        from .calcsections import paint_bands
+        paint_bands(self, painter, rect)

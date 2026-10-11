@@ -123,10 +123,45 @@ class DefinitionIndex:
     def __init__(self):
         self.vars: dict = {}  # name -> [(key, value)] sorted by key
         self.funcs: dict = {}  # (name, nargs) -> [(key, UserFunction)]
+        # CalcForge's calculation sections: the keys where each starts
+        # (sorted). A definition is seen from later in its own section only,
+        # unless it was made global (its key is in global_keys): then from
+        # every section after it as well.
+        self.starts: list = []
+        self.global_keys: set = set()
 
     def clear(self) -> None:
         self.vars.clear()
         self.funcs.clear()
+        self.global_keys.clear()
+
+    def section_start(self, key):
+        """Where the section holding *key* starts (None: the first section)."""
+        starts = self.starts
+        if not starts:
+            return None
+        i = bisect.bisect_right(starts, key)
+        return starts[i - 1] if i else None
+
+    def visible(self, entry_key, key) -> bool:
+        """Whether a definition at *entry_key* is seen at *key* (which is after it)."""
+        start = self.section_start(key)
+        return start is None or entry_key >= start or entry_key in self.global_keys
+
+    def last_entry(self, lst, key):
+        """The last (key, value) of *lst* defined before *key* and seen there."""
+        if not lst:
+            return None
+        i = bisect.bisect_left(lst, key, key=lambda e: e[0])
+        if not self.starts:
+            return lst[i - 1] if i else None
+        start = self.section_start(key)
+        while i:
+            entry = lst[i - 1]
+            if start is None or entry[0] >= start or entry[0] in self.global_keys:
+                return entry
+            i -= 1
+        return None
 
     @staticmethod
     def _put(table: dict, name, key, value) -> None:
@@ -148,13 +183,9 @@ class DefinitionIndex:
             if not lst:
                 del table[name]
 
-    @staticmethod
-    def _before(table: dict, name, key):
-        lst = table.get(name)
-        if not lst:
-            return None
-        i = bisect.bisect_left(lst, key, key=lambda e: e[0])
-        return lst[i - 1][1] if i else None
+    def _before(self, table: dict, name, key):
+        entry = self.last_entry(table.get(name), key)
+        return entry[1] if entry is not None else None
 
     def add(self, key, variables: dict, functions: dict) -> None:
         for n, v in variables.items():
@@ -175,9 +206,25 @@ class DefinitionIndex:
         return self._before(self.funcs, (name, nargs), key)
 
     def names_before(self, key) -> set:
+        if self.starts:
+            out = {n for n, lst in self.vars.items() if self.last_entry(lst, key) is not None}
+            out |= {n for (n, _), lst in self.funcs.items() if self.last_entry(lst, key) is not None}
+            return out
         out = {n for n, lst in self.vars.items() if lst[0][0] < key}
         out |= {n for (n, _), lst in self.funcs.items() if lst[0][0] < key}
         return out
+
+    def first_function(self, name: str, key):
+        """A user function *name* (any argument count) seen at *key*."""
+        for (n, _k), lst in self.funcs.items():
+            if n == name:
+                entry = self.last_entry(lst, key)
+                if entry is not None:
+                    return entry[1]
+        return None
+
+    def arities_before(self, key) -> dict:
+        return {n: k for (n, k), lst in self.funcs.items() if self.last_entry(lst, key) is not None}
 
 
 class IndexedContext(Context):
@@ -206,16 +253,13 @@ class IndexedContext(Context):
         for (n, k), f in self.funcs.items():
             if n == name:
                 return f
-        for (n, k), lst in self.index.funcs.items():
-            if n == name and lst[0][0] < self.key:
-                return lst[0][1]
-        return None
+        return self.index.first_function(name, self.key)
 
     def names(self) -> set:
         return set(self.vars) | {n for n, _ in self.funcs} | self.index.names_before(self.key)
 
     def function_arities(self) -> dict:
-        out = {n: k for (n, k), lst in self.index.funcs.items() if lst[0][0] < self.key}
+        out = self.index.arities_before(self.key)
         out.update({n: k for n, k in self.funcs})
         return out
 

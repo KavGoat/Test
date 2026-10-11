@@ -87,6 +87,8 @@ def region_to_data(region) -> dict:
         data["fmt"] = asdict(region.fmt)
     if region.plot is not None:
         data["plot"] = asdict(region.plot)
+    if region.is_global:
+        data["global"] = True
     if region.line_runs:
         data["line_runs"] = [[[t, dict(st or {})] for t, st in line] for line in region.line_runs]
     return data
@@ -119,6 +121,7 @@ def apply_region_data(region, data: dict) -> None:
     region.plot = None if plot is None else PlotState(
         **{f.name: plot[f.name] for f in fields(PlotState) if f.name in plot})
     region.line_runs = [[(t, st) for t, st in line] for line in data.get("line_runs", [])]
+    region.is_global = bool(data.get("global", False))
 
 
 def add_region_from_data(worksheet, x: float, y: float, data: dict):

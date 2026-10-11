@@ -312,6 +312,9 @@ class Workbook:
         self.day_first = True
         # asked for a document variable: outside(sheet, name) -> value; raises KeyError
         self.outside: Optional[Callable] = None
+        # whether one sheet may read cells of another (from, to, (t, l, b, r)):
+        # the document's calculation sections (sheet/docbook.py); None: always
+        self.reach: Optional[Callable] = None
         self.circular: list[tuple] = []              # (sheet, row, col) in a loop
         self.listeners: list[Callable[[set], None]] = []   # told the keys whose values changed
         self._deps = _Dependents()
@@ -1223,10 +1226,15 @@ class Workbook:
                 return None if at <= i < at - delta else (i + delta if i >= at - delta else i)
             if axis == "row" and page.get("breaks"):
                 page["breaks"] = sorted({m for m in (mv(b) for b in page["breaks"]) if m})
+            if axis == "col" and page.get("col_breaks"):
+                page["col_breaks"] = sorted({m for m in (mv(b) for b in page["col_breaks"]) if m})
             for key in ("print_area",):
                 if page.get(key):
                     moved = _shift_ranges({"ranges": [page[key]]}, axis, at, delta)
                     page[key] = moved["ranges"][0] if moved else None
+            if page.get("global_cells"):
+                moved = _shift_ranges({"ranges": page["global_cells"]}, axis, at, delta)
+                page["global_cells"] = moved["ranges"] if moved else []
             if axis == "row" and page.get("titles"):
                 moved = _shift_ranges({"ranges": [[page["titles"][0], 0, page["titles"][1], 0]]},
                                       axis, at, delta)

@@ -343,6 +343,12 @@ class CalcItem(MarkupItem):
             self._view.selected_region = False
         if printing:
             return
+        region = getattr(self, "region", None)
+        if region is not None and region.is_global:
+            # made global (calc sections): a bar down its left edge, on screen
+            from ..ui.calcsections import BAND
+            box = self.local_rect()
+            painter.fillRect(QRectF(box.left(), box.top(), 2.0, box.height()), BAND)
         if self.too_wide or self.warning:
             painter.save()
             pen = QPen(QColor("#ff8c00"))

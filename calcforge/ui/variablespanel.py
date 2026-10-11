@@ -11,6 +11,10 @@ headings name (Loads.Load), with its value; clicking one goes to its cells.
 
 A name defined twice has two rows: SMath allows redefining, and which
 definition an equation sees depends on where it is.
+
+With calc section breaks (2026-10-11) the rows come section by section,
+under a heading for each; a global one is marked, and right-click makes a
+variable (or a table's cells) global or local again.
 """
 from __future__ import annotations
 
@@ -19,8 +23,8 @@ from typing import Optional
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QBrush, QColor
-from PySide6.QtWidgets import (QHeaderView, QLabel, QLineEdit, QTreeWidget, QTreeWidgetItem,
-                               QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QHeaderView, QLabel, QLineEdit, QMenu, QTreeWidget,
+                               QTreeWidgetItem, QVBoxLayout, QWidget)
 
 COLUMNS = ("Name", "Value", "Unit", "Page")
 ERROR_RED = "#c92a2a"
@@ -37,6 +41,8 @@ class VariableRow:
     region_id: int
     source: str = "Equation"    # or "Measurement" (decision 24), or "Table"
     cells: Optional[tuple] = None   # a table's: (sheet name, (top, left, bottom, right))
+    section: int = 1            # the calc section it is in (1-based)
+    is_global: bool = False     # read by later sections too
 
 
 def _split_value(shown: str) -> tuple:
@@ -57,6 +63,7 @@ def variable_rows(document) -> list:
     worksheet = sheet.worksheet
     pages = {page.uid: index for index, page in enumerate(document.pages)}
     rows = []
+    sectioned = bool(sheet.section_starts())
     for region in worksheet.ordered():
         page_uid = sheet.page_uid(region)
         if page_uid not in pages or region.kind != "math":
@@ -68,19 +75,24 @@ def variable_rows(document) -> list:
         error = region.error.message if region.error is not None else ""
         fmt = region.fmt or worksheet.format
         source = getattr(region, "calcforge_source", "Equation")
+        section = sheet.section_of(region) + 1 if sectioned else 1
+        made = region.is_global
+        if made:
+            where += " · global"
         names = list(region.defined_vars.items())
         for name, value in names:
             shown, problem = _value_text(worksheet, region, value, fmt)
             number, unit = _split_value(shown)
             rows.append(VariableRow(name, number, unit, page, where, error or problem,
-                                    region.id, source))
+                                    region.id, source, None, section, made))
         for (name, arity), _body in region.defined_funcs.items():
             rows.append(VariableRow(f"{name}({', '.join(['·'] * arity)})", "function", "",
-                                    page, where, error, region.id, source))
+                                    page, where, error, region.id, source, None, section, made))
         if not names and not region.defined_funcs and error:
             name = _defined_name(region)
             if name:
-                rows.append(VariableRow(name, "", "", page, where, error, region.id, source))
+                rows.append(VariableRow(name, "", "", page, where, error, region.id, source,
+                                        None, section, made))
     return rows
 
 
@@ -96,6 +108,17 @@ def table_rows(document) -> list:
     book = book_for(document)
     wb = book.workbook
     pages = {page.uid: index for index, page in enumerate(document.pages)}
+    calc = book._calc()
+    sectioned = bool(calc.section_starts())
+
+    def placed(sheet, cells) -> dict:
+        """The section a table is in, and whether these of its cells are global."""
+        if not sectioned or sheet is None:
+            return {}
+        out = {"section": calc.section_of_key(book._key(sheet)) + 1}
+        if cells is not None:
+            out["is_global"] = book._within(cells[1], (sheet.page or {}).get("global_cells") or [])
+        return out
     homes = {}
     for uid, sheet in book.by_uid.items():
         place = book._places.get(uid)
@@ -141,7 +164,7 @@ def table_rows(document) -> list:
         page = homes.get(sheet.id, 0) if sheet is not None else 0
         name = dn.name + (f" ({home.name})" if home is not None else "")
         rows.append(VariableRow(name, text, unit, page, f"Page {page}" if page else "",
-                                error, -1, "Table", cells))
+                                error, -1, "Table", cells, **placed(sheet, cells)))
     for sheet in wb.sheets:
         if sheet.kind != "table" or not sheet.size:
             continue
@@ -153,9 +176,10 @@ def table_rows(document) -> list:
                       if (r, col) in sheet.cells]
             text, unit, error = shown(values)
             page = homes.get(sheet.id, 0)
+            cells = (sheet.name, (1, col, max(1, height - 1), col))
             rows.append(VariableRow(f"{sheet.name}.{_ident(cell.value)}", text, unit, page,
                                     f"Page {page}" if page else "", error, -1, "Table",
-                                    (sheet.name, (1, col, max(1, height - 1), col))))
+                                    cells, **placed(sheet, cells)))
     return rows
 
 
@@ -220,6 +244,8 @@ class VariablesPanel(QWidget):
         header.setSectionResizeMode(1, QHeaderView.Stretch)
         header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._menu)
         self.tree.itemClicked.connect(lambda node, _col: self.go_to(node))
         self.tree.itemActivated.connect(lambda node, _col: self.go_to(node))
         lay.addWidget(self.tree, 1)
@@ -271,24 +297,42 @@ class VariablesPanel(QWidget):
             pass
         self._fill()
 
+    def _heading(self, text: str, tip: str, colour: Optional[str] = None) -> None:
+        head = QTreeWidgetItem([text, "", "", ""])
+        font = head.font(0)
+        font.setBold(True)
+        head.setFont(0, font)
+        head.setFlags(Qt.ItemIsEnabled)
+        head.setToolTip(0, tip)
+        if colour:
+            head.setForeground(0, QBrush(QColor(colour)))
+        self.tree.addTopLevelItem(head)
+        head.setFirstColumnSpanned(True)          # the heading across the whole row
+
     def _fill(self) -> None:
+        from .calcsections import BAND, has_sections, sections
         wanted = self.filter.text().strip().lower()
         self.tree.clear()
+        document = self.window.document
+        listed = sections(document) if has_sections(document) else []
         headed = False
+        section_shown = None
         for index, row in enumerate(self.rows):
             if wanted and wanted not in row.name.lower():
                 continue
             if row.source == "Table" and not headed:
                 headed = True
-                head = QTreeWidgetItem(["Tables", "", "", ""])
-                font = head.font(0)
-                font.setBold(True)
-                head.setFont(0, font)
-                head.setFlags(Qt.ItemIsEnabled)
-                head.setToolTip(0, "What the tables give the equations: named cells, and "
-                                   "Table.Column for each heading")
-                self.tree.addTopLevelItem(head)
-            node = QTreeWidgetItem([row.name, row.error or row.value, row.unit, row.where])
+                section_shown = None
+                self._heading("Tables", "What the tables give the equations: named cells, and "
+                                        "Table.Column for each heading")
+            if listed and row.section != section_shown and row.section <= len(listed):
+                section_shown = row.section
+                part = listed[row.section - 1]
+                self._heading(part.label if row.source != "Table" else f"  {part.label}",
+                              "A calc section: what is defined in it is not seen after the next "
+                              "break, unless it is global", BAND.name())
+            node = QTreeWidgetItem([("🌐 " if row.is_global else "") + row.name,
+                                    row.error or row.value, row.unit, row.where])
             node.setData(0, Qt.UserRole, index)
             tip = f"{row.name} — {row.source.lower()} on page {row.page}" if row.page else row.name
             if row.error:
@@ -299,6 +343,38 @@ class VariablesPanel(QWidget):
                 node.setToolTip(column, tip)
             self.tree.addTopLevelItem(node)
         self.empty.setVisible(not self.rows)
+
+    # -- global or not (calc sections) ------------------------------------------------------
+    def _menu(self, pos) -> None:
+        row = self.row_of(self.tree.itemAt(pos))
+        if row is None:
+            return
+        menu = QMenu(self)
+        menu.addAction("Go to", lambda: self.go_to(self.tree.itemAt(pos)))
+        if row.source != "Measurement":
+            act = menu.addAction("Make Local" if row.is_global else "Make Global",
+                                 lambda: self.set_global(row, not row.is_global))
+            act.setToolTip("A global variable or cell is read by every later calc section")
+        menu.exec(self.tree.viewport().mapToGlobal(pos))
+
+    def set_global(self, row: VariableRow, on: bool) -> None:
+        """Make a variable's equation, or a table's cells, global (or not)."""
+        window = self.window
+        if row.cells is not None:
+            tables = window.view.tables
+            target = next((t for t in tables._all_tables()
+                           if t.sheet is not None and t.sheet.name == row.cells[0]), None)
+            if target is not None:
+                from .calcsections import set_cells_global
+                set_cells_global(window, target, row.cells[1], on)
+        else:
+            item = self.item_for(row.region_id)
+            if item is None or getattr(item, "region", None) is None:
+                return
+            from .calcmenu import change
+            change(window, [item], "Make global" if on else "Make local",
+                   lambda r: setattr(r, "is_global", bool(on)))
+        self.refresh()
 
     # -- going to one ---------------------------------------------------------------
     def row_of(self, node) -> Optional[VariableRow]:

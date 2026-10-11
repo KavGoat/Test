@@ -28,9 +28,11 @@ def change_options(window, item, label: str, **changes) -> None:
     if sheet is None:
         return
     view = window.view
-    view.begin_snapshot(item.run_frames())
+    run = getattr(item, "run_frames", None)
+    view.begin_snapshot(run() if run is not None else view.involved_frames(item))
     sheet.workbook.set_page_options(sheet, **changes)
-    item.relayout()
+    if run is not None:
+        item.relayout()
     view.commit_snapshot(label)
 
 

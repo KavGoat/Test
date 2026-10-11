@@ -160,9 +160,15 @@ class DocumentSheet:
             self.worksheet.update_after_edit(region)
         self._report()
 
+    def _order(self) -> tuple:
+        """The pages' order and where sections start: a change re-keys everything."""
+        return tuple((page.uid, bool(getattr(page, "section_break", False)))
+                     for page in self.document.pages)
+
     def _pages_moved(self) -> bool:
-        """Pages reordered, inserted or deleted since the last look: re-key all."""
-        now = tuple(page.uid for page in self.document.pages)
+        """Pages reordered, inserted or deleted (or a section break put in or
+        taken out) since the last look: re-key all."""
+        now = self._order()
         if now == self._order_seen:
             return False
         self._order_seen = now
@@ -180,10 +186,38 @@ class DocumentSheet:
             return
         self._pages_moved()
 
+    # -- calculation sections ------------------------------------------------------------
+    def section_starts(self) -> list:
+        """Where each section after the first starts, as reading keys."""
+        return [(index * STRIDE,) for index, page in enumerate(self.document.pages)
+                if index and getattr(page, "section_break", False)]
+
+    def section_of_key(self, key) -> int:
+        """The section (0 is the first) a reading key is in."""
+        import bisect
+        return bisect.bisect_right(self.section_starts(), key)
+
+    def section_of(self, region: Region) -> int:
+        return self.section_of_key(region.key)
+
+    def sections_changed(self) -> None:
+        """A section break put in or taken out, or something made global."""
+        if self._batch:
+            self._dirty = True
+            return
+        self.recalculate()
+
+    def set_global(self, region: Region, on: bool) -> None:
+        if region.is_global == bool(on):
+            return
+        region.is_global = bool(on)
+        self.sections_changed()
+
     def recalculate(self, force: bool = False) -> None:
         """Everything, in reading order (F9, loading, pages moved)."""
         self._moved.clear()
-        self._order_seen = tuple(page.uid for page in self.document.pages)
+        self._order_seen = self._order()
+        self.worksheet.index.starts = self.section_starts()
         self._blocks_dirty = False
         self._apply_scopes()
         if self.worksheet.auto_calculation or force:

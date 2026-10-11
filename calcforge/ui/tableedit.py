@@ -2293,6 +2293,13 @@ class TableEditing:
         names_menu.addAction("Name Manager…", lambda: _names.name_manager(self), QKeySequence("Ctrl+F3"))
         names_menu.addAction("Create from Selection…", lambda: _names.ask_create_from_selection(self),
                              QKeySequence("Ctrl+Shift+F3"))
+        # calculation sections (2026-10-11): cells read by every later section
+        from . import calcsections
+        area = list(self.selection())
+        on = calcsections.cells_global(item.sheet, area)
+        made = menu.addAction("Make Local" if on else "Make Global",
+                              lambda: calcsections.set_cells_global(window, item, area, not on))
+        made.setToolTip("Global cells are read by every later calc section (past its breaks)")
         if _is_run(item):
             self._page_layout_menu(menu, item)
             menu.addAction("Rename Sheet…", self.rename)
