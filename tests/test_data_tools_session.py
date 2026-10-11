@@ -76,9 +76,10 @@ def test_text_date_and_formula_rules(w):
 
     # a row whose span is 6 m: a formula for the top-left cell, moved down the rows
     tabs.select((1, 0), (5, 0))
-    d = datatools.formula_rule_dialog(tabs)
+    d = datatools.formula_rule_dialog(tabs)            # New Rule…: Use a formula
+    d.types.setCurrentRow(5)
     d.formula.setText("B2=6 m")
-    d.accept()
+    datatools.add_rule(tabs, d.rule())
     assert table.sheet.cond_rules[0]["formula"] == "=B2=6 m"
     assert looks(table, ["A2", "A3", "A4"]) == ["#ffc7ce", None, "#ffc7ce"]
     assert len(table.sheet.cond_rules) == 3
@@ -95,18 +96,19 @@ def test_rules_manager_orders_moves_and_deletes(w):
     datatools.add_rule(tabs, {"type": "top", "n": 1, "format": {"fill": "#c6efce"}})
     m = datatools.manage_rules_dialog(tabs)
     assert m.table.rowCount() == 2
-    assert m.table.cellWidget(0, 1).text() == "B2:B6"
-    m.table.setCurrentCell(1, 0)
+    assert m.ranges_edit(0).text() == "=B2:B6"
+    m.table.selectRow(1)
     m.move(-1)                                       # duplicates first
-    m.table.cellWidget(0, 1).setText("B2:B4")        # and only over three rows
-    m.table.cellWidget(0, 2).setChecked(True)
+    m.ranges_edit(0).setText("=B2:B4")               # and only over three rows
+    m.ranges_edit(0).editingFinished.emit()
+    m.stop_box(0).setChecked(True)
     m.accept()
     rules = tables(w)[0].sheet.cond_rules
     assert [r["type"] for r in rules] == ["duplicate", "top"]
     assert rules[0]["ranges"] == [[1, 1, 3, 1]] and rules[0]["stop"]
     assert looks(table, ["B2", "B4", "B6"]) == ["#ffc7ce", "#ffc7ce", None]
     m = datatools.manage_rules_dialog(tabs)
-    m.table.setCurrentCell(0, 0)
+    m.table.selectRow(0)
     m.delete()
     m.accept()
     assert [r["type"] for r in tables(w)[0].sheet.cond_rules] == ["top"]
@@ -282,3 +284,64 @@ def test_goal_seek_says_when_it_cannot(w):
     d.accept()
     assert d.result_text == "Goal Seeking with Cell A2 may not have found a solution."
     assert typed(tables(w)[0], "A1") == "3", "left as it was"
+
+
+def test_the_rules_manager_is_excels(w):
+    """Show rules for the selection or the sheet, each rule's look drawn in
+    its colours, New / Edit / Duplicate, its cells outlined on the sheet, and
+    Applies to chosen by dragging over the cells."""
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QImage, QPainter
+    from calcforge.ui import cfmanager
+    schedule(w)
+    tabs = w.view.tables
+    tabs.select((1, 1), (5, 1))
+    datatools.add_rule(tabs, {"type": "cell", "op": "greater", "a": "4",
+                              "format": {"fill": "#ffc7ce", "color": "#9c0006"}})
+    tabs.select((1, 2), (5, 2))
+    datatools.add_rule(tabs, {"type": "scale", "colors": ["#f8696b", "#63be7b"]})
+    m = datatools.manage_rules_dialog(tabs)
+    assert m.table.rowCount() == 2 and m.scope.currentData() == "sheet"
+    # the look of each: its fill drawn in the Format column's box
+    image = QImage(130, 24, QImage.Format_RGB32)
+    image.fill(0xFFFFFFFF)
+    painter = QPainter(image)
+    cfmanager.paint_preview(painter, QRectF(0, 0, 130, 24), m.rules[1])
+    painter.end()
+    assert image.pixelColor(10, 12).name() == "#ffc7ce"
+    # for the selected cells only: the colour scale over column C
+    tabs.select((2, 2))
+    m.scope.setCurrentIndex(0)
+    assert m.table.rowCount() == 1 and m.rules[m.current()]["type"] == "scale"
+    assert tabs.highlight_ranges == [[1, 2, 5, 2]], "its cells outlined on the sheet"
+    m.scope.setCurrentIndex(1)
+    # New Rule: Format only top or bottom ranked values, top 2
+    def answer(dialog):
+        dialog.types.setCurrentRow(2)
+        dialog.rank_n.setValue(2)
+        return True
+    w.answer_rule_dialog = answer
+    tabs.select((1, 1), (5, 1))
+    m.new()
+    assert m.rules[0]["type"] == "top" and m.rules[0]["n"] == 2
+    assert m.rules[0]["ranges"] == [[1, 1, 5, 1]] and m.rules[0]["format"]
+    # Edit keeps the ranges; Duplicate copies
+    def recolour(dialog):
+        assert dialog.windowTitle() == "Edit Formatting Rule"
+        dialog.picker.fill = "#c6efce"
+        return True
+    w.answer_rule_dialog = recolour
+    m.table.selectRow(0)
+    m.edit()
+    assert m.rules[0]["format"]["fill"] == "#c6efce" and m.rules[0]["ranges"] == [[1, 1, 5, 1]]
+    m.duplicate()
+    assert len(m.rules) == 4 and m.rules[1] == m.rules[0]
+    # Applies to by dragging over the cells
+    m.pick_cells(1)
+    assert not m.isVisible()
+    tabs.select((1, 1), (2, 1))
+    m.picked(True)
+    assert m.rules[1]["ranges"] == [[1, 1, 2, 1]]
+    m.accept()
+    assert tabs.highlight_ranges is None
+    assert len(tables(w)[0].sheet.cond_rules) == 4

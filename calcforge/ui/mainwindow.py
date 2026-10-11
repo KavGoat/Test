@@ -4073,6 +4073,7 @@ class MainWindow(QMainWindow):
                 panel.refresh()
             except RuntimeError:        # its fields already gone with the window
                 pass
+        self.view.tables.refresh_bar()      # a spreadsheet page in view keeps the formula bar
         scale = self.current_page().scale
         self.status_scale.setText(f"Scale {scale.label}")
         self.status_scale.setToolTip(
@@ -5163,6 +5164,7 @@ class MainWindow(QMainWindow):
             from shiboken6 import isValid
             if not isValid(self.properties_panel):
                 return
+            self.view.tables.refresh_bar()          # a table picked out shows the formula bar
             shown = self.properties_panel._items
             picked = [i for i in self.selected_items() if isinstance(i, MarkupItem)]
             if len(shown) != len(picked) or any(a is not b for a, b in zip(shown, picked)):

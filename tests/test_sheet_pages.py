@@ -632,3 +632,35 @@ def test_print_titles_are_added_to_the_print_area_as_excel(w):
     assert sheetlayout.parse_cols("$A:$B") == [0, 1] and sheetlayout.parse_cols("1") is False
     wb.insert_cols(run.sheet, 0, 1)
     assert options(run.sheet)["title_cols"] == [1, 1]
+
+
+def test_the_page_panel_has_the_spreadsheets_page_layout(w):
+    """Excel's Page Layout settings in the Page panel too, on a spreadsheet
+    page: margins, print area, titles, scaling, centring, what prints."""
+    panel = w.page_panel
+    panel.refresh()
+    assert panel.sheet_box.isHidden(), "a plain page has no spreadsheet settings"
+    run = sheet_page(w)
+    w.go_to_page(1)
+    pump()
+    panel.refresh()
+    assert not panel.sheet_box.isHidden()
+    assert panel.margins.currentText() == "Normal"
+    panel.print_area.setText("A1:F40")
+    panel.print_area.editingFinished.emit()
+    panel.title_rows.setText("$1:$2")
+    panel.title_rows.editingFinished.emit()
+    panel.adjust.setValue(80)
+    panel.print_grid.setChecked(True)
+    (run,) = runs(w)
+    opts = options(run.sheet)
+    assert opts["print_area"] == [0, 0, 39, 5] and opts["titles"] == [0, 1]
+    assert opts["scale"] == 80 and opts["print_gridlines"]
+    panel.margins.setCurrentText("Narrow")
+    panel._margins_changed()
+    pump()
+    page = w.document.pages[1]
+    assert page.setup.margin_left == pytest.approx(0.25 * 25.4)
+    w.undo_stack.undo()
+    pump()
+    assert w.document.pages[1].setup.margin_left == pytest.approx(0.7 * 25.4)

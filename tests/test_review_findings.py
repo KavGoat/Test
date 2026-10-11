@@ -244,3 +244,32 @@ def test_slow_downs_are_recorded_with_what_was_running(w, tmp_path, monkeypatch)
     assert "1 stalls" in text or "stalls over" in text
     assert "test_review_findings.py:test_slow_downs" in text or "slow_paint" in text
     assert stallwatch._running is None
+
+
+def test_the_formula_bar_shows_while_a_sheet_or_table_is_in_use(w):
+    """Excel's formula bar: on a spreadsheet page, or with a table open or
+    picked out; not on a plain drawing page (the user's choice)."""
+    from tests.test_tables import make_table
+    bar = w.formula_bar
+    assert bar.isHidden()
+    table = make_table(w)
+    w.view.tables.close()
+    w.view.scene().clearSelection()
+    pump()
+    pump()
+    assert bar.isHidden(), "a plain page, nothing picked"
+    table.setSelected(True)
+    pump()
+    pump()
+    assert not bar.isHidden(), "a table picked out"
+    assert bar.edit.isReadOnly() and bar.edit.text() == ""
+    w.view.scene().clearSelection()
+    w.insert_sheet_page(0)
+    pump()
+    pump()
+    w.go_to_page(1)
+    pump()
+    assert not bar.isHidden(), "a spreadsheet page in view"
+    w.go_to_page(0)
+    pump()
+    assert bar.isHidden()

@@ -133,7 +133,180 @@ class PagePanel(QScrollArea):
             row.addWidget(button)
         column.addLayout(row)
         layout.addWidget(ports)
+        self._build_sheet(layout)
         layout.addStretch(1)
+
+    # -- a spreadsheet page: Excel's Page Layout -------------------------------
+    MARGINS = {"Normal": (0.7, 0.75, 0.7, 0.75), "Wide": (1.0, 1.0, 1.0, 1.0),
+               "Narrow": (0.25, 0.75, 0.25, 0.75)}          # inches: left, top, right, bottom
+
+    def _build_sheet(self, layout) -> None:
+        """The spreadsheet's page layout and print settings, as in Excel's
+        Page Layout tab — here as well as in its dialog (shown on a
+        spreadsheet page only); each change applies at once, one undo step."""
+        from PySide6.QtWidgets import QLineEdit
+        box = self.sheet_box = QGroupBox("Spreadsheet")
+        form = QFormLayout(box)
+        self.margins = QComboBox()
+        self.margins.addItems(list(self.MARGINS) + ["Custom"])
+        self.margins.setToolTip("Excel's margins: Normal 0.7\"/0.75\", Wide 1\", Narrow 0.25\"/0.75\"")
+        self.margins.activated.connect(lambda _i: self._margins_changed())
+        form.addRow("Margins", self.margins)
+        self.print_area = QLineEdit()
+        self.print_area.setPlaceholderText("the columns that fit")
+        self.print_area.editingFinished.connect(lambda: self._sheet_changed("print_area"))
+        form.addRow("Print area", self.print_area)
+        self.title_rows = QLineEdit()
+        self.title_rows.setPlaceholderText("e.g. $1:$2")
+        self.title_rows.editingFinished.connect(lambda: self._sheet_changed("titles"))
+        form.addRow("Rows to repeat", self.title_rows)
+        self.title_cols = QLineEdit()
+        self.title_cols.setPlaceholderText("e.g. $A:$B")
+        self.title_cols.editingFinished.connect(lambda: self._sheet_changed("title_cols"))
+        form.addRow("Columns to repeat", self.title_cols)
+        self.adjust = QSpinBox()
+        self.adjust.setRange(10, 400)
+        self.adjust.setSuffix(" %")
+        self.adjust.setKeyboardTracking(False)
+        self.adjust.valueChanged.connect(lambda _v: self._sheet_changed("scale"))
+        form.addRow("Adjust to", self.adjust)
+        self.fit_wide = QCheckBox("Fit to 1 page wide")
+        self.fit_wide.toggled.connect(lambda _on: self._sheet_changed("fit_width"))
+        form.addRow("", self.fit_wide)
+        self.fit_tall = QSpinBox()
+        self.fit_tall.setRange(0, 999)
+        self.fit_tall.setSpecialValueText("automatic")
+        self.fit_tall.setSuffix(" tall")
+        self.fit_tall.setKeyboardTracking(False)
+        self.fit_tall.valueChanged.connect(lambda _v: self._sheet_changed("fit_tall"))
+        form.addRow("by", self.fit_tall)
+        self.center_h = QCheckBox("Horizontally")
+        self.center_v = QCheckBox("Vertically")
+        centre = QHBoxLayout()
+        centre.addWidget(self.center_h)
+        centre.addWidget(self.center_v)
+        self.center_h.toggled.connect(lambda _on: self._sheet_changed("center_h"))
+        self.center_v.toggled.connect(lambda _on: self._sheet_changed("center_v"))
+        form.addRow("Centre", centre)
+        self.print_grid = QCheckBox("Gridlines")
+        self.print_heads = QCheckBox("Headings")
+        prints = QHBoxLayout()
+        prints.addWidget(self.print_grid)
+        prints.addWidget(self.print_heads)
+        self.print_grid.toggled.connect(lambda _on: self._sheet_changed("print_gridlines"))
+        self.print_heads.toggled.connect(lambda _on: self._sheet_changed("print_headings"))
+        form.addRow("Print", prints)
+        breaks = QHBoxLayout()
+        insert = QPushButton("Insert break")
+        insert.setToolTip("A page break above the selected cell's row")
+        insert.clicked.connect(self._insert_break)
+        reset = QPushButton("Reset breaks")
+        reset.setToolTip("Reset All Page Breaks")
+        reset.clicked.connect(self._reset_breaks)
+        breaks.addWidget(insert)
+        breaks.addWidget(reset)
+        form.addRow("Breaks", breaks)
+        layout.addWidget(box)
+
+    def _run(self):
+        from .sheetlayout import _run_item
+        window = self.window
+        page = self.page()
+        if page is None or page.sheet is None:
+            return None
+        item = _run_item(window, window.current_index)
+        return item if item is not None and item.sheet is not None else None
+
+    def _refresh_sheet(self, page) -> None:
+        from ..sheet.pagination import options
+        from ..sheet.refs import area_text, col_letters
+        item = self._run()
+        self.sheet_box.setVisible(item is not None)
+        if item is None:
+            return
+        opts = options(item.sheet)
+        setup = page.setup
+        mm = (setup.margin_left, setup.margin_top, setup.margin_right, setup.margin_bottom)
+        named = next((name for name, inches in self.MARGINS.items()
+                      if all(abs(a - b * 25.4) < 0.05 for a, b in zip(mm, inches))), "Custom")
+        self.margins.setCurrentText(named)
+        area = opts["print_area"]
+        self.print_area.setText(area_text(*area) if area else "")
+        rows = opts["titles"]
+        self.title_rows.setText(f"${rows[0] + 1}:${rows[1] + 1}" if rows else "")
+        cols = opts.get("title_cols")
+        self.title_cols.setText(f"${col_letters(cols[0])}:${col_letters(cols[1])}" if cols else "")
+        self.adjust.setValue(int(opts.get("scale") or 100))
+        self.fit_wide.setChecked(bool(opts["fit_width"]))
+        self.fit_tall.setValue(int(opts.get("fit_tall") or 0))
+        self.adjust.setEnabled(not (opts["fit_width"] or opts.get("fit_tall")))
+        self.center_h.setChecked(bool(opts["center_h"]))
+        self.center_v.setChecked(bool(opts["center_v"]))
+        self.print_grid.setChecked(bool(opts["print_gridlines"]))
+        self.print_heads.setChecked(bool(opts["print_headings"]))
+
+    def _sheet_changed(self, key: str) -> None:
+        if self._filling:
+            return
+        from . import sheetlayout
+        item = self._run()
+        if item is None:
+            return
+        if key == "print_area":
+            value = sheetlayout.parse_area(self.print_area.text())
+        elif key == "titles":
+            value = sheetlayout.parse_rows(self.title_rows.text())
+        elif key == "title_cols":
+            value = sheetlayout.parse_cols(self.title_cols.text())
+        elif key == "scale":
+            value = self.adjust.value()
+        elif key == "fit_width":
+            value = self.fit_wide.isChecked()
+        elif key == "fit_tall":
+            value = self.fit_tall.value()
+        else:
+            value = {"center_h": self.center_h, "center_v": self.center_v,
+                     "print_gridlines": self.print_grid,
+                     "print_headings": self.print_heads}[key].isChecked()
+        if value is False and key in ("print_area", "titles", "title_cols"):
+            self.window.status_hint.setText("That is not a range (e.g. A1:K40, $1:$2, $A:$B)")
+            self.refresh()
+            return
+        from ..sheet.pagination import options
+        if options(item.sheet).get(key) == value:
+            return
+        sheetlayout.change_options(self.window, item, "Page layout", **{key: value})
+        self.refresh()
+
+    def _margins_changed(self) -> None:
+        if self._filling:
+            return
+        inches = self.MARGINS.get(self.margins.currentText())
+        if inches is None:
+            return
+        setup = PageSetup.from_dict(self.page().setup.to_dict())
+        (setup.margin_left, setup.margin_top, setup.margin_right,
+         setup.margin_bottom) = (v * 25.4 for v in inches)
+        self.window.set_page_setup(setup)
+        self.refresh()
+
+    def _insert_break(self) -> None:
+        from . import sheetlayout
+        item = self._run()
+        tables = self.window.view.tables
+        if item is None:
+            return
+        row = tables.active[0] if tables.item is item else 0
+        if row <= 0:
+            self.window.status_hint.setText("Pick a cell below the first row for the break to go above")
+            return
+        sheetlayout.insert_break(self.window, item, row)
+
+    def _reset_breaks(self) -> None:
+        from . import sheetlayout
+        item = self._run()
+        if item is not None:
+            sheetlayout.reset_breaks(self.window, item)
 
     def _ratio_box(self, name: str) -> QComboBox:
         box = QComboBox()
@@ -185,6 +358,7 @@ class PagePanel(QScrollArea):
             has = bool(page.viewports)
             self.edit_button.setEnabled(has)
             self.delete_button.setEnabled(has)
+            self._refresh_sheet(page)
         finally:
             self._filling = False
 

@@ -13,11 +13,10 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox,
                                QFormLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget,
-                               QListWidgetItem, QMenu, QPlainTextEdit, QPushButton, QTableWidget,
-                               QTableWidgetItem, QVBoxLayout, QWidget)
+                               QListWidgetItem, QMenu, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget)
 
-from ..sheet import condfmt, data, find, validation
-from ..sheet.refs import area_text, col_letters, parse_range
+from ..sheet import data, find, validation
+from ..sheet.refs import col_letters
 
 PRESET_LOOKS = [("Light red fill with dark red text", {"fill": "#ffc7ce", "color": "#9c0006"}),
                 ("Yellow fill with dark yellow text", {"fill": "#ffeb9c", "color": "#9c5700"}),
@@ -294,126 +293,16 @@ class _FormatPicker(QWidget):
         return out
 
 
-class FormulaRuleDialog(QDialog):
-    """New Formatting Rule: "Use a formula to determine which cells to format"."""
-
-    def __init__(self, tables):
-        super().__init__(tables.view)
-        self.tables = tables
-        self.setWindowTitle("New Formatting Rule")
-        layout = QFormLayout(self)
-        t, l, _b, _r = tables.selection()
-        self.formula = QLineEdit("=")
-        self.formula.setToolTip(f"Written for the top-left cell {col_letters(l)}{t + 1}; relative "
-                                "references move across the range, as in Excel")
-        layout.addRow("Format values where this formula is true:", self.formula)
-        self.picker = _FormatPicker({"fill": "#ffc7ce"})
-        layout.addRow("Format:", self.picker)
-        self.stop = QCheckBox("Stop If True")
-        layout.addRow("", self.stop)
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addRow(buttons)
-
-    def accept(self) -> None:
-        text = self.formula.text().strip()
-        if not text.startswith("="):
-            text = "=" + text
-        add_rule(self.tables, {"type": "formula", "formula": text, "format": self.picker.format(),
-                               "stop": self.stop.isChecked()})
-        super().accept()
-
-
 def formula_rule_dialog(tables):
-    dialog = FormulaRuleDialog(tables)
-    _show(tables.view.window, dialog)
-    return dialog
-
-
-class ManageRulesDialog(QDialog):
-    """Conditional Formatting Rules Manager: order, applies to, stop if true, delete."""
-
-    def __init__(self, tables):
-        super().__init__(tables.view)
-        self.tables = tables
-        self.setWindowTitle("Conditional Formatting Rules Manager")
-        self.rules = copy.deepcopy(tables.item.sheet.cond_rules)
-        layout = QVBoxLayout(self)
-        self.table = QTableWidget(0, 3)
-        self.table.setHorizontalHeaderLabels(["Rule (in order applied)", "Applies to", "Stop If True"])
-        self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.verticalHeader().setVisible(False)
-        layout.addWidget(self.table)
-        row = QHBoxLayout()
-        for text, slot in (("Delete Rule", self.delete), ("Move Up", lambda: self.move(-1)),
-                           ("Move Down", lambda: self.move(1))):
-            b = QPushButton(text)
-            b.clicked.connect(slot)
-            row.addWidget(b)
-        row.addStretch(1)
-        layout.addLayout(row)
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
-        self._fill()
-        self.resize(620, 360)
-
-    def _fill(self):
-        self.table.setRowCount(0)
-        for rule in self.rules:
-            r = self.table.rowCount()
-            self.table.insertRow(r)
-            self.table.setItem(r, 0, QTableWidgetItem(condfmt.describe(rule)))
-            edit = QLineEdit(",".join(area_text(*rg) for rg in rule["ranges"]))
-            self.table.setCellWidget(r, 1, edit)
-            stop = QCheckBox()
-            stop.setChecked(bool(rule.get("stop")))
-            self.table.setCellWidget(r, 2, stop)
-
-    def _read(self):
-        for r, rule in enumerate(self.rules):
-            ranges = []
-            for part in self.table.cellWidget(r, 1).text().split(","):
-                ref = parse_range(part.strip().replace("$", ""))
-                if ref is None:
-                    continue
-                if hasattr(ref, "top"):
-                    ranges.append([ref.top, ref.left, ref.bottom, ref.right])
-                else:
-                    ranges.append([ref.row, ref.col, ref.row, ref.col])
-            if ranges:
-                rule["ranges"] = ranges
-            rule["stop"] = self.table.cellWidget(r, 2).isChecked()
-
-    def delete(self):
-        r = self.table.currentRow()
-        if 0 <= r < len(self.rules):
-            self._read()
-            del self.rules[r]
-            self._fill()
-
-    def move(self, step):
-        r = self.table.currentRow()
-        t = r + step
-        if 0 <= r < len(self.rules) and 0 <= t < len(self.rules):
-            self._read()
-            self.rules[r], self.rules[t] = self.rules[t], self.rules[r]
-            self._fill()
-            self.table.setCurrentCell(t, 0)
-
-    def accept(self) -> None:
-        self._read()
-        rules = self.rules
-        self.tables._change("Conditional formatting", lambda wb, s: wb.set_cond_rules(s, rules))
-        super().accept()
+    """Conditional Formatting ▸ New Rule… (Excel's New Formatting Rule)."""
+    from .cfmanager import new_rule
+    return new_rule(tables)
 
 
 def manage_rules_dialog(tables):
-    dialog = ManageRulesDialog(tables)
-    _show(tables.view.window, dialog)
-    return dialog
+    """Conditional Formatting ▸ Manage Rules… (Excel's Rules Manager)."""
+    from .cfmanager import rules_manager
+    return rules_manager(tables)
 
 
 # -- sort and filter ------------------------------------------------------------------------------------

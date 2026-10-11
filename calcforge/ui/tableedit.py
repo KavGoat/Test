@@ -329,6 +329,7 @@ class TableEditing:
         self.point: Optional[tuple] = None   # (start, end) of the reference being pointed
         self.copied: Optional[tuple] = None  # (uid, block, cut)
         self.bar: Optional[FormulaBar] = None
+        self.highlight_ranges: Optional[list] = None    # outlined blocks (the Rules Manager)
         self.insert_drag: Optional[tuple] = None
 
     # -- which table ------------------------------------------------------------------
@@ -387,11 +388,38 @@ class TableEditing:
         cell = cell or (0, 0)
         self.anchor = self.active = self.edge = cell
         self._show_selection()
-        if self.bar is not None:
-            self.bar.show()
+        self.refresh_bar()
         self._refresh_controls()
         view.setFocus()
         view.statusMessage.emit(f"{item.name}: type into the cells · click outside it or Esc to close it")
+
+    def refresh_bar(self) -> None:
+        """The formula bar shows whenever a sheet or table is in use: one open
+        for its cells, a table picked out, or a spreadsheet page in view (the
+        user's choice, 2026-10-11); empty and read-only until a cell is chosen."""
+        bar = self.bar
+        if bar is None:
+            return
+        from shiboken6 import isValid
+        if not isValid(bar):
+            return
+        view = self.view
+        window = getattr(view, "window", None)
+        wanted = self.item is not None
+        if not wanted:
+            scene = view.scene()
+            wanted = scene is not None and any(isinstance(i, TableItem) for i in scene.selectedItems())
+        if not wanted and window is not None and getattr(window, "document", None) is not None:
+            pages = window.document.pages
+            index = getattr(window, "current_index", 0)
+            wanted = 0 <= index < len(pages) and pages[index].sheet is not None
+        if self.item is None:
+            bar.name.clear()
+            bar.edit.clear()
+            bar.edit.setPlaceholderText("click a cell")
+        bar.edit.setReadOnly(self.item is None)
+        bar.name.setReadOnly(self.item is None)
+        bar.setVisible(wanted)
 
     @property
     def help(self):
@@ -439,8 +467,7 @@ class TableEditing:
         self._uid = None
         self.copied = None
         self.held_format = None
-        if self.bar is not None:
-            self.bar.hide()
+        self.refresh_bar()
         self._refresh_controls()
 
     # -- the selection ---------------------------------------------------------------------
@@ -1487,6 +1514,14 @@ class TableEditing:
             painter.setPen(pen)
             painter.setBrush(Qt.NoBrush)
             painter.drawRect(box)
+        for block in self.highlight_ranges or ():
+            # the cells a conditional formatting rule picked in the Rules
+            # Manager applies to, outlined as Excel outlines them
+            pen = QPen(QColor("#2f6fd6"), 2, Qt.DashLine)
+            pen.setCosmetic(True)
+            painter.setPen(pen)
+            painter.setBrush(QColor(47, 111, 214, 28))
+            painter.drawRect(item.block_rect(*block))
         if self.copied is not None and self.copied[0] == item.uid:
             box = item.block_rect(*self.copied[1])
             pen = QPen(QColor("#217346"), 1.5, Qt.DashLine)
