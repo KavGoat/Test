@@ -4,7 +4,6 @@ change with Process Images; Mask Images makes a colour transparent."""
 from __future__ import annotations
 
 import pymupdf
-import pytest
 
 from calcforge.io import colorproc
 from calcforge.io.colorproc import Process
@@ -47,7 +46,7 @@ LINE, RED, BLUE, PICTURE = (100, 90), (40, 50), (100, 50), (160, 85)   # raster:
 def test_modify_colors_changes_vectors_only_and_keeps_them_vectors():
     data = a_page()
     assert colour_at(data, *RED)[0] > 200
-    out = colorproc.process_pdf(data, [0], Process(MODIFY := colorproc.MODIFY,
+    out = colorproc.process_pdf(data, [0], Process(colorproc.MODIFY,
                                                     pairs=[("#ff0000", "#00ff00"),
                                                            ("#000000", "#0000ff")]))
     assert colour_at(out, *RED) == (0, 255, 0)

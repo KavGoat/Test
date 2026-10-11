@@ -40,6 +40,16 @@ class DocumentBook:
         self.workbook.journal = False           # the window's undo stack records pages
         self.workbook.outside = self._outside
         self.workbook.reach = self._reach
+        # SMath's custom units: a quantity the equations define is a unit in the cells
+        import weakref
+
+        from . import values as _values
+        method = weakref.WeakMethod(self._custom_unit)
+
+        def custom(name, method=method):
+            found = method()
+            return found(name) if found is not None else None
+        _values.CUSTOM_UNITS = custom
         # the reading key of the equation now asking for a table's values
         # (calc/worksheet.py sets it), for the calculation sections
         self.reading_at = None
@@ -116,6 +126,27 @@ class DocumentBook:
         sheet = self.by_uid.get(uid)
         if sheet is not None:
             self.workbook.outside_changed({n for n in self.workbook.outside_names_read()})
+
+    def _custom_unit(self, name: str):
+        """(factor, dims) of a custom unit — a quantity with units the
+        document's equations define (its last definition) — or None."""
+        if self._sheet is None and self.document is None:
+            return None
+        lst = self._calc().worksheet.index.vars.get(name)
+        if not lst:
+            return None
+        from calcforge.calc.engine.units import Quantity
+
+        value = lst[-1][1]
+        if not isinstance(value, Quantity):
+            return None
+        try:
+            got = from_engine(value)
+        except Exception:                              # noqa: BLE001
+            return None
+        if not isinstance(got, Qty) or not any(got.dims):
+            return None
+        return got.si, got.dims
 
     # -- calculation sections --------------------------------------------------------------
     def _section(self, key) -> int:
@@ -379,6 +410,8 @@ class DocumentBook:
             self._starts_seen = starts
             self._soon("sections", self.sections_changed)
         self._starts_seen = starts
+        if self.workbook.unit_waiting and not self._syncing:
+            self._soon("units", self.workbook.reread_units)
         if self._syncing or not self.workbook.outside_names_read():
             return
         self._soon("equations", self._take_up_equations)

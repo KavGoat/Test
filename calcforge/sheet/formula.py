@@ -124,10 +124,12 @@ def tokenize(text: str) -> list[Token]:
             k = m.end()
             # allow kN/m written after the apostrophe: 'kN/m, 'm^2
             unit_m = re.compile(r"[\w°µμΩ%]+(?:\^-?[0-9.]+)?(?:[*/·][\w°µμΩ%]+(?:\^-?[0-9.]+)?)*").match(text, j)
-            if unit_m and is_unit_text(unit_m.group(0)):
+            if unit_m and is_unit_text(unit_m.group(0), custom=True):
                 k = unit_m.end()
             unit = text[j:k]
-            if not is_unit_text(unit):
+            if not is_unit_text(unit, custom=True) and \
+                    not re.fullmatch(r"[^\W\d][\w]*(?:\^-?[0-9.]+)?", unit):
+                # (a name may be a custom unit the equations define later)
                 raise FormulaError(f"'{unit} is not a unit.", i)
             out.append(Token("unit", text[i:k], lead, i))
             i = k

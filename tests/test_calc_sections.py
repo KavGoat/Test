@@ -10,7 +10,6 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
 import tests.calc.test_calcforge_window as cw
-from calcforge.calc.docsheet import sheet_for
 from calcforge.ui import calcsections
 from calcforge.ui.calcmenu import change
 from tests.test_table_equations import answers, table_at
@@ -170,7 +169,6 @@ def test_the_break_is_saved_shown_and_named(v, tmp_path):
     parts = calcsections.sections(v.window.document)
     assert [p.label for p in parts] == ["Section 1 (page 1)", "Section 2 · Footings (page 2)"]
     # shown above page 2 on the canvas: drawn in the gap, purple
-    from PySide6.QtGui import QImage, QPainter
     view = v.window.view
     frame = v.window.document.pages[1].frame
     view.centerOn(frame.mapToScene(frame.page_rect().topLeft()))

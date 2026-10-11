@@ -9,7 +9,7 @@ Format Painter and Format Cells.
 from __future__ import annotations
 
 from PySide6.QtGui import QFont
-from PySide6.QtWidgets import (QComboBox, QFontComboBox, QLabel, QLineEdit, QMenu, QToolButton)
+from PySide6.QtWidgets import (QComboBox, QFontComboBox, QLabel, QMenu, QToolButton)
 
 from ..sheet.numfmt import is_date_format
 from ..sheet.values import UnitTextError, unit_parts
@@ -124,12 +124,11 @@ class TableControls:
             b.setToolTip(tip)
             b.clicked.connect(lambda _c=False, s=step: self._decimals(s))
             add(b)
-        self.unit = QLineEdit()
-        self.unit.setPlaceholderText("unit")
-        self.unit.setFixedWidth(64)
-        self.unit.setToolTip("Show quantities in this unit (kN, kN/m, MPa…); blank: as typed")
+        # the display unit is typed into SMath's unit box, in the formula bar
+        # after the value (ui/unitbox.py), as an equation's result unit is
+        self.unit = window.formula_bar.unit
+        self.unit.window = window
         self.unit.editingFinished.connect(self._unit_chosen)
-        add(self.unit)
         add(self._sep())
         cells = QToolButton()
         cells.setText("Rows && Columns")

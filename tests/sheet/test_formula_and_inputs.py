@@ -52,8 +52,11 @@ def test_units_after_numbers():
     tree = F.parse("10 kN/m*B2").tree
     assert isinstance(tree, F.Binary) and tree.left.right == F.Unit("kN/m")
     assert isinstance(F.parse("A1/'kN").tree.right, F.Unit)
+    # after the apostrophe, a name may be a custom unit the equations define
+    # (2026-10-11): it is read when calculated; what can't be a name is refused
+    assert F.parse("A1/'kip_s").tree.right == F.Unit("kip_s")
     with pytest.raises(F.FormulaError):
-        F.parse("A1/'notaunit")
+        F.parse("A1/'1x")
 
 
 def test_var_of_one_name_is_a_document_variable_and_otherwise_excels_variance():

@@ -315,6 +315,8 @@ class Workbook:
         # whether one sheet may read cells of another (from, to, (t, l, b, r)):
         # the document's calculation sections (sheet/docbook.py); None: always
         self.reach: Optional[Callable] = None
+        # cells typed with a custom unit not (yet) defined: (sheet id, row, col)
+        self.unit_waiting: set = set()
         self.circular: list[tuple] = []              # (sheet, row, col) in a loop
         self.listeners: list[Callable[[set], None]] = []   # told the keys whose values changed
         self._deps = _Dependents()
@@ -596,6 +598,25 @@ class Workbook:
         with self.transaction("Typing"):
             self._set_state(sheet, row, col, (text, style, comment))
 
+    def reread_units(self) -> None:
+        """Cells typed with a custom unit read again (its equation calculated)."""
+        changed = False
+        for key in list(self.unit_waiting):
+            sheet = self.sheet_by_id(key[0])
+            cell = sheet.cells.get(key[1:]) if sheet is not None else None
+            if cell is None or cell.is_formula:
+                self.unit_waiting.discard(key)
+                continue
+            value, _fmt = read_value(cell.input, self.day_first)
+            if not isinstance(value, str):
+                self.unit_waiting.discard(key)
+                cell.value = value
+                self._changed.add(key)
+                self._touched.append(key)
+                changed = True
+        if changed:
+            self._recalc_if_auto()
+
     def set_style(self, sheet: Sheet, row: int, col: int, style: int) -> None:
         cell = sheet.cells.get((row, col))
         state = (cell.input, style, cell.comment) if cell else ("", style, None)
@@ -661,6 +682,11 @@ class Workbook:
             cell.parsed = None
             cell.problem = None
             self._changed.add(key)
+            # 5'kip_s: a custom unit not defined (yet) — read again once it is
+            if isinstance(value, str) and "'" in text and not text.startswith("'"):
+                self.unit_waiting.add(key)
+            else:
+                self.unit_waiting.discard(key)
         else:
             self._changed.add(key)
         self._touched.append(key)

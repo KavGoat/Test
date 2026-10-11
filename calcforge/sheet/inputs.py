@@ -6,6 +6,8 @@
     $1,200       -> 1200              ($#,##0)
     (40)         -> -40
     5 kN         -> 5 kN              (a quantity; CalcForge's units)
+    5'kN         -> 5 kN              (SMath's way of writing a unit)
+    5'kip_s      -> 5 kip_s           (a custom unit the equations define)
     2.5 kN/m^2   -> 2.5 kN/m^2
     TRUE         -> TRUE
     #N/A         -> the error #N/A
@@ -199,7 +201,9 @@ def read_value(text: str, day_first: bool = True):
     m = _UNIT_AFTER.match(stripped)
     if m:
         try:
-            unit_parts(m.group(2))
+            # a unit the document defines (SMath's custom units) only with
+            # SMath's apostrophe, 5'kip_s, so ordinary words stay text
+            unit_parts(m.group(2), custom="'" in m.group(2))
         except UnitTextError:
             return text, None
         return with_unit(float(m.group(1)), m.group(2)), None

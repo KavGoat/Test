@@ -140,10 +140,30 @@ class UnitTextError(ValueError):
     pass
 
 
-@lru_cache(maxsize=2048)
-def unit_parts(text: str):
+# SMath's custom units (2026-10-11): a name the document's equations define
+# as a quantity (kip_s := 5'kN) is a unit too. The document's workbook sets
+# this: name -> (factor, dims) or None (sheet/docbook.py).
+CUSTOM_UNITS = None
+
+
+def unit_parts(text: str, custom: bool = True):
     """(factor, dims, offset) of a unit written like "kN", "kN/m^2", "kN·m",
-    "kg m/s²", "N/(m s)". Raises UnitTextError if it isn't one."""
+    "kg m/s²", "N/(m s)" — or, with *custom*, using a custom unit the
+    document defines. Raises UnitTextError if it isn't one."""
+    try:
+        return _known_unit_parts(text)
+    except UnitTextError:
+        if not custom or CUSTOM_UNITS is None:
+            raise
+    return _unit_parts(text, CUSTOM_UNITS)
+
+
+@lru_cache(maxsize=2048)
+def _known_unit_parts(text: str):
+    return _unit_parts(text, None)
+
+
+def _unit_parts(text: str, custom):
     tokens = []
     pos, text = 0, text.strip()
     while pos < len(text):
@@ -162,9 +182,13 @@ def unit_parts(text: str):
             tokens.append(("^", float(power)))
         else:
             name = m.group(5).lstrip("'")
-            if name not in UNITS:
-                raise UnitTextError(name)
-            tokens.append(("u", name))
+            if name in UNITS:
+                tokens.append(("u", name))
+            else:
+                made = custom(name) if custom is not None else None
+                if made is None:
+                    raise UnitTextError(name)
+                tokens.append(("c", (float(made[0]), tuple(made[1]))))
         if pos < len(text) and text[pos] == " " and tokens[-1][0] in ("u", ")", "^"):
             # a space between two units multiplies them: "kg m"
             rest = text[pos:].lstrip()
@@ -188,6 +212,9 @@ def unit_parts(text: str):
         elif kind == "u":
             at[0] += 1
             f, d = float(UNITS[value][0]), tuple(UNITS[value][1])
+        elif kind == "c":
+            at[0] += 1
+            f, d = value
         elif kind is None and False:
             raise UnitTextError(text)
         else:
@@ -214,14 +241,16 @@ def unit_parts(text: str):
     if at[0] != len(tokens):
         raise UnitTextError(text)
     offset = 0.0
-    if len(tokens) == 1:
+    if len(tokens) == 1 and tokens[0][0] == "u":
         offset = float(UNITS[tokens[0][1]][2])
     return f, tuple(d), offset
 
 
-def is_unit_text(text: str) -> bool:
+def is_unit_text(text: str, custom: bool = False) -> bool:
+    """Whether *text* is a unit (CalcForge's own; with *custom*, also one
+    the document's equations define)."""
     try:
-        unit_parts(text)
+        unit_parts(text, custom=custom)
         return True
     except UnitTextError:
         return False
@@ -239,9 +268,10 @@ def default_unit(dims: tuple) -> str:
 
 
 def with_unit(x: float, unit: str):
-    """x written in unit: 5, "kN" -> Qty(5000, force, "kN")."""
+    """x written in unit: 5, "kN" -> Qty(5000, force, "kN"); SMath's
+    apostrophe (5'kN) marks a unit and is not shown."""
     factor, dims, offset = unit_parts(unit)
-    return Qty(x * factor + offset, dims, unit)
+    return Qty(x * factor + offset, dims, unit.replace("'", ""))
 
 
 # -- what Excel does with each kind of value ---------------------------------------

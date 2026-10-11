@@ -149,6 +149,11 @@ class FormulaBar(QWidget):
         self.edit.returnPressed.connect(lambda: tables.commit(move=(1, 0), enter=True))
         self.edit.installEventFilter(self)
         layout.addWidget(self.edit, 1)
+        # SMath's unit box after the value, as in an equation (ui/unitbox.py);
+        # the table controls (ui/tablebar.py) set the cells' display unit from it
+        from .unitbox import UnitBox
+        self.unit = UnitBox(getattr(tables.view, "window", None))
+        layout.addWidget(self.unit)
         self.hide()
 
     def eventFilter(self, obj, event) -> bool:
@@ -420,6 +425,9 @@ class TableEditing:
             bar.edit.setPlaceholderText("click a cell")
         bar.edit.setReadOnly(self.item is None)
         bar.name.setReadOnly(self.item is None)
+        bar.unit.setEnabled(self.item is not None)
+        if self.item is None:
+            bar.unit.clear()
         bar.setVisible(wanted)
 
     @property
@@ -2311,7 +2319,6 @@ class TableEditing:
     def _page_layout_menu(self, menu, item) -> None:
         """Excel's Page Layout commands, for a spreadsheet page."""
         from . import sheetlayout
-        from ..sheet.pagination import options
         window = self.view.window
         layout = menu.addMenu("Page Layout")
         row, col = self.active

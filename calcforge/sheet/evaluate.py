@@ -8,6 +8,7 @@ walk only the cells that hold something.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 from typing import Optional
 
@@ -15,7 +16,7 @@ from . import formula as F
 from .refs import MAX_COLS, MAX_ROWS, is_cell_name
 from .values import (BLANK, CALC, ERRORS, NA, NAME, NUM, REF, UNITS_ERR, VALUE, Array,
                      ErrorValue, Qty, SheetError, add, div, mul, neg, power, sub,
-                     to_number, to_text, unit_parts, with_unit, UnitTextError)
+                     is_unit_text, to_number, to_text, unit_parts, with_unit, UnitTextError)
 
 
 @dataclass(frozen=True)
@@ -181,6 +182,7 @@ def ev(n, ctx: Ctx):
         v = deref(ev(n.arg, ctx))
         return _lift1(v, lambda x: div(to_number(x), 100.0))
     if t is F.Unit:
+        _follow_custom(n.text, ctx)
         return _unit(n.text)
     if t is F.Name:
         return _name(n, ctx)
@@ -222,9 +224,19 @@ def _intersect(v, ctx):
     return v
 
 
-def _unit(text: str):
+def _follow_custom(text: str, ctx: Ctx) -> None:
+    """A custom unit ('kip_s): the cell follows the equation defining it, as
+    it follows a document variable it reads."""
+    if not is_unit_text(text):
+        for name in re.findall(r"[^\W\d][\w]*", text):
+            ctx.reads.add(name.lower())
+
+
+def _unit(text: str, custom: bool = True):
+    """1 of a unit; a custom unit (one the equations define) only when
+    written SMath's way, 'kip_s — never a bare name."""
     try:
-        factor, dims, _offset = unit_parts(text)
+        factor, dims, _offset = unit_parts(text, custom=custom)
     except UnitTextError:
         raise SheetError(NAME)
     if not any(dims):
@@ -370,7 +382,7 @@ def _name(n: F.Name, ctx: Ctx):
             if e.error is not NAME:
                 raise
         try:
-            return _unit(n.name)
+            return _unit(n.name, custom=False)
         except SheetError:
             pass
     return NAME
@@ -451,6 +463,7 @@ def _binary(n: F.Binary, ctx: Ctx):
                         max(a.bottom, b.bottom), max(a.right, b.right))
     # 5 °C: a number written in a unit that has an offset
     if op == "*" and type(n.right) is F.Unit and type(n.left) is F.Num:
+        _follow_custom(n.right.text, ctx)
         try:
             return with_unit(n.left.value, n.right.text)
         except UnitTextError:

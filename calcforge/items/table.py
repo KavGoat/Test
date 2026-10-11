@@ -672,6 +672,17 @@ class TableItem(MarkupItem):
                 path.lineTo(rect.topRight() + QPointF(0, 4))
                 path.closeSubpath()
                 painter.fillPath(path, QColor("#d9480f"))
+        # cells made global (calc sections): a purple dashed edge round them
+        made = (sheet.page or {}).get("global_cells")
+        if made:
+            from ..ui.calcsections import BAND
+            pen = QPen(BAND, 2.2, Qt.DashLine)
+            pen.setCosmetic(True)
+            painter.setPen(pen)
+            painter.setBrush(Qt.NoBrush)
+            for t, l, b, r in made:
+                if t < rows and l < cols:
+                    painter.drawRect(self.block_rect(t, l, min(b, rows - 1), min(r, cols - 1)))
         flt = sheet.filter
         if flt is not None:
             t, l, b, r = flt["range"]
