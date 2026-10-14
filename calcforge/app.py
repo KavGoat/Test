@@ -23,7 +23,7 @@ def main() -> int:
 
     qInstallMessageHandler(_message_filter)
 
-    if "QT_QPA_PLATFORM" not in os.environ and not os.environ.get("DISPLAY"):
+    if sys.platform == "linux" and "QT_QPA_PLATFORM" not in os.environ and not os.environ.get("DISPLAY"):
         os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
     app = QApplication(sys.argv)
