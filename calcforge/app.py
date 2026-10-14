@@ -6,19 +6,32 @@ import sys
 
 
 def main() -> int:
-    import warnings
-    warnings.filterwarnings("ignore", message=".*Cannot find font directory.*")
     os.environ.setdefault("QT_FONT_DPI", "96")
 
     from PySide6.QtWidgets import QApplication
-    from PySide6.QtCore import Qt
+    from PySide6.QtCore import Qt, QtMsgType, qInstallMessageHandler
     from PySide6.QtGui import QFont
+
+    _original_handler = None
+
+    def _message_filter(msg_type, context, message):
+        if "Cannot find font directory" in message:
+            return
+        if "propagateSizeHints" in message:
+            return
+        if _original_handler is not None:
+            _original_handler(msg_type, context, message)
+        elif msg_type == QtMsgType.QtFatalMsg:
+            sys.stderr.write(message + "\n")
+
+    _original_handler = qInstallMessageHandler(_message_filter)
 
     if "QT_QPA_PLATFORM" not in os.environ and not os.environ.get("DISPLAY"):
         os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
     app = QApplication(sys.argv)
-    app.setFont(QFont("Segoe UI" if sys.platform == "win32" else "sans-serif", 9))
+    from .core.typography import sans_family
+    app.setFont(QFont(sans_family(), 9))
     app.setApplicationName("CalcForge")
     app.setApplicationVersion("1.0.0")
     app.setOrganizationName("CalcForge")
