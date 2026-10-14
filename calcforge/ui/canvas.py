@@ -1,4 +1,4 @@
-"""Page canvas — the QGraphicsView/Scene that holds page items."""
+"""Worksheet canvas — QGraphicsView/Scene matching SMath Studio's page layout."""
 from __future__ import annotations
 
 from typing import Optional
@@ -6,7 +6,7 @@ from typing import Optional
 from PySide6.QtCore import Qt, QRectF, QPointF, Signal
 from PySide6.QtGui import (
     QPainter, QPen, QColor, QBrush, QWheelEvent, QMouseEvent,
-    QKeyEvent, QFont,
+    QKeyEvent,
 )
 from PySide6.QtWidgets import (
     QGraphicsView, QGraphicsScene, QGraphicsRectItem,
@@ -17,14 +17,7 @@ from ..core.document import Document, Page, Region, PageSettings
 from ..items.base import PageItem
 from ..items.calculation import CalculationItem
 from ..items.text import TextItem
-from ..items.table import TableItem
 from ..items.plot import PlotItem
-from ..items.shapes import (
-    LineItem, ArrowItem, RectangleItem, EllipseItem,
-    PolygonItem, CloudItem,
-)
-from ..items.measure import MeasureItem
-from ..items.stamp import StampItem
 
 
 PAGE_GAP = 20.0
@@ -35,16 +28,7 @@ def _create_item(region: Region) -> Optional[PageItem]:
     creators = {
         "calculation": CalculationItem,
         "text": TextItem,
-        "table": TableItem,
         "plot": PlotItem,
-        "line": LineItem,
-        "arrow": ArrowItem,
-        "rectangle": RectangleItem,
-        "ellipse": EllipseItem,
-        "polygon": PolygonItem,
-        "cloud": CloudItem,
-        "measure": MeasureItem,
-        "stamp": StampItem,
     }
     cls = creators.get(region.type)
     if cls:
@@ -53,7 +37,7 @@ def _create_item(region: Region) -> Optional[PageItem]:
 
 
 class PageBackground(QGraphicsRectItem):
-    """White page rectangle with shadow."""
+    """White page rectangle with drop shadow, matching SMath Studio."""
 
     def __init__(self, page: Page, y_offset: float):
         w = page.settings.width
@@ -72,7 +56,7 @@ class PageBackground(QGraphicsRectItem):
             PAGE_SHADOW, self.y_offset + PAGE_SHADOW,
             self.page.settings.width, self.page.settings.height,
         )
-        painter.fillRect(shadow_rect, QColor(200, 200, 200))
+        painter.fillRect(shadow_rect, QColor(190, 190, 190))
         page_rect = QRectF(0, self.y_offset,
                            self.page.settings.width, self.page.settings.height)
         painter.fillRect(page_rect, QColor(255, 255, 255))
@@ -80,7 +64,7 @@ class PageBackground(QGraphicsRectItem):
         painter.drawRect(page_rect)
         if self.page.settings.grid_visible:
             gs = self.page.settings.grid_spacing
-            painter.setPen(QPen(QColor(230, 230, 240), 0.3))
+            painter.setPen(QPen(QColor(220, 220, 230), 0.3))
             x = gs
             while x < self.page.settings.width:
                 painter.drawLine(QPointF(x, self.y_offset),
@@ -91,12 +75,6 @@ class PageBackground(QGraphicsRectItem):
                 painter.drawLine(QPointF(0, self.y_offset + y),
                                  QPointF(self.page.settings.width, self.y_offset + y))
                 y += gs
-        m = self.page.settings.margins
-        content = QRectF(m.left, self.y_offset + m.top,
-                         self.page.settings.width - m.left - m.right,
-                         self.page.settings.height - m.top - m.bottom)
-        painter.setPen(QPen(QColor(200, 210, 230), 0.3))
-        painter.drawRect(content)
 
 
 class DocumentScene(QGraphicsScene):
@@ -111,7 +89,7 @@ class DocumentScene(QGraphicsScene):
         self.document = document
         self._page_bgs: list[PageBackground] = []
         self._items: dict[str, PageItem] = {}
-        self.setBackgroundBrush(QBrush(QColor(220, 220, 225)))
+        self.setBackgroundBrush(QBrush(QColor(190, 195, 200)))
         self.rebuild()
 
     def rebuild(self):
@@ -166,7 +144,7 @@ class DocumentScene(QGraphicsScene):
 
 
 class DocumentCanvas(QGraphicsView):
-    """View widget for the document scene."""
+    """Worksheet view — click to create math regions, like SMath Studio."""
 
     tool_changed = Signal(str)
 
@@ -182,7 +160,6 @@ class DocumentCanvas(QGraphicsView):
         self._current_tool = "select"
         self._panning = False
         self._pan_start = QPointF()
-        self._drawing_start: Optional[QPointF] = None
 
     @property
     def current_tool(self) -> str:
@@ -195,9 +172,6 @@ class DocumentCanvas(QGraphicsView):
         if tool == "select":
             self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
             self.setCursor(Qt.CursorShape.ArrowCursor)
-        elif tool == "pan":
-            self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
-            self.setCursor(Qt.CursorShape.OpenHandCursor)
         else:
             self.setDragMode(QGraphicsView.DragMode.NoDrag)
             self.setCursor(Qt.CursorShape.CrossCursor)
@@ -249,8 +223,6 @@ class DocumentCanvas(QGraphicsView):
             self._pan_start = event.position()
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
             return
-        if self._current_tool not in ("select", "pan") and event.button() == Qt.MouseButton.LeftButton:
-            self._drawing_start = self.mapToScene(event.position().toPoint())
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent):
@@ -267,45 +239,30 @@ class DocumentCanvas(QGraphicsView):
     def mouseReleaseEvent(self, event: QMouseEvent):
         if self._panning:
             self._panning = False
-            self.setCursor(Qt.CursorShape.ArrowCursor if self._current_tool == "select"
-                           else Qt.CursorShape.CrossCursor)
+            self.setCursor(Qt.CursorShape.ArrowCursor)
             return
-        if self._drawing_start and event.button() == Qt.MouseButton.LeftButton:
-            end = self.mapToScene(event.position().toPoint())
-            self._finish_drawing(self._drawing_start, end)
-            self._drawing_start = None
         super().mouseReleaseEvent(event)
 
-    def _finish_drawing(self, start: QPointF, end: QPointF):
-        page_idx = self._scene.page_at_scene_pos(start)
-        y_off = self._scene.page_y_offset(page_idx)
-        x = min(start.x(), end.x())
-        y = min(start.y(), end.y()) - y_off
-        w = max(abs(end.x() - start.x()), 20)
-        h = max(abs(end.y() - start.y()), 20)
-        region = Region(
-            type=self._current_tool,
-            x=x, y=y, width=w, height=h,
-            page_index=page_idx,
-        )
-        if self._current_tool == "calculation":
-            region.data = {"lines": [""]}
-        elif self._current_tool == "text":
-            region.data = {"text": "Text", "font_size": 10}
-        elif self._current_tool == "table":
-            region.data = {}
-            region.width = max(w, 300)
-            region.height = max(h, 150)
-        elif self._current_tool == "plot":
-            region.data = {"expressions": ["x^2"], "x_var": "x",
-                           "x_min": 0, "x_max": 10}
-            region.width = max(w, 300)
-            region.height = max(h, 200)
-        elif self._current_tool == "stamp":
-            region.data = {"stamp_text": "APPROVED"}
-            region.width = max(w, 180)
-            region.height = max(h, 50)
-        page = self._scene.document.pages[page_idx]
-        page.add_region(region)
-        self._scene.add_region_item(region)
-        self._scene.document.modified = True
+    def mouseDoubleClickEvent(self, event: QMouseEvent):
+        scene_pos = self.mapToScene(event.position().toPoint())
+        item = self._scene.itemAt(scene_pos, self.transform())
+        if isinstance(item, PageItem):
+            super().mouseDoubleClickEvent(event)
+            return
+        if isinstance(item, PageBackground) or item is None:
+            page_idx = self._scene.page_at_scene_pos(scene_pos)
+            y_off = self._scene.page_y_offset(page_idx)
+            region = Region(
+                type="calculation",
+                x=scene_pos.x(),
+                y=scene_pos.y() - y_off,
+                width=100, height=24,
+                page_index=page_idx,
+                data={"lines": [""]},
+            )
+            page = self._scene.document.pages[page_idx]
+            page.add_region(region)
+            self._scene.add_region_item(region)
+            self._scene.document.modified = True
+            return
+        super().mouseDoubleClickEvent(event)

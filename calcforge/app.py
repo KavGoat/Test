@@ -9,7 +9,7 @@ def main() -> int:
     os.environ.setdefault("QT_FONT_DPI", "96")
 
     from PySide6.QtWidgets import QApplication
-    from PySide6.QtCore import Qt, QtMsgType, qInstallMessageHandler
+    from PySide6.QtCore import QtMsgType, qInstallMessageHandler
     from PySide6.QtGui import QFont
 
     def _message_filter(msg_type, context, message):
@@ -29,30 +29,17 @@ def main() -> int:
     app = QApplication(sys.argv)
     from .core.typography import sans_family
     app.setFont(QFont(sans_family(), 9))
-    app.setApplicationName("CalcForge")
+    app.setApplicationName("SMath Studio")
     app.setApplicationVersion("1.0.0")
-    app.setOrganizationName("CalcForge")
+    app.setOrganizationName("SMath")
 
     file_path = None
-    load_sample = False
     for arg in sys.argv[1:]:
-        if arg == "--sample":
-            load_sample = True
-        elif not arg.startswith("-"):
+        if not arg.startswith("-"):
             file_path = arg
 
     from .ui.mainwindow import MainWindow
     window = MainWindow(file_path=file_path)
-    if load_sample:
-        from .sample import create_sample_document
-        window._document = create_sample_document()
-        from .ui.canvas import DocumentScene
-        window._scene = DocumentScene(window._document)
-        window._canvas.setScene(window._scene)
-        window._canvas._scene = window._scene
-        window._thumb_panel.update_pages(len(window._document.pages))
-        window._recalculate()
-        window.setWindowTitle("CalcForge — Sample")
     window.show()
     window.raise_()
     window.activateWindow()

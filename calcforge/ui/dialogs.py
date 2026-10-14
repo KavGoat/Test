@@ -136,15 +136,15 @@ class DocumentPropertiesDialog(QDialog):
 class AboutDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("About CalcForge")
-        self.setFixedSize(400, 250)
+        self.setWindowTitle("About SMath Studio")
+        self.setFixedSize(380, 220)
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("<h2>CalcForge</h2>"))
-        layout.addWidget(QLabel("Engineering calculations, drawing markup\n"
-                                "and spreadsheets in one page-by-page document."))
+        layout.addWidget(QLabel("<h2>SMath Studio</h2>"))
+        layout.addWidget(QLabel("Mathematical notebook with unit-aware\n"
+                                "calculations, 2D plotting, and text regions."))
         layout.addWidget(QLabel(""))
-        layout.addWidget(QLabel("Version 1.0.0"))
-        layout.addWidget(QLabel("Built with PySide6, Pint, NumPy, SymPy"))
+        layout.addWidget(QLabel("Python/Qt reimplementation"))
+        layout.addWidget(QLabel("Built with PySide6 and Pint"))
         layout.addStretch()
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
         buttons.accepted.connect(self.accept)
