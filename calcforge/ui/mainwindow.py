@@ -5184,6 +5184,11 @@ class MainWindow(QMainWindow):
             self.view.tables.refresh_bar()          # a table picked out shows the formula bar
             shown = self.properties_panel._items
             picked = [i for i in self.selected_items() if isinstance(i, MarkupItem)]
+            if picked:
+                # something picked: SMath's red cross goes, as SMath's does when
+                # a region is selected (it stayed behind a pasted picture or a
+                # snapshot being recoloured, 2026-10-14)
+                self.view.calc.clear_cross()
             if len(shown) != len(picked) or any(a is not b for a, b in zip(shown, picked)):
                 self._selection_changed_on_the_canvas()
         QTimer.singleShot(0, check)

@@ -1516,7 +1516,14 @@ class DocumentScene(QGraphicsScene):
         # not hundreds of thousands, so a linear scan is cheaper than the index
         # would have been anyway.
         self.setItemIndexMethod(QGraphicsScene.NoIndex)
-        self.set_canvas_colour(CANVAS[LIGHT])
+        # the desk of the theme in use: a scene made after a document was
+        # opened came up light grey under a dark theme (the user, 2026-10-14)
+        try:
+            from ..app import current_theme
+            theme = current_theme()
+        except Exception:  # noqa: BLE001
+            theme = LIGHT
+        self.set_canvas_colour(CANVAS.get(theme, CANVAS[LIGHT]))
         self.selectionChanged.connect(self.selectionInfoChanged.emit)
         # A square of a page finished drawing in the background: repaint just
         # where it belongs. The scene listens rather than each page, because a

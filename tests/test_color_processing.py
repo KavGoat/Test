@@ -221,3 +221,36 @@ def test_a_snapshots_colours_are_its_drawings_and_modify_changes_them(window, tm
     window.undo_stack.undo()
     (snap,) = [i for i in window.view.scene().items() if isinstance(i, SnapshotItem)]
     assert red_and_green() == (True, False)
+
+
+def test_the_red_cross_goes_when_something_is_picked(window, tmp_path):
+    """The user, 2026-10-14: the insert cross stayed on the page while a
+    snapshot's colours were changed or a picture was pasted. Picking
+    anything takes it away, as selecting a region does in SMath."""
+    from PySide6.QtCore import QPointF, QRectF
+    from PySide6.QtWidgets import QApplication
+    from calcforge.items.shapes import RectItem
+    calc = window.view.calc
+    calc.mode = "calc"
+    frame = window.document.pages[0].frame
+    calc.place_cross(frame, QPointF(100, 100))
+    assert calc.cross is not None
+    box = RectItem()
+    box.set_local_rect(QRectF(0, 0, 40, 20))
+    frame.add_markup(box, QPointF(200, 200))
+    window.view.scene().clearSelection()
+    box.setSelected(True)                  # as a paste or a right-click picks it
+    QApplication.processEvents()
+    assert calc.cross is None
+
+
+def test_a_new_canvas_has_the_desk_of_the_theme_in_use(window, monkeypatch):
+    """The user, 2026-10-14: the desk behind the pages turned light. A canvas
+    made afresh (a document opened or started) took the light theme's grey
+    whatever the theme was."""
+    from calcforge import app
+    from calcforge.theme import CANVAS, DARK
+    from calcforge.ui.scene import DocumentScene
+    monkeypatch.setattr(app, "current_theme", lambda: DARK)
+    scene = DocumentScene(window.document)
+    assert scene.backgroundBrush().color().name() == CANVAS[DARK]
