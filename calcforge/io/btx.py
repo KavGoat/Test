@@ -169,10 +169,12 @@ def drawn_box(box, inset, width: float) -> list[float]:
             max(wide - left - right, 0.5), max(high - top - bottom, 0.5)]
 
 
+# Bluebeam's line ends, each as the one drawn here (2026-10-14: an open
+# arrow came in closed, a circle as nothing at all, a slash or butt lost)
 ARROWS = {
-    "OpenArrow": "arrow", "ClosedArrow": "arrow", "ROpenArrow": "arrow",
-    "RClosedArrow": "arrow", "Diamond": "diamond", "RDiamond": "diamond",
-    "Circle": "circle", "Square": "square", "Butt": "none", "Slash": "none",
+    "OpenArrow": "open", "ClosedArrow": "arrow", "ROpenArrow": "open_reversed",
+    "RClosedArrow": "closed_reversed", "Diamond": "diamond", "RDiamond": "diamond",
+    "Circle": "dot", "Square": "square", "Butt": "butt", "Slash": "slash",
     "None": "none",
 }
 

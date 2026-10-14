@@ -34,7 +34,8 @@ def build_application(argv: list[str]) -> QApplication:
 
 def current_theme() -> str:
     """The theme the user last chose."""
-    value = app_settings().value("theme", LIGHT)
+    # Revu 21 starts in its dark theme, and so does CalcForge (2026-10-14)
+    value = app_settings().value("theme", DARK)
     return DARK if str(value) == DARK else LIGHT
 
 

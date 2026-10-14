@@ -135,7 +135,16 @@ def _is_hatch(name: str) -> bool:
     return hatches.is_hatch(name)
 
 
-ARROW_HEADS = ["none", "arrow", "open", "dot", "square", "diamond", "slash", "half"]
+ARROW_HEADS = ["none", "open", "arrow", "open_reversed", "closed_reversed", "butt",
+               "diamond", "dot", "square", "slash", "half"]
+# Bluebeam's names for the line ends (its Start and End lists, in its order);
+# "half" is CalcForge's own, a one-sided head
+ARROW_NAMES = {"none": "None", "open": "Open", "arrow": "Closed",
+               "open_reversed": "Open (Reversed)", "closed_reversed": "Closed (Reversed)",
+               "butt": "Butt", "diamond": "Diamond", "dot": "Round", "square": "Square",
+               "slash": "Slash", "half": "Half Arrow"}
+# the ends that are filled; the others are strokes only
+FILLED_HEADS = {"arrow", "closed_reversed", "diamond", "dot", "square"}
 
 # Bluebeam-ish default palette offered in colour pickers.
 PALETTE = [
@@ -369,6 +378,42 @@ def build_item(data: dict):
 
 HANDLE_SIZE = 4.0
 HANDLE_SCREEN_PX = 4.0
+# Bluebeam's selection colours (from its manual's screenshots): the dashed
+# boxes and the scale handles blue, control points gold, rotation blue
+SELECT_BLUE = QColor("#2a7dbe")
+CONTROL_GOLD = QColor("#d1b53a")
+ROTATE_BLUE = QColor("#3987c2")
+
+
+def handle_zoom(painter: QPainter) -> float:
+    shape = painter.transform()
+    return max(math.hypot(shape.m11(), shape.m12()), 0.01)
+
+
+def selection_pen(zoom: float) -> QPen:
+    pen = QPen(SELECT_BLUE)
+    pen.setWidthF(0.7 / zoom)
+    pen.setStyle(Qt.DashLine)
+    return pen
+
+
+def paint_control_point(painter: QPainter, point: QPointF, zoom: float,
+                        colour: QColor = CONTROL_GOLD) -> None:
+    """A control point: a gold dot, as Bluebeam's."""
+    radius = (HANDLE_SCREEN_PX + 1.0) / zoom / 2
+    painter.setPen(QPen(colour.darker(160), 0.7 / zoom))
+    painter.setBrush(QBrush(colour))
+    painter.drawEllipse(point, radius, radius)
+
+
+def paint_rotate_handle(painter: QPainter, point: QPointF, stalk: QPointF, zoom: float) -> None:
+    """Bluebeam's rotation handle: a blue dot on a dashed stalk."""
+    painter.setPen(selection_pen(zoom))
+    painter.drawLine(point, stalk)
+    radius = (HANDLE_SCREEN_PX + 1.5) / zoom / 2
+    painter.setPen(QPen(ROTATE_BLUE.darker(150), 0.7 / zoom))
+    painter.setBrush(QBrush(ROTATE_BLUE))
+    painter.drawEllipse(point, radius, radius)
 ROTATE_OFFSET = 22.0
 
 CORNER_HANDLES = ("nw", "n", "ne", "e", "se", "s", "sw", "w")
@@ -379,14 +424,45 @@ HANDLE_CURSORS = {
     "ne": Qt.SizeBDiagCursor, "sw": Qt.SizeBDiagCursor,
     "n": Qt.SizeVerCursor, "s": Qt.SizeVerCursor,
     "e": Qt.SizeHorCursor, "w": Qt.SizeHorCursor,
-    "rot": Qt.CrossCursor,
+    # Revu's scale box: its corners resize the whole markup, diagonally.
+    "scale_nw": Qt.SizeFDiagCursor, "scale_se": Qt.SizeFDiagCursor,
+    "scale_ne": Qt.SizeBDiagCursor, "scale_sw": Qt.SizeBDiagCursor,
     # A call-out's arrow heads and hinges are numbered — l0, e0, l1, e1 —
     # because there is no limit to how many a comment may need, so they are
     # matched by their shape below rather than listed here.
     # A measurement's own words: dragged to move them, turned to angle them.
     "lbl": Qt.SizeAllCursor,
-    "lblrot": Qt.CrossCursor,
 }
+
+#: The handles that turn a markup, which get Revu's curled arrow.
+ROTATE_HANDLES = ("rot", "lblrot")
+_ROTATE_CURSOR = None
+
+
+def rotate_cursor():
+    """Revu's rotation pointer: three quarters of a circle with an arrowhead,
+    black on a white halo so it shows on any drawing. Made on first use, as a
+    cursor needs the application running."""
+    global _ROTATE_CURSOR
+    if _ROTATE_CURSOR is None:
+        from PySide6.QtGui import QCursor, QPixmap
+        pixmap = QPixmap(24, 24)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        arc = QPainterPath()
+        arc.arcMoveTo(QRectF(5, 5, 14, 14), 90)
+        arc.arcTo(QRectF(5, 5, 14, 14), 90, 270)
+        head = QPolygonF([QPointF(11, 2), QPointF(15.5, 5), QPointF(11, 8)])
+        for colour, width in (("#ffffff", 4.0), ("#000000", 1.6)):
+            painter.setPen(QPen(QColor(colour), width, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawPath(arc)
+            painter.setBrush(QColor(colour))
+            painter.drawPolygon(head)
+        painter.end()
+        _ROTATE_CURSOR = QCursor(pixmap, 12, 12)
+    return _ROTATE_CURSOR
 
 
 def cursor_for_handle(key: str):
@@ -396,6 +472,8 @@ def cursor_for_handle(key: str):
     cannot be listed one by one. Every one of them moves a point, which is
     what the pointing hand means everywhere else in the app.
     """
+    if key in ROTATE_HANDLES:
+        return rotate_cursor()
     if key in HANDLE_CURSORS:
         return HANDLE_CURSORS[key]
     letter, rest = key[:1], key[1:]
@@ -432,6 +510,40 @@ class MarkupItem(QGraphicsObject):
     TYPE = "markup"
     NAME = "Markup"
     RESIZABLE = True
+    # A cloud's Size, as Bluebeam's: no unit — it is the PDF's cloudy-border
+    # intensity (/BE /I), so every reader draws the same scallops from it —
+    # and Invert, the scallops turned inward. Only clouds use them.
+    cloud_size: float = 2.0
+    cloud_invert: bool = False
+
+    @property
+    def cloud_radius(self) -> float:
+        """The scallops' radius in points, from the Size and the line width."""
+        return cloud_radius_for(self.cloud_size, self._cloud_line_width())
+
+    @cloud_radius.setter
+    def cloud_radius(self, radius: float) -> None:
+        self.cloud_size = cloud_size_for(float(radius), self._cloud_line_width())
+
+    def _cloud_line_width(self) -> float:
+        style = getattr(self, "style", None)
+        return float(getattr(style, "width", 0.0) or 0.0)
+
+    def cloud_to_dict(self, data: dict) -> None:
+        data["cloud_size"] = round(float(self.cloud_size), 6)
+        if self.cloud_invert:
+            data["cloud_invert"] = True
+
+    def cloud_from_dict(self, data: dict) -> None:
+        """After the style is read: a record from before Size (2026-10-14)
+        gave the radius in points, turned into the Size that draws it the same."""
+        if "cloud_size" in data:
+            self.cloud_size = float(data["cloud_size"])
+        elif "cloud_radius" in data:
+            self.cloud_radius = float(data["cloud_radius"])
+        else:
+            self.cloud_size = CLOUD_SIZE
+        self.cloud_invert = bool(data.get("cloud_invert", False))
     ROTATABLE = True
     HAS_TEXT = False
 
@@ -632,7 +744,17 @@ class MarkupItem(QGraphicsObject):
             # is painted outside the item's own rectangle, so Qt clips it and
             # leaves a smear of it behind every time the markup moves.
             box.setTop(box.top() - ROTATE_OFFSET - HANDLE_SIZE)
-        return box
+        return self._with_scale_box(box)
+
+    def _with_scale_box(self, box: QRectF) -> QRectF:
+        """*box* grown to hold the scale box and the rotation handle above it."""
+        if not self.has_scale_box():
+            return box
+        outer = self.scale_box().adjusted(-HANDLE_SIZE - 2, -HANDLE_SIZE - 2,
+                                          HANDLE_SIZE + 2, HANDLE_SIZE + 2)
+        if self.ROTATABLE or getattr(self, "kind", "") in ("polyline", "polygon", "cloud"):
+            outer.setTop(outer.top() - ROTATE_OFFSET - HANDLE_SIZE)
+        return box.united(outer)
 
     def shape(self) -> QPainterPath:
         path = QPainterPath()
@@ -680,7 +802,9 @@ class MarkupItem(QGraphicsObject):
             "sw": rect.bottomLeft(), "w": QPointF(rect.left(), rect.center().y()),
         }
         if self.ROTATABLE:
-            points["rot"] = QPointF(rect.center().x(), rect.top() - ROTATE_OFFSET)
+            # above the scale box when there is one, as Bluebeam's
+            top = self.scale_box().top() if self.has_scale_box() else rect.top()
+            points["rot"] = QPointF(rect.center().x(), top - ROTATE_OFFSET)
         return points
 
     def leader_handles(self) -> set[str]:
@@ -695,14 +819,73 @@ class MarkupItem(QGraphicsObject):
         """
         return set()
 
+    # Bluebeam's scale box: a dashed box round everything drawn, its four
+    # corners handles that scale the markup in proportion (Shift frees the
+    # proportions). Shapes, pictures and snapshots have one.
+    SCALE_BOX = False
+
+    def has_scale_box(self) -> bool:
+        return self.SCALE_BOX and self.RESIZABLE and not self.locked
+
+    def scale_box(self) -> QRectF:
+        """The scale box: what is drawn, and a little room round it."""
+        rect = self.local_rect().normalized()
+        pad = max(float(getattr(self.style, "width", 0.0) or 0.0), 0.0) / 2 + 3.0
+        if getattr(self, "kind", "") == "cloud" or getattr(self, "shape_kind", "") == "cloud":
+            pad += self.cloud_radius
+        return rect.adjusted(-pad, -pad, pad, pad)
+
+    def scale_points(self) -> dict[str, QPointF]:
+        if not self.has_scale_box():
+            return {}
+        box = self.scale_box()
+        return {"scale_nw": box.topLeft(), "scale_ne": box.topRight(),
+                "scale_se": box.bottomRight(), "scale_sw": box.bottomLeft()}
+
     def handle_at(self, local_pos: QPointF, tolerance: float = HANDLE_SIZE) -> Optional[str]:
         if self.locked:
             return None
-        for key, point in self.handle_points().items():
-            if (abs(point.x() - local_pos.x()) <= tolerance
-                    and abs(point.y() - local_pos.y()) <= tolerance):
-                return key
-        return None
+        # the nearest within reach: a shape's corner and its scale-box corner
+        # can both be in reach of one click
+        best, best_distance = None, None
+        for key, point in list(self.handle_points().items()) + list(self.scale_points().items()):
+            dx, dy = abs(point.x() - local_pos.x()), abs(point.y() - local_pos.y())
+            if dx <= tolerance and dy <= tolerance:
+                distance = dx * dx + dy * dy
+                if best_distance is None or distance < best_distance:
+                    best, best_distance = key, distance
+        return best
+
+    def drag_handle(self, key: str, local_pos: QPointF, keep_ratio: bool = False) -> None:
+        """A handle dragged to *local_pos*: a scale-box corner scales the
+        markup about the opposite corner, in proportion unless Shift is held
+        (Bluebeam's); any other handle is the markup's own."""
+        if not key.startswith("scale_"):
+            self.move_handle(key, local_pos, keep_ratio)
+            return
+        rect = self.local_rect().normalized()
+        box = self.scale_box()
+        corner = key[len("scale_"):]
+        anchor = QPointF(box.right() if "w" in corner else box.left(),
+                         box.bottom() if "n" in corner else box.top())
+        wide, high = max(box.width(), 1e-6), max(box.height(), 1e-6)
+        sx = abs(local_pos.x() - anchor.x()) / wide
+        sy = abs(local_pos.y() - anchor.y()) / high
+        if not keep_ratio:
+            sx = sy = max(sx, sy)
+        sx, sy = max(sx, 0.02), max(sy, 0.02)
+        # the shape's own box, scaled about the anchor the same way
+        left = anchor.x() + (rect.left() - anchor.x()) * sx
+        right = anchor.x() + (rect.right() - anchor.x()) * sx
+        top = anchor.y() + (rect.top() - anchor.y()) * sy
+        bottom = anchor.y() + (rect.bottom() - anchor.y()) * sy
+        new_rect = QRectF(QPointF(left, top), QPointF(right, bottom)).normalized()
+        if new_rect.width() < 2 or new_rect.height() < 2:
+            return
+        self.prepareGeometryChange()
+        self.set_local_rect(new_rect)
+        self.touch()
+        self.geometryChanged.emit()
 
     def move_handle(self, key: str, local_pos: QPointF, keep_ratio: bool = False) -> None:
         rect = self.local_rect().normalized()
@@ -736,43 +919,35 @@ class MarkupItem(QGraphicsObject):
         self.geometryChanged.emit()
 
     def paint_handles(self, painter: QPainter) -> None:
+        """Bluebeam's selection: the shape's box dashed in blue, gold control
+        points, the blue scale box round it all with square corners, and the
+        rotation handle a blue dot on a dashed stalk above."""
         if not self.isSelected() or not self._handles_visible:
             return
         if self.group:
             return
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing, True)
-        import math
-        shape = painter.transform()
-        zoom = max(math.hypot(shape.m11(), shape.m12()), 0.01)
-        handle = HANDLE_SCREEN_PX / zoom
-        half = handle / 2
+        zoom = handle_zoom(painter)
         rect = self.local_rect().normalized()
-        outline = QPen(QColor(30, 110, 220, 200))
-        outline.setWidthF(0.6 / zoom)
-        outline.setStyle(Qt.DashLine)
-        painter.setPen(outline)
+        painter.setPen(selection_pen(zoom))
         painter.setBrush(Qt.NoBrush)
         painter.drawRect(rect)
         if self.locked:
             painter.restore()
             return
-        painter.setPen(QPen(QColor(20, 90, 200), 0.6 / zoom))
-        painter.setBrush(QBrush(QColor(255, 255, 255)))
+        self.paint_scale_box(painter, zoom)
         points = self.handle_points()
         leader = self.leader_handles()
         dots = self.control_dots()
         for key, point in points.items():
             if key == "rot":
-                painter.setBrush(QBrush(QColor(120, 200, 120)))
-                painter.drawEllipse(point, half, half)
-                painter.setBrush(QBrush(QColor(255, 255, 255)))
-                painter.drawLine(point, QPointF(rect.center().x(), rect.top()))
+                top = self.scale_box().top() if self.has_scale_box() else rect.top()
+                paint_rotate_handle(painter, point, QPointF(rect.center().x(), top), zoom)
             elif key in dots:
-                painter.setBrush(QBrush(QColor(20, 90, 200)))
-                painter.drawEllipse(point, half * 0.8, half * 0.8)
-                painter.setBrush(QBrush(QColor(255, 255, 255)))
+                paint_control_point(painter, point, zoom, colour=SELECT_BLUE)
             elif key in leader:
+                half = HANDLE_SCREEN_PX / zoom / 2
                 painter.setPen(QPen(QColor(200, 90, 20), 0.6 / zoom))
                 painter.setBrush(QBrush(QColor(255, 170, 80)))
                 painter.drawPolygon(QPolygonF([
@@ -780,12 +955,22 @@ class MarkupItem(QGraphicsObject):
                     QPointF(point.x() + half + 1.0 / zoom, point.y()),
                     QPointF(point.x(), point.y() + half + 1.0 / zoom),
                     QPointF(point.x() - half - 1.0 / zoom, point.y())]))
-                painter.setPen(QPen(QColor(20, 90, 200), 0.6 / zoom))
-                painter.setBrush(QBrush(QColor(255, 255, 255)))
             else:
-                painter.drawRect(QRectF(point.x() - half, point.y() - half,
-                                        handle, handle))
+                paint_control_point(painter, point, zoom)
         painter.restore()
+
+    def paint_scale_box(self, painter: QPainter, zoom: float) -> None:
+        if not self.has_scale_box():
+            return
+        box = self.scale_box()
+        painter.setPen(selection_pen(zoom))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRect(box)
+        size = (HANDLE_SCREEN_PX + 1.5) / zoom
+        painter.setPen(QPen(SELECT_BLUE.darker(130), 0.6 / zoom))
+        painter.setBrush(QBrush(SELECT_BLUE))
+        for point in self.scale_points().values():
+            painter.drawRect(QRectF(point.x() - size / 2, point.y() - size / 2, size, size))
 
     # -- painting helpers --------------------------------------------------
     def apply_blend(self, painter: QPainter) -> None:
@@ -803,7 +988,8 @@ class MarkupItem(QGraphicsObject):
         painter.save()
         self.apply_blend(painter)
         frame = self.parentItem()
-        if not (self.split_theirs and not getattr(frame, "print_mode", True)):
+        if not (self.split_theirs and (not getattr(frame, "print_mode", True)
+                                       or self.split_from in getattr(frame, "file_drew_split", ()))):
             self.paint_visible(painter)      # nothing while it is still theirs
         painter.restore()
         self.paint_handles(painter)
@@ -1226,7 +1412,12 @@ class MarkupItem(QGraphicsObject):
         # Rotation is always about the visible object's centre.  Keeping the
         # origin implicit at (0, 0) made a reopened rotated object orbit away
         # from the position stored in the document.
-        self.setTransformOriginPoint(self.local_rect().center())
+        # An equation and a table turn about their corner, WebSMath's way
+        # (they read upright while edited by turning back about it), and are
+        # put back so: about their centre a table on a turned page came back
+        # from a save somewhere else (2026-10-14).
+        self.setTransformOriginPoint(QPointF(0, 0) if hasattr(self, "show_upright")
+                                     else self.local_rect().center())
         self.setRotation(float(data.get("rotation", 0)))
         self.sync_their_look()
 
@@ -1258,6 +1449,17 @@ def arrow_path(tip: QPointF, direction: float, size: float, kind: str) -> QPaint
     """Build an arrowhead of *kind* at *tip*, pointing along *direction* (radians)."""
     path = QPainterPath()
     if kind in ("none", ""):
+        return path
+    if kind in ("open_reversed", "closed_reversed"):
+        # the head turned round: its point a head's length back along the line
+        back = tip - QPointF(math.cos(direction) * size, math.sin(direction) * size)
+        return arrow_path(back, direction + math.pi, size,
+                          "open" if kind == "open_reversed" else "arrow")
+    if kind == "butt":
+        offset = QPointF(math.cos(direction + math.pi / 2) * size * 0.45,
+                         math.sin(direction + math.pi / 2) * size * 0.45)
+        path.moveTo(tip - offset)
+        path.lineTo(tip + offset)
         return path
     if kind in ("arrow", "open", "half"):
         spread = math.radians(24)
@@ -1300,6 +1502,22 @@ def arrow_path(tip: QPointF, direction: float, size: float, kind: str) -> QPaint
     return path
 
 
+def draw_head(painter: QPainter, tip: QPointF, direction: float, size: float,
+              kind: str) -> None:
+    """A line end of *kind*: filled with the brush in hand when it is a
+    filled one (Closed, Round, Square, Diamond…), strokes only otherwise —
+    an Open head left unfilled, as Bluebeam and every reader draw it."""
+    if kind in ("none", ""):
+        return
+    if kind in FILLED_HEADS:
+        painter.drawPath(arrow_path(tip, direction, size, kind))
+        return
+    brush = painter.brush()
+    painter.setBrush(Qt.NoBrush)
+    painter.drawPath(arrow_path(tip, direction, size, kind))
+    painter.setBrush(brush)
+
+
 def round_the_joins(painter: QPainter) -> None:
     """Draw what comes next with round joins — for a cloud's scallops.
 
@@ -1314,12 +1532,28 @@ def round_the_joins(painter: QPainter) -> None:
     painter.setPen(pen)
 
 
-def cloud_path(polygon: QPolygonF, radius: float, closed: bool = True) -> QPainterPath:
-    """Convert a polyline into a Bluebeam-style revision cloud."""
-    key = (tuple((point.x(), point.y()) for point in polygon), radius, closed)
+CLOUD_SIZE = 2.0        # a new cloud's Size (Bluebeam's Cloud tool)
+
+
+def cloud_radius_for(size: float, line_width: float) -> float:
+    """A cloud's scallop radius from its Size (the PDF's /BE intensity), as
+    PDF readers draw a cloudy border: 4.75 × intensity + half the line width
+    (Apache PDFBox, CloudyBorder)."""
+    return 4.75 * max(float(size), 0.0) + 0.5 * max(float(line_width), 0.0)
+
+
+def cloud_size_for(radius: float, line_width: float) -> float:
+    return max((float(radius) - 0.5 * max(float(line_width), 0.0)) / 4.75, 0.05)
+
+
+def cloud_path(polygon: QPolygonF, radius: float, closed: bool = True,
+               inverted: bool = False) -> QPainterPath:
+    """Convert a polyline into a Bluebeam-style revision cloud; *inverted*
+    turns the scallops the other way (Bluebeam's Invert)."""
+    key = (tuple((point.x(), point.y()) for point in polygon), radius, closed, inverted)
     made = _CLOUDS.get(key)
     if made is None:
-        made = _cloud_path(polygon, radius, closed)
+        made = _cloud_path(polygon, radius, closed, inverted)
         if len(_CLOUDS) > 2048:
             _CLOUDS.clear()
         _CLOUDS[key] = made
@@ -1332,34 +1566,119 @@ _CLOUDS: dict = {}
 _PENS: dict = {}
 
 
-def _cloud_path(polygon: QPolygonF, radius: float, closed: bool = True) -> QPainterPath:
+def _cloud_path(polygon: QPolygonF, radius: float, closed: bool = True,
+                inverted: bool = False) -> QPainterPath:
+    """A revision cloud round *polygon*, drawn as PDF readers draw a cloudy
+    border (Apache PDFBox's CloudyBorder, after Acrobat): a corner curl at
+    each corner, then curls of *radius* along each side, their arcs meeting
+    in cusps, the leftover length shared out by easing the first arcs. The
+    curls bulge outward; *inverted* (Bluebeam's Invert) turns them inward.
+    Worked in y-up coordinates, as the PDF's own, and turned back."""
+    points = [(p.x(), -p.y()) for p in polygon]
+    # no zero-length sides, and closed
+    clean = []
+    for pt in points:
+        if not clean or math.hypot(pt[0] - clean[-1][0], pt[1] - clean[-1][1]) > 1e-9:
+            clean.append(pt)
+    if len(clean) >= 2 and math.hypot(clean[0][0] - clean[-1][0], clean[0][1] - clean[-1][1]) > 1e-9:
+        clean.append(clean[0])
     path = QPainterPath()
-    points = list(polygon)
-    if len(points) < 2:
+    if len(clean) < 3:
         return path
-    if closed and points[0] != points[-1]:
-        points.append(points[0])
-    radius = max(radius, 1.5)
-    started = False
-    for start, end in zip(points, points[1:]):
-        delta = end - start
-        length = math.hypot(delta.x(), delta.y())
-        if length < 1e-6:
-            continue
-        bumps = max(int(round(length / (radius * 1.9))), 1)
-        step = length / bumps
-        angle = math.atan2(delta.y(), delta.x())
-        for index in range(bumps):
-            bump_start = start + QPointF(math.cos(angle), math.sin(angle)) * (index * step)
-            bump_end = start + QPointF(math.cos(angle), math.sin(angle)) * ((index + 1) * step)
-            mid = (bump_start + bump_end) / 2
-            box = QRectF(mid.x() - step / 2, mid.y() - step / 2, step, step)
-            sweep_start = math.degrees(math.atan2(-(bump_start.y() - mid.y()),
-                                                  bump_start.x() - mid.x()))
-            if not started:
-                path.arcMoveTo(box, sweep_start)
-                started = True
-            path.arcTo(box, sweep_start, -200)
+    # the positive angle direction (curls outward), or the other way round
+    area = sum(clean[i][0] * clean[(i + 1) % len(clean)][1]
+               - clean[i][1] * clean[(i + 1) % len(clean)][0] for i in range(len(clean)))
+    if (area < 0) != inverted:
+        clean.reverse()
+    radius = max(float(radius), 0.5)
+    a34, a30, a12, a90, a180 = (math.radians(34), math.radians(30), math.radians(12),
+                                math.pi / 2, math.pi)
+    k = math.cos(a34)
+    adv_interm = 2 * k * radius
+    adv_corner = k * radius
+    started = [False]
+
+    def out(x, y):
+        return QPointF(x, -y)
+
+    def segment(start, end, cx, cy, move=False):
+        denom = math.sin((end - start) / 2.0)
+        ca, sa, cb, sb = math.cos(start), math.sin(start), math.cos(end), math.sin(end)
+        if move or not started[0]:
+            path.moveTo(out(cx + radius * ca, cy + radius * sa))
+            started[0] = True
+        if denom == 0:
+            return
+        bcp = 1.333333333 * (1 - math.cos((end - start) / 2.0)) / denom
+        path.cubicTo(out(cx + radius * (ca - bcp * sa), cy + radius * (sa + bcp * ca)),
+                     out(cx + radius * (cb + bcp * sb), cy + radius * (sb - bcp * cb)),
+                     out(cx + radius * cb, cy + radius * sb))
+
+    def arc(start, end, cx, cy, concave=False):
+        todo = end - start
+        while todo < 0:
+            todo += 2 * math.pi
+        if concave and todo > math.pi:
+            # a corner turning the other way (a concave corner, or every
+            # corner of an inverted cloud): the short way back, not round
+            todo -= 2 * math.pi
+        step = a90 if todo >= 0 else -a90
+        sweep, done = todo, 0.0
+        while abs(todo) > a90:
+            segment(start + done, start + done + step, cx, cy)
+            done += step
+            todo -= step
+        if todo != 0:
+            segment(start + done, start + sweep, cx, cy)
+
+    def params(length):
+        n = math.ceil((length - 2 * adv_corner) / adv_interm)
+        dx = (length - (2 * adv_corner + n * adv_interm)) / 2
+        arg = (k * radius + dx) / radius
+        alpha = 0.0 if arg < -1.0 or arg > 1.0 else math.acos(arg)
+        return n, alpha, dx
+
+    count = len(clean)
+    first = math.hypot(clean[0][0] - clean[-2][0], clean[0][1] - clean[-2][1])
+    n0, alpha0, _dx = params(first)
+    alpha_prev = alpha0 if n0 == 0 else a34
+    angle_prev = 0.0
+    for j in range(count - 1):
+        (x0, y0), (x1, y1) = clean[j], clean[j + 1]
+        length = math.hypot(x1 - x0, y1 - y0)
+        n, alpha, dx = params(length)
+        angle = math.atan2(y1 - y0, x1 - x0)
+        if j == 0:
+            px, py = clean[count - 2]
+            angle_prev = math.atan2(y0 - py, x0 - px)
+        cos, sin = (x1 - x0) / length, (y1 - y0) / length
+        # the corner curl
+        a = angle_prev + a180 + alpha_prev
+        b = a - math.radians(22)
+        turn = (angle - angle_prev + math.pi) % (2 * math.pi) - math.pi
+        segment(a, b, x0, y0, move=not started[0])
+        arc(b, angle - alpha, x0, y0, concave=turn < -1e-9)
+        x = x0 + (2 * k * radius + 2 * dx) * cos
+        y = y0 + (2 * k * radius + 2 * dx) * sin
+        rest = n
+        if n >= 1:
+            back = angle + a180
+            segment(back + alpha, back + alpha - a30, x, y)
+            segment(back + alpha - a30, back + a90, x, y)
+            segment(back + a90, back + a180 - a34, x, y)
+            x += adv_interm * cos
+            y += adv_interm * sin
+            rest = n - 1
+        back = angle + a180
+        for _ in range(rest):
+            segment(back + a34, back + a12, x, y)
+            segment(back + a12, back + a90, x, y)
+            segment(back + a90, back + a180 - a34, x, y)
+            x += adv_interm * cos
+            y += adv_interm * sin
+        angle_prev = angle
+        alpha_prev = alpha if n == 0 else a34
+    path.closeSubpath()
     return path
 
 

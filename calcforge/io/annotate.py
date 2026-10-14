@@ -57,6 +57,9 @@ LINE_ENDINGS = {
     "diamond": "Diamond",
     "slash": "Slash",
     "half": "OpenArrow",
+    "open_reversed": "ROpenArrow",
+    "closed_reversed": "RClosedArrow",
+    "butt": "Butt",
 }
 
 
@@ -966,12 +969,11 @@ def _difference(place: "Placement", outer, inner) -> list:
 
 def _cloudy(annotation, item) -> None:
     """A cloud is a border effect, not a shape drawn to look like one."""
-    # How pronounced the scallops are. Ours are drawn to a radius; the PDF
-    # says it in steps of one, and two is the middle setting every reader has.
-    radius = float(getattr(item, "cloud_radius", 9.0) or 9.0)
+    # The cloud's Size is the border effect's intensity, as Bluebeam writes it,
+    # so a reader drawing it afresh draws scallops of the same size.
     annotation["BE"] = {
         "S": Name("C"),
-        "I": 1.0 if radius < 7.0 else (2.0 if radius < 14.0 else 3.0),
+        "I": round(float(getattr(item, "cloud_size", 2.0) or 2.0), 4),
     }
     if str(annotation.get("Subtype")) == "Polygon":
         annotation["IT"] = Name("PolygonCloud")

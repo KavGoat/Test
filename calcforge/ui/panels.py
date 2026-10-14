@@ -26,11 +26,11 @@ from ..items.measure import CountItem, MeasureItem
 from ..items.shapes import PolyItem, RectItem
 from ..items.text import STAMP_PRESETS, CalloutItem, NoteItem, StampItem, TextItem
 from .icons import icon
-from .stylecaps import CLOUD
+from .stylecaps import CLOUD, CORNER
 from .stylecaps import (DASH, FILL, FILL_OPACITY, HATCH, OPACITY, STROKE,
                         WIDTH, common_capabilities)
-from .widgets import (ColorButton, LabeledSlider, UnitCombo, arrow_combo,
-                      big_pattern_dropdown)
+from .widgets import (ColorButton, UnitCombo, arrow_combo,
+                      big_pattern_dropdown, set_arrow)
 
 
 def _line_style_icon(name: str, colour: str, width: float) -> QIcon:
@@ -54,6 +54,20 @@ def _line_style_icon(name: str, colour: str, width: float) -> QIcon:
 def _hatch_icon(name: str, colour: str) -> QIcon:
     from ..items.hatches import sample_icon
     return sample_icon(name, colour, 150, 34)
+
+
+def fill_hatch_combo(combo, colour: str, current: str = "") -> None:
+    """A hatch list as Revu's: None, every pattern drawn, then Manage…"""
+    from ..items import hatches
+    from .hatchpatterns import MANAGE
+    combo.blockSignals(True)
+    combo.clear()
+    for name in HATCH_PATTERNS:
+        combo.addItem(_hatch_icon(name, colour), hatches.display_name(name), name)
+    combo.insertSeparator(combo.count())
+    combo.addItem("Manage…", MANAGE)
+    combo.setCurrentIndex(max(combo.findData(current or ""), 0))
+    combo.blockSignals(False)
 
 
 # ---------------------------------------------------------------------------
@@ -1341,6 +1355,137 @@ class BookmarksPanel(QWidget):
         self.window.insert_contents_block()
 
 
+class _ToolGrid(QListWidget):
+    """A tool set's tools as Bluebeam's Symbol view shows them: a grid of
+    pictures, the first nine of My Tools numbered for their keys."""
+
+    def __init__(self, panel, group_name: str):
+        super().__init__()
+        self.panel = panel
+        self.group_name = group_name
+        self.setObjectName("toolGrid")
+        self.setViewMode(QListView.IconMode)
+        self.setMovement(QListView.Static)
+        self.setResizeMode(QListView.Adjust)
+        self.setWrapping(True)
+        self.setSpacing(3)
+        self.setFrameShape(QListWidget.NoFrame)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._menu)
+        self.itemClicked.connect(self._clicked)
+
+    def _clicked(self, item) -> None:
+        self.panel.select_entry(self.group_name, item.data(Qt.UserRole))
+        self.panel.use_selected()
+
+    def _menu(self, point) -> None:
+        item = self.itemAt(point)
+        if item is not None:
+            self.panel.select_entry(self.group_name, item.data(Qt.UserRole))
+        else:
+            self.panel.select_set(self.group_name)
+        self.panel.build_menu().exec(self.viewport().mapToGlobal(point))
+
+    def fit(self, width: int) -> None:
+        """Tall enough for every row of tools, no taller."""
+        size = self.iconSize().width() + 8
+        per_row = max(1, (max(width, size) - 4) // (size + 2 * self.spacing()))
+        rows = max(1, -(-self.count() // per_row)) if self.count() else 1
+        self.setFixedHeight(rows * (size + 2 * self.spacing()) + 4)
+
+
+class _SetHeader(QWidget):
+    """A tool set's bar, as Bluebeam's: the chevron that rolls it up, its
+    name, its gear (the set's own menu) — and, in Symbol view, its tools."""
+
+    def __init__(self, panel, header_item, group, symbols: bool):
+        super().__init__()
+        self.panel = panel
+        self.item = header_item
+        self.group_name = group.name
+        self.setObjectName("toolSetHeader")
+        column = QVBoxLayout(self)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(0)
+        bar = QWidget()
+        bar.setObjectName("toolSetBar")
+        line = QHBoxLayout(bar)
+        line.setContentsMargins(4, 2, 2, 2)
+        line.setSpacing(4)
+        self.chevron = QToolButton()
+        self.chevron.setObjectName("toolSetChevron")
+        self.chevron.setAutoRaise(True)
+        self.chevron.clicked.connect(self._toggle)
+        line.addWidget(self.chevron)
+        self.title = QLabel(f"{group.name}  ({len(group.entries)})")
+        self.title.setObjectName("toolSetName")
+        line.addWidget(self.title, 1)
+        self.gear = QToolButton()
+        self.gear.setObjectName("toolSetGear")
+        self.gear.setAutoRaise(True)
+        self.gear.setIcon(icon("gear", 16))
+        self.gear.setToolTip(f"“{group.name}”: its view, its tools, its name")
+        self.gear.setPopupMode(QToolButton.InstantPopup)
+        self.gear.clicked.connect(self._gear)
+        line.addWidget(self.gear)
+        column.addWidget(bar)
+        self.grid = None
+        if symbols:
+            self.grid = _ToolGrid(panel, group.name)
+            side = panel.tool_size
+            self.grid.setIconSize(QSize(side, side))
+            from . import toolsets
+            numbered = group.name == toolsets.MY_TOOLS
+            for position, entry in enumerate(group.entries):
+                picture = entry_thumbnail(entry, side, side)
+                if numbered and position < 9:
+                    _badge(picture, str(position + 1))
+                tool = QListWidgetItem(QIcon(picture), "")
+                tool.setToolTip(entry.label)
+                tool.setData(Qt.UserRole, position)
+                self.grid.addItem(tool)
+            column.addWidget(self.grid)
+        self.sync()
+
+    def sync(self) -> None:
+        open_ = self.item.isExpanded()
+        self.chevron.setArrowType(Qt.DownArrow if open_ else Qt.RightArrow)
+        if self.grid is not None:
+            self.grid.setVisible(open_ and self.grid.count() > 0)
+            self.grid.fit(self.panel.tree.viewport().width() - 8)
+        self.adjustSize()
+        self.item.setSizeHint(0, QSize(10, self.sizeHint().height()))
+
+    def _toggle(self) -> None:
+        self.item.setExpanded(not self.item.isExpanded())
+        self.sync()
+
+    def _gear(self) -> None:
+        self.panel.select_set(self.group_name)
+        self.panel.build_set_menu().exec(self.gear.mapToGlobal(self.gear.rect().bottomLeft()))
+
+
+def _badge(picture, text: str) -> None:
+    """Bluebeam's little number on a My Tools tool: the key that picks it up."""
+    from PySide6.QtGui import QPainter
+    painter = QPainter(picture)
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    size = max(9, picture.width() // 3)
+    box = QRectF(picture.width() - size, 0, size, size)
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(QColor("#3c3e40"))
+    painter.drawRect(box)
+    font = painter.font()
+    font.setPixelSize(max(7, size - 3))
+    painter.setFont(font)
+    painter.setPen(QColor("#ffffff"))
+    painter.drawText(box, Qt.AlignCenter, text)
+    painter.end()
+
+
 class ToolSetsPanel(QWidget):
     """Bluebeam's tool chest: every set you have, all showing at once.
 
@@ -1367,11 +1512,26 @@ class ToolSetsPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
+        from ..settings import app_settings
+        # Bluebeam's tool size slider, and which sets are in Detail view
+        self.tool_size = int(app_settings().value("toolchest/size", 32) or 32)
+        self.detail_sets = set(app_settings().value("toolchest/detail", []) or [])
+
+        # Bluebeam's "Tool Chest ▾": the sets, and making or bringing in one
+        self.chest_button = QToolButton()
+        self.chest_button.setObjectName("toolChestMenu")
+        self.chest_button.setText("Tool Sets ▾")
+        self.chest_button.setPopupMode(QToolButton.InstantPopup)
+        self.chest_button.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self.chest_button.clicked.connect(self._chest_menu)
+        layout.addWidget(self.chest_button)
 
         self.tree = QTreeWidget()
+        self.tree.setObjectName("toolChestTree")
         self.tree.setHeaderHidden(True)
         self.tree.setIconSize(QSize(48, 34))
-        self.tree.setRootIsDecorated(True)
+        self.tree.setRootIsDecorated(False)
+        self.tree.setIndentation(8)
         self.tree.setUniformRowHeights(False)
         self.tree.setSelectionMode(QAbstractItemView.SingleSelection)
         self.tree.setDragDropMode(QAbstractItemView.InternalMove)
@@ -1389,6 +1549,15 @@ class ToolSetsPanel(QWidget):
         self.hint.setStyleSheet("color:#6b7280;")
         layout.addWidget(self.hint)
 
+        from PySide6.QtWidgets import QSlider
+        self.size_slider = QSlider(Qt.Horizontal)
+        self.size_slider.setObjectName("toolSize")
+        self.size_slider.setRange(20, 64)
+        self.size_slider.setValue(self.tool_size)
+        self.size_slider.setToolTip("How big the tools are drawn")
+        self.size_slider.valueChanged.connect(self._resize_tools)
+        layout.addWidget(self.size_slider)
+
         # Kept so the rest of the window can ask about the state of a tool
         # without knowing how the panel is laid out.
         self.entry_buttons: dict = {}
@@ -1404,6 +1573,7 @@ class ToolSetsPanel(QWidget):
         self.groups = toolsets.load_toolsets()
         self.tree.blockSignals(True)
         self.tree.clear()
+        self.headers: dict = {}
         for group in self.groups:
             header = QTreeWidgetItem([f"{group.name}  ({len(group.entries)})"])
             header.setData(0, self.SET_ROLE, group.name)
@@ -1412,10 +1582,22 @@ class ToolSetsPanel(QWidget):
             font = header.font(0)
             font.setBold(True)
             header.setFont(0, font)
+            header.setForeground(0, QColor(0, 0, 0, 0))   # the bar says it
             self.tree.addTopLevelItem(header)
             self._fill(header, group)
             header.setExpanded(group.name not in rolled)
+            symbols = group.name not in self.detail_sets
+            for index in range(header.childCount()):
+                header.child(index).setHidden(symbols)    # Symbol view: the grid instead
+            bar = _SetHeader(self, header, group, symbols)
+            self.tree.setItemWidget(header, 0, bar)
+            self.headers[group.name] = bar
+            header.setHidden(group.hidden)     # unticked in Manage Tool Sets
         self.tree.blockSignals(False)
+        if not getattr(self, "_watching_expansion", False):
+            self.tree.itemExpanded.connect(self._sync_header)
+            self.tree.itemCollapsed.connect(self._sync_header)
+            self._watching_expansion = True
         if wanted:
             self.show_set(wanted)
         self.refresh_buttons()
@@ -1612,6 +1794,82 @@ class ToolSetsPanel(QWidget):
     def import_set(self) -> None:
         self.window.import_toolset()
 
+    # -- Bluebeam's menus and views ---------------------------------------
+    def _sync_header(self, item) -> None:
+        bar = self.headers.get(item.data(0, self.SET_ROLE)) if hasattr(self, "headers") else None
+        if bar is not None:
+            bar.sync()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        for bar in getattr(self, "headers", {}).values():
+            bar.sync()
+
+    def _resize_tools(self, value: int) -> None:
+        from ..settings import app_settings
+        self.tool_size = int(value)
+        app_settings().setValue("toolchest/size", self.tool_size)
+        self.rebuild()
+
+    def set_detail(self, name: str, detail: bool) -> None:
+        """Bluebeam's Symbol or Detail view for one set."""
+        from ..settings import app_settings
+        if detail:
+            self.detail_sets.add(name)
+        else:
+            self.detail_sets.discard(name)
+        app_settings().setValue("toolchest/detail", sorted(self.detail_sets))
+        self.rebuild(keep=name)
+
+    def build_set_menu(self) -> QMenu:
+        """A set's gear: Symbol or Detail, and what the right-click offers."""
+        menu = QMenu(self)
+        group = self.current_set()
+        if group is not None:
+            symbol = menu.addAction("Symbol", lambda n=group.name: self.set_detail(n, False))
+            symbol.setCheckable(True)
+            symbol.setChecked(group.name not in self.detail_sets)
+            detail = menu.addAction("Detail", lambda n=group.name: self.set_detail(n, True))
+            detail.setCheckable(True)
+            detail.setChecked(group.name in self.detail_sets)
+            menu.addSeparator()
+        for action in self.build_menu().actions():
+            action.setParent(menu)
+            menu.addAction(action)
+        return menu
+
+    def build_chest_menu(self) -> QMenu:
+        """Revu's Tool Chest menu: a tick for each set the chest shows, then
+        managing, making and bringing in sets."""
+        menu = QMenu(self)
+        for group in self.groups:
+            shown = menu.addAction(group.name)
+            shown.setCheckable(True)
+            shown.setChecked(not group.hidden)
+            shown.toggled.connect(lambda on, n=group.name: self.set_shown(n, on))
+        menu.addSeparator()
+        menu.addAction("Manage Tool Sets…", self.window.manage_toolsets)
+        menu.addAction("New Tool Set…", self.new_set)
+        menu.addAction("Import Tool Set…", self.import_set)
+        return menu
+
+    def _chest_menu(self) -> None:
+        self.build_chest_menu().exec(
+            self.chest_button.mapToGlobal(self.chest_button.rect().bottomLeft()))
+
+    def set_shown(self, name: str, shown: bool) -> None:
+        """Show a set in the chest, or keep it without showing it."""
+        from . import toolsets
+
+        group = next((g for g in self.groups if g.name == name), None)
+        if group is None or group.hidden == (not shown):
+            return
+        group.hidden = not shown
+        toolsets.save_toolsets(self.groups)
+        self.rebuild()
+        if shown:
+            self.select_set(name)
+
     # -- the right-click menu ----------------------------------------------
     def _menu_at(self, point) -> None:
         row = self.tree.itemAt(point)
@@ -1627,8 +1885,8 @@ class ToolSetsPanel(QWidget):
         entry = self.current_entry()
         group = self.current_set()
         if entry is not None:
-            menu.addAction("Use", self.use_selected)
-            draw = menu.addAction("Property mode", self.toggle_mode)
+            menu.addAction("Use Tool", self.use_selected)
+            draw = menu.addAction("Properties Mode", self.toggle_mode)
             draw.setCheckable(True)
             draw.setChecked(entry.mode == toolsets.PROPERTIES)
             draw.setEnabled(toolsets.can_be_properties(entry.payload))
@@ -1639,15 +1897,15 @@ class ToolSetsPanel(QWidget):
             menu.addAction("Remove", self.remove_entry)
             menu.addSeparator()
         if group is not None:
-            add = menu.addAction("Add selection", self.add_selection)
+            add = menu.addAction("Add Selection", self.add_selection)
             add.setToolTip(f"Keep what is selected on the page in “{group.name}”")
-            rename = menu.addAction("Rename set…", self.rename_set)
+            rename = menu.addAction("Rename Tool Set…", self.rename_set)
             rename.setToolTip(f"Rename “{group.name}”")
-            delete = menu.addAction("Delete set", self.delete_set)
+            delete = menu.addAction("Delete Tool Set", self.delete_set)
             delete.setToolTip(f"Delete “{group.name}” and everything in it")
             menu.addSeparator()
-        menu.addAction("New tool set…", self.new_set)
-        imported = menu.addAction("Import tools…", self.import_set)
+        menu.addAction("New Tool Set…", self.new_set)
+        imported = menu.addAction("Import Tool Set…", self.import_set)
         imported.setToolTip("Import a Bluebeam tool set (.btx) as a new set")
         return menu
 
@@ -1813,6 +2071,76 @@ def _icon_for_type(type_name: str) -> str:
 # Properties
 # ---------------------------------------------------------------------------
 
+class PropertySection(QGroupBox):
+    """A section of Bluebeam's Properties panel — General, Appearance,
+    Layout, Options…: its title with a chevron, open or folded by a click on
+    it, and kept folded for the rest of the session."""
+
+    folded: set = set()
+
+    def __init__(self, title: str):
+        super().__init__(title)
+        self.setObjectName("propSection")
+        self.setCheckable(True)
+        self.setChecked(title not in PropertySection.folded)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(2, 2, 2, 6)
+        self.body = QWidget()
+        outer.addWidget(self.body)
+        self.form = QFormLayout(self.body)
+        self.form.setContentsMargins(4, 4, 4, 0)
+        self.form.setHorizontalSpacing(8)
+        self.form.setVerticalSpacing(5)
+        self.form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        self.body.setVisible(self.isChecked())
+        self.toggled.connect(self._fold)
+
+    def _fold(self, on: bool) -> None:
+        self.body.setVisible(on)
+        if on:
+            PropertySection.folded.discard(self.title())
+        else:
+            PropertySection.folded.add(self.title())
+
+
+def _spin(value: float, low: float, high: float, decimals: int = 2, step: float = 1.0,
+          suffix: str = "") -> QDoubleSpinBox:
+    """A number as Bluebeam's panel shows one: right-aligned in its box."""
+    box = QDoubleSpinBox()
+    box.setRange(low, high)
+    box.setDecimals(decimals)
+    box.setSingleStep(step)
+    box.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+    if suffix:
+        box.setSuffix(suffix)
+    box.setValue(value)
+    return box
+
+
+def _percent(fraction: float, name: str = "") -> QSpinBox:
+    """An opacity, 0 to 100, as Bluebeam's."""
+    box = QSpinBox()
+    box.setRange(0, 100)
+    box.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+    box.setValue(int(round(float(fraction) * 100)))
+    if name:
+        box.setObjectName(name)
+    return box
+
+
+def _row(*widgets, stretch_first: bool = False) -> QWidget:
+    holder = QWidget()
+    line = QHBoxLayout(holder)
+    line.setContentsMargins(0, 0, 0, 0)
+    line.setSpacing(6)
+    for n, widget in enumerate(widgets):
+        line.addWidget(widget, 1 if (stretch_first and n == 0) else 0)
+    if not stretch_first:
+        line.addStretch(1)
+    return holder
+
+
 class PropertiesPanel(QScrollArea):
     """Context-sensitive editor for whatever is selected."""
 
@@ -1823,6 +2151,7 @@ class PropertiesPanel(QScrollArea):
         self.window = window
         self.setWidgetResizable(True)
         self.setFrameShape(QScrollArea.NoFrame)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._items: list[MarkupItem] = []
         self._building = False
         self.body = QWidget()
@@ -1861,13 +2190,17 @@ class PropertiesPanel(QScrollArea):
             return
 
         first = self._items[0]
-        heading = QLabel(first.display_name() if len(self._items) == 1
-                         else f"{len(self._items)} markups selected")
+        # Bluebeam's heading: the markup's icon and "<Type> Properties"
+        heading = QLabel(f"{first.display_name()} Properties" if len(self._items) == 1
+                         else f"{len(self._items)} Markups Properties")
+        heading.setObjectName("propHeading")
         font = heading.font()
         font.setBold(True)
+        font.setPointSizeF(font.pointSizeF() + 1.5)
         heading.setFont(font)
         self.layout.addWidget(heading)
 
+        self._add_metadata(first)
         if all(getattr(i, "IS_CALC", False) and getattr(i, "region", None) is not None
                for i in self._items):
             self._add_equation(first)
@@ -1878,13 +2211,15 @@ class PropertiesPanel(QScrollArea):
         if len(self._items) == 1 and getattr(first, "TYPE", "") == "chart":
             self._add_chart(first)
         appearance = common_capabilities(self._items)
-        if appearance - {"font"}:
+        texts = all(getattr(i, "HAS_TEXT", False) or isinstance(i, (StampItem, CountItem, MeasureItem))
+                    for i in self._items)
+        ends = all(isinstance(i, (PolyItem, MeasureItem, CalloutItem)) for i in self._items)
+        if appearance - {"font"} or texts or ends:
             self._add_appearance(first, appearance)
-        if all(getattr(i, "HAS_TEXT", False) or isinstance(i, (StampItem, CountItem, MeasureItem))
-               for i in self._items):
-            self._add_text(first, compact=not getattr(first, "HAS_TEXT", False))
-        if all(isinstance(i, (PolyItem, MeasureItem, CalloutItem)) for i in self._items):
-            self._add_arrows(first)
+            if ends:
+                self._add_arrows(first)
+            if texts:
+                self._add_text(first, compact=not getattr(first, "HAS_TEXT", False))
         if len(self._items) == 1:
             if isinstance(first, MeasureItem):
                 self._add_measure(first)
@@ -1900,45 +2235,36 @@ class PropertiesPanel(QScrollArea):
                 self._add_image(first)
             elif isinstance(first, SnapshotItem):
                 form = self._group("Snapshot")
-                keep = QCheckBox("Keep ratio")
+                keep = QCheckBox("Keep Ratio")
                 keep.setChecked(first.keep_aspect)
                 keep.toggled.connect(lambda on: self._apply(
                     lambda i: setattr(i, "keep_aspect", on), "Snapshot ratio"))
                 form.addRow("", keep)
-                form.addRow("Source page", QLabel(str(first.source_page)))
+                form.addRow("Source Page:", QLabel(str(first.source_page)))
                 colours = QPushButton("Change Colors…")
                 colours.clicked.connect(lambda: self.window.change_colors(first))
                 form.addRow("", colours)
             elif isinstance(first, RectItem) and first.kind in ("rect", "ellipse"):
                 self._add_size(first)
-                if first.kind == "rect":
-                    form = self._group("Corners")
-                    radius = QDoubleSpinBox()
-                    radius.setRange(0, 200)
-                    radius.setValue(first.style.corner_radius)
-                    radius.setSuffix(" pt")
-                    radius.valueChanged.connect(lambda value: self._slide(
-                        lambda i: setattr(i.style, "corner_radius", value),
-                        "Corner radius"))
-                    form.addRow("Radius", radius)
-            elif isinstance(first, RectItem) and first.kind == "cloud":
-                self._add_cloud(first)
-            elif isinstance(first, PolyItem) and first.kind == "cloud":
-                self._add_cloud(first)
-            elif isinstance(first, CalloutItem) and (
-                    getattr(first, "shape_kind", "") == "cloud"
-                    or any(leader.clouds() for leader in getattr(first, "leaders", []))):
-                self._add_cloud(first)
         if len(self._items) == 1:
             self._add_geometry(first)
             if isinstance(first, PolyItem) and first.broken:
                 self._add_breaks(first)
-        self._add_metadata(first)
-        if len(self._items) == 1:
             self._add_defaults(first)
+        self._fit_width()
         self.layout.addStretch(1)
         self._settle()
         self._building = False
+
+    def _fit_width(self) -> None:
+        """Everything fits the panel's width, as Bluebeam's does: lists shrink
+        to what they must show rather than pushing the panel sideways."""
+        for combo in self.body.findChildren(QComboBox):
+            combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+            combo.setMinimumContentsLength(4)
+            combo.setMinimumWidth(0)
+        for edit in self.body.findChildren(QLineEdit):
+            edit.setMinimumWidth(0)
 
     def _settle(self) -> None:
         """Re-lay-out the rebuilt form and scroll back to the top.
@@ -1962,13 +2288,26 @@ class PropertiesPanel(QScrollArea):
         self.horizontalScrollBar().setValue(0)
 
     def _group(self, title: str) -> QFormLayout:
-        box = QGroupBox(title)
-        form = QFormLayout(box)
-        form.setContentsMargins(8, 8, 8, 8)
-        form.setSpacing(5)
-        form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.layout.addWidget(box)
-        return form
+        """A section of the panel, as Bluebeam's: its form to fill in. A
+        section asked for twice (Appearance, then the text in it) is the one."""
+        for section in self.body.findChildren(PropertySection):
+            if section.title() == title and section.parent() is self.body:
+                return section.form
+        section = PropertySection(title)
+        self.layout.addWidget(section)
+        return section.form
+
+    def _hatch_chosen(self, combo, style) -> None:
+        """A pattern picked, or Manage… — which opens Hatch Patterns and leaves
+        the markup's pattern as it was."""
+        from .hatchpatterns import MANAGE
+        if combo.currentData() == MANAGE:
+            combo.blockSignals(True)
+            combo.setCurrentIndex(max(combo.findData(style.hatch or ""), 0))
+            combo.blockSignals(False)
+            QTimer.singleShot(0, self.window.manage_hatches)
+            return
+        self._apply(lambda i: setattr(i.style, "hatch", combo.currentData()), "Hatch")
 
     def _apply(self, setter, description: str, coalesce: bool = False) -> None:
         """Change every selected item, and record one undo step for it.
@@ -2038,7 +2377,7 @@ class PropertiesPanel(QScrollArea):
         decimals.setValue(fmt.decimals)
         decimals.valueChanged.connect(lambda n: change(
             f"Decimal places: {n}", set_fmt(decimals=n)))
-        form.addRow("Decimals", decimals)
+        form.addRow("Decimals:", decimals)
         threshold = QSpinBox()
         threshold.setObjectName("equationThreshold")
         threshold.setRange(0, 15)
@@ -2047,7 +2386,7 @@ class PropertiesPanel(QScrollArea):
                              "power of ten")
         threshold.valueChanged.connect(lambda n: change(
             f"Exponential threshold: {n}", set_fmt(threshold=n)))
-        form.addRow("Threshold", threshold)
+        form.addRow("Threshold:", threshold)
         fractions = QComboBox()
         fractions.setObjectName("equationFractions")
         for key, title in (("decimal", "Decimal"), ("fraction", "Fraction"), ("auto", "Auto")):
@@ -2055,7 +2394,7 @@ class PropertiesPanel(QScrollArea):
         fractions.setCurrentIndex(max(fractions.findData(fmt.fractions), 0))
         fractions.currentIndexChanged.connect(lambda _i: change(
             "Fractions", set_fmt(fractions=fractions.currentData())))
-        form.addRow("Fractions", fractions)
+        form.addRow("Fractions:", fractions)
         for title, attr in (("Trailing zeros", "trailing_zeros"),
                             ("Significant figures", "significant")):
             box = QCheckBox(title)
@@ -2068,7 +2407,7 @@ class PropertiesPanel(QScrollArea):
         rounding.setCurrentIndex(0 if fmt.half_even else 1)
         rounding.currentIndexChanged.connect(lambda _i: change(
             "Rounding", set_fmt(half_even=rounding.currentData())))
-        form.addRow("Rounding", rounding)
+        form.addRow("Rounding:", rounding)
         default = QPushButton("Document default")
         default.setToolTip("Show the result as Preferences says, like the rest")
         default.clicked.connect(lambda: change("Result format: default",
@@ -2083,15 +2422,15 @@ class PropertiesPanel(QScrollArea):
         size.setValue(region.font_size)
         size.valueChanged.connect(lambda value: change(
             "Font size", lambda r: setattr(r, "font_size", float(value))))
-        form.addRow("Size", size)
+        form.addRow("Size:", size)
         colour = ColorButton(region.color, label="Colour")
         colour.colorChanged.connect(lambda value: change(
             "Colour", lambda r: setattr(r, "color", value or "#000000")))
-        form.addRow("Colour", colour)
+        form.addRow("Color:", colour)
         background = ColorButton(region.bg_color, label="Background")
         background.colorChanged.connect(lambda value: change(
             "Background", lambda r: setattr(r, "bg_color", value or "#ffffff")))
-        form.addRow("Background", background)
+        form.addRow("Background:", background)
         for title, attr, on in (("Bold", "bold", region.bold),
                                 ("Italic", "italic", region.italic),
                                 ("Underline", "underline", region.underline),
@@ -2110,52 +2449,39 @@ class PropertiesPanel(QScrollArea):
         form.addRow("", disabled)
 
     def _add_geometry(self, item) -> None:
-        """Where it is, how big it is and which way it is turned — as numbers.
-
-        Dragging is fine for most things and useless for the rest: a detail
-        that has to start exactly 40 mm in, or two boxes that have to be the
-        same width, are typed rather than nudged. The numbers are in
-        millimetres because that is what the page is set up in, and they are
-        measured from the top-left corner of the paper.
-        """
+        """Bluebeam's Layout: where it is, how big and which way it is
+        turned, as numbers with the unit beside them — millimetres, measured
+        from the top-left corner of the paper."""
         from ..core.document import MM_TO_PT, PT_TO_MM
 
-        form = self._group("Position and size")
+        form = self._group("Layout")
         rect = item.local_rect().normalized()
         rows = [
-            ("X", item.pos().x(), lambda i, v: i.setPos(v, i.pos().y()), False),
-            ("Y", item.pos().y(), lambda i, v: i.setPos(i.pos().x(), v), False),
+            ("X:", item.pos().x(), lambda i, v: i.setPos(v, i.pos().y()), False),
+            ("Y:", item.pos().y(), lambda i, v: i.setPos(i.pos().x(), v), False),
         ]
         if item.RESIZABLE and rect.width() > 0 and rect.height() > 0:
             rows += [
-                ("Width", rect.width(), self._set_width, True),
-                ("Height", rect.height(), self._set_height, True),
+                ("Width:", rect.width(), self._set_width, True),
+                ("Height:", rect.height(), self._set_height, True),
             ]
         for label, value, setter, is_size in rows:
-            box = QDoubleSpinBox()
-            box.setRange(0.1 if is_size else -20000.0, 20000.0)
-            box.setDecimals(1)
-            box.setSuffix(" mm")
-            box.setSingleStep(1.0)
-            box.setValue(value * PT_TO_MM)
+            box = _spin(value * PT_TO_MM, 0.1 if is_size else -20000.0, 20000.0, 1, 1.0)
+            box.setObjectName("layout" + label.rstrip(":"))
             box.setToolTip(f"{value:.1f} pt")
             box.valueChanged.connect(
                 lambda millimetres, apply=setter:
                 self._slide(lambda i: apply(i, millimetres * MM_TO_PT),
                             "Position and size"))
-            form.addRow(label, box)
+            form.addRow(label, _row(box, QLabel("mm"), stretch_first=True))
 
         if item.ROTATABLE:
-            turn = QDoubleSpinBox()
-            turn.setRange(-360.0, 360.0)
-            turn.setDecimals(1)
-            turn.setSuffix("°")
+            turn = _spin(item.rotation(), -360.0, 360.0, 1, 1.0)
+            turn.setObjectName("layoutRotation")
             turn.setWrapping(True)
-            turn.setValue(item.rotation())
-            turn.valueChanged.connect(
-                lambda angle: self._slide(lambda i: i.set_item_rotation(angle),
-                                          "Rotation"))
-            form.addRow("Rotation", turn)
+            turn.valueChanged.connect(lambda angle: self._slide(
+                lambda i: i.set_item_rotation(angle), "Rotation"))
+            form.addRow("Rotation:", _row(turn, QLabel("°"), stretch_first=True))
 
     @staticmethod
     def _set_width(item, points: float) -> None:
@@ -2171,143 +2497,141 @@ class PropertiesPanel(QScrollArea):
 
     # -- sections ----------------------------------------------------------
     def _add_appearance(self, first: MarkupItem, controls: set[str]) -> None:
+        """Bluebeam's Appearance section, in its order and with its names:
+        Color, Fill Color (Highlight), Hatch and its Scale, Opacity, Fill
+        Opacity, Line Width, Style, a cloud's Size and Invert. CalcForge's own
+        (hatch opacity, dash spacing, corner radius) sit beside the setting
+        they belong to."""
         form = self._group("Appearance")
+        style = first.style
 
         if controls == {OPACITY}:
-            opacity = LabeledSlider(0, 100, int(first.style.opacity * 100))
-            opacity.valueChanged.connect(
-                lambda value: self._slide(
-                    lambda i: setattr(i.style, "opacity", value), "Opacity"))
-            form.addRow("Opacity", opacity)
+            opacity = _percent(style.opacity, "overallOpacity")
+            opacity.valueChanged.connect(lambda value: self._slide(
+                lambda i: setattr(i.style, "opacity", value / 100.0), "Opacity"))
+            form.addRow("Opacity:", opacity)
             return
 
         if STROKE in controls:
-            stroke = ColorButton(first.style.stroke, allow_none=True, label="Line colour")
-            stroke.colorChanged.connect(
-                lambda colour: self._apply(
-                    lambda i: setattr(i.style, "stroke", colour), "Line colour"))
-            form.addRow("Line", stroke)
+            stroke = ColorButton(style.stroke, allow_none=True, label="Color")
+            stroke.colorChanged.connect(lambda colour: self._apply(
+                lambda i: setattr(i.style, "stroke", colour), "Line colour"))
+            form.addRow("Color:", _row(stroke))
 
         if FILL in controls:
-            fill = ColorButton(first.style.fill, allow_none=True, label="Fill colour")
-            fill.colorChanged.connect(
-                lambda colour: self._apply(
-                    lambda i: setattr(i.style, "fill", colour), "Fill colour"))
-            form.addRow("Fill", fill)
+            fill = ColorButton(style.fill, allow_none=True, label="Fill Color")
+            fill.colorChanged.connect(lambda colour: self._apply(
+                lambda i: setattr(i.style, "fill", colour), "Fill colour"))
+            highlight = QCheckBox("Highlight")
+            highlight.setObjectName("fillHighlight")
+            highlight.setToolTip("The fill and hatch let what is under them show "
+                                 "through, as a highlighter does")
+            highlight.setChecked(style.blend == "multiply")
+            highlight.toggled.connect(lambda on: self._apply(
+                lambda i: setattr(i.style, "blend", "multiply" if on else "normal"),
+                "Highlight"))
+            form.addRow("Fill Color:", _row(fill, highlight))
 
-        if CLOUD in controls:
-            arc = QDoubleSpinBox()
-            arc.setObjectName("cloudArc")
-            arc.setRange(2.0, 60.0)
-            arc.setDecimals(1)
-            arc.setSuffix(" pt")
-            arc.setValue(float(getattr(first, "cloud_radius", 9.0)))
-            arc.setToolTip("Cloud arc size: how big each bump of the cloud is")
-            arc.valueChanged.connect(lambda value: self._apply(
-                lambda i: (i.prepareGeometryChange(), setattr(i, "cloud_radius", value)),
-                "Cloud arc size", coalesce=True))
-            form.addRow("Arc size", arc)
+        # A hatch over the fill: how a section reads as concrete or as steel.
+        if HATCH in controls:
+            hatch = QComboBox()
+            hatch.setObjectName("hatchPattern")
+            big_pattern_dropdown(hatch, QSize(76, 22))
+            hatch_colour = style.hatch_color or style.stroke
+            fill_hatch_combo(hatch, hatch_colour, style.hatch or "")
+            hatch.currentIndexChanged.connect(lambda _index: self._hatch_chosen(hatch, style))
+            hatch_ink = ColorButton(style.hatch_color, label="Hatch color")
+            hatch_ink.setObjectName("hatchColour")
+            hatch_ink.setToolTip("The hatch pattern's line color")
+            hatch_ink.colorChanged.connect(lambda colour: self._apply(
+                lambda i: setattr(i.style, "hatch_color", colour), "Hatch colour"))
+            form.addRow("Hatch:", _row(hatch, hatch_ink, stretch_first=True))
+            # Bluebeam's Scale: 100 is the pattern as drawn, 200 twice as big
+            from .widgets import UnboundedSpin
+            scale = UnboundedSpin()
+            scale.setObjectName("hatchScale")
+            scale.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            scale.setValue(style.hatch_scale * 100)
+            scale.setToolTip("The hatch pattern's scale: 100 as drawn, 50 half, 200 twice")
+            scale.valueChanged.connect(lambda value: self._apply(
+                lambda i: setattr(i.style, "hatch_scale", value / 100.0), "Hatch scale",
+                coalesce=True))
+            form.addRow("Scale:", scale)
 
-        # each opacity beside what it fades: the fill's here, the hatch's with
-        # the hatch, and the overall one (line, fill and hatch) last
+        if OPACITY in controls:
+            opacity = _percent(style.opacity, "overallOpacity")
+            opacity.setToolTip("The whole markup: line, fill and hatch together")
+            opacity.valueChanged.connect(lambda value: self._slide(
+                lambda i: setattr(i.style, "opacity", value / 100.0), "Opacity"))
+            form.addRow("Opacity:", opacity)
+
         if FILL_OPACITY in controls:
-            fill_opacity = LabeledSlider(0, 100, int(first.style.fill_opacity * 100))
-            fill_opacity.setObjectName("fillOpacity")
+            fill_opacity = _percent(style.fill_opacity, "fillOpacity")
             fill_opacity.setToolTip("How solid the fill is (not the line or the hatch)")
-            fill_opacity.valueChanged.connect(
-                lambda value: self._slide(
-                    lambda i: setattr(i.style, "fill_opacity", value),
-                    "Fill opacity"))
-            form.addRow("Fill opacity", fill_opacity)
+            fill_opacity.valueChanged.connect(lambda value: self._slide(
+                lambda i: setattr(i.style, "fill_opacity", value / 100.0), "Fill opacity"))
+            form.addRow("Fill Opacity:", fill_opacity)
+
+        if HATCH in controls:
+            hatch_opacity = _percent(getattr(style, "hatch_opacity", 1.0), "hatchOpacity")
+            hatch_opacity.setToolTip("How solid the hatch lines are (not the fill or the line)")
+            hatch_opacity.valueChanged.connect(lambda value: self._slide(
+                lambda i: setattr(i.style, "hatch_opacity", value / 100.0), "Hatch opacity"))
+            form.addRow("Hatch Opacity:", hatch_opacity)
 
         if WIDTH in controls:
-            width = QDoubleSpinBox()
-            width.setRange(0.0, 40.0)
-            width.setSingleStep(0.25)
-            width.setDecimals(2)
-            width.setValue(first.style.width)
-            width.setSuffix(" pt")
-            width.valueChanged.connect(
-                lambda value: self._slide(
-                    lambda i: setattr(i.style, "width", value), "Line width"))
-            form.addRow("Thickness", width)
+            width = _spin(style.width, 0.0, 40.0, 2, 0.25)
+            width.setObjectName("lineWidth")
+            width.setToolTip("Line width, in points")
+            width.valueChanged.connect(lambda value: self._slide(
+                lambda i: setattr(i.style, "width", value), "Line width"))
+            form.addRow("Line Width:", width)
 
         if DASH in controls:
             line_style = QComboBox()
             line_style.setObjectName("lineStyle")
             big_pattern_dropdown(line_style, QSize(76, 22))
             for name in DASH_ARRAYS:
-                line_style.addItem(
-                    _line_style_icon(name, first.style.stroke, first.style.width),
-                    name, name)
-            line_style.setCurrentIndex(
-                max(line_style.findData(first.style.line_style), 0))
-            line_style.currentIndexChanged.connect(
-                lambda _index: self._apply(
-                    lambda i: (setattr(i.style, "line_style", line_style.currentData()),
-                               setattr(i.style, "dash_array", ())),
-                    "Line style"))
-            form.addRow("Style", line_style)
-            spacing = QDoubleSpinBox()
+                line_style.addItem(_line_style_icon(name, style.stroke, style.width),
+                                   name.title(), name)
+            line_style.setCurrentIndex(max(line_style.findData(style.line_style), 0))
+            line_style.currentIndexChanged.connect(lambda _index: self._apply(
+                lambda i: (setattr(i.style, "line_style", line_style.currentData()),
+                           setattr(i.style, "dash_array", ())), "Line style"))
+            form.addRow("Style:", line_style)
+            spacing = _spin(style.dash_scale, 0.1, 50.0, 2, 0.25)
             spacing.setObjectName("dashSpacing")
-            spacing.setRange(0.1, 50.0)
-            spacing.setDecimals(2)
-            spacing.setSingleStep(0.25)
             spacing.setPrefix("× ")
-            spacing.setValue(first.style.dash_scale)
             spacing.setToolTip("How long the dashes, dots and gaps are — the "
-                               "line's thickness does not change them")
-            spacing.valueChanged.connect(
-                lambda value: self._slide(
-                    lambda i: setattr(i.style, "dash_scale", value), "Dash spacing"))
-            form.addRow("Spacing", spacing)
+                               "line's width does not change them")
+            spacing.valueChanged.connect(lambda value: self._slide(
+                lambda i: setattr(i.style, "dash_scale", value), "Dash spacing"))
+            form.addRow("Spacing:", spacing)
 
-        # A hatch over the fill: how a section reads as concrete or as steel,
-        # and what a Bluebeam tool set full of sections needs to come in with.
-        if HATCH in controls:
-            hatch = QComboBox()
-            hatch.setObjectName("hatchPattern")
-            big_pattern_dropdown(hatch, QSize(76, 22))
-            hatch_colour = first.style.hatch_color or first.style.stroke
-            for name in HATCH_PATTERNS:
-                hatch.addItem(_hatch_icon(name, hatch_colour), name or "plain", name)
-            hatch.setCurrentIndex(max(hatch.findData(first.style.hatch or ""), 0))
-            hatch.currentIndexChanged.connect(
-                lambda _index: self._apply(
-                    lambda i: setattr(i.style, "hatch", hatch.currentData()),
-                                          "Hatch"))
-            form.addRow("Hatch", hatch)
-            hatch_ink = ColorButton(first.style.hatch_color, label="Hatch colour")
-            hatch_ink.setObjectName("hatchColour")
-            hatch_ink.colorChanged.connect(
-                lambda colour: self._apply(
-                    lambda i: setattr(i.style, "hatch_color", colour), "Hatch colour"))
-            form.addRow("Hatch colour", hatch_ink)
-            from .widgets import UnboundedSpin
-            hatch_scale = UnboundedSpin()
-            hatch_scale.setObjectName("hatchScale")
-            hatch_scale.setSuffix(" ×")
-            hatch_scale.setValue(first.style.hatch_scale)
-            hatch_scale.valueChanged.connect(lambda value: self._apply(
-                lambda i: setattr(i.style, "hatch_scale", value), "Hatch scale"))
-            form.addRow("Hatch scale", hatch_scale)
-            hatch_opacity = LabeledSlider(
-                0, 100, int(getattr(first.style, "hatch_opacity", 1.0) * 100))
-            hatch_opacity.setObjectName("hatchOpacity")
-            hatch_opacity.setToolTip("How solid the hatch lines are (not the fill or the line)")
-            hatch_opacity.valueChanged.connect(
-                lambda value: self._slide(
-                    lambda i: setattr(i.style, "hatch_opacity", value), "Hatch opacity"))
-            form.addRow("Hatch opacity", hatch_opacity)
+        if CLOUD in controls:
+            # Bluebeam's Size (no unit: the PDF's cloud intensity) and Invert
+            size = _spin(float(getattr(first, "cloud_size", 2.0)), 0.1, 20.0, 2, 0.25)
+            size.setObjectName("cloudSize")
+            size.setToolTip("Size: how big the cloud's scallops are")
+            size.valueChanged.connect(lambda value: self._apply(
+                lambda i: (i.prepareGeometryChange(), setattr(i, "cloud_size", value)),
+                "Cloud size", coalesce=True))
+            invert = QCheckBox("Invert")
+            invert.setObjectName("cloudInvert")
+            invert.setToolTip("Turn the cloud's scallops inward")
+            invert.setChecked(bool(getattr(first, "cloud_invert", False)))
+            invert.toggled.connect(lambda on: self._apply(
+                lambda i: (i.prepareGeometryChange(), setattr(i, "cloud_invert", bool(on))),
+                "Cloud invert"))
+            form.addRow("Size:", _row(size, invert, stretch_first=True))
 
-        if OPACITY in controls:
-            opacity = LabeledSlider(0, 100, int(first.style.opacity * 100))
-            opacity.setObjectName("overallOpacity")
-            opacity.setToolTip("The whole markup: line, fill and hatch together")
-            opacity.valueChanged.connect(
-                lambda value: self._slide(
-                    lambda i: setattr(i.style, "opacity", value), "Opacity"))
-            form.addRow("Overall opacity", opacity)
+        if CORNER in controls and len(self._items) == 1:
+            radius = _spin(style.corner_radius, 0, 200, 1, 1.0, " pt")
+            radius.setObjectName("cornerRadiusPanel")
+            radius.setToolTip("How round the rectangle's corners are")
+            radius.valueChanged.connect(lambda value: self._slide(
+                lambda i: setattr(i.style, "corner_radius", value), "Corner radius"))
+            form.addRow("Corner Radius:", radius)
 
 
     def _add_breaks(self, item: PolyItem) -> None:
@@ -2332,130 +2656,129 @@ class PropertiesPanel(QScrollArea):
                 form.addRow(label, spin)
 
     def _add_text(self, first: MarkupItem, compact: bool = False) -> None:
-        form = self._group("Text")
+        """The words' settings, in Appearance as Bluebeam keeps them: the font
+        and its size, Text Color, Alignment, Font Style, Margin."""
+        form = self._group("Appearance")
+        style = first.style
         family = QFontComboBox()
-        family.setCurrentFont(QFont(QFontInfo(first.style.font()).family()))
-        family.currentFontChanged.connect(
-            lambda font: self._apply(lambda i: setattr(i.style, "font_family", font.family()),
-                                     "Font"))
-        form.addRow("Font", family)
+        family.setObjectName("fontFamily")
+        family.setCurrentFont(QFont(QFontInfo(style.font()).family()))
+        family.currentFontChanged.connect(lambda font: self._apply(
+            lambda i: setattr(i.style, "font_family", font.family()), "Font"))
+        form.addRow("Font:", family)
 
-        size = QDoubleSpinBox()
+        size = _spin(style.font_size, 3.0, 96.0, 1, 0.5)
         if isinstance(first, MeasureItem):
             size.setObjectName("measurementTextSize")
         elif isinstance(first, CountItem):
             size.setObjectName("countTextSize")
-        size.setRange(3.0, 96.0)
-        size.setSingleStep(0.5)
-        size.setValue(first.style.font_size)
-        size.setSuffix(" pt")
-        size.valueChanged.connect(
-            lambda value: self._slide(lambda i: setattr(i.style, "font_size", value), "Font size"))
-        form.addRow("Size", size)
+        else:
+            size.setObjectName("fontSize")
+        size.valueChanged.connect(lambda value: self._slide(
+            lambda i: setattr(i.style, "font_size", value), "Font size"))
+        form.addRow("Font Size:", size)
 
-        row = QHBoxLayout()
-        for label, attribute in (("B", "bold"), ("I", "italic"), ("U", "underline")):
+        colour = ColorButton(style.text_color, label="Text Color")
+        colour.colorChanged.connect(lambda value: self._apply(
+            lambda i: setattr(i.style, "text_color", value), "Text colour"))
+        form.addRow("Text Color:", _row(colour))
+
+        weights = []
+        for label, attribute, tip in (("B", "bold", "Bold"), ("I", "italic", "Italic"),
+                                      ("U", "underline", "Underline")):
             button = QToolButton()
             button.setText(label)
+            button.setToolTip(tip)
+            button.setObjectName(f"fontStyle_{attribute}")
             button.setCheckable(True)
-            button.setChecked(getattr(first.style, attribute))
-            button.toggled.connect(
-                lambda on, a=attribute: self._apply(lambda i: setattr(i.style, a, on), "Font style"))
-            row.addWidget(button)
-        row.addStretch(1)
-        holder = QWidget()
-        holder.setLayout(row)
-        form.addRow("Weight", holder)
-
-        colour = ColorButton(first.style.text_color, label="Text colour")
-        colour.colorChanged.connect(
-            lambda value: self._apply(lambda i: setattr(i.style, "text_color", value),
-                                      "Text colour"))
-        form.addRow("Colour", colour)
+            button.setChecked(getattr(style, attribute))
+            font = button.font()
+            font.setBold(attribute == "bold")
+            font.setItalic(attribute == "italic")
+            font.setUnderline(attribute == "underline")
+            button.setFont(font)
+            button.toggled.connect(lambda on, a=attribute: self._apply(
+                lambda i: setattr(i.style, a, on), "Font style"))
+            weights.append(button)
+        form.addRow("Font Style:", _row(*weights))
 
         if compact:
             return
 
-        align = QComboBox()
-        align.addItems(["left", "center", "right", "justify"])
-        align.setCurrentText(first.style.align)
-        align.currentTextChanged.connect(
-            lambda value: self._apply(lambda i: setattr(i.style, "align", value), "Alignment"))
-        form.addRow("Align", align)
-
-        valign = QComboBox()
-        valign.addItems(["top", "middle", "bottom"])
-        valign.setCurrentText(first.style.valign)
-        valign.currentTextChanged.connect(
-            lambda value: self._apply(lambda i: setattr(i.style, "valign", value), "Alignment"))
-        form.addRow("Vertical", valign)
-        padding = QDoubleSpinBox()
-        padding.setRange(0, 100)
-        padding.setSuffix(" pt")
-        padding.setValue(first.style.padding)
-        padding.valueChanged.connect(lambda value: self._slide(
+        # Bluebeam's Alignment: three across, then three down
+        across = QComboBox()
+        across.setObjectName("textAlign")
+        for name in ("left", "center", "right", "justify"):
+            across.addItem(name.title(), name)
+        across.setCurrentIndex(max(across.findData(style.align), 0))
+        across.currentIndexChanged.connect(lambda _i: self._apply(
+            lambda i: setattr(i.style, "align", across.currentData()), "Alignment"))
+        down = QComboBox()
+        down.setObjectName("textVAlign")
+        for name in ("top", "middle", "bottom"):
+            down.addItem(name.title(), name)
+        down.setCurrentIndex(max(down.findData(style.valign), 0))
+        down.currentIndexChanged.connect(lambda _i: self._apply(
+            lambda i: setattr(i.style, "valign", down.currentData()), "Alignment"))
+        form.addRow("Alignment:", _row(across, down))
+        margin = _spin(style.padding, 0, 100, 2, 0.5)
+        margin.setObjectName("textMargin")
+        margin.setToolTip("The space between the box's edge and its words, in points")
+        margin.valueChanged.connect(lambda value: self._slide(
             lambda i: setattr(i.style, "padding", value), "Text padding"))
-        form.addRow("Padding", padding)
+        form.addRow("Margin:", margin)
 
     def _add_arrows(self, first: MarkupItem) -> None:
-        """What the ends of a line carry.
-
-        A callout's leader has one end that means anything — the one pointing
-        at the thing — so it is offered that and nothing else. Asking which
-        arrow head goes on the end joined to the box is a question with no
-        useful answer.
-        """
+        """What the ends of a line carry: Bluebeam's Start and End, in
+        Appearance. A callout's leader has one end that means anything — the
+        one pointing at the thing — so it is offered End and nothing else;
+        its box can be drawn as a cloud (Bluebeam's Shape)."""
+        form = self._group("Appearance")
         if isinstance(first, CalloutItem):
-            form = self._group("Leader")
             head = arrow_combo()
-            head.setCurrentText(first.style.arrow_end)
-            head.currentTextChanged.connect(
-                lambda value: self._apply(
-                    lambda i: setattr(i.style, "arrow_end", value), "Arrow head"))
-            form.addRow("Arrow head", head)
+            head.setObjectName("arrowEnd")
+            set_arrow(head, first.style.arrow_end)
+            head.currentIndexChanged.connect(lambda _i: self._apply(
+                lambda i: setattr(i.style, "arrow_end", head.currentData()), "Arrow head"))
+            form.addRow("End:", head)
             self._add_arrow_size(form, first)
             shape = QComboBox()
-            shape.addItems(["Box", "Cloud"])
+            shape.setObjectName("calloutShape")
+            shape.addItems(["Rectangle", "Cloud"])
             shape.setCurrentIndex(1 if first.shape_kind == "cloud" else 0)
-            shape.currentIndexChanged.connect(
-                lambda index: self._apply(
-                    lambda i: setattr(i, "shape_kind", "cloud" if index else "box"),
-                    "Callout shape"))
-            form.addRow("Drawn as", shape)
+            shape.currentIndexChanged.connect(lambda index: self._apply(
+                lambda i: setattr(i, "shape_kind", "cloud" if index else "box"),
+                "Callout shape"))
+            form.addRow("Shape:", shape)
             if first.leaders and not first.clouds_a_region():
-                stand_off = QDoubleSpinBox()
+                leader = self._group("Leader")
+                stand_off = _spin(first.leaders[0].reach, first.LEAST_REACH, 400.0, 0, 1.0, " pt")
                 stand_off.setObjectName("leaderStandOff")
-                stand_off.setRange(first.LEAST_REACH, 400.0)
-                stand_off.setDecimals(0)
-                stand_off.setSuffix(" pt")
-                stand_off.setValue(first.leaders[0].reach)
                 stand_off.setToolTip(
                     "How far the hinge stands off the box before the line "
                     "turns towards\nwhat it points at. Dragging the hinge "
                     "does the same thing.")
-                stand_off.valueChanged.connect(
-                    lambda value: self._slide(
-                        lambda i: setattr(i, "elbow_reach", value),
-                        "Leader stand-off"))
-                form.addRow("Hinge", stand_off)
+                stand_off.valueChanged.connect(lambda value: self._slide(
+                    lambda i: setattr(i, "elbow_reach", value), "Leader stand-off"))
+                leader.addRow("Hinge:", stand_off)
                 count = QLabel(f"{len(first.leaders)}"
-                               + (" arrow" if len(first.leaders) == 1
-                                  else " arrows"))
+                               + (" arrow" if len(first.leaders) == 1 else " arrows"))
                 count.setToolTip("Right-click the call-out to add another, or "
                                  "to take one away")
-                form.addRow("Leaders", count)
+                leader.addRow("Leaders:", count)
             return
-        form = self._group("Ends")
         start = arrow_combo()
-        start.setCurrentText(first.style.arrow_start)
-        start.currentTextChanged.connect(
-            lambda value: self._apply(lambda i: setattr(i.style, "arrow_start", value), "Arrow"))
-        form.addRow("Start", start)
+        start.setObjectName("arrowStart")
+        set_arrow(start, first.style.arrow_start)
+        start.currentIndexChanged.connect(lambda _i: self._apply(
+            lambda i: setattr(i.style, "arrow_start", start.currentData()), "Arrow"))
+        form.addRow("Start:", start)
         end = arrow_combo()
-        end.setCurrentText(first.style.arrow_end)
-        end.currentTextChanged.connect(
-            lambda value: self._apply(lambda i: setattr(i.style, "arrow_end", value), "Arrow"))
-        form.addRow("End", end)
+        end.setObjectName("arrowEnd")
+        set_arrow(end, first.style.arrow_end)
+        end.currentIndexChanged.connect(lambda _i: self._apply(
+            lambda i: setattr(i.style, "arrow_end", end.currentData()), "Arrow"))
+        form.addRow("End:", end)
         self._add_arrow_size(form, first)
 
     def _add_arrow_size(self, form, first: MarkupItem) -> None:
@@ -2470,7 +2793,7 @@ class PropertiesPanel(QScrollArea):
             lambda value: self._slide(
                 lambda item: setattr(item.style, "arrow_size", value),
                 "Arrowhead size"))
-        form.addRow("Head size", size)
+        form.addRow("End Size:", size)
 
     def _add_size(self, item) -> None:
         """What a rectangle or an ellipse measures, and whether it says so.
@@ -2486,7 +2809,7 @@ class PropertiesPanel(QScrollArea):
         font = value.font()
         font.setBold(True)
         value.setFont(font)
-        form.addRow("It is", value)
+        form.addRow("Measures:", value)
 
         exact = QPushButton("Exact size…")
         exact.setToolTip("Set the scaled width and height or diameters")
@@ -2509,7 +2832,7 @@ class PropertiesPanel(QScrollArea):
         heading.setPlaceholderText("Contents")
         heading.textEdited.connect(
             lambda text: self._apply(lambda i: setattr(i, "title", text), "Heading"))
-        form.addRow("Heading", heading)
+        form.addRow("Heading:", heading)
 
         for label, attribute in (("Page numbers", "show_page_numbers"),
                                  ("Leader dots", "leader_dots")):
@@ -2526,11 +2849,11 @@ class PropertiesPanel(QScrollArea):
         text_size.setSuffix(" pt")
         text_size.valueChanged.connect(lambda value: self._slide(
             lambda i: setattr(i.style, "font_size", value), "Text size"))
-        form.addRow("Text size", text_size)
+        form.addRow("Text Size:", text_size)
         text_colour = ColorButton(item.style.text_color, label="Text colour")
         text_colour.colorChanged.connect(lambda value: self._apply(
             lambda i: setattr(i.style, "text_color", value), "Text colour"))
-        form.addRow("Text colour", text_colour)
+        form.addRow("Text Color:", text_colour)
 
         height = QDoubleSpinBox()
         height.setRange(8.0, 60.0)
@@ -2539,7 +2862,7 @@ class PropertiesPanel(QScrollArea):
         height.valueChanged.connect(
             lambda value: self._slide(
                 lambda i: setattr(i, "row_height", value), "Contents"))
-        form.addRow("Line spacing", height)
+        form.addRow("Line Spacing:", height)
 
         note = QLabel(f"{len(item.entries())} bookmark(s) — add them from the "
                       "bookmarks panel")
@@ -2581,46 +2904,24 @@ class PropertiesPanel(QScrollArea):
         colours.clicked.connect(lambda: self.window.change_colors(item))
         form.addRow("", colours)
 
-    def _add_cloud(self, first) -> None:
-        """How big a cloud's scallops are — a setting of its own, not the line's."""
-        form = self._group("Cloud")
-        radius = QDoubleSpinBox()
-        radius.setObjectName("cloudSize")
-        radius.setRange(1.5, 200.0)
-        radius.setDecimals(1)
-        radius.setValue(float(getattr(first, "cloud_radius", 9.0)))
-        radius.setSuffix(" pt")
-        radius.setToolTip("How big each scallop of the cloud is")
-
-        def resize(item, value):
-            if hasattr(item, "cloud_radius"):
-                item.prepareGeometryChange()
-                item.cloud_radius = value
-        radius.valueChanged.connect(
-            lambda value: self._slide(lambda i: resize(i, value), "Cloud size"))
-        form.addRow("Cloud size", radius)
-
-
-
-
     def _add_measure(self, item: MeasureItem) -> None:
         form = self._group("Measurement")
         value = QLabel(item.value_text or "—")
         font = value.font()
         font.setBold(True)
         value.setFont(font)
-        form.addRow("Value", value)
+        form.addRow("Value:", value)
 
         subject = QLineEdit(item.subject)
         subject.setToolTip("Measurements sharing a subject are totalled in the markups list")
         subject.textEdited.connect(
             lambda text: self._apply(lambda i: setattr(i, "subject", text), "Subject"))
-        form.addRow("Counts as", subject)
+        form.addRow("Counts as:", subject)
 
         if item.kind in ("area", "volume", "perimeter"):
             unit = UnitCombo(self.window.current_page().scale.area_unit)
             unit.currentTextChanged.connect(self.window.set_area_unit)
-            form.addRow("Area unit", unit)
+            form.addRow("Area Unit:", unit)
         if item.kind == "volume":
             depth = QLineEdit(item.depth_text)
             depth.setPlaceholderText("e.g. 150 mm")
@@ -2628,7 +2929,7 @@ class PropertiesPanel(QScrollArea):
                 lambda text: self._apply(
                     lambda i: (setattr(i, "depth_text", text),
                                i.refresh(page=self.window.current_page())), "Depth"))
-            form.addRow("Depth", depth)
+            form.addRow("Depth:", depth)
 
         if len(self._items) == 1 and item.kind != "calibrate":
             variable = QLineEdit(item.variable)
@@ -2639,7 +2940,7 @@ class PropertiesPanel(QScrollArea):
                                 "it as it changes")
             variable.editingFinished.connect(
                 lambda: self.window.set_measure_variable(item, variable.text()))
-            form.addRow("Variable", variable)
+            form.addRow("Variable:", variable)
 
         words = QLineEdit(item.custom_label)
         words.setPlaceholderText(item.measured_text or "the measured value")
@@ -2650,7 +2951,7 @@ class PropertiesPanel(QScrollArea):
                 lambda i: (setattr(i, "custom_label", words.text().strip()),
                            i.refresh(page=self.window.current_page())),
                 "Measurement text"))
-        form.addRow("Says", words)
+        form.addRow("Says:", words)
 
         inline = QCheckBox("Inline text")
         inline.setToolTip("Keep the measurement text in line with its line")
@@ -2678,20 +2979,20 @@ class PropertiesPanel(QScrollArea):
         subject = QLineEdit(item.subject)
         subject.textEdited.connect(
             lambda text: self._apply(lambda i: setattr(i, "subject", text), "Count subject"))
-        form.addRow("Subject", subject)
+        form.addRow("Subject:", subject)
         symbol = QComboBox()
         symbol.addItems(list(CountItem.SYMBOLS))
         symbol.setCurrentText(item.symbol)
         symbol.currentTextChanged.connect(
             lambda value: self._apply(lambda i: setattr(i, "symbol", value), "Count symbol"))
-        form.addRow("Symbol", symbol)
+        form.addRow("Symbol:", symbol)
         number = QSpinBox()
         number.setObjectName("countNumber")
         number.setRange(1, 999999)
         number.setValue(item.index)
         number.valueChanged.connect(
             lambda value: self._apply(lambda i: setattr(i, "index", value), "Count number"))
-        form.addRow("Number", number)
+        form.addRow("Number:", number)
         show = QCheckBox("Show number")
         show.setChecked(item.show_index)
         show.toggled.connect(
@@ -2705,12 +3006,12 @@ class PropertiesPanel(QScrollArea):
         preset.addItems(list(STAMP_PRESETS))
         preset.setCurrentText(item.text)
         preset.currentTextChanged.connect(self._set_stamp_text)
-        form.addRow("Text", preset)
+        form.addRow("Text:", preset)
         subtext = QLineEdit(item.subtext)
         subtext.setPlaceholderText("Name, date, revision…")
         subtext.textEdited.connect(
             lambda text: self._apply(lambda i: setattr(i, "subtext", text), "Stamp"))
-        form.addRow("Sub-text", subtext)
+        form.addRow("Sub-text:", subtext)
         radius = QDoubleSpinBox()
         radius.setObjectName("stampCornerRadius")
         radius.setRange(0, 100)
@@ -2720,7 +3021,7 @@ class PropertiesPanel(QScrollArea):
         radius.valueChanged.connect(lambda value: self._slide(
             lambda selected: setattr(selected.style, "corner_radius", value),
             "Stamp corners"))
-        form.addRow("Corners", radius)
+        form.addRow("Corners:", radius)
 
     def _set_stamp_text(self, text: str) -> None:
         colour = STAMP_PRESETS.get(text.upper())
@@ -2734,31 +3035,38 @@ class PropertiesPanel(QScrollArea):
         self._apply(setter, "Stamp text")
 
     def _add_defaults(self, first: MarkupItem) -> None:
-        """Keep this one's look for the next one of its kind, or add it to a set."""
+        """Bluebeam's Options: Add to Tool Chest (a list of the tool sets)
+        and Set as Default — and Forget Default, to go back."""
         from . import toolsets
 
-        form = self._group("Defaults")
-        note = QLabel("Set how it is now as the way new ones are drawn, or keep "
-                      "the whole thing in a tool set to use again.")
-        note.setWordWrap(True)
-        note.setStyleSheet("color:#6b7280;")
-        form.addRow(note)
+        form = self._group("Options")
+        add = QToolButton()
+        add.setObjectName("addToToolChest")
+        add.setText("Add to Tool Chest")
+        add.setToolTip("Keep this markup, contents and all, in a tool set to use again")
+        add.setPopupMode(QToolButton.MenuButtonPopup)
+        add.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        menu = QMenu(add)
+        for group in toolsets.load_toolsets():
+            menu.addAction(group.name, lambda name=group.name: self.window.add_to_toolset(
+                first, into=name, ask=False))
+        if menu.isEmpty():
+            menu.addAction("Choose a Tool Set…", lambda: self.window.add_to_toolset(first))
+        add.setMenu(menu)
+        add.clicked.connect(lambda: self.window.add_to_toolset(first))
+        form.addRow(add)
 
-        default = QPushButton("Set default")
+        default = QPushButton("Set as Default")
+        default.setObjectName("setAsDefault")
         default.setToolTip("New markups of this kind will be drawn like this one")
         default.clicked.connect(lambda: self.window.set_as_default(first))
-        form.addRow("", default)
+        form.addRow(default)
 
         if toolsets.default_key(first) in toolsets.load_defaults():
-            forget = QPushButton("Forget default")
+            forget = QPushButton("Forget Default")
             forget.setToolTip("Restore the original defaults for this markup kind")
             forget.clicked.connect(lambda: self._forget_default(first))
-            form.addRow("", forget)
-
-        add = QPushButton("Add tool…")
-        add.setToolTip("Keep this markup, contents and all, to put down again")
-        add.clicked.connect(lambda: self.window.add_to_toolset(first))
-        form.addRow("", add)
+            form.addRow(forget)
 
     def _add_block(self, first) -> None:
         """A calculation block: what it holds, and whether it keeps its names."""
@@ -2769,7 +3077,7 @@ class PropertiesPanel(QScrollArea):
                       + (f", {len(members) - len(equations)} text" if len(members) > len(equations)
                          else ""))
         held.setObjectName("blockHolds")
-        form.addRow("Holds", held)
+        form.addRow("Holds:", held)
         contained = QCheckBox("Self-contained")
         contained.setObjectName("blockSelfContained")
         contained.setToolTip("What the equations in the block define stays inside it; "
@@ -2799,11 +3107,11 @@ class PropertiesPanel(QScrollArea):
                 if not self.window.view.tables.rename_to(first, text):
                     name.setText(first.name)
         name.editingFinished.connect(renamed)
-        form.addRow("Name", name)
+        form.addRow("Name:", name)
         rows, cols = first.size
         size = QLabel(f"{rows} rows × {cols} columns")
         size.setObjectName("tableSize")
-        form.addRow("Size", size)
+        form.addRow("Size:", size)
         open_button = QPushButton("Edit cells")
         open_button.setToolTip("Open the table for its cells (or double-click it)")
         open_button.clicked.connect(lambda: self.window.view.tables.open(first))
@@ -2814,8 +3122,8 @@ class PropertiesPanel(QScrollArea):
         form = self._group("Chart")
         kind = {"scatter": "XY scatter", "line": "Line", "column": "Column"}.get(
             first.spec.get("kind"), "")
-        form.addRow("Type", QLabel(kind))
-        form.addRow("Series", QLabel(str(len(first.spec.get("series", [])))))
+        form.addRow("Type:", QLabel(kind))
+        form.addRow("Series:", QLabel(str(len(first.spec.get("series", [])))))
         edit = QPushButton("Edit chart…")
         edit.setToolTip("Type, titles, axes, series, error bars and trendlines (or double-click it)")
         edit.setEnabled(not first.locked)
@@ -2831,34 +3139,50 @@ class PropertiesPanel(QScrollArea):
         self.show_items(self._items)
 
     def _add_metadata(self, first: MarkupItem) -> None:
-        form = self._group("Details")
-        label = QLineEdit(first.label)
-        label.textEdited.connect(
-            lambda text: self._apply(lambda i: setattr(i, "label", text), "Label"))
-        form.addRow("Label", label)
+        """Bluebeam's General: Subject, Author, Label, the comments, when it
+        was last changed, Lock — and Print, whether it goes on paper."""
+        form = self._group("General")
+        subject = QLineEdit(first.subject)
+        subject.setObjectName("markupSubject")
+        subject.textEdited.connect(lambda text: self._apply(
+            lambda i: setattr(i, "subject", text), "Subject"))
+        form.addRow("Subject:", subject)
 
         author = QLineEdit(first.author)
-        author.textEdited.connect(
-            lambda text: self._apply(lambda i: setattr(i, "author", text), "Author"))
-        form.addRow("Author", author)
+        author.setObjectName("markupAuthor")
+        author.textEdited.connect(lambda text: self._apply(
+            lambda i: setattr(i, "author", text), "Author"))
+        form.addRow("Author:", author)
+
+        label = QLineEdit(first.label)
+        label.setObjectName("markupLabel")
+        label.textEdited.connect(lambda text: self._apply(
+            lambda i: setattr(i, "label", text), "Label"))
+        form.addRow("Label:", label)
 
         comment = QPlainTextEdit(first.comment)
+        comment.setObjectName("markupComments")
+        comment.setPlaceholderText("Comments")
         comment.setFixedHeight(58)
-        comment.textChanged.connect(
-            lambda: self._apply(lambda i: setattr(i, "comment", comment.toPlainText()), "Comment"))
-        form.addRow("Comment", comment)
+        comment.textChanged.connect(lambda: self._apply(
+            lambda i: setattr(i, "comment", comment.toPlainText()), "Comment"))
+        form.addRow(comment)
 
-        locked = QCheckBox("Locked")
+        if len(self._items) == 1 and getattr(first, "modified", ""):
+            form.addRow("Modified:", QLabel(str(first.modified).replace("T", " ")))
+
+        locked = QCheckBox("Lock")
+        locked.setObjectName("markupLock")
         locked.setChecked(first.locked)
-        locked.toggled.connect(
-            lambda on: self._apply(lambda i: i.set_locked(on), "Lock"))
-        form.addRow("", locked)
-
+        locked.toggled.connect(lambda on: self._apply(lambda i: i.set_locked(on), "Lock"))
+        boxes = [locked]
         if not getattr(first, "IS_CALC", False):
             # an equation always prints (decision 17)
             printable = QCheckBox("Print")
+            printable.setObjectName("markupPrint")
             printable.setToolTip("Include this markup when the page is printed")
             printable.setChecked(first.printable)
-            printable.toggled.connect(
-                lambda on: self._apply(lambda i: setattr(i, "printable", on), "Print flag"))
-            form.addRow("", printable)
+            printable.toggled.connect(lambda on: self._apply(
+                lambda i: setattr(i, "printable", on), "Print flag"))
+            boxes.append(printable)
+        form.addRow(_row(*boxes))

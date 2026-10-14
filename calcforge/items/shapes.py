@@ -10,8 +10,9 @@ from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPolygon
 from PySide6.QtGui import QFontMetricsF
 
 from ..core.units import Unit, format_quantity, parse_unit
-from .base import (HANDLE_SCREEN_PX, HANDLE_SIZE, MarkupItem, Style,
-                   arrow_path, cloud_path, register_item, round_the_joins)
+from .base import (CLOUD_SIZE, HANDLE_SIZE, SELECT_BLUE, MarkupItem, Style,
+                   handle_zoom, paint_control_point, paint_rotate_handle,
+                   cloud_path, draw_head, register_item, round_the_joins)
 
 # Page refreshes construct two lengths per rectangle; the unit is built once.
 _MILLIMETRES = Unit((("mm", 1),))
@@ -51,12 +52,13 @@ class RectItem(MarkupItem):
     TYPE = "rect"
     NAME = "Rectangle"
     KINDS = ("rect", "ellipse", "cloud", "highlight", "redact", "marquee")
+    SCALE_BOX = True
 
     def __init__(self, kind: str = "rect", rect: Optional[QRectF] = None):
         super().__init__()
         self.kind = kind
         self._rect = QRectF(rect) if rect else QRectF(0, 0, 120, 70)
-        self.cloud_radius = 9.0
+        self.cloud_size = CLOUD_SIZE
         # A rectangle reports its real size when the page carries a scale, so it
         # can be used to set out an area rather than only to draw a box.
         # Off: a rectangle drawn on a drawing is a rectangle, not a dimension.
@@ -250,7 +252,7 @@ class RectItem(MarkupItem):
         elif self.kind == "cloud":
             path = cloud_path(QPolygonF([rect.topLeft(), rect.topRight(),
                                          rect.bottomRight(), rect.bottomLeft()]),
-                              self.cloud_radius)
+                              self.cloud_radius, inverted=self.cloud_invert)
             path.closeSubpath()
         elif self.style.corner_radius > 0:
             path.addRoundedRect(rect, self.style.corner_radius, self.style.corner_radius)
@@ -298,7 +300,7 @@ class RectItem(MarkupItem):
         elif self.kind == "cloud":
             polygon = QPolygonF([rect.topLeft(), rect.topRight(),
                                  rect.bottomRight(), rect.bottomLeft()])
-            path = cloud_path(polygon, self.cloud_radius)
+            path = cloud_path(polygon, self.cloud_radius, inverted=self.cloud_invert)
             if self.style.paints_inside():
                 filled = QPainterPath(path)
                 filled.closeSubpath()
@@ -368,8 +370,8 @@ class RectItem(MarkupItem):
         data = self.base_dict()
         data.update({"kind": self.kind, "rect": [self._rect.x(), self._rect.y(),
                                                  self._rect.width(), self._rect.height()],
-                     "cloud_radius": self.cloud_radius,
                      "show_size": self.show_size})
+        self.cloud_to_dict(data)
         if self.cutouts:
             data["cutouts"] = self.cutouts_as_data()
         return data
@@ -378,10 +380,10 @@ class RectItem(MarkupItem):
         self.kind = data.get("kind", "rect")
         values = data.get("rect", [0, 0, 100, 60])
         self._rect = QRectF(*values)
-        self.cloud_radius = float(data.get("cloud_radius", 9.0))
         self.show_size = bool(data.get("show_size", False))
         self.cutouts_from_data(data)
         self.load_base(data)
+        self.cloud_from_dict(data)
 
 
 # ---------------------------------------------------------------------------
@@ -427,7 +429,7 @@ class PolyItem(MarkupItem):
         super().__init__()
         self.kind = kind
         self.points: list[QPointF] = [QPointF(p) for p in (points or [])]
-        self.cloud_radius = 9.0
+        self.cloud_size = CLOUD_SIZE
         self.smooth = kind in ("ink", "highlighter")
         # A shape does not have to be all straight lines. Each corner can be
         # rounded off, each segment can be bowed into an arc, and any segment
@@ -472,6 +474,12 @@ class PolyItem(MarkupItem):
     def closed(self) -> bool:
         return self.kind in ("polygon", "cloud")
 
+    def has_scale_box(self) -> bool:
+        """Polygons, polylines and clouds have Bluebeam's scale box; a
+        line, an arrow or an arc has its two ends and nothing else."""
+        return (self.kind in ("polyline", "polygon", "cloud") and len(self.points) > 2
+                and not self.locked)
+
     # -- geometry ----------------------------------------------------------
     def local_rect(self) -> QRectF:
         if not self.points:
@@ -510,13 +518,15 @@ class PolyItem(MarkupItem):
         kind = "cloud" if box.kind == "cloud" else "polygon"
         shape = cls(kind, box.corner_points())
         shape.style = box.style.copy()
-        shape.cloud_radius = getattr(box, "cloud_radius", 9.0)
+        shape.cloud_size = box.cloud_size
+        shape.cloud_invert = box.cloud_invert
         shape.from_drawing = box.from_drawing
         shape.author = box.author
         shape.label = box.label
         shape.locked = box.locked
         shape.printable = box.printable
         shape.setPos(box.pos())
+        shape.setTransformOriginPoint(box.transformOriginPoint())   # turned about the same point
         shape.setRotation(box.rotation())
         shape.setZValue(box.zValue())
         return shape
@@ -627,7 +637,7 @@ class PolyItem(MarkupItem):
         full of somebody's clouds (Calcs.pdf, 2026-10-01)."""
         # the points themselves: compared by value, in C++, one by one (nothing
         # moves a point in place; a moved point is a new one)
-        return (self.kind, tuple(self.points), self.cloud_radius,
+        return (self.kind, tuple(self.points), self.cloud_radius, self.cloud_invert,
                 self.smooth, self.closed, repr(sorted(self.rounded.items())),
                 repr(sorted(self.curved.items())), repr(sorted(self.broken.items())),
                 repr(sorted(self.bezier.items())), self.style.width)
@@ -650,7 +660,8 @@ class PolyItem(MarkupItem):
                 path.addEllipse(self.points[0], 0.6, 0.6)
             return path
         if self.kind == "cloud":
-            return cloud_path(QPolygonF(self.points), self.cloud_radius, closed=True)
+            return cloud_path(QPolygonF(self.points), self.cloud_radius, closed=True,
+                              inverted=self.cloud_invert)
         if self.kind == "arc" and len(self.points) >= 2:
             return _arc_path(self.points)
         if self.smooth:
@@ -768,7 +779,7 @@ class PolyItem(MarkupItem):
     def boundingRect(self) -> QRectF:
         margin = self.style.width + HANDLE_SIZE + 12
         rect = self.local_rect().united(self.build_path().boundingRect())
-        return rect.adjusted(-margin, -margin, margin, margin)
+        return self._with_scale_box(rect.adjusted(-margin, -margin, margin, margin))
 
     # -- handles -----------------------------------------------------------
     def handle_points(self) -> dict[str, QPointF]:
@@ -801,7 +812,8 @@ class PolyItem(MarkupItem):
                     handles[f"z{segment}"] = centre + QPointF(-direction.y(), direction.x()) * (height / 2)
             if self.kind in ("polyline", "polygon", "cloud") and len(self.points) > 2:
                 rect = self.local_rect()
-                handles["rot"] = QPointF(rect.center().x(), rect.top() - 22)
+                top = self.scale_box().top() if self.has_scale_box() else rect.top()
+                handles["rot"] = QPointF(rect.center().x(), top - 22)
             return handles
         return super().handle_points()
 
@@ -1018,12 +1030,12 @@ class PolyItem(MarkupItem):
             tip = self.points[-1]
             previous = self.points[-2]
             angle = math.atan2(tip.y() - previous.y(), tip.x() - previous.x())
-            painter.drawPath(arrow_path(tip, angle, size, self.style.arrow_end))
+            draw_head(painter, tip, angle, size, self.style.arrow_end)
         if self.style.arrow_start != "none":
             tip = self.points[0]
             following = self.points[1]
             angle = math.atan2(tip.y() - following.y(), tip.x() - following.x())
-            painter.drawPath(arrow_path(tip, angle, size, self.style.arrow_start))
+            draw_head(painter, tip, angle, size, self.style.arrow_start)
 
     def paint_handles(self, painter: QPainter) -> None:
         # The same three guards the base draws under: not selected, handles
@@ -1039,24 +1051,19 @@ class PolyItem(MarkupItem):
             return
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing, True)
-        import math as _math
-        shape = painter.transform()
-        zoom = max(_math.hypot(shape.m11(), shape.m12()), 0.01)
-        handle = HANDLE_SCREEN_PX / zoom
-        half = handle / 2
-        painter.setPen(QPen(QColor(20, 90, 200), 0.6 / zoom))
-        painter.setBrush(QBrush(QColor(255, 255, 255)))
+        zoom = handle_zoom(painter)
+        self.paint_scale_box(painter, zoom)
+        rect = self.local_rect()
         for key, point in self.handle_points().items():
             if key == "rot":
-                painter.setBrush(QBrush(QColor(120, 200, 120)))
-                painter.drawEllipse(point, half, half)
-                painter.setBrush(QBrush(QColor(255, 255, 255)))
+                top = self.scale_box().top() if self.has_scale_box() else rect.top()
+                paint_rotate_handle(painter, point, QPointF(rect.center().x(), top), zoom)
             elif key.startswith("b") and key[1:].isdigit():
-                painter.setBrush(QBrush(QColor("#1971c2")))
-                painter.drawEllipse(point, 3 / zoom, 3 / zoom)
-                painter.setBrush(QBrush(QColor(255, 255, 255)))
+                paint_control_point(painter, point, zoom, colour=SELECT_BLUE)
             elif key[:1] in ("w", "z") and key[1:].isdigit():
                 extent = 3.5 / zoom
+                painter.setPen(QPen(SELECT_BLUE.darker(130), 0.6 / zoom))
+                painter.setBrush(QBrush(QColor(255, 255, 255)))
                 painter.drawRect(QRectF(point.x() - extent, point.y() - extent,
                                         2 * extent, 2 * extent))
                 if key[0] == "w":
@@ -1066,8 +1073,8 @@ class PolyItem(MarkupItem):
                     painter.drawLine(QPointF(point.x(), point.y() - extent * 0.6),
                                      QPointF(point.x(), point.y() + extent * 0.6))
             else:
-                painter.drawRect(QRectF(point.x() - half, point.y() - half,
-                                        handle, handle))
+                # a vertex, a radius, a bow: Bluebeam's gold control points
+                paint_control_point(painter, point, zoom)
         painter.restore()
 
     # -- serialisation -----------------------------------------------------
@@ -1076,9 +1083,9 @@ class PolyItem(MarkupItem):
         data.update({
             "kind": self.kind,
             "points": [[round(p.x(), 3), round(p.y(), 3)] for p in self.points],
-            "cloud_radius": self.cloud_radius,
             "smooth": self.smooth,
         })
+        self.cloud_to_dict(data)
         if self.rounded:
             data["rounded"] = {str(k): round(v, 3) for k, v in self.rounded.items()}
         if self.curved:
@@ -1098,7 +1105,6 @@ class PolyItem(MarkupItem):
     def deserialize(self, data: dict) -> None:
         self.kind = data.get("kind", "line")
         self.points = [QPointF(x, y) for x, y in data.get("points", [])]
-        self.cloud_radius = float(data.get("cloud_radius", 9.0))
         self.smooth = bool(data.get("smooth", self.kind in ("ink", "highlighter")))
         self.rounded = {int(k): float(v)
                         for k, v in (data.get("rounded") or {}).items()}
@@ -1117,6 +1123,7 @@ class PolyItem(MarkupItem):
                                          max(0.05, min(0.95, float(position))))
         self.cutouts_from_data(data)
         self.load_base(data)
+        self.cloud_from_dict(data)
 
 
 def _distance(a: QPointF, b: QPointF) -> float:

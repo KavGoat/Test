@@ -366,6 +366,33 @@ def test_a_three_stroke_ink_note_is_drawn_once(calcs):
     assert three[0] in frame.markups_drawn_alone()
 
 
+def test_a_three_stroke_ink_note_prints_as_its_file_draws_it(calcs):
+    """Printed, an untouched ink note is the file's own curves, as on screen —
+    not the strokes' straight-line reading of them (rotated_ink.pdf, 2026-10-14)."""
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QImage, QPainter
+    window, path = calcs
+    frame = window.document.pages[0].frame
+    strokes = [i for i in frame.markups() if getattr(i, "kind", "") == "ink"
+               and i.style.width < 10]
+    number = strokes[0].split_from
+    assert number not in frame.left_to_us(for_print=True, drawing=True)
+    assert number in frame.left_to_us(for_print=True), "a save still writes the strokes"
+
+    def printed():
+        image = QImage(200, 140, QImage.Format_RGB32)
+        painter = QPainter(image)
+        frame.render_page(painter, QRectF(image.rect()), for_print=True)
+        painter.end()
+        return image
+    printed()
+    assert number in frame.file_drew_split          # the page drew it; the strokes kept out
+    strokes[0].setPos(strokes[0].pos() + QPointF(5, 0))
+    assert number in frame.left_to_us(for_print=True, drawing=True)
+    printed()
+    assert number not in frame.file_drew_split      # taken over: drawn by the strokes
+
+
 def test_a_three_stroke_ink_note_survives_save_and_reopen(calcs, tmp_path):
     from tests.test_calc_saving import save_to
     window, path = calcs

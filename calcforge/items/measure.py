@@ -9,7 +9,7 @@ from PySide6.QtGui import (QBrush, QColor, QFontMetricsF, QPainter, QPainterPath
                            QPen, QPolygonF)
 
 from ..core.units import Q_, convert, format_quantity, parse_unit
-from .base import HANDLE_SIZE, MarkupItem, Style, arrow_path, register_item
+from .base import HANDLE_SIZE, MarkupItem, Style, draw_head, register_item
 
 DIMENSION = "dimension"
 LENGTH = "length"
@@ -625,24 +625,26 @@ class MeasureItem(MarkupItem):
         if self.is_dimensioned():
             start, end = self.dimension_ends()
             if self.style.arrow_end != "none":
-                painter.drawPath(arrow_path(
+                draw_head(
+                    painter,
                     end, math.atan2(end.y() - start.y(), end.x() - start.x()),
-                    size, self.style.arrow_end))
+                    size, self.style.arrow_end)
             if self.style.arrow_start != "none":
-                painter.drawPath(arrow_path(
+                draw_head(
+                    painter,
                     start, math.atan2(start.y() - end.y(), start.x() - end.x()),
-                    size, self.style.arrow_start))
+                    size, self.style.arrow_start)
             return
         if self.style.arrow_end != "none":
             tip, previous = self.points[-1], self.points[-2]
-            painter.drawPath(arrow_path(tip, math.atan2(tip.y() - previous.y(),
+            draw_head(painter, tip, math.atan2(tip.y() - previous.y(),
                                                         tip.x() - previous.x()),
-                                        size, self.style.arrow_end))
+                                        size, self.style.arrow_end)
         if self.style.arrow_start != "none":
             tip, following = self.points[0], self.points[1]
-            painter.drawPath(arrow_path(tip, math.atan2(tip.y() - following.y(),
+            draw_head(painter, tip, math.atan2(tip.y() - following.y(),
                                                         tip.x() - following.x()),
-                                        size, self.style.arrow_start))
+                                        size, self.style.arrow_start)
 
     def _paint_label(self, painter: QPainter) -> None:
         """The text, in line with what it measures — or on a leader if moved."""

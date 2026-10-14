@@ -53,6 +53,7 @@ class SnapshotItem(MarkupItem):
 
     TYPE = "snapshot"
     NAME = "Snapshot"
+    SCALE_BOX = True               # Bluebeam's scale box round it
 
     def __init__(self, rect: Optional[QRectF] = None):
         super().__init__()

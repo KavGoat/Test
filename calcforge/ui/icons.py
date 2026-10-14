@@ -119,6 +119,56 @@ def _ruler(painter: QPainter) -> None:
 
 
 def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon table
+    if name in ("show_grid", "snap_grid"):
+        # Bluebeam's grid: a hash; snapping adds a magnet's arc in the corner
+        _pen(painter, INK, 1.3)
+        for at in (8, 16):
+            painter.drawLine(QPointF(at, 3), QPointF(at, 21))
+            painter.drawLine(QPointF(3, at), QPointF(21, at))
+        if name == "snap_grid":
+            _pen(painter, ACCENT, 2.0)
+            painter.drawArc(QRectF(13, 13, 9, 9), 180 * 16, 180 * 16)
+        return
+    if name in ("snap_content", "snap_markup"):
+        # a corner caught by the pointer: on the drawing (content) or on a box
+        _pen(painter, INK, 1.4)
+        if name == "snap_content":
+            painter.drawLine(QPointF(4, 19), QPointF(13, 10))
+            painter.drawLine(QPointF(13, 10), QPointF(20, 17))
+        else:
+            painter.drawRect(QRectF(4, 8, 13, 11))
+        _pen(painter, ACCENT, 2.0)
+        painter.drawArc(QRectF(11, 2, 9, 9), 180 * 16, 180 * 16)
+        return
+    if name == "reuse":
+        # Bluebeam's Reuse Markup Tools: a pointer going round again
+        _pen(painter, INK, 1.5)
+        painter.drawArc(QRectF(5, 5, 14, 14), 30 * 16, 300 * 16)
+        painter.setBrush(QBrush(QColor(INK)))
+        painter.drawPolygon(QPolygonF([QPointF(18.5, 4), QPointF(19.5, 10), QPointF(14, 8.5)]))
+        return
+    if name in ("nav_first", "nav_prev", "nav_next", "nav_last"):
+        _pen(painter, INK, 1.5)
+        painter.setBrush(QBrush(QColor(INK)))
+        right = name in ("nav_next", "nav_last")
+        tip, back = (16, 9) if right else (8, 15)
+        painter.drawPolygon(QPolygonF([QPointF(tip, 12), QPointF(back, 7), QPointF(back, 17)]))
+        if name in ("nav_first", "nav_last"):
+            bar = 18 if right else 6
+            painter.drawLine(QPointF(bar, 7), QPointF(bar, 17))
+        return
+    if name == "gear":
+        # Bluebeam's tool set menu: a gear of eight teeth round a hole
+        import math as _m
+        _pen(painter, INK, 1.4)
+        outline = QPolygonF()
+        for step in range(32):
+            angle = _m.radians(step * 360 / 32)
+            radius = 8.4 if (step % 4) in (0, 1) else 6.4
+            outline.append(QPointF(12 + radius * _m.cos(angle), 12 + radius * _m.sin(angle)))
+        painter.drawPolygon(outline)
+        painter.drawEllipse(QPointF(12, 12), 2.6, 2.6)
+        return
     if name == "select":
         _pen(painter, INK, 1.5)
         painter.setBrush(QBrush(QColor(INK)))

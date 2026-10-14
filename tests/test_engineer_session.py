@@ -113,14 +113,14 @@ def test_tables_and_charts_show_their_own_properties(w):
     texts = [label.text() for label in w.properties_panel.findChildren(QLabel)
              if label.isVisible()]
     assert "XY scatter" in texts, "the chart's own section, straight after inserting it"
-    assert "Thickness" not in texts and "Fill" not in texts
+    assert "Line Width:" not in texts and "Fill Color:" not in texts
     w.view.scene().clearSelection()
     table.setSelected(True)
     w.refresh_selection()
     pump()
     texts = [label.text() for label in w.properties_panel.findChildren(QLabel)
              if label.isVisible()]
-    assert "Name" in texts and "Thickness" not in texts and "Fill" not in texts
+    assert "Name:" in texts and "Line Width:" not in texts and "Fill Color:" not in texts
     assert chart.scene() is not None
 
 

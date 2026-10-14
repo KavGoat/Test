@@ -65,6 +65,9 @@ def capabilities(item, for_default: bool = False) -> set[str]:
         result = {STROKE, FILL, WIDTH, DASH, FONT, OPACITY, FILL_OPACITY}
         if isinstance(item, CalloutItem):
             result.add(ARROW_SIZE)
+            if getattr(item, "shape_kind", "") == "cloud" \
+                    or any(leader.clouds() for leader in getattr(item, "leaders", [])):
+                result.add(CLOUD)              # its cloud's Size and Invert
         return result
     if isinstance(item, MeasureItem):
         result = {STROKE, WIDTH, DASH, FONT, OPACITY}

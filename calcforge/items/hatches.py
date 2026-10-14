@@ -99,6 +99,107 @@ _FROM_QT = {
 }
 
 
+# -- patterns of one's own: Revu's Manage Hatch Patterns -----------------------
+#: Where the patterns brought in or written are kept, between sessions.
+CUSTOM_KEY = "hatches/custom"
+#: The ones of one's own: library key -> the name as written ("ANSI31").
+CUSTOM: dict[str, str] = {}
+#: A .pat file's units are inches; the library's are points.
+PAT_UNIT = 72.0
+
+
+def display_name(key: str) -> str:
+    """What a list shows for a pattern: its own spelling, or the library's."""
+    if not key:
+        return "None"
+    return CUSTOM.get(key, key.title())
+
+
+def parse_pat(text: str, unit: float = PAT_UNIT) -> dict[str, tuple[str, tuple]]:
+    """An AutoCAD / Revu .pat file's patterns: lower-cased key -> (its name,
+    its line families). A family is ``angle, x0,y0, dx,dy [, dash, ...]``
+    with dashes positive, gaps negative and 0 a dot, as the library's are."""
+    found: dict[str, tuple[str, list]] = {}
+    current = None
+    for raw in (text or "").splitlines():
+        line = raw.split(";", 1)[0].strip()
+        if not line:
+            continue
+        if line.startswith("*"):
+            name = line[1:].split(",", 1)[0].strip()
+            current = name.lower() if name else None
+            if current:
+                found[current] = (name, [])
+            continue
+        if current is None:
+            continue
+        try:
+            numbers = [float(value) for value in line.split(",") if value.strip()]
+        except ValueError:
+            continue
+        if len(numbers) < 5:
+            continue
+        angle, x0, y0, dx, dy, *dashes = numbers
+        found[current][1].append(_family(angle, x0 * unit, y0 * unit, dx * unit, dy * unit,
+                                         [d * unit for d in dashes]))
+    return {key: (name, tuple(families)) for key, (name, families) in found.items()
+            if families}
+
+
+def add_pattern(name: str, families) -> str:
+    """Put a pattern of one's own in the library and the lists. Its key."""
+    key = name.strip().lower()
+    if not key or key in ("", "solid") or (key in LIBRARY and key not in CUSTOM):
+        return ""                                   # the built-in ones stay as they are
+    LIBRARY[key] = (tuple(tuple(f) for f in families), "")
+    CUSTOM[key] = name.strip()
+    if key not in NAMES:
+        NAMES.append(key)
+        MATERIALS.append(key)
+    from .base import HATCH_PATTERNS
+    HATCH_PATTERNS[key] = None
+    return key
+
+
+def remove_pattern(key: str) -> bool:
+    if key not in CUSTOM:
+        return False
+    del CUSTOM[key]
+    LIBRARY.pop(key, None)
+    for names in (NAMES, MATERIALS):
+        if key in names:
+            names.remove(key)
+    from .base import HATCH_PATTERNS
+    HATCH_PATTERNS.pop(key, None)
+    return True
+
+
+def save_custom() -> None:
+    import json
+    from ..settings import app_settings
+    data = {key: {"name": name, "families": [list(f[:5]) + [list(f[5])] for f in LIBRARY[key][0]]}
+            for key, name in CUSTOM.items()}
+    app_settings().setValue(CUSTOM_KEY, json.dumps(data))
+
+
+def load_custom() -> None:
+    """The patterns of one's own kept from before, back in the library."""
+    import json
+    from ..settings import app_settings
+    for key in list(CUSTOM):
+        remove_pattern(key)
+    try:
+        data = json.loads(app_settings().value(CUSTOM_KEY, "") or "{}")
+    except (ValueError, TypeError):
+        data = {}
+    for entry in data.values() if isinstance(data, dict) else ():
+        try:
+            families = [_family(*f[:5], dashes=f[5] if len(f) > 5 else ()) for f in entry["families"]]
+            add_pattern(str(entry["name"]), families)
+        except (KeyError, TypeError, ValueError):
+            continue
+
+
 def key_for(name: str) -> str:
     """The library pattern *name* means: its own entry, or Bluebeam's word."""
     if not name:

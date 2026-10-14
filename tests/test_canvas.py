@@ -187,10 +187,11 @@ def test_the_grid_belongs_to_the_page_not_the_canvas(window):
 # ---------------------------------------------------------------------------
 
 def test_the_desk_is_a_different_colour_from_the_paper(window):
-    from calcforge.theme import CANVAS, LIGHT
+    from calcforge.app import current_theme
+    from calcforge.theme import CANVAS
 
     desk = window.view.scene().backgroundBrush().color()
-    assert desk.name() == CANVAS[LIGHT]
+    assert desk.name() == CANVAS[current_theme()]
     assert desk.name() != "#ffffff"
     # and dark enough to see a white sheet against
     assert desk.lightness() < 200

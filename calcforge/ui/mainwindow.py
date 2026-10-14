@@ -42,7 +42,7 @@ from ..settings import app_settings
 from . import dialogs
 from .commands import DocumentStructureCommand
 from .icons import icon
-from .panels import (_hatch_icon, _line_style_icon, BookmarksPanel, MarkupsPanel, PagesPanel,
+from .panels import (_hatch_icon, _line_style_icon, fill_hatch_combo, BookmarksPanel, MarkupsPanel, PagesPanel,
                      PropertiesPanel, ToolSetsPanel)
 from .docks import PanelDock, load_panel_state, save_panel_state
 from .rail import (AREAS, LEFT, RIGHT, PanelRail, RailBar, load_order,
@@ -380,6 +380,7 @@ _SHORTCUT_GROUPS = {
     "calculate": "SMath", "insert_matrix": "SMath", "auto_calc": "SMath",
     "new": "File", "open": "File", "save": "File", "save_as": "File",
     "insert_pdf": "File", "insert_image_page": "File", "import_toolset": "File",
+    "manage_toolsets": "File",
     "insert_workbook": "File",
     "export_pdf": "File", "export_png": "File", "export_markups": "File",
     "preview": "File", "print": "File", "quit": "File",
@@ -448,6 +449,8 @@ class MainWindow(QMainWindow):
             lambda *_: type(self)._windows.remove(self)
             if self in type(self)._windows else None)
         self._syncing_view = False
+        from ..items import hatches
+        hatches.load_custom()          # the hatch patterns of one's own, from before
         self._undo_clean_slot = lambda _clean: self.update_title()
         self._connected_undo_stacks = []
         keep_the_wheel_with_the_scroller(QApplication.instance())
@@ -659,52 +662,54 @@ class MainWindow(QMainWindow):
         return action
 
     def _build_actions(self) -> None:
-        self._act("new", "New", lambda: self.new_document(), "Ctrl+N", "new")
-        self._act("new_tab", "New tab", lambda: self.open_in_new_tab(), "Ctrl+T",
+        self._act("new", "New PDF", lambda: self.new_document(), "Ctrl+N", "new")
+        self._act("new_tab", "New Tab", lambda: self.open_in_new_tab(), "Ctrl+T",
                   tip="Open another document beside this one, in its own tab")
-        self._act("new_window", "New window", self.open_new_window, "Ctrl+Shift+N",
+        self._act("new_window", "New Window", self.open_new_window, "Ctrl+Shift+N",
                   tip="Open a second window with a document of its own")
-        self._act("markups_list", "Markups list", self.show_markups_list, "Alt+L",
+        self._act("markups_list", "Markups List", self.show_markups_list, "Alt+L",
                   checkable=True,
                   tip="Open or close the markups list under the drawing — or "
                       "drag its bar up and down")
-        self._act("crop_page", "Crop page", lambda: self.select_tool("crop"),
+        self._act("crop_page", "Crop Pages", lambda: self.select_tool("crop"),
                   tip="Drag the part of the page to keep; Undo restores the rest")
-        self._act("extract_pages", "Extract pages…", lambda: self.extract_pages(),
+        self._act("extract_pages", "Extract Pages…", lambda: self.extract_pages(),
                   tip="Save chosen pages, with their markups, as a new PDF")
-        self._act("split_pages", "Split pages…", lambda: self.split_into_files(),
+        self._act("split_pages", "Split Document…", lambda: self.split_into_files(),
                   tip="Save the document as several PDFs of so many pages each")
-        self._act("split_view", "Split view", self.toggle_split_view,
+        self._act("split_view", "Split View", self.toggle_split_view,
                   checkable=True,
                   tip="View this document beside another editable pane; "
                       "choose again to turn the split off")
-        self._act("separate_views", "Separate views", self.separate_views,
+        self._act("separate_views", "Separate Views", self.separate_views,
                   tip="Return split panes to independent windows")
         self._act("open", "Open…", self.open_document, "Ctrl+O", "open")
         self._act("save", "Save", self.save_document, "Ctrl+S", "save")
-        self._act("save_as", "Save as…", self.save_document_as, "Ctrl+Shift+S")
+        self._act("save_as", "Save As…", self.save_document_as, "Ctrl+Shift+S")
         # Not Ctrl+I. That belongs to italic wherever there are words, and
         # while somebody was typing it inserted a PDF instead — which is the
         # exact thing the requirement says must never happen. It never reached
         # the shortcut list either, because keys reserved for the text are not
         # registered, so it was a binding nobody could see or change.
-        self._act("insert_pdf", "Insert PDF…", lambda: self.insert_pdf(),
+        self._act("insert_pdf", "Pages from Document…", lambda: self.insert_pdf(),
                   "Ctrl+Shift+I", "pdf")
-        self._act("insert_workbook", "Insert Excel…", lambda: self.insert_workbook(),
+        self._act("insert_workbook", "Excel Workbook…", lambda: self.insert_workbook(),
                   tip="An Excel workbook's worksheets as spreadsheet pages after this page "
                       "(cells, formulas, formats, names and page layout)")
-        self._act("import_toolset", "Import tools…",
+        self._act("import_toolset", "Import Tool Set…",
                   lambda: self.import_toolset(),
                   tip="Bring in a Bluebeam tool set — a .btx file")
-        self._act("insert_image_page", "Image page…",
+        self._act("manage_toolsets", "Manage Tool Sets…", lambda: self.manage_toolsets(),
+                  tip="Show, hide, order, rename and remove tool sets")
+        self._act("insert_image_page", "Image Page…",
                   lambda: self.insert_image_page(), "", "image")
         self._act("export_pdf", "Export PDF…", self.export_pdf, "Ctrl+E", "pdf")
-        self._act("export_png", "Export images…", self.export_images,
+        self._act("export_png", "Export Images…", self.export_images,
                   tip="Export every printable page as an image")
-        self._act("export_markups", "Export markups…", self.export_markups,
+        self._act("export_markups", "Markups Summary…", self.export_markups,
                   tip="Export the document's markup list")
         self._act("print", "Print…", self.print_document, "Ctrl+P", "print")
-        self._act("preview", "Print preview…", self.print_preview)
+        self._act("preview", "Print Preview…", self.print_preview)
         self._act("quit", "Exit", self.close, "Ctrl+Q")
 
         # Undo and redo come from the stack itself rather than from _act, so
@@ -733,24 +738,24 @@ class MainWindow(QMainWindow):
         self._act("cut", "Cut", self.cut_selection, "Ctrl+X")
         self._act("copy", "Copy", self.copy_selection, "Ctrl+C")
         self._act("paste", "Paste", self.paste_items, "Ctrl+V")
-        self._act("paste_in_place", "Paste in place", self.paste_in_place,
+        self._act("paste_in_place", "Paste in Place", self.paste_in_place,
                   "Ctrl+Shift+V",
                   tip="Put it back at the same place on this page, as Bluebeam does")
-        self._act("paste_here", "Paste here…", self.paste_with_preview,
+        self._act("paste_here", "Paste Here…", self.paste_with_preview,
                   "Ctrl+Alt+V",
                   tip="Carry what was copied on the pointer and click to drop it")
         self._act("duplicate", "Duplicate", self.duplicate_selection, "Ctrl+D")
         self._act("delete", "Delete", self.delete_selection, "", "delete")
-        self._act("select_all", "Select all", self.select_all, "Ctrl+A")
+        self._act("select_all", "Select All", self.select_all, "Ctrl+A")
         # SMath (decisions 5, 6 and 18): the mode switch and the calculation
         # commands the document has whatever is going on. SMath's keys inside
         # an equation are in the shortcut manager's SMath section.
-        self._act("calc_mode", "Calc mode", self.toggle_calc_mode, "F12", checkable=True,
+        self._act("calc_mode", "Calc Mode", self.toggle_calc_mode, "F12", checkable=True,
                   tip="Calc mode: typing on the page starts an equation, as in SMath. "
                       "Markup mode: the markup tools' keys")
         self._act("calculate", "Calculate", self.calculate, "F9",
                   tip="Recalculate every equation in the document")
-        self._act("auto_calc", "Auto-calc", self.set_auto_calc, checkable=True,
+        self._act("auto_calc", "Auto-Calc", self.set_auto_calc, checkable=True,
                   tip="Recalculate what depends on an equation as soon as it is left")
         self.act_auto_calc.setChecked(True)
         self._act("insert_matrix", "Matrix", self.insert_matrix, "Ctrl+M",
@@ -772,7 +777,7 @@ class MainWindow(QMainWindow):
         self._act("calc_rules", "Conditional Formatting…", self.conditional_formatting_rules,
                   tip="Presets of rules that colour and size equations by their result "
                       "(DCR > 1 red…), and which variable names use them")
-        self._act("insert_calc_text", "Calc text", self.insert_calc_text,
+        self._act("insert_calc_text", "Calc Text", self.insert_calc_text,
                   tip="Calculation text: words among the equations, on their grid "
                       "(\" in Calc mode)")
         # WebSMath's Calculation menu, on the selected part of an equation (or
@@ -806,19 +811,19 @@ class MainWindow(QMainWindow):
                   tip="Insert a function into the equation (Ctrl+E in an equation)")
         self._act("constants", "Constants…", self.show_constants,
                   tip="SMath's constants; double-click one to insert it (Ctrl+K in an equation)")
-        self._act("double_check", "Double-check", self.double_check,
+        self._act("double_check", "Double-Check", self.double_check,
                   tip="Recalculate every result independently and compare "
                       "(Ctrl+Shift+D in an equation)")
         self._act("lock", "Lock", self.toggle_lock, "Ctrl+L",
                   tip="Lock the selection so it cannot be moved, or let it go")
-        self._act("array", "Multiple…", self.array_selection,
+        self._act("array", "Multiple Copies…", self.array_selection,
                   "Ctrl+Shift+D",
                   tip="Repeat the selection at a fixed spacing, any number of times")
-        self._act("front", "Bring front", lambda: self.reorder("front"), "Ctrl+Shift+]",
+        self._act("front", "Bring to Front", lambda: self.reorder("front"), "Ctrl+Shift+]",
                   tip="Bring the selection to the front")
-        self._act("back", "Send back", lambda: self.reorder("back"), "Ctrl+Shift+[", tip="Send the selection behind every other markup")
-        self._act("forward", "Bring forward", lambda: self.reorder("forward"), "Ctrl+]")
-        self._act("backward", "Send backward", lambda: self.reorder("backward"), "Ctrl+[")
+        self._act("back", "Send to Back", lambda: self.reorder("back"), "Ctrl+Shift+[", tip="Send the selection behind every other markup")
+        self._act("forward", "Bring Forward", lambda: self.reorder("forward"), "Ctrl+]")
+        self._act("backward", "Send Backward", lambda: self.reorder("backward"), "Ctrl+[")
         for key, label in (("left", "Align left"), ("hcenter", "Align centres"),
                            ("right", "Align right"), ("top", "Align top"),
                            ("vcenter", "Align middles"), ("bottom", "Align bottom")):
@@ -833,98 +838,98 @@ class MainWindow(QMainWindow):
                   tip="Italicise the words picked out, or the whole markup")
         self._act("underline", "Underline", self.toggle_underline, "Ctrl+U",
                   tip="Underline the words picked out, or the whole markup")
-        self._act("text_left", "Text left",
+        self._act("text_left", "Align Left",
                   lambda: self.format_content(alignment="left"), "Ctrl+Alt+Left")
-        self._act("text_center", "Text centre",
+        self._act("text_center", "Align Center",
                   lambda: self.format_content(alignment="center"), "Ctrl+Alt+Home")
-        self._act("text_right", "Text right",
+        self._act("text_right", "Align Right",
                   lambda: self.format_content(alignment="right"), "Ctrl+Alt+Right")
-        self._act("font_increase", "Larger text",
+        self._act("font_increase", "Increase Font Size",
                   lambda: self.format_content(font_delta=1.0), "Ctrl+Alt+Up")
-        self._act("font_decrease", "Smaller text",
+        self._act("font_decrease", "Decrease Font Size",
                   lambda: self.format_content(font_delta=-1.0), "Ctrl+Alt+Down")
 
-        self._act("zoom_in", "Zoom in", self.view.zoom_in, "Ctrl++", "zoom_in")
-        self._act("zoom_out", "Zoom out", self.view.zoom_out, "Ctrl+-", "zoom_out")
-        self._act("fit_page", "Fit page", self.view.fit_page, "Ctrl+0", "fit")
-        self._act("fit_width", "Fit width", self.view.fit_width, "Ctrl+1")
-        self._act("zoom_sel", "Zoom selection", self.view.zoom_to_selection, "Ctrl+2",
+        self._act("zoom_in", "Zoom In", self.view.zoom_in, "Ctrl++", "zoom_in")
+        self._act("zoom_out", "Zoom Out", self.view.zoom_out, "Ctrl+-", "zoom_out")
+        self._act("fit_page", "Fit Page", self.view.fit_page, "Ctrl+0", "fit")
+        self._act("fit_width", "Fit Width", self.view.fit_width, "Ctrl+1")
+        self._act("zoom_sel", "Zoom to Selection", self.view.zoom_to_selection, "Ctrl+2",
                   tip="Zoom to the selected markups")
         # Turning the view is a way of looking at the page, not a change to
         # it: for reading a drawing that came in sideways. Rotating the page
         # itself is on the page menu, and does change the document.
-        self._act("turn_view_cw", "Turn clockwise",
+        self._act("turn_view_cw", "Rotate Clockwise",
                   lambda: self.view.rotate_view(True), "Ctrl+Shift+.",
                   tip="Turn the page on screen, for reading a drawing "
                       "sideways — the page itself is not changed")
-        self._act("turn_view_acw", "Turn anticlockwise",
+        self._act("turn_view_acw", "Rotate Counterclockwise",
                   lambda: self.view.rotate_view(False), "Ctrl+Shift+,",
                   tip="Turn the page on screen the other way — the page "
                       "itself is not changed")
-        self._act("turn_view_reset", "Reset turn",
+        self._act("turn_view_reset", "Reset Rotation",
                   self.view.reset_view_rotation,
                   tip="Put the view back the way up the page is")
         # Bare Page Up/Down scroll a screenful, as they do in any reader; with
         # Ctrl they jump a whole page.
-        self._act("prev_page", "Previous page", lambda: self.go_to_page(self.current_index - 1),
+        self._act("prev_page", "Previous Page", lambda: self.go_to_page(self.current_index - 1),
                   "Ctrl+PgUp")
-        self._act("next_page", "Next page", lambda: self.go_to_page(self.current_index + 1),
+        self._act("next_page", "Next Page", lambda: self.go_to_page(self.current_index + 1),
                   "Ctrl+PgDown")
-        self._act("actual_size", "Actual size", lambda: self.view.set_zoom(1.0), "Ctrl+Alt+0")
-        self._act("pin_panels", "Pin panels", self.pin_all_panels, "", checkable=True,
+        self._act("actual_size", "Actual Size", lambda: self.view.set_zoom(1.0), "Ctrl+Alt+0")
+        self._act("pin_panels", "Pin Panels", self.pin_all_panels, "", checkable=True,
                   tip="Keep the panels where they are, so a stray drag cannot move them")
-        self._act("show_panels", "Show panels", self.show_all_panels,
+        self._act("show_panels", "Show Panels", self.show_all_panels,
                   tip="Open the default panel on each side")
-        self._act("reset_layout", "Reset layout", self.reset_layout,
+        self._act("reset_layout", "Reset Layout", self.reset_layout,
                   tip="Put the panels and toolbars back where they started")
-        self._act("lock_toolbars", "Lock toolbars", self.lock_toolbars, "",
+        self._act("lock_toolbars", "Lock Toolbars", self.lock_toolbars, "",
                   checkable=True, tip="Stop the toolbars being dragged about")
-        self._act("customise_toolbar", "Choose tools…",
+        self._act("customise_toolbar", "Customize Toolbars…",
                   self.customise_toolbar,
                   tip="Pick which tools appear on the markup toolbar")
 
-        self._act("add_page", "Add page", lambda: self.add_page())
+        self._act("add_page", "Blank Page", lambda: self.add_page())
         self._act("add_sheet_page", "Spreadsheet page", lambda: self.insert_sheet_page(),
                   tip="A page of spreadsheet cells; pages next to each other are one sheet")
-        self._act("sheet_page_setup", "Sheet layout…", lambda: self.sheet_page_setup(),
+        self._act("sheet_page_setup", "Sheet Layout…", lambda: self.sheet_page_setup(),
                   tip="Print area, titles, fit to page width, centring, gridlines and headings")
-        self._act("duplicate_page", "Duplicate page", lambda: self.duplicate_page())
-        self._act("delete_page", "Delete page", lambda: self.delete_page())
+        self._act("duplicate_page", "Duplicate Page", lambda: self.duplicate_page())
+        self._act("delete_page", "Delete Pages", lambda: self.delete_page())
         # No key: Ctrl+Shift+P shows the problems panel, and page setup is on
         # the Page menu and on a page's own right-click menu.
-        self._act("page_setup", "Page setup…", self.page_setup, "", "page")
-        self._act("scale", "Page scale…", self.calibrate_dialog,
+        self._act("page_setup", "Page Setup…", self.page_setup, "", "page")
+        self._act("scale", "Page Scale…", self.calibrate_dialog,
                   "Ctrl+Shift+K", "calibrate")
         self._act("viewports", "Viewports…", self.viewports_dialog, "", "viewport",
                   tip="The regions of this page drawn at their own scale")
-        self._act("doc_props", "Document properties…", lambda: self.document_properties())
-        self._act("header_footer", "Header/footer…", self.edit_header_footer, "",
+        self._act("doc_props", "Document Properties…", lambda: self.document_properties())
+        self._act("header_footer", "Headers && Footers…", self.edit_header_footer, "",
                   tip="Page numbers, the date, a title and a logo on every page")
 
         # Ctrl+G is Group, here as in Bluebeam, so the grid takes the key
         # next to it rather than fighting for one. Ctrl+Alt+G is Greek gamma.
-        self._act("grid", "Show grid", self.toggle_grid, "Ctrl+'", checkable=True)
-        self._act("snap", "Grid snap", self.toggle_snap, "", checkable=True,
+        self._act("grid", "Show Grid", self.toggle_grid, "Ctrl+'", checkable=True)
+        self._act("snap", "Snap to Grid", self.toggle_snap, "", checkable=True,
                   tip="Snap points to the page grid")
-        self._act("snap_items", "Markup snap", self.toggle_item_snap, "",
+        self._act("snap_items", "Snap to Markup", self.toggle_item_snap, "",
                   checkable=True,
                   tip="Catch corners, centres, side middles and line ends of "
                       "the markups already on the page")
-        self._act("snap_content", "PDF snap", self.toggle_content_snap,
+        self._act("snap_content", "Snap to Content", self.toggle_content_snap,
                   "", checkable=True,
                   tip="Catch the corners and ends of the line work that came "
                       "in on the page — and only those, because a drawing has "
                       "thousands of them")
-        self._act("snap_alignment", "Align markups",
+        self._act("snap_alignment", "Align to Markups",
                   self.toggle_alignment_snap, "", checkable=True,
                   tip="Line a new markup up level with, or directly under, a "
                       "point on a markup already drawn")
-        self._act("snap_pdf_alignment", "Align PDF",
+        self._act("snap_pdf_alignment", "Align to Content",
                   self.toggle_pdf_alignment_snap, "", checkable=True,
                   tip="Line a new markup up level with, or directly under, a "
                       "corner or line end in the PDF drawing itself")
-        self._act("dark", "Dark theme", self.toggle_theme, "", checkable=True)
-        self._act("margins", "Show margins", self.toggle_margins, "", checkable=True)
+        self._act("dark", "Dark Mode", self.toggle_theme, "", checkable=True)
+        self._act("margins", "Show Margins", self.toggle_margins, "", checkable=True)
         self.act_margins.setChecked(True)
         self._act("name_tags", "Name Tags", self.toggle_name_tags, "", checkable=True,
                   tip="A small printed tag with the name on each named cell, "
@@ -933,59 +938,59 @@ class MainWindow(QMainWindow):
         self.act_snap_items.setChecked(True)
         self.act_snap_content.setChecked(True)
         self.act_snap_alignment.setChecked(True)
-        self._act("sticky", "Stay active", self.toggle_sticky, "", "pin",
+        self._act("sticky", "Stay Active", self.toggle_sticky, "", "pin",
                   checkable=True,
                   tip="Stay on the current tool after drawing instead of returning to Select")
-        self._act("check_spelling", "Check spelling…", self.check_spelling, "F7",
+        self._act("check_spelling", "Check Spelling in Markups…", self.check_spelling, "F7",
                   tip="Go through every text markup in the document, word by "
                       "word, and correct what the dictionary does not know")
-        self._act("apply_redactions", "Apply redactions…", self.apply_redactions, "",
+        self._act("apply_redactions", "Apply Redactions…", self.apply_redactions, "",
                   tip="Permanently remove what the black boxes cover")
 
-        self._act("shortcuts", "Shortcuts…", self.show_shortcuts, "F1",
+        self._act("shortcuts", "Keyboard Shortcuts…", self.show_shortcuts, "F1",
                   tip="Every shortcut, and the keys you want them on")
         self._act("find_text", "Find…", self.find_in_document, "Ctrl+F",
                   tip="Find words in the drawing and in the markups, on every "
                       "page, and replace them in the markups")
-        self._act("find_tool", "Search…", self.find_a_tool, "Shift+F1",
+        self._act("find_tool", "Find Tools + Commands", self.find_a_tool, "Shift+F1",
                   tip="Type what you want to do, and it says which tool does "
                       "it and which key it is on")
-        self._act("renumber_counts", "Renumber counts", self.renumber_counts,
+        self._act("renumber_counts", "Renumber Counts", self.renumber_counts,
                   tip="Renumber the count markers in page order")
         self._act("group", "Group", self.group_selection, "Ctrl+G",
                   tip="Make the selected markups one thing to click and move")
         self._act("ungroup", "Ungroup", self.ungroup_selection, "Ctrl+Shift+G")
-        self._act("autosize", "Auto-size", self.autosize_text, "Alt+Z",
+        self._act("autosize", "Auto-Size", self.autosize_text, "Alt+Z",
                   tip="Shrink the box around the words in it")
-        self._act("format_painter", "Format painter", self.format_painter,
+        self._act("format_painter", "Format Painter", self.format_painter,
                   "Ctrl+Shift+C", "format_painter",
                   tip="Take this one's look, then click another to paint it on")
         self._act("hide", "Hide", self.hide_selection,
                   tip="Take it off the screen and out of the print, without "
                       "deleting it — Show hidden brings it back")
-        self._act("show_hidden", "Show hidden", self.show_hidden,
+        self._act("show_hidden", "Show Hidden", self.show_hidden,
                   tip="Bring back everything that was hidden")
-        self._act("flatten", "Flatten selection", self.flatten_selection,
+        self._act("flatten", "Flatten Selection", self.flatten_selection,
                   tip="Make it part of the drawing rather than a markup on top "
                       "of it — it can no longer be moved or edited")
         self._act("flatten_document", "Flatten…", self.flatten_document,
                   tip="Choose which content classes to flatten on every page")
-        self._act("recover_flattened", "Recover", self.recover_flattened,
+        self._act("recover_flattened", "Unflatten", self.recover_flattened,
                   tip="Restore source items retained by recoverable flattening")
         self._act("preferences", "Preferences…", self.edit_preferences, "Ctrl+,",
                   tip="How the wheel behaves, how blocks start, spell checking")
-        self._act("forget_defaults", "Forget defaults", self.forget_defaults,
+        self._act("forget_defaults", "Forget Defaults", self.forget_defaults,
                   tip="Put every kind of markup back to how it started")
-        self._act("bookmark", "Add bookmark", self.add_bookmark_here, "Ctrl+B",
+        self._act("bookmark", "Add Bookmark", self.add_bookmark_here, "Ctrl+B",
                   tip="Name this place so it can be jumped to, printed in a "
                       "contents block and exported as a PDF bookmark")
-        self._act("contents", "Contents", self.insert_contents_block,
+        self._act("contents", "Table of Contents", self.insert_contents_block,
                   tip="Insert a table of contents built from document bookmarks")
         self._act("about", f"About {APP_NAME}", self.show_about)
         self._act("color_processing", "Color Processing…", lambda: self.color_processing(),
                   tip="Bluebeam's Color Processing: change the page's own colours — modify, "
                       "colorize, grayscale, black and white, luminosity/saturation/hue, mask images")
-        self._act("record_slowdowns", "Record slow-downs", self.record_slowdowns, checkable=True,
+        self._act("record_slowdowns", "Record Slow-Downs", self.record_slowdowns, checkable=True,
                   tip="Note what the window was doing whenever it stalled, in a file to send back")
 
     def _add_toolbar(self, bar) -> None:
@@ -1050,13 +1055,21 @@ class MainWindow(QMainWindow):
         self.style_kind_label = QLabel("")
         self.style_kind_label.setObjectName("styleKind")
         self._style_kind_action = style_bar.addWidget(self.style_kind_label)
+        # Bluebeam's ▾ beside the type: the Subject, and how many are picked
+        self.style_kind_menu = QToolButton()
+        self.style_kind_menu.setObjectName("styleKindMenu")
+        self.style_kind_menu.setText("▾")
+        self.style_kind_menu.setAutoRaise(True)
+        self.style_kind_menu.setToolTip("Subject and how many markups are selected")
+        self.style_kind_menu.clicked.connect(self._show_subject_popup)
+        style_bar.addWidget(self.style_kind_menu)
         # what a new cloud's arcs are (an item setting, not a pen setting)
-        self.default_cloud_radius = 9.0
-        self._style_widgets[STROKE].append(style_bar.addWidget(QLabel(" Line ")))
+        self.default_cloud_size = 2.0       # Bluebeam's cloud Size
+        self._style_widgets[STROKE].append(style_bar.addWidget(QLabel(" Line: ")))
         self.stroke_button = ColorButton(self.default_style.stroke, True, "Line colour")
         self.stroke_button.colorChanged.connect(self._style_stroke)
         self._style_widgets[STROKE].append(style_bar.addWidget(self.stroke_button))
-        self._style_widgets[FILL].append(style_bar.addWidget(QLabel(" Fill ")))
+        self._style_widgets[FILL].append(style_bar.addWidget(QLabel(" Fill: ")))
         self.fill_button = ColorButton("", True, "Fill colour")
         self.fill_button.colorChanged.connect(self._style_fill)
         self._style_widgets[FILL].append(style_bar.addWidget(self.fill_button))
@@ -1073,39 +1086,40 @@ class MainWindow(QMainWindow):
         self.fill_opacity_spin.valueChanged.connect(self._style_fill_opacity)
         self._style_widgets[FILL_OPACITY].append(
             style_bar.addWidget(self.fill_opacity_spin))
-        self._style_widgets[WIDTH].append(style_bar.addWidget(QLabel(" Thickness ")))
         self.width_spin = QDoubleSpinBox()
         self.width_spin.setRange(0.0, 40.0)
         self.width_spin.setSingleStep(0.25)
         self.width_spin.setValue(self.default_style.width)
         self.width_spin.setSuffix(" pt")
+        self.width_spin.setObjectName("lineWidth")
+        self.width_spin.setToolTip("Line width")
         self.width_spin.valueChanged.connect(self._style_width)
         self._style_widgets[WIDTH].append(style_bar.addWidget(self.width_spin))
-        self._style_widgets[ARROW_SIZE].append(style_bar.addWidget(QLabel(" Head size ")))
         self.arrow_size_spin = QDoubleSpinBox()
         self.arrow_size_spin.setObjectName("arrowSize")
         self.arrow_size_spin.setRange(0.25, 4.0)
         self.arrow_size_spin.setSingleStep(0.25)
         self.arrow_size_spin.setValue(self.default_style.arrow_size)
         self.arrow_size_spin.setSuffix(" ×")
-        self.arrow_size_spin.setToolTip("Arrowhead size, independent of line thickness")
+        self.arrow_size_spin.setToolTip("End size: how big the line ends are, "
+                                        "whatever the line width")
         self.arrow_size_spin.valueChanged.connect(self._style_arrow_size)
-        self._style_widgets[ARROW_SIZE].append(
-            style_bar.addWidget(self.arrow_size_spin))
         self.arrow_start_combo = arrow_combo()
         self.arrow_end_combo = arrow_combo()
         self.arrow_start_label_action = None
         for label, control, attribute in (("Start", self.arrow_start_combo, "arrow_start"),
                                            ("End", self.arrow_end_combo, "arrow_end")):
             control.setToolTip(f"{label} line ending")
-            control.currentTextChanged.connect(
-                lambda value, name=attribute: self._style_line_ending(name, value))
-            label_action = style_bar.addWidget(QLabel(f" {label} "))
+            control.currentIndexChanged.connect(
+                lambda _i, name=attribute, box=control: self._style_line_ending(
+                    name, box.currentData()))
+            label_action = style_bar.addWidget(QLabel(f" {label}: "))
             if label == "Start":
                 self.arrow_start_label_action = label_action
             self._style_widgets[ARROW_SIZE].append(label_action)
             self._style_widgets[ARROW_SIZE].append(style_bar.addWidget(control))
-        self._style_widgets[DASH].append(style_bar.addWidget(QLabel(" Dash ")))
+        # the heads' size after Start and End, as Bluebeam's Auto box
+        self._style_widgets[ARROW_SIZE].append(style_bar.addWidget(self.arrow_size_spin))
         from .widgets import PatternCombo
         self.dash_combo = PatternCombo()
         from .widgets import big_pattern_dropdown
@@ -1127,20 +1141,19 @@ class MainWindow(QMainWindow):
         self.dash_scale_spin.valueChanged.connect(lambda value: self._style_change(
             DASH, lambda style: setattr(style, "dash_scale", value), "Dash spacing"))
         self._style_widgets[DASH].append(style_bar.addWidget(self.dash_scale_spin))
-        # a cloud's arc size (Bluebeam's cloud intensity)
-        self._style_widgets[CLOUD].append(style_bar.addWidget(QLabel(" Arc ")))
+        # a cloud's Size (Bluebeam's: the PDF's cloud intensity, no unit)
+        self._style_widgets[CLOUD].append(style_bar.addWidget(QLabel(" Size: ")))
         self.cloud_spin = QDoubleSpinBox()
-        self.cloud_spin.setObjectName("cloudArc")
-        self.cloud_spin.setRange(2.0, 60.0)
-        self.cloud_spin.setDecimals(1)
-        self.cloud_spin.setSingleStep(1.0)
-        self.cloud_spin.setSuffix(" pt")
-        self.cloud_spin.setValue(self.default_cloud_radius)
-        self.cloud_spin.setToolTip("Cloud arc size: how big each bump of the cloud is")
+        self.cloud_spin.setObjectName("cloudSize")
+        self.cloud_spin.setRange(0.1, 20.0)
+        self.cloud_spin.setDecimals(2)
+        self.cloud_spin.setSingleStep(0.25)
+        self.cloud_spin.setValue(self.default_cloud_size)
+        self.cloud_spin.setToolTip("Size: how big the cloud's scallops are")
         self.cloud_spin.valueChanged.connect(self._style_cloud)
         self._style_widgets[CLOUD].append(style_bar.addWidget(self.cloud_spin))
         # a rectangle's corners
-        self._style_widgets[CORNER].append(style_bar.addWidget(QLabel(" Radius ")))
+        self._style_widgets[CORNER].append(style_bar.addWidget(QLabel(" Radius: ")))
         self.corner_spin = QDoubleSpinBox()
         self.corner_spin.setObjectName("cornerRadius")
         self.corner_spin.setRange(0.0, 200.0)
@@ -1152,7 +1165,7 @@ class MainWindow(QMainWindow):
             CORNER, lambda style: setattr(style, "corner_radius", value), "Corner radius"))
         self._style_widgets[CORNER].append(style_bar.addWidget(self.corner_spin))
         # a count's symbol
-        self._style_widgets[SYMBOL].append(style_bar.addWidget(QLabel(" Symbol ")))
+        self._style_widgets[SYMBOL].append(style_bar.addWidget(QLabel(" Symbol: ")))
         self.symbol_combo = QComboBox()
         self.symbol_combo.setObjectName("countSymbol")
         from ..items.measure import CountItem as _Count
@@ -1160,7 +1173,7 @@ class MainWindow(QMainWindow):
         self.symbol_combo.setToolTip("Count symbol")
         self.symbol_combo.currentTextChanged.connect(self._style_symbol)
         self._style_widgets[SYMBOL].append(style_bar.addWidget(self.symbol_combo))
-        self._style_widgets[FONT].append(style_bar.addWidget(QLabel(" Text ")))
+        self._style_widgets[FONT].append(style_bar.addWidget(QLabel(" Font: ")))
         self.font_family_combo = QFontComboBox()
         self.font_family_combo.setMaximumWidth(145)
         self.font_family_combo.currentFontChanged.connect(lambda font: self._style_change(
@@ -1196,13 +1209,12 @@ class MainWindow(QMainWindow):
         # so the two surfaces disagreed about every markup that has them: the
         # panel offered a hatch and a transparency the toolbar had no way to
         # reach. They are the same setting either way, so they are here too.
-        self._style_widgets[HATCH].append(style_bar.addWidget(QLabel(" Hatch ")))
+        self._style_widgets[HATCH].append(style_bar.addWidget(QLabel(" Hatch: ")))
         from .widgets import PatternCombo
         self.hatch_combo = PatternCombo()
         self.hatch_combo.setObjectName("hatchPattern")
         big_pattern_dropdown(self.hatch_combo)
-        for name in HATCH_PATTERNS:
-            self.hatch_combo.addItem(_hatch_icon(name, _bar_ink()), name or "plain", name)
+        fill_hatch_combo(self.hatch_combo, _bar_ink())
         self.hatch_combo.setToolTip("Hatch pattern, drawn over the fill in its own colour")
         self.hatch_combo.currentIndexChanged.connect(
             lambda _index: self._style_hatch(self.hatch_combo.currentData()))
@@ -1217,10 +1229,12 @@ class MainWindow(QMainWindow):
         self.hatch_scale_spin = UnboundedSpin()
         self.hatch_scale_spin.setObjectName("hatchScale")
         self.hatch_scale_spin.setMinimumWidth(84)
-        self.hatch_scale_spin.setSuffix(" ×")
-        self.hatch_scale_spin.setToolTip("Hatch scale")
+        self.hatch_scale_spin.setSuffix(" %")
+        self.hatch_scale_spin.setValue(100)
+        self.hatch_scale_spin.setToolTip("Hatch scale, as Bluebeam's: 100 as drawn, "
+                                         "50 half, 200 twice")
         self.hatch_scale_spin.valueChanged.connect(lambda value: self._style_change(
-            HATCH, lambda style: setattr(style, "hatch_scale", value), "Hatch scale"))
+            HATCH, lambda style: setattr(style, "hatch_scale", value / 100.0), "Hatch scale"))
         self._style_widgets[HATCH].append(style_bar.addWidget(self.hatch_scale_spin))
         self.hatch_opacity_spin = QSpinBox()
         self.hatch_opacity_spin.setObjectName("hatchOpacity")
@@ -1231,13 +1245,12 @@ class MainWindow(QMainWindow):
         self.hatch_opacity_spin.setValue(int(self.default_style.hatch_opacity * 100))
         self.hatch_opacity_spin.valueChanged.connect(self._style_hatch_opacity)
         self._style_widgets[HATCH].append(style_bar.addWidget(self.hatch_opacity_spin))
-        self._style_widgets[OPACITY].append(style_bar.addWidget(QLabel(" Overall ")))
         self.opacity_spin = QSpinBox()
         self.opacity_spin.setObjectName("overallOpacity")
         self.opacity_spin.setRange(0, 100)
         self.opacity_spin.setSuffix(" %")
         self.opacity_spin.setToolTip(
-            "Overall opacity: the whole markup — line, fill and hatch together")
+            "Opacity: the whole markup — line, fill and hatch together")
         self.opacity_spin.setValue(int(self.default_style.opacity * 100))
         self.opacity_spin.valueChanged.connect(self._style_opacity)
         self._style_widgets[OPACITY].append(style_bar.addWidget(self.opacity_spin))
@@ -1315,7 +1328,7 @@ class MainWindow(QMainWindow):
     def _build_docks(self) -> None:
         self.panels: list[PanelDock] = []
         self.pages_panel = PagesPanel(self)
-        self.dock_pages = self._dock("Pages", self.pages_panel, Qt.LeftDockWidgetArea,
+        self.dock_pages = self._dock("Thumbnails", self.pages_panel, Qt.LeftDockWidgetArea,
                                      "dock_pages")
         self.properties_panel = PropertiesPanel(self)
         self.dock_properties = self._dock("Properties", self.properties_panel,
@@ -1327,7 +1340,7 @@ class MainWindow(QMainWindow):
         self._markups_height = 220
         self.bottom_split.setSizes([1, 0])
         self.toolsets_panel = ToolSetsPanel(self)
-        self.dock_toolsets = self._dock("Tool sets", self.toolsets_panel,
+        self.dock_toolsets = self._dock("Tool Chest", self.toolsets_panel,
                                         Qt.BottomDockWidgetArea, "dock_toolsets")
         self.bookmarks_panel = BookmarksPanel(self)
         self.bookmarks_panel.bookmarkActivated.connect(self.go_to_bookmark)
@@ -1339,7 +1352,7 @@ class MainWindow(QMainWindow):
                                       Qt.LeftDockWidgetArea, "dock_search")
         from .pagepanel import PagePanel
         self.page_panel = PagePanel(self)
-        self.dock_page = self._dock("Page setup", self.page_panel,
+        self.dock_page = self._dock("Page Setup", self.page_panel,
                                     Qt.RightDockWidgetArea, "dock_page")
         from .mathspanel import MathsPanel
         self.maths_panel = MathsPanel(self)
@@ -1359,12 +1372,12 @@ class MainWindow(QMainWindow):
     # Every panel is behind one icon on one of the two rails. Which side it is
     # on is remembered; dragging its icon across moves it.
     PANEL_ICONS = {
-        "dock_pages": ("Pages", "panel_pages"),
+        "dock_pages": ("Thumbnails", "panel_pages"),
         "dock_bookmarks": ("Bookmarks", "panel_bookmarks"),
-        "dock_toolsets": ("Tool sets", "panel_toolsets"),
+        "dock_toolsets": ("Tool Chest", "panel_toolsets"),
         "dock_properties": ("Properties", "panel_properties"),
         "dock_search": ("Search", "panel_search"),
-        "dock_page": ("Page setup", "panel_page"),
+        "dock_page": ("Page Setup", "panel_page"),
         "dock_maths": ("Maths", "panel_maths"),
         "dock_variables": ("Variables", "panel_variables"),
     }
@@ -1651,27 +1664,39 @@ class MainWindow(QMainWindow):
             self.reveal_markup(page_index, uid)
 
     def _build_menus(self) -> None:
+        """Bluebeam Revu's menu bar — Revu, File, Edit, View, Document, Batch,
+        Tools, Window, Help — with CalcForge's own Calculation menu between
+        Tools and Window (the user's choice, 2026-10-14). Every command keeps
+        its place in one of them; what Revu has, where Revu has it."""
         bar = self.menuBar()
         self._build_search()
 
+        revu_menu = bar.addMenu("&Revu")
+        revu_menu.setObjectName("menuRevu")
+        for action in (self.act_about, None, self.act_preferences, self.act_shortcuts,
+                       None, self.act_quit):
+            revu_menu.addSeparator() if action is None else revu_menu.addAction(action)
+
         file_menu = bar.addMenu("&File")
         for action in (self.act_new, self.act_new_tab, self.act_new_window, self.act_open,
-                       None, self.act_save, self.act_save_as,
-                       None, self.act_insert_pdf, self.act_insert_image_page,
-                       self.act_insert_workbook, self.act_import_toolset,
-                       None, self.act_export_pdf,
-                       self.act_export_png, self.act_export_markups,
-                       None, self.act_preview, self.act_print, None, self.act_quit):
+                       None, self.act_save, self.act_save_as, None):
             file_menu.addSeparator() if action is None else file_menu.addAction(action)
+        export_menu = file_menu.addMenu("Export")
+        for action in (self.act_export_pdf, self.act_export_png, self.act_export_markups):
+            export_menu.addAction(action)
+        file_menu.addSeparator()
+        file_menu.addAction(self.act_preview)
+        file_menu.addAction(self.act_print)
 
         edit_menu = bar.addMenu("&Edit")
         for action in (self.act_undo, self.act_redo, None, self.act_cut, self.act_copy,
                        self.act_paste, self.act_paste_in_place, self.act_paste_here,
-                       self.act_duplicate, self.act_delete, None,
-                       self.act_select_all, self.act_lock, self.act_array, None,
-                       self.act_find_text):
+                       self.act_duplicate, self.act_array, None, self.act_hide,
+                       self.act_show_hidden, self.act_delete, None,
+                       self.act_select_all, self.act_format_painter, None,
+                       self.act_lock, self.act_group, self.act_ungroup):
             edit_menu.addSeparator() if action is None else edit_menu.addAction(action)
-        order_menu = edit_menu.addMenu("Order")
+        order_menu = edit_menu.addMenu("Arrange")
         for action in (self.act_front, self.act_forward, self.act_backward, self.act_back):
             order_menu.addAction(action)
         align_menu = edit_menu.addMenu("Align")
@@ -1682,96 +1707,67 @@ class MainWindow(QMainWindow):
                        self.act_text_left, self.act_text_center, self.act_text_right,
                        None, self.act_font_increase, self.act_font_decrease):
             text_menu.addSeparator() if action is None else text_menu.addAction(action)
+        edit_menu.addSeparator()
+        edit_menu.addAction(self.act_find_text)
+        edit_menu.addAction(self.act_apply_redactions)
+        spelling = edit_menu.addMenu("Check Spelling")
+        spelling.addAction(self.act_check_spelling)
+
         view_menu = bar.addMenu("&View")
-        for action in (self.act_zoom_in, self.act_zoom_out, self.act_actual_size,
-                       self.act_fit_page,
-                       self.act_fit_width, self.act_zoom_sel, None,
-                       self.act_turn_view_cw, self.act_turn_view_acw,
-                       self.act_turn_view_reset, None, self.act_grid,
-                       self.act_snap, self.act_snap_items, self.act_snap_content,
-                       self.act_snap_alignment, self.act_snap_pdf_alignment,
-                       self.act_margins, self.act_name_tags,
-                       self.act_dark, None,
-                       self.act_prev_page,
-                       self.act_next_page):
+        for action in (self.act_fit_page, self.act_fit_width, self.act_actual_size,
+                       self.act_zoom_in, self.act_zoom_out, self.act_zoom_sel, None):
             view_menu.addSeparator() if action is None else view_menu.addAction(action)
-        view_menu.addSeparator()
-        view_menu.addAction(self.act_markups_list)
-        view_menu.addAction(self.act_split_view)
-        view_menu.addAction(self.act_separate_views)
-        panels_menu = view_menu.addMenu("Panels")
-        for dock in self.panels:
-            panels_menu.addAction(dock.toggleViewAction())
-        panels_menu.addSeparator()
-        panels_menu.addAction(self.act_pin_panels)
-        panels_menu.addAction(self.act_show_panels)
-        panels_menu.addAction(self.act_reset_layout)
-        view_menu.addSeparator()
-        toolbars_menu = view_menu.addMenu("Toolbars")
-        for toolbar in self.toolbars:
-            toolbars_menu.addAction(toolbar.toggleViewAction())
-        toolbars_menu.addSeparator()
-        toolbars_menu.addAction(self.act_lock_toolbars)
-        toolbars_menu.addAction(self.act_customise_toolbar)
+        rotate_menu = view_menu.addMenu("Rotate View")
+        for action in (self.act_turn_view_cw, self.act_turn_view_acw, self.act_turn_view_reset):
+            rotate_menu.addAction(action)
+        for action in (self.act_split_view, self.act_separate_views, None,
+                       self.act_grid, self.act_snap, self.act_snap_content,
+                       self.act_snap_items, self.act_snap_alignment,
+                       self.act_snap_pdf_alignment, None, self.act_margins,
+                       self.act_name_tags, self.act_dark, None,
+                       self.act_prev_page, self.act_next_page):
+            view_menu.addSeparator() if action is None else view_menu.addAction(action)
 
-        # Mnemonic on the "k": Alt+M belongs to the dimension tool, and a
-        # menu with the same mnemonic makes the shortcut ambiguous.
-        markup_menu = bar.addMenu("Mar&kup")
-        self.selection_menu = markup_menu.addMenu("Selected")
-        self.selection_menu.aboutToShow.connect(self._rebuild_selection_menu)
-        markup_menu.addSeparator()
-        markup_menu.addAction(self.act_group)
-        markup_menu.addAction(self.act_ungroup)
-        markup_menu.addAction(self.act_autosize)
-        markup_menu.addSeparator()
-        markup_menu.addAction(self.act_format_painter)
-        markup_menu.addAction(self.act_sticky)
-        markup_menu.addAction(self.act_lock)
-        markup_menu.addAction(self.act_hide)
-        markup_menu.addAction(self.act_show_hidden)
-        markup_menu.addAction(self.act_flatten)
-        markup_menu.addAction(self.act_flatten_document)
-        markup_menu.addAction(self.act_recover_flattened)
-        markup_menu.addSeparator()
-        markup_menu.addAction(self.act_renumber_counts)
-        markup_menu.addAction(self.act_check_spelling)
-        markup_menu.addAction(self.act_forget_defaults)
-        markup_menu.addSeparator()
-        markup_menu.addAction(self.act_apply_redactions)
-        markup_menu.addSeparator()
-        markup_menu.addAction(self.act_export_markups)
-
-        # Mnemonic on the "g" for the same reason: Alt+P draws freehand.
-        page_menu = bar.addMenu("Pa&ge")
-        self.current_page_menu = page_menu.addMenu("Current")
+        # Mnemonic on the "D": Revu's Document menu (Alt+P draws freehand).
+        page_menu = bar.addMenu("&Document")
+        page_menu.setObjectName("menuDocument")
+        for action in (self.act_doc_props, self.act_page_setup, None):
+            page_menu.addSeparator() if action is None else page_menu.addAction(action)
+        self.current_page_menu = page_menu.addMenu("Current Page")
         self.current_page_menu.aboutToShow.connect(self._rebuild_current_page_menu)
-        page_menu.addSeparator()
-        for action in (self.act_bookmark, None,
-                       self.act_add_page, self.act_add_sheet_page, self.act_duplicate_page,
-                       self.act_delete_page, self.act_sheet_page_setup,
-                       None, self.act_crop_page, self.act_extract_pages,
-                       self.act_split_pages,
-                       None, self.act_page_setup, self.act_scale, self.act_viewports,
-                       self.act_header_footer, self.act_color_processing,
-                       None, self.act_doc_props):
+        insert_pages = page_menu.addMenu("Insert")
+        for action in (self.act_add_page, self.act_add_sheet_page, self.act_insert_pdf,
+                       self.act_insert_image_page, self.act_insert_workbook):
+            insert_pages.addAction(action)
+        for action in (self.act_duplicate_page, self.act_extract_pages, self.act_split_pages,
+                       self.act_delete_page, self.act_crop_page, None,
+                       self.act_sheet_page_setup, self.act_header_footer, self.act_scale,
+                       self.act_viewports, self.act_bookmark, self.act_contents, None,
+                       self.act_color_processing, None, self.act_flatten,
+                       self.act_recover_flattened):
             page_menu.addSeparator() if action is None else page_menu.addAction(action)
 
-        insert_menu = bar.addMenu("&Insert")
+        batch_menu = bar.addMenu("&Batch")
+        batch_menu.setObjectName("menuBatch")
+        batch_menu.addAction(self.act_export_markups)       # Revu's Summary
+        batch_menu.addAction(self.act_flatten_document)
+
+        tools_menu = bar.addMenu("&Tools")
+        tools_menu.setObjectName("menuTools")
         self.insert_tool_actions: dict[str, list[QAction]] = {}
+        # Every drawing tool, by name: somebody who does not know which button
+        # the polygon is under can find it by reading, as in Revu's Tools menu.
+        markup_sub = tools_menu.addMenu("Markup")
         for tool in TOOLS:
             if tool.category == "Annotate":
                 action = self.give_icon(QAction(tool.label, self), tool.icon)
                 action.triggered.connect(lambda _c=False, key=tool.key: self.select_tool(key))
-                insert_menu.addAction(action)
+                markup_sub.addAction(action)
                 self.insert_tool_actions.setdefault(tool.key, []).append(action)
-        insert_menu.addSeparator()
-        # Every drawing tool, on the menu as well as on the toolbar. Somebody
-        # who does not know which button the polygon is under can find it by
-        # reading, which is what a menu bar is for.
-        for heading in ("Navigate", "Draw", "Measure"):
-            title = {"Navigate": "Navigation", "Draw": "Markup",
-                     "Measure": "Measurement"}[heading]
-            sub = insert_menu.addMenu(title)
+        markup_sub.addSeparator()
+        for heading in ("Draw", "Measure", "Navigate"):
+            sub = markup_sub if heading == "Draw" else tools_menu.addMenu(
+                {"Measure": "Measure", "Navigate": "Navigation"}[heading])
             for tool in tools_in(heading):
                 if tool.mode == NONE and heading != "Navigate":
                     continue
@@ -1781,11 +1777,22 @@ class MainWindow(QMainWindow):
                     lambda _c=False, key=tool.key: self.select_tool(key))
                 sub.addAction(entry)
                 self.insert_tool_actions.setdefault(tool.key, []).append(entry)
-        insert_menu.addSeparator()
-        insert_menu.addAction(self.act_contents)
-        insert_menu.addSeparator()
-        insert_menu.addAction(self.act_insert_pdf)
-        insert_menu.addAction(self.act_insert_image_page)
+        tools_menu.addSeparator()
+        self.selection_menu = tools_menu.addMenu("Selected Markups")
+        self.selection_menu.aboutToShow.connect(self._rebuild_selection_menu)
+        for action in (self.act_autosize, self.act_sticky, self.act_renumber_counts,
+                       self.act_forget_defaults):
+            tools_menu.addAction(action)
+        tools_menu.addSeparator()
+        chest_menu = tools_menu.addMenu("Tool Chest")      # Revu: Tools ▸ Tool Chest
+        chest_menu.addAction(self.act_manage_toolsets)
+        chest_menu.addAction(self.act_import_toolset)
+        toolbars_menu = tools_menu.addMenu("Toolbars")
+        for toolbar in self.toolbars:
+            toolbars_menu.addAction(toolbar.toggleViewAction())
+        toolbars_menu.addSeparator()
+        toolbars_menu.addAction(self.act_lock_toolbars)
+        toolbars_menu.addAction(self.act_customise_toolbar)
 
         calc_menu = bar.addMenu("&Calculation")
         # Calc mode is the switch on the menu bar (and F12), not a menu entry
@@ -1807,9 +1814,16 @@ class MainWindow(QMainWindow):
         calc_menu.addSeparator()
         calc_menu.addAction(self.act_double_check)
 
-        settings_menu = bar.addMenu("&Settings")
-        settings_menu.addAction(self.act_preferences)
-        settings_menu.addAction(self.act_shortcuts)
+        window_menu = bar.addMenu("&Window")
+        window_menu.setObjectName("menuWindow")
+        panels_menu = window_menu.addMenu("Panels")
+        for dock in self.panels:
+            panels_menu.addAction(dock.toggleViewAction())
+        window_menu.addAction(self.act_markups_list)
+        window_menu.addSeparator()
+        window_menu.addAction(self.act_show_panels)
+        window_menu.addAction(self.act_pin_panels)
+        window_menu.addAction(self.act_reset_layout)
 
         help_menu = bar.addMenu("&Help")
         help_menu.addAction(self.act_find_tool)
@@ -1824,6 +1838,33 @@ class MainWindow(QMainWindow):
         # says rather than things it offers, so they sit together on the left.
         # The controls are permanent widgets and gather on the right, and the
         # page navigation goes in the middle of what is left between them.
+        # Bluebeam's status bar starts with its toggles, as icons: Show Grid,
+        # Snap to Grid, Snap to Content, Snap to Markup, Reuse Markup Tools
+        self.status_toggles = QWidget()
+        toggles = QHBoxLayout(self.status_toggles)
+        toggles.setContentsMargins(2, 0, 6, 0)
+        toggles.setSpacing(1)
+        self.status_grid = QToolButton()
+        self.status_grid.setObjectName("statusShowGrid")
+        self.status_grid.setAutoRaise(True)
+        self.status_grid.setCheckable(True)
+        self.status_grid.setToolTip("Show Grid on this page")
+        self.status_grid.toggled.connect(
+            lambda on: self.set_page_grid(self.current_index, on))
+        toggles.addWidget(self.status_grid)
+        self._status_icon_buttons = {self.status_grid: "show_grid"}
+        for action, name in ((self.act_snap, "snap_grid"), (self.act_snap_content, "snap_content"),
+                             (self.act_snap_items, "snap_markup"), (self.act_sticky, "reuse")):
+            button = QToolButton()
+            button.setAutoRaise(True)
+            button.setDefaultAction(action)
+            button.setToolButtonStyle(Qt.ToolButtonIconOnly)
+            toggles.addWidget(button)
+            self._icon_names[action] = name       # re-tinted with the theme
+            action.setIcon(icon(name))
+        self._refresh_status_icons()
+        status.addWidget(self.status_toggles)
+
         self.status_hint = QLabel("Ready")
         self.status_hint.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.status_hint.setMinimumWidth(0)
@@ -1849,21 +1890,30 @@ class MainWindow(QMainWindow):
         page_bar.setContentsMargins(4, 0, 4, 0)
         page_bar.setSpacing(4)
 
+        # Bluebeam's: |◀ ◀ [ 2 of 3 ] ▶ ▶|
+        self.page_first = QToolButton()
+        self.page_first.setAutoRaise(True)
+        self.page_first.setToolTip("First Page")
+        self.page_first.clicked.connect(lambda: self.go_to_page(0))
+        page_bar.addWidget(self.page_first)
         self.page_back = QToolButton()
-        self.page_back.setText("‹")
         self.page_back.setAutoRaise(True)
-        self.page_back.setToolTip("Previous page")
+        self.page_back.setToolTip("Previous Page")
         self.page_back.clicked.connect(lambda: self.go_to_page(self.current_index - 1))
         page_bar.addWidget(self.page_back)
 
         self.page_spin = QSpinBox()
+        self.page_spin.setObjectName("pageNumber")
         self.page_spin.setRange(1, 1)
-        self.page_spin.setPrefix("Page ")
+        self.page_spin.setSuffix(" of 1")
+        self.page_spin.setButtonSymbols(QSpinBox.NoButtons)
+        self.page_spin.setMinimumWidth(110)
         self.page_spin.lineEdit().setAlignment(Qt.AlignCenter)
         self.page_spin.valueChanged.connect(lambda value: self.go_to_page(value - 1))
         page_bar.addWidget(self.page_spin)
 
         self.page_total = QLabel("of 1")
+        self.page_total.setVisible(False)        # said in the page box, as Bluebeam's
         page_bar.addWidget(self.page_total)
 
         self.page_label = QLabel("")
@@ -1874,11 +1924,19 @@ class MainWindow(QMainWindow):
         page_bar.addWidget(self.page_label)
 
         self.page_forward = QToolButton()
-        self.page_forward.setText("›")
         self.page_forward.setAutoRaise(True)
-        self.page_forward.setToolTip("Next page")
+        self.page_forward.setToolTip("Next Page")
         self.page_forward.clicked.connect(lambda: self.go_to_page(self.current_index + 1))
         page_bar.addWidget(self.page_forward)
+        self.page_last = QToolButton()
+        self.page_last.setAutoRaise(True)
+        self.page_last.setToolTip("Last Page")
+        self.page_last.clicked.connect(lambda: self.go_to_page(len(self.document.pages) - 1))
+        page_bar.addWidget(self.page_last)
+        for button, name in ((self.page_first, "nav_first"), (self.page_back, "nav_prev"),
+                             (self.page_forward, "nav_next"), (self.page_last, "nav_last")):
+            self._status_icon_buttons[button] = name
+        self._refresh_status_icons()
         status.set_center_widget(self.page_navigation)
         # centred on the page view: follow it as panels open, close and resize
         self._page_bar_follower = _SizeFollower(self._center_page_bar, self)
@@ -1912,16 +1970,6 @@ class MainWindow(QMainWindow):
         self.status_scroll.setMenu(scroll_menu)
         self.status_scroll.setPopupMode(QToolButton.InstantPopup)
         status.addPermanentWidget(self.status_scroll)
-
-        # Calc or Markup (decision 5): always in view, one click to change.
-        self.status_grid = QToolButton()
-        self.status_grid.setAutoRaise(True)
-        self.status_grid.setCheckable(True)
-        self.status_grid.setText("Grid")
-        self.status_grid.setToolTip("Show the grid on this page")
-        self.status_grid.toggled.connect(
-            lambda on: self.set_page_grid(self.current_index, on))
-        status.addPermanentWidget(self.status_grid)
 
         self.status_snap = QToolButton()
         self.status_snap.setAutoRaise(True)
@@ -3534,13 +3582,32 @@ class MainWindow(QMainWindow):
             if frame is not None:
                 frame._background = None
                 for item in frame.markups():
-                    position = item.pos()
+                    if hasattr(item, "show_upright"):
+                        # an equation or a table: turned about its corner,
+                        # WebSMath's way, which its own layout reads back
+                        position = item.pos()
+                        if clockwise:
+                            item.setPos(height - position.y(), position.x())
+                            item.setRotation(item.rotation() + 90)
+                        else:
+                            item.setPos(position.y(), width - position.x())
+                            item.setRotation(item.rotation() - 90)
+                        continue
+                    # Turned about its own centre, as every markup is (and
+                    # as a reopened one is), and its centre carried to where
+                    # the page's turn takes it: turned about its corner it
+                    # came back from a save off to one side (2026-10-14).
+                    centre = item.local_rect().center()
+                    where = item.mapToParent(centre)
                     if clockwise:
-                        item.setPos(height - position.y(), position.x())
-                        item.setRotation(item.rotation() + 90)
+                        landing = QPointF(height - where.y(), where.x())
+                        turn = 90
                     else:
-                        item.setPos(position.y(), width - position.x())
-                        item.setRotation(item.rotation() - 90)
+                        landing = QPointF(where.y(), width - where.x())
+                        turn = -90
+                    item.setTransformOriginPoint(centre)
+                    item.setRotation(item.rotation() + turn)
+                    item.setPos(item.pos() + landing - item.mapToParent(centre))
             self.current_index = which
         self._structural_change("Rotate page", mutate)
         self.view.fit_page()
@@ -3664,14 +3731,14 @@ class MainWindow(QMainWindow):
         several = len(acting) > 1
         these = f"these {len(acting)} pages" if several else "page"
         menu = menu or QMenu(self)
-        here = menu.addAction("Go here", lambda: self.go_to_page(index))
+        here = menu.addAction("Go to Page", lambda: self.go_to_page(index))
         here.setToolTip("Go to this page")
-        bookmark = menu.addAction("Add bookmark", lambda: self.bookmark_page(index))
+        bookmark = menu.addAction("Add Bookmark", lambda: self.bookmark_page(index))
         bookmark.setToolTip("Add this page to the document bookmarks")
         if not several:
             rename = menu.addAction("Rename…", lambda: self.rename_page(index))
             rename.setToolTip("Give this page a custom label")
-            reset = menu.addAction("Reset label", lambda: self.reset_page_label(index))
+            reset = menu.addAction("Reset Label", lambda: self.reset_page_label(index))
             reset.setToolTip("Restore the imported label, or the normal page number")
             reset.setEnabled(bool(self.document.pages[index].label))
         include = menu.addAction("Print")
@@ -3681,72 +3748,72 @@ class MainWindow(QMainWindow):
         include.toggled.connect(
             lambda on, pages=tuple(acting): self.set_pages_printable(pages, on))
         menu.addSeparator()
-        copy = menu.addAction("Copy pages" if several else "Copy page",
+        copy = menu.addAction("Copy Pages" if several else "Copy Page",
                               lambda: self.copy_page(index))
         copy.setToolTip(f"Copy {these}")
-        # Named with the place it lands, because "Paste page" on its own does
+        # Named with the place it lands, because "Paste Page" on its own does
         # not say where the page goes and there is nothing on screen to say
         # so either.
         waiting = self.page_on_the_clipboard()
-        paste = menu.addAction("Paste after",
+        paste = menu.addAction("Paste After",
                                lambda: self.paste_page(index))
         paste.setToolTip(f"Paste a page after page {index + 1}")
         paste.setEnabled(waiting is not None)
         if waiting is None:
-            paste.setText("Paste page")
+            paste.setText("Paste Page")
             paste.setToolTip("There is no page on the clipboard")
-        before = menu.addAction("Paste before",
+        before = menu.addAction("Paste Before",
                                 lambda: self.paste_page(index, before=True))
         before.setToolTip(f"Paste a page before page {index + 1}")
         before.setEnabled(waiting is not None)
         menu.addSeparator()
-        blank_before = menu.addAction("Blank before", lambda: self.add_page_before(index))
+        blank_before = menu.addAction("Blank Before", lambda: self.add_page_before(index))
         blank_before.setToolTip("Insert a blank page before this page")
-        blank_after = menu.addAction("Blank after", lambda: self.add_page(index))
+        blank_after = menu.addAction("Blank After", lambda: self.add_page(index))
         blank_after.setToolTip("Insert a blank page after this page")
-        sheet_page = menu.addAction("Spreadsheet after",
+        sheet_page = menu.addAction("Spreadsheet After",
                                     lambda: self.insert_sheet_page(index))
         sheet_page.setToolTip("Insert a page of spreadsheet cells after this page")
         if self.document.pages[index].sheet is not None:
-            sheet_page.setText("Add sheet page")
-            layout = menu.addAction("Sheet layout…",
+            sheet_page.setText("Add Sheet Page")
+            layout = menu.addAction("Sheet Layout…",
                                     lambda: self.sheet_page_setup(index))
             layout.setToolTip("Print area, titles, fit to page width, centring, gridlines")
-        duplicate = menu.addAction("Duplicate pages" if several else "Duplicate page",
+        duplicate = menu.addAction("Duplicate Pages" if several else "Duplicate Page",
                                    lambda: self.duplicate_page(index))
         duplicate.setToolTip(f"Duplicate {these}")
         menu.addSeparator()
-        pdf_before = menu.addAction("PDF before…",
+        pdf_before = menu.addAction("PDF Before…",
                                     lambda: self.insert_pdf(index, before=True))
         pdf_before.setToolTip("Insert PDF pages before this page")
-        pdf_after = menu.addAction("PDF after…", lambda: self.insert_pdf(index))
+        pdf_after = menu.addAction("PDF After…", lambda: self.insert_pdf(index))
         pdf_after.setToolTip("Insert PDF pages after this page")
         image_before = menu.addAction(
-            "Image before…", lambda: self.insert_image_page(index, before=True))
+            "Image Before…", lambda: self.insert_image_page(index, before=True))
         image_before.setToolTip("Insert an image page before this page")
-        image_after = menu.addAction("Image after…",
+        image_after = menu.addAction("Image After…",
                                      lambda: self.insert_image_page(index))
         image_after.setToolTip("Insert an image page after this page")
         menu.addSeparator()
         first, last = acting[0], acting[-1]
-        up = menu.addAction("Move up", lambda: self.move_page(
+        up = menu.addAction("Move Up", lambda: self.move_page(
             first, first - 1, len(acting)))
         up.setEnabled(first > 0)
-        down = menu.addAction("Move down", lambda: self.move_page(
+        down = menu.addAction("Move Down", lambda: self.move_page(
             first, first + 1, len(acting)))
         down.setEnabled(last < len(self.document.pages) - 1)
         menu.addSeparator()
         menu.addSeparator()
-        turn_cw = menu.addAction("Rotate clockwise",
+        turn_cw = menu.addAction("Rotate Clockwise",
                                  lambda: self.rotate_page(index, True))
         turn_cw.setToolTip("Turn the paper and everything drawn on it. To turn "
                            "only the way it is shown, use View ▸ Turn view.")
-        turn_acw = menu.addAction("Rotate anticlockwise",
+        turn_acw = menu.addAction("Rotate Counterclockwise",
                                   lambda: self.rotate_page(index, False))
         turn_acw.setToolTip("Turn the paper and everything drawn on it anticlockwise")
-        running = menu.addMenu("Header/footer")
-        for which, label in (("header", "Show header"),
-                             ("footer", "Show footer")):
+        running = menu.addMenu("Header/Footer")
+        for which, label in (("header", "Show Header"),
+                             ("footer", "Show Footer")):
             entry = running.addAction(label)
             entry.setCheckable(True)
             page = self.document.pages[index]
@@ -3755,23 +3822,23 @@ class MainWindow(QMainWindow):
             entry.toggled.connect(
                 lambda on, i=index, w=which: self.set_page_running_text(i, w, on))
         running.addSeparator()
-        wording = running.addAction("Edit wording…", self.edit_header_footer)
+        wording = running.addAction("Edit Wording…", self.edit_header_footer)
         wording.setToolTip("Edit the document's header and footer wording")
-        grid = menu.addAction("Page grid")
+        grid = menu.addAction("Page Grid")
         grid.setCheckable(True)
         grid.setChecked(self.document.pages[index].shows_a_grid(
             self.document.settings))
         grid.setToolTip("A grid belongs to the page it is on, and prints with "
                         "it.\nPages that came in from a PDF start without one.")
         grid.toggled.connect(lambda on, i=index: self.set_page_grid(i, on))
-        paper = menu.addMenu("Paper size")
+        paper = menu.addMenu("Paper Size")
         for name in PAGE_SIZES:
             entry = paper.addAction(name, lambda n=name: self.set_page_size(index, n))
             entry.setCheckable(True)
             entry.setChecked(self.document.pages[index].setup.size_name == name)
-        menu.addAction("Page setup…", lambda: (self.go_to_page(index),
+        menu.addAction("Page Setup…", lambda: (self.go_to_page(index),
                                                self.page_setup()))
-        menu.addAction("Page scale…", lambda: (self.go_to_page(index),
+        menu.addAction("Page Scale…", lambda: (self.go_to_page(index),
                                                self.calibrate_dialog()))
         from . import calcsections
         calcsections.add_menu(self, menu, index)
@@ -3779,7 +3846,7 @@ class MainWindow(QMainWindow):
                                     lambda: self.color_processing(index))
         page = self.document.pages[index]
         processing.setEnabled(bool(page.background_key or page.pdf_key))
-        editable = menu.addAction("Make this page's markups editable",
+        editable = menu.addAction("Make This Page's Markups Editable",
                                   lambda: self.make_markups_editable(index))
         editable.setToolTip(
             "Read the clouds, call-outs and dimensions already on this page "
@@ -3787,7 +3854,7 @@ class MainWindow(QMainWindow):
             "change. What is read out is\nCalcForge's drawing of them, so it "
             "will not match the file exactly.")
         editable.setEnabled(bool(page.pdf_key) and page.pdf_annotations)
-        delete = menu.addAction("Delete pages" if several else "Delete page",
+        delete = menu.addAction("Delete Pages" if several else "Delete Page",
                                 lambda: self.delete_page(index))
         delete.setToolTip(f"Delete {these}")
         delete.setEnabled(len(self.document.pages) > 1)
@@ -4105,8 +4172,11 @@ class MainWindow(QMainWindow):
         """The bar along the bottom, saying what this page is."""
         total = len(self.document.pages)
         self.page_total.setText(f"of {total}")
+        self.page_spin.setSuffix(f" of {total}")
         self.page_back.setEnabled(self.current_index > 0)
         self.page_forward.setEnabled(self.current_index < total - 1)
+        self.page_first.setEnabled(self.current_index > 0)
+        self.page_last.setEnabled(self.current_index < total - 1)
         page = self.current_page()
         self.page_label.setText(f"· {page.label.strip()}" if page.label.strip() else "")
         setup = page.setup
@@ -4345,8 +4415,12 @@ class MainWindow(QMainWindow):
                     (self.fill_button, active.style.fill, "set_color"),
                     (self.width_spin, active.style.width, "setValue"),
                     (self.arrow_size_spin, active.style.arrow_size, "setValue"),
-                    (self.arrow_start_combo, active.style.arrow_start, "setCurrentText"),
-                    (self.arrow_end_combo, active.style.arrow_end, "setCurrentText"),
+                    (self.arrow_start_combo,
+                     max(self.arrow_start_combo.findData(active.style.arrow_start), 0),
+                     "setCurrentIndex"),
+                    (self.arrow_end_combo,
+                     max(self.arrow_end_combo.findData(active.style.arrow_end), 0),
+                     "setCurrentIndex"),
                     (self.dash_combo, active.style.line_style, "setCurrentText"),
                     (self.dash_scale_spin, active.style.dash_scale, "setValue"),
                     (self.font_spin, active.style.font_size, "setValue"),
@@ -4354,14 +4428,14 @@ class MainWindow(QMainWindow):
                      "setCurrentFont"),
                     (self.text_colour_button, active.style.text_color, "set_color"),
                     (self.text_align_combo, active.style.align, "setCurrentText"),
-                    (self.hatch_combo, active.style.hatch or "plain",
-                     "setCurrentText"),
-                    (self.hatch_scale_spin, active.style.hatch_scale, "setValue"),
+                    (self.hatch_combo, max(self.hatch_combo.findData(active.style.hatch or ""), 0),
+                     "setCurrentIndex"),
+                    (self.hatch_scale_spin, active.style.hatch_scale * 100, "setValue"),
                     (self.hatch_colour_button, active.style.hatch_color, "set_color"),
                     (self.hatch_opacity_spin,
                      int(round(getattr(active.style, "hatch_opacity", 1.0) * 100)), "setValue"),
-                    (self.cloud_spin, float(getattr(active, "cloud_radius", self.default_cloud_radius))
-                     if items else self.default_cloud_radius, "setValue"),
+                    (self.cloud_spin, float(getattr(active, "cloud_size", self.default_cloud_size))
+                     if items else self.default_cloud_size, "setValue"),
                     (self.corner_spin, float(active.style.corner_radius) if items
                      else self.default_style.corner_radius, "setValue"),
                     (self.symbol_combo, getattr(active, "symbol", self.view.count_symbol)
@@ -4844,8 +4918,37 @@ class MainWindow(QMainWindow):
                            "Font size")
 
     def _style_hatch(self, value: str) -> None:
+        from .hatchpatterns import MANAGE
+        if value == MANAGE:
+            # Manage… opens Hatch Patterns; the markup keeps its pattern
+            self.hatch_combo.blockSignals(True)
+            self.hatch_combo.setCurrentIndex(
+                max(self.hatch_combo.findData(self._hatch_shown()), 0))
+            self.hatch_combo.blockSignals(False)
+            QTimer.singleShot(0, self.manage_hatches)
+            return
         self._style_change(HATCH, lambda style: setattr(style, "hatch", value or ""),
                            "Hatch")
+
+    def _hatch_shown(self) -> str:
+        """The pattern the toolbar is showing: the selection's, or the default's."""
+        chosen = [i for i in self.view.scene().selectedItems() if isinstance(i, MarkupItem)] \
+            if self.view.scene() is not None else []
+        return (chosen[0].style.hatch if chosen else self.default_style.hatch) or ""
+
+    def manage_hatches(self):
+        """Revu's Hatch Patterns: import a .pat, write one, take one out. The
+        hatch lists are filled again after. Returned so a test can drive it."""
+        from .hatchpatterns import HatchPatternsDialog
+        dialog = HatchPatternsDialog(self, _bar_ink())
+        dialog.finished.connect(lambda *_: self._hatches_changed())
+        if self.interactive_prompts:
+            dialog.exec()
+        return dialog
+
+    def _hatches_changed(self) -> None:
+        fill_hatch_combo(self.hatch_combo, _bar_ink(), self._hatch_shown())
+        self.refresh_selection()
 
     def _style_opacity(self, percent: int) -> None:
         value = percent / 100.0
@@ -4854,10 +4957,45 @@ class MainWindow(QMainWindow):
 
     # Bluebeam's Properties toolbar leads with what matters for the markup:
     # the font for anything with words in it, the line and fill for shapes.
-    _SHAPE_ORDER = (STROKE, FILL, FILL_OPACITY, WIDTH, DASH, CLOUD, CORNER, ARROW_SIZE,
-                    SYMBOL, HATCH, FONT, OPACITY)
-    _TEXT_ORDER = (FONT, STROKE, FILL, FILL_OPACITY, WIDTH, DASH, CLOUD, CORNER,
-                   ARROW_SIZE, SYMBOL, HATCH, OPACITY)
+    # Bluebeam's Properties toolbar: Line: colour, opacity, style, width;
+    # Start and End; Fill: colour, opacity; Hatch; Font (words first for
+    # anything with words in it)
+    _SHAPE_ORDER = (STROKE, OPACITY, DASH, WIDTH, ARROW_SIZE, CLOUD, CORNER,
+                    FILL, FILL_OPACITY, HATCH, SYMBOL, FONT)
+    _TEXT_ORDER = (FONT, STROKE, OPACITY, DASH, WIDTH, ARROW_SIZE, CLOUD, CORNER,
+                   FILL, FILL_OPACITY, HATCH, SYMBOL)
+
+    def _show_subject_popup(self) -> None:
+        """Bluebeam's: Subject (typed in, for every selected markup) and the
+        number of markups selected."""
+        from PySide6.QtWidgets import QFormLayout, QFrame
+        items = [i for i in self.selected_items() if isinstance(i, MarkupItem)]
+        popup = QFrame(self, Qt.Popup)
+        popup.setObjectName("subjectPopup")
+        popup.setFrameShape(QFrame.StyledPanel)
+        form = QFormLayout(popup)
+        subject = QLineEdit(items[0].subject if items else "")
+        subject.setObjectName("subjectField")
+        subject.setEnabled(bool(items))
+        subject.setMinimumWidth(200)
+
+        def apply() -> None:
+            if not items:
+                return
+            self.view.begin_snapshot(self.view.involved_frames(*items))
+            for one in items:
+                one.subject = subject.text()
+                one.touch()
+            self.view.commit_snapshot("Subject")
+            self.properties_panel.show_items(self.selected_items())
+        subject.editingFinished.connect(apply)
+        form.addRow("Subject:", subject)
+        form.addRow("Markups:", QLabel(str(len(items))))
+        popup.adjustSize()
+        popup.move(self.style_kind_menu.mapToGlobal(self.style_kind_menu.rect().bottomLeft()))
+        popup.show()
+        subject.setFocus()
+        self._subject_popup = popup
 
     @staticmethod
     def _type_name(item) -> str:
@@ -4903,9 +5041,9 @@ class MainWindow(QMainWindow):
 
     def _style_cloud(self, value: float) -> None:
         if not self.selected_items():
-            self.default_cloud_radius = float(value)
+            self.default_cloud_size = float(value)
             return
-        self._item_setting(CLOUD, "cloud_radius", float(value), "Cloud arc size")
+        self._item_setting(CLOUD, "cloud_size", float(value), "Cloud size")
 
     def _style_symbol(self, value: str) -> None:
         if not value:
@@ -5075,7 +5213,7 @@ class MainWindow(QMainWindow):
             item.style.hatch_opacity = style.hatch_opacity
         caps = capabilities(item)
         if CLOUD in caps:
-            item.cloud_radius = self.default_cloud_radius
+            item.cloud_size = self.default_cloud_size
         if CORNER in caps:
             item.style.corner_radius = style.corner_radius
         item.style.font_size = style.font_size
@@ -5757,7 +5895,14 @@ class MainWindow(QMainWindow):
     # ==================================================================
     # tool sets
     # ==================================================================
-    def add_to_toolset(self, item=None, into: str = "") -> None:
+    def remember_recent(self, item) -> None:
+        """A markup just drawn goes to the top of Bluebeam's Recent Tools."""
+        if item is None or getattr(item, "IS_CALC", False):
+            return
+        if toolsets.remember_recent(item):
+            self.toolsets_panel.rebuild()
+
+    def add_to_toolset(self, item=None, into: str = "", ask: bool = True) -> None:
         """Keep a markup — or the selection — in a tool set to use again."""
         items = [item] if item is not None else [
             i for i in self.selected_items() if isinstance(i, MarkupItem)]
@@ -5779,11 +5924,15 @@ class MainWindow(QMainWindow):
         items = [one for one in items if id(one) not in held]
         groups = toolsets.load_toolsets()
         names = [group.name for group in groups]
-        chosen, accepted = QInputDialog.getItem(
-            self, "Add to a tool set", "Which set?", names,
-            max(names.index(into), 0) if into in names else 0, False)
-        if not accepted:
-            return
+        if into in names and not ask:
+            # chosen from Add to Tool Chest's own list (the Properties panel)
+            chosen = into
+        else:
+            chosen, accepted = QInputDialog.getItem(
+                self, "Add to a tool set", "Which set?", names,
+                max(names.index(into), 0) if into in names else 0, False)
+            if not accepted:
+                return
         group = next(g for g in groups if g.name == chosen)
         # Grouped markups go in as one tool; anything else, one tool each.
         families: dict = {}
@@ -5807,6 +5956,14 @@ class MainWindow(QMainWindow):
         self.status_hint.setText(
             f"Kept {kept} tool(s) in “{chosen}” — double-click one to put "
             "it down again")
+
+    def manage_toolsets(self):
+        """Revu's Manage Tool Sets dialog. Returned so a test can drive it."""
+        from .managetoolsets import ManageToolSetsDialog
+        dialog = ManageToolSetsDialog(self)
+        if self.interactive_prompts:
+            dialog.exec()
+        return dialog
 
     def import_toolset(self, path: str = "") -> bool:
         """Bring a Bluebeam tool set in from a ``.btx`` file.
@@ -6724,7 +6881,7 @@ class MainWindow(QMainWindow):
             "source_name": source.display_name().lower(),
             "style": deepcopy(source.style.to_dict()),
             "controls": set(capabilities(source)),
-            "cloud_radius": getattr(source, "cloud_radius", None)
+            "cloud": (source.cloud_size, source.cloud_invert)
             if self._is_clouded(source) else None,
             "corner_radius": source.style.corner_radius,
         }
@@ -6778,10 +6935,9 @@ class MainWindow(QMainWindow):
                         if field_name == "dash_array":
                             value = tuple(value)
                         setattr(item.style, field_name, value)
-            if held.get("cloud_radius") and self._is_clouded(item) \
-                    and hasattr(item, "cloud_radius"):
+            if held.get("cloud") and self._is_clouded(item):
                 item.prepareGeometryChange()
-                item.cloud_radius = held["cloud_radius"]
+                item.cloud_size, item.cloud_invert = held["cloud"]
             if getattr(item, "kind", "") == "rect" and held["source_type"] == item.TYPE:
                 item.style.corner_radius = held["corner_radius"]
             if hasattr(item, "apply_style"):
@@ -7501,22 +7657,34 @@ class MainWindow(QMainWindow):
                     item.update()          # a cached table draws itself again
         self._refresh_all_scenes()
 
+    def _refresh_status_icons(self) -> None:
+        for button, name in getattr(self, "_status_icon_buttons", {}).items():
+            button.setIcon(icon(name))
+
     def refresh_icons(self) -> None:
         """Redraw every icon in the colours of the theme now in use."""
         for action, name in self._icon_names.items():
             action.setIcon(icon(name))
+        self._refresh_status_icons()
         # the style bar's line and hatch samples, in the theme's ink: drawn
         # near-black they were invisible on the dark bar (the user, 2026-10-01)
         for index in range(self.dash_combo.count()):
             self.dash_combo.setItemIcon(
                 index, _line_style_icon(self.dash_combo.itemText(index), _bar_ink(), 1))
         for index in range(self.hatch_combo.count()):
-            self.hatch_combo.setItemIcon(
-                index, _hatch_icon(self.hatch_combo.itemData(index) or "", _bar_ink()))
+            if self.hatch_combo.itemData(index) in HATCH_PATTERNS:   # not Manage…
+                self.hatch_combo.setItemIcon(
+                    index, _hatch_icon(self.hatch_combo.itemData(index) or "", _bar_ink()))
         for dock in self.panels:
             bar = dock.titleBarWidget()
             if hasattr(bar, "refresh_icons"):
                 bar.refresh_icons()
+        # the panel rails' icons too: drawn for the old theme they all but
+        # vanished on the new one
+        for rail in (self.left_rail, self.right_rail):
+            for name, button in rail.buttons.items():
+                if name in self.PANEL_ICONS:
+                    button.setIcon(icon(self.PANEL_ICONS[name][1]))
         self.markups_panel.rebuild(self.document)
 
     def toggle_theme(self, dark: bool) -> None:
@@ -7705,30 +7873,30 @@ class MainWindow(QMainWindow):
             edit.setEnabled(not item.locked)
             menu.addSeparator()
         if item is not None and getattr(item, "TYPE", "") == "calc_block":
-            contained = menu.addAction("Self-contained")
+            contained = menu.addAction("Self-Contained")
             contained.setCheckable(True)
             contained.setChecked(item.self_contained)
             contained.setEnabled(not item.locked)
             contained.setToolTip("What the equations in the block define stays inside it")
             contained.triggered.connect(lambda on: self.set_block_self_contained([item], on))
-            menu.addAction("Select its equations", lambda: self._select_block_members(item))
-            remove = menu.addAction("Remove block, keep equations",
+            menu.addAction("Select Its Equations", lambda: self._select_block_members(item))
+            remove = menu.addAction("Remove Block, Keep Equations",
                                     lambda: self.remove_block_keep_equations(item))
             remove.setEnabled(not item.locked)
             menu.addSeparator()
         if item is not None:
             if isinstance(item, ImageItem) and not item.locked:
-                swap = menu.addMenu("Replace image")
-                swap.addAction("From file…", lambda: self.replace_image(item, "file"))
-                pasted = swap.addAction("From clipboard",
+                swap = menu.addMenu("Replace Image")
+                swap.addAction("From File…", lambda: self.replace_image(item, "file"))
+                pasted = swap.addAction("From Clipboard",
                                         lambda: self.replace_image(item, "clipboard"))
                 pasted.setEnabled(self.clipboard_has_image())
                 menu.addSeparator()
             if getattr(item, "TYPE", "") == "link":
-                menu.addAction("Follow link", lambda: self.follow_link(item))
-                menu.addAction("Edit link…", lambda: self.edit_link(item))
+                menu.addAction("Follow Link", lambda: self.follow_link(item))
+                menu.addAction("Edit Link…", lambda: self.edit_link(item))
             if isinstance(item, _TextBase):
-                menu.addAction("Edit…", lambda: self.view.begin_item_edit(item))
+                menu.addAction("Edit Text", lambda: self.view.begin_item_edit(item))
             if isinstance(item, SnapshotItem):
                 menu.addAction("Change Colors…", lambda: self.change_colors(item))
             elif isinstance(item, ImageItem):
@@ -7739,12 +7907,12 @@ class MainWindow(QMainWindow):
                 # polygon's is offered on theirs.
                 self._fill_outline_menu(menu, item, scene_pos)
             if isinstance(item, RectItem) and item.kind in SIZED_SHAPES:
-                convert = menu.addAction("Convert polygon",
+                convert = menu.addAction("Convert to Polygon",
                                lambda: self.rectangle_to_polygon(item))
                 convert.setToolTip("Turn this rectangle or ellipse into a polygon")
-                menu.addAction("Exact size…",
+                menu.addAction("Exact Size…",
                                lambda: self.set_rectangle_size(item))
-                show = menu.addAction("Show size")
+                show = menu.addAction("Show Size")
                 show.setCheckable(True)
                 show.setChecked(item.show_size)
                 show.toggled.connect(lambda on: self.set_size_visible(item, on))
@@ -7757,14 +7925,14 @@ class MainWindow(QMainWindow):
                         menu.addAction("Show in Variables",
                                        lambda i=item: self.show_variable_of(i))
                     menu.addSeparator()
-                menu.addAction("Edit text…", lambda: self.edit_measure_text(item))
-                straight = menu.addAction("Inline text")
+                menu.addAction("Edit Text…", lambda: self.edit_measure_text(item))
+                straight = menu.addAction("Inline Text")
                 straight.setToolTip("Keep the measurement text in line with its line")
                 straight.setCheckable(True)
                 straight.setChecked(item.label_angle is None)
                 straight.toggled.connect(
                     lambda on, i=item: self.set_label_angle(i, None if on else 0.0))
-                menu.addAction("Page scale…", self.calibrate_dialog)
+                menu.addAction("Page Scale…", self.calibrate_dialog)
             if hasattr(item, "size_to_text"):
                 menu.addAction(self.act_autosize)
             menu.addSeparator()
@@ -7778,10 +7946,16 @@ class MainWindow(QMainWindow):
             # hidden or flattened (decision 17): only what applies to them
             calc_like = bool(getattr(item, "IS_CALC", False))
             if not calc_like:
-                default = menu.addAction("Set default", lambda: self.set_as_default(item))
+                default = menu.addAction("Set as Default", lambda: self.set_as_default(item))
                 default.setToolTip("Use these properties for new markups of this kind")
-            add_tool = menu.addAction("Add tool…", lambda: self.add_to_toolset(item))
-            add_tool.setToolTip("Add this item to a tool set")
+            # Bluebeam's Add to Tool Chest: the tool sets, one click each
+            add_tool = menu.addMenu("Add to Tool Chest")
+            add_tool.setToolTip("Keep this markup in a tool set to use again")
+            for group in toolsets.load_toolsets():
+                add_tool.addAction(group.name, lambda n=group.name: self.add_to_toolset(
+                    item, into=n, ask=False))
+            add_tool.addSeparator()
+            add_tool.addAction("Choose a Tool Set…", lambda: self.add_to_toolset(item))
             menu.addSeparator()
             menu.addAction(self.act_cut)
             menu.addAction(self.act_copy)
@@ -7791,7 +7965,7 @@ class MainWindow(QMainWindow):
                 menu.addAction(self.act_format_painter)
             menu.addAction(self.act_delete)
             menu.addSeparator()
-            order = menu.addMenu("Order")
+            order = menu.addMenu("Arrange")
             for action in (self.act_front, self.act_forward, self.act_backward, self.act_back):
                 order.addAction(action)
             align = menu.addMenu("Align")
@@ -7804,7 +7978,7 @@ class MainWindow(QMainWindow):
                 menu.addAction(self.act_hide)
                 menu.addSeparator()
                 menu.addAction(self.act_flatten)
-                apply_pages = menu.addAction("Apply pages…",
+                apply_pages = menu.addAction("Apply to Pages…",
                                              lambda: self.apply_to_pages(item))
                 apply_pages.setToolTip("Copy this markup to chosen pages")
             menu.addSeparator()
@@ -7814,7 +7988,7 @@ class MainWindow(QMainWindow):
             menu.addAction(self.act_paste_in_place)
             menu.addAction(self.act_paste_here)
             menu.addSeparator()
-            insert = menu.addMenu("Insert here")
+            insert = menu.addMenu("Insert Here")
             for key in ("text", "callout", "note", "stamp", "image"):
                 tool = TOOL_MAP[key]
                 insert.addAction(icon(tool.icon), tool.label,
@@ -7830,7 +8004,7 @@ class MainWindow(QMainWindow):
                     page = frame.page
                     menu.addAction(f"{viewport.name} scale…",
                                    lambda: self.edit_viewport(page, viewport))
-                    menu.addAction("Delete viewport",
+                    menu.addAction("Delete Viewport",
                                    lambda: self.delete_viewport(page, viewport))
             menu.addAction(self.act_select_all)
         return menu

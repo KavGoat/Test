@@ -39,7 +39,7 @@ def src(item):
 
 def test_the_calculation_toolbar_has_smaths_commands(win):
     names = [a.text() for a in win.calculation_bar.actions() if a.text()]
-    assert names == ["Calculate", "Auto-calc", "Plot", "Matrix", "Calc text", "Block", "Table",
+    assert names == ["Calculate", "Auto-Calc", "Plot", "Matrix", "Calc Text", "Block", "Table",
                      "If", "For", "While", "Line"]
     for action in win.calculation_bar.actions():
         if action.text():
@@ -57,7 +57,7 @@ def test_plot_on_the_toolbar_puts_a_plot_at_the_red_cross(win):
 
 def test_calc_text_on_the_toolbar(win):
     into_calc_mode(win, 100, 300)
-    QTest.mouseClick(toolbar_button(win, "Calc text"), Qt.LeftButton)
+    QTest.mouseClick(toolbar_button(win, "Calc Text"), Qt.LeftButton)
     typed(win, "Beam B1")
     press_key(win.view, Qt.Key_Escape)
     (made,) = [i for i in win.view.scene().items() if isinstance(i, CalcTextItem)]
@@ -81,7 +81,7 @@ def test_auto_calc_off_waits_for_calculate(win):
     typed(win, "w3*3=")
     press_key(win.view, Qt.Key_Return)
     press_key(win.view, Qt.Key_Escape)
-    toolbar_button(win, "Auto-calc").click()
+    toolbar_button(win, "Auto-Calc").click()
     assert not win.act_auto_calc.isChecked()
     (first,) = [i for i in equations(win) if src(i) == "w3:2"]
     win.view.calc.focus(first, first.sceneBoundingRect().center())
@@ -480,7 +480,7 @@ def test_search_finds_equations_by_what_was_typed_and_what_they_show(win):
 
 def test_calculation_text_is_spell_checked(win):
     into_calc_mode(win)
-    QTest.mouseClick(toolbar_button(win, "Calc text"), Qt.LeftButton)
+    QTest.mouseClick(toolbar_button(win, "Calc Text"), Qt.LeftButton)
     typed(win, "The beem is fine")
     press_key(win.view, Qt.Key_Escape)
     from calcforge.core.spelling import shared
@@ -494,7 +494,7 @@ def test_calculation_text_lands_on_the_grid_when_moved(win):
     from tests.test_usability import drag
     from calcforge.ui.calcedit import GRID_PT
     into_calc_mode(win)
-    QTest.mouseClick(toolbar_button(win, "Calc text"), Qt.LeftButton)
+    QTest.mouseClick(toolbar_button(win, "Calc Text"), Qt.LeftButton)
     typed(win, "Note")
     press_key(win.view, Qt.Key_Escape)
     (text,) = [i for i in win.view.scene().items() if isinstance(i, CalcTextItem)]

@@ -343,7 +343,7 @@ class PageFrame(QGraphicsObject):
             bool(getattr(page, "pdf_annotations", True)),
             without=self.markups_drawn_alone(), ask=False) is None
 
-    def left_to_us(self, for_print: bool = False) -> tuple:
+    def left_to_us(self, for_print: bool = False, drawing: bool = False) -> tuple:
         """The page's own annotations this application is now drawing itself.
 
         A markup read out of the file is drawn *by* the file for as long as
@@ -351,6 +351,10 @@ class PageFrame(QGraphicsObject):
         look exactly like theirs. The moment one is taken over — edited,
         hidden or deleted — the page has to stop drawing it, or it would show
         twice: once as the file has it and once as it now is.
+
+        *drawing*: for the page's own print render, which also draws an
+        annotation that came in as several untouched strokes. A save must not
+        ask with it, or it would write the strokes and the annotation both.
         """
         page = self.page
         left_out = set(getattr(page, "markup_annotations", ()) or ())
@@ -365,6 +369,21 @@ class PageFrame(QGraphicsObject):
             if not item.isVisible() or (for_print and not item.printable):
                 continue
             left_out.discard(number)
+        if not drawing:
+            return tuple(sorted(left_out))
+        # An annotation that came in as several strokes (an ink line), every
+        # one untouched and showing: the page draws it as its file has it, in
+        # print as on screen — the strokes are our straight-line reading of
+        # the file's curves (rotated_ink.pdf, 2026-10-14).
+        strokes: dict = {}
+        for item in self.markups():
+            number = getattr(item, "split_from", 0)
+            if number and number in left_out:
+                strokes.setdefault(number, []).append(item)
+        for number, items in strokes.items():
+            if all(getattr(i, "split_theirs", False) and i.isVisible()
+                   and (not for_print or i.printable) for i in items):
+                left_out.discard(number)
         return tuple(sorted(left_out))
 
     # -- geometry ----------------------------------------------------------
@@ -374,6 +393,9 @@ class PageFrame(QGraphicsObject):
     #: and where in its run's grid it starts (pages across sit side by side)
     sheet_offset: Optional[QPointF] = None
     _as_paper = False
+    #: in print, the annotations in several strokes the page's render drew
+    #: itself, whose strokes then draw nothing (paint_the_pdf)
+    file_drew_split: frozenset = frozenset()
 
     @property
     def is_sheet(self) -> bool:
@@ -455,7 +477,7 @@ class PageFrame(QGraphicsObject):
         # (MarkupItem.paint_their_file), so taking one over, or undoing that,
         # never re-renders the page. In print, the page draws the ones still
         # the file's itself.
-        without = (self.left_to_us(for_print=True) if self.print_mode
+        without = (self.left_to_us(for_print=True, drawing=True) if self.print_mode
                    else self.markups_drawn_alone())
         painter.save()
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
@@ -471,6 +493,10 @@ class PageFrame(QGraphicsObject):
             if drawn is not None and not drawn.isNull():
                 painter.drawImage(region, drawn, QRectF(drawn.rect()))
                 drew = True
+                # the split annotations it drew itself: their strokes stay out
+                self.file_drew_split = frozenset(
+                    getattr(page, "markup_annotations", ()) or ()) - set(without) \
+                    if shown else frozenset()
             painter.restore()
             return drew
 
@@ -1230,6 +1256,7 @@ class PageFrame(QGraphicsObject):
         previous = self.print_mode
         previous_overlay = self._pdf_overlay
         self.print_mode = for_print
+        self.file_drew_split = frozenset()
         self._pdf_overlay = bool(pdf_overlay)
         self._items_only = layer == "calc"
         # The selection is *hidden* for the render, not cleared and put back.
@@ -1303,6 +1330,7 @@ class PageFrame(QGraphicsObject):
         sy = target.height() / max(paper.height(), 1e-9)
         previous = self.print_mode
         self.print_mode = for_print
+        self.file_drew_split = frozenset()
         try:
             painter.save()
             painter.translate(target.topLeft())

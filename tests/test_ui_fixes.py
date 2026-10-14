@@ -166,10 +166,11 @@ def test_hatch_opacity_is_its_own_and_leaves_the_fill_alone(window):
     order = [w for w in widgets if w in (window.fill_button, window.fill_opacity_spin,
                                          window.hatch_combo, window.hatch_opacity_spin,
                                          window.opacity_spin)]
-    assert order == [window.fill_button, window.fill_opacity_spin, window.hatch_combo,
-                     window.hatch_opacity_spin, window.opacity_spin]
+    # Bluebeam's order: Line: colour, opacity …; Fill: colour, opacity; Hatch
+    assert order == [window.opacity_spin, window.fill_button, window.fill_opacity_spin,
+                     window.hatch_combo, window.hatch_opacity_spin]
     for spin, word in ((window.fill_opacity_spin, "Fill"), (window.hatch_opacity_spin, "Hatch"),
-                       (window.opacity_spin, "Overall")):
+                       (window.opacity_spin, "Opacity")):
         assert spin.toolTip().startswith(word)
 
 
@@ -296,28 +297,31 @@ def test_the_toolbar_shows_each_types_own_controls(window):
     assert first_font < first_line, "words first for anything with words in it, as Bluebeam"
 
 
-def test_the_cloud_arc_is_set_from_the_toolbar_and_for_new_clouds(window):
+def test_the_cloud_size_is_set_from_the_toolbar_and_for_new_clouds(window):
+    """Bluebeam's Size: no unit, the PDF's cloud intensity."""
     from PySide6.QtCore import QRectF
     from calcforge.items.shapes import RectItem
     window.show()
     frame = window.document.pages[0].frame
     cloud = RectItem("cloud", QRectF(0, 0, 120, 60))
     frame.add_markup(cloud, QPointF(100, 100))
+    assert cloud.cloud_size == pytest.approx(2.0), "Bluebeam's Cloud tool"
     _select(window, cloud)
-    window.cloud_spin.setValue(18.0)
-    assert cloud.cloud_radius == pytest.approx(18.0)
+    window.cloud_spin.setValue(3.0)
+    assert cloud.cloud_size == pytest.approx(3.0)
+    assert cloud.cloud_radius == pytest.approx(4.75 * 3.0 + 0.5 * cloud.style.width)
     window.undo_stack.undo()
     (cloud,) = [i for i in frame.markups() if isinstance(i, RectItem)]
-    assert cloud.cloud_radius == pytest.approx(9.0)
-    # nothing selected, the cloud tool in hand: the next cloud's arcs
+    assert cloud.cloud_size == pytest.approx(2.0)
+    # nothing selected, the cloud tool in hand: the next cloud's Size
     window.view.scene().clearSelection()
     window.select_tool("cloud")
     window.refresh_selection()
     assert window.style_kind_label.text().strip() == "New cloud"
-    window.cloud_spin.setValue(24.0)
+    window.cloud_spin.setValue(4.0)
     made = RectItem("cloud", QRectF(0, 0, 50, 50))
     window.apply_default_style(made)
-    assert made.cloud_radius == pytest.approx(24.0)
+    assert made.cloud_size == pytest.approx(4.0)
 
 
 def test_count_symbol_and_corner_radius_from_the_toolbar(window):

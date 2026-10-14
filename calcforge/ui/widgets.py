@@ -6,15 +6,15 @@ from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRect, QSize, Qt, S
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap, QPen
 from PySide6.QtWidgets import (QAbstractScrollArea, QLayout, QAbstractSpinBox, QComboBox,
                                QHBoxLayout, QSlider,
-                               QToolButton, QWidget, QSpinBox,
-                               QDoubleSpinBox)
+                               QToolButton, QWidget, QDoubleSpinBox)
 
 from .icons import colour_icon
 
 
 def arrow_combo() -> QComboBox:
-    """Line endings with the same geometry used on the drawing."""
-    from ..items.base import ARROW_HEADS, arrow_path
+    """Line ends as Bluebeam lists them (None, Open, Closed, …), each drawn
+    with the same geometry used on the drawing; the item's data is its key."""
+    from ..items.base import ARROW_HEADS, ARROW_NAMES, FILLED_HEADS, arrow_path
     combo = QComboBox()
     combo.setIconSize(QSize(42, 20))
     for kind in ARROW_HEADS:
@@ -28,12 +28,18 @@ def arrow_combo() -> QComboBox:
         pen.setMiterLimit(8)
         painter.setPen(pen)
         painter.drawLine(QPointF(3, 10), QPointF(31, 10))
-        painter.setBrush(colour if kind in ("arrow", "dot", "square", "diamond")
-                         else Qt.NoBrush)
+        painter.setBrush(colour if kind in FILLED_HEADS else Qt.NoBrush)
         painter.drawPath(arrow_path(QPointF(31, 10), 0, 11, kind))
         painter.end()
-        combo.addItem(QIcon(pixmap), kind)
+        combo.addItem(QIcon(pixmap), ARROW_NAMES.get(kind, kind), kind)
     return combo
+
+
+def set_arrow(combo: QComboBox, kind: str) -> None:
+    """Show line end *kind* in an arrow_combo, without saying it changed."""
+    combo.blockSignals(True)
+    combo.setCurrentIndex(max(combo.findData(kind or "none"), 0))
+    combo.blockSignals(False)
 
 
 class ColorButton(QToolButton):
@@ -82,33 +88,6 @@ class ColorButton(QToolButton):
             self.setIcon(QIcon(pixmap))
         else:
             self.setIcon(colour_icon(self._colour))
-
-
-class LabeledSlider(QWidget):
-    """Editable percentage with step buttons (legacy class name)."""
-
-    valueChanged = Signal(float)
-
-    def __init__(self, minimum: int = 0, maximum: int = 100, value: int = 100):
-        super().__init__()
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
-        self.slider = QSpinBox()
-        self.slider.setSuffix(" %")
-        self.slider.setKeyboardTracking(False)
-        self.slider.setRange(minimum, maximum)
-        self.slider.setValue(value)
-        layout.addWidget(self.slider, 1)
-        self.slider.valueChanged.connect(self._changed)
-
-    def _changed(self, value: int) -> None:
-        self.valueChanged.emit(value / 100.0)
-
-    def set_value(self, fraction: float) -> None:
-        self.slider.blockSignals(True)
-        self.slider.setValue(int(round(fraction * 100)))
-        self.slider.blockSignals(False)
 
 
 class UnitCombo(QComboBox):
@@ -349,7 +328,7 @@ class ModeSwitch(QWidget):
     toggled = Signal(bool)
 
     def __init__(self, parent=None):
-        from PySide6.QtWidgets import QButtonGroup, QHBoxLayout, QToolButton
+        from PySide6.QtWidgets import QButtonGroup, QToolButton
         super().__init__(parent)
         self.setObjectName("modeSwitch")
         lay = QHBoxLayout(self)

@@ -318,7 +318,7 @@ def test_context_menu_is_built_for_both_targets(window):
     on_item = window.build_context_menu(item, QPointF(150, 150))
     on_page = window.build_context_menu(None, QPointF(400, 400))
     assert [a.text() for a in on_item.actions() if a.text()]
-    assert any("Insert here" in a.text() for a in on_page.actions() if a.text())
+    assert any("Insert Here" in a.text() for a in on_page.actions() if a.text())
 
 
 
@@ -574,7 +574,8 @@ def test_the_desk_behind_the_paper_is_actually_painted(window):
     """Overriding drawBackground loses Qt's own fill unless it is put back."""
     from PySide6.QtGui import QImage, QPainter
     from PySide6.QtCore import QRectF
-    from calcforge.theme import CANVAS, LIGHT
+    from calcforge.app import current_theme
+    from calcforge.theme import CANVAS
 
     frame = window.current_page().frame
     scene = frame.scene()
@@ -588,7 +589,7 @@ def test_the_desk_behind_the_paper_is_actually_painted(window):
 
     corner = image.pixelColor(3, 3).name()
     middle = image.pixelColor(100, 100).name()
-    assert corner == CANVAS[LIGHT], "the desk was left transparent"
+    assert corner == CANVAS[current_theme()], "the desk was left transparent"
     assert middle == "#ffffff", "the paper is not white"
 
 
@@ -840,7 +841,7 @@ def test_removing_the_logo_takes_it_off_every_page(window):
 def test_the_header_and_footer_have_a_menu_entry_of_their_own(window):
     from calcforge.ui import dialogs
 
-    assert window.act_header_footer.text() == "Header/footer…"
+    assert window.act_header_footer.text() == "Headers && Footers…"
     dialog = dialogs.DocumentPropertiesDialog(window.document)
     dialog.show_tab("header")
     assert "Header" in dialog.tabs.tabText(dialog.tabs.currentIndex())

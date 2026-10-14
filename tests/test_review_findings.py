@@ -21,16 +21,16 @@ def test_properties_let_go_when_escape_does(w):
     box.setSelected(True)
     w.refresh_selection()
     pump()
-    assert "Rectangle" in visible_labels(w)
+    assert "Rectangle Properties" in visible_labels(w)
     w.view.escape_everything()
     pump()
     pump()
-    assert "Rectangle" not in visible_labels(w)
+    assert "Rectangle Properties" not in visible_labels(w)
     assert any(text.startswith("Nothing selected") for text in visible_labels(w))
     box.setSelected(True)                  # picked some other way than a click
     pump()
     pump()
-    assert "Rectangle" in visible_labels(w)
+    assert "Rectangle Properties" in visible_labels(w)
 
 
 def test_a_blank_pages_thumbnail_has_an_edge(w):

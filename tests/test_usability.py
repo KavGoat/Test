@@ -150,12 +150,12 @@ def test_right_click_offers_a_menu_for_the_item_under_it(window):
     menu = window.build_context_menu(markups(window)[0], QPointF(160, 150))
     labels = [a.text() for a in menu.actions() if a.text()]
     assert "Cut" in labels and "Duplicate" in labels
-    assert "Multiple…" in labels
+    assert "Multiple Copies…" in labels
 
 
 def test_right_click_on_empty_paper_offers_insertions(window):
     menu = window.build_context_menu(None, QPointF(400, 400))
-    assert any("Insert here" in a.text() for a in menu.actions() if a.text())
+    assert any("Insert Here" in a.text() for a in menu.actions() if a.text())
 
 
 # ---------------------------------------------------------------------------
@@ -610,8 +610,16 @@ def test_every_label_the_user_reads_is_one_or_two_words(window, qapp):
                 if widget.text() and words(widget.text()) > 2:
                     long.append(f"{tool.key}: {widget.text()!r}")
 
-    # "Paste in place" is what Bluebeam calls it, so it stays as it is.
-    long = [entry for entry in long if "Paste in place" not in entry]
+    # What Bluebeam calls them, kept as they are (2026-10-14: the menus and
+    # names are Revu's)
+    bluebeams = ("Paste in Place", "Pages from Document", "Table of Contents",
+                 "Find Tools + Commands", "Check Spelling in Markups", "Add to Tool Chest",
+                 "Zoom to Selection", "Increase Font Size", "Decrease Font Size",
+                 "Send to Back", "Bring to Front", "Snap to Grid", "Snap to Content",
+                 "Snap to Markup", "Align to Markups", "Align to Content",
+                 "Rotate Counterclockwise", "Headers && Footers", "Apply to Pages",
+                 "Set as Default", "Convert to Polygon", "Import Tool Set")
+    long = [entry for entry in long if not any(name in entry for name in bluebeams)]
     assert not long, "labels of more than two words:\n" + "\n".join(sorted(set(long)))
 
 
@@ -1218,7 +1226,7 @@ def test_an_exact_size_can_be_asked_for_from_the_right_click_menu(window, monkey
     rect.setSelected(True)
 
     menu = window.build_context_menu(rect, QPointF(150, 140))
-    assert "Exact size…" in [a.text() for a in menu.actions() if a.text()]
+    assert "Exact Size…" in [a.text() for a in menu.actions() if a.text()]
 
     monkeypatch.setattr(dialogs.RectangleSizeDialog, "exec",
                         lambda self: dialogs.QDialog.Accepted)
@@ -1789,10 +1797,10 @@ def test_current_page_commands_are_reachable_from_the_menu_bar(window, qapp):
     menu.popup(window.mapToGlobal(window.rect().center()))
     qapp.processEvents()
     labels = _menu_labels(menu)
-    assert {"Rename…", "Blank after", "Move down",
-            "Rotate clockwise", "Color Processing…"} <= set(labels)
+    assert {"Rename…", "Blank After", "Move Down",
+            "Rotate Clockwise", "Color Processing…"} <= set(labels)
 
-    add = _menu_entry(menu, "Blank after")
+    add = _menu_entry(menu, "Blank After")
     QTest.mouseClick(menu, Qt.LeftButton, Qt.NoModifier,
                      menu.actionGeometry(add).center())
     qapp.processEvents()
@@ -1826,14 +1834,14 @@ def test_every_tool_and_application_action_is_reachable_from_the_menu_bar(window
                and name not in on_the_bar]
     assert missing == []
 
-    insert_labels = set(_menu_labels(top["Insert"]))
+    insert_labels = set(_menu_labels(top["Tools"]))       # Bluebeam's Tools menu
     assert {tool.label for tool in TOOLS} <= insert_labels
 
 
 def test_the_only_page_cannot_be_deleted_from_the_menu(window):
     assert len(window.document.pages) == 1
     actions = {action.text(): action for action in window.page_menu(0).actions()}
-    assert not actions["Delete page"].isEnabled()
+    assert not actions["Delete Page"].isEnabled()
 
 
 def test_inserting_an_image_page_can_be_undone(window, tmp_path, monkeypatch):
@@ -2051,7 +2059,7 @@ def test_calibration_has_a_visible_rebindable_shortcut(window):
     assert window.act_scale.shortcut().toString() == "Ctrl+Shift+K"
     binding = [b for b in window.shortcuts.bindings()
                if b.action_id == "command.scale"]
-    assert binding and binding[0].label == "Page scale"
+    assert binding and binding[0].label == "Page Scale"
 
 
 @pytest.mark.parametrize("entered", ["10mm", "10 mm"])
@@ -2177,7 +2185,7 @@ def test_a_page_label_can_be_renamed_and_reset_from_its_menu(window, monkeypatch
 
     menu = window.page_menu(0)
     next(action for action in menu.actions()
-         if action.text() == "Reset label").trigger()
+         if action.text() == "Reset Label").trigger()
     assert page.label == "drawing.pdf page A1"
     assert "drawing.pdf page A1" in window.pages_panel.list.item(0).text()
 
@@ -2193,7 +2201,7 @@ def test_resetting_a_blank_pages_label_restores_its_number(window):
 
 def test_the_page_menu_can_set_the_scale(window):
     labels = [action.text() for action in window.page_menu(0).actions()]
-    assert "Page scale…" in labels
+    assert "Page Scale…" in labels
 
 
 # ---------------------------------------------------------------------------
@@ -2229,10 +2237,11 @@ def test_turning_a_page_turns_what_is_drawn_on_it(window):
     drag(window.view, 80, 120, 180, 200)
     box = markups(window)[0]
     height = window.current_page().setup.height_pt
-    before = box.pos()
+    corner = box.local_rect().topLeft()
+    before = box.mapToParent(corner)
 
     window.rotate_page(0, clockwise=True)
-    after = box.pos()
+    after = box.mapToParent(corner)          # the same corner, where the turn took it
     assert after.x() == pytest.approx(height - before.y(), abs=0.5)
     assert after.y() == pytest.approx(before.x(), abs=0.5)
     assert box.rotation() % 360 == pytest.approx(90)
@@ -2282,10 +2291,10 @@ def test_the_page_menu_offers_rotating_and_paper_sizes(window):
     labels = [action.text() for action in menu.actions()]
     # Named so it cannot be mistaken for turning the view, which is on the
     # View menu and changes nothing about the document.
-    assert "Rotate clockwise" in labels
-    assert "Rotate anticlockwise" in labels
+    assert "Rotate Clockwise" in labels
+    assert "Rotate Counterclockwise" in labels
     paper = next(action.menu() for action in menu.actions()
-                 if action.text() == "Paper size")
+                 if action.text() == "Paper Size")
     sizes = [action.text() for action in paper.actions()]
     assert "A4" in sizes and "A3" in sizes
     assert next(a for a in paper.actions() if a.text() == "A4").isChecked()
@@ -2859,9 +2868,11 @@ def test_the_properties_panel_offers_it(window):
     window.select_tool("select")
     box.setSelected(True)
     window.refresh_selection()
+    from PySide6.QtWidgets import QToolButton
     labels = [b.text() for b in window.properties_panel.findChildren(QPushButton)]
-    assert "Set default" in labels
-    assert "Add tool…" in labels
+    labels += [b.text() for b in window.properties_panel.findChildren(QToolButton)]
+    assert "Set as Default" in labels
+    assert "Add to Tool Chest" in labels
 
 
 def test_the_style_toolbar_sets_the_selected_markup_as_default(window, qapp):
@@ -2896,7 +2907,7 @@ def test_a_markup_can_be_saved_to_a_tool_set_from_its_context_menu(window):
     labels = _menu_labels(window.build_context_menu(
         box, box.mapToScene(box.local_rect().center())))
 
-    assert "Add tool…" in labels
+    assert "Add to Tool Chest" in labels
 
 
 # ---------------------------------------------------------------------------
@@ -3019,7 +3030,7 @@ def test_a_tool_can_be_switched_between_the_two_modes(window):
     assert panel.current_entry().mode == toolsets.COPY
     panel.toggle_mode()
     assert panel.current_entry().mode == toolsets.PROPERTIES
-    draw = _menu_entry(panel.build_menu(), "Property mode")
+    draw = _menu_entry(panel.build_menu(), "Properties Mode")
     assert draw.isChecked()
     assert "properties" in panel.tree.currentItem().toolTip(0)
     assert "Property" in panel.tree.currentItem().text(0)
@@ -3851,7 +3862,7 @@ def test_a_raster_image_offers_its_frame_but_no_fill_style_controls(window, tmp_
                       window.properties_panel.findChildren(QGroupBox)
                       if group.title() == "Appearance")
     labels = [label.text() for label in appearance.findChildren(QLabel)]
-    assert "Line" in labels and "Fill" not in labels
+    assert "Color:" in labels and "Fill Color:" not in labels
 
     before = image.style.stroke
     window._style_stroke("#c92a2a")
@@ -4182,9 +4193,9 @@ def test_drawing_again_is_greyed_out_for_a_calculation(window):
     panel.rebuild(keep=toolsets.MY_TOOLS)
 
     panel.select_entry(toolsets.MY_TOOLS, len(group.entries) - 2)
-    assert not _menu_entry(panel.build_menu(), "Property mode").isEnabled()
+    assert not _menu_entry(panel.build_menu(), "Properties Mode").isEnabled()
     panel.select_entry(toolsets.MY_TOOLS, len(group.entries) - 1)
-    assert _menu_entry(panel.build_menu(), "Property mode").isEnabled()
+    assert _menu_entry(panel.build_menu(), "Properties Mode").isEnabled()
 
 
 def test_tools_can_be_dragged_into_the_order_you_want(window):
@@ -4319,7 +4330,13 @@ def test_every_vertex_of_a_polyline_gets_the_same_pointer(window):
     # A hinge takes hold rather than points: it slides along its own line and
     # hops from side to side.
     assert cursor_for_handle("e0") == Qt.OpenHandCursor
-    assert cursor_for_handle("lblrot") == Qt.CrossCursor
+    # Turning: Revu's curled arrow, for a markup and for a measurement's words
+    from calcforge.items.base import rotate_cursor
+    assert cursor_for_handle("lblrot") is rotate_cursor() is cursor_for_handle("rot")
+    assert not rotate_cursor().pixmap().isNull()
+    # the scale box's corners resize diagonally
+    assert cursor_for_handle("scale_nw") == Qt.SizeFDiagCursor
+    assert cursor_for_handle("scale_ne") == Qt.SizeBDiagCursor
 
 
 def test_shape_modifiers_have_distinct_add_remove_and_curve_cursors(window):
@@ -4383,8 +4400,8 @@ def test_a_callout_is_asked_only_about_the_end_that_points(window):
     groups = _panel_groups(window, callout)
     assert "Leader" in groups and "Ends" not in groups
     boxes = {b.objectName(): b for b in window.properties_panel.findChildren(QComboBox)}
-    assert "Box" in [w.itemText(i) for w in window.properties_panel.findChildren(QComboBox)
-                     for i in range(w.count())]
+    assert "Rectangle" in [w.itemText(i) for w in window.properties_panel.findChildren(QComboBox)
+                           for i in range(w.count())]
 
 
 def test_a_callout_can_be_turned_into_a_cloud_afterwards(window):
@@ -4401,7 +4418,7 @@ def test_a_callout_can_be_turned_into_a_cloud_afterwards(window):
     window.refresh_selection()
 
     shape = [w for w in window.properties_panel.findChildren(QComboBox)
-             if [w.itemText(i) for i in range(w.count())] == ["Box", "Cloud"]][0]
+             if [w.itemText(i) for i in range(w.count())] == ["Rectangle", "Cloud"]][0]
     shape.setCurrentIndex(1)
     assert callout.shape_kind == "cloud"
 
@@ -4547,9 +4564,9 @@ def test_the_markup_menu_offers_the_whole_of_bluebeams(window):
     rect = _a_rectangle(window)
     rect.setSelected(True)
     labels = _menu_labels(window.build_context_menu(rect, QPointF(150, 150)))
-    for wanted in ("Cut", "Copy", "Paste", "Duplicate", "Format painter",
-                   "Delete", "Order", "Align", "Lock",
-                   "Hide", "Flatten selection", "Apply pages…",
+    for wanted in ("Cut", "Copy", "Paste", "Duplicate", "Format Painter",
+                   "Delete", "Arrange", "Align", "Lock",
+                   "Hide", "Flatten Selection", "Apply to Pages…",
                    "Properties"):
         assert wanted in labels, f"{wanted!r} missing from {labels}"
 
@@ -5220,9 +5237,9 @@ def test_the_tool_chests_right_click_menu_carries_everything(window):
     panel.select_entry(toolsets.MY_TOOLS, 0)
 
     labels = _menu_labels(panel.build_menu())
-    for wanted in ("Use", "Property mode", "Rename…", "Remove",
-                   "Add selection", "Rename set…", "Delete set",
-                   "New tool set…", "Import tools…"):
+    for wanted in ("Use Tool", "Properties Mode", "Rename…", "Remove",
+                   "Add Selection", "Rename Tool Set…", "Delete Tool Set",
+                   "New Tool Set…", "Import Tool Set…"):
         assert wanted in labels, f"{wanted!r} missing from {labels}"
 
 
@@ -5230,9 +5247,9 @@ def test_the_menu_on_bare_panel_still_offers_a_new_set(window):
     panel = window.toolsets_panel
     panel.tree.setCurrentItem(None)
     labels = _menu_labels(panel.build_menu())
-    assert "New tool set…" in labels
-    assert "Import tools…" in labels
-    assert "Use" not in labels          # nothing is picked out to use
+    assert "New Tool Set…" in labels
+    assert "Import Tool Set…" in labels
+    assert "Use Tool" not in labels          # nothing is picked out to use
 
 
 def test_nothing_is_placed_behind_a_dashed_box(window):
@@ -5793,10 +5810,11 @@ def test_turning_the_view_is_on_the_view_menu(window):
     labels = []
     for menu in window.menuBar().actions():
         if menu.text() == "&View":
-            labels = [a.text() for a in menu.menu().actions()]
-    assert "Turn clockwise" in labels
-    assert "Turn anticlockwise" in labels
-    assert "Reset turn" in labels
+            rotate = next(a.menu() for a in menu.menu().actions() if a.text() == "Rotate View")
+            labels = [a.text() for a in rotate.actions()]
+    assert "Rotate Clockwise" in labels
+    assert "Rotate Counterclockwise" in labels
+    assert "Reset Rotation" in labels
 
 
 # ---------------------------------------------------------------------------
@@ -5949,7 +5967,7 @@ def test_a_rectangle_can_become_a_polygon_to_be_reshaped(window):
     box.setSelected(True)
 
     labels = [a.text() for a in window.build_context_menu(box, QPointF(150, 150)).actions()]
-    assert "Convert polygon" in labels
+    assert "Convert to Polygon" in labels
 
     window.rectangle_to_polygon(box)
     shape = [i for i in markups(window) if isinstance(i, PolyItem)][-1]
@@ -5981,21 +5999,23 @@ def test_reshaping_can_be_undone(window):
     assert not shape.is_rounded(1)
 
 
-def test_every_drawing_tool_is_on_the_insert_menu(window):
-    """Not only on the toolbar: findable by reading, as a menu bar is for."""
+def test_every_drawing_tool_is_on_the_tools_menu(window):
+    """Not only on the toolbar: findable by reading, as a menu bar is for —
+    in Bluebeam's Tools menu, under Markup and Measure."""
     from calcforge.ui.tools import NONE, tools_in
 
     insert = None
     for entry in window.menuBar().actions():
-        if entry.text() == "&Insert":
+        if entry.text() == "&Tools":
             insert = entry.menu()
     assert insert is not None
     subs = {a.text(): a.menu() for a in insert.actions() if a.menu()}
-    assert "Markup" in subs and "Measurement" in subs
+    subs["Measurement"] = subs.get("Measure")
+    assert "Markup" in subs and subs["Measurement"] is not None
     drawn = [a.text() for a in subs["Markup"].actions()]
     for tool in tools_in("Draw"):
         if tool.mode != NONE:
-            assert tool.label in drawn, f"{tool.label} is not on Insert ▸ Markup"
+            assert tool.label in drawn, f"{tool.label} is not on Tools ▸ Markup"
     measured = [a.text() for a in subs["Measurement"].actions()]
     for tool in tools_in("Measure"):
         if tool.mode != NONE:
@@ -6034,7 +6054,7 @@ def test_paste_page_is_greyed_out_with_nothing_to_paste(window):
 
     QApplication.clipboard().setText("")
     paste = [a for a in window.page_menu(0).actions()
-             if a.text().startswith("Paste page")]
+             if a.text().startswith("Paste Page")]
     assert paste and not any(a.isEnabled() for a in paste)
 
 
@@ -6174,7 +6194,7 @@ def test_an_inserted_pdf_page_comes_in_without_a_grid(window, tmp_path):
 
 def test_the_page_grid_is_on_the_page_menu_and_undoes(window):
     labels = [a.text() for a in window.page_menu(0).actions()]
-    assert "Page grid" in labels
+    assert "Page Grid" in labels
 
     window.set_page_grid(0, True)
     assert window.document.pages[0].grid is True
@@ -6237,10 +6257,10 @@ def test_a_page_can_be_left_out_of_the_header_and_footer(window):
 
 def test_the_header_and_footer_are_on_the_page_menu(window):
     subs = {a.text(): a.menu() for a in window.page_menu(0).actions() if a.menu()}
-    assert "Header/footer" in subs
-    labels = [a.text() for a in subs["Header/footer"].actions()]
-    assert "Show header" in labels
-    assert "Show footer" in labels
+    assert "Header/Footer" in subs
+    labels = [a.text() for a in subs["Header/Footer"].actions()]
+    assert "Show Header" in labels
+    assert "Show Footer" in labels
 
 
 def _wheel_over(widget, notches: int, modifiers=Qt.NoModifier):
@@ -6377,7 +6397,7 @@ def test_find_a_tool_is_on_the_help_menu(window):
     for entry in window.menuBar().actions():
         if entry.text() == "&Help":
             labels = [a.text() for a in entry.menu().actions()]
-    assert "Search…" in labels
+    assert "Find Tools + Commands" in labels
     assert window.act_find_tool.shortcut().toString() == "Shift+F1"
 
 
@@ -6407,7 +6427,7 @@ def test_search_lists_commands_and_markups_too(window):
     assert "Tool" in kinds and any(k.startswith("Markup") for k in kinds)
     labels = [label for label, kind, _t in window.search_everything("split")
               if kind == "Command"]
-    assert any(label.startswith("Split view") for label in labels)
+    assert any(label.startswith("Split View") for label in labels)
 
 
 # ---------------------------------------------------------------------------
@@ -6511,6 +6531,7 @@ def test_the_line_and_hatch_lists_are_in_the_properties_panel(window):
         window.properties_panel.findChild(QComboBox).parent()))] if False else []
     boxes = window.properties_panel.findChildren(QComboBox)
     entries = [[b.itemText(i) for i in range(b.count())] for b in boxes]
+    entries = [[text.lower() for text in e] for e in entries]
     assert any("centre" in e for e in entries), "the line types should be there"
     assert any("diagonal cross" in e for e in entries), "the hatches should be there"
 
@@ -6531,7 +6552,7 @@ def test_line_and_hatch_choices_have_real_pattern_previews(window):
     assert not line.itemIcon(line.findData("solid")).isNull()
     assert (line.itemIcon(line.findData("solid")).pixmap(solid).toImage()
             != line.itemIcon(line.findData("dash")).pixmap(solid).toImage())
-    assert hatch.itemText(hatch.findData("")) == "plain"
+    assert hatch.itemText(hatch.findData("")) == "None"          # Bluebeam's word
     assert (hatch.itemIcon(hatch.findData("")).pixmap(hatch.iconSize()).toImage()
             != hatch.itemIcon(hatch.findData("diagonal cross")).pixmap(
                 hatch.iconSize()).toImage())
@@ -6690,8 +6711,8 @@ def test_the_grid_and_snap_buttons_are_on_the_bar(window):
     assert not window.document.settings.snap_to_grid
 
     labels = [action.text() for action in window.status_snap.menu().actions()]
-    assert labels == ["Grid snap", "Markup snap", "PDF snap", "Align markups",
-                      "Align PDF"]
+    assert labels == ["Snap to Grid", "Snap to Markup", "Snap to Content", "Align to Markups",
+                      "Align to Content"]
 
 
 def test_the_snap_dropdown_toggles_a_target_through_qt(window):
@@ -7066,13 +7087,13 @@ def test_the_properties_panel_says_where_it_is_and_how_big(window):
 
     groups = {g.title(): g for g in
               window.properties_panel.findChildren(QGroupBox)}
-    assert "Position and size" in groups
-    labels = [w.text().rstrip(":") for w in groups["Position and size"].findChildren(
-        type(groups["Position and size"].findChild(QLabel)))]
+    assert "Layout" in groups
+    labels = [w.text().rstrip(":") for w in groups["Layout"].findChildren(
+        type(groups["Layout"].findChild(QLabel)))]
     for wanted in ("X", "Y", "Width", "Height", "Rotation"):
         assert wanted in labels, f"{wanted} should be in the panel"
 
-    spins = groups["Position and size"].findChildren(QDoubleSpinBox)
+    spins = groups["Layout"].findChildren(QDoubleSpinBox)
     # It reads what is actually there, in millimetres.
     assert spins[0].value() == pytest.approx(box.pos().x() * PT_TO_MM, abs=0.1)
     assert spins[2].value() == pytest.approx(
@@ -7090,7 +7111,7 @@ def test_typing_a_number_moves_and_resizes_it(window):
     window.properties_panel.show_items([box])
     groups = {g.title(): g for g in
               window.properties_panel.findChildren(QGroupBox)}
-    spins = groups["Position and size"].findChildren(QDoubleSpinBox)
+    spins = groups["Layout"].findChildren(QDoubleSpinBox)
 
     spins[0].setValue(40.0)                       # 40 mm in from the left
     assert box.pos().x() == pytest.approx(40.0 * MM_TO_PT, abs=0.5)
@@ -7113,7 +7134,7 @@ def test_a_markup_that_cannot_be_resized_is_not_asked_about_its_size(window):
     window.properties_panel.show_items([flag])
     groups = {g.title(): g for g in
               window.properties_panel.findChildren(QGroupBox)}
-    spins = groups["Position and size"].findChildren(QDoubleSpinBox)
+    spins = groups["Layout"].findChildren(QDoubleSpinBox)
     assert len(spins) == 2                        # only X and Y
 
 
@@ -7633,11 +7654,11 @@ def test_the_snaps_are_on_the_view_menu(window):
     for entry in window.menuBar().actions():
         if entry.text() == "&View":
             labels = [a.text() for a in entry.menu().actions()]
-    assert "Grid snap" in labels
-    assert "Markup snap" in labels
-    assert "PDF snap" in labels
-    assert "Align markups" in labels
-    assert "Align PDF" in labels
+    assert "Snap to Grid" in labels
+    assert "Snap to Markup" in labels
+    assert "Snap to Content" in labels
+    assert "Align to Markups" in labels
+    assert "Align to Content" in labels
 
 
 # ---------------------------------------------------------------------------
@@ -8002,20 +8023,20 @@ def test_the_menu_says_how_many_pages_it_is_about(window):
     labels = [a.text() for a in actions]
     # Two-word labels; how many pages the command is about is in the tooltip,
     # so a command about six sheets still cannot read as being about one.
-    assert "Delete pages" in labels
-    assert "Duplicate pages" in labels
-    assert "Copy pages" in labels
+    assert "Delete Pages" in labels
+    assert "Duplicate Pages" in labels
+    assert "Copy Pages" in labels
     tips = {a.text(): a.toolTip() for a in actions}
-    assert tips["Delete pages"] == "Delete these 2 pages"
-    assert tips["Duplicate pages"] == "Duplicate these 2 pages"
-    assert tips["Copy pages"] == "Copy these 2 pages"
+    assert tips["Delete Pages"] == "Delete these 2 pages"
+    assert tips["Duplicate Pages"] == "Duplicate these 2 pages"
+    assert tips["Copy Pages"] == "Copy these 2 pages"
 
     _pick_pages(window, [1])
     actions = window.page_menu(1).actions()
     labels = [a.text() for a in actions]
     tips = {a.text(): a.toolTip() for a in actions}
-    assert "Delete page" in labels
-    assert tips["Delete page"] == "Delete page"
+    assert "Delete Page" in labels
+    assert tips["Delete Page"] == "Delete page"
 
 
 # ---------------------------------------------------------------------------
@@ -8351,12 +8372,12 @@ def test_property_mode_is_greyed_out_for_what_cannot_use_it(window):
     _kept(window, markups(window)[0])
     panel = window.toolsets_panel
     panel.select_entry(toolsets.MY_TOOLS, 0)
-    offered = [a for a in panel.build_menu().actions() if a.text() == "Property mode"]
+    offered = [a for a in panel.build_menu().actions() if a.text() == "Properties Mode"]
     assert offered and offered[0].isEnabled(), "a rectangle can be drawn again"
 
     entry = panel.current_entry()
     entry.payload = dict(entry.payload, type="image")
-    offered = [a for a in panel.build_menu().actions() if a.text() == "Property mode"]
+    offered = [a for a in panel.build_menu().actions() if a.text() == "Properties Mode"]
     assert offered and not offered[0].isEnabled()
     assert "only makes sense" in offered[0].toolTip()
 
@@ -9367,8 +9388,8 @@ def test_an_image_offers_replace_on_its_right_click_menu(window, tmp_path, monke
     drag(window.view, 100, 100, 300, 240)
     image = next(i for i in markups(window) if isinstance(i, ImageItem))
     menu = window.build_context_menu(image, image.sceneBoundingRect().center())
-    swap = next(a.menu() for a in menu.actions() if a.text() == "Replace image")
-    assert [a.text() for a in swap.actions()] == ["From file…", "From clipboard"]
+    swap = next(a.menu() for a in menu.actions() if a.text() == "Replace Image")
+    assert [a.text() for a in swap.actions()] == ["From File…", "From Clipboard"]
 
 
 # ---------------------------------------------------------------------------
@@ -9676,8 +9697,14 @@ def test_every_cloud_has_a_cloud_size(window):
     window.refresh_selection()
     size = window.properties_panel.findChild(QDoubleSpinBox, "cloudSize")
     assert size is not None
-    size.setValue(20.0)
-    assert cloud.cloud_radius == 20.0
+    size.setValue(3.5)
+    assert cloud.cloud_size == 3.5
+    from PySide6.QtWidgets import QCheckBox
+    invert = window.properties_panel.findChild(QCheckBox, "cloudInvert")
+    before = cloud.hatch_region().boundingRect()
+    invert.setChecked(True)
+    assert cloud.cloud_invert, "Bluebeam's Invert: scallops turned inward"
+    assert cloud.hatch_region().boundingRect().width() < before.width()
 
 
 def test_adding_a_leader_carries_the_callouts_own_picture(window):
@@ -9709,7 +9736,7 @@ def test_the_format_painter_carries_the_whole_look_like_bluebeams(window):
     source.style.width, source.style.opacity = 3.0, 0.6
     source.style.line_style, source.style.dash_scale = "dash", 2.0
     source.style.hatch = "brick"
-    source.cloud_radius = 20.0
+    source.cloud_size, source.cloud_invert = 3.0, True
     frame.add_markup(source, QPointF(50, 50))
     other_cloud = RectItem("cloud")
     other_cloud.set_local_rect(QRectF(0, 0, 80, 50))
@@ -9729,7 +9756,7 @@ def test_the_format_painter_carries_the_whole_look_like_bluebeams(window):
     assert (style.stroke, style.fill, style.width, style.opacity) == \
         ("#aa0000", "#00aa00", 3.0, 0.6)
     assert (style.line_style, style.dash_scale, style.hatch) == ("dash", 2.0, "brick")
-    assert other_cloud.cloud_radius == 20.0
+    assert (other_cloud.cloud_size, other_cloud.cloud_invert) == (3.0, True)
     assert other_cloud.local_rect() == size_before       # never the size
     assert window.paint_format_onto(words)               # a second markup
     assert words.style.stroke == "#aa0000" and words.text() == "keep me"

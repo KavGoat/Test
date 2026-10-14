@@ -16,43 +16,49 @@ DARK = "dark"
 # ---------------------------------------------------------------------------
 
 _LIGHT_TOKENS = {
-    "chrome": "#f4f6f8",          # toolbars, menu bar, dock titles
-    "chrome_edge": "#dce1e7",     # the hairline between bands
-    "surface": "#eef1f4",         # window behind the panels
+    # Bluebeam Revu 21's light look: grey chrome, white fields, Revu's blue
+    "chrome": "#f0f0f0",          # toolbars, menu bar, dock titles
+    "chrome_edge": "#d4d5d6",     # the hairline between bands
+    "surface": "#f0f0f0",         # window behind the panels
     "field": "#ffffff",           # anything you can type into
-    "field_edge": "#c8cfd8",
-    "row_alt": "#f7f9fb",
-    "ink": "#1f2530",
-    "ink_soft": "#5a6472",
-    "ink_faint": "#8a93a2",
-    "accent": "#0b6bcb",          # the one colour the chrome is allowed
-    "accent_soft": "#e4eefb",
-    "accent_edge": "#a9c9ee",
-    "accent_deep": "#cbe0f8",
+    "field_edge": "#a9abad",
+    "row_alt": "#f7f7f7",
+    "ink": "#1e2022",
+    "ink_soft": "#45484b",
+    "ink_faint": "#8a8c8e",
+    "accent": "#1e77bf",          # Revu's blue
+    "accent_soft": "#dbe9f6",
+    "accent_edge": "#9cc3e6",
+    "accent_deep": "#c2dbf1",
     "danger": "#b3261e",
-    "scroll": "#c6cdd7",
-    "scroll_hover": "#a7b1be",
+    "scroll": "#c6c8ca",
+    "scroll_hover": "#a9abad",
     "menu": "#ffffff",
+    "menubar": "#f0f0f0",
 }
 
 _DARK_TOKENS = {
-    "chrome": "#2a2e36",
-    "chrome_edge": "#191c21",
-    "surface": "#22252b",
-    "field": "#1b1e24",
-    "field_edge": "#3a404b",
-    "row_alt": "#242830",
-    "ink": "#e2e7ee",
-    "ink_soft": "#aab3c0",
-    "ink_faint": "#7e8797",
-    "accent": "#4d9be6",
-    "accent_soft": "#2b394d",
-    "accent_edge": "#3f5f8a",
-    "accent_deep": "#334a68",
+    # Bluebeam Revu 21's dark look, from its manual's screenshots: one
+    # charcoal (#1e2022) for bars, panels and fields, fields outlined in
+    # grey, menus a shade lighter with a blue-grey hover, Revu's blue
+    "chrome": "#1e2022",
+    "chrome_edge": "#3c3e40",
+    "surface": "#1e2022",
+    "field": "#1e2022",
+    "field_edge": "#5a5c5e",
+    "row_alt": "#232527",
+    "ink": "#ffffff",
+    "ink_soft": "#c9cacb",
+    "ink_faint": "#8a8c8e",
+    "accent": "#1e77bf",
+    "accent_soft": "#244053",
+    "accent_edge": "#1e77bf",
+    "accent_deep": "#0f527e",
     "danger": "#e5726a",
-    "scroll": "#434a56",
-    "scroll_hover": "#59616f",
-    "menu": "#2a2e36",
+    "scroll": "#3c3e40",
+    "scroll_hover": "#5a5c5e",
+    "menu": "#2d2f31",
+    "menubar": "#000000",
 }
 
 TEMPLATE = """
@@ -101,7 +107,7 @@ QToolBar::separator {{ background: {chrome_edge}; width: 1px; margin: 5px 6px; }
    The padding above leaves it room. */
 
 /* --- menus --------------------------------------------------------------- */
-QMenuBar {{ background: {chrome}; border-bottom: 1px solid {chrome_edge}; }}
+QMenuBar {{ background: {menubar}; border-bottom: 1px solid {chrome_edge}; }}
 QMenuBar::item {{ padding: 5px 11px; background: transparent; }}
 QMenuBar::item:selected {{ background: {accent_soft}; }}
 QMenu {{ background: {menu}; border: 1px solid {field_edge}; padding: 5px; }}
@@ -221,7 +227,12 @@ QTabBar::tab {{
     padding: 6px 14px; color: {ink_soft};
 }}
 QTabBar::tab:hover {{ color: {ink}; }}
-QTabBar::tab:selected {{ color: {accent}; border-bottom: 2px solid {accent}; }}
+QTabBar::tab:selected {{ color: {ink}; border-bottom: 2px solid {accent}; }}
+QTabBar::close-button {{
+    image: url({arrow_close}); subcontrol-position: right; border-radius: 2px;
+    margin: 2px;
+}}
+QTabBar::close-button:hover {{ background: {accent_soft}; }}
 
 /* --- status bar ---------------------------------------------------------- */
 QStatusBar {{ background: {chrome}; border-top: 1px solid {chrome_edge}; }}
@@ -245,12 +256,13 @@ QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
 QSplitter::handle {{ background: {chrome_edge}; }}
 QCheckBox, QRadioButton {{ spacing: 7px; }}
 /* a box you can see in either theme, filled with the accent when ticked */
-QCheckBox::indicator {{
+/* (and the same box in lists and trees: Manage Tool Sets, Layers) */
+QCheckBox::indicator, QAbstractItemView::indicator {{
     width: 13px; height: 13px; border-radius: 3px;
     border: 1px solid {ink_soft}; background: {field};
 }}
-QCheckBox::indicator:hover {{ border-color: {accent}; }}
-QCheckBox::indicator:checked {{
+QCheckBox::indicator:hover, QAbstractItemView::indicator:hover {{ border-color: {accent}; }}
+QCheckBox::indicator:checked, QAbstractItemView::indicator:checked {{
     background: {accent}; border-color: {accent}; image: url("{arrow_tick}");
 }}
 QCheckBox::indicator:disabled {{ border-color: {chrome_edge}; background: {surface}; }}
@@ -277,6 +289,27 @@ QSlider::handle:horizontal {{
     background: {accent}; width: 12px; margin: -5px 0; border-radius: 6px;
 }}
 QMenu::icon {{ padding-left: 6px; }}
+
+/* --- Bluebeam's Properties panel: sections with a chevron, no box ------- */
+QGroupBox#propSection {{
+    border: 0; background: transparent; margin-top: 24px; font-weight: 600;
+}}
+QGroupBox#propSection::title {{
+    subcontrol-origin: margin; subcontrol-position: top left; left: 2px;
+    padding: 3px 4px; color: {ink}; font-size: 13px;
+}}
+QGroupBox#propSection::indicator {{ width: 12px; height: 12px; }}
+QGroupBox#propSection::indicator:checked {{ image: url({arrow_chev_down}); }}
+QGroupBox#propSection::indicator:unchecked {{ image: url({arrow_chev_right}); }}
+QLabel#propHeading {{ font-size: 14px; padding: 2px 2px 4px 2px; }}
+
+/* --- Bluebeam's Tool Chest: set bars, tools on a light ground ----------- */
+QListWidget#toolGrid {{ background: #e4e5e6; border: 0; border-radius: 0; }}
+QListWidget#toolGrid::item {{ border-radius: 2px; }}
+QListWidget#toolGrid::item:hover {{ background: #cfd6de; }}
+QListWidget#toolGrid::item:selected {{ background: #b9cde3; }}
+QLabel#toolSetName {{ color: {ink}; font-weight: 600; }}
+QTreeWidget#toolChestTree::item {{ padding: 0; }}
 QLabel:disabled {{ color: {ink_faint}; }}
 """
 
@@ -295,6 +328,16 @@ def _arrow_files(ink: str, name: str) -> dict:
     drawings = {way: ('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" '
                       f'viewBox="0 0 10 10"><polygon points="{points}" '
                       f'fill="{ink}"/></svg>') for way, points in shapes.items()}
+    # Bluebeam's section chevrons (the Properties panel): open, folded
+    for way, points in (("chev_down", "2,4.5 6,8.5 10,4.5"), ("chev_right", "4.5,2 8.5,6 4.5,10")):
+        drawings[way] = ('<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" '
+                         f'viewBox="0 0 12 12"><polyline points="{points}" fill="none" '
+                         f'stroke="{ink}" stroke-width="1.4" stroke-linecap="round" '
+                         'stroke-linejoin="round"/></svg>')
+    # a tab's close cross, Bluebeam's plain ×
+    drawings["close"] = ('<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" '
+                         f'viewBox="0 0 12 12"><path d="M3 3 L9 9 M9 3 L3 9" fill="none" '
+                         f'stroke="{ink}" stroke-width="1.3" stroke-linecap="round"/></svg>')
     # a ticked box's tick, white on the accent
     drawings["tick"] = ('<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" '
                         'viewBox="0 0 12 12"><polyline points="2.5,6.5 5,9 9.5,3" '

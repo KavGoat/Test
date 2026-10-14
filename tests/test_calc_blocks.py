@@ -77,7 +77,7 @@ def test_block_on_the_toolbar_wraps_the_selected_equations(v):
 def test_self_contained_keeps_the_blocks_names_inside_it(v):
     block, outside, inside, after = two_checks(v)
     menu = v.window.build_context_menu(block, block.sceneBoundingRect().topLeft())
-    (toggle,) = [a for a in menu.actions() if a.text() == "Self-contained"]
+    (toggle,) = [a for a in menu.actions() if a.text() == "Self-Contained"]
     toggle.trigger()
     settle(v.window)
     assert block.self_contained
@@ -394,10 +394,10 @@ def test_a_blocks_menu_and_properties_offer_what_applies_to_it(v):
     block, outside, inside, after = two_checks(v)
     menu = v.window.build_context_menu(block, block.sceneBoundingRect().center())
     texts = [a.text() for a in menu.actions() if a.text()]
-    for wanted in ("Self-contained", "Select its equations", "Remove block, keep equations",
+    for wanted in ("Self-Contained", "Select Its Equations", "Remove Block, Keep Equations",
                    "Delete", "Properties"):
         assert wanted in texts, wanted
-    for gone in ("Set default", "Format painter", "Hide", "Flatten selection", "Apply pages…"):
+    for gone in ("Set as Default", "Format Painter", "Hide", "Flatten Selection", "Apply to Pages…"):
         assert gone not in texts, gone
     v.view.scene().clearSelection()
     block.setSelected(True)
@@ -422,7 +422,7 @@ def test_an_equation_has_no_markup_pen_in_properties(v):
     assert "Appearance" not in titles and "Equation" in " ".join(titles)
     menu = v.window.build_context_menu(inside[0], inside[0].sceneBoundingRect().center())
     texts = [a.text() for a in menu.actions() if a.text()]
-    assert "Format painter" not in texts and "Hide" not in texts
+    assert "Format Painter" not in texts and "Hide" not in texts
 
 
 def test_a_closed_blocks_equation_points_and_right_clicks_as_the_block(v):
@@ -433,7 +433,7 @@ def test_a_closed_blocks_equation_points_and_right_clicks_as_the_block(v):
     hover(v.view, centre.x(), centre.y())
     assert v.view.cursor().shape() != Qt.IBeamCursor
     menu = v.window.build_context_menu(v.view.markup_at(centre), centre)
-    assert "Self-contained" in [a.text() for a in menu.actions()]
+    assert "Self-Contained" in [a.text() for a in menu.actions()]
     open_by_double_click(v, block)
     assert v.calc.hover_cursor(centre) == Qt.ArrowCursor, "open: the equation's own"
 

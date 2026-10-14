@@ -415,26 +415,32 @@ def test_every_icon_on_the_window_is_redrawn_for_the_theme(window):
     """An icon set once and forgotten keeps its old ink and vanishes."""
     from PySide6.QtGui import QAction
 
+    from calcforge.app import current_theme
+    from calcforge.theme import DARK
+    started_dark = current_theme() == DARK          # Revu's default (2026-10-14)
     before = {action: _icon_pixels(action) for action in window._icon_names}
-    window.toggle_theme(True)
+    window.toggle_theme(not started_dark)
     try:
         changed = [action for action in before
                    if _icon_pixels(action) != before[action]]
         assert len(changed) == len(before), \
-            f"{len(before) - len(changed)} icon(s) kept their light-theme ink"
+            f"{len(before) - len(changed)} icon(s) kept the other theme's ink"
     finally:
-        window.toggle_theme(False)
+        window.toggle_theme(started_dark)
 
 
 def test_undo_and_redo_are_among_them(window):
     assert window.act_undo in window._icon_names
     assert window.act_redo in window._icon_names
+    from calcforge.app import current_theme
+    from calcforge.theme import DARK
+    started_dark = current_theme() == DARK
     before = _icon_pixels(window.act_undo)
-    window.toggle_theme(True)
+    window.toggle_theme(not started_dark)
     try:
         assert _icon_pixels(window.act_undo) != before
     finally:
-        window.toggle_theme(False)
+        window.toggle_theme(started_dark)
 
 
 def test_no_action_with_an_icon_was_left_out(window):
@@ -452,20 +458,21 @@ def test_there_is_one_shortcuts_window_not_two(window):
     labels = [entry.text().replace("&", "")
               for top in window.menuBar().actions()
               for entry in top.menu().actions()]
-    assert labels.count("Shortcuts…") == 1
-    assert "Keyboard shortcuts" not in labels
+    assert labels.count("Keyboard Shortcuts…") == 1
+    assert "Shortcuts…" not in labels
 
 
-def test_preferences_and_shortcuts_live_under_settings(window):
+def test_preferences_and_shortcuts_live_under_the_revu_menu(window):
+    """Bluebeam keeps Preferences and Keyboard Shortcuts in its Revu menu."""
     menus = {action.text().replace("&", ""): action.menu()
              for action in window.menuBar().actions()}
-    assert "Settings" in menus
-    labels = [action.text() for action in menus["Settings"].actions()]
-    assert labels == ["Preferences…", "Shortcuts…"]
+    assert "Revu" in menus and "Settings" not in menus
+    labels = [action.text() for action in menus["Revu"].actions() if action.text()]
+    assert labels == ["About CalcForge", "Preferences…", "Keyboard Shortcuts…", "Exit"]
     edit = [action.text() for action in menus["Edit"].actions()]
     help_labels = [action.text() for action in menus["Help"].actions()]
     assert "Preferences…" not in edit
-    assert "Shortcuts…" not in help_labels
+    assert "Keyboard Shortcuts…" not in help_labels
 
 
 def test_rail_icons_can_be_reordered_top_to_bottom(window):

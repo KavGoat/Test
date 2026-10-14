@@ -15,6 +15,7 @@ class ImageItem(MarkupItem):
 
     TYPE = "image"
     NAME = "Image"
+    SCALE_BOX = True               # Bluebeam's scale box round it
 
     def __init__(self, asset_key: str = "", rect: Optional[QRectF] = None):
         super().__init__()

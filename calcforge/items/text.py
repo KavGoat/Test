@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (QGraphicsItem, QGraphicsTextItem,
                                QInputDialog, QMenu, QStyle,
                                QStyleOptionGraphicsItem)
 
-from .base import HANDLE_SIZE, MarkupItem, Style, arrow_path, register_item
+from .base import CLOUD_SIZE, HANDLE_SIZE, MarkupItem, Style, draw_head, register_item
 
 STAMP_PRESETS = {
     "APPROVED": "#2f9e44",
@@ -878,7 +878,8 @@ class _TextBase(MarkupItem):
                 painter.save()
                 round_the_joins(painter)
                 painter.drawPath(cloud_path(QPolygonF(list(leader.cloud)),
-                                            self.cloud_radius_of(leader)))
+                                            self.cloud_radius_of(leader),
+                                            inverted=self.cloud_invert))
                 painter.restore()
                 continue
             if self.style.arrow_end != "none":
@@ -886,14 +887,14 @@ class _TextBase(MarkupItem):
                 colour = QColor(pen.color())
                 colour.setAlphaF(self.style.opacity)
                 painter.setBrush(QBrush(colour))
-                painter.drawPath(arrow_path(tip, angle,
+                draw_head(painter, tip, angle,
                                             max(self.style.width * 4.5, 8.0)
                                             * max(self.style.arrow_size, 0.1),
-                                            self.style.arrow_end))
+                                            self.style.arrow_end)
 
     def cloud_radius_of(self, _leader) -> float:
         """How big the puffs on a cloud leader are."""
-        return getattr(self, "cloud_radius", 9.0)
+        return self.cloud_radius
 
     def tip_of(self, leader) -> QPointF:
         """Where the leader's line ends.
@@ -1345,7 +1346,7 @@ class CalloutItem(_TextBase):
                  leader: Optional[list[QPointF]] = None, shape: str = "box"):
         super().__init__(text, rect)
         self.shape_kind = shape if shape in self.SHAPES else "box"
-        self.cloud_radius = 9.0
+        self.cloud_size = CLOUD_SIZE
         # The region a cloud call-out is about lives on the leader that points
         # at it, not on the call-out — because a call-out can have several
         # leaders, and each of them is either an arrow at a place or a cloud
@@ -1474,7 +1475,7 @@ class CalloutItem(_TextBase):
             from .base import cloud_path, round_the_joins
             round_the_joins(painter)
             painter.drawPath(cloud_path(self.cloud_polygon_of(rect),
-                                        self.cloud_radius))
+                                        self.cloud_radius, inverted=self.cloud_invert))
         else:
             painter.drawRoundedRect(rect, self.style.corner_radius,
                                     self.style.corner_radius)
@@ -1541,7 +1542,7 @@ class CalloutItem(_TextBase):
     def serialize(self) -> dict:
         data = super().serialize()
         data["shape_kind"] = self.shape_kind
-        data["cloud_radius"] = self.cloud_radius
+        self.cloud_to_dict(data)
         if not self.box_border:
             data["box_border"] = False
         # The region travels on its leader now. This is written as well so a
@@ -1553,7 +1554,7 @@ class CalloutItem(_TextBase):
     def deserialize(self, data: dict) -> None:
         super().deserialize(data)
         self.shape_kind = data.get("shape_kind", "box")
-        self.cloud_radius = float(data.get("cloud_radius", 9.0))
+        self.cloud_from_dict(data)
         self.box_border = bool(data.get("box_border", True))
         if self.clouds_a_region():
             return                    # it came in on its leader, as it should

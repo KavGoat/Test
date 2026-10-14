@@ -1,5 +1,6 @@
 """Real process rendering, cancellation, cache reuse and shutdown regressions."""
 import multiprocessing
+import sys
 import os
 import time
 
@@ -218,3 +219,48 @@ def test_reference_pdf_matches_at_overview_and_detail_zooms(qapp):
     finally:
         worker.stop()
         assert worker.wait(5000)
+
+
+# -- a renderer ends with the application, even mid-page (2026-10-14) ----------
+
+def _stuck_renderer():
+    """A renderer that never finishes its page."""
+    from calcforge.io.pdfrender import _die_with_parent
+    _die_with_parent()
+    end = time.time() + 60
+    while time.time() < end:
+        sum(range(10000))
+
+
+def _application(found):
+    import multiprocessing
+    child = multiprocessing.get_context("spawn").Process(target=_stuck_renderer, daemon=False)
+    child.start()
+    found.put(child.pid)
+    time.sleep(60)
+
+
+def _gone(pid: int) -> bool:
+    try:
+        with open(f"/proc/{pid}/stat") as stat:
+            return stat.read().split(")")[-1].split()[0] in ("Z", "X")
+    except OSError:
+        return True
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="reads /proc")
+def test_a_renderer_dies_with_the_application_even_mid_page():
+    import multiprocessing
+    import signal
+    context = multiprocessing.get_context("spawn")
+    found = context.Queue()
+    application = context.Process(target=_application, args=(found,))
+    application.start()
+    renderer = found.get(timeout=60)
+    assert not _gone(renderer)
+    os.kill(application.pid, signal.SIGKILL)               # a crash, or the task manager
+    application.join(10)
+    deadline = time.time() + 10
+    while not _gone(renderer) and time.time() < deadline:
+        time.sleep(0.1)
+    assert _gone(renderer), "the renderer outlived the application"

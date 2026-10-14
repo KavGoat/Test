@@ -2221,6 +2221,7 @@ class PageView(QGraphicsView):
             self.begin_snapshot()
             item = self.create_item(tool, point)
             if item is not None:
+                self.window.remember_recent(item)
                 self.commit_snapshot(f"Add {tool.label.lower()}")
             self.finish_tool()
             event.accept()
@@ -2397,8 +2398,7 @@ class PageView(QGraphicsView):
                 # Images and snapshots protect their proportions by default;
                 # Shift is the deliberate exception that releases the lock.
                 keep_ratio = not keep_ratio
-            self._handle_item.move_handle(self._handle_key, local,
-                                          keep_ratio)
+            self._handle_item.drag_handle(self._handle_key, local, keep_ratio)
             if isinstance(self._handle_item, MeasureItem):
                 self._handle_item.refresh(page=self.page_of(self._handle_item))
             event.accept()
@@ -3479,6 +3479,7 @@ class PageView(QGraphicsView):
         self.scene().clearSelection()
         item.setSelected(True)
         self.selectionChanged.emit()
+        self.window.remember_recent(item)
         self.commit_snapshot(f"Add {tool.label.lower()}")
         self.finish_tool()
         self.begin_item_edit(item)
@@ -3636,6 +3637,7 @@ class PageView(QGraphicsView):
         if isinstance(draft, MeasureItem):
             if draft.kind != DIMENSION:
                 note_scale = True
+        self.window.remember_recent(draft)
         self.commit_snapshot(f"Add {tool.label.lower()}")
 
         if isinstance(draft, MeasureItem) and draft.kind == DIMENSION \
@@ -3707,6 +3709,7 @@ class PageView(QGraphicsView):
         draft.refresh(page=self.page())
         self.scene().clearSelection()
         draft.setSelected(True)
+        self.window.remember_recent(draft)
         self.commit_snapshot(f"Add {tool.label.lower()}")
         self.selectionChanged.emit()
         self.finish_tool()
@@ -3740,6 +3743,7 @@ class PageView(QGraphicsView):
         target.update()
         self.scene().clearSelection()
         target.setSelected(True)
+        self.window.remember_recent(target)
         self.commit_snapshot(f"Add {tool.label.lower()}")
         self.selectionChanged.emit()
         # A measurement says what is left; a plain shape has no total to say.

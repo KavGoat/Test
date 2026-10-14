@@ -114,9 +114,40 @@ class Renderer:
         return engine.raster_from(drawing, region, scale, alpha=True)
 
 
+def _die_with_parent() -> None:
+    """End this renderer when the application does, however it ends.
+
+    A renderer waiting for its next job notices at once — its pipe closes —
+    but one in the middle of a page that takes MuPDF minutes went on drawing
+    it after a crash or a kill, three of them keeping a core and a half busy
+    for good (2026-10-14). On Linux the kernel ends it with its parent; and
+    everywhere a watcher looks every second, between MuPDF's calls."""
+    import multiprocessing
+    import sys
+    import threading
+    parent = multiprocessing.parent_process()
+    if sys.platform.startswith("linux"):
+        try:
+            import ctypes
+            import signal
+            PR_SET_PDEATHSIG = 1
+            ctypes.CDLL("libc.so.6", use_errno=True).prctl(PR_SET_PDEATHSIG, signal.SIGKILL)
+        except (OSError, AttributeError):
+            pass
+    if parent is None:
+        return
+
+    def watch():
+        while parent.is_alive():
+            time.sleep(1.0)
+        os._exit(0)
+    threading.Thread(target=watch, name="parent watch", daemon=True).start()
+
+
 def serve(connection, memory_name, memory_size):
     """One persistent renderer. The parent assigns at most one job at a time."""
     from multiprocessing.shared_memory import SharedMemory
+    _die_with_parent()
     memory = SharedMemory(name=memory_name)
     renderer = Renderer()
     try:

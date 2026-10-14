@@ -170,13 +170,11 @@ def test_opacity_has_keyboard_and_step_buttons(window):
     item.setSelected(True)
     window.refresh_selection()
     assert not window.properties_panel.findChildren(QSlider)
-    controls = [spin for spin in window.properties_panel.findChildren(QSpinBox)
-                if spin.suffix().strip() == "%"]
-    assert controls
-    # the overall one (Fill % now sits by the fill colour, before it)
-    from PySide6.QtWidgets import QWidget
-    overall = window.properties_panel.findChild(QWidget, "overallOpacity")
-    spin = overall.findChild(QSpinBox)
+    # Bluebeam's Opacity and Fill Opacity: 0 to 100, typed or stepped
+    controls = [window.properties_panel.findChild(QSpinBox, name)
+                for name in ("overallOpacity", "fillOpacity")]
+    assert all(controls) and all(spin.maximum() == 100 for spin in controls)
+    spin = controls[0]
     before = spin.value()
     QTest.keyClick(spin, Qt.Key_Down)
     assert spin.value() == before - 1

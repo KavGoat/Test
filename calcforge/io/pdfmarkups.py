@@ -270,7 +270,10 @@ def _one(source, annotation: dict, kind: str, place, scale: float,
         shape = "ellipse" if kind == "Circle" else "rect"
         if _is_cloudy(source, annotation):
             shape = "cloud"
-        return [_shape("rect", shape, inside, style, common)]
+        made = _shape("rect", shape, inside, style, common)
+        if shape == "cloud":
+            _cloud_size(source, annotation, made, style, scale)
+        return [made]
     if kind == "FreeText":
         return [_free_text(source, annotation, box, style, common, place,
                            scale, intent)]
@@ -295,7 +298,9 @@ def _one(source, annotation: dict, kind: str, place, scale: float,
         if len(points) >= 2:
             _line_endings(source, annotation, style)
             if _is_cloudy(source, annotation) or intent == "PolygonCloud":
-                return [_line("cloud", points, style, common)]
+                made = _line("cloud", points, style, common)
+                _cloud_size(source, annotation, made, style, scale)
+                return [made]
             if intent in ("PolygonDimension", "PolyLineDimension"):
                 return [_take_off(points, style, common, intent)]
             made = _line("polyline" if kind == "PolyLine" else "polygon",
@@ -539,6 +544,27 @@ def _text(kind: str, box: list, style: dict, common: dict) -> dict:
     return payload
 
 
+def _cloud_size(source, annotation: dict, made: dict, style: dict, scale: float) -> None:
+    """The cloud's Size: its border effect's intensity (Bluebeam writes its
+    Size there), scallops as big as other readers draw them."""
+    effect = source.resolve(annotation.get("BE"))
+    if not isinstance(effect, dict):
+        return
+    try:
+        intensity = float(source.resolve(effect.get("I")) or 0.0)
+    except (TypeError, ValueError):
+        return
+    if intensity <= 0:
+        return
+    from ..items.base import cloud_radius_for, cloud_size_for
+    width = float(style.get("width", 0.0))
+    if abs(scale - 1.0) < 1e-6:
+        made["cloud_size"] = intensity
+    else:
+        radius = cloud_radius_for(intensity, width / max(scale, 1e-6)) * scale
+        made["cloud_size"] = cloud_size_for(radius, width)
+
+
 def _is_cloudy(source, annotation: dict) -> bool:
     """A cloudy border effect: what a PDF calls a revision cloud."""
     effect = source.resolve(annotation.get("BE"))
@@ -550,8 +576,8 @@ def _is_cloudy(source, annotation: dict) -> bool:
 INCOMING_ENDINGS = {
     "None": "none", "ClosedArrow": "arrow", "OpenArrow": "open",
     "Circle": "dot", "Square": "square", "Diamond": "diamond",
-    "Slash": "slash", "Butt": "none", "RClosedArrow": "arrow",
-    "ROpenArrow": "open",
+    "Slash": "slash", "Butt": "butt", "RClosedArrow": "closed_reversed",
+    "ROpenArrow": "open_reversed",
 }
 
 

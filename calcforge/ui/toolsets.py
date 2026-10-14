@@ -27,6 +27,8 @@ from ..settings import app_settings
 DEFAULTS_KEY = "markups/defaults"
 TOOLSETS_KEY = "toolsets/sets"
 MY_TOOLS = "My Tools"
+RECENT_TOOLS = "Recent Tools"   # Bluebeam's: the markups last drawn, newest first
+MAX_RECENTS = 10
 
 COPY = "copy"                # put back exactly what was added
 PROPERTIES = "properties"    # draw a new one wearing its properties
@@ -159,14 +161,19 @@ class ToolSet:
 
     name: str
     entries: list = field(default_factory=list)
+    hidden: bool = False      # unticked in Manage Tool Sets: kept, not shown
 
     def to_dict(self) -> dict:
-        return {"name": self.name, "entries": [e.to_dict() for e in self.entries]}
+        data = {"name": self.name, "entries": [e.to_dict() for e in self.entries]}
+        if self.hidden:
+            data["hidden"] = True
+        return data
 
     @classmethod
     def from_dict(cls, data: dict) -> "ToolSet":
         return cls(str(data.get("name", "Tools")),
-                   [ToolEntry.from_dict(entry) for entry in data.get("entries", [])])
+                   [ToolEntry.from_dict(entry) for entry in data.get("entries", [])],
+                   bool(data.get("hidden", False)))
 
 
 def load_toolsets() -> list:
@@ -178,8 +185,32 @@ def load_toolsets() -> list:
         sets = []
     if not any(group.name == MY_TOOLS for group in sets):
         sets.insert(0, ToolSet(MY_TOOLS))
-    sets.sort(key=lambda group: 0 if group.name == MY_TOOLS else 1)
+    sets.sort(key=lambda group: 0 if group.name == MY_TOOLS
+              else (1 if group.name == RECENT_TOOLS else 2))
     return sets
+
+
+def remember_recent(item) -> bool:
+    """Bluebeam's Recent Tools: the markup just drawn, its look kept as a
+    tool at the top of the set (one of each look), at most ten. True when
+    the set changed."""
+    entry = entry_for(item, PROPERTIES if can_be_properties(item.serialize()) else COPY)
+    if entry.mode != PROPERTIES:
+        return False                     # only looks to draw again, not contents
+    sets = load_toolsets()
+    recent = next((g for g in sets if g.name == RECENT_TOOLS), None)
+    if recent is None:
+        recent = ToolSet(RECENT_TOOLS)
+        sets.insert(1, recent)
+
+    def same(a, b) -> bool:
+        keep = ("type", "kind", "style", "cloud_size", "cloud_invert")
+        return all(a.payload.get(k) == b.payload.get(k) for k in keep)
+    recent.entries = [e for e in recent.entries if not same(e, entry)]
+    recent.entries.insert(0, entry)
+    del recent.entries[MAX_RECENTS:]
+    save_toolsets(sets)
+    return True
 
 
 def save_toolsets(sets: list) -> None:
